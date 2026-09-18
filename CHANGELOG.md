@@ -9,6 +9,9 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Escape paths in generated JSON configuration so OpenClaw can start with the
+  search plugin on Windows, including temporary paths containing `Temp\2`.
+
 - Check npm before offering npm-based harness installation and show platform-specific
   Node.js setup steps without requesting an error report when npm is missing.
 

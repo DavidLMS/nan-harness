@@ -58,6 +58,29 @@ pub(super) fn render_user_home(value: &str, user_home: &Path) -> String {
     value.replace(USER_HOME_PLACEHOLDER, &user_home.to_string_lossy())
 }
 
+pub(super) fn render_overlay_paths(
+    value: &str,
+    overlay_id: &str,
+    overlay_path: &Path,
+    user_home: &Path,
+    json_strings: bool,
+) -> String {
+    let encode = |path: &Path| {
+        let path = path.to_string_lossy().into_owned();
+        if json_strings {
+            // Placeholders occur inside JSON strings; preserve Windows separators and
+            // quotes/control characters in paths without changing their decoded value.
+            let encoded = serde_json::Value::String(path).to_string();
+            encoded[1..encoded.len() - 1].to_owned()
+        } else {
+            path
+        }
+    };
+    value
+        .replace(USER_HOME_PLACEHOLDER, &encode(user_home))
+        .replace(&format!("{{artifact:{overlay_id}}}"), &encode(overlay_path))
+}
+
 pub(super) fn resolve_overlay_source(
     value: &str,
     user_home: &Path,
@@ -82,7 +105,7 @@ pub(super) fn user_home() -> Result<PathBuf, TemporaryError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{render_user_home, validate_path_hint};
+    use super::{render_overlay_paths, render_user_home, validate_path_hint};
     use crate::temporary::TemporaryError;
     use nan_harness_core::launch_plan::USER_HOME_PLACEHOLDER;
     use std::path::Path;
@@ -107,6 +130,48 @@ mod tests {
                 Path::new("/private/home"),
             ),
             "/private/home/one:/private/home/two"
+        );
+    }
+
+    #[test]
+    fn json_overlay_paths_round_trip_on_every_platform() {
+        let template = r#"{"plugins":{"load":{"paths":["{artifact:openclaw-config}/plugins/nan-harness-search"]}},"home":"{runtime:user_home}"}"#;
+        for path in [
+            r"C:\Users\ADMINI~1\AppData\Local\Temp\2\nan-harness-test\openclaw",
+            r"\\server\share\new\test",
+            "/tmp/nan-harness-test/openclaw",
+            "/var/folders/example/T/nan-harness-test/openclaw",
+            "/tmp/quoted\"directory/line\nfeed",
+        ] {
+            let rendered = render_overlay_paths(
+                template,
+                "openclaw-config",
+                Path::new(path),
+                Path::new(path),
+                true,
+            );
+            let config: serde_json::Value =
+                serde_json::from_str(&rendered).expect("paths must remain valid JSON");
+            assert_eq!(
+                config["plugins"]["load"]["paths"][0],
+                format!("{path}/plugins/nan-harness-search")
+            );
+            assert_eq!(config["home"], path);
+        }
+    }
+
+    #[test]
+    fn non_json_overlay_paths_remain_literal() {
+        let path = r"C:\Users\Administrator\Temp\2";
+        assert_eq!(
+            render_overlay_paths(
+                "{artifact:config}/plugins:{runtime:user_home}",
+                "config",
+                Path::new(path),
+                Path::new(path),
+                false,
+            ),
+            format!("{path}/plugins:{path}"),
         );
     }
 }

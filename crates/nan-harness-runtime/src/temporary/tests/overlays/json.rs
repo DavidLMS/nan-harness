@@ -89,7 +89,9 @@ fn preserve_policy_creates_only_missing_fallback_files() {
             OverlayFile {
                 path: "nan-harness.json".to_owned(),
                 mode: TemporaryArtifactMode::OwnerFile,
-                content_template: "{artifact:openclaw-config}/plugins".to_owned(),
+                content_template:
+                    r#"{"plugins":{"load":{"paths":["{artifact:openclaw-config}/plugins"]}}}"#
+                        .to_owned(),
                 policy: OverlayFilePolicy::Replace,
             },
         ],
@@ -110,9 +112,13 @@ fn preserve_policy_creates_only_missing_fallback_files() {
             .expect("original config should remain readable"),
         "USER_CONFIG"
     );
-    assert_eq!(
-        fs::read_to_string(overlay.join("nan-harness.json"))
+    let config: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(overlay.join("nan-harness.json"))
             .expect("nan-harness config should be readable"),
+    )
+    .expect("materialized OpenClaw configuration should be valid JSON");
+    assert_eq!(
+        config["plugins"]["load"]["paths"][0],
         format!("{}/plugins", overlay.display())
     );
 }

@@ -3,7 +3,7 @@ use super::formats::{
     merge_json_objects, merge_toml_tables, merge_yaml_mappings, parse_json_object,
     parse_toml_table, parse_yaml_mapping, relocate_hook_state_keys,
 };
-use super::paths::{ensure_mode, invalid_artifact, path_exists, render_user_home};
+use super::paths::{ensure_mode, invalid_artifact, path_exists, render_overlay_paths};
 use super::platform::{link_entry, restrict_directory};
 use nan_harness_core::launch_plan::{
     ConfigurationOverlay, OverlayFilePolicy, TemporaryArtifactMode,
@@ -103,9 +103,20 @@ fn overlay_file_content(
             .map_err(|source| overlay_error(&overlay.id, source));
     }
     let rendered = render(&overlay.id, &file.content_template)?;
-    let rendered = render_user_home(&rendered, user_home);
-    let overlay_placeholder = format!("{{artifact:{}}}", overlay.id);
-    let rendered = rendered.replace(&overlay_placeholder, &overlay_path.to_string_lossy());
+    let json_strings = file.policy == OverlayFilePolicy::MergeJson
+        || matches!(
+            Path::new(&file.path)
+                .extension()
+                .and_then(|value| value.to_str()),
+            Some("json" | "json5")
+        );
+    let rendered = render_overlay_paths(
+        &rendered,
+        &overlay.id,
+        overlay_path,
+        user_home,
+        json_strings,
+    );
     if rendered.contains("{artifact:") {
         return Err(invalid_artifact(
             &overlay.id,
