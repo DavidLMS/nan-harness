@@ -216,34 +216,10 @@ try {
         throw 'hermes requires an immutable source ref'
       }
       $hermesHome = Join-Path $cell 'hermes'; $hermesInstall = Join-Path $hermesHome 'hermes-agent'
-      Invoke-HermesPinned "https://raw.githubusercontent.com/NousResearch/hermes-agent/$Ref/scripts/install.ps1" @('-SkipSetup','-NoVenv','-HermesHome',$hermesHome,'-InstallDir',$hermesInstall,'-Commit',$Ref,'-ForceCommit')
-      # The product resolves `hermes` from PATH, and the installer's own directory is not on
-      # the cell's PATH, so a shim that forwards to the installed launcher is written where
-      # the cell already looks.
-      # Prefer a launcher `cmd.exe` can run directly; an extensionless entry script is only a
-      # fallback, because `call` cannot start it without an interpreter.
-      $launcher = $null
-      foreach ($candidate in @('hermes.exe','hermes.cmd','hermes.bat','hermes')) {
-        $launcher = Get-ChildItem -LiteralPath $hermesInstall -Recurse -File -ErrorAction SilentlyContinue |
-          Where-Object { $_.Name -eq $candidate } | Select-Object -First 1
-        if ($launcher) { break }
-      }
-      if (-not $launcher) {
-        Set-InstallDiagnostic 'asset-selection' 'official-installer' $null $null $null 'expected-executable-missing'
-        throw 'hermes installer did not produce a launcher'
-      }
-      $shim = '@echo off' + [Environment]::NewLine + 'call "' + $launcher.FullName + '" %*' + [Environment]::NewLine
-      $shimPath = Join-Path $bin 'hermes.cmd'
-      [IO.File]::WriteAllText($shimPath, $shim, [Text.UTF8Encoding]::new($false))
-      # A launcher the cell cannot execute is an installer failure, not a version failure:
-      # the product runs `hermes --version` through the same shim.
-      $previousPreference = $ErrorActionPreference
-      $ErrorActionPreference = 'Continue'
-      try { & $shimPath --version *> $null } finally { $ErrorActionPreference = $previousPreference }
-      if ($LASTEXITCODE -ne 0) {
-        Set-InstallDiagnostic 'asset-selection' 'official-installer' $LASTEXITCODE $null $null 'launcher-verify-failed'
-        throw "the installed hermes launcher did not run"
-      }
+      # The installer stages its launchers into <HermesHome>\bin only when it manages the
+      # virtual environment, and -NoVenv skips that staging entirely: without it the cell
+      # has no `hermes` to run at all. <cell>\hermes\bin is already on the cell PATH.
+      Invoke-HermesPinned "https://raw.githubusercontent.com/NousResearch/hermes-agent/$Ref/scripts/install.ps1" @('-SkipSetup','-HermesHome',$hermesHome,'-InstallDir',$hermesInstall,'-Commit',$Ref,'-ForceCommit')
     }
     'omp' {
       $assets = GitHubReleaseAssets 'can1357/oh-my-pi' "v$Version"

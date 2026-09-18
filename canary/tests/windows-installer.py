@@ -25,6 +25,10 @@ class WindowsInstallerTests(unittest.TestCase):
         # they pin the resolved version and bootstrap what the harness's shell tools need.
         self.assertIn("https://code.kimi.com/kimi-code/install.ps1", SCRIPT)
         self.assertIn("$env:KIMI_VERSION = $Version", SCRIPT)
+        # Hermes stages its own launchers only when it manages the virtual environment, so
+        # the cell must not skip it.
+        self.assertNotIn("'-NoVenv'", SCRIPT)
+        self.assertIn("@('-SkipSetup','-HermesHome',$hermesHome,'-InstallDir',$hermesInstall", SCRIPT)
         self.assertIn("https://openclaw.ai/install.ps1", SCRIPT)
         self.assertNotIn("'openclaw' { Npm", SCRIPT)
 
