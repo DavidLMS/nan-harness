@@ -29,6 +29,9 @@ class WindowsInstallerTests(unittest.TestCase):
         # the cell must not skip it.
         self.assertNotIn("'-NoVenv'", SCRIPT)
         self.assertIn("@('-SkipSetup','-HermesHome',$hermesHome,'-InstallDir',$hermesInstall", SCRIPT)
+        # A missing staged launcher is reported by the installer instead of surfacing later as
+        # an uninstalled harness in the product's doctor.
+        self.assertIn("'launcher-missing'", SCRIPT)
         self.assertIn("https://openclaw.ai/install.ps1", SCRIPT)
         self.assertNotIn("'openclaw' { Npm", SCRIPT)
 

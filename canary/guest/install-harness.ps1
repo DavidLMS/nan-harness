@@ -48,7 +48,7 @@ function Set-InstallDiagnostic {
 function Write-InstallerResult([string]$Status, [string]$Reason) {
   $allowed = @('passed','installer-failed','official-asset-missing','official-metadata-probe-failed',
                'official-metadata-no-windows-asset','capability-not-implemented','invalid-frozen-ref','invalid-version',
-               'launcher-verify-failed')
+               'launcher-verify-failed','launcher-missing')
   if ($allowed -notcontains $Reason) { $Reason = 'installer-failed' }
   $value = @{ schemaVersion = 2; status = $Status; reason = $Reason; diagnostic = $script:InstallDiagnostic } | ConvertTo-Json -Compress
   [IO.File]::WriteAllText($resultPath, $value, [Text.UTF8Encoding]::new($false))
@@ -220,6 +220,15 @@ try {
       # virtual environment, and -NoVenv skips that staging entirely: without it the cell
       # has no `hermes` to run at all. <cell>\hermes\bin is already on the cell PATH.
       Invoke-HermesPinned "https://raw.githubusercontent.com/NousResearch/hermes-agent/$Ref/scripts/install.ps1" @('-SkipSetup','-HermesHome',$hermesHome,'-InstallDir',$hermesInstall,'-Commit',$Ref,'-ForceCommit')
+      # The installer stages its launchers into <HermesHome>\bin and verifies them there, so a
+      # missing launcher afterwards is an installer failure worth reporting as such instead of
+      # letting the product's doctor discover it later as an uninstalled harness.
+      $staged = @('hermes.exe','hermes.cmd') | ForEach-Object { Join-Path (Join-Path $hermesHome 'bin') $_ } |
+        Where-Object { Test-Path -LiteralPath $_ -PathType Leaf }
+      if (-not $staged) {
+        Set-InstallDiagnostic 'asset-selection' 'official-installer' $null $null $null 'launcher-missing'
+        throw 'the hermes installer staged no launcher'
+      }
     }
     'omp' {
       $assets = GitHubReleaseAssets 'can1357/oh-my-pi' "v$Version"

@@ -442,7 +442,7 @@ def mark_dependents(phases, names, reason, cause):
 _INSTALLER_REASONS = frozenset({
     "passed", "installer-failed", "official-asset-missing", "official-metadata-probe-failed",
     "official-metadata-no-windows-asset", "capability-not-implemented", "invalid-frozen-ref",
-    "invalid-version", "launcher-verify-failed",
+    "invalid-version", "launcher-verify-failed", "launcher-missing",
 })
 _INSTALLER_DIAGNOSTIC_KEYS = frozenset({
     "subphase", "executable", "exitCode", "win32Error", "httpStatus", "assetReason",
