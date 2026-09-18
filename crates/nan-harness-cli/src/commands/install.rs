@@ -24,6 +24,7 @@ pub(crate) enum InstallDecision {
 
 pub(crate) fn offer_install(kind: HarnessKind) -> Result<InstallDecision, InstallError> {
     let spec = install_spec(kind).ok_or(InstallError::UnsupportedHarness(kind))?;
+    installer::check_install_prerequisites(spec)?;
     if !io::stdin().is_terminal() || !io::stderr().is_terminal() {
         return Ok(InstallDecision::NotInteractive);
     }

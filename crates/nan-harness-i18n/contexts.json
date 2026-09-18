@@ -6459,6 +6459,27 @@
       "crates/nan-harness-cli/src/commands/install.rs"
     ]
   },
+  "install_npm_linux": {
+    "description": "Missing npm setup guidance. Preserve URLs, command names, file extensions and PATH. The command parameter is the harness subcommand.",
+    "section": "install",
+    "sources": [
+      "crates/nan-harness-cli/src/commands/install/runtime.rs"
+    ]
+  },
+  "install_npm_macos": {
+    "description": "Missing npm setup guidance. Preserve URLs, command names, file extensions and PATH. The command parameter is the harness subcommand.",
+    "section": "install",
+    "sources": [
+      "crates/nan-harness-cli/src/commands/install/runtime.rs"
+    ]
+  },
+  "install_npm_windows": {
+    "description": "Missing npm setup guidance. Preserve URLs, command names, file extensions and PATH. The command parameter is the harness subcommand.",
+    "section": "install",
+    "sources": [
+      "crates/nan-harness-cli/src/commands/install/runtime.rs"
+    ]
+  },
   "install_official_installer": {
     "description": "Installation, updates and removal. Preserve command names, paths, provider identifiers and diagnostic codes.",
     "section": "install",

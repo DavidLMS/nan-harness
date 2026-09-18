@@ -130,14 +130,26 @@ impl InstallError {
         "NH-INSTALL-001"
     }
 
-    pub(crate) const fn is_runtime_precondition(&self) -> bool {
-        matches!(
-            self,
-            Self::RuntimeCommandStart { .. }
-                | Self::RuntimeCommandFailed { .. }
-                | Self::RuntimeUnsupported { .. }
-                | Self::RuntimeUnparseable { .. }
-        )
+    fn missing_npm(&self) -> Option<HarnessKind> {
+        match self {
+            Self::CommandStart {
+                harness,
+                program: "npm",
+                source,
+            } if source.kind() == io::ErrorKind::NotFound => Some(*harness),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn is_runtime_precondition(&self) -> bool {
+        self.missing_npm().is_some()
+            || matches!(
+                self,
+                Self::RuntimeCommandStart { .. }
+                    | Self::RuntimeCommandFailed { .. }
+                    | Self::RuntimeUnsupported { .. }
+                    | Self::RuntimeUnparseable { .. }
+            )
     }
 }
 
@@ -156,6 +168,9 @@ impl nan_harness_i18n::TerminalMessage for InstallError {
     )]
     fn terminal_message(&self, locale: nan_harness_i18n::Locale) -> String {
         use nan_harness_i18n::messages as m;
+        if let Some(harness) = self.missing_npm() {
+            return super::runtime::npm_hint_for(harness, locale);
+        }
         if locale == nan_harness_i18n::Locale::En {
             return self.to_string();
         }

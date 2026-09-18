@@ -9,6 +9,34 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use tempfile::NamedTempFile;
 
+pub(super) fn check_install_prerequisites(spec: &InstallSpec) -> Result<(), InstallError> {
+    check_install_prerequisites_with(spec, |program| {
+        run_command(OsStr::new(program), &["--version"], Command::output)
+            .map(|output| output.status)
+    })
+}
+
+fn check_install_prerequisites_with(
+    spec: &InstallSpec,
+    probe: impl FnOnce(&str) -> io::Result<std::process::ExitStatus>,
+) -> Result<(), InstallError> {
+    if let InstallMethod::Command { program: "npm", .. } = spec.method()? {
+        let status = probe("npm").map_err(|source| InstallError::CommandStart {
+            harness: spec.kind(),
+            program: "npm",
+            source,
+        })?;
+        if !status.success() {
+            return Err(InstallError::CommandFailed {
+                harness: spec.kind(),
+                program: "npm",
+                exit_code: status.code(),
+            });
+        }
+    }
+    Ok(())
+}
+
 pub(super) fn install(spec: &InstallSpec) -> Result<(), InstallError> {
     let method = spec.method()?;
     eprintln!(
@@ -57,7 +85,15 @@ fn run_installer_command(
     program: &OsStr,
     arguments: &[&str],
 ) -> io::Result<std::process::ExitStatus> {
-    let result = Command::new(program).args(arguments).status();
+    run_command(program, arguments, Command::status)
+}
+
+fn run_command<T>(
+    program: &OsStr,
+    arguments: &[&str],
+    mut run: impl FnMut(&mut Command) -> io::Result<T>,
+) -> io::Result<T> {
+    let result = run(Command::new(program).args(arguments));
     #[cfg(windows)]
     if let Err(source) = &result {
         // Rust only infers .exe; npm supplied by Node.js is a .cmd shim.
@@ -68,7 +104,7 @@ fn run_installer_command(
             && path.extension().is_none()
             && (path.components().count() == 1 || shim.is_file())
         {
-            return Command::new(shim).args(arguments).status();
+            return run(Command::new(shim).args(arguments));
         }
     }
     result
@@ -241,6 +277,47 @@ mod tests {
     use nan_harness_core::HarnessKind;
     use std::fs;
 
+    #[test]
+    fn npm_preflight_distinguishes_missing_and_broken_installations() {
+        let spec = crate::commands::install::install_spec(HarnessKind::Cline).unwrap();
+        for kind in [
+            std::io::ErrorKind::NotFound,
+            std::io::ErrorKind::PermissionDenied,
+        ] {
+            let error = super::check_install_prerequisites_with(spec, |program| {
+                assert_eq!(program, "npm");
+                Err(std::io::Error::from(kind))
+            })
+            .unwrap_err();
+            assert_eq!(
+                error.is_runtime_precondition(),
+                kind == std::io::ErrorKind::NotFound
+            );
+        }
+        let executable = std::env::current_exe().unwrap();
+        let status = std::process::Command::new(&executable)
+            .args(["--exact", "nonexistent_installer_test"])
+            .output()
+            .unwrap()
+            .status;
+        super::check_install_prerequisites_with(spec, |_| Ok(status)).unwrap();
+        let status = std::process::Command::new(executable)
+            .arg("--invalid-test-option")
+            .output()
+            .unwrap()
+            .status;
+        assert!(matches!(
+            super::check_install_prerequisites_with(spec, |_| Ok(status)),
+            Err(super::InstallError::CommandFailed { program: "npm", .. })
+        ));
+    }
+
+    #[test]
+    fn script_installers_do_not_require_npm() {
+        let spec = crate::commands::install::install_spec(HarnessKind::ClaudeCode).unwrap();
+        super::check_install_prerequisites_with(spec, |_| panic!("must not probe npm")).unwrap();
+    }
+
     #[cfg(windows)]
     #[test]
     fn windows_installer_runs_cmd_shims_and_preserves_exit_codes() {
@@ -255,6 +332,13 @@ mod tests {
             let status = super::run_installer_command(program.as_os_str(), &[&code.to_string()])
                 .expect("Windows installer should find the cmd shim");
             assert_eq!(status.code(), Some(code));
+            let output = super::run_command(
+                program.as_os_str(),
+                &[&code.to_string()],
+                std::process::Command::output,
+            )
+            .expect("preflight should also find the cmd shim");
+            assert_eq!(output.status.code(), Some(code));
         }
     }
 

@@ -110,6 +110,17 @@ fn validate_runtime_version(
     }
 }
 
+pub(super) fn npm_hint_for(kind: HarnessKind, locale: nan_harness_i18n::Locale) -> String {
+    use nan_harness_i18n::messages as m;
+    if cfg!(windows) {
+        m::install_npm_windows(locale, kind.binary_name(), &kind)
+    } else if cfg!(target_os = "macos") {
+        m::install_npm_macos(locale, kind.binary_name(), &kind)
+    } else {
+        m::install_npm_linux(locale, kind.binary_name(), &kind)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{runtime_hint, runtime_requirement};

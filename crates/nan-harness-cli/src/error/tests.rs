@@ -248,3 +248,48 @@ fn upstream_windows_unavailability_is_localized_and_not_reportable() {
         }
     }
 }
+
+#[test]
+fn missing_npm_has_localized_setup_steps_and_never_reports() {
+    let cli = dry_run_cli();
+    let error = CliError::Install(InstallError::CommandStart {
+        harness: HarnessKind::Cline,
+        program: "npm",
+        source: std::io::ErrorKind::NotFound.into(),
+    });
+    assert!(!error.should_report_telemetry(&cli));
+    for locale in [nan_harness_i18n::Locale::En, nan_harness_i18n::Locale::Es] {
+        let message = error.user_message(&cli);
+        let translated = nan_harness_i18n::TerminalMessage::terminal_message(&error, locale);
+        assert_eq!(
+            message.level,
+            nan_harness_diagnostics::MessageLevel::SetupRequired
+        );
+        assert_eq!(message.code, None);
+        assert!(!message.is_reportable());
+        for step in [
+            "https://nodejs.org/en/download",
+            "node --version",
+            "npm --version",
+            "nanh cline",
+        ] {
+            assert!(translated.contains(step), "missing step: {step}");
+        }
+    }
+}
+
+#[test]
+fn other_installer_start_failures_remain_reportable() {
+    for (program, kind) in [
+        ("npm", std::io::ErrorKind::PermissionDenied),
+        ("other-installer", std::io::ErrorKind::NotFound),
+    ] {
+        let error = CliError::Install(InstallError::CommandStart {
+            harness: HarnessKind::Cline,
+            program,
+            source: kind.into(),
+        });
+        assert!(error.user_message(&dry_run_cli()).is_reportable());
+        assert!(error.should_report_telemetry(&dry_run_cli()));
+    }
+}

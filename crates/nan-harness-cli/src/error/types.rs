@@ -101,6 +101,9 @@ impl CliError {
 impl nan_harness_i18n::TerminalMessage for CliError {
     fn terminal_message(&self, locale: nan_harness_i18n::Locale) -> String {
         use nan_harness_i18n::messages as m;
+        if let Self::Install(error) = self {
+            return error.terminal_message(locale);
+        }
         if locale == nan_harness_i18n::Locale::En {
             return self.to_string();
         }

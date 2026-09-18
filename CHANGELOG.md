@@ -9,6 +9,9 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Check npm before offering npm-based harness installation and show platform-specific
+  Node.js setup steps without requesting an error report when npm is missing.
+
 - Explain that fx and Prime Agent do not yet support Windows before searching
   for executables or offering installation. Allow explicit `--executable` paths
   to try future compatible builds with nan-harness.
