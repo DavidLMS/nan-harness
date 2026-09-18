@@ -111,7 +111,6 @@ pub(crate) fn round_trip_probe(
                 "commands": [cline_round_trip_command(
                     &workspace.join("tool-output.txt"),
                     cfg!(windows),
-                    workspace,
                 )]
             }),
             filesystem_contract(
@@ -163,26 +162,18 @@ pub(crate) fn round_trip_probe(
 
 /// The command Cline runs for the deterministic round trip.
 ///
-/// Cline's own command runner is not a POSIX shell on Windows, where `printf` and
-/// single-quoted paths have no meaning, and which shell it does use is its own choice. The
-/// Windows cell therefore stages the side effect in a command script and asks Cline to run
-/// that script by path, which every candidate shell accepts. The platform is a parameter so
-/// both forms stay testable on every host.
-pub(crate) fn cline_round_trip_command(path: &Path, windows: bool, workspace: &Path) -> String {
+/// Cline's own command runner is not a POSIX shell on Windows: `printf` and single-quoted
+/// paths have no meaning there, and the runner refused every quoted absolute path we tried
+/// (`filesystem-unreadable`). A native `cmd` builtin writing the file the workspace already
+/// holds, relative to the working directory Cline runs in, is the form that works. The
+/// platform is a parameter so both forms stay testable on every host.
+pub(crate) fn cline_round_trip_command(path: &Path, windows: bool) -> String {
     if windows {
-        let script = workspace.join("cline-round-trip.cmd");
-        let contents = format!(
-            "@echo off\r\npowershell -NoProfile -Command \"Set-Content -NoNewline -LiteralPath '{}' -Value NAN_HARNESS_TOOL_OK\"\r\n",
-            path.display()
-        );
-        if fs::write(&script, contents).is_ok() {
-            // Forward slashes keep the path valid for a Windows shell and for a POSIX shell,
-            // because Cline chooses the runner and neither form is universal.
-            format!("\"{}\"", script.display().to_string().replace('\\', "/"))
-        } else {
-            // A cell that cannot stage the script reports the probe as unselectable.
-            String::from("cline-round-trip.cmd")
-        }
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("tool-output.txt");
+        format!("echo NAN_HARNESS_TOOL_OK> {name}")
     } else {
         format!("printf NAN_HARNESS_TOOL_OK > '{}'", path.display())
     }

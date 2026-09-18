@@ -254,18 +254,17 @@ fn prime_cleanup_does_not_signal_an_unrelated_shared_process_group_member() {
 
 #[test]
 fn cline_round_trip_command_matches_the_host_shell() {
-    // Cline's command runner is not a POSIX shell on Windows, so the Windows cell stages a
-    // command script and runs it by path, which every candidate shell accepts.
+    // Cline's command runner is not a POSIX shell on Windows, where `printf` and quoted
+    // absolute paths were both refused; a native cmd builtin writing the workspace file
+    // relative to the working directory is the form that works.
     let workspace = tempfile::tempdir().expect("workspace should exist");
     let path = workspace.path().join("tool-output.txt");
     assert_eq!(
-        cline_round_trip_command(&path, false, workspace.path()),
+        cline_round_trip_command(&path, false),
         format!("printf NAN_HARNESS_TOOL_OK > '{}'", path.display())
     );
-    let command = cline_round_trip_command(&path, true, workspace.path());
-    let script = workspace.path().join("cline-round-trip.cmd");
-    assert_eq!(command, format!("\"{}\"", script.display()));
-    let contents = std::fs::read_to_string(&script).expect("probe script should exist");
-    assert!(contents.contains(&path.display().to_string()));
-    assert!(contents.contains("NAN_HARNESS_TOOL_OK"));
+    assert_eq!(
+        cline_round_trip_command(&path, true),
+        "echo NAN_HARNESS_TOOL_OK> tool-output.txt"
+    );
 }
