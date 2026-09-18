@@ -265,6 +265,6 @@ fn cline_round_trip_command_matches_the_host_shell() {
     );
     assert_eq!(
         cline_round_trip_command(&path, true),
-        "echo NAN_HARNESS_TOOL_OK> tool-output.txt"
+        format!("echo NAN_HARNESS_TOOL_OK> \"{}\"", path.display())
     );
 }
