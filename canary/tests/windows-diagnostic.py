@@ -922,6 +922,18 @@ class WindowsDiagnosticTests(unittest.TestCase):
                 self.assertRejectedMarker(
                     diagnostic.probe_diagnostic(Path(tmp), "deterministic-contract"))
 
+    def test_assertion_reader_is_closed_and_deduplicated(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "assertion.jsonl"
+            self.assertEqual(diagnostic.read_assertions(path), {"assertionStatus": "absent"})
+            path.write_text("side-effect-missing\nside-effect-missing\n", encoding="ascii")
+            self.assertEqual(diagnostic.read_assertions(path),
+                             {"assertionStatus": "valid", "assertions": ["side-effect-missing"]})
+            path.write_text("side-effect-missing\nsecret\n", encoding="ascii")
+            self.assertEqual(diagnostic.read_assertions(path), {"assertionStatus": "corrupt"})
+            path.write_text("\n", encoding="ascii")
+            self.assertEqual(diagnostic.read_assertions(path), {"assertionStatus": "corrupt"})
+
     def test_conformance_failure_diagnostic_survives_the_summary(self):
         # A conformance failure publishes failedScenarios and progress; the summary must
         # accept both, which only a Windows run exercised before this test.

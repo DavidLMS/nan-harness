@@ -113,6 +113,23 @@ class WindowsSummaryTests(unittest.TestCase):
             summary.safe_view(value)
         self.assertNotIn("secret", str(raised.exception))
 
+    def test_assertion_codes_are_allowlisted_and_rendered(self):
+        # A failed conformance contract publishes the closed code of the assertion that failed.
+        value = report()
+        value["harnesses"][0]["phases"]["deterministic-contract"]["diagnostic"] = {
+            "assertions": {"assertionStatus": "valid", "assertions": ["side-effect-missing"]}}
+        rendered = summary.render(summary.safe_view(value))
+        self.assertIn("assertions=side-effect-missing", rendered)
+        for bad in ({"assertionStatus": "valid", "assertions": ["secret"]},
+                    {"assertionStatus": "valid", "assertions": []},
+                    {"assertionStatus": "valid", "assertions": "side-effect-missing"},
+                    {"assertionStatus": "absent", "assertions": ["process-failed"]},
+                    {"assertionStatus": "secret"}):
+            value["harnesses"][0]["phases"]["deterministic-contract"]["diagnostic"] = {"assertions": bad}
+            with self.assertRaises(summary.UnsafeReport) as raised:
+                summary.safe_view(value)
+            self.assertNotIn("secret", str(raised.exception))
+
     def test_failed_scenarios_are_allowlisted(self):
         # A conformance failure publishes the closed names of the scenarios that failed.
         value = report()

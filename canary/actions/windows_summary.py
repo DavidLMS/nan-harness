@@ -26,6 +26,12 @@ PIP_CATEGORIES = frozenset(("network-dns", "network-connection", "network-timeou
 PROCESS_REASONS = frozenset(("win32-launch-failed", "exit-nonzero", "native-unavailable"))
 PARENT_INSTALL_REASONS = frozenset(("timeout", "launch-failed", "nonzero"))
 INSTALLER_MARKER_REASONS = frozenset(("passed", "installer-failed", "official-asset-missing", "official-metadata-probe-failed", "official-metadata-no-windows-asset", "capability-not-implemented", "invalid-frozen-ref", "invalid-version", "launcher-verify-failed", "launcher-missing"))
+# Closed reasons a failed conformance assertion may report.
+PROBE_ASSERTION_CODES = frozenset((
+    "process-failed", "provider-incomplete", "inventory-mismatch", "tool-call-missing",
+    "tool-call-mismatch", "tool-traffic-unexpected", "tool-result-mismatch", "marker-missing",
+    "side-effect-missing", "filesystem-unreadable",
+))
 # Field names the Windows probe can publish for a rejected marker.
 PROBE_MARKER_FIELDS = frozenset({
     "schemaVersion", "stage", "status", "diagnostics", "exitCode", "doctorVersion",
@@ -124,6 +130,20 @@ def _diagnostic(value, label):
             if item not in DISCOVERY_CODES: raise UnsafeReport(f"invalid {label} diagnostic")
         elif key == "inventoryFailureReasons":
             if not isinstance(item, list) or len(item) > 5 or len(set(item)) != len(item) or any(x not in INVENTORY_REASONS for x in item): raise UnsafeReport(f"invalid {label} diagnostic")
+        elif key == "assertions":
+            # Closed assertion codes of a failed conformance contract, never free text.
+            if (not isinstance(item, dict) or set(item) - {"assertionStatus", "assertions"}
+                    or item.get("assertionStatus") not in {"absent", "corrupt", "valid"}):
+                raise UnsafeReport(f"invalid {label} diagnostic")
+            if item["assertionStatus"] == "valid":
+                codes = item.get("assertions")
+                if (not isinstance(codes, list) or not codes or len(codes) > 32
+                        or len(set(codes)) != len(codes)
+                        or any(not isinstance(code, str) or code not in PROBE_ASSERTION_CODES
+                               for code in codes)):
+                    raise UnsafeReport(f"invalid {label} diagnostic")
+            elif "assertions" in item:
+                raise UnsafeReport(f"invalid {label} diagnostic")
         elif key == "failedScenarios":
             # Closed scenario names of a conformance failure, never free text.
             if (not isinstance(item, list) or not item
@@ -240,10 +260,13 @@ def render(view):
         for name, value in item["phases"].items():
             details = []
             if value.get("diagnostic"):
+                assertions = value["diagnostic"].get("assertions")
+                if assertions and assertions.get("assertionStatus") == "valid":
+                    details.append("assertions=" + ",".join(assertions.get("assertions", [])))
                 inventory_process = value["diagnostic"].get("inventoryProcess")
                 if inventory_process:
                     details.append("inventoryProcess=" + ",".join(f"{k}={v}" for k, v in inventory_process.items()))
-                diagnostic = {k: v for k, v in value["diagnostic"].items() if k not in {"progress", "inventoryProcess"}}
+                diagnostic = {k: v for k, v in value["diagnostic"].items() if k not in {"progress", "inventoryProcess", "assertions"}}
                 if diagnostic:
                     details.append("diagnostic=" + ",".join(f"{k}={v}" for k, v in diagnostic.items()))
             if value.get("causeDetails"):

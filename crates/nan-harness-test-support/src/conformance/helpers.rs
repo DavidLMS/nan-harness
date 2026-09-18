@@ -1,5 +1,6 @@
 use super::constants::MAX_DURATION_MILLISECONDS;
 use super::report::{ConformanceCheck, ConformanceScenario, ConformanceStatus};
+use crate::assertions::ProbeAssertionError;
 use crate::manifest::Expectation;
 use crate::scripted_provider::ScriptedToolCall;
 use crate::terminal::TerminalOutput;
@@ -12,6 +13,69 @@ use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 const PROGRESS_ENV: &str = "NAN_HARNESS_CONFORMANCE_PROGRESS";
+const ASSERTION_ENV: &str = "NAN_HARNESS_CONFORMANCE_ASSERTION";
+
+/// Closed codes a failed conformance assertion may publish.
+///
+/// A harness process, a provider exchange and the filesystem are three different failure
+/// domains, and a hosted report must say which one failed without copying harness output.
+#[must_use]
+pub(crate) fn assertion_code(error: &ProbeAssertionError) -> &'static str {
+    match error {
+        ProbeAssertionError::ProcessFailed => "process-failed",
+        ProbeAssertionError::MissingProviderRequest => "tool-call-missing",
+        ProbeAssertionError::UnexpectedToolTraffic => "tool-traffic-unexpected",
+        ProbeAssertionError::UnexpectedToolCallCount { .. }
+        | ProbeAssertionError::UnexpectedToolCallId { .. }
+        | ProbeAssertionError::UnexpectedToolName { .. }
+        | ProbeAssertionError::UnexpectedToolInput { .. }
+        | ProbeAssertionError::UnexpectedFunctionTools => "tool-call-mismatch",
+        ProbeAssertionError::UnexpectedToolResults { .. }
+        | ProbeAssertionError::EmptyToolResult
+        | ProbeAssertionError::ToolResultError => "tool-result-mismatch",
+        ProbeAssertionError::MissingMarker(_) => "marker-missing",
+        ProbeAssertionError::MissingFilesystemSideEffect(_) => "side-effect-missing",
+        ProbeAssertionError::Filesystem(_) => "filesystem-unreadable",
+    }
+}
+
+/// Records one closed assertion code when a cell asked for the record.
+pub(crate) fn record_assertion(error: &ProbeAssertionError) {
+    record_assertion_code(assertion_code(error));
+}
+
+/// Records the closed code of a failed assertion and reports whether it passed.
+pub(crate) fn assertion_passed(result: Result<(), ProbeAssertionError>) -> bool {
+    match result {
+        Ok(()) => true,
+        Err(error) => {
+            record_assertion(&error);
+            false
+        }
+    }
+}
+
+/// Records one closed code that a scenario derived without a [`ProbeAssertionError`].
+pub(crate) fn record_assertion_code(code: &str) {
+    let Some(path) = std::env::var_os(ASSERTION_ENV).map(std::path::PathBuf::from) else {
+        return;
+    };
+    let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    else {
+        return;
+    };
+    if fs::create_dir_all(parent).is_err() {
+        return;
+    }
+    let Ok(mut file) = fs::OpenOptions::new().create(true).append(true).open(&path) else {
+        return;
+    };
+    let mut line = code.to_owned();
+    line.push('\n');
+    let _ = file.write_all(line.as_bytes());
+}
 
 #[derive(serde::Serialize)]
 struct ProgressEvent<'a> {

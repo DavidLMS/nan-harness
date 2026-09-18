@@ -1,7 +1,8 @@
 use super::super::arguments::RunKind;
 use super::super::constants::{INVENTORY_MARKER, ROUND_TRIP_MARKER, SENTINEL_MARKER};
 use super::super::helpers::{
-    failed_scenario, progress_event, scenario, tool_names, verify_expectation,
+    assertion_passed, failed_scenario, progress_event, record_assertion_code, scenario, tool_names,
+    verify_expectation,
 };
 use super::super::inventory::{
     inventory_drift_fingerprint, inventory_matches, round_trip_probe, verify_probe_side_effect,
@@ -120,6 +121,20 @@ pub(super) async fn run_inventory(
             && provider_shutdown
             && daemon_clean
     });
+    if !operationally_compatible || !inventory_matches {
+        record_assertion_code(if !inventory_matches {
+            "inventory-mismatch"
+        } else if !output.as_ref().is_ok_and(|output| output.status.success()) {
+            "process-failed"
+        } else if !output
+            .as_ref()
+            .is_ok_and(|output| output.stdout.contains(INVENTORY_MARKER))
+        {
+            "marker-missing"
+        } else {
+            "provider-incomplete"
+        });
+    }
     if !operationally_compatible
         || !inventory_matches
         || std::env::var_os("NAN_HARNESS_CONFORMANCE_DIAGNOSTICS").is_some()
@@ -345,6 +360,7 @@ pub(super) async fn run_tool_round_trip(
     progress_result("tool-round-trip", "cleanup", daemon_clean, started);
     let passed = output.as_ref().is_ok_and(|output| {
         if !(provider_complete && provider_bounded && provider_shutdown && daemon_clean) {
+            record_assertion_code("provider-incomplete");
             return false;
         }
         let assertion = match registration.kind {
@@ -368,9 +384,7 @@ pub(super) async fn run_tool_round_trip(
                 ROUND_TRIP_MARKER,
             ),
         };
-        assertion
-            .and_then(|()| verify_probe_side_effect(&probe))
-            .is_ok()
+        assertion_passed(assertion.and_then(|()| verify_probe_side_effect(&probe)))
     });
     let status = if passed {
         ConformanceStatus::Passed
@@ -418,11 +432,11 @@ pub(super) async fn run_sentinel(
     let daemon_clean = daemon.cleanup().await.is_ok();
     progress_result("sentinel", "cleanup", daemon_clean, started);
     let passed = output.as_ref().is_ok_and(|output| {
-        provider_complete
-            && provider_bounded
-            && provider_shutdown
-            && daemon_clean
-            && assert_sentinel(output, &requests, SENTINEL_MARKER).is_ok()
+        if !(provider_complete && provider_bounded && provider_shutdown && daemon_clean) {
+            record_assertion_code("provider-incomplete");
+            return false;
+        }
+        assertion_passed(assert_sentinel(output, &requests, SENTINEL_MARKER))
     });
     let status = if passed {
         ConformanceStatus::Passed

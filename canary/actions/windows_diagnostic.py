@@ -16,12 +16,20 @@ SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
 SHA = re.compile(r"^[0-9a-f]{40}$")
 ROOT = Path(__file__).resolve().parents[2]
 PROGRESS_ENV = "NAN_HARNESS_CONFORMANCE_PROGRESS"
+ASSERTION_ENV = "NAN_HARNESS_CONFORMANCE_ASSERTION"
 PROGRESS_SCENARIOS = frozenset(("inventory", "sentinel", "tool-round-trip", "external-prerequisite"))
 PROGRESS_STAGES = frozenset(("scenario", "process", "provider-shutdown", "cleanup"))
 PROGRESS_STATUSES = frozenset(("started", "passed", "failed"))
 PROGRESS_MAX_LINE = 4096
 PROGRESS_MAX_RECORDS = 256
 PROBE_MARKER_MAX_BYTES = 64 * 1024
+ASSERTION_MAX_RECORDS = 32
+# Closed reasons a failed conformance assertion may report, one per failure domain.
+PROBE_ASSERTION_CODES = frozenset((
+    "process-failed", "provider-incomplete", "inventory-mismatch", "tool-call-missing",
+    "tool-call-mismatch", "tool-traffic-unexpected", "tool-result-mismatch", "marker-missing",
+    "side-effect-missing", "filesystem-unreadable",
+))
 
 class BatchBudget:
     """Monotonic collector deadline with a small reserve for finalization."""
@@ -168,6 +176,37 @@ def run_bounded(argv, cwd, env, timeout):
 def run_bounded_command_line(command_line, cwd, env, timeout):
     """Run a raw Windows command line, bypassing list2cmdline/CRT quoting."""
     return _run_bounded(command_line, cwd, env, timeout)
+
+def assertion_path(cell):
+    """Return a fresh private assertion path for one deterministic invocation."""
+    return cell / ("conformance-assertion-" + uuid.uuid4().hex + ".jsonl")
+
+
+def read_assertions(path):
+    """Read only the closed assertion contract; an unknown or torn record is unusable."""
+    if not path.exists():
+        return {"assertionStatus": "absent"}
+    try:
+        with path.open("rb") as stream:
+            raw = stream.read(ASSERTION_MAX_RECORDS * 64 + 1)
+        if len(raw) > ASSERTION_MAX_RECORDS * 64:
+            return {"assertionStatus": "corrupt"}
+        codes = []
+        for line in raw.splitlines():
+            payload = line.strip()
+            if not payload:
+                continue
+            code = payload.decode("ascii")
+            if code not in PROBE_ASSERTION_CODES:
+                return {"assertionStatus": "corrupt"}
+            if code not in codes:
+                codes.append(code)
+        if not codes:
+            return {"assertionStatus": "corrupt"}
+        return {"assertionStatus": "valid", "assertions": codes}
+    except (OSError, UnicodeError, ValueError, TypeError):
+        return {"assertionStatus": "corrupt"}
+
 
 def progress_path(cell):
     """Return a fresh private progress path for one deterministic invocation."""
@@ -924,16 +963,24 @@ def collect(args, harnesses, output):
             invocation_env = probe_env
             progress = None
             progress_file = None
+            assertion_file = None
+            assertion_record = None
             if stage == "deterministic-contract":
                 progress_file = progress_path(cell)
                 # A new path per invocation prevents stale records from a
                 # previous process being mistaken for current hang evidence.
                 invocation_env = dict(probe_env)
                 invocation_env[PROGRESS_ENV] = str(progress_file)
+                # The runner also records the closed code of a failed assertion in a second
+                # per-invocation file, so a report can say which expectation failed instead
+                # of only that a scenario failed.
+                assertion_file = assertion_path(cell)
+                invocation_env[ASSERTION_ENV] = str(assertion_file)
             code, reason = run_bounded(common + ["-Stage", stage], cell, invocation_env, child_timeout)
             diagnostic = probe_diagnostic(cell, stage)
             if stage == "deterministic-contract" and code != 0:
                 progress = read_progress(progress_file)
+                assertion_record = read_assertions(assertion_file)
             marker_failed = diagnostic.get("status") == "failed"
             if code != 0 or marker_failed:
                 failure_reason = reason if code != 0 else "diagnostic"
@@ -942,6 +989,9 @@ def collect(args, harnesses, output):
                     diagnostic.pop("status", None)
                     if progress:
                         diagnostic["progress"] = progress
+                    # An absent record adds nothing; a corrupt or valid one is evidence.
+                    if assertion_record and assertion_record.get("assertionStatus") != "absent":
+                        diagnostic["assertions"] = assertion_record
                     if diagnostic: phases[name]["diagnostic"] = diagnostic
                 mark_dependents(phases, ("deterministic-contract", "live-tool") if name == "version-doctor" else ("live-tool",), name + "-failed", cause)
                 any_failure = True; checkpoint(); break
