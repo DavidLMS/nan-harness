@@ -25,7 +25,7 @@ NPM_CODES = frozenset(("registry-dns", "registry-connection", "registry-timeout"
 PIP_CATEGORIES = frozenset(("network-dns", "network-connection", "network-timeout", "package-not-found", "permission", "tls-certificate", "pip-missing", "pip-unknown"))
 PROCESS_REASONS = frozenset(("win32-launch-failed", "exit-nonzero", "native-unavailable"))
 PARENT_INSTALL_REASONS = frozenset(("timeout", "launch-failed", "nonzero"))
-INSTALLER_MARKER_REASONS = frozenset(("passed", "installer-failed", "official-asset-missing", "official-metadata-probe-failed", "official-metadata-no-windows-asset", "capability-not-implemented", "invalid-frozen-ref", "invalid-version"))
+INSTALLER_MARKER_REASONS = frozenset(("passed", "installer-failed", "official-asset-missing", "official-metadata-probe-failed", "official-metadata-no-windows-asset", "capability-not-implemented", "invalid-frozen-ref", "invalid-version", "launcher-verify-failed"))
 # Field names the Windows probe can publish for a rejected marker.
 PROBE_MARKER_FIELDS = frozenset({
     "schemaVersion", "stage", "status", "diagnostics", "exitCode", "doctorVersion",

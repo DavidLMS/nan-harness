@@ -47,7 +47,8 @@ function Set-InstallDiagnostic {
 }
 function Write-InstallerResult([string]$Status, [string]$Reason) {
   $allowed = @('passed','installer-failed','official-asset-missing','official-metadata-probe-failed',
-               'official-metadata-no-windows-asset','capability-not-implemented','invalid-frozen-ref','invalid-version')
+               'official-metadata-no-windows-asset','capability-not-implemented','invalid-frozen-ref','invalid-version',
+               'launcher-verify-failed')
   if ($allowed -notcontains $Reason) { $Reason = 'installer-failed' }
   $value = @{ schemaVersion = 2; status = $Status; reason = $Reason; diagnostic = $script:InstallDiagnostic } | ConvertTo-Json -Compress
   [IO.File]::WriteAllText($resultPath, $value, [Text.UTF8Encoding]::new($false))
