@@ -301,6 +301,7 @@
   "error_claude_desktop_unsupported_receipt": "the private Claude Desktop receipt schema is not supported",
   "error_claude_desktop_write": "could not write Claude Desktop configuration: {value_1}",
   "error_claude_desktop_write_backup": "could not write a private Claude Desktop backup: {value_1}",
+  "error_cli_harness_windows_unavailable": "{harness} does not yet support Windows. Windows support depends on the harness publishing a compatible build. Once available, you can try it with nan-harness using --executable <path>.",
   "error_cli_credential_invariant": "internal credential preflight was not completed",
   "error_cli_current_directory": "could not read the current working directory: {value_1}",
   "error_cli_invalid_plan": "launch plan is invalid: {value_1}",

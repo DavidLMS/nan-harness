@@ -7,6 +7,12 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Explain that fx and Prime Agent do not yet support Windows before searching
+  for executables or offering installation. Allow explicit `--executable` paths
+  to try future compatible builds with nan-harness.
+
 ## [0.1.7] - 2026-09-16
 
 ### Added

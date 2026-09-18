@@ -226,3 +226,25 @@ fn dry_run_cli() -> Cli {
         }),
     }
 }
+
+#[test]
+fn upstream_windows_unavailability_is_localized_and_not_reportable() {
+    use nan_harness_i18n::{Locale, TerminalMessage};
+    for harness in [HarnessKind::PrimeAgent, HarnessKind::Fx] {
+        let error = CliError::HarnessWindowsUnavailable(harness);
+        let cli = dry_run_cli();
+        assert!(!error.user_message(&cli).is_reportable());
+        assert!(!error.should_report_telemetry(&cli));
+        assert_eq!(
+            super::diagnostics::typed_diagnostic(&error).reason(),
+            DiagnosticReason::InvalidConfiguration
+        );
+        for locale in [Locale::En, Locale::Es] {
+            let message = error.terminal_message(locale);
+            assert!(message.contains(&harness.to_string()));
+            assert!(message.contains("Windows"));
+            assert!(message.contains("nan-harness"));
+            assert!(message.contains("--executable"));
+        }
+    }
+}

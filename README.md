@@ -41,6 +41,12 @@ It works with the harnesses you already use.
 | `nanh dsh` | [DeepSeek Harness](https://deepseek.com/harness/en/) | OpenAI Chat Completions | Optional |
 | `nanh fx` | [fx](https://fx.sh/) | fx AI Gateway bridge | Not available |
 
+Prime Agent and fx do not yet support Windows upstream. On Windows,
+`nanh prime` and `nanh fx` explain this before searching for an executable or
+trying to install one. When a Windows build becomes available, you can try it
+with `nanh <harness> --executable <path>`; the usual version and launch checks
+still apply. Linux and macOS launches are unchanged.
+
 Harnesses that use OpenAI Chat Completions use an authenticated local gateway by
 default. This enables features such as reporting token usage when a session ends.
 

@@ -10,13 +10,17 @@ use crate::commands::search::SearchCommandError;
 use crate::commands::uninstall::UninstallError;
 use crate::commands::zed_desktop::ZedDesktopError;
 use crate::usage_evidence::UsageEvidenceError;
-use nan_harness_core::PlanError;
+use nan_harness_core::{HarnessKind, PlanError};
 use nan_harness_runtime::{DiscoveryError, RuntimeError};
 use nan_harness_telemetry::consent::SettingsError;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub(crate) enum CliError {
+    #[error(
+        "{0} does not yet support Windows. Windows support depends on the harness publishing a compatible build. Once available, you can try it with nan-harness using --executable <path>."
+    )]
+    HarnessWindowsUnavailable(HarnessKind),
     #[error(transparent)]
     Discovery(#[from] DiscoveryError),
     #[error(transparent)]
@@ -66,6 +70,7 @@ pub(crate) enum CliError {
 impl CliError {
     pub(crate) const fn code(&self) -> &'static str {
         match self {
+            Self::HarnessWindowsUnavailable(_) => "NH-CLI-007",
             Self::Discovery(error) => error.code(),
             Self::Install(_) => InstallError::code(),
             Self::Credential(error) => error.code(),
@@ -100,6 +105,9 @@ impl nan_harness_i18n::TerminalMessage for CliError {
             return self.to_string();
         }
         match self {
+            Self::HarnessWindowsUnavailable(harness) => {
+                m::error_cli_harness_windows_unavailable(locale, harness)
+            }
             Self::Discovery(field_0) => {
                 nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
             }

@@ -8,7 +8,9 @@ use nan_harness_runtime::update::UpdateError;
 pub(super) fn should_report(error: &CliError, cli: &Cli) -> bool {
     if matches!(
         error,
-        CliError::Update(UpdateError::UpdateChannelUnavailable) | CliError::UsageEvidence(_)
+        CliError::HarnessWindowsUnavailable(_)
+            | CliError::Update(UpdateError::UpdateChannelUnavailable)
+            | CliError::UsageEvidence(_)
     ) {
         return false;
     }

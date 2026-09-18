@@ -17,7 +17,8 @@ pub(super) fn classify(error: &CliError) -> Classification {
         CliError::Install(error) => discovery_install::classify_install(error),
         CliError::Credential(error) => credentials::classify(error),
         CliError::Configuration(error) => configuration::classify(error),
-        CliError::ChatGptDesktop(_)
+        CliError::HarnessWindowsUnavailable(_)
+        | CliError::ChatGptDesktop(_)
         | CliError::ClaudeDesktop(_)
         | CliError::HermesDesktop(_)
         | CliError::PenDesktop(_)

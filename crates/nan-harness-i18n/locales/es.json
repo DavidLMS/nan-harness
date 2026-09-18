@@ -301,6 +301,7 @@
   "error_claude_desktop_unsupported_receipt": "el esquema del registro privado de Claude Desktop no es compatible",
   "error_claude_desktop_write": "no se ha podido escribir la configuración de Claude Desktop: {value_1}",
   "error_claude_desktop_write_backup": "no se ha podido escribir una copia de seguridad privada de Claude Desktop: {value_1}",
+  "error_cli_harness_windows_unavailable": "{harness} aún no es compatible con Windows. El soporte para Windows depende de que el propio harness publique una build compatible. Cuando esté disponible, podrás probarla con nan-harness usando --executable <ruta>.",
   "error_cli_credential_invariant": "no se ha completado la comprobación interna previa de credenciales",
   "error_cli_current_directory": "no se ha podido leer el directorio de trabajo actual: {value_1}",
   "error_cli_invalid_plan": "el plan de ejecución no es válido: {value_1}",

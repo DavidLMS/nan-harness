@@ -76,5 +76,10 @@ fn unavailable_model_message(error: &CliError, cli: &Cli, locale: Locale) -> Opt
 
 fn requires_setup(error: &CliError) -> bool {
     matches!(error, CliError::Install(error) if error.is_runtime_precondition())
-        || matches!(error, CliError::Credential(_) | CliError::Configuration(_))
+        || matches!(
+            error,
+            CliError::HarnessWindowsUnavailable(_)
+                | CliError::Credential(_)
+                | CliError::Configuration(_)
+        )
 }

@@ -1964,6 +1964,13 @@
       "crates/nan-harness-cli/src/commands/claude_desktop/error.rs"
     ]
   },
+  "error_cli_harness_windows_unavailable": {
+    "description": "Upstream harness Windows availability, separate from nan-harness integration or installer availability. Preserve --executable. The explicit path permits trying future builds without promising compatibility.",
+    "section": "error",
+    "sources": [
+      "crates/nan-harness-cli/src/error/types.rs"
+    ]
+  },
   "error_cli_credential_invariant": {
     "description": "Provider credential setup, status and removal. Preserve command names, paths, provider identifiers and diagnostic codes.",
     "section": "credentials",

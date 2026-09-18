@@ -5,6 +5,22 @@ pub(crate) fn locate_or_install_harness(
     kind: HarnessKind,
     arguments: &HarnessRunArgs,
 ) -> Result<Option<PathBuf>, CliError> {
+    locate_harness_for_platform(kind, arguments, cfg!(windows))
+}
+
+fn locate_harness_for_platform(
+    kind: HarnessKind,
+    arguments: &HarnessRunArgs,
+    windows: bool,
+) -> Result<Option<PathBuf>, CliError> {
+    // Upstream platform availability is independent of the installer catalog.
+    // An explicit executable lets users try a future build without waiting for an update.
+    if windows
+        && matches!(kind, HarnessKind::PrimeAgent | HarnessKind::Fx)
+        && arguments.executable.is_none()
+    {
+        return Err(CliError::HarnessWindowsUnavailable(kind));
+    }
     match locate_harness_executable(kind, arguments.executable.as_deref()) {
         Ok(executable) => Ok(Some(executable)),
         Err(DiscoveryError::ExecutableNotFound(_))
@@ -77,4 +93,64 @@ pub(super) fn report_install_skipped(kind: HarnessKind, reason: &str) {
     );
     eprintln!(
         "{}", nan_harness_i18n::messages::discovery_install_the_official_release_or_pass_executable_path_to(nan_harness_i18n::locale(), &(kind.binary_name())));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn windows_upstream_availability_precedes_discovery_in_all_launch_modes() {
+        for command in ["prime", "prime-agent", "fx"] {
+            for flags in [
+                vec![],
+                vec!["--dry-run"],
+                vec!["--allow-unsupported", "--allow-untested"],
+            ] {
+                let cli = Cli::try_parse_from(["nanh", command].into_iter().chain(flags))
+                    .expect("valid harness command");
+                let (kind, arguments) = harness_run_arguments(&cli).expect("harness arguments");
+                assert!(matches!(
+                    locate_harness_for_platform(kind, arguments, true),
+                    Err(CliError::HarnessWindowsUnavailable(blocked)) if blocked == kind
+                ));
+            }
+        }
+    }
+
+    #[test]
+    fn explicit_future_builds_reach_executable_validation() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let missing = directory.path().join("future-build.exe");
+        for command in ["prime", "fx"] {
+            let cli = Cli::try_parse_from([
+                "nanh",
+                command,
+                "--executable",
+                missing.to_str().expect("UTF-8 path"),
+            ])
+            .expect("valid harness command");
+            let (kind, arguments) = harness_run_arguments(&cli).expect("harness arguments");
+            for windows in [false, true] {
+                assert!(matches!(
+                    locate_harness_for_platform(kind, arguments, windows),
+                    Err(CliError::Discovery(_))
+                ));
+            }
+        }
+    }
+
+    #[test]
+    fn missing_installer_does_not_imply_upstream_windows_incompatibility() {
+        for (command, windows) in [("goose", true), ("prime", false), ("fx", false)] {
+            let cli =
+                Cli::try_parse_from(["nanh", command, "--dry-run"]).expect("valid harness command");
+            let (kind, arguments) = harness_run_arguments(&cli).expect("harness arguments");
+            assert!(!matches!(
+                locate_harness_for_platform(kind, arguments, windows),
+                Err(CliError::HarnessWindowsUnavailable(_))
+            ));
+        }
+    }
 }
