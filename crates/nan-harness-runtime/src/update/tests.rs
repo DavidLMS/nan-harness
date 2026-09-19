@@ -9,6 +9,7 @@ use axum::routing::get;
 use semver::Version;
 use sha2::{Digest as _, Sha256};
 use std::sync::Arc;
+use std::time::Duration;
 
 #[tokio::test]
 async fn skipped_release_returns_only_when_a_newer_version_exists() {
@@ -159,7 +160,7 @@ async fn downloads_and_verifies_an_executable_candidate() {
     )
     .expect("manager should build");
 
-    let candidate = super::artifact::download(&manager.client, &release.artifacts[0])
+    let candidate = super::artifact::download(&manager.artifact_client, &release.artifacts[0])
         .await
         .expect("candidate should download");
     let candidate_path: &std::path::Path = candidate.as_ref();
@@ -173,6 +174,57 @@ async fn downloads_and_verifies_an_executable_candidate() {
     );
     verify_candidate(candidate_path, &release.version)
         .expect("candidate should report the expected version");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn artifact_downloads_can_take_longer_than_metadata_requests() {
+    use std::convert::Infallible;
+
+    let binary = b"#!/bin/sh\nprintf '%s\\n' 'nan-harness 0.2.0'\n".to_vec();
+    let checksum = hex_digest(Sha256::digest(&binary));
+    let delayed_binary = binary.clone();
+    let binary_server = serve(Router::new().route(
+        "/nan",
+        get(move || {
+            let binary = delayed_binary.clone();
+            async move {
+                let body = futures_util::stream::once(async move {
+                    tokio::time::sleep(Duration::from_secs(4)).await;
+                    Ok::<_, Infallible>(binary)
+                });
+                Response::builder()
+                    .status(StatusCode::OK)
+                    .body(Body::from_stream(body))
+                    .expect("response should build")
+            }
+        }),
+    ))
+    .await;
+    let release = ReleaseManifest {
+        schema_version: 1,
+        version: Version::new(0, 2, 0),
+        notes_url: "https://example.com/notes".to_owned(),
+        artifacts: vec![ReleaseArtifact {
+            target: current_target().to_owned(),
+            url: format!("{binary_server}/nan"),
+            sha256: checksum,
+        }],
+    };
+    let directory = tempfile::tempdir().expect("temporary directory should exist");
+    let manager = UpdateManager::new(
+        "0.1.0",
+        Some("https://example.com/manifest.json".to_owned()),
+        None,
+        UpdateStateStore::new(directory.path()),
+    )
+    .expect("manager should build");
+
+    let candidate = super::artifact::download(&manager.artifact_client, &release.artifacts[0])
+        .await
+        .expect("slow candidate should download");
+    verify_candidate(candidate.as_ref(), &release.version)
+        .expect("slow candidate should report the expected version");
 }
 
 #[tokio::test]
