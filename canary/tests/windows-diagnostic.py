@@ -561,6 +561,15 @@ class WindowsDiagnosticTests(unittest.TestCase):
         self.assertEqual(install["diagnostic"], {"subphase": "install", "executable": "npm-cmd", "exitCode": 1,
                                                   "npmCode": "registry-dns", "processReason": "exit-nonzero"})
 
+    def test_shell_error_result_code_is_accepted(self):
+        # The runner names shell failure text inside an otherwise healthy tool result.
+        self.assertIn("tool-result-shell-error", diagnostic.PROBE_ASSERTION_CODES)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "assertion.jsonl"
+            path.write_text("tool-result-shell-error\n", encoding="ascii")
+            self.assertEqual(diagnostic.read_assertions(path),
+                             {"assertionStatus": "valid", "assertions": ["tool-result-shell-error"]})
+
     def test_inventory_only_failure_is_maintenance_evidence(self):
         # The hosted gate never blocks on inventory drift; the native collector keeps that policy
         # while still publishing the drift as evidence.

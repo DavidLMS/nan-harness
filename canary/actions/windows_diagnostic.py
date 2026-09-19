@@ -34,7 +34,8 @@ INSTALL_DETERMINISTIC_REASONS = frozenset((
 # Closed reasons a failed conformance assertion may report, one per failure domain.
 PROBE_ASSERTION_CODES = frozenset((
     "process-failed", "provider-incomplete", "inventory-mismatch", "tool-call-missing",
-    "tool-call-mismatch", "tool-traffic-unexpected", "tool-result-mismatch", "marker-missing",
+    "tool-call-mismatch", "tool-traffic-unexpected", "tool-result-mismatch",
+    "tool-result-shell-error", "marker-missing",
     "side-effect-missing", "filesystem-unreadable",
 ))
 

@@ -34,7 +34,8 @@ INSTALLER_MARKER_REASONS = frozenset(("passed", "installer-failed", "official-as
 # Closed reasons a failed conformance assertion may report.
 PROBE_ASSERTION_CODES = frozenset((
     "process-failed", "provider-incomplete", "inventory-mismatch", "tool-call-missing",
-    "tool-call-mismatch", "tool-traffic-unexpected", "tool-result-mismatch", "marker-missing",
+    "tool-call-mismatch", "tool-traffic-unexpected", "tool-result-mismatch",
+    "tool-result-shell-error", "marker-missing",
     "side-effect-missing", "filesystem-unreadable",
 ))
 # Field names the Windows probe can publish for a rejected marker.

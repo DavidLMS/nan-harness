@@ -1,6 +1,7 @@
 use super::errors::ProbeAssertionError;
 use super::extraction::{
-    normalized_tool_result_id, unique_tool_calls, unique_tool_results, value_is_error,
+    normalized_tool_result_id, result_text_reports_shell_error, unique_tool_calls,
+    unique_tool_results, value_is_error,
 };
 use crate::scripted_provider::ScriptedToolCall;
 use crate::terminal::TerminalOutput;
@@ -170,6 +171,9 @@ fn assert_result_health(results: Vec<(String, Value)>) -> Result<(), ProbeAssert
         }
         if value_is_error(&content) {
             return Err(ProbeAssertionError::ToolResultError);
+        }
+        if result_text_reports_shell_error(&content) {
+            return Err(ProbeAssertionError::ToolResultShellError);
         }
     }
     Ok(())

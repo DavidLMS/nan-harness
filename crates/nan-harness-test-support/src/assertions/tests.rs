@@ -259,4 +259,19 @@ fn claude_transcript_allows_prerequisite_tool_lifecycles() {
     transcript
         .require_complete_tool_round_trip("Edit", "EDIT_CONFORMANCE_OK")
         .expect("the target lifecycle should ignore completed prerequisite tools");
+
+    #[test]
+    fn a_shell_failure_text_inside_a_healthy_result_is_classified() {
+        // Cline returns the shell's own wording as a non-empty, non-error result.
+        let value = serde_json::json!(
+            "'printf' is not recognized as an internal or external command, operable program or batch file."
+        );
+        assert!(!super::extraction::value_is_error(&value));
+        assert!(super::extraction::result_text_reports_shell_error(&value));
+        let success =
+            serde_json::json!({"content": [{"type": "text", "text": "NAN_HARNESS_TOOL_OK"}]});
+        assert!(!super::extraction::result_text_reports_shell_error(
+            &success
+        ));
+    }
 }

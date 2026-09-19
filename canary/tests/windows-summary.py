@@ -130,6 +130,14 @@ class WindowsSummaryTests(unittest.TestCase):
                 summary.safe_view(value)
             self.assertNotIn("secret", str(raised.exception))
 
+    def test_shell_error_result_code_is_allowlisted(self):
+        self.assertIn("tool-result-shell-error", summary.PROBE_ASSERTION_CODES)
+        value = report()
+        value["harnesses"][0]["phases"]["deterministic-contract"]["diagnostic"] = {
+            "assertions": {"assertionStatus": "valid", "assertions": ["tool-result-shell-error"]}}
+        rendered = summary.render(summary.safe_view(value))
+        self.assertIn("assertions=tool-result-shell-error", rendered)
+
     def test_nested_installer_failure_class_is_allowlisted(self):
         value = report()
         value["harnesses"][0]["phases"]["install"]["diagnostic"] = {
