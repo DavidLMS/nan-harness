@@ -4,6 +4,7 @@ use crate::conformance::{
 use nan_harness_core::HarnessKind;
 use serde_json::json;
 use std::ffi::OsString;
+use std::path::Path;
 
 fn exact_args(values: &[&str]) -> Vec<OsString> {
     values.iter().map(OsString::from).collect()
@@ -22,6 +23,44 @@ fn external_run_kind() -> RunKind {
         tool: "DesignSync".to_owned(),
         arguments: vec!["--fixture".to_owned(), "http://fixture".to_owned()],
         enabled_tools: vec!["DesignSync".to_owned(), "read_file".to_owned()],
+    }
+}
+
+fn cline_expected_arguments(prompt: &str, workspace: &Path) -> Vec<OsString> {
+    let mut arguments = exact_args(&["--act", "--auto-approve", "true", "--cwd"]);
+    arguments.push(workspace.as_os_str().to_owned());
+    arguments.extend(exact_args(&["--json", "--timeout", "60", prompt]));
+    arguments
+}
+
+#[test]
+fn cline_headless_arguments_are_exact_for_every_run_kind() {
+    let workspace = tempfile::tempdir().expect("workspace should exist");
+    let cases = [
+        (RunKind::Inventory, "INVENTORY"),
+        (tool_run_kind(), "TOOL"),
+        (RunKind::Sentinel, "SENTINEL"),
+        (external_run_kind(), "EXTERNAL"),
+    ];
+
+    for (run_kind, marker) in cases {
+        let prompt = match &run_kind {
+            RunKind::Inventory | RunKind::Sentinel => {
+                format!("Reply exactly {marker} without using tools.")
+            }
+            RunKind::Tool(tool) => format!(
+                "Use the {} tool exactly once, wait for its result, then reply exactly {marker}.",
+                tool.name
+            ),
+            RunKind::External { tool, .. } => format!(
+                "Run the deterministic {tool} authorization scenario, report its controlled prerequisite, then reply exactly {marker}."
+            ),
+        };
+
+        assert_eq!(
+            headless_arguments(HarnessKind::Cline, &run_kind, marker, workspace.path()),
+            cline_expected_arguments(&prompt, workspace.path())
+        );
     }
 }
 
