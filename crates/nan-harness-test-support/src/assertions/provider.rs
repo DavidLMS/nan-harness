@@ -85,6 +85,27 @@ pub fn assert_provider_tool_round_trip(
     assert_result_health(results)
 }
 
+/// The bounded text of a request’s tool results, for an opt-in private local diagnostic.
+///
+/// Callers print this only to a local terminal: it carries harness output and must never reach
+/// a published report.
+#[must_use]
+pub fn tool_result_excerpt(requests: &[Value]) -> String {
+    const LIMIT: usize = 512;
+    let mut text = String::new();
+    for (_, value) in unique_tool_results(requests) {
+        if let Some(item) = value.as_str() {
+            text.push_str(item);
+        } else {
+            text.push_str(&value.to_string());
+        }
+        if text.len() >= LIMIT {
+            break;
+        }
+    }
+    text.chars().take(LIMIT).collect()
+}
+
 fn assert_provider_tool_calls(
     requests: &[Value],
     expected: &[ScriptedToolCall],

@@ -1,4 +1,5 @@
 use super::extraction::{result_text_reports_shell_error, value_is_error};
+use super::tool_result_excerpt;
 use super::{
     ClaudeTranscript, ProbeAssertionError, assert_provider_tool_round_trip, assert_sentinel,
     assert_tool_results, assert_tool_round_trip, assert_tool_round_trip_with_sanitized_ids,
@@ -260,6 +261,19 @@ fn claude_transcript_allows_prerequisite_tool_lifecycles() {
     transcript
         .require_complete_tool_round_trip("Edit", "EDIT_CONFORMANCE_OK")
         .expect("the target lifecycle should ignore completed prerequisite tools");
+}
+
+#[test]
+fn the_private_result_excerpt_is_bounded_and_reads_result_text() {
+    let requests = vec![json!({
+        "messages": [{"role": "tool", "tool_call_id": "call_1", "content": "printf: command not found"}]
+    })];
+    let excerpt = tool_result_excerpt(&requests);
+    assert!(excerpt.contains("command not found"), "{excerpt}");
+    let long = vec![
+        json!({"messages": [{"role": "tool", "tool_call_id": "c", "content": "x".repeat(2000)}]}),
+    ];
+    assert_eq!(tool_result_excerpt(&long).chars().count(), 512);
 }
 
 #[test]

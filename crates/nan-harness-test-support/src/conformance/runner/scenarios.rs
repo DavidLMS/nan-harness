@@ -17,7 +17,7 @@ use super::{PublishedConformanceRunner, inventory_process_evidence};
 use crate::assertions::{
     ClaudeTranscript, ProbeAssertionError, assert_aider_edit_protocol,
     assert_provider_tool_round_trip, assert_sentinel, assert_tool_round_trip,
-    assert_tool_round_trip_with_sanitized_ids,
+    assert_tool_round_trip_with_sanitized_ids, tool_result_excerpt,
 };
 use crate::manifest::{Coverage, embedded_tool_scenario};
 use crate::scripted_provider::{ProviderScenario, ScriptedProvider, ScriptedToolCall};
@@ -404,7 +404,22 @@ pub(super) async fn run_tool_round_trip(
             &probe.call,
             &workspace.resolve("edit-target.txt"),
         );
-        assertion_passed(assertion.and_then(|()| verify_probe_side_effect(&probe)))
+        let outcome = assertion.and_then(|()| verify_probe_side_effect(&probe));
+        if outcome.is_err() && std::env::var_os("NAN_HARNESS_CONFORMANCE_DIAGNOSTICS").is_some() {
+            // Local, opt-in and private: the excerpt names what the harness reported for the tool
+            // call, which is the only way to see whether it believes the command succeeded. Never
+            // part of the published report.
+            eprintln!(
+                "conformance tool diagnostics for {}: outcome={:?}, exit={:?}, marker={}, requests={}, results={:?}",
+                registration.kind,
+                outcome.as_ref().err(),
+                Some(output.status.code()),
+                output.stdout.contains(ROUND_TRIP_MARKER),
+                requests.len(),
+                tool_result_excerpt(&requests),
+            );
+        }
+        outcome.is_ok()
     });
     let status = if passed {
         ConformanceStatus::Passed
