@@ -33,6 +33,7 @@ pub(crate) fn assertion_code(error: &ProbeAssertionError) -> &'static str {
         ProbeAssertionError::UnexpectedToolResults { .. }
         | ProbeAssertionError::EmptyToolResult
         | ProbeAssertionError::ToolResultError => "tool-result-mismatch",
+        ProbeAssertionError::ToolResultShellError => "tool-result-shell-error",
         ProbeAssertionError::MissingMarker(_) => "marker-missing",
         ProbeAssertionError::MissingFilesystemSideEffect(_) => "side-effect-missing",
         ProbeAssertionError::Filesystem(_) => "filesystem-unreadable",
