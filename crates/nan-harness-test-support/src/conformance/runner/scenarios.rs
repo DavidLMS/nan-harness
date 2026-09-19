@@ -15,8 +15,9 @@ use super::super::report::{
 };
 use super::{PublishedConformanceRunner, inventory_process_evidence};
 use crate::assertions::{
-    ClaudeTranscript, assert_aider_edit_protocol, assert_provider_tool_round_trip, assert_sentinel,
-    assert_tool_round_trip, assert_tool_round_trip_with_sanitized_ids,
+    ClaudeTranscript, ProbeAssertionError, assert_aider_edit_protocol,
+    assert_provider_tool_round_trip, assert_sentinel, assert_tool_round_trip,
+    assert_tool_round_trip_with_sanitized_ids,
 };
 use crate::manifest::{Coverage, embedded_tool_scenario};
 use crate::scripted_provider::{ProviderScenario, ScriptedProvider, ScriptedToolCall};
@@ -26,6 +27,37 @@ use nan_harness_core::HarnessKind;
 use std::collections::BTreeSet;
 use std::fs;
 use std::time::Instant;
+
+/// The assertion one harness must satisfy for the deterministic tool round trip.
+fn tool_round_trip_assertion(
+    kind: HarnessKind,
+    output: &TerminalOutput,
+    requests: &[serde_json::Value],
+    call: &ScriptedToolCall,
+    edit_target: &std::path::Path,
+) -> Result<(), ProbeAssertionError> {
+    match kind {
+        HarnessKind::Aider => assert_aider_edit_protocol(
+            output,
+            requests,
+            edit_target,
+            "EDIT_TARGET_BEFORE\n",
+            ROUND_TRIP_MARKER,
+        ),
+        HarnessKind::OpenClaw => assert_tool_round_trip_with_sanitized_ids(
+            output,
+            requests,
+            std::slice::from_ref(call),
+            ROUND_TRIP_MARKER,
+        ),
+        _ => assert_tool_round_trip(
+            output,
+            requests,
+            std::slice::from_ref(call),
+            ROUND_TRIP_MARKER,
+        ),
+    }
+}
 
 fn progress_result(scenario: &str, stage: &str, passed: bool, started: Instant) {
     progress_event(
@@ -358,32 +390,20 @@ pub(super) async fn run_tool_round_trip(
     progress_event("tool-round-trip", "cleanup", "started", started);
     let daemon_clean = daemon.cleanup().await.is_ok();
     progress_result("tool-round-trip", "cleanup", daemon_clean, started);
+    if output.is_err() {
+        record_assertion_code("process-failed");
+    }
     let passed = output.as_ref().is_ok_and(|output| {
         if !(provider_complete && provider_bounded && provider_shutdown && daemon_clean) {
-            record_assertion_code("provider-incomplete");
             return false;
         }
-        let assertion = match registration.kind {
-            HarnessKind::Aider => assert_aider_edit_protocol(
-                output,
-                &requests,
-                &workspace.resolve("edit-target.txt"),
-                "EDIT_TARGET_BEFORE\n",
-                ROUND_TRIP_MARKER,
-            ),
-            HarnessKind::OpenClaw => assert_tool_round_trip_with_sanitized_ids(
-                output,
-                &requests,
-                std::slice::from_ref(&probe.call),
-                ROUND_TRIP_MARKER,
-            ),
-            _ => assert_tool_round_trip(
-                output,
-                &requests,
-                std::slice::from_ref(&probe.call),
-                ROUND_TRIP_MARKER,
-            ),
-        };
+        let assertion = tool_round_trip_assertion(
+            registration.kind,
+            output,
+            &requests,
+            &probe.call,
+            &workspace.resolve("edit-target.txt"),
+        );
         assertion_passed(assertion.and_then(|()| verify_probe_side_effect(&probe)))
     });
     let status = if passed {
@@ -431,9 +451,11 @@ pub(super) async fn run_sentinel(
     progress_event("sentinel", "cleanup", "started", started);
     let daemon_clean = daemon.cleanup().await.is_ok();
     progress_result("sentinel", "cleanup", daemon_clean, started);
+    if output.is_err() {
+        record_assertion_code("process-failed");
+    }
     let passed = output.as_ref().is_ok_and(|output| {
         if !(provider_complete && provider_bounded && provider_shutdown && daemon_clean) {
-            record_assertion_code("provider-incomplete");
             return false;
         }
         assertion_passed(assert_sentinel(output, &requests, SENTINEL_MARKER))
@@ -546,6 +568,9 @@ pub(super) async fn run_external_prerequisite(
     progress_event("external-prerequisite", "cleanup", "started", started);
     let daemon_clean = daemon.cleanup().await.is_ok();
     progress_result("external-prerequisite", "cleanup", daemon_clean, started);
+    if output.is_err() {
+        record_assertion_code("process-failed");
+    }
     let passed = output.as_ref().is_ok_and(|output| {
         if !(provider_complete
             && provider_bounded

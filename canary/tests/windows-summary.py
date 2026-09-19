@@ -130,6 +130,19 @@ class WindowsSummaryTests(unittest.TestCase):
                 summary.safe_view(value)
             self.assertNotIn("secret", str(raised.exception))
 
+    def test_nested_installer_failure_class_is_allowlisted(self):
+        value = report()
+        value["harnesses"][0]["phases"]["install"]["diagnostic"] = {
+            "subphase": "install", "executable": "pwsh", "exitCode": 1,
+            "processCategory": "network-timeout"}
+        view = summary.safe_view(value)
+        self.assertEqual(view["harnesses"][0]["phases"]["install"]["diagnostic"]["processCategory"],
+                         "network-timeout")
+        value["harnesses"][0]["phases"]["install"]["diagnostic"]["processCategory"] = "secret"
+        with self.assertRaises(summary.UnsafeReport) as raised:
+            summary.safe_view(value)
+        self.assertNotIn("secret", str(raised.exception))
+
     def test_failed_scenarios_are_allowlisted(self):
         # A conformance failure publishes the closed names of the scenarios that failed.
         value = report()

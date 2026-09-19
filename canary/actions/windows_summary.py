@@ -25,6 +25,11 @@ NPM_CODES = frozenset(("registry-dns", "registry-connection", "registry-timeout"
 PIP_CATEGORIES = frozenset(("network-dns", "network-connection", "network-timeout", "package-not-found", "permission", "tls-certificate", "pip-missing", "pip-unknown"))
 PROCESS_REASONS = frozenset(("win32-launch-failed", "exit-nonzero", "native-unavailable"))
 PARENT_INSTALL_REASONS = frozenset(("timeout", "launch-failed", "nonzero"))
+# Closed failure classes a nested installer child may report.
+PROCESS_CATEGORIES = frozenset((
+    "network-dns", "network-timeout", "network-connection", "tls-certificate", "permission",
+    "disk-space", "tool-missing", "package-not-found", "installer-refused",
+))
 INSTALLER_MARKER_REASONS = frozenset(("passed", "installer-failed", "official-asset-missing", "official-metadata-probe-failed", "official-metadata-no-windows-asset", "capability-not-implemented", "invalid-frozen-ref", "invalid-version", "launcher-verify-failed", "launcher-missing"))
 # Closed reasons a failed conformance assertion may report.
 PROBE_ASSERTION_CODES = frozenset((
@@ -103,8 +108,9 @@ def _diagnostic(value, label):
         if key in {"subphase", "executable", "assetReason"}:
             choices = {"subphase": SUBPHASES, "executable": EXECUTABLES, "assetReason": ASSET_REASONS}[key]
             if item not in choices: raise UnsafeReport(f"invalid {label} diagnostic")
-        elif key in {"npmCode", "pipCategory", "processReason"}:
-            choices = {"npmCode": NPM_CODES, "pipCategory": PIP_CATEGORIES, "processReason": PROCESS_REASONS}[key]
+        elif key in {"npmCode", "pipCategory", "processReason", "processCategory"}:
+            choices = {"npmCode": NPM_CODES, "pipCategory": PIP_CATEGORIES,
+                       "processReason": PROCESS_REASONS, "processCategory": PROCESS_CATEGORIES}[key]
             if item not in choices: raise UnsafeReport(f"invalid {label} diagnostic")
         elif key == "parentReason":
             if item not in PARENT_INSTALL_REASONS: raise UnsafeReport(f"invalid {label} diagnostic")

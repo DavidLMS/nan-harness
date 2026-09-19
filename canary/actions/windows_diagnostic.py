@@ -492,7 +492,12 @@ _INSTALLER_REASONS = frozenset({
 })
 _INSTALLER_DIAGNOSTIC_KEYS = frozenset({
     "subphase", "executable", "exitCode", "win32Error", "httpStatus", "assetReason",
-    "npmCode", "pipCategory", "processReason",
+    "npmCode", "pipCategory", "processReason", "processCategory",
+})
+# Closed failure classes a nested installer child (pwsh, git, uv) may report.
+_INSTALLER_PROCESS_CATEGORIES = frozenset({
+    "network-dns", "network-timeout", "network-connection", "tls-certificate", "permission",
+    "disk-space", "tool-missing", "package-not-found", "installer-refused",
 })
 _INSTALLER_SUBPHASES = frozenset({
     "metadata", "download", "archive", "asset-selection", "execute", "install",
@@ -616,6 +621,10 @@ def _safe_installer_diagnostic(value):
             diagnostic[key] = item
         elif key == "pipCategory":
             if not isinstance(item, str) or item not in _INSTALLER_PIP_CATEGORIES:
+                return None
+            diagnostic[key] = item
+        elif key == "processCategory":
+            if not isinstance(item, str) or item not in _INSTALLER_PROCESS_CATEGORIES:
                 return None
             diagnostic[key] = item
         elif key == "processReason":
@@ -1003,6 +1012,20 @@ def collect(args, harnesses, output):
                 assertion_record = read_assertions(assertion_file)
             marker_failed = diagnostic.get("status") == "failed"
             if code != 0 or marker_failed:
+                # The canary treats the tool inventory as maintenance evidence and the hosted gate
+                # does not block on an inventory-only failure, so the native collector keeps the same
+                # policy: the drift stays in the phase evidence and the functional contracts decide.
+                scenarios = diagnostic.get("failedScenarios") or []
+                if scenarios == ["inventory"]:
+                    phases[name] = phase("PASS", "verified-with-inventory-drift")
+                    diagnostic.pop("status", None)
+                    if progress:
+                        diagnostic["progress"] = progress
+                    if assertion_record and assertion_record.get("assertionStatus") != "absent":
+                        diagnostic["assertions"] = assertion_record
+                    if diagnostic: phases[name]["diagnostic"] = diagnostic
+                    checkpoint()
+                    continue
                 failure_reason = reason if code != 0 else "diagnostic"
                 cause = causal(harness, name, failure_reason); phases[name] = phase("FAIL", "probe-" + failure_reason, cause)
                 if diagnostic:

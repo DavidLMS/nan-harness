@@ -34,13 +34,15 @@ function Set-InstallDiagnostic {
     [string]$AssetReason,
     [string]$NpmCode,
     [string]$PipCategory,
-    [string]$ProcessReason
+    [string]$ProcessReason,
+    [string]$ProcessCategory
   )
   $script:InstallDiagnostic = @{}
   foreach ($entry in @{
     subphase = $Subphase; executable = $Executable; exitCode = $ExitCode
     win32Error = $Win32Error; httpStatus = $HttpStatus; assetReason = $AssetReason
     npmCode = $NpmCode; pipCategory = $PipCategory; processReason = $ProcessReason
+    processCategory = $ProcessCategory
   }.GetEnumerator()) {
     if ($null -ne $entry.Value -and [string]$entry.Value -ne '') { $script:InstallDiagnostic[$entry.Key] = $entry.Value }
   }
@@ -56,7 +58,7 @@ function Write-InstallerResult([string]$Status, [string]$Reason) {
 
 function Invoke-Native([string]$File, [string[]]$Arguments, [string]$Executable = 'unknown', [string]$Subphase = 'execute') {
   # ProcessStartInfo.ArgumentList preserves spaces and quotes without cmd.exe.
-    Set-InstallDiagnostic $Subphase $Executable $null $null $null $null $null $null $null
+    Set-InstallDiagnostic $Subphase $Executable $null $null $null $null $null $null $null $null
   $info = [System.Diagnostics.ProcessStartInfo]::new()
   $info.FileName = $File; $info.WorkingDirectory = $cell; $info.UseShellExecute = $false
   $info.RedirectStandardOutput = $true; $info.RedirectStandardError = $true
@@ -72,7 +74,7 @@ function Invoke-Native([string]$File, [string[]]$Arguments, [string]$Executable 
   [IO.File]::WriteAllText($stdoutLog, $outTask.Result, [Text.UTF8Encoding]::new($false))
   [IO.File]::WriteAllText($stderrLog, $errTask.Result, [Text.UTF8Encoding]::new($false))
   if ($process.ExitCode -ne 0) {
-    $npmCode = $null; $pipCategory = $null
+    $npmCode = $null; $pipCategory = $null; $processCategory = $null
     if ($Executable -in @('npm-node','npm-cmd')) {
       # npm 10+ emits `npm error code`; older npm emits `npm ERR! code`.
       # Match only stable machine codes and command-resolution text; never
@@ -96,8 +98,20 @@ function Invoke-Native([string]$File, [string[]]$Arguments, [string]$Executable 
         elseif ($errTask.Result -match '(?i)Access is denied|Permission denied') { 'permission' }
         elseif ($errTask.Result -match '(?i)No module named pip') { 'pip-missing' }
         else { 'pip-unknown' }
+    } elseif ($Executable -in @('pwsh','git','uv')) {
+      # The nested installer's own failure class, from stable text only: without it a
+      # failed hermes install reports the generic 'installer-failed' and says nothing.
+      $processCategory = if ($errTask.Result -match '(?i)Temporary failure in name resolution|Name or service not known|Could not resolve host') { 'network-dns' }
+        elseif ($errTask.Result -match '(?i)timed out|operation was aborted') { 'network-timeout' }
+        elseif ($errTask.Result -match '(?i)Connection reset|Connection refused|remote end hung up|unexpected disconnect') { 'network-connection' }
+        elseif ($errTask.Result -match '(?i)CERTIFICATE_VERIFY_FAILED|certificate verify failed|SSL certificate problem') { 'tls-certificate' }
+        elseif ($errTask.Result -match '(?i)Access is denied|Permission denied') { 'permission' }
+        elseif ($errTask.Result -match '(?i)No space left|not enough space|disk full') { 'disk-space' }
+        elseif ($errTask.Result -match '(?i)is not recognized|command not found|cannot find the path') { 'tool-missing' }
+        elseif ($errTask.Result -match '(?i)No matching distribution|Could not find a version') { 'package-not-found' }
+        else { 'installer-refused' }
     }
-    Set-InstallDiagnostic $Subphase $Executable $process.ExitCode $null $null $null $npmCode $pipCategory 'exit-nonzero'
+    Set-InstallDiagnostic $Subphase $Executable $process.ExitCode $null $null $null $npmCode $pipCategory 'exit-nonzero' $processCategory
     throw 'native installer failed'
   }
 }

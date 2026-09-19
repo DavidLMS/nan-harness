@@ -51,6 +51,10 @@ class WindowsInstallerTests(unittest.TestCase):
         self.assertIn("npm(?: ERR!| error) code", SCRIPT)
         self.assertIn("npm-command-missing", SCRIPT)
         self.assertNotIn("@('/d','/c',$command)", SCRIPT)
+        # A nested installer's own failure class is recorded, so hermes does not report only
+        # the generic installer-failed reason.
+        self.assertIn("processCategory", SCRIPT)
+        self.assertIn("installer-refused", SCRIPT)
         self.assertIn("pipCategory", SCRIPT)
         self.assertIn("PythonVersion", SCRIPT)
         self.assertIn('"-$PythonVersion"', SCRIPT)

@@ -561,6 +561,64 @@ class WindowsDiagnosticTests(unittest.TestCase):
         self.assertEqual(install["diagnostic"], {"subphase": "install", "executable": "npm-cmd", "exitCode": 1,
                                                   "npmCode": "registry-dns", "processReason": "exit-nonzero"})
 
+    def test_inventory_only_failure_is_maintenance_evidence(self):
+        # The hosted gate never blocks on inventory drift; the native collector keeps that policy
+        # while still publishing the drift as evidence.
+        args = self.args()
+        def fake(argv, cwd, env, timeout):
+            if "-Stage" in argv and "deterministic-contract" in argv:
+                Path(env["NAN_CANARY_PROBE_RESULT"]).write_text(
+                    '{"schemaVersion":2,"stage":"deterministic-contract","status":"failed",'
+                    '"diagnostics":["conformance-exit-nonzero","conformance-scenario-failed"],'
+                    '"exitCode":1,"failedScenarios":["inventory"]}')
+                return (1, "nonzero")
+            self.write_probe_success(argv, env)
+            return (0, "exit")
+        with tempfile.TemporaryDirectory() as tmp, patch.object(diagnostic, "resolver_module", return_value=Resolver()), \
+             patch.object(diagnostic.shutil, "which", return_value="x"), patch.object(diagnostic, "run_bounded", side_effect=fake):
+            self.binaries(args, Path(tmp)); report, failed = diagnostic.collect(args, ["codex"], Path(tmp))
+        contract = report["harnesses"][0]["phases"]["deterministic-contract"]
+        self.assertEqual(contract["status"], "PASS")
+        self.assertEqual(contract["reason"], "verified-with-inventory-drift")
+        self.assertEqual(contract["diagnostic"]["failedScenarios"], ["inventory"])
+        self.assertFalse(failed)
+
+    def test_nested_installer_failure_class_reaches_the_phase(self):
+        # A failed hermes install names the nested child's class instead of the generic reason.
+        args = self.args()
+        def fake(argv, cwd, env, timeout):
+            if any("install-harness.ps1" in str(argument) for argument in argv):
+                (cwd / "installer-result.json").write_text(
+                    '{"schemaVersion":2,"status":"failed","reason":"installer-failed",'
+                    '"diagnostic":{"subphase":"install","executable":"pwsh","exitCode":1,'
+                    '"processCategory":"network-timeout"}}')
+                return (1, "nonzero")
+            return (0, "exit")
+        with tempfile.TemporaryDirectory() as tmp, patch.object(diagnostic, "resolver_module", return_value=Resolver()), \
+             patch.object(diagnostic.shutil, "which", return_value="x"), patch.object(diagnostic, "run_bounded", side_effect=fake):
+            self.binaries(args, Path(tmp)); report, failed = diagnostic.collect(args, ["hermes"], Path(tmp))
+        self.assertTrue(failed)
+        install = report["harnesses"][0]["phases"]["install"]
+        self.assertEqual(install["diagnostic"]["processCategory"], "network-timeout")
+
+    def test_invalid_nested_installer_class_is_dropped(self):
+        args = self.args()
+        def fake(argv, cwd, env, timeout):
+            if any("install-harness.ps1" in str(argument) for argument in argv):
+                (cwd / "installer-result.json").write_text(
+                    '{"schemaVersion":2,"status":"failed","reason":"installer-failed",'
+                    '"diagnostic":{"subphase":"install","executable":"pwsh","exitCode":1,'
+                    '"processCategory":"secret"}}')
+                return (1, "nonzero")
+            return (0, "exit")
+        with tempfile.TemporaryDirectory() as tmp, patch.object(diagnostic, "resolver_module", return_value=Resolver()), \
+             patch.object(diagnostic.shutil, "which", return_value="x"), patch.object(diagnostic, "run_bounded", side_effect=fake):
+            self.binaries(args, Path(tmp)); report, failed = diagnostic.collect(args, ["hermes"], Path(tmp))
+        self.assertTrue(failed)
+        install = report["harnesses"][0]["phases"]["install"]
+        self.assertNotIn("secret", str(report))
+        self.assertNotIn("processCategory", install.get("diagnostic", {}))
+
     def test_invalid_v2_installer_diagnostic_falls_back_without_raw_values(self):
         args = self.args()
         def fake(argv, cwd, env, timeout):
