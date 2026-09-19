@@ -487,6 +487,42 @@ class WindowsDiagnosticTests(unittest.TestCase):
         self.assertIn(str(Path(tmp) / "cells/hermes/hermes/bin"), install[1]["PATH"])
         self.assertIn(str(Path(tmp) / "cells/hermes/home/.nan-harness-canary-venv/Scripts"), install[1]["PATH"])
 
+    def test_transient_installer_failure_is_retried_once(self):
+        # A transient installer failure (network, registry, download) gets one more attempt;
+        # the phase passes when the retry succeeds.
+        args = self.args(); installs = []
+        def fake(argv, cwd, env, timeout):
+            if any("install-harness.ps1" in str(argument) for argument in argv):
+                installs.append(argv)
+                if len(installs) == 1:
+                    (cwd / "installer-result.json").write_text(
+                        '{"schemaVersion":1,"status":"failed","reason":"installer-failed"}')
+                    return (1, "nonzero")
+                (cwd / "installer-result.json").unlink(missing_ok=True)
+                return (0, "exit")
+            self.write_probe_success(argv, env)
+            return (0, "exit")
+        with tempfile.TemporaryDirectory() as tmp, patch.object(diagnostic, "resolver_module", return_value=Resolver()), \
+             patch.object(diagnostic.shutil, "which", return_value="x"), patch.object(diagnostic, "run_bounded", side_effect=fake):
+            self.binaries(args, Path(tmp)); report, _ = diagnostic.collect(args, ["hermes"], Path(tmp))
+        self.assertEqual(len(installs), 2)
+        self.assertEqual(report["harnesses"][0]["phases"]["install"]["status"], "PASS")
+
+    def test_deterministic_installer_refusal_is_not_retried(self):
+        args = self.args(); installs = []
+        def fake(argv, cwd, env, timeout):
+            if any("install-harness.ps1" in str(argument) for argument in argv):
+                installs.append(argv)
+                (cwd / "installer-result.json").write_text(
+                    '{"schemaVersion":1,"status":"failed","reason":"capability-not-implemented"}')
+                return (1, "nonzero")
+            return (0, "exit")
+        with tempfile.TemporaryDirectory() as tmp, patch.object(diagnostic, "resolver_module", return_value=Resolver()), \
+             patch.object(diagnostic.shutil, "which", return_value="x"), patch.object(diagnostic, "run_bounded", side_effect=fake):
+            self.binaries(args, Path(tmp)); report, _ = diagnostic.collect(args, ["hermes"], Path(tmp))
+        self.assertEqual(len(installs), 1)
+        self.assertEqual(report["harnesses"][0]["phases"]["install"]["reason"], "installer-nonzero")
+
     def test_closed_installer_reason_reaches_phase_without_raw_message(self):
         args = self.args()
         def fake(argv, cwd, env, timeout):

@@ -24,6 +24,13 @@ PROGRESS_MAX_LINE = 4096
 PROGRESS_MAX_RECORDS = 256
 PROBE_MARKER_MAX_BYTES = 64 * 1024
 ASSERTION_MAX_RECORDS = 32
+# A harness install that fails for a transient reason (network, registry, a download) is
+# retried once inside the same phase; a deterministic refusal is not.
+INSTALL_ATTEMPTS = 2
+INSTALL_DETERMINISTIC_REASONS = frozenset((
+    "capability-not-implemented", "invalid-frozen-ref", "invalid-version",
+    "official-metadata-no-windows-asset",
+))
 # Closed reasons a failed conformance assertion may report, one per failure domain.
 PROBE_ASSERTION_CODES = frozenset((
     "process-failed", "provider-incomplete", "inventory-mismatch", "tool-call-missing",
@@ -909,19 +916,29 @@ def collect(args, harnesses, output):
         command = ["pwsh", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(installer),
                    "-Harness", harness, "-Version", item.version, "-PythonVersion", args.python_version]
         if item.ref: command += ["-Ref", item.ref]
-        child_timeout = budget.child_timeout(args.timeout)
-        if child_timeout <= 0:
-            phases["install"] = phase("BLOCKED", "deadline-exhausted")
-            reports.append({"harness": harness, "phases": phases, "outcome": "blocked"})
-            any_failure = True; checkpoint(); active["harness"] = None; active["phases"] = {}; active["phase"] = None; continue
-        code, reason = run_bounded(command, cell, env, child_timeout)
-        if code != 0:
+        attempts = 0
+        while True:
+            child_timeout = budget.child_timeout(args.timeout)
+            if child_timeout <= 0:
+                phases["install"] = phase("BLOCKED", "deadline-exhausted")
+                reports.append({"harness": harness, "phases": phases, "outcome": "blocked"})
+                any_failure = True; checkpoint(); active["harness"] = None; active["phases"] = {}; active["phase"] = None; break
+            code, reason = run_bounded(command, cell, env, child_timeout)
+            if code == 0:
+                break
             marker_reason, marker_diagnostic = installer_diagnostic(cell) if (cell / "installer-result.json").exists() else ("installer-failed", {})
             process_reason = reason
             # A marker describes installer internals, but never replaces the
             # typed parent outcome (launch failure, timeout, or nonzero exit).
             typed = {"timeout": "installer-timeout", "launch-failed": "installer-launch-failed",
                      "nonzero": "installer-nonzero"}.get(process_reason)
+            attempts += 1
+            # One bounded retry after a transient installer failure: the marker names the
+            # reason, so a nonzero exit whose marker is transient (a registry or download
+            # failure) is retried too. A deterministic refusal is reported unchanged.
+            if (marker_reason not in INSTALL_DETERMINISTIC_REASONS
+                    and attempts < INSTALL_ATTEMPTS and budget.child_timeout(args.timeout) > 0):
+                continue
             failure_reason = typed or marker_reason
             cleanup_ok = cleanup_installer_artifacts(cell)
             if not cleanup_ok and not typed:
@@ -933,7 +950,10 @@ def collect(args, harnesses, output):
             if not cleanup_ok:
                 phases["install"]["causeDetails"]["cleanupReason"] = "cleanup-failed"
             mark_dependents(phases, PHASES[3:], "install-failed", cause); any_failure = True
-            reports.append({"harness": harness, "phases": phases}); checkpoint(); active["harness"] = None; active["phases"] = {}; active["phase"] = None; continue
+            reports.append({"harness": harness, "phases": phases}); checkpoint(); active["harness"] = None; active["phases"] = {}; active["phase"] = None; break
+        # A failed install ended this harness inside the retry loop.
+        if phases.get("install", {}).get("status") == "FAIL":
+            continue
         installer_diagnostic(cell)
         if not cleanup_installer_artifacts(cell):
             cause = causal(harness, "install", "private-cleanup-failed")
