@@ -1,5 +1,5 @@
 use crate::prepared::{BridgePreparation, PreparedError, PreparedLaunch};
-use nan_harness_core::{CodingModelProfile, LaunchPlan};
+use nan_harness_core::{CodingModelProfile, LaunchPlan, SecretStore};
 use std::path::PathBuf;
 
 pub(super) struct PreparedHarnessLaunch {
@@ -13,8 +13,15 @@ impl PreparedHarnessLaunch {
         provider_base_url: &str,
         bridge: Option<BridgePreparation>,
         model_catalog: Option<&[CodingModelProfile]>,
+        provider_secrets: &SecretStore,
     ) -> Result<Self, PreparedError> {
-        let prepared = PreparedLaunch::prepare(plan, provider_base_url, bridge, model_catalog)?;
+        let prepared = PreparedLaunch::prepare(
+            plan,
+            provider_base_url,
+            bridge,
+            model_catalog,
+            provider_secrets,
+        )?;
         let temporary_root = prepared.temporary_root(has_temporary_resources(plan));
         Ok(Self {
             prepared,

@@ -49,8 +49,15 @@ impl PreparedLaunch {
         provider_base_url: &str,
         bridge: Option<BridgePreparation>,
         model_catalog: Option<&[CodingModelProfile]>,
+        provider_secrets: &SecretStore,
     ) -> Result<Self, PreparedError> {
-        pipeline::prepare(plan, provider_base_url, bridge, model_catalog)
+        pipeline::prepare(
+            plan,
+            provider_base_url,
+            bridge,
+            model_catalog,
+            provider_secrets,
+        )
     }
 
     pub(crate) fn arguments(&self) -> &[String] {

@@ -88,7 +88,7 @@ fn run_installer_command(
     run_command(program, arguments, Command::status)
 }
 
-fn run_command<T>(
+pub(super) fn run_command<T>(
     program: &OsStr,
     arguments: &[&str],
     mut run: impl FnMut(&mut Command) -> io::Result<T>,

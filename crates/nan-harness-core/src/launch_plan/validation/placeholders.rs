@@ -61,6 +61,9 @@ pub(super) fn validate_template_placeholders(
     if let Some(session_token_ref) = session_token_reference(&plan.transport) {
         remainder = remainder.replace(&format!("{{secret:{}}}", session_token_ref.as_str()), "");
     }
+    for reference in plan.environment.secrets.values() {
+        remainder = remainder.replace(&format!("{{secret:{}}}", reference.as_str()), "");
+    }
 
     if remainder.contains("{runtime:") || remainder.contains("{secret:") {
         unsafe_resource(

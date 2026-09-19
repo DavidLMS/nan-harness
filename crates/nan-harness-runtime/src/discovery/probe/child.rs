@@ -30,8 +30,8 @@ pub(super) struct ProbeChild {
 
 impl ProbeChild {
     pub(super) fn spawn(executable: &Path, arguments: &[&str]) -> io::Result<Self> {
-        let mut command = Command::new(executable);
-        command.args(arguments).stdin(Stdio::null());
+        let mut command = command_for_executable(executable, arguments);
+        command.stdin(Stdio::null());
         #[cfg(not(windows))]
         command.stdout(Stdio::piped()).stderr(Stdio::piped());
         #[cfg(windows)]
@@ -141,4 +141,21 @@ impl ProbeChild {
         }
         result
     }
+}
+
+fn command_for_executable(executable: &Path, arguments: &[&str]) -> Command {
+    #[cfg(windows)]
+    if executable.extension().is_some_and(|extension| {
+        extension.eq_ignore_ascii_case("cmd") || extension.eq_ignore_ascii_case("bat")
+    }) {
+        let mut command = Command::new("cmd.exe");
+        command.args(["/d", "/s", "/c"]);
+        command.arg(executable);
+        command.args(arguments);
+        return command;
+    }
+
+    let mut command = Command::new(executable);
+    command.args(arguments);
+    command
 }
