@@ -58,6 +58,7 @@ pub(super) async fn execute_direct_with_gateway(
             web_search_enabled,
         }),
         discovered_models,
+        &config.secrets,
     )?;
     let mut bridge = spawn_chat_completions(
         listener,
@@ -90,8 +91,13 @@ pub(super) async fn execute_direct_without_gateway(
     cancellation: &CancellationToken,
     discovered_models: Option<&[CodingModelProfile]>,
 ) -> Result<ExecutionReport, RuntimeError> {
-    let launch =
-        PreparedHarnessLaunch::prepare(plan, &config.provider_base_url, None, discovered_models)?;
+    let launch = PreparedHarnessLaunch::prepare(
+        plan,
+        &config.provider_base_url,
+        None,
+        discovered_models,
+        &config.secrets,
+    )?;
     let mut child = spawn_child(plan, &launch.prepared, &config.secrets)?;
     let completion = wait_for_child(&mut child, plan, cancellation).await?;
     Ok(report(
