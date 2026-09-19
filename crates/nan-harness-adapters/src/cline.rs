@@ -16,6 +16,7 @@ use std::collections::BTreeSet;
 const CREDENTIAL_TARGET: &str = "OPENAI_API_KEY";
 const CONFIG_OVERLAY_ID: &str = "cline-config";
 const CONFIG_PATH: &str = "{artifact:cline-config}";
+const DATA_DIR_PATH: &str = "{artifact:cline-config}/data";
 
 fn is_flag(arguments: &[String], flag: &str) -> bool {
     arguments.iter().any(|argument| {
@@ -24,12 +25,6 @@ fn is_flag(arguments: &[String], flag: &str) -> bool {
                 .strip_prefix(flag)
                 .is_some_and(|suffix| suffix.starts_with('='))
     })
-}
-
-fn has_explicit_mode(arguments: &[String]) -> bool {
-    ["--act", "-a", "--plan", "-p", "--yolo", "-y"]
-        .iter()
-        .any(|flag| is_flag(arguments, flag))
 }
 
 fn provider_settings(model_id: &str) -> Result<String, PlanError> {
@@ -83,11 +78,12 @@ fn arguments(context: &PlanContext, model_id: &str) -> Vec<String> {
         "--model".to_owned(),
         model_id.to_owned(),
     ];
-    // Cline's non-interactive JSON path dispatches session hooks through its hub. Its
-    // 3.0.x runtime can reject the final hook payload even though the run itself is valid;
-    // yolo is Cline's supported hook-free automation mode. Preserve an explicit user mode.
-    if is_flag(&context.user_arguments, "--json") && !has_explicit_mode(&context.user_arguments) {
-        arguments.push("--yolo".to_owned());
+    // Cline's non-interactive JSON path can attach to its Hub. On Windows 3.0.x,
+    // that path reports successful shell tool calls without running the command.
+    // An explicit data directory selects Cline's local runtime while preserving
+    // act-mode's complete tool inventory.
+    if is_flag(&context.user_arguments, "--json") {
+        arguments.extend(["--data-dir".to_owned(), DATA_DIR_PATH.to_owned()]);
     }
     arguments.extend(context.user_arguments.iter().cloned());
     arguments

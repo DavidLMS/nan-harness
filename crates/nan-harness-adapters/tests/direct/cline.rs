@@ -61,7 +61,7 @@ fn cline_merges_provider_routing_and_models_into_linked_user_settings() {
 }
 
 #[test]
-fn cline_headless_arguments_disable_runtime_hooks_without_exposing_the_key() {
+fn cline_headless_arguments_use_the_local_executor_without_exposing_the_key() {
     let plan = plan(
         &ClineAdapter,
         &context(
@@ -72,10 +72,32 @@ fn cline_headless_arguments_disable_runtime_hooks_without_exposing_the_key() {
                 .collect(),
         ),
     );
-    assert!(plan.process.arguments.contains(&"--yolo".to_owned()));
+    assert!(plan.process.arguments.contains(&"--data-dir".to_owned()));
+    assert!(
+        plan.process
+            .arguments
+            .contains(&"{artifact:cline-config}/data".to_owned())
+    );
+    assert!(!plan.process.arguments.contains(&"--yolo".to_owned()));
     let serialized = serde_json::to_string(&plan).expect("plan should serialize");
     assert!(!serialized.contains("contract-key"));
     assert!(serialized.contains("{secret:nan_api_key}"));
+}
+
+#[test]
+fn cline_headless_act_arguments_use_the_local_executor() {
+    let plan = plan(
+        &ClineAdapter,
+        &context(
+            HarnessKind::Cline,
+            ["--act", "--auto-approve", "true", "--json", "run the task"]
+                .into_iter()
+                .map(str::to_owned)
+                .collect(),
+        ),
+    );
+    assert!(plan.process.arguments.contains(&"--data-dir".to_owned()));
+    assert!(!plan.process.arguments.contains(&"--yolo".to_owned()));
 }
 
 #[test]
@@ -90,5 +112,6 @@ fn cline_preserves_an_explicit_mode_for_headless_runs() {
                 .collect(),
         ),
     );
+    assert!(plan.process.arguments.contains(&"--data-dir".to_owned()));
     assert!(!plan.process.arguments.contains(&"--yolo".to_owned()));
 }
