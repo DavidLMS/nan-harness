@@ -30,6 +30,8 @@ PROCESS_REASONS = frozenset(("win32-launch-failed", "exit-nonzero", "native-unav
 PARENT_INSTALL_REASONS = frozenset(("timeout", "launch-failed", "nonzero"))
 # Closed failure classes a nested installer child may report.
 PROCESS_CATEGORIES = frozenset((
+    "git-ownership", "git-path-length", "git-config", "git-checkout", "git-download",
+    "installer-argument", "installer-path", "git-native-error",
     "network-dns", "network-timeout", "network-connection", "tls-certificate", "permission",
     "disk-space", "tool-missing", "package-not-found", "installer-refused",
 ))

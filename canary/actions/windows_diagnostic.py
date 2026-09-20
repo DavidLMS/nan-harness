@@ -510,6 +510,8 @@ _INSTALLER_DIAGNOSTIC_KEYS = frozenset({
 })
 # Closed failure classes a nested installer child (pwsh, git, uv) may report.
 _INSTALLER_PROCESS_CATEGORIES = frozenset({
+    "git-ownership", "git-path-length", "git-config", "git-checkout", "git-download",
+    "installer-argument", "installer-path", "git-native-error",
     "network-dns", "network-timeout", "network-connection", "tls-certificate", "permission",
     "disk-space", "tool-missing", "package-not-found", "installer-refused",
 })

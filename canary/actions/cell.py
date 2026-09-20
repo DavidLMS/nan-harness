@@ -131,6 +131,8 @@ INSTALL_FAILURE_CODES = {
     "diagnostic-unknown", "unknown",
 }
 WINDOWS_INSTALL_CATEGORIES = frozenset({
+    "git-ownership", "git-path-length", "git-config", "git-checkout", "git-download",
+    "installer-argument", "installer-path", "git-native-error",
     "network-dns", "network-timeout", "network-connection", "tls-certificate", "permission",
     "disk-space", "tool-missing", "package-not-found", "installer-refused",
 })

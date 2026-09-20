@@ -121,6 +121,18 @@ function Invoke-Native([string]$File, [string[]]$Arguments, [string]$Executable 
         try { $frame = $line | ConvertFrom-Json -ErrorAction Stop } catch { continue }
         if ($frame.ok -is [bool] -and -not $frame.ok -and $stages -contains $frame.stage) {
           $script:InstallDiagnostic['upstreamStage'] = [string]$frame.stage
+          if ($frame.stage -eq 'repository' -and $frame.reason -is [string]) {
+            $repositoryCategory = if ($privateProcessText -match '(?i)detected dubious ownership') { 'git-ownership' }
+              elseif ($privateProcessText -match '(?i)Filename too long|file name is too long') { 'git-path-length' }
+              elseif ($privateProcessText -match '(?i)unable to read config|bad config line|could not lock config file') { 'git-config' }
+              elseif ($frame.reason -match '(?i)git checkout .*failed') { 'git-checkout' }
+              elseif ($frame.reason -match '(?i)Failed to download repository') { 'git-download' }
+              elseif ($frame.reason -match '(?i)cannot bind argument|parameter cannot be found|cannot process argument') { 'installer-argument' }
+              elseif ($frame.reason -match '(?i)cannot find path|cannot find drive') { 'installer-path' }
+              elseif ($frame.reason -match '(?i)Cloning into|^From |^fatal:') { 'git-native-error' }
+              else { $null }
+            if ($repositoryCategory) { $script:InstallDiagnostic['processCategory'] = $repositoryCategory }
+          }
         }
       }
     }
