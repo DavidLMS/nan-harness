@@ -40,17 +40,22 @@ function Fail([string]$message) {
 }
 function Run-Native([string[]]$Arguments) {
   $previousErrorAction = $ErrorActionPreference
+  $previousOutputEncoding = [Console]::OutputEncoding
   try {
     $command = Get-Command -Name $NanBinary -CommandType Application,ExternalScript -ErrorAction Stop
     # Windows PowerShell 5.1 turns native stderr into error records. A warning
     # must not interrupt the child or replace its real exit status.
     $ErrorActionPreference = 'Continue'
+    [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
     $global:LASTEXITCODE = $null
     & $command @Arguments 1> $stdout 2> $stderr
     $script:exitCode = $global:LASTEXITCODE
   }
   catch { Add-Diagnostic 'live-child-launch'; $script:exitCode = -1; throw }
-  finally { $ErrorActionPreference = $previousErrorAction }
+  finally {
+    $ErrorActionPreference = $previousErrorAction
+    [Console]::OutputEncoding = $previousOutputEncoding
+  }
   if ($null -eq $script:exitCode) { Add-Diagnostic 'live-exit-missing'; throw 'harness exit code unavailable' }
   if ($script:exitCode -ne 0) { Add-Diagnostic 'live-exit-nonzero'; throw 'harness command failed' }
 }
@@ -196,7 +201,8 @@ try {
   $stageNow = 'read-marker'; if ($Harness -notin @('codex','hermes','prime-agent','deepseek-harness','openclaw','aider') -and -not (Has-Text $marker)) { Fail 'read marker missing' }
   $stageNow = 'completion-marker'; if (-not (Has-Text 'NAN_CANARY_OK')) { Fail 'completion marker missing' }; $stageNow = 'bridge-sentinel'; if (Has-Text 'NH-BRIDGE-') { Fail 'bridge sentinel observed' }
   $stageNow = 'usage-evidence'; try {$u=Get-Content -Raw $usage | ConvertFrom-Json} catch { Fail 'usage evidence invalid' }; if (-not (Is-BoundedInteger $u.schemaVersion 1) -or $u.schemaVersion -ne 1 -or $u.status -ne 'observed') { Fail 'usage evidence invalid' }
-  $stageNow = 'usage-summary'; if (-not (Has-Regex '^(🔥 Tokens burned — this session|NaN usage \()')) { Fail 'usage summary missing' }; if ($null -eq $exitCode) { Add-Diagnostic 'live-exit-missing'; throw 'live child exit evidence missing' }; $completed = $true
+  # Keep the pattern ASCII: Windows PowerShell 5.1 reads BOM-less scripts as ANSI.
+  $stageNow = 'usage-summary'; if (-not (Has-Regex '^(\uD83D\uDD25 Tokens burned \u2014 this session|NaN usage \()')) { Fail 'usage summary missing' }; if ($null -eq $exitCode) { Add-Diagnostic 'live-exit-missing'; throw 'live child exit evidence missing' }; $completed = $true
 } catch { exit 1 } finally {
   if ($workspace) { Remove-Item -LiteralPath $workspace -Recurse -Force -ErrorAction SilentlyContinue }
   # A failure always carries one closed code, so an unexpected stage failure is never

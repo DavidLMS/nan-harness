@@ -1005,8 +1005,8 @@ def live(args, _state):
         raise ProbeFailure("marker-missing", status)
     diagnostic = result.get("diagnostic")
     if diagnostic is None and windows:
-        # The PowerShell probe publishes its bounded codes in a list; only the aider
-        # completion-marker codes are single, and they are the only ones reported.
+        # The PowerShell reader admits only closed diagnostic codes; never forward
+        # arbitrary child output from the private capture files.
         codes = result.get("diagnostics") or []
         diagnostic = codes[0] if len(codes) == 1 else None
     if diagnostic is not None and args.harness != "aider" and not (

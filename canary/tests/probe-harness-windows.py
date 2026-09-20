@@ -55,8 +55,10 @@ class WindowsProbeContracts(unittest.TestCase):
                 "}\n"
                 "Set-Content -NoNewline -LiteralPath $env:NAN_HARNESS_INTERNAL_CANARY_USAGE_FILE "
                 "-Value '{\"schemaVersion\":1,\"status\":\"observed\"}'\n"
-                "Write-Output 'NAN_CANARY_OK'\n"
-                "Write-Output 'NaN usage (synthetic)'\n"
+                "Write-Output 'NAN_CANARY_OK'\n" +
+                ("[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)\n"
+                 "[Console]::Error.WriteLine(([char]::ConvertFromUtf32(0x1F525) + ' Tokens burned ' + [char]0x2014 + ' this session'))\n"
+                 if native_warning else "Write-Output 'NaN usage (synthetic)'\n") +
                 f"exit {exit_code}\n",
                 encoding="utf-8",
             )
