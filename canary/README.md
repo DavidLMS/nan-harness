@@ -8,13 +8,14 @@ detector with disposable Linux and macOS Tart VMs on a private Apple Silicon
 host. It tests all 15 supported harnesses without adding commands to the public
 `nanh` binary.
 
-GitHub only detects deterministic latest-source regressions and never performs
-live provider calls or feed publication. The operator host downloads the exact
-release-matched `nan-harness` and `nan-harness-canary` ARM64 assets, verifies
-the signed `SHA256SUMS` metadata and every required ARM64 checksum before host
-execution or guest staging, runs clean installation and doctor checks,
-performs deterministic conformance, and runs real `qwen3.6` probes only in the
-private scheduled tiers.
+GitHub Actions provides modular CLI checks and protected live provider probes.
+Each new draft release automatically dispatches verification of its exact
+signed Linux/macOS ARM64 and Windows x64 assets. Publication remains a separate,
+explicit operation after all 43 supported live cells pass; Windows Prime Agent
+and FX are skipped because no official Windows distribution is available.
+Historical 30-cell evidence remains valid only for recommending an already
+published stable release with its complete, bound publication receipt. It cannot
+qualify a new publication. The Tart procedures below remain recovery references.
 
 Deterministic compatibility covers installation, launch, provider traffic,
 process cleanup, sentinel behavior, and one representative tool round-trip.
@@ -26,7 +27,7 @@ block compatibility when those functional contracts pass.
 | Source/main detector | Linux x86-64 | Latest installation, doctor, and deterministic conformance for all 15 harnesses; no feed writes |
 | Daily scheduled | Linux ARM64 | Clean install, doctor, and deterministic conformance for all 15; exactly two deterministic rotating `qwen3.6` probes |
 | Weekly scheduled | Linux and macOS ARM64 | Deterministic conformance plus live `qwen3.6` probes for all 15 on both platforms |
-| Hosted release gate | Linux and macOS ARM64 | Manual full cross-platform live pass; only then allow publication of the draft |
+| Hosted release gate | Linux/macOS ARM64 and Windows x64 | Automatic draft verification of 43 supported live cells; publication remains explicit |
 
 Compatibility evidence is release-scoped schema v2. A daily Linux deterministic
 pass can advance only that harness's `lastCompatibleVersion` and `compatibleAt`.
