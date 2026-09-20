@@ -41,6 +41,10 @@ jobs:
       - name: Install pinned Cline
         shell: pwsh
         run: npm install --global cline@3.0.61
+      - name: Verify native terminal ownership
+        timeout-minutes: 5
+        shell: pwsh
+        run: cargo test --locked -p nan-harness-test-support --all-features terminal::windows_tests
       - name: Verify Cline contracts
         timeout-minutes: 7
         shell: pwsh

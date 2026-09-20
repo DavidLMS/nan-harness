@@ -5,7 +5,12 @@ use std::process::{ExitStatus, Stdio};
 use std::time::Duration;
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncReadExt as _};
-use tokio::process::{Child, Command};
+use tokio::process::Command;
+
+mod child;
+use child::TerminalChild;
+#[cfg(all(test, windows))]
+mod windows_tests;
 
 const MAX_CAPTURE_BYTES: usize = 64 * 1024;
 const PROCESS_CLEANUP_TIMEOUT: Duration = Duration::from_secs(2);
@@ -110,21 +115,19 @@ impl TerminalCommand {
         {
             command.process_group(0);
         }
-        let mut child = command.spawn().map_err(|source| TerminalError::Execute {
+        let mut child = TerminalChild::spawn(command).map_err(|source| TerminalError::Execute {
             program: self.program.clone(),
             source,
         })?;
         let pid = child.id();
         let stdout = child
-            .stdout
-            .take()
+            .take_stdout()
             .ok_or_else(|| TerminalError::MissingOutput {
                 stream: "stdout",
                 program: self.program.clone(),
             })?;
         let stderr = child
-            .stderr
-            .take()
+            .take_stderr()
             .ok_or_else(|| TerminalError::MissingOutput {
                 stream: "stderr",
                 program: self.program.clone(),
@@ -147,6 +150,15 @@ impl TerminalCommand {
                 timeout: self.timeout,
             });
         };
+        // The command has exited. Disposable Windows helpers must release inherited writers
+        // before capture joins; killing only the already-exited parent cannot close them.
+        #[cfg(windows)]
+        child
+            .close_descendants()
+            .map_err(|source| TerminalError::Execute {
+                program: self.program.clone(),
+                source,
+            })?;
         let stdout = join_capture_bounded(stdout_task, &mut child, pid, &self.program).await;
         let stderr = join_capture_bounded(stderr_task, &mut child, pid, &self.program).await;
         let stdout = stdout?;
@@ -186,7 +198,7 @@ where
 
 async fn join_capture_bounded(
     mut task: tokio::task::JoinHandle<Result<String, std::io::Error>>,
-    child: &mut Child,
+    child: &mut TerminalChild,
     pid: Option<u32>,
     program: &Path,
 ) -> Result<String, TerminalError> {
@@ -210,7 +222,7 @@ async fn join_capture_bounded(
     }
 }
 
-async fn terminate_owned_process(child: &mut Child, pid: Option<u32>) {
+async fn terminate_owned_process(child: &mut TerminalChild, pid: Option<u32>) {
     #[cfg(not(unix))]
     let _ = pid;
     #[cfg(unix)]
