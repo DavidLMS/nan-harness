@@ -14,10 +14,15 @@ fn leaf_fixture() {
 #[test]
 #[ignore = "subprocess fixture"]
 fn parent_fixture() {
-    let _child = Command::new(std::env::current_exe().expect("test executable"))
+    let mut child = Command::new(std::env::current_exe().expect("test executable"))
         .args(["--ignored", "--exact", LEAF_FIXTURE, "--nocapture"])
         .spawn()
         .expect("descendant should start with inherited output");
+    // Reap while this fixture is alive; returning from its main test process deliberately
+    // interrupts the waiter and leaves the descendant for the outer job owner to clean up.
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
     println!("TERMINAL_PARENT_OK");
     if std::env::var_os("NAN_TEST_PARENT_WAIT").is_some() {
         std::thread::sleep(Duration::from_secs(30));
