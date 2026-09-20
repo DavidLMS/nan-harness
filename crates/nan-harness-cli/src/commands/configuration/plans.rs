@@ -11,7 +11,7 @@ mod values;
 pub(crate) use combinators::{ensure_supported, preferred_model};
 #[cfg(test)]
 pub(crate) use combinators::{exclusive_json, override_json};
-pub(crate) use dispatch::for_harness;
+pub(crate) use dispatch::{PlanRequest, for_harness_with_media};
 #[cfg(test)]
 pub(crate) use families::pi_family_plans;
 #[cfg(test)]

@@ -215,7 +215,37 @@ try {
   $stageNow = 'completion-marker'; if (-not (Has-Text 'NAN_CANARY_OK')) { Fail 'completion marker missing' }; $stageNow = 'bridge-sentinel'; if (Has-Text 'NH-BRIDGE-') { Fail 'bridge sentinel observed' }
   $stageNow = 'usage-evidence'; try {$u=Get-Content -Raw $usage | ConvertFrom-Json} catch { Fail 'usage evidence invalid' }; if (-not (Is-BoundedInteger $u.schemaVersion 1) -or $u.schemaVersion -ne 1 -or $u.status -ne 'observed') { Fail 'usage evidence invalid' }
   # Keep the pattern ASCII: Windows PowerShell 5.1 reads BOM-less scripts as ANSI.
-  $stageNow = 'usage-summary'; if (-not (Has-Regex '^(\uD83D\uDD25 Tokens burned \u2014 this session|NaN usage \()')) { Fail 'usage summary missing' }; if ($null -eq $exitCode) { Add-Diagnostic 'live-exit-missing'; throw 'live child exit evidence missing' }; $completed = $true
+  $stageNow = 'usage-summary'; if (-not (Has-Regex '^(\uD83D\uDD25 Tokens burned \u2014 this session|NaN usage \()')) { Fail 'usage summary missing' }; if ($null -eq $exitCode) { Add-Diagnostic 'live-exit-missing'; throw 'live child exit evidence missing' }
+  if ($Harness -in @('hermes','openclaw')) {
+    $stageNow = 'media-capabilities'
+    $media = Join-Path $workspace 'media'; New-Item -ItemType Directory -Path $media | Out-Null
+    $plan = Join-Path $media 'plan.json'
+    & $NanBinary $Harness '--model' $Model '--dry-run' '--force-media' '--allow-unsupported' '--allow-untested' 1> $plan 2> $stderr
+    if ($LASTEXITCODE -ne 0) { throw 'media plan failed' }
+    $planText = Get-Content -Raw -LiteralPath $plan
+    if ($planText -notmatch 'nan-whisper' -or $planText -notmatch 'nan-kokoro' -or ($planText -notmatch 'image_gen/nan_harness' -and $planText -notmatch 'nan-harness-media')) { throw 'media plan incomplete' }
+    $ttsInput = Join-Path $media 'tts-input.txt'; $ttsOutput = Join-Path $media 'tts-output.mp3'
+    Set-Content -LiteralPath $ttsInput -Value 'NaN media canary speech' -NoNewline
+    Run-Native @('__media','tts','--input',$ttsInput,'--output',$ttsOutput)
+    if (-not (Test-Path -LiteralPath $ttsOutput) -or (Get-Item -LiteralPath $ttsOutput).Length -le 0) { throw 'tts output missing' }
+    $wav = Join-Path $media 'stt-input.wav'; $dataSize = 32000; $bytes = [byte[]]::new(44 + $dataSize)
+    [Text.Encoding]::ASCII.GetBytes('RIFF').CopyTo($bytes, 0); [BitConverter]::GetBytes([int](36 + $dataSize)).CopyTo($bytes, 4)
+    [Text.Encoding]::ASCII.GetBytes('WAVEfmt ').CopyTo($bytes, 8); [BitConverter]::GetBytes([int]16).CopyTo($bytes, 16)
+    [BitConverter]::GetBytes([short]1).CopyTo($bytes, 20); [BitConverter]::GetBytes([short]1).CopyTo($bytes, 22)
+    [BitConverter]::GetBytes([int]16000).CopyTo($bytes, 24); [BitConverter]::GetBytes([int]32000).CopyTo($bytes, 28)
+    [BitConverter]::GetBytes([short]2).CopyTo($bytes, 32); [BitConverter]::GetBytes([short]16).CopyTo($bytes, 34)
+    [Text.Encoding]::ASCII.GetBytes('data').CopyTo($bytes, 36); [BitConverter]::GetBytes([int]$dataSize).CopyTo($bytes, 40)
+    [IO.File]::WriteAllBytes($wav, $bytes)
+    $sttOutput = Join-Path $media 'stt-output.txt'
+    Run-Native @('__media','stt','--input',$wav,'--output',$sttOutput)
+    if (-not (Test-Path -LiteralPath $sttOutput)) { throw 'stt output missing' }
+    if ($env:NAN_CANARY_MEDIA_MODE -eq 'weekly') {
+      $imageOutput = Join-Path $media 'image-output.png'
+      Run-Native @('__media','image','--prompt','A simple blue square on a white background','--output',$imageOutput)
+      if (-not (Test-Path -LiteralPath $imageOutput) -or (Get-Item -LiteralPath $imageOutput).Length -le 0) { throw 'image output missing' }
+    }
+  }
+  $completed = $true
 } catch { exit 1 } finally {
   if ($workspace) { Remove-Item -LiteralPath $workspace -Recurse -Force -ErrorAction SilentlyContinue }
   # A failure always carries one closed code, so an unexpected stage failure is never

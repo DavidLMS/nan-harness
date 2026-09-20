@@ -293,6 +293,7 @@ fn context_for_model(user_arguments: Vec<String>, model: &str) -> PlanContext {
         working_directory: "/workspace/project".to_owned(),
         user_arguments,
         web_search_policy: WebSearchPolicy::Auto,
+        media: nan_harness_core::MediaSelection::none(),
         observability_format: ObservabilityFormat::Human,
         session_max_tokens: None,
         context_limit: None,

@@ -275,3 +275,36 @@ if ! grep -E '^(🔥 Tokens burned — this session|NaN usage \()' "$stderr_outp
   fi
   exit 1
 fi
+
+if [ "$harness" = hermes ] || [ "$harness" = openclaw ]; then
+  probe_stage='media-capabilities'
+  media_plan="$workspace/media-plan.json"
+  "$nan_command" "$harness" --model "$model" --dry-run --force-media \
+    --allow-unsupported --allow-untested >"$media_plan" 2>/dev/null
+  jq -e '[.. | strings | select(test("nan-whisper|nan-kokoro|image_gen/nan_harness|nan-harness-media"))] | length >= 3' \
+    "$media_plan" >/dev/null
+  media_directory="$workspace/media"
+  mkdir -p "$media_directory"
+  printf '%s\n' 'NaN media canary speech' >"$media_directory/tts-input.txt"
+  "$nan_command" __media tts --input "$media_directory/tts-input.txt" \
+    --output "$media_directory/tts-output.mp3" >/dev/null 2>/dev/null
+  test -s "$media_directory/tts-output.mp3"
+  python3 - "$media_directory/stt-input.wav" <<'PY'
+import sys
+import wave
+
+with wave.open(sys.argv[1], "wb") as stream:
+    stream.setnchannels(1)
+    stream.setsampwidth(2)
+    stream.setframerate(16_000)
+    stream.writeframes(b"\0\0" * 16_000)
+PY
+  "$nan_command" __media stt --input "$media_directory/stt-input.wav" \
+    --output "$media_directory/stt-output.txt" >/dev/null 2>/dev/null
+  test -f "$media_directory/stt-output.txt"
+  if [ "${NAN_CANARY_MEDIA_MODE:-}" = weekly ]; then
+    "$nan_command" __media image --prompt 'A simple blue square on a white background' \
+      --output "$media_directory/image-output.png" >/dev/null 2>/dev/null
+    test -s "$media_directory/image-output.png"
+  fi
+fi

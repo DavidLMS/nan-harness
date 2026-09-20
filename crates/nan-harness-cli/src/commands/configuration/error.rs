@@ -15,6 +15,10 @@ pub(crate) enum ConfigurationError {
     #[error("--no-search and --force-search apply only when configuring or refreshing one harness")]
     UnusedSearchPolicy,
     #[error(
+        "--force-media and the individual media flags apply only when configuring or refreshing one harness"
+    )]
+    UnusedMediaPolicy,
+    #[error(
         "{0} cannot store this provider configuration natively; launch it through nan-harness instead"
     )]
     BridgeOnly(HarnessKind),
@@ -127,7 +131,8 @@ impl ConfigurationError {
             | Self::PenNotConfigured
             | Self::HarnessRequired
             | Self::UnusedYes
-            | Self::UnusedSearchPolicy => "NH-CONFIG-001",
+            | Self::UnusedSearchPolicy
+            | Self::UnusedMediaPolicy => "NH-CONFIG-001",
             Self::ConfirmationRequired | Self::Prompt(_) => "NH-CONFIG-002",
             Self::UnmanagedDocumentConflict(_) => "NH-CONFIG-003",
             Self::ManagedDocumentChanged(_)
@@ -157,6 +162,7 @@ impl nan_harness_i18n::TerminalMessage for ConfigurationError {
             Self::HarnessRequired => m::error_configuration_harness_required(locale),
             Self::UnusedYes => m::error_configuration_unused_yes(locale),
             Self::UnusedSearchPolicy => m::error_configuration_unused_search_policy(locale),
+            Self::UnusedMediaPolicy => m::error_configuration_unused_media_policy(locale),
             Self::BridgeOnly(field_0) => m::error_configuration_bridge_only(locale, &(field_0)),
             Self::RefreshRequiresConfiguration(field_0) => {
                 m::error_configuration_refresh_requires_configuration(locale, &(field_0))

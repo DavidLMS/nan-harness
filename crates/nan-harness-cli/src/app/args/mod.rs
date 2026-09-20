@@ -12,7 +12,7 @@ pub(crate) use desktop::{
 };
 pub(crate) use doctor::DoctorArgs;
 pub(crate) use launch::{
-    BridgedHarnessRunArgs, DirectHarnessRunArgs, HarnessRunArgs, WebSearchArgs,
+    BridgedHarnessRunArgs, DirectHarnessRunArgs, HarnessRunArgs, MediaArgs, WebSearchArgs,
 };
 pub(crate) use maintenance::{
     RecordInstallationArgs, SearchCommand, SearchSetupArgs, SearchStatusArgs, UninstallArgs,

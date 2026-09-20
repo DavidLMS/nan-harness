@@ -33,9 +33,18 @@ import sys
 from pathlib import Path
 
 args = sys.argv[1:]
+if args and args[0] == "__media":
+    if "--output" in args:
+        output = Path(args[args.index("--output") + 1])
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_bytes(b"synthetic media output")
+    raise SystemExit(0)
 model = args[args.index("--model") + 1]
 with open(os.environ["NAN_CANARY_MODEL_LOG"], "a", encoding="utf-8") as log:
     log.write(model + "\n")
+if "--dry-run" in args:
+    print(json.dumps({"media": ["nan-whisper", "nan-kokoro", "image_gen/nan_harness"]}))
+    raise SystemExit(0)
 if os.environ.get("NAN_CANARY_FAKE_MODE") == "providerfailure":
     print("synthetic secret should be redacted", file=sys.stderr)
     raise SystemExit(17)
@@ -93,6 +102,8 @@ path = sys.argv[-1]
 value = json.loads(open(path, encoding="utf-8").read())
 if "openclaw-output" in path:
     assert value["meta"]["toolSummary"] == {"calls": 1, "failures": 0, "tools": ["read"]}
+elif "media-plan" in path:
+    assert value["media"] == ["nan-whisper", "nan-kokoro", "image_gen/nan_harness"]
 else:
     assert value == {"schemaVersion": 1, "status": "observed"}
 '''
@@ -143,7 +154,7 @@ class ProbeHarnessTests(unittest.TestCase):
                 self.assertEqual(CELL.probe_result(marker),
                                  {"schemaVersion": 1, "stage": "complete", "status": "passed"})
                 self.assertEqual(stat.S_IMODE(marker.stat().st_mode), stat.S_IWRITE | stat.S_IREAD)
-        self.assertEqual((self.root / "models.log").read_text().splitlines(), ["synthetic-model"] * 15)
+        self.assertEqual((self.root / "models.log").read_text().splitlines(), ["synthetic-model"] * 17)
 
     def test_failures_close_at_failing_stage_without_raw_output(self):
         for mode, stage in (("providerfailure", "harness-run"), ("toolfailure", "tool-evidence"),

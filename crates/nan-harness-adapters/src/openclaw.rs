@@ -8,7 +8,9 @@ use nan_harness_core::launch_plan::{
     OverlayFile, OverlayFilePolicy, PROVIDER_BASE_URL_PLACEHOLDER, TemporaryArtifactMode,
     USER_HOME_PLACEHOLDER,
 };
-use nan_harness_core::{HarnessAdapter, HarnessKind, LaunchPlan, PlanContext, PlanError};
+use nan_harness_core::{
+    HarnessAdapter, HarnessKind, LaunchPlan, MediaSelection, PlanContext, PlanError,
+};
 use nan_harness_i18n::DiagnosticText;
 use nan_harness_i18n::messages as detail_messages;
 use serde_json::json;
@@ -18,10 +20,11 @@ const CREDENTIAL_TARGET: &str = "NAN_API_KEY";
 const CONFIG_OVERLAY_ID: &str = "openclaw-config";
 const CONFIG_PATH: &str = "{artifact:openclaw-config}/nan-harness.json";
 const SEARCH_PLUGIN_PATH: &str = "{artifact:openclaw-config}/plugins/nan-harness-search";
+const MEDIA_PLUGIN_PATH: &str = "{artifact:openclaw-config}/plugins/nan-harness-media";
 
-fn openclaw_config(model_id: &str) -> Result<String, PlanError> {
+fn openclaw_config(model_id: &str, media: MediaSelection) -> Result<String, PlanError> {
     let model_reference = format!("nan/{model_id}");
-    let base = serde_json::to_string(&json!({
+    let mut base_value = json!({
         "$include": "./openclaw.json",
         "agents": {
             "defaults": {
@@ -44,16 +47,41 @@ fn openclaw_config(model_id: &str) -> Result<String, PlanError> {
                 }
             }
         }
-    }))
-    .map_err(|error| openclaw_serialization_error(&error))?;
-    let search = serde_json::to_string(&json!({
+    });
+    if media.tts {
+        base_value["tts"] = json!({
+            "provider": "nan-harness",
+            "providers": {"nan-harness": {"model": "kokoro"}}
+        });
+    }
+    if media.stt {
+        base_value["tools"]["media"] = json!({
+            "audio": {
+                "enabled": true,
+                "models": [{"type": "provider", "provider": "nan-harness", "model": "whisper-1"}]
+            }
+        });
+    }
+    if media.image {
+        base_value["agents"]["defaults"]["mediaModels"] = json!({
+            "image": {"primary": "nan-harness/flux-2-klein"}
+        });
+    }
+    let base =
+        serde_json::to_string(&base_value).map_err(|error| openclaw_serialization_error(&error))?;
+    let mut search_value = json!({
         "plugins": {
             "load": {"paths": [SEARCH_PLUGIN_PATH]},
             "entries": {"nan-harness-search": {"enabled": true}}
         },
         "tools": {"web": {"search": {"enabled": true, "provider": "nan-harness"}}}
-    }))
-    .map_err(|error| openclaw_serialization_error(&error))?;
+    });
+    if media.any() {
+        search_value["plugins"]["load"]["paths"] = json!([SEARCH_PLUGIN_PATH, MEDIA_PLUGIN_PATH]);
+        search_value["plugins"]["entries"]["nan-harness-media"] = json!({"enabled": true});
+    }
+    let search = serde_json::to_string(&search_value)
+        .map_err(|error| openclaw_serialization_error(&error))?;
 
     Ok(format!(
         "{}{NAN_SEARCH_BLOCK_BEGIN},{}{NAN_SEARCH_BLOCK_END}}}",
@@ -159,6 +187,124 @@ export default definePluginEntry({{
     ]
 }
 
+fn media_plugin_files(media: MediaSelection) -> Vec<OverlayFile> {
+    if !media.any() {
+        return Vec::new();
+    }
+    vec![
+        OverlayFile {
+            path: "plugins/nan-harness-media/package.json".to_owned(),
+            mode: TemporaryArtifactMode::OwnerFile,
+            content_template: r#"{"name":"nan-harness-media","version":"1.0.0","type":"module","peerDependencies":{"openclaw":">=2026.3.24"},"openclaw":{"extensions":["./index.js"]}}"#.to_owned(),
+            policy: OverlayFilePolicy::Replace,
+        },
+        OverlayFile {
+            path: "plugins/nan-harness-media/openclaw.plugin.json".to_owned(),
+            mode: TemporaryArtifactMode::OwnerFile,
+            content_template: r#"{"id":"nan-harness-media","activation":{"onStartup":false},"contracts":{"speechProviders":["nan-harness"],"mediaUnderstandingProviders":["nan-harness"],"imageGenerationProviders":["nan-harness"]},"configSchema":{"type":"object","additionalProperties":false}}"#.to_owned(),
+            policy: OverlayFilePolicy::Replace,
+        },
+        OverlayFile {
+            path: "plugins/nan-harness-media/index.js".to_owned(),
+            mode: TemporaryArtifactMode::OwnerFile,
+            content_template: render_openclaw_media_plugin("{PROVIDER_BASE_URL_PLACEHOLDER}"),
+            policy: OverlayFilePolicy::Replace,
+        },
+    ]
+}
+
+/// Renders the `OpenClaw` provider plugin for a persistent or launch-scoped home.
+#[must_use]
+pub fn render_openclaw_media_plugin(base_url: &str) -> String {
+    let encoded_base_url = serde_json::to_string(base_url).unwrap_or_else(|_| "\"\"".to_owned());
+    format!(
+        r#"import {{ definePluginEntry }} from "openclaw/plugin-sdk/plugin-entry";
+import {{ promises as fs }} from "node:fs";
+import {{ tmpdir }} from "node:os";
+import {{ join }} from "node:path";
+import {{ randomUUID }} from "node:crypto";
+import {{ spawn }} from "node:child_process";
+
+const BASE_URL = {encoded_base_url};
+
+async function runMedia(action, args, output) {{
+  await new Promise((resolve, reject) => {{
+    const child = spawn("nanh", ["__media", action, "--provider-base-url", BASE_URL, ...args], {{
+      stdio: ["ignore", "ignore", "ignore"],
+      env: process.env
+    }});
+    child.once("error", reject);
+    child.once("close", code => code === 0 ? resolve() : reject(new Error("NH-MEDIA")));
+  }});
+  return fs.readFile(output);
+}}
+
+async function withTempFile(suffix, fn) {{
+  const directory = await fs.mkdtemp(join(tmpdir(), "nanh-media-"));
+  const path = join(directory, `${{randomUUID()}}${{suffix}}`);
+  try {{ return await fn(path); }} finally {{ await fs.rm(directory, {{ recursive: true, force: true }}); }}
+}}
+
+const speech = {{
+  id: "nan-harness",
+  label: "NaN Kokoro",
+  defaultTimeoutMs: 180000,
+  isConfigured: () => Boolean(process.env.NAN_API_KEY),
+  synthesize: async request => withTempFile(".txt", async input => {{
+    const output = `${{input}}.mp3`;
+    await fs.writeFile(input, String(request.text ?? request.input ?? ""), "utf8");
+    const audioBuffer = await runMedia("tts", ["--input", input, "--output", output, "--voice", String(request.voice ?? request.speakerVoice ?? "af_heart")], output);
+    return {{ audioBuffer, outputFormat: "mp3", fileExtension: ".mp3", voiceCompatible: false }};
+  }})
+}};
+
+const understanding = {{
+  id: "nan-harness",
+  capabilities: ["audio"],
+  resolveAuth: () => ({{ kind: "none", source: "nan-harness" }}),
+  transcribeAudio: async request => withTempFile(".audio", async input => {{
+    const audio = request.audioBuffer ?? request.buffer ?? request.audio;
+    if (!audio) throw new Error("NH-MEDIA-AUDIO");
+    await fs.writeFile(input, audio);
+    const output = `${{input}}.txt`;
+    await runMedia("stt", ["--input", input, "--output", output], output);
+    return {{ text: await fs.readFile(output, "utf8") }};
+  }})
+}};
+
+const image = {{
+  id: "nan-harness",
+  label: "NaN Flux 2 Klein",
+  defaultModel: "flux-2-klein",
+  models: ["flux-2-klein"],
+  isConfigured: () => Boolean(process.env.NAN_API_KEY),
+  capabilities: {{ generate: {{ maxCount: 1 }}, edit: {{ enabled: true, maxCount: 1, maxInputImages: 4 }} }},
+  generateImage: async request => withTempFile(".png", async output => {{
+    const args = ["--prompt", String(request.prompt ?? ""), "--output", output];
+    for (const reference of request.inputImages ?? []) {{
+      const path = `${{output}}-${{args.length}}.ref`;
+      await fs.writeFile(path, reference.buffer ?? reference);
+      args.push("--input-image", path);
+    }}
+    const buffer = await runMedia("image", args, output);
+    return {{ images: [{{ buffer, mimeType: "image/png", fileName: "nan-image.png" }}] }};
+  }})
+}};
+
+export default definePluginEntry({{
+  id: "nan-harness-media",
+  name: "nan-media",
+  description: "NaN Whisper, Kokoro, and Flux 2 Klein providers",
+  register(api) {{
+    api.registerSpeechProvider(speech);
+    api.registerMediaUnderstandingProvider(understanding);
+    api.registerImageGenerationProvider(image);
+  }}
+}});
+"#
+    )
+}
+
 /// Renders the search plugin used by the persistent `OpenClaw` configuration.
 #[must_use]
 pub fn render_openclaw_search_plugin() -> String {
@@ -229,7 +375,7 @@ impl HarnessAdapter for OpenClawAdapter {
             &context.user_arguments,
             &["--model", "--profile", "--dev", "--container"],
         )?;
-        let config = openclaw_config(&context.model.resolved_id)?;
+        let config = openclaw_config(&context.model.resolved_id, context.media)?;
         let mut public_environment = provider_environment();
         public_environment.insert("OPENCLAW_CONFIG_PATH".to_owned(), CONFIG_PATH.to_owned());
         public_environment.insert(
@@ -270,6 +416,7 @@ impl HarnessAdapter for OpenClawAdapter {
                     ]
                     .into_iter()
                     .chain(search_plugin_files())
+                    .chain(media_plugin_files(context.media))
                     .collect(),
                     lifecycle: ArtifactLifecycle::Launch,
                 }],

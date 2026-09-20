@@ -9,6 +9,8 @@ pub(crate) mod hermes_desktop;
 pub(crate) mod install;
 pub(crate) mod language;
 pub(crate) mod local_diagnostics;
+pub(crate) mod media;
+pub(crate) mod media_policy;
 pub(crate) mod pen_desktop;
 pub(crate) mod persistence;
 pub(crate) mod search;

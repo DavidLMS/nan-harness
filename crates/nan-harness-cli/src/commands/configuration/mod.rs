@@ -17,8 +17,8 @@ pub(crate) use error::ConfigurationError;
 pub(crate) use lifecycle::ConfigurationManager;
 use paths::ConfigurationPaths;
 use plans::{
-    DocumentPlan, ExactFilePlan, JsonEntryMode, JsonPlan, KimiPlan, TextBlockPlan, YamlEntryMode,
-    YamlPlan, ensure_supported, for_harness, preferred_model,
+    DocumentPlan, ExactFilePlan, JsonEntryMode, JsonPlan, KimiPlan, PlanRequest, TextBlockPlan,
+    YamlEntryMode, YamlPlan, ensure_supported, for_harness_with_media, preferred_model,
 };
 use state::{
     ConfigurationChange, ConfigurationState, DocumentReceipt, ExactFileReceipt, HarnessReceipt,
@@ -44,8 +44,11 @@ use nan_harness_adapters::{
     OmpSearchMode, PiSearchMode, render_hermes_search_provider, render_omp_search_extension,
     render_openclaw_search_plugin, render_pi_search_extension,
 };
+#[cfg(test)]
+use nan_harness_adapters::{render_hermes_image_plugin, render_openclaw_media_plugin};
 use nan_harness_core::{
-    CodingModelProfile, HarnessKind, ReasoningEffort, ReasoningPolicy, WebSearchPolicy,
+    CodingModelProfile, HarnessKind, MediaSelection, ReasoningEffort, ReasoningPolicy,
+    WebSearchPolicy,
 };
 use nan_harness_runtime::{
     ResolvedConfig, SearchConfiguration, SearchPolicyError, inspect_search_configuration,

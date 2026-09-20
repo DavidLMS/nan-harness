@@ -10,6 +10,28 @@ cat >"$fake_nanh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [ "${1:-}" = __media ]; then
+  output=''
+  previous=''
+  for argument in "$@"; do
+    if [ "$previous" = --output ]; then
+      output="$argument"
+      break
+    fi
+    previous="$argument"
+  done
+  [ -n "$output" ]
+  printf '%s\n' 'synthetic media output' >"$output"
+  exit 0
+fi
+
+for argument in "$@"; do
+  if [ "$argument" = --dry-run ]; then
+    printf '%s\n' '{"media":["nan-whisper","nan-kokoro","image_gen/nan_harness"]}'
+    exit 0
+  fi
+done
+
 if [ "${1:-}" = omp ]; then
   printf '%s\n' "$@" >"$OMP_TEST_ARGUMENTS_FILE"
   read_target=''

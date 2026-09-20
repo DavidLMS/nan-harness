@@ -18,6 +18,8 @@ pub(crate) struct HarnessRunArgs {
     pub(crate) allow_untested: bool,
     #[command(flatten)]
     pub(crate) search: WebSearchArgs,
+    #[command(flatten)]
+    pub(crate) media: MediaArgs,
     #[arg(long, help = nan_harness_i18n::messages::help_print_the_safe_launch_plan_without_starting_the_harness(nan_harness_i18n::locale()))]
     pub(crate) dry_run: bool,
     #[arg(
@@ -36,6 +38,23 @@ pub(crate) struct HarnessRunArgs {
     pub(crate) context: Option<u64>,
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
     pub(crate) arguments: Vec<String>,
+}
+
+#[derive(Debug, Default, Args)]
+#[allow(clippy::struct_excessive_bools)]
+pub(crate) struct MediaArgs {
+    #[arg(
+        long,
+        help = nan_harness_i18n::messages::help_enable_nan_whisper_kokoro_and_flux_2_klein_even_when_a_media_provider_is_configured(nan_harness_i18n::locale()),
+        conflicts_with_all = ["force_stt", "force_tts", "force_image"]
+    )]
+    pub(crate) force_media: bool,
+    #[arg(long, help = nan_harness_i18n::messages::help_use_nan_whisper_for_speech_to_text(nan_harness_i18n::locale()))]
+    pub(crate) force_stt: bool,
+    #[arg(long, help = nan_harness_i18n::messages::help_use_nan_kokoro_for_text_to_speech(nan_harness_i18n::locale()))]
+    pub(crate) force_tts: bool,
+    #[arg(long, help = nan_harness_i18n::messages::help_use_nan_flux_2_klein_for_image_generation_and_editing(nan_harness_i18n::locale()))]
+    pub(crate) force_image: bool,
 }
 
 #[derive(Debug, Default, Args)]

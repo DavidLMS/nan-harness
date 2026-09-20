@@ -37,6 +37,7 @@ pub(super) fn context(kind: HarnessKind, user_arguments: Vec<String>) -> PlanCon
         working_directory: "/workspace/project".to_owned(),
         user_arguments,
         web_search_policy: WebSearchPolicy::Auto,
+        media: nan_harness_core::MediaSelection::none(),
         observability_format: ObservabilityFormat::Human,
         session_max_tokens: None,
         context_limit: None,

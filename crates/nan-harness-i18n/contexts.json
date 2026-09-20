@@ -187,6 +187,13 @@
       "crates/nan-harness-cli/src/commands/configuration/command.rs"
     ]
   },
+  "command_native_media": {
+    "description": "Persistent native configuration and its health. Preserve command names, paths, provider identifiers and diagnostic codes.",
+    "section": "configuration",
+    "sources": [
+      "crates/nan-harness-cli/src/commands/configuration/command.rs"
+    ]
+  },
   "command_nan_api_key_from_the_current_environment_will_not_be_copied": {
     "description": "Persistent native configuration and its health. Preserve command names, paths, provider identifiers and diagnostic codes.",
     "section": "configuration",
@@ -2518,6 +2525,13 @@
     ]
   },
   "error_configuration_unsupported_state_schema": {
+    "description": "Persistent native configuration and its health. Preserve command names, paths, provider identifiers and diagnostic codes.",
+    "section": "configuration",
+    "sources": [
+      "crates/nan-harness-cli/src/commands/configuration/error.rs"
+    ]
+  },
+  "error_configuration_unused_media_policy": {
     "description": "Persistent native configuration and its health. Preserve command names, paths, provider identifiers and diagnostic codes.",
     "section": "configuration",
     "sources": [
@@ -6047,6 +6061,13 @@
       "crates/nan-harness-cli/src/app/parser.rs"
     ]
   },
+  "help_enable_nan_whisper_kokoro_and_flux_2_klein_even_when_a_media_provider_is_configured": {
+    "description": "Command help and argument validation. Preserve command names, paths, provider identifiers and diagnostic codes.",
+    "section": "help",
+    "sources": [
+      "crates/nan-harness-cli/src/app/args/launch.rs"
+    ]
+  },
   "help_fail_if_the_app_does_not_connect_within_this_many_seconds": {
     "description": "Command help and argument validation. Preserve command names, paths, provider identifiers and diagnostic codes.",
     "section": "help",
@@ -6434,6 +6455,27 @@
     ]
   },
   "help_use_nan_web_search_even_when_another_search_provider_is_configured": {
+    "description": "Command help and argument validation. Preserve command names, paths, provider identifiers and diagnostic codes.",
+    "section": "help",
+    "sources": [
+      "crates/nan-harness-cli/src/app/args/launch.rs"
+    ]
+  },
+  "help_use_nan_flux_2_klein_for_image_generation_and_editing": {
+    "description": "Command help and argument validation. Preserve command names, paths, provider identifiers and diagnostic codes.",
+    "section": "help",
+    "sources": [
+      "crates/nan-harness-cli/src/app/args/launch.rs"
+    ]
+  },
+  "help_use_nan_kokoro_for_text_to_speech": {
+    "description": "Command help and argument validation. Preserve command names, paths, provider identifiers and diagnostic codes.",
+    "section": "help",
+    "sources": [
+      "crates/nan-harness-cli/src/app/args/launch.rs"
+    ]
+  },
+  "help_use_nan_whisper_for_speech_to_text": {
     "description": "Command help and argument validation. Preserve command names, paths, provider identifiers and diagnostic codes.",
     "section": "help",
     "sources": [

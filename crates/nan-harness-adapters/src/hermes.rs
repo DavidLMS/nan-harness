@@ -1,6 +1,7 @@
 use crate::direct::{
     DirectLaunch, build_direct_plan, provider_environment, validate_routing_arguments,
 };
+use nan_harness_core::MediaSelection;
 use nan_harness_core::launch_plan::{
     ArtifactLifecycle, BRIDGE_BASE_URL_PLACEHOLDER, ConfigurationOverlay,
     HERMES_MODEL_CATALOG_PLACEHOLDER, NAN_SEARCH_BLOCK_BEGIN, NAN_SEARCH_BLOCK_END, OverlayFile,
@@ -10,7 +11,7 @@ use nan_harness_core::{
     CodingModelProfile, HarnessAdapter, HarnessKind, LaunchPlan, NativeContextLimit, PlanContext,
     PlanError,
 };
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, fmt::Write as _};
 
 const CREDENTIAL_TARGET: &str = "NAN_API_KEY";
 const CONFIG_OVERLAY_ID: &str = "hermes-home";
@@ -58,11 +59,12 @@ register_provider(nan)
 /// Files used by both the stable Hermes adapter and the experimental Desktop profile.
 #[must_use]
 pub fn hermes_search_provider_files() -> Vec<OverlayFile> {
-    hermes_search_provider_files_with_context(None)
+    hermes_search_provider_files_with_context(None, MediaSelection::none())
 }
 
 fn hermes_search_provider_files_with_context(
     context_limit: Option<&nan_harness_core::ContextLimit>,
+    media: MediaSelection,
 ) -> Vec<OverlayFile> {
     vec![
         OverlayFile {
@@ -135,7 +137,7 @@ class NanHarnessWebSearchProvider(WebSearchProvider):
         OverlayFile {
             path: "config.yaml".to_owned(),
             mode: TemporaryArtifactMode::OwnerFile,
-            content_template: hermes_config_template(context_limit),
+            content_template: hermes_config_template(context_limit, media),
             policy: OverlayFilePolicy::MergeYaml,
         },
     ]
@@ -381,7 +383,10 @@ pub fn render_hermes_search_provider() -> String {
     HERMES_SEARCH_PROVIDER.to_owned()
 }
 
-fn hermes_config_template(context_limit: Option<&nan_harness_core::ContextLimit>) -> String {
+fn hermes_config_template(
+    context_limit: Option<&nan_harness_core::ContextLimit>,
+    media: MediaSelection,
+) -> String {
     let compression = context_limit
         .and_then(|limit| match limit.native {
             NativeContextLimit::HermesThreshold { threshold_tokens } => Some(format!(
@@ -390,8 +395,107 @@ fn hermes_config_template(context_limit: Option<&nan_harness_core::ContextLimit>
             _ => None,
         })
         .unwrap_or_default();
+    let mut media_fields = String::new();
+    if media.stt {
+        let _ = write!(
+            media_fields,
+            "\"stt\":{{\"provider\":\"nan-whisper\",\"providers\":{{\"nan-whisper\":{}}}}},",
+            hermes_command_provider("stt", "whisper-1", base_url_placeholder())
+        );
+    }
+    if media.tts {
+        let _ = write!(
+            media_fields,
+            "\"tts\":{{\"provider\":\"nan-kokoro\",\"providers\":{{\"nan-kokoro\":{}}}}},",
+            hermes_command_provider("tts", "kokoro", base_url_placeholder())
+        );
+    }
+    if media.image {
+        media_fields.push_str("\"image_gen\":{\"provider\":\"nan-harness\"},");
+    }
+    let mut plugins = Vec::new();
+    if media.image {
+        plugins.push("image_gen/nan_harness");
+    }
+    plugins.push("web/nan_harness");
+    let plugin_field = format!(
+        "\"plugins\":{{\"enabled\":{}}},",
+        serde_json::to_string(&plugins).unwrap_or_else(|_| "[]".to_owned())
+    );
     format!(
-        "{{{compression}{NAN_SEARCH_BLOCK_BEGIN}\"plugins\": {{\"enabled\": [\"web/nan_harness\"]}}, \"web\": {{\"search_backend\": \"nan-harness\"}}{NAN_SEARCH_BLOCK_END}}}\n"
+        "{{{compression}{media_fields}{NAN_SEARCH_BLOCK_BEGIN}{plugin_field} \"web\": {{\"search_backend\": \"nan-harness\"}}{NAN_SEARCH_BLOCK_END}}}\n"
+    )
+}
+
+fn base_url_placeholder() -> &'static str {
+    "{PROVIDER_BASE_URL_PLACEHOLDER}"
+}
+
+fn hermes_command_provider(kind: &str, model: &str, base_url: &str) -> String {
+    let command = [
+        "nanh",
+        "__media",
+        kind,
+        "--provider-base-url",
+        base_url,
+        "--input",
+        "{input}",
+        "--output",
+        "{output}",
+    ];
+    serde_json::to_string(&serde_json::json!({
+        "type": "command",
+        "command": command,
+        "model": model,
+        "env_passthrough": ["NAN_API_KEY"]
+    }))
+    .unwrap_or_else(|_| "{}".to_owned())
+}
+
+/// Renders the Hermes image generation plugin for a persistent or launch-scoped home.
+#[must_use]
+pub fn render_hermes_image_plugin(base_url: &str) -> String {
+    format!(
+        r#"import os
+import subprocess
+import tempfile
+from pathlib import Path
+
+from agent.image_gen_provider import ImageGenProvider
+
+
+class NanHarnessImageProvider(ImageGenProvider):
+    name = "nan-harness"
+    display_name = "NaN Flux 2 Klein"
+    capabilities = {{"text_to_image": True, "image_to_image": True}}
+
+    def is_available(self):
+        return bool(os.getenv("NAN_API_KEY", "").strip())
+
+    def list_models(self):
+        return ["flux-2-klein"]
+
+    def generate(self, prompt, model="flux-2-klein", input_images=None, **_kwargs):
+        with tempfile.TemporaryDirectory(prefix="nanh-image-") as directory:
+            output = Path(directory) / "image.png"
+            command = [
+                "nanh", "__media", "image", "--provider-base-url", {base_url:?},
+                "--prompt", str(prompt), "--output", str(output)
+            ]
+            for image in input_images or []:
+                command.extend(["--input-image", str(image)])
+            completed = subprocess.run(
+                command, env={{**os.environ, "NAN_API_KEY": os.environ.get("NAN_API_KEY", "")}},
+                capture_output=True, text=True, check=False
+            )
+            if completed.returncode != 0 or not output.is_file():
+                return {{"success": False, "error": "NH-MEDIA-IMAGE"}}
+            return self.success_response(output.read_bytes(), "image/png")
+
+
+def register(ctx):
+    ctx.register_image_gen_provider(NanHarnessImageProvider())
+"#
     )
 }
 
@@ -463,11 +567,39 @@ impl HarnessAdapter for HermesAdapter {
                         .into_iter()
                         .chain(hermes_search_provider_files_with_context(
                             context.context_limit.as_ref(),
+                            context.media,
                         ))
+                        .chain(hermes_media_overlay_files(context.media))
                         .collect(),
                     lifecycle: ArtifactLifecycle::Launch,
                 }],
             },
         )
     }
+}
+
+fn hermes_media_overlay_files(media: MediaSelection) -> Vec<OverlayFile> {
+    if !media.image {
+        return Vec::new();
+    }
+    vec![
+        OverlayFile {
+            path: "plugins/image_gen/nan_harness/__init__.py".to_owned(),
+            mode: TemporaryArtifactMode::OwnerFile,
+            content_template: "from .provider import NanHarnessImageProvider\n\n\ndef register(ctx):\n    ctx.register_image_gen_provider(NanHarnessImageProvider())\n".to_owned(),
+            policy: OverlayFilePolicy::Replace,
+        },
+        OverlayFile {
+            path: "plugins/image_gen/nan_harness/provider.py".to_owned(),
+            mode: TemporaryArtifactMode::OwnerFile,
+            content_template: render_hermes_image_plugin("{PROVIDER_BASE_URL_PLACEHOLDER}"),
+            policy: OverlayFilePolicy::Replace,
+        },
+        OverlayFile {
+            path: "plugins/image_gen/nan_harness/plugin.yaml".to_owned(),
+            mode: TemporaryArtifactMode::OwnerFile,
+            content_template: "name: nan-image\nkind: backend\nversion: 1.0.0\ndescription: NaN image generation\nauthor: NaN\nprovides_image_gen_providers:\n  - nan-harness\n".to_owned(),
+            policy: OverlayFilePolicy::Replace,
+        },
+    ]
 }

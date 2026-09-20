@@ -1,6 +1,7 @@
 use super::support::{assert_direct_secret, context, plan};
 use nan_harness_adapters::HermesAdapter;
 use nan_harness_core::HarnessKind;
+use nan_harness_core::MediaSelection;
 use nan_harness_core::launch_plan::{
     BRIDGE_BASE_URL_PLACEHOLDER, HERMES_MODEL_CATALOG_PLACEHOLDER, NAN_SEARCH_BLOCK_BEGIN,
     OverlayFilePolicy, PROVIDER_BASE_URL_PLACEHOLDER,
@@ -65,4 +66,38 @@ fn hermes_loads_a_launch_scoped_nan_provider_without_hiding_user_state() {
     );
     assert!(plan.environment.remove.contains("OPENAI_BASE_URL"));
     assert_direct_secret(&plan, "NAN_API_KEY");
+}
+
+#[test]
+fn hermes_media_overlay_contains_independent_native_providers() {
+    let mut context = context(HarnessKind::Hermes, Vec::new());
+    context.media = MediaSelection::all();
+    let plan = plan(&HermesAdapter, &context);
+    let overlay = plan
+        .configuration_overlays
+        .first()
+        .expect("Hermes home overlay should exist");
+    let config = overlay
+        .files
+        .iter()
+        .find(|file| file.path == "config.yaml")
+        .expect("Hermes config should exist")
+        .content_template
+        .replace(NAN_SEARCH_BLOCK_BEGIN, "")
+        .replace(nan_harness_core::launch_plan::NAN_SEARCH_BLOCK_END, "");
+    let config: serde_json::Value = serde_json::from_str(&config).expect("valid media config");
+    assert_eq!(config["stt"]["provider"], "nan-whisper");
+    assert_eq!(config["tts"]["provider"], "nan-kokoro");
+    assert_eq!(config["image_gen"]["provider"], "nan-harness");
+    assert!(
+        config["plugins"]["enabled"]
+            .as_array()
+            .is_some_and(|plugins| plugins.iter().any(|value| value == "image_gen/nan_harness"))
+    );
+    assert!(
+        overlay
+            .files
+            .iter()
+            .any(|file| file.path.ends_with("image_gen/nan_harness/provider.py"))
+    );
 }

@@ -140,6 +140,7 @@ name = "deterministic-conformance"
 script = """
 set -euo pipefail
 export PATH="\$HOME/.local/bin:\$HOME/.kimi-code/bin:\$HOME/.hermes/bin:/opt/homebrew/bin:/usr/local/bin:\$PATH"
+export NAN_CANARY_MEDIA_MODE='$trigger'
 cp '{{input}}/nan-harness-canary' "\$HOME/.local/bin/nan-harness-canary"
 chmod 755 "\$HOME/.local/bin/nan-harness-canary"
 NAN_HARNESS_CONFORMANCE_DIAGNOSTICS=1 \

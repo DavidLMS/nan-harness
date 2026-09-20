@@ -96,6 +96,56 @@ fn persistent_search_plugins_have_valid_source_syntax() {
         "Hermes provider syntax failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
+
+    persistent_media_plugins_have_valid_source_syntax();
+}
+
+fn persistent_media_plugins_have_valid_source_syntax() {
+    let mut python = Command::new("python3")
+        .args([
+            "-c",
+            "import sys; compile(sys.stdin.read(), 'image_provider.py', 'exec')",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("Python image provider syntax check should start");
+    python
+        .stdin
+        .take()
+        .expect("Python image provider stdin should be available")
+        .write_all(render_hermes_image_plugin("https://api.nan.test/v1").as_bytes())
+        .expect("image provider source should write");
+    let output = python
+        .wait_with_output()
+        .expect("Python image provider syntax check should finish");
+    assert!(
+        output.status.success(),
+        "Hermes image provider syntax failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let mut node = Command::new("node")
+        .args(["--input-type=module", "--check"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("OpenClaw media plugin syntax check should start");
+    node.stdin
+        .take()
+        .expect("OpenClaw media plugin stdin should be available")
+        .write_all(render_openclaw_media_plugin("https://api.nan.test/v1").as_bytes())
+        .expect("OpenClaw media plugin source should write");
+    let output = node
+        .wait_with_output()
+        .expect("OpenClaw media plugin syntax check should finish");
+    assert!(
+        output.status.success(),
+        "OpenClaw media plugin syntax failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[test]

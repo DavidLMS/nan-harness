@@ -1,3 +1,4 @@
+use crate::MediaSelection;
 use crate::error::PlanError;
 use crate::harness::{DetectedHarness, HarnessKind};
 use crate::launch_plan::{
@@ -13,6 +14,7 @@ pub struct PlanContext {
     pub working_directory: String,
     pub user_arguments: Vec<String>,
     pub web_search_policy: WebSearchPolicy,
+    pub media: MediaSelection,
     pub observability_format: ObservabilityFormat,
     pub session_max_tokens: Option<u64>,
     pub context_limit: Option<ContextLimit>,

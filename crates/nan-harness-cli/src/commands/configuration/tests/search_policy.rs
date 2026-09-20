@@ -182,6 +182,7 @@ fn pi_native_refresh_migrates_the_managed_search_mcp_to_an_extension() {
             model_ids: models.iter().map(|model| model.id.clone()).collect(),
             search_policy: WebSearchPolicy::Auto,
             search_managed: true,
+            media: MediaSelection::none(),
             documents,
         },
     );

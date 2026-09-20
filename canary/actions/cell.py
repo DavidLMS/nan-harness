@@ -370,7 +370,8 @@ CONFORMANCE_ATTEMPTS = 2
 # nan-harness output contract failure rather than a provider result.
 LIVE_MISMATCH_STAGES = frozenset({"usage-summary"})
 PROBE_STAGES = frozenset({"setup", "harness-run", "tool-evidence", "read-marker", "completion-marker",
-                          "bridge-sentinel", "usage-evidence", "usage-summary", "cleanup", "complete"})
+                          "bridge-sentinel", "usage-evidence", "usage-summary", "media-capabilities",
+                          "cleanup", "complete"})
 PROBE_DIAGNOSTICS = frozenset({
     "aider-completion-marker-stdout-empty-stderr-empty",
     "aider-completion-marker-stdout-empty-stderr-nonempty",
@@ -383,7 +384,8 @@ PROBE_DIAGNOSTIC_CODES = {
 # The PowerShell probe publishes its own closed marker (schema 2) with the stage the
 # native run reached and a bounded diagnostic list.
 WINDOWS_PROBE_STAGES = frozenset({"live-tool", "harness-run", "read-marker", "completion-marker",
-                                  "bridge-sentinel", "usage-evidence", "usage-summary", "complete"})
+                                  "bridge-sentinel", "usage-evidence", "usage-summary",
+                                  "media-capabilities", "complete"})
 WINDOWS_LIVE_DIAGNOSTICS = frozenset({
     "live-error-auth", "live-error-network", "live-error-arguments", "live-error-permission",
     "live-error-provider", "live-error-config",
@@ -1057,6 +1059,7 @@ def live(args, _state):
     environment = cell_environment(args.directory)
     environment["NAN_CANARY_NAN_COMMAND"] = str(args.binary)
     environment["NAN_CANARY_MODEL"] = args.model
+    environment["NAN_CANARY_MEDIA_MODE"] = getattr(args, "trigger", "manual")
     marker = args.directory / "probe-result.json"
     marker.unlink(missing_ok=True)
     # Forward slashes keep the path valid for Git Bash on native Windows.

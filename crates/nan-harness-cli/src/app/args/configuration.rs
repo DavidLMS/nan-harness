@@ -1,4 +1,4 @@
-use super::launch::WebSearchArgs;
+use super::launch::{MediaArgs, WebSearchArgs};
 use crate::app::targets::{ConfigTarget, parse_config_harness};
 use clap::Args;
 
@@ -13,6 +13,8 @@ pub(crate) struct ConfigArgs {
     pub(crate) harness: Option<ConfigTarget>,
     #[command(flatten)]
     pub(crate) search: WebSearchArgs,
+    #[command(flatten)]
+    pub(crate) media: MediaArgs,
     #[arg(
         long,
         help = nan_harness_i18n::messages::help_inspect_one_harness_or_all_harnesses_when_harness_is_omitted(nan_harness_i18n::locale()),

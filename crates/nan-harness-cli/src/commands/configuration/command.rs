@@ -2,7 +2,7 @@ use super::*;
 use crate::app::{ConfigArgs, ConfigTarget};
 use crate::commands::credentials;
 use crate::commands::pen_desktop::{self, PenDesktopError};
-use nan_harness_core::WebSearchPolicy;
+use nan_harness_core::{MediaSelection, WebSearchPolicy};
 use std::io::{BufRead as _, Write as _};
 
 pub(crate) async fn run(
@@ -104,7 +104,7 @@ async fn run_refresh_all(
     }
     let (config, models) = credentials::resolve_saved_or_onboard(None, interactive).await?;
     for harness in configured {
-        let change = manager.configure(harness, &config, &models, None)?;
+        let change = manager.configure_with_media(harness, &config, &models, None, None)?;
         print_change(harness, &change, true);
     }
     if pen_configured {
@@ -128,7 +128,12 @@ async fn configure_harness(
     if arguments.refresh && !already_configured {
         return Err(ConfigurationError::RefreshRequiresConfiguration(harness));
     }
-    if already_configured && !arguments.refresh && requested_search_policy(arguments).is_none() {
+    let requested_media = requested_media(arguments);
+    if already_configured
+        && !arguments.refresh
+        && requested_search_policy(arguments).is_none()
+        && requested_media.is_none()
+    {
         print_status(manager, harness)?;
         println!(
             "{}",
@@ -145,6 +150,7 @@ async fn configure_harness(
             manager,
             harness,
             requested_search_policy(arguments).unwrap_or_default(),
+            requested_media,
             interactive,
         )?
     {
@@ -155,11 +161,12 @@ async fn configure_harness(
         return Ok(());
     }
     let (config, models) = credentials::resolve_saved_or_onboard(None, interactive).await?;
-    let change = manager.configure(
+    let change = manager.configure_with_media(
         harness,
         &config,
         &models,
         requested_search_policy(arguments),
+        requested_media,
     )?;
     print_change(harness, &change, arguments.refresh || already_configured);
     Ok(())
@@ -187,6 +194,11 @@ fn validate_arguments(arguments: &ConfigArgs) -> Result<(), ConfigurationError> 
     {
         return Err(ConfigurationError::UnusedSearchPolicy);
     }
+    if requested_media(arguments).is_some()
+        && (arguments.status || arguments.remove || arguments.remove_all || arguments.refresh_all)
+    {
+        return Err(ConfigurationError::UnusedMediaPolicy);
+    }
     Ok(())
 }
 
@@ -200,10 +212,15 @@ fn requested_search_policy(arguments: &ConfigArgs) -> Option<WebSearchPolicy> {
     }
 }
 
+fn requested_media(arguments: &ConfigArgs) -> Option<MediaSelection> {
+    crate::commands::media_policy::requested_media(&arguments.media)
+}
+
 fn confirm_configuration(
     manager: &ConfigurationManager,
     harness: HarnessKind,
     search_policy: WebSearchPolicy,
+    media_request: Option<MediaSelection>,
     interactive: bool,
 ) -> Result<bool, ConfigurationError> {
     if !interactive {
@@ -220,6 +237,14 @@ fn confirm_configuration(
         "{}", nan_harness_i18n::messages::command_this_copies_the_api_key_saved_by_nan_harness_into_the_harness_s_native_cred(nan_harness_i18n::locale()));
     eprintln!("{}", nan_harness_i18n::messages::command_nan_api_key_from_the_current_environment_will_not_be_copied(nan_harness_i18n::locale()));
     let search_managed = manager.resolve_managed_search(harness, search_policy, false)?;
+    let working_directory = env::current_dir().map_err(ConfigurationError::CurrentDirectory)?;
+    let media = crate::commands::media_policy::configuration_media(
+        harness,
+        media_request,
+        MediaSelection::none(),
+        &manager.paths.home_directory,
+        &working_directory,
+    );
     explain_search_confirmation(
         harness,
         ManagedSearchStatus {
@@ -233,7 +258,7 @@ fn confirm_configuration(
             nan_harness_i18n::locale()
         )
     );
-    for path in manager.paths_for_search(harness, search_managed)? {
+    for path in manager.paths_for_media(harness, search_managed, media)? {
         eprintln!("  - {}", path.display());
     }
     prompt_yes_no(&nan_harness_i18n::messages::prompt_continue(
@@ -294,6 +319,13 @@ fn print_change(harness: HarnessKind, change: &ConfigurationChange, refreshed: b
         nan_harness_i18n::messages::command_web_search(
             nan_harness_i18n::locale(),
             &(search_status_summary(harness, change.search))
+        )
+    );
+    println!(
+        "{}",
+        nan_harness_i18n::messages::command_native_media(
+            nan_harness_i18n::locale(),
+            &media_status_summary(change.media)
         )
     );
     for path in &change.paths {
@@ -390,6 +422,15 @@ fn print_status(
         None => println!(
             "{}", nan_harness_i18n::messages::command_web_search_policy_not_recorded_refresh_this_configuration_to_record_automat(nan_harness_i18n::locale())),
     }
+    if let Some(media) = manager.media_status(harness)? {
+        println!(
+            "{}",
+            nan_harness_i18n::messages::command_native_media(
+                nan_harness_i18n::locale(),
+                &media_status_summary(media)
+            )
+        );
+    }
     Ok(())
 }
 
@@ -476,6 +517,23 @@ fn search_status_summary(harness: HarnessKind, search: ManagedSearchStatus) -> &
     }
 }
 
+fn media_status_summary(media: MediaSelection) -> String {
+    format!(
+        "STT={}, TTS={}, image={}",
+        if media.stt {
+            "NaN Whisper"
+        } else {
+            "preserved"
+        },
+        if media.tts { "NaN Kokoro" } else { "preserved" },
+        if media.image {
+            "NaN Flux 2 Klein"
+        } else {
+            "preserved"
+        },
+    )
+}
+
 fn print_all_statuses(manager: &ConfigurationManager) -> Result<(), ConfigurationError> {
     for harness in SUPPORTED_HARNESSES {
         print_status(manager, harness)?;
@@ -503,6 +561,9 @@ fn print_all_statuses(manager: &ConfigurationManager) -> Result<(), Configuratio
 async fn run_pen(arguments: &ConfigArgs, interactive: bool) -> Result<(), ConfigurationError> {
     if arguments.search.no_search || arguments.search.force_search {
         return Err(ConfigurationError::UnusedSearchPolicy);
+    }
+    if requested_media(arguments).is_some() {
+        return Err(ConfigurationError::UnusedMediaPolicy);
     }
     if arguments.status {
         return print_pen_status();

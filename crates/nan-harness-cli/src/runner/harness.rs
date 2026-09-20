@@ -275,6 +275,15 @@ pub(super) fn build_launch_plan(
         working_directory: working_directory.to_owned(),
         user_arguments: arguments.arguments.clone(),
         web_search_policy: web_search_policy(arguments),
+        media: commands::media_policy::launch_media(
+            adapter.kind(),
+            arguments,
+            &std::env::var_os("HOME")
+                .or_else(|| std::env::var_os("USERPROFILE"))
+                .map(PathBuf::from)
+                .unwrap_or_default(),
+            Path::new(working_directory),
+        ),
         observability_format: ObservabilityFormat::Human,
         session_max_tokens: arguments.session_max_tokens,
         context_limit,
