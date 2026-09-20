@@ -1,16 +1,13 @@
 use crate::conformance::{
-    HarnessRegistration, cline_round_trip_command, embedded_manifest, harness_registry,
-    inventory_drift_fingerprint, inventory_matches, owned_prime_pids_from_status, round_trip_probe,
-    validate_harness_registry,
+    HarnessRegistration, embedded_manifest, harness_registry, inventory_drift_fingerprint,
+    inventory_matches, owned_prime_pids_from_status, round_trip_probe, validate_harness_registry,
 };
-#[cfg(unix)]
-use crate::conformance::{PrimeCleanupTargets, prime_status_path};
 use nan_harness_core::HarnessKind;
 use serde_json::json;
 use std::path::Path;
 
 #[cfg(unix)]
-use crate::conformance::signal_prime_targets_now;
+use crate::conformance::{PrimeCleanupTargets, prime_status_path, signal_prime_targets_now};
 
 #[test]
 fn registry_covers_every_harness_kind_and_manifest() {
@@ -151,6 +148,42 @@ fn published_round_trip_probes_are_declared_by_embedded_manifests() {
 }
 
 #[test]
+fn cline_round_trip_probe_writes_the_marker_with_the_native_shell() {
+    let workspace = tempfile::Builder::new()
+        .prefix("cline's workspace ")
+        .tempdir()
+        .expect("workspace should exist");
+    let manifest =
+        embedded_manifest(HarnessKind::Cline).expect("Cline manifest should be embedded");
+    let probe = round_trip_probe(HarnessKind::Cline, workspace.path(), &manifest)
+        .expect("Cline probe should satisfy the manifest contract");
+    assert_eq!(probe.call.name, "run_commands");
+    assert!(crate::conformance::inventory::verify_probe_side_effect(&probe).is_err());
+    let command = probe.call.input["commands"][0]
+        .as_str()
+        .expect("Cline probe should contain a shell command");
+    let mut process = if cfg!(windows) {
+        let mut process = std::process::Command::new("powershell.exe");
+        process.args(["-NoProfile", "-NonInteractive", "-Command"]);
+        process
+    } else {
+        let mut process = std::process::Command::new("/bin/bash");
+        process.arg("-c");
+        process
+    };
+    let output = process
+        .arg(command)
+        .output()
+        .expect("native shell should start");
+    assert!(
+        output.status.success(),
+        "native write command should succeed"
+    );
+    crate::conformance::inventory::verify_probe_side_effect(&probe)
+        .expect("the original filesystem contract should pass");
+}
+
+#[test]
 fn prime_round_trip_probe_uses_an_absolute_json_python_path() {
     let workspace = tempfile::tempdir().expect("workspace should exist");
     let manifest =
@@ -250,21 +283,4 @@ fn prime_cleanup_does_not_signal_an_unrelated_shared_process_group_member() {
     );
     let _ = unrelated.kill();
     let _ = unrelated.wait();
-}
-
-#[test]
-fn cline_round_trip_command_matches_the_host_shell() {
-    // Cline's command runner is not a POSIX shell on Windows, where `printf` and quoted
-    // absolute paths were both refused; a native cmd builtin writing the workspace file
-    // relative to the working directory is the form that works.
-    let workspace = tempfile::tempdir().expect("workspace should exist");
-    let path = workspace.path().join("tool-output.txt");
-    assert_eq!(
-        cline_round_trip_command(&path, false),
-        format!("printf NAN_HARNESS_TOOL_OK > '{}'", path.display())
-    );
-    assert_eq!(
-        cline_round_trip_command(&path, true),
-        format!("echo NAN_HARNESS_TOOL_OK> \"{}\"", path.display())
-    );
 }

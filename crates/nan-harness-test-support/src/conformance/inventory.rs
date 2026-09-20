@@ -108,10 +108,7 @@ pub(crate) fn round_trip_probe(
         HarnessKind::Cline => (
             "run_commands",
             json!({
-                "commands": [cline_round_trip_command(
-                    &workspace.join("tool-output.txt"),
-                    cfg!(windows),
-                )]
+                "commands": [cline_write_command(&workspace.join("tool-output.txt"))]
             }),
             filesystem_contract(
                 workspace.join("tool-output.txt"),
@@ -160,21 +157,15 @@ pub(crate) fn round_trip_probe(
     })
 }
 
-/// The command Cline runs for the deterministic round trip.
-///
-/// Cline's own command runner is not a POSIX shell on Windows: `printf` and single-quoted
-/// paths have no meaning there, and every attempt so far left the workspace file missing
-/// (`filesystem-unreadable`) even though the tool call and its result passed. The Windows form
-/// is therefore a native `cmd` builtin writing a double-quoted absolute path, which no longer
-/// depends on the working directory Cline chooses. The platform is a parameter so both forms
-/// stay testable on every host.
-pub(crate) fn cline_round_trip_command(path: &Path, windows: bool) -> String {
-    if windows {
-        // A double-quoted absolute path is native to `cmd` and keeps the write independent of
-        // whichever working directory Cline runs the command in.
-        format!("echo NAN_HARNESS_TOOL_OK> \"{}\"", path.display())
+fn cline_write_command(path: &Path) -> String {
+    // Cline's default executor uses Windows PowerShell on Windows and bash elsewhere.
+    // WriteAllText avoids PowerShell 5's UTF-16 redirection and does not require printf.
+    if cfg!(windows) {
+        let path = path.to_string_lossy().replace('\'', "''");
+        format!("[System.IO.File]::WriteAllText('{path}', 'NAN_HARNESS_TOOL_OK')")
     } else {
-        format!("printf NAN_HARNESS_TOOL_OK > '{}'", path.display())
+        let path = path.to_string_lossy().replace('\'', "'\\''");
+        format!("printf NAN_HARNESS_TOOL_OK > '{path}'")
     }
 }
 

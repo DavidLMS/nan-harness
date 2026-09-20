@@ -81,7 +81,7 @@ mod tests {
                     "--exact",
                     concat!(
                         module_path!(),
-                        "::native_child_sees_os_prerequisites_and_private_paths"
+                        "::native_child_sees_os_prerequisites_and_private_paths_only"
                     ),
                 ])
                 .env(SENTINEL, "synthetic-parent-secret")

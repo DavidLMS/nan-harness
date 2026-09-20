@@ -57,6 +57,12 @@ fn cline_merges_provider_routing_and_models_into_linked_user_settings() {
         CLINE_MODEL_CATALOG_PLACEHOLDER
     );
     assert_search_mcp(&search_file.content_template, "OPENAI_API_KEY");
+    assert!(
+        !plan
+            .environment
+            .public
+            .contains_key("CLINE_SESSION_BACKEND_MODE")
+    );
     assert_direct_secret(&plan, "OPENAI_API_KEY");
 }
 
@@ -72,11 +78,13 @@ fn cline_headless_arguments_use_the_local_executor_without_exposing_the_key() {
                 .collect(),
         ),
     );
-    assert!(plan.process.arguments.contains(&"--data-dir".to_owned()));
-    assert!(
-        plan.process
-            .arguments
-            .contains(&"{artifact:cline-config}/data".to_owned())
+    assert!(!plan.process.arguments.contains(&"--data-dir".to_owned()));
+    assert_eq!(
+        plan.environment
+            .public
+            .get("CLINE_SESSION_BACKEND_MODE")
+            .map(String::as_str),
+        Some("local")
     );
     assert!(!plan.process.arguments.contains(&"--yolo".to_owned()));
     let serialized = serde_json::to_string(&plan).expect("plan should serialize");
@@ -96,7 +104,12 @@ fn cline_headless_act_arguments_use_the_local_executor() {
                 .collect(),
         ),
     );
-    assert!(plan.process.arguments.contains(&"--data-dir".to_owned()));
+    assert!(!plan.process.arguments.contains(&"--data-dir".to_owned()));
+    assert_eq!(
+        plan.environment.public["CLINE_SESSION_BACKEND_MODE"],
+        "local"
+    );
+    assert!(plan.process.arguments.contains(&"--act".to_owned()));
     assert!(!plan.process.arguments.contains(&"--yolo".to_owned()));
 }
 
@@ -112,6 +125,11 @@ fn cline_preserves_an_explicit_mode_for_headless_runs() {
                 .collect(),
         ),
     );
-    assert!(plan.process.arguments.contains(&"--data-dir".to_owned()));
+    assert!(!plan.process.arguments.contains(&"--data-dir".to_owned()));
+    assert_eq!(
+        plan.environment.public["CLINE_SESSION_BACKEND_MODE"],
+        "local"
+    );
+    assert!(plan.process.arguments.contains(&"--plan".to_owned()));
     assert!(!plan.process.arguments.contains(&"--yolo".to_owned()));
 }

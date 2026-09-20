@@ -41,12 +41,8 @@ pub(crate) use arguments::{RunKind, headless_arguments};
 #[cfg(test)]
 pub(crate) use helpers::scenario;
 #[cfg(test)]
-pub(crate) use inventory::{
-    cline_round_trip_command, inventory_drift_fingerprint, inventory_matches, round_trip_probe,
-};
+pub(crate) use inventory::{inventory_drift_fingerprint, inventory_matches, round_trip_probe};
 #[cfg(test)]
 pub(crate) use prime_cleanup::owned_prime_pids_from_status;
 #[cfg(all(test, unix))]
-pub(crate) use prime_cleanup::signal_prime_targets_now;
-#[cfg(all(test, unix))]
-pub(crate) use prime_cleanup::{PrimeCleanupTargets, prime_status_path};
+pub(crate) use prime_cleanup::{PrimeCleanupTargets, prime_status_path, signal_prime_targets_now};

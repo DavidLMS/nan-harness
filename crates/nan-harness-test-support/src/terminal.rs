@@ -10,6 +10,8 @@ use tokio::process::Child;
 use tokio::process::Command;
 
 mod diagnostic;
+#[cfg(all(test, windows))]
+mod windows_tests;
 pub use diagnostic::{
     CaptureMode, DiagnosticOutput, ProcessEvent, ReaderOutcome, ScanState, SurvivorScan,
 };
@@ -169,6 +171,13 @@ impl TerminalCommand {
                     cleanup_os_error_code: cleanup.os_error_code,
                 });
             };
+        // The root can exit while helpers keep inherited output handles open. Close only
+        // this command's Windows job before draining those handles.
+        #[cfg(windows)]
+        child_start_kill(&mut child).map_err(|source| TerminalError::Execute {
+            program: self.program.clone(),
+            source,
+        })?;
         let stdout =
             join_capture_bounded(stdout_task, &mut child, pid, &self.program, "stdout").await;
         let stderr =

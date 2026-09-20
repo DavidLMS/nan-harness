@@ -7,6 +7,11 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Select Cline's local session backend for JSON runs without overriding its
+  data directory or enabling sandbox configuration.
+
 ## [0.1.9] - 2026-09-18
 
 ### Fixed

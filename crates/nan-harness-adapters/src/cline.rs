@@ -16,7 +16,6 @@ use std::collections::BTreeSet;
 const CREDENTIAL_TARGET: &str = "OPENAI_API_KEY";
 const CONFIG_OVERLAY_ID: &str = "cline-config";
 const CONFIG_PATH: &str = "{artifact:cline-config}";
-const DATA_DIR_PATH: &str = "{artifact:cline-config}/data";
 
 fn is_flag(arguments: &[String], flag: &str) -> bool {
     arguments.iter().any(|argument| {
@@ -78,13 +77,6 @@ fn arguments(context: &PlanContext, model_id: &str) -> Vec<String> {
         "--model".to_owned(),
         model_id.to_owned(),
     ];
-    // Cline's non-interactive JSON path can attach to its Hub. On Windows 3.0.x,
-    // that path reports successful shell tool calls without running the command.
-    // An explicit data directory selects Cline's local runtime while preserving
-    // act-mode's complete tool inventory.
-    if is_flag(&context.user_arguments, "--json") {
-        arguments.extend(["--data-dir".to_owned(), DATA_DIR_PATH.to_owned()]);
-    }
     arguments.extend(context.user_arguments.iter().cloned());
     arguments
 }
@@ -141,13 +133,19 @@ impl HarnessAdapter for ClineAdapter {
             ],
         )?;
         let model_id = &context.model.resolved_id;
+        let mut public_environment = provider_environment();
+        // Select Cline's in-process executor without enabling the separate sandbox
+        // configuration selected by --data-dir or changing the user's approval mode.
+        if is_flag(&context.user_arguments, "--json") {
+            public_environment.insert("CLINE_SESSION_BACKEND_MODE".to_owned(), "local".to_owned());
+        }
 
         build_direct_plan(
             context,
             DirectLaunch {
                 arguments: arguments(context, model_id),
                 credential_target: CREDENTIAL_TARGET,
-                public_environment: provider_environment(),
+                public_environment,
                 removed_environment: BTreeSet::from([
                     "CLINE_DEFAULT_MODEL_ID".to_owned(),
                     "CLINE_MODEL".to_owned(),
