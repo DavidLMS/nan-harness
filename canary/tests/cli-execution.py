@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -44,6 +45,28 @@ cli_suite = load("cli-suite")
 
 
 class CliExecutionTests(unittest.TestCase):
+    def test_windows_cell_discovers_every_native_installer_destination(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            directory = root / "cell"
+            bash = root / "git/usr/bin/bash.exe"
+            bash.parent.mkdir(parents=True)
+            bash.write_bytes(b"synthetic")
+            proxy = SimpleNamespace(name="nt", environ=os.environ, pathsep=os.pathsep)
+            def which(name, **_kwargs):
+                return str(root / "git/cmd/git.exe") if name == "git.exe" else str(root / "node")
+            with patch.object(cell, "os", proxy), patch.object(cell, "protect_private"), \
+                    patch.object(cell.shutil, "which", side_effect=which), \
+                    patch.object(cell.subprocess, "run", return_value=SimpleNamespace(stdout="24.20.0")):
+                environment = cell.cell_environment(directory)
+            paths = environment["PATH"].split(os.pathsep)
+            for relative in ("bin", "hermes/bin", "home/.nan-harness-canary-venv/Scripts",
+                             "home/.kimi-code/bin", "home/.local", "home/AppData/Roaming/npm"):
+                self.assertIn(str(directory / relative), paths)
+            self.assertEqual(environment["HERMES_HOME"], str(directory / "hermes"))
+            for name in ("NAN_HARNESS_GIT_BASH", "KIMI_SHELL_PATH", "KIMI_CLI_GIT_BASH_PATH"):
+                self.assertEqual(environment[name], str(bash))
+
     def test_isolated_live_child_receives_only_explicit_provider_credential(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "cell"

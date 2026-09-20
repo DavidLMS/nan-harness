@@ -600,6 +600,9 @@ def cell_environment(directory):
         "NAN_HARNESS_CONFIG_DIR": home / ".config/nan-harness",
         "TMPDIR": directory / "tmp", "TEMP": directory / "tmp", "TMP": directory / "tmp",
     }
+    if os.name == "nt":
+        # The native installer stages Hermes outside HOME, unlike its Unix recipe.
+        locations["HERMES_HOME"] = directory / "hermes"
     for location in set(locations.values()):
         ensure_private_directory(location, reusable=True)
     # Keep runner-provisioned runtimes, but do not discover a harness left in the
@@ -618,11 +621,21 @@ def cell_environment(directory):
                  if entry and not any(Path(entry).resolve().is_relative_to(old) for old in hidden)]
     bins = [home / ".local/bin", home / ".local", home / ".kimi-code/bin",
             home / ".hermes/bin", home / ".local/share/nan-harness-canary-uv/bin"]
+    if os.name == "nt":
+        bins = [directory / "bin", directory / "hermes/bin",
+                home / ".nan-harness-canary-venv/Scripts",
+                home / "AppData/Roaming/npm"] + bins
     env.update({key: str(value) for key, value in locations.items()})
     retained = [str(path) for path in bins]
     if trusted_runtime_bin is not None and str(trusted_runtime_bin) not in inherited:
         retained.append(str(trusted_runtime_bin))
     env["PATH"] = os.pathsep.join(retained + inherited)
+    if os.name == "nt":
+        git = shutil.which("git.exe", path=env["PATH"])
+        bash = Path(git).parent.parent / "usr/bin/bash.exe" if git else None
+        if bash is not None and bash.is_file():
+            for name in ("NAN_HARNESS_GIT_BASH", "KIMI_SHELL_PATH", "KIMI_CLI_GIT_BASH_PATH"):
+                env[name] = str(bash)
     # Hosted installers must retain the runner-selected Node/npm ahead of the
     # legacy Tart/Homebrew prefixes; the guest script uses this only as an
     # explicit hosted-mode contract. Tart's historical one-argument callers
