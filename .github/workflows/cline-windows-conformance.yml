@@ -28,7 +28,17 @@ jobs:
       - name: Build conformance binaries
         shell: pwsh
         run: cargo build --locked -p nan-harness-cli -p nan-harness-canary
+      - name: Share only diagnostic executables
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: cline-windows-binaries
+          path: |
+            target/debug/nan-harness.exe
+            target/debug/nan-harness-canary.exe
+          retention-days: 3
+          if-no-files-found: error
       - name: Verify Cline contracts
+        timeout-minutes: 7
         shell: pwsh
         env:
           NAN_HARNESS_CONFORMANCE_DIAGNOSTICS: '1'
