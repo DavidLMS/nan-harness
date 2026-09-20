@@ -1,0 +1,31 @@
+name: Cline Windows conformance
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  conformance:
+    runs-on: windows-2025
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.20.0
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Install pinned Cline
+        shell: pwsh
+        run: npm install --global cline@3.0.61
+      - name: Build conformance binaries
+        shell: pwsh
+        run: cargo build --locked -p nan-harness-cli -p nan-harness-canary
+      - name: Verify Cline contracts
+        shell: pwsh
+        run: |
+          & target/debug/nan-harness-canary.exe conformance --nan-harness "$pwd/target/debug/nan-harness.exe" --harness cline --json
+          exit $LASTEXITCODE
