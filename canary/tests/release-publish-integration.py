@@ -197,7 +197,8 @@ class ReleasePublishIntegrationTests(unittest.TestCase):
             "checks": [{"name": name, "status": "passed", "durationMilliseconds": 1, "attempts": 1}
                        for name in ("install-and-diagnose", "deterministic-conformance", "live-tool")],
             "outcome": "passed"}
-        (self.reports / f"{system}-aarch64-{harness}.json").write_text(json.dumps(report, sort_keys=True) + "\n")
+        architecture = gate.PLATFORMS[system]["architecture"]
+        (self.reports / f"{system}-{architecture}-{harness}.json").write_text(json.dumps(report, sort_keys=True) + "\n")
 
     def _env(self):
         env = dict(os.environ)

@@ -275,19 +275,22 @@ those schedules.
 
 ### Hosted release gate and publication
 
-The manual [hosted release gate](../.github/workflows/release-gate.yml) is the
-intended replacement for the local Tart release gate. Dispatch it from the
-default branch with these exact inputs:
+The [hosted release gate](../.github/workflows/release-gate.yml) runs automatically
+from the default branch after `release.yml` creates a draft. This automatic run
+uses live inference with `verification_only=true`: it never publishes the draft.
+It can also be dispatched from the default branch with these exact inputs:
 
 ```text
 tag=vX.Y.Z  tag_commit=<40 lowercase hex>  model=<bounded identifier>
 mode=live  verification_only=true|false
 ```
 
-It checks that the named release is still a draft, resolves the tag to the
-exact supplied commit, verifies the signed `SHA256SUMS` and the four canonical
-ARM64 assets, and runs all 30 unique Linux/macOS ARM64 CLI cells using those
-assets. The workflow checks out only immutable `GITHUB_SHA` trusted-branch
+It requires a draft for publication; verification-only mode also accepts an
+already published stable release. It resolves the tag to the exact supplied
+commit, verifies the signed `SHA256SUMS` and six canonical assets, and runs
+43 unique CLI cells: 15 Linux ARM64, 15 macOS ARM64 and 13 Windows x64.
+Prime Agent and FX are explicitly unavailable on Windows and are not counted
+as passes. The workflow checks out only immutable `GITHUB_SHA` trusted-branch
 code and never executes tag-controlled workflow code. `NAN_API_KEY` is exposed
 only to live cells through the protected `canary-live` environment. The
 `release-publication` environment must be configured with protection rules
@@ -296,7 +299,7 @@ that environment.
 
 The default `verification_only=true` mode is safe for testing and produces
 verification evidence without publishing. Publication is allowed only for a
-live run with `verification_only=false`, after the full 30-cell pass and
+live run with `verification_only=false`, after the full 43-cell pass and
 provenance handoff succeed. The publisher makes the release public and
 non-latest, updates the compatibility and available-release feeds, and retains
 durable evidence/receipts; a deterministic run never satisfies the live release
@@ -467,7 +470,7 @@ is nothing to time out.
 | Manual cell | 2-5 minutes | 60 minutes | Reproduce one harness/platform without publication |
 | Daily | 20-30 minutes | 60 minutes | Detect Linux installation and deterministic regressions every non-Sunday day |
 | Weekly | 45-60 minutes (20-30 with a validated two-lane host) | 120 minutes | Verify every harness live on Linux and macOS |
-| Hosted release gate | Hosted Linux/macOS ARM64 matrix | 180 minutes | Verify a named draft with the exact full 30-cell live matrix, then allow explicit publication |
+| Hosted release gate | Hosted Linux/macOS ARM64 and Windows x64 matrix | 180 minutes per cell | Automatically verify each draft with the exact 43-cell live matrix; publication remains explicit |
 | Legacy local release gate | 45-60 minutes (20-30 with a validated two-lane host) | 120 minutes | Historical Tart release evidence and recovery only |
 
 The first uncached Tart image can add up to 30 minutes per platform. A suite

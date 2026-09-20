@@ -76,7 +76,7 @@ def _asset_entries(directory: Path):
     return result, digest(checksum)
 
 
-def _require_passing_release_report(report, version, path):
+def _require_passing_release_report(report, version, path, mode):
     if (report.get("schemaVersion") != 2 or report.get("outcome") != "passed"
             or report.get("trigger") != "release" or report.get("tier") != "release-gate"):
         raise ValueError(f"report is not a passing release-gate report: {path.name}")
@@ -86,7 +86,8 @@ def _require_passing_release_report(report, version, path):
     if not isinstance(checks, list):
         raise ValueError(f"report checks are missing: {path.name}")
     names = [check.get("name") for check in checks if isinstance(check, dict)]
-    for required in REQUIRED_CHECKS:
+    required_checks = REQUIRED_CHECKS if mode == "live" else REQUIRED_CHECKS[:2]
+    for required in required_checks:
         if names.count(required) != 1:
             raise ValueError(f"report must contain exactly one {required} check: {path.name}")
         check = checks[names.index(required)]
@@ -104,7 +105,7 @@ def build_manifest(args):
     seen = set()
     for path in sorted(args.reports_dir.glob("*.json")):
         report = json.loads(path.read_text())
-        _require_passing_release_report(report, args.tag[1:], path)
+        _require_passing_release_report(report, args.tag[1:], path, getattr(args, "mode", "live"))
         environment = report.get("environment", {})
         harness_evidence = report.get("harness", {})
         nan_harness = report.get("nanHarness", {})
@@ -185,6 +186,7 @@ def main():
     assets_parser.add_argument("--output", type=Path, required=True)
     assets_parser.set_defaults(function=assets_command)
     manifest_parser = subparsers.add_parser("manifest")
+    manifest_parser.add_argument("--mode", choices=("live", "deterministic"), default="live")
     for name in ("repository", "tag", "tag-commit", "workflow-commit", "run-id"):
         manifest_parser.add_argument("--" + name, required=True)
     manifest_parser.add_argument("--reports-dir", type=Path, required=True)

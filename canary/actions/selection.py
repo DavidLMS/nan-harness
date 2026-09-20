@@ -32,10 +32,12 @@ MODEL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}\Z")
 
 # Platforms whose evidence a harness must supply before its compatibility feed may
 # advance. The published feed keeps one platform-independent record per harness, so
-# a harness is qualified only when every platform listed here passes. Windows joins
-# a harness's list once its native cell passes deterministic and live qualification.
+# a harness is qualified only when every available platform listed here passes.
 _BASE_PLATFORMS = ("linux", "macos")
-HARNESS_PLATFORMS = {harness: _BASE_PLATFORMS for harness in CLI_HARNESSES}
+HARNESS_PLATFORMS = {
+    harness: _BASE_PLATFORMS if harness in WINDOWS_UNAVAILABLE else (*_BASE_PLATFORMS, "windows")
+    for harness in CLI_HARNESSES
+}
 
 
 def supported_platforms(harness):

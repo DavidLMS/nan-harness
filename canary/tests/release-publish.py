@@ -43,19 +43,20 @@ class ReleasePublishTests(unittest.TestCase):
         self.manifest.write_text("\n".join(f"{item['sha256']}  {item['name']}" for item in asset_entries)
                                   + f"\n{publisher.digest(update_manifest)}  update-manifest.json\n")
         reports = []
-        for platform in ("linux", "macos"):
+        for platform in publisher.PLATFORMS:
             for harness in publisher.HARNESSES:
+                if f"{platform}/{harness}" not in publisher.REQUIRED_IDENTITIES:
+                    continue
                 report = {
                     "schemaVersion": 2, "runId": self.run_id, "trigger": "release",
                     "tier": "release-gate",
                     "nanHarness": {"source": f"commit:{self.tag_commit}",
                                     "version": "1.2.3",
                                     "sha256": next(item["sha256"] for item in asset_entries
-                                                  if item["name"] == ("nan-harness-aarch64-unknown-linux-musl"
-                                                                       if platform == "linux" else
-                                                                       "nan-harness-aarch64-apple-darwin"))},
+                                                  if item["name"] == publisher.PLATFORM_ASSETS[platform]["harness"])},
                     "harness": {"id": harness},
-                    "environment": {"operatingSystem": platform, "architecture": "aarch64"},
+                    "environment": {"operatingSystem": platform,
+                                    "architecture": publisher.PLATFORMS[platform]["architecture"]},
                     "checks": [{"name": name, "status": "passed"} for name in publisher.REQUIRED_CHECKS],
                     "outcome": "passed",
                 }
@@ -68,7 +69,7 @@ class ReleasePublishTests(unittest.TestCase):
         self.handoff.write_text(json.dumps({
             "schemaVersion": 1, "repository": "Acme/Fork", "tag": "v1.2.3",
             "tagCommit": self.tag_commit, "workflowCommit": self.workflow_commit,
-            "runId": self.run_id, "reportCount": 30, "reports": reports,
+            "runId": self.run_id, "reportCount": 43, "reports": reports,
             "assets": asset_entries, "assetManifest": self.manifest.name,
             "assetManifestSha256": publisher.digest(self.manifest),
             "attestation": {"workflow": "Acme/Fork/.github/workflows/release.yml",
@@ -80,7 +81,7 @@ class ReleasePublishTests(unittest.TestCase):
 
     def test_valid_handoff_has_complete_matrix_and_assets(self):
         value = publisher.validate_handoff(self.handoff)
-        self.assertEqual(value["reportCount"], 30)
+        self.assertEqual(value["reportCount"], 43)
 
     def test_child_boundaries_strip_secrets_from_validator(self):
         with patch.dict(os.environ, {"GH_TOKEN": "gh-secret", "GITHUB_TOKEN": "github-secret",
@@ -175,7 +176,7 @@ class ReleasePublishTests(unittest.TestCase):
         for path in self.assets.iterdir():
             path.unlink()
         value = publisher.validate_handoff(self.handoff, self.assets, require_evidence=False)
-        self.assertEqual(value["reportCount"], 30)
+        self.assertEqual(value["reportCount"], 43)
 
     def test_durable_evidence_is_strict_and_binds_all_reports(self):
         handoff = publisher.validate_handoff(self.handoff)

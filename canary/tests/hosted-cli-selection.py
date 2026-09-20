@@ -57,11 +57,13 @@ class HostedCliSelectionTests(unittest.TestCase):
 
     def test_every_harness_requires_the_hosted_arm64_platforms(self):
         self.assertEqual(set(selection.HARNESS_PLATFORMS), set(selection.CLI_HARNESSES))
-        self.assertEqual(len(selection.qualified_identities()), 30)
-        self.assertEqual(selection.qualified_platforms(), ("linux", "macos"))
-        self.assertEqual(len(selection.required_assets()), 4)
+        self.assertEqual(len(selection.qualified_identities()), 43)
+        self.assertEqual(selection.qualified_platforms(), ("linux", "macos", "windows"))
+        self.assertEqual(len(selection.required_assets()), 6)
         for harness in selection.CLI_HARNESSES:
-            self.assertEqual(selection.supported_platforms(harness), ("linux", "macos"))
+            expected = (("linux", "macos") if harness in selection.WINDOWS_UNAVAILABLE
+                        else ("linux", "macos", "windows"))
+            self.assertEqual(selection.supported_platforms(harness), expected)
         with self.assertRaises(ValueError):
             selection.supported_platforms("claude-desktop")
 

@@ -23,7 +23,7 @@ two Windows skips.
 
 Use the Hosted CLI compatibility workflow for independent OS/harness cells,
 or Native Windows CLI diagnostic for a bounded batch with a safe report.
-Both remain opt-in; live mode uses the protected canary-live environment.
+Both diagnostic workflows remain opt-in; live mode uses the protected canary-live environment.
 A selection containing only unavailable Windows harnesses produces explicit
 skip evidence without executing a compatibility cell.
 
@@ -36,20 +36,24 @@ skip evidence without executing a compatibility cell.
   preserved. Owned terminal jobs close descendants before joining pipe readers.
 - An inventory-only failure is advisory only with positive process completion
   and no operational failure reasons; failed cleanup/provider work is not drift.
-- The Windows canary joins release assets and checksum generation. Adding an
-  asset alone does not qualify Windows or modify the publication requirements.
+- The Windows canary joins release assets and checksum generation. The trusted
+  release gate requires 43 unique passing live reports with matching binary
+  digests and architecture. A missing Windows report blocks publication.
+- Draft creation dispatches verification-only live checks automatically from
+  the default branch. It never publishes automatically; the explicit publisher
+  path and recommended-release workflow remain separate.
 
 ## Remaining acceptance work
 
-1. Pass native CI against the integrated tree, including terminal ownership and
-   Cline conformance. Prior branch passes do not substitute for this evidence.
+1. Repeat repository gates and native CI on the final integrated tree, including
+   terminal ownership and Cline conformance. The preceding d4156ec checks passed.
 2. Run the supported Windows batch against the exact integration SHA, first
    deterministically and then with live NaN inference; record only closed
    statuses and run links, never prompts, responses or raw harness logs.
 3. Investigate any operational failures newly exposed by strict inventory
    classification, particularly DeepSeek Harness.
-4. Extend and test the trusted exact-release-asset gate for the 13 Windows
-   harnesses after native/live qualification. Until then the mandatory release
-   gate remains the existing 30 Linux/macOS cells, not a claimed 43-cell gate.
+4. Review the 43-cell trusted exact-release-asset gate and its automatic
+   verification-only dispatch before merge. Branch diagnostics do not replace
+   exact-release-asset qualification of each future release.
 5. Complete repository gates and review before merging through a PR. Do not
    publish a release or push directly to main during this checkpoint.

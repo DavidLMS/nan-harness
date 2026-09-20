@@ -218,17 +218,21 @@ verifies the draft before publication.
       protected `release-publication` environment exists for the publisher;
       this checklist does not configure either environment or assert that it
       is already present.
-- [ ] From the default branch, manually dispatch
+- [ ] Confirm draft creation automatically dispatches verification-only live
+      checks from the default branch. For a manual retry or publication, dispatch
       [`.github/workflows/release-gate.yml`](.github/workflows/release-gate.yml)
       with `tag`, `tag_commit`, and bounded `model`. Use `mode=live` for a
       release qualification; use `verification_only=true` (the default) for a
       safe check that cannot publish. The workflow must use the exact draft
-      tag's commit, the four ARM64 release assets, and the trusted workflow
+      tag's commit, the six Linux/macOS ARM64 and Windows x64 release assets,
+      and the trusted workflow
       source rather than executing tag-controlled code.
-- [ ] Keep the draft unpublished until the live hosted gate reports all 30
-      unique Linux/macOS ARM64 cells passed and emits its complete provenance
+- [ ] Keep the draft unpublished until the live hosted gate reports all 43
+      unique cells passed (15 Linux, 15 macOS, 13 Windows) and emits its complete provenance
       handoff. A deterministic verification-only run is useful evidence but
       does not satisfy the live release criterion and cannot publish.
+      Prime Agent and FX are skipped only on Windows until official native
+      distributions exist; skips never count as passes.
 - [ ] Allow publication only through the gate's explicit live,
       `verification_only=false` path after protected-environment approval.
       Confirm that the result is public, non-latest, non-prerelease, and has

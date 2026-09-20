@@ -9,6 +9,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Require Linux, macOS and available Windows CLI live evidence before release
+  publication, and automatically start verification-only checks for new drafts.
 - Consolidate opt-in native Windows CLI diagnostics and modular hosted checks.
   Prime Agent and FX are explicitly skipped on Windows until official native
   distributions are available; skipped coverage never counts as passing.
