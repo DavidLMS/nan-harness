@@ -945,7 +945,9 @@ def collect(args, harnesses, output):
         while True:
             child_timeout = budget.child_timeout(args.timeout)
             if child_timeout <= 0:
-                phases["install"] = phase("BLOCKED", "deadline-exhausted")
+                cause = causal(harness, "install", "deadline-exhausted")
+                phases["install"] = phase("BLOCKED", "deadline-exhausted", cause)
+                mark_dependents(phases, PHASES[3:], "phase-unfinished", cause)
                 reports.append({"harness": harness, "phases": phases, "outcome": "blocked"})
                 any_failure = True; checkpoint(); active["harness"] = None; active["phases"] = {}; active["phase"] = None; break
             # Official release metadata for goose and omp is fetched through the GitHub API;
@@ -982,8 +984,8 @@ def collect(args, harnesses, output):
                 phases["install"]["causeDetails"]["cleanupReason"] = "cleanup-failed"
             mark_dependents(phases, PHASES[3:], "install-failed", cause); any_failure = True
             reports.append({"harness": harness, "phases": phases}); checkpoint(); active["harness"] = None; active["phases"] = {}; active["phase"] = None; break
-        # A failed install ended this harness inside the retry loop.
-        if phases.get("install", {}).get("status") == "FAIL":
+        # A failed or unstarted install ended this harness inside the retry loop.
+        if phases.get("install", {}).get("status") in {"FAIL", "BLOCKED"}:
             continue
         installer_diagnostic(cell)
         if not cleanup_installer_artifacts(cell):
@@ -1008,8 +1010,9 @@ def collect(args, harnesses, output):
             active["phase"] = name; checkpoint()
             child_timeout = budget.child_timeout(args.timeout)
             if child_timeout <= 0:
-                phases[name] = phase("BLOCKED", "deadline-exhausted")
-                mark_dependents(phases, ("deterministic-contract", "live-tool") if name == "version-doctor" else ("live-tool",), "phase-unfinished")
+                cause = causal(harness, name, "deadline-exhausted")
+                phases[name] = phase("BLOCKED", "deadline-exhausted", cause)
+                mark_dependents(phases, ("deterministic-contract", "live-tool") if name == "version-doctor" else ("live-tool",), "phase-unfinished", cause)
                 any_failure = True; checkpoint(); break
             invocation_env = probe_env
             progress = None

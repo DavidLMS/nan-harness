@@ -252,6 +252,46 @@ class WindowsDiagnosticTests(unittest.TestCase):
         self.assertTrue(failed); self.assertEqual(persisted, report)
         self.assertEqual(report["harnesses"][0]["phases"]["metadata"]["reason"], "deadline-exhausted")
 
+    def test_deadline_between_phases_blocks_dependents_without_duplicate_cells(self):
+        for expired_phase in ("install", "version-doctor", "deterministic-contract"):
+            with self.subTest(phase=expired_phase), tempfile.TemporaryDirectory() as tmp:
+                args = self.args("live"); now = [0.0]; calls = []
+                args.budget_seconds = 30; args.clock = lambda: now[0]
+                self.binaries(args, Path(tmp))
+
+                def resolve(*_args):
+                    if expired_phase == "install":
+                        now[0] = 20.0
+                    return Item("cline"), None
+
+                def run(argv, cwd, env, timeout):
+                    stage = argv[argv.index("-Stage") + 1] if "-Stage" in argv else "install"
+                    calls.append(stage)
+                    if stage == "version-doctor":
+                        Path(env["NAN_CANARY_PROBE_RESULT"]).write_text(json.dumps({
+                            "schemaVersion": 2, "stage": "complete", "status": "passed",
+                            "diagnostics": [], "exitCode": 0,
+                        }))
+                    if (stage == "install" and expired_phase == "version-doctor") or stage == "version-doctor":
+                        now[0] = 20.0
+                    return 0, "exit"
+
+                with patch.object(diagnostic, "native_prerequisite_self_test", return_value={"status": "PASS", "checks": {}}), \
+                        patch.object(diagnostic, "resolver_module", return_value=Resolver()), \
+                        patch.object(diagnostic, "resolve_one", side_effect=resolve), \
+                        patch.object(diagnostic.shutil, "which", return_value="x"), \
+                        patch.object(diagnostic, "run_bounded", side_effect=run):
+                    report, failed = diagnostic.collect(args, ["cline"], Path(tmp))
+                self.assertTrue(failed)
+                self.assertEqual(len(report["harnesses"]), 1)
+                phases = report["harnesses"][0]["phases"]
+                self.assertEqual(phases[expired_phase]["status"], "BLOCKED")
+                self.assertEqual(phases[expired_phase]["reason"], "deadline-exhausted")
+                self.assertEqual(phases["live-tool"]["status"], "BLOCKED")
+                self.assertEqual(phases["live-tool"]["causalId"], phases[expired_phase]["causalId"])
+                self.assertNotIn(expired_phase, calls)
+                self.assertEqual(json.loads((Path(tmp) / "report.json").read_text()), report)
+
     def test_cleanup_failure_is_explicit_and_does_not_publish_child_text(self):
         args = self.args()
         with tempfile.TemporaryDirectory() as tmp, patch.object(diagnostic, "resolver_module", return_value=Resolver()), \
