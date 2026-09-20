@@ -6,7 +6,7 @@ import time
 import uuid
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from cell import WindowsJob, finish_stage, protect_private
+from cell import HERMES_INSTALL_STAGES, WindowsJob, finish_stage, protect_private
 from selection import WINDOWS_UNAVAILABLE, WINDOWS_SKIP_REASON
 
 HARNESSES = ("claude-code", "codex", "opencode", "hermes", "pi", "omp", "prime-agent",
@@ -506,7 +506,7 @@ _INSTALLER_REASONS = frozenset({
 })
 _INSTALLER_DIAGNOSTIC_KEYS = frozenset({
     "subphase", "executable", "exitCode", "win32Error", "httpStatus", "assetReason",
-    "npmCode", "pipCategory", "processReason", "processCategory",
+    "npmCode", "pipCategory", "processReason", "processCategory", "upstreamStage",
 })
 # Closed failure classes a nested installer child (pwsh, git, uv) may report.
 _INSTALLER_PROCESS_CATEGORIES = frozenset({
@@ -629,6 +629,10 @@ def _safe_installer_diagnostic(value):
             if key == "executable" and item not in _INSTALLER_EXECUTABLES:
                 return None
             if key == "assetReason" and item not in _INSTALLER_ASSET_REASONS:
+                return None
+            diagnostic[key] = item
+        elif key == "upstreamStage":
+            if not isinstance(item, str) or item not in HERMES_INSTALL_STAGES:
                 return None
             diagnostic[key] = item
         elif key == "npmCode":

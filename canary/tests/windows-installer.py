@@ -29,6 +29,8 @@ class WindowsInstallerTests(unittest.TestCase):
         # the cell must not skip it.
         self.assertNotIn("'-NoVenv'", SCRIPT)
         self.assertIn("@('-SkipSetup','-HermesHome',$hermesHome,'-InstallDir',$hermesInstall", SCRIPT)
+        self.assertIn("'-ForceCommit','-NonInteractive','-Json'", SCRIPT)
+        self.assertIn('$privateProcessText = $errTask.Result + "`n" + $outTask.Result', SCRIPT)
         # A missing staged launcher is reported by the installer instead of surfacing later as
         # an uninstalled harness in the product's doctor.
         self.assertIn("'launcher-missing'", SCRIPT)

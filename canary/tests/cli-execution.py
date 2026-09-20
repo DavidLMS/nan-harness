@@ -69,6 +69,15 @@ class CliExecutionTests(unittest.TestCase):
                 self.assertEqual(cell.windows_install_failure(marker, "unknown"), "windows-installer-" + expected)
                 self.assertFalse(marker.exists())
 
+    def test_windows_installer_preserves_only_known_upstream_stages(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            marker = Path(temporary) / "installer-result.json"
+            for stage in ("uv", "PRIVATE_SENTINEL", ["uv"]):
+                marker.write_text(json.dumps({"schemaVersion": 2, "status": "failed", "diagnostic": {
+                    "processCategory": "installer-refused", "upstreamStage": stage}}))
+                expected = "hermes-uv" if stage == "uv" else "installer-refused"
+                self.assertEqual(cell.windows_install_failure(marker, "unknown"), "windows-installer-" + expected)
+
     def test_windows_hosted_install_and_live_use_native_batch_shell(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

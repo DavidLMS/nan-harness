@@ -101,17 +101,29 @@ function Invoke-Native([string]$File, [string[]]$Arguments, [string]$Executable 
     } elseif ($Executable -in @('pwsh','git','uv')) {
       # The nested installer's own failure class, from stable text only: without it a
       # failed hermes install reports the generic 'installer-failed' and says nothing.
-      $processCategory = if ($errTask.Result -match '(?i)Temporary failure in name resolution|Name or service not known|Could not resolve host') { 'network-dns' }
-        elseif ($errTask.Result -match '(?i)timed out|operation was aborted') { 'network-timeout' }
-        elseif ($errTask.Result -match '(?i)Connection reset|Connection refused|remote end hung up|unexpected disconnect') { 'network-connection' }
-        elseif ($errTask.Result -match '(?i)CERTIFICATE_VERIFY_FAILED|certificate verify failed|SSL certificate problem') { 'tls-certificate' }
-        elseif ($errTask.Result -match '(?i)Access is denied|Permission denied') { 'permission' }
-        elseif ($errTask.Result -match '(?i)No space left|not enough space|disk full') { 'disk-space' }
-        elseif ($errTask.Result -match '(?i)is not recognized|command not found|cannot find the path') { 'tool-missing' }
-        elseif ($errTask.Result -match '(?i)No matching distribution|Could not find a version') { 'package-not-found' }
+      # Hermes' stage protocol emits failures on stdout, not just stderr.
+      $privateProcessText = $errTask.Result + "`n" + $outTask.Result
+      $processCategory = if ($privateProcessText -match '(?i)Temporary failure in name resolution|Name or service not known|Could not resolve host') { 'network-dns' }
+        elseif ($privateProcessText -match '(?i)timed out|operation was aborted') { 'network-timeout' }
+        elseif ($privateProcessText -match '(?i)Connection reset|Connection refused|remote end hung up|unexpected disconnect') { 'network-connection' }
+        elseif ($privateProcessText -match '(?i)CERTIFICATE_VERIFY_FAILED|certificate verify failed|SSL certificate problem') { 'tls-certificate' }
+        elseif ($privateProcessText -match '(?i)Access is denied|Permission denied') { 'permission' }
+        elseif ($privateProcessText -match '(?i)No space left|not enough space|disk full') { 'disk-space' }
+        elseif ($privateProcessText -match '(?i)is not recognized|command not found|cannot find the path|uv was not found|uv not found') { 'tool-missing' }
+        elseif ($privateProcessText -match '(?i)No matching distribution|Could not find a version') { 'package-not-found' }
         else { 'installer-refused' }
     }
     Set-InstallDiagnostic $Subphase $Executable $process.ExitCode $null $null $null $npmCode $pipCategory 'exit-nonzero' $processCategory
+    if ($Executable -eq 'pwsh') {
+      $stages = @('uv','git','node','system-packages','repository','python','venv','dependencies','node-deps','path','config-templates','platform-sdks','bootstrap-marker','setup','gateway')
+      foreach ($line in ($outTask.Result -split "`n")) {
+        if ($line.Length -gt 16384 -or $line -notmatch '^\s*\{') { continue }
+        try { $frame = $line | ConvertFrom-Json -ErrorAction Stop } catch { continue }
+        if ($frame.ok -is [bool] -and -not $frame.ok -and $stages -contains $frame.stage) {
+          $script:InstallDiagnostic['upstreamStage'] = [string]$frame.stage
+        }
+      }
+    }
     throw 'native installer failed'
   }
 }
@@ -233,7 +245,9 @@ try {
       # The installer stages its launchers into <HermesHome>\bin only when it manages the
       # virtual environment, and -NoVenv skips that staging entirely: without it the cell
       # has no `hermes` to run at all. <cell>\hermes\bin is already on the cell PATH.
-      Invoke-HermesPinned "https://raw.githubusercontent.com/NousResearch/hermes-agent/$Ref/scripts/install.ps1" @('-SkipSetup','-HermesHome',$hermesHome,'-InstallDir',$hermesInstall,'-Commit',$Ref,'-ForceCommit')
+      # The interactive installer catches errors without a failing exit status.
+      # Its JSON mode preserves failures; all emitted frames stay private.
+      Invoke-HermesPinned "https://raw.githubusercontent.com/NousResearch/hermes-agent/$Ref/scripts/install.ps1" @('-SkipSetup','-HermesHome',$hermesHome,'-InstallDir',$hermesInstall,'-Commit',$Ref,'-ForceCommit','-NonInteractive','-Json')
       # The installer stages its launchers into <HermesHome>\bin and verifies them there, so a
       # missing launcher afterwards is an installer failure worth reporting as such instead of
       # letting the product's doctor discover it later as an uninstalled harness.

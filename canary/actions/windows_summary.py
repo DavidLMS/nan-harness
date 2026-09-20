@@ -5,6 +5,7 @@ import argparse, json, re, sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from selection import WINDOWS_UNAVAILABLE, WINDOWS_SKIP_REASON
+from cell import HERMES_INSTALL_STAGES
 
 HARNESSES = frozenset(("claude-code", "codex", "opencode", "hermes", "pi", "omp", "prime-agent", "deepseek-harness", "openclaw", "cline", "qwen-code", "kimi-code", "aider", "goose", "fx"))
 PHASES = ("metadata", "prerequisites", "install", "version-doctor", "deterministic-contract", "live-tool")
@@ -115,6 +116,9 @@ def _diagnostic(value, label):
             choices = {"npmCode": NPM_CODES, "pipCategory": PIP_CATEGORIES,
                        "processReason": PROCESS_REASONS, "processCategory": PROCESS_CATEGORIES}[key]
             if item not in choices: raise UnsafeReport(f"invalid {label} diagnostic")
+        elif key == "upstreamStage":
+            if not isinstance(item, str) or item not in HERMES_INSTALL_STAGES:
+                raise UnsafeReport(f"invalid {label} diagnostic")
         elif key == "parentReason":
             if item not in PARENT_INSTALL_REASONS: raise UnsafeReport(f"invalid {label} diagnostic")
         elif key == "installerReason":

@@ -134,6 +134,11 @@ WINDOWS_INSTALL_CATEGORIES = frozenset({
     "network-dns", "network-timeout", "network-connection", "tls-certificate", "permission",
     "disk-space", "tool-missing", "package-not-found", "installer-refused",
 })
+HERMES_INSTALL_STAGES = frozenset({
+    "uv", "git", "node", "system-packages", "repository", "python", "venv", "dependencies",
+    "node-deps", "path", "config-templates", "platform-sdks", "bootstrap-marker", "setup", "gateway",
+})
+INSTALL_FAILURE_CODES.update("windows-installer-hermes-" + stage for stage in HERMES_INSTALL_STAGES)
 INSTALL_FAILURE_CODES.update("windows-installer-" + code for code in WINDOWS_INSTALL_CATEGORIES)
 WINDOWS_INSTALL_DETAILS = frozenset({
     "launcher-missing", "expected-executable-missing", "invalid-ref", "invalid-version",
@@ -868,6 +873,9 @@ def windows_install_failure(marker, fallback):
             return "windows-installer-marker-passed"
         diagnostic = value.get("diagnostic")
         code = diagnostic.get("processCategory") if isinstance(diagnostic, dict) else None
+        stage = diagnostic.get("upstreamStage") if isinstance(diagnostic, dict) else None
+        if code == "installer-refused" and isinstance(stage, str) and stage in HERMES_INSTALL_STAGES:
+            return "windows-installer-hermes-" + stage
         if isinstance(code, str) and code in WINDOWS_INSTALL_CATEGORIES:
             return "windows-installer-" + code
         if isinstance(diagnostic, dict):
