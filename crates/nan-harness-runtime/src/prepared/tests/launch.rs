@@ -52,6 +52,7 @@ fn prepared_search_overlay_resolves_to_valid_enabled_or_disabled_json() {
                 web_search_enabled: enabled,
             }),
             None,
+            &nan_harness_core::SecretStore::new(),
         )
         .expect("search overlay should prepare");
         let path = prepared
@@ -90,9 +91,14 @@ fn model_catalog_placeholders_in_arguments_are_rendered() {
     plan.process.arguments = vec![OPENCODE_MODEL_CATALOG_PLACEHOLDER.to_owned()];
     let models = [model("qwen3.6")];
 
-    let prepared =
-        PreparedLaunch::prepare(&plan, "https://api.nan.builders/v1", None, Some(&models))
-            .expect("argument catalog should render");
+    let prepared = PreparedLaunch::prepare(
+        &plan,
+        "https://api.nan.builders/v1",
+        None,
+        Some(&models),
+        &nan_harness_core::SecretStore::new(),
+    )
+    .expect("argument catalog should render");
 
     assert!(prepared.arguments()[0].contains("qwen3.6"));
     assert!(!prepared.arguments()[0].contains(OPENCODE_MODEL_CATALOG_PLACEHOLDER));

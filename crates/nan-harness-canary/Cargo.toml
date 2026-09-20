@@ -12,6 +12,8 @@ name = "nan-harness-canary"
 path = "src/main.rs"
 
 [dependencies]
+nan-harness-bridge = { path = "../nan-harness-bridge", version = "0.1.6" }
+nan-harness-private-fs = { path = "../nan-harness-private-fs", version = "0.1.6" }
 clap.workspace = true
 nan-harness-core = { path = "../nan-harness-core", version = "0.1.9" }
 nan-harness-diagnostics = { path = "../nan-harness-diagnostics", version = "0.1.9" }

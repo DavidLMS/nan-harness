@@ -7,6 +7,24 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Require Linux, macOS and available Windows CLI live evidence before release
+  publication, and automatically start verification-only checks for new drafts.
+- Consolidate opt-in native Windows CLI diagnostics and modular hosted checks.
+  Prime Agent and FX are explicitly skipped on Windows until official native
+  distributions are available; skipped coverage never counts as passing.
+- Include the Windows canary executable and its checksum in release assets.
+
+### Fixed
+
+- Select Cline's local session backend for JSON runs without overriding its
+  data directory or enabling sandbox configuration.
+- Close owned Windows descendants before draining conformance output, and
+  retain operational inventory failures instead of treating them as advisory drift.
+- Preserve native exit codes when Windows PowerShell receives stderr warnings
+  during live compatibility checks.
+
 ## [0.1.9] - 2026-09-18
 
 ### Fixed

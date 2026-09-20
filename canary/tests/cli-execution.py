@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -17,14 +18,18 @@ sys.path.insert(0, str(ACTION_DIRECTORY))
 
 # The selector is workflow-owned and arrives from the parallel selector change;
 # keep these execution tests independent of that interface branch.
-selection = type(sys)("selection")
-selection.CLI_HARNESSES = (
-    "claude-code", "codex", "opencode", "hermes", "pi", "omp", "prime-agent",
-    "deepseek-harness", "openclaw", "cline", "qwen-code", "kimi-code", "aider",
-    "goose", "fx",
-)
+# The hosted platform table is the single source of truth, so these tests load the
+# real selector and only pin model resolution to keep them environment-independent.
+def _load_selection():
+    spec = importlib.util.spec_from_file_location("selection", ACTION_DIRECTORY / "selection.py")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["selection"] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+selection = _load_selection()
 selection.resolve_model = lambda requested="", configured=None: requested or configured or "qwen3.6"
-sys.modules["selection"] = selection
 
 
 def load(name):
@@ -40,6 +45,103 @@ cli_suite = load("cli-suite")
 
 
 class CliExecutionTests(unittest.TestCase):
+    def test_windows_installer_marker_exposes_only_closed_category(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            marker = Path(temporary) / "installer-result.json"
+            for category in ("network-dns", "PRIVATE_SENTINEL", ["permission"], None):
+                marker.write_text(json.dumps({"schemaVersion": 2, "status": "failed",
+                                              "diagnostic": {"processCategory": category}}))
+                expected = "windows-installer-network-dns" if category == "network-dns" else "unknown"
+                self.assertEqual(cell.windows_install_failure(marker, "unknown"), expected)
+                self.assertFalse(marker.exists())
+
+    def test_windows_installer_distinguishes_missing_marker_and_launcher(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            marker = Path(temporary) / "installer-result.json"
+            self.assertEqual(cell.windows_install_failure(marker, "unknown"), "windows-installer-marker-missing")
+            for value, expected in (({}, "marker-invalid"),
+                                    ({"schemaVersion": 2, "status": "passed"}, "marker-passed"),
+                                    ({"schemaVersion": 2, "status": "failed", "diagnostic": {
+                                        "assetReason": "launcher-missing"}}, "launcher-missing"),
+                                    ({"schemaVersion": 2, "status": "failed", "diagnostic": {
+                                        "subphase": "download"}}, "download-failed")):
+                marker.write_text(json.dumps(value))
+                self.assertEqual(cell.windows_install_failure(marker, "unknown"), "windows-installer-" + expected)
+                self.assertFalse(marker.exists())
+
+    def test_windows_installer_preserves_only_known_upstream_stages(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            marker = Path(temporary) / "installer-result.json"
+            for stage in ("uv", "PRIVATE_SENTINEL", ["uv"]):
+                marker.write_text(json.dumps({"schemaVersion": 2, "status": "failed", "diagnostic": {
+                    "processCategory": "installer-refused", "upstreamStage": stage}}))
+                expected = "hermes-uv" if stage == "uv" else "installer-refused"
+                self.assertEqual(cell.windows_install_failure(marker, "unknown"), "windows-installer-" + expected)
+            marker.write_text(json.dumps({"schemaVersion": 2, "status": "failed", "diagnostic": {
+                "processCategory": "permission", "upstreamStage": "python"}}))
+            self.assertEqual(cell.windows_install_failure(marker, "unknown"),
+                             "windows-installer-hermes-python-permission")
+
+    def test_windows_hosted_install_and_live_use_native_batch_shell(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            args = SimpleNamespace(directory=root, binary=root / "nan-harness.exe",
+                                   canary=root / "nan-harness-canary.exe", harness="codex",
+                                   model="qwen3.6", harness_version="0.155.1")
+            proxy = SimpleNamespace(name="nt", environ={"NAN_API_KEY": "synthetic"})
+            def run(command, _directory, **_kwargs):
+                self.assertEqual(command[0], "pwsh")
+                self.assertIn("-NonInteractive", command)
+                (root / "probe-result.json").write_text(json.dumps({
+                    "schemaVersion": 2, "stage": "complete", "status": "passed",
+                    "diagnostics": [], "exitCode": 0}))
+                return 0
+            with patch.object(cell, "os", proxy), \
+                    patch.object(cell, "cell_environment", return_value={}), \
+                    patch.object(cell, "private_command", side_effect=run):
+                self.assertEqual(cell.installer_command("codex", "0.155.1")[0], "pwsh")
+                self.assertEqual(cell.live(args, {}), 1)
+
+    def test_windows_cell_discovers_every_native_installer_destination(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            directory = root / "cell"
+            bash = root / "git/usr/bin/bash.exe"
+            bash.parent.mkdir(parents=True)
+            bash.write_bytes(b"synthetic")
+            proxy = SimpleNamespace(name="nt", environ=os.environ, pathsep=os.pathsep)
+            def which(name, **_kwargs):
+                return str(root / "git/cmd/git.exe") if name == "git.exe" else str(root / "node")
+            with patch.object(cell, "os", proxy), patch.object(cell, "protect_private"), \
+                    patch.object(cell.shutil, "which", side_effect=which), \
+                    patch.object(cell.subprocess, "run", return_value=SimpleNamespace(stdout="24.20.0")):
+                environment = cell.cell_environment(directory)
+            paths = environment["PATH"].split(os.pathsep)
+            for relative in ("bin", "hermes/bin", "home/.nan-harness-canary-venv/Scripts",
+                             "home/.kimi-code/bin", "home/.local", "home/AppData/Roaming/npm"):
+                self.assertIn(str(directory / relative), paths)
+            self.assertEqual(environment["HERMES_HOME"], str(directory / "hermes"))
+            for name in ("NAN_HARNESS_GIT_BASH", "KIMI_SHELL_PATH", "KIMI_CLI_GIT_BASH_PATH"):
+                self.assertEqual(environment[name], str(bash))
+
+    def test_isolated_live_child_receives_only_explicit_provider_credential(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "cell"
+            with patch.dict(os.environ, {"NAN_API_KEY": "synthetic-provider-key"}), \
+                    patch.object(cell.subprocess, "run", return_value=type(
+                        "Result", (), {"stdout": "24.20.0"})()):
+                environment = cell.cell_environment(root)
+            self.assertEqual(environment["NAN_API_KEY"], "synthetic-provider-key")
+            self.assertTrue(Path(environment["NAN_HARNESS_CONFIG_DIR"]).is_relative_to(root))
+            for live in (False, True):
+                expected = "synthetic-provider-key" if live else None
+                code = cell.private_command([
+                    sys.executable, "-c",
+                    "import os,sys; sys.exit(0 if os.environ.get('NAN_API_KEY') == "
+                    + repr(expected) + " else 1)",
+                ], root, live=live, environment=environment, allow_failure=True)
+                self.assertEqual(code, 0)
+
     @staticmethod
     def install_args(root):
         return type("Args", (), {

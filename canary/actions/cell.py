@@ -57,7 +57,7 @@ if os.name == "nt":
                     ("active_processes", wintypes.DWORD), ("terminated_processes", wintypes.DWORD)]
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from selection import CLI_HARNESSES, resolve_model
+from selection import CLI_HARNESSES, PLATFORMS as HOSTED_PLATFORMS, resolve_model
 
 HARNESSES = CLI_HARNESSES
 SEMVER = re.compile(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?\Z")
@@ -130,6 +130,27 @@ INSTALL_FAILURE_CODES = {
     "hosted-node-missing", "hosted-node-version-mismatch", "hosted-npm-missing",
     "diagnostic-unknown", "unknown",
 }
+WINDOWS_INSTALL_CATEGORIES = frozenset({
+    "git-ownership", "git-path-length", "git-config", "git-checkout", "git-download",
+    "installer-argument", "installer-path", "git-native-error",
+    "network-dns", "network-timeout", "network-connection", "tls-certificate", "permission",
+    "disk-space", "tool-missing", "package-not-found", "installer-refused",
+})
+HERMES_INSTALL_STAGES = frozenset({
+    "uv", "git", "node", "system-packages", "repository", "python", "venv", "dependencies",
+    "node-deps", "path", "config-templates", "platform-sdks", "bootstrap-marker", "setup", "gateway",
+})
+INSTALL_FAILURE_CODES.update("windows-installer-hermes-" + stage for stage in HERMES_INSTALL_STAGES)
+INSTALL_FAILURE_CODES.update("windows-installer-hermes-" + stage + "-" + category
+                             for stage in HERMES_INSTALL_STAGES for category in WINDOWS_INSTALL_CATEGORIES)
+INSTALL_FAILURE_CODES.update("windows-installer-" + code for code in WINDOWS_INSTALL_CATEGORIES)
+WINDOWS_INSTALL_DETAILS = frozenset({
+    "launcher-missing", "expected-executable-missing", "invalid-ref", "invalid-version",
+    "empty-download", "metadata-request-failed", "invalid-archive",
+    "official-asset-missing", "official-metadata-probe-failed", "invalid-frozen-ref",
+    "marker-missing", "marker-invalid", "marker-passed", "download-failed", "native-exit",
+})
+INSTALL_FAILURE_CODES.update("windows-installer-" + code for code in WINDOWS_INSTALL_DETAILS)
 PRIVATE_DIAGNOSTIC_LIMIT = 64 * 1024
 NPM_ERROR_LINE = re.compile(r"^\s*npm\s+(?:err!|error)\s?(.*)$", re.IGNORECASE)
 # Reviewed against npm metadata for pinned openclaw@2026.9.2: its 65 direct
@@ -359,6 +380,33 @@ PROBE_DIAGNOSTICS = frozenset({
 PROBE_DIAGNOSTIC_CODES = {
     diagnostic: f"live-{diagnostic}-exit-1" for diagnostic in PROBE_DIAGNOSTICS
 }
+# The PowerShell probe publishes its own closed marker (schema 2) with the stage the
+# native run reached and a bounded diagnostic list.
+WINDOWS_PROBE_STAGES = frozenset({"live-tool", "harness-run", "read-marker", "completion-marker",
+                                  "bridge-sentinel", "usage-evidence", "usage-summary", "complete"})
+WINDOWS_LIVE_DIAGNOSTICS = frozenset({
+    "live-error-auth", "live-error-network", "live-error-arguments", "live-error-permission",
+    "live-error-provider", "live-error-config",
+    "live-child-launch", "live-exit-nonzero", "live-exit-missing", "live-credential-missing",
+    "live-tool-evidence-missing", "live-read-marker-missing", "live-completion-marker-missing",
+    "live-bridge-sentinel", "live-usage-invalid", "live-usage-summary-missing",
+    "probe-unexpected-failure",
+})
+
+
+def detected_identity():
+    """The hosted platform and architecture this process runs on, in canonical names."""
+    if os.name == "nt":
+        system = "windows"
+        machine = os.environ.get("PROCESSOR_ARCHITECTURE", "")
+    else:
+        system = {"linux": "linux", "darwin": "macos"}.get(sys.platform)
+        machine = getattr(os, "uname")().machine
+    architecture = {"arm64": "aarch64", "aarch64": "aarch64",
+                    "amd64": "x86_64", "x86_64": "x86_64"}.get(machine.strip().lower())
+    if system is None or architecture is None:
+        raise RuntimeError("this gate requires a supported hosted runner")
+    return system, architecture
 
 
 def select_coverage(coverage, harnesses, ordinal, release_commit, workflow_commit):
@@ -575,6 +623,9 @@ def cell_environment(directory):
         "NAN_HARNESS_CONFIG_DIR": home / ".config/nan-harness",
         "TMPDIR": directory / "tmp", "TEMP": directory / "tmp", "TMP": directory / "tmp",
     }
+    if os.name == "nt":
+        # The native installer stages Hermes outside HOME, unlike its Unix recipe.
+        locations["HERMES_HOME"] = directory / "hermes"
     for location in set(locations.values()):
         ensure_private_directory(location, reusable=True)
     # Keep runner-provisioned runtimes, but do not discover a harness left in the
@@ -593,11 +644,21 @@ def cell_environment(directory):
                  if entry and not any(Path(entry).resolve().is_relative_to(old) for old in hidden)]
     bins = [home / ".local/bin", home / ".local", home / ".kimi-code/bin",
             home / ".hermes/bin", home / ".local/share/nan-harness-canary-uv/bin"]
+    if os.name == "nt":
+        bins = [directory / "bin", directory / "hermes/bin",
+                home / ".nan-harness-canary-venv/Scripts",
+                home / "AppData/Roaming/npm"] + bins
     env.update({key: str(value) for key, value in locations.items()})
     retained = [str(path) for path in bins]
     if trusted_runtime_bin is not None and str(trusted_runtime_bin) not in inherited:
         retained.append(str(trusted_runtime_bin))
     env["PATH"] = os.pathsep.join(retained + inherited)
+    if os.name == "nt":
+        git = shutil.which("git.exe", path=env["PATH"])
+        bash = Path(git).parent.parent / "usr/bin/bash.exe" if git else None
+        if bash is not None and bash.is_file():
+            for name in ("NAN_HARNESS_GIT_BASH", "KIMI_SHELL_PATH", "KIMI_CLI_GIT_BASH_PATH"):
+                env[name] = str(bash)
     # Hosted installers must retain the runner-selected Node/npm ahead of the
     # legacy Tart/Homebrew prefixes; the guest script uses this only as an
     # explicit hosted-mode contract. Tart's historical one-argument callers
@@ -798,15 +859,58 @@ class WindowsJob:
 def installer_command(harness, version, ref=""):
     """Exact-version installer argv; a ref is the frozen immutable source commit."""
     if os.name == "nt":
-        command = ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File",
+        command = ["pwsh", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File",
                    str(ROOT / "canary/guest/install-harness.ps1"), "-Harness", harness, "-Version", version]
         return command + (["-Ref", ref] if ref else [])
     return ["bash", str(ROOT / "canary/guest/install-harness.sh"), harness, version] + ([ref] if ref else [])
 
 
+def windows_install_failure(marker, fallback):
+    """Project one closed installer category; discard all private marker content."""
+    try:
+        if marker.stat().st_size > PRIVATE_DIAGNOSTIC_LIMIT:
+            return "windows-installer-marker-invalid"
+        value = json.loads(marker.read_bytes())
+        if not isinstance(value, dict) or value.get("schemaVersion") != 2 or value.get("status") not in ("failed", "passed"):
+            return "windows-installer-marker-invalid"
+        if value["status"] == "passed":
+            return "windows-installer-marker-passed"
+        diagnostic = value.get("diagnostic")
+        code = diagnostic.get("processCategory") if isinstance(diagnostic, dict) else None
+        stage = diagnostic.get("upstreamStage") if isinstance(diagnostic, dict) else None
+        if isinstance(stage, str) and stage in HERMES_INSTALL_STAGES:
+            if code == "installer-refused":
+                return "windows-installer-hermes-" + stage
+            if isinstance(code, str) and code in WINDOWS_INSTALL_CATEGORIES:
+                return "windows-installer-hermes-" + stage + "-" + code
+        if isinstance(code, str) and code in WINDOWS_INSTALL_CATEGORIES:
+            return "windows-installer-" + code
+        if isinstance(diagnostic, dict):
+            asset = diagnostic.get("assetReason")
+            if isinstance(asset, str) and asset in WINDOWS_INSTALL_DETAILS:
+                return "windows-installer-" + asset
+            if diagnostic.get("subphase") == "download":
+                return "windows-installer-download-failed"
+            if diagnostic.get("processReason") == "exit-nonzero":
+                return "windows-installer-native-exit"
+        reason = value.get("reason")
+        if isinstance(reason, str) and reason in WINDOWS_INSTALL_DETAILS:
+            return "windows-installer-" + reason
+        return fallback
+    except FileNotFoundError:
+        return "windows-installer-marker-missing"
+    except (OSError, ValueError):
+        return "windows-installer-marker-invalid"
+    finally:
+        marker.unlink(missing_ok=True)
+
+
 def install(args, state):
     command = installer_command(args.harness, args.harness_version, getattr(args, "harness_ref", "") or "")
     environment = cell_environment(args.directory)
+    installer_marker = args.directory / "installer-result.json"
+    if os.name == "nt":
+        installer_marker.unlink(missing_ok=True)
     installer_code = "unknown"
 
     def capture_installer(log, status):
@@ -822,6 +926,8 @@ def install(args, state):
     except (OSError, RuntimeError, subprocess.SubprocessError) as error:
         raise InstallFailure(INSTALLER_FAILURE_PHASE, installer_code) from error
     if status:
+        if os.name == "nt":
+            installer_code = windows_install_failure(installer_marker, installer_code)
         raise InstallFailure(INSTALLER_FAILURE_PHASE, installer_code)
     doctor = args.directory / "doctor.json"
     try:
@@ -926,6 +1032,25 @@ def probe_result(path):
     return value
 
 
+def windows_probe_result(path):
+    """Read the PowerShell probe marker; missing or malformed markers are unproven."""
+    try:
+        value = json.loads(path.read_bytes())
+    except (OSError, ValueError):
+        return None
+    if (not isinstance(value, dict) or type(value.get("schemaVersion")) is not int
+            or value["schemaVersion"] != 2 or value.get("stage") not in WINDOWS_PROBE_STAGES
+            or value.get("status") not in ("passed", "failed")
+            or (value["status"] == "passed") != (value["stage"] == "complete")):
+        return None
+    diagnostics = value.get("diagnostics")
+    if diagnostics is not None and (not isinstance(diagnostics, list) or len(diagnostics) > 1
+                                    or any(not isinstance(item, str) or item not in WINDOWS_LIVE_DIAGNOSTICS
+                                           for item in diagnostics)):
+        return None
+    return value
+
+
 def live(args, _state):
     if not os.environ.get("NAN_API_KEY"):
         raise RuntimeError("live stage requires an explicitly supplied key")
@@ -936,13 +1061,21 @@ def live(args, _state):
     marker.unlink(missing_ok=True)
     # Forward slashes keep the path valid for Git Bash on native Windows.
     environment["NAN_CANARY_PROBE_RESULT"] = marker.as_posix()
-    probe = ROOT / "canary/guest/probe-harness.ps1" if os.name == "nt" else ROOT / "canary/guest/probe-harness.sh"
-    command = ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File",
-               str(probe), args.harness] if os.name == "nt" else ["bash", str(probe), args.harness]
+    windows = os.name == "nt"
+    probe = ROOT / ("canary/guest/probe-harness.ps1" if windows else "canary/guest/probe-harness.sh")
+    if windows:
+        # Match the native batch runner: PowerShell 7 preserves embedded quotes
+        # when passing the tool prompt to the native nan-harness executable.
+        command = ["pwsh", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+                   "-File", str(probe), "-Harness", args.harness, "-Stage", "live-tool",
+                   "-Model", args.model, "-NanBinary", str(args.binary), "-Canary", str(args.canary),
+                   "-Version", args.harness_version]
+    else:
+        command = ["bash", str(probe), args.harness]
     try:
         status = private_command(command, args.directory, timeout=600, live=True,
                                  allow_failure=True, environment=environment)
-        result = probe_result(marker)
+        result = windows_probe_result(marker) if windows else probe_result(marker)
     finally:
         marker.unlink(missing_ok=True)
     if status == 0 and result is not None and result["status"] == "passed":
@@ -954,24 +1087,28 @@ def live(args, _state):
     if result is None:
         raise ProbeFailure("marker-missing", status)
     diagnostic = result.get("diagnostic")
-    if diagnostic is not None and args.harness != "aider":
+    if diagnostic is None and windows:
+        # The PowerShell reader admits only closed diagnostic codes; never forward
+        # arbitrary child output from the private capture files.
+        codes = result.get("diagnostics") or []
+        diagnostic = codes[0] if len(codes) == 1 else None
+    if diagnostic is not None and args.harness != "aider" and not (
+            windows and diagnostic in WINDOWS_LIVE_DIAGNOSTICS):
         diagnostic = None
     raise ProbeFailure(result["stage"], status, diagnostic)
 
 
 def initial_state(args):
-    detected_platform = {"linux": "linux", "darwin": "macos", "win32": "windows"}.get(sys.platform)
+    detected_platform, detected_architecture = detected_identity()
     platform = getattr(args, "system", None) or detected_platform
-    machine = os.environ.get("PROCESSOR_ARCHITECTURE", "") if os.name == "nt" else getattr(os, "uname")().machine
-    if platform not in ("linux", "macos") or machine.lower() not in ("arm64", "aarch64"):
-        raise RuntimeError("this gate requires a supported hosted runner")
-    architecture = getattr(args, "architecture", None) or "aarch64"
-    detected_architecture = "aarch64"
-    if (getattr(args, "system", None) and args.system != detected_platform) or (
-            getattr(args, "architecture", None) and args.architecture != detected_architecture):
+    try:
+        expected_architecture = HOSTED_PLATFORMS[platform]["architecture"]
+    except KeyError:
+        raise RuntimeError("this gate requires a supported hosted runner") from None
+    architecture = getattr(args, "architecture", None) or detected_architecture
+    if (platform != detected_platform or architecture != detected_architecture
+            or architecture != expected_architecture):
         raise RuntimeError("requested hosted identity does not match the native runner")
-    if architecture != "aarch64":
-        raise RuntimeError("CLI qualification requires ARM64 hosted runners")
     node = subprocess.run(["node", "-p", "process.versions.node"], check=True,
                           capture_output=True, timeout=10).stdout.decode().strip()
     if node != "24.20.0":
@@ -1090,6 +1227,8 @@ def failed_report(args, mismatch=None):
         code = (PROBE_DIAGNOSTIC_CODES.get(mismatch.diagnostic)
                 if args.harness == "aider" and mismatch.stage == "completion-marker"
                 and mismatch.status == 1 else None)
+        if mismatch.diagnostic in WINDOWS_LIVE_DIAGNOSTICS and mismatch.status == 1:
+            code = mismatch.diagnostic + "-exit-1"
         if code is None:
             code = f"live-{mismatch.stage}-exit-{mismatch.status}"
         summary = "Hosted live probe closed at stage " + mismatch.stage \
@@ -1138,8 +1277,8 @@ def main():
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--model", default="")
     parser.add_argument("--mode", choices=("deterministic", "live"), default=None)
-    parser.add_argument("--system", choices=("linux", "macos"), default=None)
-    parser.add_argument("--architecture", choices=("aarch64",), default=None)
+    parser.add_argument("--system", choices=tuple(HOSTED_PLATFORMS), default=None)
+    parser.add_argument("--architecture", choices=("aarch64", "x86_64"), default=None)
     parser.add_argument("--source-kind", choices=("branch", "release"), default="release")
     parser.add_argument("--source-sha", default=None)
     parser.add_argument("--nan-version", default=None)

@@ -1,12 +1,12 @@
-name: Hosted ARM64 CLI compatibility
+name: Hosted CLI compatibility
 
 on:
   workflow_dispatch:
     inputs:
       platforms:
-        description: Operating systems to test
+        description: Operating systems to test (both means linux and macos)
         type: choice
-        options: [linux, macos, both]
+        options: [linux, macos, windows, both, all]
         default: both
       harnesses:
         description: all or comma-separated CLI harness IDs
@@ -34,6 +34,7 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       matrix: ${{ steps.select.outputs.matrix }}
+      has_cells: ${{ steps.select.outputs.has_cells }}
       model: ${{ steps.select.outputs.model }}
       source_ref: ${{ steps.source.outputs.ref }}
     steps:
@@ -64,9 +65,12 @@ jobs:
           python3 canary/actions/selection.py --platforms "$PLATFORMS" \
             --harnesses "$HARNESSES" --mode "$MODE" --model "$MODEL" > matrix.json
           python3 -c 'import json; value=json.load(open("matrix.json")); print("matrix=" + json.dumps({"include": value["cells"]})); print("model=" + value["model"])' >> "$GITHUB_OUTPUT"
+          python3 -c 'import json; value=json.load(open("matrix.json")); print("has_cells=" + str(bool(value["cells"])).lower())' >> "$GITHUB_OUTPUT"
+          python3 -c 'import json; value=json.load(open("matrix.json")); print("\n".join("{} / {}: skipped ({})".format(item["system"], item["harness"], item["reason"]) for item in value["skipped"]))' >> "$GITHUB_STEP_SUMMARY"
 
   cli:
     needs: select
+    if: needs.select.outputs.has_cells == 'true'
     strategy:
       fail-fast: false
       max-parallel: 3
@@ -74,6 +78,12 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 180
     environment: ${{ matrix.mode == 'live' && 'canary-live' || '' }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      # Hosted Windows runners expose python without the python3 alias.
+      PYTHON: ${{ matrix.system == 'windows' && 'python' || 'python3' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -99,16 +109,22 @@ jobs:
           MODEL: ${{ needs.select.outputs.model }}
         run: |
           test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE"
+          case "${{ matrix.system }}" in
+            linux|macos) test "$(uname -m)" = arm64 -o "$(uname -m)" = aarch64 ;;
+            windows) test "$(uname -m)" = x86_64 ;;
+          esac
           mkdir -p "$RUNNER_TEMP/cli-cell" "$RUNNER_TEMP/cli-reports"
           cargo build --locked --release --package nan-harness-cli --bin nan-harness
           cargo build --locked --release --package nan-harness-canary --bin nan-harness-canary
           cargo metadata --no-deps --format-version 1 > "$RUNNER_TEMP/cli-metadata.json"
-          nan_version="$(python3 -c 'import json,sys; data=json.load(open(sys.argv[1])); print(next(p["version"] for p in data["packages"] if p["name"] == "nan-harness-cli"))' "$RUNNER_TEMP/cli-metadata.json")"
+          nan_version="$("$PYTHON" -c 'import json,sys; data=json.load(open(sys.argv[1])); print(next(p["version"] for p in data["packages"] if p["name"] == "nan-harness-cli"))' "$RUNNER_TEMP/cli-metadata.json")"
+          suffix=""
+          if [ "${{ matrix.system }}" = windows ]; then suffix=".exe"; fi
           {
             echo "SOURCE_SHA=$EXPECTED_SOURCE"
             echo "NAN_VERSION=$nan_version"
-            echo "BINARY_PATH=$GITHUB_WORKSPACE/target/release/nan-harness"
-            echo "CANARY_PATH=$GITHUB_WORKSPACE/target/release/nan-harness-canary"
+            echo "BINARY_PATH=$GITHUB_WORKSPACE/target/release/nan-harness${suffix}"
+            echo "CANARY_PATH=$GITHUB_WORKSPACE/target/release/nan-harness-canary${suffix}"
           } >> "$GITHUB_ENV"
       - name: Resolve official CLI metadata
         env:
@@ -118,7 +134,7 @@ jobs:
           MODEL: ${{ needs.select.outputs.model }}
           GITHUB_TOKEN: ${{ github.token }}
         run: |
-          python3 canary/actions/cli-suite.py resolve \
+          "$PYTHON" canary/actions/cli-suite.py resolve \
             --harnesses "$HARNESS" --system "$SYSTEM" --architecture "$ARCHITECTURE" \
             --model "$MODEL" --output "$RUNNER_TEMP/cli-versions.json"
       - name: Run isolated CLI cell
@@ -130,7 +146,7 @@ jobs:
         run: |
           test -n "$SOURCE_SHA"
           if [ "$MODE" = deterministic ]; then unset NAN_API_KEY; fi
-          python3 canary/actions/cli-suite.py --harnesses "$HARNESS" --mode "$MODE" \
+          "$PYTHON" canary/actions/cli-suite.py --harnesses "$HARNESS" --mode "$MODE" \
             --trigger manual --tag "v${NAN_VERSION}" --model "$MODEL" \
             --source-kind branch --source-sha "$SOURCE_SHA" --nan-version "$NAN_VERSION" \
             --system "${{ matrix.system }}" --architecture "${{ matrix.architecture }}" \
@@ -141,6 +157,7 @@ jobs:
         if: always()
         with:
           name: cli-cell-${{ matrix.system }}-${{ matrix.harness }}
+          overwrite: true
           path: ${{ runner.temp }}/cli-reports/*.json
           if-no-files-found: ignore
           retention-days: 7

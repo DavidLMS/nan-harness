@@ -43,19 +43,20 @@ class ReleasePublishTests(unittest.TestCase):
         self.manifest.write_text("\n".join(f"{item['sha256']}  {item['name']}" for item in asset_entries)
                                   + f"\n{publisher.digest(update_manifest)}  update-manifest.json\n")
         reports = []
-        for platform in ("linux", "macos"):
+        for platform in publisher.PLATFORMS:
             for harness in publisher.HARNESSES:
+                if f"{platform}/{harness}" not in publisher.REQUIRED_IDENTITIES:
+                    continue
                 report = {
                     "schemaVersion": 2, "runId": self.run_id, "trigger": "release",
                     "tier": "release-gate",
                     "nanHarness": {"source": f"commit:{self.tag_commit}",
                                     "version": "1.2.3",
                                     "sha256": next(item["sha256"] for item in asset_entries
-                                                  if item["name"] == ("nan-harness-aarch64-unknown-linux-musl"
-                                                                       if platform == "linux" else
-                                                                       "nan-harness-aarch64-apple-darwin"))},
+                                                  if item["name"] == publisher.PLATFORM_ASSETS[platform]["harness"])},
                     "harness": {"id": harness},
-                    "environment": {"operatingSystem": platform, "architecture": "aarch64"},
+                    "environment": {"operatingSystem": platform,
+                                    "architecture": publisher.PLATFORMS[platform]["architecture"]},
                     "checks": [{"name": name, "status": "passed"} for name in publisher.REQUIRED_CHECKS],
                     "outcome": "passed",
                 }
@@ -68,7 +69,7 @@ class ReleasePublishTests(unittest.TestCase):
         self.handoff.write_text(json.dumps({
             "schemaVersion": 1, "repository": "Acme/Fork", "tag": "v1.2.3",
             "tagCommit": self.tag_commit, "workflowCommit": self.workflow_commit,
-            "runId": self.run_id, "reportCount": 30, "reports": reports,
+            "runId": self.run_id, "reportCount": 43, "reports": reports,
             "assets": asset_entries, "assetManifest": self.manifest.name,
             "assetManifestSha256": publisher.digest(self.manifest),
             "attestation": {"workflow": "Acme/Fork/.github/workflows/release.yml",
@@ -80,7 +81,34 @@ class ReleasePublishTests(unittest.TestCase):
 
     def test_valid_handoff_has_complete_matrix_and_assets(self):
         value = publisher.validate_handoff(self.handoff)
-        self.assertEqual(value["reportCount"], 30)
+        self.assertEqual(value["reportCount"], 43)
+
+    def historical_handoff(self):
+        raw = json.loads(self.handoff.read_text())
+        raw["reports"] = [item for item in raw["reports"] if not item["identity"].startswith("windows-")]
+        raw["assets"] = [item for item in raw["assets"] if item["name"] in publisher.HISTORICAL_ASSETS]
+        raw["reportCount"] = 30
+        self.handoff.write_text(json.dumps(raw))
+
+    def test_historical_evidence_cannot_qualify_a_new_publication(self):
+        self.historical_handoff()
+        with self.assertRaises(publisher.ContractError):
+            publisher.validate_handoff(self.handoff)
+        handoff = publisher.validate_handoff(self.handoff, recommendation=True)
+        evidence = publisher.build_evidence(self.handoff, handoff)
+        with self.assertRaises(publisher.ContractError):
+            publisher.validate_evidence(evidence, "Acme/Fork", "v1.2.3")
+        publisher.validate_evidence(evidence, "Acme/Fork", "v1.2.3", recommendation=True)
+        evidence["reports"].pop(next(iter(evidence["reports"])))
+        with self.assertRaises(publisher.ContractError):
+            publisher.validate_evidence(evidence, "Acme/Fork", "v1.2.3", recommendation=True)
+
+    def test_publication_cannot_enable_recommendation_matrix_policy(self):
+        args = publisher.parser().parse_args(["--repository", "Acme/Fork", "--tag", "v1.2.3",
+                                              "--publish"])
+        args.recommend = True
+        with self.assertRaises(publisher.ContractError):
+            publisher.publish(args)
 
     def test_child_boundaries_strip_secrets_from_validator(self):
         with patch.dict(os.environ, {"GH_TOKEN": "gh-secret", "GITHUB_TOKEN": "github-secret",
@@ -175,7 +203,7 @@ class ReleasePublishTests(unittest.TestCase):
         for path in self.assets.iterdir():
             path.unlink()
         value = publisher.validate_handoff(self.handoff, self.assets, require_evidence=False)
-        self.assertEqual(value["reportCount"], 30)
+        self.assertEqual(value["reportCount"], 43)
 
     def test_durable_evidence_is_strict_and_binds_all_reports(self):
         handoff = publisher.validate_handoff(self.handoff)
@@ -247,13 +275,19 @@ class ReleasePublishTests(unittest.TestCase):
             publisher.validate_evidence(evidence, "Acme/Fork", "v1.2.3")
 
     def test_main_recommendation_self_fetches_from_empty_workspace(self):
-        handoff = publisher.validate_handoff(self.handoff)
+        self.check_recommendation_from_empty_workspace()
+
+    def test_historical_recommendation_retains_receipt_and_tamper_checks(self):
+        self.historical_handoff()
+        self.check_recommendation_from_empty_workspace()
+
+    def check_recommendation_from_empty_workspace(self):
         current_commit = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True,
                                         check=True).stdout.strip()
         raw = json.loads(self.handoff.read_text())
         raw["workflowCommit"] = current_commit
         self.handoff.write_text(json.dumps(raw))
-        handoff = publisher.validate_handoff(self.handoff)
+        handoff = publisher.validate_handoff(self.handoff, recommendation=True)
         evidence = publisher.build_evidence(self.handoff, handoff)
         evidence_path = self.root / "release-gate-evidence-1.2.3.json"
         evidence_path.write_text(json.dumps(evidence, sort_keys=True, separators=(",", ":")) + "\n")
@@ -326,6 +360,18 @@ class ReleasePublishTests(unittest.TestCase):
         with patch.dict(os.environ, {"FAKE_GH_REMOTE": str(remote),
                                      "NAN_TRUSTED_REPORT_VALIDATOR": str(validator),
                                      "PATH": str(fake_bin) + os.pathsep + os.environ["PATH"]}), patch("os.getcwd", return_value=str(clean)):
+            receipt_path = remote / "release-publication-receipt-1.2.3.json"
+            for missing in (True, False):
+                if missing:
+                    receipt_path.unlink()
+                else:
+                    incomplete = dict(receipt, phases={phase: False for phase in publisher.PHASES})
+                    receipt_path.write_text(json.dumps(incomplete))
+                self.assertNotEqual(publisher.main(["--repository", "Acme/Fork", "--tag", "v1.2.3",
+                                                    "--workflow-commit", current_commit, "--run-id",
+                                                    "recommend-incomplete", "--recommend"]), 0)
+                self.assertFalse((remote / "latest-mutated").exists())
+            receipt_path.write_text(json.dumps(receipt))
             self.assertEqual(publisher.main(["--repository", "Acme/Fork", "--tag", "v1.2.3", "--workflow-commit",
                                              current_commit, "--run-id", "recommend-1", "--recommend"]), 0)
         self.assertTrue((remote / "latest-mutated").exists())

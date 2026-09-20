@@ -5,6 +5,7 @@ import importlib.util
 import json
 import re
 import shlex
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -21,9 +22,35 @@ PUBLISHER_SPEC.loader.exec_module(publisher)
 
 
 class ReleaseGateTests(unittest.TestCase):
+    def test_qualified_platforms_drive_matrix_assets_and_identities(self):
+        # The support list is shared data: adding a platform to a harness must change
+        # the required identities, and a platform without a canary asset must fail
+        # closed instead of collecting a cell whose evidence cannot exist.
+        selection = sys.modules["selection"]
+        original = dict(selection.HARNESS_PLATFORMS)
+        original_windows_asset = dict(selection.PLATFORM_ASSETS["windows"])
+        try:
+            self.assertEqual(len(release_gate.expected_identities()), 43)
+            self.assertEqual(len(release_gate.ASSETS), 6)
+            self.assertIn("windows-codex", release_gate.expected_identities())
+            self.assertNotIn("windows-prime-agent", release_gate.expected_identities())
+            self.assertNotIn("windows-fx", release_gate.expected_identities())
+            selection.PLATFORM_ASSETS["windows"]["canary"] = None
+            with self.assertRaisesRegex(ValueError, "published canary release asset"):
+                release_gate.matrix(None)
+        finally:
+            selection.HARNESS_PLATFORMS.clear()
+            selection.HARNESS_PLATFORMS.update(original)
+            selection.PLATFORM_ASSETS["windows"] = original_windows_asset
+
     def test_workflows_are_manual_serialized_and_trusted(self):
         gate = (ROOT / ".github/workflows/release-gate.yml").read_text()
         recommend = (ROOT / ".github/workflows/recommend-release.yml").read_text()
+        modular = (ROOT / ".github/workflows/cli-release-gate.yml").read_text()
+        self.assertIn('name: cli-cell-${{ matrix.system }}-${{ matrix.harness }}\n          overwrite: true', modular)
+        for name in ('release-gate-assets', 'release-gate-report-${{ matrix.system }}-${{ matrix.harness }}',
+                     'release-gate-handoff'):
+            self.assertIn(f'name: {name}\n          overwrite: true', gate)
         for workflow in (gate, recommend):
             self.assertIn("workflow_dispatch:", workflow)
             self.assertIn("cancel-in-progress: false", workflow)
@@ -37,14 +64,16 @@ class ReleaseGateTests(unittest.TestCase):
         self.assertIn("contents: write", gate)
         self.assertIn("inputs.mode == 'live' && inputs.verification_only == false", gate)
         self.assertIn('if [ "$VERIFICATION_ONLY" = true ]; then', gate)
-        self.assertIn('jq -r .isDraft <<<"$release_json")" = false', gate)
+        self.assertNotIn('jq -r .isDraft <<<"$release_json")" = false', gate)
         self.assertIn('jq -r .isDraft <<<"$release_json")" = true', gate)
         self.assertIn("isPrerelease", gate)
         self.assertIn("environment: release-publication", gate)
         self.assertIn("environment: release-publication", recommend)
         self.assertIn("permissions:\n  contents: read", recommend)
         self.assertNotIn("ref: ${{ inputs.tag }}", gate)
-        self.assertIn('"macos-14"', (ROOT / "canary/actions/release_gate.py").read_text())
+        # The hosted runner labels live in the hosted platform table, which every
+        # consumer shares.
+        self.assertIn('"macos-14"', (ROOT / "canary/actions/selection.py").read_text())
         self.assertIn('test "$(uname -m)" = arm64', gate)
         self.assertIn("--reports-dir reports", gate)
         self.assertNotIn("gh run download", recommend)
@@ -80,7 +109,7 @@ class ReleaseGateTests(unittest.TestCase):
             '--repository Acme/Fork --tag v1.2.3 --tag-commit ' + 'a' * 40
             + ' --workflow-commit ' + 'b' * 40 + ' --run-id current-1 --recommend'))
 
-    def _fixture(self, count=30):
+    def _fixture(self, count=43):
         directory = Path(tempfile.mkdtemp())
         reports = directory / "reports"
         assets = directory / "assets"
@@ -100,10 +129,11 @@ class ReleaseGateTests(unittest.TestCase):
             system, harness = identity.split("-", 1)
             report = {
                 "schemaVersion": 2, "runId": "run-1", "trigger": "release", "tier": "release-gate",
-                "outcome": "passed", "environment": {"operatingSystem": system, "architecture": "aarch64"},
+                "outcome": "passed", "environment": {"operatingSystem": system,
+                    "architecture": release_gate.PLATFORMS[system]["architecture"]},
                 "harness": {"id": harness}, "nanHarness": {
                     "source": "commit:" + "a" * 40, "version": "1.2.3",
-                    "sha256": release_gate.digest(assets / release_gate.PLATFORM_ASSETS[system]),
+                    "sha256": release_gate.digest(assets / release_gate.PLATFORM_ASSETS[system]["harness"]),
                 }, "checks": [{"name": name, "status": "passed"}
                               for name in release_gate.REQUIRED_CHECKS],
             }
@@ -115,12 +145,12 @@ class ReleaseGateTests(unittest.TestCase):
                                workflow_commit="b" * 40, run_id="run-1", reports_dir=reports,
                                assets_dir=assets, output=root / "handoff.json")
 
-    def test_manifest_contains_exact_full30_and_asset_provenance(self):
+    def test_manifest_contains_exact_full43_and_asset_provenance(self):
         root, reports, assets = self._fixture()
         manifest = release_gate.build_manifest(self._args(root, reports, assets))
-        self.assertEqual(manifest["reportCount"], 30)
-        self.assertEqual(len(manifest["reports"]), 30)
-        self.assertEqual(len(manifest["assets"]), 4)
+        self.assertEqual(manifest["reportCount"], 43)
+        self.assertEqual(len(manifest["reports"]), 43)
+        self.assertEqual(len(manifest["assets"]), 6)
         self.assertEqual(manifest["attestation"]["sourceRef"], "refs/tags/v1.2.3")
 
     def test_generated_handoff_is_accepted_by_actual_publisher_validator(self):
@@ -129,11 +159,11 @@ class ReleaseGateTests(unittest.TestCase):
         release_gate.build_manifest(args)
         value = publisher.validate_handoff(args.output, assets, reports)
         self.assertEqual(value["tagCommit"], args.tag_commit)
-        self.assertEqual(value["reportCount"], 30)
+        self.assertEqual(value["reportCount"], 43)
 
     def test_missing_or_cross_source_report_is_rejected(self):
-        root, reports, assets = self._fixture(29)
-        with self.assertRaisesRegex(ValueError, "exactly 30"):
+        root, reports, assets = self._fixture(42)
+        with self.assertRaisesRegex(ValueError, "exactly 43"):
             release_gate.build_manifest(self._args(root, reports, assets))
         root, reports, assets = self._fixture()
         path = next(reports.glob("*.json"))
@@ -148,6 +178,56 @@ class ReleaseGateTests(unittest.TestCase):
         (assets / release_gate.ASSETS[0]).write_bytes(b"tampered")
         with self.assertRaisesRegex(ValueError, "asset checksum"):
             release_gate.build_manifest(self._args(root, reports, assets))
+
+    def test_linux_macos_only_cannot_qualify_a_release(self):
+        root, reports, assets = self._fixture(30)
+        with self.assertRaisesRegex(ValueError, "exactly 43"):
+            release_gate.build_manifest(self._args(root, reports, assets))
+
+    def test_windows_architecture_and_binary_digest_are_required(self):
+        for field in ("architecture", "sha256"):
+            root, reports, assets = self._fixture()
+            path = reports / "windows-cline.json"
+            value = json.loads(path.read_text())
+            if field == "architecture":
+                value["environment"][field] = "aarch64"
+            else:
+                value["nanHarness"][field] = release_gate.digest(
+                    assets / release_gate.PLATFORM_ASSETS["linux"]["harness"])
+            path.write_text(json.dumps(value))
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                release_gate.build_manifest(self._args(root, reports, assets))
+
+    def test_deterministic_evidence_cannot_authorize_publication(self):
+        root, reports, assets = self._fixture()
+        for path in reports.glob("*.json"):
+            value = json.loads(path.read_text())
+            value["checks"] = value["checks"][:2]
+            path.write_text(json.dumps(value))
+        args = self._args(root, reports, assets)
+        with self.assertRaisesRegex(ValueError, "live-tool"):
+            release_gate.build_manifest(args)
+        args.mode = "deterministic"
+        self.assertEqual(release_gate.build_manifest(args)["reportCount"], 43)
+        with self.assertRaises(publisher.ContractError):
+            publisher.validate_handoff(args.output, assets, reports)
+
+    def test_release_dispatches_verification_only_after_draft_creation(self):
+        release = (ROOT / ".github/workflows/release.yml").read_text()
+        qualify = release.split("  qualify:\n", 1)[1]
+        self.assertIn("needs: publish", qualify)
+        self.assertIn("actions: write", qualify)
+        self.assertIn('gh workflow run release-gate.yml --repo "$GITHUB_REPOSITORY"', qualify)
+        self.assertIn('--ref "$DEFAULT_BRANCH"', qualify)
+        self.assertIn('-f tag_commit="$GITHUB_SHA"', qualify)
+        self.assertIn("-f mode=live -f verification_only=true", qualify)
+        self.assertNotIn("checkout", qualify)
+        gate = (ROOT / ".github/workflows/release-gate.yml").read_text()
+        self.assertIn('windows) test "$(uname -m)" = x86_64', gate)
+        self.assertIn('--architecture "$ARCHITECTURE"', gate)
+        self.assertIn('"$PYTHON" canary/actions/cli-suite.py', gate)
+        for asset in release_gate.ASSETS:
+            self.assertIn(asset, gate)
 
     def test_full_release_checksum_manifest_is_preserved(self):
         root, reports, assets = self._fixture()

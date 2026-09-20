@@ -14,7 +14,7 @@ use super::report::{
     validate_published_scenario_set,
 };
 use crate::scripted_provider::ScriptedProvider;
-use crate::terminal::{TerminalCommand, TerminalOutput};
+use crate::terminal::{TerminalCommand, TerminalError, TerminalOutput};
 use crate::workspace::ConformanceWorkspace;
 use nan_harness_core::HarnessKind;
 use std::ffi::OsString;
@@ -24,13 +24,14 @@ use std::time::{Duration, Instant};
 use thiserror::Error;
 
 mod scenarios;
+use super::environment;
 
 #[derive(Debug, Error)]
 pub enum ConformanceError {
     #[error(transparent)]
     Registry(RegistryError),
     #[error(transparent)]
-    Terminal(#[from] crate::terminal::TerminalError),
+    Terminal(#[from] TerminalError),
     #[error("could not prepare isolated conformance environment: {0}")]
     Environment(std::io::Error),
     #[error(transparent)]
@@ -71,7 +72,8 @@ impl PublishedConformanceRunner {
             ConformanceError::Registry(RegistryError::Missing(self.harness)),
         )?;
         let started = Instant::now();
-        let (inventory, observation) = scenarios::run_inventory(&self, registration).await;
+        let (inventory, observation, inventory_failure_reasons, inventory_process) =
+            scenarios::run_inventory(&self, registration).await;
         let scenarios = vec![
             inventory,
             scenarios::run_tool_round_trip(&self, registration).await,
@@ -89,6 +91,8 @@ impl PublishedConformanceRunner {
             harness: self.harness,
             scenarios,
             observations: observation.into_iter().collect(),
+            inventory_failure_reasons,
+            inventory_process,
             outcome: if outcome {
                 ConformanceOutcome::Passed
             } else {
@@ -124,7 +128,7 @@ impl PublishedConformanceRunner {
         ));
         let home = workspace.path().join("home");
         fs::create_dir_all(&home).map_err(ConformanceError::Environment)?;
-        let mut command = TerminalCommand::new(&self.nan_harness, workspace.path())
+        let command = TerminalCommand::new(&self.nan_harness, workspace.path())
             .clear_environment()
             .args(arguments)
             .env("CI", "1")
@@ -143,8 +147,14 @@ impl PublishedConformanceRunner {
                 "NAN_HARNESS_CONFIG_DIR",
                 workspace.path().join("nan-config"),
             )
-            .env("HOME", &home)
+            .env("HOME", &home);
+        #[cfg(windows)]
+        let mut command = environment::apply(command, workspace.path())
+            .map_err(ConformanceError::Environment)?
             .timeout(timeout_for(registration.kind));
+        #[cfg(not(windows))]
+        let mut command =
+            environment::apply(command, workspace.path()).timeout(timeout_for(registration.kind));
         if registration.kind == HarnessKind::ClaudeCode {
             command = command
                 .env("CLAUDE_CONFIG_DIR", workspace.claude_config_path())
@@ -179,7 +189,118 @@ impl PublishedConformanceRunner {
                 command = command.env(*name, *value);
             }
         }
-        command.run().await.map_err(ConformanceError::Terminal)
+        command.run().await.map_err(|error| {
+            use crate::terminal::TerminalError;
+            let reason = match &error {
+                TerminalError::Timeout { .. } => "timeout",
+                TerminalError::Execute { .. } => "execute",
+                TerminalError::MissingOutput { .. } => "missing-output",
+                TerminalError::CaptureJoin { .. } => "capture-join",
+                TerminalError::Capture { .. } => "capture-read",
+                TerminalError::DescendantCleanup { .. } => "descendant-cleanup",
+            };
+            eprintln!("conformance terminal failure: {reason}");
+            ConformanceError::Terminal(error)
+        })
+    }
+}
+
+pub(super) fn inventory_process_evidence(
+    result: &Result<TerminalOutput, ConformanceError>,
+) -> Option<super::report::InventoryProcessEvidence> {
+    use super::report::{
+        InventoryCleanupStage, InventoryCleanupStream, InventoryProcessEvidence,
+        InventoryProcessStatus,
+    };
+    use crate::terminal::CleanupStage;
+
+    match result {
+        Ok(output) => Some(InventoryProcessEvidence {
+            status: if output.status.success() {
+                InventoryProcessStatus::Completed
+            } else {
+                InventoryProcessStatus::NonzeroExit
+            },
+            exit_code: output.status.code(),
+            os_error_code: None,
+            timeout_milliseconds: None,
+            cleanup_stage: None,
+            cleanup_stream: None,
+        }),
+        Err(ConformanceError::Terminal(error)) => Some(match error {
+            TerminalError::Execute { source, .. } => InventoryProcessEvidence {
+                status: InventoryProcessStatus::LaunchError,
+                exit_code: None,
+                os_error_code: source
+                    .raw_os_error()
+                    .and_then(|code| u32::try_from(code).ok()),
+                timeout_milliseconds: None,
+                cleanup_stage: None,
+                cleanup_stream: None,
+            },
+            TerminalError::Timeout { timeout, .. } => InventoryProcessEvidence {
+                status: InventoryProcessStatus::Timeout,
+                exit_code: None,
+                os_error_code: None,
+                timeout_milliseconds: Some(
+                    u64::try_from(timeout.as_millis().min(u128::from(u64::MAX)))
+                        .unwrap_or(u64::MAX),
+                ),
+                cleanup_stage: None,
+                cleanup_stream: None,
+            },
+            TerminalError::MissingOutput { .. } => InventoryProcessEvidence {
+                status: InventoryProcessStatus::MissingOutput,
+                exit_code: None,
+                os_error_code: None,
+                timeout_milliseconds: None,
+                cleanup_stage: None,
+                cleanup_stream: None,
+            },
+            TerminalError::CaptureJoin { .. } | TerminalError::Capture { .. } => {
+                InventoryProcessEvidence {
+                    status: InventoryProcessStatus::CaptureError,
+                    exit_code: None,
+                    os_error_code: None,
+                    timeout_milliseconds: None,
+                    cleanup_stage: None,
+                    cleanup_stream: None,
+                }
+            }
+            TerminalError::DescendantCleanup {
+                stage,
+                stream,
+                os_error_code,
+                ..
+            } => InventoryProcessEvidence {
+                status: InventoryProcessStatus::CleanupError,
+                exit_code: None,
+                os_error_code: *os_error_code,
+                timeout_milliseconds: None,
+                cleanup_stage: Some(match stage {
+                    CleanupStage::Terminate => InventoryCleanupStage::Terminate,
+                    CleanupStage::Wait => InventoryCleanupStage::Wait,
+                    CleanupStage::WaitTimeout => InventoryCleanupStage::WaitTimeout,
+                    CleanupStage::CaptureTimeout => InventoryCleanupStage::CaptureTimeout,
+                }),
+                cleanup_stream: Some(match *stream {
+                    "stdout" => InventoryCleanupStream::Stdout,
+                    "stderr" => InventoryCleanupStream::Stderr,
+                    _ => unreachable!("terminal stream is closed"),
+                }),
+            },
+        }),
+        Err(ConformanceError::Environment(error)) => Some(InventoryProcessEvidence {
+            status: InventoryProcessStatus::EnvironmentError,
+            exit_code: None,
+            os_error_code: error
+                .raw_os_error()
+                .and_then(|code| u32::try_from(code).ok()),
+            cleanup_stage: None,
+            cleanup_stream: None,
+            timeout_milliseconds: None,
+        }),
+        Err(ConformanceError::Registry(_) | ConformanceError::ReportShape(_)) => None,
     }
 }
 

@@ -27,6 +27,8 @@ pub enum ProbeAssertionError {
     EmptyToolResult,
     #[error("provider returned a tool error")]
     ToolResultError,
+    #[error("provider returned shell failure text as a healthy tool result")]
+    ToolResultShellError,
     #[error("harness did not emit marker '{0}'")]
     MissingMarker(String),
     #[error("harness did not produce the required filesystem side effect at '{0}'")]

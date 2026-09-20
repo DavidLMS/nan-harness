@@ -1,6 +1,9 @@
 use super::super::arguments::RunKind;
 use super::super::constants::{INVENTORY_MARKER, ROUND_TRIP_MARKER, SENTINEL_MARKER};
-use super::super::helpers::{failed_scenario, scenario, tool_names, verify_expectation};
+use super::super::helpers::{
+    assertion_passed, failed_scenario, progress_event, record_assertion_code, scenario, tool_names,
+    verify_expectation,
+};
 use super::super::inventory::{
     inventory_drift_fingerprint, inventory_matches, round_trip_probe, verify_probe_side_effect,
 };
@@ -8,39 +11,113 @@ use super::super::prime_cleanup::PrimeDaemonGuard;
 use super::super::registry::HarnessRegistration;
 use super::super::report::{
     ConformanceObservation, ConformanceObservationKind, ConformanceScenario, ConformanceStatus,
+    InventoryFailureReason,
 };
-use super::PublishedConformanceRunner;
+use super::{PublishedConformanceRunner, inventory_process_evidence};
 use crate::assertions::{
-    ClaudeTranscript, assert_aider_edit_protocol, assert_provider_tool_round_trip, assert_sentinel,
-    assert_tool_round_trip, assert_tool_round_trip_with_sanitized_ids,
+    ClaudeTranscript, ProbeAssertionError, assert_aider_edit_protocol,
+    assert_provider_tool_round_trip, assert_sentinel, assert_tool_round_trip,
+    assert_tool_round_trip_with_sanitized_ids, tool_result_excerpt,
 };
 use crate::manifest::{Coverage, embedded_tool_scenario};
 use crate::scripted_provider::{ProviderScenario, ScriptedProvider, ScriptedToolCall};
+use crate::terminal::TerminalOutput;
 use crate::workspace::ConformanceWorkspace;
 use nan_harness_core::HarnessKind;
 use std::collections::BTreeSet;
 use std::fs;
 use std::time::Instant;
 
+/// The assertion one harness must satisfy for the deterministic tool round trip.
+fn tool_round_trip_assertion(
+    kind: HarnessKind,
+    output: &TerminalOutput,
+    requests: &[serde_json::Value],
+    call: &ScriptedToolCall,
+    edit_target: &std::path::Path,
+) -> Result<(), ProbeAssertionError> {
+    match kind {
+        HarnessKind::Aider => assert_aider_edit_protocol(
+            output,
+            requests,
+            edit_target,
+            "EDIT_TARGET_BEFORE\n",
+            ROUND_TRIP_MARKER,
+        ),
+        HarnessKind::OpenClaw => assert_tool_round_trip_with_sanitized_ids(
+            output,
+            requests,
+            std::slice::from_ref(call),
+            ROUND_TRIP_MARKER,
+        ),
+        _ => assert_tool_round_trip(
+            output,
+            requests,
+            std::slice::from_ref(call),
+            ROUND_TRIP_MARKER,
+        ),
+    }
+}
+
+fn progress_result(scenario: &str, stage: &str, passed: bool, started: Instant) {
+    progress_event(
+        scenario,
+        stage,
+        if passed { "passed" } else { "failed" },
+        started,
+    );
+}
+
+#[allow(
+    clippy::too_many_lines,
+    reason = "keep the measured inventory checks together"
+)]
 pub(super) async fn run_inventory(
     runner: &PublishedConformanceRunner,
     registration: HarnessRegistration,
-) -> (ConformanceScenario, Option<ConformanceObservation>) {
+) -> (
+    ConformanceScenario,
+    Option<ConformanceObservation>,
+    Vec<InventoryFailureReason>,
+    Option<super::super::report::InventoryProcessEvidence>,
+) {
     let started = Instant::now();
+    progress_event("inventory", "scenario", "started", started);
     let Ok(manifest) = registration.manifest() else {
-        return (failed_scenario("inventory", started), None);
+        return (
+            failed_scenario("inventory", started),
+            None,
+            Vec::new(),
+            None,
+        );
     };
     let Ok(workspace) = ConformanceWorkspace::create() else {
-        return (failed_scenario("inventory", started), None);
+        return (
+            failed_scenario("inventory", started),
+            None,
+            Vec::new(),
+            None,
+        );
     };
     let Ok(mut daemon) = PrimeDaemonGuard::for_harness(registration.kind, workspace.path()) else {
-        return (failed_scenario("inventory", started), None);
+        return (
+            failed_scenario("inventory", started),
+            None,
+            Vec::new(),
+            None,
+        );
     };
     let Ok(provider) = ScriptedProvider::start(ProviderScenario::inventory(INVENTORY_MARKER)).await
     else {
         let _ = daemon.cleanup().await;
-        return (failed_scenario("inventory", started), None);
+        return (
+            failed_scenario("inventory", started),
+            None,
+            vec![InventoryFailureReason::ProviderFailed],
+            None,
+        );
     };
+    progress_event("inventory", "process", "started", started);
     let output = runner
         .run_process(
             registration,
@@ -50,11 +127,17 @@ pub(super) async fn run_inventory(
             INVENTORY_MARKER,
         )
         .await;
+    let process_evidence = inventory_process_evidence(&output);
+    progress_result("inventory", "process", output.is_ok(), started);
     let requests = provider.chat_requests();
     let provider_complete = provider.completed();
     let provider_bounded = provider.recording_bounded();
+    progress_event("inventory", "provider-shutdown", "started", started);
     let provider_shutdown = provider.shutdown().await.is_ok();
+    progress_result("inventory", "provider-shutdown", provider_shutdown, started);
+    progress_event("inventory", "cleanup", "started", started);
     let daemon_clean = daemon.cleanup().await.is_ok();
+    progress_result("inventory", "cleanup", daemon_clean, started);
     let actual_inventory = requests
         .iter()
         .filter_map(tool_names)
@@ -70,21 +153,68 @@ pub(super) async fn run_inventory(
             && provider_shutdown
             && daemon_clean
     });
+    if !operationally_compatible || !inventory_matches {
+        record_assertion_code(if !inventory_matches {
+            "inventory-mismatch"
+        } else if !output.as_ref().is_ok_and(|output| output.status.success()) {
+            "process-failed"
+        } else if !output
+            .as_ref()
+            .is_ok_and(|output| output.stdout.contains(INVENTORY_MARKER))
+        {
+            "marker-missing"
+        } else {
+            "provider-incomplete"
+        });
+    }
     if !operationally_compatible
         || !inventory_matches
         || std::env::var_os("NAN_HARNESS_CONFORMANCE_DIAGNOSTICS").is_some()
     {
-        eprintln!(
-            "conformance inventory diagnostics for {}: expected={:?}, actual={actual_inventory:?}, matched={inventory_matches}, process_succeeded={}, marker_observed={}, requests={}, provider_complete={provider_complete}, provider_bounded={provider_bounded}, provider_shutdown={provider_shutdown}, daemon_clean={daemon_clean}",
-            registration.kind,
-            manifest.tool_names(),
-            output.as_ref().is_ok_and(|output| output.status.success()),
-            output
-                .as_ref()
-                .is_ok_and(|output| output.stdout.contains(INVENTORY_MARKER)),
-            requests.len(),
-        );
+        let diagnostics = InventoryDiagnostics {
+            kind: registration.kind,
+            expected: manifest.tool_names(),
+            actual: &actual_inventory,
+            matched: status_of(inventory_matches),
+            output: output.as_ref().ok(),
+            requests: requests.len(),
+            provider_complete: status_of(provider_complete),
+            provider_bounded: status_of(provider_bounded),
+            provider_shutdown: status_of(provider_shutdown),
+            daemon_clean: status_of(daemon_clean),
+        };
+        log_inventory_diagnostics(&diagnostics);
     }
+    let failure_reasons = inventory_failure_reasons(InventoryHealth {
+        output: output.as_ref().ok(),
+        provider: ProviderHealth {
+            requests: if requests.is_empty() {
+                CheckStatus::Failed
+            } else {
+                CheckStatus::Passed
+            },
+            complete: if provider_complete {
+                CheckStatus::Passed
+            } else {
+                CheckStatus::Failed
+            },
+            bounded: if provider_bounded {
+                CheckStatus::Passed
+            } else {
+                CheckStatus::Failed
+            },
+        },
+        provider_shutdown: if provider_shutdown {
+            CheckStatus::Passed
+        } else {
+            CheckStatus::Failed
+        },
+        daemon_cleanup: if daemon_clean {
+            CheckStatus::Passed
+        } else {
+            CheckStatus::Failed
+        },
+    });
     let status = if operationally_compatible {
         ConformanceStatus::Passed
     } else {
@@ -99,7 +229,100 @@ pub(super) async fn run_inventory(
                 &actual_inventory,
             ),
         });
-    (scenario("inventory", status, started), observation)
+    (
+        scenario("inventory", status, started),
+        observation,
+        failure_reasons,
+        process_evidence,
+    )
+}
+
+#[derive(Clone, Copy)]
+struct InventoryHealth<'a> {
+    output: Option<&'a TerminalOutput>,
+    provider: ProviderHealth,
+    provider_shutdown: CheckStatus,
+    daemon_cleanup: CheckStatus,
+}
+
+#[derive(Clone, Copy)]
+struct ProviderHealth {
+    requests: CheckStatus,
+    complete: CheckStatus,
+    bounded: CheckStatus,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CheckStatus {
+    Passed,
+    Failed,
+}
+
+fn inventory_failure_reasons(health: InventoryHealth<'_>) -> Vec<InventoryFailureReason> {
+    let mut reasons = Vec::new();
+    if !health.output.is_some_and(|output| output.status.success()) {
+        reasons.push(InventoryFailureReason::ProcessFailed);
+    } else if !health
+        .output
+        .is_some_and(|output| output.stdout.contains(INVENTORY_MARKER))
+    {
+        reasons.push(InventoryFailureReason::MarkerMissing);
+    }
+    if health.provider.requests == CheckStatus::Failed
+        || health.provider.complete == CheckStatus::Failed
+        || health.provider.bounded == CheckStatus::Failed
+    {
+        reasons.push(InventoryFailureReason::ProviderFailed);
+    }
+    if health.provider_shutdown == CheckStatus::Failed {
+        reasons.push(InventoryFailureReason::ProviderShutdownFailed);
+    }
+    if health.daemon_cleanup == CheckStatus::Failed {
+        reasons.push(InventoryFailureReason::DaemonCleanupFailed);
+    }
+    reasons
+}
+
+struct InventoryDiagnostics<'a> {
+    kind: HarnessKind,
+    expected: BTreeSet<String>,
+    actual: &'a BTreeSet<String>,
+    matched: CheckStatus,
+    output: Option<&'a TerminalOutput>,
+    requests: usize,
+    provider_complete: CheckStatus,
+    provider_bounded: CheckStatus,
+    provider_shutdown: CheckStatus,
+    daemon_clean: CheckStatus,
+}
+
+fn status_of(value: bool) -> CheckStatus {
+    if value {
+        CheckStatus::Passed
+    } else {
+        CheckStatus::Failed
+    }
+}
+
+fn log_inventory_diagnostics(diagnostics: &InventoryDiagnostics<'_>) {
+    eprintln!(
+        "conformance inventory diagnostics for {}: expected={:?}, actual={:?}, matched={}, process_succeeded={}, marker_observed={}, requests={}, provider_complete={}, provider_bounded={}, provider_shutdown={}, daemon_clean={}",
+        diagnostics.kind,
+        diagnostics.expected,
+        diagnostics.actual,
+        diagnostics.matched == CheckStatus::Passed,
+        diagnostics
+            .output
+            .is_some_and(|output| output.status.success()),
+        diagnostics
+            .output
+            .is_some_and(|output| output.stdout.contains(INVENTORY_MARKER)),
+        diagnostics.requests,
+        diagnostics.provider_complete == CheckStatus::Passed,
+        diagnostics.provider_bounded == CheckStatus::Passed,
+        diagnostics.provider_shutdown == CheckStatus::Passed,
+        diagnostics.daemon_clean == CheckStatus::Passed,
+    );
 }
 
 pub(super) async fn run_tool_round_trip(
@@ -107,6 +330,7 @@ pub(super) async fn run_tool_round_trip(
     registration: HarnessRegistration,
 ) -> ConformanceScenario {
     let started = Instant::now();
+    progress_event("tool-round-trip", "scenario", "started", started);
     let Ok(manifest) = registration.manifest() else {
         return failed_scenario("tool-round-trip", started);
     };
@@ -141,6 +365,7 @@ pub(super) async fn run_tool_round_trip(
         let _ = daemon.cleanup().await;
         return failed_scenario("tool-round-trip", started);
     };
+    progress_event("tool-round-trip", "process", "started", started);
     let output = runner
         .run_process(
             registration,
@@ -150,39 +375,51 @@ pub(super) async fn run_tool_round_trip(
             ROUND_TRIP_MARKER,
         )
         .await;
+    progress_result("tool-round-trip", "process", output.is_ok(), started);
     let requests = provider.chat_requests();
     let provider_complete = provider.completed();
     let provider_bounded = provider.recording_bounded();
+    progress_event("tool-round-trip", "provider-shutdown", "started", started);
     let provider_shutdown = provider.shutdown().await.is_ok();
+    progress_result(
+        "tool-round-trip",
+        "provider-shutdown",
+        provider_shutdown,
+        started,
+    );
+    progress_event("tool-round-trip", "cleanup", "started", started);
     let daemon_clean = daemon.cleanup().await.is_ok();
+    progress_result("tool-round-trip", "cleanup", daemon_clean, started);
+    if output.is_err() {
+        record_assertion_code("process-failed");
+    }
     let passed = output.as_ref().is_ok_and(|output| {
         if !(provider_complete && provider_bounded && provider_shutdown && daemon_clean) {
             return false;
         }
-        let assertion = match registration.kind {
-            HarnessKind::Aider => assert_aider_edit_protocol(
-                output,
-                &requests,
-                &workspace.resolve("edit-target.txt"),
-                "EDIT_TARGET_BEFORE\n",
-                ROUND_TRIP_MARKER,
-            ),
-            HarnessKind::OpenClaw => assert_tool_round_trip_with_sanitized_ids(
-                output,
-                &requests,
-                std::slice::from_ref(&probe.call),
-                ROUND_TRIP_MARKER,
-            ),
-            _ => assert_tool_round_trip(
-                output,
-                &requests,
-                std::slice::from_ref(&probe.call),
-                ROUND_TRIP_MARKER,
-            ),
-        };
-        assertion
-            .and_then(|()| verify_probe_side_effect(&probe))
-            .is_ok()
+        let assertion = tool_round_trip_assertion(
+            registration.kind,
+            output,
+            &requests,
+            &probe.call,
+            &workspace.resolve("edit-target.txt"),
+        );
+        let outcome = assertion.and_then(|()| verify_probe_side_effect(&probe));
+        if outcome.is_err() && std::env::var_os("NAN_HARNESS_CONFORMANCE_DIAGNOSTICS").is_some() {
+            // Local, opt-in and private: the excerpt names what the harness reported for the tool
+            // call, which is the only way to see whether it believes the command succeeded. Never
+            // part of the published report.
+            eprintln!(
+                "conformance tool diagnostics for {}: outcome={:?}, exit={:?}, marker={}, requests={}, results={:?}",
+                registration.kind,
+                outcome.as_ref().err(),
+                Some(output.status.code()),
+                output.stdout.contains(ROUND_TRIP_MARKER),
+                requests.len(),
+                tool_result_excerpt(&requests),
+            );
+        }
+        outcome.is_ok()
     });
     let status = if passed {
         ConformanceStatus::Passed
@@ -197,6 +434,7 @@ pub(super) async fn run_sentinel(
     registration: HarnessRegistration,
 ) -> ConformanceScenario {
     let started = Instant::now();
+    progress_event("sentinel", "scenario", "started", started);
     let Ok(workspace) = ConformanceWorkspace::create() else {
         return failed_scenario("sentinel", started);
     };
@@ -208,6 +446,7 @@ pub(super) async fn run_sentinel(
         let _ = daemon.cleanup().await;
         return failed_scenario("sentinel", started);
     };
+    progress_event("sentinel", "process", "started", started);
     let output = runner
         .run_process(
             registration,
@@ -217,17 +456,24 @@ pub(super) async fn run_sentinel(
             SENTINEL_MARKER,
         )
         .await;
+    progress_result("sentinel", "process", output.is_ok(), started);
     let requests = provider.chat_requests();
     let provider_complete = provider.completed();
     let provider_bounded = provider.recording_bounded();
+    progress_event("sentinel", "provider-shutdown", "started", started);
     let provider_shutdown = provider.shutdown().await.is_ok();
+    progress_result("sentinel", "provider-shutdown", provider_shutdown, started);
+    progress_event("sentinel", "cleanup", "started", started);
     let daemon_clean = daemon.cleanup().await.is_ok();
+    progress_result("sentinel", "cleanup", daemon_clean, started);
+    if output.is_err() {
+        record_assertion_code("process-failed");
+    }
     let passed = output.as_ref().is_ok_and(|output| {
-        provider_complete
-            && provider_bounded
-            && provider_shutdown
-            && daemon_clean
-            && assert_sentinel(output, &requests, SENTINEL_MARKER).is_ok()
+        if !(provider_complete && provider_bounded && provider_shutdown && daemon_clean) {
+            return false;
+        }
+        assertion_passed(assert_sentinel(output, &requests, SENTINEL_MARKER))
     });
     let status = if passed {
         ConformanceStatus::Passed
@@ -243,6 +489,7 @@ pub(super) async fn run_external_prerequisite(
     registration: HarnessRegistration,
 ) -> ConformanceScenario {
     let started = Instant::now();
+    progress_event("external-prerequisite", "scenario", "started", started);
     let Ok(manifest) = registration.manifest() else {
         return failed_scenario("external-prerequisite", started);
     };
@@ -302,6 +549,7 @@ pub(super) async fn run_external_prerequisite(
         .iter()
         .map(|call| call.name.clone())
         .collect::<Vec<_>>();
+    progress_event("external-prerequisite", "process", "started", started);
     let output = runner
         .run_process(
             registration,
@@ -315,11 +563,29 @@ pub(super) async fn run_external_prerequisite(
             &scenario_definition.final_marker,
         )
         .await;
+    progress_result("external-prerequisite", "process", output.is_ok(), started);
     let requests = provider.chat_requests();
     let provider_complete = provider.completed();
     let provider_bounded = provider.recording_bounded();
+    progress_event(
+        "external-prerequisite",
+        "provider-shutdown",
+        "started",
+        started,
+    );
     let provider_shutdown = provider.shutdown().await.is_ok();
+    progress_result(
+        "external-prerequisite",
+        "provider-shutdown",
+        provider_shutdown,
+        started,
+    );
+    progress_event("external-prerequisite", "cleanup", "started", started);
     let daemon_clean = daemon.cleanup().await.is_ok();
+    progress_result("external-prerequisite", "cleanup", daemon_clean, started);
+    if output.is_err() {
+        record_assertion_code("process-failed");
+    }
     let passed = output.as_ref().is_ok_and(|output| {
         if !(provider_complete
             && provider_bounded

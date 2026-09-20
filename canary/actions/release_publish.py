@@ -20,24 +20,21 @@ import sys
 import tempfile
 from typing import Any
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from selection import (CLI_HARNESSES as HARNESSES, PLATFORM_ASSETS, PLATFORMS,
+                       qualified_identities, required_assets)
+
 
 SCHEMA_VERSION = 1
 RECEIPT_SCHEMA_VERSION = 1
-REPORT_COUNT = 30
 MAX_REPORT_BYTES = 2_000_000
 MAX_EVIDENCE_BYTES = 64_000_000
-HARNESSES = (
-    "claude-code", "codex", "opencode", "hermes", "pi", "omp",
-    "prime-agent", "deepseek-harness", "openclaw", "cline", "qwen-code",
-    "kimi-code", "aider", "goose", "fx",
-)
 REQUIRED_CHECKS = ("install-and-diagnose", "deterministic-conformance", "live-tool")
-ASSET_NAMES = (
-    "nan-harness-aarch64-unknown-linux-musl",
-    "nan-harness-canary-aarch64-unknown-linux-musl",
-    "nan-harness-aarch64-apple-darwin",
-    "nan-harness-canary-aarch64-apple-darwin",
-)
+REQUIRED_IDENTITIES = qualified_identities()
+REPORT_COUNT = len(REQUIRED_IDENTITIES)
+ASSET_NAMES = required_assets()
+HISTORICAL_IDENTITIES = {f"{platform}/{harness}" for platform in ("linux", "macos") for harness in HARNESSES}
+HISTORICAL_ASSETS = {name for platform in ("linux", "macos") for name in PLATFORM_ASSETS[platform].values()}
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 TAG = re.compile(r"^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?$")
@@ -139,8 +136,16 @@ def _validate_release_report(report: dict[str, Any], version: str, name: str) ->
             raise ContractError(f"report check is not passing: {name}")
 
 
+def _matrix_policy(handoff: dict[str, Any], recommendation: bool):
+    # Historical evidence is usable only on the recommendation path, which also
+    # requires a bound, completed publication receipt and a public stable release.
+    if recommendation and handoff.get("reportCount") == len(HISTORICAL_IDENTITIES):
+        return HISTORICAL_IDENTITIES, HISTORICAL_ASSETS
+    return REQUIRED_IDENTITIES, set(ASSET_NAMES)
+
+
 def validate_handoff(path: Path, assets_dir: Path | None = None, reports_dir: Path | None = None,
-                    require_evidence: bool = True) -> dict[str, Any]:
+                    require_evidence: bool = True, *, recommendation: bool = False) -> dict[str, Any]:
     """Validate provenance and all local evidence, returning normalized data."""
     handoff = _load_json(path)
     if handoff.get("schemaVersion") != SCHEMA_VERSION:
@@ -154,16 +159,18 @@ def validate_handoff(path: Path, assets_dir: Path | None = None, reports_dir: Pa
     tag_commit = _hex(handoff.get("tagCommit"), HEX40, "tagCommit")
     workflow_commit = _hex(handoff.get("workflowCommit"), HEX40, "workflowCommit")
     run_id = _string(handoff.get("runId"), "runId")
-    if handoff.get("reportCount") != REPORT_COUNT:
-        raise ContractError("handoff must contain exactly 30 reports")
+    expected_identities, expected_assets = _matrix_policy(handoff, recommendation)
+    report_count = len(expected_identities)
+    if handoff.get("reportCount") != report_count:
+        raise ContractError(f"handoff must contain exactly {report_count} reports")
     root = path.parent.resolve()
     assets_root = (assets_dir or root).resolve()
     reports_root = (reports_dir or root).resolve()
     reports = handoff.get("reports")
-    if not isinstance(reports, list) or len(reports) != REPORT_COUNT:
-        raise ContractError("handoff reports must contain exactly 30 entries")
+    if not isinstance(reports, list) or len(reports) != report_count:
+        raise ContractError(
+            f"handoff reports must contain exactly {report_count} entries")
     identities: set[str] = set()
-    expected_identities = {f"{platform}/{harness}" for platform in ("linux", "macos") for harness in HARNESSES}
     asset_entries = handoff.get("assets")
     if not isinstance(asset_entries, list):
         raise ContractError("handoff assets are required before report validation")
@@ -196,26 +203,26 @@ def validate_handoff(path: Path, assets_dir: Path | None = None, reports_dir: Pa
             raise ContractError(f"report source identity mismatch: {identity}")
         _validate_release_report(report, tag[1:].split("-", 1)[0], identity)
         platform, harness = canonical_identity.split("/", 1)
-        platform_asset = ("nan-harness-aarch64-unknown-linux-musl"
-                          if platform == "linux" else "nan-harness-aarch64-apple-darwin")
+        platform_asset = PLATFORM_ASSETS[platform]["harness"]
         if report.get("nanHarness", {}).get("sha256") != asset_digests.get(platform_asset):
             raise ContractError(f"report binary digest does not match release asset: {identity}")
         if report.get("harness", {}).get("id") != harness:
             raise ContractError(f"report harness mismatch: {identity}")
         if (report.get("environment", {}).get("operatingSystem") != platform
-                or report.get("environment", {}).get("architecture") != "aarch64"):
+                or report.get("environment", {}).get("architecture")
+                != PLATFORMS[platform]["architecture"]):
             raise ContractError(f"report platform mismatch: {identity}")
     if identities != expected_identities:
         raise ContractError("handoff report matrix is incomplete")
 
     assets = handoff.get("assets")
-    if not isinstance(assets, list) or {item.get("name") for item in assets if isinstance(item, dict)} != set(ASSET_NAMES):
-        raise ContractError("handoff assets must contain the four canonical ARM64 assets")
+    if not isinstance(assets, list) or {item.get("name") for item in assets if isinstance(item, dict)} != expected_assets:
+        raise ContractError("handoff assets must contain every required release asset")
     for entry in assets:
         if not isinstance(entry, dict):
             raise ContractError("asset entry is not an object")
         name = entry.get("name")
-        if name not in ASSET_NAMES:
+        if name not in expected_assets:
             raise ContractError("unknown asset name")
         asset_path_value = entry.get("path", f"{entry.get('name', '')}")
         asset_path = _evidence_path(_string(asset_path_value, "asset path"), assets_root, root, "asset path")
@@ -273,7 +280,8 @@ def build_evidence(path: Path, handoff: dict[str, Any], reports_dir: Path | None
     return evidence
 
 
-def validate_evidence(evidence: dict[str, Any], repository: str, tag: str) -> dict[str, Any]:
+def validate_evidence(evidence: dict[str, Any], repository: str, tag: str, *,
+                      recommendation: bool = False) -> dict[str, Any]:
     """Validate durable evidence without filesystem paths or downloaded binaries."""
     if set(evidence) != {"schemaVersion", "handoff", "reports", "reportDigests", "reportCanonicalDigests"}:
         raise ContractError("evidence has unexpected or missing fields")
@@ -284,9 +292,9 @@ def validate_evidence(evidence: dict[str, Any], repository: str, tag: str) -> di
         raise ContractError("evidence handoff identity mismatch")
     _hex(handoff.get("tagCommit"), HEX40, "evidence tagCommit")
     _hex(handoff.get("workflowCommit"), HEX40, "evidence workflowCommit")
-    if handoff.get("reportCount") != REPORT_COUNT or not isinstance(evidence["reports"], dict):
-        raise ContractError("evidence does not contain exactly 30 reports")
-    expected = {f"{platform}/{harness}" for platform in ("linux", "macos") for harness in HARNESSES}
+    expected, expected_assets = _matrix_policy(handoff, recommendation)
+    if handoff.get("reportCount") != len(expected) or not isinstance(evidence["reports"], dict):
+        raise ContractError(f"evidence does not contain exactly {len(expected)} reports")
     reports = evidence["reports"]
     if set(reports) != expected or set(evidence["reportDigests"]) != expected or set(evidence["reportCanonicalDigests"]) != expected:
         raise ContractError("evidence report identities are incomplete or duplicated")
@@ -297,7 +305,7 @@ def validate_evidence(evidence: dict[str, Any], repository: str, tag: str) -> di
     if set(handoff_by_identity) != expected:
         raise ContractError("evidence handoff report identities are incomplete")
     asset_digests = {item.get("name"): item.get("sha256") for item in handoff.get("assets", []) if isinstance(item, dict)}
-    if set(asset_digests) != set(ASSET_NAMES):
+    if set(asset_digests) != expected_assets:
         raise ContractError("evidence handoff assets are incomplete")
     for identity in sorted(expected):
         report = reports[identity]
@@ -315,9 +323,10 @@ def validate_evidence(evidence: dict[str, Any], repository: str, tag: str) -> di
                 or report.get("nanHarness", {}).get("source") != f"commit:{handoff.get('tagCommit')}"
                 or report.get("harness", {}).get("id") != harness
                 or report.get("environment", {}).get("operatingSystem") != platform
-                or report.get("environment", {}).get("architecture") != "aarch64"):
+                or report.get("environment", {}).get("architecture")
+                != PLATFORMS[platform]["architecture"]):
             raise ContractError(f"report content/provenance mismatch: {identity}")
-        binary = "nan-harness-aarch64-unknown-linux-musl" if platform == "linux" else "nan-harness-aarch64-apple-darwin"
+        binary = PLATFORM_ASSETS[platform]["harness"]
         if report.get("nanHarness", {}).get("sha256") != asset_digests[binary]:
             raise ContractError(f"report binary binding mismatch: {identity}")
     return handoff
@@ -439,6 +448,8 @@ def _write_receipt(path: Path, handoff: dict[str, Any], phases: dict[str, bool])
 
 
 def publish(args: argparse.Namespace) -> int:
+    if args.publish and args.recommend:
+        raise ContractError("publication and recommendation are separate operations")
     if (args.publish or args.recommend) and "-" in args.tag:
         raise ContractError("publication and recommendation require a stable release tag")
     if args.recommend and args.handoff is None:
@@ -451,7 +462,7 @@ def publish(args: argparse.Namespace) -> int:
             if not _evidence_asset(args.repository, args.tag, evidence_path):
                 raise ContractError("recommendation requires the durable release-gate evidence asset")
             evidence = _load_json(evidence_path)
-            validate_evidence(evidence, args.repository, args.tag)
+            validate_evidence(evidence, args.repository, args.tag, recommendation=True)
             handoff_path = bootstrap_root / "handoff.json"
             handoff_path.write_text(json.dumps(evidence["handoff"], sort_keys=True) + "\n")
             empty_assets = bootstrap_root / "empty-assets"
@@ -468,7 +479,8 @@ def publish(args: argparse.Namespace) -> int:
     # mandatory before recovery is allowed when it is absent.
     local_reports_available = args.reports_dir is None or args.reports_dir.is_dir()
     handoff = validate_handoff(Path(args.handoff), Path(args.assets_dir), args.reports_dir,
-                               not args.recommend and local_reports_available)
+                               not args.recommend and local_reports_available,
+                               recommendation=args.recommend)
     if args.repository != handoff["repository"] or args.tag != handoff["tag"]:
         raise ContractError("CLI identity does not match handoff")
     if args.tag_commit is not None and args.tag_commit != handoff["tagCommit"]:
@@ -555,7 +567,7 @@ def publish(args: argparse.Namespace) -> int:
             if digest(remote_evidence) != handoff["_evidenceSha256"]:
                 raise ContractError("durable evidence digest differs from receipt")
             durable_evidence = _load_json(remote_evidence)
-            validate_evidence(durable_evidence, args.repository, args.tag)
+            validate_evidence(durable_evidence, args.repository, args.tag, recommendation=True)
             validate_embedded_reports(durable_evidence, report_validator, temporary_path / "embedded-reports")
             handoff["_evidenceSha256"] = digest(remote_evidence)
         elif remote_evidence_exists:

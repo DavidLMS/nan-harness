@@ -34,6 +34,8 @@ pub(crate) enum Command {
     Record(Box<RecordArgs>),
     #[command(hide = true, about = "Run published-release harness conformance")]
     Conformance(ConformanceArgs),
+    #[command(about = "Run the credential-free Codex diagnostic battery")]
+    CodexDiagnostic(CodexDiagnosticArgs),
 }
 
 #[derive(Debug, Args)]
@@ -165,6 +167,22 @@ pub(crate) struct ConformanceArgs {
     pub(crate) harness: HarnessKind,
     #[arg(long)]
     pub(crate) json: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct CodexDiagnosticArgs {
+    #[arg(long, value_name = "PATH")]
+    pub(crate) codex: PathBuf,
+    #[arg(long)]
+    pub(crate) expected_version: String,
+    #[arg(long, value_name = "PATH")]
+    pub(crate) nan_harness: PathBuf,
+    #[arg(long, value_name = "PATH")]
+    pub(crate) report: PathBuf,
+    #[arg(long, default_value_t = 15_000, value_name = "MILLISECONDS")]
+    pub(crate) case_deadline_ms: u64,
+    #[arg(long, default_value_t = 120_000, value_name = "MILLISECONDS")]
+    pub(crate) total_deadline_ms: u64,
 }
 
 #[cfg(test)]

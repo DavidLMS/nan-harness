@@ -65,7 +65,6 @@ jobs:
           release_json="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json tagName,isDraft)"
           test "$(jq -r .tagName <<<"$release_json")" = "$TAG"
           if [ "$VERIFICATION_ONLY" = true ]; then
-            test "$(jq -r .isDraft <<<"$release_json")" = false
             test "$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isPrerelease | jq -r .isPrerelease)" = false
           else
             test "$(jq -r .isDraft <<<"$release_json")" = true
@@ -85,8 +84,10 @@ jobs:
             echo "workflow_commit=$(git rev-parse HEAD)"
           } >> "$GITHUB_OUTPUT"
       - id: matrix
-        name: Expand the mandatory 30-cell matrix
-        run: echo "matrix=$(python3 canary/actions/release_gate.py matrix)" >> "$GITHUB_OUTPUT"
+        name: Expand the mandatory 43-cell matrix
+        run: |
+          echo "matrix=$(python3 canary/actions/release_gate.py matrix)" >> "$GITHUB_OUTPUT"
+          echo 'Windows skips: Prime Agent and FX (official-windows-distribution-unavailable); skips do not count as passes.' >> "$GITHUB_STEP_SUMMARY"
       - name: Download exact draft assets
         env:
           GH_TOKEN: ${{ github.token }}
@@ -97,7 +98,9 @@ jobs:
             nan-harness-aarch64-unknown-linux-musl \
             nan-harness-canary-aarch64-unknown-linux-musl \
             nan-harness-aarch64-apple-darwin \
-            nan-harness-canary-aarch64-apple-darwin; do
+            nan-harness-canary-aarch64-apple-darwin \
+            nan-harness-x86_64-pc-windows-msvc.exe \
+            nan-harness-canary-x86_64-pc-windows-msvc.exe; do
             gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "$asset" \
               --dir "$RUNNER_TEMP/release-assets"
           done
@@ -113,6 +116,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: release-gate-assets
+          overwrite: true
           path: ${{ runner.temp }}/release-assets/*
           retention-days: 7
 
@@ -126,6 +130,11 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 180
     environment: ${{ inputs.mode == 'live' && 'canary-live' || '' }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHON: ${{ matrix.system == 'windows' && 'python' || 'python3' }}
     steps:
       - name: Check out trusted default branch
         uses: actions/checkout@v4
@@ -142,9 +151,14 @@ jobs:
       - name: Verify trusted source and prepare cell
         env:
           EXPECTED_WORKFLOW_COMMIT: ${{ needs.prepare.outputs.workflow_commit }}
+          SYSTEM: ${{ matrix.system }}
         run: |
           test "$(git rev-parse HEAD)" = "$EXPECTED_WORKFLOW_COMMIT"
-          test "$(uname -m)" = arm64 -o "$(uname -m)" = aarch64
+          case "$SYSTEM" in
+            linux|macos) test "$(uname -m)" = arm64 -o "$(uname -m)" = aarch64 ;;
+            windows) test "$(uname -m)" = x86_64 ;;
+            *) exit 1 ;;
+          esac
           mkdir -p "$RUNNER_TEMP/cli-cell" "$RUNNER_TEMP/cli-reports"
           chmod 755 "$RUNNER_TEMP/release-assets"/*
       - name: Resolve official CLI metadata
@@ -152,11 +166,12 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           HARNESS: ${{ matrix.harness }}
           SYSTEM: ${{ matrix.system }}
+          ARCHITECTURE: ${{ matrix.architecture }}
           MODEL: ${{ inputs.model }}
         run: |
-          python3 canary/actions/cli-suite.py resolve \
+          "$PYTHON" canary/actions/cli-suite.py resolve \
             --harnesses "$HARNESS" --system "$SYSTEM" \
-            --architecture aarch64 --model "$MODEL" \
+            --architecture "$ARCHITECTURE" --model "$MODEL" \
             --output "$RUNNER_TEMP/cli-versions.json"
       - name: Verify live credential is available
         if: inputs.mode == 'live'
@@ -168,6 +183,7 @@ jobs:
           NAN_API_KEY: ${{ inputs.mode == 'live' && secrets.NAN_API_KEY || '' }}
           MODE: ${{ inputs.mode }}
           SYSTEM: ${{ matrix.system }}
+          ARCHITECTURE: ${{ matrix.architecture }}
           HARNESS: ${{ matrix.harness }}
           MODEL: ${{ inputs.model }}
           TAG: ${{ needs.prepare.outputs.tag }}
@@ -178,28 +194,34 @@ jobs:
           if [ "$SYSTEM" = linux ]; then
             binary="$RUNNER_TEMP/release-assets/nan-harness-aarch64-unknown-linux-musl"
             canary="$RUNNER_TEMP/release-assets/nan-harness-canary-aarch64-unknown-linux-musl"
-          else
+          elif [ "$SYSTEM" = macos ]; then
             binary="$RUNNER_TEMP/release-assets/nan-harness-aarch64-apple-darwin"
             canary="$RUNNER_TEMP/release-assets/nan-harness-canary-aarch64-apple-darwin"
+          elif [ "$SYSTEM" = windows ]; then
+            binary="$RUNNER_TEMP/release-assets/nan-harness-x86_64-pc-windows-msvc.exe"
+            canary="$RUNNER_TEMP/release-assets/nan-harness-canary-x86_64-pc-windows-msvc.exe"
+          else
+            exit 1
           fi
-          python3 canary/actions/cli-suite.py --harnesses "$HARNESS" \
+          "$PYTHON" canary/actions/cli-suite.py --harnesses "$HARNESS" \
             --mode "$MODE" --trigger release --tag "$TAG" \
             --model "$MODEL" --source-kind release \
             --source-sha "$TAG_COMMIT" \
             --nan-version "$NAN_VERSION" --system "$SYSTEM" \
-            --architecture aarch64 --manifest "$RUNNER_TEMP/cli-versions.json" \
+            --architecture "$ARCHITECTURE" --manifest "$RUNNER_TEMP/cli-versions.json" \
             --binary "$binary" --canary "$canary" --directory "$RUNNER_TEMP/cli-cell" \
             --output "$RUNNER_TEMP/cli-reports" --run-id "$GITHUB_RUN_ID"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: release-gate-report-${{ matrix.system }}-${{ matrix.harness }}
+          overwrite: true
           path: ${{ runner.temp }}/cli-reports/*.json
           if-no-files-found: error
           retention-days: 7
 
   aggregate:
-    name: Validate full 30-cell evidence
+    name: Validate full 43-cell evidence
     needs: [prepare, cell]
     if: always() && needs.prepare.result == 'success' && needs.cell.result == 'success'
     runs-on: ubuntu-24.04
@@ -226,17 +248,21 @@ jobs:
           TAG: ${{ needs.prepare.outputs.tag }}
           TAG_COMMIT: ${{ needs.prepare.outputs.tag_commit }}
           WORKFLOW_COMMIT: ${{ needs.prepare.outputs.workflow_commit }}
+          MODE: ${{ inputs.mode }}
         run: |
           test "$(git rev-parse HEAD)" = "$EXPECTED_WORKFLOW_COMMIT"
           python3 canary/actions/release_gate.py manifest \
             --repository "$GITHUB_REPOSITORY" --tag "$TAG" \
             --tag-commit "$TAG_COMMIT" \
             --workflow-commit "$WORKFLOW_COMMIT" \
+            --mode "$MODE" \
             --run-id "$GITHUB_RUN_ID" --reports-dir reports --assets-dir assets \
             --output release-gate-manifest.json
       - uses: actions/upload-artifact@v4
+        if: inputs.mode == 'live'
         with:
           name: release-gate-handoff
+          overwrite: true
           path: release-gate-manifest.json
           retention-days: 30
       - name: Record deterministic verification-only result
@@ -244,7 +270,7 @@ jobs:
         run: |
           {
             echo '## Verification-only result'
-            echo 'The exact 30-cell deterministic evidence passed; no publication is permitted for deterministic mode.'
+            echo 'The exact 43-cell deterministic evidence passed; no publication is permitted for deterministic mode.'
           } >> "$GITHUB_STEP_SUMMARY"
 
   publish:

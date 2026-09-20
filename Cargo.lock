@@ -1591,8 +1591,10 @@ version = "0.1.9"
 dependencies = [
  "clap",
  "jsonschema",
+ "nan-harness-bridge",
  "nan-harness-core",
  "nan-harness-diagnostics",
+ "nan-harness-private-fs",
  "nan-harness-test-support",
  "reqwest",
  "semver",
@@ -1649,6 +1651,7 @@ dependencies = [
  "base64",
  "getrandom 0.4.3",
  "nan-harness-core",
+ "nan-harness-detach",
  "nan-harness-i18n",
  "nan-harness-private-fs",
  "nan-harness-test-support",
@@ -1674,6 +1677,13 @@ dependencies = [
  "tempfile",
  "thiserror",
  "zeroize",
+]
+
+[[package]]
+name = "nan-harness-detach"
+version = "0.1.9"
+dependencies = [
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1711,6 +1721,7 @@ dependencies = [
  "jsonc-parser",
  "nan-harness-bridge",
  "nan-harness-core",
+ "nan-harness-detach",
  "nan-harness-i18n",
  "nan-harness-private-fs",
  "nan-harness-search",
@@ -1775,7 +1786,9 @@ version = "0.1.9"
 dependencies = [
  "axum",
  "nan-harness-core",
+ "nan-harness-private-fs",
  "nix",
+ "process-wrap",
  "semver",
  "serde",
  "serde_json",

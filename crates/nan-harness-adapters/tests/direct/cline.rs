@@ -47,9 +47,9 @@ fn cline_merges_provider_routing_and_models_into_linked_user_settings() {
         PROVIDER_BASE_URL_PLACEHOLDER
     );
     assert!(
-        settings["providers"]["openai-compatible"]["settings"]
-            .get("apiKey")
-            .is_none()
+        settings["providers"]["openai-compatible"]["settings"]["apiKey"]
+            .as_str()
+            .is_some_and(|value| value == "{secret:nan_api_key}")
     );
     assert_eq!(
         serde_json::from_str::<serde_json::Value>(&models_file.content_template)
@@ -57,5 +57,79 @@ fn cline_merges_provider_routing_and_models_into_linked_user_settings() {
         CLINE_MODEL_CATALOG_PLACEHOLDER
     );
     assert_search_mcp(&search_file.content_template, "OPENAI_API_KEY");
+    assert!(
+        !plan
+            .environment
+            .public
+            .contains_key("CLINE_SESSION_BACKEND_MODE")
+    );
     assert_direct_secret(&plan, "OPENAI_API_KEY");
+}
+
+#[test]
+fn cline_headless_arguments_use_the_local_executor_without_exposing_the_key() {
+    let plan = plan(
+        &ClineAdapter,
+        &context(
+            HarnessKind::Cline,
+            ["--json", "--timeout", "60", "run the task"]
+                .into_iter()
+                .map(str::to_owned)
+                .collect(),
+        ),
+    );
+    assert!(!plan.process.arguments.contains(&"--data-dir".to_owned()));
+    assert_eq!(
+        plan.environment
+            .public
+            .get("CLINE_SESSION_BACKEND_MODE")
+            .map(String::as_str),
+        Some("local")
+    );
+    assert!(!plan.process.arguments.contains(&"--yolo".to_owned()));
+    let serialized = serde_json::to_string(&plan).expect("plan should serialize");
+    assert!(!serialized.contains("contract-key"));
+    assert!(serialized.contains("{secret:nan_api_key}"));
+}
+
+#[test]
+fn cline_headless_act_arguments_use_the_local_executor() {
+    let plan = plan(
+        &ClineAdapter,
+        &context(
+            HarnessKind::Cline,
+            ["--act", "--auto-approve", "true", "--json", "run the task"]
+                .into_iter()
+                .map(str::to_owned)
+                .collect(),
+        ),
+    );
+    assert!(!plan.process.arguments.contains(&"--data-dir".to_owned()));
+    assert_eq!(
+        plan.environment.public["CLINE_SESSION_BACKEND_MODE"],
+        "local"
+    );
+    assert!(plan.process.arguments.contains(&"--act".to_owned()));
+    assert!(!plan.process.arguments.contains(&"--yolo".to_owned()));
+}
+
+#[test]
+fn cline_preserves_an_explicit_mode_for_headless_runs() {
+    let plan = plan(
+        &ClineAdapter,
+        &context(
+            HarnessKind::Cline,
+            ["--json", "--plan", "plan the task"]
+                .into_iter()
+                .map(str::to_owned)
+                .collect(),
+        ),
+    );
+    assert!(!plan.process.arguments.contains(&"--data-dir".to_owned()));
+    assert_eq!(
+        plan.environment.public["CLINE_SESSION_BACKEND_MODE"],
+        "local"
+    );
+    assert!(plan.process.arguments.contains(&"--plan".to_owned()));
+    assert!(!plan.process.arguments.contains(&"--yolo".to_owned()));
 }

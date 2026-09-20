@@ -321,8 +321,14 @@ mod tests {
     fn command_preserves_argument_order_and_removes_inherited_provider_credentials() {
         let mut plan: LaunchPlan = serde_json::from_str(DIRECT_PLAN).expect("valid fixture");
         plan.environment.secrets.clear();
-        let prepared = PreparedLaunch::prepare(&plan, "https://api.nan.builders/v1", None, None)
-            .expect("launch should prepare");
+        let prepared = PreparedLaunch::prepare(
+            &plan,
+            "https://api.nan.builders/v1",
+            None,
+            None,
+            &SecretStore::new(),
+        )
+        .expect("launch should prepare");
         let command =
             prepare_command(&plan, &prepared, &SecretStore::new()).expect("command should build");
         let arguments = command.as_std().get_args().collect::<Vec<_>>();
@@ -355,8 +361,14 @@ mod tests {
             INTERNAL_CANARY_USAGE_FILE.to_owned(),
             "should-not-leak".to_owned(),
         );
-        let prepared = PreparedLaunch::prepare(&plan, "https://api.nan.builders/v1", None, None)
-            .expect("launch should prepare");
+        let prepared = PreparedLaunch::prepare(
+            &plan,
+            "https://api.nan.builders/v1",
+            None,
+            None,
+            &SecretStore::new(),
+        )
+        .expect("launch should prepare");
         let command =
             prepare_command(&plan, &prepared, &SecretStore::new()).expect("command should build");
 

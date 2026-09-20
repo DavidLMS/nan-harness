@@ -168,9 +168,9 @@ class ReleasePublishIntegrationTests(unittest.TestCase):
         sums = [f"{gate.digest(self.assets / name)}  {name}" for name in gate.ASSETS]
         sums.append(f"{gate.digest(self.assets / 'update-manifest.json')}  update-manifest.json")
         (self.assets / "SHA256SUMS").write_text("\n".join(sums) + "\n")
-        for system in gate.SYSTEMS:
-            for harness in gate.HARNESSES:
-                self._write_report(system, harness)
+        for identity in sorted(gate.expected_identities()):
+            system, harness = identity.split("-", 1)
+            self._write_report(system, harness)
         self.handoff = self.root / "handoff.json"
         gate.build_manifest(type("Args", (), {"repository": self.repository, "tag": self.tag,
             "tag_commit": self.tag_commit, "workflow_commit": self.workflow_commit, "run_id": "run-1",
@@ -183,20 +183,22 @@ class ReleasePublishIntegrationTests(unittest.TestCase):
     def tearDown(self): self.temp.cleanup()
 
     def _write_report(self, system, harness):
-        asset = "nan-harness-aarch64-unknown-linux-musl" if system == "linux" else "nan-harness-aarch64-apple-darwin"
+        asset = gate.PLATFORM_ASSETS[system]["harness"]
         report = {"schemaVersion": 2, "runId": "run-1", "cellId": f"{system}-{harness}",
             "specSha256": "c" * 64, "trigger": "release", "tier": "release-gate",
             "scenario": "synthetic-release-gate", "startedAt": "2026-09-14T00:00:00Z",
             "completedAt": "2026-09-14T00:00:01Z", "durationMilliseconds": 1000,
             "nanHarness": {"version": "1.2.3", "source": f"commit:{self.tag_commit}",
                            "sha256": gate.digest(self.assets / asset)},
-            "environment": {"operatingSystem": system, "architecture": "aarch64", "image": "synthetic",
+            "environment": {"operatingSystem": system,
+                             "architecture": gate.PLATFORMS[system]["architecture"], "image": "synthetic",
                              "profile": "release", "runtimes": []},
             "harness": {"id": harness, "version": "9999.0.0"},
             "checks": [{"name": name, "status": "passed", "durationMilliseconds": 1, "attempts": 1}
                        for name in ("install-and-diagnose", "deterministic-conformance", "live-tool")],
             "outcome": "passed"}
-        (self.reports / f"{system}-aarch64-{harness}.json").write_text(json.dumps(report, sort_keys=True) + "\n")
+        architecture = gate.PLATFORMS[system]["architecture"]
+        (self.reports / f"{system}-{architecture}-{harness}.json").write_text(json.dumps(report, sort_keys=True) + "\n")
 
     def _env(self):
         env = dict(os.environ)

@@ -160,6 +160,27 @@ limit of seven. Its scoped `expect` preserves a complete translatable message
 and compile-time parameter checking. Reassess when the status message or the
 catalog API changes.
 
+### Unsafe code exceptions
+
+`unsafe_code` is denied workspace-wide and every other crate forbids it again with an inner
+`#![forbid(unsafe_code)]`. One crate is the single, audited exception:
+
+- `crates/nan-harness-detach` calls `GetStdHandle`, `GetHandleInformation`, and
+  `SetHandleInformation` so a launcher withholds its own standard handles while it starts a
+  long-lived helper — the shared request coordinator and the standalone `SearXNG` host. Windows
+  copies every inheritable handle of the launcher into a new process, so a helper started with null
+  streams still receives a copy of the launcher's stdout and keeps a caller's pipe open after the
+  launcher exits; pipelines, scripts, and CI steps then wait for a launcher that already exited. The
+  crate carries a reason-scoped `#![expect(unsafe_code, reason = "...")]`, exposes one safe function
+  that configures and starts the child, and only narrows inheritance where the platform does not
+  already replace the child's descriptors.
+
+Reassess this exception when the standard library offers stable handle-inheritance control
+(`CommandExt::inherit_handles` is unstable today), when the detached helpers stop outliving their
+launcher, or when the crate grows beyond those three Windows API calls. Any further
+`expect(unsafe_code)` needs its own recorded entry here, and the workspace level must stay `deny` so
+every other crate keeps its inner `forbid`.
+
 ## Terminal languages
 
 Keep English source messages in `crates/nan-harness-i18n/locales/en.json` with
@@ -197,17 +218,21 @@ verifies the draft before publication.
       protected `release-publication` environment exists for the publisher;
       this checklist does not configure either environment or assert that it
       is already present.
-- [ ] From the default branch, manually dispatch
+- [ ] Confirm draft creation automatically dispatches verification-only live
+      checks from the default branch. For a manual retry or publication, dispatch
       [`.github/workflows/release-gate.yml`](.github/workflows/release-gate.yml)
       with `tag`, `tag_commit`, and bounded `model`. Use `mode=live` for a
       release qualification; use `verification_only=true` (the default) for a
       safe check that cannot publish. The workflow must use the exact draft
-      tag's commit, the four ARM64 release assets, and the trusted workflow
+      tag's commit, the six Linux/macOS ARM64 and Windows x64 release assets,
+      and the trusted workflow
       source rather than executing tag-controlled code.
-- [ ] Keep the draft unpublished until the live hosted gate reports all 30
-      unique Linux/macOS ARM64 cells passed and emits its complete provenance
+- [ ] Keep the draft unpublished until the live hosted gate reports all 43
+      unique cells passed (15 Linux, 15 macOS, 13 Windows) and emits its complete provenance
       handoff. A deterministic verification-only run is useful evidence but
       does not satisfy the live release criterion and cannot publish.
+      Prime Agent and FX are skipped only on Windows until official native
+      distributions exist; skips never count as passes.
 - [ ] Allow publication only through the gate's explicit live,
       `verification_only=false` path after protected-environment approval.
       Confirm that the result is public, non-latest, non-prerelease, and has
