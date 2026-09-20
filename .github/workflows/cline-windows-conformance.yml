@@ -26,9 +26,6 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-on-failure: true
-      - name: Install pinned Cline
-        shell: pwsh
-        run: npm install --global cline@3.0.61
       - name: Build conformance binaries
         shell: pwsh
         run: cargo build --locked -p nan-harness-cli -p nan-harness-canary
@@ -41,6 +38,9 @@ jobs:
             target/debug/nan-harness-canary.exe
           retention-days: 3
           if-no-files-found: error
+      - name: Install pinned Cline
+        shell: pwsh
+        run: npm install --global cline@3.0.61
       - name: Verify Cline contracts
         timeout-minutes: 7
         shell: pwsh

@@ -193,7 +193,19 @@ impl PublishedConformanceRunner {
                 command = command.env(*name, *value);
             }
         }
-        command.run().await.map_err(ConformanceError::Terminal)
+        command.run().await.map_err(|error| {
+            use crate::terminal::TerminalError;
+            let reason = match &error {
+                TerminalError::Timeout { .. } => "timeout",
+                TerminalError::Execute { .. } => "execute",
+                TerminalError::MissingOutput { .. } => "missing-output",
+                TerminalError::CaptureJoin { .. } => "capture-join",
+                TerminalError::Capture { .. } => "capture-read",
+                TerminalError::DescendantCleanup { .. } => "descendant-cleanup",
+            };
+            eprintln!("conformance terminal failure: {reason}");
+            ConformanceError::Terminal(error)
+        })
     }
 }
 
