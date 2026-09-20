@@ -193,60 +193,7 @@ impl PublishedConformanceRunner {
                 command = command.env(*name, *value);
             }
         }
-        let output = command.run().await.map_err(ConformanceError::Terminal);
-        if std::env::var_os("NAN_HARNESS_CONFORMANCE_DIAGNOSTICS").is_some() {
-            if let Ok(output) = &output {
-                eprintln!("startup exit code: {:?}", output.status.code());
-                for family in [
-                    "CLI",
-                    "DISCOVERY",
-                    "PLAN",
-                    "RUNTIME",
-                    "BRIDGE",
-                    "CREDENTIAL",
-                    "PREPARED",
-                    "TEMPORARY",
-                ] {
-                    for number in 1..=20 {
-                        let code = format!("NH-{family}-{number:03}");
-                        if output.stderr.contains(&code) || output.stdout.contains(&code) {
-                            eprintln!("startup diagnostic code: {code}");
-                        }
-                    }
-                }
-                for indicator in [
-                    "unknown option",
-                    "Unknown command",
-                    "Cannot find module",
-                    "MODULE_NOT_FOUND",
-                    "ENOENT",
-                    "EACCES",
-                    "EPERM",
-                    "EINVAL",
-                    "SQLITE",
-                    "Invalid hook",
-                    "invalid hook",
-                    "not recognized",
-                    "system cannot find",
-                    "os error 2",
-                    "os error 5",
-                    "provider",
-                    "credentials",
-                    "sandbox",
-                    "directory",
-                    "session",
-                    "hooks",
-                    "key",
-                ] {
-                    if output.stderr.contains(indicator) {
-                        eprintln!("startup diagnostic indicator: {indicator}");
-                    }
-                }
-            } else {
-                eprintln!("startup terminal operation failed");
-            }
-        }
-        output
+        command.run().await.map_err(ConformanceError::Terminal)
     }
 }
 
