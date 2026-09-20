@@ -45,9 +45,9 @@ function Run-Native([string[]]$Arguments) {
     # Windows PowerShell 5.1 turns native stderr into error records. A warning
     # must not interrupt the child or replace its real exit status.
     $ErrorActionPreference = 'Continue'
-    $LASTEXITCODE = $null
+    $global:LASTEXITCODE = $null
     & $command @Arguments 1> $stdout 2> $stderr
-    $script:exitCode = $LASTEXITCODE
+    $script:exitCode = $global:LASTEXITCODE
   }
   catch { Add-Diagnostic 'live-child-launch'; $script:exitCode = -1; throw }
   finally { $ErrorActionPreference = $previousErrorAction }
