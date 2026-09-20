@@ -8,6 +8,7 @@ on:
       - canary/tests/probe-harness-windows.py
       - .github/workflows/cline-windows-conformance.yml
       - crates/nan-harness-adapters/**
+      - crates/nan-harness-detach/**
       - crates/nan-harness-runtime/**
       - crates/nan-harness-test-support/**
 
@@ -50,6 +51,10 @@ jobs:
         timeout-minutes: 5
         shell: pwsh
         run: cargo test --locked -p nan-harness-test-support --all-features terminal::windows_tests
+      - name: Verify detached helper handle ownership
+        timeout-minutes: 5
+        shell: pwsh
+        run: cargo test --locked -p nan-harness-detach --all-features
       - name: Verify exited-parent readiness and cleanup
         timeout-minutes: 5
         shell: pwsh

@@ -250,14 +250,27 @@ impl Observation<'_> {
         let observe_deadline = self
             .deadline
             .min(tokio::time::Instant::now() + self.cleanup_slice.min(Duration::from_secs(3)));
+        // A completed JoinHandle cannot be polled again; only timed-out readers remain live.
         let (post_out, post_err) = tokio::join!(
-            tokio::time::timeout_at(observe_deadline, &mut stdout),
-            tokio::time::timeout_at(observe_deadline, &mut stderr)
+            async {
+                if out.is_err() {
+                    Some(tokio::time::timeout_at(observe_deadline, &mut stdout).await)
+                } else {
+                    None
+                }
+            },
+            async {
+                if err.is_err() {
+                    Some(tokio::time::timeout_at(observe_deadline, &mut stderr).await)
+                } else {
+                    None
+                }
+            }
         );
-        if matches!(post_out, Ok(Ok(Ok(())))) {
+        if matches!(post_out, Some(Ok(Ok(Ok(()))))) {
             self.result.stdout_eof_after_cleanup = capture_snapshot(out_state).1;
         }
-        if matches!(post_err, Ok(Ok(Ok(())))) {
+        if matches!(post_err, Some(Ok(Ok(Ok(()))))) {
             self.result.stderr_eof_after_cleanup = capture_snapshot(err_state).1;
         }
         if self.result.event == ProcessEvent::Exited {
@@ -475,6 +488,25 @@ mod tests {
             ])
         }
         .timeout(Duration::from_secs(2))
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn independently_closed_stream_is_not_polled_again_during_cleanup() {
+        for redirect in ["1>/dev/null", "2>/dev/null"] {
+            let root = tempfile::tempdir().unwrap();
+            let script = format!("printf OUT; printf ERR >&2; sleep 120 {redirect} &");
+            let output = TerminalCommand::new("/bin/sh", root.path())
+                .args(["-c", &script])
+                .timeout(Duration::from_secs(2))
+                .diagnose(CaptureMode::Pipe, None)
+                .await;
+            assert_eq!(output.event, ProcessEvent::Failed);
+            assert!(output.stdout.contains("OUT"));
+            assert!(output.stderr.contains("ERR"));
+            assert_eq!(output.cleanup, Some(true));
+            assert_ne!(output.stdout_eof, output.stderr_eof);
+        }
     }
 
     #[tokio::test]

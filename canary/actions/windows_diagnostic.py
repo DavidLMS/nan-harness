@@ -728,9 +728,10 @@ def probe_diagnostic(cell, expected_stage=None):
         if not isinstance(value, dict) or value.get("schemaVersion") not in {1, 2}:
             result["markerState"] = "invalid"
             return result
-        if not isinstance(value.get("stage"), str) or value.get("status") not in {"passed", "failed"}:
-            result["markerState"] = "invalid"
-            return result
+        if (not isinstance(value.get("stage"), str)
+                or value["stage"] not in _PROBE_MARKER_FIELDS_STAGES
+                or value.get("status") not in {"passed", "failed"}):
+            return _invalid_marker(value)
         result = {"status": value["status"], "markerState": "valid", "stage": value["stage"]}
         if value["schemaVersion"] == 1:
             if set(value) - {"schemaVersion", "stage", "status", "diagnostic"}:

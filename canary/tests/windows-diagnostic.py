@@ -1167,6 +1167,18 @@ class WindowsDiagnosticTests(unittest.TestCase):
         self.assertIn("failedScenarios", rendered)
         self.assertIn("progress[tool-round-trip]=cleanup=passed", rendered)
 
+    def test_legacy_marker_cannot_publish_arbitrary_stage_text(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            marker = Path(tmp) / "probe-result.json"
+            marker.write_text(json.dumps({
+                "schemaVersion": 1, "stage": "synthetic-private-output",
+                "status": "failed", "diagnostic": "synthetic-private-output",
+            }))
+            parsed = diagnostic.probe_diagnostic(Path(tmp), "version-doctor")
+            self.assertEqual(parsed["status"], "failed")
+            self.assertEqual(parsed["markerState"], "invalid")
+            self.assertNotIn("synthetic-private-output", json.dumps(parsed))
+
     def test_rejected_marker_counts_names_it_does_not_publish(self):
         with tempfile.TemporaryDirectory() as tmp:
             marker = Path(tmp) / "probe-result.json"

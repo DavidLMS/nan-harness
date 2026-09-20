@@ -8,6 +8,7 @@
 //!
 //! This module is the workspace's single audited exception to `unsafe_code`.
 
+use std::sync::Mutex;
 use windows_sys::Win32::Foundation::{
     GetHandleInformation, HANDLE, HANDLE_FLAG_INHERIT, INVALID_HANDLE_VALUE, SetHandleInformation,
 };
@@ -16,9 +17,15 @@ use windows_sys::Win32::System::Console::{
 };
 
 const STANDARD_HANDLES: [u32; 3] = [STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE];
+static SPAWN_LOCK: Mutex<()> = Mutex::new(());
 
 /// Runs `start` while no standard handle of this process is inheritable.
 pub(super) fn without_inherited_standard_handles<T>(start: impl FnOnce() -> T) -> T {
+    // The flags are process-wide: overlapping guards could restore inheritance while
+    // another guarded spawn is still using it. Restore before releasing this lock.
+    let _lock = SPAWN_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let _guard = InheritanceGuard::engage();
     start()
 }
@@ -68,5 +75,30 @@ impl Drop for InheritanceGuard {
             let _ =
                 unsafe { SetHandleInformation(handle, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT) };
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::without_inherited_standard_handles;
+    use std::sync::Barrier;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn concurrent_guarded_spawns_do_not_overlap() {
+        let barrier = Barrier::new(8);
+        let active = AtomicUsize::new(0);
+        std::thread::scope(|scope| {
+            for _ in 0..8 {
+                scope.spawn(|| {
+                    barrier.wait();
+                    without_inherited_standard_handles(|| {
+                        assert_eq!(active.fetch_add(1, Ordering::SeqCst), 0);
+                        std::thread::sleep(std::time::Duration::from_millis(5));
+                        assert_eq!(active.fetch_sub(1, Ordering::SeqCst), 1);
+                    });
+                });
+            }
+        });
     }
 }
