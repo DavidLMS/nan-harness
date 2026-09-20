@@ -25,9 +25,36 @@ class HostedCliSelectionTests(unittest.TestCase):
                          [("linux", "codex"), ("linux", "fx"), ("macos", "codex"), ("macos", "fx")])
         self.assertEqual(result["mode"], "live")
 
-    def test_invalid_windows_desktop_duplicates_and_mode_fail(self):
-        for platforms, harnesses, mode in (("windows", "all", "deterministic"),
-                                           ("linux,linux", "all", "deterministic"),
+    def test_native_windows_is_an_explicit_hosted_platform(self):
+        result = selection.select_cli("windows", "codex")
+        self.assertEqual(result["cells"], [{"system": "windows", "runner": "windows-2025",
+                                            "architecture": "x86_64",
+                                            "target": "x86_64-pc-windows-msvc",
+                                            "harness": "codex", "mode": "deterministic"}])
+        every = selection.select_cli("all", "codex")
+        self.assertEqual({cell["system"] for cell in every["cells"]},
+                         {"linux", "macos", "windows"})
+        self.assertEqual(len(every["cells"]), 3)
+
+    def test_platform_and_architecture_pairs_are_closed(self):
+        self.assertEqual(selection.identity("windows", "x86_64")["runner"], "windows-2025")
+        for system, architecture in (("windows", "aarch64"), ("linux", "x86_64"),
+                                     ("solaris", "x86_64")):
+            with self.subTest(system=system, architecture=architecture), self.assertRaises(ValueError):
+                selection.identity(system, architecture)
+
+    def test_every_harness_requires_the_hosted_arm64_platforms(self):
+        self.assertEqual(set(selection.HARNESS_PLATFORMS), set(selection.CLI_HARNESSES))
+        self.assertEqual(len(selection.qualified_identities()), 30)
+        self.assertEqual(selection.qualified_platforms(), ("linux", "macos"))
+        self.assertEqual(len(selection.required_assets()), 4)
+        for harness in selection.CLI_HARNESSES:
+            self.assertEqual(selection.supported_platforms(harness), ("linux", "macos"))
+        with self.assertRaises(ValueError):
+            selection.supported_platforms("claude-desktop")
+
+    def test_invalid_duplicates_and_mode_fail(self):
+        for platforms, harnesses, mode in (("linux,linux", "all", "deterministic"),
                                            ("linux", "codex,codex", "deterministic"),
                                            ("linux", "claude-desktop", "deterministic"),
                                            ("linux", "all", "publish")):

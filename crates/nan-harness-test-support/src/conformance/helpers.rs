@@ -1,13 +1,135 @@
 use super::constants::MAX_DURATION_MILLISECONDS;
 use super::report::{ConformanceCheck, ConformanceScenario, ConformanceStatus};
+use crate::assertions::ProbeAssertionError;
 use crate::manifest::Expectation;
 use crate::scripted_provider::ScriptedToolCall;
 use crate::terminal::TerminalOutput;
 use serde_json::Value;
 use std::collections::BTreeSet;
 use std::fs;
+use std::io::Write as _;
 use std::path::Path;
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
+
+const PROGRESS_ENV: &str = "NAN_HARNESS_CONFORMANCE_PROGRESS";
+const ASSERTION_ENV: &str = "NAN_HARNESS_CONFORMANCE_ASSERTION";
+
+/// Closed codes a failed conformance assertion may publish.
+///
+/// A harness process, a provider exchange and the filesystem are three different failure
+/// domains, and a hosted report must say which one failed without copying harness output.
+#[must_use]
+pub(crate) fn assertion_code(error: &ProbeAssertionError) -> &'static str {
+    match error {
+        ProbeAssertionError::ProcessFailed => "process-failed",
+        ProbeAssertionError::MissingProviderRequest => "tool-call-missing",
+        ProbeAssertionError::UnexpectedToolTraffic => "tool-traffic-unexpected",
+        ProbeAssertionError::UnexpectedToolCallCount { .. }
+        | ProbeAssertionError::UnexpectedToolCallId { .. }
+        | ProbeAssertionError::UnexpectedToolName { .. }
+        | ProbeAssertionError::UnexpectedToolInput { .. }
+        | ProbeAssertionError::UnexpectedFunctionTools => "tool-call-mismatch",
+        ProbeAssertionError::UnexpectedToolResults { .. }
+        | ProbeAssertionError::EmptyToolResult
+        | ProbeAssertionError::ToolResultError => "tool-result-mismatch",
+        ProbeAssertionError::ToolResultShellError => "tool-result-shell-error",
+        ProbeAssertionError::MissingMarker(_) => "marker-missing",
+        ProbeAssertionError::MissingFilesystemSideEffect(_) => "side-effect-missing",
+        ProbeAssertionError::Filesystem(_) => "filesystem-unreadable",
+    }
+}
+
+/// Records one closed assertion code when a cell asked for the record.
+pub(crate) fn record_assertion(error: &ProbeAssertionError) {
+    record_assertion_code(assertion_code(error));
+}
+
+/// Records the closed code of a failed assertion and reports whether it passed.
+pub(crate) fn assertion_passed(result: Result<(), ProbeAssertionError>) -> bool {
+    match result {
+        Ok(()) => true,
+        Err(error) => {
+            record_assertion(&error);
+            false
+        }
+    }
+}
+
+/// Records one closed code that a scenario derived without a [`ProbeAssertionError`].
+pub(crate) fn record_assertion_code(code: &str) {
+    let Some(path) = std::env::var_os(ASSERTION_ENV).map(std::path::PathBuf::from) else {
+        return;
+    };
+    let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    else {
+        return;
+    };
+    if fs::create_dir_all(parent).is_err() {
+        return;
+    }
+    let Ok(mut file) = fs::OpenOptions::new().create(true).append(true).open(&path) else {
+        return;
+    };
+    let mut line = code.to_owned();
+    line.push('\n');
+    let _ = file.write_all(line.as_bytes());
+}
+
+#[derive(serde::Serialize)]
+struct ProgressEvent<'a> {
+    schema_version: u8,
+    scenario: &'a str,
+    stage: &'a str,
+    status: &'a str,
+    elapsed_milliseconds: u64,
+}
+
+static PROGRESS_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+/// Appends one safe conformance progress event when explicitly enabled.
+pub(crate) fn progress_event(scenario: &str, stage: &str, status: &str, started: Instant) {
+    let Some(path) = std::env::var_os(PROGRESS_ENV).map(std::path::PathBuf::from) else {
+        return;
+    };
+    write_progress_event(&path, scenario, stage, status, started);
+}
+
+fn write_progress_event(path: &Path, scenario: &str, stage: &str, status: &str, started: Instant) {
+    let event = ProgressEvent {
+        schema_version: 1,
+        scenario,
+        stage,
+        status,
+        elapsed_milliseconds: duration_milliseconds(started.elapsed()),
+    };
+    let Ok(encoded) = serde_json::to_vec(&event) else {
+        return;
+    };
+    let lock = PROGRESS_LOCK.get_or_init(|| Mutex::new(()));
+    let Ok(_guard) = lock.lock() else {
+        return;
+    };
+    let Ok(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .map(Path::to_owned)
+        .ok_or(())
+    else {
+        return;
+    };
+    if fs::create_dir_all(parent).is_err() {
+        return;
+    }
+    let mut line = encoded;
+    line.push(b'\n');
+    let Ok(mut file) = fs::OpenOptions::new().create(true).append(true).open(path) else {
+        return;
+    };
+    let _ = file.write_all(&line).and_then(|()| file.sync_data());
+}
 
 /// Builds a scripted tool call for a deterministic conformance scenario.
 #[must_use]
@@ -210,4 +332,66 @@ pub(crate) fn duration_milliseconds(duration: Duration) -> u64 {
         .try_into()
         .unwrap_or(MAX_DURATION_MILLISECONDS)
         .min(MAX_DURATION_MILLISECONDS)
+}
+
+#[cfg(test)]
+mod progress_tests {
+    use super::write_progress_event;
+    use serde_json::Value;
+    use std::time::{Duration, Instant};
+
+    #[tokio::test]
+    async fn progress_is_durable_before_pending_await_and_after_cancellation() {
+        let workspace = tempfile::tempdir().expect("workspace should exist");
+        let path = workspace.path().join("progress.jsonl");
+        let started = Instant::now();
+        write_progress_event(&path, "inventory", "process", "started", started);
+        let pending = tokio::time::timeout(Duration::from_millis(10), async {
+            std::future::pending::<()>().await;
+        })
+        .await;
+        assert!(pending.is_err());
+        write_progress_event(&path, "inventory", "process", "failed", started);
+        let lines = std::fs::read_to_string(&path).expect("progress should be durable");
+        let events = lines
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0]["status"], "started");
+        assert_eq!(events[1]["status"], "failed");
+        for event in &events {
+            assert_eq!(event.as_object().expect("event object").len(), 5);
+            assert_eq!(event["schemaVersion"], Value::Null);
+            assert_eq!(event["schema_version"], 1);
+            assert!(event["elapsed_milliseconds"].as_u64().is_some());
+        }
+        let encoded = lines.to_ascii_lowercase();
+        assert!(!encoded.contains("path"));
+        assert!(!encoded.contains("output"));
+        assert!(!encoded.contains("secret"));
+    }
+
+    #[test]
+    fn progress_writer_ignores_missing_or_unwritable_paths() {
+        let workspace = tempfile::tempdir().expect("workspace should exist");
+        let missing_parent = workspace.path().join("missing/progress.jsonl");
+        write_progress_event(
+            &missing_parent,
+            "sentinel",
+            "scenario",
+            "started",
+            Instant::now(),
+        );
+        assert!(missing_parent.is_file());
+        let unwritable = workspace.path().join("directory");
+        std::fs::create_dir(&unwritable).expect("directory should exist");
+        write_progress_event(
+            &unwritable,
+            "sentinel",
+            "scenario",
+            "started",
+            Instant::now(),
+        );
+    }
 }

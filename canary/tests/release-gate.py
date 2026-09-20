@@ -5,6 +5,7 @@ import importlib.util
 import json
 import re
 import shlex
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -21,6 +22,23 @@ PUBLISHER_SPEC.loader.exec_module(publisher)
 
 
 class ReleaseGateTests(unittest.TestCase):
+    def test_qualified_platforms_drive_matrix_assets_and_identities(self):
+        # The support list is shared data: adding a platform to a harness must change
+        # the required identities, and a platform without a canary asset must fail
+        # closed instead of collecting a cell whose evidence cannot exist.
+        selection = sys.modules["selection"]
+        original = dict(selection.HARNESS_PLATFORMS)
+        try:
+            self.assertEqual(len(release_gate.expected_identities()), 30)
+            self.assertEqual(len(release_gate.ASSETS), 4)
+            selection.HARNESS_PLATFORMS["codex"] = ("linux", "macos", "windows")
+            self.assertIn("windows-codex", release_gate.expected_identities())
+            with self.assertRaisesRegex(ValueError, "published canary release asset"):
+                release_gate.matrix(None)
+        finally:
+            selection.HARNESS_PLATFORMS.clear()
+            selection.HARNESS_PLATFORMS.update(original)
+
     def test_workflows_are_manual_serialized_and_trusted(self):
         gate = (ROOT / ".github/workflows/release-gate.yml").read_text()
         recommend = (ROOT / ".github/workflows/recommend-release.yml").read_text()
@@ -44,7 +62,9 @@ class ReleaseGateTests(unittest.TestCase):
         self.assertIn("environment: release-publication", recommend)
         self.assertIn("permissions:\n  contents: read", recommend)
         self.assertNotIn("ref: ${{ inputs.tag }}", gate)
-        self.assertIn('"macos-14"', (ROOT / "canary/actions/release_gate.py").read_text())
+        # The hosted runner labels live in the hosted platform table, which every
+        # consumer shares.
+        self.assertIn('"macos-14"', (ROOT / "canary/actions/selection.py").read_text())
         self.assertIn('test "$(uname -m)" = arm64', gate)
         self.assertIn("--reports-dir reports", gate)
         self.assertNotIn("gh run download", recommend)
@@ -103,7 +123,7 @@ class ReleaseGateTests(unittest.TestCase):
                 "outcome": "passed", "environment": {"operatingSystem": system, "architecture": "aarch64"},
                 "harness": {"id": harness}, "nanHarness": {
                     "source": "commit:" + "a" * 40, "version": "1.2.3",
-                    "sha256": release_gate.digest(assets / release_gate.PLATFORM_ASSETS[system]),
+                    "sha256": release_gate.digest(assets / release_gate.PLATFORM_ASSETS[system]["harness"]),
                 }, "checks": [{"name": name, "status": "passed"}
                               for name in release_gate.REQUIRED_CHECKS],
             }

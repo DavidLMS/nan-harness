@@ -9,11 +9,11 @@ on:
         default: all
         type: string
       mode:
-        description: deterministic checks or explicitly authorized live probe
+        description: credential-free native boundary diagnostic, deterministic checks, or explicitly authorized live probe
         required: true
         default: deterministic
         type: choice
-        options: [deterministic, live]
+        options: [native-diagnostic, deterministic, live, codex-diagnostic]
       model:
         description: Bounded model identifier
         required: true
@@ -38,10 +38,17 @@ jobs:
     runs-on: windows-2025
     timeout-minutes: 120
     environment: ${{ inputs.mode == 'live' && 'canary-live' || '' }}
+    env:
+      DIAGNOSTIC_MODE: ${{ inputs.mode }}
     defaults:
       run:
         shell: pwsh
     steps:
+      - name: Record diagnostic timing origin
+        id: timing
+        run: |
+          "NAN_DIAGNOSTIC_WORKFLOW_START_UTC=$((Get-Date).ToUniversalTime().ToString('o'))" >> $env:GITHUB_ENV
+
       - name: Check out trusted workflow source
         id: checkout
         continue-on-error: true
@@ -94,6 +101,80 @@ jobs:
           if ((git -C $env:GITHUB_WORKSPACE rev-parse HEAD) -ne $source) { throw 'tested source checkout identity mismatch' }
           "TESTED_SOURCE_SHA=$source" >> $env:GITHUB_ENV
 
+      - name: Run native Windows fixture regressions
+        id: fixtures
+        continue-on-error: true
+        if: always()
+        run: |
+          if ('${{ steps.source.outcome }}' -ne 'success') {
+            "NAN_DIAGNOSTIC_SETUP_FIXTURES=not-run-source-checkout" >> $env:GITHUB_ENV
+            throw 'Windows fixture regressions were not run because exact source checkout failed'
+          }
+          if (-not (Get-Command pwsh -ErrorAction SilentlyContinue)) {
+            "NAN_DIAGNOSTIC_SETUP_FIXTURES=failed-pwsh-missing" >> $env:GITHUB_ENV
+            throw 'pwsh is required for Windows fixture regressions'
+          }
+          $output = & python -m unittest -v canary/tests/windows-diagnostic-workflow.py canary/tests/windows-diagnostic.py canary/tests/windows-summary.py canary/tests/windows-installer.py 2>&1
+          $code = $LASTEXITCODE
+          $output | Write-Output
+          if ($code -ne 0 -or $output -match 'skipped=[1-9][0-9]*') {
+            "NAN_DIAGNOSTIC_SETUP_FIXTURES=failed-python-regressions" >> $env:GITHUB_ENV
+            throw "Windows Python fixture regressions failed with exit code $code or unexpected skip."
+          }
+          $probe = & python3 canary/tests/probe-harness-windows.py -v 2>&1
+          $probeCode = $LASTEXITCODE
+          $probe | Write-Output
+          if ($probeCode -ne 0 -or $probe -match 'skipped=[1-9][0-9]*') {
+            "NAN_DIAGNOSTIC_SETUP_FIXTURES=failed-probe-regressions" >> $env:GITHUB_ENV
+            throw "Windows probe fixture regressions failed with exit code $probeCode or unexpected skip."
+          }
+          "NAN_DIAGNOSTIC_SETUP_FIXTURES=success" >> $env:GITHUB_ENV
+
+      - name: Run focused Rust Windows environment fixture
+        id: rust_fixture
+        continue-on-error: true
+        if: always()
+        run: |
+          if ('${{ steps.source.outcome }}' -ne 'success') {
+            "NAN_DIAGNOSTIC_SETUP_RUST_FIXTURE=not-run-source-checkout" >> $env:GITHUB_ENV
+            throw 'focused Rust fixture was not run because exact source checkout failed'
+          }
+          $filters = @(
+            @{ Filter = 'conformance::environment::tests::native_child_sees_os_prerequisites_and_private_paths_only'; Name = 'environment' },
+            @{ Filter = 'terminal::tests::inherited_pipe_descendants_are_killed_with_the_owned_shell'; Name = 'terminal-live-parent' }
+            @{ Filter = 'terminal::tests::parent_exits_before_inherited_pipe_cleanup'; Name = 'terminal-parent-exit' }
+            @{ Filter = 'terminal::diagnostic::tests::real_pipe_and_private_file_captures_are_distinct'; Name = 'diagnostic-capture' }
+            @{ Filter = 'terminal::diagnostic::tests::cancellation_and_timeout_are_independent_owned_events'; Name = 'diagnostic-cancel' }
+            @{ Filter = 'terminal::diagnostic::tests::missing_executable_does_not_claim_exit_or_cleanup'; Name = 'diagnostic-missing' }
+            @{ Filter = 'terminal::diagnostic::tests::retention_cap_is_not_eof_and_does_not_block_writer'; Name = 'diagnostic-eof' }
+            @{ Filter = 'terminal::diagnostic::survivors::tests::scan_reports_the_current_process_ancestry'; Name = 'diagnostic-survivors' }
+          )
+          $rustFailures = @()
+          foreach ($entry in $filters) {
+            $filter = $entry.Filter
+            $listed = @(& cargo test --locked -p nan-harness-test-support --all-features $filter -- --exact --list 2>&1)
+            $listCode = $LASTEXITCODE
+            $listed | Write-Output
+            $matches = @($listed | Where-Object { $_ -match ': test$' })
+            if ($listCode -ne 0 -or $matches.Count -ne 1) {
+              $rustFailures += "$($entry.Name)-discovery"
+              "focused Rust $($entry.Name) fixture discovery failed: exit=$listCode matches=$($matches.Count)" | Write-Output
+              continue
+            }
+            & cargo test --locked -p nan-harness-test-support --all-features $filter -- --exact
+            $fixtureCode = $LASTEXITCODE
+            if ($fixtureCode -ne 0) {
+              $rustFailures += "$($entry.Name)-exit-$fixtureCode"
+              "focused Rust $($entry.Name) fixture failed with exit code $fixtureCode" | Write-Output
+            }
+          }
+          if ($rustFailures.Count -eq 0) {
+            "NAN_DIAGNOSTIC_SETUP_RUST_FIXTURE=success" >> $env:GITHUB_ENV
+          } else {
+            "NAN_DIAGNOSTIC_SETUP_RUST_FIXTURE=failed-$($rustFailures -join ',')" >> $env:GITHUB_ENV
+            throw "focused Rust fixtures failed: $($rustFailures -join ',')"
+          }
+
       - name: Build native diagnostic binaries
         id: build
         continue-on-error: true
@@ -107,7 +188,59 @@ jobs:
           $canaryCode = $LASTEXITCODE
           "NAN_DIAGNOSTIC_BUILD_CLI=$cliCode" >> $env:GITHUB_ENV
           "NAN_DIAGNOSTIC_BUILD_CANARY=$canaryCode" >> $env:GITHUB_ENV
-          if ($cliCode -ne 0 -or $canaryCode -ne 0) { exit 1 }
+          # The supervised standard-stream regression uses the same harness double as the
+          # focused fixtures, so it never depends on a live harness conversation.
+          cargo build --locked --release --package nan-harness-canary --bin codex-harness-fixture --target x86_64-pc-windows-msvc
+          $fixtureCode = $LASTEXITCODE
+          "NAN_DIAGNOSTIC_HARNESS_FIXTURE=$env:GITHUB_WORKSPACE\target\x86_64-pc-windows-msvc\release\codex-harness-fixture.exe" >> $env:GITHUB_ENV
+          if ($cliCode -ne 0 -or $canaryCode -ne 0 -or $fixtureCode -ne 0) { exit 1 }
+
+      - name: Run supervised standard-stream regression
+        id: supervised
+        if: always()
+        env:
+          NAN_CODEX_DIAGNOSTIC_TEST_NAN_HARNESS: ${{ github.workspace }}\target\x86_64-pc-windows-msvc\release\nan-harness.exe
+          NAN_CODEX_DIAGNOSTIC_TEST_HARNESS_FIXTURE: ${{ github.workspace }}\target\x86_64-pc-windows-msvc\release\codex-harness-fixture.exe
+        run: |
+          if ('${{ steps.build.outcome }}' -ne 'success') {
+            "NAN_DIAGNOSTIC_SETUP_SUPERVISED=not-run-build" >> $env:GITHUB_ENV
+            throw 'the supervised standard-stream regression requires the built binaries'
+          }
+          # The regression drives the real supervisor with a harness double that leaves a
+          # controlled descendant holding the inherited streams. It reports whether the
+          # supervisor terminated that descendant before it exited. A failure here is the
+          # deterministic reproduction and must not stop the independent batch below.
+          & cargo test --locked -p nan-harness-canary --all-features codex_diagnostic::tests::native_supervised_launch_attributes_a_leaked_descendant -- --ignored --exact --nocapture
+          $code = $LASTEXITCODE
+          if ($null -eq $code) { $code = 1 }
+          if ($code -ne 0) {
+            "NAN_DIAGNOSTIC_SETUP_SUPERVISED=failed-exit-$code" >> $env:GITHUB_ENV
+            throw "the supervised standard-stream regression failed with exit code $code"
+          }
+          "NAN_DIAGNOSTIC_SETUP_SUPERVISED=success" >> $env:GITHUB_ENV
+
+      - name: Run detached-helper inheritance regression
+        id: detached_helper
+        continue-on-error: true
+        if: always()
+        run: |
+          if ('${{ steps.source.outcome }}' -ne 'success') {
+            "NAN_DIAGNOSTIC_SETUP_DETACHED_HELPER=not-run-source-checkout" >> $env:GITHUB_ENV
+            throw 'the detached-helper regression was not run because exact source checkout failed'
+          }
+          # A long-lived helper must own nothing of its launcher: Windows copies every inheritable
+          # handle into the child, so a helper that keeps a copy of the launcher's stdout defeats end
+          # of file for every reader of a pipe. The regression runs a launcher with a piped stdout
+          # that starts a helper, first through a plain spawn to observe the platform behaviour and
+          # then through the production helper guarded by the fix.
+          & cargo test --locked -p nan-harness-detach --all-features --test inherited_handles -- --nocapture
+          $code = $LASTEXITCODE
+          if ($null -eq $code) { $code = 1 }
+          if ($code -ne 0) {
+            "NAN_DIAGNOSTIC_SETUP_DETACHED_HELPER=failed-exit-$code" >> $env:GITHUB_ENV
+            throw "the detached-helper inheritance regression failed with exit code $code"
+          }
+          "NAN_DIAGNOSTIC_SETUP_DETACHED_HELPER=success" >> $env:GITHUB_ENV
 
       - name: Run one isolated Windows diagnostic batch
         id: batch
@@ -115,33 +248,101 @@ jobs:
         continue-on-error: true
         env:
           NAN_API_KEY: ${{ inputs.mode == 'live' && secrets.NAN_API_KEY || '' }}
+          # Official version metadata reaches the GitHub API. The hosted ARM64 gate
+          # already authenticates that call; anonymous requests from a shared runner
+          # are rate limited and surface as official-metadata-unavailable. The token
+          # stays in the collector: the cell environment is an allowlist that never
+          # forwards it to a harness.
+          GITHUB_TOKEN: ${{ github.token }}
           HARNESS_SELECTION: ${{ inputs.harnesses }}
           DIAGNOSTIC_MODE: ${{ inputs.mode }}
           DIAGNOSTIC_MODEL: ${{ inputs.model }}
+          NAN_DIAGNOSTIC_PYTHON_VERSION: '3.12'
           REPORT_DIR: ${{ runner.temp }}\windows-cli-diagnostic
           NAN_DIAGNOSTIC_SETUP_CHECKOUT: ${{ steps.checkout.outcome }}
+          NAN_DIAGNOSTIC_SETUP_IDENTITY: ${{ steps.identity.outcome }}
           NAN_DIAGNOSTIC_SETUP_NODE: ${{ steps.node.outcome }}
           NAN_DIAGNOSTIC_SETUP_PYTHON: ${{ steps.python.outcome }}
           NAN_DIAGNOSTIC_SETUP_RUST: ${{ steps.rust.outcome }}
           NAN_DIAGNOSTIC_SETUP_SOURCE: ${{ steps.source.outcome }}
+          NAN_DIAGNOSTIC_SETUP_FIXTURES: ${{ env.NAN_DIAGNOSTIC_SETUP_FIXTURES || steps.fixtures.outcome }}
+          NAN_DIAGNOSTIC_SETUP_RUST_FIXTURE: ${{ env.NAN_DIAGNOSTIC_SETUP_RUST_FIXTURE || steps.rust_fixture.outcome }}
           NAN_DIAGNOSTIC_SETUP_BUILD: ${{ steps.build.outcome }}
           NAN_DIAGNOSTIC_BINARY: ${{ github.workspace }}\target\x86_64-pc-windows-msvc\release\nan-harness.exe
           NAN_DIAGNOSTIC_CANARY: ${{ github.workspace }}\target\x86_64-pc-windows-msvc\release\nan-harness-canary.exe
         run: |
           $ErrorActionPreference = 'Continue'
           $source = if ($env:TESTED_SOURCE_SHA) { $env:TESTED_SOURCE_SHA } else { $env:GITHUB_SHA }
+          # Derive the collector allowance from the actual job elapsed time;
+          # Timing starts before checkout. Reserve two minutes for runner
+          # startup plus ten minutes for summary/artifact/final-gate work;
+          # setup can therefore never consume either reserve.
+          $remaining = 1
+          if (-not $env:NAN_DIAGNOSTIC_WORKFLOW_START_UTC) {
+            Write-Output 'Diagnostic timing origin missing; forcing minimal safe batch budget.'
+          } else {
+            try {
+              $started = [DateTimeOffset]::Parse($env:NAN_DIAGNOSTIC_WORKFLOW_START_UTC)
+              $elapsed = ([DateTimeOffset]::UtcNow - $started).TotalSeconds
+              $remaining = [math]::Floor(120 * 60 - $elapsed - 600 - 120)
+            } catch {
+              Write-Output 'Diagnostic timing origin invalid; forcing minimal safe batch budget.'
+            }
+          }
+          if ($remaining -lt 1) { $remaining = 1 }
+          $env:NAN_DIAGNOSTIC_BATCH_BUDGET = [string]([math]::Min(6000, $remaining))
+          Write-Output "Diagnostic batch budget seconds: $env:NAN_DIAGNOSTIC_BATCH_BUDGET"
           New-Item -ItemType Directory -Force -Path $env:REPORT_DIR | Out-Null
           $entrypoint = Join-Path $env:GITHUB_WORKSPACE 'canary\windows-diagnostic.cmd'
-          if (Test-Path $entrypoint) {
+          if ($env:DIAGNOSTIC_MODE -eq 'codex-diagnostic') {
+            # The historical `all` default is normalized to the sole supported
+            # harness for this mode; any explicit non-Codex selection fails closed.
+            $selection = if ([string]::IsNullOrWhiteSpace($env:HARNESS_SELECTION) -or $env:HARNESS_SELECTION -eq 'all') { 'codex' } else { $env:HARNESS_SELECTION }
+            if ($selection -ne 'codex') {
+              python -I (Join-Path $env:GITHUB_WORKSPACE 'canary\actions\codex_diagnostic.py') --report (Join-Path $env:REPORT_DIR 'report.json') --output (Join-Path $env:REPORT_DIR 'summary.md') --blocked-reason unsafe_prerequisite
+              $global:LASTEXITCODE = 1
+              return
+            }
+            $requiredSetup = @($env:NAN_DIAGNOSTIC_SETUP_CHECKOUT, $env:NAN_DIAGNOSTIC_SETUP_IDENTITY,
+              $env:NAN_DIAGNOSTIC_SETUP_NODE, $env:NAN_DIAGNOSTIC_SETUP_PYTHON,
+              $env:NAN_DIAGNOSTIC_SETUP_RUST, $env:NAN_DIAGNOSTIC_SETUP_SOURCE,
+              $env:NAN_DIAGNOSTIC_SETUP_FIXTURES, $env:NAN_DIAGNOSTIC_SETUP_RUST_FIXTURE,
+              $env:NAN_DIAGNOSTIC_SETUP_BUILD)
+            if (@($requiredSetup | Where-Object { $_ -ne 'success' }).Count -gt 0) {
+              python -I (Join-Path $env:GITHUB_WORKSPACE 'canary\actions\codex_diagnostic.py') --report (Join-Path $env:REPORT_DIR 'report.json') --output (Join-Path $env:REPORT_DIR 'summary.md') --blocked-reason unsafe_prerequisite
+              $global:LASTEXITCODE = 1
+              return
+            }
+            $codexCell = Join-Path $env:REPORT_DIR 'private-codex-cell'
+            $setupReport = Join-Path $codexCell 'setup.json'
+            $prepareStarted = [DateTimeOffset]::UtcNow
+            # prepare_codex reuses canary/guest/install-harness.ps1 and cli-suite resolver.
+            python -I (Join-Path $env:GITHUB_WORKSPACE 'canary\actions\codex_diagnostic.py') --prepare --cell $codexCell --setup-report $setupReport --report (Join-Path $env:REPORT_DIR 'private-setup.json') --model $env:DIAGNOSTIC_MODEL --timeout-seconds $env:NAN_DIAGNOSTIC_BATCH_BUDGET
+            if ($LASTEXITCODE -ne 0) {
+              python -I (Join-Path $env:GITHUB_WORKSPACE 'canary\actions\codex_diagnostic.py') --report (Join-Path $env:REPORT_DIR 'report.json') --output (Join-Path $env:REPORT_DIR 'summary.md') --blocked-reason unsafe_prerequisite
+              $global:LASTEXITCODE = 1
+              return
+            }
+            $env:PATH = (Join-Path $codexCell 'home\.npm-global') + ';' + (Join-Path $codexCell 'bin') + ';' + $env:PATH
+            $totalMilliseconds = [math]::Max(1, [int64]$env:NAN_DIAGNOSTIC_BATCH_BUDGET * 1000 - [int64]([DateTimeOffset]::UtcNow - $prepareStarted).TotalMilliseconds)
+            $installed = Get-Content -LiteralPath $setupReport -Raw | ConvertFrom-Json
+            if (-not (Test-Path $env:NAN_DIAGNOSTIC_CANARY)) {
+              throw 'Codex diagnostic canary binary is unavailable'
+            }
+            & $env:NAN_DIAGNOSTIC_CANARY codex-diagnostic --nan-harness $env:NAN_DIAGNOSTIC_BINARY --codex $installed.executable --expected-version $installed.version --report (Join-Path $env:REPORT_DIR 'report.json') --total-deadline-ms $totalMilliseconds
+            $batchCode = $LASTEXITCODE
+            if ($null -eq $batchCode) { $batchCode = 1 }
+            $global:LASTEXITCODE = $batchCode
+          } elseif (Test-Path $entrypoint) {
             & $entrypoint --harnesses $env:HARNESS_SELECTION --mode $env:DIAGNOSTIC_MODE `
-              --model $env:DIAGNOSTIC_MODEL --source-sha $source --binary $env:NAN_DIAGNOSTIC_BINARY `
+              --model $env:DIAGNOSTIC_MODEL --python-version $env:NAN_DIAGNOSTIC_PYTHON_VERSION --budget-seconds $env:NAN_DIAGNOSTIC_BATCH_BUDGET --source-sha $source --binary $env:NAN_DIAGNOSTIC_BINARY `
               --canary $env:NAN_DIAGNOSTIC_CANARY --output $env:REPORT_DIR
             $batchCode = $LASTEXITCODE
             if ($null -eq $batchCode) { $batchCode = 1 }
             $global:LASTEXITCODE = $batchCode
           } else {
-            @{ schemaVersion = 1; platform = @{ os = 'windows'; architecture = 'x64' };
-               mode = $env:DIAGNOSTIC_MODE; model = $env:DIAGNOSTIC_MODEL; source = $source;
+            @{ schemaVersion = 1; mode = $env:DIAGNOSTIC_MODE; sourceSha = $source;
+               platform = @{ os = 'windows'; architecture = 'x64' };
                setup = @{ checkout = 'failed'; entrypoint = 'blocked' };
                harnesses = @(); totals = @{ selected = 0; passed = 0; failed = 1; blocked = 1 } } |
               ConvertTo-Json -Depth 8 | Set-Content (Join-Path $env:REPORT_DIR 'report.json')
@@ -157,14 +358,44 @@ jobs:
           $summary = Join-Path $env:RUNNER_TEMP 'windows-cli-diagnostic\summary.md'
           New-Item -ItemType Directory -Force -Path (Split-Path $report) | Out-Null
           if (-not (Test-Path $report)) {
-            @{ schemaVersion = 1; platform = @{ os = 'windows'; architecture = 'x64' };
-               setup = @{ workflow = 'failed'; batch = 'blocked' };
-               harnesses = @(); totals = @{ selected = 0; passed = 0; failed = 1; blocked = 1 } } |
-              ConvertTo-Json -Depth 8 | Set-Content $report
+            if ($env:DIAGNOSTIC_MODE -eq 'codex-diagnostic') {
+              python -I (Join-Path $env:GITHUB_WORKSPACE 'canary\actions\codex_diagnostic.py') --report $report --output $summary --blocked-reason unsafe_prerequisite
+              python -I (Join-Path $env:GITHUB_WORKSPACE 'canary\actions\codex_diagnostic.py') --report $report --output $summary
+            } else {
+              @{ schemaVersion = 1; mode = $env:DIAGNOSTIC_MODE;
+                 sourceSha = $env:GITHUB_SHA; platform = @{ os = 'windows'; architecture = 'x64' };
+                 setup = @{ workflow = 'failed'; batch = 'blocked' };
+                 harnesses = @(); totals = @{ selected = 0; passed = 0; failed = 1; blocked = 1 } } |
+                ConvertTo-Json -Depth 8 | Set-Content $report
+            }
           }
           if (-not (Test-Path $summary)) {
             "# Native Windows CLI diagnostic`n`nNo safe batch report was produced; workflow setup or cancellation blocked collection." |
               Set-Content $summary
+          }
+
+      - name: Publish safe step summary
+        if: always()
+        continue-on-error: true
+        run: |
+          if ($env:DIAGNOSTIC_MODE -eq 'codex-diagnostic') {
+            $artifactSummary = Join-Path $env:RUNNER_TEMP 'windows-cli-diagnostic\summary.md'
+            python -I (Join-Path $env:GITHUB_WORKSPACE 'canary\actions\codex_diagnostic.py') `
+              --report (Join-Path $env:RUNNER_TEMP 'windows-cli-diagnostic\report.json') `
+              --output $artifactSummary
+            if ($LASTEXITCODE -ne 0) {
+              python -I (Join-Path $env:GITHUB_WORKSPACE 'canary\actions\codex_diagnostic.py') `
+                --report (Join-Path $env:RUNNER_TEMP 'windows-cli-diagnostic\report.json') `
+                --output $artifactSummary --blocked-reason unsafe_prerequisite
+              python -I (Join-Path $env:GITHUB_WORKSPACE 'canary\actions\codex_diagnostic.py') `
+                --report (Join-Path $env:RUNNER_TEMP 'windows-cli-diagnostic\report.json') `
+                --output $artifactSummary
+            }
+            Copy-Item -LiteralPath $artifactSummary -Destination $env:GITHUB_STEP_SUMMARY -Force
+          } else {
+            python -I (Join-Path $env:GITHUB_WORKSPACE 'canary\actions\windows_summary.py') `
+              --report (Join-Path $env:RUNNER_TEMP 'windows-cli-diagnostic\report.json') `
+              --output $env:GITHUB_STEP_SUMMARY
           }
 
       - name: Upload diagnostic report
@@ -172,13 +403,37 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: windows-cli-diagnostic-${{ github.run_id }}
-          path: ${{ runner.temp }}\windows-cli-diagnostic\*
+          path: |
+            ${{ runner.temp }}\windows-cli-diagnostic\report.json
+            ${{ runner.temp }}\windows-cli-diagnostic\summary.md
           if-no-files-found: warn
           retention-days: 7
 
       - name: Fail for failed, blocked, or unsupported required checks
         if: always()
+        env:
+          DIAGNOSTIC_MODE: ${{ inputs.mode }}
         run: |
+          if ($env:DIAGNOSTIC_MODE -eq 'codex-diagnostic') {
+            $safe = Join-Path $env:RUNNER_TEMP 'windows-cli-diagnostic\codex-summary.md'
+            & python -I (Join-Path $env:GITHUB_WORKSPACE 'canary\actions\codex_diagnostic.py') `
+              --report (Join-Path $env:RUNNER_TEMP 'windows-cli-diagnostic\report.json') --output $safe
+            if ($LASTEXITCODE -ne 0) { throw 'Codex diagnostic report was missing or malformed.' }
+            $report = Get-Content (Join-Path $env:RUNNER_TEMP 'windows-cli-diagnostic\report.json') -Raw | ConvertFrom-Json
+            $bad = @($report.cases | Where-Object { $_.status -in @('failed', 'blocked') })
+            if ($bad.Count -gt 0 -or $report.overall.failed -gt 0 -or $report.overall.blocked -gt 0) {
+              throw "Codex diagnostic has $($bad.Count) failed or blocked case(s)."
+            }
+            # Both product regressions must pass even when the battery already reports the same
+            # defect, so a regression failure stays visible in the job verdict.
+            foreach ($regression in @('NAN_DIAGNOSTIC_SETUP_SUPERVISED', 'NAN_DIAGNOSTIC_SETUP_DETACHED_HELPER')) {
+              $value = [System.Environment]::GetEnvironmentVariable($regression)
+              if ($value -ne 'success') {
+                throw "$regression did not pass: $value"
+              }
+            }
+            exit 0
+          }
           $report = Get-Content (Join-Path $env:RUNNER_TEMP 'windows-cli-diagnostic\report.json') -Raw | ConvertFrom-Json
           $bad = @($report.harnesses | Where-Object {
             $_.outcome -in @('failed', 'blocked', 'unsupported', 'incomplete') -or
@@ -187,9 +442,20 @@ jobs:
           if ($bad.Count -gt 0 -or $report.totals.failed -gt 0 -or $report.totals.blocked -gt 0) {
             throw "Windows diagnostic has $($bad.Count) failed or blocked harness result(s)."
           }
+          $requiredSetup = @('checkout', 'node', 'python', 'rust', 'source', 'fixtures', 'rust_fixture', 'build')
+          $setupMissing = @($requiredSetup | Where-Object {
+            $property = $report.setup.PSObject.Properties[$_]
+            $null -eq $property -or [string]::IsNullOrWhiteSpace([string]$property.Value)
+          })
+          if ($setupMissing.Count -gt 0) {
+            throw "Windows diagnostic setup evidence missing: $($setupMissing -join ', ')."
+          }
           $setupBad = @($report.setup.PSObject.Properties | Where-Object {
             $_.Value -notin @('success', '')
           })
           if ($setupBad.Count -gt 0) {
             throw "Windows diagnostic setup failed: $($setupBad.Name -join ', ')."
+          }
+          if ($env:DIAGNOSTIC_MODE -eq 'native-diagnostic' -and $report.nativePrerequisites.status -ne 'PASS') {
+            throw "Native prerequisite diagnostic did not pass: $($report.nativePrerequisites.reason)."
           }

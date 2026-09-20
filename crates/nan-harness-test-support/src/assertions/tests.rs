@@ -1,3 +1,5 @@
+use super::extraction::{result_text_reports_shell_error, value_is_error};
+use super::tool_result_excerpt;
 use super::{
     ClaudeTranscript, ProbeAssertionError, assert_provider_tool_round_trip, assert_sentinel,
     assert_tool_results, assert_tool_round_trip, assert_tool_round_trip_with_sanitized_ids,
@@ -259,4 +261,29 @@ fn claude_transcript_allows_prerequisite_tool_lifecycles() {
     transcript
         .require_complete_tool_round_trip("Edit", "EDIT_CONFORMANCE_OK")
         .expect("the target lifecycle should ignore completed prerequisite tools");
+}
+
+#[test]
+fn the_private_result_excerpt_is_bounded_and_reads_result_text() {
+    let requests = vec![json!({
+        "messages": [{"role": "tool", "tool_call_id": "call_1", "content": "printf: command not found"}]
+    })];
+    let excerpt = tool_result_excerpt(&requests);
+    assert!(excerpt.contains("command not found"), "{excerpt}");
+    let long = vec![
+        json!({"messages": [{"role": "tool", "tool_call_id": "c", "content": "x".repeat(2000)}]}),
+    ];
+    assert_eq!(tool_result_excerpt(&long).chars().count(), 512);
+}
+
+#[test]
+fn a_shell_failure_text_inside_a_healthy_result_is_classified() {
+    // Cline returns the shell's own wording as a non-empty, non-error result.
+    let value = json!(
+        "'printf' is not recognized as an internal or external command, operable program or batch file."
+    );
+    assert!(!value_is_error(&value));
+    assert!(result_text_reports_shell_error(&value));
+    let success = json!({"content": [{"type": "text", "text": "NAN_HARNESS_TOOL_OK"}]});
+    assert!(!result_text_reports_shell_error(&success));
 }

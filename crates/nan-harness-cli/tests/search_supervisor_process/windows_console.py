@@ -32,7 +32,7 @@ job = check(kernel32.CreateJobObjectW(None, None))
 try:
     check(kernel32.AssignProcessToJobObject(job, kernel32.GetCurrentProcess()))
     with subprocess.Popen(
-        [sys.argv[1], "--exact", "child_session", "--nocapture"],
+        [sys.argv[1], "--exact", "child_session", "--nocapture", "--test-threads=2"],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,

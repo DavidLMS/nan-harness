@@ -10,25 +10,17 @@ import argparse
 import hashlib
 import json
 import re
+import sys
 from pathlib import Path
 
 
-HARNESSES = (
-    "claude-code", "codex", "opencode", "hermes", "pi", "omp", "prime-agent",
-    "deepseek-harness", "openclaw", "cline", "qwen-code", "kimi-code", "aider",
-    "goose", "fx",
-)
-SYSTEMS = ("linux", "macos")
-ASSETS = (
-    "nan-harness-aarch64-unknown-linux-musl",
-    "nan-harness-canary-aarch64-unknown-linux-musl",
-    "nan-harness-aarch64-apple-darwin",
-    "nan-harness-canary-aarch64-apple-darwin",
-)
-PLATFORM_ASSETS = {
-    "linux": "nan-harness-aarch64-unknown-linux-musl",
-    "macos": "nan-harness-aarch64-apple-darwin",
-}
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from selection import (CLI_HARNESSES as HARNESSES, PLATFORM_ASSETS, PLATFORMS,
+                      qualified_identities, required_assets, supported_platforms)
+
+
+SYSTEMS = tuple(PLATFORMS)
+ASSETS = required_assets()
 COMMIT = re.compile(r"[0-9a-f]{40}\Z")
 SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 TAG = re.compile(r"v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?\Z")
@@ -45,8 +37,9 @@ def digest(path: Path) -> str:
 
 def expected_identities():
     # Artifact names use a hyphenated identity; the publisher normalizes the
-    # first separator to the canonical system/harness pair.
-    return {f"{system}-{harness}" for system in SYSTEMS for harness in HARNESSES}
+    # first separator to the canonical system/harness pair. A harness is qualified
+    # only on the platforms its support list declares.
+    return {identity.replace("/", "-") for identity in qualified_identities()}
 
 
 def _require(value, pattern, label):
@@ -73,7 +66,7 @@ def _asset_entries(directory: Path):
         if SHA256.fullmatch(value):
             entries[name] = value
     if not set(ASSETS).issubset(entries):
-        raise ValueError("checksum manifest must contain all four ARM64 assets")
+        raise ValueError("checksum manifest must contain every required release asset")
     result = []
     for name in ASSETS:
         path = directory / name
@@ -119,13 +112,16 @@ def build_manifest(args):
         if identity not in expected_identities() or identity in seen:
             raise ValueError(f"duplicate or unknown report identity: {identity}")
         seen.add(identity)
-        if environment.get("architecture") != "aarch64":
-            raise ValueError(f"report architecture is not ARM64: {path.name}")
+        expected_architecture = PLATFORMS[environment["operatingSystem"]]["architecture"]
+        if environment.get("architecture") != expected_architecture:
+            raise ValueError(
+                f"report architecture is not {expected_architecture}: {path.name}")
         source = nan_harness.get("source")
         if (source != "commit:" + args.tag_commit or report.get("runId") != args.run_id
                 or nan_harness.get("version") != args.tag[1:]
-                or nan_harness.get("sha256") != next(item["sha256"] for item in assets
-                                                  if item["name"] == PLATFORM_ASSETS[environment["operatingSystem"]])):
+                or nan_harness.get("sha256") != next(
+                    item["sha256"] for item in assets
+                    if item["name"] == PLATFORM_ASSETS[environment["operatingSystem"]]["harness"])):
             raise ValueError(f"report provenance mismatch: {path.name}")
         reports.append({
             "identity": identity,
@@ -135,8 +131,10 @@ def build_manifest(args):
             "runId": report["runId"],
             "bytes": path.stat().st_size,
         })
-    if seen != expected_identities() or len(reports) != 30:
-        raise ValueError(f"expected exactly 30 unique passing reports, found {len(reports)}")
+    expected = expected_identities()
+    if seen != expected or len(reports) != len(expected):
+        raise ValueError(
+            f"expected exactly {len(expected)} unique passing reports, found {len(reports)}")
     manifest = {
         "schemaVersion": 1,
         "repository": args.repository,
@@ -163,13 +161,17 @@ def assets_command(args):
 
 
 def matrix(_args):
+    """Every cell the release gate must collect, from each harness support list."""
     cells = []
-    for system in SYSTEMS:
-        # macos-14 is the previously validated ARM64 hosted label; the cell
-        # still checks uname so a label change cannot silently qualify x86_64.
-        runner = "ubuntu-24.04-arm" if system == "linux" else "macos-14"
-        for harness in HARNESSES:
-            cells.append({"system": system, "runner": runner, "architecture": "aarch64", "harness": harness})
+    for harness in HARNESSES:
+        for system in supported_platforms(harness):
+            entry = PLATFORMS[system]
+            if PLATFORM_ASSETS[system]["canary"] is None:
+                raise ValueError(
+                    system + " qualification requires a published canary release asset")
+            cells.append({"system": system, "runner": entry["runner"],
+                          "architecture": entry["architecture"], "target": entry["target"],
+                          "harness": harness})
     print(json.dumps({"include": cells}, separators=(",", ":")))
 
 

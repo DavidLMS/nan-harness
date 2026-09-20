@@ -15,7 +15,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 from urllib.parse import urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from selection import CLI_HARNESSES, resolve_model
+from selection import CLI_HARNESSES, SYSTEMS, identity, resolve_model
 from cell import SEMVER, source_identity
 
 
@@ -66,6 +66,9 @@ _NPM_PACKAGES = {
     "cline": "cline", "qwen-code": "@qwen-code/qwen-code",
 }
 _PYPI_PACKAGES = {"aider": "aider-chat"}
+# Aider installs from PyPI on Windows too; every other harness uses the same source on
+# both platforms.
+_WINDOWS_PYPI_PACKAGES = {"aider": "aider-chat"}
 _GITHUB_REPOS = {
     "omp": "can1357/oh-my-pi", "goose": "aaif-goose/goose",
     "hermes": "NousResearch/hermes-agent",
@@ -76,8 +79,8 @@ _COMMIT_PINNED = frozenset({"hermes"})
 FX_SOURCE = "https://releases.fx.sh/latest.txt"
 _TEXT_SOURCES = {
     "fx": FX_SOURCE,
-    # The public code.kimi.com endpoint redirects here. Keep the canonical CDN
-    # URL explicit because metadata fetches reject redirects by design.
+    # Both platforms install the vendor's own Kimi CLI, which resolves through this
+    # stable channel.
     "kimi-code": "https://cdn.kimi.com/kimi-code/latest",
     # Official install.sh resolves this stable channel, not GitHub's latest tag.
     "prime-agent": "https://pub-728493de92a943e2a9b2d17b4719f318.r2.dev/stable",
@@ -159,7 +162,7 @@ def _validate_resolution_diagnostic(value):
         raise ValueError("invalid resolver diagnostic status")
 
 
-def _official_json(url):
+def _official_json(url, timeout=20):
     parsed = urlsplit(url)
     headers = {"Accept": "application/json", "User-Agent": "nan-harness-cli-gate"}
     port = 443 if parsed.port is None else parsed.port
@@ -170,16 +173,16 @@ def _official_json(url):
             headers["Authorization"] = "Bearer " + token
     request = Request(url, headers=headers)
     opener = build_opener(_NoRedirect)
-    with opener.open(request, timeout=20) as response:
+    with opener.open(request, timeout=timeout) as response:
         raw = response.read(2_000_001)
         if len(raw) > 2_000_000:
             raise ValueError("official version metadata exceeds its size limit")
         return json.loads(raw)
 
 
-def _official_text(url, limit=256):
+def _official_text(url, limit=256, timeout=20):
     request = Request(url, headers={"User-Agent": "nan-harness-cli-gate"})
-    with build_opener(_NoRedirect).open(request, timeout=20) as response:
+    with build_opener(_NoRedirect).open(request, timeout=timeout) as response:
         raw = response.read(limit + 1)
     if len(raw) > limit:
         raise ValueError("official version marker exceeds its size limit")
@@ -196,12 +199,22 @@ def _version(value):
     return value
 
 
-def _source(harness):
+def _pypi_version(document):
+    """Resolve a PyPI JSON document without leaking shape errors as unknown."""
+    try:
+        value = document["info"]["version"]
+    except (KeyError, TypeError):
+        raise _InvalidVersion("official PyPI metadata omitted its version") from None
+    return _version(value)
+
+
+def _source(harness, system=""):
     """Closed source and package identity for a known CLI harness."""
     if harness in _NPM_PACKAGES:
         return "npm:" + _NPM_PACKAGES[harness], _NPM_PACKAGES[harness]
-    if harness in _PYPI_PACKAGES:
-        return "pypi:" + _PYPI_PACKAGES[harness], _PYPI_PACKAGES[harness]
+    packages = _WINDOWS_PYPI_PACKAGES if system == "windows" else _PYPI_PACKAGES
+    if harness in packages:
+        return "pypi:" + packages[harness], packages[harness]
     if harness in _GITHUB_REPOS:
         return "github:" + _GITHUB_REPOS[harness], ""
     if harness in _TEXT_SOURCES:
@@ -219,12 +232,12 @@ def _pinned_project_version(repo, tag, fetch_json, fetch_document):
 
 
 def _resolve_one(harness, system, architecture, model, fetch_json, fetch_text, fetch_document):
-    source, package = _source(harness)
+    source, package = _source(harness, system)
     ref = ""
     if harness in _NPM_PACKAGES:
         version = _version(fetch_json("https://registry.npmjs.org/" + package + "/latest")["version"])
-    elif harness in _PYPI_PACKAGES:
-        version = _version(fetch_json("https://pypi.org/pypi/" + package + "/json")["info"]["version"])
+    elif source.startswith("pypi:"):
+        version = _pypi_version(fetch_json("https://pypi.org/pypi/" + package + "/json"))
     elif harness in _GITHUB_REPOS:
         repo = _GITHUB_REPOS[harness]
         release = fetch_json("https://api.github.com/repos/" + repo + "/releases/latest")
@@ -244,22 +257,26 @@ def _resolve_one(harness, system, architecture, model, fetch_json, fetch_text, f
 
 
 def resolve_manifest(harnesses, system, architecture, model, fetch_json=_official_json,
-                     fetch_text=_official_text, fetch_document=None):
+                     fetch_text=_official_text, fetch_document=None, timeout=20):
     """Resolve each official source independently.
 
     One unavailable upstream yields an ``UnresolvedHarness`` with no version; the
     others keep their frozen identities. Fetchers are injectable so tests stay offline.
     """
-    fetch_document = fetch_document or (lambda url: _official_text(url, 200_000))
+    if fetch_json is _official_json:
+        fetch_json = lambda url: _official_json(url, timeout)
+    if fetch_text is _official_text:
+        fetch_text = lambda url: _official_text(url, timeout=timeout)
+    fetch_document = fetch_document or (lambda url: _official_text(url, 200_000, timeout))
     for harness in harnesses:
-        _source(harness)
+        _source(harness, system)
     resolved, unresolved = [], []
     for harness in harnesses:
         try:
             resolved.append(_resolve_one(harness, system, architecture, model,
                                          fetch_json, fetch_text, fetch_document))
         except _MANIFEST_METADATA_ERRORS + (tomllib.TOMLDecodeError,) as error:
-            source, package = _source(harness)
+            source, package = _source(harness, system)
             diagnostic = _resolution_diagnostic(error)
             unresolved.append(UnresolvedHarness(harness, system, architecture, source, package,
                                                 model, diagnostic))
@@ -303,7 +320,7 @@ def _load_manifest(path, harnesses, system, architecture, model):
     for item in resolved + unresolved:
         if (item.system, item.architecture, item.model) != (system, architecture, model):
             raise ValueError("frozen manifest platform or model differs from this run")
-        if (item.source, item.package) != _source(item.harness):
+        if (item.source, item.package) != _source(item.harness, system):
             raise ValueError("frozen manifest has an untrusted installer source")
     for item in resolved:
         if _version(item.version) != item.version:
@@ -383,11 +400,15 @@ def read_unresolved_manifest(path, harnesses, system, architecture, model):
 def resolve_main(argv):
     parser = argparse.ArgumentParser(description="Resolve official CLI versions")
     parser.add_argument("--harnesses", required=True)
-    parser.add_argument("--system", required=True, choices=("linux", "macos"))
-    parser.add_argument("--architecture", required=True, choices=("aarch64",))
+    parser.add_argument("--system", required=True, choices=SYSTEMS)
+    parser.add_argument("--architecture", required=True, choices=("aarch64", "x86_64"))
     parser.add_argument("--model", default="")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
+    try:
+        identity(args.system, args.architecture)
+    except ValueError as error:
+        parser.error(str(error))
     harnesses = [value.strip() for value in args.harnesses.split(",") if value.strip()]
     model = resolve_model(args.model)
     resolved, unresolved = resolve_manifest(harnesses, args.system, args.architecture, model)
@@ -424,6 +445,7 @@ def main():
     args = parser.parse_args()
     try:
         model = resolve_model(args.model)
+        identity(args.system, args.architecture)
         source_identity(args.source_sha)
         harnesses = [item.strip() for item in args.harnesses.split(",")]
         if not harnesses or len(harnesses) != len(set(harnesses)) or any(item not in CLI_HARNESSES for item in harnesses):

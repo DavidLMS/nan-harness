@@ -1,8 +1,10 @@
 use crate::conformance::{
-    HarnessRegistration, PrimeCleanupTargets, embedded_manifest, harness_registry,
-    inventory_drift_fingerprint, inventory_matches, owned_prime_pids_from_status,
-    prime_status_path, round_trip_probe, validate_harness_registry,
+    HarnessRegistration, cline_round_trip_command, embedded_manifest, harness_registry,
+    inventory_drift_fingerprint, inventory_matches, owned_prime_pids_from_status, round_trip_probe,
+    validate_harness_registry,
 };
+#[cfg(unix)]
+use crate::conformance::{PrimeCleanupTargets, prime_status_path};
 use nan_harness_core::HarnessKind;
 use serde_json::json;
 use std::path::Path;
@@ -248,4 +250,21 @@ fn prime_cleanup_does_not_signal_an_unrelated_shared_process_group_member() {
     );
     let _ = unrelated.kill();
     let _ = unrelated.wait();
+}
+
+#[test]
+fn cline_round_trip_command_matches_the_host_shell() {
+    // Cline's command runner is not a POSIX shell on Windows, where `printf` and quoted
+    // absolute paths were both refused; a native cmd builtin writing the workspace file
+    // relative to the working directory is the form that works.
+    let workspace = tempfile::tempdir().expect("workspace should exist");
+    let path = workspace.path().join("tool-output.txt");
+    assert_eq!(
+        cline_round_trip_command(&path, false),
+        format!("printf NAN_HARNESS_TOOL_OK > '{}'", path.display())
+    );
+    assert_eq!(
+        cline_round_trip_command(&path, true),
+        format!("echo NAN_HARNESS_TOOL_OK> \"{}\"", path.display())
+    );
 }

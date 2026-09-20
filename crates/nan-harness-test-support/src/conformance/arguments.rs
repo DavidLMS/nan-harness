@@ -22,7 +22,7 @@ pub(crate) fn headless_arguments(
     workspace: &Path,
 ) -> Vec<OsString> {
     let prompt = headless_prompt(run_kind, marker);
-    let mut arguments = headless_base_arguments(kind, run_kind, &prompt);
+    let mut arguments = headless_base_arguments(kind, run_kind, &prompt, workspace);
     if kind == HarnessKind::ClaudeCode {
         append_claude_arguments(&mut arguments, run_kind);
     }
@@ -50,7 +50,12 @@ fn headless_prompt(run_kind: &RunKind, marker: &str) -> String {
     }
 }
 
-fn headless_base_arguments(kind: HarnessKind, run_kind: &RunKind, prompt: &str) -> Vec<OsString> {
+fn headless_base_arguments(
+    kind: HarnessKind,
+    run_kind: &RunKind,
+    prompt: &str,
+    workspace: &Path,
+) -> Vec<OsString> {
     match kind {
         HarnessKind::ClaudeCode => claude_base_arguments(prompt),
         HarnessKind::Codex => codex_base_arguments(prompt),
@@ -61,7 +66,7 @@ fn headless_base_arguments(kind: HarnessKind, run_kind: &RunKind, prompt: &str) 
         HarnessKind::Omp => omp_base_arguments(prompt),
         HarnessKind::DeepSeekHarness => deepseek_base_arguments(prompt),
         HarnessKind::OpenClaw => openclaw_base_arguments(prompt),
-        HarnessKind::Cline => cline_base_arguments(prompt),
+        HarnessKind::Cline => cline_base_arguments(prompt, workspace),
         HarnessKind::QwenCode => qwen_base_arguments(prompt),
         HarnessKind::KimiCode => kimi_base_arguments(prompt),
         HarnessKind::Aider => aider_arguments(run_kind, prompt),
@@ -184,8 +189,14 @@ fn openclaw_base_arguments(prompt: &str) -> Vec<OsString> {
     ]
 }
 
-fn cline_base_arguments(prompt: &str) -> Vec<OsString> {
+fn cline_base_arguments(prompt: &str, workspace: &Path) -> Vec<OsString> {
+    // Keep the deterministic contract independent of Cline's persisted mode and approval settings.
     vec![
+        "--act".into(),
+        "--auto-approve".into(),
+        "true".into(),
+        "--cwd".into(),
+        workspace.as_os_str().to_owned(),
         "--json".into(),
         "--timeout".into(),
         "60".into(),
@@ -204,6 +215,7 @@ fn qwen_base_arguments(prompt: &str) -> Vec<OsString> {
 }
 
 fn kimi_base_arguments(prompt: &str) -> Vec<OsString> {
+    // Both platforms install the vendor's own Kimi CLI, which accepts these arguments.
     vec![
         "--prompt".into(),
         prompt.to_owned().into(),

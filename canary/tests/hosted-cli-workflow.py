@@ -21,7 +21,8 @@ class HostedCliWorkflowTests(unittest.TestCase):
         line = next(line.strip() for line in WORKFLOW.splitlines()
                     if line.strip().startswith('nan_version="$('))
         command = shlex.split(line[len('nan_version="$('):-2])
-        self.assertEqual(command[:2], ["python3", "-c"])
+        # Hosted Windows runners expose python without the python3 alias.
+        self.assertEqual(command[:2], ["$PYTHON", "-c"])
         with tempfile.TemporaryDirectory() as directory:
             metadata = Path(directory) / "metadata.json"
             metadata.write_text(json.dumps({"packages": [
@@ -36,7 +37,11 @@ class HostedCliWorkflowTests(unittest.TestCase):
         for text in ("workflow_dispatch:", "platforms:", "harnesses:", "mode:", "source_ref:"):
             self.assertIn(text, WORKFLOW)
         self.assertNotIn("workflow_call:", WORKFLOW)
-        self.assertIn("type: choice\n        options: [linux, macos, both]", WORKFLOW)
+        self.assertIn("type: choice\n        options: [linux, macos, windows, both, all]", WORKFLOW)
+        # Native Windows cells run the same steps under Git Bash with the Windows
+        # binary names and the hosted python alias.
+        self.assertIn('suffix=".exe"', WORKFLOW)
+        self.assertIn("PYTHON: ${{ matrix.system == 'windows' && 'python' || 'python3' }}", WORKFLOW)
         self.assertIn("options: [deterministic, live]", WORKFLOW)
 
     def test_matrix_is_independent_and_target_is_arm64(self):

@@ -17,14 +17,18 @@ import ssl
 
 ACTION_DIRECTORY = Path(__file__).resolve().parents[1] / "actions"
 sys.path.insert(0, str(ACTION_DIRECTORY))
-selection = type(sys)("selection")
-selection.CLI_HARNESSES = (
-    "claude-code", "codex", "opencode", "hermes", "pi", "omp", "prime-agent",
-    "deepseek-harness", "openclaw", "cline", "qwen-code", "kimi-code", "aider",
-    "goose", "fx",
-)
+# The hosted platform table is the single source of truth, so these tests load the
+# real selector and only pin model resolution to keep them environment-independent.
+def _load_selection():
+    spec = importlib.util.spec_from_file_location("selection", ACTION_DIRECTORY / "selection.py")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["selection"] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+selection = _load_selection()
 selection.resolve_model = lambda requested="", configured=None: requested or configured or "qwen3.6"
-sys.modules["selection"] = selection
 
 
 def load(name, filename):
@@ -107,18 +111,69 @@ class CliResolutionTests(unittest.TestCase):
         self.assertEqual(timeout, 20)
         self.assertEqual(response.limit, 33)
 
-    def test_kimi_uses_canonical_cdn_metadata_without_credentials(self):
+    def test_kimi_uses_the_vendor_channel_on_every_platform(self):
+        # Both platforms install the vendor's own Kimi CLI, so Windows resolves through the
+        # same stable channel Unix does instead of a PyPI distribution.
+        for system, architecture in (("windows", "x86_64"), ("linux", "aarch64")):
+            seen = []
+
+            def fetch_text(url):
+                seen.append(url)
+                return "0.43.0"
+
+            resolved, unresolved = suite.resolve_manifest(
+                ["kimi-code"], system, architecture, "qwen3.6", fetch_text=fetch_text)
+            self.assertEqual(unresolved, [])
+            self.assertEqual(resolved[0].version, "0.43.0")
+            self.assertEqual(resolved[0].source, "https://cdn.kimi.com/kimi-code/latest")
+            self.assertEqual(seen, ["https://cdn.kimi.com/kimi-code/latest"])
+
+    def test_aider_uses_pypi_metadata_for_windows_pip_install(self):
+        seen = []
+
+        def fetch_json(url):
+            seen.append(url)
+            return {"info": {"version": "1.2.3"}}
+
+        resolved, unresolved = suite.resolve_manifest(
+            ["aider"], "windows", "x86_64", "qwen3.6", fetch_json=fetch_json)
+        self.assertEqual(unresolved, [])
+        self.assertEqual(resolved[0].version, "1.2.3")
+        self.assertEqual(resolved[0].source, "pypi:aider-chat")
+        self.assertEqual(seen, ["https://pypi.org/pypi/aider-chat/json"])
+
+    def test_kimi_preserves_unix_stable_channel(self):
         seen = []
 
         def fetch_text(url):
             seen.append(url)
-            return "1.2.3"
+            return "0.43.0"
 
         resolved, unresolved = suite.resolve_manifest(
             ["kimi-code"], "linux", "aarch64", "qwen3.6", fetch_text=fetch_text)
         self.assertEqual(unresolved, [])
-        self.assertEqual(resolved[0].version, "1.2.3")
+        self.assertEqual(resolved[0].version, "0.43.0")
+        self.assertEqual(resolved[0].source, "https://cdn.kimi.com/kimi-code/latest")
+        self.assertEqual(resolved[0].package, "")
         self.assertEqual(seen, ["https://cdn.kimi.com/kimi-code/latest"])
+
+    def test_kimi_rejects_a_malformed_vendor_channel(self):
+        for document in ("", "latest", "v", "1.2"):
+            with self.subTest(document=document):
+                resolved, unresolved = suite.resolve_manifest(
+                    ["kimi-code"], "windows", "x86_64", "qwen3.6",
+                    fetch_text=lambda _url, value=document: value)
+                self.assertEqual(resolved, [])
+                self.assertEqual(unresolved[0].diagnostic, {"category": "invalid-version"})
+
+    def test_aider_rejects_missing_or_malformed_pypi_versions(self):
+        for document in ({"info": {}}, {"info": {"version": None}}, {"info": {"version": "latest"}}):
+            with self.subTest(document=document):
+                resolved, unresolved = suite.resolve_manifest(
+                    ["aider"], "windows", "x86_64", "qwen3.6",
+                    fetch_json=lambda _url, value=document: value)
+                self.assertEqual(resolved, [])
+                self.assertEqual(unresolved[0].diagnostic, {"category": "invalid-version"})
 
     def test_official_json_uses_no_redirect_handler_and_token_is_not_forwarded(self):
         class Response:

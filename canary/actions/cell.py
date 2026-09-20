@@ -57,7 +57,7 @@ if os.name == "nt":
                     ("active_processes", wintypes.DWORD), ("terminated_processes", wintypes.DWORD)]
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from selection import CLI_HARNESSES, resolve_model
+from selection import CLI_HARNESSES, PLATFORMS as HOSTED_PLATFORMS, resolve_model
 
 HARNESSES = CLI_HARNESSES
 SEMVER = re.compile(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?\Z")
@@ -359,6 +359,25 @@ PROBE_DIAGNOSTICS = frozenset({
 PROBE_DIAGNOSTIC_CODES = {
     diagnostic: f"live-{diagnostic}-exit-1" for diagnostic in PROBE_DIAGNOSTICS
 }
+# The PowerShell probe publishes its own closed marker (schema 2) with the stage the
+# native run reached and a bounded diagnostic list.
+WINDOWS_PROBE_STAGES = frozenset({"live-tool", "harness-run", "read-marker", "completion-marker",
+                                  "bridge-sentinel", "usage-evidence", "usage-summary", "complete"})
+
+
+def detected_identity():
+    """The hosted platform and architecture this process runs on, in canonical names."""
+    if os.name == "nt":
+        system = "windows"
+        machine = os.environ.get("PROCESSOR_ARCHITECTURE", "")
+    else:
+        system = {"linux": "linux", "darwin": "macos"}.get(sys.platform)
+        machine = getattr(os, "uname")().machine
+    architecture = {"arm64": "aarch64", "aarch64": "aarch64",
+                    "amd64": "x86_64", "x86_64": "x86_64"}.get(machine.strip().lower())
+    if system is None or architecture is None:
+        raise RuntimeError("this gate requires a supported hosted runner")
+    return system, architecture
 
 
 def select_coverage(coverage, harnesses, ordinal, release_commit, workflow_commit):
@@ -926,6 +945,24 @@ def probe_result(path):
     return value
 
 
+def windows_probe_result(path):
+    """Read the PowerShell probe marker; missing or malformed markers are unproven."""
+    try:
+        value = json.loads(path.read_bytes())
+    except (OSError, ValueError):
+        return None
+    if (not isinstance(value, dict) or type(value.get("schemaVersion")) is not int
+            or value["schemaVersion"] != 2 or value.get("stage") not in WINDOWS_PROBE_STAGES
+            or value.get("status") not in ("passed", "failed")
+            or (value["status"] == "passed") != (value["stage"] == "complete")):
+        return None
+    diagnostics = value.get("diagnostics")
+    if diagnostics is not None and (not isinstance(diagnostics, list) or len(diagnostics) > 1
+                                    or any(not isinstance(item, str) for item in diagnostics)):
+        return None
+    return value
+
+
 def live(args, _state):
     if not os.environ.get("NAN_API_KEY"):
         raise RuntimeError("live stage requires an explicitly supplied key")
@@ -936,13 +973,19 @@ def live(args, _state):
     marker.unlink(missing_ok=True)
     # Forward slashes keep the path valid for Git Bash on native Windows.
     environment["NAN_CANARY_PROBE_RESULT"] = marker.as_posix()
-    probe = ROOT / "canary/guest/probe-harness.ps1" if os.name == "nt" else ROOT / "canary/guest/probe-harness.sh"
-    command = ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File",
-               str(probe), args.harness] if os.name == "nt" else ["bash", str(probe), args.harness]
+    windows = os.name == "nt"
+    probe = ROOT / ("canary/guest/probe-harness.ps1" if windows else "canary/guest/probe-harness.sh")
+    if windows:
+        command = ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+                   "-File", str(probe), "-Harness", args.harness, "-Stage", "live-tool",
+                   "-Model", args.model, "-NanBinary", str(args.binary), "-Canary", str(args.canary),
+                   "-Version", args.harness_version]
+    else:
+        command = ["bash", str(probe), args.harness]
     try:
         status = private_command(command, args.directory, timeout=600, live=True,
                                  allow_failure=True, environment=environment)
-        result = probe_result(marker)
+        result = windows_probe_result(marker) if windows else probe_result(marker)
     finally:
         marker.unlink(missing_ok=True)
     if status == 0 and result is not None and result["status"] == "passed":
@@ -954,24 +997,27 @@ def live(args, _state):
     if result is None:
         raise ProbeFailure("marker-missing", status)
     diagnostic = result.get("diagnostic")
+    if diagnostic is None and windows:
+        # The PowerShell probe publishes its bounded codes in a list; only the aider
+        # completion-marker codes are single, and they are the only ones reported.
+        codes = result.get("diagnostics") or []
+        diagnostic = codes[0] if len(codes) == 1 else None
     if diagnostic is not None and args.harness != "aider":
         diagnostic = None
     raise ProbeFailure(result["stage"], status, diagnostic)
 
 
 def initial_state(args):
-    detected_platform = {"linux": "linux", "darwin": "macos", "win32": "windows"}.get(sys.platform)
+    detected_platform, detected_architecture = detected_identity()
     platform = getattr(args, "system", None) or detected_platform
-    machine = os.environ.get("PROCESSOR_ARCHITECTURE", "") if os.name == "nt" else getattr(os, "uname")().machine
-    if platform not in ("linux", "macos") or machine.lower() not in ("arm64", "aarch64"):
-        raise RuntimeError("this gate requires a supported hosted runner")
-    architecture = getattr(args, "architecture", None) or "aarch64"
-    detected_architecture = "aarch64"
-    if (getattr(args, "system", None) and args.system != detected_platform) or (
-            getattr(args, "architecture", None) and args.architecture != detected_architecture):
+    try:
+        expected_architecture = HOSTED_PLATFORMS[platform]["architecture"]
+    except KeyError:
+        raise RuntimeError("this gate requires a supported hosted runner") from None
+    architecture = getattr(args, "architecture", None) or detected_architecture
+    if (platform != detected_platform or architecture != detected_architecture
+            or architecture != expected_architecture):
         raise RuntimeError("requested hosted identity does not match the native runner")
-    if architecture != "aarch64":
-        raise RuntimeError("CLI qualification requires ARM64 hosted runners")
     node = subprocess.run(["node", "-p", "process.versions.node"], check=True,
                           capture_output=True, timeout=10).stdout.decode().strip()
     if node != "24.20.0":
@@ -1138,8 +1184,8 @@ def main():
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--model", default="")
     parser.add_argument("--mode", choices=("deterministic", "live"), default=None)
-    parser.add_argument("--system", choices=("linux", "macos"), default=None)
-    parser.add_argument("--architecture", choices=("aarch64",), default=None)
+    parser.add_argument("--system", choices=tuple(HOSTED_PLATFORMS), default=None)
+    parser.add_argument("--architecture", choices=("aarch64", "x86_64"), default=None)
     parser.add_argument("--source-kind", choices=("branch", "release"), default="release")
     parser.add_argument("--source-sha", default=None)
     parser.add_argument("--nan-version", default=None)
