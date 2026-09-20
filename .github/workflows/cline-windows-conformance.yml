@@ -2,6 +2,8 @@ name: Cline Windows conformance
 
 on:
   workflow_dispatch:
+  push:
+    branches: [fix/cline-headless-startup]
 
 permissions:
   contents: read
