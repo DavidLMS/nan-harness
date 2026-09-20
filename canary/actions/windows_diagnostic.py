@@ -7,6 +7,7 @@ import uuid
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from cell import WindowsJob, finish_stage, protect_private
+from selection import WINDOWS_UNAVAILABLE, WINDOWS_SKIP_REASON
 
 HARNESSES = ("claude-code", "codex", "opencode", "hermes", "pi", "omp", "prime-agent",
              "deepseek-harness", "openclaw", "cline", "qwen-code", "kimi-code", "aider", "goose", "fx")
@@ -81,6 +82,12 @@ def unfinished_harness(harness, reason="not-started"):
     phases = {name: phase("NOT_REQUESTED", reason) for name in PHASES}
     return {"harness": harness, "outcome": "blocked", "phases": phases}
 
+def inventory_drift_only(diagnostic):
+    """Only inventory-name drift is advisory; process/provider failures remain failures."""
+    return (diagnostic.get("failedScenarios") == ["inventory"]
+            and diagnostic.get("inventoryProcess") == {"status": "completed", "exitCode": 0}
+            and diagnostic.get("inventoryFailureReasons") == [])
+
 def _report(args, reports, native_test, selected, setup=None, active=None):
     """Build a pure safe snapshot, including the currently active harness."""
     # Checkpoints must never mutate collector state: a later marker can turn a
@@ -95,6 +102,11 @@ def _report(args, reports, native_test, selected, setup=None, active=None):
     snapshots = []
     required = PHASES if args.mode == "live" else PHASES[:-1]
     for name in selected:
+        if name in WINDOWS_UNAVAILABLE:
+            snapshots.append({"harness": name, "outcome": "skipped",
+                              "phases": {phase_name: phase("SKIPPED", WINDOWS_SKIP_REASON)
+                                         for phase_name in PHASES}})
+            continue
         item = copy.deepcopy(by_name.get(name, unfinished_harness(name)))
         phases = item.setdefault("phases", {})
         # Missing phases in a completed record are genuinely not started;
@@ -112,7 +124,7 @@ def _report(args, reports, native_test, selected, setup=None, active=None):
     reports = snapshots
     phase_totals = {status: sum(item["phases"].get(name, {}).get("status") == status
                                 for item in reports for name in PHASES)
-                    for status in ("PASS", "FAIL", "BLOCKED", "NOT_REQUESTED")}
+                    for status in ("PASS", "FAIL", "BLOCKED", "NOT_REQUESTED", "SKIPPED")}
     causes = {}
     for item in reports:
         for phase_name, value in item["phases"].items():
@@ -132,6 +144,7 @@ def _report(args, reports, native_test, selected, setup=None, active=None):
             "setup": setup or {},
             "totals": {"selected": len(selected), "passed": sum(x["outcome"] == "passed" for x in reports),
                        "failed": sum(x["outcome"] == "failed" for x in reports),
+                       "skipped": sum(x["outcome"] == "skipped" for x in reports),
                        "blocked": sum(x["outcome"] == "blocked" for x in reports), "phases": phase_totals},
             "groupedCauses": causes, "nativePrerequisites": native_test}
 
@@ -878,6 +891,8 @@ def collect(args, harnesses, output):
         return report, native_test.get("status") != "PASS" or setup_failed
     checkpoint()
     for harness in selected:
+        if harness in WINDOWS_UNAVAILABLE:
+            continue
         if budget.exhausted():
             any_failure = True; checkpoint(); break
         phases = {}; cell = root / harness
@@ -1022,8 +1037,7 @@ def collect(args, harnesses, output):
                 # The canary treats the tool inventory as maintenance evidence and the hosted gate
                 # does not block on an inventory-only failure, so the native collector keeps the same
                 # policy: the drift stays in the phase evidence and the functional contracts decide.
-                scenarios = diagnostic.get("failedScenarios") or []
-                if scenarios == ["inventory"]:
+                if inventory_drift_only(diagnostic):
                     phases[name] = phase("PASS", "verified-with-inventory-drift")
                     diagnostic.pop("status", None)
                     if progress:

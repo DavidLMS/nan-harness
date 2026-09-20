@@ -20,6 +20,20 @@ def report(**updates):
     value.update(updates); return value
 
 class WindowsSummaryTests(unittest.TestCase):
+    def test_skips_cannot_be_counted_as_passes_or_applied_to_available_harnesses(self):
+        value = report(harnesses=[{"harness": "fx", "outcome": "skipped", "phases": {
+            name: {"status": "SKIPPED", "reason": summary.WINDOWS_SKIP_REASON}
+            for name in summary.PHASES}}],
+            totals={"selected": 1, "passed": 0, "failed": 0, "blocked": 0, "skipped": 1})
+        self.assertEqual(summary.safe_view(value)["totals"]["passed"], 0)
+        value["totals"]["passed"] = 1
+        with self.assertRaises(summary.UnsafeReport):
+            summary.safe_view(value)
+        value["totals"]["passed"] = 0
+        value["harnesses"][0]["harness"] = "cline"
+        with self.assertRaises(summary.UnsafeReport):
+            summary.safe_view(value)
+
     def test_generated_collector_reports_are_accepted(self):
         with tempfile.TemporaryDirectory() as directory:
             for index, value in enumerate((report(), report(sourceSha="b" * 40))):

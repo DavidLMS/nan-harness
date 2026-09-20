@@ -13,6 +13,18 @@ SPEC.loader.exec_module(selection)
 
 
 class HostedCliSelectionTests(unittest.TestCase):
+    def test_windows_unavailable_harnesses_are_explicit_skips_only_on_windows(self):
+        result = selection.select_cli("all", "all", "live")
+        self.assertEqual(len(result["cells"]), 43)
+        self.assertEqual({item["harness"] for item in result["skipped"]}, {"prime-agent", "fx"})
+        self.assertTrue(all(item["system"] == "windows" for item in result["skipped"]))
+        for harness in ("prime-agent", "fx"):
+            self.assertEqual({cell["system"] for cell in result["cells"]
+                              if cell["harness"] == harness}, {"linux", "macos"})
+        only_skips = selection.select_cli("windows", "fx,prime-agent")
+        self.assertEqual(only_skips["cells"], [])
+        self.assertEqual(len(only_skips["skipped"]), 2)
+
     def test_all_is_fifteen_independent_arm64_cells(self):
         result = selection.select_cli("both", "all")
         self.assertEqual(len(result["cells"]), 30)

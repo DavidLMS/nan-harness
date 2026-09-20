@@ -23,6 +23,10 @@ PLATFORMS = {
                 "target": "x86_64-pc-windows-msvc"},
 }
 SYSTEMS = tuple(PLATFORMS)
+# Explicit maintainer policy until official native Windows distributions exist.
+# This is availability, not qualification: other Windows harnesses still need live evidence.
+WINDOWS_UNAVAILABLE = frozenset(("prime-agent", "fx"))
+WINDOWS_SKIP_REASON = "official-windows-distribution-unavailable"
 DEFAULT_MODEL = "qwen3.6"
 MODEL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}\Z")
 
@@ -65,7 +69,8 @@ PLATFORM_ASSETS = {
               "canary": "nan-harness-canary-aarch64-unknown-linux-musl"},
     "macos": {"harness": "nan-harness-aarch64-apple-darwin",
               "canary": "nan-harness-canary-aarch64-apple-darwin"},
-    "windows": {"harness": "nan-harness-x86_64-pc-windows-msvc.exe", "canary": None},
+    "windows": {"harness": "nan-harness-x86_64-pc-windows-msvc.exe",
+                "canary": "nan-harness-canary-x86_64-pc-windows-msvc.exe"},
 }
 
 
@@ -125,13 +130,18 @@ def select_cli(platforms="all", harnesses="all", mode="deterministic", model="")
                      SYSTEMS, "platforms")
     selected = _names(harnesses, CLI_HARNESSES, "harnesses")
     cells = []
+    skipped = []
     for system in systems:
         entry = PLATFORMS[system]
         for harness in selected:
+            if system == "windows" and harness in WINDOWS_UNAVAILABLE:
+                skipped.append({"system": system, "harness": harness,
+                                "status": "skipped", "reason": WINDOWS_SKIP_REASON})
+                continue
             cells.append({"system": system, "runner": entry["runner"],
                           "architecture": entry["architecture"], "target": entry["target"],
                           "harness": harness, "mode": mode})
-    return {"mode": mode, "model": resolve_model(model), "cells": cells}
+    return {"mode": mode, "model": resolve_model(model), "cells": cells, "skipped": skipped}
 
 
 def main():

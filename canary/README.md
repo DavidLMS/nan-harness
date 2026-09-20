@@ -1,5 +1,8 @@
 # Compatibility Canary
 
+For the Windows integration candidate, explicit platform skips and remaining
+qualification work, see [Windows integration](windows-integration.md).
+
 The nan-harness compatibility canary combines a deterministic source/main
 detector with disposable Linux and macOS Tart VMs on a private Apple Silicon
 host. It tests all 15 supported harnesses without adding commands to the public

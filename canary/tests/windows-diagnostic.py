@@ -33,6 +33,26 @@ class WindowsOsProxy:
 
 
 class WindowsDiagnosticTests(unittest.TestCase):
+    def test_unavailable_distributions_skip_without_resolution_install_or_live_calls(self):
+        for mode in ("deterministic", "live"):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as tmp, \
+                    patch.object(diagnostic, "resolver_module", return_value=Resolver()), \
+                    patch.object(diagnostic, "native_prerequisite_self_test",
+                                 return_value={"status": "PASS", "checks": {}}), \
+                    patch.object(diagnostic, "resolve_one") as resolve, \
+                    patch.object(diagnostic, "run_bounded") as run:
+                report, failed = diagnostic.collect(
+                    self.args(mode), ["prime-agent", "fx"], Path(tmp))
+                resolve.assert_not_called()
+                run.assert_not_called()
+                self.assertFalse(failed)
+                self.assertEqual(report["totals"]["skipped"], 2)
+                self.assertEqual(report["totals"]["passed"], 0)
+                self.assertTrue(all(item["outcome"] == "skipped" for item in report["harnesses"]))
+                rendered = summary.render(summary.safe_view(report))
+                self.assertIn("skipped=2", rendered)
+                self.assertIn(diagnostic.WINDOWS_SKIP_REASON, rendered)
+
     def args(self, mode="deterministic"):
         return type("Args", (), {"source": "a" * 40, "mode": mode, "model": "test/model", "python_version": "3.12", "timeout": 1,
                                   "binary": Path("nanh.exe"), "canary": Path("nan-harness-canary.exe")})()
@@ -263,9 +283,12 @@ class WindowsDiagnosticTests(unittest.TestCase):
             self.binaries(args, Path(tmp))
             report, failed = diagnostic.collect(args, list(diagnostic.HARNESSES), Path(tmp))
         self.assertTrue(failed); self.assertEqual(report["totals"]["selected"], 15)
-        self.assertEqual(report["totals"]["passed"] + report["totals"]["failed"] + report["totals"]["blocked"], 15)
+        self.assertEqual(sum(report["totals"][key] for key in ("passed", "failed", "blocked", "skipped")), 15)
+        self.assertEqual(report["totals"]["skipped"], 2)
         for item in report["harnesses"]:
-            self.assertEqual(set(item["phases"]), set(diagnostic.PHASES)); self.assertEqual(item["outcome"], "failed")
+            self.assertEqual(set(item["phases"]), set(diagnostic.PHASES))
+            expected = "skipped" if item["harness"] in diagnostic.WINDOWS_UNAVAILABLE else "failed"
+            self.assertEqual(item["outcome"], expected)
 
     def test_first_middle_timeout_does_not_stop_later_harnesses(self):
         args = self.args("live"); calls = []
@@ -462,7 +485,9 @@ class WindowsDiagnosticTests(unittest.TestCase):
              patch.object(diagnostic.shutil, "which", return_value="x"):
             report, failed = diagnostic.collect(args, list(diagnostic.HARNESSES), Path(tmp))
         self.assertTrue(failed); self.assertEqual(len(report["harnesses"]), 15)
-        self.assertTrue(all(item["phases"]["version-doctor"]["status"] == "BLOCKED" for item in report["harnesses"]))
+        self.assertTrue(all(item["phases"]["version-doctor"]["status"] ==
+                            ("SKIPPED" if item["harness"] in diagnostic.WINDOWS_UNAVAILABLE else "BLOCKED")
+                            for item in report["harnesses"]))
 
     def test_output_redacts_child_text_and_groups_causal_ids(self):
         args = self.args()
@@ -585,7 +610,9 @@ class WindowsDiagnosticTests(unittest.TestCase):
                 Path(env["NAN_CANARY_PROBE_RESULT"]).write_text(
                     '{"schemaVersion":2,"stage":"deterministic-contract","status":"failed",'
                     '"diagnostics":["conformance-exit-nonzero","conformance-scenario-failed"],'
-                    '"exitCode":1,"failedScenarios":["inventory"]}')
+                    '"exitCode":1,"failedScenarios":["inventory"],'
+                    '"inventoryProcess":{"status":"completed","exitCode":0},'
+                    '"inventoryFailureReasons":[]}')
                 return (1, "nonzero")
             self.write_probe_success(argv, env)
             return (0, "exit")
@@ -597,6 +624,21 @@ class WindowsDiagnosticTests(unittest.TestCase):
         self.assertEqual(contract["reason"], "verified-with-inventory-drift")
         self.assertEqual(contract["diagnostic"]["failedScenarios"], ["inventory"])
         self.assertFalse(failed)
+
+    def test_inventory_operational_failure_cannot_be_downgraded_to_drift(self):
+        good = {"failedScenarios": ["inventory"],
+                "inventoryProcess": {"status": "completed", "exitCode": 0},
+                "inventoryFailureReasons": []}
+        self.assertTrue(diagnostic.inventory_drift_only(good))
+        for change in (
+                {"inventoryProcess": {"status": "cleanup-error", "cleanupStage": "capture-timeout"}},
+                {"inventoryFailureReasons": ["provider-failed"]},
+                {"inventoryFailureReasons": ["marker-missing"]},
+                {"inventoryProcess": None},
+                {"failedScenarios": ["tool-round-trip"]}):
+            with self.subTest(change=change):
+                self.assertFalse(diagnostic.inventory_drift_only({**good, **change}))
+        self.assertFalse(diagnostic.inventory_drift_only({"failedScenarios": ["inventory"]}))
 
     def test_installer_gets_the_token_and_the_harness_environment_does_not(self):
         args = self.args(); envs = {}

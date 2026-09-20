@@ -20,9 +20,10 @@ pub(super) const RELEASE_TARGETS: [&str; 5] = [
     "x86_64-unknown-linux-musl",
     "x86_64-pc-windows-msvc",
 ];
-pub(super) const AUXILIARY_ARTIFACTS: [&str; 2] = [
+pub(super) const AUXILIARY_ARTIFACTS: [&str; 3] = [
     "nan-harness-canary-aarch64-unknown-linux-musl",
     "nan-harness-canary-aarch64-apple-darwin",
+    "nan-harness-canary-x86_64-pc-windows-msvc.exe",
 ];
 
 #[derive(Serialize)]

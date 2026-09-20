@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """Publish only bounded Windows diagnostic facts to an Actions summary."""
 from __future__ import annotations
-import argparse, json, re
+import argparse, json, re, sys
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from selection import WINDOWS_UNAVAILABLE, WINDOWS_SKIP_REASON
 
 HARNESSES = frozenset(("claude-code", "codex", "opencode", "hermes", "pi", "omp", "prime-agent", "deepseek-harness", "openclaw", "cline", "qwen-code", "kimi-code", "aider", "goose", "fx"))
 PHASES = ("metadata", "prerequisites", "install", "version-doctor", "deterministic-contract", "live-tool")
 SETUP = frozenset(("checkout", "node", "python", "rust", "source", "fixtures", "rust_fixture", "build", "workflow", "batch", "entrypoint"))
-OUTCOMES = frozenset(("passed", "failed", "blocked"))
-STATUSES = frozenset(("PASS", "FAIL", "BLOCKED", "NOT_REQUESTED", "UNSUPPORTED"))
+OUTCOMES = frozenset(("passed", "failed", "blocked", "skipped"))
+STATUSES = frozenset(("PASS", "FAIL", "BLOCKED", "NOT_REQUESTED", "UNSUPPORTED", "SKIPPED"))
 MODES = frozenset(("deterministic", "live", "native-diagnostic"))
 SHA = re.compile(r"^[0-9a-f]{40}$")
 TOKEN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
@@ -209,7 +211,7 @@ def _phase(value, label):
         raise UnsafeReport(f"invalid {label}")
     result = {"status": value["status"]}
     if "reason" in value:
-        if value["reason"] not in REASONS:
+        if value["reason"] not in REASONS | {WINDOWS_SKIP_REASON, "verified-with-inventory-drift"}:
             raise UnsafeReport(f"invalid {label} reason")
         result["reason"] = value["reason"]
     for key in ("causalId", "causeGroup"):
@@ -238,16 +240,28 @@ def safe_view(report):
         phases = item.get("phases")
         if not isinstance(phases, dict) or set(phases) - set(PHASES):
             raise UnsafeReport("invalid phase set")
+        if item["outcome"] == "skipped" or any(
+                isinstance(value, dict) and value.get("status") == "SKIPPED"
+                for value in phases.values()):
+            expected = {name: {"status": "SKIPPED", "reason": WINDOWS_SKIP_REASON}
+                        for name in PHASES}
+            if (item["harness"] not in WINDOWS_UNAVAILABLE or
+                    item["outcome"] != "skipped" or phases != expected):
+                raise UnsafeReport("invalid platform skip")
         harnesses.append({"harness": item["harness"], "outcome": item["outcome"], "phases": {name: _phase(phases[name], name) for name in PHASES if name in phases}})
     if len({item["harness"] for item in harnesses}) != len(harnesses):
         raise UnsafeReport("duplicate harness")
     totals = report.get("totals")
-    keys = ("selected", "passed", "failed", "blocked")
+    if isinstance(totals, dict):
+        totals = {"skipped": 0, **totals}
+    keys = ("selected", "passed", "failed", "blocked", "skipped")
     if not isinstance(totals, dict) or set(totals) - set(keys) - {"phases"} or any(not isinstance(totals.get(k), int) or isinstance(totals[k], bool) or not 0 <= totals[k] <= 15 for k in keys):
         raise UnsafeReport("invalid totals")
     if "phases" in totals and (not isinstance(totals["phases"], dict) or set(totals["phases"]) - STATUSES or any(not isinstance(v, int) or isinstance(v, bool) or not 0 <= v <= 90 for v in totals["phases"].values())):
         raise UnsafeReport("invalid phase totals")
-    if totals["selected"] != len(harnesses) or (totals["selected"] and totals["passed"] + totals["failed"] + totals["blocked"] != totals["selected"]):
+    if totals["selected"] != len(harnesses) or (totals["selected"] and any(
+            totals[outcome] != sum(item["outcome"] == outcome for item in harnesses)
+            for outcome in OUTCOMES)):
         raise UnsafeReport("inconsistent totals")
     raw_setup = report.get("setup", {})
     if not isinstance(raw_setup, dict) or set(raw_setup) - SETUP:
@@ -289,13 +303,15 @@ def render(view):
                     details.append("progress=" + progress["progressStatus"])
             rendered.append(f"{name}={value['status']}" + (" [" + "; ".join(details) + "]" if details else ""))
         phases = ", ".join(rendered)
+        if item["outcome"] == "skipped":
+            phases = WINDOWS_SKIP_REASON
         lines.append(f"| `{item['harness']}` | `{item['outcome']}` | {phases} |")
     totals = view["totals"]
     setup = view.get("setup", {})
     if setup:
         lines += ["", "## Setup", ""]
         lines.extend("- %s: %s" % (name, value or "missing") for name, value in sorted(setup.items()))
-    lines += ["", f"Totals: selected={totals['selected']}, passed={totals['passed']}, failed={totals['failed']}, blocked={totals['blocked']}"]
+    lines += ["", f"Totals: selected={totals['selected']}, passed={totals['passed']}, failed={totals['failed']}, blocked={totals['blocked']}, skipped={totals['skipped']}"]
     return "\n".join(lines) + "\n"
 
 def main(argv=None):

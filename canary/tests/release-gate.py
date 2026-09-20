@@ -28,16 +28,19 @@ class ReleaseGateTests(unittest.TestCase):
         # closed instead of collecting a cell whose evidence cannot exist.
         selection = sys.modules["selection"]
         original = dict(selection.HARNESS_PLATFORMS)
+        original_windows_asset = dict(selection.PLATFORM_ASSETS["windows"])
         try:
             self.assertEqual(len(release_gate.expected_identities()), 30)
             self.assertEqual(len(release_gate.ASSETS), 4)
             selection.HARNESS_PLATFORMS["codex"] = ("linux", "macos", "windows")
             self.assertIn("windows-codex", release_gate.expected_identities())
+            selection.PLATFORM_ASSETS["windows"]["canary"] = None
             with self.assertRaisesRegex(ValueError, "published canary release asset"):
                 release_gate.matrix(None)
         finally:
             selection.HARNESS_PLATFORMS.clear()
             selection.HARNESS_PLATFORMS.update(original)
+            selection.PLATFORM_ASSETS["windows"] = original_windows_asset
 
     def test_workflows_are_manual_serialized_and_trusted(self):
         gate = (ROOT / ".github/workflows/release-gate.yml").read_text()
