@@ -20,6 +20,8 @@ jobs:
         with:
           node-version: 24.20.0
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          cache-on-failure: true
       - name: Install pinned Cline
         shell: pwsh
         run: npm install --global cline@3.0.61
@@ -28,6 +30,8 @@ jobs:
         run: cargo build --locked -p nan-harness-cli -p nan-harness-canary
       - name: Verify Cline contracts
         shell: pwsh
+        env:
+          NAN_HARNESS_CONFORMANCE_DIAGNOSTICS: '1'
         run: |
           & target/debug/nan-harness-canary.exe conformance --nan-harness "$pwd/target/debug/nan-harness.exe" --harness cline --json
           exit $LASTEXITCODE
