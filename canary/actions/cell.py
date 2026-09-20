@@ -135,6 +135,13 @@ WINDOWS_INSTALL_CATEGORIES = frozenset({
     "disk-space", "tool-missing", "package-not-found", "installer-refused",
 })
 INSTALL_FAILURE_CODES.update("windows-installer-" + code for code in WINDOWS_INSTALL_CATEGORIES)
+WINDOWS_INSTALL_DETAILS = frozenset({
+    "launcher-missing", "expected-executable-missing", "invalid-ref", "invalid-version",
+    "empty-download", "metadata-request-failed", "invalid-archive",
+    "official-asset-missing", "official-metadata-probe-failed", "invalid-frozen-ref",
+    "marker-missing", "marker-invalid", "marker-passed", "download-failed", "native-exit",
+})
+INSTALL_FAILURE_CODES.update("windows-installer-" + code for code in WINDOWS_INSTALL_DETAILS)
 PRIVATE_DIAGNOSTIC_LIMIT = 64 * 1024
 NPM_ERROR_LINE = re.compile(r"^\s*npm\s+(?:err!|error)\s?(.*)$", re.IGNORECASE)
 # Reviewed against npm metadata for pinned openclaw@2026.9.2: its 65 direct
@@ -853,17 +860,32 @@ def windows_install_failure(marker, fallback):
     """Project one closed installer category; discard all private marker content."""
     try:
         if marker.stat().st_size > PRIVATE_DIAGNOSTIC_LIMIT:
-            return fallback
+            return "windows-installer-marker-invalid"
         value = json.loads(marker.read_bytes())
-        if not isinstance(value, dict) or value.get("schemaVersion") != 2 or value.get("status") != "failed":
-            return fallback
+        if not isinstance(value, dict) or value.get("schemaVersion") != 2 or value.get("status") not in ("failed", "passed"):
+            return "windows-installer-marker-invalid"
+        if value["status"] == "passed":
+            return "windows-installer-marker-passed"
         diagnostic = value.get("diagnostic")
         code = diagnostic.get("processCategory") if isinstance(diagnostic, dict) else None
         if isinstance(code, str) and code in WINDOWS_INSTALL_CATEGORIES:
             return "windows-installer-" + code
+        if isinstance(diagnostic, dict):
+            asset = diagnostic.get("assetReason")
+            if isinstance(asset, str) and asset in WINDOWS_INSTALL_DETAILS:
+                return "windows-installer-" + asset
+            if diagnostic.get("subphase") == "download":
+                return "windows-installer-download-failed"
+            if diagnostic.get("processReason") == "exit-nonzero":
+                return "windows-installer-native-exit"
+        reason = value.get("reason")
+        if isinstance(reason, str) and reason in WINDOWS_INSTALL_DETAILS:
+            return "windows-installer-" + reason
         return fallback
+    except FileNotFoundError:
+        return "windows-installer-marker-missing"
     except (OSError, ValueError):
-        return fallback
+        return "windows-installer-marker-invalid"
     finally:
         marker.unlink(missing_ok=True)
 

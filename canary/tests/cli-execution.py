@@ -55,6 +55,20 @@ class CliExecutionTests(unittest.TestCase):
                 self.assertEqual(cell.windows_install_failure(marker, "unknown"), expected)
                 self.assertFalse(marker.exists())
 
+    def test_windows_installer_distinguishes_missing_marker_and_launcher(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            marker = Path(temporary) / "installer-result.json"
+            self.assertEqual(cell.windows_install_failure(marker, "unknown"), "windows-installer-marker-missing")
+            for value, expected in (({}, "marker-invalid"),
+                                    ({"schemaVersion": 2, "status": "passed"}, "marker-passed"),
+                                    ({"schemaVersion": 2, "status": "failed", "diagnostic": {
+                                        "assetReason": "launcher-missing"}}, "launcher-missing"),
+                                    ({"schemaVersion": 2, "status": "failed", "diagnostic": {
+                                        "subphase": "download"}}, "download-failed")):
+                marker.write_text(json.dumps(value))
+                self.assertEqual(cell.windows_install_failure(marker, "unknown"), "windows-installer-" + expected)
+                self.assertFalse(marker.exists())
+
     def test_windows_hosted_install_and_live_use_native_batch_shell(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
