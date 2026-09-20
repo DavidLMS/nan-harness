@@ -27,8 +27,15 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
         with:
           python-version: '3.12'
-      - name: Inspect only closed installer failure facts
-        shell: ${{ matrix.shell }}
+      - name: Inspect native installer failure facts
+        if: matrix.shell == 'pwsh'
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python canary/actions/temporary_installer_probe.py
+      - name: Inspect Git Bash installer failure facts
+        if: matrix.shell == 'bash'
+        shell: bash
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: python canary/actions/temporary_installer_probe.py
