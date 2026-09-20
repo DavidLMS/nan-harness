@@ -27,6 +27,9 @@ done
 # Offline Python contracts. They cover the hosted platform table, the resolver, the
 # cell driver, the release gate and the publisher; the Windows suites skip their
 # live PowerShell fixtures where pwsh is unavailable.
+# Publisher integration tests execute the real validator. A fresh worktree must
+# build it explicitly instead of depending on a binary left by an earlier run.
+cargo build --locked --package nan-harness-canary --bin nan-harness-canary
 for test_script in \
   hosted-cli-selection.py \
   hosted-cli-workflow.py \
