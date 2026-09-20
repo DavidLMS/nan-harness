@@ -145,6 +145,20 @@ impl PublishedConformanceRunner {
             )
             .env("HOME", &home)
             .timeout(timeout_for(registration.kind));
+        #[cfg(windows)]
+        {
+            // env_clear also removes Windows' temporary directory and profile selectors.
+            // Keep native tools inside the disposable workspace, not the system directory.
+            command = command
+                .env("USERPROFILE", &home)
+                .env("TEMP", workspace.path())
+                .env("TMP", workspace.path());
+            for name in ["SystemRoot", "ComSpec", "PATHEXT"] {
+                if let Some(value) = std::env::var_os(name) {
+                    command = command.env(name, value);
+                }
+            }
+        }
         if registration.kind == HarnessKind::ClaudeCode {
             command = command
                 .env("CLAUDE_CONFIG_DIR", workspace.claude_config_path())
