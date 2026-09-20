@@ -21,8 +21,9 @@ CELL_SPEC.loader.exec_module(CELL)
 
 
 class WindowsProbeContracts(unittest.TestCase):
-    def _run_live_fixture(self, harness="fx", *, exit_code=0, missing_child=False):
-        pwsh = shutil.which("pwsh")
+    def _run_live_fixture(self, harness="fx", *, exit_code=0, missing_child=False,
+                          shell="pwsh", native_warning=False):
+        pwsh = shutil.which(shell)
         if not pwsh:
             self.skipTest("pwsh unavailable; live PowerShell fixture deferred to Windows")
         with tempfile.TemporaryDirectory() as tmp:
@@ -30,10 +31,12 @@ class WindowsProbeContracts(unittest.TestCase):
             marker = root / "probe-result.json"
             child = root / "synthetic-live-child.ps1"
             child.write_text(
+                ("[Console]::Error.WriteLine('synthetic native warning')\n" if native_warning else "") +
                 "$prompt = [string]$args[-1]\n"
                 "if ($prompt -match \"read '([^']+)'\") {\n"
                 "  Write-Output ('Reading ' + $Matches[1])\n"
                 "  Get-Content -Raw -LiteralPath $Matches[1]\n"
+                "  Write-Output 'read_files'\n"
                 "}\n"
                 "if ($prompt -match 'powershell -NoProfile -Command \"([^\"]+)\"') {\n"
                 "  & pwsh -NoProfile -NonInteractive -Command $Matches[1]\n"
@@ -46,6 +49,12 @@ class WindowsProbeContracts(unittest.TestCase):
                 f"exit {exit_code}\n",
                 encoding="utf-8",
             )
+            if native_warning:
+                wrapper = root / "synthetic-native.cmd"
+                wrapper.write_text(
+                    f'@"{pwsh}" -NoProfile -NonInteractive -File "{child}" %*\n'
+                    '@exit /b %errorlevel%\n', encoding="utf-8")
+                child = wrapper
             command = [pwsh, "-NoProfile", "-NonInteractive", "-File", str(PROBE),
                        "-Harness", harness, "-Stage", "live-tool", "-NanBinary",
                        str(root / "missing-child.ps1" if missing_child else child),
@@ -62,6 +71,15 @@ class WindowsProbeContracts(unittest.TestCase):
             else:
                 self.assertNotEqual(run.returncode, 0, f"probe_result={value}")
             return value
+
+    @unittest.skipUnless(os.name == "nt", "Windows PowerShell native stderr contract")
+    def test_windows_powershell_native_warning_preserves_success_and_actual_failure(self):
+        for code in (0, 7):
+            with self.subTest(exit_code=code):
+                value = self._run_live_fixture(
+                    harness="cline", shell="powershell.exe", native_warning=True, exit_code=code)
+                self.assertEqual(value["exitCode"], code)
+                self.assertEqual(value["status"], "failed" if code else "passed")
 
     def test_real_pwsh_live_success_records_zero_exit(self):
         value = self._run_live_fixture()

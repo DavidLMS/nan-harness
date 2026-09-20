@@ -828,7 +828,7 @@ mod tests {
         });
         tokio::time::timeout(Duration::from_secs(1), async {
             while !(started.load(Ordering::SeqCst) && join_started.load(Ordering::SeqCst)) {
-                tokio::task::yield_now().await;
+                tokio::time::sleep(Duration::from_millis(10)).await;
             }
         })
         .await
@@ -933,7 +933,7 @@ mod tests {
             &std::process::id().to_string(),
         );
         let current_exe = std::env::current_exe().expect("test executable should be available");
-        let child = ChildGuard(
+        let mut child = ChildGuard(
             std::process::Command::new(current_exe)
                 .args([
                     "--exact",
@@ -951,6 +951,7 @@ mod tests {
         if std::env::var_os("NAN_HARNESS_TERMINAL_FIXTURE_PARENT_EXITS").as_deref()
             == Some(std::ffi::OsStr::new("1"))
         {
+            wait_for_leaf_ready(&mut child, &ready_file, &pid_file).await;
             atomic_publish(
                 &fixture_path("NAN_HARNESS_TERMINAL_FIXTURE_PARENT_EXITED"),
                 "parent-exited",
@@ -961,6 +962,31 @@ mod tests {
                 tokio::time::sleep(Duration::from_millis(50)).await;
             }
         }
+    }
+
+    #[cfg(windows)]
+    async fn wait_for_leaf_ready(child: &mut ChildGuard, ready: &Path, pid: &Path) {
+        let expected_pid = child.0.id().to_string();
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if ready.is_file()
+                    && std::fs::read_to_string(pid).is_ok_and(|value| value == expected_pid)
+                {
+                    return;
+                }
+                assert!(
+                    child
+                        .0
+                        .try_wait()
+                        .expect("leaf status should be available")
+                        .is_none(),
+                    "leaf exited before publishing readiness"
+                );
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("leaf must publish its PID and open-stream readiness before parent exit");
     }
 
     #[cfg(windows)]
