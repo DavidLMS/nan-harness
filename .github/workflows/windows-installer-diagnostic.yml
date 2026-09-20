@@ -1,6 +1,11 @@
 name: Temporary Windows installer diagnostic
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/windows-installer-diagnostic.yml
+      - canary/guest/install-harness.ps1
+      - canary/actions/cell.py
 permissions:
   contents: read
 jobs:
