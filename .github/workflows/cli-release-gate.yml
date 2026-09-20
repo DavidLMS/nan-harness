@@ -157,6 +157,7 @@ jobs:
         if: always()
         with:
           name: cli-cell-${{ matrix.system }}-${{ matrix.harness }}
+          overwrite: true
           path: ${{ runner.temp }}/cli-reports/*.json
           if-no-files-found: ignore
           retention-days: 7

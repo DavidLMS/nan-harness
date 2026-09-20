@@ -116,6 +116,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: release-gate-assets
+          overwrite: true
           path: ${{ runner.temp }}/release-assets/*
           retention-days: 7
 
@@ -214,6 +215,7 @@ jobs:
         if: always()
         with:
           name: release-gate-report-${{ matrix.system }}-${{ matrix.harness }}
+          overwrite: true
           path: ${{ runner.temp }}/cli-reports/*.json
           if-no-files-found: error
           retention-days: 7
@@ -260,6 +262,7 @@ jobs:
         if: inputs.mode == 'live'
         with:
           name: release-gate-handoff
+          overwrite: true
           path: release-gate-manifest.json
           retention-days: 30
       - name: Record deterministic verification-only result

@@ -46,6 +46,11 @@ class ReleaseGateTests(unittest.TestCase):
     def test_workflows_are_manual_serialized_and_trusted(self):
         gate = (ROOT / ".github/workflows/release-gate.yml").read_text()
         recommend = (ROOT / ".github/workflows/recommend-release.yml").read_text()
+        modular = (ROOT / ".github/workflows/cli-release-gate.yml").read_text()
+        self.assertIn('name: cli-cell-${{ matrix.system }}-${{ matrix.harness }}\n          overwrite: true', modular)
+        for name in ('release-gate-assets', 'release-gate-report-${{ matrix.system }}-${{ matrix.harness }}',
+                     'release-gate-handoff'):
+            self.assertIn(f'name: {name}\n          overwrite: true', gate)
         for workflow in (gate, recommend):
             self.assertIn("workflow_dispatch:", workflow)
             self.assertIn("cancel-in-progress: false", workflow)
