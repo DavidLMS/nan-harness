@@ -836,7 +836,7 @@ class WindowsJob:
 def installer_command(harness, version, ref=""):
     """Exact-version installer argv; a ref is the frozen immutable source commit."""
     if os.name == "nt":
-        command = ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File",
+        command = ["pwsh", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File",
                    str(ROOT / "canary/guest/install-harness.ps1"), "-Harness", harness, "-Version", version]
         return command + (["-Ref", ref] if ref else [])
     return ["bash", str(ROOT / "canary/guest/install-harness.sh"), harness, version] + ([ref] if ref else [])
@@ -996,7 +996,9 @@ def live(args, _state):
     windows = os.name == "nt"
     probe = ROOT / ("canary/guest/probe-harness.ps1" if windows else "canary/guest/probe-harness.sh")
     if windows:
-        command = ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+        # Match the native batch runner: PowerShell 7 preserves embedded quotes
+        # when passing the tool prompt to the native nan-harness executable.
+        command = ["pwsh", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
                    "-File", str(probe), "-Harness", args.harness, "-Stage", "live-tool",
                    "-Model", args.model, "-NanBinary", str(args.binary), "-Canary", str(args.canary),
                    "-Version", args.harness_version]

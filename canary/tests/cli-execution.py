@@ -45,6 +45,26 @@ cli_suite = load("cli-suite")
 
 
 class CliExecutionTests(unittest.TestCase):
+    def test_windows_hosted_install_and_live_use_native_batch_shell(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            args = SimpleNamespace(directory=root, binary=root / "nan-harness.exe",
+                                   canary=root / "nan-harness-canary.exe", harness="codex",
+                                   model="qwen3.6", harness_version="0.155.1")
+            proxy = SimpleNamespace(name="nt", environ={"NAN_API_KEY": "synthetic"})
+            def run(command, _directory, **_kwargs):
+                self.assertEqual(command[0], "pwsh")
+                self.assertIn("-NonInteractive", command)
+                (root / "probe-result.json").write_text(json.dumps({
+                    "schemaVersion": 2, "stage": "complete", "status": "passed",
+                    "diagnostics": [], "exitCode": 0}))
+                return 0
+            with patch.object(cell, "os", proxy), \
+                    patch.object(cell, "cell_environment", return_value={}), \
+                    patch.object(cell, "private_command", side_effect=run):
+                self.assertEqual(cell.installer_command("codex", "0.155.1")[0], "pwsh")
+                self.assertEqual(cell.live(args, {}), 1)
+
     def test_windows_cell_discovers_every_native_installer_destination(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
