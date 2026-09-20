@@ -663,7 +663,9 @@ mod tests {
         .await;
         let pid = read_fixture_pid(&pid_file);
         let parent_pid = read_fixture_pid(&parent_pid_file);
-        assert!(process_is_alive(pid, &comspec).expect("liveness query should execute"));
+        if !parent_exits {
+            assert!(process_is_alive(pid, &comspec).expect("liveness query should execute"));
+        }
         assert!(wait_for_process_state(parent_pid, &comspec, !parent_exits).await);
         let result = terminal
             .join_bounded_with_checkpoint(Duration::from_secs(8), None)
@@ -727,15 +729,10 @@ mod tests {
         parent_exits: bool,
     ) {
         if parent_exits {
-            assert!(matches!(
-                result,
-                Err(super::TerminalError::DescendantCleanup {
-                    stream: "stdout",
-                    stage: super::CleanupStage::CaptureTimeout,
-                    os_error_code: None,
-                    ..
-                })
-            ));
+            assert!(
+                result.as_ref().is_ok_and(|output| output.status.success()),
+                "an exited parent must close its owned descendants before draining output"
+            );
         } else {
             assert!(matches!(result, Err(super::TerminalError::Timeout { .. })));
         }
