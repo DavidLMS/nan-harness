@@ -77,6 +77,10 @@ class CliExecutionTests(unittest.TestCase):
                     "processCategory": "installer-refused", "upstreamStage": stage}}))
                 expected = "hermes-uv" if stage == "uv" else "installer-refused"
                 self.assertEqual(cell.windows_install_failure(marker, "unknown"), "windows-installer-" + expected)
+            marker.write_text(json.dumps({"schemaVersion": 2, "status": "failed", "diagnostic": {
+                "processCategory": "permission", "upstreamStage": "python"}}))
+            self.assertEqual(cell.windows_install_failure(marker, "unknown"),
+                             "windows-installer-hermes-python-permission")
 
     def test_windows_hosted_install_and_live_use_native_batch_shell(self):
         with tempfile.TemporaryDirectory() as temporary:
