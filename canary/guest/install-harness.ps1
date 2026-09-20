@@ -254,6 +254,16 @@ try {
         throw 'hermes requires an immutable source ref'
       }
       $hermesHome = Join-Path $cell 'hermes'; $hermesInstall = Join-Path $hermesHome 'hermes-agent'
+      # Start with the frozen revision, never a checkout of the moving main
+      # branch. The official installer can then update/verify this exact clone
+      # without its SSH/main/ZIP bootstrap changing the source under test.
+      if ((Test-Path -LiteralPath $hermesInstall) -and -not (Test-Path -LiteralPath (Join-Path $hermesInstall '.git'))) { throw 'Hermes checkout is not a retryable Git repository' }
+      Invoke-Native 'git.exe' @('init',$hermesInstall) 'git' 'install'
+      Invoke-Native 'git.exe' @('-C',$hermesInstall,'config','remote.origin.url','https://github.com/NousResearch/hermes-agent.git') 'git' 'install'
+      Invoke-Native 'git.exe' @('-C',$hermesInstall,'config','remote.origin.fetch','+refs/heads/*:refs/remotes/origin/*') 'git' 'install'
+      Invoke-Native 'git.exe' @('-C',$hermesInstall,'-c','windows.appendAtomically=false','fetch','--depth','1','origin',$Ref) 'git' 'install'
+      Invoke-Native 'git.exe' @('-C',$hermesInstall,'config','core.autocrlf','false') 'git' 'install'
+      Invoke-Native 'git.exe' @('-C',$hermesInstall,'checkout','--detach',$Ref) 'git' 'install'
       # The installer stages its launchers into <HermesHome>\bin only when it manages the
       # virtual environment, and -NoVenv skips that staging entirely: without it the cell
       # has no `hermes` to run at all. <cell>\hermes\bin is already on the cell PATH.

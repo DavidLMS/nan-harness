@@ -520,7 +520,7 @@ _INSTALLER_SUBPHASES = frozenset({
     "virtualenv", "cleanup", "unknown",
 })
 _INSTALLER_EXECUTABLES = frozenset({
-    "unknown", "npm-node", "npm-cmd", "pwsh", "py-launcher", "python", "uv", "github-api",
+    "unknown", "npm-node", "npm-cmd", "pwsh", "py-launcher", "python", "uv", "git", "github-api",
     "http-download", "official-metadata", "archive", "archive-extract",
 })
 _INSTALLER_ASSET_REASONS = frozenset({

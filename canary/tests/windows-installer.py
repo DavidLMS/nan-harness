@@ -30,6 +30,9 @@ class WindowsInstallerTests(unittest.TestCase):
         self.assertNotIn("'-NoVenv'", SCRIPT)
         self.assertIn("@('-SkipSetup','-HermesHome',$hermesHome,'-InstallDir',$hermesInstall", SCRIPT)
         self.assertIn("'-ForceCommit','-NonInteractive','-Json'", SCRIPT)
+        self.assertIn("'fetch','--depth','1','origin',$Ref", SCRIPT)
+        self.assertIn("'checkout','--detach',$Ref", SCRIPT)
+        self.assertIn("Hermes checkout is not a retryable Git repository", SCRIPT)
         self.assertIn('$privateProcessText = $errTask.Result + "`n" + $outTask.Result', SCRIPT)
         # A missing staged launcher is reported by the installer instead of surfacing later as
         # an uninstalled harness in the product's doctor.
