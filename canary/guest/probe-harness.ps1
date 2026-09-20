@@ -7,7 +7,20 @@ param(
 )
 $ErrorActionPreference = 'Stop'; $stageNow = $Stage; $workspace = $null; $stdout = $null; $stderr = $null; $completed = $false; $markerPath = $env:NAN_CANARY_PROBE_RESULT; $diagnostics = New-Object System.Collections.Generic.List[string]; $exitCode = $null; $doctorVersion = $null; $doctorExpectedVersion = $null; $doctorReason = $null; $doctorSchemaReason = $null; $discoveryCode = $null; $inventoryFailureReasons = $null; $inventoryProcess = $null; $failedScenarios = $null
 $knownDiagnostics = @('doctor-child-launch','doctor-exit-nonzero','doctor-output-invalid','doctor-schema-invalid','doctor-version-missing','doctor-version-invalid','doctor-version-mismatch','doctor-exit-missing','conformance-child-launch','conformance-exit-nonzero','conformance-output-invalid','conformance-schema-invalid','conformance-scenario-missing','conformance-scenario-failed','conformance-inventory-failed','conformance-inventory-operational-failed','conformance-check-invalid','conformance-exit-missing','live-child-launch','live-exit-nonzero','live-exit-missing','live-credential-missing','live-tool-evidence-missing','live-read-marker-missing','live-completion-marker-missing','live-bridge-sentinel','live-usage-invalid','live-usage-summary-missing','probe-unexpected-failure')
+$knownDiagnostics += @('live-error-auth','live-error-network','live-error-arguments','live-error-permission','live-error-provider','live-error-config')
 function Add-Diagnostic([string]$Code) { if ($knownDiagnostics -contains $Code -and -not $diagnostics.Contains($Code)) { [void]$diagnostics.Add($Code) } }
+function Native-FailureCode {
+  # Project only fixed categories from private capture; never copy matching text.
+  foreach ($entry in @(
+    @('live-error-auth', 'invalid_api_key|401 Unauthorized|didn.t provide an API key'),
+    @('live-error-arguments', 'unexpected argument|unrecognized (argument|option)'),
+    @('live-error-permission', 'Access is denied|Permission denied|os error 5\b'),
+    @('live-error-config', 'failed to load configuration|error loading config'),
+    @('live-error-network', 'error sending request|failed to send request|Connection refused|Could not resolve host'),
+    @('live-error-provider', 'stream disconnected|rate limit|server error')
+  )) { if (Has-Regex $entry[1]) { return $entry[0] } }
+  return 'live-exit-nonzero'
+}
 function Write-Result([string]$resultStage, [string]$status) {
   if (-not $markerPath) { return }; $parent = Split-Path -Parent $markerPath
   $value = [ordered]@{ schemaVersion = 2; stage = $resultStage; status = $status; diagnostics = @($diagnostics.ToArray()) }
@@ -57,7 +70,7 @@ function Run-Native([string[]]$Arguments) {
     [Console]::OutputEncoding = $previousOutputEncoding
   }
   if ($null -eq $script:exitCode) { Add-Diagnostic 'live-exit-missing'; throw 'harness exit code unavailable' }
-  if ($script:exitCode -ne 0) { Add-Diagnostic 'live-exit-nonzero'; throw 'harness command failed' }
+  if ($script:exitCode -ne 0) { Add-Diagnostic (Native-FailureCode); throw 'harness command failed' }
 }
 function Has-Text([string]$Pattern) { return [bool](Select-String -LiteralPath @($stdout, $stderr) -Pattern $Pattern -SimpleMatch -Quiet -ErrorAction SilentlyContinue) }
 function Has-Regex([string]$Pattern) { return [bool](Select-String -LiteralPath @($stdout, $stderr) -Pattern $Pattern -Quiet -ErrorAction SilentlyContinue) }

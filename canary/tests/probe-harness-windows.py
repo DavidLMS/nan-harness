@@ -33,7 +33,7 @@ class WindowsProbeContracts(unittest.TestCase):
             self.assertIsNone(CELL.windows_probe_result(marker))
 
     def _run_live_fixture(self, harness="fx", *, exit_code=0, missing_child=False,
-                          shell="pwsh", native_warning=False):
+                          shell="pwsh", native_warning=False, failure_text=""):
         pwsh = shutil.which(shell)
         if not pwsh:
             self.skipTest("pwsh unavailable; live PowerShell fixture deferred to Windows")
@@ -42,6 +42,7 @@ class WindowsProbeContracts(unittest.TestCase):
             marker = root / "probe-result.json"
             child = root / "synthetic-live-child.ps1"
             child.write_text(
+                ("Write-Output '" + failure_text.replace("'", "''") + "'\n" if failure_text else "") +
                 ("[Console]::Error.WriteLine('synthetic native warning')\n" if native_warning else "") +
                 "$prompt = [string]$args[-1]\n"
                 "if ($prompt -match \"read '([^']+)'\") {\n"
@@ -105,6 +106,17 @@ class WindowsProbeContracts(unittest.TestCase):
         self.assertEqual(value["status"], "failed")
         self.assertEqual(value["exitCode"], 7)
         self.assertEqual(value["diagnostics"], ["live-exit-nonzero"])
+
+    def test_real_pwsh_failure_categories_never_copy_private_text(self):
+        for message, code in (("401 Unauthorized PRIVATE_SENTINEL", "live-error-auth"),
+                              ("unexpected argument PRIVATE_SENTINEL", "live-error-arguments"),
+                              ("Permission denied PRIVATE_SENTINEL", "live-error-permission"),
+                              ("stream disconnected PRIVATE_SENTINEL", "live-error-provider"),
+                              ("unclassified PRIVATE_SENTINEL", "live-exit-nonzero")):
+            with self.subTest(code=code):
+                value = self._run_live_fixture(exit_code=7, failure_text=message)
+                self.assertEqual(value["diagnostics"], [code])
+                self.assertNotIn("PRIVATE_SENTINEL", json.dumps(value))
 
     def test_real_pwsh_live_launch_failure_records_safe_sentinel_exit(self):
         value = self._run_live_fixture(missing_child=True)

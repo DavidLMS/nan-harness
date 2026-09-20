@@ -45,6 +45,16 @@ cli_suite = load("cli-suite")
 
 
 class CliExecutionTests(unittest.TestCase):
+    def test_windows_installer_marker_exposes_only_closed_category(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            marker = Path(temporary) / "installer-result.json"
+            for category in ("network-dns", "PRIVATE_SENTINEL", ["permission"], None):
+                marker.write_text(json.dumps({"schemaVersion": 2, "status": "failed",
+                                              "diagnostic": {"processCategory": category}}))
+                expected = "windows-installer-network-dns" if category == "network-dns" else "unknown"
+                self.assertEqual(cell.windows_install_failure(marker, "unknown"), expected)
+                self.assertFalse(marker.exists())
+
     def test_windows_hosted_install_and_live_use_native_batch_shell(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

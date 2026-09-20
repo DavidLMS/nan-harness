@@ -544,6 +544,8 @@ _PROBE_DIAGNOSTICS = frozenset({
     "conformance-scenario-failed", "conformance-inventory-failed", "conformance-check-invalid",
     "conformance-inventory-operational-failed", "doctor-exit-missing", "conformance-exit-missing",
     "live-child-launch", "live-exit-nonzero",
+    "live-error-auth", "live-error-network", "live-error-arguments", "live-error-permission",
+    "live-error-provider", "live-error-config",
     "live-exit-missing", "live-credential-missing", "live-tool-evidence-missing",
     "live-read-marker-missing", "live-completion-marker-missing", "live-bridge-sentinel",
     "live-usage-invalid", "live-usage-summary-missing", "probe-unexpected-failure",

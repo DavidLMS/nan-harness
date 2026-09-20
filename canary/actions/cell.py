@@ -130,6 +130,11 @@ INSTALL_FAILURE_CODES = {
     "hosted-node-missing", "hosted-node-version-mismatch", "hosted-npm-missing",
     "diagnostic-unknown", "unknown",
 }
+WINDOWS_INSTALL_CATEGORIES = frozenset({
+    "network-dns", "network-timeout", "network-connection", "tls-certificate", "permission",
+    "disk-space", "tool-missing", "package-not-found", "installer-refused",
+})
+INSTALL_FAILURE_CODES.update("windows-installer-" + code for code in WINDOWS_INSTALL_CATEGORIES)
 PRIVATE_DIAGNOSTIC_LIMIT = 64 * 1024
 NPM_ERROR_LINE = re.compile(r"^\s*npm\s+(?:err!|error)\s?(.*)$", re.IGNORECASE)
 # Reviewed against npm metadata for pinned openclaw@2026.9.2: its 65 direct
@@ -364,6 +369,8 @@ PROBE_DIAGNOSTIC_CODES = {
 WINDOWS_PROBE_STAGES = frozenset({"live-tool", "harness-run", "read-marker", "completion-marker",
                                   "bridge-sentinel", "usage-evidence", "usage-summary", "complete"})
 WINDOWS_LIVE_DIAGNOSTICS = frozenset({
+    "live-error-auth", "live-error-network", "live-error-arguments", "live-error-permission",
+    "live-error-provider", "live-error-config",
     "live-child-launch", "live-exit-nonzero", "live-exit-missing", "live-credential-missing",
     "live-tool-evidence-missing", "live-read-marker-missing", "live-completion-marker-missing",
     "live-bridge-sentinel", "live-usage-invalid", "live-usage-summary-missing",
@@ -842,9 +849,31 @@ def installer_command(harness, version, ref=""):
     return ["bash", str(ROOT / "canary/guest/install-harness.sh"), harness, version] + ([ref] if ref else [])
 
 
+def windows_install_failure(marker, fallback):
+    """Project one closed installer category; discard all private marker content."""
+    try:
+        if marker.stat().st_size > PRIVATE_DIAGNOSTIC_LIMIT:
+            return fallback
+        value = json.loads(marker.read_bytes())
+        if not isinstance(value, dict) or value.get("schemaVersion") != 2 or value.get("status") != "failed":
+            return fallback
+        diagnostic = value.get("diagnostic")
+        code = diagnostic.get("processCategory") if isinstance(diagnostic, dict) else None
+        if isinstance(code, str) and code in WINDOWS_INSTALL_CATEGORIES:
+            return "windows-installer-" + code
+        return fallback
+    except (OSError, ValueError):
+        return fallback
+    finally:
+        marker.unlink(missing_ok=True)
+
+
 def install(args, state):
     command = installer_command(args.harness, args.harness_version, getattr(args, "harness_ref", "") or "")
     environment = cell_environment(args.directory)
+    installer_marker = args.directory / "installer-result.json"
+    if os.name == "nt":
+        installer_marker.unlink(missing_ok=True)
     installer_code = "unknown"
 
     def capture_installer(log, status):
@@ -860,6 +889,8 @@ def install(args, state):
     except (OSError, RuntimeError, subprocess.SubprocessError) as error:
         raise InstallFailure(INSTALLER_FAILURE_PHASE, installer_code) from error
     if status:
+        if os.name == "nt":
+            installer_code = windows_install_failure(installer_marker, installer_code)
         raise InstallFailure(INSTALLER_FAILURE_PHASE, installer_code)
     doctor = args.directory / "doctor.json"
     try:
