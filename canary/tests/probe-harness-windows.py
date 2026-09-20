@@ -21,6 +21,17 @@ CELL_SPEC.loader.exec_module(CELL)
 
 
 class WindowsProbeContracts(unittest.TestCase):
+    def test_live_marker_accepts_only_closed_diagnostic_categories(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            marker = Path(tmp) / "marker.json"
+            value = {"schemaVersion": 2, "stage": "harness-run", "status": "failed",
+                     "diagnostics": ["live-child-launch"], "exitCode": -1}
+            marker.write_text(json.dumps(value))
+            self.assertEqual(CELL.windows_probe_result(marker)["diagnostics"], ["live-child-launch"])
+            value["diagnostics"] = ["private provider message"]
+            marker.write_text(json.dumps(value))
+            self.assertIsNone(CELL.windows_probe_result(marker))
+
     def _run_live_fixture(self, harness="fx", *, exit_code=0, missing_child=False,
                           shell="pwsh", native_warning=False):
         pwsh = shutil.which(shell)

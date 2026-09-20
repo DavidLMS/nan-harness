@@ -39,8 +39,19 @@ function Fail([string]$message) {
   if ($code) { Add-Diagnostic $code }; throw $message
 }
 function Run-Native([string[]]$Arguments) {
-  try { & $NanBinary @Arguments 1> $stdout 2> $stderr; $script:exitCode = $LASTEXITCODE }
+  $previousErrorAction = $ErrorActionPreference
+  try {
+    $command = Get-Command -Name $NanBinary -CommandType Application,ExternalScript -ErrorAction Stop
+    # Windows PowerShell 5.1 turns native stderr into error records. A warning
+    # must not interrupt the child or replace its real exit status.
+    $ErrorActionPreference = 'Continue'
+    $LASTEXITCODE = $null
+    & $command @Arguments 1> $stdout 2> $stderr
+    $script:exitCode = $LASTEXITCODE
+  }
   catch { Add-Diagnostic 'live-child-launch'; $script:exitCode = -1; throw }
+  finally { $ErrorActionPreference = $previousErrorAction }
+  if ($null -eq $script:exitCode) { Add-Diagnostic 'live-exit-missing'; throw 'harness exit code unavailable' }
   if ($script:exitCode -ne 0) { Add-Diagnostic 'live-exit-nonzero'; throw 'harness command failed' }
 }
 function Has-Text([string]$Pattern) { return [bool](Select-String -LiteralPath @($stdout, $stderr) -Pattern $Pattern -SimpleMatch -Quiet -ErrorAction SilentlyContinue) }

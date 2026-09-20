@@ -20,6 +20,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   data directory or enabling sandbox configuration.
 - Close owned Windows descendants before draining conformance output, and
   retain operational inventory failures instead of treating them as advisory drift.
+- Preserve native exit codes when Windows PowerShell receives stderr warnings
+  during live compatibility checks.
 
 ## [0.1.9] - 2026-09-18
 

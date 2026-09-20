@@ -44,6 +44,24 @@ cli_suite = load("cli-suite")
 
 
 class CliExecutionTests(unittest.TestCase):
+    def test_isolated_live_child_receives_only_explicit_provider_credential(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "cell"
+            with patch.dict(os.environ, {"NAN_API_KEY": "synthetic-provider-key"}), \
+                    patch.object(cell.subprocess, "run", return_value=type(
+                        "Result", (), {"stdout": "24.20.0"})()):
+                environment = cell.cell_environment(root)
+            self.assertEqual(environment["NAN_API_KEY"], "synthetic-provider-key")
+            self.assertTrue(Path(environment["NAN_HARNESS_CONFIG_DIR"]).is_relative_to(root))
+            for live in (False, True):
+                expected = "synthetic-provider-key" if live else None
+                code = cell.private_command([
+                    sys.executable, "-c",
+                    "import os,sys; sys.exit(0 if os.environ.get('NAN_API_KEY') == "
+                    + repr(expected) + " else 1)",
+                ], root, live=live, environment=environment, allow_failure=True)
+                self.assertEqual(code, 0)
+
     @staticmethod
     def install_args(root):
         return type("Args", (), {

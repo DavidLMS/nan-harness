@@ -363,6 +363,12 @@ PROBE_DIAGNOSTIC_CODES = {
 # native run reached and a bounded diagnostic list.
 WINDOWS_PROBE_STAGES = frozenset({"live-tool", "harness-run", "read-marker", "completion-marker",
                                   "bridge-sentinel", "usage-evidence", "usage-summary", "complete"})
+WINDOWS_LIVE_DIAGNOSTICS = frozenset({
+    "live-child-launch", "live-exit-nonzero", "live-exit-missing", "live-credential-missing",
+    "live-tool-evidence-missing", "live-read-marker-missing", "live-completion-marker-missing",
+    "live-bridge-sentinel", "live-usage-invalid", "live-usage-summary-missing",
+    "probe-unexpected-failure",
+})
 
 
 def detected_identity():
@@ -958,7 +964,8 @@ def windows_probe_result(path):
         return None
     diagnostics = value.get("diagnostics")
     if diagnostics is not None and (not isinstance(diagnostics, list) or len(diagnostics) > 1
-                                    or any(not isinstance(item, str) for item in diagnostics)):
+                                    or any(not isinstance(item, str) or item not in WINDOWS_LIVE_DIAGNOSTICS
+                                           for item in diagnostics)):
         return None
     return value
 
@@ -1002,7 +1009,8 @@ def live(args, _state):
         # completion-marker codes are single, and they are the only ones reported.
         codes = result.get("diagnostics") or []
         diagnostic = codes[0] if len(codes) == 1 else None
-    if diagnostic is not None and args.harness != "aider":
+    if diagnostic is not None and args.harness != "aider" and not (
+            windows and diagnostic in WINDOWS_LIVE_DIAGNOSTICS):
         diagnostic = None
     raise ProbeFailure(result["stage"], status, diagnostic)
 
@@ -1136,6 +1144,8 @@ def failed_report(args, mismatch=None):
         code = (PROBE_DIAGNOSTIC_CODES.get(mismatch.diagnostic)
                 if args.harness == "aider" and mismatch.stage == "completion-marker"
                 and mismatch.status == 1 else None)
+        if mismatch.diagnostic in WINDOWS_LIVE_DIAGNOSTICS and mismatch.status == 1:
+            code = mismatch.diagnostic + "-exit-1"
         if code is None:
             code = f"live-{mismatch.stage}-exit-{mismatch.status}"
         summary = "Hosted live probe closed at stage " + mismatch.stage \

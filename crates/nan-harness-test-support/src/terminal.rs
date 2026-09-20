@@ -828,7 +828,7 @@ mod tests {
         });
         tokio::time::timeout(Duration::from_secs(1), async {
             while !(started.load(Ordering::SeqCst) && join_started.load(Ordering::SeqCst)) {
-                tokio::time::sleep(Duration::from_millis(10)).await;
+                tokio::task::yield_now().await;
             }
         })
         .await
@@ -982,7 +982,7 @@ mod tests {
                         .is_none(),
                     "leaf exited before publishing readiness"
                 );
-                tokio::task::yield_now().await;
+                tokio::time::sleep(Duration::from_millis(10)).await;
             }
         })
         .await
