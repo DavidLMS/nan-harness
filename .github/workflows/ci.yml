@@ -114,6 +114,8 @@ jobs:
           cache-bin: true
       - name: Verify private filesystem ACL primitive
         run: cargo test --locked -p nan-harness-private-fs --all-features
+      - name: Verify Hermes command providers on Windows
+        run: cargo test --locked -p nan-harness-adapters --all-features --lib --test direct hermes
       - name: Verify Windows local search installation and lifecycle
         shell: pwsh
         run: |

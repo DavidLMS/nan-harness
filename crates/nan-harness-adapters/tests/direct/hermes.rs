@@ -141,9 +141,17 @@ fn hermes_command_providers_use_the_native_string_contract() {
             .is_some_and(|command| { command.contains("{voice}") && command.contains("{format}") })
     );
     assert_eq!(tts["format"], "mp3");
-    assert!(tts["command"].as_str().is_some_and(|command| {
-        command.contains("--provider-base-url 'https://api.nan.test/v1'")
-            && command.contains("--input '{input_path}'")
-            && command.contains("--output '{output_path}'")
-    }));
+    let quote = if cfg!(windows) { '"' } else { '\'' };
+    for provider in [&tts, &stt] {
+        let command = provider["command"]
+            .as_str()
+            .expect("command should be a string");
+        for (flag, value) in [
+            ("provider-base-url", "https://api.nan.test/v1"),
+            ("input", "{input_path}"),
+            ("output", "{output_path}"),
+        ] {
+            assert!(command.contains(&format!("--{flag} {quote}{value}{quote}")));
+        }
+    }
 }

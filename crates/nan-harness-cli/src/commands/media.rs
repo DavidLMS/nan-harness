@@ -165,8 +165,9 @@ fn resolve_api_key_from(
     environment: Option<String>,
     saved: impl FnOnce() -> Result<Option<String>, MediaError>,
 ) -> Result<String, MediaError> {
-    if let Some(value) = media_environment.or(environment)
-        && !value.trim().is_empty()
+    if let Some(value) = media_environment
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| environment.filter(|value| !value.trim().is_empty()))
     {
         return Ok(value);
     }
@@ -560,6 +561,38 @@ mod tests {
             .expect("media credential should resolve"),
             "provider-key"
         );
+    }
+
+    #[test]
+    fn blank_media_credentials_do_not_mask_native_credentials() {
+        for media in [None, Some(String::new()), Some(" \t\n".to_owned())] {
+            assert_eq!(
+                resolve_api_key_from(media, Some("native-key".to_owned()), || {
+                    panic!("saved credential should not be read")
+                })
+                .expect("native credential should resolve"),
+                "native-key"
+            );
+        }
+    }
+
+    #[test]
+    fn blank_environment_credentials_fall_back_to_saved_credentials() {
+        for media in [None, Some(String::new()), Some(" \t".to_owned())] {
+            for native in [None, Some(String::new()), Some(" \n".to_owned())] {
+                assert_eq!(
+                    resolve_api_key_from(media.clone(), native.clone(), || {
+                        Ok(Some("saved-key".to_owned()))
+                    })
+                    .expect("saved credential should resolve"),
+                    "saved-key"
+                );
+                assert!(matches!(
+                    resolve_api_key_from(media.clone(), native, || Ok(None)),
+                    Err(MediaError::MissingApiKey)
+                ));
+            }
+        }
     }
 
     #[test]

@@ -530,17 +530,14 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn windows_command_provider_preserves_arguments_through_cmd() {
+        use std::os::windows::process::CommandExt;
         use std::process::Command;
 
         let directory =
-            std::env::temp_dir().join(format!("nanh-hermes-command-{}", std::process::id()));
+            std::env::temp_dir().join(format!("nanh hermes command {}", std::process::id()));
         std::fs::create_dir_all(&directory).expect("temporary command directory should exist");
-        let capture = directory.join("arguments.txt");
         let script = directory.join("capture.cmd");
-        let capture_path = capture.to_str().expect("capture path should be Unicode");
-        let script_body = format!(
-            "@echo off\r\n>\"{capture_path}\" echo(%1\r\n>>\"{capture_path}\" echo(%2\r\n>>\"{capture_path}\" echo(%3\r\n>>\"{capture_path}\" echo(%4\r\n>>\"{capture_path}\" echo(%5\r\n>>\"{capture_path}\" echo(%6\r\n>>\"{capture_path}\" echo(%7\r\n>>\"{capture_path}\" echo(%8\r\n>>\"{capture_path}\" echo(%9\r\n"
-        );
+        let script_body = "@echo off\r\n:next\r\nif \"%~1\"==\"\" exit /b 0\r\necho(%~1\r\nshift\r\ngoto next\r\n";
         std::fs::write(&script, script_body).expect("capture script should write");
 
         let provider = hermes_command_provider_config_for_platform(
@@ -552,36 +549,41 @@ mod tests {
         let command = provider["command"]
             .as_str()
             .expect("command should be a string")
-            .replacen(
-                "nanh",
-                &shell_quote_for_platform(
-                    script.to_str().expect("script path should be Unicode"),
-                    true,
-                ),
-                1,
-            )
+            .replacen("nanh", "capture.cmd", 1)
             .replace("{voice}", "af voice")
             .replace("{format}", "mp3")
             .replace("{input_path}", r"C:\Audio Files\input.wav")
             .replace("{output_path}", r"C:\Audio Files\output.mp3");
-        let status = Command::new("cmd.exe")
-            .args(["/d", "/c"])
-            .arg(command)
-            .status()
+        let output = Command::new("cmd.exe")
+            .current_dir(&directory)
+            .args(["/d", "/s", "/c"])
+            .raw_arg(format!("\"{command}\""))
+            .output()
             .expect("cmd should start");
-        let actual = std::fs::read_to_string(&capture).expect("capture output should exist");
+        std::fs::remove_dir_all(&directory).expect("capture directory should be removed");
+        let actual = String::from_utf8(output.stdout).expect("arguments should be UTF-8");
         let actual = actual.lines().collect::<Vec<_>>();
-        assert!(status.success(), "cmd should execute the provider command");
-        assert_eq!(actual[0], "tts");
-        assert_eq!(actual[1], "--provider-base-url");
-        assert_eq!(actual[2], "https://api.nan.test/v1");
-        assert_eq!(actual[3], "--input");
-        assert_eq!(actual[4], r"C:\Audio Files\input.wav");
-        assert_eq!(actual[5], "--output");
-        assert_eq!(actual[6], r"C:\Audio Files\output.mp3");
-        assert_eq!(actual[7], "--voice");
-        assert_eq!(actual[8], "af voice");
-        let _ = std::fs::remove_dir_all(directory);
+        assert!(
+            output.status.success(),
+            "cmd should execute the provider command"
+        );
+        assert_eq!(
+            actual,
+            [
+                "__media",
+                "tts",
+                "--provider-base-url",
+                "https://api.nan.test/v1",
+                "--input",
+                r"C:\Audio Files\input.wav",
+                "--output",
+                r"C:\Audio Files\output.mp3",
+                "--voice",
+                "af voice",
+                "--format",
+                "mp3",
+            ]
+        );
     }
 }
 
@@ -640,7 +642,7 @@ class NanHarnessImageProvider(ImageGenProvider):
                 if reference.exists():
                     command.extend(["--input-image", str(reference)])
             completed = subprocess.run(
-                command, env={{**os.environ, "NAN_MEDIA_API_KEY": os.environ.get("NAN_MEDIA_API_KEY", "")}},
+                command, env=os.environ.copy(),
                 capture_output=True, text=True, check=False
             )
             if completed.returncode != 0 or not output.is_file():
