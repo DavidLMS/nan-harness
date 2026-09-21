@@ -13,6 +13,7 @@ pub const BRIDGE_BASE_URL_PLACEHOLDER: &str = "{runtime:bridge_base_url}";
 pub const FX_GATEWAY_CHAT_URL_PLACEHOLDER: &str = "{runtime:bridge_chat_url}";
 pub const PROVIDER_BASE_URL_PLACEHOLDER: &str = "{runtime:provider_base_url}";
 pub const MEDIA_PROVIDER_BASE_URL_PLACEHOLDER: &str = "{runtime:media_provider_base_url}";
+pub const MEDIA_CREDENTIAL_ENVIRONMENT: &str = "NAN_MEDIA_API_KEY";
 pub const CLAUDE_AVAILABLE_MODELS_PLACEHOLDER: &str = "{runtime:claude_available_models}";
 pub const CLAUDE_MODEL_PICKER_PLACEHOLDER: &str = "{runtime:claude_model_picker}";
 pub const CLAUDE_MODEL_PRESENTATIONS_PLACEHOLDER: &str = "{runtime:claude_model_presentations}";

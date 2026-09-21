@@ -1,7 +1,7 @@
 use nan_harness_core::launch_plan::{
-    CleanupPolicy, ConfigurationOverlay, EnvironmentOverlay, ObservabilityPolicy,
-    PROVIDER_BASE_URL_PLACEHOLDER, ProcessSpec, Protocol, TemporaryArtifact, TerminalMode,
-    Transport,
+    CleanupPolicy, ConfigurationOverlay, EnvironmentOverlay, MEDIA_CREDENTIAL_ENVIRONMENT,
+    ObservabilityPolicy, PROVIDER_BASE_URL_PLACEHOLDER, ProcessSpec, Protocol, TemporaryArtifact,
+    TerminalMode, Transport,
 };
 use nan_harness_core::model::ReasoningPolicy;
 use nan_harness_core::{
@@ -37,6 +37,11 @@ pub(crate) fn build_direct_plan(
     let credential_target = launch.credential_target.to_owned();
     let mut redacted = BTreeSet::from([credential_target.clone(), "NAN_API_KEY".to_owned()]);
     redacted.extend(launch.removed_environment.iter().cloned());
+    let mut secrets = BTreeMap::from([(credential_target.clone(), credential_ref.clone())]);
+    if context.media.any() {
+        secrets.insert(MEDIA_CREDENTIAL_ENVIRONMENT.to_owned(), credential_ref);
+        redacted.insert(MEDIA_CREDENTIAL_ENVIRONMENT.to_owned());
+    }
 
     Ok(LaunchPlan {
         schema_version: 2,
@@ -60,7 +65,7 @@ pub(crate) fn build_direct_plan(
         },
         environment: EnvironmentOverlay {
             public: launch.public_environment,
-            secrets: BTreeMap::from([(credential_target, credential_ref)]),
+            secrets,
             remove: launch.removed_environment,
         },
         temporary_artifacts: launch.temporary_artifacts,

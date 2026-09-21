@@ -1,6 +1,6 @@
 use crate::prepared::PreparedLaunch;
 use crate::searxng::SearxngCommand;
-use nan_harness_core::launch_plan::{LaunchPlan, TerminalMode};
+use nan_harness_core::launch_plan::{LaunchPlan, MEDIA_CREDENTIAL_ENVIRONMENT, TerminalMode};
 use nan_harness_core::{SecretError, SecretStore};
 use std::io;
 use std::process::ExitStatus;
@@ -247,6 +247,7 @@ fn prepare_command(
         .args(prepared.arguments())
         .current_dir(&plan.process.working_directory)
         .env_remove("NAN_API_KEY")
+        .env_remove(MEDIA_CREDENTIAL_ENVIRONMENT)
         .env_remove(INTERNAL_CANARY_USAGE_FILE);
 
     for variable in &plan.environment.remove {
@@ -256,11 +257,19 @@ fn prepare_command(
         command.env(variable, value);
     }
     for (variable, reference) in &plan.environment.secrets {
-        prepared
-            .with_secret(secrets, reference, |value| {
-                command.env(variable, value);
-            })
-            .map_err(ProcessError::Secret)?;
+        if variable == MEDIA_CREDENTIAL_ENVIRONMENT {
+            secrets
+                .with_secret(reference, |value| {
+                    command.env(variable, value);
+                })
+                .map_err(ProcessError::Secret)?;
+        } else {
+            prepared
+                .with_secret(secrets, reference, |value| {
+                    command.env(variable, value);
+                })
+                .map_err(ProcessError::Secret)?;
+        }
     }
 
     command.env_remove(INTERNAL_CANARY_USAGE_FILE);

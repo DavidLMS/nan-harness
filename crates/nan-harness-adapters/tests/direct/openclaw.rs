@@ -5,7 +5,7 @@ use nan_harness_adapters::OpenClawAdapter;
 use nan_harness_core::HarnessKind;
 use nan_harness_core::MediaSelection;
 use nan_harness_core::launch_plan::{
-    BRIDGE_BASE_URL_PLACEHOLDER, MEDIA_PROVIDER_BASE_URL_PLACEHOLDER,
+    BRIDGE_BASE_URL_PLACEHOLDER, MEDIA_CREDENTIAL_ENVIRONMENT, MEDIA_PROVIDER_BASE_URL_PLACEHOLDER,
     OPENCLAW_MODEL_ALIASES_PLACEHOLDER, OPENCLAW_MODEL_CATALOG_PLACEHOLDER,
 };
 
@@ -144,6 +144,14 @@ fn openclaw_media_plugin_registers_speech_audio_and_image_contracts() {
         plugin
             .content_template
             .contains("registerImageGenerationProvider")
+    );
+    assert!(plugin.content_template.contains("NAN_MEDIA_API_KEY"));
+    assert_eq!(
+        plan.environment
+            .secrets
+            .get(MEDIA_CREDENTIAL_ENVIRONMENT)
+            .map(nan_harness_core::SecretRef::as_str),
+        Some("nan_api_key")
     );
     assert!(
         plugin

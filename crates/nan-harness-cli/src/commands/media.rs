@@ -1,6 +1,7 @@
 use crate::commands::credentials::CredentialManager;
 use crate::commands::media_audio;
 use base64::Engine as _;
+use nan_harness_core::launch_plan::MEDIA_CREDENTIAL_ENVIRONMENT;
 use reqwest::multipart::{Form, Part};
 use reqwest::{Client, Url};
 use serde::Deserialize;
@@ -152,14 +153,19 @@ fn resolve_api_key() -> Result<String, MediaError> {
             .map_err(|_| MediaError::MissingApiKey)?
             .map(|(value, _source)| value.with_secret(str::to_owned)))
     };
-    resolve_api_key_from(std::env::var("NAN_API_KEY").ok(), saved)
+    resolve_api_key_from(
+        std::env::var(MEDIA_CREDENTIAL_ENVIRONMENT).ok(),
+        std::env::var("NAN_API_KEY").ok(),
+        saved,
+    )
 }
 
 fn resolve_api_key_from(
+    media_environment: Option<String>,
     environment: Option<String>,
     saved: impl FnOnce() -> Result<Option<String>, MediaError>,
 ) -> Result<String, MediaError> {
-    if let Some(value) = environment
+    if let Some(value) = media_environment.or(environment)
         && !value.trim().is_empty()
     {
         return Ok(value);
@@ -526,21 +532,34 @@ mod tests {
     #[test]
     fn saved_media_credentials_are_used_only_when_environment_is_missing() {
         assert_eq!(
-            resolve_api_key_from(Some("environment-key".to_owned()), || {
+            resolve_api_key_from(None, Some("environment-key".to_owned()), || {
                 panic!("saved credential should not be read")
             })
             .expect("environment credential should resolve"),
             "environment-key"
         );
         assert_eq!(
-            resolve_api_key_from(None, || Ok(Some("saved-key".to_owned())))
+            resolve_api_key_from(None, None, || Ok(Some("saved-key".to_owned())))
                 .expect("saved credential should resolve"),
             "saved-key"
         );
         assert!(matches!(
-            resolve_api_key_from(None, || Ok(None)),
+            resolve_api_key_from(None, None, || Ok(None)),
             Err(MediaError::MissingApiKey)
         ));
+    }
+
+    #[test]
+    fn dedicated_media_credential_wins_over_the_launch_session_credential() {
+        assert_eq!(
+            resolve_api_key_from(
+                Some("provider-key".to_owned()),
+                Some("launch-session-token".to_owned()),
+                || panic!("saved credential should not be read"),
+            )
+            .expect("media credential should resolve"),
+            "provider-key"
+        );
     }
 
     #[test]

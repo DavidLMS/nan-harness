@@ -444,20 +444,35 @@ pub fn hermes_command_provider_config(
     model: &str,
     base_url: &str,
 ) -> serde_json::Value {
+    hermes_command_provider_config_for_platform(kind, model, base_url, cfg!(windows))
+}
+
+fn hermes_command_provider_config_for_platform(
+    kind: &str,
+    model: &str,
+    base_url: &str,
+    windows: bool,
+) -> serde_json::Value {
     let options = if kind == "tts" {
-        " --voice '{voice}' --format '{format}'"
+        format!(
+            " --voice {} --format {}",
+            shell_quote_for_platform("{voice}", windows),
+            shell_quote_for_platform("{format}", windows)
+        )
     } else {
-        ""
+        String::new()
     };
     let command = format!(
-        "nanh __media {kind} --provider-base-url {} --input '{{input_path}}' --output '{{output_path}}'{options}",
-        shell_quote(base_url),
+        "nanh __media {kind} --provider-base-url {} --input {} --output {}{options}",
+        shell_quote_for_platform(base_url, windows),
+        shell_quote_for_platform("{input_path}", windows),
+        shell_quote_for_platform("{output_path}", windows),
     );
     let mut config = serde_json::json!({
         "type": "command",
         "command": command,
         "model": model,
-        "env_passthrough": ["NAN_API_KEY"]
+        "env_passthrough": ["NAN_MEDIA_API_KEY", "NAN_API_KEY"]
     });
     if kind == "tts" {
         config["voice"] = serde_json::json!("af_heart");
@@ -466,8 +481,108 @@ pub fn hermes_command_provider_config(
     config
 }
 
-fn shell_quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "'\\\"'\\\"'"))
+fn shell_quote_for_platform(value: &str, windows: bool) -> String {
+    if windows {
+        format!("\"{}\"", value.replace('"', "\\\""))
+    } else {
+        format!("'{}'", value.replace('\'', "'\\\"'\\\"'"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::hermes_command_provider_config_for_platform;
+
+    #[test]
+    fn windows_command_provider_quotes_paths_for_cmd() {
+        let provider = hermes_command_provider_config_for_platform(
+            "tts",
+            "kokoro",
+            "https://api.nan.test/v1",
+            true,
+        );
+        let command = provider["command"]
+            .as_str()
+            .expect("command should be a string");
+        assert_eq!(
+            command,
+            "nanh __media tts --provider-base-url \"https://api.nan.test/v1\" --input \"{input_path}\" --output \"{output_path}\" --voice \"{voice}\" --format \"{format}\""
+        );
+    }
+
+    #[test]
+    fn posix_command_provider_keeps_shell_safe_single_quotes() {
+        let provider = hermes_command_provider_config_for_platform(
+            "stt",
+            "whisper-1",
+            "https://api.nan.test/v1",
+            false,
+        );
+        let command = provider["command"]
+            .as_str()
+            .expect("command should be a string");
+        assert_eq!(
+            command,
+            "nanh __media stt --provider-base-url 'https://api.nan.test/v1' --input '{input_path}' --output '{output_path}'"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_command_provider_preserves_arguments_through_cmd() {
+        use std::process::Command;
+
+        let directory =
+            std::env::temp_dir().join(format!("nanh-hermes-command-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).expect("temporary command directory should exist");
+        let capture = directory.join("arguments.txt");
+        let script = directory.join("capture.cmd");
+        let capture_path = capture.to_str().expect("capture path should be Unicode");
+        let script_body = format!(
+            "@echo off\r\n>\"{capture_path}\" echo(%1\r\n>>\"{capture_path}\" echo(%2\r\n>>\"{capture_path}\" echo(%3\r\n>>\"{capture_path}\" echo(%4\r\n>>\"{capture_path}\" echo(%5\r\n>>\"{capture_path}\" echo(%6\r\n>>\"{capture_path}\" echo(%7\r\n>>\"{capture_path}\" echo(%8\r\n>>\"{capture_path}\" echo(%9\r\n"
+        );
+        std::fs::write(&script, script_body).expect("capture script should write");
+
+        let provider = hermes_command_provider_config_for_platform(
+            "tts",
+            "kokoro",
+            "https://api.nan.test/v1",
+            true,
+        );
+        let command = provider["command"]
+            .as_str()
+            .expect("command should be a string")
+            .replacen(
+                "nanh",
+                &shell_quote_for_platform(
+                    script.to_str().expect("script path should be Unicode"),
+                    true,
+                ),
+                1,
+            )
+            .replace("{voice}", "af voice")
+            .replace("{format}", "mp3")
+            .replace("{input_path}", r"C:\Audio Files\input.wav")
+            .replace("{output_path}", r"C:\Audio Files\output.mp3");
+        let status = Command::new("cmd.exe")
+            .args(["/d", "/c"])
+            .arg(command)
+            .status()
+            .expect("cmd should start");
+        let actual = std::fs::read_to_string(&capture).expect("capture output should exist");
+        let actual = actual.lines().collect::<Vec<_>>();
+        assert!(status.success(), "cmd should execute the provider command");
+        assert_eq!(actual[0], "tts");
+        assert_eq!(actual[1], "--provider-base-url");
+        assert_eq!(actual[2], "https://api.nan.test/v1");
+        assert_eq!(actual[3], "--input");
+        assert_eq!(actual[4], r"C:\Audio Files\input.wav");
+        assert_eq!(actual[5], "--output");
+        assert_eq!(actual[6], r"C:\Audio Files\output.mp3");
+        assert_eq!(actual[7], "--voice");
+        assert_eq!(actual[8], "af voice");
+        let _ = std::fs::remove_dir_all(directory);
+    }
 }
 
 /// Renders the Hermes image generation plugin for a persistent or launch-scoped home.
@@ -490,7 +605,7 @@ class NanHarnessImageProvider(ImageGenProvider):
         return {{"modalities": ["text", "image"], "max_reference_images": 4}}
 
     def is_available(self):
-        if os.getenv("NAN_API_KEY", "").strip():
+        if os.getenv("NAN_MEDIA_API_KEY", "").strip():
             return True
         try:
             return subprocess.run(
@@ -525,7 +640,7 @@ class NanHarnessImageProvider(ImageGenProvider):
                 if reference.exists():
                     command.extend(["--input-image", str(reference)])
             completed = subprocess.run(
-                command, env={{**os.environ, "NAN_API_KEY": os.environ.get("NAN_API_KEY", "")}},
+                command, env={{**os.environ, "NAN_MEDIA_API_KEY": os.environ.get("NAN_MEDIA_API_KEY", "")}},
                 capture_output=True, text=True, check=False
             )
             if completed.returncode != 0 or not output.is_file():

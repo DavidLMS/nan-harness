@@ -278,7 +278,7 @@ import {{ spawn, spawnSync }} from "node:child_process";
 const BASE_URL = {encoded_base_url};
 
 function hasCredential() {{
-  if (process.env.NAN_API_KEY?.trim()) return true;
+  if (process.env.NAN_MEDIA_API_KEY?.trim()) return true;
   return spawnSync("nanh", ["__media", "credentials"], {{
     stdio: "ignore", env: process.env
   }}).status === 0;

@@ -3,7 +3,7 @@ use nan_harness_adapters::{HermesAdapter, hermes_command_provider_config};
 use nan_harness_core::HarnessKind;
 use nan_harness_core::MediaSelection;
 use nan_harness_core::launch_plan::{
-    BRIDGE_BASE_URL_PLACEHOLDER, HERMES_MODEL_CATALOG_PLACEHOLDER,
+    BRIDGE_BASE_URL_PLACEHOLDER, HERMES_MODEL_CATALOG_PLACEHOLDER, MEDIA_CREDENTIAL_ENVIRONMENT,
     MEDIA_PROVIDER_BASE_URL_PLACEHOLDER, NAN_SEARCH_BLOCK_BEGIN, OverlayFilePolicy,
     PROVIDER_BASE_URL_PLACEHOLDER,
 };
@@ -109,6 +109,13 @@ fn hermes_media_overlay_contains_independent_native_providers() {
             .content_template
             .contains("{PROVIDER_BASE_URL_PLACEHOLDER}")
     );
+    assert_eq!(
+        plan.environment
+            .secrets
+            .get(MEDIA_CREDENTIAL_ENVIRONMENT)
+            .map(nan_harness_core::SecretRef::as_str),
+        Some("nan_api_key")
+    );
 }
 
 #[test]
@@ -123,7 +130,10 @@ fn hermes_command_providers_use_the_native_string_contract() {
             command.contains("{input_path}") && command.contains("{output_path}")
         }));
         assert!(!provider["command"].is_array());
-        assert_eq!(provider["env_passthrough"][0], "NAN_API_KEY");
+        assert_eq!(
+            provider["env_passthrough"],
+            serde_json::json!([MEDIA_CREDENTIAL_ENVIRONMENT, "NAN_API_KEY"])
+        );
     }
     assert!(
         tts["command"]
@@ -131,4 +141,9 @@ fn hermes_command_providers_use_the_native_string_contract() {
             .is_some_and(|command| { command.contains("{voice}") && command.contains("{format}") })
     );
     assert_eq!(tts["format"], "mp3");
+    assert!(tts["command"].as_str().is_some_and(|command| {
+        command.contains("--provider-base-url 'https://api.nan.test/v1'")
+            && command.contains("--input '{input_path}'")
+            && command.contains("--output '{output_path}'")
+    }));
 }
