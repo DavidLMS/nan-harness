@@ -34,7 +34,12 @@ pub(super) fn context(kind: HarnessKind, user_arguments: Vec<String>) -> PlanCon
             qualification: QualificationStatus::Qualified,
             warnings: Vec::new(),
         },
-        working_directory: "/workspace/project".to_owned(),
+        working_directory: if cfg!(windows) {
+            r"C:\workspace\project"
+        } else {
+            "/workspace/project"
+        }
+        .to_owned(),
         user_arguments,
         web_search_policy: WebSearchPolicy::Auto,
         media: nan_harness_core::MediaSelection::none(),
