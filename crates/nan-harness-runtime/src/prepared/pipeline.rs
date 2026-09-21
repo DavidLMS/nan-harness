@@ -1,7 +1,8 @@
 use crate::temporary::{TemporaryError, TemporaryWorkspace};
 use nan_harness_core::launch_plan::{
     BRIDGE_BASE_URL_PLACEHOLDER, CLAUDE_AVAILABLE_MODELS_PLACEHOLDER,
-    CODEX_MODEL_CATALOG_PLACEHOLDER, PROVIDER_BASE_URL_PLACEHOLDER,
+    CODEX_MODEL_CATALOG_PLACEHOLDER, MEDIA_PROVIDER_BASE_URL_PLACEHOLDER,
+    PROVIDER_BASE_URL_PLACEHOLDER,
 };
 use nan_harness_core::{CodingModelProfile, LaunchPlan, SecretRef, SecretStore};
 use std::collections::BTreeMap;
@@ -32,6 +33,7 @@ pub(super) fn prepare(
         .map_err(PreparedError::ModelCatalog)?;
     let runtime_values = values::RuntimeRenderValues {
         provider_base_url: client_base_url,
+        media_provider_base_url: provider_base_url,
         bridge_base_url,
         bridge_chat_url: bridge
             .as_ref()
@@ -50,6 +52,7 @@ pub(super) fn prepare(
             render_template(
                 template,
                 client_base_url,
+                provider_base_url,
                 &plan.model.resolved_id,
                 selected_reasoning_effort.as_deref(),
                 bridge.as_ref(),
@@ -119,6 +122,7 @@ pub(super) fn prepare(
 fn render_template(
     template: &str,
     provider_base_url: &str,
+    media_provider_base_url: &str,
     selected_model_id: &str,
     selected_reasoning_effort: Option<&str>,
     bridge: Option<&BridgePreparation>,
@@ -129,6 +133,7 @@ fn render_template(
         bridge.is_some_and(|values| values.web_search_enabled),
     )?;
     let rendered = rendered.replace(PROVIDER_BASE_URL_PLACEHOLDER, provider_base_url);
+    let rendered = rendered.replace(MEDIA_PROVIDER_BASE_URL_PLACEHOLDER, media_provider_base_url);
     let rendered = catalogs::render_model_catalogs(
         &rendered,
         provider_base_url,
@@ -237,6 +242,7 @@ mod tests {
         let rendered = render_template(
             r#"{"apiKey":"{secret:nan_api_key}"}"#,
             "https://api.nan.builders/v1",
+            "https://api.nan.builders/v1",
             "qwen3.6",
             None,
             None,
@@ -248,5 +254,24 @@ mod tests {
         .expect("provider secret should render");
 
         assert_eq!(rendered, r#"{"apiKey":"provider-key"}"#);
+    }
+
+    #[test]
+    fn media_provider_placeholder_keeps_the_direct_endpoint_when_chat_uses_a_gateway() {
+        let rendered = render_template(
+            r#"{"chat":"{runtime:provider_base_url}","media":"{runtime:media_provider_base_url}"}"#,
+            "http://127.0.0.1:3210/v1",
+            "https://api.nan.builders/v1",
+            "qwen3.6",
+            None,
+            None,
+            None,
+        )
+        .expect("runtime endpoints should render");
+
+        assert_eq!(
+            rendered,
+            r#"{"chat":"http://127.0.0.1:3210/v1","media":"https://api.nan.builders/v1"}"#
+        );
     }
 }

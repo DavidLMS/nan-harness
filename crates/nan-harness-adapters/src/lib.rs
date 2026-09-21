@@ -26,8 +26,9 @@ pub use direct::{ModelDescription, describe_model};
 pub use fx::FxAdapter;
 pub use goose::GooseAdapter;
 pub use hermes::{
-    HermesAdapter, hermes_search_provider_files, render_hermes_desktop_provider_block,
-    render_hermes_image_plugin, render_hermes_search_provider,
+    HermesAdapter, hermes_command_provider_config, hermes_search_provider_files,
+    render_hermes_desktop_provider_block, render_hermes_image_plugin,
+    render_hermes_search_provider,
 };
 pub use kimi_code::KimiCodeAdapter;
 pub use omp::{OmpAdapter, OmpSearchMode, render_omp_search_extension};

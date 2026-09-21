@@ -19,13 +19,16 @@ fn media_entries(
                 mode: YamlEntryMode::Override,
             },
             YamlEntryPlan {
-                path: vec!["stt".to_owned(), "providers".to_owned(), "nan-whisper".to_owned()],
-                value: to_yaml_value(json!({
-                    "type": "command",
-                    "command": ["nanh", "__media", "stt", "--provider-base-url", base_url, "--input", "{input}", "--output", "{output}"],
-                    "model": "whisper-1",
-                    "env_passthrough": ["NAN_API_KEY"]
-                }))?,
+                path: vec![
+                    "stt".to_owned(),
+                    "providers".to_owned(),
+                    "nan-whisper".to_owned(),
+                ],
+                value: to_yaml_value(nan_harness_adapters::hermes_command_provider_config(
+                    "stt",
+                    "whisper-1",
+                    base_url,
+                ))?,
                 mode: YamlEntryMode::Override,
             },
         ]);
@@ -38,14 +41,14 @@ fn media_entries(
                 mode: YamlEntryMode::Override,
             },
             YamlEntryPlan {
-                path: vec!["tts".to_owned(), "providers".to_owned(), "nan-kokoro".to_owned()],
-                value: to_yaml_value(json!({
-                    "type": "command",
-                    "command": ["nanh", "__media", "tts", "--provider-base-url", base_url, "--input", "{input}", "--output", "{output}"],
-                    "model": "kokoro",
-                    "output_format": "mp3",
-                    "env_passthrough": ["NAN_API_KEY"]
-                }))?,
+                path: vec![
+                    "tts".to_owned(),
+                    "providers".to_owned(),
+                    "nan-kokoro".to_owned(),
+                ],
+                value: to_yaml_value(nan_harness_adapters::hermes_command_provider_config(
+                    "tts", "kokoro", base_url,
+                ))?,
                 mode: YamlEntryMode::Override,
             },
         ]);

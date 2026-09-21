@@ -2,8 +2,9 @@ use crate::temporary::TemporaryWorkspace;
 use nan_harness_core::CodingModelProfile;
 use nan_harness_core::launch_plan::{
     ARTIFACT_PLACEHOLDER_PREFIX, BRIDGE_BASE_URL_PLACEHOLDER, FX_GATEWAY_CHAT_URL_PLACEHOLDER,
-    GOOSE_ADDITIONAL_CONFIG_FILES_PLACEHOLDER, NAN_SEARCH_BLOCK_BEGIN, NAN_SEARCH_BLOCK_END,
-    PROVIDER_BASE_URL_PLACEHOLDER, USER_HOME_PLACEHOLDER,
+    GOOSE_ADDITIONAL_CONFIG_FILES_PLACEHOLDER, MEDIA_PROVIDER_BASE_URL_PLACEHOLDER,
+    NAN_SEARCH_BLOCK_BEGIN, NAN_SEARCH_BLOCK_END, PROVIDER_BASE_URL_PLACEHOLDER,
+    USER_HOME_PLACEHOLDER,
 };
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
@@ -12,6 +13,7 @@ use super::{PreparedError, catalogs};
 
 pub(super) struct RuntimeRenderValues<'a> {
     pub(super) provider_base_url: &'a str,
+    pub(super) media_provider_base_url: &'a str,
     pub(super) bridge_base_url: Option<&'a str>,
     pub(super) bridge_chat_url: Option<&'a str>,
     pub(super) selected_reasoning_effort: Option<&'a str>,
@@ -79,6 +81,10 @@ pub(super) fn render_runtime_value(
                 PROVIDER_BASE_URL_PLACEHOLDER,
                 runtime_values.provider_base_url,
             );
+    rendered = rendered.replace(
+        MEDIA_PROVIDER_BASE_URL_PLACEHOLDER,
+        runtime_values.media_provider_base_url,
+    );
     if rendered.contains(BRIDGE_BASE_URL_PLACEHOLDER) {
         let bridge_base_url = runtime_values.bridge_base_url.ok_or_else(|| {
             PreparedError::UnresolvedPlaceholder(BRIDGE_BASE_URL_PLACEHOLDER.into())

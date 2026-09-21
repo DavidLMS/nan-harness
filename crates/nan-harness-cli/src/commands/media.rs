@@ -1,3 +1,4 @@
+use crate::commands::credentials::CredentialManager;
 use crate::commands::media_audio;
 use base64::Engine as _;
 use reqwest::multipart::{Form, Part};
@@ -5,7 +6,7 @@ use reqwest::{Client, Url};
 use serde::Deserialize;
 use serde_json::json;
 use std::ffi::OsString;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Duration;
@@ -16,6 +17,7 @@ const DEFAULT_BASE_URL: &str = "https://api.nan.builders/v1";
 const MAX_IMAGE_BYTES: usize = 50 * 1024 * 1024;
 const MAX_TEXT_BYTES: usize = 256 * 1024;
 const MAX_JSON_BYTES: usize = 2 * 1024 * 1024;
+const MAX_IMAGE_JSON_BYTES: usize = (MAX_IMAGE_BYTES.div_ceil(3) * 4) + 256 * 1024;
 
 #[derive(Debug, Error)]
 enum MediaError {
@@ -83,7 +85,7 @@ fn parse(values: impl IntoIterator<Item = OsString>) -> Result<Arguments, MediaE
         .next()
         .and_then(|value| value.into_string().ok())
         .ok_or(MediaError::Arguments)?;
-    if !matches!(command.as_str(), "stt" | "tts" | "image") {
+    if !matches!(command.as_str(), "credentials" | "stt" | "tts" | "image") {
         return Err(MediaError::Arguments);
     }
     let mut arguments = Arguments {
@@ -123,9 +125,9 @@ fn next_value<I: Iterator<Item = OsString>>(values: &mut I) -> Result<String, Me
 }
 
 async fn run(arguments: Arguments) -> Result<(), MediaError> {
-    let api_key = std::env::var("NAN_API_KEY").map_err(|_| MediaError::MissingApiKey)?;
-    if api_key.trim().is_empty() {
-        return Err(MediaError::MissingApiKey);
+    let api_key = resolve_api_key()?;
+    if arguments.command == "credentials" {
+        return Ok(());
     }
     let base_url = endpoint(arguments.provider_base_url.as_deref())?;
     let client = Client::builder()
@@ -139,6 +141,30 @@ async fn run(arguments: Arguments) -> Result<(), MediaError> {
         "image" => generate_image(&client, &base_url, &api_key, &arguments).await,
         _ => Err(MediaError::Arguments),
     }
+}
+
+fn resolve_api_key() -> Result<String, MediaError> {
+    let saved = || {
+        let manager =
+            CredentialManager::from_environment().map_err(|_| MediaError::MissingApiKey)?;
+        Ok(manager
+            .load()
+            .map_err(|_| MediaError::MissingApiKey)?
+            .map(|(value, _source)| value.with_secret(str::to_owned)))
+    };
+    resolve_api_key_from(std::env::var("NAN_API_KEY").ok(), saved)
+}
+
+fn resolve_api_key_from(
+    environment: Option<String>,
+    saved: impl FnOnce() -> Result<Option<String>, MediaError>,
+) -> Result<String, MediaError> {
+    if let Some(value) = environment
+        && !value.trim().is_empty()
+    {
+        return Ok(value);
+    }
+    saved()?.ok_or(MediaError::MissingApiKey)
 }
 
 fn endpoint(explicit: Option<&str>) -> Result<Url, MediaError> {
@@ -230,7 +256,7 @@ async fn transcribe_bytes(
         .send()
         .await
         .map_err(|_| MediaError::Request)?;
-    let payload: TranscriptionResponse = response_json(response).await?;
+    let payload: TranscriptionResponse = response_json(response, MAX_JSON_BYTES).await?;
     Ok(payload.text)
 }
 
@@ -305,26 +331,21 @@ async fn generate_image(
             .await
             .map_err(|_| MediaError::Request)?
     };
-    let payload: ImageResponse = response_json(response).await?;
+    let payload: ImageResponse = response_json(response, MAX_IMAGE_JSON_BYTES).await?;
     let item = payload.data.first().ok_or(MediaError::Response)?;
     let bytes = if let Some(encoded) = &item.b64_json {
         if encoded.len() > (MAX_IMAGE_BYTES / 3) * 4 + 4 {
             return Err(MediaError::Response);
         }
-        base64::engine::general_purpose::STANDARD
+        let bytes = base64::engine::general_purpose::STANDARD
             .decode(encoded)
-            .map_err(|_| MediaError::Response)?
-    } else if let Some(url) = &item.url {
-        let parsed = Url::parse(url).map_err(|_| MediaError::Response)?;
-        if !matches!(parsed.scheme(), "http" | "https")
-            || parsed.host_str().is_none()
-            || parsed.username() != ""
-            || parsed.password().is_some()
-            || parsed.query().is_some()
-            || parsed.fragment().is_some()
-        {
+            .map_err(|_| MediaError::Response)?;
+        if bytes.len() > MAX_IMAGE_BYTES {
             return Err(MediaError::Response);
         }
+        bytes
+    } else if let Some(url) = &item.url {
+        let parsed = asset_url(url)?;
         let response = client
             .get(parsed)
             .send()
@@ -335,6 +356,19 @@ async fn generate_image(
         return Err(MediaError::Response);
     };
     write_output(arguments.output.as_deref(), &bytes)
+}
+
+fn asset_url(raw: &str) -> Result<Url, MediaError> {
+    let parsed = Url::parse(raw).map_err(|_| MediaError::Response)?;
+    if !matches!(parsed.scheme(), "http" | "https")
+        || parsed.host_str().is_none()
+        || parsed.username() != ""
+        || parsed.password().is_some()
+        || parsed.fragment().is_some()
+    {
+        return Err(MediaError::Response);
+    }
+    Ok(parsed)
 }
 
 fn join(base_url: &Url, suffix: &str) -> Url {
@@ -364,42 +398,45 @@ struct ImageData {
 
 async fn response_json<T: for<'de> Deserialize<'de>>(
     response: reqwest::Response,
+    limit: usize,
 ) -> Result<T, MediaError> {
-    if !response.status().is_success() {
-        return Err(MediaError::Request);
-    }
-    let bytes = response.bytes().await.map_err(|_| MediaError::Request)?;
-    if bytes.len() > MAX_JSON_BYTES {
-        return Err(MediaError::Response);
-    }
+    let bytes = response_bytes(response, limit).await?;
     serde_json::from_slice(&bytes).map_err(|_| MediaError::Response)
 }
 
-async fn response_bytes(response: reqwest::Response, limit: usize) -> Result<Vec<u8>, MediaError> {
+async fn response_bytes(
+    mut response: reqwest::Response,
+    limit: usize,
+) -> Result<Vec<u8>, MediaError> {
     if !response.status().is_success() {
         return Err(MediaError::Request);
     }
-    let bytes = response.bytes().await.map_err(|_| MediaError::Request)?;
-    if bytes.len() > limit {
-        return Err(MediaError::Response);
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response.chunk().await.map_err(|_| MediaError::Request)? {
+        if bytes.len().saturating_add(chunk.len()) > limit {
+            return Err(MediaError::Response);
+        }
+        bytes.extend_from_slice(&chunk);
     }
-    Ok(bytes.to_vec())
+    Ok(bytes)
 }
 
 fn read_limited(path: &Path, limit: usize) -> Result<Vec<u8>, std::io::Error> {
-    let limit_u64 = u64::try_from(limit).map_err(|_| {
+    let read_limit = limit.checked_add(1).ok_or_else(|| {
         std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
             "media size limit is not supported on this platform",
         )
     })?;
-    if std::fs::metadata(path)?.len() > limit_u64 {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "media input exceeds its size limit",
-        ));
-    }
-    let bytes = std::fs::read(path)?;
+    let mut bytes = Vec::new();
+    std::fs::File::open(path)?
+        .take(u64::try_from(read_limit).map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "media size limit is not supported on this platform",
+            )
+        })?)
+        .read_to_end(&mut bytes)?;
     if bytes.len() > limit {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
@@ -434,7 +471,10 @@ fn write_output_atomically(path: &Path, bytes: &[u8]) -> Result<(), MediaError> 
 
 #[cfg(test)]
 mod tests {
-    use super::{MediaError, endpoint, parse};
+    use super::{
+        MAX_IMAGE_BYTES, MAX_IMAGE_JSON_BYTES, MediaError, asset_url, endpoint, parse,
+        read_limited, resolve_api_key_from,
+    };
     use std::ffi::OsString;
 
     #[test]
@@ -481,5 +521,56 @@ mod tests {
             ));
         }
         assert!(endpoint(Some("https://example.test/v1")).is_ok());
+    }
+
+    #[test]
+    fn saved_media_credentials_are_used_only_when_environment_is_missing() {
+        assert_eq!(
+            resolve_api_key_from(Some("environment-key".to_owned()), || {
+                panic!("saved credential should not be read")
+            })
+            .expect("environment credential should resolve"),
+            "environment-key"
+        );
+        assert_eq!(
+            resolve_api_key_from(None, || Ok(Some("saved-key".to_owned())))
+                .expect("saved credential should resolve"),
+            "saved-key"
+        );
+        assert!(matches!(
+            resolve_api_key_from(None, || Ok(None)),
+            Err(MediaError::MissingApiKey)
+        ));
+    }
+
+    #[test]
+    fn image_json_budget_covers_base64_envelope_but_decoded_limit_remains_50_mib() {
+        let encoded_limit = MAX_IMAGE_BYTES.div_ceil(3) * 4;
+        assert!(MAX_IMAGE_JSON_BYTES > encoded_limit);
+        assert_eq!(MAX_IMAGE_BYTES, 50 * 1024 * 1024);
+    }
+
+    #[test]
+    fn signed_asset_urls_are_allowed_but_unsafe_urls_are_rejected() {
+        assert!(asset_url("https://assets.example.test/image.png?signature=synthetic").is_ok());
+        for value in [
+            "https://user:secret@example.test/image.png",
+            "file:///tmp/image.png",
+            "https://example.test/image.png#fragment",
+        ] {
+            assert!(matches!(asset_url(value), Err(MediaError::Response)));
+        }
+    }
+
+    #[test]
+    fn read_limited_rejects_before_returning_oversized_input() {
+        let directory = tempfile::tempdir().expect("temporary media directory");
+        let path = directory.path().join("input");
+        std::fs::write(&path, b"0123456789").expect("media fixture should write");
+        assert_eq!(
+            read_limited(&path, 10).expect("input should fit"),
+            b"0123456789"
+        );
+        assert!(read_limited(&path, 9).is_err());
     }
 }

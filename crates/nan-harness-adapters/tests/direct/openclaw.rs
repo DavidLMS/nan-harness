@@ -5,8 +5,8 @@ use nan_harness_adapters::OpenClawAdapter;
 use nan_harness_core::HarnessKind;
 use nan_harness_core::MediaSelection;
 use nan_harness_core::launch_plan::{
-    BRIDGE_BASE_URL_PLACEHOLDER, OPENCLAW_MODEL_ALIASES_PLACEHOLDER,
-    OPENCLAW_MODEL_CATALOG_PLACEHOLDER,
+    BRIDGE_BASE_URL_PLACEHOLDER, MEDIA_PROVIDER_BASE_URL_PLACEHOLDER,
+    OPENCLAW_MODEL_ALIASES_PLACEHOLDER, OPENCLAW_MODEL_CATALOG_PLACEHOLDER,
 };
 
 #[test]
@@ -27,9 +27,9 @@ fn openclaw_merges_user_configuration_without_persisting_the_nan_secret() {
     let config: serde_json::Value =
         serde_json::from_str(&without_search_block(&config_file.content_template))
             .expect("OpenClaw configuration without search should be JSON");
-    let search_config: serde_json::Value =
-        serde_json::from_str(&with_search_block(&config_file.content_template))
-            .expect("OpenClaw configuration with search should be JSON");
+    let search_rendered = with_search_block(&config_file.content_template);
+    let search_config: serde_json::Value = serde_json::from_str(&search_rendered)
+        .expect("OpenClaw configuration with search should be JSON");
     let search_plugin = overlay
         .files
         .iter()
@@ -96,12 +96,14 @@ fn openclaw_media_plugin_registers_speech_audio_and_image_contracts() {
         .iter()
         .find(|file| file.path == "nan-harness.json")
         .expect("OpenClaw configuration should exist");
-    let config: serde_json::Value = serde_json::from_str(
-        &without_search_block(&config_file.content_template)
-            .replace("{NAN_SEARCH_BLOCK_BEGIN}", "")
-            .replace("{NAN_SEARCH_BLOCK_END}", ""),
-    )
-    .expect("OpenClaw media configuration should be JSON");
+    let rendered_config = without_search_block(&config_file.content_template)
+        .replace("{NAN_SEARCH_BLOCK_BEGIN}", "")
+        .replace("{NAN_SEARCH_BLOCK_END}", "");
+    let config: serde_json::Value = serde_json::from_str(&rendered_config)
+        .expect("OpenClaw media configuration should be JSON");
+    let search_config: serde_json::Value =
+        serde_json::from_str(&with_search_block(&config_file.content_template))
+            .expect("OpenClaw media configuration with search should be JSON");
     assert_eq!(config["tts"]["provider"], "nan-harness");
     assert_eq!(
         config["tools"]["media"]["audio"]["models"][0]["model"],
@@ -110,6 +112,22 @@ fn openclaw_media_plugin_registers_speech_audio_and_image_contracts() {
     assert_eq!(
         config["agents"]["defaults"]["mediaModels"]["image"]["primary"],
         "nan-harness/flux-2-klein"
+    );
+    assert!(
+        search_config["plugins"]["load"]["paths"]
+            .as_array()
+            .is_some_and(|paths| {
+                paths
+                    .iter()
+                    .any(|path| path == "{artifact:openclaw-config}/plugins/nan-harness-search")
+                    && paths
+                        .iter()
+                        .any(|path| path == "{artifact:openclaw-config}/plugins/nan-harness-media")
+            })
+    );
+    assert_eq!(
+        search_config["tools"]["web"]["search"]["provider"],
+        "nan-harness"
     );
     let plugin = overlay
         .files
@@ -126,5 +144,15 @@ fn openclaw_media_plugin_registers_speech_audio_and_image_contracts() {
         plugin
             .content_template
             .contains("registerImageGenerationProvider")
+    );
+    assert!(
+        plugin
+            .content_template
+            .contains(MEDIA_PROVIDER_BASE_URL_PLACEHOLDER)
+    );
+    assert!(
+        !plugin
+            .content_template
+            .contains("{PROVIDER_BASE_URL_PLACEHOLDER}")
     );
 }

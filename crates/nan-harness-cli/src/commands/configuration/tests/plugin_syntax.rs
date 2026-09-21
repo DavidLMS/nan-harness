@@ -101,6 +101,9 @@ fn persistent_search_plugins_have_valid_source_syntax() {
 }
 
 fn persistent_media_plugins_have_valid_source_syntax() {
+    use std::io::Write as _;
+    use std::process::{Command, Stdio};
+
     let mut python = Command::new("python3")
         .args([
             "-c",
@@ -123,6 +126,51 @@ fn persistent_media_plugins_have_valid_source_syntax() {
     assert!(
         output.status.success(),
         "Hermes image provider syntax failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let mut contract = Command::new("python3")
+        .args([
+            "-c",
+            r#"
+import sys
+import types
+
+agent = types.ModuleType("agent")
+provider_module = types.ModuleType("agent.image_gen_provider")
+class ImageGenProvider:
+    pass
+def success_response(**kwargs):
+    return kwargs
+provider_module.ImageGenProvider = ImageGenProvider
+provider_module.success_response = success_response
+sys.modules["agent"] = agent
+sys.modules["agent.image_gen_provider"] = provider_module
+namespace = {}
+exec(sys.stdin.read(), namespace)
+provider = namespace["NanHarnessImageProvider"]()
+assert callable(provider.capabilities)
+assert provider.capabilities()["max_reference_images"] == 4
+assert provider.list_models()[0]["id"] == "flux-2-klein"
+"#,
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("Hermes image provider contract check should start");
+    contract
+        .stdin
+        .take()
+        .expect("Hermes image provider contract stdin should be available")
+        .write_all(render_hermes_image_plugin("https://api.nan.test/v1").as_bytes())
+        .expect("Hermes image provider contract source should write");
+    let output = contract
+        .wait_with_output()
+        .expect("Hermes image provider contract check should finish");
+    assert!(
+        output.status.success(),
+        "Hermes image provider contract failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 

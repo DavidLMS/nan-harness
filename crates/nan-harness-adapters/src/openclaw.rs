@@ -3,10 +3,10 @@ use crate::direct::{
 };
 use crate::search::saved_search_javascript;
 use nan_harness_core::launch_plan::{
-    ArtifactLifecycle, BRIDGE_BASE_URL_PLACEHOLDER, ConfigurationOverlay, NAN_SEARCH_BLOCK_BEGIN,
-    NAN_SEARCH_BLOCK_END, OPENCLAW_MODEL_ALIASES_PLACEHOLDER, OPENCLAW_MODEL_CATALOG_PLACEHOLDER,
-    OverlayFile, OverlayFilePolicy, PROVIDER_BASE_URL_PLACEHOLDER, TemporaryArtifactMode,
-    USER_HOME_PLACEHOLDER,
+    ArtifactLifecycle, BRIDGE_BASE_URL_PLACEHOLDER, ConfigurationOverlay,
+    MEDIA_PROVIDER_BASE_URL_PLACEHOLDER, NAN_SEARCH_BLOCK_BEGIN, NAN_SEARCH_BLOCK_END,
+    OPENCLAW_MODEL_ALIASES_PLACEHOLDER, OPENCLAW_MODEL_CATALOG_PLACEHOLDER, OverlayFile,
+    OverlayFilePolicy, PROVIDER_BASE_URL_PLACEHOLDER, TemporaryArtifactMode, USER_HOME_PLACEHOLDER,
 };
 use nan_harness_core::{
     HarnessAdapter, HarnessKind, LaunchPlan, MediaSelection, PlanContext, PlanError,
@@ -21,6 +21,9 @@ const CONFIG_OVERLAY_ID: &str = "openclaw-config";
 const CONFIG_PATH: &str = "{artifact:openclaw-config}/nan-harness.json";
 const SEARCH_PLUGIN_PATH: &str = "{artifact:openclaw-config}/plugins/nan-harness-search";
 const MEDIA_PLUGIN_PATH: &str = "{artifact:openclaw-config}/plugins/nan-harness-media";
+const SEARCH_PLUGIN_PATH_SENTINEL: &str = "zz__NAN_HARNESS_SEARCH_PLUGIN_PATH__";
+const SEARCH_PLUGIN_ENTRY_SENTINEL: &str = "zz__NAN_HARNESS_SEARCH_PLUGIN_ENTRY__";
+const SEARCH_TOOLS_SENTINEL: &str = "zz__NAN_HARNESS_SEARCH_TOOLS__";
 
 fn openclaw_config(model_id: &str, media: MediaSelection) -> Result<String, PlanError> {
     let model_reference = format!("nan/{model_id}");
@@ -54,40 +57,87 @@ fn openclaw_config(model_id: &str, media: MediaSelection) -> Result<String, Plan
             "providers": {"nan-harness": {"model": "kokoro"}}
         });
     }
+    let mut tools = json!({});
     if media.stt {
-        base_value["tools"]["media"] = json!({
+        tools["media"] = json!({
             "audio": {
                 "enabled": true,
                 "models": [{"type": "provider", "provider": "nan-harness", "model": "whisper-1"}]
             }
         });
     }
+    tools[SEARCH_TOOLS_SENTINEL] = json!({
+        "web": {"search": {"enabled": true, "provider": "nan-harness"}}
+    });
+    base_value["tools"] = tools;
     if media.image {
         base_value["agents"]["defaults"]["mediaModels"] = json!({
             "image": {"primary": "nan-harness/flux-2-klein"}
         });
     }
+    let mut plugin_paths = vec![json!(SEARCH_PLUGIN_PATH_SENTINEL)];
+    let mut plugin_entries = json!({});
+    if media.any() {
+        plugin_paths.insert(0, json!(MEDIA_PLUGIN_PATH));
+        plugin_entries["nan-harness-media"] = json!({"enabled": true});
+    }
+    plugin_entries[SEARCH_PLUGIN_ENTRY_SENTINEL] = json!({"enabled": true});
+    base_value["plugins"] = json!({
+        "load": {"paths": plugin_paths},
+        "entries": plugin_entries
+    });
+
     let base =
         serde_json::to_string(&base_value).map_err(|error| openclaw_serialization_error(&error))?;
-    let mut search_value = json!({
-        "plugins": {
-            "load": {"paths": [SEARCH_PLUGIN_PATH]},
-            "entries": {"nan-harness-search": {"enabled": true}}
-        },
-        "tools": {"web": {"search": {"enabled": true, "provider": "nan-harness"}}}
-    });
-    if media.any() {
-        search_value["plugins"]["load"]["paths"] = json!([SEARCH_PLUGIN_PATH, MEDIA_PLUGIN_PATH]);
-        search_value["plugins"]["entries"]["nan-harness-media"] = json!({"enabled": true});
-    }
-    let search = serde_json::to_string(&search_value)
-        .map_err(|error| openclaw_serialization_error(&error))?;
+    Ok(render_openclaw_search_variants(&base, media))
+}
 
-    Ok(format!(
-        "{}{NAN_SEARCH_BLOCK_BEGIN},{}{NAN_SEARCH_BLOCK_END}}}",
-        &base[..base.len() - 1],
-        &search[1..search.len() - 1]
-    ))
+fn render_openclaw_search_variants(base: &str, media: MediaSelection) -> String {
+    let search_path = if media.any() {
+        format!("{NAN_SEARCH_BLOCK_BEGIN},\"{SEARCH_PLUGIN_PATH}\"{NAN_SEARCH_BLOCK_END}")
+    } else {
+        format!("{NAN_SEARCH_BLOCK_BEGIN}\"{SEARCH_PLUGIN_PATH}\"{NAN_SEARCH_BLOCK_END}")
+    };
+    let search_entry = if media.any() {
+        format!(
+            "{NAN_SEARCH_BLOCK_BEGIN},\"nan-harness-search\":{{\"enabled\":true}}{NAN_SEARCH_BLOCK_END}"
+        )
+    } else {
+        format!(
+            "{NAN_SEARCH_BLOCK_BEGIN}\"nan-harness-search\":{{\"enabled\":true}}{NAN_SEARCH_BLOCK_END}"
+        )
+    };
+    let search_tools = if media.stt {
+        format!(
+            "{NAN_SEARCH_BLOCK_BEGIN},\"web\":{{\"search\":{{\"enabled\":true,\"provider\":\"nan-harness\"}}}}{NAN_SEARCH_BLOCK_END}"
+        )
+    } else {
+        format!(
+            "{NAN_SEARCH_BLOCK_BEGIN}\"web\":{{\"search\":{{\"enabled\":true,\"provider\":\"nan-harness\"}}}}{NAN_SEARCH_BLOCK_END}"
+        )
+    };
+    let search_path_target = if media.any() {
+        format!(",\"{SEARCH_PLUGIN_PATH_SENTINEL}\"")
+    } else {
+        format!("\"{SEARCH_PLUGIN_PATH_SENTINEL}\"")
+    };
+    let search_entry_target = if media.any() {
+        format!(",\"{SEARCH_PLUGIN_ENTRY_SENTINEL}\":{{\"enabled\":true}}")
+    } else {
+        format!("\"{SEARCH_PLUGIN_ENTRY_SENTINEL}\":{{\"enabled\":true}}")
+    };
+    let search_tools_target = if media.stt {
+        format!(
+            ",\"{SEARCH_TOOLS_SENTINEL}\":{{\"web\":{{\"search\":{{\"enabled\":true,\"provider\":\"nan-harness\"}}}}}}"
+        )
+    } else {
+        format!(
+            "\"{SEARCH_TOOLS_SENTINEL}\":{{\"web\":{{\"search\":{{\"enabled\":true,\"provider\":\"nan-harness\"}}}}}}"
+        )
+    };
+    base.replace(&search_path_target, &search_path)
+        .replace(&search_entry_target, &search_entry)
+        .replace(&search_tools_target, &search_tools)
 }
 
 fn openclaw_serialization_error(error: &serde_json::Error) -> PlanError {
@@ -207,7 +257,7 @@ fn media_plugin_files(media: MediaSelection) -> Vec<OverlayFile> {
         OverlayFile {
             path: "plugins/nan-harness-media/index.js".to_owned(),
             mode: TemporaryArtifactMode::OwnerFile,
-            content_template: render_openclaw_media_plugin("{PROVIDER_BASE_URL_PLACEHOLDER}"),
+            content_template: render_openclaw_media_plugin(MEDIA_PROVIDER_BASE_URL_PLACEHOLDER),
             policy: OverlayFilePolicy::Replace,
         },
     ]
@@ -223,9 +273,16 @@ import {{ promises as fs }} from "node:fs";
 import {{ tmpdir }} from "node:os";
 import {{ join }} from "node:path";
 import {{ randomUUID }} from "node:crypto";
-import {{ spawn }} from "node:child_process";
+import {{ spawn, spawnSync }} from "node:child_process";
 
 const BASE_URL = {encoded_base_url};
+
+function hasCredential() {{
+  if (process.env.NAN_API_KEY?.trim()) return true;
+  return spawnSync("nanh", ["__media", "credentials"], {{
+    stdio: "ignore", env: process.env
+  }}).status === 0;
+}}
 
 async function runMedia(action, args, output) {{
   await new Promise((resolve, reject) => {{
@@ -249,7 +306,7 @@ const speech = {{
   id: "nan-harness",
   label: "NaN Kokoro",
   defaultTimeoutMs: 180000,
-  isConfigured: () => Boolean(process.env.NAN_API_KEY),
+  isConfigured: hasCredential,
   synthesize: async request => withTempFile(".txt", async input => {{
     const output = `${{input}}.mp3`;
     await fs.writeFile(input, String(request.text ?? request.input ?? ""), "utf8");
@@ -277,7 +334,7 @@ const image = {{
   label: "NaN Flux 2 Klein",
   defaultModel: "flux-2-klein",
   models: ["flux-2-klein"],
-  isConfigured: () => Boolean(process.env.NAN_API_KEY),
+  isConfigured: hasCredential,
   capabilities: {{ generate: {{ maxCount: 1 }}, edit: {{ enabled: true, maxCount: 1, maxInputImages: 4 }} }},
   generateImage: async request => withTempFile(".png", async output => {{
     const args = ["--prompt", String(request.prompt ?? ""), "--output", output];

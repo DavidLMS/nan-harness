@@ -223,7 +223,27 @@ try {
     & $NanBinary $Harness '--model' $Model '--dry-run' '--force-media' '--allow-unsupported' '--allow-untested' 1> $plan 2> $stderr
     if ($LASTEXITCODE -ne 0) { throw 'media plan failed' }
     $planText = Get-Content -Raw -LiteralPath $plan
-    if ($planText -notmatch 'nan-whisper' -or $planText -notmatch 'nan-kokoro' -or ($planText -notmatch 'image_gen/nan_harness' -and $planText -notmatch 'nan-harness-media')) { throw 'media plan incomplete' }
+    $planValue = $planText | ConvertFrom-Json
+    $files = @($planValue.configurationOverlays | ForEach-Object { $_.files })
+    if ($Harness -eq 'openclaw') {
+      $mediaPlugin = $files | Where-Object { $_.path -eq 'plugins/nan-harness-media/index.js' }
+      $configFile = $files | Where-Object { $_.path -eq 'nan-harness.json' }
+      if ($null -eq $mediaPlugin -or $null -eq $configFile -or
+          $configFile.contentTemplate -notmatch 'nan-harness-media' -or
+          $configFile.contentTemplate -notmatch 'whisper-1' -or
+          $configFile.contentTemplate -notmatch 'kokoro' -or
+          $mediaPlugin.contentTemplate -notmatch 'registerSpeechProvider' -or
+          $mediaPlugin.contentTemplate -notmatch 'registerMediaUnderstandingProvider' -or
+          $mediaPlugin.contentTemplate -notmatch 'registerImageGenerationProvider') { throw 'OpenClaw media plan incomplete' }
+    } else {
+      $configFile = $files | Where-Object { $_.path -eq 'config.yaml' }
+      $imagePlugin = $files | Where-Object { $_.path -eq 'plugins/image_gen/nan_harness/provider.py' }
+      if ($null -eq $configFile -or $null -eq $imagePlugin -or
+          $configFile.contentTemplate -notmatch 'nan-whisper' -or
+          $configFile.contentTemplate -notmatch 'nan-kokoro' -or
+          $imagePlugin.contentTemplate -notmatch 'register_image_gen_provider' -or
+          $imagePlugin.contentTemplate -notmatch 'max_reference_images') { throw 'Hermes media plan incomplete' }
+    }
     $ttsInput = Join-Path $media 'tts-input.txt'; $ttsOutput = Join-Path $media 'tts-output.mp3'
     Set-Content -LiteralPath $ttsInput -Value 'NaN media canary speech' -NoNewline
     Run-Native @('__media','tts','--input',$ttsInput,'--output',$ttsOutput)
