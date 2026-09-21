@@ -7,11 +7,6 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Fixed
-
-- Generate capability-tagged media models for OpenClaw so transcription-enabled
-  launches pass current configuration validation.
-
 ## [0.1.10] - 2026-09-21
 
 ### Added
@@ -27,6 +22,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Select Cline's local session backend for JSON runs without overriding its
   data directory or enabling sandbox configuration.
+- Generate capability-tagged media models for OpenClaw so transcription-enabled
+  launches pass current configuration validation.
 - Close owned Windows descendants before draining conformance output, and
   retain operational inventory failures instead of treating them as advisory drift.
 - Preserve native exit codes when Windows PowerShell receives stderr warnings
