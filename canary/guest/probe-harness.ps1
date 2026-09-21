@@ -192,7 +192,7 @@ try {
     if ($diagnostics.Count -eq 0) { $completed = $true; return }; exit 1
   }
   if (-not $env:NAN_API_KEY) { Fail 'live mode requires explicit provider key' }; Set-Location $workspace; New-Item -ItemType Directory -Path (Join-Path $workspace 'home') | Out-Null; $env:HOME = Join-Path $workspace 'home'; $env:NAN_HARNESS_CONFIG_DIR = Join-Path $workspace 'nan-state'; $usage = Join-Path $workspace 'usage-evidence.json'; $env:NAN_HARNESS_INTERNAL_CANARY_USAGE_FILE = $usage
-  $marker = 'NAN_CANARY_READ_' + [guid]::NewGuid().ToString('N'); $readTarget = Join-Path $workspace 'read-target.txt'; Set-Content -LiteralPath $readTarget -Value $marker -NoNewline; $prompt = "Use the available file-reading tool to read '$readTarget'. Include the exact file content, then reply exactly NAN_CANARY_OK. Do not answer before the tool succeeds."
+  $marker = 'NAN_CANARY_READ_' + [guid]::NewGuid().ToString('N'); $readTarget = Join-Path $workspace 'read-target.txt'; Set-Content -LiteralPath $readTarget -Value $marker -NoNewline; $prompt = "Use the available file-reading tool to read '$readTarget'. After the read succeeds, respond with two lines: the exact file content on the first line and NAN_CANARY_OK on the second line. Do not answer before the tool succeeds."
   $stageNow = 'harness-run'
   switch ($Harness) {
     'claude-code' { Run-Native @('claude','--model',$Model,'--','-p',$prompt,'--output-format','stream-json','--verbose','--no-session-persistence','--max-turns','4','--tools','Read','--allowedTools','Read'); if (-not (Has-Text '"name":"Read"')) { Fail 'tool evidence missing' } }
@@ -217,7 +217,7 @@ try {
   # Keep the pattern ASCII: Windows PowerShell 5.1 reads BOM-less scripts as ANSI.
   $stageNow = 'usage-summary'; if (-not (Has-Regex '^(\uD83D\uDD25 Tokens burned \u2014 this session|NaN usage \()')) { Fail 'usage summary missing' }; if ($null -eq $exitCode) { Add-Diagnostic 'live-exit-missing'; throw 'live child exit evidence missing' }
   if ($Harness -in @('hermes','openclaw')) {
-    $stageNow = 'media-capabilities'
+    $stageNow = 'media-plan'
     $media = Join-Path $workspace 'media'; New-Item -ItemType Directory -Path $media | Out-Null
     $plan = Join-Path $media 'plan.json'
     & $NanBinary $Harness '--model' $Model '--dry-run' '--force-media' '--allow-unsupported' '--allow-untested' 1> $plan 2> $stderr
@@ -246,6 +246,7 @@ try {
     }
     $ttsInput = Join-Path $media 'tts-input.txt'; $ttsOutput = Join-Path $media 'tts-output.mp3'
     Set-Content -LiteralPath $ttsInput -Value 'NaN media canary speech' -NoNewline
+    $stageNow = 'media-tts'
     Run-Native @('__media','tts','--input',$ttsInput,'--output',$ttsOutput)
     if (-not (Test-Path -LiteralPath $ttsOutput) -or (Get-Item -LiteralPath $ttsOutput).Length -le 0) { throw 'tts output missing' }
     $wav = Join-Path $media 'stt-input.wav'; $dataSize = 32000; $bytes = [byte[]]::new(44 + $dataSize)
@@ -257,10 +258,12 @@ try {
     [Text.Encoding]::ASCII.GetBytes('data').CopyTo($bytes, 36); [BitConverter]::GetBytes([int]$dataSize).CopyTo($bytes, 40)
     [IO.File]::WriteAllBytes($wav, $bytes)
     $sttOutput = Join-Path $media 'stt-output.txt'
+    $stageNow = 'media-stt'
     Run-Native @('__media','stt','--input',$wav,'--output',$sttOutput)
     if (-not (Test-Path -LiteralPath $sttOutput)) { throw 'stt output missing' }
     if ($env:NAN_CANARY_MEDIA_MODE -eq 'weekly') {
       $imageOutput = Join-Path $media 'image-output.png'
+      $stageNow = 'media-image'
       Run-Native @('__media','image','--prompt','A simple blue square on a white background','--output',$imageOutput)
       if (-not (Test-Path -LiteralPath $imageOutput) -or (Get-Item -LiteralPath $imageOutput).Length -le 0) { throw 'image output missing' }
     }

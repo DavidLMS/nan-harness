@@ -372,6 +372,10 @@ fn native_search_plugins_execute_through_a_lifecycle_helper_and_release_it() {
 }
 
 #[cfg(unix)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "keep the three native plugin fixtures beside their shared lifecycle assertions"
+)]
 fn run_node_native_plugins(config: &Path, helper: &Path, marker: &Path) {
     let node_sources = [
         (
@@ -422,8 +426,8 @@ if (retried.details.results[0].title !== "Synthetic result") throw new Error("he
                     1,
                 )
                 .replacen(
-                    "import { getSearchProvider, setExcludedSearchProviders } from \"@oh-my-pi/pi-coding-agent/web/search\";",
-                    "const getSearchProvider = async () => ({ isAvailable: async () => false }); const setExcludedSearchProviders = () => {};",
+                    "import * as searchProviders from \"@oh-my-pi/pi-coding-agent/web/search\";",
+                    "const searchProviders = {};",
                     1,
                 )
                 .replacen(
@@ -448,7 +452,11 @@ if (result.details.results[0].title !== "Synthetic result") throw new Error("OMP
                     "const definePluginEntry = (entry) => entry;",
                     1,
                 )
-                .replacen("export default definePluginEntry", "const plugin = definePluginEntry", 1),
+                .replacen(
+                    "export default definePluginEntry",
+                    "const plugin = definePluginEntry",
+                    1,
+                ),
             r#"
 let provider;
 plugin.register({ registerWebSearchProvider(value) { provider = value; } });

@@ -132,7 +132,7 @@ def _diagnostic(value, label):
         elif key in {"doctorVersion", "doctorExpectedVersion"}:
             if not isinstance(item, str) or not SEMVER.fullmatch(item): raise UnsafeReport(f"invalid {label} diagnostic")
         elif key == "stage":
-            if item not in PHASES and item not in {"complete", "harness-run", "read-marker", "completion-marker", "bridge-sentinel", "usage-evidence", "usage-summary"}: raise UnsafeReport(f"invalid {label} diagnostic")
+            if item not in PHASES and item not in {"complete", "harness-run", "read-marker", "completion-marker", "bridge-sentinel", "usage-evidence", "usage-summary", "media-capabilities", "media-plan", "media-tts", "media-stt", "media-image"}: raise UnsafeReport(f"invalid {label} diagnostic")
         elif key == "diagnostics":
             if not isinstance(item, list) or len(item) > 16 or any(x not in PROBE_DIAGNOSTICS for x in item): raise UnsafeReport(f"invalid {label} diagnostic")
         elif key == "markerState":

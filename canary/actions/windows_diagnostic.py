@@ -557,7 +557,7 @@ _PROBE_DIAGNOSTICS = frozenset({
 # ever copying a value out of the marker.
 _PROBE_MARKER_FIELDS_STAGES = frozenset(PHASES) | {
     "complete", "harness-run", "read-marker", "completion-marker", "bridge-sentinel",
-    "usage-evidence", "usage-summary",
+    "usage-evidence", "usage-summary", "media-capabilities", "media-plan", "media-tts", "media-stt", "media-image",
 }
 _PROBE_MARKER_FIELDS = frozenset({
     "schemaVersion", "stage", "status", "diagnostics", "exitCode", "doctorVersion",
@@ -580,7 +580,7 @@ _INVENTORY_CLEANUP_STAGES = frozenset({"terminate", "wait", "wait-timeout", "cap
 _INVENTORY_CLEANUP_STREAMS = frozenset({"stdout", "stderr"})
 _LIVE_FAILURE_STAGES = frozenset({
     "live-tool", "harness-run", "read-marker", "completion-marker", "bridge-sentinel",
-    "usage-evidence", "usage-summary",
+    "usage-evidence", "usage-summary", "media-capabilities", "media-plan", "media-tts", "media-stt", "media-image",
 })
 
 # Closed vocabularies a rejected marker may still report, so a failure is diagnosable

@@ -303,3 +303,74 @@ fn run_optional_child(
             .expect("behavior check should finish"),
     )
 }
+
+#[test]
+fn omp_search_supports_legacy_exclusions_and_model_scoped_search() {
+    use nan_harness_adapters::{OmpSearchMode, render_omp_search_extension};
+
+    let fixture = SearchFixture::new();
+    let source = render_omp_search_extension("https://unused.nan.test/v1", OmpSearchMode::Auto)
+        .replace(
+            "import { Type } from \"@oh-my-pi/pi-ai\";",
+            "const Type = new Proxy({}, { get: () => (...args) => args[0] ?? {} });",
+        )
+        .replace(
+            "import { settings } from \"@oh-my-pi/pi-coding-agent\";",
+            "const settings = { get: () => ['blocked'] };",
+        )
+        .replace(
+            "import * as searchProviders from \"@oh-my-pi/pi-coding-agent/web/search\";",
+            "const searchProviders = {};",
+        )
+        .replace(
+            "export default function registerNanSearch",
+            "function registerNanSearch",
+        )
+        + r#"
+let tool;
+registerNanSearch({ registerTool(value) { tool = value; } });
+let fallbackCalls = 0;
+nanSearchResults = async () => { fallbackCalls++; return []; };
+let nativeCalls = 0;
+const models = [
+  { provider: "anonymous", id: "public", kind: "search" },
+  { provider: "blocked", id: "blocked", kind: "search" },
+  { provider: "unconfigured", id: "unconfigured", kind: "search" },
+  { provider: "paid", id: "chat-only" },
+  { provider: "paid", id: "search-model", kind: "search" }
+];
+const authStorage = { hasAuth: id => id === "paid" || id === "blocked" };
+const ctx = { modelRegistry: { authStorage, getAvailable: () => models } };
+searchProviders.runSearchQuery = async (params, options) => {
+  if (params.model !== "paid/search-model" || options.authStorage !== authStorage) throw new Error("unsafe model selection");
+  nativeCalls++;
+  return { content: [{ type: "text", text: "native result" }] };
+};
+await tool.execute("modern", {query:"synthetic"}, undefined, undefined, ctx);
+if (nativeCalls !== 1 || fallbackCalls !== 0) throw new Error("modern native search lost");
+searchProviders.runSearchQuery = async () => ({ details: { error: "native failed" } });
+await tool.execute("failed", {query:"synthetic"}, undefined, undefined, ctx);
+if (fallbackCalls !== 1) throw new Error("modern error did not fall back");
+ctx.modelRegistry.getAvailable = () => [];
+await tool.execute("unconfigured", {query:"synthetic"}, undefined, undefined, ctx);
+if (fallbackCalls !== 2) throw new Error("missing credentials did not fall back");
+let exclusions;
+searchProviders.getSearchProvider = async () => ({ isAvailable: async () => false });
+searchProviders.setExcludedSearchProviders = value => { exclusions = value; };
+ctx.invokeTool = async () => { nativeCalls++; return {content:[]}; };
+await tool.execute("legacy", {query:"synthetic"}, undefined, undefined, ctx);
+if (nativeCalls !== 2 || fallbackCalls !== 2) throw new Error("legacy native search lost");
+for (const id of ["blocked", "public", "perplexity", "exa", "firecrawl"]) {
+  if (!exclusions.includes(id)) throw new Error("unsafe legacy exclusions");
+}
+"#;
+    let Some(output) = run_optional_child("node", &["--input-type=module"], &source, &fixture)
+    else {
+        return;
+    };
+    assert!(
+        output.status.success(),
+        "OMP search behavior failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}

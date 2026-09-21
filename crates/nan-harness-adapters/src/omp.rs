@@ -19,6 +19,42 @@ const EXTENSION_PATH_PLACEHOLDER: &str = "{artifact:omp-provider-extension}";
 const CONFIG_ARTIFACT_ID: &str = "omp-launch-config";
 const CONFIG_PATH_PLACEHOLDER: &str = "{artifact:omp-launch-config}";
 
+// OMP 18.2 replaced global provider exclusions with model-scoped search. Keep the
+// legacy API optional so importing the extension cannot disable provider routing.
+const NATIVE_SEARCH: &str = r#"
+async function callAuthenticatedOmpSearch(params, signal, onUpdate, ctx, exclusions, hybridProviders) {
+  const modelRegistry = ctx.modelRegistry;
+  const authStorage = modelRegistry?.authStorage;
+  if (typeof searchProviders.setExcludedSearchProviders === "function") {
+    for (const id of hybridProviders) {
+      let authenticated = false;
+      try { authenticated = !!authStorage && await (await searchProviders.getSearchProvider(id)).isAvailable(authStorage); } catch {}
+      if (!authenticated) exclusions.add(id);
+    }
+    searchProviders.setExcludedSearchProviders([...exclusions]);
+    if (!ctx.invokeTool) throw new Error("native OMP web_search is unavailable");
+    return ctx.invokeTool(params, { signal, onUpdate });
+  }
+  // Explicit model selection prevents the native chain from falling through to
+  // anonymous providers. Credentials and disabled providers remain native-owned.
+  const models = modelRegistry?.getAvailable?.("all") ?? [];
+  for (const model of models) {
+    if (exclusions.has(model.id) || exclusions.has(model.provider) || exclusions.has(model.webSearch)) continue;
+    if (model.kind !== "search" && !model.webSearch) continue;
+    if (!authStorage?.hasAuth(model.provider)) continue;
+    try {
+      const result = await searchProviders.runSearchQuery({ ...params, model: `${model.provider}/${model.id}` }, {
+        authStorage, modelRegistry, signal
+      });
+      if (!result.isError && !result.details?.error) return result;
+    } catch (error) {
+      if (signal?.aborted) throw error;
+    }
+  }
+  throw new Error("native OMP authenticated web_search is unavailable");
+}
+"#;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OmpSearchMode {
     Auto,
@@ -135,7 +171,8 @@ fn provider_extension(search_policy: WebSearchPolicy) -> String {
     format!(
         r#"import {{ Type }} from "@oh-my-pi/pi-ai";
 import {{ settings }} from "@oh-my-pi/pi-coding-agent";
-import {{ getSearchProvider, setExcludedSearchProviders }} from "@oh-my-pi/pi-coding-agent/web/search";
+import * as searchProviders from "@oh-my-pi/pi-coding-agent/web/search";
+{NATIVE_SEARCH}
 
 const baseUrl = "{PROVIDER_BASE_URL_PLACEHOLDER}".replace(/\/+$/, "");
 const profiles = {PI_MODEL_CATALOG_PLACEHOLDER};
@@ -194,7 +231,8 @@ pub fn render_omp_search_extension(_base_url: &str, mode: OmpSearchMode) -> Stri
         r#"{}
 import {{ Type }} from "@oh-my-pi/pi-ai";
 import {{ settings }} from "@oh-my-pi/pi-coding-agent";
-import {{ getSearchProvider, setExcludedSearchProviders }} from "@oh-my-pi/pi-coding-agent/web/search";
+import * as searchProviders from "@oh-my-pi/pi-coding-agent/web/search";
+{NATIVE_SEARCH}
 
 export default function registerNanSearch(pi) {{
 {}
@@ -240,19 +278,10 @@ fn persistent_search_registration(mode: OmpSearchMode) -> String {
       if (forceNanSearch) return callSearxng(params, signal);
 
       const exclusions = new Set([...configuredExclusions, ...anonymousProviders]);
-      const authStorage = ctx.modelRegistry?.authStorage;
-      for (const id of hybridProviders) {{
-        let authenticated = false;
-        try {{ authenticated = !!authStorage && await (await getSearchProvider(id)).isAvailable(authStorage); }} catch {{}}
-        if (!authenticated) exclusions.add(id);
-      }}
-      setExcludedSearchProviders([...exclusions]);
-
       let nativeFailure;
       try {{
-        if (!ctx.invokeTool) throw new Error("native OMP web_search is unavailable");
-        const result = await ctx.invokeTool(params, {{ signal, onUpdate }});
-        if (!result.isError) return result;
+        const result = await callAuthenticatedOmpSearch(params, signal, onUpdate, ctx, exclusions, hybridProviders);
+        if (!result.isError && !result.details?.error) return result;
         nativeFailure = new Error("native OMP web_search failed");
       }} catch (error) {{
         nativeFailure = error;
@@ -314,19 +343,10 @@ fn search_registration(
       if (forceNanSearch) return callNan(params, signal, ctx);
 
       const exclusions = new Set([...configuredExclusions, ...anonymousProviders]);
-      const authStorage = ctx.modelRegistry?.authStorage;
-      for (const id of hybridProviders) {{
-        let authenticated = false;
-        try {{ authenticated = !!authStorage && await (await getSearchProvider(id)).isAvailable(authStorage); }} catch {{}}
-        if (!authenticated) exclusions.add(id);
-      }}
-      setExcludedSearchProviders([...exclusions]);
-
       let nativeFailure;
       try {{
-        if (!ctx.invokeTool) throw new Error("native OMP web_search is unavailable");
-        const result = await ctx.invokeTool(params, {{ signal, onUpdate }});
-        if (!result.isError) return result;
+        const result = await callAuthenticatedOmpSearch(params, signal, onUpdate, ctx, exclusions, hybridProviders);
+        if (!result.isError && !result.details?.error) return result;
         nativeFailure = new Error("native OMP web_search failed");
       }} catch (error) {{
         nativeFailure = error;

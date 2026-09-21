@@ -7,6 +7,15 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Load the NaN provider on OMP 18.2 after its search API change, retaining
+  authenticated native search and fallback support for older OMP versions.
+- Send an application User-Agent, a default Kokoro voice, and the NaN Whisper
+  model identifier from the media helper so live speech checks can complete.
+- Distinguish media plan, speech synthesis, transcription, and image failures
+  in canary reports, and clarify the live read probe's required response.
+
 ## [0.1.10] - 2026-09-21
 
 ### Added

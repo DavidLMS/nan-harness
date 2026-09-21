@@ -34,6 +34,8 @@ from pathlib import Path
 
 args = sys.argv[1:]
 if args and args[0] == "__media":
+    if os.environ.get("NAN_CANARY_FAKE_MODE") == "media-" + args[1]:
+        raise SystemExit(1)
     if "--output" in args:
         output = Path(args[args.index("--output") + 1])
         output.parent.mkdir(parents=True, exist_ok=True)
@@ -43,6 +45,8 @@ model = args[args.index("--model") + 1]
 with open(os.environ["NAN_CANARY_MODEL_LOG"], "a", encoding="utf-8") as log:
     log.write(model + "\n")
 if "--dry-run" in args:
+    if os.environ.get("NAN_CANARY_FAKE_MODE") == "media-plan":
+        raise SystemExit(1)
     print(json.dumps({"media": ["nan-whisper", "nan-kokoro", "image_gen/nan_harness"]}))
     raise SystemExit(0)
 if os.environ.get("NAN_CANARY_FAKE_MODE") == "providerfailure":
@@ -135,6 +139,7 @@ class ProbeHarnessTests(unittest.TestCase):
             "NAN_CANARY_MODEL_LOG": str(self.root / "models.log"),
             "NAN_CANARY_FAKE_MODE": mode,
             "NAN_CANARY_REDACT_FAILURE_OUTPUT": "1",
+            "NAN_CANARY_MEDIA_MODE": "weekly",
         })
         if model is not None:
             env["NAN_CANARY_MODEL"] = model
@@ -166,6 +171,15 @@ class ProbeHarnessTests(unittest.TestCase):
                 self.assertEqual(json.loads(marker.read_text())["stage"], stage)
                 self.assertEqual(json.loads(marker.read_text())["status"], "failed")
                 self.assertNotIn("synthetic secret", result.stderr)
+
+    def test_media_failures_identify_the_operation(self):
+        for harness in ("hermes", "openclaw"):
+            for stage in ("media-plan", "media-tts", "media-stt", "media-image"):
+                with self.subTest(harness=harness, stage=stage):
+                    result, marker = self.run_probe(harness, mode=stage)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertEqual(CELL.probe_result(marker)["stage"], stage)
+                    self.assertIn(stage, CELL.WINDOWS_PROBE_STAGES)
 
     def test_aider_completion_failure_reports_safe_fixed_diagnostic(self):
         result, marker = self.run_probe("aider", mode="aidercompletionmissing")

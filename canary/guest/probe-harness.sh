@@ -91,7 +91,7 @@ usage_evidence="$workspace/usage-evidence.json"
 export NAN_HARNESS_INTERNAL_CANARY_USAGE_FILE="$usage_evidence"
 marker="NAN_CANARY_READ_$(date +%s)_$RANDOM"
 printf '%s\n' "$marker" > read-target.txt
-prompt="Use the available file-reading tool to read '$workspace/read-target.txt'. Include the exact file content, then reply exactly NAN_CANARY_OK. Do not answer before the tool succeeds."
+prompt="Use the available file-reading tool to read '$workspace/read-target.txt'. After the read succeeds, respond with two lines: the exact file content on the first line and NAN_CANARY_OK on the second line. Do not answer before the tool succeeds."
 output="$workspace/harness-output.txt"
 stderr_output="$workspace/harness-stderr.txt"
 verify_read_marker=true
@@ -277,7 +277,7 @@ if ! grep -E '^(🔥 Tokens burned — this session|NaN usage \()' "$stderr_outp
 fi
 
 if [ "$harness" = hermes ] || [ "$harness" = openclaw ]; then
-  probe_stage='media-capabilities'
+  probe_stage='media-plan'
   media_plan="$workspace/media-plan.json"
   "$nan_command" "$harness" --model "$model" --dry-run --force-media \
     --allow-unsupported --allow-untested >"$media_plan" 2>/dev/null
@@ -286,6 +286,7 @@ if [ "$harness" = hermes ] || [ "$harness" = openclaw ]; then
   media_directory="$workspace/media"
   mkdir -p "$media_directory"
   printf '%s\n' 'NaN media canary speech' >"$media_directory/tts-input.txt"
+  probe_stage='media-tts'
   "$nan_command" __media tts --input "$media_directory/tts-input.txt" \
     --output "$media_directory/tts-output.mp3" >/dev/null 2>/dev/null
   test -s "$media_directory/tts-output.mp3"
@@ -299,10 +300,12 @@ with wave.open(sys.argv[1], "wb") as stream:
     stream.setframerate(16_000)
     stream.writeframes(b"\0\0" * 16_000)
 PY
+  probe_stage='media-stt'
   "$nan_command" __media stt --input "$media_directory/stt-input.wav" \
     --output "$media_directory/stt-output.txt" >/dev/null 2>/dev/null
   test -f "$media_directory/stt-output.txt"
   if [ "${NAN_CANARY_MEDIA_MODE:-}" = weekly ]; then
+    probe_stage='media-image'
     "$nan_command" __media image --prompt 'A simple blue square on a white background' \
       --output "$media_directory/image-output.png" >/dev/null 2>/dev/null
     test -s "$media_directory/image-output.png"

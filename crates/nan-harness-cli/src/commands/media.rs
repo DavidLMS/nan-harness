@@ -132,6 +132,7 @@ async fn run(arguments: Arguments) -> Result<(), MediaError> {
     }
     let base_url = endpoint(arguments.provider_base_url.as_deref())?;
     let client = Client::builder()
+        .user_agent(concat!("nan-harness/", env!("CARGO_PKG_VERSION")))
         .connect_timeout(Duration::from_secs(10))
         .timeout(Duration::from_mins(3))
         .build()
@@ -249,7 +250,7 @@ async fn transcribe_bytes(
     let mut form = Form::new()
         .text(
             "model",
-            arguments.model.as_deref().unwrap_or("whisper-1").to_owned(),
+            arguments.model.as_deref().unwrap_or("whisper").to_owned(),
         )
         .text("response_format", "json".to_owned())
         .part("file", Part::bytes(bytes).file_name(file_name.to_owned()));
@@ -276,14 +277,12 @@ async fn synthesize(
     let input = arguments.input.as_deref().ok_or(MediaError::Input)?;
     let text = read_limited(input, MAX_TEXT_BYTES).map_err(|_| MediaError::Input)?;
     let text = String::from_utf8(text).map_err(|_| MediaError::Input)?;
-    let mut body = json!({
+    let body = json!({
         "model": arguments.model.as_deref().unwrap_or("kokoro"),
         "input": text,
+        "voice": arguments.voice.as_deref().unwrap_or("af_heart"),
         "response_format": arguments.format.as_deref().unwrap_or("mp3")
     });
-    if let Some(voice) = &arguments.voice {
-        body["voice"] = json!(voice);
-    }
     let response = client
         .post(join(base_url, "audio/speech"))
         .bearer_auth(api_key)

@@ -143,6 +143,13 @@ an internal state machine. Their `expect` attributes include reasons and become
 unfulfilled if the lint no longer applies; the exceptions do not waive other
 quality requirements.
 
+`run_node_native_plugins` in
+`crates/nan-harness-cli/src/commands/configuration/tests/plugin_syntax.rs` has
+102 lines, mostly a three-entry table of generated JavaScript fixtures. Keep
+each plugin's import stubs and invocation beside the shared lifecycle assertions
+so the test remains reviewable as one contract. Reassess if another plugin or
+independent behavior is added; the scoped `expect` does not waive test coverage.
+
 `CompatibilityError::terminal_message` in
 `crates/nan-harness-runtime/src/compatibility/error.rs` has 139 lines. Its
 exhaustive variant-to-message projection remains together so missing cases are

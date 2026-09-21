@@ -370,7 +370,7 @@ CONFORMANCE_ATTEMPTS = 2
 # nan-harness output contract failure rather than a provider result.
 LIVE_MISMATCH_STAGES = frozenset({"usage-summary"})
 PROBE_STAGES = frozenset({"setup", "harness-run", "tool-evidence", "read-marker", "completion-marker",
-                          "bridge-sentinel", "usage-evidence", "usage-summary", "media-capabilities",
+                          "bridge-sentinel", "usage-evidence", "usage-summary", "media-capabilities", "media-plan", "media-tts", "media-stt", "media-image",
                           "cleanup", "complete"})
 PROBE_DIAGNOSTICS = frozenset({
     "aider-completion-marker-stdout-empty-stderr-empty",
@@ -385,7 +385,7 @@ PROBE_DIAGNOSTIC_CODES = {
 # native run reached and a bounded diagnostic list.
 WINDOWS_PROBE_STAGES = frozenset({"live-tool", "harness-run", "read-marker", "completion-marker",
                                   "bridge-sentinel", "usage-evidence", "usage-summary",
-                                  "media-capabilities", "complete"})
+                                  "media-capabilities", "media-plan", "media-tts", "media-stt", "media-image", "complete"})
 WINDOWS_LIVE_DIAGNOSTICS = frozenset({
     "live-error-auth", "live-error-network", "live-error-arguments", "live-error-permission",
     "live-error-provider", "live-error-config",
