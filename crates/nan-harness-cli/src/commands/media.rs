@@ -1,9 +1,11 @@
+use crate::commands::media_audio;
 use base64::Engine as _;
 use reqwest::multipart::{Form, Part};
 use reqwest::{Client, Url};
 use serde::Deserialize;
 use serde_json::json;
 use std::ffi::OsString;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Duration;
@@ -11,7 +13,6 @@ use thiserror::Error;
 
 const SUBCOMMAND: &str = "__media";
 const DEFAULT_BASE_URL: &str = "https://api.nan.builders/v1";
-const MAX_AUDIO_BYTES: usize = 25 * 1024 * 1024;
 const MAX_IMAGE_BYTES: usize = 50 * 1024 * 1024;
 const MAX_TEXT_BYTES: usize = 256 * 1024;
 const MAX_JSON_BYTES: usize = 2 * 1024 * 1024;
@@ -26,6 +27,12 @@ enum MediaError {
     InvalidEndpoint,
     #[error("media input is missing or exceeds its size limit")]
     Input,
+    #[error("large audio input must be a supported PCM WAV file")]
+    AudioFormat,
+    #[error("audio input could not be prepared")]
+    AudioPrepare,
+    #[error("transcription failed for audio chunk {index} of {total}")]
+    AudioChunk { index: usize, total: usize },
     #[error("media output path is required")]
     Output,
     #[error("media request failed")]
@@ -162,14 +169,57 @@ async fn transcribe(
     arguments: &Arguments,
 ) -> Result<(), MediaError> {
     let input = arguments.input.as_deref().ok_or(MediaError::Input)?;
-    let bytes = read_limited(input, MAX_AUDIO_BYTES).map_err(|_| MediaError::Input)?;
+    let request_limit =
+        u64::try_from(media_audio::MAX_AUDIO_REQUEST_BYTES).map_err(|_| MediaError::Input)?;
+    let input_size = std::fs::metadata(input)
+        .map_err(|_| MediaError::Input)?
+        .len();
+    if input_size <= request_limit {
+        let bytes = read_limited(input, media_audio::MAX_AUDIO_REQUEST_BYTES)
+            .map_err(|_| MediaError::Input)?;
+        let text = transcribe_bytes(client, base_url, api_key, arguments, bytes, "audio").await?;
+        return write_text_or_stdout(arguments.output.as_deref(), &text);
+    }
+
+    let (_temporary_directory, chunks) = media_audio::prepare_chunks(input).map_err(|error| {
+        if matches!(error, media_audio::AudioError::Format) {
+            MediaError::AudioFormat
+        } else {
+            MediaError::AudioPrepare
+        }
+    })?;
+    let total = chunks.len();
+    let mut parts = Vec::with_capacity(total);
+    for (index, chunk) in chunks.iter().enumerate() {
+        let bytes = read_limited(chunk, media_audio::MAX_AUDIO_REQUEST_BYTES)
+            .map_err(|_| MediaError::AudioPrepare)?;
+        let text = transcribe_bytes(client, base_url, api_key, arguments, bytes, "audio.wav")
+            .await
+            .map_err(|_| MediaError::AudioChunk {
+                index: index + 1,
+                total,
+            })?;
+        parts.push(text);
+    }
+    let text = media_audio::merge_transcripts(&parts);
+    write_text_or_stdout(arguments.output.as_deref(), &text)
+}
+
+async fn transcribe_bytes(
+    client: &Client,
+    base_url: &Url,
+    api_key: &str,
+    arguments: &Arguments,
+    bytes: Vec<u8>,
+    file_name: &str,
+) -> Result<String, MediaError> {
     let mut form = Form::new()
         .text(
             "model",
             arguments.model.as_deref().unwrap_or("whisper-1").to_owned(),
         )
         .text("response_format", "json".to_owned())
-        .part("file", Part::bytes(bytes).file_name("audio"));
+        .part("file", Part::bytes(bytes).file_name(file_name.to_owned()));
     if let Some(language) = &arguments.language {
         form = form.text("language", language.clone());
     }
@@ -181,7 +231,7 @@ async fn transcribe(
         .await
         .map_err(|_| MediaError::Request)?;
     let payload: TranscriptionResponse = response_json(response).await?;
-    write_text_or_stdout(arguments.output.as_deref(), &payload.text)
+    Ok(payload.text)
 }
 
 async fn synthesize(
@@ -337,6 +387,18 @@ async fn response_bytes(response: reqwest::Response, limit: usize) -> Result<Vec
 }
 
 fn read_limited(path: &Path, limit: usize) -> Result<Vec<u8>, std::io::Error> {
+    let limit_u64 = u64::try_from(limit).map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "media size limit is not supported on this platform",
+        )
+    })?;
+    if std::fs::metadata(path)?.len() > limit_u64 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "media input exceeds its size limit",
+        ));
+    }
     let bytes = std::fs::read(path)?;
     if bytes.len() > limit {
         return Err(std::io::Error::new(
@@ -354,11 +416,20 @@ fn write_output(path: Option<&Path>, bytes: &[u8]) -> Result<(), MediaError> {
 
 fn write_text_or_stdout(path: Option<&Path>, text: &str) -> Result<(), MediaError> {
     if let Some(path) = path {
-        std::fs::write(path, text.as_bytes()).map_err(|_| MediaError::Write)
+        write_output_atomically(path, text.as_bytes())
     } else {
         println!("{text}");
         Ok(())
     }
+}
+
+fn write_output_atomically(path: &Path, bytes: &[u8]) -> Result<(), MediaError> {
+    let directory = path.parent().unwrap_or_else(|| Path::new("."));
+    let mut temporary =
+        tempfile::NamedTempFile::new_in(directory).map_err(|_| MediaError::Write)?;
+    temporary.write_all(bytes).map_err(|_| MediaError::Write)?;
+    temporary.persist(path).map_err(|_| MediaError::Write)?;
+    Ok(())
 }
 
 #[cfg(test)]
