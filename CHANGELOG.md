@@ -7,6 +7,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.10] - 2026-09-21
+
 ### Added
 
 - Require Linux, macOS and available Windows CLI live evidence before release
@@ -801,7 +803,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   startup update prompts, daily compatibility canaries, and a monotonic remote
   verification feed.
 
-[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.1.9...HEAD
+[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.1.10...HEAD
+[0.1.10]: https://github.com/DavidLMS/nan-harness/compare/v0.1.9...v0.1.10
 [0.1.9]: https://github.com/DavidLMS/nan-harness/compare/v0.1.8...v0.1.9
 [0.1.8]: https://github.com/DavidLMS/nan-harness/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/DavidLMS/nan-harness/compare/v0.1.6...v0.1.7
