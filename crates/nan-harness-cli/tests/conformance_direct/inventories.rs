@@ -234,6 +234,7 @@ async fn openclaw_native_inventory_reaches_nan() {
             "file_write",
             "gateway",
             "get_goal",
+            "image_generate",
             "intent",
             "memory_get",
             "memory_search",

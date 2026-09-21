@@ -105,10 +105,7 @@ fn openclaw_media_plugin_registers_speech_audio_and_image_contracts() {
         serde_json::from_str(&with_search_block(&config_file.content_template))
             .expect("OpenClaw media configuration with search should be JSON");
     assert_eq!(config["tts"]["provider"], "nan-harness");
-    assert_eq!(
-        config["tools"]["media"]["audio"]["models"][0]["model"],
-        "whisper-1"
-    );
+    assert_eq!(config["tools"]["media"]["models"][0]["model"], "whisper-1");
     assert_eq!(
         config["agents"]["defaults"]["mediaModels"]["image"]["primary"],
         "nan-harness/flux-2-klein"
@@ -163,4 +160,45 @@ fn openclaw_media_plugin_registers_speech_audio_and_image_contracts() {
             .content_template
             .contains("{PROVIDER_BASE_URL_PLACEHOLDER}")
     );
+}
+
+#[test]
+fn openclaw_scopes_media_models_to_audio_only_when_transcription_is_enabled() {
+    for tts in [false, true] {
+        for stt in [false, true] {
+            for image in [false, true] {
+                let mut context = context(HarnessKind::OpenClaw, Vec::new());
+                context.media = MediaSelection { tts, stt, image };
+                let plan = plan(&OpenClawAdapter, &context);
+                let config_file = plan.configuration_overlays[0]
+                    .files
+                    .iter()
+                    .find(|file| file.path == "nan-harness.json")
+                    .expect("OpenClaw configuration should exist");
+                for rendered in [
+                    without_search_block(&config_file.content_template),
+                    with_search_block(&config_file.content_template),
+                ] {
+                    let config: serde_json::Value = serde_json::from_str(&rendered)
+                        .expect("OpenClaw configuration should be JSON");
+                    if stt {
+                        assert_eq!(
+                            config["tools"]["media"],
+                            serde_json::json!({
+                                "audio": {"enabled": true},
+                                "models": [{
+                                    "type": "provider",
+                                    "provider": "nan-harness",
+                                    "model": "whisper-1",
+                                    "capabilities": ["audio"]
+                                }]
+                            })
+                        );
+                    } else {
+                        assert!(config["tools"].get("media").is_none());
+                    }
+                }
+            }
+        }
+    }
 }

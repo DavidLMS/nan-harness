@@ -61,9 +61,14 @@ fn openclaw_config(model_id: &str, media: MediaSelection) -> Result<String, Plan
     if media.stt {
         tools["media"] = json!({
             "audio": {
-                "enabled": true,
-                "models": [{"type": "provider", "provider": "nan-harness", "model": "whisper-1"}]
-            }
+                "enabled": true
+            },
+            "models": [{
+                "type": "provider",
+                "provider": "nan-harness",
+                "model": "whisper-1",
+                "capabilities": ["audio"]
+            }]
         });
     }
     tools[SEARCH_TOOLS_SENTINEL] = json!({

@@ -7,6 +7,11 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Generate capability-tagged media models for OpenClaw so transcription-enabled
+  launches pass current configuration validation.
+
 ## [0.1.10] - 2026-09-21
 
 ### Added
