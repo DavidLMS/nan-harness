@@ -62,6 +62,7 @@ jobs:
           VERIFICATION_ONLY: ${{ inputs.verification_only }}
         run: |
           python3 -c 'import re,sys; tag,commit,model=sys.argv[1:]; assert re.fullmatch(r"v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?", tag); assert re.fullmatch(r"[0-9a-f]{40}", commit); assert re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}", model)' "$TAG" "$EXPECTED_COMMIT" "$MODEL"
+          bash .github/scripts/check-release-tag.sh "$GITHUB_REPOSITORY" "$TAG" unique
           release_json="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json tagName,isDraft)"
           test "$(jq -r .tagName <<<"$release_json")" = "$TAG"
           if [ "$VERIFICATION_ONLY" = true ]; then
@@ -92,6 +93,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.identity.outputs.tag }}
+          TAG_COMMIT: ${{ steps.identity.outputs.tag_commit }}
         run: |
           mkdir -p "$RUNNER_TEMP/release-assets"
           for asset in \
@@ -109,7 +111,7 @@ jobs:
           gh attestation verify "$RUNNER_TEMP/release-assets/SHA256SUMS" \
             --repo "$GITHUB_REPOSITORY" \
             --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
-            --source-ref "refs/tags/$TAG" --deny-self-hosted-runners
+            --source-ref "refs/tags/$TAG" --source-digest "$TAG_COMMIT" --deny-self-hosted-runners
           python3 canary/actions/release_gate.py assets \
             --assets-dir "$RUNNER_TEMP/release-assets" --output "$RUNNER_TEMP/assets.json"
       - name: Upload verified release assets

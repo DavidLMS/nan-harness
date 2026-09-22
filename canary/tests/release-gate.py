@@ -3,9 +3,11 @@
 
 import importlib.util
 import json
+import os
 import re
 import shlex
 import sys
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -22,6 +24,45 @@ PUBLISHER_SPEC.loader.exec_module(publisher)
 
 
 class ReleaseGateTests(unittest.TestCase):
+    def test_release_tag_guard_rejects_duplicates_across_pages_and_api_failures(self):
+        script = ROOT / ".github/scripts/check-release-tag.sh"
+        with tempfile.TemporaryDirectory() as directory:
+            mock = Path(directory) / "gh"
+            mock.write_text('#!/bin/sh\ncat "$RELEASE_FIXTURE"\nexit "${API_EXIT:-0}"\n')
+            mock.chmod(0o755)
+            fixture = Path(directory) / "releases.json"
+            env = {**os.environ, "PATH": directory + os.pathsep + os.environ["PATH"],
+                   "RELEASE_FIXTURE": str(fixture), "API_EXIT": "0"}
+            for pages, mode, succeeds in [
+                ([[]], "absent", True),
+                ([[]], "unique", False),
+                ([[{"tag_name": "v1.2.3"}]], "absent", False),
+                ([[{"tag_name": "v0.1.0"}], [{"tag_name": "v1.2.3"}]], "unique", True),
+                ([[{"tag_name": "v1.2.3", "draft": True}],
+                  [{"tag_name": "v1.2.3", "draft": True}]], "unique", False),
+                ([[{"tag_name": "v1.2.3", "draft": False}]], "absent", False),
+            ]:
+                fixture.write_text(json.dumps(pages))
+                result = subprocess.run(["bash", str(script), "Acme/Fork", "v1.2.3", mode],
+                                        env=env, capture_output=True)
+                self.assertEqual(result.returncode == 0, succeeds, (pages, mode))
+            fixture.write_text("[[]]")
+            env["API_EXIT"] = "1"
+            result = subprocess.run(["bash", str(script), "Acme/Fork", "v1.2.3", "absent"],
+                                    env=env, capture_output=True)
+            self.assertNotEqual(result.returncode, 0)
+
+    def test_release_workflows_require_unambiguous_tags_and_exact_source_digest(self):
+        release = (ROOT / ".github/workflows/release.yml").read_text()
+        gate = (ROOT / ".github/workflows/release-gate.yml").read_text()
+        guard = 'bash .github/scripts/check-release-tag.sh'
+        self.assertLess(release.index(guard), release.index('gh release create'))
+        self.assertIn('"$GITHUB_REF_NAME" absent', release)
+        self.assertLess(gate.index(guard), gate.index('gh release view'))
+        self.assertIn('"$TAG" unique', gate)
+        self.assertIn('TAG_COMMIT: ${{ steps.identity.outputs.tag_commit }}', gate)
+        self.assertIn('--source-digest "$TAG_COMMIT"', gate)
+
     def test_qualified_platforms_drive_matrix_assets_and_identities(self):
         # The support list is shared data: adding a platform to a harness must change
         # the required identities, and a platform without a canary asset must fail

@@ -220,6 +220,10 @@ verifies the draft before publication.
       metadata.
 - [ ] Push the matching tag to GitHub and confirm that `release.yml` creates a
       draft with the expected assets, checksums, attestations, and notes.
+- [ ] Ensure exactly one release names the tag. GitHub permits duplicate drafts;
+      tag-based downloads can select an obsolete draft. Resolve duplicates before
+      retrying verification, and require the checksum attestation's source digest
+      to match the exact tag commit, not only the tag name.
 - [ ] Confirm the protected `canary-live` environment exists with
       `NAN_API_KEY` configured and appropriate required reviewers. Confirm the
       protected `release-publication` environment exists for the publisher;

@@ -215,6 +215,7 @@ jobs:
           trap 'rm -f "$notes_file"' EXIT
           changelog_file="$(mktemp)"
           trap 'rm -f "$notes_file" "$changelog_file"' EXIT
+          bash .github/scripts/check-release-tag.sh "$GITHUB_REPOSITORY" "$GITHUB_REF_NAME" absent
           cargo xtask changelog-notes "$version" "$changelog_file"
           {
             echo "## nan-harness $version"
