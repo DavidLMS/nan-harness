@@ -9,6 +9,9 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Inspect YAML search settings structurally so unrelated text cannot cause reserved
+  MCP name conflicts or establish managed ownership; report malformed YAML safely.
+
 - Move diagnostic capture disk writes off async routing workers, with bounded
   concurrent storage batches and no blocking threads reserved for idle writers.
 - Recover native configuration, model catalogs and both receipts together when

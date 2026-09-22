@@ -54,7 +54,7 @@ pub(super) fn inspect_configuration(
                 })?;
             Ok(inspect_value(&value, path))
         }
-        Some("yaml" | "yml") => Ok(inspect_yaml(contents, path)),
+        Some("yaml" | "yml") => inspect_yaml(contents, path),
         _ => {
             let value: Value = jsonc_parser::parse_to_serde_value(
                 contents,
@@ -70,15 +70,36 @@ pub(super) fn inspect_configuration(
 }
 
 fn inspect_value(value: &Value, path: &Path) -> DetectionSignal {
-    inspect_value_at(value, path, &[])
+    inspect_value_at(value, path, &[], false)
 }
 
-fn inspect_value_at(value: &Value, path: &Path, ancestors: &[String]) -> DetectionSignal {
+fn inspect_value_at(
+    value: &Value,
+    path: &Path,
+    ancestors: &[String],
+    yaml_components: bool,
+) -> DetectionSignal {
     if let Value::Array(values) = value {
         return values
             .iter()
             .fold(DetectionSignal::None, |detected, value| {
-                detected.combine(inspect_value_at(value, path, ancestors))
+                let component = if yaml_components {
+                    value.get("id").and_then(Value::as_str)
+                } else {
+                    None
+                };
+                if component.is_some() && !mcp_enabled(value) {
+                    return detected;
+                }
+                let signal = component
+                    .filter(|id| search_like(id))
+                    .map_or(DetectionSignal::None, provider_signal);
+                detected.combine(signal).combine(inspect_value_at(
+                    value,
+                    path,
+                    ancestors,
+                    yaml_components,
+                ))
             });
     }
     let Value::Object(object) = value else {
@@ -91,6 +112,11 @@ fn inspect_value_at(value: &Value, path: &Path, ancestors: &[String]) -> Detecti
             && let Value::Object(servers) = value
         {
             detected = detected.combine(inspect_mcp_servers(servers, path));
+            if yaml_components {
+                // MCP entries own their enabled state; do not rediscover disabled
+                // entries or interpret their arguments as native provider selectors.
+                continue;
+            }
         }
 
         let in_search_section = ancestors.iter().any(|ancestor| ancestor.contains("search"))
@@ -108,7 +134,7 @@ fn inspect_value_at(value: &Value, path: &Path, ancestors: &[String]) -> Detecti
 
         let mut nested = ancestors.to_vec();
         nested.push(normalized);
-        detected = detected.combine(inspect_value_at(value, path, &nested));
+        detected = detected.combine(inspect_value_at(value, path, &nested, yaml_components));
     }
     detected
 }
@@ -171,94 +197,35 @@ fn value_contains_search(value: &Value) -> bool {
     }
 }
 
-fn inspect_yaml(contents: &str, path: &Path) -> DetectionSignal {
-    let active = contents
-        .lines()
-        .map(strip_yaml_comment)
-        .filter(|line| !line.trim().is_empty())
-        .collect::<Vec<_>>();
-    let lower = active.join("\n").to_ascii_lowercase();
-    if lower.contains(super::MCP_SERVER_ID) {
-        return if lower.contains(super::MANAGED_MCP_SIGNATURE) {
-            DetectionSignal::ManagedNan
-        } else {
-            DetectionSignal::Collision(path.to_path_buf())
-        };
-    }
-
-    let mut detected = inspect_yaml_components(&active);
-    let mut sections = Vec::<(usize, String)>::new();
-    for line in &active {
-        let indentation = line.len().saturating_sub(line.trim_start().len());
-        while sections
-            .last()
-            .is_some_and(|(section_indent, _)| *section_indent >= indentation)
-        {
-            sections.pop();
-        }
-        let trimmed = line.trim();
-        let Some((raw_key, raw_value)) = trimmed.trim_start_matches("- ").split_once(':') else {
-            continue;
-        };
-        let key = normalize(raw_key.trim());
-        let value = raw_value.trim().trim_matches(['\'', '"']);
-        let in_search_section = sections
-            .iter()
-            .any(|(_, section)| section.contains("search"));
-        let in_mcp_section = sections.iter().any(|(_, section)| section.contains("mcp"));
-        let is_selector = matches!(
-            key.as_str(),
-            "searchbackend" | "searchprovider" | "websearchbackend" | "websearchprovider"
-        ) || (key == "provider" && in_search_section);
-        if is_selector && !value.is_empty() {
-            detected = detected.combine(provider_signal(value));
-        }
-        if in_mcp_section && value.is_empty() && search_like(&key) {
-            detected = detected.combine(DetectionSignal::External);
-        }
-        if value.is_empty() {
-            sections.push((indentation, key));
-        }
-    }
-    detected
+fn inspect_yaml(contents: &str, path: &Path) -> Result<DetectionSignal, SearchPolicyError> {
+    let value: serde_yaml_ng::Value =
+        serde_yaml_ng::from_str(contents).map_err(|source| SearchPolicyError::ParseYaml {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    Ok(inspect_value_at(&yaml_search_value(value), path, &[], true))
 }
 
-fn inspect_yaml_components(lines: &[&str]) -> DetectionSignal {
-    let mut detected = DetectionSignal::None;
-    let mut index = 0;
-    while index < lines.len() {
-        let trimmed = lines[index].trim();
-        let Some(id) = trimmed.strip_prefix("- id:").map(str::trim) else {
-            index += 1;
-            continue;
-        };
-        let start_indent = lines[index]
-            .len()
-            .saturating_sub(lines[index].trim_start().len());
-        let mut end = index + 1;
-        while end < lines.len() {
-            let next = lines[end];
-            let next_indent = next.len().saturating_sub(next.trim_start().len());
-            if next_indent <= start_indent && next.trim().starts_with("- id:") {
-                break;
-            }
-            end += 1;
-        }
-        let disabled = lines[index + 1..end].iter().any(|line| {
-            line.trim()
-                .split_once(':')
-                .is_some_and(|(key, value)| normalize(key) == "disabled" && value.trim() == "true")
-        });
-        if search_like(id) && !disabled {
-            detected = detected.combine(provider_signal(id));
-        }
-        index = end;
+// Keep search-relevant scalar types and string keys. YAML tags (including DeepSeek's
+// !!js values) are data here; inspection must never evaluate them.
+fn yaml_search_value(value: serde_yaml_ng::Value) -> Value {
+    use serde_yaml_ng::Value as Yaml;
+    match value {
+        Yaml::String(value) => Value::String(value),
+        Yaml::Bool(value) => Value::Bool(value),
+        Yaml::Sequence(values) => Value::Array(values.into_iter().map(yaml_search_value).collect()),
+        Yaml::Mapping(values) => Value::Object(
+            values
+                .into_iter()
+                .filter_map(|(key, value)| {
+                    key.as_str()
+                        .map(|key| (key.to_owned(), yaml_search_value(value)))
+                })
+                .collect(),
+        ),
+        Yaml::Tagged(value) => yaml_search_value(value.value),
+        Yaml::Null | Yaml::Number(_) => Value::Null,
     }
-    detected
-}
-
-fn strip_yaml_comment(line: &str) -> &str {
-    line.split_once('#').map_or(line, |(content, _)| content)
 }
 
 fn provider_signal(provider: &str) -> DetectionSignal {

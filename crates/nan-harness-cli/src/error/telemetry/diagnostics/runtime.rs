@@ -73,6 +73,7 @@ pub(in crate::error::telemetry) fn classify_search_policy(
         | SearchPolicyError::ConfigurationTooLarge(_)
         | SearchPolicyError::ParseJson { .. }
         | SearchPolicyError::ParseToml { .. }
+        | SearchPolicyError::ParseYaml { .. }
         | SearchPolicyError::ConvertToml { .. } => (FailureCause::InvalidConfiguration, None),
     }
 }

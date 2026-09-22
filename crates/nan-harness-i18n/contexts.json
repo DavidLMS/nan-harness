@@ -4940,6 +4940,11 @@
       "crates/nan-harness-runtime/src/search_policy/errors.rs"
     ]
   },
+  "error_search_policy_parse_yaml": {
+    "description": "YAML search configuration parse failure. Do not include parser details or configuration contents.",
+    "section": "search",
+    "sources": ["crates/nan-harness-runtime/src/search_policy/errors.rs"]
+  },
   "error_search_policy_parse_toml": {
     "description": "Web-search setup, supervision and status. Preserve command names, paths, provider identifiers and diagnostic codes.",
     "section": "search",

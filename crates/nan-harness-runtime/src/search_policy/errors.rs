@@ -42,6 +42,12 @@ pub enum SearchPolicyError {
         #[source]
         source: toml::de::Error,
     },
+    #[error("web search configuration '{}' is not valid YAML", path.display())]
+    ParseYaml {
+        path: PathBuf,
+        #[source]
+        source: serde_yaml_ng::Error,
+    },
     #[error("could not inspect TOML web search configuration '{}': {source}", path.display())]
     ConvertToml {
         path: PathBuf,
@@ -81,6 +87,9 @@ impl nan_harness_i18n::TerminalMessage for SearchPolicyError {
             }
             Self::ParseToml { path, source } => {
                 m::error_search_policy_parse_toml(locale, &(source), &(path.display()))
+            }
+            Self::ParseYaml { path, .. } => {
+                m::error_search_policy_parse_yaml(locale, &(path.display()))
             }
             Self::ConvertToml { path, source } => {
                 m::error_search_policy_convert_toml(locale, &(source), &(path.display()))

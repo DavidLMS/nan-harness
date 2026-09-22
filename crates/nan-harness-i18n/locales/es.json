@@ -728,6 +728,7 @@
   "error_search_policy_mcp_name_collision": "la configuración '{value_1}' ya define 'nan-search', pero nan-harness no gestiona esa entrada; cámbiale el nombre, elimínala o usa --no-search",
   "error_search_policy_missing_home_directory": "no se ha podido determinar el directorio personal del usuario actual al comprobar la configuración de búsqueda web",
   "error_search_policy_parse_json": "la configuración de búsqueda web '{value_1}' no es JSON o JSONC válido: {source}",
+  "error_search_policy_parse_yaml": "la configuración de búsqueda web '{path}' no es YAML válido",
   "error_search_policy_parse_toml": "la configuración de búsqueda web '{value_1}' no es TOML válido: {source}",
   "error_search_policy_read_configuration": "no se ha podido leer la configuración de búsqueda web '{value_1}': {source}",
   "error_search_policy_requires_direct_gateway": "la búsqueda web de NaN requiere la pasarela local de Chat Completions; elimina --no-chat-gateway u omite --force-search",
