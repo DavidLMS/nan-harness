@@ -52,6 +52,17 @@ def fixture():
 
 
 class DailyEvidenceTests(unittest.TestCase):
+    def test_spec_digest_survives_windows_checkout(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            checkout = Path(tmp)
+            env = dict(os.environ, GIT_INDEX_FILE=str(checkout / "index"))
+            subprocess.run(["git", "read-tree", "HEAD"], cwd=ROOT, env=env, check=True)
+            source = "canary/actions/cell.py"
+            subprocess.run(["git", "-c", "core.autocrlf=true", "checkout-index",
+                            "--prefix=" + str(checkout) + "/", source],
+                           cwd=ROOT, env=env, check=True)
+            self.assertEqual(daily.digest(checkout / source), daily.digest(ROOT / source))
+
     def test_channels_are_deduplicated_and_must_be_stable(self):
         self.assertEqual(evidence.release_tags({"version": "1.2.3"}, {"tag_name": "v1.2.3"}), ["v1.2.3"])
         self.assertEqual(evidence.release_tags({"version": "1.3.0"}, {"tag_name": "v1.2.3"}),

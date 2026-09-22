@@ -1,0 +1,2 @@
+# The canary specification is hashed as raw bytes across native runners.
+canary/actions/cell.py text eol=lf
