@@ -301,24 +301,38 @@ impl PreferencesStore {
 
 impl PersistenceManager {
     pub(super) fn load_state(&self) -> Result<IntegrationState, PersistenceError> {
-        match fs::read(&self.state_path) {
-            Ok(contents) => {
+        self.prepare_state().map(|(state, _)| state)
+    }
+
+    pub(super) fn prepare_state(
+        &self,
+    ) -> Result<(IntegrationState, super::PreparedFileChange), PersistenceError> {
+        let receipt =
+            super::PreparedFileChange::read(self.state_path.clone(), None).map_err(|error| {
+                match error {
+                    PersistenceError::ReadFile { source, .. } => {
+                        PersistenceError::ReadState(source)
+                    }
+                    error => error,
+                }
+            })?;
+        let state = match receipt.original.as_deref() {
+            Some(contents) => {
                 let state: IntegrationState =
-                    serde_json::from_slice(&contents).map_err(PersistenceError::ParseState)?;
+                    serde_json::from_slice(contents).map_err(PersistenceError::ParseState)?;
                 if state.schema_version != STATE_SCHEMA_VERSION {
                     return Err(PersistenceError::UnsupportedStateSchema(
                         state.schema_version,
                     ));
                 }
-                Ok(state)
+                state
             }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                Ok(IntegrationState::default())
-            }
-            Err(error) => Err(PersistenceError::ReadState(error)),
-        }
+            None => IntegrationState::default(),
+        };
+        Ok((state, receipt))
     }
 
+    #[cfg(test)]
     pub(super) fn save_state(&self, state: &IntegrationState) -> Result<(), PersistenceError> {
         fs::create_dir_all(&self.state_directory)
             .map_err(PersistenceError::CreateStateDirectory)?;

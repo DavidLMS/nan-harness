@@ -138,6 +138,7 @@ pub(in super::super) fn prepare_managed_block_removal(
         return Ok(PreparedFileChange {
             path: managed.path.clone(),
             original,
+            replacement_permissions: original_permissions.clone(),
             original_permissions,
             replacement: None,
         });
@@ -165,6 +166,7 @@ pub(in super::super) fn prepare_managed_block_removal(
     Ok(PreparedFileChange {
         path: managed.path.clone(),
         original,
+        replacement_permissions: original_permissions.clone(),
         original_permissions,
         replacement,
     })
@@ -179,6 +181,7 @@ pub(in super::super) fn prepare_json_entries_removal(
         return Ok(PreparedFileChange {
             path: managed.path.clone(),
             original,
+            replacement_permissions: original_permissions.clone(),
             original_permissions,
             replacement: None,
         });
@@ -217,6 +220,7 @@ pub(in super::super) fn prepare_json_entries_removal(
     Ok(PreparedFileChange {
         path: managed.path.clone(),
         original,
+        replacement_permissions: original_permissions.clone(),
         original_permissions,
         replacement,
     })

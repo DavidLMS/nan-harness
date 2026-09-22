@@ -9,6 +9,9 @@ mod tests;
 
 pub(super) fn typed(error: &PersistenceError) -> Diagnostic {
     match error {
+        PersistenceError::RollbackIncomplete { .. } => {
+            Diagnostic::general(DiagnosticReason::ConfigurationRecoveryIncomplete)
+        }
         PersistenceError::MissingConfigDirectory | PersistenceError::MissingHomeDirectory => {
             Diagnostic::general(DiagnosticReason::MissingDirectory)
         }

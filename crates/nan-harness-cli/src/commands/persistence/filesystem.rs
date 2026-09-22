@@ -35,6 +35,14 @@ pub(crate) fn write_private_file(
     payload: &[u8],
     permissions: Option<&Permissions>,
 ) -> Result<(), PersistenceError> {
+    write_private_file_with_permissions(path, payload, permissions).map(|_| ())
+}
+
+pub(super) fn write_private_file_with_permissions(
+    path: &Path,
+    payload: &[u8],
+    permissions: Option<&Permissions>,
+) -> Result<Permissions, PersistenceError> {
     let parent = path
         .parent()
         .ok_or_else(|| PersistenceError::InvalidPath(path.to_path_buf()))?;
@@ -65,19 +73,28 @@ pub(crate) fn write_private_file(
             }
         })?;
     }
+    let published_permissions = temporary
+        .as_file()
+        .metadata()
+        .map_err(|source| PersistenceError::WriteFile {
+            path: path.to_path_buf(),
+            source,
+        })?
+        .permissions();
     temporary
         .persist(path)
         .map_err(|error| PersistenceError::WriteFile {
             path: path.to_path_buf(),
             source: error.error,
         })?;
-    Ok(())
+    Ok(published_permissions)
 }
 
 fn set_permissions(file: &fs::File, permissions: &Permissions) -> Result<(), std::io::Error> {
     file.set_permissions(permissions.clone())
 }
 
+#[cfg(test)]
 pub(super) fn rollback_file(
     path: &Path,
     original: Option<&[u8]>,
