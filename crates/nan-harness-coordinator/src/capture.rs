@@ -4,13 +4,15 @@ use base64::Engine as _;
 use nan_harness_private_fs::{open_private_new, open_private_truncate};
 use serde::Serialize;
 use serde_json::Value;
-use std::fs::File;
-use std::io::Write as _;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
+
+mod writer;
+
+use writer::write_records;
 
 const RECORD_QUEUE_CAPACITY: usize = 256;
 const RECORD_QUEUE_BYTES: usize = 64 * 1024 * 1024;
@@ -229,35 +231,6 @@ fn start_writer(directory: &Path, capture_id: &str, launch_id: &str) -> Option<A
         byte_capacity: RECORD_QUEUE_BYTES,
         launch_id: Arc::from(launch_id),
     }))
-}
-
-async fn write_records(
-    mut file: File,
-    lock: File,
-    mut receiver: mpsc::Receiver<Record>,
-    incomplete: Arc<AtomicBool>,
-    incomplete_path: PathBuf,
-) {
-    while let Some(record) = receiver.recv().await {
-        let result = serde_json::to_writer(&mut file, &record)
-            .map_err(std::io::Error::other)
-            .and_then(|()| file.write_all(b"\n"));
-        if result.is_err() {
-            incomplete.store(true, Ordering::Relaxed);
-            break;
-        }
-    }
-    // Dropping queued records also releases their credits on writer failure.
-    drop(receiver);
-    if file.flush().is_err() {
-        incomplete.store(true, Ordering::Relaxed);
-    }
-    if incomplete.load(Ordering::Relaxed)
-        && let Ok(mut marker) = open_private_new(&incomplete_path)
-    {
-        let _ = marker.write_all(b"capture incomplete\n");
-    }
-    drop(lock);
 }
 
 fn encode_payload(payload: &[u8], output_limit: usize) -> Option<(&'static str, String)> {
