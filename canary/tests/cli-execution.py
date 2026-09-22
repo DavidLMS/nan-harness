@@ -229,6 +229,9 @@ class CliExecutionTests(unittest.TestCase):
                 io.BytesIO(b"npm WARN EBADENGINE\nnpm ERR! code E404"), 1),
                 "npm-package-not-found")
             self.assertEqual(cell.classify_install_failure(
+                io.BytesIO(b"npm error code ETARGET\nnpm error notarget private-package@private-version"), 1),
+                "npm-package-not-found")
+            self.assertEqual(cell.classify_install_failure(
                 io.BytesIO(b"npm ERR! code E404\nnpm ERR! code EACCES"), 1),
                 "diagnostic-unknown")
             self.assertEqual(cell.classify_install_failure(

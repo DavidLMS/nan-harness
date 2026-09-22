@@ -158,8 +158,14 @@ case "$harness" in
     fi
     ;;
   deepseek-harness)
+    arguments=(--allow-scripts='@deepseek-ai/dsh-subprocess-local,koffi,node-pty,@google/genai,protobufjs')
+    # rc.2 ranges admit rc.3, whose dependency publication is incomplete.
+    # Bound only this affected version to the last complete registry snapshot.
+    if [ "$version" = '0.1.5-rc.2' ]; then
+      arguments+=(--before=2026-09-22T00:00:00Z)
+    fi
     global_npm_install \
-      --allow-scripts='@deepseek-ai/dsh-subprocess-local,koffi,node-pty,@google/genai,protobufjs' \
+      "${arguments[@]}" \
       "@deepseek-ai/dsh@$version"
     ;;
   openclaw)

@@ -267,7 +267,7 @@ def classify_install_failure(log, status, expected_package=None):
     if not records:
         return "diagnostic-unknown"
     categories = {
-        "npm-package-not-found": {"E404", "ENOTARGET"},
+        "npm-package-not-found": {"E404", "ETARGET", "ENOTARGET"},
         "npm-network": {"EAI_AGAIN", "ENOTFOUND", "ETIMEDOUT", "ENETUNREACH"},
         "npm-permission": {"EACCES", "EPERM"},
         "npm-engine-mismatch": {"EBADENGINE"},

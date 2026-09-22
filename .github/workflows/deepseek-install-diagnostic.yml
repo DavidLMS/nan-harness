@@ -1,0 +1,35 @@
+name: DeepSeek install diagnostic
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [fix/deepseek-rc2-install]
+
+permissions:
+  contents: read
+
+jobs:
+  install:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04-arm, macos-14, windows-2025]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.20.0
+      - name: Reproduce original install and verify corrected installer
+        shell: bash
+        run: python canary/actions/deepseek-install-diagnostic.py --output deepseek-install-report.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: deepseek-install-${{ matrix.runner }}
+          path: deepseek-install-report.json
+          if-no-files-found: error
+          retention-days: 7

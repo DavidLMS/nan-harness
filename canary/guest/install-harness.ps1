@@ -79,11 +79,11 @@ function Invoke-Native([string]$File, [string[]]$Arguments, [string]$Executable 
       # npm 10+ emits `npm error code`; older npm emits `npm ERR! code`.
       # Match only stable machine codes and command-resolution text; never
       # place provider output, URLs, paths, or credentials in the marker.
-      $npmCode = if ($errTask.Result -match '(?im)npm(?: ERR!| error) code (EAI_AGAIN|ECONNRESET|ETIMEDOUT|ENETUNREACH|ENOTFOUND|ECONNREFUSED|E404|EACCES|EPERM|CERT_HAS_EXPIRED|SELF_SIGNED_CERT_IN_CHAIN)') {
+      $npmCode = if ($errTask.Result -match '(?im)npm(?: ERR!| error) code (EAI_AGAIN|ECONNRESET|ETIMEDOUT|ENETUNREACH|ENOTFOUND|ECONNREFUSED|E404|ETARGET|EACCES|EPERM|CERT_HAS_EXPIRED|SELF_SIGNED_CERT_IN_CHAIN)') {
         switch ($Matches[1]) {
           'EAI_AGAIN' { 'registry-dns' }; 'ECONNRESET' { 'registry-connection' }; 'ETIMEDOUT' { 'registry-timeout' }
           'ENETUNREACH' { 'registry-unreachable' }; 'ENOTFOUND' { 'registry-dns' }; 'ECONNREFUSED' { 'registry-connection' }
-          'E404' { 'package-not-found' }; 'EACCES' { 'permission' }; 'EPERM' { 'permission' }
+          'E404' { 'package-not-found' }; 'ETARGET' { 'package-not-found' }; 'EACCES' { 'permission' }; 'EPERM' { 'permission' }
           default { 'tls-certificate' }
         }
       } elseif ($errTask.Result -match "(?im)'?npm(?:\.cmd)?'? is not recognized|cannot find the path.*npm(?:\.cmd)?") {
@@ -165,7 +165,12 @@ function Npm([string]$Package) {
     Set-InstallDiagnostic 'install' 'npm-node' $null $null $null 'expected-executable-missing'
     throw 'npm cli was not found beside npm.cmd'
   }
-  Invoke-Native $node @($npmCli,'install','--global','--no-fund','--no-audit',$Package) 'npm-node' 'install'
+  $arguments = @($npmCli,'install','--global','--no-fund','--no-audit')
+  # rc.2 ranges admit the incomplete rc.3 publication. Do not constrain other versions.
+  if ($Package -ceq '@deepseek-ai/dsh@0.1.5-rc.2') {
+    $arguments += '--before=2026-09-22T00:00:00Z'
+  }
+  Invoke-Native $node ($arguments + @($Package)) 'npm-node' 'install'
 }
 function Invoke-OfficialScript([string]$Uri, [string[]]$Arguments) {
   $script = Join-Path $tmp 'official-installer.ps1'; Invoke-Download $Uri $script

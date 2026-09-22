@@ -147,3 +147,20 @@ bash "$repository_root/.github/scripts/install-pinned-harness.sh" omp
 test "$(cat "$temporary_directory/omp-url")" = \
   'https://github.com/can1357/oh-my-pi/releases/download/v18.1.13/omp-linux-x64'
 test "$("$temporary_directory/omp-home/.local/bin/omp" --version)" = 'omp/18.1.13'
+
+# Exercise the affected pin independently of the compatibility manifest's older pin.
+cat >"$bin_directory/jq" <<'EOF'
+#!/usr/bin/env bash
+printf '0.1.5-rc.2\n'
+EOF
+chmod 755 "$bin_directory/jq"
+for deepseek_mode in --pinned --latest; do
+  NPM_TEST_ARGUMENTS_FILE="$temporary_directory/npm-arguments" \
+  PATH="$bin_directory:$PATH" \
+  bash "$repository_root/.github/scripts/install-pinned-harness.sh" deepseek-harness "$deepseek_mode"
+  if [ "$deepseek_mode" = --pinned ]; then
+    grep -Fx -- '--before=2026-09-22T00:00:00Z' "$temporary_directory/npm-arguments" >/dev/null
+  elif grep -F -- '--before=' "$temporary_directory/npm-arguments" >/dev/null; then
+    exit 1
+  fi
+done

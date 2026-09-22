@@ -165,3 +165,17 @@ if bash "$repository_root/canary/guest/install-harness.sh" hermes 1.2.3 invalid 
   printf 'Hermes malformed source ref unexpectedly passed\n' >&2
   exit 1
 fi
+
+# Only the affected exact DeepSeek version receives the registry cutoff.
+for deepseek_version in 0.1.5-rc.2 0.1.5-rc.3 latest; do
+  NPM_TEST_ARGS="$temporary_directory/npm-args" \
+  HOME="$temporary_directory/home" NAN_CANARY_LEGACY_PATHS="$bin_directory" \
+  PATH="$bin_directory:$PATH" \
+  bash "$repository_root/canary/guest/install-harness.sh" deepseek-harness "$deepseek_version"
+  if [ "$deepseek_version" = 0.1.5-rc.2 ]; then
+    grep -F -- '--before=2026-09-22T00:00:00Z' "$temporary_directory/npm-args" >/dev/null
+  elif grep -F -- '--before=' "$temporary_directory/npm-args" >/dev/null; then
+    exit 1
+  fi
+  grep -F -- "@deepseek-ai/dsh@$deepseek_version" "$temporary_directory/npm-args" >/dev/null
+done
