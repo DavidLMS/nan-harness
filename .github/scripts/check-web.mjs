@@ -322,7 +322,7 @@ assert.match(docs, /<code>nanh &lt;harness&gt;<\/code>/);
 assert.match(docs, /<code>nanh config &lt;harness&gt;<\/code>/);
 assert.match(docs, /nanh hermes.*nanh omp.*nanh prime-agent/s);
 
-const docsSectionIds = ['install', 'first-run', 'harnesses', 'desktop', 'search', 'limits', 'options', 'help'];
+const docsSectionIds = ['install', 'first-run', 'harnesses', 'media', 'platforms', 'desktop', 'search', 'limits', 'options', 'cli', 'help'];
 for (const html of [docs, docsEs]) {
   for (const sectionId of docsSectionIds) {
     assert.equal((html.match(new RegExp(`<section class="docs-section" id="${sectionId}">`, 'g')) ?? []).length, 1);

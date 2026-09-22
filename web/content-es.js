@@ -147,6 +147,36 @@ function nanHarnessContentEs({ harnessLink, nanLink, unixInstallCommand, windows
         ['p', 'Claude Code, Codex y fx necesitan que nan-harness siga ejecutándose porque su conexión con NaN depende de un bridge o gateway local. Por eso no se pueden preparar para uso independiente con <code>nanh config</code>.'],
         ['p', 'La configuración nativa usa la API key guardada por <code>nanh auth login</code>; una clave que solo está en el entorno nunca se copia a otra aplicación. Usa <code>--status</code> para revisarla y <code>--refresh</code> después de cambiar la clave guardada o el catálogo de modelos. <code>--remove</code> elimina lo que añadió nan-harness y restaura los ajustes anteriores cuando puede hacerlo de forma segura.']
       ]],
+      ['media', 'MEDIOS NATIVOS', [
+        ['p', 'Hermes Agent y OpenClaw pueden encaminar sus funciones multimedia nativas mediante NaN. nan-harness conserva el proveedor multimedia existente y añade uno de NaN solo cuando esa capacidad aún no está configurada.'],
+        ['table', ['Capacidad', 'Proveedor de NaN', 'Qué hace'], [
+          ['Voz a texto', 'NaN Whisper', 'Transcribe audio. Los archivos WAV PCM grandes se dividen en fragmentos solapados con tamaño limitado y después se unen.'],
+          ['Texto a voz', 'NaN Kokoro', 'Convierte texto en audio hablado.'],
+          ['Generación y edición de imágenes', 'NaN Flux 2 Klein', 'Genera imágenes y puede usar imágenes de referencia para editarlas.']
+        ]],
+        ['h3', 'Úsalo durante un arranque'],
+        ['table', ['Opción', 'Qué hace'], [
+          ['(por defecto)', 'Añade cada proveedor multimedia de NaN solo cuando el harness no tiene otro proveedor para esa capacidad.'],
+          ['--force-media', 'Activa los tres proveedores multimedia de NaN aunque haya otro proveedor configurado.'],
+          ['--force-stt', 'Usa NaN Whisper para convertir voz en texto.'],
+          ['--force-tts', 'Usa NaN Kokoro para convertir texto en voz.'],
+          ['--force-image', 'Usa NaN Flux 2 Klein para generar y editar imágenes.']
+        ]],
+        ['codes', ['nanh hermes --force-media', 'nanh openclaw --force-image']],
+        ['h3', 'Úsalo en la configuración nativa'],
+        ['p', 'Pasa las mismas opciones a <code>nanh config hermes</code> o <code>nanh config openclaw</code> para escribir los proveedores multimedia en la configuración del harness. La selección multimedia gestionada se conserva al actualizar esa configuración.'],
+        ['code', 'nanh config hermes --force-media'],
+        ['note', 'Las peticiones multimedia usan tu credencial de NaN. Las credenciales de los proveedores existentes permanecen en el harness y nan-harness no las sustituye salvo que fuerces esa capacidad.']
+      ]],
+      ['platforms', 'NOTAS DE PLATAFORMA', [
+        ['p', 'Algunas integraciones dependen de las distribuciones que proporciona cada harness. nan-harness informa de estas limitaciones antes de buscar un ejecutable u ofrecer la instalación.'],
+        ['table', ['Integración', 'Disponibilidad'], [
+          ['Prime Agent', 'Linux y macOS. El upstream todavía no proporciona una distribución nativa para Windows.'],
+          ['fx', 'Linux y macOS. El upstream todavía no proporciona una distribución nativa para Windows.'],
+          ['SearXNG local', 'macOS, Linux y Windows x64. Necesita Python 3.11 o posterior y <code>tar</code> en el <code>PATH</code>.']
+        ]],
+        ['p', 'En Windows, puedes pasar <code>--executable &lt;path&gt;</code> para probar una futura versión compatible de Prime Agent o fx. Se siguen aplicando las comprobaciones habituales de versión y arranque.']
+      ]],
       ['desktop', 'APPS DE ESCRITORIO (EXPERIMENTAL)', [
         ['p', 'Estas integraciones son <strong>experimentales</strong>. Las cinco apps se han probado en macOS. Las demás combinaciones de plataforma están cubiertas por pruebas automatizadas de compatibilidad.'],
         ['table', ['Comando', 'App', 'Disponible en'], [
@@ -170,7 +200,7 @@ function nanHarnessContentEs({ harnessLink, nanLink, unixInstallCommand, windows
         ['p', 'nan-harness puede dar a tu agente una herramienta de búsqueda web con <a href="https://docs.searxng.org/" target="_blank" rel="noreferrer">SearXNG</a>. Es opcional: no se instala ni se contacta nada hasta que configuras un backend.'],
         ['h3', 'Configúrala'],
         ['table', ['Comando', 'Qué hace'], [
-          ['nanh search setup --local', 'Instala un SearXNG privado en tu equipo. Necesita Python 3.10+ y <code>tar</code> (macOS, Linux, Windows x64).'],
+          ['nanh search setup --local', 'Instala un SearXNG privado en tu equipo. Necesita Python 3.11+ y <code>tar</code> (macOS, Linux, Windows x64).'],
           ['nanh search setup --docker', 'Ejecuta SearXNG en un contenedor de Docker.'],
           ['nanh search setup --url https://…', 'Usa un servidor SearXNG de tu confianza.']
         ]],
@@ -244,6 +274,13 @@ function nanHarnessContentEs({ harnessLink, nanLink, unixInstallCommand, windows
           ['nanh telemetry on|off', 'Activa o desactiva la telemetría anónima.'],
           ['nanh uninstall', 'Elimina nan-harness y todo lo que dejó puesto.'],
           ['nanh --help', 'La lista completa, en tu terminal.']
+        ]]
+      ]],
+      ['cli', 'UTILIDADES DE CLI', [
+        ['table', ['Comando', 'Qué hace'], [
+          ['nanh language', 'Muestra el idioma actual del terminal y los idiomas disponibles.'],
+          ['nanh language en', 'Usa mensajes de terminal en inglés y guarda la preferencia.'],
+          ['nanh language es', 'Usa mensajes de terminal en español y guarda la preferencia.']
         ]]
       ]],
       ['help', 'AYUDA Y PRIVACIDAD', [
