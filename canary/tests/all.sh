@@ -35,6 +35,7 @@ for test_script in \
   hosted-cli-workflow.py \
   cli-resolution.py \
   cli-execution.py \
+  deepseek-install-diagnostic.py \
   release-gate.py \
   release-publish.py \
   release-publish-integration.py \
