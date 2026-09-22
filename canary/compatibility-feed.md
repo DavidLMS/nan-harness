@@ -150,6 +150,13 @@ all, because their embedded registry is not refreshable.
 
 ## Producing the assets
 
+The daily hosted workflow runs at 05:00 Europe/Madrid and checks new upstream CLI
+versions against the available and recommended published nan-harness binaries.
+Each harness advances independently only after every supported platform passes
+deterministic and live checks for the same version. See the
+[daily hosted runbook](README.md#daily-hosted-compatibility) for rollout and
+verification-only dispatch. Desktop records are preserved by this workflow.
+
 ```sh
 cargo xtask compatibility-feed <FILE>                          # schema v2
 cargo xtask unified-compatibility-feed <FILE>                  # schema v3
@@ -171,6 +178,14 @@ overwriting explicit updates. No other release is ever seeded: evidence from
 this source cannot certify a different binary.
 
 ## Publishing
+
+The trusted daily aggregator supplies `--verified-updates <directory>` to the
+shared publisher after checking complete native-platform evidence and provenance.
+This internal input is restricted to the `daily` trigger and exact-release CLI
+updates; it does not relax the release gate's full-matrix requirement. The Rust
+merger validates version advancement, then the daily projection preserves every
+unobserved record instead of seeding evidence from the publisher's checkout.
+The publisher rereads the established feeds under the shared publication lock.
 
 `canary/host/publish-compatibility.sh` publishes both assets under one
 host lock, legacy asset first. Each asset is recovered, migrated, merged and

@@ -3,7 +3,7 @@ set -euo pipefail
 umask 077
 
 usage() {
-  printf 'usage: %s --trigger <daily|weekly|release|manual> --nan-harness-version <version> --release-tag <tag> --reports <directory> --output-dir <directory> --state-dir <directory> --report-validator <path> [--repository <owner/name>] [--publish-feed]\n' "$0" >&2
+  printf 'usage: %s --trigger <daily|weekly|release|manual> --nan-harness-version <version> --release-tag <tag> --reports <directory> --output-dir <directory> --state-dir <directory> --report-validator <path> [--repository <owner/name>] [--publish-feed] [--verified-updates <directory>]\n' "$0" >&2
   exit 2
 }
 
@@ -15,6 +15,7 @@ output_directory=''
 state_directory=''
 report_validator=''
 publish_feed=false
+verified_updates=''
 release_repository="${NAN_CANARY_COMPATIBILITY_REPOSITORY:-${NAN_CANARY_RELEASE_REPOSITORY:-DavidLMS/nan-harness}}"
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -27,6 +28,7 @@ while [ "$#" -gt 0 ]; do
     --report-validator) report_validator="${2:-}"; shift 2 ;;
     --repository) release_repository="${2:-}"; shift 2 ;;
     --publish-feed) publish_feed=true; shift ;;
+    --verified-updates) verified_updates="${2:-}"; shift 2 ;;
     *) usage ;;
   esac
 done
@@ -97,7 +99,29 @@ validator_failed=false
 # The phases below run in this shell on purpose. Calling one from a subshell, a
 # condition or a pipeline would hide its exit status from errexit and lose the
 # state it records, and only this shell owns the feed lock and the cleanup trap.
-select_compatibility_updates
+if [ -n "$verified_updates" ]; then
+  # The trusted daily aggregator binds reports to all required native platforms,
+  # this workflow execution and the signed release before supplying this input.
+  [ "$trigger" = daily ] && [ -d "$verified_updates" ] || usage
+  if compgen -G "$updates_directory/*.json" >/dev/null; then
+    printf 'daily updates require a fresh output directory\n' >&2
+    exit 1
+  fi
+  for update in "$verified_updates"/*.json; do
+    [ -f "$update" ] || continue
+    jq -e --arg version "$nan_harness_version" '
+      (keys | sort) == (["nanHarnessVersion", "id", "lastCompatibleVersion", "compatibleAt", "lastLiveVerifiedVersion", "liveVerifiedAt"] | sort) and
+      .nanHarnessVersion == $version and
+      (.id as $id | ["claude-code","codex","opencode","hermes","pi","omp","prime-agent","deepseek-harness","openclaw","cline","qwen-code","kimi-code","aider","goose","fx"] | index($id) != null) and
+      .lastCompatibleVersion == .lastLiveVerifiedVersion and .compatibleAt == .liveVerifiedAt
+    ' "$update" >/dev/null
+    update_target="$updates_directory/$(jq -r .id "$update").json"
+    [ ! -e "$update_target" ] || { printf 'duplicate daily harness update\n' >&2; exit 1; }
+    cp "$update" "$update_target"
+  done
+else
+  select_compatibility_updates
+fi
 require_publishable_updates
 
 base_directory="$(mktemp -d "$output_directory/.compatibility-base.XXXXXX")"
@@ -110,6 +134,12 @@ recover_unified_base_feed
 build_validated_unified_candidate
 
 if [ "$publish_feed" = true ]; then
+  if [ -n "$verified_updates" ] && [ "$first_publication" = false ] && [ "$unified_first_publication" = false ] \
+    && cmp -s <(jq -S . "$base") <(jq -S . "$candidate") \
+    && cmp -s <(jq -S . "$base_v3") <(jq -S . "$candidate_v3"); then
+    printf 'compatibility evidence is already published\n'
+    exit 0
+  fi
   upload_directory="$(mktemp -d "$output_directory/.compatibility-upload.XXXXXX")"
   publish_compatibility_feeds
 else

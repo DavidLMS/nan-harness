@@ -7,6 +7,12 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- Replace the daily source detector with release-scoped CLI compatibility checks
+  at 05:00 Europe/Madrid. Verify new upstream versions across their supported
+  platforms and publish successful harness results to both compatibility feeds.
+
 ## [0.1.11] - 2026-09-22
 
 ### Fixed

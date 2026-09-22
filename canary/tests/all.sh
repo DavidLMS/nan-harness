@@ -33,6 +33,7 @@ cargo build --locked --package nan-harness-canary --bin nan-harness-canary
 for test_script in \
   hosted-cli-selection.py \
   hosted-cli-workflow.py \
+  daily-compatibility.py \
   cli-resolution.py \
   cli-execution.py \
   deepseek-install-diagnostic.py \

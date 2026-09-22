@@ -3,10 +3,10 @@
 For the Windows integration candidate, explicit platform skips and remaining
 qualification work, see [Windows integration](windows-integration.md).
 
-The nan-harness compatibility canary combines a deterministic source/main
-detector with disposable Linux and macOS Tart VMs on a private Apple Silicon
-host. It tests all 15 supported harnesses without adding commands to the public
-`nanh` binary.
+The nan-harness compatibility canary tests all 15 supported CLI harnesses on
+GitHub-hosted native runners without adding commands to the public `nanh`
+binary. Daily checks refresh compatibility evidence for published binaries;
+the separate release gate qualifies new releases.
 
 GitHub Actions provides modular CLI checks and protected live provider probes.
 Each new draft release automatically dispatches verification of its exact
@@ -24,17 +24,59 @@ block compatibility when those functional contracts pass.
 
 | Trigger | Platforms | Coverage |
 | --- | --- | --- |
-| Source/main detector | Linux x86-64 | Latest installation, doctor, and deterministic conformance for all 15 harnesses; no feed writes |
-| Daily scheduled | Linux ARM64 | Clean install, doctor, and deterministic conformance for all 15; exactly two deterministic rotating `qwen3.6` probes |
-| Weekly scheduled | Linux and macOS ARM64 | Deterministic conformance plus live `qwen3.6` probes for all 15 on both platforms |
+| Daily hosted | Linux/macOS ARM64 and Windows x64 | Pending upstream versions: clean install, doctor, deterministic conformance and live `qwen3.6`; partial feed publication by harness |
 | Hosted release gate | Linux/macOS ARM64 and Windows x64 | Automatic draft verification of 43 supported live cells; publication remains explicit |
 
-Compatibility evidence is release-scoped schema v2. A daily Linux deterministic
-pass can advance only that harness's `lastCompatibleVersion` and `compatibleAt`.
-Weekly live evidence advances only when Linux and macOS deterministic and live
-checks pass for the same observed harness version. Release-gate publication is
-all-or-nothing for the release's initial two evidence tiers, while preserving
-older release records.
+Compatibility evidence is release-scoped, with CLI schema v2 and unified CLI /
+Desktop schema v3 assets. Daily publication requires every supported native
+platform to pass for the same upstream version and exact nan-harness release.
+Release-gate publication remains all-or-nothing for its full matrix.
+
+## Daily hosted compatibility
+
+`.github/workflows/harness-canary.yml` runs at 05:00 `Europe/Madrid`, including
+daylight-saving changes. GitHub may delay scheduled execution. It replaces the
+source/main detector, whose reports never updated the feed.
+
+The workflow selects the stable release named by the `available` feed and the
+GitHub-recommended `latest` release, deduplicating equal tags. It verifies unique
+tags, exact commits, signed checksums and all six native CLI/canary assets.
+Missing or invalid assets leave that release pending; they do not certify a
+replacement built from `main` or block an independently usable release.
+
+Official upstream versions are frozen before native cells run. Only versions
+newer than each release's live evidence, or missing that evidence, are tested.
+Unresolved metadata and failed cells are retried on the next daily run. Each
+harness must pass installation, diagnosis, deterministic conformance and live
+`qwen3.6` on Linux, macOS and Windows; Prime Agent and FX remain unavailable on
+Windows. At most three cells run concurrently. Desktop apps are not selected.
+
+The aggregator binds reports to the run attempt, trusted workflow, exact release
+binary, platform and frozen version. Missing or failing cells hold back only
+their harness. Invalid provenance rejects the affected release batch. Successful
+independent results update both `compatibility.json` and `compatibility-v3.json`;
+other CLI entries, Desktop evidence and historical releases are preserved. The
+workflow reports failure after publishing independent successes when any work
+remains pending. Reports and the per-harness summary are retained for 30 days;
+raw child output and credentials are never uploaded.
+
+Manual dispatch defaults to `verification_only=true`. Set `force=true` to
+reverify current versions, including those already certified. A verification-only
+run generates candidates without remote writes, including during backup recovery.
+Scheduled runs publish automatically. All runs share the release-channel
+concurrency group with release publication and recommendation.
+
+Before enabling the schedule, configure `compatibility-live` and
+`compatibility-publication` environments with deployment branch policies allowing
+only the repository's default branch and no per-run reviewer requirement. Store
+the existing provider credential as `NAN_API_KEY` in `compatibility-live` through
+the normal secret-management channel. The live job has read-only GitHub access;
+only the publisher has `contents: write` and it receives no provider credential.
+Do not weaken the separate release-publication environment to enable daily runs.
+
+For rollout, run a manual verification-only pass first, inspect its summary,
+then dispatch with `verification_only=false` and inspect both remote feed assets.
+No new nan-harness release is needed to distribute refreshed evidence.
 
 Safe reports follow
 [`crates/nan-harness-canary/resources/canary-report.schema.json`](../crates/nan-harness-canary/resources/canary-report.schema.json).
@@ -217,7 +259,7 @@ cargo run --locked -p nan-harness-canary -- reproduce \
   --output /path/to/reproduced-report.json
 ```
 
-## Schedules
+## Legacy Tart schedules (retired)
 
 Check the host before installing schedules:
 
@@ -283,9 +325,9 @@ platforms=both   harnesses=codex,claude-code  mode=live
 Each OS/harness cell is independent and uses the selected checkout's explicit
 40-character commit identity (a branch or tag is not accepted). Live mode is
 restricted to explicit manual dispatch and has no reusable-call, schedule,
-publication, or cutover behavior. Daily and weekly Tart suites remain
-separate compatibility operations; this workflow does not start or modify
-those schedules.
+publication, or cutover behavior. The retired daily and weekly Tart procedures
+remain recovery references only; the daily hosted workflow owns scheduled feed
+refreshes.
 
 ### Hosted release gate and publication
 

@@ -431,11 +431,12 @@ For a new harness PR:
 - [ ] The PR states which evidence level is complete and which roadmap level
       remains.
 
-The current CI runs workspace quality gates, pinned conformance for all
-supported harnesses, and a latest-version deterministic matrix. The private Mac
-mini canary adds clean Linux and macOS installation plus live `qwen3.6` tool
-probes. Release assets remain in a GitHub draft until all 15 harnesses pass that
-gate. New harnesses must add a versioned
+The current CI runs workspace quality gates and pinned conformance for all
+supported harnesses. The daily hosted canary checks pending upstream CLI versions
+against published nan-harness binaries on every supported native platform and
+refreshes both compatibility feeds from complete per-harness live evidence.
+Release assets remain in a GitHub draft until the separate full live release
+gate passes. New harnesses must add a versioned
 `tests/conformance/<harness>/manifest.toml`, deterministic coverage, a clean-VM
 installer path, and a live tool probe instead of a one-off workflow.
 
