@@ -4,6 +4,14 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub(crate) enum PersistenceError {
+    #[error(
+        "native configuration failed and {failures} restorations remain incomplete; private recovery copies were retained in the nan-harness state directory"
+    )]
+    RollbackIncomplete {
+        source: Box<PersistenceError>,
+        failures: usize,
+        recovery_files: Vec<PathBuf>,
+    },
     #[error("could not determine the nan-harness configuration directory")]
     MissingConfigDirectory,
     #[error("could not determine the current user's home directory")]
@@ -121,6 +129,7 @@ pub(crate) enum PersistenceError {
 impl PersistenceError {
     pub(crate) const fn code(&self) -> &'static str {
         match self {
+            Self::RollbackIncomplete { .. } => "NH-INTEGRATION-010",
             Self::UnmanagedProviderConflict(_)
             | Self::UnmanagedSectionConflict(_)
             | Self::AmbiguousOpenCodeConfig(_) => "NH-INTEGRATION-002",
@@ -180,6 +189,9 @@ impl nan_harness_i18n::TerminalMessage for PersistenceError {
             return self.to_string();
         }
         match self {
+            Self::RollbackIncomplete { failures, .. } => {
+                m::error_persistence_rollback_incomplete(locale, failures)
+            }
             Self::MissingConfigDirectory => m::error_persistence_missing_config_directory(locale),
             Self::MissingHomeDirectory => m::error_persistence_missing_home_directory(locale),
             Self::RenderConfiguration(field_0) => {

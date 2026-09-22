@@ -1,17 +1,25 @@
 use super::super::{
     IntegrationState, LEGACY_PI_EXTENSION_RELATIVE_PATH, ManagedFile, PI_EXTENSION_RELATIVE_PATH,
     PRIME_EXTENSION_RELATIVE_PATH, PersistenceError, PersistenceManager, RemovalOutcome,
-    permissions, read_optional, rollback_file, sha256,
+    permissions, read_optional, sha256,
 };
+use crate::commands::persistence::PreparedFileChange;
 use crate::commands::persistence::{ConfigurationHealth, read_managed_document};
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 impl PersistenceManager {
     pub(crate) fn unpersist_pi(&self) -> Result<RemovalOutcome, PersistenceError> {
-        let mut state = self.load_state()?;
+        let (files, outcome) = self.prepare_remove_pi()?;
+        self.publish_configuration_files(&files)?;
+        Ok(outcome)
+    }
+
+    pub(crate) fn prepare_remove_pi(
+        &self,
+    ) -> Result<(Vec<PreparedFileChange>, RemovalOutcome), PersistenceError> {
+        let (mut state, receipt) = self.prepare_state()?;
         let Some(managed) = state.pi.clone() else {
-            return Ok(RemovalOutcome::NotConfigured);
+            return Ok((Vec::new(), RemovalOutcome::NotConfigured));
         };
         let path = managed.path.clone().unwrap_or_else(|| {
             let current = self.home_directory.join(PI_EXTENSION_RELATIVE_PATH);
@@ -28,18 +36,18 @@ impl PersistenceManager {
         {
             return Err(PersistenceError::ManagedFileChanged(path));
         }
-        if original.is_some() {
-            fs::remove_file(&path).map_err(|source| PersistenceError::RemoveFile {
-                path: path.clone(),
-                source,
-            })?;
-        }
         state.pi = None;
-        if let Err(error) = self.save_state(&state) {
-            rollback_file(&path, original.as_deref(), original_permissions.as_ref());
-            return Err(error);
-        }
-        Ok(RemovalOutcome::Removed)
+        let files = vec![PreparedFileChange {
+            path,
+            original,
+            replacement_permissions: original_permissions.clone(),
+            original_permissions,
+            replacement: None,
+        }];
+        Ok((
+            Self::prepare_integration_files(files, &state, receipt)?,
+            RemovalOutcome::Removed,
+        ))
     }
 
     #[cfg(test)]
@@ -61,9 +69,17 @@ impl PersistenceManager {
     }
 
     pub(crate) fn unpersist_prime_agent(&self) -> Result<RemovalOutcome, PersistenceError> {
-        let mut state = self.load_state()?;
+        let (files, outcome) = self.prepare_remove_prime_agent()?;
+        self.publish_configuration_files(&files)?;
+        Ok(outcome)
+    }
+
+    pub(crate) fn prepare_remove_prime_agent(
+        &self,
+    ) -> Result<(Vec<PreparedFileChange>, RemovalOutcome), PersistenceError> {
+        let (mut state, receipt) = self.prepare_state()?;
         let Some(managed) = state.prime_agent.clone() else {
-            return Ok(RemovalOutcome::NotConfigured);
+            return Ok((Vec::new(), RemovalOutcome::NotConfigured));
         };
         let path = managed
             .path
@@ -71,13 +87,24 @@ impl PersistenceManager {
             .unwrap_or_else(|| self.home_directory.join(PRIME_EXTENSION_RELATIVE_PATH));
         let original = read_optional(&path)?;
         let original_permissions = permissions(&path)?;
-        Self::remove_managed_file(&path, &managed)?;
-        state.prime_agent = None;
-        if let Err(error) = self.save_state(&state) {
-            rollback_file(&path, original.as_deref(), original_permissions.as_ref());
-            return Err(error);
+        if original
+            .as_ref()
+            .is_some_and(|contents| sha256(contents) != managed.sha256)
+        {
+            return Err(PersistenceError::ManagedFileChanged(path));
         }
-        Ok(RemovalOutcome::Removed)
+        state.prime_agent = None;
+        let files = vec![PreparedFileChange {
+            path,
+            original,
+            replacement_permissions: original_permissions.clone(),
+            original_permissions,
+            replacement: None,
+        }];
+        Ok((
+            Self::prepare_integration_files(files, &state, receipt)?,
+            RemovalOutcome::Removed,
+        ))
     }
 
     #[cfg(test)]
@@ -98,19 +125,6 @@ impl PersistenceManager {
                     .unwrap_or_else(|| self.prime_directory.join("extensions/nan-provider.js"))
             },
         )
-    }
-
-    fn remove_managed_file(path: &Path, managed: &ManagedFile) -> Result<(), PersistenceError> {
-        let Some(contents) = read_optional(path)? else {
-            return Ok(());
-        };
-        if sha256(&contents) != managed.sha256 {
-            return Err(PersistenceError::ManagedFileChanged(path.to_path_buf()));
-        }
-        fs::remove_file(path).map_err(|source| PersistenceError::RemoveFile {
-            path: path.to_path_buf(),
-            source,
-        })
     }
 
     fn inspect_managed_file(

@@ -1,4 +1,5 @@
 {
+  "error_persistence_rollback_incomplete": "Native configuration failed and {failures} restorations remain incomplete. Private recovery copies were retained in the nan-harness state directory.",
   "cache_connection": "connection failed",
   "cache_empty": "no usable models returned",
   "cache_invalid": "invalid response",

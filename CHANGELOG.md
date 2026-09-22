@@ -11,6 +11,10 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Move diagnostic capture disk writes off async routing workers, with bounded
   concurrent storage batches and no blocking threads reserved for idle writers.
+- Recover native configuration, model catalogs and both receipts together when
+  configure, refresh or removal fails. Preserve intervening user edits and retain
+  private recovery snapshots when restoration cannot complete.
+
 - Load the NaN provider on OMP 18.2 after its search API change, retaining
   authenticated native search and fallback support for older OMP versions.
 - Send an application User-Agent, a default Kokoro voice, and the NaN Whisper

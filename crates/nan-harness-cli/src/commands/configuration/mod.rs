@@ -10,8 +10,7 @@ mod state;
 use catalog::{catalog_integration, legacy_harness};
 pub(crate) use command::run;
 use documents::{
-    apply_prepared, dotenv_quote, inspect_document, prepare_documents, prepare_removals,
-    rollback_prepared, sha256, yaml_quote,
+    dotenv_quote, inspect_document, prepare_documents, prepare_removals, sha256, yaml_quote,
 };
 pub(crate) use error::ConfigurationError;
 pub(crate) use lifecycle::ConfigurationManager;
@@ -27,7 +26,7 @@ use state::{
 };
 
 #[cfg(test)]
-use documents::document_is_active;
+use documents::{apply_prepared, document_is_active};
 
 #[cfg(test)]
 use plans::{
@@ -38,7 +37,6 @@ use plans::{
 use crate::commands::persistence::{
     ConfigurationHealth, IntegrationChange, PersistenceError, PersistenceManager,
     PersistentIntegration, RemovalOutcome, config_directory, read_managed_document,
-    write_private_file,
 };
 use nan_harness_adapters::{
     OmpSearchMode, PiSearchMode, render_hermes_search_provider, render_omp_search_extension,
@@ -85,3 +83,6 @@ const SUPPORTED_HARNESSES: [HarnessKind; 12] = [
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+use crate::commands::persistence::write_private_file;

@@ -1,4 +1,5 @@
 {
+  "error_persistence_rollback_incomplete": "La configuración nativa falló y quedan {failures} restauraciones incompletas. Se conservaron copias privadas de recuperación en el directorio de estado de nan-harness.",
   "cache_connection": "fallo de conexión",
   "cache_empty": "no se han recibido modelos utilizables",
   "cache_invalid": "respuesta no válida",

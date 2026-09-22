@@ -33,6 +33,7 @@ pub enum DiagnosticReason {
     FilesystemOperationFailed,
     SerializationFailed,
     ConfigurationConflict,
+    ConfigurationRecoveryIncomplete,
     InvalidConfiguration,
     MissingDirectory,
     ModelUnavailable,
@@ -75,6 +76,7 @@ impl DiagnosticReason {
             | Self::RandomGenerationFailed => diagnostic_launch_reason(self),
             Self::FilesystemOperationFailed
             | Self::SerializationFailed
+            | Self::ConfigurationRecoveryIncomplete
             | Self::ConfigurationConflict
             | Self::InvalidConfiguration
             | Self::MissingDirectory => diagnostic_configuration_reason(self),
@@ -154,6 +156,7 @@ const fn diagnostic_configuration_reason(reason: DiagnosticReason) -> &'static s
     match reason {
         DiagnosticReason::FilesystemOperationFailed => "filesystem-operation-failed",
         DiagnosticReason::SerializationFailed => "serialization-failed",
+        DiagnosticReason::ConfigurationRecoveryIncomplete => "configuration-recovery-incomplete",
         DiagnosticReason::ConfigurationConflict => "configuration-conflict",
         DiagnosticReason::InvalidConfiguration => "invalid-configuration",
         DiagnosticReason::MissingDirectory => "missing-directory",
@@ -224,6 +227,10 @@ mod tests {
                 "filesystem-operation-failed",
             ),
             (Reason::SerializationFailed, "serialization-failed"),
+            (
+                Reason::ConfigurationRecoveryIncomplete,
+                "configuration-recovery-incomplete",
+            ),
             (Reason::ConfigurationConflict, "configuration-conflict"),
             (Reason::InvalidConfiguration, "invalid-configuration"),
             (Reason::MissingDirectory, "missing-directory"),

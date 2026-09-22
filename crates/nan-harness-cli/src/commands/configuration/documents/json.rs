@@ -50,13 +50,7 @@ pub(crate) fn prepare_json_entries(
     plan: &JsonPlan,
     previous: Option<&JsonReceipt>,
 ) -> Result<Vec<JsonEntryReceipt>, ConfigurationError> {
-    let previous_entries = previous.map_or_else(BTreeMap::new, |receipt| {
-        receipt
-            .entries
-            .iter()
-            .map(|entry| (entry.path.clone(), entry))
-            .collect::<BTreeMap<_, _>>()
-    });
+    let previous_entries = merged_json_receipts(previous.map_or(&[], |receipt| &receipt.entries));
     for prior in previous_entries.values() {
         let current = get_json_path(document, &prior.path)
             .ok_or_else(|| ConfigurationError::ManagedDocumentChanged(plan.path.clone()))?;
@@ -82,29 +76,34 @@ pub(crate) fn prepare_json_entries(
             remove_json_path(document, &prior.path);
         }
     }
-    let mut entries = Vec::with_capacity(plan.entries.len());
+    let mut entries: Vec<JsonEntryReceipt> = Vec::with_capacity(plan.entries.len());
     for planned in &plan.entries {
-        let prior = previous_entries.get(&planned.path).copied();
-        if prior.is_none()
-            && matches!(planned.mode, JsonEntryMode::Exclusive)
-            && get_json_path(document, &planned.path).is_some()
+        let prior = previous_entries.get(&planned.path);
+        let current = get_json_path(document, &planned.path).cloned();
+        if prior.is_none() && matches!(planned.mode, JsonEntryMode::Exclusive) && current.is_some()
         {
             return Err(ConfigurationError::UnmanagedDocumentConflict(
                 plan.path.clone(),
             ));
         }
-        let current = get_json_path(document, &planned.path).cloned();
-        let prior_value = prior.and_then(|entry| entry.previous.clone()).or_else(|| {
-            matches!(
+        let previous_value = match prior {
+            Some(entry) => entry.previous.clone(),
+            None => matches!(
                 planned.mode,
                 JsonEntryMode::Override | JsonEntryMode::AppendUnique
             )
             .then_some(current.clone())
-            .flatten()
-        });
+            .flatten(),
+        };
+        let already_appended = entries.iter().any(|entry| entry.path == planned.path);
+        let append_base = if prior.is_some() && !already_appended {
+            previous_value.as_ref()
+        } else {
+            current.as_ref()
+        };
         let desired = match planned.mode {
             JsonEntryMode::AppendUnique => append_unique_json_value(
-                current.as_ref(),
+                append_base,
                 &planned.value,
                 &plan.path,
                 planned.path.last().map_or("", String::as_str),
@@ -112,11 +111,15 @@ pub(crate) fn prepare_json_entries(
             JsonEntryMode::Exclusive | JsonEntryMode::Override => planned.value.clone(),
         };
         set_json_path(document, &planned.path, desired.clone(), &plan.path)?;
-        entries.push(JsonEntryReceipt {
-            path: planned.path.clone(),
-            value_sha256: hash_json(&desired)?,
-            previous: prior_value,
-        });
+        if let Some(entry) = entries.iter_mut().find(|entry| entry.path == planned.path) {
+            entry.value_sha256 = hash_json(&desired)?;
+        } else {
+            entries.push(JsonEntryReceipt {
+                path: planned.path.clone(),
+                value_sha256: hash_json(&desired)?,
+                previous: previous_value,
+            });
+        }
     }
     Ok(entries)
 }
@@ -146,7 +149,8 @@ pub(crate) fn prepare_json_removal(
             source,
         }
     })?;
-    for entry in &receipt.entries {
+    let entries = merged_json_receipts(&receipt.entries);
+    for entry in entries.values() {
         let current = get_json_path(&document, &entry.path)
             .ok_or_else(|| ConfigurationError::ManagedDocumentChanged(receipt.path.clone()))?;
         if hash_json(current)? != entry.value_sha256 {
@@ -155,7 +159,7 @@ pub(crate) fn prepare_json_removal(
             ));
         }
     }
-    for entry in receipt.entries.iter().rev() {
+    for entry in entries.values().rev() {
         if let Some(previous) = &entry.previous {
             set_json_path(&mut document, &entry.path, previous.clone(), &receipt.path)?;
         } else {
@@ -174,4 +178,17 @@ pub(crate) fn prepare_json_removal(
         replacement,
         receipt: DocumentReceipt::Json(receipt.clone()),
     })
+}
+
+fn merged_json_receipts(entries: &[JsonEntryReceipt]) -> BTreeMap<Vec<String>, JsonEntryReceipt> {
+    let mut previous_entries: BTreeMap<Vec<String>, JsonEntryReceipt> = BTreeMap::new();
+    for entry in entries {
+        // Older receipts can contain multiple appends to the same plugin list.
+        // Its first baseline and final hash describe the actual owned change.
+        previous_entries
+            .entry(entry.path.clone())
+            .and_modify(|prior| prior.value_sha256.clone_from(&entry.value_sha256))
+            .or_insert_with(|| entry.clone());
+    }
+    previous_entries
 }

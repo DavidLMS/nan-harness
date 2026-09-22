@@ -3,12 +3,10 @@ use super::{
     ConfigurationState, DEFAULT_MODEL_ID, DocumentPlan, HarnessKind, HarnessReceipt,
     ManagedSearchStatus, MediaSelection, PathBuf, PersistenceError, PersistenceManager,
     PlanRequest, RemovalOutcome, ResolvedConfig, STATE_SCHEMA_VERSION, SearchConfiguration,
-    SearchPolicyError, WebSearchPolicy, apply_prepared, catalog_integration, ensure_supported, env,
+    SearchPolicyError, WebSearchPolicy, catalog_integration, ensure_supported, env,
     for_harness_with_media, inspect_document, inspect_search_configuration, legacy_harness,
-    preferred_model, prepare_documents, prepare_removals, receipt_manages_content,
-    rollback_prepared, sha256, write_private_file,
+    preferred_model, prepare_documents, prepare_removals, receipt_manages_content, sha256,
 };
-use std::fs;
 #[cfg(test)]
 use std::path::Path;
 
@@ -153,7 +151,7 @@ impl ConfigurationManager {
                 (value.to_owned(), sha256(value.as_bytes()))
             })
             .map_err(PersistenceError::Secret)?;
-        let mut state = self.load_state()?;
+        let (mut state, state_file) = self.prepare_state()?;
         let previous = state.harnesses.get(&harness.to_string());
         let search_policy = search_policy_override
             .or_else(|| previous.map(|receipt| receipt.search_policy))
@@ -187,20 +185,13 @@ impl ConfigurationManager {
         )?;
         let prepared =
             prepare_documents(&plans, previous.map(|receipt| receipt.documents.as_slice()))?;
-        apply_prepared(&prepared)?;
-        let catalog_change = match self.configure_catalogs(
+        let (catalog_files, catalog_change) = self.prepare_catalogs(
             harness,
             models,
             &config.provider_base_url,
             &api_key,
             search_managed,
-        ) {
-            Ok(change) => change,
-            Err(error) => {
-                rollback_prepared(&prepared);
-                return Err(error);
-            }
-        };
+        )?;
         let changed = catalog_change.as_ref().is_some_and(|change| change.changed)
             || prepared
                 .iter()
@@ -230,10 +221,7 @@ impl ConfigurationManager {
                     .collect(),
             },
         );
-        if let Err(error) = self.save_state(&state) {
-            rollback_prepared(&prepared);
-            return Err(error);
-        }
+        self.publish_operation(prepared, catalog_files, &state, state_file)?;
         Ok(ConfigurationChange {
             changed,
             paths,
@@ -251,18 +239,15 @@ impl ConfigurationManager {
         harness: HarnessKind,
     ) -> Result<RemovalOutcome, ConfigurationError> {
         ensure_supported(harness)?;
-        let mut state = self.load_state()?;
-        let Some(receipt) = state.harnesses.get(&harness.to_string()).cloned() else {
-            return self.remove_legacy(harness);
+        let (mut state, state_file) = self.prepare_state()?;
+        let (legacy_files, legacy_outcome) = self.prepare_remove_legacy(harness)?;
+        let Some(receipt) = state.harnesses.get(&harness.to_string()) else {
+            self.legacy.publish_configuration_files(&legacy_files)?;
+            return Ok(legacy_outcome);
         };
         let prepared = prepare_removals(&receipt.documents)?;
-        self.remove_legacy(harness)?;
-        apply_prepared(&prepared)?;
         state.harnesses.remove(&harness.to_string());
-        if let Err(error) = self.save_state(&state) {
-            rollback_prepared(&prepared);
-            return Err(error);
-        }
+        self.publish_operation(prepared, legacy_files, &state, state_file)?;
         Ok(RemovalOutcome::Removed)
     }
 
@@ -399,31 +384,78 @@ impl ConfigurationManager {
     }
 
     pub(crate) fn load_state(&self) -> Result<ConfigurationState, ConfigurationError> {
-        match fs::read(&self.paths.state_path) {
-            Ok(contents) => {
+        self.prepare_state().map(|(state, _)| state)
+    }
+
+    fn prepare_state(
+        &self,
+    ) -> Result<
+        (
+            ConfigurationState,
+            crate::commands::persistence::PreparedFileChange,
+        ),
+        ConfigurationError,
+    > {
+        let receipt = crate::commands::persistence::PreparedFileChange::read(
+            self.paths.state_path.clone(),
+            None,
+        )
+        .map_err(|error| match error {
+            PersistenceError::ReadFile { path, source } => {
+                ConfigurationError::ReadState { path, source }
+            }
+            error => error.into(),
+        })?;
+        let state = match receipt.original.as_deref() {
+            Some(contents) => {
                 let state: ConfigurationState =
-                    serde_json::from_slice(&contents).map_err(ConfigurationError::ParseState)?;
+                    serde_json::from_slice(contents).map_err(ConfigurationError::ParseState)?;
                 if state.schema_version != STATE_SCHEMA_VERSION {
                     return Err(ConfigurationError::UnsupportedStateSchema(
                         state.schema_version,
                     ));
                 }
-                Ok(state)
+                state
             }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                Ok(ConfigurationState::default())
-            }
-            Err(source) => Err(ConfigurationError::ReadState {
-                path: self.paths.state_path.clone(),
-                source,
-            }),
-        }
+            None => ConfigurationState::default(),
+        };
+        Ok((state, receipt))
     }
 
+    #[cfg(test)]
     pub(crate) fn save_state(&self, state: &ConfigurationState) -> Result<(), ConfigurationError> {
         let payload =
             serde_json::to_vec_pretty(state).map_err(ConfigurationError::SerializeState)?;
-        write_private_file(&self.paths.state_path, &payload, None)?;
+        super::write_private_file(&self.paths.state_path, &payload, None)?;
+        Ok(())
+    }
+}
+
+impl ConfigurationManager {
+    fn publish_operation(
+        &self,
+        documents: Vec<super::PreparedDocument>,
+        catalogs: Vec<crate::commands::persistence::PreparedFileChange>,
+        state: &ConfigurationState,
+        mut state_file: crate::commands::persistence::PreparedFileChange,
+    ) -> Result<(), ConfigurationError> {
+        use crate::commands::persistence::PreparedFileChange;
+        let mut files = documents
+            .into_iter()
+            .map(|document| PreparedFileChange {
+                path: document.path,
+                original: document.original,
+                original_permissions: document.permissions,
+                replacement: document.replacement,
+                replacement_permissions: None,
+            })
+            .collect::<Vec<_>>();
+        files.extend(catalogs);
+        let payload =
+            serde_json::to_vec_pretty(state).map_err(ConfigurationError::SerializeState)?;
+        state_file.replacement = Some(payload);
+        files.push(state_file);
+        self.legacy.publish_configuration_files(&files)?;
         Ok(())
     }
 }

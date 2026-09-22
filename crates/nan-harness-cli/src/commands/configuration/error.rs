@@ -55,11 +55,6 @@ pub(crate) enum ConfigurationError {
         path: PathBuf,
         source: std::io::Error,
     },
-    #[error("could not remove configuration document '{}': {source}", path.display())]
-    RemoveDocument {
-        path: PathBuf,
-        source: std::io::Error,
-    },
     #[error("configuration document '{}' is not valid JSON: {source}", path.display())]
     ParseDocument {
         path: PathBuf,
@@ -198,9 +193,6 @@ impl nan_harness_i18n::TerminalMessage for ConfigurationError {
             }
             Self::ReadDocument { path, source } => {
                 m::error_configuration_read_document(locale, &(source), &(path.display()))
-            }
-            Self::RemoveDocument { path, source } => {
-                m::error_configuration_remove_document(locale, &(source), &(path.display()))
             }
             Self::ParseDocument { path, source } => {
                 m::error_configuration_parse_document(locale, &(source), &(path.display()))
