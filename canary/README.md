@@ -233,11 +233,8 @@ rc.3 publication, which requests an unpublished
 `ETARGET` before install scripts run. Only this exact version is bounded;
 latest-version checks remain unrestricted. Reassess the workaround when adopting
 a complete upstream release. The cutoff is not a lockfile and cannot protect
-against registry removals. The `DeepSeek install diagnostic` workflow compares
-the original and corrected installers in fresh Linux ARM64, macOS ARM64 and
-Windows x64 cells. It exports only a closed diagnostic projection and verifies
-the installed version; raw npm logs stay private and are deleted. Installation
-success never substitutes for the complete live release gate.
+against registry removals. Installation success never substitutes for the
+complete live release gate.
 
 The single-cell wrapper downloads both matching ARM64 asset pairs and runs a
 clean deterministic-plus-live probe for one harness. The central suite wrapper
