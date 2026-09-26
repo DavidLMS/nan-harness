@@ -7,6 +7,10 @@ on:
         description: Compare frozen OMP 18.3.1/18.3.2 with v0.1.11 and this workflow SHA; no publication
         type: boolean
         default: false
+      omp_candidate_only:
+        description: Run only pending candidate cells after release evidence has been collected
+        type: boolean
+        default: false
       harnesses:
         description: all or comma-separated harness identifiers
         required: true
@@ -475,7 +479,7 @@ jobs:
       fail-fast: false
       max-parallel: 2
       matrix:
-        kind: [release, candidate]
+        kind: ${{ fromJSON(inputs.omp_candidate_only && '["candidate"]' || '["release", "candidate"]') }}
         omp: ['18.3.1', '18.3.2']
     defaults:
       run:

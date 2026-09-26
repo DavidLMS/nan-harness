@@ -29,6 +29,13 @@ async fn chat_completions_settles_terminal_outcomes_once() {
         .env("NAN_HARNESS_CONFIG_DIR", directory.path())
         .env("NAN_HARNESS_INTERNAL_MANAGED_PROCESS", "1")
         .kill_on_drop(true);
+    // Winsock needs the OS directory even in an isolated child environment.
+    #[cfg(windows)]
+    for name in ["SystemRoot", "WINDIR"] {
+        if let Some(value) = std::env::var_os(name) {
+            command.env(name, value);
+        }
+    }
     if let Some(profile) = std::env::var_os("LLVM_PROFILE_FILE") {
         command.env("LLVM_PROFILE_FILE", profile);
     }
