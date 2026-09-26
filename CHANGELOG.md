@@ -7,6 +7,13 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Select the default NaN image model with `--image-model`, which also enables
+  images, or use `--image` for Flux. Hermes and OpenClaw can select Flux 2 Klein
+  or Qwen Image 2.1 per tool call without changing the configured default.
+  Qwen Image supports generation only; Flux remains available for editing.
+
 ### Changed
 
 - Promote MiMo V2.6 Flash to the curated coding catalog with shared capabilities

@@ -6067,6 +6067,20 @@
       "crates/nan-harness-cli/src/app/parser.rs"
     ]
   },
+  "error_image_model_unsupported_harness": {
+    "description": "CLI validation when selecting an image model on a harness without native NaN image support. Preserve --image-model and harness names.",
+    "section": "errors",
+    "sources": [
+      "crates/nan-harness-cli/src/app/parser.rs"
+    ]
+  },
+  "help_enable_images_with_model": {
+    "description": "CLI option that enables image generation and selects its default model. Preserve harness names.",
+    "section": "help",
+    "sources": [
+      "crates/nan-harness-cli/src/app/args/launch.rs"
+    ]
+  },
   "help_enable_nan_whisper_kokoro_and_flux_2_klein_even_when_a_media_provider_is_configured": {
     "description": "Command help and argument validation. Preserve command names, paths, provider identifiers and diagnostic codes.",
     "section": "help",

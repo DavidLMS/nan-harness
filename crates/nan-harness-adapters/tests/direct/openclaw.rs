@@ -168,7 +168,12 @@ fn openclaw_scopes_media_models_to_audio_only_when_transcription_is_enabled() {
         for stt in [false, true] {
             for image in [false, true] {
                 let mut context = context(HarnessKind::OpenClaw, Vec::new());
-                context.media = MediaSelection { tts, stt, image };
+                context.media = MediaSelection {
+                    tts,
+                    stt,
+                    image,
+                    image_model: None,
+                };
                 let plan = plan(&OpenClawAdapter, &context);
                 let config_file = plan.configuration_overlays[0]
                     .files

@@ -36,6 +36,8 @@ enum MediaError {
     AudioPrepare,
     #[error("transcription failed for audio chunk {index} of {total}")]
     AudioChunk { index: usize, total: usize },
+    #[error("Qwen Image supports generation only; use flux-2-klein to edit images")]
+    ImageEditingUnsupported,
     #[error("media output path is required")]
     Output,
     #[error("media request failed")]
@@ -312,6 +314,9 @@ async fn generate_image(
         return Err(MediaError::Input);
     };
     let model = arguments.model.as_deref().unwrap_or("flux-2-klein");
+    if model == "qwen-image-2.1" && !arguments.input_images.is_empty() {
+        return Err(MediaError::ImageEditingUnsupported);
+    }
     let response = if arguments.input_images.is_empty() {
         client
             .post(join(base_url, "images/generations"))

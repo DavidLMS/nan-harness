@@ -412,11 +412,15 @@ fn hermes_config_template(
         );
     }
     if media.image {
-        media_fields.push_str("\"image_gen\":{\"provider\":\"nan-harness\"},");
+        let _ = write!(
+            media_fields,
+            "\"image_gen\":{{\"provider\":\"nan-harness\",\"model\":\"{}\"}},",
+            media.image_model.unwrap_or_default().as_str()
+        );
     }
     let plugin_field = if media.image {
         format!(
-            "\"plugins\":{{\"enabled\":[\"image_gen/nan_harness\"{NAN_SEARCH_BLOCK_BEGIN},\"web/nan_harness\"{NAN_SEARCH_BLOCK_END}]}}"
+            "\"plugins\":{{\"entries\":{{\"image_gen/nan_harness\":{{\"allow_tool_override\":true}}}},\"enabled\":[\"image_gen/nan_harness\"{NAN_SEARCH_BLOCK_BEGIN},\"web/nan_harness\"{NAN_SEARCH_BLOCK_END}]}}"
         )
     } else {
         format!(
@@ -589,81 +593,16 @@ mod tests {
 
 /// Renders the Hermes image generation plugin for a persistent or launch-scoped home.
 #[must_use]
-pub fn render_hermes_image_plugin(base_url: &str) -> String {
-    format!(
-        r#"import os
-import subprocess
-import tempfile
-import uuid
-from pathlib import Path
-
-from agent.image_gen_provider import ImageGenProvider, success_response
-
-
-class NanHarnessImageProvider(ImageGenProvider):
-    name = "nan-harness"
-    display_name = "NaN Flux 2 Klein"
-    def capabilities(self):
-        return {{"modalities": ["text", "image"], "max_reference_images": 4}}
-
-    def is_available(self):
-        if os.getenv("NAN_MEDIA_API_KEY", "").strip():
-            return True
-        try:
-            return subprocess.run(
-                ["nanh", "__media", "credentials"],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
-            ).returncode == 0
-        except OSError:
-            return False
-
-    def list_models(self):
-        return [{{"id": "flux-2-klein", "name": "Flux 2 Klein"}}]
-
-    def generate(self, prompt, aspect_ratio="landscape", *, image_url=None,
-                 reference_image_urls=None, model="flux-2-klein", **_kwargs):
-        references = ([image_url] if image_url else []) + list(reference_image_urls or [])
-        with tempfile.TemporaryDirectory(prefix="nanh-image-") as directory:
-            output = Path(directory) / "image.png"
-            command = [
-                "nanh", "__media", "image", "--provider-base-url", {base_url:?},
-                "--model", str(model), "--prompt", str(prompt), "--output", str(output)
-            ]
-            for index, image in enumerate(references):
-                reference = Path(image)
-                if isinstance(image, str) and image.startswith(("http://", "https://")):
-                    import urllib.request
-                    reference = Path(directory) / f"reference-{{index}}.bin"
-                    with urllib.request.urlopen(image, timeout=60) as response:
-                        data = response.read(25 * 1024 * 1024 + 1)
-                        if len(data) > 25 * 1024 * 1024:
-                            return {{"success": False, "error": "NH-MEDIA-REFERENCE"}}
-                        reference.write_bytes(data)
-                if reference.exists():
-                    command.extend(["--input-image", str(reference)])
-            completed = subprocess.run(
-                command, env=os.environ.copy(),
-                capture_output=True, text=True, check=False
-            )
-            if completed.returncode != 0 or not output.is_file():
-                return {{"success": False, "error": "NH-MEDIA-IMAGE"}}
-            hermes_home = os.getenv("HERMES_HOME")
-            image_directory = Path(hermes_home) if hermes_home else Path.home() / ".hermes"
-            image_directory = image_directory / "cache" / "images"
-            image_directory.mkdir(parents=True, exist_ok=True)
-            image_path = image_directory / f"nan-image-{{uuid.uuid4().hex}}.png"
-            image_path.write_bytes(output.read_bytes())
-            return success_response(
-                image=str(image_path), model=str(model), prompt=str(prompt),
-                aspect_ratio=str(aspect_ratio), provider=self.name,
-                modality="image" if references else "text",
-            )
-
-
-def register(ctx):
-    ctx.register_image_gen_provider(NanHarnessImageProvider())
-"#
-    )
+pub fn render_hermes_image_plugin(
+    base_url: &str,
+    image_model: nan_harness_core::ImageModel,
+) -> String {
+    include_str!("hermes/image_provider.py")
+        .replace(
+            "__NAN_IMAGE_MODEL__",
+            &serde_json::json!(image_model.as_str()).to_string(),
+        )
+        .replace("__NAN_BASE_URL__", &serde_json::json!(base_url).to_string())
 }
 
 /// Render the provider entry shared by the experimental persistent Desktop profile.
@@ -753,13 +692,13 @@ fn hermes_media_overlay_files(media: MediaSelection) -> Vec<OverlayFile> {
         OverlayFile {
             path: "plugins/image_gen/nan_harness/__init__.py".to_owned(),
             mode: TemporaryArtifactMode::OwnerFile,
-            content_template: "from .provider import NanHarnessImageProvider\n\n\ndef register(ctx):\n    ctx.register_image_gen_provider(NanHarnessImageProvider())\n".to_owned(),
+            content_template: "from .provider import register\n".to_owned(),
             policy: OverlayFilePolicy::Replace,
         },
         OverlayFile {
             path: "plugins/image_gen/nan_harness/provider.py".to_owned(),
             mode: TemporaryArtifactMode::OwnerFile,
-            content_template: render_hermes_image_plugin(MEDIA_PROVIDER_BASE_URL_PLACEHOLDER),
+            content_template: render_hermes_image_plugin(MEDIA_PROVIDER_BASE_URL_PLACEHOLDER, media.image_model.unwrap_or_default()),
             policy: OverlayFilePolicy::Replace,
         },
         OverlayFile {

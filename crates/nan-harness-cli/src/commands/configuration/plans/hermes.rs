@@ -56,6 +56,21 @@ fn media_entries(
     if media.image {
         entries.extend([
             YamlEntryPlan {
+                path: vec!["image_gen".to_owned(), "model".to_owned()],
+                value: YamlValue::String(media.image_model.unwrap_or_default().as_str().to_owned()),
+                mode: YamlEntryMode::Override,
+            },
+            YamlEntryPlan {
+                path: vec![
+                    "plugins".to_owned(),
+                    "entries".to_owned(),
+                    "image_gen/nan_harness".to_owned(),
+                    "allow_tool_override".to_owned(),
+                ],
+                value: YamlValue::Bool(true),
+                mode: YamlEntryMode::Override,
+            },
+            YamlEntryPlan {
                 path: vec!["image_gen".to_owned(), "provider".to_owned()],
                 value: YamlValue::String("nan-harness".to_owned()),
                 mode: YamlEntryMode::Override,
@@ -126,13 +141,13 @@ pub(crate) fn hermes_plans(
         }),
         DocumentPlan::ExactFile(ExactFilePlan {
             path: directory.join("plugins/image_gen/nan_harness/__init__.py"),
-            payload: media.image.then(|| b"from .provider import NanHarnessImageProvider\n\n\ndef register(ctx):\n    ctx.register_image_gen_provider(NanHarnessImageProvider())\n".to_vec()),
+            payload: media.image.then(|| b"from .provider import register\n".to_vec()),
         }),
         DocumentPlan::ExactFile(ExactFilePlan {
             path: directory.join("plugins/image_gen/nan_harness/provider.py"),
             payload: media
                 .image
-                .then(|| nan_harness_adapters::render_hermes_image_plugin(base_url).into_bytes()),
+                .then(|| nan_harness_adapters::render_hermes_image_plugin(base_url, media.image_model.unwrap_or_default()).into_bytes()),
         }),
         DocumentPlan::ExactFile(ExactFilePlan {
             path: directory.join("plugins/image_gen/nan_harness/plugin.yaml"),

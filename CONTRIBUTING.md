@@ -167,6 +167,12 @@ limit of seven. Its scoped `expect` preserves a complete translatable message
 and compile-time parameter checking. Reassess when the status message or the
 catalog API changes.
 
+`openclaw_plans` in `commands/configuration/plans/openclaw.rs` has 101 lines.
+Keep its native settings and owned plugin files together so configuration and
+removal ownership remain reviewable in one plan. Reassess if another capability
+or independent behavior is added. This scoped exception does not waive tests
+or other quality requirements.
+
 ### Unsafe code exceptions
 
 `unsafe_code` is denied workspace-wide and every other crate forbids it again with an inner

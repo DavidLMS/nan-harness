@@ -1,5 +1,5 @@
 use crate::app::{HarnessRunArgs, MediaArgs};
-use nan_harness_core::{HarnessKind, MediaSelection};
+use nan_harness_core::{HarnessKind, ImageModel, MediaSelection};
 use serde_json::Value;
 use serde_yaml_ng::Value as YamlValue;
 use std::fs;
@@ -16,13 +16,25 @@ enum ExistingCapability {
 
 /// Returns the explicit media request, leaving `None` to mean automatic selection.
 pub(crate) fn requested_media(arguments: &MediaArgs) -> Option<MediaSelection> {
+    let image_model = arguments
+        .image_model
+        .as_deref()
+        .and_then(ImageModel::from_id);
     if arguments.force_media {
-        Some(MediaSelection::all())
-    } else if arguments.force_stt || arguments.force_tts || arguments.force_image {
+        Some(MediaSelection {
+            image_model,
+            ..MediaSelection::all()
+        })
+    } else if arguments.force_stt
+        || arguments.force_tts
+        || arguments.force_image
+        || image_model.is_some()
+    {
         Some(MediaSelection {
             stt: arguments.force_stt,
             tts: arguments.force_tts,
-            image: arguments.force_image,
+            image: arguments.force_image || image_model.is_some(),
+            image_model: image_model.or_else(|| arguments.force_image.then(ImageModel::default)),
         })
     } else {
         None
@@ -75,12 +87,16 @@ fn resolve(
         stt: automatic_capability(detected.stt, previously_managed.map(|value| value.stt)),
         tts: automatic_capability(detected.tts, previously_managed.map(|value| value.tts)),
         image: automatic_capability(detected.image, previously_managed.map(|value| value.image)),
+        image_model: previously_managed
+            .and_then(|value| value.image_model)
+            .or(detected.image_model),
     };
     match requested {
         Some(requested) => MediaSelection {
             stt: requested.stt || previously_managed.is_some_and(|value| value.stt),
             tts: requested.tts || previously_managed.is_some_and(|value| value.tts),
             image: requested.image || previously_managed.is_some_and(|value| value.image),
+            image_model: requested.image_model.or(automatic.image_model),
         },
         None => automatic,
     }
@@ -98,6 +114,7 @@ struct DetectedMedia {
     stt: ExistingCapability,
     tts: ExistingCapability,
     image: ExistingCapability,
+    image_model: Option<ImageModel>,
 }
 
 fn detect(kind: HarnessKind, home: &Path) -> DetectedMedia {
@@ -108,6 +125,7 @@ fn detect(kind: HarnessKind, home: &Path) -> DetectedMedia {
             stt: ExistingCapability::External,
             tts: ExistingCapability::External,
             image: ExistingCapability::External,
+            image_model: None,
         },
     }
 }
@@ -121,6 +139,7 @@ fn detect_hermes(home: &Path) -> DetectedMedia {
             stt: ExistingCapability::None,
             tts: ExistingCapability::None,
             image: ExistingCapability::None,
+            image_model: None,
         };
     };
     let Ok(value) = serde_yaml_ng::from_slice::<YamlValue>(&contents) else {
@@ -130,6 +149,11 @@ fn detect_hermes(home: &Path) -> DetectedMedia {
         stt: hermes_provider_state(&value, "stt", &["stt", "provider"], "nan-whisper"),
         tts: hermes_provider_state(&value, "tts", &["tts", "provider"], "nan-kokoro"),
         image: provider_state(&value, &["image_gen", "provider"], &["nan-harness"]),
+        image_model: value
+            .get("image_gen")
+            .and_then(|value| value.get("model"))
+            .and_then(YamlValue::as_str)
+            .and_then(ImageModel::from_id),
     }
 }
 
@@ -160,6 +184,7 @@ fn detect_openclaw(home: &Path) -> DetectedMedia {
             stt: ExistingCapability::None,
             tts: ExistingCapability::None,
             image: ExistingCapability::None,
+            image_model: None,
         };
     };
     let Ok(value) = serde_json::from_slice::<Value>(&contents) else {
@@ -176,6 +201,11 @@ fn detect_openclaw(home: &Path) -> DetectedMedia {
             tts
         },
         image: openclaw_image_state(&value),
+        image_model: value
+            .pointer("/agents/defaults/mediaModels/image/primary")
+            .and_then(Value::as_str)
+            .and_then(|id| id.strip_prefix("nan-harness/"))
+            .and_then(ImageModel::from_id),
     }
 }
 
@@ -236,6 +266,7 @@ fn external_media() -> DetectedMedia {
         stt: ExistingCapability::External,
         tts: ExistingCapability::External,
         image: ExistingCapability::External,
+        image_model: None,
     }
 }
 
@@ -252,8 +283,10 @@ fn read_bounded(path: &Path) -> Result<Vec<u8>, std::io::Error> {
 
 #[cfg(test)]
 mod tests {
-    use super::configuration_media;
-    use nan_harness_core::{HarnessKind, MediaSelection};
+    use super::{configuration_media, requested_media};
+    use crate::app::{Cli, Command};
+    use clap::Parser as _;
+    use nan_harness_core::{HarnessKind, ImageModel, MediaSelection};
     use std::fs;
     use tempfile::tempdir;
 
@@ -278,7 +311,8 @@ mod tests {
             MediaSelection {
                 stt: false,
                 tts: true,
-                image: true
+                image: true,
+                image_model: None,
             }
         );
     }
@@ -298,6 +332,7 @@ mod tests {
                 stt: false,
                 tts: true,
                 image: false,
+                image_model: None,
             }),
             MediaSelection::none(),
             root.path(),
@@ -306,5 +341,56 @@ mod tests {
         assert!(selected.tts);
         assert!(!selected.stt);
         assert!(!selected.image);
+    }
+    #[test]
+    fn image_flags_enable_images_without_an_extra_switch() {
+        for (options, model) in [
+            (vec!["--image"], ImageModel::Flux2Klein),
+            (vec!["--force-image"], ImageModel::Flux2Klein),
+            (
+                vec!["--image-model", "qwen-image-2.1"],
+                ImageModel::QwenImage21,
+            ),
+            (
+                vec!["--image", "--image-model", "qwen-image-2.1"],
+                ImageModel::QwenImage21,
+            ),
+            (
+                vec!["--force-media", "--image-model", "qwen-image-2.1"],
+                ImageModel::QwenImage21,
+            ),
+        ] {
+            let mut args = vec!["nanh", "hermes"];
+            args.extend(options);
+            let cli = Cli::try_parse_from(args).expect("image options");
+            let Command::Hermes(args) = cli.command else {
+                panic!("Hermes command")
+            };
+            let media = requested_media(&args.run.media).expect("explicit images");
+            assert!(media.image);
+            assert_eq!(media.image_model, Some(model));
+        }
+        assert!(Cli::try_parse_from(["nanh", "hermes", "--image-model", "qwen3.6"]).is_err());
+    }
+
+    #[test]
+    fn refresh_preserves_the_selected_image_model() {
+        let home = tempdir().expect("home");
+        let previous = MediaSelection {
+            image: true,
+            image_model: Some(ImageModel::QwenImage21),
+            ..MediaSelection::none()
+        };
+        for requested in [None, Some(MediaSelection::all())] {
+            let selected = configuration_media(
+                HarnessKind::Hermes,
+                requested,
+                previous,
+                home.path(),
+                home.path(),
+            );
+            assert!(selected.image);
+            assert_eq!(selected.image_model, Some(ImageModel::QwenImage21));
+        }
     }
 }

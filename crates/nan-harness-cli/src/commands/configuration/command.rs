@@ -527,7 +527,7 @@ fn media_status_summary(media: MediaSelection) -> String {
         },
         if media.tts { "NaN Kokoro" } else { "preserved" },
         if media.image {
-            "NaN Flux 2 Klein"
+            media.image_model.unwrap_or_default().as_str()
         } else {
             "preserved"
         },

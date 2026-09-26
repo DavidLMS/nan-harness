@@ -118,7 +118,13 @@ fn persistent_media_plugins_have_valid_source_syntax() {
         .stdin
         .take()
         .expect("Python image provider stdin should be available")
-        .write_all(render_hermes_image_plugin("https://api.nan.test/v1").as_bytes())
+        .write_all(
+            render_hermes_image_plugin(
+                "https://api.nan.test/v1",
+                nan_harness_core::ImageModel::default(),
+            )
+            .as_bytes(),
+        )
         .expect("image provider source should write");
     let output = python
         .wait_with_output()
@@ -139,7 +145,13 @@ fn persistent_media_plugins_have_valid_source_syntax() {
     node.stdin
         .take()
         .expect("OpenClaw media plugin stdin should be available")
-        .write_all(render_openclaw_media_plugin("https://api.nan.test/v1").as_bytes())
+        .write_all(
+            render_openclaw_media_plugin(
+                "https://api.nan.test/v1",
+                nan_harness_core::ImageModel::default(),
+            )
+            .as_bytes(),
+        )
         .expect("OpenClaw media plugin source should write");
     let output = node
         .wait_with_output()
@@ -215,7 +227,13 @@ for credentials in [
         .stdin
         .take()
         .expect("Hermes image provider contract stdin should be available")
-        .write_all(render_hermes_image_plugin("https://api.nan.test/v1").as_bytes())
+        .write_all(
+            render_hermes_image_plugin(
+                "https://api.nan.test/v1",
+                nan_harness_core::ImageModel::default(),
+            )
+            .as_bytes(),
+        )
         .expect("Hermes image provider contract source should write");
     let output = contract
         .wait_with_output()

@@ -53,8 +53,15 @@ pub(crate) struct MediaArgs {
     pub(crate) force_stt: bool,
     #[arg(long, help = nan_harness_i18n::messages::help_use_nan_kokoro_for_text_to_speech(nan_harness_i18n::locale()))]
     pub(crate) force_tts: bool,
-    #[arg(long, help = nan_harness_i18n::messages::help_use_nan_flux_2_klein_for_image_generation_and_editing(nan_harness_i18n::locale()))]
+    #[arg(long, visible_alias = "image", help = nan_harness_i18n::messages::help_use_nan_flux_2_klein_for_image_generation_and_editing(nan_harness_i18n::locale()))]
     pub(crate) force_image: bool,
+    #[arg(
+        long,
+        value_name = "MODEL",
+        value_parser = ["flux-2-klein", "qwen-image-2.1"],
+        help = nan_harness_i18n::messages::help_enable_images_with_model(nan_harness_i18n::locale())
+    )]
+    pub(crate) image_model: Option<String>,
 }
 
 #[derive(Debug, Default, Args)]

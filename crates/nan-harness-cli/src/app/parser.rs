@@ -32,8 +32,10 @@ impl Cli {
             .collect::<Vec<std::ffi::OsString>>();
         let parsed = match localization::command(Self::command())
             .try_get_matches_from(arguments.clone())
-            .and_then(|matches| Self::from_arg_matches(&matches))
-        {
+            .and_then(|matches| {
+                validate_image_model_harness(&matches)?;
+                Self::from_arg_matches(&matches)
+            }) {
             Ok(parsed) => parsed,
             Err(mut error) if localization::suggests_private_command(&error) => {
                 error.remove(ContextKind::SuggestedSubcommand);
@@ -54,5 +56,37 @@ impl Cli {
             ));
         }
         Ok(parsed)
+    }
+}
+
+fn validate_image_model_harness(matches: &clap::ArgMatches) -> Result<(), clap::Error> {
+    let Some((name, args)) = matches.subcommand() else {
+        return Ok(());
+    };
+    if args
+        .try_get_one::<String>("image_model")
+        .ok()
+        .flatten()
+        .is_none()
+    {
+        return Ok(());
+    }
+    let supported = matches!(name, "hermes" | "hermes-desktop" | "openclaw")
+        || name == "config"
+            && matches!(
+                args.get_one::<super::ConfigTarget>("harness"),
+                Some(super::ConfigTarget::Stable(
+                    nan_harness_core::HarnessKind::Hermes | nan_harness_core::HarnessKind::OpenClaw
+                ))
+            );
+    if supported {
+        Ok(())
+    } else {
+        Err(Cli::command().error(
+            clap::error::ErrorKind::InvalidValue,
+            nan_harness_i18n::messages::error_image_model_unsupported_harness(
+                nan_harness_i18n::locale(),
+            ),
+        ))
     }
 }

@@ -77,7 +77,7 @@ fn openclaw_config(model_id: &str, media: MediaSelection) -> Result<String, Plan
     base_value["tools"] = tools;
     if media.image {
         base_value["agents"]["defaults"]["mediaModels"] = json!({
-            "image": {"primary": "nan-harness/flux-2-klein"}
+            "image": {"primary": format!("nan-harness/{}", media.image_model.unwrap_or_default().as_str())}
         });
     }
     let mut plugin_paths = vec![json!(SEARCH_PLUGIN_PATH_SENTINEL)];
@@ -262,7 +262,7 @@ fn media_plugin_files(media: MediaSelection) -> Vec<OverlayFile> {
         OverlayFile {
             path: "plugins/nan-harness-media/index.js".to_owned(),
             mode: TemporaryArtifactMode::OwnerFile,
-            content_template: render_openclaw_media_plugin(MEDIA_PROVIDER_BASE_URL_PLACEHOLDER),
+            content_template: render_openclaw_media_plugin(MEDIA_PROVIDER_BASE_URL_PLACEHOLDER, media.image_model.unwrap_or_default()),
             policy: OverlayFilePolicy::Replace,
         },
     ]
@@ -270,7 +270,11 @@ fn media_plugin_files(media: MediaSelection) -> Vec<OverlayFile> {
 
 /// Renders the `OpenClaw` provider plugin for a persistent or launch-scoped home.
 #[must_use]
-pub fn render_openclaw_media_plugin(base_url: &str) -> String {
+pub fn render_openclaw_media_plugin(
+    base_url: &str,
+    image_model: nan_harness_core::ImageModel,
+) -> String {
+    let default_image_model = image_model.as_str();
     let encoded_base_url = serde_json::to_string(base_url).unwrap_or_else(|_| "\"\"".to_owned());
     format!(
         r#"import {{ definePluginEntry }} from "openclaw/plugin-sdk/plugin-entry";
@@ -336,16 +340,21 @@ const understanding = {{
 
 const image = {{
   id: "nan-harness",
-  label: "NaN Flux 2 Klein",
-  defaultModel: "flux-2-klein",
-  models: ["flux-2-klein"],
+  label: "NaN Images",
+  defaultModel: "{default_image_model}",
+  models: ["flux-2-klein", "qwen-image-2.1"],
   isConfigured: hasCredential,
   capabilities: {{ generate: {{ maxCount: 1 }}, edit: {{ enabled: true, maxCount: 1, maxInputImages: 4 }} }},
   generateImage: async request => withTempFile(".png", async output => {{
-    const args = ["--prompt", String(request.prompt ?? ""), "--output", output];
+    const model = request.model ?? "{default_image_model}";
+    if (!image.models.includes(model)) throw new Error("NH-MEDIA-MODEL: Choose flux-2-klein or qwen-image-2.1.");
+    if (model === "qwen-image-2.1" && request.inputImages?.length) {{
+      throw new Error("NH-MEDIA-EDIT: Qwen Image supports generation only. Choose flux-2-klein to edit images.");
+    }}
+    const args = ["--model", model, "--prompt", String(request.prompt ?? ""), "--output", output];
     for (const reference of request.inputImages ?? []) {{
       const path = `${{output}}-${{args.length}}.ref`;
-      await fs.writeFile(path, reference.buffer ?? reference);
+      await fs.writeFile(path, Buffer.isBuffer(reference) ? reference : reference.buffer);
       args.push("--input-image", path);
     }}
     const buffer = await runMedia("image", args, output);
@@ -356,7 +365,7 @@ const image = {{
 export default definePluginEntry({{
   id: "nan-harness-media",
   name: "nan-media",
-  description: "NaN Whisper, Kokoro, and Flux 2 Klein providers",
+  description: "NaN Whisper, Kokoro, Flux 2 Klein, and Qwen Image providers",
   register(api) {{
     api.registerSpeechProvider(speech);
     api.registerMediaUnderstandingProvider(understanding);

@@ -66,6 +66,8 @@ fn request(command: &str, options: &[&str], status: u16, body: &'static [u8]) ->
     assert_eq!(result.status.success(), status == 200);
     let expected = if status != 200 {
         b"existing output".as_slice()
+    } else if command == "image" {
+        b"synthetic-image".as_slice()
     } else if command == "stt" {
         b"synthetic transcript".as_slice()
     } else {
@@ -129,4 +131,57 @@ fn transcription_uses_nan_model_and_preserves_explicit_override() {
 fn failed_media_requests_preserve_existing_output() {
     request("tts", &[], 403, b"synthetic provider rejection");
     request("stt", &[], 401, b"synthetic provider rejection");
+}
+
+#[test]
+fn image_defaults_and_overrides_reach_the_provider() {
+    for (options, model) in [
+        (vec!["--prompt", "synthetic"], "flux-2-klein"),
+        (
+            vec!["--prompt", "synthetic", "--model", "qwen-image-2.1"],
+            "qwen-image-2.1",
+        ),
+    ] {
+        let request = request(
+            "image",
+            &options,
+            200,
+            br#"{"data":[{"b64_json":"c3ludGhldGljLWltYWdl"}]}"#,
+        );
+        assert!(request.starts_with("POST /v1/images/generations "));
+        let body: serde_json::Value =
+            serde_json::from_str(request.split_once("\r\n\r\n").expect("body").1).expect("JSON");
+        assert_eq!(body["model"], model);
+    }
+}
+
+#[test]
+fn unsupported_qwen_edits_preserve_the_existing_output() {
+    let directory = tempfile::tempdir().expect("workspace");
+    let output = directory.path().join("output.png");
+    std::fs::write(&output, b"existing image").expect("existing output");
+    let result = Command::new(env!("CARGO_BIN_EXE_nanh"))
+        .args([
+            "__media",
+            "image",
+            "--provider-base-url",
+            "http://127.0.0.1:1/v1",
+            "--model",
+            "qwen-image-2.1",
+            "--prompt",
+            "synthetic edit",
+            "--input-image",
+        ])
+        .arg(&output)
+        .arg("--output")
+        .arg(&output)
+        .env("NAN_MEDIA_API_KEY", "synthetic-key")
+        .output()
+        .expect("helper");
+    assert!(!result.status.success());
+    assert!(String::from_utf8_lossy(&result.stderr).contains("flux-2-klein"));
+    assert_eq!(
+        std::fs::read(output).expect("preserved file"),
+        b"existing image"
+    );
 }

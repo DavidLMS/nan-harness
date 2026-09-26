@@ -5,6 +5,10 @@ use super::types::{DocumentPlan, ExactFilePlan, JsonPlan};
 use super::values::{openclaw_aliases, openclaw_provider};
 use std::path::Path;
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "keep the owned OpenClaw settings and plugin files in one reviewable plan"
+)]
 pub(crate) fn openclaw_plans(
     directory: &Path,
     api_key: &str,
@@ -14,6 +18,7 @@ pub(crate) fn openclaw_plans(
     search_managed: bool,
     media: MediaSelection,
 ) -> Vec<DocumentPlan> {
+    let image_model = media.image_model.unwrap_or_default();
     let plugin_directory = directory.join("extensions/nan-harness-search");
     let media_plugin_directory = directory.join("extensions/nan-harness-media");
     let mut entries = vec![
@@ -79,7 +84,7 @@ pub(crate) fn openclaw_plans(
     if media.image {
         entries.push(override_json(
             &["agents", "defaults", "mediaModels", "image", "primary"],
-            Value::String("nan-harness/flux-2-klein".to_owned()),
+            Value::String(format!("nan-harness/{}", image_model.as_str())),
         ));
     }
     vec![
@@ -111,7 +116,7 @@ pub(crate) fn openclaw_plans(
             path: media_plugin_directory.join("index.js"),
             payload: media
                 .any()
-                .then(|| nan_harness_adapters::render_openclaw_media_plugin(base_url).into_bytes()),
+                .then(|| nan_harness_adapters::render_openclaw_media_plugin(base_url, image_model).into_bytes()),
         }),
     ]
 }
