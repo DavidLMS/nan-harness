@@ -6,12 +6,13 @@ pub const CLAUDE_AUTO_MODE_PROVIDER_MODEL_ID: &str = "qwen3.6";
 pub const GENERIC_CODING_MODEL_DESCRIPTION: &str = "NaN text model · capabilities not yet profiled";
 pub const GENERIC_CODING_MODEL_CONTEXT_WINDOW: u64 = 262_144;
 pub const GENERIC_CODING_MODEL_MAX_OUTPUT_TOKENS: u64 = 32_768;
-pub const KNOWN_NON_CODING_MODELS: [&str; 6] = [
+pub const KNOWN_NON_CODING_MODELS: [&str; 7] = [
     "whisper",
     "qwen3-embedding",
     "rerank",
     "kokoro",
     "flux-2-klein",
+    "qwen-image-2.1",
     "minimax-h3",
 ];
 pub const KNOWN_CODING_MODELS: [CodingModelMetadata; 8] = [
@@ -54,13 +55,17 @@ pub const KNOWN_CODING_MODELS: [CodingModelMetadata; 8] = [
         },
     },
     CodingModelMetadata {
-        id: "mimo-v2.5",
-        display_name: "NaN · MiMo V2.5",
-        description: "Omnimodal reasoning · tools + vision · 1M",
+        // Xiaomi documents 1M context and 128K output. NaN honors its shared
+        // chat_template_kwargs.enable_thinking switch for this model.
+        id: "mimo-v2.6-flash",
+        display_name: "NaN · MiMo V2.6 Flash",
+        description: "Omnimodal reasoning · tools + vision · 1M context",
         context_window: 1_000_000,
-        max_output_tokens: 65_536,
+        max_output_tokens: 131_072,
         image_input: true,
-        reasoning: ReasoningPolicy::AlwaysOn,
+        reasoning: ReasoningPolicy::Toggle {
+            default_enabled: true,
+        },
     },
     CodingModelMetadata {
         id: "gemma4",

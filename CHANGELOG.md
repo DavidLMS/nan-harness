@@ -9,6 +9,10 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- Promote MiMo V2.6 Flash to the curated coding catalog with shared capabilities
+  and descriptions; retain MiMo V2.5 only through live model discovery.
+- Exclude Qwen Image 2.1 from text model catalogs.
+
 - Replace the daily source detector with release-scoped CLI compatibility checks
   at 05:00 Europe/Madrid. Verify new upstream versions across their supported
   platforms and publish successful harness results to both compatibility feeds.

@@ -205,7 +205,7 @@ mod tests {
         let catalog = CodexModelCatalog::from_provider_ids(
             [
                 "qwen3.6".to_owned(),
-                "mimo-v2.5".to_owned(),
+                "mimo-v2.6-flash".to_owned(),
                 "qwen3-embedding".to_owned(),
                 "whisper".to_owned(),
                 "minimax-h3".to_owned(),
@@ -221,7 +221,7 @@ mod tests {
             .iter()
             .map(|model| model["slug"].as_str().expect("slug should be text"))
             .collect::<Vec<_>>();
-        assert_eq!(slugs, ["qwen3.6", "mimo-v2.5"]);
+        assert_eq!(slugs, ["qwen3.6", "mimo-v2.6-flash"]);
     }
 
     #[test]
@@ -251,7 +251,7 @@ mod tests {
             [
                 "qwen3.6",
                 "deepseek-v4-flash",
-                "mimo-v2.5",
+                "mimo-v2.6-flash",
                 "gemma4",
                 "glm5.2",
             ]
@@ -284,7 +284,10 @@ mod tests {
                 vec![json!("low"), json!("medium"), json!("high")]
             )
         );
-        assert_eq!(contract(2), (json!("high"), vec![json!("high")]));
+        assert_eq!(
+            contract(2),
+            (json!("high"), vec![json!("none"), json!("high")])
+        );
         assert_eq!(
             contract(3),
             (json!("none"), vec![json!("none"), json!("high")])
@@ -354,7 +357,7 @@ mod tests {
     #[test]
     fn catalog_rejects_an_unavailable_selected_model() {
         let error = CodexModelCatalog::from_provider_ids(
-            ["qwen3.6".to_owned(), "mimo-v2.5".to_owned()],
+            ["qwen3.6".to_owned(), "mimo-v2.6-flash".to_owned()],
             "gemma4",
         )
         .expect_err("unavailable model should be rejected");

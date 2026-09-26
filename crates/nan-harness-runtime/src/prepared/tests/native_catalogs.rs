@@ -13,7 +13,7 @@ use super::support::{known_models, model};
 
 #[test]
 fn model_catalog_rendering_deduplicates_ids_stably() {
-    let models = [model("qwen3.6"), model("qwen3.6"), model("mimo-v2.5")];
+    let models = [model("qwen3.6"), model("qwen3.6"), model("mimo-v2.6-flash")];
     let template = format!(
         r#"{{"opencode":{OPENCODE_MODEL_CATALOG_PLACEHOLDER},"pi":{PI_MODEL_CATALOG_PLACEHOLDER}}}"#
     );
@@ -35,7 +35,7 @@ fn model_catalog_rendering_deduplicates_ids_stably() {
             .expect("map")
             .keys()
             .collect::<Vec<_>>(),
-        &[&"mimo-v2.5".to_owned(), &"qwen3.6".to_owned()]
+        &[&"mimo-v2.6-flash".to_owned(), &"qwen3.6".to_owned()]
     );
 }
 
@@ -141,7 +141,7 @@ fn metadata_and_capabilities_do_not_claim_reasoning_for_every_model() {
             .find(|entry| entry["id"] == id)
             .expect("model")
     };
-    assert_eq!(by_id("mimo-v2.5")["reasoning"], true);
+    assert_eq!(by_id("mimo-v2.6-flash")["reasoning"], true);
     assert_eq!(by_id("glm5.2")["reasoning"], true);
 
     let selected = render_model_catalogs(
@@ -187,7 +187,7 @@ fn metadata_and_capabilities_do_not_claim_reasoning_for_every_model() {
     );
 
     let deepseek = deepseek_model_catalog(&models).expect("DeepSeek catalog");
-    assert!(deepseek.contains("id: \"mimo-v2.5\""));
+    assert!(deepseek.contains("id: \"mimo-v2.6-flash\""));
     assert!(deepseek.contains("reasoning: true"));
     let glm_section = deepseek
         .split("id: \"glm5.2\"")
@@ -236,7 +236,7 @@ fn aider_declares_reasoning_effort_for_effort_capable_models() {
     }
     assert!(by_name("openai/qwen3.6").get("reasoning_effort").is_none());
     assert!(
-        by_name("openai/mimo-v2.5")
+        by_name("openai/mimo-v2.6-flash")
             .get("reasoning_effort")
             .is_none()
     );

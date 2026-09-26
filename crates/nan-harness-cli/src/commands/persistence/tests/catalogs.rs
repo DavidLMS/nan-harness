@@ -184,7 +184,7 @@ fn assert_persisted_catalogs<const N: usize>(paths: [&Path; N], qwen_path: &Path
     for path in paths {
         let persisted =
             std::fs::read_to_string(path).expect("persistent configuration should be readable");
-        for model in ["qwen3.6", "deepseek-v4-flash", "mimo-v2.5", "gemma4"] {
+        for model in ["qwen3.6", "deepseek-v4-flash", "mimo-v2.6-flash", "gemma4"] {
             assert!(
                 persisted.contains(model),
                 "{} is missing {model}",

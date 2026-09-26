@@ -71,7 +71,7 @@ async fn supervisor_materializes_new_text_models_in_every_direct_catalog_format(
             "printf '%s' \"$OPENCODE_MODELS\" | grep -Fq 'capabilities not yet profiled' && ",
             "printf '%s' \"$GOOSE_MODELS\" | grep -Fq 'capabilities not yet profiled' && ",
             "printf '%s' \"$KIMI_MODELS\" | grep -Fq 'provider = \"__kimi_env__\"' && ",
-            "printf '%s' \"$KIMI_MODELS\" | grep -Fq 'nan/mimo-v2.5' && ",
+            "printf '%s' \"$KIMI_MODELS\" | grep -Fq 'nan/mimo-v2.6-flash' && ",
             "! printf '%s' \"$KIMI_MODELS\" | grep -Fq 'nan/qwen3.6'"
         )
         .to_owned(),

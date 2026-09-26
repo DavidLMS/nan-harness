@@ -112,11 +112,12 @@ async fn fake_models(headers: HeaderMap) -> Response {
         "object": "list",
         "data": [
             {"id": "qwen3.6", "object": "model"},
-            {"id": "mimo-v2.5", "object": "model"},
+            {"id": "mimo-v2.6-flash", "object": "model"},
             {"id": "gemma4", "object": "model"},
             {"id": "qwen3-embedding", "object": "model"},
             {"id": "whisper", "object": "model"},
             {"id": "minimax-h3", "object": "model"},
+            {"id": "qwen-image-2.1", "object": "model"},
             {"id": "deepseek-v4-flash-0731", "object": "model"}
         ]
     }))

@@ -40,10 +40,10 @@ async fn supervisor_prepares_and_cleans_an_anthropic_bridge_launch() {
             "test -z \"$CLAUDE_CODE_SUBPROCESS_ENV_SCRUB\" && ",
             "test \"$ANTHROPIC_MODEL\" = \"anthropic/nan/qwen3.6\" && ",
             "test \"$CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY\" = \"1\" && ",
-            "grep -Fq '\"availableModels\":[\"anthropic/nan/qwen3.6\",\"anthropic/nan/mimo-v2.5\",\"anthropic/nan/gemma4\",\"anthropic/nan/deepseek-v4-flash-0731\"]' \"$1\" && ",
+            "grep -Fq '\"availableModels\":[\"anthropic/nan/qwen3.6\",\"anthropic/nan/mimo-v2.6-flash\",\"anthropic/nan/gemma4\",\"anthropic/nan/deepseek-v4-flash-0731\"]' \"$1\" && ",
             "grep -Fq '\"replaceBuiltInOptions\":true' \"$1\" && ",
             "grep -Fq '\"model\":\"opus\"' \"$1\" && ",
-            "grep -Fq '\"model\":\"anthropic/nan/mimo-v2.5[1m]\"' \"$1\" && ",
+            "grep -Fq '\"model\":\"anthropic/nan/mimo-v2.6-flash[1m]\"' \"$1\" && ",
             "! grep -Fq '\"model\":\"anthropic/nan/gemma4[1m]\"' \"$1\" && ",
             "! grep -Fq '\"model\":\"anthropic/nan/deepseek-v4-flash-0731[1m]\"' \"$1\" && ",
             "grep -Fq '\"ANTHROPIC_DEFAULT_OPUS_MODEL\":\"anthropic/nan/qwen3.6\"' \"$1\" && ",
@@ -121,12 +121,12 @@ async fn supervisor_materializes_a_codex_catalog_for_the_responses_bridge() {
             "catalog=${1#--catalog=} && ",
             "test -f \"$catalog\" && ",
             "grep -Fq '\"slug\":\"qwen3.6\"' \"$catalog\" && ",
-            "grep -Fq '\"slug\":\"mimo-v2.5\"' \"$catalog\" && ",
+            "grep -Fq '\"slug\":\"mimo-v2.6-flash\"' \"$catalog\" && ",
             "grep -Fq '\"slug\":\"gemma4\"' \"$catalog\" && ",
             "grep -Fq '\"slug\":\"deepseek-v4-flash-0731\"' \"$catalog\" && ",
             "! grep -Fq '\"slug\":\"qwen3-embedding\"' \"$catalog\" && ",
             "grep -Fq '\"apply_patch_tool_type\":\"freeform\"' \"$catalog\" && ",
-            "printf '%s\\n' 'model = \"mimo-v2.5\"' > \"$2/config.toml\""
+            "printf '%s\\n' 'model = \"mimo-v2.6-flash\"' > \"$2/config.toml\""
         )
         .to_owned(),
         "nan-harness-test".to_owned(),
@@ -145,7 +145,7 @@ async fn supervisor_materializes_a_codex_catalog_for_the_responses_bridge() {
         .await
         .expect("responses bridge launch should complete");
     assert_eq!(report.outcome, ExecutionOutcome::Succeeded);
-    assert_eq!(report.selected_model.as_deref(), Some("mimo-v2.5"));
+    assert_eq!(report.selected_model.as_deref(), Some("mimo-v2.6-flash"));
     assert_removed(report.temporary_root);
 
     plan.process.arguments[1] =

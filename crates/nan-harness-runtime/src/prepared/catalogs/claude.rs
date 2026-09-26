@@ -52,7 +52,7 @@ const CLAUDE_MODEL_FAMILIES: [&str; 3] = ["OPUS", "SONNET", "HAIKU"];
 const CLAUDE_CURATED_MODEL_PRIORITY: [&str; 5] = [
     "qwen3.6",
     "deepseek-v4-flash",
-    "mimo-v2.5",
+    "mimo-v2.6-flash",
     "glm5.2",
     "gemma4",
 ];

@@ -40,7 +40,7 @@ fn claude_model_picker_settings_template_for(model: &str) -> String {
 fn claude_picker_slots_come_from_the_discovered_catalog() {
     let models = [
         coding_model_profile("qwen3.6").expect("known coding model"),
-        coding_model_profile("mimo-v2.5").expect("known coding model"),
+        coding_model_profile("mimo-v2.6-flash").expect("known coding model"),
     ];
     let rendered = render_model_catalogs(
         &claude_settings_template(),
@@ -67,7 +67,7 @@ fn claude_picker_slots_come_from_the_discovered_catalog() {
     );
     assert_eq!(
         environment["ANTHROPIC_DEFAULT_SONNET_MODEL"],
-        "anthropic/nan/mimo-v2.5"
+        "anthropic/nan/mimo-v2.6-flash"
     );
     assert!(
         !environment.contains_key("ANTHROPIC_DEFAULT_HAIKU_MODEL"),

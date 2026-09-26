@@ -15,7 +15,7 @@ fn deepseek_completes_a_real_read_tool_round_trip() {
 #[test]
 #[ignore = "requires Claude Code, network access, and NAN_API_KEY"]
 fn mimo_completes_a_real_read_tool_round_trip() {
-    assert_read_tool_round_trip("mimo-v2.5");
+    assert_read_tool_round_trip("mimo-v2.6-flash");
 }
 
 #[test]

@@ -193,7 +193,7 @@ fn scoped_profile_fixture() -> ScopedProfileFixture {
             "profile_path=$CODEX_HOME/$profile.config.toml\n",
             "grep -Fq 'model = \"qwen3.6\"' \"$profile_path\"\n",
             "grep -Fq 'model_reasoning_effort = \"high\"' \"$profile_path\"\n",
-            "printf '%s\\n' 'model = \"mimo-v2.5\"' 'model_reasoning_effort = \"high\"' > \"$profile_path\"\n",
+            "printf '%s\\n' 'model = \"mimo-v2.6-flash\"' 'model_reasoning_effort = \"high\"' > \"$profile_path\"\n",
         ),
     );
     ScopedProfileFixture {
@@ -252,7 +252,7 @@ fn assert_scoped_profile_result(fixture: &ScopedProfileFixture, output: &Output)
     );
     assert_saved_codex_selection(
         &fixture.config,
-        "mimo-v2.5",
+        "mimo-v2.6-flash",
         &serde_json::json!({"kind": "toggle", "value": true}),
     );
 }

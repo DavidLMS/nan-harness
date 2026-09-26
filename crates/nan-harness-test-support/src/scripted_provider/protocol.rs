@@ -16,7 +16,7 @@ pub(super) async fn models(State(state): State<Arc<ProviderState>>) -> Json<Valu
         "data": [
             {"id": "qwen3.6", "object": "model"},
             {"id": "deepseek-v4-flash", "object": "model"},
-            {"id": "mimo-v2.5", "object": "model"},
+            {"id": "mimo-v2.6-flash", "object": "model"},
             {"id": "gemma4", "object": "model"}
         ]
     }))
