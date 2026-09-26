@@ -179,7 +179,10 @@ async fn run_case(
     );
     if model.is_some() && streaming && status == 200 {
         let snapshot = bridge.usage();
-        if matches!(expected, "invalid_response" | "transport" | "cancelled") {
+        let completed = payload
+            .windows(b"[DONE]".len())
+            .any(|part| part == b"[DONE]");
+        if !completed && matches!(expected, "invalid_response" | "transport" | "cancelled") {
             assert_eq!(snapshot.incomplete_responses(), 1);
         } else {
             assert_eq!(

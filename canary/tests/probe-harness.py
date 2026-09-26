@@ -397,7 +397,10 @@ class ProbeHarnessTests(unittest.TestCase):
             self.assertEqual(report["failure"]["code"], "live-harness-run-exit-17")
             self.assertIn("harness-run", report["failure"]["summary"])
             self.assertIn("exit status 17", report["failure"]["summary"])
-            for diagnostic in ("live-child-launch", "live-credential-missing"):
+            for diagnostic in ("live-child-launch", "live-credential-missing",
+                               "live-usage-invalid", "live-usage-missing", "live-usage-unreadable",
+                               "live-usage-malformed", "live-usage-schema-invalid",
+                               "live-usage-not-observed", "live-usage-unsupported"):
                 with mock.patch.object(CELL, "private_command", return_value=0):
                     CELL.failed_report(args, CELL.ProbeFailure("harness-run", 1, diagnostic))
                 report = json.loads(args.output.read_text())

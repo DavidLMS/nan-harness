@@ -85,6 +85,22 @@ failure fingerprint. They exclude credentials, prompts, responses, tool
 payloads, command output, and local paths. Raw output is retained only in
 private local logs when explicitly requested.
 
+### OMP usage incident comparison
+
+The manual Native Windows CLI diagnostic workflow accepts
+`omp_usage_comparison=true` for the 2026-09-26 usage incident. This runs four
+isolated cells: OMP 18.3.1 and 18.3.2 against the signed v0.1.11 Windows assets
+and against binaries built from the dispatch SHA. It ignores the normal batch
+selection inputs, uses qwen3.6, makes one attempt per pair, and never publishes
+compatibility evidence. The candidate is identified by its source and binary
+hashes, not treated as release evidence. The `canary-live` environment's branch
+policy must authorize the dispatch ref; do not bypass it with a release tag.
+
+The artifacts contain only provenance and sanitized cell reports. Usage failures
+distinguish missing/unreadable evidence, malformed JSON, an invalid schema,
+not-observed usage and unsupported usage. All remain failures. A later passing
+run does not establish the cause of the original incident.
+
 ## Operations
 
 This runbook configures and operates the compatibility canary host.

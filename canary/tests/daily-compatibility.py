@@ -58,6 +58,12 @@ class DailyEvidenceTests(unittest.TestCase):
             env = dict(os.environ, GIT_INDEX_FILE=str(checkout / "index"))
             subprocess.run(["git", "read-tree", "HEAD"], cwd=ROOT, env=env, check=True)
             source = "canary/actions/cell.py"
+            # Exercise checkout conversion of the current source, including
+            # uncommitted edits, without touching the user's real index.
+            blob = subprocess.run(["git", "hash-object", "-w", source], cwd=ROOT,
+                                  check=True, capture_output=True, text=True).stdout.strip()
+            subprocess.run(["git", "update-index", "--cacheinfo", "100644", blob, source],
+                           cwd=ROOT, env=env, check=True)
             subprocess.run(["git", "-c", "core.autocrlf=true", "checkout-index",
                             "--prefix=" + str(checkout) + "/", source],
                            cwd=ROOT, env=env, check=True)

@@ -391,7 +391,7 @@ WINDOWS_LIVE_DIAGNOSTICS = frozenset({
     "live-error-provider", "live-error-config",
     "live-child-launch", "live-exit-nonzero", "live-exit-missing", "live-credential-missing",
     "live-tool-evidence-missing", "live-read-marker-missing", "live-completion-marker-missing",
-    "live-bridge-sentinel", "live-usage-invalid", "live-usage-summary-missing",
+    "live-bridge-sentinel", "live-usage-invalid", "live-usage-missing", "live-usage-unreadable", "live-usage-malformed", "live-usage-schema-invalid", "live-usage-not-observed", "live-usage-unsupported", "live-usage-summary-missing",
     "probe-unexpected-failure",
 })
 

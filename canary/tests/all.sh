@@ -34,6 +34,7 @@ for test_script in \
   hosted-cli-selection.py \
   hosted-cli-workflow.py \
   daily-compatibility.py \
+  omp-usage-comparison.py \
   cli-resolution.py \
   cli-execution.py \
   deepseek-install-diagnostic.py \

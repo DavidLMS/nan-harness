@@ -3,6 +3,10 @@ name: Native Windows CLI diagnostic
 on:
   workflow_dispatch:
     inputs:
+      omp_usage_comparison:
+        description: Compare frozen OMP 18.3.1/18.3.2 with v0.1.11 and this workflow SHA; no publication
+        type: boolean
+        default: false
       harnesses:
         description: all or comma-separated harness identifiers
         required: true
@@ -29,11 +33,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: windows-cli-diagnostic-${{ github.repository }}
+  group: windows-cli-diagnostic-${{ github.repository }}${{ inputs.omp_usage_comparison && '-omp-usage' || '' }}
   cancel-in-progress: true
 
 jobs:
   diagnostic:
+    if: ${{ !inputs.omp_usage_comparison }}
     name: Windows 2025 x64 batch diagnostic
     runs-on: windows-2025
     timeout-minutes: 120
@@ -459,3 +464,67 @@ jobs:
           if ($env:DIAGNOSTIC_MODE -eq 'native-diagnostic' -and $report.nativePrerequisites.status -ne 'PASS') {
             throw "Native prerequisite diagnostic did not pass: $($report.nativePrerequisites.reason)."
           }
+
+  omp-usage-comparison:
+    if: inputs.omp_usage_comparison
+    name: OMP usage (${{ matrix.kind }}, ${{ matrix.omp }})
+    runs-on: windows-2025
+    timeout-minutes: 90
+    environment: canary-live
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        kind: [release, candidate]
+        omp: ['18.3.1', '18.3.2']
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.20.0
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version: '3.12.10'
+      - name: Verify native probe categories in both PowerShell versions
+        run: |
+          $output = & python -m unittest -v canary/tests/probe-harness-windows.py canary/tests/omp-usage-comparison.py 2>&1
+          $code = $LASTEXITCODE
+          $output | Write-Output
+          if ($code -ne 0 -or $output -match 'skipped=[1-9][0-9]*') {
+            throw 'OMP usage fixtures failed or skipped native coverage'
+          }
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        if: matrix.kind == 'candidate'
+        with:
+          shared-key: omp-usage-windows
+      - name: Build and test the exact candidate
+        if: matrix.kind == 'candidate'
+        run: |
+          cargo test --locked -p nan-harness-bridge --all-features --lib chat_completions::usage_observer
+          if ($LASTEXITCODE -ne 0) { throw 'usage observer regression failed' }
+          cargo test --locked -p nan-harness-bridge --all-features --test chat_completions terminal_outcomes
+          if ($LASTEXITCODE -ne 0) { throw 'terminal outcome regression failed' }
+          cargo build --locked --release -p nan-harness-cli --bin nan-harness -p nan-harness-canary --bin nan-harness-canary
+          if ($LASTEXITCODE -ne 0) { throw 'candidate build failed' }
+      - name: Compare one frozen version without publishing
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NAN_API_KEY: ${{ secrets.NAN_API_KEY }}
+          BINARY_KIND: ${{ matrix.kind }}
+          OMP_VERSION: ${{ matrix.omp }}
+        run: |
+          python canary/actions/omp_usage_comparison.py --kind $env:BINARY_KIND --omp-version $env:OMP_VERSION --directory "$env:RUNNER_TEMP/omp-usage" --reports "$env:RUNNER_TEMP/omp-usage-reports"
+          if ($LASTEXITCODE -ne 0) { throw 'OMP usage comparison failed; inspect sanitized reports' }
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: omp-usage-${{ github.run_attempt }}-${{ matrix.kind }}-${{ matrix.omp }}
+          path: ${{ runner.temp }}/omp-usage-reports/*.json
+          if-no-files-found: warn
+          retention-days: 30
