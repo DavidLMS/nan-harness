@@ -7,6 +7,14 @@ use std::fs;
 fn version_updates_only_touch_workspace_and_local_packages() {
     assert!(CARGO_MANIFEST_FILES.contains(&"crates/nan-harness-private-fs/Cargo.toml"));
     assert!(LOCAL_PACKAGE_NAMES.contains(&"nan-harness-private-fs"));
+    for (manifest, package) in [
+        ("crates/nan-harness-detach/Cargo.toml", "nan-harness-detach"),
+        ("crates/nan-harness-i18n/Cargo.toml", "nan-harness-i18n"),
+        ("crates/nan-harness-search/Cargo.toml", "nan-harness-search"),
+    ] {
+        assert!(CARGO_MANIFEST_FILES.contains(&manifest));
+        assert!(LOCAL_PACKAGE_NAMES.contains(&package));
+    }
 
     let directory = tempfile::tempdir().expect("temporary directory should exist");
     let manifest = directory.path().join("Cargo.toml");

@@ -6,7 +6,7 @@ use std::fs;
 use std::path::Path;
 use time::OffsetDateTime;
 
-pub(super) const CARGO_MANIFEST_FILES: [&str; 13] = [
+pub(super) const CARGO_MANIFEST_FILES: [&str; 16] = [
     "Cargo.toml",
     "crates/nan-harness-adapters/Cargo.toml",
     "crates/nan-harness-bridge/Cargo.toml",
@@ -14,23 +14,29 @@ pub(super) const CARGO_MANIFEST_FILES: [&str; 13] = [
     "crates/nan-harness-cli/Cargo.toml",
     "crates/nan-harness-coordinator/Cargo.toml",
     "crates/nan-harness-core/Cargo.toml",
+    "crates/nan-harness-detach/Cargo.toml",
     "crates/nan-harness-diagnostics/Cargo.toml",
+    "crates/nan-harness-i18n/Cargo.toml",
     "crates/nan-harness-private-fs/Cargo.toml",
     "crates/nan-harness-runtime/Cargo.toml",
+    "crates/nan-harness-search/Cargo.toml",
     "crates/nan-harness-telemetry/Cargo.toml",
     "crates/nan-harness-test-support/Cargo.toml",
     "xtask/Cargo.toml",
 ];
-pub(super) const LOCAL_PACKAGE_NAMES: [&str; 12] = [
+pub(super) const LOCAL_PACKAGE_NAMES: [&str; 15] = [
     "nan-harness-adapters",
     "nan-harness-bridge",
     "nan-harness-canary",
     "nan-harness-cli",
     "nan-harness-coordinator",
     "nan-harness-core",
+    "nan-harness-detach",
     "nan-harness-diagnostics",
+    "nan-harness-i18n",
     "nan-harness-private-fs",
     "nan-harness-runtime",
+    "nan-harness-search",
     "nan-harness-telemetry",
     "nan-harness-test-support",
     "xtask",
