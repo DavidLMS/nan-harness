@@ -7,6 +7,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.12] - 2026-09-26
+
 ### Added
 
 - Select the default NaN image model with `--image-model`, which also enables
@@ -847,7 +849,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   startup update prompts, daily compatibility canaries, and a monotonic remote
   verification feed.
 
-[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.1.11...HEAD
+[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.1.12...HEAD
+[0.1.12]: https://github.com/DavidLMS/nan-harness/compare/v0.1.11...v0.1.12
 [0.1.11]: https://github.com/DavidLMS/nan-harness/compare/v0.1.10...v0.1.11
 [0.1.10]: https://github.com/DavidLMS/nan-harness/compare/v0.1.9...v0.1.10
 [0.1.9]: https://github.com/DavidLMS/nan-harness/compare/v0.1.8...v0.1.9
