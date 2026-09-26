@@ -46,6 +46,11 @@ replacement built from `main` or block an independently usable release.
 
 Official upstream versions are frozen before native cells run. Only versions
 newer than each release's live evidence, or missing that evidence, are tested.
+The shared daily/release resolver retries HTTP 429 metadata reads at most twice
+per URL. It honors `Retry-After` and exhausted GitHub rate-limit reset times;
+without those headers it waits 60, then 120 seconds. A requested wait above
+120 seconds or an invalid cooldown fails without retrying early. Exhausted
+retries retain the sanitized HTTP failure and never substitute a version.
 Unresolved metadata and failed cells are retried on the next daily run. Each
 harness must pass installation, diagnosis, deterministic conformance and live
 `qwen3.6` on Linux, macOS and Windows; Prime Agent and FX remain unavailable on

@@ -3,6 +3,7 @@
 
 import argparse
 from dataclasses import asdict, dataclass
+from email.utils import parsedate_to_datetime
 import hashlib
 import json
 import os
@@ -10,7 +11,9 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import time
 import tomllib
+from urllib.error import HTTPError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 from urllib.parse import urlsplit
 
@@ -162,6 +165,39 @@ def _validate_resolution_diagnostic(value):
         raise ValueError("invalid resolver diagnostic status")
 
 
+def _rate_limit_delay(headers, attempt):
+    """Respect server cooldowns; do not retry early when they exceed our budget."""
+    delay = 60 * (2 ** attempt)
+    retry_after = headers.get("Retry-After")
+    try:
+        if retry_after is not None:
+            if retry_after.strip().isdigit():
+                delay = int(retry_after)
+            else:
+                delay = parsedate_to_datetime(retry_after).timestamp() - time.time()
+        if headers.get("X-RateLimit-Remaining") == "0":
+            delay = max(delay, int(headers["X-RateLimit-Reset"]) - time.time())
+    except (ValueError, TypeError, OverflowError, KeyError):
+        return None
+    return max(1, delay) if delay <= 120 else None
+
+
+def _open_official(request, timeout):
+    """Retry throttled metadata reads at most twice, without following redirects."""
+    opener = build_opener(_NoRedirect)
+    for attempt in range(3):
+        try:
+            return opener.open(request, timeout=timeout)
+        except HTTPError as error:
+            error.close()
+            if error.code != 429 or attempt == 2:
+                raise
+            delay = _rate_limit_delay(error.headers or {}, attempt)
+            if delay is None:
+                raise
+            time.sleep(delay)
+
+
 def _official_json(url, timeout=20):
     parsed = urlsplit(url)
     headers = {"Accept": "application/json", "User-Agent": "nan-harness-cli-gate"}
@@ -172,8 +208,7 @@ def _official_json(url, timeout=20):
         if token:
             headers["Authorization"] = "Bearer " + token
     request = Request(url, headers=headers)
-    opener = build_opener(_NoRedirect)
-    with opener.open(request, timeout=timeout) as response:
+    with _open_official(request, timeout) as response:
         raw = response.read(2_000_001)
         if len(raw) > 2_000_000:
             raise ValueError("official version metadata exceeds its size limit")
@@ -182,7 +217,7 @@ def _official_json(url, timeout=20):
 
 def _official_text(url, limit=256, timeout=20):
     request = Request(url, headers={"User-Agent": "nan-harness-cli-gate"})
-    with build_opener(_NoRedirect).open(request, timeout=timeout) as response:
+    with _open_official(request, timeout) as response:
         raw = response.read(limit + 1)
     if len(raw) > limit:
         raise ValueError("official version marker exceeds its size limit")

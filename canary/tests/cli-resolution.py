@@ -9,7 +9,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from urllib.error import HTTPError, URLError
 import socket
 import ssl
@@ -43,6 +43,92 @@ suite = load("cli_suite_resolution", "cli-suite.py")
 
 
 class CliResolutionTests(unittest.TestCase):
+    def test_hermes_recovers_from_throttling_at_each_official_endpoint(self):
+        commit = "a" * 40
+        urls = [
+            "https://api.github.com/repos/NousResearch/hermes-agent/releases/latest",
+            "https://api.github.com/repos/NousResearch/hermes-agent/commits/v2026.9.11",
+            "https://raw.githubusercontent.com/NousResearch/hermes-agent/" + commit + "/pyproject.toml",
+        ]
+        documents = [b'{"tag_name":"v2026.9.11"}',
+                     json.dumps({"sha": commit}).encode(), b'[project]\nversion = "0.21.2"\n']
+        for throttled_url in urls:
+            with self.subTest(endpoint=throttled_url):
+                seen = []
+                failed_body = io.BytesIO(b"private upstream error")
+
+                def open_request(request, timeout):
+                    url = request.full_url
+                    seen.append((url, request.get_header("Authorization"), timeout))
+                    if url == throttled_url and sum(item[0] == url for item in seen) == 1:
+                        raise HTTPError(url, 429, "private reason", {"Retry-After": "2"}, failed_body)
+                    return io.BytesIO(documents[urls.index(url)])
+
+                opener = Mock()
+                opener.open.side_effect = open_request
+                with patch.object(suite, "build_opener", return_value=opener), \
+                        patch.object(suite.time, "sleep") as sleep, \
+                        patch.dict(suite.os.environ, {"GITHUB_TOKEN": "test-token"}):
+                    resolved, unresolved = suite.resolve_manifest(
+                        ["hermes"], "linux", "aarch64", "qwen3.6")
+                self.assertEqual(unresolved, [])
+                self.assertEqual((resolved[0].version, resolved[0].ref), ("0.21.2", commit))
+                self.assertEqual(len(seen), 4)
+                self.assertTrue(failed_body.closed)
+                sleep.assert_called_once_with(2)
+                for url, auth, timeout in seen:
+                    self.assertEqual(auth, None if url == urls[2] else "Bearer test-token")
+                    self.assertEqual(timeout, 20)
+
+    def test_persistent_throttling_is_bounded_and_preserves_safe_diagnostic(self):
+        opener = Mock()
+        opener.open.side_effect = [HTTPError("https://private.example", 429,
+                                             "private reason", {}, io.BytesIO(b"private body"))
+                                   for _ in range(3)]
+        with patch.object(suite, "build_opener", return_value=opener), \
+                patch.object(suite.time, "sleep") as sleep:
+            resolved, unresolved = suite.resolve_manifest(
+                ["hermes"], "linux", "aarch64", "qwen3.6")
+        self.assertEqual(resolved, [])
+        self.assertEqual(unresolved[0].diagnostic, {"category": "http", "httpStatus": 429})
+        self.assertEqual(opener.open.call_count, 3)
+        self.assertEqual([call.args[0] for call in sleep.call_args_list], [60, 120])
+        self.assertNotIn("private", json.dumps(unresolved[0].as_dict()))
+
+    def test_long_or_invalid_cooldowns_fail_without_retrying_early(self):
+        for value in ("121", "garbage", "-1"):
+            with self.subTest(retry_after=value):
+                opener = Mock()
+                opener.open.side_effect = HTTPError("https://example.com", 429, "limited",
+                                                    {"Retry-After": value}, None)
+                with patch.object(suite, "build_opener", return_value=opener), \
+                        patch.object(suite.time, "sleep") as sleep:
+                    with self.assertRaises(HTTPError):
+                        suite._official_text("https://example.com/stable")
+                self.assertEqual(opener.open.call_count, 1)
+                sleep.assert_not_called()
+
+    def test_cooldown_honors_http_dates_and_exhausted_rate_limit_reset(self):
+        with patch.object(suite.time, "time", return_value=0):
+            self.assertEqual(suite._rate_limit_delay(
+                {"Retry-After": "Thu, 01 Jan 1970 00:01:30 GMT"}, 0), 90)
+            self.assertEqual(suite._rate_limit_delay(
+                {"Retry-After": "2", "X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "90"}, 0), 90)
+            self.assertIsNone(suite._rate_limit_delay(
+                {"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "3600"}, 0))
+
+    def test_other_http_failures_are_not_retried(self):
+        for status in (302, 401, 403, 404, 500):
+            with self.subTest(status=status):
+                opener = Mock()
+                opener.open.side_effect = HTTPError("https://example.com", status, "failure", {}, None)
+                with patch.object(suite, "build_opener", return_value=opener), \
+                        patch.object(suite.time, "sleep") as sleep:
+                    with self.assertRaises(HTTPError):
+                        suite._official_json("https://example.com/metadata")
+                self.assertEqual(opener.open.call_count, 1)
+                sleep.assert_not_called()
+
     def test_official_json_authenticates_only_exact_github_api_origin(self):
         class Response:
             def __enter__(self): return self
