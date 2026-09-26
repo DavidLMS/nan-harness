@@ -6,7 +6,7 @@ param(
   [Parameter(Mandatory=$true)][string]$Canary, [Parameter(Mandatory=$true)][string]$Version
 )
 $ErrorActionPreference = 'Stop'; $stageNow = $Stage; $workspace = $null; $stdout = $null; $stderr = $null; $completed = $false; $markerPath = $env:NAN_CANARY_PROBE_RESULT; $diagnostics = New-Object System.Collections.Generic.List[string]; $exitCode = $null; $doctorVersion = $null; $doctorExpectedVersion = $null; $doctorReason = $null; $doctorSchemaReason = $null; $discoveryCode = $null; $inventoryFailureReasons = $null; $inventoryProcess = $null; $failedScenarios = $null
-$knownDiagnostics = @('doctor-child-launch','doctor-exit-nonzero','doctor-output-invalid','doctor-schema-invalid','doctor-version-missing','doctor-version-invalid','doctor-version-mismatch','doctor-exit-missing','conformance-child-launch','conformance-exit-nonzero','conformance-output-invalid','conformance-schema-invalid','conformance-scenario-missing','conformance-scenario-failed','conformance-inventory-failed','conformance-inventory-operational-failed','conformance-check-invalid','conformance-exit-missing','live-child-launch','live-exit-nonzero','live-exit-missing','live-credential-missing','live-tool-evidence-missing','live-read-marker-missing','live-completion-marker-missing','live-bridge-sentinel','live-usage-invalid','live-usage-summary-missing','probe-unexpected-failure')
+$knownDiagnostics = @('doctor-child-launch','doctor-exit-nonzero','doctor-output-invalid','doctor-schema-invalid','doctor-version-missing','doctor-version-invalid','doctor-version-mismatch','doctor-exit-missing','conformance-child-launch','conformance-exit-nonzero','conformance-output-invalid','conformance-schema-invalid','conformance-scenario-missing','conformance-scenario-failed','conformance-inventory-failed','conformance-inventory-operational-failed','conformance-check-invalid','conformance-exit-missing','live-child-launch','live-exit-nonzero','live-exit-missing','live-credential-missing','live-tool-evidence-missing','live-read-marker-missing','live-completion-marker-missing','live-bridge-sentinel','live-usage-invalid', 'live-usage-missing', 'live-usage-unreadable', 'live-usage-malformed', 'live-usage-schema-invalid', 'live-usage-not-observed', 'live-usage-unsupported','live-usage-summary-missing','probe-unexpected-failure')
 $knownDiagnostics += @('live-error-auth','live-error-network','live-error-arguments','live-error-permission','live-error-provider','live-error-config')
 function Add-Diagnostic([string]$Code) { if ($knownDiagnostics -contains $Code -and -not $diagnostics.Contains($Code)) { [void]$diagnostics.Add($Code) } }
 function Native-FailureCode {
@@ -82,6 +82,22 @@ function Is-Integer($Value) {
 }
 function Is-BoundedInteger($Value, [decimal]$Maximum) {
   return (Is-Integer $Value) -and ([decimal]$Value -ge 0) -and ([decimal]$Value -le $Maximum)
+}
+function Assert-UsageEvidence([string]$Path) {
+  try { $text = [IO.File]::ReadAllText($Path) }
+  catch [IO.FileNotFoundException] { Add-Diagnostic 'live-usage-missing'; throw 'usage evidence missing' }
+  catch [IO.DirectoryNotFoundException] { Add-Diagnostic 'live-usage-missing'; throw 'usage evidence missing' }
+  catch { Add-Diagnostic 'live-usage-unreadable'; throw 'usage evidence unreadable' }
+  try { $value = ConvertFrom-Json -InputObject $text -ErrorAction Stop }
+  catch { Add-Diagnostic 'live-usage-malformed'; throw 'usage evidence malformed' }
+  if (-not $text.TrimStart().StartsWith('{') -or $null -eq $value -or $value -isnot [pscustomobject] -or
+      @($value.PSObject.Properties).Count -ne 2 -or
+      -not (Is-BoundedInteger $value.schemaVersion 1) -or $value.schemaVersion -ne 1 -or
+      $value.status -isnot [string] -or $value.status -cnotin @('observed','not-observed','unsupported')) {
+    Add-Diagnostic 'live-usage-schema-invalid'; throw 'usage evidence schema invalid'
+  }
+  if ($value.status -ceq 'not-observed') { Add-Diagnostic 'live-usage-not-observed'; throw 'usage not observed' }
+  if ($value.status -ceq 'unsupported') { Add-Diagnostic 'live-usage-unsupported'; throw 'usage unsupported' }
 }
 function Is-SignedInt32($Value) {
   return (Is-Integer $Value) -and ([decimal]$Value -ge -2147483648) -and ([decimal]$Value -le 2147483647)
@@ -213,7 +229,7 @@ try {
   }
   $stageNow = 'read-marker'; if ($Harness -notin @('codex','hermes','prime-agent','deepseek-harness','openclaw','aider') -and -not (Has-Text $marker)) { Fail 'read marker missing' }
   $stageNow = 'completion-marker'; if (-not (Has-Text 'NAN_CANARY_OK')) { Fail 'completion marker missing' }; $stageNow = 'bridge-sentinel'; if (Has-Text 'NH-BRIDGE-') { Fail 'bridge sentinel observed' }
-  $stageNow = 'usage-evidence'; try {$u=Get-Content -Raw $usage | ConvertFrom-Json} catch { Fail 'usage evidence invalid' }; if (-not (Is-BoundedInteger $u.schemaVersion 1) -or $u.schemaVersion -ne 1 -or $u.status -ne 'observed') { Fail 'usage evidence invalid' }
+  $stageNow = 'usage-evidence'; Assert-UsageEvidence $usage
   # Keep the pattern ASCII: Windows PowerShell 5.1 reads BOM-less scripts as ANSI.
   $stageNow = 'usage-summary'; if (-not (Has-Regex '^(\uD83D\uDD25 Tokens burned \u2014 this session|NaN usage \()')) { Fail 'usage summary missing' }; if ($null -eq $exitCode) { Add-Diagnostic 'live-exit-missing'; throw 'live child exit evidence missing' }
   if ($Harness -in @('hermes','openclaw')) {

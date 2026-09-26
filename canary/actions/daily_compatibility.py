@@ -63,7 +63,11 @@ def read_feed(repository, name, directory):
 
 
 def release_identity(repository, tag):
-    command(["bash", ROOT / ".github/scripts/check-release-tag.sh", repository, tag, "unique"])
+    # Native gh works on Windows too; generic bash there may resolve to WSL.
+    # Include all pages because duplicate drafts can shadow a tag-based download.
+    pages = json.loads(gh("api", "--paginate", "--slurp", f"repos/{repository}/releases?per_page=100"))
+    if sum(release["tag_name"] == tag for page in pages for release in page) != 1:
+        raise ValueError("release tag must have exactly one matching release")
     release = json.loads(gh("api", f"repos/{repository}/releases/tags/{tag}"))
     if release["draft"] or release["prerelease"] or release["tag_name"] != tag:
         raise ValueError("daily checks require a public stable release")
