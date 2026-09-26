@@ -22,6 +22,12 @@ RELEASE_DIGEST = "f8a3c3d324cdf7bd697d034aeb3469b5213bfc4502c9c7e8dbfe90b3b9869c
 VERSIONS = ("18.3.1", "18.3.2")
 
 
+class SetupFailure(ValueError):
+    def __init__(self, reason):
+        self.reason = reason
+        super().__init__("comparison setup failed")
+
+
 def binaries(kind, directory, source_sha):
     pair = PLATFORM_ASSETS["windows"]
     if kind == "release":
@@ -40,13 +46,16 @@ def run(args):
     # Asset tools and installers do not inherit the provider credential.
     key = os.environ.pop("NAN_API_KEY", "")
     if not key:
-        raise ValueError("explicit live credential required")
+        raise SetupFailure("credential-missing")
     source_sha = daily.command(["git", "rev-parse", "HEAD"]).decode().strip()
     if (not re.fullmatch(r"[0-9a-f]{40}", source_sha)
             or source_sha != os.environ.get("GITHUB_SHA")):
-        raise ValueError("comparison checkout differs from dispatch")
+        raise SetupFailure("checkout-mismatch")
     args.directory.mkdir(parents=True, exist_ok=False)
-    binary, canary, commit, version = binaries(args.kind, args.directory, source_sha)
+    try:
+        binary, canary, commit, version = binaries(args.kind, args.directory, source_sha)
+    except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
+        raise SetupFailure("binary-preparation") from error
     source, package = daily.suite._source("omp", "windows")
     frozen = daily.suite.FrozenHarness("omp", args.omp_version, "windows", "x86_64",
                                       source, package, "qwen3.6", "")
@@ -87,8 +96,10 @@ def main():
         parser.error("this comparison requires native Windows")
     try:
         return run(args)
-    except (OSError, ValueError, KeyError, subprocess.SubprocessError):
-        print("OMP comparison setup failed; no private process output was published.", file=sys.stderr)
+    except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
+        # Only locally authored categories are projected, never exception text.
+        reason = error.reason if isinstance(error, SetupFailure) else "setup-unclassified"
+        print("OMP comparison setup failed: " + reason + ". No private output was published.", file=sys.stderr)
         return 1
 
 

@@ -69,6 +69,23 @@ class DailyEvidenceTests(unittest.TestCase):
                            cwd=ROOT, env=env, check=True)
             self.assertEqual(daily.digest(checkout / source), daily.digest(ROOT / source))
 
+    def test_release_identity_is_native_and_rejects_duplicate_drafts_across_pages(self):
+        release = {"tag_name": "v1.2.3", "draft": False, "prerelease": False}
+        def response(*args):
+            if "--slurp" in args:
+                return json.dumps([[{"tag_name": "v1.2.2"}], [release]]).encode()
+            if args[-1].endswith("/releases/tags/v1.2.3"):
+                return json.dumps(release).encode()
+            return json.dumps({"object": {"type": "commit", "sha": "a" * 40}}).encode()
+        with patch.object(daily, "gh", side_effect=response), patch.object(daily, "command") as shell:
+            self.assertEqual(daily.release_identity("Acme/Fork", "v1.2.3"), "a" * 40)
+            shell.assert_not_called()
+        for pages in ([], [[release], [{**release, "draft": True}]]):
+            with patch.object(daily, "gh", return_value=json.dumps(pages).encode()) as gh:
+                with self.assertRaises(ValueError):
+                    daily.release_identity("Acme/Fork", "v1.2.3")
+                self.assertEqual(gh.call_count, 1)
+
     def test_channels_are_deduplicated_and_must_be_stable(self):
         self.assertEqual(evidence.release_tags({"version": "1.2.3"}, {"tag_name": "v1.2.3"}), ["v1.2.3"])
         self.assertEqual(evidence.release_tags({"version": "1.3.0"}, {"tag_name": "v1.2.3"}),
