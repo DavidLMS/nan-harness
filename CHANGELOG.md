@@ -13,6 +13,11 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   at 05:00 Europe/Madrid. Verify new upstream versions across their supported
   platforms and publish successful harness results to both compatibility feeds.
 
+### Fixed
+
+- Preserve Chat Completions token usage when a client disconnects after the
+  terminal streaming event but before the HTTP response closes.
+
 ## [0.1.11] - 2026-09-22
 
 ### Fixed

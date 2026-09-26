@@ -550,7 +550,7 @@ _PROBE_DIAGNOSTICS = frozenset({
     "live-error-provider", "live-error-config",
     "live-exit-missing", "live-credential-missing", "live-tool-evidence-missing",
     "live-read-marker-missing", "live-completion-marker-missing", "live-bridge-sentinel",
-    "live-usage-invalid", "live-usage-summary-missing", "probe-unexpected-failure",
+    "live-usage-invalid", "live-usage-missing", "live-usage-unreadable", "live-usage-malformed", "live-usage-schema-invalid", "live-usage-not-observed", "live-usage-unsupported", "live-usage-summary-missing", "probe-unexpected-failure",
 })
 # Marker field names the probe itself can emit. A rejected marker publishes only these
 # names, plus a count of anything else, so the shape of a failure is diagnosable without

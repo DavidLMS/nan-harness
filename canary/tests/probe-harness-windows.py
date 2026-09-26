@@ -33,7 +33,14 @@ class WindowsProbeContracts(unittest.TestCase):
             self.assertIsNone(CELL.windows_probe_result(marker))
 
     def _run_live_fixture(self, harness="fx", *, exit_code=0, missing_child=False,
-                          shell="pwsh", native_warning=False, failure_text=""):
+                          shell="pwsh", native_warning=False, failure_text="",
+                          usage_payload='{"schemaVersion":1,"status":"observed"}'):
+        usage_command = ""
+        if usage_payload == "unreadable":
+            usage_command = "New-Item -ItemType Directory -Path $env:NAN_HARNESS_INTERNAL_CANARY_USAGE_FILE | Out-Null\n"
+        elif usage_payload is not None:
+            usage_command = ("Set-Content -NoNewline -LiteralPath $env:NAN_HARNESS_INTERNAL_CANARY_USAGE_FILE "
+                             "-Value '" + usage_payload.replace("'", "''") + "'\n")
         pwsh = shutil.which(shell)
         if not pwsh:
             self.skipTest("pwsh unavailable; live PowerShell fixture deferred to Windows")
@@ -54,9 +61,7 @@ class WindowsProbeContracts(unittest.TestCase):
                 "  & pwsh -NoProfile -NonInteractive -Command $Matches[1]\n"
                 "  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }\n"
                 "}\n"
-                "Set-Content -NoNewline -LiteralPath $env:NAN_HARNESS_INTERNAL_CANARY_USAGE_FILE "
-                "-Value '{\"schemaVersion\":1,\"status\":\"observed\"}'\n"
-                "Write-Output 'NAN_CANARY_OK'\n" +
+                + usage_command + "Write-Output 'NAN_CANARY_OK'\n" +
                 ("[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)\n"
                  "[Console]::Error.WriteLine(([char]::ConvertFromUtf32(0x1F525) + ' Tokens burned ' + [char]0x2014 + ' this session'))\n"
                  if native_warning else "Write-Output 'NaN usage (synthetic)'\n") +
@@ -79,7 +84,8 @@ class WindowsProbeContracts(unittest.TestCase):
                 value = json.loads(marker.read_text(encoding="utf-8-sig"))
             except (OSError, json.JSONDecodeError) as error:
                 self.fail(f"probe result unavailable: {type(error).__name__}")
-            expected_success = not exit_code and not missing_child
+            expected_success = (not exit_code and not missing_child
+                                and usage_payload == '{"schemaVersion":1,"status":"observed"}')
             if expected_success:
                 self.assertEqual(run.returncode, 0, f"probe_result={value}")
             else:
@@ -99,6 +105,32 @@ class WindowsProbeContracts(unittest.TestCase):
         value = self._run_live_fixture()
         self.assertEqual(value, {"schemaVersion": 2, "stage": "complete", "status": "passed",
                                  "diagnostics": [], "exitCode": 0})
+
+    def test_usage_failures_keep_closed_categories_through_the_daily_reader(self):
+        cases = [(None, "missing"), ("unreadable", "unreadable"),
+                 ("{PRIVATE_SENTINEL", "malformed"),
+                 ('{"schemaVersion":1,"status":"not-observed"}', "not-observed"),
+                 ('{"schemaVersion":1,"status":"unsupported"}', "unsupported")]
+        cases += [(payload, "schema-invalid") for payload in (
+            "null", "[]", '[{"schemaVersion":1,"status":"observed"}]',
+            '{"schemaVersion":true,"status":"observed"}',
+            '{"schemaVersion":2,"status":"observed"}',
+            '{"schemaVersion":1,"status":"PRIVATE_SENTINEL"}',
+            '{"schemaVersion":1,"status":"OBSERVED"}',
+            '{"schemaVersion":1,"status":"observed","extra":"PRIVATE_SENTINEL"}')]
+        shells = ("pwsh", "powershell.exe") if os.name == "nt" else ("pwsh",)
+        for shell in shells:
+            for payload, reason in cases:
+                with self.subTest(shell=shell, reason=reason, payload=payload):
+                    result = self._run_live_fixture(shell=shell, usage_payload=payload)
+                    self.assertEqual(result["stage"], "usage-evidence")
+                    self.assertEqual(result["exitCode"], 0)
+                    self.assertEqual(result["diagnostics"], ["live-usage-" + reason])
+                    self.assertNotIn("PRIVATE_SENTINEL", json.dumps(result))
+                    with tempfile.TemporaryDirectory() as tmp:
+                        marker = Path(tmp) / "probe.json"
+                        marker.write_text(json.dumps(result))
+                        self.assertEqual(CELL.windows_probe_result(marker), result)
 
     def test_real_pwsh_live_nonzero_records_actual_exit(self):
         value = self._run_live_fixture(exit_code=7)

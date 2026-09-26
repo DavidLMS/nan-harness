@@ -49,6 +49,16 @@ class WindowsSummaryTests(unittest.TestCase):
         self.assertIn("`omp` | `failed`", rendered); self.assertIn("live-tool=FAIL", rendered)
         self.assertNotIn("causalId", rendered)
 
+    def test_usage_categories_survive_summary_projection(self):
+        for code in ("live-usage-invalid", "live-usage-missing", "live-usage-unreadable",
+                     "live-usage-malformed", "live-usage-schema-invalid",
+                     "live-usage-not-observed", "live-usage-unsupported"):
+            value = report()
+            value["harnesses"][0]["phases"]["live-tool"]["diagnostic"] = {
+                "stage": "usage-evidence",
+                "diagnostics": [code], "exitCode": 0}
+            self.assertIn(code, summary.render(summary.safe_view(value)))
+
     def test_cause_details_are_allowlisted_and_rendered(self):
         value = report()
         value["harnesses"][0]["phases"]["install"]["causeDetails"] = {

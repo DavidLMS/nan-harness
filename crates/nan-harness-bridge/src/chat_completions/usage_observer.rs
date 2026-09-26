@@ -65,7 +65,15 @@ impl UsageObserver {
             return;
         }
         if self.kind == ObservationKind::Streaming {
+            if self.terminal == SseTerminal::Done {
+                return;
+            }
             self.observe_sse_chunk(chunk);
+            // Clients may close immediately after DONE, before the proxy polls
+            // HTTP EOF. Commit protocol-complete usage before yielding it.
+            if self.terminal == SseTerminal::Done {
+                self.finish();
+            }
         } else if self.availability == ObservationAvailability::Available {
             let Some(next_len) = self.buffer.len().checked_add(chunk.len()) else {
                 self.mark_observation_unavailable();
@@ -102,6 +110,9 @@ impl UsageObserver {
                 self.buffer.extend_from_slice(&chunk[..line_length]);
                 chunk = &chunk[line_length..];
                 self.observe_sse_lines();
+                if self.terminal == SseTerminal::Done {
+                    return;
+                }
             } else if pending.saturating_add(chunk.len()) > MAX_OBSERVATION_BYTES {
                 self.mark_observation_unavailable();
                 self.line_mode = SseLineMode::DiscardUntilLineEnd;
@@ -135,6 +146,9 @@ impl UsageObserver {
                 self.usage = usage;
             }
             self.cursor = end + 1;
+            if saw_done {
+                return;
+            }
             if self.cursor >= OBSERVATION_COMPACTION_THRESHOLD
                 && self.cursor.saturating_mul(2) >= self.buffer.len()
             {
@@ -346,6 +360,42 @@ mod tests {
                 ..ModelUsageSnapshot::default()
             }
         );
+    }
+
+    #[test]
+    fn terminal_usage_survives_disconnect_before_eof_without_double_counting() {
+        for with_usage in [false, true] {
+            for finish_at_eof in [false, true] {
+                let usage = new_usage();
+                let guard = RequestUsageGuard::new(&usage, "qwen3.6");
+                let mut observer = UsageObserver::new(true, Some(guard));
+                if with_usage {
+                    observer.observe(
+                        b"data: {\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":7}}\n\n",
+                    );
+                }
+                observer.observe(b"data: [DONE]\n\n");
+                // The terminal event reaches the client before HTTP EOF. The
+                // client may now disconnect, dropping the response body.
+                assert_eq!(snapshot(&usage).completed_requests(), 1);
+                observer.observe(b"data: {\"usage\":{\"prompt_tokens\":99,\"completion_tokens\":99}}\n\ndata: [DONE]\n\n");
+                if finish_at_eof {
+                    observer.finish();
+                    observer.finish();
+                }
+                drop(observer);
+                assert_eq!(
+                    snapshot(&usage).models["qwen3.6"],
+                    ModelUsageSnapshot {
+                        responses_with_usage: u64::from(with_usage),
+                        responses_without_usage: u64::from(!with_usage),
+                        input_tokens: if with_usage { 5 } else { 0 },
+                        output_tokens: if with_usage { 7 } else { 0 },
+                        ..ModelUsageSnapshot::default()
+                    }
+                );
+            }
+        }
     }
 
     #[test]
