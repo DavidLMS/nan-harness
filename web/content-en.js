@@ -152,7 +152,7 @@ function nanHarnessContentEn({ harnessLink, nanLink, unixInstallCommand, windows
         ['table', ['Capability', 'NaN provider', 'What it does'], [
           ['Speech to text', 'NaN Whisper', 'Transcribes audio. Large PCM WAV files are split into bounded overlapping chunks and merged.'],
           ['Text to speech', 'NaN Kokoro', 'Converts text to spoken audio.'],
-          ['Image generation and editing', 'NaN Flux 2 Klein', 'Generates images and can use reference images for edits.']
+          ['Image generation and editing', 'NaN image models', 'Generates images with Flux 2 Klein or Qwen Image 2.1; Flux can also edit reference images.']
         ]],
         ['h3', 'Use it during a launch'],
         ['table', ['Flag', 'What it does'], [
@@ -160,12 +160,20 @@ function nanHarnessContentEn({ harnessLink, nanLink, unixInstallCommand, windows
           ['--force-media', 'Enables all three NaN media providers even when another provider is configured.'],
           ['--force-stt', 'Uses NaN Whisper for speech to text.'],
           ['--force-tts', 'Uses NaN Kokoro for text to speech.'],
-          ['--force-image', 'Uses NaN Flux 2 Klein for image generation and editing.']
+          ['--force-image / --image', 'Enables images with Flux 2 Klein.'],
+          ['--image-model &lt;id&gt;', 'Enables images and sets the default to Flux 2 Klein or Qwen Image 2.1.']
         ]],
-        ['codes', ['nanh hermes --force-media', 'nanh openclaw --force-image']],
+        ['h3', 'Choose an image model'],
+        ['p', 'Use <code>--image-model</code> with Hermes Agent or OpenClaw to choose the default image model. Qwen Image 2.1 is for generation and Flux 2 Klein also supports editing and up to four reference images. The <code>--image</code> and <code>--force-image</code> options use Flux by default.'],
+        ['table', ['Model', 'Generate', 'Edit / reference images'], [
+          ['<code>flux-2-klein</code>', 'Yes', 'Yes, up to four references'],
+          ['<code>qwen-image-2.1</code>', 'Yes', 'No, generation only']
+        ]],
+        ['codes', ['nanh hermes --image-model qwen-image-2.1', 'nanh openclaw --image']],
+        ['p', 'You can choose a model for one image request in the native image tool without changing the configured default. Ask for Qwen Image 2.1 for generation or Flux 2 Klein for editing. A Qwen request with references returns an error.'],
         ['h3', 'Use it in native setup'],
-        ['p', 'Pass the same flags to <code>nanh config hermes</code> or <code>nanh config openclaw</code> to write the media providers into the harness configuration. The managed media selection is retained when you refresh that configuration.'],
-        ['code', 'nanh config hermes --force-media'],
+        ['p', 'Pass the same flags to <code>nanh config hermes</code> or <code>nanh config openclaw</code> to write the media providers into the harness configuration. The managed media selection, including the image model, is retained when you refresh that configuration.'],
+        ['code', 'nanh config hermes --image-model qwen-image-2.1'],
         ['note', 'Media requests use your NaN credential. Existing provider credentials remain with the harness, and nan-harness does not replace them unless you explicitly force that capability.']
       ]],
       ['platforms', 'PLATFORM NOTES', [

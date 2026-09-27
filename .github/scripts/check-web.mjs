@@ -167,6 +167,10 @@ for (const relativePath of [
 assert.match(markdownFiles.get('index.md'), /nanh codex --model qwen3\.6/);
 assert.match(markdownFiles.get('docs.md'), /nanh hermes[\s\S]*nanh omp[\s\S]*nanh prime-agent/s);
 assert.match(markdownFiles.get('es/docs.md'), /nanh hermes[\s\S]*nanh omp[\s\S]*nanh prime-agent/s);
+assert.match(markdownFiles.get('docs.md'), /--image-model qwen-image-2\.1/);
+assert.match(markdownFiles.get('docs.md'), /qwen-image-2\.1[\s\S]*generation only/);
+assert.match(markdownFiles.get('es/docs.md'), /--image-model qwen-image-2\.1/);
+assert.match(markdownFiles.get('es/docs.md'), /qwen-image-2\.1[\s\S]*solo generación/);
 
 function assertNoUnsupportedServices(directory) {
   for (const missingPath of [

@@ -152,7 +152,7 @@ function nanHarnessContentEs({ harnessLink, nanLink, unixInstallCommand, windows
         ['table', ['Capacidad', 'Proveedor de NaN', 'Qué hace'], [
           ['Voz a texto', 'NaN Whisper', 'Transcribe audio. Los archivos WAV PCM grandes se dividen en fragmentos solapados con tamaño limitado y después se unen.'],
           ['Texto a voz', 'NaN Kokoro', 'Convierte texto en audio hablado.'],
-          ['Generación y edición de imágenes', 'NaN Flux 2 Klein', 'Genera imágenes y puede usar imágenes de referencia para editarlas.']
+          ['Generación y edición de imágenes', 'Modelos de imagen de NaN', 'Genera imágenes con Flux 2 Klein o Qwen Image 2.1; Flux también puede editar imágenes de referencia.']
         ]],
         ['h3', 'Úsalo durante un arranque'],
         ['table', ['Opción', 'Qué hace'], [
@@ -160,12 +160,20 @@ function nanHarnessContentEs({ harnessLink, nanLink, unixInstallCommand, windows
           ['--force-media', 'Activa los tres proveedores multimedia de NaN aunque haya otro proveedor configurado.'],
           ['--force-stt', 'Usa NaN Whisper para convertir voz en texto.'],
           ['--force-tts', 'Usa NaN Kokoro para convertir texto en voz.'],
-          ['--force-image', 'Usa NaN Flux 2 Klein para generar y editar imágenes.']
+          ['--force-image / --image', 'Activa las imágenes con Flux 2 Klein.'],
+          ['--image-model &lt;id&gt;', 'Activa las imágenes y fija Flux 2 Klein o Qwen Image 2.1 como modelo predeterminado.']
         ]],
-        ['codes', ['nanh hermes --force-media', 'nanh openclaw --force-image']],
+        ['h3', 'Elige un modelo de imagen'],
+        ['p', 'Usa <code>--image-model</code> con Hermes Agent u OpenClaw para elegir el modelo de imagen predeterminado. Qwen Image 2.1 sirve para generar y Flux 2 Klein también admite edición y hasta cuatro imágenes de referencia. Las opciones <code>--image</code> y <code>--force-image</code> usan Flux de forma predeterminada.'],
+        ['table', ['Modelo', 'Generar', 'Editar / imágenes de referencia'], [
+          ['<code>flux-2-klein</code>', 'Sí', 'Sí, hasta cuatro referencias'],
+          ['<code>qwen-image-2.1</code>', 'Sí', 'No, solo generación']
+        ]],
+        ['codes', ['nanh hermes --image-model qwen-image-2.1', 'nanh openclaw --image']],
+        ['p', 'Puedes elegir un modelo para una petición de imagen concreta desde la herramienta nativa sin cambiar el modelo predeterminado configurado. Pide Qwen Image 2.1 para generar o Flux 2 Klein para editar. Una petición de Qwen con referencias devuelve un error.'],
         ['h3', 'Úsalo en la configuración nativa'],
-        ['p', 'Pasa las mismas opciones a <code>nanh config hermes</code> o <code>nanh config openclaw</code> para escribir los proveedores multimedia en la configuración del harness. La selección multimedia gestionada se conserva al actualizar esa configuración.'],
-        ['code', 'nanh config hermes --force-media'],
+        ['p', 'Pasa las mismas opciones a <code>nanh config hermes</code> o <code>nanh config openclaw</code> para escribir los proveedores multimedia en la configuración del harness. La selección multimedia gestionada, incluido el modelo de imagen, se conserva al actualizar esa configuración.'],
+        ['code', 'nanh config hermes --image-model qwen-image-2.1'],
         ['note', 'Las peticiones multimedia usan tu credencial de NaN. Las credenciales de los proveedores existentes permanecen en el harness y nan-harness no las sustituye salvo que fuerces esa capacidad.']
       ]],
       ['platforms', 'NOTAS DE PLATAFORMA', [
