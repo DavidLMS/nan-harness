@@ -6,44 +6,76 @@ function sampleRetryInterior(button) {
     ownerDocumentSame: doc === document, hitOwnedPoints: 0, clipped: false,
     rectInViewport: rect.left >= 0 && rect.top >= 0 && rect.right <= innerWidth && rect.bottom <= innerHeight,
     pointerEventsNone: getComputedStyle(button).pointerEvents === 'none' };
-  if (!button.isConnected || doc !== document || button.tagName !== 'BUTTON'
-      || button.type !== 'button' || button.disabled || button.matches(':disabled')
-      || button.getAttribute('aria-disabled') === 'true' || button.closest('[inert]')
-      || rect.width <= 0 || rect.height <= 0 || rect.left < 0 || rect.top < 0
-      || rect.right > innerWidth || rect.bottom > innerHeight) return { closed, candidate: null };
+  closed.status = 'unmeasured';
+  closed.frontTag = 'unmeasured'; closed.frontRegion = 'unmeasured';
+  closed.hitAncestor = false; closed.sharesTurnPair = false; closed.containsComposer = false;
+  const reject = status => { closed.status = status; return { closed, candidate: null }; };
+  if (!button.isConnected) return reject('detached');
+  if (doc !== document) return reject('foreign-document');
+  if (button.tagName !== 'BUTTON' || button.type !== 'button') return reject('native-control-invalid');
+  if (button.disabled || button.matches(':disabled') || button.getAttribute('aria-disabled') === 'true') return reject('disabled');
+  if (button.closest('[inert]')) return reject('inert');
+  if (rect.width <= 0 || rect.height <= 0 || !closed.rectInViewport) return reject('outside-viewport');
+  if (typeof button.checkVisibility !== 'function' || !button.checkVisibility({ contentVisibilityAuto: true,
+    opacityProperty: true, visibilityProperty: true })) return reject('hidden');
   let ancestor = button;
   for (let depth = 0; ancestor && depth < 64; depth++, ancestor = ancestor.parentElement) {
     const style = getComputedStyle(ancestor);
     if (style.pointerEvents === 'none') closed.pointerEventsNone = true;
     if (style.display === 'none' || ['hidden', 'collapse'].includes(style.visibility)
-        || style.contentVisibility === 'hidden' || style.pointerEvents === 'none') return { closed, candidate: null };
+        || style.contentVisibility === 'hidden') return reject('hidden');
+    if (style.pointerEvents === 'none') return reject('pointer-events-none');
     if ((style.clipPath !== 'none' && !/^inset\(0(?:px)?(?:\s+0(?:px)?){0,3}\)$/.test(style.clipPath)) || style.maskImage !== 'none') {
-      closed.clipped = true; return { closed, candidate: null };
+      closed.clipped = true; return reject('clipped');
     }
     if (ancestor !== button) {
       const a = ancestor.getBoundingClientRect();
       const clips = value => ['hidden', 'clip', 'scroll', 'auto'].includes(value);
       if ((clips(style.overflowX) && (rect.left < a.left || rect.right > a.right))
           || (clips(style.overflowY) && (rect.top < a.top || rect.bottom > a.bottom))) {
-        closed.clipped = true; return { closed, candidate: null };
+        closed.clipped = true; return reject('clipped');
       }
     }
   }
-  if (ancestor) return { closed, candidate: null };
+  if (ancestor) return reject('hidden');
   // Position for ordinary Playwright click is relative to the padding box.
   // A scale/rotation would invalidate this simple CSS-coordinate conversion.
   if (Math.abs(rect.width - button.offsetWidth) > 1 || Math.abs(rect.height - button.offsetHeight) > 1)
-    return { closed, candidate: null };
+    return reject('transformed');
   let candidate = null;
+  let representative;
   for (const [fx, fy] of [[.5,.5],[.25,.25],[.75,.25],[.25,.75],[.75,.75],[.5,.25],[.5,.75],[.25,.5],[.75,.5]]) {
     const x = button.clientWidth * fx;
     const y = button.clientHeight * fy;
     const hit = doc.elementFromPoint(rect.left + button.clientLeft + x, rect.top + button.clientTop + y);
+    if (representative === undefined) representative = hit;
     if (hit === button || (hit && button.contains(hit))) {
+      if (!candidate) representative = hit;
       closed.hitOwnedPoints++;
       candidate ??= { x, y, left: rect.left, top: rect.top, width: rect.width, height: rect.height };
     }
   }
+  closed.status = candidate ? 'owned' : 'no-owned-point';
+  const front = representative;
+  const tag = front?.tagName?.toLowerCase();
+  closed.frontTag = !front ? 'none' : ['html', 'body', 'button', 'div', 'span', 'svg'].includes(tag) ? tag : 'other';
+  closed.frontRegion = !front ? 'none'
+    : front.closest('[data-slot="composer-root"]') ? 'composer-root'
+    : front.closest('[data-slot="composer-drag-region"]') ? 'composer-drag-region'
+    : front.closest('[data-slot="composer-dock"]') ? 'composer-dock'
+    : front.closest('[role="dialog"],[role="alertdialog"]') ? 'dialog'
+    : front.closest('[data-slot="popover-content"]') ? 'popover'
+    : front.closest('[role="tooltip"]') ? 'tooltip'
+    : front.closest('[data-slot="aui_thread-viewport"]') ? 'thread-viewport'
+    : front.closest('[data-slot="chat-drop-overlay"]') ? 'chat-drop-overlay'
+    : front.closest('.particle-field') ? 'particle-field'
+    : front.closest('[data-composer-owner]') ? 'composer-portal'
+    : front.closest('[data-slot="composer-bounds"]') ? 'composer-bounds' : 'other';
+  closed.hitAncestor = Boolean(front && front !== button && front.contains(button));
+  const pair = button.closest('[data-slot="aui_turn-pair"]');
+  closed.sharesTurnPair = Boolean(pair && front?.closest('[data-slot="aui_turn-pair"]') === pair);
+  const composers = [...doc.querySelectorAll('[data-slot="composer-root"] [role="textbox"]')];
+  closed.containsComposer = Boolean(front && composers.some(composer => front.contains(composer)));
   return { closed, candidate };
 }
 function stableCandidate(first, second) {
@@ -107,7 +139,7 @@ async function driveDom() {
     retryPointerEventsNone: false, retryHitTag: 'unmeasured', retryHitRegion: 'unmeasured',
     retryFocusAfterAcquire: false, retryFocusBeforeAction: false, retryButtonConnected: false,
     retryAncestorHidden: false, retryAncestorInert: false, retryFieldsetDisabled: false,
-    retryDocumentFocused: false, retryActiveTag: 'unmeasured', retryActiveRegion: 'unmeasured', retryHitOwnedPoints: 0, retryPointStable: false });
+    retryDocumentFocused: false, retryActiveTag: 'unmeasured', retryActiveRegion: 'unmeasured', retryHitOwnedPoints: 0, retryPointStable: false, retrySampleStatus: 'unmeasured', retryHitAncestor: false, retryHitSharesTurnPair: false, retryHitContainsComposer: false });
   saveFacts();
   const exactKeys = (value, keys) => value && typeof value === 'object' && !Array.isArray(value) &&
     Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
@@ -291,7 +323,12 @@ async function driveDom() {
     facts.retryPointStable = Boolean(retryPosition);
     facts.retryHitOwned = Boolean(retryPosition);
     facts.retryHitTarget = retryPosition ? 'self' : 'other';
-    facts.retryHitTag = second.closed.buttonTag;
+    facts.retryHitTag = second.closed.frontTag;
+    facts.retryHitRegion = second.closed.frontRegion;
+    facts.retrySampleStatus = second.closed.status;
+    facts.retryHitAncestor = second.closed.hitAncestor;
+    facts.retryHitSharesTurnPair = second.closed.sharesTurnPair;
+    facts.retryHitContainsComposer = second.closed.containsComposer;
     facts.retryAncestorClipped = second.closed.clipped;
     facts.retryRectInViewport = second.closed.rectInViewport;
     facts.retryPointerEventsNone = second.closed.pointerEventsNone;
@@ -318,6 +355,13 @@ async function driveDom() {
     }
     facts.sendBlocker = await readiness();
     const finalSample = await retryHandle.evaluate(sampleRetryInterior);
+    facts.retrySampleStatus = finalSample.closed.status;
+    facts.retryHitTag = finalSample.closed.frontTag; facts.retryHitRegion = finalSample.closed.frontRegion;
+    facts.retryHitAncestor = finalSample.closed.hitAncestor; facts.retryHitSharesTurnPair = finalSample.closed.sharesTurnPair;
+    facts.retryHitContainsComposer = finalSample.closed.containsComposer;
+    facts.retryHitOwnedPoints = finalSample.closed.hitOwnedPoints;
+    facts.retryRectInViewport = finalSample.closed.rectInViewport; facts.retryAncestorClipped = finalSample.closed.clipped;
+    facts.retryPointerEventsNone = finalSample.closed.pointerEventsNone;
     const stillStable = stableCandidate({ candidate: { ...retryPosition, ...secondCandidate } }, finalSample);
     if (facts.sendBlocker !== null || !stillStable || !ownedEndpoint()) {
       facts.retryPointStable = false; facts.retryHitOwned = false;

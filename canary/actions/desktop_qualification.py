@@ -176,11 +176,13 @@ def semantic_observations(directory, app):
         elif mechanism == 'hermes-renderer-qualification':
             for key in ('endpointOwned', 'attached', 'targetVerified', 'uniqueComposer', 'inputReadback',
                         'inputSubmitted', 'responseVerified', 'providerResponseVerified', 'errorObserved',
-                        'retryControl', 'retryHitOwned', 'retryPointStable', 'retryRectInViewport', 'retryAncestorClipped',
+                        'retryControl', 'retryHitOwned', 'retryPointStable',
+                        'retryHitAncestor', 'retryHitSharesTurnPair', 'retryHitContainsComposer', 'retryRectInViewport', 'retryAncestorClipped',
                         'retryPointerEventsNone', 'inputCleared', 'userTurnObserved',
                         'retryFocusAfterAcquire', 'retryFocusBeforeAction', 'retryButtonConnected',
                         'retryAncestorHidden', 'retryAncestorInert', 'retryFieldsetDisabled', 'retryDocumentFocused'):
                 flag(record, value, key)
+            enum(record, value, 'retrySampleStatus', {'unmeasured', 'native-control-invalid', 'detached', 'hidden', 'disabled', 'inert', 'foreign-document', 'clipped', 'pointer-events-none', 'transformed', 'outside-viewport', 'no-owned-point', 'owned'})
             if 'retryHitOwnedPoints' in value:
                 count = value['retryHitOwnedPoints']
                 if count is not None and (type(count) is not int or not 0 <= count <= 9):

@@ -305,6 +305,62 @@ impl RetryFocusFacts {
     }
 }
 
+#[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum RetrySampleStatus {
+    Unmeasured,
+    NativeControlInvalid,
+    Detached,
+    Hidden,
+    Disabled,
+    Inert,
+    ForeignDocument,
+    Clipped,
+    PointerEventsNone,
+    Transformed,
+    OutsideViewport,
+    NoOwnedPoint,
+    Owned,
+}
+
+#[derive(Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RetrySampleFacts {
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "retrySampleStatus"
+    )]
+    status: Option<RetrySampleStatus>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "retryHitAncestor"
+    )]
+    hit_ancestor: Option<bool>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "retryHitSharesTurnPair"
+    )]
+    hit_shares_turn_pair: Option<bool>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "retryHitContainsComposer"
+    )]
+    hit_contains_composer: Option<bool>,
+}
+
+impl RetrySampleFacts {
+    fn complete(&self) -> bool {
+        self.status.is_some()
+            && self.hit_ancestor.is_some()
+            && self.hit_shares_turn_pair.is_some()
+            && self.hit_contains_composer.is_some()
+    }
+}
+
 #[derive(Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct QualificationFacts {
@@ -324,11 +380,14 @@ struct QualificationFacts {
     geometry: RetryGeometryFacts,
     #[serde(flatten)]
     focus: RetryFocusFacts,
+    #[serde(flatten)]
+    sample: RetrySampleFacts,
 }
 
 impl QualificationFacts {
     fn pointer_verified(&self) -> bool {
-        self.retry_hit_owned == Some(true)
+        self.sample.status == Some(RetrySampleStatus::Owned)
+            && self.retry_hit_owned == Some(true)
             && self.retry_hit_target == Some(RetryHitTarget::Control)
             && self
                 .retry_hit_owned_points
@@ -362,7 +421,8 @@ impl QualificationFacts {
                 && self.geometry.rect_in_viewport.is_some()
                 && self.geometry.ancestor_clipped.is_some()
                 && self.geometry.pointer_events_none.is_some()
-                && self.focus.complete())
+                && self.focus.complete()
+                && self.sample.complete())
             && (self.retry_hit_owned != Some(true)
                 || self.retry_hit_target == Some(RetryHitTarget::Control))
             && (!qualification
@@ -428,6 +488,10 @@ const DOM_FACT_KEYS: &[&str] = &[
     "retryHitOwned",
     "retryHitOwnedPoints",
     "retryPointStable",
+    "retrySampleStatus",
+    "retryHitAncestor",
+    "retryHitSharesTurnPair",
+    "retryHitContainsComposer",
     "retryHitTarget",
     "retryRectInViewport",
     "retryAncestorClipped",
@@ -456,7 +520,7 @@ fn read_facts(path: &Path, qualification: bool) -> Result<Facts, Reason> {
     let value: serde_json::Value =
         serde_json::from_slice(&bytes).map_err(|_| Reason::IsolationUnavailable)?;
     let object = value.as_object().ok_or(Reason::IsolationUnavailable)?;
-    let count = if qualification { 44..=46 } else { 24..=26 };
+    let count = if qualification { 48..=50 } else { 24..=26 };
     if !count.contains(&object.len())
         || object
             .keys()
@@ -470,6 +534,10 @@ fn read_facts(path: &Path, qualification: bool) -> Result<Facts, Reason> {
         "retryHitOwned",
         "retryHitOwnedPoints",
         "retryPointStable",
+        "retrySampleStatus",
+        "retryHitAncestor",
+        "retryHitSharesTurnPair",
+        "retryHitContainsComposer",
         "retryHitTarget",
         "retryRectInViewport",
         "retryAncestorClipped",
@@ -760,6 +828,10 @@ mod tests {
         }
         value["retryHitOwnedPoints"] = json!(0);
         value["retryPointStable"] = json!(false);
+        value["retrySampleStatus"] = json!("unmeasured");
+        value["retryHitAncestor"] = json!(false);
+        value["retryHitSharesTurnPair"] = json!(false);
+        value["retryHitContainsComposer"] = json!(false);
         value["retryActiveTag"] = json!("unmeasured");
         value["retryActiveRegion"] = json!("unmeasured");
     }
@@ -811,6 +883,7 @@ mod tests {
         focus_facts(&mut value);
         value["retryHitOwnedPoints"] = json!(1);
         value["retryPointStable"] = json!(true);
+        value["retrySampleStatus"] = json!("owned");
         value["retryRectInViewport"] = json!(true);
         assert!(read(&value, true).is_ok());
         for key in ["retryPointStable", "retryRectInViewport"] {
@@ -818,6 +891,11 @@ mod tests {
             assert!(read(&value, true).is_err());
             value[key] = json!(true);
         }
+        for status in ["no-owned-point", "hidden", "unmeasured", "PRIVATE"] {
+            value["retrySampleStatus"] = json!(status);
+            assert!(read(&value, true).is_err());
+        }
+        value["retrySampleStatus"] = json!("owned");
         for count in [0, 10] {
             value["retryHitOwnedPoints"] = json!(count);
             assert!(read(&value, true).is_err());

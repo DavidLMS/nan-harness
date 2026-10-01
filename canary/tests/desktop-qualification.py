@@ -367,6 +367,8 @@ class QualificationTests(unittest.TestCase):
             value = dict(schemaVersion=1, mechanism='hermes-renderer-qualification',
                          retryRectInViewport=True, retryAncestorClipped=True,
                          retryPointerEventsNone=False, retryHitOwned=False, retryHitOwnedPoints=0, retryPointStable=False,
+                         retrySampleStatus="no-owned-point", retryHitAncestor=False,
+                         retryHitSharesTurnPair=False, retryHitContainsComposer=False,
                          retryHitTarget='other', retryHitTag='div',
                          retryHitRegion='thread-viewport', className='PRIVATE', rectangle=[1, 2, 3, 4])
             path.write_text(json.dumps(value))
@@ -379,7 +381,8 @@ class QualificationTests(unittest.TestCase):
                                  ('retryPointerEventsNone', None), ('retryHitTag', 'custom-private-tag'),
                                  ('retryHitRegion', 'PRIVATE'), ('retryPointStable', 1),
                                  ('retryHitOwnedPoints', True), ('retryHitOwnedPoints', 10),
-                                 ('retryHitOwnedPoints', -1)]:
+                                 ('retryHitOwnedPoints', -1), ('retrySampleStatus', 'PRIVATE'),
+                                 ('retryHitAncestor', 1), ('retryHitContainsComposer', None)]:
                 path.write_text(json.dumps({**value, key: invalid}))
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'hermes-desktop')

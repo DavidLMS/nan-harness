@@ -27,9 +27,13 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
     matches(selector) { assert.equal(selector, ':disabled'); return scenario === 'retry-fieldset-disabled'; } };
   const reclaimedComposer = { tagName: 'DIV', privateText: 'PRIVATE_SYNTHETIC_VALUE',
     closest(selector) { return selector === '[data-slot="composer-root"]' ? {} : null; } };
-  const overlay = { tagName: 'DIV', closest(selector) { return ['[data-slot="composer-root"]', '[data-slot="composer-dock"]'].includes(selector) ? {} : null; } };
+  const turnPair = {};
+  const ancestorFront = { tagName: 'DIV', privateValue: 'PRIVATE_SYNTHETIC_VALUE',
+    contains(element) { return element === hitButton || scenario === 'retry-composer-cover'; },
+    closest(selector) { return selector === '[data-slot="aui_turn-pair"]' ? turnPair : null; } };
+  const overlay = { tagName: 'DIV', contains() { return false; }, closest(selector) { return ['[data-slot="composer-root"]', '[data-slot="composer-dock"]'].includes(selector) ? {} : null; } };
   const dockStrip = { tagName: 'DIV', privateClass: 'PRIVATE_SYNTHETIC_VALUE', closest(selector) { return selector === '[data-slot="composer-dock"]' ? {} : null; } };
-  const foreignHit = { tagName: 'PRIVATE_SYNTHETIC_VALUE', closest() { return null; } };
+  const foreignHit = { tagName: 'PRIVATE_SYNTHETIC_VALUE', contains() { return false; }, closest() { return null; } };
   const sourceRegionSelectors = { 'composer-bounds': '[data-slot="composer-bounds"]',
     'composer-portal': '[data-composer-owner]', 'particle-field': '.particle-field',
     'chat-drop-overlay': '[data-slot="chat-drop-overlay"]' };
@@ -43,8 +47,8 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
   const hitChild = { tagName: 'SVG', privateLabel: 'PRIVATE_SYNTHETIC_VALUE', closest() { return null; } };
   const hitButton = {
     tagName: 'BUTTON', type: 'button', isConnected: true, disabled: false, offsetWidth: 20, offsetHeight: 20, clientWidth: 20, clientHeight: 20, clientLeft: 0, clientTop: 0,
-    getAttribute() { return null; }, matches() { return false; }, parentElement: scenario === 'retry-clipped' ? clippedParent : ['retry-source-clipped', 'retry-frame-settle'].includes(scenario) ? sourceClipParent : null,
-    closest(selector) { return selector === '[data-slot="aui_thread-viewport"]' ? {} : null; },
+    getAttribute() { return null; }, matches() { return false; }, checkVisibility(options) { assert.equal(options.contentVisibilityAuto, true); return scenario !== 'retry-hidden-render'; }, parentElement: scenario === 'retry-clipped' ? clippedParent : ['retry-source-clipped', 'retry-frame-settle'].includes(scenario) ? sourceClipParent : null,
+    closest(selector) { return selector === '[data-slot="aui_turn-pair"]' ? turnPair : selector === '[data-slot="aui_thread-viewport"]' ? {} : null; },
     getBoundingClientRect() { const left = scenario === 'retry-offviewport' ? 200 : scenario === 'retry-unstable' && sampleCount > 1 ? 11 : 10; return { left, right: left + 20, top: 10, bottom: 30, width: 20, height: 20 }; },
     contains(element) { return element === hitChild; },
     scrollIntoView(options) {
@@ -84,7 +88,7 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
         : scenario === 'inert' ? 'inert' : null;
     },
     async elementHandle() { return {
-      async evaluate(callback) { sampleCount++; hitButton.type = scenario === 'retry-wrong-type' ? 'submit' : 'button'; hitButton.ownerDocument = scenario === 'retry-foreign-document' ? {} : fixtureDocument; return callback(hitButton); },
+      async evaluate(callback) { sampleCount++; hitButton.isConnected = scenario !== 'retry-detached'; hitButton.disabled = scenario === 'retry-disabled'; hitButton.offsetWidth = scenario === 'retry-transformed' ? 40 : 20; hitButton.type = scenario === 'retry-wrong-type' ? 'submit' : 'button'; hitButton.ownerDocument = scenario === 'retry-foreign-document' ? {} : fixtureDocument; return callback(hitButton); },
       async click(options) { return send.click(options); },
     }; },
     async scrollIntoViewIfNeeded() {},
@@ -214,14 +218,14 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
         getPropertyValue: property => property === '--sticky-prompt-clip' && element === sourceClipParent ? scenario === 'retry-frame-settle' && frames >= 2 ? '0px' : '25px'
           : property === '-webkit-app-region' && scenario === 'retry-native-drag' ? 'drag' : '' }),
       document: fixtureDocument = { hasFocus() { return true; }, get activeElement() { if (scenario === 'retry-focus-reclaimed') return reclaimedComposer; return focused && scenario !== 'focus-failed' && !(scenario === 'retry-focus-lost' && focusChecks > 1) ? focusButton : null; }, querySelectorAll: selector => {
-        if (!submits) return [];
+        if (!submits) return selector.includes('composer-root') ? [{ value: '', getBoundingClientRect: rect }] : [];
         if (selector === '[data-role="user"]') return [responseUser];
         if (selector === '[data-role="assistant"]') return [responseAssistant];
         if (selector.includes('composer-root')) return scenario === 'missing-editor' ? [] : [{ value: '', getBoundingClientRect: rect }];
         return [];
       }, elementFromPoint: (x, y) =>
         scenario === 'retry-center-covered' && x === 20 && y === 20 || scenario === 'retry-overlay' || (scenario === 'retry-centering' && centers === 0)
-          || (scenario === 'retry-intercepted' && clicks > 0) ? overlay : (scenario === 'retry-all-covered' || scenario === 'retry-covered-at-final' && sampleCount >= 3) ? foreignHit : sourceRegionSelectors[scenario] ? sourceRegionHit : scenario === 'retry-frame-settle' && frames < 2 ? threadBackground : scenario === 'retry-source-clipped' ? threadBackground : scenario === 'retry-offviewport' ? null : scenario === 'retry-private-hit' ? foreignHit : scenario === 'retry-body-hit' ? bodyHit : scenario === 'retry-dock-strip' ? dockStrip : scenario === 'retry-child-hit' ? hitChild : hitButton },
+          || (scenario === 'retry-intercepted' && clicks > 0) ? overlay : ['retry-ancestor-cover', 'retry-composer-cover'].includes(scenario) ? ancestorFront : (scenario === 'retry-all-covered' || scenario === 'retry-covered-at-final' && sampleCount >= 3) ? foreignHit : sourceRegionSelectors[scenario] ? sourceRegionHit : scenario === 'retry-frame-settle' && frames < 2 ? threadBackground : scenario === 'retry-source-clipped' ? threadBackground : scenario === 'retry-offviewport' ? null : scenario === 'retry-private-hit' ? foreignHit : scenario === 'retry-body-hit' ? bodyHit : scenario === 'retry-dock-strip' ? dockStrip : scenario === 'retry-child-hit' ? hitChild : hitButton },
       process: { argv: ['node', 'helper', qualify ? '--qualify' : '--drive', '/request', '/output'], exit: resolve },
     });
     setTimeout(() => reject(new Error('bounded helper fixture timed out')), 1000).unref();
@@ -312,10 +316,31 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
   assert.equal(edge.clicks, 1);
   assert.equal(edge.keys, 0);
   assert.equal(edge.facts.retryHitOwnedPoints, 8);
-  for (const scenario of ['retry-all-covered', 'retry-unstable', 'retry-remounted', 'retry-source-clipped', 'retry-foreign-document', 'retry-wrong-type', 'retry-covered-at-final']) {
+  assert.equal(edge.facts.retrySampleStatus, 'owned');
+  assert.equal(edge.facts.retryHitTag, 'button');
+  const statuses = { 'retry-all-covered': 'no-owned-point', 'retry-source-clipped': 'clipped',
+    'retry-foreign-document': 'foreign-document', 'retry-wrong-type': 'native-control-invalid',
+    'retry-hidden-render': 'hidden', 'retry-detached': 'detached', 'retry-disabled': 'disabled',
+    'retry-transformed': 'transformed' };
+  for (const [scenario, status] of Object.entries(statuses)) {
+    const rejected = await trial(retryRequest, {}, scenario, true);
+    assert.equal(rejected.facts.retrySampleStatus, status, scenario);
+    assert.equal(rejected.clicks, 0);
+    assert.equal(rejected.keys, 0);
+  }
+  for (const scenario of ['retry-all-covered', 'retry-unstable', 'retry-remounted', 'retry-source-clipped', 'retry-foreign-document', 'retry-wrong-type', 'retry-covered-at-final', 'retry-hidden-render', 'retry-detached', 'retry-disabled', 'retry-transformed']) {
     const blocked = await trial(retryRequest, {}, scenario, true);
     assert.equal(blocked.clicks, 0, scenario);
     assert.equal(blocked.keys, 0, scenario);
+  }
+  for (const scenario of ['retry-ancestor-cover', 'retry-composer-cover']) {
+    const front = await trial(retryRequest, {}, scenario, true);
+    assert.equal(front.facts.retrySampleStatus, 'no-owned-point');
+    assert.equal(front.facts.retryHitTag, 'div');
+    assert.equal(front.facts.retryHitAncestor, true);
+    assert.equal(front.facts.retryHitSharesTurnPair, true);
+    assert.equal(front.facts.retryHitContainsComposer, scenario === 'retry-composer-cover');
+    assert.equal(front.clicks, 0);
   }
   const uncertain = await trial(retryRequest, {}, 'retry-intercepted', true);
   assert.equal(uncertain.clicks, 1);
