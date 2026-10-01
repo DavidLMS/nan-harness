@@ -13,6 +13,50 @@ fn read_json(path: &Path) -> Value {
 }
 
 #[test]
+fn mimo_auto_search_preserves_external_search_in_every_global_config_format() {
+    for custom_home in [false, true] {
+        for name in ["config.json", "mimocode.json", "mimocode.jsonc"] {
+            let root = tempfile::tempdir().unwrap();
+            let state = root.path().join("state");
+            let directory = if custom_home {
+                root.path().join("mimo-home/config")
+            } else {
+                root.path().join("xdg-config/mimocode")
+            };
+            std::fs::create_dir_all(&directory).unwrap();
+            std::fs::create_dir(&state).unwrap();
+            write_private_credential_fixture(&state, "synthetic-key");
+            let path = directory.join(name);
+            let original =
+                json!({"mcp": {"brave-search": {"type": "local", "command": ["brave-search"]}}});
+            std::fs::write(&path, serde_json::to_vec(&original).unwrap()).unwrap();
+            let (endpoint, request) =
+                capture_one_http_request_with_response(r#"{"data":[{"id":"qwen3.6"}]}"#);
+            let configured = mimo_command(root.path(), &format!("{endpoint}/v1"), custom_home)
+                .args(["config", "mimo", "--yes"])
+                .output()
+                .unwrap();
+            assert!(
+                configured.status.success(),
+                "{}",
+                String::from_utf8_lossy(&configured.stderr)
+            );
+            request.join().unwrap();
+            let receipt = read_json(&state.join("configurations.json"));
+            assert_eq!(receipt["harnesses"]["mimo-code"]["searchManaged"], false);
+            assert!(read_json(&path)["mcp"]["nan-search"].is_null());
+            assert_eq!(read_json(&path)["mcp"], original["mcp"]);
+            let removed = mimo_command(root.path(), "http://127.0.0.1:1/v1", custom_home)
+                .args(["config", "mimo", "--remove"])
+                .output()
+                .unwrap();
+            assert!(removed.status.success());
+            assert_eq!(read_json(&path), original);
+        }
+    }
+}
+
+#[test]
 fn mimo_native_configuration_uses_xdg_and_custom_home_and_refreshes_the_saved_key() {
     for custom_home in [false, true] {
         let root = tempfile::tempdir().unwrap();
@@ -160,7 +204,11 @@ fn mimo_command(root: &Path, base_url: &str, custom_home: bool) -> std::process:
         .env("USERPROFILE", home)
         .env("XDG_CONFIG_HOME", root.join("xdg-config"))
         .env("XDG_DATA_HOME", root.join("xdg-data"))
-        .env_remove("MIMOCODE_HOME");
+        .env_remove("MIMOCODE_HOME")
+        .env_remove("MIMOCODE_CONFIG")
+        .env_remove("MIMOCODE_CONFIG_DIR")
+        .env_remove("MIMOCODE_CONFIG_CONTENT")
+        .current_dir(root);
     if custom_home {
         command.env("MIMOCODE_HOME", root.join("mimo-home"));
     }

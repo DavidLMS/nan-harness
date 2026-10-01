@@ -239,30 +239,6 @@ fn invalid_mimo_paths_fail_before_writes_and_leave_other_harnesses_usable() {
 }
 
 #[test]
-fn mimo_auto_search_preserves_external_search_in_every_global_config_format() {
-    for name in ["config.json", "mimocode.json", "mimocode.jsonc"] {
-        let root = tempdir().unwrap();
-        let manager = ConfigurationManager::new(&root.path().join("state"), root.path());
-        let path = manager.paths.mimo_config_directory.join(name);
-        fs::create_dir_all(path.parent().unwrap()).unwrap();
-        let original =
-            json!({"mcp": {"brave-search": {"type": "local", "command": ["brave-search"]}}});
-        fs::write(&path, serde_json::to_vec(&original).unwrap()).unwrap();
-        let change = manager
-            .configure(HarnessKind::MimoCode, &test_config(), &test_models(), None)
-            .unwrap();
-        assert!(
-            !change.search.managed,
-            "{name} external search must be detected"
-        );
-        assert!(read_config(&path)["mcp"]["nan-search"].is_null());
-        assert_eq!(read_config(&path)["mcp"], original["mcp"]);
-        manager.remove(HarnessKind::MimoCode).unwrap();
-        assert_eq!(read_config(&path), original);
-    }
-}
-
-#[test]
 fn mimo_layered_global_configs_preserve_filters_and_reject_lower_nan_credentials() {
     let root = tempdir().unwrap();
     let manager = ConfigurationManager::new(&root.path().join("state"), root.path());
