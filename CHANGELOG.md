@@ -7,8 +7,7 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-- Verify MiMo native configuration, credential rotation, tool and search MCP
-  round-trips, and safe removal in pinned conformance and published canary checks.
+## [0.1.13] - 2026-10-01
 
 ### Added
 
@@ -860,7 +859,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   startup update prompts, daily compatibility canaries, and a monotonic remote
   verification feed.
 
-[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.1.12...HEAD
+[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.1.13...HEAD
+[0.1.13]: https://github.com/DavidLMS/nan-harness/compare/v0.1.12...v0.1.13
 [0.1.12]: https://github.com/DavidLMS/nan-harness/compare/v0.1.11...v0.1.12
 [0.1.11]: https://github.com/DavidLMS/nan-harness/compare/v0.1.10...v0.1.11
 [0.1.10]: https://github.com/DavidLMS/nan-harness/compare/v0.1.9...v0.1.10
