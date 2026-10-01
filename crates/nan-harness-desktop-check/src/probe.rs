@@ -683,7 +683,7 @@ async fn scenario(
     {
         return Err(Reason::IsolationUnavailable);
     }
-    let accessibility_facts = strict_accessibility_directory(spec)?;
+    let experiment = HostedExperiment::from_spec(spec)?;
     if binary_digest(&spec.nan_harness)? != spec.nan_harness_sha256 {
         return Err(Reason::InstallationUnreadable);
     }
@@ -718,9 +718,10 @@ async fn scenario(
     let outcome = match &gui {
         Ok(gui) => {
             result.steps.push(CheckStep::Launched);
-            if let Some(directory) = &accessibility_facts {
+            if let Some(experiment) = &experiment {
                 // This partial hosted experiment cannot become compatibility evidence.
-                gui.probe_accessibility(directory, &final_marker, result, &gate)
+                experiment
+                    .run(gui, process.id(), &final_marker, result, &gate)
                     .and(Err(Reason::NotRun))
             } else if let Err(failure) = gui.prepare_conversation() {
                 result.gui_stage = Some(failure.stage);
@@ -791,6 +792,74 @@ async fn start_provider_gate(
         .map_err(|()| Reason::ProviderFailed)
 }
 
+enum HostedExperiment {
+    Accessibility(PathBuf),
+    NativeCopy(PathBuf),
+    HermesDom(PathBuf),
+}
+
+impl HostedExperiment {
+    fn from_spec(spec: &ProbeSpec) -> Result<Option<Self>, Reason> {
+        let mut selected = None;
+        for candidate in [
+            strict_accessibility_directory(spec)?.map(Self::Accessibility),
+            native_copy_directory(spec)?.map(Self::NativeCopy),
+            hermes_dom_directory(spec)?.map(Self::HermesDom),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            if selected.replace(candidate).is_some() {
+                return Err(Reason::IsolationUnavailable);
+            }
+        }
+        Ok(selected)
+    }
+
+    fn run(
+        &self,
+        gui: &Gui,
+        owner: Option<u32>,
+        marker: &str,
+        result: &mut ProbeResult,
+        gate: &ProviderGate,
+    ) -> Result<(), Reason> {
+        match self {
+            Self::Accessibility(directory) => {
+                gui.probe_accessibility(directory, marker, result, gate)
+            }
+            Self::NativeCopy(directory) => gui.probe_native_copy(directory, marker, result, gate),
+            Self::HermesDom(directory) => gui.probe_dom(
+                directory,
+                owner.ok_or(Reason::ApplicationExited)?,
+                marker,
+                result,
+                gate,
+            ),
+        }
+    }
+}
+
+fn hermes_dom_directory(spec: &ProbeSpec) -> Result<Option<PathBuf>, Reason> {
+    let Some(directory) = std::env::var_os("FEASIBILITY_HERMES_DOM_FACTS") else {
+        return Ok(None);
+    };
+    if spec.live
+        || spec.kind != DesktopHarnessKind::Hermes
+        || !cfg!(target_os = "linux")
+        || spec.session != crate::cli::SessionMode::GithubHosted
+        || !spec.session.available()
+    {
+        return Err(Reason::IsolationUnavailable);
+    }
+    let directory = PathBuf::from(directory);
+    if !directory.is_absolute() {
+        return Err(Reason::IsolationUnavailable);
+    }
+    create_private_dir_all(&directory).map_err(|_| Reason::IsolationUnavailable)?;
+    Ok(Some(directory))
+}
+
 fn strict_accessibility_directory(spec: &ProbeSpec) -> Result<Option<PathBuf>, Reason> {
     let Some(directory) = std::env::var_os("FEASIBILITY_ZED_AX_FACTS") else {
         return Ok(None);
@@ -799,6 +868,27 @@ fn strict_accessibility_directory(spec: &ProbeSpec) -> Result<Option<PathBuf>, R
         || spec.kind != DesktopHarnessKind::Zed
         || spec.session != crate::cli::SessionMode::GithubHosted
         || !spec.session.available()
+    {
+        return Err(Reason::IsolationUnavailable);
+    }
+    let directory = PathBuf::from(directory);
+    if !directory.is_absolute() {
+        return Err(Reason::IsolationUnavailable);
+    }
+    create_private_dir_all(&directory).map_err(|_| Reason::IsolationUnavailable)?;
+    Ok(Some(directory))
+}
+
+fn native_copy_directory(spec: &ProbeSpec) -> Result<Option<PathBuf>, Reason> {
+    let Some(directory) = std::env::var_os("FEASIBILITY_ZED_NATIVE_COPY_FACTS") else {
+        return Ok(None);
+    };
+    if spec.live
+        || spec.kind != DesktopHarnessKind::Zed
+        || spec.session != crate::cli::SessionMode::GithubHosted
+        || !spec.session.available()
+        || !cfg!(target_os = "macos")
+        || std::env::var_os("FEASIBILITY_ZED_AX_FACTS").is_some()
     {
         return Err(Reason::IsolationUnavailable);
     }
@@ -1302,7 +1392,17 @@ fn prepare_zed_profile(spec: &ProbeSpec) -> Result<(), Reason> {
                 br#"{"auto_update":false,"telemetry":{"metrics":false,"diagnostics":false},"agent_ui_font_size":18,"agent_buffer_font_size":16}"#,
             )
         })
-        .map_err(|_| Reason::IsolationUnavailable)
+        .map_err(|_| Reason::IsolationUnavailable)?;
+    if std::env::var_os("FEASIBILITY_ZED_NATIVE_COPY_FACTS").is_some() {
+        // HostedExperiment admits this opt-in only for an owned deterministic VM.
+        // NewThread's workspace handler focuses the panel without toggling it.
+        open_private_new(&directory.join("keymap.json"))
+            .and_then(|mut file| {
+                file.write_all(br#"[{"bindings":{"ctrl-alt-n":"agent::NewThread"}}]"#)
+            })
+            .map_err(|_| Reason::IsolationUnavailable)?;
+    }
+    Ok(())
 }
 
 fn endpoint_help_command(spec: &ProbeSpec) -> Command {

@@ -11,6 +11,11 @@ on:
         description: Verify integration without repeating native measurements
         type: boolean
         default: false
+      experiment:
+        description: Observation mechanism to evaluate
+        type: choice
+        default: native-copy-dom
+        options: [native-copy-dom, strict-semantic]
 permissions:
   contents: read
 concurrency:
@@ -91,10 +96,11 @@ jobs:
           nanh="$FEASIBILITY_REAL_NANH"
           if [[ "$RUNNER_OS" == Linux ]]; then nanh="$GITHUB_WORKSPACE/scripts/desktop-feasibility/nanh-shim.py"; fi
           target/debug/nanh-desktop-check prepare --app '${{ matrix.app }}' --model qwen3.6 --yes --non-interactive --ephemeral --nan-harness "$nanh" --frozen "$RUNNER_TEMP/semantic-feasibility/frozen.json" --artifacts "$RUNNER_TEMP/semantic-feasibility/artifacts" --output "$RUNNER_TEMP/semantic-feasibility/prepared.json"
-      - name: Run strict AX inventory or same-runtime Hermes startup A/B
+      - name: Run bounded native-copy or renderer DOM experiment
         shell: bash
         env:
           FEASIBILITY_REAL_NANH: ${{ github.workspace }}/target/debug/nan-harness
+          SELECTED_EXPERIMENT: ${{ inputs.experiment }}
         run: |
           set -euo pipefail
           unset NAN_API_KEY GH_TOKEN GITHUB_TOKEN
@@ -102,6 +108,7 @@ jobs:
           if [[ '${{ matrix.app }}' == hermes-desktop ]]; then tag=v2026.9.24; fi
           bash scripts/run-desktop-check-session.sh python3 scripts/desktop-feasibility/run-experiments.py \
             --app '${{ matrix.app }}' --platform '${{ matrix.platform }}' --source-sha "$GITHUB_SHA" --release-tag "$tag" \
+            --experiment "$SELECTED_EXPERIMENT" \
             --checker "$GITHUB_WORKSPACE/target/debug/nanh-desktop-check" --real-nanh "$FEASIBILITY_REAL_NANH" \
             --prepared "$RUNNER_TEMP/semantic-feasibility/prepared.json" --frozen "$RUNNER_TEMP/semantic-feasibility/frozen.json" \
             --directory "$RUNNER_TEMP/semantic-feasibility"
@@ -146,3 +153,4 @@ jobs:
         run: |
           for test in scripts/desktop-feasibility/test-*.py; do python3 "$test"; done
           node --check scripts/desktop-feasibility/observe-hermes.cjs
+          node scripts/desktop-feasibility/test-hermes-dom.cjs

@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Exercise delegation and owned-child cleanup on observer startup failure."""
+import io
+import tempfile
 import os
 from pathlib import Path
 import runpy
@@ -23,25 +25,29 @@ class ShimLifecycle(unittest.TestCase):
                     self.invoke(args)
                 execute.assert_called_once_with('/synthetic/nanh', ['/synthetic/nanh', *args])
 
-    def test_no_cdp_arm_delegates_without_switches_or_observer(self):
+    def test_no_cdp_arm_wraps_for_classification_without_switches_or_observer(self):
         args = ['hermes-desktop', '--provider-base-url', 'http://127.0.0.1', '--', '--synthetic']
-        with patch.dict(os.environ, {'FEASIBILITY_REAL_NANH': '/synthetic/nanh',
-                                    'FEASIBILITY_HERMES_CDP': 'disabled'}), \
+        child = Mock(pid=123, stderr=io.BytesIO(b'Missing X server'), poll=Mock(return_value=1), wait=Mock(return_value=1))
+        with tempfile.TemporaryDirectory() as facts, \
+             patch.dict(os.environ, {'FEASIBILITY_REAL_NANH': '/synthetic/nanh',
+                                    'FEASIBILITY_HERMES_CDP': 'disabled', 'FEASIBILITY_FACTS': facts}), \
              patch.object(sys, 'argv', [str(SHIM), *args]), \
-             patch('os.execv', side_effect=SystemExit) as execute, \
-             patch('subprocess.Popen') as spawn:
+             patch('subprocess.Popen', return_value=child) as spawn, patch('signal.signal'):
             with self.assertRaises(SystemExit):
                 self.invoke(args)
-            execute.assert_called_once_with('/synthetic/nanh', ['/synthetic/nanh', *args])
-            spawn.assert_not_called()
+            self.assertEqual(spawn.call_count, 1)
+            self.assertEqual(spawn.call_args.args[0], ['/synthetic/nanh', *args])
+            self.assertTrue((Path(facts) / 'startup-123.json').exists())
 
     def test_observer_failure_terminates_owned_child(self):
-        child = Mock(pid=123, poll=Mock(return_value=None))
-        with patch.dict(os.environ, {'FEASIBILITY_REAL_NANH': '/synthetic/nanh',
-                                    'FEASIBILITY_FACTS': '/synthetic/facts'}), \
+        child = Mock(pid=123, stderr=io.BytesIO(b""), poll=Mock(return_value=None))
+        with tempfile.TemporaryDirectory() as facts, \
+             patch.dict(os.environ, {'FEASIBILITY_REAL_NANH': '/synthetic/nanh',
+                                    'FEASIBILITY_FACTS': facts, 'FEASIBILITY_HERMES_CDP': 'enabled', 'FEASIBILITY_HERMES_DOM_INPUT': '0'}), \
              patch.object(sys, 'argv', [str(SHIM), 'hermes-desktop', '--provider-base-url', 'http://127.0.0.1']), \
              patch('subprocess.Popen', side_effect=[child, OSError('synthetic')]) as spawn, \
-             patch('signal.signal'):
+             patch('signal.signal'), patch('socket.socket') as socket:
+            socket.return_value.__enter__.return_value.getsockname.return_value = ('127.0.0.1', 43210)
             with self.assertRaises(OSError):
                 self.invoke([])
             child.terminate.assert_called_once()

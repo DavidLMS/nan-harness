@@ -1,0 +1,238 @@
+//! Hosted renderer experiment with one input owner and no OCR fallback.
+
+use super::Gui;
+use crate::provider::ProviderGate;
+use crate::report::{CheckStep, ProbeResult, Reason};
+use nan_harness_private_fs::{open_private_new, open_private_read};
+use serde::{Deserialize, Serialize};
+use std::io::{Read as _, Write as _};
+use std::path::Path;
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Request<'a> {
+    connection_path: std::path::PathBuf,
+    owner_pid: u32,
+    prompt: &'a str,
+    expected_marker: &'a str,
+    timeout_ms: u32,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum DriverError {
+    Unclassified,
+    InvalidRequest,
+    LauncherUnowned,
+    EndpointUnowned,
+    TargetAmbiguous,
+    TargetInvalid,
+    ComposerAmbiguous,
+    StaleResponse,
+    InputMismatch,
+    ResponseTimeout,
+    AttachmentOrActionFailed,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EndpointFacts {
+    endpoint_owned: bool,
+    target_verified: bool,
+    attached: bool,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct InputFacts {
+    unique_composer: bool,
+    input_readback: bool,
+    input_submitted: bool,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ResponseFacts {
+    response_verified: bool,
+    synthetic_text_present: bool,
+    #[serde(default)]
+    provider_response_verified: bool,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Facts {
+    schema_version: u8,
+    mechanism: String,
+    #[serde(flatten)]
+    endpoint: EndpointFacts,
+    #[serde(flatten)]
+    input: InputFacts,
+    #[serde(flatten)]
+    response: ResponseFacts,
+    error_category: Option<DriverError>,
+    playwright_version: Option<String>,
+    observed_runtime_version: Option<String>,
+}
+
+fn read_facts(path: &Path) -> Result<Facts, Reason> {
+    const KEYS: &[&str] = &[
+        "schemaVersion",
+        "mechanism",
+        "endpointOwned",
+        "targetVerified",
+        "attached",
+        "uniqueComposer",
+        "inputReadback",
+        "inputSubmitted",
+        "responseVerified",
+        "syntheticTextPresent",
+        "errorCategory",
+        "playwrightVersion",
+        "observedRuntimeVersion",
+        "providerResponseVerified",
+    ];
+    let mut bytes = Vec::new();
+    open_private_read(path)
+        .and_then(|(file, _)| file.take(8193).read_to_end(&mut bytes))
+        .map_err(|_| Reason::IsolationUnavailable)?;
+    if bytes.len() > 8192 {
+        return Err(Reason::IsolationUnavailable);
+    }
+    let value: serde_json::Value =
+        serde_json::from_slice(&bytes).map_err(|_| Reason::IsolationUnavailable)?;
+    let object = value.as_object().ok_or(Reason::IsolationUnavailable)?;
+    if !(13..=14).contains(&object.len()) || object.keys().any(|key| !KEYS.contains(&key.as_str()))
+    {
+        return Err(Reason::IsolationUnavailable);
+    }
+    let facts: Facts = serde_json::from_value(value).map_err(|_| Reason::IsolationUnavailable)?;
+    let version = |value: &Option<String>| {
+        value.as_ref().is_none_or(|value| {
+            !value.is_empty()
+                && value.len() <= 64
+                && value
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || b".- ".contains(&byte))
+        })
+    };
+    if facts.schema_version != 1
+        || facts.mechanism != "hermes-playwright-dom"
+        || !version(&facts.playwright_version)
+        || !version(&facts.observed_runtime_version)
+        || facts.input.input_submitted
+            && !(facts.endpoint.endpoint_owned
+                && facts.endpoint.target_verified
+                && facts.endpoint.attached
+                && facts.input.unique_composer
+                && facts.input.input_readback)
+        || facts.response.response_verified
+            && !(facts.endpoint.endpoint_owned
+                && facts.endpoint.target_verified
+                && facts.endpoint.attached
+                && facts.input.unique_composer
+                && facts.input.input_readback
+                && facts.input.input_submitted
+                && facts.response.synthetic_text_present
+                && facts.error_category.is_none())
+    {
+        return Err(Reason::IsolationUnavailable);
+    }
+    Ok(facts)
+}
+
+impl Gui {
+    pub(crate) fn probe_dom(
+        &self,
+        directory: &Path,
+        owner: u32,
+        marker: &str,
+        result: &mut ProbeResult,
+        provider: &ProviderGate,
+    ) -> Result<(), Reason> {
+        self.visual.guard()?;
+        self.require_owned_foreground()?;
+        let driver = std::env::var_os("FEASIBILITY_HERMES_DOM_DRIVER")
+            .map(std::path::PathBuf::from)
+            .ok_or(Reason::IsolationUnavailable)?;
+        if !driver.is_absolute()
+            || !std::fs::symlink_metadata(&driver)
+                .is_ok_and(|metadata| metadata.file_type().is_file())
+        {
+            return Err(Reason::IsolationUnavailable);
+        }
+        let mut nonce = [0u8; 8];
+        getrandom::fill(&mut nonce).map_err(|_| Reason::IsolationUnavailable)?;
+        let stem = format!("{owner}-{}", u64::from_le_bytes(nonce));
+        let request_path = directory.join(format!("request-{stem}.private"));
+        let output_path = directory.join(format!("dom-{stem}.json"));
+        let request = Request {
+            connection_path: directory.join(format!("connection-{owner}.json")),
+            owner_pid: owner,
+            prompt: "Check this connection",
+            expected_marker: marker,
+            timeout_ms: 30_000,
+        };
+        let bytes = serde_json::to_vec(&request).map_err(|_| Reason::IsolationUnavailable)?;
+        open_private_new(&request_path)
+            .and_then(|mut file| file.write_all(&bytes))
+            .map_err(|_| Reason::IsolationUnavailable)?;
+        let outcome = self.run_dom_driver(&driver, &request_path, &output_path);
+        std::fs::remove_file(&request_path).map_err(|_| Reason::IsolationUnavailable)?;
+        outcome?;
+        let mut facts = read_facts(&output_path)?;
+        facts.response.provider_response_verified = provider.response_verified();
+        let bytes = serde_json::to_vec(&facts).map_err(|_| Reason::IsolationUnavailable)?;
+        let final_path = output_path.with_extension("closed");
+        open_private_new(&final_path)
+            .and_then(|mut file| file.write_all(&bytes))
+            .and_then(|()| std::fs::rename(final_path, &output_path))
+            .map_err(|_| Reason::IsolationUnavailable)?;
+        if facts.input.input_submitted {
+            result.steps.push(CheckStep::InputSubmitted);
+        }
+        if !facts.response.response_verified {
+            return Err(Reason::ResponseMismatch);
+        }
+        if !facts.response.provider_response_verified {
+            return Err(Reason::ProviderFailed);
+        }
+        result.steps.push(CheckStep::ResponseVerified);
+        Ok(())
+    }
+
+    fn run_dom_driver(&self, driver: &Path, request: &Path, output: &Path) -> Result<(), Reason> {
+        let mut child = Command::new("node")
+            .arg(driver)
+            .arg("--drive")
+            .arg(request)
+            .arg(output)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|_| Reason::ActionUnsupported)?;
+        let deadline = Instant::now() + Duration::from_secs(35);
+        let outcome = loop {
+            match child.try_wait() {
+                Ok(Some(_)) => break Ok(()),
+                Err(_) => break Err(Reason::ActionUnsupported),
+                Ok(None) => {}
+            }
+            if let Err(reason) = self.visual.guard() {
+                break Err(reason);
+            }
+            if Instant::now() >= deadline {
+                break Err(Reason::Timeout);
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        };
+        if outcome.is_err() {
+            let _ = child.kill();
+            child.wait().map_err(|_| Reason::IsolationUnavailable)?;
+        }
+        outcome
+    }
+}

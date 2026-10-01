@@ -14,27 +14,41 @@ from desktop_diagnostics import validate_bundle
 from cell import write_json
 
 
-def conditions(app):
+def conditions(app, experiment='strict-semantic'):
+    if experiment == 'native-copy-dom':
+        return ['native-copy'] if app == 'zed-desktop' else ['startup-baseline', 'playwright-dom']
     return ['strict-ax'] if app == 'zed-desktop' else ['without-cdp', 'with-cdp']
 
 
 def experiment_environment(app, condition, facts, real_nanh):
     environment = os.environ.copy()
     for name in ('NAN_API_KEY', 'OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'CODEX_API_KEY',
-                 'GH_TOKEN', 'GITHUB_TOKEN', 'FEASIBILITY_ZED_AX_FACTS'):
+                 'GH_TOKEN', 'GITHUB_TOKEN', 'FEASIBILITY_ZED_AX_FACTS',
+                 'FEASIBILITY_ZED_NATIVE_COPY_FACTS', 'FEASIBILITY_HERMES_DOM_FACTS',
+                 'FEASIBILITY_HERMES_DOM_INPUT', 'FEASIBILITY_HERMES_CDP',
+                 'FEASIBILITY_HERMES_DOM_DRIVER', 'FEASIBILITY_HERMES_STARTUP_CAPTURE',
+                 'FEASIBILITY_HERMES_EXECUTABLE'):
         environment.pop(name, None)
     environment['FEASIBILITY_REAL_NANH'] = str(real_nanh)
     environment['FEASIBILITY_FACTS'] = str(facts)
-    if app == 'zed-desktop':
+    if condition == 'native-copy':
+        environment['FEASIBILITY_ZED_NATIVE_COPY_FACTS'] = str(facts)
+    elif app == 'zed-desktop':
         environment['FEASIBILITY_ZED_AX_FACTS'] = str(facts)
     else:
-        environment['FEASIBILITY_HERMES_CDP'] = 'enabled' if condition == 'with-cdp' else 'disabled'
+        environment['FEASIBILITY_HERMES_CDP'] = 'enabled' if condition in ('with-cdp', 'playwright-dom') else 'disabled'
+        environment['FEASIBILITY_HERMES_STARTUP_CAPTURE'] = '1'
+        if condition == 'playwright-dom':
+            environment['FEASIBILITY_HERMES_DOM_INPUT'] = '1'
+            environment['FEASIBILITY_HERMES_DOM_FACTS'] = str(facts)
+            environment['FEASIBILITY_HERMES_DOM_DRIVER'] = str(Path(__file__).with_name('observe-hermes.cjs').resolve())
     return environment
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--app', choices=['zed-desktop', 'hermes-desktop'], required=True)
+    parser.add_argument('--experiment', choices=['strict-semantic', 'native-copy-dom'], default='strict-semantic')
     for name in ('checker', 'real-nanh', 'prepared', 'frozen', 'directory'):
         parser.add_argument('--' + name, type=Path, required=True)
     parser.add_argument('--source-sha', required=True)
@@ -45,13 +59,17 @@ def main():
         raise SystemExit('Disposable hosted runner required.')
     arms = []
     frozen_digest = hashlib.sha256(args.frozen.read_bytes()).hexdigest()
-    for condition in conditions(args.app):
+    prepared = json.loads(args.prepared.read_text())
+    prepared_app = next((app for app in prepared.get('apps', []) if app.get('app') == args.app), {})
+    for condition in conditions(args.app, args.experiment):
         directory = args.directory / condition
         facts = directory / 'facts'
         facts.mkdir(mode=0o700, parents=True, exist_ok=False)
         report = directory / 'report.json'
         diagnostic = directory / 'diagnostics.json'
         environment = experiment_environment(args.app, condition, facts, args.real_nanh)
+        if args.app == 'hermes-desktop':
+            environment['FEASIBILITY_HERMES_EXECUTABLE'] = prepared_app['executable']['path']
         command = [sys.executable, str(ROOT / 'canary/actions/desktop_diagnostics.py'),
                    '--output', str(diagnostic), '--source-sha', args.source_sha,
                    '--platform', args.platform, '--timeout', '1200', '--', str(args.checker),
@@ -81,7 +99,8 @@ def main():
         if arms[-1]['summary']['appCleanup'] != 'passed' or arms[-1]['summary']['reportCleanup'] != 'passed':
             break
     combined = dict(schemaVersion=1, experimentOnly=True, sourceCommit=args.source_sha,
-                    app=args.app, officialReleaseTag=args.release_tag, noOcrQualification=False, arms=arms)
+                    app=args.app, experiment=args.experiment, officialReleaseTag=args.release_tag,
+                    noOcrQualification=False, arms=arms)
     write_json(args.directory / 'summary.json', combined)
     # An experiment can complete with a blocked observation. It is never a
     # compatibility approval, and cleanup failure must not start another arm.

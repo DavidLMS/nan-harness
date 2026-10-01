@@ -10,6 +10,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'canary/actions'))
 from desktop_diagnostics import REASONS
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from experiment_facts import native_copy, startup, dom
 
 ROLES = set("unknown window application button check_box radio_button text_field text_area static_text combo_box list list_item menu menu_item menu_bar tab tab_group table table_row table_cell toolbar scroll_bar slider image link group dialog alert progress_bar tree_item web_area heading separator split_group switch spin_button tooltip status navigation scroll_thumb".split())
 AX_STAGES = set("initial-inventory trust-control agent-panel after-panel before-keyboard after-keyboard response completed".split())
@@ -99,11 +101,36 @@ def main():
     result['noOcrQualification'] = False
     result['stage'] = ('measured' if any(probe.get('steps') for probe in result['probes'])
                        else 'blocked-before-ui' if report else 'preparation-or-report-missing')
+    records = []
+    if args.facts:
+        paths = sorted(Path(args.facts).glob('*.json'))
+        if len(paths) > 32:
+            raise ValueError('too many experiment facts')
+        for path in paths:
+            if path.name.startswith('connection-'):
+                continue  # Private ownership protocol; never publish ports or PIDs.
+            if path.stat().st_size > 32768:
+                raise ValueError('oversized experiment facts')
+            records.append(json.loads(path.read_text()))
+    clean = result['appCleanup'] == 'passed' and result['reportCleanup'] == 'passed'
     if args.app == 'zed-desktop':
         result['semanticConversationReadback'] = bool(semantic_zed(report) and entry.get('version') and result['checkerSha256'] and len(args.source_sha) == 40)
         result['verdict'] = 'conversation-readback-viable' if result['semanticConversationReadback'] else 'inconclusive'
-        result['accessibilityInventories'] = [validate_ax(json.loads(path.read_text()))
-                                            for path in sorted(Path(args.facts).glob('*.json'))] if args.facts else []
+        result['accessibilityInventories'] = [validate_ax(value) for value in records
+                                            if value.get('mechanism') == 'zed-native-accessibility']
+        copies = [native_copy(value, REASONS) for value in records
+                  if value.get('mechanism') == 'zed-native-copy']
+        if len(copies) + len(result['accessibilityInventories']) != len(records):
+            raise ValueError('unknown Zed facts')
+        result['nativeCopyObservations'] = copies
+        result['nativeCopyReadbackObserved'] = bool(len(copies) == 3 and clean and all(
+            value['input']['entered'] and value['input']['clipboardVerified'] and value['input']['submitted']
+            and value['response']['copyAction'] and value['response']['clipboardVerified']
+            and value['response']['providerVerified'] and value['clipboardCleanup'] == 'passed'
+            for value in copies))
+        if copies:
+            result['expectedNativeCopyObservationCount'] = 3
+            result['verdict'] = 'native-copy-readback-observed' if result['nativeCopyReadbackObserved'] else 'inconclusive'
         if result['accessibilityInventories']:
             result['accessibilityObservationCount'] = len(result['accessibilityInventories'])
             result['expectedAccessibilityObservationCount'] = 3
@@ -115,8 +142,15 @@ def main():
 
     else:
         observations = []
-        for path in Path(args.facts).glob('*.json'):
-            value = json.loads(path.read_text())
+        startups = []
+        driven = []
+        for value in records:
+            if value.get('mechanism') == 'hermes-startup':
+                startups.append(startup(value))
+                continue
+            if value.get('mechanism') == 'hermes-playwright-dom':
+                driven.append(dom(value))
+                continue
             keys = {'schemaVersion', 'mechanism', 'endpointOwned', 'attached', 'uniqueComposer', 'inputReadback', 'syntheticTextPresent'}
             if set(value) != keys or type(value['schemaVersion']) is not int or value['schemaVersion'] != 1 or value['mechanism'] != 'hermes-cdp':
                 raise ValueError('invalid observer facts')
@@ -126,6 +160,17 @@ def main():
         result['shimSha256'] = hashlib.sha256(Path(args.shim).read_bytes()).hexdigest()
         result['observations'] = observations
         result['verdict'] = 'renderer-readable' if any(v['endpointOwned'] and v['attached'] and v['uniqueComposer'] for v in observations) else 'inconclusive'
+        result['startupObservations'] = startups
+        result['domObservations'] = driven
+        result['domReadbackObserved'] = bool(len(driven) == 3 and clean and all(
+            value['responseVerified'] and value['providerResponseVerified'] for value in driven))
+        result['observedChromiumVersions'] = sorted({value['observedRuntimeVersion'] for value in driven
+                                                     if value['observedRuntimeVersion']})
+        for name, filename in [('domDriverSha256', 'observe-hermes.cjs'),
+                               ('startupClassifierSha256', 'hermes-startup.py')]:
+            result[name] = hashlib.sha256(Path(__file__).with_name(filename).read_bytes()).hexdigest()
+        if driven:
+            result['verdict'] = 'dom-readback-observed' if result['domReadbackObserved'] else 'inconclusive'
         result['domDrivenQualification'] = False
     Path(args.output).parent.mkdir(parents=True, exist_ok=True)
     Path(args.output).write_text(json.dumps(result, indent=2) + '\n')
