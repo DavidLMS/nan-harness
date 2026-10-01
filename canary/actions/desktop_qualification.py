@@ -150,8 +150,11 @@ def semantic_observations(directory, app):
         elif mechanism == 'hermes-renderer-qualification':
             for key in ('endpointOwned', 'attached', 'targetVerified', 'uniqueComposer', 'inputReadback',
                         'inputSubmitted', 'responseVerified', 'providerResponseVerified', 'errorObserved',
-                        'retryControl', 'retryHitOwned', 'inputCleared', 'userTurnObserved'):
+                        'retryControl', 'retryHitOwned', 'retryRectInViewport', 'retryAncestorClipped',
+                        'retryPointerEventsNone', 'inputCleared', 'userTurnObserved'):
                 flag(record, value, key)
+            enum(record, value, 'retryHitTag', {'html', 'body', 'button', 'div', 'span', 'svg', 'other', 'none', 'unmeasured'})
+            enum(record, value, 'retryHitRegion', {'thread-viewport', 'composer-dock', 'composer-drag-region', 'titlebar-drag', 'dialog', 'popover', 'tooltip', 'other', 'none', 'unmeasured'})
             enum(record, value, 'retryHitTarget', {'self', 'composer', 'error-card', 'menu', 'modal', 'other', 'none', 'unmeasured'})
             enum(record, value, 'errorCategory', DOM_ERRORS)
             enum(record, value, 'sendBlocker', {'modal', 'menu', 'tooltip', 'composer-drag-region', 'other',

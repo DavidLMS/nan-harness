@@ -169,6 +169,55 @@ enum RetryHitTarget {
     Unmeasured,
 }
 
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum RetryHitTag {
+    Html,
+    Body,
+    Button,
+    Div,
+    Span,
+    Svg,
+    Other,
+    None,
+    Unmeasured,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum RetryHitRegion {
+    ThreadViewport,
+    ComposerDock,
+    ComposerDragRegion,
+    TitlebarDrag,
+    Dialog,
+    Popover,
+    Tooltip,
+    Other,
+    None,
+    Unmeasured,
+}
+
+#[derive(Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RetryGeometryFacts {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "retryRectInViewport")]
+    rect_in_viewport: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "retryAncestorClipped")]
+    ancestor_clipped: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "retryPointerEventsNone")]
+    pointer_events_none: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "retryHitTag")]
+    hit_tag: Option<RetryHitTag>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "retryHitRegion")]
+    hit_region: Option<RetryHitRegion>,
+}
+
 #[derive(Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct QualificationFacts {
@@ -180,6 +229,8 @@ struct QualificationFacts {
     retry_hit_owned: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     retry_hit_target: Option<RetryHitTarget>,
+    #[serde(flatten)]
+    geometry: RetryGeometryFacts,
 }
 
 impl QualificationFacts {
@@ -192,7 +243,11 @@ impl QualificationFacts {
         matches!(
             (qualification, self.error_observed, self.retry_control),
             (false, None, None) | (true, Some(_), Some(_))
-        ) && (!qualification || self.retry_hit_owned.is_some())
+        ) && (!qualification
+            || self.retry_hit_owned.is_some()
+                && self.geometry.rect_in_viewport.is_some()
+                && self.geometry.ancestor_clipped.is_some()
+                && self.geometry.pointer_events_none.is_some())
             && (self.retry_hit_owned != Some(true)
                 || self.retry_hit_target == Some(RetryHitTarget::Control))
             && (!qualification
@@ -257,6 +312,11 @@ const DOM_FACT_KEYS: &[&str] = &[
     "retryControl",
     "retryHitOwned",
     "retryHitTarget",
+    "retryRectInViewport",
+    "retryAncestorClipped",
+    "retryPointerEventsNone",
+    "retryHitTag",
+    "retryHitRegion",
 ];
 
 fn read_facts(path: &Path, qualification: bool) -> Result<Facts, Reason> {
@@ -270,7 +330,7 @@ fn read_facts(path: &Path, qualification: bool) -> Result<Facts, Reason> {
     let value: serde_json::Value =
         serde_json::from_slice(&bytes).map_err(|_| Reason::IsolationUnavailable)?;
     let object = value.as_object().ok_or(Reason::IsolationUnavailable)?;
-    let count = if qualification { 28..=30 } else { 24..=26 };
+    let count = if qualification { 33..=35 } else { 24..=26 };
     if !count.contains(&object.len())
         || object
             .keys()
@@ -278,8 +338,19 @@ fn read_facts(path: &Path, qualification: bool) -> Result<Facts, Reason> {
     {
         return Err(Reason::IsolationUnavailable);
     }
-    if qualification != object.contains_key("retryHitTarget")
-        || qualification != object.contains_key("retryHitOwned")
+    if [
+        "errorObserved",
+        "retryControl",
+        "retryHitOwned",
+        "retryHitTarget",
+        "retryRectInViewport",
+        "retryAncestorClipped",
+        "retryPointerEventsNone",
+        "retryHitTag",
+        "retryHitRegion",
+    ]
+    .iter()
+    .any(|key| qualification != object.contains_key(*key))
     {
         return Err(Reason::IsolationUnavailable);
     }
@@ -548,6 +619,11 @@ mod tests {
         qualifier["errorObserved"] = json!(false);
         qualifier["retryControl"] = json!(false);
         qualifier["retryHitOwned"] = json!(false);
+        qualifier["retryRectInViewport"] = json!(false);
+        qualifier["retryAncestorClipped"] = json!(false);
+        qualifier["retryPointerEventsNone"] = json!(false);
+        qualifier["retryHitTag"] = json!("unmeasured");
+        qualifier["retryHitRegion"] = json!("unmeasured");
         qualifier["retryHitTarget"] = json!("unmeasured");
         assert!(read(&qualifier, true).is_ok());
         assert!(read(&qualifier, false).is_err());
@@ -562,6 +638,11 @@ mod tests {
         value["errorObserved"] = json!(true);
         value["retryControl"] = json!(true);
         value["retryHitOwned"] = json!(true);
+        value["retryRectInViewport"] = json!(false);
+        value["retryAncestorClipped"] = json!(false);
+        value["retryPointerEventsNone"] = json!(false);
+        value["retryHitTag"] = json!("unmeasured");
+        value["retryHitRegion"] = json!("unmeasured");
         value["retryHitTarget"] = json!("self");
         value["inputSubmitted"] = json!(true);
         value["sendMechanism"] = json!("pointer");

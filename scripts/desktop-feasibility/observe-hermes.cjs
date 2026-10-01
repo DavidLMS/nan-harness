@@ -50,7 +50,8 @@ async function driveDom() {
     requestFailureCategory: null, apiErrorStatus: null, apiErrorResponseCount: 0, errorCategory: 'unclassified',
     playwrightVersion: require('../../.github/web-check/node_modules/playwright/package.json').version,
     observedRuntimeVersion: null });
-  if (qualify) Object.assign(facts, { mechanism: 'hermes-renderer-qualification', errorObserved: false, retryControl: false, retryHitOwned: false, retryHitTarget: 'unmeasured' });
+  if (qualify) Object.assign(facts, { mechanism: 'hermes-renderer-qualification', errorObserved: false, retryControl: false, retryHitOwned: false, retryHitTarget: 'unmeasured', retryRectInViewport: false, retryAncestorClipped: false,
+    retryPointerEventsNone: false, retryHitTag: 'unmeasured', retryHitRegion: 'unmeasured' });
   saveFacts();
   const exactKeys = (value, keys) => value && typeof value === 'object' && !Array.isArray(value) &&
     Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
@@ -209,21 +210,79 @@ async function driveDom() {
     try {
       const observation = await send.evaluate(button => {
         const rect = button.getBoundingClientRect();
-        const front = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
-        if (!front) return { retryHitOwned: false, retryHitTarget: 'none' };
-        if (front === button || button.contains(front)) return { retryHitOwned: true, retryHitTarget: 'self' };
-        const target = front.closest('[aria-modal="true"],[role="alertdialog"]') ? 'modal'
+        const x = rect.left + rect.width / 2;
+        const y = rect.top + rect.height / 2;
+        const front = document.elementFromPoint(x, y);
+        const observation = {
+          retryRectInViewport: rect.width > 0 && rect.height > 0 && rect.left >= 0 && rect.top >= 0 &&
+            rect.left + rect.width <= window.innerWidth && rect.top + rect.height <= window.innerHeight,
+          retryAncestorClipped: false,
+          retryPointerEventsNone: getComputedStyle(button).pointerEvents === 'none',
+          retryHitTag: front ? ['html', 'body', 'button', 'div', 'span', 'svg'].includes(front.tagName?.toLowerCase())
+            ? front.tagName.toLowerCase() : 'other' : 'none',
+          retryHitRegion: 'none', retryHitOwned: false, retryHitTarget: 'none',
+        };
+        for (let parent = button.parentElement; parent; parent = parent.parentElement) {
+          const bounds = parent.getBoundingClientRect();
+          const style = getComputedStyle(parent);
+          const clips = value => ['hidden', 'clip', 'scroll', 'auto'].includes(value);
+          if (parent.matches('[data-sticky-prompt-clip]')) {
+            const insetText = style.getPropertyValue('--sticky-prompt-clip');
+            if (/^\d+(?:\.\d+)?px$/.test(insetText)) {
+              const inset = Number.parseFloat(insetText);
+              if (Number.isFinite(inset) && y < bounds.top + inset) observation.retryAncestorClipped = true;
+            }
+          }
+          const paintClip = style.contain?.split(/\s+/).some(value => ['paint', 'strict', 'content'].includes(value));
+          if (((clips(style.overflowX) || paintClip) && (x < bounds.left || x >= bounds.left + bounds.width)) ||
+              ((clips(style.overflowY) || paintClip) && (y < bounds.top || y >= bounds.top + bounds.height)))
+            observation.retryAncestorClipped = true;
+        }
+        if (!front) return observation;
+        observation.retryHitRegion = front.closest('[data-slot="composer-drag-region"]') ? 'composer-drag-region'
+          : front.closest('[data-slot="composer-dock"]') ? 'composer-dock'
+          : front.closest('[role="dialog"],[role="alertdialog"]') ? 'dialog'
+          : front.closest('[data-slot="popover-content"]') ? 'popover'
+          : front.closest('[role="tooltip"]') ? 'tooltip'
+          : getComputedStyle(front).getPropertyValue('-webkit-app-region') === 'drag' ? 'titlebar-drag'
+          : front.closest('[data-slot="aui_thread-viewport"]') ? 'thread-viewport' : 'other';
+        if (front === button || button.contains(front)) {
+          observation.retryHitOwned = true; observation.retryHitTarget = 'self'; return observation;
+        }
+        observation.retryHitTarget = front.closest('[aria-modal="true"],[role="alertdialog"]') ? 'modal'
           : front.closest('[role="menu"]') ? 'menu'
-          : front.closest('[data-slot="composer-root"]') ? 'composer'
+          : front.closest('[data-slot="composer-root"]') || front.closest('[data-slot="composer-dock"]') ? 'composer'
           : front.closest('[role="alert"]')?.closest('[data-role="assistant"][data-slot="aui_assistant-message-root"]') ? 'error-card' : 'other';
-        return { retryHitOwned: false, retryHitTarget: target };
+        return observation;
       }, undefined, { timeout: 500 });
       Object.assign(facts, observation);
-    } catch { facts.retryHitOwned = false; facts.retryHitTarget = 'unmeasured'; }
+    } catch {
+      facts.retryHitOwned = false; facts.retryHitTarget = 'unmeasured';
+      facts.retryRectInViewport = false; facts.retryAncestorClipped = false;
+      facts.retryPointerEventsNone = false; facts.retryHitTag = 'unmeasured'; facts.retryHitRegion = 'unmeasured';
+    }
   }
   if (retryAction) {
     await send.evaluate(button => button.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' }),
       undefined, { timeout: Math.max(1, deadline - Date.now()) });
+    // The frozen sticky-prompt clip reconciles on scroll/IO animation frames.
+    // Observe that ordinary layout lifecycle before testing the click point.
+    const frameBudget = Math.max(0, Math.min(500, deadline - Date.now()));
+    let framesSettled = false;
+    if (frameBudget > 0) {
+      try {
+        framesSettled = await Promise.race([
+          page.evaluate(() => new Promise(resolve => {
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve(true)));
+          })),
+          delay(frameBudget).then(() => false),
+        ]);
+      } catch { /* Context loss is unmeasured, never authorization to click. */ }
+    }
+    if (!framesSettled || !ownedEndpoint()) {
+      facts.sendBlocker = 'unmeasured'; facts.retryHitOwned = false; facts.retryHitTarget = 'unmeasured';
+      facts.errorCategory = 'submit-action-timeout'; saveFacts(); return;
+    }
     await retryHitTest();
     saveFacts();
     if (!facts.retryHitOwned) {

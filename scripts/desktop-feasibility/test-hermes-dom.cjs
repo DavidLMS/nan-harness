@@ -14,10 +14,20 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
   let clicks = 0;
   let keys = 0;
   let centers = 0;
-  const overlay = { closest(selector) { return selector === '[data-slot="composer-root"]' ? {} : null; } };
-  const hitChild = { privateLabel: 'PRIVATE_SYNTHETIC_VALUE' };
+  let frames = 0;
+  const overlay = { tagName: 'DIV', closest(selector) { return ['[data-slot="composer-root"]', '[data-slot="composer-dock"]'].includes(selector) ? {} : null; } };
+  const dockStrip = { tagName: 'DIV', privateClass: 'PRIVATE_SYNTHETIC_VALUE', closest(selector) { return selector === '[data-slot="composer-dock"]' ? {} : null; } };
+  const foreignHit = { tagName: 'PRIVATE_SYNTHETIC_VALUE', closest() { return null; } };
+  const bodyHit = { tagName: 'BODY', closest() { return null; } };
+  const clippedParent = { matches() { return false; }, parentElement: null, getBoundingClientRect() { return { left: 0, top: 0, width: 5, height: 5 }; } };
+  const sourceClipParent = { matches(selector) { return selector === '[data-sticky-prompt-clip]'; },
+    parentElement: null, getBoundingClientRect() { return { left: 0, top: 0, width: 100, height: 100 }; } };
+  const threadBackground = { tagName: 'DIV', closest(selector) { return selector === '[data-slot="aui_thread-viewport"]' ? {} : null; } };
+  const hitChild = { tagName: 'SVG', privateLabel: 'PRIVATE_SYNTHETIC_VALUE', closest() { return null; } };
   const hitButton = {
-    getBoundingClientRect() { return { left: 10, top: 10, width: 20, height: 20 }; },
+    tagName: 'BUTTON', parentElement: scenario === 'retry-clipped' ? clippedParent : ['retry-source-clipped', 'retry-frame-settle'].includes(scenario) ? sourceClipParent : null,
+    closest(selector) { return selector === '[data-slot="aui_thread-viewport"]' ? {} : null; },
+    getBoundingClientRect() { return { left: scenario === 'retry-offviewport' ? 200 : 10, top: 10, width: 20, height: 20 }; },
     contains(element) { return element === hitChild; },
     scrollIntoView(options) {
       assert.equal(options.block, 'center');
@@ -106,6 +116,7 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
       return { targetInfo: { type: 'page', url: rendererUrl } };
     } }; } }; },
     async evaluate(_callback, args) {
+      if (_callback.toString().includes('requestAnimationFrame')) return _callback();
       if (!args) return true;
       assert.equal(args.prompt, request.prompt);
       assert.equal(args.marker, request.expectedMarker);
@@ -150,9 +161,17 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
         return { chromium: { async connectOverCDP() { attaches++;
           if (!scenario) throw new Error('must not attach'); return browser; } } };
       },
-      URL, setTimeout, document: { querySelectorAll: () => [], elementFromPoint: () =>
+      URL, setTimeout, requestAnimationFrame: callback => {
+        assert.equal(centers, 1);
+        if (scenario !== 'retry-no-frames') setTimeout(() => { frames++; callback(); }, 0);
+      }, window: { innerWidth: 100, innerHeight: 100 },
+      getComputedStyle: element => ({ pointerEvents: scenario === 'retry-pointer-none' && element === hitButton ? 'none' : 'auto',
+        overflowX: element === clippedParent ? 'hidden' : 'visible', overflowY: 'visible', contain: '',
+        getPropertyValue: property => property === '--sticky-prompt-clip' && element === sourceClipParent ? scenario === 'retry-frame-settle' && frames >= 2 ? '0px' : '25px'
+          : property === '-webkit-app-region' && scenario === 'retry-native-drag' ? 'drag' : '' }),
+      document: { querySelectorAll: () => [], elementFromPoint: () =>
         scenario === 'retry-overlay' || (scenario === 'retry-centering' && centers === 0)
-          || (scenario === 'retry-intercepted' && clicks > 0) ? overlay : scenario === 'retry-child-hit' ? hitChild : hitButton },
+          || (scenario === 'retry-intercepted' && clicks > 0) ? overlay : scenario === 'retry-frame-settle' && frames < 2 ? threadBackground : scenario === 'retry-source-clipped' ? threadBackground : scenario === 'retry-offviewport' ? null : scenario === 'retry-private-hit' ? foreignHit : scenario === 'retry-body-hit' ? bodyHit : scenario === 'retry-dock-strip' ? dockStrip : scenario === 'retry-child-hit' ? hitChild : hitButton },
       process: { argv: ['node', 'helper', qualify ? '--qualify' : '--drive', '/request', '/output'], exit: resolve },
     });
     setTimeout(() => reject(new Error('bounded helper fixture timed out')), 1000).unref();
@@ -161,7 +180,7 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
   const facts = JSON.parse(output.get('/output'));
   if (qualify) {
     assert(!output.get('/output').includes(request.expectedMarker));
-    return { facts, submits, fills, clicks, keys, centers };
+    return { facts, submits, fills, clicks, keys, centers, frames };
   }
   assert.equal(facts.inputSubmitted, ['happy', 'delayed', 'missing-editor', 'transient-context', 'keyboard'].includes(scenario));
   assert.equal(facts.responseVerified, ['happy', 'delayed', 'missing-editor', 'transient-context', 'keyboard'].includes(scenario));
@@ -242,6 +261,50 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
   assert.equal(childHit.facts.retryHitOwned, true);
   assert.equal(childHit.facts.retryHitTarget, 'self');
   assert.equal(childHit.clicks, 1);
+  assert.equal(childHit.facts.retryHitTag, 'svg');
+  assert.equal(retry.facts.retryRectInViewport, true);
+  assert.equal(retry.facts.retryAncestorClipped, false);
+  assert.equal(retry.facts.retryPointerEventsNone, false);
+  assert.equal(retry.facts.retryHitTag, 'button');
+  assert.equal(retry.facts.retryHitRegion, 'thread-viewport');
+  const clipped = await trial(retryRequest, {}, 'retry-clipped', true);
+  assert.equal(clipped.facts.retryAncestorClipped, true);
+  const sourceClipped = await trial(retryRequest, {}, 'retry-source-clipped', true);
+  assert.equal(sourceClipped.facts.retryAncestorClipped, true);
+  assert.equal(sourceClipped.facts.retryHitTarget, 'other');
+  assert.equal(sourceClipped.facts.retryHitRegion, 'thread-viewport');
+  assert.equal(sourceClipped.clicks, 0);
+  const pointerNone = await trial(retryRequest, {}, 'retry-pointer-none', true);
+  assert.equal(pointerNone.facts.retryPointerEventsNone, true);
+  const nativeDrag = await trial(retryRequest, {}, 'retry-native-drag', true);
+  assert.equal(nativeDrag.facts.retryHitRegion, 'titlebar-drag');
+  const dock = await trial(retryRequest, {}, 'retry-dock-strip', true);
+  assert.equal(dock.facts.retryHitTarget, 'composer');
+  assert.equal(dock.facts.retryHitRegion, 'composer-dock');
+  assert.equal(dock.clicks, 0);
+  const body = await trial(retryRequest, {}, 'retry-body-hit', true);
+  assert.equal(body.facts.retryHitTag, 'body');
+  assert.equal(body.facts.retryHitTarget, 'other');
+  assert.equal(body.clicks, 0);
+  const unknown = await trial(retryRequest, {}, 'retry-private-hit', true);
+  assert.equal(unknown.facts.retryHitTag, 'other');
+  assert.equal(unknown.clicks, 0);
+  const offviewport = await trial(retryRequest, {}, 'retry-offviewport', true);
+  assert.equal(offviewport.facts.retryRectInViewport, false);
+  assert.equal(offviewport.facts.retryHitTarget, 'none');
+  assert.equal(offviewport.clicks, 0);
+  const settled = await trial(retryRequest, {}, 'retry-frame-settle', true);
+  assert.equal(settled.frames, 2);
+  assert.equal(settled.centers, 1);
+  assert.equal(settled.facts.retryHitOwned, true);
+  assert.equal(settled.facts.retryAncestorClipped, false);
+  assert.equal(settled.clicks, 1);
+  const noFrames = await trial({ ...retryRequest, timeoutMs: 100 }, {}, 'retry-no-frames', true);
+  assert.equal(noFrames.frames, 0);
+  assert.equal(noFrames.facts.retryHitTarget, 'unmeasured');
+  assert.equal(noFrames.facts.errorCategory, 'submit-action-timeout');
+  assert.equal(noFrames.clicks, 0);
+  assert.equal(noFrames.submits, 0);
   const covered = await trial(retryRequest, {}, 'retry-overlay', true);
   assert.equal(covered.facts.retryHitOwned, false);
   assert.equal(covered.facts.retryHitTarget, 'composer');
@@ -273,5 +336,5 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
   }
   const invalid = await trial({ ...phase, action: 'retry' }, {}, null, true);
   assert.equal(invalid.facts.errorCategory, 'invalid-request');
-  console.log('Hermes DOM feasibility and qualification guards: 40 synthetic cases passed');
+  console.log('Hermes DOM feasibility and qualification guards: 50 synthetic cases passed');
 })().catch(error => { console.error(error.message); process.exitCode = 1; });

@@ -335,5 +335,27 @@ class QualificationTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 q.semantic_observations(root, 'hermes-desktop')
 
+    def test_retry_overlay_diagnostics_use_only_closed_categories(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / 'dom.json'
+            value = dict(schemaVersion=1, mechanism='hermes-renderer-qualification',
+                         retryRectInViewport=True, retryAncestorClipped=True,
+                         retryPointerEventsNone=False, retryHitOwned=False,
+                         retryHitTarget='other', retryHitTag='div',
+                         retryHitRegion='thread-viewport', className='PRIVATE', rectangle=[1, 2, 3, 4])
+            path.write_text(json.dumps(value))
+            public = q.semantic_observations(root, 'hermes-desktop')[0]
+            self.assertTrue(public['retryAncestorClipped'])
+            self.assertEqual(public['retryHitRegion'], 'thread-viewport')
+            self.assertNotIn('PRIVATE', str(public))
+            self.assertNotIn('rectangle', public)
+            for key, invalid in [('retryRectInViewport', 1), ('retryAncestorClipped', 'true'),
+                                 ('retryPointerEventsNone', None), ('retryHitTag', 'custom-private-tag'),
+                                 ('retryHitRegion', 'PRIVATE')]:
+                path.write_text(json.dumps({**value, key: invalid}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'hermes-desktop')
+
 if __name__ == '__main__':
     unittest.main()
