@@ -7,9 +7,10 @@ on:
         type: choice
         default: all
         options: [all, zed-desktop, hermes-desktop]
-  push:
-    branches: ['DavidLMS/desktop-integration-wave8']
-    paths: ['.github/workflows/desktop-automation-feasibility.yml', 'scripts/desktop-feasibility/**']
+      quality_only:
+        description: Verify integration without repeating native measurements
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -17,6 +18,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   select:
+    if: inputs.quality_only != true
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:

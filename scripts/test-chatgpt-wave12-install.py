@@ -318,9 +318,12 @@ class InstallerTests(unittest.TestCase):
                 failure_context = failure or nullcontext()
                 with patch.object(installer.subprocess, "Popen", side_effect=launch), \
                         failure_context, read_context, self.assertRaises(OSError):
-                    child = ("from pathlib import Path; "
+                    # Publish pipe data before readiness so a real selector must
+                    # reach the injected read fault instead of waiting for timeout.
+                    child = ("from pathlib import Path; import os, time; "
+                             "os.write(1, b'readable'); "
                              f"Path({str(ready_file)!r}).write_text('ready'); "
-                             "import time; time.sleep(30)")
+                             "time.sleep(30)")
                     installer.command([sys.executable, "-c", child], timeout=1)
                 if name == "read":
                     self.assertIn("launch", read_phases)
