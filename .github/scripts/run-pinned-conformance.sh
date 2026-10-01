@@ -39,6 +39,9 @@ for harness in "$@"; do
         fi
         cargo run --locked --quiet -- doctor "$command_name"
         cargo test --locked -p nan-harness-cli --test conformance_direct "$test_filter" -- --ignored
+        if [ "$harness" = 'mimo-code' ]; then
+          cargo test --locked -p nan-harness-cli --test cli configuration::mimo -- --include-ignored
+        fi
       )
       ;;
     fx)

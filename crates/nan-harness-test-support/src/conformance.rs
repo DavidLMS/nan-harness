@@ -3,6 +3,7 @@ mod constants;
 mod environment;
 mod helpers;
 mod inventory;
+mod mimo;
 mod prime_cleanup;
 mod registry;
 mod report;
@@ -16,6 +17,7 @@ pub use helpers::{
     assert_file, assert_inventory, assert_success, call, tool_names, tool_result,
     tool_result_failed, write_fixture,
 };
+pub use mimo::mimo_native_configuration_check;
 pub use registry::{
     HarnessRegistration, RegistryError, conformance_command, harness_registration,
     harness_registry, validate_harness_registry,

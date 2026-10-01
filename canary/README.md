@@ -22,6 +22,14 @@ process cleanup, sentinel behavior, and one representative tool round-trip.
 The complete native tool inventory is observed for maintenance but does not
 block compatibility when those functional contracts pass.
 
+MiMo's deterministic tool contracts also cover `config mimo`: configure, status,
+refresh with credential rotation, and removal preserving existing settings and
+credentials. A direct `mimo` process uses the persisted catalog and credential
+for read/write/edit, shell, file discovery, a subagent, and a search MCP round-trip
+against local fixtures. Failure of this `native-configuration` check fails
+conformance in daily and release cells. Published assets acquire this check only
+when they include the updated canary binary; daily never substitutes a source build.
+
 | Trigger | Platforms | Coverage |
 | --- | --- | --- |
 | Daily hosted | Linux/macOS ARM64 and Windows x64 | Pending upstream versions: clean install, doctor, deterministic conformance and live `qwen3.6`; partial feed publication by harness |

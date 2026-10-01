@@ -167,63 +167,12 @@ fn mimo_command(root: &Path, base_url: &str, custom_home: bool) -> std::process:
     command
 }
 
-#[cfg(unix)]
 #[tokio::test]
 #[ignore = "requires the pinned MiMo Code executable"]
 async fn mimo_runs_directly_with_the_persisted_catalog_and_credential() {
-    use nan_harness_test_support::conformance::{TEST_CREDENTIAL, assert_success, call};
-    use nan_harness_test_support::scripted_provider::{ProviderScenario, ScriptedProvider};
-    use nan_harness_test_support::terminal::TerminalCommand;
-    let root = tempfile::tempdir().unwrap();
-    let state = root.path().join("state");
-    std::fs::create_dir_all(&state).unwrap();
-    write_private_credential_fixture(&state, TEST_CREDENTIAL);
-    let target = root.path().join("read-target.txt");
-    std::fs::write(&target, "MIMO_PERSISTENT_READ_OK\n").unwrap();
-    let provider = ScriptedProvider::start(ProviderScenario::sequence(
-        [call("read", json!({"file_path": target}))],
-        "MIMO_PERSISTENT_OK",
-    ))
-    .await
-    .unwrap();
-    let mut configure = mimo_command(root.path(), provider.base_url(), true);
-    configure.args(["config", "mimo", "--yes", "--no-search"]);
-    let configured = tokio::process::Command::from(configure)
-        .output()
-        .await
-        .unwrap();
-    assert!(
-        configured.status.success(),
-        "{}",
-        String::from_utf8_lossy(&configured.stderr)
-    );
-    let output = TerminalCommand::new("mimo", root.path())
-        .clear_environment()
-        .env("PATH", std::env::var_os("PATH").unwrap_or_default())
-        .env("HOME", root.path().join("home"))
-        .env("MIMOCODE_HOME", root.path().join("mimo-home"))
-        .env("CI", "1")
-        .args([
-            "run",
-            "--pure",
-            "--format",
-            "json",
-            "--dangerously-skip-permissions",
-            "Read the fixture and complete the deterministic check.",
-        ])
-        .timeout(std::time::Duration::from_mins(2))
-        .run()
-        .await
-        .unwrap();
-    assert_success(&output);
-    assert!(
-        output.stdout.contains("MIMO_PERSISTENT_OK"),
-        "{}",
-        output.diagnostic()
-    );
-    assert!(provider.completed());
-    let requests = provider.chat_requests();
-    assert!(!requests.is_empty());
-    assert!(requests.iter().all(|request| request["model"] == "qwen3.6"));
-    provider.shutdown().await.unwrap();
+    use nan_harness_test_support::conformance::{
+        ConformanceStatus, mimo_native_configuration_check,
+    };
+    let check = mimo_native_configuration_check(Path::new(env!("CARGO_BIN_EXE_nan-harness"))).await;
+    assert_eq!(check.status, ConformanceStatus::Passed, "{check:?}");
 }

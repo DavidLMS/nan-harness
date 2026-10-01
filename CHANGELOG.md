@@ -7,6 +7,9 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Verify MiMo native configuration, credential rotation, tool and search MCP
+  round-trips, and safe removal in pinned conformance and published canary checks.
+
 ### Added
 
 - Launch MiMo Code through NaN with `nanh mimo` (alias `mimo-code`), including

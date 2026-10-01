@@ -9,7 +9,7 @@ use tokio::task::JoinHandle;
 use tokio::time::Duration;
 
 use super::ProviderScenario;
-use super::protocol::{chat_completions, fixture, models, search};
+use super::protocol::{chat_completions, fixture, models, search, searxng};
 use super::state::ProviderState;
 
 const PROVIDER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
@@ -43,6 +43,7 @@ impl ScriptedProvider {
             .route("/v1/models", get(models))
             .route("/v1/chat/completions", post(chat_completions))
             .route("/v1/search", post(search))
+            .route("/search", get(searxng))
             .route("/fixture", get(fixture))
             .with_state(Arc::clone(&state));
         let (shutdown, shutdown_rx) = oneshot::channel();

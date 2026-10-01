@@ -2,6 +2,32 @@ use super::support::*;
 
 #[tokio::test]
 #[ignore = "requires the pinned MiMo Code executable"]
+async fn mimo_published_conformance_checks_native_configuration() {
+    use nan_harness_test_support::conformance::{ConformanceStatus, PublishedConformanceRunner};
+    let report = PublishedConformanceRunner::new(
+        env!("CARGO_BIN_EXE_nan-harness"),
+        nan_harness_core::HarnessKind::MimoCode,
+    )
+    .run()
+    .await
+    .expect("published conformance should produce a safe report");
+    assert!(report.is_success(), "{report:?}");
+    let tools = report
+        .scenarios
+        .iter()
+        .find(|scenario| scenario.name == "tool-round-trip")
+        .expect("tool contracts should be reported");
+    assert!(
+        tools
+            .checks
+            .iter()
+            .any(|check| check.name == "native-configuration"
+                && check.status == ConformanceStatus::Passed)
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires the pinned MiMo Code executable"]
 async fn mimo_native_tools_complete_round_trips() {
     let workspace = tempfile::tempdir().expect("workspace");
     write_fixture(workspace.path(), "read-target.txt", "MIMO_READ_OK\n");
