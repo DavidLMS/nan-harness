@@ -73,6 +73,13 @@ struct Facts {
     retry_selector: Option<&'static str>,
     retry_title_count: Option<usize>,
     retry_label_count: Option<usize>,
+    retry_inventory_status: Option<&'static str>,
+    retry_inventory_total: Option<usize>,
+    retry_inventory_buttons: Option<usize>,
+    retry_inventory_static_text: Option<usize>,
+    retry_inventory_title_matches: Option<usize>,
+    retry_inventory_generation_matches: Option<usize>,
+    retry_inventory_retry_matches: Option<usize>,
     retry_candidate_count: Option<usize>,
     retry_tooltip_count: Option<usize>,
     clipboard_cleanup: &'static str,
@@ -374,6 +381,13 @@ fn native_copy_facts() -> Facts {
         retry_selector: None,
         retry_title_count: None,
         retry_label_count: None,
+        retry_inventory_status: None,
+        retry_inventory_total: None,
+        retry_inventory_buttons: None,
+        retry_inventory_static_text: None,
+        retry_inventory_title_matches: None,
+        retry_inventory_generation_matches: None,
+        retry_inventory_retry_matches: None,
         retry_candidate_count: None,
         retry_tooltip_count: None,
         clipboard_cleanup: "not-run",
@@ -419,6 +433,34 @@ fn retry_header_candidate(title: xa11y::Rect, button: &xa11y::Element) -> bool {
                 && i64::from(bounds.y) < i64::from(title.y) + i64::from(title.height)
                 && i64::from(bounds.y) + i64::from(bounds.height) > i64::from(title.y)
         })
+}
+
+#[derive(Debug, Default, PartialEq, Eq)]
+struct RetryInventoryCounts {
+    total: usize,
+    buttons: usize,
+    static_text: usize,
+    title_matches: usize,
+    generation_matches: usize,
+    retry_matches: usize,
+}
+
+fn retry_inventory_counts<'a>(
+    elements: impl IntoIterator<Item = &'a xa11y::ElementData>,
+) -> RetryInventoryCounts {
+    let mut counts = RetryInventoryCounts::default();
+    for element in elements.into_iter().take(4096) {
+        counts.total += 1;
+        counts.buttons += usize::from(element.role == xa11y::Role::Button);
+        counts.static_text += usize::from(element.role == xa11y::Role::StaticText);
+        let matches = |expected| {
+            element.name.as_deref() == Some(expected) || element.value.as_deref() == Some(expected)
+        };
+        counts.title_matches += usize::from(matches("An Error Happened"));
+        counts.generation_matches += usize::from(matches("Retry Generation"));
+        counts.retry_matches += usize::from(matches("Retry"));
+    }
+    counts
 }
 
 fn retry_label_parent(label: &xa11y::Element) -> Result<xa11y::Element, Reason> {
@@ -523,10 +565,36 @@ impl NativeClipboardSession<'_> {
                 return Ok(());
             }
             if Instant::now() >= deadline {
+                self.observe_retry_inventory()?;
                 return self.discover_retry_tooltip();
             }
             std::thread::sleep(Duration::from_millis(100));
         }
+    }
+
+    fn observe_retry_inventory(&mut self) -> Result<(), Reason> {
+        self.gui
+            .native_copy_guard(&mut self.facts, "retry-inventory-before")?;
+        let app = self.gui.app.as_ref().ok_or(Reason::SelectorNotMatched)?;
+        match app.locator("*").elements() {
+            Ok(elements) => {
+                self.facts.retry_inventory_status = Some(if elements.len() > 4096 {
+                    "budget-exceeded"
+                } else {
+                    "complete"
+                });
+                let counts = retry_inventory_counts(elements.iter().map(xa11y::Element::data));
+                self.facts.retry_inventory_total = Some(counts.total);
+                self.facts.retry_inventory_buttons = Some(counts.buttons);
+                self.facts.retry_inventory_static_text = Some(counts.static_text);
+                self.facts.retry_inventory_title_matches = Some(counts.title_matches);
+                self.facts.retry_inventory_generation_matches = Some(counts.generation_matches);
+                self.facts.retry_inventory_retry_matches = Some(counts.retry_matches);
+            }
+            Err(_) => self.facts.retry_inventory_status = Some("query-error"),
+        }
+        self.gui
+            .native_copy_guard(&mut self.facts, "retry-inventory-after")
     }
 
     fn retry_text_button(&mut self) -> Result<Option<xa11y::Element>, Reason> {
@@ -1180,6 +1248,53 @@ mod tests {
             Ok(())
         );
         assert_eq!((observations, waits), (3, 2));
+    }
+
+    #[test]
+    fn inventory_reduces_role_independent_matches_once_and_bounds_observations() {
+        let data = |role, name: Option<&str>, value: Option<&str>| xa11y::ElementData {
+            role,
+            name: name.map(str::to_owned),
+            value: value.map(str::to_owned),
+            description: None,
+            bounds: None,
+            actions: Vec::new(),
+            states: xa11y::StateSet::default(),
+            numeric_value: None,
+            min_value: None,
+            max_value: None,
+            stable_id: None,
+            pid: None,
+            raw: std::collections::HashMap::default(),
+            handle: 0,
+        };
+        let elements = [
+            data(xa11y::Role::Button, Some("Retry"), Some("Retry")),
+            data(xa11y::Role::Group, None, Some("An Error Happened")),
+            data(xa11y::Role::StaticText, Some("Retry Generation"), None),
+            data(xa11y::Role::StaticText, Some("prefix Retry"), None),
+        ];
+        assert_eq!(
+            retry_inventory_counts(&elements),
+            RetryInventoryCounts {
+                total: 4,
+                buttons: 1,
+                static_text: 2,
+                title_matches: 1,
+                generation_matches: 1,
+                retry_matches: 1,
+            }
+        );
+        let repeated = std::iter::repeat_n(&elements[0], 4097);
+        assert_eq!(
+            retry_inventory_counts(repeated),
+            RetryInventoryCounts {
+                total: 4096,
+                buttons: 4096,
+                retry_matches: 4096,
+                ..Default::default()
+            }
+        );
     }
 
     #[test]

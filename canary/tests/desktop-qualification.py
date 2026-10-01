@@ -185,12 +185,16 @@ class QualificationTests(unittest.TestCase):
             native = dict(schemaVersion=1, mechanism='zed-native-copy', substage='retry-tooltip-query',
                           retrySelector='retry-tooltip', retryTitleCount=0, retryCandidateCount=6,
                           retryTooltipCount=1, retryLabelCount=None, activationAttempted=True,
-                          activationSucceeded=False, privateRole='PRIVATE', privatePid=123)
+                          activationSucceeded=False, privateRole='PRIVATE', privatePid=123, retryInventoryStatus='complete',
+                          retryInventoryTotal=20, retryInventoryButtons=3, retryInventoryStaticText=4,
+                          retryInventoryTitleMatches=1, retryInventoryGenerationMatches=0, retryInventoryRetryMatches=0)
             path.write_text(json.dumps(native))
             public = q.semantic_observations(root, 'zed-desktop')[0]
             self.assertEqual(public['retryTooltipCount'], 1)
             self.assertEqual(public['retryCandidateCount'], 6)
             self.assertEqual(public['retrySelector'], 'retry-tooltip')
+            self.assertEqual(public['retryInventoryStatus'], 'complete')
+            self.assertEqual(public['retryInventoryTotal'], 20)
             self.assertTrue(public['activationAttempted'])
             self.assertFalse(public['activationSucceeded'])
             self.assertNotIn('PRIVATE', str(public))
@@ -199,7 +203,9 @@ class QualificationTests(unittest.TestCase):
                 path.write_text(json.dumps({**native, field: 1}))
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'zed-desktop')
-            for field in ('retryTitleCount', 'retryCandidateCount', 'retryTooltipCount', 'retryLabelCount'):
+            for field in ('retryTitleCount', 'retryCandidateCount', 'retryTooltipCount', 'retryLabelCount',
+                          'retryInventoryTotal', 'retryInventoryButtons', 'retryInventoryStaticText',
+                          'retryInventoryTitleMatches', 'retryInventoryGenerationMatches', 'retryInventoryRetryMatches'):
                 for invalid in (True, -1, 4097):
                     path.write_text(json.dumps({**native, field: invalid}))
                     with self.assertRaises(ValueError):
