@@ -312,5 +312,28 @@ class QualificationTests(unittest.TestCase):
         self.assertNotIn('PRIVATE_SYNTHETIC', str(value))
 
 
+    def test_native_icon_diagnostics_remain_closed_and_cannot_claim_qualification(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / 'icon.json'
+            value = dict(schemaVersion=1, mechanism='zed-native-icons', diagnosticsOnly=True,
+                         status='complete', reason=None, templateSide=28, retryMatches=1,
+                         copyMatches=1, closeMatches=1, baselineClusters=0, firstClusters=1,
+                         secondClusters=1, newStableClusters=1, privateFrame='PRIVATE', x=123)
+            path.write_text(json.dumps(value))
+            public = q.semantic_observations(root, 'zed-desktop')[0]
+            self.assertTrue(public['diagnosticsOnly'])
+            self.assertEqual(public['newStableClusters'], 1)
+            self.assertNotIn('PRIVATE', str(public))
+            self.assertNotIn('x', public)
+            for key, invalid in [('diagnosticsOnly', False), ('templateSide', 27),
+                                 ('retryMatches', 4097), ('status', 'PRIVATE')]:
+                path.write_text(json.dumps({**value, key: invalid}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'zed-desktop')
+            path.write_text(json.dumps(value))
+            with self.assertRaises(ValueError):
+                q.semantic_observations(root, 'hermes-desktop')
+
 if __name__ == '__main__':
     unittest.main()

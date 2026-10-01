@@ -488,6 +488,13 @@ impl Visual {
         Ok(screenshot)
     }
 
+    pub(super) fn native_icon_frame(
+        &self,
+    ) -> Result<super::native_icon_probe::PrivateIconFrame, Reason> {
+        self.screenshot()
+            .map(super::native_icon_probe::PrivateIconFrame::new)
+    }
+
     fn page(&self, interpolate: bool) -> Result<(Page, f32), Reason> {
         let screenshot = self.screenshot()?;
         let screenshot = if interpolate {

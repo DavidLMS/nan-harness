@@ -4,6 +4,7 @@ mod accessibility_probe;
 mod clipboard;
 mod dom_probe;
 mod native_copy_probe;
+mod native_icon_probe;
 mod visual;
 
 pub(crate) use dom_probe::{DomAction, DomPurpose, DomTurn};

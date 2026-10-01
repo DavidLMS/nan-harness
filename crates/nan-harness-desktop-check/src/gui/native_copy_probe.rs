@@ -6,7 +6,7 @@ use crate::report::{CheckStep, ProbeResult, Reason};
 use nan_harness_private_fs::open_private_new;
 use serde::{Deserialize, Serialize};
 use std::io::{Read as _, Write as _};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 use zeroize::Zeroizing;
@@ -504,12 +504,44 @@ fn same_retry_element(before: &xa11y::Element, after: &xa11y::Element) -> bool {
         && before.stable_id == after.stable_id
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct IconObservation {
+    schema_version: u8,
+    mechanism: &'static str,
+    status: &'static str,
+    reason: Option<Reason>,
+    #[serde(flatten)]
+    counts: super::native_icon_probe::IconDiagnostics,
+}
+
+fn record_icon_observation(directory: &Path, observation: &IconObservation) -> Result<(), Reason> {
+    let bytes = serde_json::to_vec(observation).map_err(|_| Reason::IsolationUnavailable)?;
+    let name = format!("icons-{}-{}.json", std::process::id(), nonce()?);
+    open_private_new(&directory.join(name))
+        .and_then(|mut file| file.write_all(&bytes).and_then(|()| file.sync_all()))
+        .map_err(|_| Reason::IsolationUnavailable)
+}
+
+fn icon_guard_failure(reason: Reason) -> bool {
+    matches!(
+        reason,
+        Reason::FocusChanged
+            | Reason::WindowChanged
+            | Reason::WindowOccluded
+            | Reason::ApplicationExited
+            | Reason::IsolationUnavailable
+    )
+}
+
 pub(crate) struct NativeClipboardSession<'a> {
     gui: &'a Gui,
     directory: &'a Path,
     facts: Facts,
     retry_ready: bool,
     retry_element: Option<xa11y::Element>,
+    icon_directory: Option<PathBuf>,
+    icon_baseline: Option<super::native_icon_probe::PrivateIconFrame>,
 }
 
 impl NativeClipboardSession<'_> {
@@ -522,7 +554,91 @@ impl NativeClipboardSession<'_> {
         self.facts.input = InputFacts::default();
         self.facts.response = ResponseFacts::default();
         self.facts.settle_observations = 0;
-        self.gui.new_native_copy_turn(&mut self.facts, prompt)
+        self.icon_baseline = None;
+        self.gui.compose_native_copy_turn(&mut self.facts, prompt)?;
+        self.capture_icon_baseline()?;
+        self.gui.send_native_copy_turn(&mut self.facts)
+    }
+
+    fn record_icon_failure(&self, reason: Reason) -> Result<(), Reason> {
+        record_icon_observation(
+            self.directory,
+            &IconObservation {
+                schema_version: 1,
+                mechanism: "zed-native-icons",
+                status: if matches!(
+                    reason,
+                    Reason::ActionUnsupported | Reason::SelectorNotMatched
+                ) {
+                    "unsupported"
+                } else {
+                    "query-error"
+                },
+                reason: Some(reason),
+                counts: super::native_icon_probe::IconDiagnostics::unsupported(),
+            },
+        )
+    }
+
+    fn capture_icon_baseline(&mut self) -> Result<(), Reason> {
+        if self.icon_directory.is_none() {
+            return Ok(());
+        }
+        self.gui
+            .native_copy_guard(&mut self.facts, "icon-baseline-before")?;
+        match self.gui.visual.native_icon_frame() {
+            Ok(frame) => self.icon_baseline = Some(frame),
+            Err(reason) => {
+                self.record_icon_failure(reason)?;
+                if icon_guard_failure(reason) {
+                    return Err(reason);
+                }
+            }
+        }
+        self.gui
+            .native_copy_guard(&mut self.facts, "icon-baseline-after")
+    }
+
+    fn observe_native_icons(&mut self) -> Result<(), Reason> {
+        let Some(directory) = self.icon_directory.as_ref() else {
+            return Ok(());
+        };
+        let Some(baseline) = self.icon_baseline.as_ref() else {
+            return Ok(());
+        };
+        self.gui
+            .native_copy_guard(&mut self.facts, "icon-observation-before")?;
+        let outcome = (|| {
+            let templates = super::native_icon_probe::Templates::load(directory, baseline.scale())?;
+            let first = self.gui.visual.native_icon_frame()?;
+            self.gui
+                .native_copy_guard(&mut self.facts, "icon-observation-settle")?;
+            std::thread::sleep(Duration::from_millis(200));
+            self.gui
+                .native_copy_guard(&mut self.facts, "icon-observation-after")?;
+            let second = self.gui.visual.native_icon_frame()?;
+            super::native_icon_probe::observe(&templates, baseline, &first, &second)
+        })();
+        match outcome {
+            Ok(counts) => record_icon_observation(
+                self.directory,
+                &IconObservation {
+                    schema_version: 1,
+                    mechanism: "zed-native-icons",
+                    status: "complete",
+                    reason: None,
+                    counts,
+                },
+            )?,
+            Err(reason) => {
+                self.record_icon_failure(reason)?;
+                if icon_guard_failure(reason) {
+                    return Err(reason);
+                }
+            }
+        }
+        self.gui
+            .native_copy_guard(&mut self.facts, "icon-observation-completed")
     }
 
     pub(crate) fn wait_response(&mut self, marker: &str, timeout: Duration) -> Result<(), Reason> {
@@ -566,7 +682,11 @@ impl NativeClipboardSession<'_> {
             }
             if Instant::now() >= deadline {
                 self.observe_retry_inventory()?;
-                return self.discover_retry_tooltip();
+                let outcome = self.discover_retry_tooltip();
+                if outcome.is_err() {
+                    self.observe_native_icons()?;
+                }
+                return outcome;
             }
             std::thread::sleep(Duration::from_millis(100));
         }
@@ -811,6 +931,10 @@ impl Gui {
             facts,
             retry_ready: false,
             retry_element: None,
+            icon_directory: std::env::var_os("NANH_ZED_ICON_TEMPLATES")
+                .map(PathBuf::from)
+                .filter(|path| path.is_dir()),
+            icon_baseline: None,
         })
     }
 
@@ -966,6 +1090,11 @@ impl Gui {
     }
 
     fn new_native_copy_turn(&self, facts: &mut Facts, prompt: &str) -> Result<(), Reason> {
+        self.compose_native_copy_turn(facts, prompt)?;
+        self.send_native_copy_turn(facts)
+    }
+
+    fn compose_native_copy_turn(&self, facts: &mut Facts, prompt: &str) -> Result<(), Reason> {
         // The private profile binds the global workspace NewThread handler,
         // which creates the draft and focuses its panel regardless of prior focus.
         self.guarded_chord(
@@ -976,7 +1105,10 @@ impl Gui {
             "new-thread-after",
         )?;
         self.settle_native_copy_panel(facts)?;
-        self.native_copy_input(facts, prompt)?;
+        self.native_copy_input(facts, prompt)
+    }
+
+    fn send_native_copy_turn(&self, facts: &mut Facts) -> Result<(), Reason> {
         facts.stage = "submit";
         // Collapse selection before the one source-bound MessageEditor Chat action.
         self.native_copy_guard(facts, "collapse-selection-before")?;

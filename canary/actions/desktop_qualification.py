@@ -72,7 +72,7 @@ def bounded_json(path, limit=1024 * 1024):
 
 DOM_ERRORS = set('unclassified invalid-request launcher-unowned endpoint-unowned target-ambiguous target-invalid composer-ambiguous send-unavailable stale-response input-mismatch response-timeout submit-action-timeout submit-action-intercepted submit-action-detached submit-action-failed response-observation-failed attachment-or-action-failed'.split())
 NATIVE_STAGES = set('trust panel input submit response-control response-readback completed'.split())
-NATIVE_SUBSTAGES = set('trust-query trust-before trust-after panel-query new-thread-before new-thread-after panel-settle select-all-before select-all-after type-before type-after paste-before paste-after paste-settle input-sentinel-write copy-select-all-before copy-select-all-after input-copy-before input-copy-after collapse-selection-before submit-before response-control-query response-sentinel-write response-copy-before response-copy-after clipboard-read-before clipboard-read-after export-copy-before export-copy-after export-read-before export-read-after export-parse completed retry-control-query retry-before retry-after retry-title-query retry-tooltip-reset retry-tooltip-hover retry-tooltip-query retry-tooltip-clear retry-revalidate retry-label-query retry-label-parent activation-before activation-after retry-inventory-before retry-inventory-after'.split())
+NATIVE_SUBSTAGES = set('trust-query trust-before trust-after panel-query new-thread-before new-thread-after panel-settle select-all-before select-all-after type-before type-after paste-before paste-after paste-settle input-sentinel-write copy-select-all-before copy-select-all-after input-copy-before input-copy-after collapse-selection-before submit-before response-control-query response-sentinel-write response-copy-before response-copy-after clipboard-read-before clipboard-read-after export-copy-before export-copy-after export-read-before export-read-after export-parse completed retry-control-query retry-before retry-after retry-title-query retry-tooltip-reset retry-tooltip-hover retry-tooltip-query retry-tooltip-clear retry-revalidate retry-label-query retry-label-parent activation-before activation-after retry-inventory-before retry-inventory-after icon-baseline-before icon-baseline-after icon-observation-before icon-observation-settle icon-observation-after icon-observation-completed'.split())
 
 
 def semantic_observations(directory, app):
@@ -103,10 +103,10 @@ def semantic_observations(directory, app):
         if type(value) is not dict:
             raise ValueError('invalid semantic observation')
         mechanism = value.get('mechanism')
-        if mechanism not in {'hermes-renderer-qualification', 'zed-native-copy', 'semantic-provider-oracle', 'hermes-retry-policy', 'semantic-inventory'}:
+        if mechanism not in {'hermes-renderer-qualification', 'zed-native-copy', 'semantic-provider-oracle', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons'}:
             continue
         expected = 'hermes-renderer-qualification' if app == 'hermes-desktop' else 'zed-native-copy'
-        if (mechanism != expected and mechanism not in {'semantic-provider-oracle', 'hermes-retry-policy', 'semantic-inventory'}) or type(value.get('schemaVersion')) is not int or value['schemaVersion'] != 1:
+        if (mechanism != expected and mechanism not in {'semantic-provider-oracle', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons'}) or type(value.get('schemaVersion')) is not int or value['schemaVersion'] != 1:
             raise ValueError('semantic observation identity differs')
         record = {'schemaVersion': 1, 'mechanism': mechanism}
         if mechanism == 'semantic-inventory':
@@ -118,6 +118,22 @@ def semantic_observations(directory, app):
             if type(value.get('readToolSelected')) is not bool:
                 raise ValueError('invalid semantic inventory flag')
             record['readToolSelected'] = value['readToolSelected']
+        elif mechanism == 'zed-native-icons':
+            if app != 'zed-desktop' or value.get('diagnosticsOnly') is not True:
+                raise ValueError('invalid native icon diagnostic identity')
+            record['diagnosticsOnly'] = True
+            enum(record, value, 'status', {'complete', 'unsupported', 'query-error'})
+            enum(record, value, 'reason', REASONS)
+            side = value.get('templateSide')
+            if type(side) is not int or side not in {0, 14, 28}:
+                raise ValueError('invalid native icon template side')
+            record['templateSide'] = side
+            for key in ('retryMatches', 'copyMatches', 'closeMatches', 'baselineClusters',
+                        'firstClusters', 'secondClusters', 'newStableClusters'):
+                count = value.get(key)
+                if count is not None and (type(count) is not int or not 0 <= count <= 4096):
+                    raise ValueError('invalid native icon diagnostic count')
+                record[key] = count
         elif mechanism == 'hermes-retry-policy':
             if app != 'hermes-desktop' or value.get('policy') != 'explicit-ui-retry' or type(value.get('autoRecoveryCycles')) is not int or value['autoRecoveryCycles'] != 0 or type(value.get('apiMaxRetries')) is not int or value['apiMaxRetries'] != 3:
                 raise ValueError('invalid Hermes qualification policy')

@@ -19,7 +19,7 @@ SESSION_ENV = {'PATH', 'HOME', 'TMPDIR', 'TMP', 'TEMP', 'USER', 'LOGNAME', 'SHEL
                'XDG_RUNTIME_DIR', 'GITHUB_ACTIONS', 'RUNNER_ENVIRONMENT', 'RUNNER_OS'}
 ZED_HELPERS = {'FEASIBILITY_ZED_INPUT_DRIVER', 'FEASIBILITY_ZED_INPUT_DRIVER_MODE',
                'FEASIBILITY_ZED_EXPORT_PARSER', 'FEASIBILITY_ZED_ZSTD',
-               'FEASIBILITY_ZED_RESPONSE_METHOD'}
+               'FEASIBILITY_ZED_RESPONSE_METHOD', 'NANH_ZED_ICON_TEMPLATES'}
 HERMES_RUNTIME = {'HERMES_DESKTOP_HERMES_ROOT', 'HERMES_DESKTOP_HERMES'}
 
 
@@ -34,7 +34,7 @@ def qualification_environment(app, facts, real_nanh, executable, inherited=None)
         environment.update({key: value for key, value in source.items() if key in ZED_HELPERS})
         if (environment.get('FEASIBILITY_ZED_INPUT_DRIVER_MODE') != 'paste'
                 or environment.get('FEASIBILITY_ZED_RESPONSE_METHOD') != 'thread-export'
-                or not all(environment.get(key) for key in ZED_HELPERS)):
+                or not all(environment.get(key) for key in ZED_HELPERS - {'NANH_ZED_ICON_TEMPLATES'})):
             raise ValueError('qualification requires native input and thread export helpers')
     elif app == 'hermes-desktop':
         environment.update({key: value for key, value in source.items() if key in HERMES_RUNTIME})
