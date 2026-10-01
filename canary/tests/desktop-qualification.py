@@ -124,6 +124,64 @@ class QualificationTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 q.aggregate(root, 'a' * 40)
 
+    def test_semantic_observations_publish_only_closed_progress(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'observation.json'
+            value = dict(schemaVersion=1, mechanism='hermes-renderer-qualification',
+                         errorCategory='response-timeout', responseVerified=False,
+                         providerResponseVerified=True, errorObserved=True, retryControl=True,
+                         uniqueComposer=True, inputSubmitted=True, observedRuntimeVersion='144.0.7559.236',
+                         privatePrompt='PRIVATE_SYNTHETIC', rawError='PRIVATE_SYNTHETIC')
+            path.write_text(json.dumps(value))
+            (Path(root) / 'connection-123.json').write_text('PRIVATE_SOCKET_PROTOCOL')
+            (Path(root) / 'startup-123.json').write_text('PRIVATE_STARTUP')
+            public = q.semantic_observations(root, 'hermes-desktop')
+            self.assertNotIn('PRIVATE', str(public))
+            self.assertEqual(public[0]['errorCategory'], 'response-timeout')
+            self.assertTrue(public[0]['retryControl'])
+            for field, invalid in [('errorCategory', 'PRIVATE_SYNTHETIC'), ('uniqueComposer', 1),
+                                   ('observedRuntimeVersion', 'PRIVATE_SYNTHETIC')]:
+                path.write_text(json.dumps({**value, field: invalid}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'hermes-desktop')
+            native = dict(schemaVersion=1, mechanism='zed-native-copy', stage='response-control',
+                          substage='retry-control-query', guardKind=None, guardCategory=None,
+                          blocker='selector-not-matched', clipboardCleanup='passed',
+                          retryControlCount=0, retrySelector='retry-name-or-description',
+                          input={'submitted': True, 'clipboardVerified': True, 'private': 'PRIVATE'},
+                          response={'clipboardVerified': False, 'providerVerified': True})
+            path.write_text(json.dumps(native))
+            public = q.semantic_observations(root, 'zed-desktop')
+            self.assertEqual(public[0]['substage'], 'retry-control-query')
+            self.assertTrue(public[0]['inputSubmitted'])
+            self.assertEqual(public[0]['retryControlCount'], 0)
+            self.assertEqual(public[0]['retrySelector'], 'retry-name-or-description')
+            for field, invalid in [('retryControlCount', True), ('retryControlCount', 4097),
+                                   ('retrySelector', 'PRIVATE_SYNTHETIC')]:
+                path.write_text(json.dumps({**native, field: invalid}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'zed-desktop')
+            path.write_text(json.dumps(native))
+            self.assertNotIn('PRIVATE', str(public))
+            with self.assertRaises(ValueError):
+                q.semantic_observations(root, 'hermes-desktop')
+
+    def test_semantic_observation_bounds_and_symlink_rejection(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'observation.json'
+            path.write_text(' ' * 8193)
+            with self.assertRaises(ValueError):
+                q.semantic_observations(root, 'hermes-desktop')
+            path.unlink()
+            path.symlink_to(Path(root) / 'absent')
+            with self.assertRaises(ValueError):
+                q.semantic_observations(root, 'hermes-desktop')
+            path.unlink()
+            for index in range(33):
+                (Path(root) / f'connection-{index}.json').write_text('{}')
+            with self.assertRaises(ValueError):
+                q.semantic_observations(root, 'hermes-desktop')
+
     def trial(self, mutate=lambda report: None):
         with tempfile.TemporaryDirectory() as root:
             paths = {key: Path(root) / key for key in ('checker', 'launcher', 'real_nanh', 'prepared', 'frozen', 'report')}

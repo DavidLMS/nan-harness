@@ -156,7 +156,7 @@ jobs:
           if [[ -f "$RUNNER_TEMP/semantic-feasibility/report.json" ]]; then
             launcher="$GITHUB_WORKSPACE/target/debug/nan-harness"
             if [[ "$RUNNER_OS" == Linux ]]; then launcher="$GITHUB_WORKSPACE/scripts/desktop-feasibility/nanh-shim.py"; fi
-            python3 canary/actions/desktop_qualification.py reduce --app '${{ matrix.app }}' --platform '${{ matrix.platform }}' --architecture '${{ matrix.architecture }}' --source-sha "$GITHUB_SHA" --model qwen3.6 --checker "$GITHUB_WORKSPACE/target/debug/nanh-desktop-check" --launcher "$launcher" --real-nanh "$GITHUB_WORKSPACE/target/debug/nan-harness" --prepared "$RUNNER_TEMP/semantic-feasibility/prepared.json" --frozen "$RUNNER_TEMP/semantic-feasibility/frozen.json" --report "$RUNNER_TEMP/semantic-feasibility/report.json" --output "$RUNNER_TEMP/semantic-feasibility/qualification.json"
+            python3 canary/actions/desktop_qualification.py reduce --app '${{ matrix.app }}' --platform '${{ matrix.platform }}' --architecture '${{ matrix.architecture }}' --source-sha "$GITHUB_SHA" --model qwen3.6 --checker "$GITHUB_WORKSPACE/target/debug/nanh-desktop-check" --launcher "$launcher" --real-nanh "$GITHUB_WORKSPACE/target/debug/nan-harness" --prepared "$RUNNER_TEMP/semantic-feasibility/prepared.json" --frozen "$RUNNER_TEMP/semantic-feasibility/frozen.json" --report "$RUNNER_TEMP/semantic-feasibility/report.json" --facts "$RUNNER_TEMP/semantic-feasibility/qualification-facts" --output "$RUNNER_TEMP/semantic-feasibility/qualification.json"
           fi
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always() && inputs.experiment == 'deterministic-full'

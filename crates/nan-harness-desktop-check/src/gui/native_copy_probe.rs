@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 use zeroize::Zeroizing;
 
 const RESPONSE_COPY: &str = "button[name=\"Copy This Agent Response\"], button[description=\"Copy This Agent Response\"], menu_item[name=\"Copy This Agent Response\"]";
+const RETRY_CONTROL: &str = "button[name=\"Retry\"], button[description=\"Retry\"], button[name=\"Retry Generation\"], button[description=\"Retry Generation\"]";
 
 #[derive(Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -59,6 +60,8 @@ struct Facts {
     trust_control_count: Option<usize>,
     panel_control_count: Option<usize>,
     response_control_count: Option<usize>,
+    retry_control_count: Option<usize>,
+    retry_selector: Option<&'static str>,
     clipboard_cleanup: &'static str,
     input: InputFacts,
     response: ResponseFacts,
@@ -338,6 +341,8 @@ fn native_copy_facts() -> Facts {
         trust_control_count: None,
         panel_control_count: None,
         response_control_count: None,
+        retry_control_count: None,
+        retry_selector: None,
         clipboard_cleanup: "not-run",
         input: InputFacts::default(),
         response: ResponseFacts::default(),
@@ -408,12 +413,14 @@ impl NativeClipboardSession<'_> {
             return Err(Reason::ActionUnsupported);
         }
         let app = self.gui.app.as_ref().ok_or(Reason::SelectorNotMatched)?;
-        let retry = app.locator("button[name=\"Retry\"]");
+        let retry = app.locator(RETRY_CONTROL);
+        self.facts.retry_selector = Some("retry-name-or-description");
         let deadline = Instant::now() + timeout;
         loop {
             self.gui
                 .native_copy_guard(&mut self.facts, "retry-control-query")?;
             let count = control_count(&retry)?;
+            self.facts.retry_control_count = Some(count);
             if count == 1 {
                 retry.wait_visible(WAIT).map_err(map_error)?;
                 self.retry_ready = true;
@@ -431,8 +438,10 @@ impl NativeClipboardSession<'_> {
             return Err(Reason::ActionUnsupported);
         }
         let app = self.gui.app.as_ref().ok_or(Reason::SelectorNotMatched)?;
-        let retry = app.locator("button[name=\"Retry\"]");
-        if control_count(&retry)? != 1 {
+        let retry = app.locator(RETRY_CONTROL);
+        let count = control_count(&retry)?;
+        self.facts.retry_control_count = Some(count);
+        if count != 1 {
             return Err(Reason::SelectorNotMatched);
         }
         self.gui
@@ -460,6 +469,7 @@ impl Gui {
         }
         let mut facts = native_copy_facts();
         facts.response_method = "thread-export";
+        facts.experiment_only = false;
         if let Err(reason) = self.prepare_native_copy(&mut facts) {
             finish_native_copy(directory, facts, None, Err(reason))?;
             return Err(reason);

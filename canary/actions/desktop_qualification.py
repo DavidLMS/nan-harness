@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import re
 
+from desktop_diagnostics import CATEGORIES, REASONS
 from desktop_suite import read_frozen_manifest, validated_report
 
 APPS = ('zed-desktop', 'chatgpt-desktop', 'claude-desktop', 'hermes-desktop', 'pen-desktop')
@@ -55,7 +56,7 @@ def envelope(app, platform, architecture, source_sha):
                 realNanhSha256=None, frozenManifestSha256=None, preparedSha256=None,
                 reportSha256=None, applicationSha256=None, upstreamRevision=None,
                 upstreamArtifactSha256=None, appVersion=None, runtimeVersion=None,
-                appCleanup=None, globalCleanup=None, probes=[])
+                appCleanup=None, globalCleanup=None, probes=[], semanticObservations=[])
 
 
 def bounded_json(path, limit=1024 * 1024):
@@ -69,9 +70,88 @@ def bounded_json(path, limit=1024 * 1024):
     return json.loads(raw)
 
 
+DOM_ERRORS = set('unclassified invalid-request launcher-unowned endpoint-unowned target-ambiguous target-invalid composer-ambiguous send-unavailable stale-response input-mismatch response-timeout submit-action-timeout submit-action-intercepted submit-action-detached submit-action-failed response-observation-failed attachment-or-action-failed'.split())
+NATIVE_STAGES = set('trust panel input submit response-control response-readback completed'.split())
+NATIVE_SUBSTAGES = set('trust-query trust-before trust-after panel-query new-thread-before new-thread-after panel-settle select-all-before select-all-after type-before type-after paste-before paste-after paste-settle input-sentinel-write copy-select-all-before copy-select-all-after input-copy-before input-copy-after collapse-selection-before submit-before response-control-query response-sentinel-write response-copy-before response-copy-after clipboard-read-before clipboard-read-after export-copy-before export-copy-after export-read-before export-read-after export-parse completed retry-control-query retry-before retry-after'.split())
+
+
+def semantic_observations(directory, app):
+    if directory is None:
+        return []
+    directory = Path(directory)
+    if directory.is_symlink() or not directory.is_dir():
+        raise ValueError('semantic facts directory is invalid')
+    paths = sorted(directory.glob('*.json'))
+    if len(paths) > 32:
+        raise ValueError('too many semantic observations')
+    observations = []
+    def flag(record, source, key, output=None):
+        if key in source:
+            if type(source[key]) is not bool:
+                raise ValueError('invalid semantic flag')
+            record[output or key] = source[key]
+    def enum(record, source, key, allowed):
+        if key in source:
+            value = source[key]
+            if value is not None and (type(value) is not str or value not in allowed):
+                raise ValueError('invalid semantic enum')
+            record[key] = value
+    for path in paths:
+        if path.name.startswith(('connection-', 'startup-')):
+            continue
+        value = bounded_json(path, 8192)
+        if type(value) is not dict:
+            raise ValueError('invalid semantic observation')
+        mechanism = value.get('mechanism')
+        if mechanism not in {'hermes-renderer-qualification', 'zed-native-copy'}:
+            continue
+        expected = 'hermes-renderer-qualification' if app == 'hermes-desktop' else 'zed-native-copy'
+        if mechanism != expected or type(value.get('schemaVersion')) is not int or value['schemaVersion'] != 1:
+            raise ValueError('semantic observation identity differs')
+        record = {'schemaVersion': 1, 'mechanism': mechanism}
+        if mechanism == 'hermes-renderer-qualification':
+            for key in ('endpointOwned', 'attached', 'targetVerified', 'uniqueComposer', 'inputReadback',
+                        'inputSubmitted', 'responseVerified', 'providerResponseVerified', 'errorObserved',
+                        'retryControl', 'inputCleared', 'userTurnObserved'):
+                flag(record, value, key)
+            enum(record, value, 'errorCategory', DOM_ERRORS)
+            enum(record, value, 'sendBlocker', {'modal', 'menu', 'tooltip', 'composer-drag-region', 'other',
+                                              'unmeasured', 'focus', 'disabled', 'inert'})
+            if 'observedRuntimeVersion' in value:
+                version = value['observedRuntimeVersion']
+                if version is not None and (type(version) is not str or not re.fullmatch(r'[0-9]+(?:\.[0-9]+){1,3}', version) or len(version) > 64):
+                    raise ValueError('invalid semantic runtime version')
+                record['observedRuntimeVersion'] = version
+        else:
+            enum(record, value, 'stage', NATIVE_STAGES)
+            enum(record, value, 'substage', NATIVE_SUBSTAGES)
+            enum(record, value, 'blocker', REASONS)
+            enum(record, value, 'guardKind', {'native-window', 'direct-foreground'})
+            enum(record, value, 'guardCategory', CATEGORIES)
+            enum(record, value, 'clipboardCleanup', {'passed', 'failed', 'not-run'})
+            enum(record, value, 'retrySelector', {'retry-name-or-description'})
+            if 'retryControlCount' in value:
+                count = value['retryControlCount']
+                if count is not None and (type(count) is not int or not 0 <= count <= 4096):
+                    raise ValueError('invalid retry control count')
+                record['retryControlCount'] = count
+            enum(record, value, 'lastExportError', {'request', 'schema', 'user-mismatch', 'assistant-mismatch', 'decompression'})
+            enum(record, value, 'lastExportTransportError', {'configuration', 'spawn', 'pipes', 'timeout', 'wait', 'write', 'read', 'exit', 'output-budget', 'json', 'verdict'})
+            for nested, fields in (('input', {'submitted': 'inputSubmitted', 'clipboardVerified': 'inputReadback'}),
+                                   ('response', {'clipboardVerified': 'responseVerified', 'providerVerified': 'providerResponseVerified'})):
+                source = value.get(nested, {})
+                if type(source) is not dict:
+                    raise ValueError('invalid semantic flags')
+                for key, output in fields.items():
+                    flag(record, source, key, output)
+        observations.append(record)
+    return observations
+
+
 def reduce_report(*, app, platform, architecture, source_sha, model, frozen, prepared,
-                  checker, launcher, real_nanh, report):
+                  checker, launcher, real_nanh, report, facts=None):
     result = envelope(app, platform, architecture, source_sha)
+    result['semanticObservations'] = semantic_observations(facts, app)
     if result['backend'] == 'pending':
         raise ValueError('native backend is not qualified for this cell')
     manifest = read_frozen_manifest(frozen, [app], platform, architecture, model)
@@ -159,7 +239,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('command', choices=('matrix', 'pending', 'reduce', 'aggregate'))
     for name in ('app', 'platform', 'architecture', 'source-sha', 'output', 'model', 'frozen', 'prepared',
-                 'checker', 'launcher', 'real-nanh', 'report', 'directory'):
+                 'checker', 'launcher', 'real-nanh', 'report', 'directory', 'facts'):
         parser.add_argument('--' + name)
     args = parser.parse_args()
     try:
@@ -174,7 +254,7 @@ def main():
             raise ValueError('required cell evidence is missing')
         result = (aggregate(args.directory, args.source_sha) if args.command == 'aggregate' else
                   envelope(args.app, args.platform, args.architecture, args.source_sha)
-                  if args.command == 'pending' else reduce_report(**{key: getattr(args, key) for key in required if key != 'output'}))
+                  if args.command == 'pending' else reduce_report(**{key: getattr(args, key) for key in required if key != 'output'}, facts=args.facts))
         destination = Path(args.output)
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_text(json.dumps(result, sort_keys=True) + '\n')

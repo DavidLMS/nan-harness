@@ -123,7 +123,7 @@ jobs:
           if [[ -f "$RUNNER_TEMP/desktop-qualification/report.json" ]]; then
             launcher="$GITHUB_WORKSPACE/target/debug/nan-harness"
             if [[ "$RUNNER_OS" == Linux ]]; then launcher="$GITHUB_WORKSPACE/scripts/desktop-feasibility/nanh-shim.py"; fi
-            python3 canary/actions/desktop_qualification.py reduce --app '${{ matrix.app }}' --platform '${{ matrix.platform }}' --architecture '${{ matrix.architecture }}' --source-sha "$GITHUB_SHA" --model qwen3.6 --checker "$GITHUB_WORKSPACE/target/debug/nanh-desktop-check" --launcher "$launcher" --real-nanh "$GITHUB_WORKSPACE/target/debug/nan-harness" --prepared "$RUNNER_TEMP/desktop-qualification/prepared.json" --frozen "$RUNNER_TEMP/desktop-qualification/frozen.json" --report "$RUNNER_TEMP/desktop-qualification/report.json" --output "$RUNNER_TEMP/desktop-qualification/qualification.json"
+            python3 canary/actions/desktop_qualification.py reduce --app '${{ matrix.app }}' --platform '${{ matrix.platform }}' --architecture '${{ matrix.architecture }}' --source-sha "$GITHUB_SHA" --model qwen3.6 --checker "$GITHUB_WORKSPACE/target/debug/nanh-desktop-check" --launcher "$launcher" --real-nanh "$GITHUB_WORKSPACE/target/debug/nan-harness" --prepared "$RUNNER_TEMP/desktop-qualification/prepared.json" --frozen "$RUNNER_TEMP/desktop-qualification/frozen.json" --report "$RUNNER_TEMP/desktop-qualification/report.json" --facts "$RUNNER_TEMP/desktop-qualification/qualification-facts" --output "$RUNNER_TEMP/desktop-qualification/qualification.json"
           fi
       - name: Remove owned Hermes namespace policy
         if: always() && matrix.backend == 'renderer-dom'
