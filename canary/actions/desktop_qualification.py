@@ -73,6 +73,8 @@ def bounded_json(path, limit=1024 * 1024):
 DOM_ERRORS = set('unclassified invalid-request launcher-unowned endpoint-unowned target-ambiguous target-invalid composer-ambiguous send-unavailable stale-response input-mismatch response-timeout submit-action-timeout submit-action-intercepted submit-action-detached submit-action-failed response-observation-failed attachment-or-action-failed'.split())
 NATIVE_STAGES = set('trust panel input submit response-control response-readback completed'.split())
 NATIVE_SUBSTAGES = set('trust-query trust-before trust-after panel-query new-thread-before new-thread-after panel-settle select-all-before select-all-after type-before type-after paste-before paste-after paste-settle input-sentinel-write copy-select-all-before copy-select-all-after input-copy-before input-copy-after collapse-selection-before submit-before response-control-query response-sentinel-write response-copy-before response-copy-after clipboard-read-before clipboard-read-after export-copy-before export-copy-after export-read-before export-read-after export-parse completed retry-control-query retry-before retry-after retry-title-query retry-tooltip-reset retry-tooltip-hover retry-tooltip-query retry-tooltip-clear retry-revalidate retry-label-query retry-label-parent activation-before activation-after retry-inventory-before retry-inventory-after icon-baseline-before icon-baseline-after icon-observation-before icon-observation-settle icon-observation-after icon-observation-completed'.split())
+DOM_TAGS = {'html', 'body', 'button', 'div', 'span', 'svg', 'other', 'none', 'unmeasured'}
+DOM_REGIONS = {'thread-viewport', 'composer-root', 'composer-dock', 'composer-drag-region', 'composer-bounds', 'composer-portal', 'particle-field', 'chat-drop-overlay', 'titlebar-drag', 'dialog', 'popover', 'tooltip', 'other', 'none', 'unmeasured'}
 
 
 def semantic_observations(directory, app):
@@ -175,10 +177,14 @@ def semantic_observations(directory, app):
             for key in ('endpointOwned', 'attached', 'targetVerified', 'uniqueComposer', 'inputReadback',
                         'inputSubmitted', 'responseVerified', 'providerResponseVerified', 'errorObserved',
                         'retryControl', 'retryHitOwned', 'retryRectInViewport', 'retryAncestorClipped',
-                        'retryPointerEventsNone', 'inputCleared', 'userTurnObserved'):
+                        'retryPointerEventsNone', 'inputCleared', 'userTurnObserved',
+                        'retryFocusAfterAcquire', 'retryFocusBeforeAction', 'retryButtonConnected',
+                        'retryAncestorHidden', 'retryAncestorInert', 'retryFieldsetDisabled', 'retryDocumentFocused'):
                 flag(record, value, key)
-            enum(record, value, 'retryHitTag', {'html', 'body', 'button', 'div', 'span', 'svg', 'other', 'none', 'unmeasured'})
-            enum(record, value, 'retryHitRegion', {'thread-viewport', 'composer-dock', 'composer-drag-region', 'composer-bounds', 'composer-portal', 'particle-field', 'chat-drop-overlay', 'titlebar-drag', 'dialog', 'popover', 'tooltip', 'other', 'none', 'unmeasured'})
+            for key in ('retryHitTag', 'retryActiveTag'):
+                enum(record, value, key, DOM_TAGS)
+            for key in ('retryHitRegion', 'retryActiveRegion'):
+                enum(record, value, key, DOM_REGIONS)
             enum(record, value, 'retryHitTarget', {'self', 'composer', 'error-card', 'menu', 'modal', 'other', 'none', 'unmeasured'})
             enum(record, value, 'errorCategory', DOM_ERRORS)
             enum(record, value, 'sendBlocker', {'modal', 'menu', 'tooltip', 'composer-drag-region', 'other',

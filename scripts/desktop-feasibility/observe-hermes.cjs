@@ -51,7 +51,10 @@ async function driveDom() {
     playwrightVersion: require('../../.github/web-check/node_modules/playwright/package.json').version,
     observedRuntimeVersion: null });
   if (qualify) Object.assign(facts, { mechanism: 'hermes-renderer-qualification', errorObserved: false, retryControl: false, retryHitOwned: false, retryHitTarget: 'unmeasured', retryRectInViewport: false, retryAncestorClipped: false,
-    retryPointerEventsNone: false, retryHitTag: 'unmeasured', retryHitRegion: 'unmeasured' });
+    retryPointerEventsNone: false, retryHitTag: 'unmeasured', retryHitRegion: 'unmeasured',
+    retryFocusAfterAcquire: false, retryFocusBeforeAction: false, retryButtonConnected: false,
+    retryAncestorHidden: false, retryAncestorInert: false, retryFieldsetDisabled: false,
+    retryDocumentFocused: false, retryActiveTag: 'unmeasured', retryActiveRegion: 'unmeasured' });
   saveFacts();
   const exactKeys = (value, keys) => value && typeof value === 'object' && !Array.isArray(value) &&
     Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
@@ -215,6 +218,43 @@ async function driveDom() {
     if (!pointerRetry && button.tabIndex < 0) return 'focus';
     return null;
   }, retryAction, { timeout: Math.max(1, Math.min(1000, deadline - Date.now())) });
+  async function retryFocusSnapshot(beforeAction) {
+    const snapshot = await send.evaluate(button => {
+      const active = document.activeElement;
+      const tag = active?.tagName?.toLowerCase();
+      let hidden = false;
+      let ancestor = button;
+      for (let depth = 0; ancestor && depth < 64; depth++, ancestor = ancestor.parentElement) {
+        const style = getComputedStyle(ancestor);
+        hidden ||= style.display === 'none' || ['hidden', 'collapse'].includes(style.visibility)
+          || style.contentVisibility === 'hidden';
+      }
+      // A bounded walk that does not reach the root cannot establish visibility.
+      hidden ||= Boolean(ancestor);
+      const region = !active ? 'none'
+        : active.closest('[data-slot="composer-root"]') ? 'composer-root'
+        : active.closest('[data-slot="composer-drag-region"]') ? 'composer-drag-region'
+        : active.closest('[data-slot="composer-dock"]') ? 'composer-dock'
+        : active.closest('[role="dialog"],[role="alertdialog"]') ? 'dialog'
+        : active.closest('[data-slot="popover-content"]') ? 'popover'
+        : active.closest('[role="tooltip"]') ? 'tooltip'
+        : active.closest('[data-slot="aui_thread-viewport"]') ? 'thread-viewport'
+        : active.closest('[data-slot="chat-drop-overlay"]') ? 'chat-drop-overlay'
+        : active.closest('.particle-field') ? 'particle-field'
+        : active.closest('[data-composer-owner]') ? 'composer-portal'
+        : active.closest('[data-slot="composer-bounds"]') ? 'composer-bounds' : 'other';
+      return { focused: active === button, retryButtonConnected: button.isConnected === true,
+        retryAncestorHidden: hidden, retryAncestorInert: Boolean(button.closest('[inert]')),
+        retryFieldsetDisabled: button.matches(':disabled'), retryDocumentFocused: document.hasFocus(),
+        retryActiveTag: !active ? 'none' : ['html', 'body', 'button', 'div', 'span', 'svg'].includes(tag) ? tag : 'other',
+        retryActiveRegion: region };
+    });
+    const { focused, ...closed } = snapshot;
+    Object.assign(facts, closed);
+    facts[beforeAction ? 'retryFocusBeforeAction' : 'retryFocusAfterAcquire'] = focused;
+    return focused && snapshot.retryButtonConnected && !snapshot.retryAncestorHidden
+      && !snapshot.retryAncestorInert && !snapshot.retryFieldsetDisabled;
+  }
   facts.sendBlocker = await readiness();
   if (facts.sendBlocker !== null) {
     facts.errorCategory = 'submit-action-intercepted'; saveFacts(); return;
@@ -222,8 +262,8 @@ async function driveDom() {
   await send.scrollIntoViewIfNeeded({ timeout: Math.max(1, deadline - Date.now()) });
   await send.focus({ timeout: Math.max(1, deadline - Date.now()) });
   facts.sendBlocker = await readiness();
-  if (facts.sendBlocker === null && !await send.evaluate(button => document.activeElement === button))
-    facts.sendBlocker = 'focus';
+  if (facts.sendBlocker === null && !(retryAction ? await retryFocusSnapshot(false)
+    : await send.evaluate(button => document.activeElement === button))) facts.sendBlocker = 'focus';
   saveFacts();
   if (facts.sendBlocker !== null || !ownedEndpoint()) {
     facts.errorCategory = 'submit-action-intercepted'; saveFacts(); return;
@@ -242,8 +282,7 @@ async function driveDom() {
     // Async turn/error checks can remount or defocus the control. Verify the
     // current unique enabled Retry and actual focus at the action boundary.
     facts.sendBlocker = await readiness();
-    if (facts.sendBlocker === null && !await send.evaluate(button => document.activeElement === button))
-      facts.sendBlocker = 'focus';
+    if (facts.sendBlocker === null && !await retryFocusSnapshot(true)) facts.sendBlocker = 'focus';
     if (facts.sendBlocker !== null || !ownedEndpoint() || await send.count() !== 1 || !await send.isEnabled()) {
       facts.errorCategory = 'submit-action-intercepted'; saveFacts(); return;
     }

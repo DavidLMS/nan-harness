@@ -187,6 +187,7 @@ enum RetryHitTag {
 #[serde(rename_all = "kebab-case")]
 enum RetryHitRegion {
     ThreadViewport,
+    ComposerRoot,
     ComposerDock,
     ComposerDragRegion,
     ComposerBounds,
@@ -224,6 +225,88 @@ struct RetryGeometryFacts {
 
 #[derive(Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+struct RetryFocusFacts {
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "retryFocusAfterAcquire"
+    )]
+    after_acquire: Option<bool>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "retryFocusBeforeAction"
+    )]
+    before_action: Option<bool>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "retryButtonConnected"
+    )]
+    button_connected: Option<bool>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "retryAncestorHidden"
+    )]
+    ancestor_hidden: Option<bool>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "retryAncestorInert"
+    )]
+    ancestor_inert: Option<bool>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "retryFieldsetDisabled"
+    )]
+    fieldset_disabled: Option<bool>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "retryDocumentFocused"
+    )]
+    document_focused: Option<bool>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "retryActiveTag"
+    )]
+    active_tag: Option<RetryHitTag>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "retryActiveRegion"
+    )]
+    active_region: Option<RetryHitRegion>,
+}
+
+impl RetryFocusFacts {
+    fn complete(&self) -> bool {
+        self.after_acquire.is_some()
+            && self.before_action.is_some()
+            && self.button_connected.is_some()
+            && self.ancestor_hidden.is_some()
+            && self.ancestor_inert.is_some()
+            && self.fieldset_disabled.is_some()
+            && self.document_focused.is_some()
+            && self.active_tag.is_some()
+            && self.active_region.is_some()
+    }
+
+    fn verified(&self) -> bool {
+        self.after_acquire == Some(true)
+            && self.before_action == Some(true)
+            && self.button_connected == Some(true)
+            && self.ancestor_hidden == Some(false)
+            && self.ancestor_inert == Some(false)
+            && self.fieldset_disabled == Some(false)
+    }
+}
+
+#[derive(Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct QualificationFacts {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     error_observed: Option<bool>,
@@ -235,6 +318,8 @@ struct QualificationFacts {
     retry_hit_target: Option<RetryHitTarget>,
     #[serde(flatten)]
     geometry: RetryGeometryFacts,
+    #[serde(flatten)]
+    focus: RetryFocusFacts,
 }
 
 impl QualificationFacts {
@@ -251,7 +336,8 @@ impl QualificationFacts {
             || self.retry_hit_owned.is_some()
                 && self.geometry.rect_in_viewport.is_some()
                 && self.geometry.ancestor_clipped.is_some()
-                && self.geometry.pointer_events_none.is_some())
+                && self.geometry.pointer_events_none.is_some()
+                && self.focus.complete())
             && (self.retry_hit_owned != Some(true)
                 || self.retry_hit_target == Some(RetryHitTarget::Control))
             && (!qualification
@@ -321,6 +407,15 @@ const DOM_FACT_KEYS: &[&str] = &[
     "retryPointerEventsNone",
     "retryHitTag",
     "retryHitRegion",
+    "retryFocusAfterAcquire",
+    "retryFocusBeforeAction",
+    "retryButtonConnected",
+    "retryAncestorHidden",
+    "retryAncestorInert",
+    "retryFieldsetDisabled",
+    "retryDocumentFocused",
+    "retryActiveTag",
+    "retryActiveRegion",
 ];
 
 fn read_facts(path: &Path, qualification: bool) -> Result<Facts, Reason> {
@@ -334,7 +429,7 @@ fn read_facts(path: &Path, qualification: bool) -> Result<Facts, Reason> {
     let value: serde_json::Value =
         serde_json::from_slice(&bytes).map_err(|_| Reason::IsolationUnavailable)?;
     let object = value.as_object().ok_or(Reason::IsolationUnavailable)?;
-    let count = if qualification { 33..=35 } else { 24..=26 };
+    let count = if qualification { 42..=44 } else { 24..=26 };
     if !count.contains(&object.len())
         || object
             .keys()
@@ -352,6 +447,15 @@ fn read_facts(path: &Path, qualification: bool) -> Result<Facts, Reason> {
         "retryPointerEventsNone",
         "retryHitTag",
         "retryHitRegion",
+        "retryFocusAfterAcquire",
+        "retryFocusBeforeAction",
+        "retryButtonConnected",
+        "retryAncestorHidden",
+        "retryAncestorInert",
+        "retryFieldsetDisabled",
+        "retryDocumentFocused",
+        "retryActiveTag",
+        "retryActiveRegion",
     ]
     .iter()
     .any(|key| qualification != object.contains_key(*key))
@@ -462,7 +566,10 @@ impl Gui {
             .and_then(|mut file| file.write_all(&bytes))
             .and_then(|()| std::fs::rename(final_path, &output_path))
             .map_err(|_| Reason::IsolationUnavailable)?;
-        if !facts.input.input_submitted || facts.error_category.is_some() {
+        if !facts.input.input_submitted
+            || facts.error_category.is_some()
+            || matches!(turn.action, DomAction::Retry) && !facts.qualification.focus.verified()
+        {
             return Err(Reason::ResponseMismatch);
         }
         match turn.purpose {
@@ -607,6 +714,22 @@ mod tests {
         read_facts(&path, qualification)
     }
 
+    fn focus_facts(value: &mut serde_json::Value) {
+        for key in [
+            "retryFocusAfterAcquire",
+            "retryFocusBeforeAction",
+            "retryButtonConnected",
+            "retryAncestorHidden",
+            "retryAncestorInert",
+            "retryFieldsetDisabled",
+            "retryDocumentFocused",
+        ] {
+            value[key] = json!(false);
+        }
+        value["retryActiveTag"] = json!("unmeasured");
+        value["retryActiveRegion"] = json!("unmeasured");
+    }
+
     #[test]
     fn optional_qualification_facts_are_an_atomic_pair() {
         let basic = base_facts();
@@ -629,6 +752,7 @@ mod tests {
         qualifier["retryHitTag"] = json!("unmeasured");
         qualifier["retryHitRegion"] = json!("unmeasured");
         qualifier["retryHitTarget"] = json!("unmeasured");
+        focus_facts(&mut qualifier);
         assert!(read(&qualifier, true).is_ok());
         assert!(read(&qualifier, false).is_err());
         qualifier["retryControl"] = serde_json::Value::Null;
@@ -650,6 +774,7 @@ mod tests {
         value["retryHitTarget"] = json!("self");
         value["inputSubmitted"] = json!(true);
         value["sendMechanism"] = json!("pointer");
+        focus_facts(&mut value);
         assert!(read(&value, true).is_ok());
         for target in ["composer", "error-card", "other", "unmeasured", "PRIVATE"] {
             value["retryHitTarget"] = json!(target);
@@ -658,5 +783,24 @@ mod tests {
         value["retryHitTarget"] = json!("self");
         value["retryHitOwned"] = json!(false);
         assert!(read(&value, true).is_err());
+    }
+
+    #[test]
+    fn retry_focus_proof_requires_both_observations_and_closed_categories() {
+        let mut value = base_facts();
+        focus_facts(&mut value);
+        assert!(read(&value, false).is_err());
+        let mut focus: RetryFocusFacts = serde_json::from_value(value.clone()).unwrap();
+        assert!(focus.complete());
+        assert!(!focus.verified());
+        focus.after_acquire = Some(true);
+        assert!(!focus.verified());
+        focus.before_action = Some(true);
+        focus.button_connected = Some(true);
+        assert!(focus.verified());
+        focus.ancestor_hidden = Some(true);
+        assert!(!focus.verified());
+        value["retryActiveRegion"] = json!("PRIVATE");
+        assert!(serde_json::from_value::<RetryFocusFacts>(value).is_err());
     }
 }

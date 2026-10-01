@@ -382,5 +382,26 @@ class QualificationTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'hermes-desktop')
 
+    def test_retry_focus_diagnostics_cannot_publish_active_editor_contents(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / 'dom.json'
+            value = dict(schemaVersion=1, mechanism='hermes-renderer-qualification',
+                         retryFocusAfterAcquire=False, retryFocusBeforeAction=False,
+                         retryButtonConnected=True, retryAncestorHidden=False,
+                         retryAncestorInert=False, retryFieldsetDisabled=False, retryDocumentFocused=True,
+                         retryActiveTag='div', retryActiveRegion='composer-root', activeText='PRIVATE',
+                         activeAttributes={'PRIVATE': 'PRIVATE'})
+            path.write_text(json.dumps(value))
+            public = q.semantic_observations(root, 'hermes-desktop')[0]
+            self.assertEqual(public['retryActiveRegion'], 'composer-root')
+            self.assertFalse(public['retryFocusAfterAcquire'])
+            self.assertNotIn('PRIVATE', str(public))
+            for key, invalid in [('retryFocusAfterAcquire', 1), ('retryDocumentFocused', None),
+                                 ('retryActiveTag', 'private-tag'), ('retryActiveRegion', 'PRIVATE')]:
+                path.write_text(json.dumps({**value, key: invalid}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'hermes-desktop')
+
 if __name__ == '__main__':
     unittest.main()

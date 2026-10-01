@@ -17,7 +17,12 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
   let frames = 0;
   let focusChecks = 0;
   let focused = false;
-  const focusButton = { tabIndex: scenario === 'retry-not-focusable' ? -1 : 0 };
+  const focusButton = { tagName: 'BUTTON', tabIndex: scenario === 'retry-not-focusable' ? -1 : 0,
+    isConnected: scenario !== 'retry-disconnected', parentElement: null,
+    closest(selector) { return selector === '[inert]' && scenario === 'retry-ancestor-inert' ? {} : null; },
+    matches(selector) { assert.equal(selector, ':disabled'); return scenario === 'retry-fieldset-disabled'; } };
+  const reclaimedComposer = { tagName: 'DIV', privateText: 'PRIVATE_SYNTHETIC_VALUE',
+    closest(selector) { return selector === '[data-slot="composer-root"]' ? {} : null; } };
   const overlay = { tagName: 'DIV', closest(selector) { return ['[data-slot="composer-root"]', '[data-slot="composer-dock"]'].includes(selector) ? {} : null; } };
   const dockStrip = { tagName: 'DIV', privateClass: 'PRIVATE_SYNTHETIC_VALUE', closest(selector) { return selector === '[data-slot="composer-dock"]' ? {} : null; } };
   const foreignHit = { tagName: 'PRIVATE_SYNTHETIC_VALUE', closest() { return null; } };
@@ -189,11 +194,11 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
         assert.equal(centers, 1);
         if (scenario !== 'retry-no-frames') setTimeout(() => { frames++; callback(); }, 0);
       }, window: { innerWidth: 100, innerHeight: 100 },
-      getComputedStyle: element => ({ pointerEvents: scenario === 'retry-pointer-none' && element === hitButton ? 'none' : 'auto',
+      getComputedStyle: element => ({ display: scenario === 'retry-ancestor-hidden' ? 'none' : 'block', visibility: 'visible', contentVisibility: 'visible', pointerEvents: scenario === 'retry-pointer-none' && element === hitButton ? 'none' : 'auto',
         overflowX: element === clippedParent ? 'hidden' : 'visible', overflowY: 'visible', contain: '',
         getPropertyValue: property => property === '--sticky-prompt-clip' && element === sourceClipParent ? scenario === 'retry-frame-settle' && frames >= 2 ? '0px' : '25px'
           : property === '-webkit-app-region' && scenario === 'retry-native-drag' ? 'drag' : '' }),
-      document: { get activeElement() { return focused && scenario !== 'focus-failed' && !(scenario === 'retry-focus-lost' && focusChecks > 1) ? focusButton : null; }, querySelectorAll: selector => {
+      document: { hasFocus() { return true; }, get activeElement() { if (scenario === 'retry-focus-reclaimed') return reclaimedComposer; return focused && scenario !== 'focus-failed' && !(scenario === 'retry-focus-lost' && focusChecks > 1) ? focusButton : null; }, querySelectorAll: selector => {
         if (!submits) return [];
         if (selector === '[data-role="user"]') return [responseUser];
         if (selector === '[data-role="assistant"]') return [responseAssistant];
@@ -290,12 +295,24 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
   assert.equal(nonTabstop.clicks, 0);
   assert.equal(nonTabstop.fills, 0);
   assert.equal(nonTabstop.facts.responseVerified, true);
-  for (const scenario of ['focus-failed', 'retry-focus-lost']) {
+  assert.equal(nonTabstop.facts.retryFocusAfterAcquire, true);
+  assert.equal(nonTabstop.facts.retryFocusBeforeAction, true);
+  assert.equal(nonTabstop.facts.retryButtonConnected, true);
+  assert.equal(nonTabstop.facts.retryDocumentFocused, true);
+  assert.equal(nonTabstop.facts.retryActiveTag, 'button');
+  assert.equal(nonTabstop.facts.retryActiveRegion, 'other');
+  for (const scenario of ['focus-failed', 'retry-focus-lost', 'retry-disconnected', 'retry-ancestor-hidden', 'retry-ancestor-inert', 'retry-fieldset-disabled', 'retry-focus-reclaimed']) {
     const lost = await trial(retryRequest, {}, scenario, true);
     assert.equal(lost.keys, 0);
     assert.equal(lost.clicks, 0);
     assert.equal(lost.facts.sendBlocker, 'focus');
   }
+  const reclaimed = await trial(retryRequest, {}, 'retry-focus-reclaimed', true);
+  assert.equal(reclaimed.facts.retryActiveTag, 'div');
+  assert.equal(reclaimed.facts.retryActiveRegion, 'composer-root');
+  assert.equal(reclaimed.facts.retryFocusAfterAcquire, false);
+  assert.equal(reclaimed.facts.retryFocusBeforeAction, false);
+  assert.equal(reclaimed.keys, 0);
   const timeout = await trial(retryRequest, {}, 'click-timeout', true);
   assert.equal(timeout.keys, 1);
   assert.equal(timeout.submits, 0);
