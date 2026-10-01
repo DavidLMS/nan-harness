@@ -134,6 +134,7 @@ jobs:
         with:
           shared-key: desktop-integration-quality
           cache-bin: true
+          cache-on-failure: true
       - name: Install pinned dependency policy checker
         run: |
           if ! command -v cargo-deny >/dev/null 2>&1; then

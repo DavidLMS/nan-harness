@@ -308,6 +308,7 @@ jobs:
         run: test "$(git rev-parse HEAD)" = "$EXPECTED_WORKFLOW_COMMIT"
       - name: Invoke trusted publisher
         env:
+          NAN_CANARY_WRITER: actions
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.prepare.outputs.tag }}
           TAG_COMMIT: ${{ needs.prepare.outputs.tag_commit }}

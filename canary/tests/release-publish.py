@@ -112,13 +112,16 @@ class ReleasePublishTests(unittest.TestCase):
 
     def test_child_boundaries_strip_secrets_from_validator(self):
         with patch.dict(os.environ, {"GH_TOKEN": "gh-secret", "GITHUB_TOKEN": "github-secret",
-                                     "NAN_API_KEY": "api-secret"}):
+                                     "NAN_API_KEY": "api-secret", "NAN_CANARY_WRITER": "actions",
+                                     "GITHUB_ACTIONS": "true"}):
             validator_env = publisher._child_env(github=False)
             helper_env = publisher._child_env(github=True)
         self.assertNotIn("GH_TOKEN", validator_env)
         self.assertNotIn("GITHUB_TOKEN", validator_env)
         self.assertNotIn("NAN_API_KEY", validator_env)
         self.assertEqual(helper_env.get("GH_TOKEN"), "gh-secret")
+        self.assertEqual(helper_env.get("NAN_CANARY_WRITER"), "actions")
+        self.assertEqual(helper_env.get("GITHUB_ACTIONS"), "true")
         self.assertNotIn("GITHUB_TOKEN", helper_env)
         self.assertNotIn("NAN_API_KEY", helper_env)
 

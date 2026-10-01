@@ -100,6 +100,10 @@ class ReleaseGateTests(unittest.TestCase):
             self.assertIn("persist-credentials: false", workflow)
             self.assertIn("group: release-channel-${{ github.repository }}", workflow)
             self.assertNotIn("group: release-channel-${{ github.repository }}-${{ inputs.tag }}", workflow)
+            invocation = workflow.index("python3 canary/actions/release_publish.py")
+            step = workflow[workflow.rfind("      - name:", 0, invocation):invocation]
+            self.assertIn("          NAN_CANARY_WRITER: actions\n", step)
+            self.assertEqual(workflow.count("NAN_CANARY_WRITER:"), 1)
         self.assertIn("reportCount", (ROOT / "canary/actions/release_gate.py").read_text())
         self.assertIn("verification_only", gate)
         self.assertIn("contents: write", gate)

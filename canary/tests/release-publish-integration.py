@@ -203,7 +203,8 @@ class ReleasePublishIntegrationTests(unittest.TestCase):
     def _env(self):
         env = dict(os.environ)
         env.update({"FAKE_GH_STATE": str(self.remote), "PATH": str(self.bin) + os.pathsep + env["PATH"],
-                    "NAN_CANARY_RETRY_DELAY_SECONDS": "0", "NAN_CANARY_STATE_DIR": str(self.root / "state")})
+                    "NAN_CANARY_RETRY_DELAY_SECONDS": "0", "NAN_CANARY_STATE_DIR": str(self.root / "state"),
+                    "NAN_CANARY_WRITER": "actions", "GITHUB_ACTIONS": "true"})
         return env
 
     def _run(self, *extra):
