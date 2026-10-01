@@ -12,6 +12,7 @@ func post(_ key: CGKeyCode, _ down: Bool, _ flags: CGEventFlags, _ text: String?
         }
     }
     event.post(tap: .cghidEventTap)
+    Thread.sleep(forTimeInterval: 0.01)
 }
 
 let mode = CommandLine.arguments.count == 1 ? "type" : CommandLine.arguments.count == 2 ? CommandLine.arguments[1] : "invalid"
@@ -32,6 +33,7 @@ if mode == "type" {
     switch mode {
     case "new-thread": key = 45; modifiers = [(59, .maskControl), (58, .maskAlternate)]
     case "select-all": key = 0; modifiers = [(55, .maskCommand)]
+    case "paste": key = 9; modifiers = [(55, .maskCommand)]
     case "copy": key = 8; modifiers = [(55, .maskCommand)]
     case "right": key = 124; modifiers = []
     case "submit": key = 36; modifiers = []

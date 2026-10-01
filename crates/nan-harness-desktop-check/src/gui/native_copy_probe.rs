@@ -71,7 +71,7 @@ fn neutral_input(executable: &Path, mode: &str, prompt: &str) -> Result<(), Reas
         || prompt.len() > 4096
         || !matches!(
             mode,
-            "type" | "new-thread" | "select-all" | "copy" | "right" | "submit"
+            "type" | "new-thread" | "select-all" | "copy" | "paste" | "right" | "submit"
         )
         || (mode == "type" && prompt.is_empty())
         || (mode != "type" && !prompt.is_empty())
@@ -153,8 +153,16 @@ impl Gui {
             mechanism: "zed-native-copy",
             navigation: "private-keymap-new-thread",
             keyboard_transport: if std::env::var_os("FEASIBILITY_ZED_INPUT_DRIVER").is_some() {
-                if std::env::var("FEASIBILITY_ZED_INPUT_DRIVER_MODE").as_deref() == Ok("all") {
-                    "neutral-quartz-all"
+                if matches!(
+                    std::env::var("FEASIBILITY_ZED_INPUT_DRIVER_MODE").as_deref(),
+                    Ok("all" | "paste")
+                ) {
+                    if std::env::var("FEASIBILITY_ZED_INPUT_DRIVER_MODE").as_deref() == Ok("paste")
+                    {
+                        "neutral-quartz-paste"
+                    } else {
+                        "neutral-quartz-all"
+                    }
                 } else {
                     "neutral-quartz"
                 }
@@ -223,7 +231,10 @@ impl Gui {
         after: &'static str,
     ) -> Result<(), Reason> {
         self.native_copy_guard(facts, before)?;
-        if std::env::var("FEASIBILITY_ZED_INPUT_DRIVER_MODE").as_deref() == Ok("all") {
+        if matches!(
+            std::env::var("FEASIBILITY_ZED_INPUT_DRIVER_MODE").as_deref(),
+            Ok("all" | "paste")
+        ) {
             let mode = match character {
                 'n' => "new-thread",
                 'a' => "select-all",
@@ -248,7 +259,10 @@ impl Gui {
     }
 
     fn native_copy_key(mode: &str, key: xa11y::Key) -> Result<(), Reason> {
-        if std::env::var("FEASIBILITY_ZED_INPUT_DRIVER_MODE").as_deref() == Ok("all") {
+        if matches!(
+            std::env::var("FEASIBILITY_ZED_INPUT_DRIVER_MODE").as_deref(),
+            Ok("all" | "paste")
+        ) {
             Self::neutral_key(mode)
         } else {
             xa11y::input_sim()
@@ -336,7 +350,16 @@ impl Gui {
             "select-all-after",
         )?;
         self.native_copy_guard(facts, "type-before")?;
-        if let Some(executable) = std::env::var_os("FEASIBILITY_ZED_INPUT_DRIVER") {
+        if std::env::var("FEASIBILITY_ZED_INPUT_DRIVER_MODE").as_deref() == Ok("paste") {
+            clipboard::write(&prompt)?;
+            self.native_copy_guard(facts, "paste-before")?;
+            Self::neutral_key("paste")?;
+            self.native_copy_guard(facts, "paste-after")?;
+            // Allow queued Paste to read its clipboard before replacing it.
+            // This is one action, not a retry; exact independent copy gates send.
+            std::thread::sleep(Duration::from_millis(100));
+            self.native_copy_guard(facts, "paste-settle")?;
+        } else if let Some(executable) = std::env::var_os("FEASIBILITY_ZED_INPUT_DRIVER") {
             neutral_input(Path::new(&executable), "type", &prompt)?;
         } else {
             xa11y::input_sim()
@@ -499,6 +522,16 @@ mod tests {
             Ok(())
         );
         assert_eq!((observations, waits), (3, 2));
+    }
+
+    #[test]
+    fn input_oracle_rejects_uncopied_sentinel_and_previous_prompt() {
+        let expected = "input-nonce-new";
+        let sentinel = "input-copy-sentinel";
+        assert!(!exact_readback(sentinel, expected, sentinel));
+        assert!(!exact_readback("input-nonce-old", expected, sentinel));
+        assert!(!exact_readback("", expected, sentinel));
+        assert!(exact_readback(expected, expected, sentinel));
     }
 
     #[test]

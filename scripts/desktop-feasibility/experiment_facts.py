@@ -26,9 +26,9 @@ def native_copy(value, reasons):
         raise ValueError('invalid native-copy method')
     if value['stage'] not in {'trust', 'panel', 'input', 'submit', 'response-control', 'response-readback', 'completed'} or value['clipboardCleanup'] not in {'passed', 'failed', 'not-run'}:
         raise ValueError('invalid native-copy stage')
-    if value['keyboardTransport'] not in {'xa11y', 'neutral-quartz', 'neutral-quartz-all'}:
+    if value['keyboardTransport'] not in {'xa11y', 'neutral-quartz', 'neutral-quartz-all', 'neutral-quartz-paste'}:
         raise ValueError('invalid keyboard transport')
-    substages = set('trust-query trust-before trust-after panel-query new-thread-before new-thread-after panel-settle select-all-before select-all-after type-before type-after input-sentinel-write copy-select-all-before copy-select-all-after input-copy-before input-copy-after collapse-selection-before submit-before response-control-query response-sentinel-write response-copy-before response-copy-after clipboard-read-before clipboard-read-after completed'.split())
+    substages = set('trust-query trust-before trust-after panel-query new-thread-before new-thread-after panel-settle select-all-before select-all-after type-before type-after paste-before paste-after paste-settle input-sentinel-write copy-select-all-before copy-select-all-after input-copy-before input-copy-after collapse-selection-before submit-before response-control-query response-sentinel-write response-copy-before response-copy-after clipboard-read-before clipboard-read-after completed'.split())
     if value['substage'] not in substages or value['guardKind'] not in {None, 'native-window', 'direct-foreground'}:
         raise ValueError('invalid copy boundary')
     if value['guardCategory'] is not None and value['guardCategory'] not in CATEGORIES:
