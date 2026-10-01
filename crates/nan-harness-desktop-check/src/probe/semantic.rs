@@ -119,7 +119,9 @@ impl SemanticUi<'_> {
                 session.new_turn(prompt)?;
                 match purpose {
                     DomPurpose::Response => session.wait_response(marker, Duration::from_secs(30)),
-                    DomPurpose::Failure => session.wait_retry(Duration::from_secs(30)),
+                    // Frozen Zed retries 503 four times with 5/10/20/40-second
+                    // delays and up to 10% jitter before exposing manual Retry.
+                    DomPurpose::Failure => session.wait_retry(Duration::from_secs(90)),
                 }
             }
             Self::Hermes {

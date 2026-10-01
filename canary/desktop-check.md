@@ -106,10 +106,20 @@ explicit unqualified cell and prevents aggregate acceptance. Current semantic
 adapters cover Zed on macOS ARM64 and Hermes on Linux x64; additional application
 and platform adapters require their own native evidence.
 
+Until the qualification workflow is present on the default branch, use the
+registered `Desktop semantic automation feasibility` workflow on the integration
+branch with `experiment=deterministic-full`. Select `native_only=true` while
+iterating; select `quality_only=true` for the final repository gate. The older
+`native-copy-dom` experiment remains feasibility evidence and cannot satisfy
+the full acceptance gate. Neither semantic adapter has completed recovery
+qualification yet; implemented adapters are not accepted cells.
+
 `--verification semantic-only` requires a disposable GitHub-hosted deterministic
 session and a supported adapter. It never falls back to OCR. Zed uses native
 clipboard input readback and its native thread export; Hermes uses an owned
-renderer DOM connection and normal keyboard activation. A passing probe must
+renderer DOM connection, normal keyboard Send activation and an ordinary Retry
+button click with an owned hit test. Hermes binds error, Retry and assistant
+response to the expected user's renderer turn pair. A passing probe must
 verify the assistant response, a real file-tool round trip, an observed provider
 failure, and recovery through exactly one UI Retry in the failed turn. Each
 response also needs independent completed-provider evidence. Three passing
