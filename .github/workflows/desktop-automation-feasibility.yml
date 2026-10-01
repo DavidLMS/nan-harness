@@ -19,7 +19,7 @@ on:
         description: Observation mechanism to evaluate
         type: choice
         default: native-copy-dom
-        options: [native-copy-dom, strict-semantic]
+        options: [native-copy-dom, strict-semantic, deterministic-full]
 permissions:
   contents: read
 concurrency:
@@ -123,6 +123,7 @@ jobs:
           python3 scripts/desktop-feasibility/hermes-namespace.py prepare --prepared "$RUNNER_TEMP/semantic-feasibility/prepared.json" --state "$RUNNER_TEMP/semantic-feasibility/namespace-policy.json"
           echo 'FEASIBILITY_HERMES_NAMESPACE_POLICY=scoped-apparmor-userns' >> "$GITHUB_ENV"
       - name: Run bounded native-copy or renderer DOM experiment
+        if: inputs.experiment != 'deterministic-full'
         shell: bash
         env:
           FEASIBILITY_REAL_NANH: ${{ github.workspace }}/target/debug/nan-harness
@@ -138,6 +139,32 @@ jobs:
             --checker "$GITHUB_WORKSPACE/target/debug/nanh-desktop-check" --real-nanh "$FEASIBILITY_REAL_NANH" \
             --prepared "$RUNNER_TEMP/semantic-feasibility/prepared.json" --frozen "$RUNNER_TEMP/semantic-feasibility/frozen.json" \
             --directory "$RUNNER_TEMP/semantic-feasibility"
+      - name: Run full deterministic semantic qualification
+        if: inputs.experiment == 'deterministic-full'
+        shell: bash
+        env:
+          FEASIBILITY_REAL_NANH: ${{ github.workspace }}/target/debug/nan-harness
+        run: |
+          set -euo pipefail
+          unset NAN_API_KEY GH_TOKEN GITHUB_TOKEN
+          bash scripts/run-desktop-check-session.sh python3 scripts/desktop-feasibility/run-qualification.py --app '${{ matrix.app }}' --platform '${{ matrix.platform }}' --source-sha "$GITHUB_SHA" --checker "$GITHUB_WORKSPACE/target/debug/nanh-desktop-check" --real-nanh "$FEASIBILITY_REAL_NANH" --prepared "$RUNNER_TEMP/semantic-feasibility/prepared.json" --frozen "$RUNNER_TEMP/semantic-feasibility/frozen.json" --directory "$RUNNER_TEMP/semantic-feasibility"
+      - name: Reduce full deterministic qualification
+        if: always() && inputs.experiment == 'deterministic-full'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f "$RUNNER_TEMP/semantic-feasibility/report.json" ]]; then
+            launcher="$GITHUB_WORKSPACE/target/debug/nan-harness"
+            if [[ "$RUNNER_OS" == Linux ]]; then launcher="$GITHUB_WORKSPACE/scripts/desktop-feasibility/nanh-shim.py"; fi
+            python3 canary/actions/desktop_qualification.py reduce --app '${{ matrix.app }}' --platform '${{ matrix.platform }}' --architecture '${{ matrix.architecture }}' --source-sha "$GITHUB_SHA" --model qwen3.6 --checker "$GITHUB_WORKSPACE/target/debug/nanh-desktop-check" --launcher "$launcher" --real-nanh "$GITHUB_WORKSPACE/target/debug/nan-harness" --prepared "$RUNNER_TEMP/semantic-feasibility/prepared.json" --frozen "$RUNNER_TEMP/semantic-feasibility/frozen.json" --report "$RUNNER_TEMP/semantic-feasibility/report.json" --output "$RUNNER_TEMP/semantic-feasibility/qualification.json"
+          fi
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always() && inputs.experiment == 'deterministic-full'
+        with:
+          name: deterministic-qualification-${{ matrix.app }}-${{ matrix.platform }}
+          path: ${{ runner.temp }}/semantic-feasibility/qualification.json
+          if-no-files-found: error
+          retention-days: 30
       - name: Remove owned Hermes namespace policy
         if: always() && runner.os == 'Linux'
         shell: bash
@@ -150,7 +177,7 @@ jobs:
             cat "$RUNNER_TEMP/semantic-feasibility/summary.json" >> "$GITHUB_STEP_SUMMARY"
           fi
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: always()
+        if: always() && inputs.experiment != 'deterministic-full'
         with:
           name: semantic-feasibility-${{ matrix.app }}-${{ matrix.platform }}
           path: ${{ runner.temp }}/semantic-feasibility/summary.json
