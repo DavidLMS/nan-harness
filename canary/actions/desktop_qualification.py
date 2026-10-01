@@ -134,8 +134,9 @@ def semantic_observations(directory, app):
         elif mechanism == 'hermes-renderer-qualification':
             for key in ('endpointOwned', 'attached', 'targetVerified', 'uniqueComposer', 'inputReadback',
                         'inputSubmitted', 'responseVerified', 'providerResponseVerified', 'errorObserved',
-                        'retryControl', 'inputCleared', 'userTurnObserved'):
+                        'retryControl', 'retryHitOwned', 'inputCleared', 'userTurnObserved'):
                 flag(record, value, key)
+            enum(record, value, 'retryHitTarget', {'self', 'composer', 'error-card', 'menu', 'modal', 'other', 'none', 'unmeasured'})
             enum(record, value, 'errorCategory', DOM_ERRORS)
             enum(record, value, 'sendBlocker', {'modal', 'menu', 'tooltip', 'composer-drag-region', 'other',
                                               'unmeasured', 'focus', 'disabled', 'inert'})

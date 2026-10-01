@@ -155,6 +155,20 @@ struct ResponseFacts {
     provider_generation_count: Option<usize>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum RetryHitTarget {
+    #[serde(rename = "self")]
+    Control,
+    Composer,
+    ErrorCard,
+    Menu,
+    Modal,
+    Other,
+    None,
+    Unmeasured,
+}
+
 #[derive(Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct QualificationFacts {
@@ -162,6 +176,30 @@ struct QualificationFacts {
     error_observed: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     retry_control: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    retry_hit_owned: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    retry_hit_target: Option<RetryHitTarget>,
+}
+
+impl QualificationFacts {
+    fn valid_action(
+        &self,
+        qualification: bool,
+        input: &InputFacts,
+        submission: &SubmissionFacts,
+    ) -> bool {
+        matches!(
+            (qualification, self.error_observed, self.retry_control),
+            (false, None, None) | (true, Some(_), Some(_))
+        ) && (!qualification || self.retry_hit_owned.is_some())
+            && (self.retry_hit_owned != Some(true)
+                || self.retry_hit_target == Some(RetryHitTarget::Control))
+            && (!qualification
+                || !input.input_submitted
+                || !matches!(submission.send_mechanism, SendMechanism::Pointer)
+                || self.retry_hit_owned == Some(true))
+    }
 }
 
 #[derive(Deserialize, Serialize)]
@@ -188,37 +226,40 @@ struct Facts {
     observed_runtime_version: Option<String>,
 }
 
+const DOM_FACT_KEYS: &[&str] = &[
+    "schemaVersion",
+    "mechanism",
+    "endpointOwned",
+    "targetVerified",
+    "attached",
+    "uniqueComposer",
+    "inputReadback",
+    "inputSubmitted",
+    "responseVerified",
+    "syntheticTextPresent",
+    "errorCategory",
+    "playwrightVersion",
+    "observedRuntimeVersion",
+    "providerResponseVerified",
+    "providerGenerationCount",
+    "inputCleared",
+    "userTurnObserved",
+    "assistantTurnCount",
+    "uniqueSendControl",
+    "canSend",
+    "sendBlocker",
+    "sendMechanism",
+    "requestFailedCount",
+    "requestFailureCategory",
+    "apiErrorStatus",
+    "apiErrorResponseCount",
+    "errorObserved",
+    "retryControl",
+    "retryHitOwned",
+    "retryHitTarget",
+];
+
 fn read_facts(path: &Path, qualification: bool) -> Result<Facts, Reason> {
-    const KEYS: &[&str] = &[
-        "schemaVersion",
-        "mechanism",
-        "endpointOwned",
-        "targetVerified",
-        "attached",
-        "uniqueComposer",
-        "inputReadback",
-        "inputSubmitted",
-        "responseVerified",
-        "syntheticTextPresent",
-        "errorCategory",
-        "playwrightVersion",
-        "observedRuntimeVersion",
-        "providerResponseVerified",
-        "providerGenerationCount",
-        "inputCleared",
-        "userTurnObserved",
-        "assistantTurnCount",
-        "uniqueSendControl",
-        "canSend",
-        "sendBlocker",
-        "sendMechanism",
-        "requestFailedCount",
-        "requestFailureCategory",
-        "apiErrorStatus",
-        "apiErrorResponseCount",
-        "errorObserved",
-        "retryControl",
-    ];
     let mut bytes = Vec::new();
     open_private_read(path)
         .and_then(|(file, _)| file.take(8193).read_to_end(&mut bytes))
@@ -229,8 +270,17 @@ fn read_facts(path: &Path, qualification: bool) -> Result<Facts, Reason> {
     let value: serde_json::Value =
         serde_json::from_slice(&bytes).map_err(|_| Reason::IsolationUnavailable)?;
     let object = value.as_object().ok_or(Reason::IsolationUnavailable)?;
-    let count = if qualification { 26..=28 } else { 24..=26 };
-    if !count.contains(&object.len()) || object.keys().any(|key| !KEYS.contains(&key.as_str())) {
+    let count = if qualification { 28..=30 } else { 24..=26 };
+    if !count.contains(&object.len())
+        || object
+            .keys()
+            .any(|key| !DOM_FACT_KEYS.contains(&key.as_str()))
+    {
+        return Err(Reason::IsolationUnavailable);
+    }
+    if qualification != object.contains_key("retryHitTarget")
+        || qualification != object.contains_key("retryHitOwned")
+    {
         return Err(Reason::IsolationUnavailable);
     }
     let facts: Facts = serde_json::from_value(value).map_err(|_| Reason::IsolationUnavailable)?;
@@ -250,14 +300,9 @@ fn read_facts(path: &Path, qualification: bool) -> Result<Facts, Reason> {
             } else {
                 "hermes-playwright-dom"
             }
-        || !matches!(
-            (
-                qualification,
-                facts.qualification.error_observed,
-                facts.qualification.retry_control
-            ),
-            (false, None, None) | (true, Some(_), Some(_))
-        )
+        || !facts
+            .qualification
+            .valid_action(qualification, &facts.input, &facts.submission)
         || !version(&facts.playwright_version)
         || !version(&facts.observed_runtime_version)
         || facts.turns.assistant_turn_count > 4096
@@ -502,9 +547,31 @@ mod tests {
         qualifier["mechanism"] = json!("hermes-renderer-qualification");
         qualifier["errorObserved"] = json!(false);
         qualifier["retryControl"] = json!(false);
+        qualifier["retryHitOwned"] = json!(false);
+        qualifier["retryHitTarget"] = json!("unmeasured");
         assert!(read(&qualifier, true).is_ok());
         assert!(read(&qualifier, false).is_err());
         qualifier["retryControl"] = serde_json::Value::Null;
         assert!(read(&qualifier, true).is_err());
+    }
+
+    #[test]
+    fn pointer_retry_requires_the_owned_control_at_the_hit_point() {
+        let mut value = base_facts();
+        value["mechanism"] = json!("hermes-renderer-qualification");
+        value["errorObserved"] = json!(true);
+        value["retryControl"] = json!(true);
+        value["retryHitOwned"] = json!(true);
+        value["retryHitTarget"] = json!("self");
+        value["inputSubmitted"] = json!(true);
+        value["sendMechanism"] = json!("pointer");
+        assert!(read(&value, true).is_ok());
+        for target in ["composer", "error-card", "other", "unmeasured", "PRIVATE"] {
+            value["retryHitTarget"] = json!(target);
+            assert!(read(&value, true).is_err());
+        }
+        value["retryHitTarget"] = json!("self");
+        value["retryHitOwned"] = json!(false);
+        assert!(read(&value, true).is_err());
     }
 }

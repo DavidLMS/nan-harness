@@ -50,7 +50,7 @@ async function driveDom() {
     requestFailureCategory: null, apiErrorStatus: null, apiErrorResponseCount: 0, errorCategory: 'unclassified',
     playwrightVersion: require('../../.github/web-check/node_modules/playwright/package.json').version,
     observedRuntimeVersion: null });
-  if (qualify) Object.assign(facts, { mechanism: 'hermes-renderer-qualification', errorObserved: false, retryControl: false });
+  if (qualify) Object.assign(facts, { mechanism: 'hermes-renderer-qualification', errorObserved: false, retryControl: false, retryHitOwned: false, retryHitTarget: 'unmeasured' });
   saveFacts();
   const exactKeys = (value, keys) => value && typeof value === 'object' && !Array.isArray(value) &&
     Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
@@ -205,7 +205,33 @@ async function driveDom() {
   if (facts.sendBlocker !== null) {
     facts.errorCategory = 'submit-action-intercepted'; saveFacts(); return;
   }
-  await send.scrollIntoViewIfNeeded({ timeout: Math.max(1, deadline - Date.now()) });
+  async function retryHitTest() {
+    try {
+      const observation = await send.evaluate(button => {
+        const rect = button.getBoundingClientRect();
+        const front = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+        if (!front) return { retryHitOwned: false, retryHitTarget: 'none' };
+        if (front === button || button.contains(front)) return { retryHitOwned: true, retryHitTarget: 'self' };
+        const target = front.closest('[aria-modal="true"],[role="alertdialog"]') ? 'modal'
+          : front.closest('[role="menu"]') ? 'menu'
+          : front.closest('[data-slot="composer-root"]') ? 'composer'
+          : front.closest('[role="alert"]')?.closest('[data-role="assistant"][data-slot="aui_assistant-message-root"]') ? 'error-card' : 'other';
+        return { retryHitOwned: false, retryHitTarget: target };
+      }, undefined, { timeout: 500 });
+      Object.assign(facts, observation);
+    } catch { facts.retryHitOwned = false; facts.retryHitTarget = 'unmeasured'; }
+  }
+  if (retryAction) {
+    await send.evaluate(button => button.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' }),
+      undefined, { timeout: Math.max(1, deadline - Date.now()) });
+    await retryHitTest();
+    saveFacts();
+    if (!facts.retryHitOwned) {
+      facts.sendBlocker = facts.retryHitTarget === 'composer' ? 'composer-drag-region'
+        : ['modal', 'menu'].includes(facts.retryHitTarget) ? facts.retryHitTarget : 'other';
+      facts.errorCategory = 'submit-action-intercepted'; saveFacts(); return;
+    }
+  } else await send.scrollIntoViewIfNeeded({ timeout: Math.max(1, deadline - Date.now()) });
   if (!retryAction) await send.focus({ timeout: Math.max(1, deadline - Date.now()) });
   facts.sendBlocker = await readiness();
   if (!retryAction && facts.sendBlocker === null && !await send.evaluate(button => document.activeElement === button))
@@ -232,6 +258,7 @@ async function driveDom() {
     else await send.press('Enter', { timeout: Math.max(1, deadline - Date.now()) });
   } catch (error) {
     try { facts.sendBlocker = await readiness(); } catch { facts.sendBlocker = 'unmeasured'; }
+    if (retryAction) await retryHitTest();
     const detail = String(error?.message ?? '');
     facts.errorCategory = /intercepts pointer events|subtree intercepts/i.test(detail) ? 'submit-action-intercepted'
       : /detached|not attached/i.test(detail) ? 'submit-action-detached'

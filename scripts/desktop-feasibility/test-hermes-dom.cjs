@@ -13,6 +13,19 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
   let fills = 0;
   let clicks = 0;
   let keys = 0;
+  let centers = 0;
+  const overlay = { closest(selector) { return selector === '[data-slot="composer-root"]' ? {} : null; } };
+  const hitChild = { privateLabel: 'PRIVATE_SYNTHETIC_VALUE' };
+  const hitButton = {
+    getBoundingClientRect() { return { left: 10, top: 10, width: 20, height: 20 }; },
+    contains(element) { return element === hitChild; },
+    scrollIntoView(options) {
+      assert.equal(options.block, 'center');
+      assert.equal(options.inline, 'nearest');
+      assert.equal(options.behavior, 'instant');
+      centers++;
+    },
+  };
   let pageEnumerations = 0;
   let observations = 0;
   let value = '';
@@ -31,6 +44,8 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
     async count() { return scenario === 'send-duplicate' ? 2 : 1; },
     async isEnabled() { return scenario !== 'send-disabled'; },
     async evaluate(callback, pointerRetry) {
+      if (callback.toString().includes('document.elementFromPoint')) return callback(hitButton);
+      if (callback.toString().includes('button.scrollIntoView')) return callback(hitButton);
       if (scenario === 'retry-not-focusable' && !callback.toString().includes('document.activeElement')) {
         assert.equal(pointerRetry, true);
         return callback({ tabIndex: -1, disabled: false, getAttribute: () => null, closest: () => null }, pointerRetry);
@@ -135,7 +150,9 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
         return { chromium: { async connectOverCDP() { attaches++;
           if (!scenario) throw new Error('must not attach'); return browser; } } };
       },
-      URL, setTimeout, document: { querySelectorAll: () => [] },
+      URL, setTimeout, document: { querySelectorAll: () => [], elementFromPoint: () =>
+        scenario === 'retry-overlay' || (scenario === 'retry-centering' && centers === 0)
+          || (scenario === 'retry-intercepted' && clicks > 0) ? overlay : scenario === 'retry-child-hit' ? hitChild : hitButton },
       process: { argv: ['node', 'helper', qualify ? '--qualify' : '--drive', '/request', '/output'], exit: resolve },
     });
     setTimeout(() => reject(new Error('bounded helper fixture timed out')), 1000).unref();
@@ -144,7 +161,7 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
   const facts = JSON.parse(output.get('/output'));
   if (qualify) {
     assert(!output.get('/output').includes(request.expectedMarker));
-    return { facts, submits, fills, clicks, keys };
+    return { facts, submits, fills, clicks, keys, centers };
   }
   assert.equal(facts.inputSubmitted, ['happy', 'delayed', 'missing-editor', 'transient-context', 'keyboard'].includes(scenario));
   assert.equal(facts.responseVerified, ['happy', 'delayed', 'missing-editor', 'transient-context', 'keyboard'].includes(scenario));
@@ -218,6 +235,24 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
   assert.equal(retry.clicks, 1);
   assert.equal(retry.keys, 0);
   assert.equal(retry.facts.sendMechanism, 'pointer');
+  assert.equal(retry.facts.retryHitOwned, true);
+  assert.equal(retry.facts.retryHitTarget, 'self');
+  assert.equal(retry.centers, 1);
+  const childHit = await trial(retryRequest, {}, 'retry-child-hit', true);
+  assert.equal(childHit.facts.retryHitOwned, true);
+  assert.equal(childHit.facts.retryHitTarget, 'self');
+  assert.equal(childHit.clicks, 1);
+  const covered = await trial(retryRequest, {}, 'retry-overlay', true);
+  assert.equal(covered.facts.retryHitOwned, false);
+  assert.equal(covered.facts.retryHitTarget, 'composer');
+  assert.equal(covered.facts.errorCategory, 'submit-action-intercepted');
+  assert.equal(covered.clicks, 0);
+  assert.equal(covered.submits, 0);
+  const centered = await trial(retryRequest, {}, 'retry-centering', true);
+  assert.equal(centered.centers, 1);
+  assert.equal(centered.facts.retryHitOwned, true);
+  assert.equal(centered.clicks, 1);
+  assert.equal(centered.submits, 1);
   const nonfocusable = await trial(retryRequest, {}, 'retry-not-focusable', true);
   assert.equal(nonfocusable.submits, 1);
   assert.equal(nonfocusable.clicks, 1);
@@ -229,6 +264,8 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
   assert.equal(intercepted.submits, 0);
   assert.equal(intercepted.clicks, 1);
   assert.equal(intercepted.keys, 0);
+  assert.equal(intercepted.facts.retryHitTarget, 'composer');
+  assert.equal(intercepted.facts.retryHitOwned, false);
   for (const scenario of ['missing-error', 'duplicate-error', 'missing-retry', 'foreign-user', 'blocked-modal', 'blocked-menu', 'inert', 'stale', 'duplicate', 'duplicate-retry', 'send-disabled']) {
     const rejected = await trial(retryRequest, {}, scenario, true);
     assert.equal(rejected.submits, 0, scenario);
@@ -236,5 +273,5 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
   }
   const invalid = await trial({ ...phase, action: 'retry' }, {}, null, true);
   assert.equal(invalid.facts.errorCategory, 'invalid-request');
-  console.log('Hermes DOM feasibility and qualification guards: 37 synthetic cases passed');
+  console.log('Hermes DOM feasibility and qualification guards: 40 synthetic cases passed');
 })().catch(error => { console.error(error.message); process.exitCode = 1; });
