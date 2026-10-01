@@ -1,4 +1,4 @@
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 use super::SystemPenProcess;
 #[cfg(unix)]
 use super::{PenDesktopError, process_matches};
