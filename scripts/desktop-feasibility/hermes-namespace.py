@@ -90,7 +90,7 @@ def main():
     if sys.platform != 'linux' or os.environ.get('GITHUB_ACTIONS') != 'true' or os.environ.get('RUNNER_ENVIRONMENT') != 'github-hosted':
         raise ValueError('disposable Linux hosted runner required')
     runner_root = Path(os.environ['RUNNER_TEMP']).resolve(strict=True)
-    args.state.parent.resolve(strict=True).relative_to(runner_root)
+    args.state.parent.resolve(strict=False).relative_to(runner_root)
     if args.operation == 'cleanup':
         cleanup(args.state)
     else:

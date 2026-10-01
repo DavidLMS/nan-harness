@@ -7,6 +7,7 @@ use nan_harness_private_fs::open_private_new;
 use serde::Serialize;
 use std::io::Write as _;
 use std::path::Path;
+use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 use zeroize::Zeroizing;
 
@@ -34,6 +35,7 @@ struct Facts {
     schema_version: u8,
     mechanism: &'static str,
     navigation: &'static str,
+    keyboard_transport: &'static str,
     experiment_only: bool,
     ocr_used: bool,
     ax_text_used: bool,
@@ -59,6 +61,54 @@ fn nonce() -> Result<String, Reason> {
 
 fn exact_readback(actual: &str, expected: &str, sentinel: &str) -> bool {
     actual == expected && actual != sentinel && !expected.is_empty()
+}
+
+fn neutral_type_text(executable: &Path, prompt: &str) -> Result<(), Reason> {
+    if !executable.is_absolute()
+        || !executable.is_file()
+        || prompt.is_empty()
+        || prompt.len() > 4096
+    {
+        return Err(Reason::IsolationUnavailable);
+    }
+    let mut child = Command::new(executable)
+        .env_clear()
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|_| Reason::ActionUnsupported)?;
+    let outcome = std::thread::scope(|scope| {
+        let Some(mut stdin) = child.stdin.take() else {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(Reason::ActionUnsupported);
+        };
+        let writer = scope.spawn(move || stdin.write_all(prompt.as_bytes()));
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let status = loop {
+            match child.try_wait() {
+                Ok(Some(status)) => break Some(status),
+                Err(_) => break None,
+                Ok(None) if Instant::now() >= deadline => break None,
+                Ok(None) => std::thread::sleep(Duration::from_millis(20)),
+            }
+        };
+        if status.is_none() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        let written = writer.join().map_err(|_| Reason::ActionUnsupported)?;
+        if !status.is_some_and(|status| status.success()) {
+            return Err(Reason::ActionUnsupported);
+        }
+        written.map_err(|_| Reason::ActionUnsupported)
+    });
+    if outcome.is_err() {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+    outcome
 }
 
 fn observe_settling(
@@ -94,6 +144,11 @@ impl Gui {
             schema_version: 1,
             mechanism: "zed-native-copy",
             navigation: "private-keymap-new-thread",
+            keyboard_transport: if std::env::var_os("FEASIBILITY_ZED_INPUT_DRIVER").is_some() {
+                "neutral-quartz"
+            } else {
+                "xa11y"
+            },
             experiment_only: true,
             ocr_used: false,
             ax_text_used: false,
@@ -247,11 +302,15 @@ impl Gui {
             "select-all-after",
         )?;
         self.native_copy_guard(facts, "type-before")?;
-        xa11y::input_sim()
-            .map_err(map_error)?
-            .keyboard()
-            .type_text(&prompt)
-            .map_err(map_error)?;
+        if let Some(executable) = std::env::var_os("FEASIBILITY_ZED_INPUT_DRIVER") {
+            neutral_type_text(Path::new(&executable), &prompt)?;
+        } else {
+            xa11y::input_sim()
+                .map_err(map_error)?
+                .keyboard()
+                .type_text(&prompt)
+                .map_err(map_error)?;
+        }
         facts.input.entered = true;
         self.native_copy_guard(facts, "type-after")?;
         let sentinel = Zeroizing::new(format!("clipboard-sentinel-{}", nonce()?));
@@ -339,6 +398,22 @@ impl Gui {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn neutral_transport_rejects_unbounded_or_relative_requests_before_spawn() {
+        assert_eq!(
+            neutral_type_text(Path::new("relative"), "nonce"),
+            Err(Reason::IsolationUnavailable)
+        );
+        assert_eq!(
+            neutral_type_text(Path::new("/usr/bin/true"), &"x".repeat(4097)),
+            Err(Reason::IsolationUnavailable)
+        );
+        assert_eq!(
+            neutral_type_text(Path::new("/usr/bin/true"), ""),
+            Err(Reason::IsolationUnavailable)
+        );
+    }
 
     #[test]
     fn settling_stops_on_first_rejected_ownership_without_recovery() {

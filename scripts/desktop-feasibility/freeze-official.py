@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import time
 
 VERSION = re.compile(r'(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\Z')
 SHA = re.compile(r'[0-9a-f]{40}\Z')
@@ -18,9 +19,14 @@ DIGEST = re.compile(r'sha256:[0-9a-f]{64}\Z')
 
 
 def metadata(endpoint):
-    completed = subprocess.run(['gh', 'api', '--hostname', 'github.com', endpoint],
-                               stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                               timeout=60, check=False)
+    for attempt in range(3):
+        completed = subprocess.run(['gh', 'api', '--hostname', 'github.com', endpoint],
+                                   stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                   timeout=20, check=False)
+        if completed.returncode == 0:
+            break
+        if attempt < 2:
+            time.sleep(2)
     if completed.returncode or len(completed.stdout) > 4 * 1024 * 1024:
         raise ValueError('official-metadata-fetch-failed')
     value = json.loads(completed.stdout)
@@ -126,5 +132,8 @@ def main():
 if __name__ == '__main__':
     try:
         main()
-    except (ValueError, KeyError, OSError, subprocess.TimeoutExpired):
-        raise SystemExit('Official metadata acquisition failed; no application was launched.') from None
+    except ValueError as error:
+        category = str(error) if re.fullmatch(r'official-[a-z-]+', str(error)) else 'official-metadata-invalid'
+        raise SystemExit(category) from None
+    except (KeyError, OSError, subprocess.TimeoutExpired):
+        raise SystemExit('official-metadata-io-failed') from None
