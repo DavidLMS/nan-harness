@@ -166,6 +166,30 @@ class QualificationTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 q.semantic_observations(root, 'hermes-desktop')
 
+    def test_native_icon_calibration_prunes_pixels_and_rejects_unbounded_metrics(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / 'icons.json'
+            metrics = dict(contrastPositions=10, foregroundPositions=4, maxCorrelationMilli=980,
+                           maxContrastMilli=120000, maxSpreadMilli=24000, pixels='PRIVATE')
+            calibration = dict(scaleMilli=1000, grayRange=200, grayStdMilli=25000,
+                               retry=metrics, copy=metrics, close=metrics, width=123, pixels='PRIVATE')
+            value = dict(schemaVersion=1, mechanism='zed-native-icons', diagnosticsOnly=True,
+                         status='complete', stage='completed', reason=None, templateSide=14,
+                         calibration=calibration)
+            path.write_text(json.dumps(value))
+            public = q.semantic_observations(root, 'zed-desktop')[0]['calibration']
+            self.assertEqual(public['retry']['maxCorrelationMilli'], 980)
+            self.assertNotIn('PRIVATE', str(public))
+            self.assertNotIn('width', public)
+            for changed in ({**calibration, 'scaleMilli': 1500},
+                            {**calibration, 'grayRange': True},
+                            {**calibration, 'retry': {**metrics, 'contrastPositions': 4194305}},
+                            {**calibration, 'copy': {**metrics, 'maxCorrelationMilli': 1001}}):
+                path.write_text(json.dumps({**value, 'calibration': changed}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'zed-desktop')
+
     def test_provider_oracle_and_retry_tooltip_diagnostics_are_closed(self):
         with tempfile.TemporaryDirectory() as root:
             path = Path(root) / 'provider.json'

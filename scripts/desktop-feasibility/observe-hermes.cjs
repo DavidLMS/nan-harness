@@ -131,6 +131,19 @@ async function driveDom() {
   const retryButton = errorCards.getByRole('button', { name: 'Retry', exact: true });
   async function errorProof() {
     facts.errorObserved = await errorCards.count() === 1;
+    if (facts.errorObserved && qualify) {
+      // Frozen list.tsx groups one user and its following responses in a turn
+      // pair. A delayed older error must never activate that older turn's Retry.
+      facts.errorObserved = await errorCards.evaluate((alert, prompt) => {
+        const assistant = alert.closest('[data-role="assistant"][data-slot="aui_assistant-message-root"]');
+        const pair = assistant?.closest('[data-slot="aui_turn-pair"]');
+        const group = pair?.closest('[data-slot="aui_message-group"]');
+        if (!pair || !group || alert.closest('[data-slot="aui_turn-pair"]') !== pair) return false;
+        const users = [...pair.querySelectorAll('[data-role="user"]')];
+        return users.length === 1 && users[0].innerText.trim() === prompt
+          && users[0].closest('[data-slot="aui_turn-pair"]') === pair;
+      }, request.prompt);
+    }
     facts.retryControl = facts.errorObserved && await retryButton.count() === 1 && await retryButton.isEnabled();
     return facts.errorObserved && facts.retryControl;
   }
@@ -245,7 +258,11 @@ async function driveDom() {
           : front.closest('[data-slot="popover-content"]') ? 'popover'
           : front.closest('[role="tooltip"]') ? 'tooltip'
           : getComputedStyle(front).getPropertyValue('-webkit-app-region') === 'drag' ? 'titlebar-drag'
-          : front.closest('[data-slot="aui_thread-viewport"]') ? 'thread-viewport' : 'other';
+          : front.closest('[data-slot="aui_thread-viewport"]') ? 'thread-viewport'
+          : front.closest('[data-slot="chat-drop-overlay"]') ? 'chat-drop-overlay'
+          : front.closest('.particle-field') ? 'particle-field'
+          : front.closest('[data-composer-owner]') ? 'composer-portal'
+          : front.closest('[data-slot="composer-bounds"]') ? 'composer-bounds' : 'other';
         if (front === button || button.contains(front)) {
           observation.retryHitOwned = true; observation.retryHitTarget = 'self'; return observation;
         }
@@ -334,7 +351,7 @@ async function driveDom() {
       }
       // A submission may disable or replace the editor. Read a single snapshot
       // instead of waiting on a now-missing editable locator after submission.
-      const observation = await page.evaluate(({ prompt, marker }) => {
+      const observation = await page.evaluate(({ prompt, marker, bindTurn }) => {
         const visible = e => { const r = e.getBoundingClientRect();
           const style = getComputedStyle(e); return r.width > 0 && r.height > 0 &&
             style.visibility !== 'hidden' && style.display !== 'none'; };
@@ -345,9 +362,16 @@ async function driveDom() {
           inputCleared: editors.length === 1 && (editors[0].value ?? editors[0].textContent).trim() === '',
           userTurnObserved: users.filter(e => e.innerText.trim() === prompt).length === 1,
           assistantTurnCount: Math.min(4096, assistants.length),
-          responseVerified: assistants.filter(e => e.innerText.includes(marker)).length === 1,
+          responseVerified: assistants.filter(e => e.innerText.includes(marker) && (!bindTurn || (() => {
+            const pair = e.closest('[data-slot="aui_turn-pair"]');
+            if (!pair || !pair.closest('[data-slot="aui_message-group"]')
+              || users.filter(user => user.innerText.trim() === prompt).length !== 1) return false;
+            const pairUsers = [...pair.querySelectorAll('[data-role="user"]')];
+            return pairUsers.length === 1 && pairUsers[0].innerText.trim() === prompt
+              && pairUsers[0].closest('[data-slot="aui_turn-pair"]') === pair;
+          })())).length === 1,
         };
-      }, { prompt: request.prompt, marker: request.expectedMarker });
+      }, { prompt: request.prompt, marker: request.expectedMarker, bindTurn: qualify });
       facts.inputCleared ||= observation.inputCleared;
       facts.userTurnObserved ||= observation.userTurnObserved;
       facts.assistantTurnCount = observation.assistantTurnCount;

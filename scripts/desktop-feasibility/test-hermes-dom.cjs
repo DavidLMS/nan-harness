@@ -18,6 +18,11 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
   const overlay = { tagName: 'DIV', closest(selector) { return ['[data-slot="composer-root"]', '[data-slot="composer-dock"]'].includes(selector) ? {} : null; } };
   const dockStrip = { tagName: 'DIV', privateClass: 'PRIVATE_SYNTHETIC_VALUE', closest(selector) { return selector === '[data-slot="composer-dock"]' ? {} : null; } };
   const foreignHit = { tagName: 'PRIVATE_SYNTHETIC_VALUE', closest() { return null; } };
+  const sourceRegionSelectors = { 'composer-bounds': '[data-slot="composer-bounds"]',
+    'composer-portal': '[data-composer-owner]', 'particle-field': '.particle-field',
+    'chat-drop-overlay': '[data-slot="chat-drop-overlay"]' };
+  const sourceRegionHit = { tagName: 'DIV', privateValue: 'PRIVATE_SYNTHETIC_VALUE',
+    closest(selector) { return selector === sourceRegionSelectors[scenario] ? {} : null; } };
   const bodyHit = { tagName: 'BODY', closest() { return null; } };
   const clippedParent = { matches() { return false; }, parentElement: null, getBoundingClientRect() { return { left: 0, top: 0, width: 5, height: 5 }; } };
   const sourceClipParent = { matches(selector) { return selector === '[data-sticky-prompt-clip]'; },
@@ -83,7 +88,15 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
     },
   };
   const errorCards = {
-    async count() { return scenario === 'failure-appears' && submits === 0 ? 0 : scenario === 'missing-error' ? 0 : scenario === 'duplicate-error' ? 2 : 1; },
+    async evaluate(callback, prompt) {
+      const user = { innerText: ['foreign-error-turn', 'delayed-foreign-error'].includes(scenario) ? 'Older unrelated user turn' : request.prompt,
+        closest() { return pair; } };
+      const pair = { querySelectorAll(selector) { assert.equal(selector, '[data-role="user"]'); return [user]; },
+        closest() { return {}; } };
+      const assistantRoot = { closest() { return pair; } };
+      return callback({ closest(selector) { return selector.includes('assistant-message-root') ? assistantRoot : pair; } }, prompt);
+    },
+    async count() { return ['failure-appears', 'delayed-foreign-error'].includes(scenario) && submits === 0 ? 0 : scenario === 'missing-error' ? 0 : scenario === 'duplicate-error' ? 2 : 1; },
     getByRole(role, options) { assert.equal(role, 'button'); assert.equal(options.name, 'Retry'); return { ...send, async count() { return scenario === 'missing-retry' ? 0 : scenario === 'duplicate-retry' ? 2 : 1; } }; },
   };
   const users = { filter({ hasText }) { assert.equal(hasText, request.prompt); return {
@@ -100,6 +113,13 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
       };
     },
   };
+  const rect = () => ({ width: 20, height: 20 });
+  const responseUser = { innerText: request.prompt, getBoundingClientRect: rect, closest() { return responsePair; } };
+  const foreignResponseUser = { ...responseUser, innerText: 'Older unrelated prompt' };
+  const responsePair = { closest() { return {}; }, querySelectorAll() {
+    return [scenario === 'foreign-response-turn' ? foreignResponseUser : responseUser];
+  } };
+  const responseAssistant = { innerText: request.expectedMarker, getBoundingClientRect: rect, closest() { return responsePair; } };
   const page = {
     url() { return rendererUrl; },
     on(event, callback) {
@@ -122,6 +142,7 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
       assert.equal(args.marker, request.expectedMarker);
       observations++;
       if (scenario === 'transient-context' && observations === 1) throw new Error('Execution context was destroyed');
+      if (qualify) return _callback(args);
       return { inputCleared: scenario !== 'missing-editor', userTurnObserved: submits === 1,
         assistantTurnCount: submits, responseVerified: submits === 1 };
     },
@@ -169,9 +190,15 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
         overflowX: element === clippedParent ? 'hidden' : 'visible', overflowY: 'visible', contain: '',
         getPropertyValue: property => property === '--sticky-prompt-clip' && element === sourceClipParent ? scenario === 'retry-frame-settle' && frames >= 2 ? '0px' : '25px'
           : property === '-webkit-app-region' && scenario === 'retry-native-drag' ? 'drag' : '' }),
-      document: { querySelectorAll: () => [], elementFromPoint: () =>
+      document: { querySelectorAll: selector => {
+        if (!submits) return [];
+        if (selector === '[data-role="user"]') return [responseUser];
+        if (selector === '[data-role="assistant"]') return [responseAssistant];
+        if (selector.includes('composer-root')) return scenario === 'missing-editor' ? [] : [{ value: '', getBoundingClientRect: rect }];
+        return [];
+      }, elementFromPoint: () =>
         scenario === 'retry-overlay' || (scenario === 'retry-centering' && centers === 0)
-          || (scenario === 'retry-intercepted' && clicks > 0) ? overlay : scenario === 'retry-frame-settle' && frames < 2 ? threadBackground : scenario === 'retry-source-clipped' ? threadBackground : scenario === 'retry-offviewport' ? null : scenario === 'retry-private-hit' ? foreignHit : scenario === 'retry-body-hit' ? bodyHit : scenario === 'retry-dock-strip' ? dockStrip : scenario === 'retry-child-hit' ? hitChild : hitButton },
+          || (scenario === 'retry-intercepted' && clicks > 0) ? overlay : sourceRegionSelectors[scenario] ? sourceRegionHit : scenario === 'retry-frame-settle' && frames < 2 ? threadBackground : scenario === 'retry-source-clipped' ? threadBackground : scenario === 'retry-offviewport' ? null : scenario === 'retry-private-hit' ? foreignHit : scenario === 'retry-body-hit' ? bodyHit : scenario === 'retry-dock-strip' ? dockStrip : scenario === 'retry-child-hit' ? hitChild : hitButton },
       process: { argv: ['node', 'helper', qualify ? '--qualify' : '--drive', '/request', '/output'], exit: resolve },
     });
     setTimeout(() => reject(new Error('bounded helper fixture timed out')), 1000).unref();
@@ -329,12 +356,30 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
   assert.equal(intercepted.keys, 0);
   assert.equal(intercepted.facts.retryHitTarget, 'composer');
   assert.equal(intercepted.facts.retryHitOwned, false);
-  for (const scenario of ['missing-error', 'duplicate-error', 'missing-retry', 'foreign-user', 'blocked-modal', 'blocked-menu', 'inert', 'stale', 'duplicate', 'duplicate-retry', 'send-disabled']) {
+  for (const scenario of ['missing-error', 'duplicate-error', 'missing-retry', 'foreign-error-turn', 'foreign-user', 'blocked-modal', 'blocked-menu', 'inert', 'stale', 'duplicate', 'duplicate-retry', 'send-disabled']) {
     const rejected = await trial(retryRequest, {}, scenario, true);
     assert.equal(rejected.submits, 0, scenario);
     assert.equal(rejected.fills, 0, scenario);
   }
+  const delayedForeign = await trial({ ...phase, timeoutMs: 10 }, {}, 'delayed-foreign-error', true);
+  assert.equal(delayedForeign.submits, 1);
+  assert.equal(delayedForeign.facts.errorObserved, false);
+  assert.equal(delayedForeign.facts.retryControl, false);
+  assert.equal(delayedForeign.facts.errorCategory, 'response-timeout');
+  const foreignResponse = await trial({ ...retryRequest, timeoutMs: 10 }, {}, 'foreign-response-turn', true);
+  assert.equal(foreignResponse.submits, 1);
+  assert.equal(foreignResponse.facts.userTurnObserved, true);
+  assert.equal(foreignResponse.facts.responseVerified, false);
+  assert.equal(foreignResponse.facts.errorCategory, 'response-timeout');
+  for (const region of ['composer-bounds', 'composer-portal', 'particle-field', 'chat-drop-overlay']) {
+    const coveredBySourceRegion = await trial(retryRequest, {}, region, true);
+    assert.equal(coveredBySourceRegion.facts.retryHitRegion, region);
+    assert.equal(coveredBySourceRegion.facts.retryHitOwned, false);
+    assert.equal(coveredBySourceRegion.facts.retryHitTarget, 'other');
+    assert.equal(coveredBySourceRegion.clicks, 0);
+    assert.equal(coveredBySourceRegion.submits, 0);
+  }
   const invalid = await trial({ ...phase, action: 'retry' }, {}, null, true);
   assert.equal(invalid.facts.errorCategory, 'invalid-request');
-  console.log('Hermes DOM feasibility and qualification guards: 50 synthetic cases passed');
+  console.log('Hermes DOM feasibility and qualification guards: 57 synthetic cases passed');
 })().catch(error => { console.error(error.message); process.exitCode = 1; });

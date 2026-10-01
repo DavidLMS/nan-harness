@@ -135,6 +135,29 @@ def semantic_observations(directory, app):
                 if count is not None and (type(count) is not int or not 0 <= count <= 4096):
                     raise ValueError('invalid native icon diagnostic count')
                 record[key] = count
+            calibration = value.get('calibration')
+            if calibration is not None:
+                if type(calibration) is not dict:
+                    raise ValueError('invalid native icon calibration')
+                safe = {}
+                for key, maximum in (('scaleMilli', 2000), ('grayRange', 255), ('grayStdMilli', 127500)):
+                    number = calibration.get(key)
+                    if type(number) is not int or not 0 <= number <= maximum or (key == 'scaleMilli' and number not in {1000, 2000}):
+                        raise ValueError('invalid native icon calibration number')
+                    safe[key] = number
+                for icon in ('retry', 'copy', 'close'):
+                    source = calibration.get(icon)
+                    if type(source) is not dict:
+                        raise ValueError('invalid native icon calibration metrics')
+                    metrics = {}
+                    for key, maximum in (('contrastPositions', 4194304), ('foregroundPositions', 4194304),
+                                         ('maxCorrelationMilli', 1000), ('maxContrastMilli', 255000), ('maxSpreadMilli', 255000)):
+                        number = source.get(key)
+                        if type(number) is not int or not 0 <= number <= maximum:
+                            raise ValueError('invalid native icon calibration metric')
+                        metrics[key] = number
+                    safe[icon] = metrics
+                record['calibration'] = safe
         elif mechanism == 'hermes-retry-policy':
             if app != 'hermes-desktop' or value.get('policy') != 'explicit-ui-retry' or type(value.get('autoRecoveryCycles')) is not int or value['autoRecoveryCycles'] != 0 or type(value.get('apiMaxRetries')) is not int or value['apiMaxRetries'] != 3:
                 raise ValueError('invalid Hermes qualification policy')
@@ -155,7 +178,7 @@ def semantic_observations(directory, app):
                         'retryPointerEventsNone', 'inputCleared', 'userTurnObserved'):
                 flag(record, value, key)
             enum(record, value, 'retryHitTag', {'html', 'body', 'button', 'div', 'span', 'svg', 'other', 'none', 'unmeasured'})
-            enum(record, value, 'retryHitRegion', {'thread-viewport', 'composer-dock', 'composer-drag-region', 'titlebar-drag', 'dialog', 'popover', 'tooltip', 'other', 'none', 'unmeasured'})
+            enum(record, value, 'retryHitRegion', {'thread-viewport', 'composer-dock', 'composer-drag-region', 'composer-bounds', 'composer-portal', 'particle-field', 'chat-drop-overlay', 'titlebar-drag', 'dialog', 'popover', 'tooltip', 'other', 'none', 'unmeasured'})
             enum(record, value, 'retryHitTarget', {'self', 'composer', 'error-card', 'menu', 'modal', 'other', 'none', 'unmeasured'})
             enum(record, value, 'errorCategory', DOM_ERRORS)
             enum(record, value, 'sendBlocker', {'modal', 'menu', 'tooltip', 'composer-drag-region', 'other',
