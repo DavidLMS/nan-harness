@@ -137,5 +137,22 @@ fn detach(mount: &Path) -> Result<(), InspectError> {
 
 #[cfg(not(target_os = "macos"))]
 fn dmg_bundle_version(_: DesktopHarnessKind, _: &Path) -> Result<Option<String>, InspectError> {
-    Ok(None)
+    Err(InspectError::Unresolved)
+}
+
+#[cfg(all(test, not(target_os = "macos")))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dmg_inspection_requires_native_macos_support() {
+        assert_eq!(
+            artifact_version(
+                DesktopHarnessKind::Zed,
+                PackageFormat::Dmg,
+                Path::new("not-installed.dmg"),
+            ),
+            Err(InspectError::Unresolved),
+        );
+    }
 }

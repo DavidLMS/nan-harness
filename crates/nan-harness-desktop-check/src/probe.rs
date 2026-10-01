@@ -704,19 +704,7 @@ async fn scenario(
     let inventory = ScriptedProvider::start(ProviderScenario::inventory(&final_marker))
         .await
         .map_err(|_| Reason::ProviderFailed)?;
-    let key = if spec.live {
-        Zeroizing::new(std::env::var("NAN_API_KEY").map_err(|_| Reason::MissingKey)?)
-    } else {
-        Zeroizing::new("nanh-desktop-check-synthetic".into())
-    };
-    let upstream = if spec.live {
-        "https://api.nan.builders/v1"
-    } else {
-        inventory.base_url()
-    };
-    let gate = ProviderGate::start(upstream, key, spec.live, &marker)
-        .await
-        .map_err(|()| Reason::ProviderFailed)?;
+    let gate = start_provider_gate(spec, &inventory, &marker).await?;
     let mut process = launch(spec, &gate).map_err(|(reason, failure)| {
         launch_observation.failure = Some(failure);
         reason
@@ -781,6 +769,26 @@ async fn scenario(
         diagnostic,
     )
     .await
+}
+
+async fn start_provider_gate(
+    spec: &ProbeSpec,
+    inventory: &ScriptedProvider,
+    marker: &str,
+) -> Result<ProviderGate, Reason> {
+    let key = if spec.live {
+        Zeroizing::new(std::env::var("NAN_API_KEY").map_err(|_| Reason::MissingKey)?)
+    } else {
+        Zeroizing::new("nanh-desktop-check-synthetic".into())
+    };
+    let upstream = if spec.live {
+        "https://api.nan.builders/v1"
+    } else {
+        inventory.base_url()
+    };
+    ProviderGate::start(upstream, key, spec.live, marker)
+        .await
+        .map_err(|()| Reason::ProviderFailed)
 }
 
 fn strict_accessibility_directory(spec: &ProbeSpec) -> Result<Option<PathBuf>, Reason> {
