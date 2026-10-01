@@ -63,6 +63,7 @@ struct Facts {
     retry_control_count: Option<usize>,
     retry_selector: Option<&'static str>,
     retry_title_count: Option<usize>,
+    retry_label_count: Option<usize>,
     retry_candidate_count: Option<usize>,
     retry_tooltip_count: Option<usize>,
     clipboard_cleanup: &'static str,
@@ -347,6 +348,7 @@ fn native_copy_facts() -> Facts {
         retry_control_count: None,
         retry_selector: None,
         retry_title_count: None,
+        retry_label_count: None,
         retry_candidate_count: None,
         retry_tooltip_count: None,
         clipboard_cleanup: "not-run",
@@ -392,6 +394,40 @@ fn retry_header_candidate(title: xa11y::Rect, button: &xa11y::Element) -> bool {
                 && i64::from(bounds.y) < i64::from(title.y) + i64::from(title.height)
                 && i64::from(bounds.y) + i64::from(bounds.height) > i64::from(title.y)
         })
+}
+
+fn retry_label_parent(label: &xa11y::Element) -> Result<xa11y::Element, Reason> {
+    let label_bounds = label.bounds.ok_or(Reason::ActionUnsupported)?;
+    let pid = label.pid.ok_or(Reason::IsolationUnavailable)?;
+    let mut parent = label.parent().map_err(map_error)?;
+    for _ in 0..2 {
+        let element = parent.ok_or(Reason::SelectorNotMatched)?;
+        if element.pid != Some(pid) {
+            return Err(Reason::IsolationUnavailable);
+        }
+        if element.role == xa11y::Role::Button {
+            let bounds = element.bounds.ok_or(Reason::ActionUnsupported)?;
+            if !rect_contains(bounds, label_bounds) {
+                return Err(Reason::ActionUnsupported);
+            }
+            return Ok(element);
+        }
+        parent = element.parent().map_err(map_error)?;
+    }
+    Err(Reason::SelectorNotMatched)
+}
+
+fn rect_contains(outer: xa11y::Rect, inner: xa11y::Rect) -> bool {
+    outer.width > 0
+        && outer.height > 0
+        && inner.width > 0
+        && inner.height > 0
+        && inner.x >= outer.x
+        && inner.y >= outer.y
+        && i64::from(inner.x) + i64::from(inner.width)
+            <= i64::from(outer.x) + i64::from(outer.width)
+        && i64::from(inner.y) + i64::from(inner.height)
+            <= i64::from(outer.y) + i64::from(outer.height)
 }
 
 fn same_retry_element(before: &xa11y::Element, after: &xa11y::Element) -> bool {
@@ -455,10 +491,41 @@ impl NativeClipboardSession<'_> {
             if count > 1 {
                 return Err(Reason::SelectorNotMatched);
             }
+            if let Some(button) = self.retry_text_button()? {
+                self.facts.retry_selector = Some("retry-label");
+                self.retry_element = Some(button);
+                self.retry_ready = true;
+                return Ok(());
+            }
             if Instant::now() >= deadline {
                 return self.discover_retry_tooltip();
             }
             std::thread::sleep(Duration::from_millis(100));
+        }
+    }
+
+    fn retry_text_button(&mut self) -> Result<Option<xa11y::Element>, Reason> {
+        self.facts.ax_text_used = true;
+        self.gui
+            .native_copy_guard(&mut self.facts, "retry-label-query")?;
+        let app = self.gui.app.as_ref().ok_or(Reason::SelectorNotMatched)?;
+        let labels = app
+            .locator("label[value=\"Retry\"], label[name=\"Retry\"]")
+            .elements()
+            .map_err(map_error)?;
+        self.facts.retry_label_count = Some(labels.len().min(4096));
+        match labels.as_slice() {
+            [] => Ok(None),
+            [label] => {
+                self.gui
+                    .native_copy_guard(&mut self.facts, "retry-label-parent")?;
+                let button = retry_label_parent(label)?;
+                self.gui
+                    .visual
+                    .validate_native_bounds(button.bounds.ok_or(Reason::ActionUnsupported)?)?;
+                Ok(Some(button))
+            }
+            _ => Err(Reason::SelectorNotMatched),
         }
     }
 
@@ -566,6 +633,18 @@ impl NativeClipboardSession<'_> {
         if let Some(captured) = self.retry_element.take() {
             self.gui
                 .native_copy_guard(&mut self.facts, "retry-revalidate")?;
+            if self.facts.retry_selector == Some("retry-label") {
+                let button = self
+                    .retry_text_button()?
+                    .ok_or(Reason::SelectorNotMatched)?;
+                if !same_retry_element(&captured, &button) {
+                    return Err(Reason::SelectorNotMatched);
+                }
+                self.gui
+                    .native_copy_guard(&mut self.facts, "retry-before")?;
+                button.press().map_err(map_error)?;
+                return self.gui.native_copy_guard(&mut self.facts, "retry-after");
+            }
             let app = self.gui.app.as_ref().ok_or(Reason::SelectorNotMatched)?;
             let current = app.locator("button").elements().map_err(map_error)?;
             if current.len() > 64 {
@@ -1056,6 +1135,34 @@ mod tests {
             Ok(())
         );
         assert_eq!((observations, waits), (3, 2));
+    }
+
+    #[test]
+    fn retry_label_requires_positive_contained_geometry() {
+        let outer = xa11y::Rect {
+            x: -20,
+            y: 10,
+            width: 80,
+            height: 30,
+        };
+        let inner = xa11y::Rect {
+            x: -10,
+            y: 15,
+            width: 40,
+            height: 10,
+        };
+        assert!(rect_contains(outer, inner));
+        for invalid in [
+            xa11y::Rect { width: 0, ..inner },
+            xa11y::Rect { x: -21, ..inner },
+            xa11y::Rect { y: 35, ..inner },
+            xa11y::Rect {
+                width: u32::MAX,
+                ..inner
+            },
+        ] {
+            assert!(!rect_contains(outer, invalid));
+        }
     }
 
     #[test]

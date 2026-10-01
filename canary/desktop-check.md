@@ -115,6 +115,14 @@ failure, and recovery through exactly one UI Retry in the failed turn. Each
 response also needs independent completed-provider evidence. Three passing
 probes and successful app/global cleanup are required per accepted cell.
 
+Hermes's UI Retry trial sets the supported `agent.auto_recovery_cycles: 0` in
+its fresh owned profile before the first turn. Ordinary API retries retain the
+frozen default of three attempts. This exposes a terminal controlled failure
+within the bounded trial, instead of waiting through five automatic recovery
+cycles. The closed result records this explicit UI Retry policy and hashes of
+the private configuration before and after the change. It does not qualify the
+default automatic recovery schedule.
+
 Qualification artifacts contain closed results and exact binary, application,
 manifest and report hashes. Private prompts, clipboard exports, raw native logs
 and connection details are excluded. These branch-only deterministic results do

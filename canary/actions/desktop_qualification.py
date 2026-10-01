@@ -72,7 +72,7 @@ def bounded_json(path, limit=1024 * 1024):
 
 DOM_ERRORS = set('unclassified invalid-request launcher-unowned endpoint-unowned target-ambiguous target-invalid composer-ambiguous send-unavailable stale-response input-mismatch response-timeout submit-action-timeout submit-action-intercepted submit-action-detached submit-action-failed response-observation-failed attachment-or-action-failed'.split())
 NATIVE_STAGES = set('trust panel input submit response-control response-readback completed'.split())
-NATIVE_SUBSTAGES = set('trust-query trust-before trust-after panel-query new-thread-before new-thread-after panel-settle select-all-before select-all-after type-before type-after paste-before paste-after paste-settle input-sentinel-write copy-select-all-before copy-select-all-after input-copy-before input-copy-after collapse-selection-before submit-before response-control-query response-sentinel-write response-copy-before response-copy-after clipboard-read-before clipboard-read-after export-copy-before export-copy-after export-read-before export-read-after export-parse completed retry-control-query retry-before retry-after retry-title-query retry-tooltip-reset retry-tooltip-hover retry-tooltip-query retry-tooltip-clear retry-revalidate'.split())
+NATIVE_SUBSTAGES = set('trust-query trust-before trust-after panel-query new-thread-before new-thread-after panel-settle select-all-before select-all-after type-before type-after paste-before paste-after paste-settle input-sentinel-write copy-select-all-before copy-select-all-after input-copy-before input-copy-after collapse-selection-before submit-before response-control-query response-sentinel-write response-copy-before response-copy-after clipboard-read-before clipboard-read-after export-copy-before export-copy-after export-read-before export-read-after export-parse completed retry-control-query retry-before retry-after retry-title-query retry-tooltip-reset retry-tooltip-hover retry-tooltip-query retry-tooltip-clear retry-revalidate retry-label-query retry-label-parent'.split())
 
 
 def semantic_observations(directory, app):
@@ -103,13 +103,30 @@ def semantic_observations(directory, app):
         if type(value) is not dict:
             raise ValueError('invalid semantic observation')
         mechanism = value.get('mechanism')
-        if mechanism not in {'hermes-renderer-qualification', 'zed-native-copy', 'semantic-provider-oracle'}:
+        if mechanism not in {'hermes-renderer-qualification', 'zed-native-copy', 'semantic-provider-oracle', 'hermes-retry-policy', 'semantic-inventory'}:
             continue
         expected = 'hermes-renderer-qualification' if app == 'hermes-desktop' else 'zed-native-copy'
-        if (mechanism != expected and mechanism != 'semantic-provider-oracle') or type(value.get('schemaVersion')) is not int or value['schemaVersion'] != 1:
+        if (mechanism != expected and mechanism not in {'semantic-provider-oracle', 'hermes-retry-policy', 'semantic-inventory'}) or type(value.get('schemaVersion')) is not int or value['schemaVersion'] != 1:
             raise ValueError('semantic observation identity differs')
         record = {'schemaVersion': 1, 'mechanism': mechanism}
-        if mechanism == 'semantic-provider-oracle':
+        if mechanism == 'semantic-inventory':
+            for key in ('requestCount', 'toolCount', 'knownReadToolCount'):
+                count = value.get(key)
+                if type(count) is not int or not 0 <= count <= 4096:
+                    raise ValueError('invalid semantic inventory count')
+                record[key] = count
+            if type(value.get('readToolSelected')) is not bool:
+                raise ValueError('invalid semantic inventory flag')
+            record['readToolSelected'] = value['readToolSelected']
+        elif mechanism == 'hermes-retry-policy':
+            if app != 'hermes-desktop' or value.get('policy') != 'explicit-ui-retry' or type(value.get('autoRecoveryCycles')) is not int or value['autoRecoveryCycles'] != 0 or type(value.get('apiMaxRetries')) is not int or value['apiMaxRetries'] != 3:
+                raise ValueError('invalid Hermes qualification policy')
+            record.update(policy='explicit-ui-retry', autoRecoveryCycles=0, apiMaxRetries=3)
+            for key in ('configBeforeSha256', 'configAfterSha256'):
+                if type(value.get(key)) is not str or not HASH.fullmatch(value[key]):
+                    raise ValueError('invalid policy config identity')
+                record[key] = value[key]
+        elif mechanism == 'semantic-provider-oracle':
             enum(record, value, 'stage', {'tool', 'failure'})
             for key in ('toolCompleted', 'toolRecordingBounded', 'toolVerified',
                         'fixtureResponseVerified', 'failureObserved'):
@@ -134,8 +151,8 @@ def semantic_observations(directory, app):
             enum(record, value, 'guardKind', {'native-window', 'direct-foreground'})
             enum(record, value, 'guardCategory', CATEGORIES)
             enum(record, value, 'clipboardCleanup', {'passed', 'failed', 'not-run'})
-            enum(record, value, 'retrySelector', {'retry-name-or-description', 'retry-tooltip'})
-            for key in ('retryControlCount', 'retryTitleCount', 'retryCandidateCount', 'retryTooltipCount'):
+            enum(record, value, 'retrySelector', {'retry-name-or-description', 'retry-tooltip', 'retry-label'})
+            for key in ('retryControlCount', 'retryTitleCount', 'retryCandidateCount', 'retryTooltipCount', 'retryLabelCount'):
                 if key in value:
                     count = value[key]
                     if count is not None and (type(count) is not int or not 0 <= count <= 4096):
@@ -206,7 +223,10 @@ def reduce_report(*, app, platform, architecture, source_sha, model, frozen, pre
                   appCleanup=observed.get('cleanup'), globalCleanup=checked.get('cleanup'), probes=public)
     # Semantic mechanisms are explicit, never inferred from visual/OCR success.
     semantic_pairs = {('native-clipboard-and-keyboard', 'native-thread-export')} if result['backend'] == 'native-thread-export' else {('renderer-dom-and-keyboard', 'renderer-dom')}
-    accepted = (len(probes) == 3 and result['appCleanup'] == 'passed' and result['globalCleanup'] == 'passed'
+    policy_disclosed = app != 'hermes-desktop' or sum(
+        observation['mechanism'] == 'hermes-retry-policy'
+        for observation in result['semanticObservations']) == 3
+    accepted = (policy_disclosed and len(probes) == 3 and result['appCleanup'] == 'passed' and result['globalCleanup'] == 'passed'
                 and all(probe.get('status') == 'passed' and len(probe.get('steps', [])) == 5
                         and set(probe.get('steps', [])) == STEPS
                         and (probe.get('inputMode'), probe.get('responseVerification')) in semantic_pairs for probe in probes))

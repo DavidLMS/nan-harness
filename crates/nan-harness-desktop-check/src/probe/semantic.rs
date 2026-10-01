@@ -62,11 +62,21 @@ impl SemanticBackend {
             DesktopHarnessKind::Zed => {
                 SemanticUi::Zed(Box::new(gui.native_clipboard_session(&self.directory)?))
             }
-            DesktopHarnessKind::Hermes => SemanticUi::Hermes {
-                gui,
-                directory: &self.directory,
-                owner: owner.ok_or(Reason::ApplicationExited)?,
-            },
+            DesktopHarnessKind::Hermes => {
+                // Configure the owned fresh profile before Hermes creates its first agent.
+                super::hermes_policy::prepare(
+                    scenario
+                        .fixture
+                        .parent()
+                        .ok_or(Reason::IsolationUnavailable)?,
+                    &self.directory,
+                )?;
+                SemanticUi::Hermes {
+                    gui,
+                    directory: &self.directory,
+                    owner: owner.ok_or(Reason::ApplicationExited)?,
+                }
+            }
             _ => return Err(Reason::ActionUnsupported),
         };
         let outcome = complete_scenario(&mut ui, &scenario, &self.directory, result).await;
@@ -187,8 +197,10 @@ async fn complete_scenario(
         .steps
         .extend([CheckStep::InputSubmitted, CheckStep::ResponseVerified]);
 
-    let (name, arguments) =
-        select_read_tool(&inventory.chat_requests(), fixture).ok_or(Reason::ToolMismatch)?;
+    let requests = inventory.chat_requests();
+    let selected = select_read_tool(&requests, fixture);
+    record_inventory(directory, &requests, selected.is_some())?;
+    let (name, arguments) = selected.ok_or(Reason::ToolMismatch)?;
     let tool_marker = visual_marker("NAN CHECK TOOL")?;
     let tool = ScriptedProvider::start(ProviderScenario::tool(name, arguments, &tool_marker))
         .await
@@ -286,6 +298,52 @@ fn record_provider_oracle(
     let path = directory.join(format!("provider-{}.json", u64::from_le_bytes(nonce)));
     let bytes = serde_json::to_vec(&facts).map_err(|_| Reason::IsolationUnavailable)?;
     open_private_new(&path)
+        .and_then(|mut file| file.write_all(&bytes).and_then(|()| file.sync_all()))
+        .map_err(|_| Reason::IsolationUnavailable)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct InventoryFacts {
+    schema_version: u8,
+    mechanism: &'static str,
+    request_count: usize,
+    tool_count: usize,
+    known_read_tool_count: usize,
+    read_tool_selected: bool,
+}
+
+fn record_inventory(
+    directory: &Path,
+    requests: &[serde_json::Value],
+    selected: bool,
+) -> Result<(), Reason> {
+    let tools: Vec<_> = requests
+        .iter()
+        .filter_map(|request| request.get("tools")?.as_array())
+        .flatten()
+        .collect();
+    let facts = InventoryFacts {
+        schema_version: 1,
+        mechanism: "semantic-inventory",
+        request_count: requests.len(),
+        tool_count: tools.len(),
+        read_tool_selected: selected,
+        known_read_tool_count: tools
+            .iter()
+            .filter(|tool| {
+                matches!(
+                    tool.pointer("/function/name")
+                        .and_then(serde_json::Value::as_str),
+                    Some("Read" | "read_file" | "read_files" | "exec_command")
+                )
+            })
+            .count(),
+    };
+    let mut nonce = [0_u8; 8];
+    getrandom::fill(&mut nonce).map_err(|_| Reason::IsolationUnavailable)?;
+    let bytes = serde_json::to_vec(&facts).map_err(|_| Reason::IsolationUnavailable)?;
+    open_private_new(&directory.join(format!("inventory-{}.json", u64::from_le_bytes(nonce))))
         .and_then(|mut file| file.write_all(&bytes).and_then(|()| file.sync_all()))
         .map_err(|_| Reason::IsolationUnavailable)
 }

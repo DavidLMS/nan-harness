@@ -118,6 +118,7 @@ mod windows_process_tests {
     }
 }
 
+mod hermes_policy;
 mod semantic;
 
 /// Opt-in startup diagnostic binding. Only the `chatgpt-desktop` launch runs
@@ -1361,8 +1362,9 @@ fn select_read_tool(requests: &[Value], fixture: &Path) -> Option<(String, Value
             continue;
         };
         for tool in tools {
-            let function = tool.get("function")?;
-            let name = function.get("name")?.as_str()?;
+            let Some(name) = tool.pointer("/function/name").and_then(Value::as_str) else {
+                continue;
+            };
             let input = match name {
                 "Read" => json!({"file_path":fixture}),
                 "read_file" => json!({"path":fixture}),
@@ -1845,6 +1847,20 @@ mod tests {
         assert_eq!(stop(&mut process, None, None).await, Ok(()));
         assert!(process.id().is_none());
         assert!(!windows_process_tests::descendant_alive(pid).await);
+    }
+
+    #[test]
+    fn tool_discovery_skips_non_function_tools_and_unrelated_requests() {
+        let fixture = Path::new("/synthetic/read-target.txt");
+        let requests = vec![
+            json!({"tools": [{"type": "web_search"}]}),
+            json!({"tools": [{"function": {}}, {"function": {"name": "read_file"}}]}),
+        ];
+        assert_eq!(
+            select_read_tool(&requests, fixture),
+            Some(("read_file".into(), json!({"path": fixture})))
+        );
+        assert!(select_read_tool(&requests[..1], fixture).is_none());
     }
 
     #[test]

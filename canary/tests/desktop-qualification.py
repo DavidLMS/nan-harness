@@ -184,17 +184,54 @@ class QualificationTests(unittest.TestCase):
                     q.semantic_observations(root, 'zed-desktop')
             native = dict(schemaVersion=1, mechanism='zed-native-copy', substage='retry-tooltip-query',
                           retrySelector='retry-tooltip', retryTitleCount=0, retryCandidateCount=6,
-                          retryTooltipCount=1)
+                          retryTooltipCount=1, retryLabelCount=None)
             path.write_text(json.dumps(native))
             public = q.semantic_observations(root, 'zed-desktop')[0]
             self.assertEqual(public['retryTooltipCount'], 1)
             self.assertEqual(public['retryCandidateCount'], 6)
             self.assertEqual(public['retrySelector'], 'retry-tooltip')
-            for field in ('retryTitleCount', 'retryCandidateCount', 'retryTooltipCount'):
+            for field in ('retryTitleCount', 'retryCandidateCount', 'retryTooltipCount', 'retryLabelCount'):
                 for invalid in (True, -1, 4097):
                     path.write_text(json.dumps({**native, field: invalid}))
                     with self.assertRaises(ValueError):
                         q.semantic_observations(root, 'zed-desktop')
+
+    def test_private_retry_policy_has_only_fixed_settings_and_hashes(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'policy.json'
+            policy = dict(schemaVersion=1, mechanism='hermes-retry-policy', policy='explicit-ui-retry',
+                          autoRecoveryCycles=0, apiMaxRetries=3, configBeforeSha256='a' * 64,
+                          configAfterSha256='b' * 64, privateYaml='PRIVATE')
+            path.write_text(json.dumps(policy))
+            public = q.semantic_observations(root, 'hermes-desktop')[0]
+            self.assertEqual(public['autoRecoveryCycles'], 0)
+            self.assertEqual(public['apiMaxRetries'], 3)
+            self.assertNotIn('PRIVATE', str(public))
+            with self.assertRaises(ValueError):
+                q.semantic_observations(root, 'zed-desktop')
+            for field, invalid in [('policy', 'PRIVATE'), ('autoRecoveryCycles', False),
+                                   ('apiMaxRetries', 1), ('configAfterSha256', 'PRIVATE')]:
+                path.write_text(json.dumps({**policy, field: invalid}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'hermes-desktop')
+
+    def test_semantic_inventory_exposes_counts_without_tool_names(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'inventory.json'
+            value = dict(schemaVersion=1, mechanism='semantic-inventory', requestCount=1,
+                         toolCount=12, knownReadToolCount=0, readToolSelected=False,
+                         privateToolNames=['PRIVATE'])
+            path.write_text(json.dumps(value))
+            for app in ('hermes-desktop', 'zed-desktop'):
+                public = q.semantic_observations(root, app)[0]
+                self.assertEqual(public['knownReadToolCount'], 0)
+                self.assertFalse(public['readToolSelected'])
+                self.assertNotIn('PRIVATE', str(public))
+            for field, invalid in [('requestCount', True), ('toolCount', -1),
+                                   ('knownReadToolCount', 4097), ('readToolSelected', 0)]:
+                path.write_text(json.dumps({**value, field: invalid}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'hermes-desktop')
 
     def test_semantic_observation_bounds_and_symlink_rejection(self):
         with tempfile.TemporaryDirectory() as root:
@@ -212,7 +249,7 @@ class QualificationTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 q.semantic_observations(root, 'hermes-desktop')
 
-    def trial(self, mutate=lambda report: None):
+    def trial(self, mutate=lambda report: None, policy_count=3):
         with tempfile.TemporaryDirectory() as root:
             paths = {key: Path(root) / key for key in ('checker', 'launcher', 'real_nanh', 'prepared', 'frozen', 'report')}
             for key, path in paths.items():
@@ -230,12 +267,18 @@ class QualificationTests(unittest.TestCase):
                            frozen={'sha256': q.digest(paths['frozen']), 'model': 'qwen3.6'}, apps= [dict(app='hermes-desktop', executable={'sha256': 'c' * 64})])
             with patch.object(q, 'read_frozen_manifest', return_value=manifest), \
                  patch.object(q, 'bounded_json', return_value=receipt), \
+                 patch.object(q, 'semantic_observations', return_value=[dict(
+                     schemaVersion=1, mechanism='hermes-retry-policy', policy='explicit-ui-retry',
+                     autoRecoveryCycles=0, apiMaxRetries=3, configBeforeSha256='e' * 64,
+                     configAfterSha256='f' * 64) for _ in range(policy_count)]), \
                  patch.object(q, 'validated_report', return_value=(report, 'd' * 64)):
                 return q.reduce_report(app='hermes-desktop', platform='linux', architecture='x86_64',
                                        source_sha='a' * 40, model='qwen3.6', **paths)
 
     def test_full_three_probes_and_cleanup_are_required(self):
         self.assertEqual(self.trial()['qualification'], 'deterministic-full')
+        for count in (0, 1, 2, 4):
+            self.assertEqual(self.trial(policy_count=count)['qualification'], 'unqualified')
         changes = [lambda r: r['results'][0]['deterministic'].pop(),
                    lambda r: r['results'][0]['deterministic'][0]['steps'].remove('tool-verified'),
                    lambda r: r['results'][0]['deterministic'][0].update(status='skipped'),
