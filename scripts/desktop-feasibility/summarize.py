@@ -33,8 +33,15 @@ def main():
                   realNanhSha256=hashlib.sha256(Path(args.real_nanh).read_bytes()).hexdigest() if Path(args.real_nanh).exists() else None)
     result['checkerSha256'] = hashlib.sha256(Path(args.checker).read_bytes()).hexdigest() if Path(args.checker).exists() else None
     result['reportSha256'] = hashlib.sha256(Path(args.report).read_bytes()).hexdigest() if Path(args.report).exists() else None
+    app_result = next((app for app in report.get('results', []) if app.get('app') == args.app), {})
+    fields = {'status', 'reason', 'steps', 'inputMode', 'responseVerification', 'guiStage'}
+    result['probes'] = [{key: value for key, value in probe.items() if key in fields}
+                        for probe in app_result.get('deterministic', [])]
+    result['appCleanup'] = app_result.get('cleanup')
+    result['reportCleanup'] = report.get('cleanup')
     result['noOcrQualification'] = False
-    result['stage'] = 'measured' if report and entry.get('version') else 'preparation-or-report-missing'
+    result['stage'] = ('measured' if any(probe.get('steps') for probe in result['probes'])
+                       else 'blocked-before-ui' if report else 'preparation-or-report-missing')
     if args.app == 'zed-desktop':
         result['semanticConversationReadback'] = bool(semantic_zed(report) and entry.get('version') and result['checkerSha256'] and len(args.source_sha) == 40)
         result['verdict'] = 'conversation-readback-viable' if result['semanticConversationReadback'] else 'inconclusive'

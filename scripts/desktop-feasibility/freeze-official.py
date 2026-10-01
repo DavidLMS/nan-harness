@@ -1,0 +1,112 @@
+#!/usr/bin/env python3
+"""Freeze public upstream metadata using the hosted job's read-only GitHub token.
+
+Credentials are scoped to metadata acquisition; application installers consume
+only the frozen manifest after the token has been removed from their environment.
+"""
+import argparse
+import base64
+import json
+import os
+from pathlib import Path
+import re
+import subprocess
+
+VERSION = re.compile(r'(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\Z')
+SHA = re.compile(r'[0-9a-f]{40}\Z')
+DIGEST = re.compile(r'sha256:[0-9a-f]{64}\Z')
+
+
+def metadata(endpoint):
+    completed = subprocess.run(['gh', 'api', '--hostname', 'github.com', endpoint],
+                               stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                               timeout=60, check=False)
+    if completed.returncode or len(completed.stdout) > 4 * 1024 * 1024:
+        raise ValueError('official-metadata-fetch-failed')
+    value = json.loads(completed.stdout)
+    if not isinstance(value, dict):
+        raise ValueError('official-metadata-shape-invalid')
+    return value
+
+
+def release_tag(value):
+    if value.get('draft') is not False or value.get('prerelease') is not False:
+        raise ValueError('official-release-channel-invalid')
+    tag = value.get('tag_name', '')
+    if not isinstance(tag, str) or not tag.startswith('v') or not VERSION.fullmatch(tag[1:]):
+        raise ValueError('official-release-version-invalid')
+    return tag
+
+
+def freeze_zed(fetch=metadata):
+    repository = 'zed-industries/zed'
+    release = fetch(f'repos/{repository}/releases/latest')
+    tag = release_tag(release)
+    name = 'Zed-aarch64.dmg'
+    url = f'https://github.com/{repository}/releases/download/{tag}/{name}'
+    assets = [a for a in release.get('assets', []) if a.get('name') == name]
+    if len(assets) != 1 or assets[0].get('browser_download_url') != url:
+        raise ValueError('official-asset-identity-invalid')
+    digest = assets[0].get('digest', '')
+    if not isinstance(digest, str) or not DIGEST.fullmatch(digest):
+        raise ValueError('official-asset-digest-invalid')
+    # Existing GithubAsset policy requires staged=false. The checker downloads
+    # this immutable public URL and verifies this digest during preparation.
+    return dict(status='frozen', app='zed-desktop', version=tag[1:],
+                channel=f'github-release:{repository}', url=url, format='dmg',
+                digest=digest, staged=False, installer='checker')
+
+
+def git_commit(value):
+    obj = value.get('object', {})
+    kind, sha = obj.get('type'), obj.get('sha', '')
+    if kind not in {'tag', 'commit'} or not isinstance(sha, str) or not SHA.fullmatch(sha):
+        raise ValueError('official-source-object-invalid')
+    return kind, sha
+
+
+def freeze_hermes(fetch=metadata):
+    repository = 'NousResearch/hermes-agent'
+    tag = release_tag(fetch(f'repos/{repository}/releases/latest'))
+    kind, revision = git_commit(fetch(f'repos/{repository}/git/ref/tags/{tag}'))
+    if kind == 'tag':
+        kind, revision = git_commit(fetch(f'repos/{repository}/git/tags/{revision}'))
+    if kind != 'commit':
+        raise ValueError('official-source-commit-invalid')
+    content = fetch(f'repos/{repository}/contents/apps/desktop/package.json?ref={revision}')
+    if content.get('encoding') != 'base64' or content.get('type') != 'file' or content.get('path') != 'apps/desktop/package.json':
+        raise ValueError('official-source-package-invalid')
+    package = json.loads(base64.b64decode(''.join(content['content'].split()), validate=True))
+    version = package.get('version', '')
+    if not isinstance(version, str) or not VERSION.fullmatch(version):
+        raise ValueError('official-source-version-invalid')
+    return dict(status='frozen', app='hermes-desktop', version=version,
+                channel=f'github-source:{repository}', url=f'https://github.com/{repository}.git',
+                format='source', revision=revision, staged=False, installer='external')
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--app', choices=['zed-desktop', 'hermes-desktop'], required=True)
+    parser.add_argument('--output', type=Path, required=True)
+    args = parser.parse_args()
+    if os.environ.get('GITHUB_ACTIONS') != 'true' or os.environ.get('RUNNER_ENVIRONMENT') != 'github-hosted':
+        raise ValueError('disposable-hosted-runner-required')
+    if not os.environ.get('GH_TOKEN') or os.environ.get('NAN_API_KEY'):
+        raise ValueError('metadata-only-credentials-required')
+    entry = freeze_zed() if args.app == 'zed-desktop' else freeze_hermes()
+    platform, architecture = ('macos', 'aarch64') if args.app == 'zed-desktop' else ('linux', 'x86_64')
+    manifest = dict(schemaVersion=1, suite='desktop', platform=platform,
+                    architecture=architecture, model='qwen3.6', apps=[entry])
+    args.output.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    descriptor = os.open(args.output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(descriptor, 'w') as outgoing:
+        json.dump(manifest, outgoing)
+        outgoing.write('\n')
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except (ValueError, KeyError, OSError, subprocess.TimeoutExpired):
+        raise SystemExit('Official metadata acquisition failed; no application was launched.') from None

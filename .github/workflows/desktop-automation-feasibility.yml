@@ -1,6 +1,12 @@
 name: Desktop semantic automation feasibility
 on:
   workflow_dispatch:
+    inputs:
+      app:
+        description: One bounded native experiment
+        type: choice
+        default: all
+        options: [all, zed-desktop, hermes-desktop]
   push:
     branches: ['DavidLMS/desktop-integration-wave8']
     paths: ['.github/workflows/desktop-automation-feasibility.yml', 'scripts/desktop-feasibility/**']
@@ -10,19 +16,28 @@ concurrency:
   group: desktop-semantic-feasibility-${{ github.ref }}
   cancel-in-progress: false
 jobs:
+  select:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.selection.outputs.matrix }}
+    steps:
+      - id: selection
+        env:
+          SELECTED_APP: ${{ inputs.app || 'all' }}
+        shell: bash
+        run: |
+          case "$SELECTED_APP" in
+            all) echo 'matrix={"include":[{"runner":"macos-15","platform":"macos","architecture":"aarch64","app":"zed-desktop"},{"runner":"ubuntu-24.04","platform":"linux","architecture":"x86_64","app":"hermes-desktop"}]}' >> "$GITHUB_OUTPUT" ;;
+            zed-desktop) echo 'matrix={"include":[{"runner":"macos-15","platform":"macos","architecture":"aarch64","app":"zed-desktop"}]}' >> "$GITHUB_OUTPUT" ;;
+            hermes-desktop) echo 'matrix={"include":[{"runner":"ubuntu-24.04","platform":"linux","architecture":"x86_64","app":"hermes-desktop"}]}' >> "$GITHUB_OUTPUT" ;;
+            *) exit 2 ;;
+          esac
   native:
+    needs: select
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - runner: macos-15
-            platform: macos
-            architecture: aarch64
-            app: zed-desktop
-          - runner: ubuntu-24.04
-            platform: linux
-            architecture: x86_64
-            app: hermes-desktop
+      matrix: ${{ fromJSON(needs.select.outputs.matrix) }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 75
     steps:
@@ -41,17 +56,32 @@ jobs:
       - name: Install pinned observation client
         if: runner.os == 'Linux'
         run: npm ci --prefix .github/web-check --ignore-scripts
-      - name: Freeze and install exact application
+      - name: Freeze authenticated public official metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset NAN_API_KEY
+          python3 scripts/desktop-feasibility/freeze-official.py --app '${{ matrix.app }}' --output "$RUNNER_TEMP/semantic-feasibility/frozen.json"
+      - name: Install exact frozen application without credentials
         env:
           FEASIBILITY_REAL_NANH: ${{ github.workspace }}/target/debug/nan-harness
           FEASIBILITY_FACTS: ${{ runner.temp }}/semantic-feasibility/facts
         shell: bash
         run: |
           set -euo pipefail
-          unset NAN_API_KEY
+          unset NAN_API_KEY GH_TOKEN GITHUB_TOKEN
           mkdir -m 700 -p "$RUNNER_TEMP/semantic-feasibility/facts"
-          target/debug/nanh-desktop-check resolve --app '${{ matrix.app }}' --model qwen3.6 --artifacts "$RUNNER_TEMP/semantic-feasibility/artifacts" --output "$RUNNER_TEMP/semantic-feasibility/frozen.json"
           python3 canary/actions/desktop_install.py --manifest "$RUNNER_TEMP/semantic-feasibility/frozen.json" --artifacts "$RUNNER_TEMP/semantic-feasibility/artifacts" --platform '${{ matrix.platform }}' --architecture '${{ matrix.architecture }}' --model qwen3.6 --harnesses '${{ matrix.app }}'
+      - name: Prepare private receipt after installation environment exports
+        env:
+          FEASIBILITY_REAL_NANH: ${{ github.workspace }}/target/debug/nan-harness
+          FEASIBILITY_FACTS: ${{ runner.temp }}/semantic-feasibility/facts
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset NAN_API_KEY GH_TOKEN GITHUB_TOKEN
           nanh="$FEASIBILITY_REAL_NANH"
           if [[ "$RUNNER_OS" == Linux ]]; then nanh="$GITHUB_WORKSPACE/scripts/desktop-feasibility/nanh-shim.py"; fi
           target/debug/nanh-desktop-check prepare --app '${{ matrix.app }}' --model qwen3.6 --yes --non-interactive --ephemeral --nan-harness "$nanh" --frozen "$RUNNER_TEMP/semantic-feasibility/frozen.json" --artifacts "$RUNNER_TEMP/semantic-feasibility/artifacts" --output "$RUNNER_TEMP/semantic-feasibility/prepared.json"
@@ -62,7 +92,7 @@ jobs:
           FEASIBILITY_FACTS: ${{ runner.temp }}/semantic-feasibility/facts
         run: |
           set -euo pipefail
-          unset NAN_API_KEY
+          unset NAN_API_KEY GH_TOKEN GITHUB_TOKEN
           nanh="$FEASIBILITY_REAL_NANH"
           if [[ "$RUNNER_OS" == Linux ]]; then nanh="$GITHUB_WORKSPACE/scripts/desktop-feasibility/nanh-shim.py"; fi
           bash scripts/run-desktop-check-session.sh target/debug/nanh-desktop-check run --app '${{ matrix.app }}' --model qwen3.6 --yes --non-interactive --ephemeral --mode deterministic --session github-hosted --prepared "$RUNNER_TEMP/semantic-feasibility/prepared.json" --output "$RUNNER_TEMP/semantic-feasibility/report.json"
