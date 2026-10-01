@@ -11,6 +11,8 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
   let attaches = 0;
   let submits = 0;
   let fills = 0;
+  let clicks = 0;
+  let keys = 0;
   let pageEnumerations = 0;
   let observations = 0;
   let value = '';
@@ -28,23 +30,36 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
   const send = {
     async count() { return scenario === 'send-duplicate' ? 2 : 1; },
     async isEnabled() { return scenario !== 'send-disabled'; },
-    async evaluate(callback) {
+    async evaluate(callback, pointerRetry) {
+      if (scenario === 'retry-not-focusable' && !callback.toString().includes('document.activeElement')) {
+        assert.equal(pointerRetry, true);
+        return callback({ tabIndex: -1, disabled: false, getAttribute: () => null, closest: () => null }, pointerRetry);
+      }
       if (callback.toString().includes('document.activeElement')) return scenario !== 'focus-failed';
       return scenario === 'blocked-modal' ? 'modal' : scenario === 'blocked-menu' ? 'menu'
         : scenario === 'inert' ? 'inert' : null;
     },
     async scrollIntoViewIfNeeded() {},
-    async focus() {},
-    async click() { throw new Error('Semantic driver must never click'); },
+    async focus() { if (qualify && request.action === 'retry') throw new Error('Retry must not require retained keyboard focus'); },
+    async click(options) {
+      assert(qualify && request.action === 'retry');
+      assert.equal(options.force, undefined);
+      assert(options.timeout > 0);
+      clicks++;
+      if (scenario === 'retry-intercepted') throw new Error('subtree intercepts pointer events PRIVATE_SYNTHETIC_VALUE');
+      submits++; value = '';
+    },
     async press(key) {
       assert.equal(key, 'Enter');
+      keys++;
+      assert(!(qualify && request.action === 'retry'));
       if (scenario === 'click-timeout') throw new Error('Timeout 100ms exceeded PRIVATE_SYNTHETIC_VALUE');
       submits++; value = '';
     },
   };
   const errorCards = {
     async count() { return scenario === 'failure-appears' && submits === 0 ? 0 : scenario === 'missing-error' ? 0 : scenario === 'duplicate-error' ? 2 : 1; },
-    getByRole(role, options) { assert.equal(role, 'button'); assert.equal(options.name, 'Retry'); return { ...send, async count() { return scenario === 'missing-retry' ? 0 : 1; } }; },
+    getByRole(role, options) { assert.equal(role, 'button'); assert.equal(options.name, 'Retry'); return { ...send, async count() { return scenario === 'missing-retry' ? 0 : scenario === 'duplicate-retry' ? 2 : 1; } }; },
   };
   const users = { filter({ hasText }) { assert.equal(hasText, request.prompt); return {
     async count() { return scenario === 'foreign-user' ? 0 : 1; },
@@ -120,7 +135,7 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
         return { chromium: { async connectOverCDP() { attaches++;
           if (!scenario) throw new Error('must not attach'); return browser; } } };
       },
-      URL, setTimeout,
+      URL, setTimeout, document: { querySelectorAll: () => [] },
       process: { argv: ['node', 'helper', qualify ? '--qualify' : '--drive', '/request', '/output'], exit: resolve },
     });
     setTimeout(() => reject(new Error('bounded helper fixture timed out')), 1000).unref();
@@ -129,7 +144,7 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
   const facts = JSON.parse(output.get('/output'));
   if (qualify) {
     assert(!output.get('/output').includes(request.expectedMarker));
-    return { facts, submits, fills };
+    return { facts, submits, fills, clicks, keys };
   }
   assert.equal(facts.inputSubmitted, ['happy', 'delayed', 'missing-editor', 'transient-context', 'keyboard'].includes(scenario));
   assert.equal(facts.responseVerified, ['happy', 'delayed', 'missing-editor', 'transient-context', 'keyboard'].includes(scenario));
@@ -200,12 +215,26 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
   assert.equal(retry.facts.uniqueComposer, true);
   assert.equal(retry.submits, 1);
   assert.equal(retry.fills, 0);
-  for (const scenario of ['missing-error', 'duplicate-error', 'missing-retry', 'foreign-user', 'blocked-modal', 'focus-failed', 'stale', 'duplicate']) {
+  assert.equal(retry.clicks, 1);
+  assert.equal(retry.keys, 0);
+  assert.equal(retry.facts.sendMechanism, 'pointer');
+  const nonfocusable = await trial(retryRequest, {}, 'retry-not-focusable', true);
+  assert.equal(nonfocusable.submits, 1);
+  assert.equal(nonfocusable.clicks, 1);
+  assert.equal(nonfocusable.keys, 0);
+  assert.equal(nonfocusable.fills, 0);
+  const intercepted = await trial(retryRequest, {}, 'retry-intercepted', true);
+  assert.equal(intercepted.facts.errorCategory, 'submit-action-intercepted');
+  assert.equal(intercepted.facts.inputSubmitted, false);
+  assert.equal(intercepted.submits, 0);
+  assert.equal(intercepted.clicks, 1);
+  assert.equal(intercepted.keys, 0);
+  for (const scenario of ['missing-error', 'duplicate-error', 'missing-retry', 'foreign-user', 'blocked-modal', 'blocked-menu', 'inert', 'stale', 'duplicate', 'duplicate-retry', 'send-disabled']) {
     const rejected = await trial(retryRequest, {}, scenario, true);
     assert.equal(rejected.submits, 0, scenario);
     assert.equal(rejected.fills, 0, scenario);
   }
   const invalid = await trial({ ...phase, action: 'retry' }, {}, null, true);
   assert.equal(invalid.facts.errorCategory, 'invalid-request');
-  console.log('Hermes DOM feasibility and qualification guards: 32 synthetic cases passed');
+  console.log('Hermes DOM feasibility and qualification guards: 37 synthetic cases passed');
 })().catch(error => { console.error(error.message); process.exitCode = 1; });

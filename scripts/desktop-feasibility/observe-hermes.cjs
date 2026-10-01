@@ -188,7 +188,9 @@ async function driveDom() {
     (e.value ?? e.textContent) === prompt, request.prompt);
   if (!facts.inputReadback) { facts.errorCategory = 'input-mismatch'; saveFacts(); return; }
   }
-  const readiness = () => send.evaluate(button => {
+  const retryAction = qualify && request.action === 'retry';
+  if (retryAction) facts.sendMechanism = 'pointer';
+  const readiness = () => send.evaluate((button, pointerRetry) => {
     const visible = e => { const r = e.getBoundingClientRect();
       const style = getComputedStyle(e); return r.width > 0 && r.height > 0 &&
         style.visibility !== 'hidden' && style.display !== 'none'; };
@@ -196,17 +198,17 @@ async function driveDom() {
     if ([...document.querySelectorAll('[role="menu"]')].some(visible)) return 'menu';
     if (button.disabled || button.getAttribute('aria-disabled') === 'true') return 'disabled';
     if (button.closest('[inert]')) return 'inert';
-    if (button.tabIndex < 0) return 'focus';
+    if (!pointerRetry && button.tabIndex < 0) return 'focus';
     return null;
-  }, undefined, { timeout: Math.max(1, Math.min(1000, deadline - Date.now())) });
+  }, retryAction, { timeout: Math.max(1, Math.min(1000, deadline - Date.now())) });
   facts.sendBlocker = await readiness();
   if (facts.sendBlocker !== null) {
     facts.errorCategory = 'submit-action-intercepted'; saveFacts(); return;
   }
   await send.scrollIntoViewIfNeeded({ timeout: Math.max(1, deadline - Date.now()) });
-  await send.focus({ timeout: Math.max(1, deadline - Date.now()) });
+  if (!retryAction) await send.focus({ timeout: Math.max(1, deadline - Date.now()) });
   facts.sendBlocker = await readiness();
-  if (facts.sendBlocker === null && !await send.evaluate(button => document.activeElement === button))
+  if (!retryAction && facts.sendBlocker === null && !await send.evaluate(button => document.activeElement === button))
     facts.sendBlocker = 'focus';
   saveFacts();
   if (facts.sendBlocker !== null || !ownedEndpoint()) {
@@ -223,7 +225,11 @@ async function driveDom() {
     if (!await errorProof()) { facts.errorCategory = 'send-unavailable'; saveFacts(); return; }
   }
   try {
-    await send.press('Enter', { timeout: Math.max(1, deadline - Date.now()) });
+    // Frozen assistant-message.tsx uses a real button with Reload asChild.
+    // Its ordinary click activates Reload without requiring retained keyboard
+    // focus; Playwright still enforces pointer actionability, never force.
+    if (retryAction) await send.click({ timeout: Math.max(1, deadline - Date.now()) });
+    else await send.press('Enter', { timeout: Math.max(1, deadline - Date.now()) });
   } catch (error) {
     try { facts.sendBlocker = await readiness(); } catch { facts.sendBlocker = 'unmeasured'; }
     const detail = String(error?.message ?? '');
