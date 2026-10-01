@@ -644,7 +644,7 @@ def cell_environment(directory):
     hidden.append(directory.resolve().parent)
     inherited = [entry for entry in env.get("PATH", "").split(os.pathsep)
                  if entry and not any(Path(entry).resolve().is_relative_to(old) for old in hidden)]
-    bins = [home / ".local/bin", home / ".local", home / ".kimi-code/bin",
+    bins = [home / ".local/bin", home / ".local", home / ".mimocode/bin", home / ".kimi-code/bin",
             home / ".hermes/bin", home / ".local/share/nan-harness-canary-uv/bin"]
     if os.name == "nt":
         bins = [directory / "bin", directory / "hermes/bin",
