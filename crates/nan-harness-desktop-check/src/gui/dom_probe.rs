@@ -187,6 +187,18 @@ enum RetryHitTag {
 #[serde(rename_all = "kebab-case")]
 enum RetryHitRegion {
     ThreadViewport,
+    PaneOverlay,
+    PaneHost,
+    NarrowOverlay,
+    FloatingPane,
+    TreeGroup,
+    PanelHeader,
+    PanelPageHeader,
+    ZoneTabstrip,
+    WindowDragHandle,
+    GatewayConnecting,
+    CommandBackdrop,
+    DialogOverlay,
     ComposerRoot,
     ComposerDock,
     ComposerDragRegion,
@@ -323,9 +335,22 @@ enum RetrySampleStatus {
     Owned,
 }
 
+#[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum RetryReveal {
+    None,
+    CommandDismissed,
+}
+
 #[derive(Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct RetrySampleFacts {
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "retryReveal"
+    )]
+    reveal: Option<RetryReveal>,
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
@@ -354,7 +379,8 @@ struct RetrySampleFacts {
 
 impl RetrySampleFacts {
     fn complete(&self) -> bool {
-        self.status.is_some()
+        self.reveal.is_some()
+            && self.status.is_some()
             && self.hit_ancestor.is_some()
             && self.hit_shares_turn_pair.is_some()
             && self.hit_contains_composer.is_some()
@@ -483,12 +509,16 @@ const DOM_FACT_KEYS: &[&str] = &[
     "requestFailureCategory",
     "apiErrorStatus",
     "apiErrorResponseCount",
+];
+
+const DOM_QUALIFICATION_KEYS: &[&str] = &[
     "errorObserved",
     "retryControl",
     "retryHitOwned",
     "retryHitOwnedPoints",
     "retryPointStable",
     "retrySampleStatus",
+    "retryReveal",
     "retryHitAncestor",
     "retryHitSharesTurnPair",
     "retryHitContainsComposer",
@@ -520,42 +550,23 @@ fn read_facts(path: &Path, qualification: bool) -> Result<Facts, Reason> {
     let value: serde_json::Value =
         serde_json::from_slice(&bytes).map_err(|_| Reason::IsolationUnavailable)?;
     let object = value.as_object().ok_or(Reason::IsolationUnavailable)?;
-    let count = if qualification { 48..=50 } else { 24..=26 };
+    let extra = if qualification {
+        DOM_QUALIFICATION_KEYS.len()
+    } else {
+        0
+    };
+    let count = (24 + extra)..=(26 + extra);
     if !count.contains(&object.len())
-        || object
-            .keys()
-            .any(|key| !DOM_FACT_KEYS.contains(&key.as_str()))
+        || object.keys().any(|key| {
+            !DOM_FACT_KEYS.contains(&key.as_str())
+                && !DOM_QUALIFICATION_KEYS.contains(&key.as_str())
+        })
     {
         return Err(Reason::IsolationUnavailable);
     }
-    if [
-        "errorObserved",
-        "retryControl",
-        "retryHitOwned",
-        "retryHitOwnedPoints",
-        "retryPointStable",
-        "retrySampleStatus",
-        "retryHitAncestor",
-        "retryHitSharesTurnPair",
-        "retryHitContainsComposer",
-        "retryHitTarget",
-        "retryRectInViewport",
-        "retryAncestorClipped",
-        "retryPointerEventsNone",
-        "retryHitTag",
-        "retryHitRegion",
-        "retryFocusAfterAcquire",
-        "retryFocusBeforeAction",
-        "retryButtonConnected",
-        "retryAncestorHidden",
-        "retryAncestorInert",
-        "retryFieldsetDisabled",
-        "retryDocumentFocused",
-        "retryActiveTag",
-        "retryActiveRegion",
-    ]
-    .iter()
-    .any(|key| qualification != object.contains_key(*key))
+    if DOM_QUALIFICATION_KEYS
+        .iter()
+        .any(|key| qualification != object.contains_key(*key))
     {
         return Err(Reason::IsolationUnavailable);
     }
@@ -829,6 +840,7 @@ mod tests {
         value["retryHitOwnedPoints"] = json!(0);
         value["retryPointStable"] = json!(false);
         value["retrySampleStatus"] = json!("unmeasured");
+        value["retryReveal"] = json!("none");
         value["retryHitAncestor"] = json!(false);
         value["retryHitSharesTurnPair"] = json!(false);
         value["retryHitContainsComposer"] = json!(false);

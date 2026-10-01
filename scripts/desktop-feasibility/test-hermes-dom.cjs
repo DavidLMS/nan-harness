@@ -17,6 +17,8 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
   let frames = 0;
   let fixtureDocument;
   let sampleCount = 0;
+  let escapes = 0;
+  let commandVisible = scenario?.startsWith('command-') ?? false;
   let focusChecks = 0;
   let focused = false;
   let focuses = 0;
@@ -36,9 +38,14 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
   const foreignHit = { tagName: 'PRIVATE_SYNTHETIC_VALUE', contains() { return false; }, closest() { return null; } };
   const sourceRegionSelectors = { 'composer-bounds': '[data-slot="composer-bounds"]',
     'composer-portal': '[data-composer-owner]', 'particle-field': '.particle-field',
-    'chat-drop-overlay': '[data-slot="chat-drop-overlay"]' };
-  const sourceRegionHit = { tagName: 'DIV', privateValue: 'PRIVATE_SYNTHETIC_VALUE',
-    closest(selector) { return selector === sourceRegionSelectors[scenario] ? {} : null; } };
+    'chat-drop-overlay': '[data-slot="chat-drop-overlay"]',
+    'pane-overlay': '[data-pane-overlay]', 'pane-host': '[data-pane-host]', 'narrow-overlay': '[data-narrow-overlay]',
+    'floating-pane': '[data-floating-pane]', 'tree-group': '[data-tree-group]', 'panel-header': '[data-panel-header]',
+    'panel-page-header': '[data-panel-page-header]', 'zone-tabstrip': '[data-zone-tabstrip]',
+    'window-drag-handle': '[data-window-drag-handle]', 'dialog-overlay': '[data-slot="dialog-overlay"]' };
+  const sourceRegionHit = { tagName: 'DIV', contains: () => false, privateValue: 'PRIVATE_SYNTHETIC_VALUE',
+    classList: { contains: name => scenario === 'gateway-connecting' && name === 'z-(--z-connecting)' },
+    closest(selector) { return ['gateway-connecting', 'gateway-forged'].includes(scenario) && selector === '[data-glass-opaque]' ? this : selector === sourceRegionSelectors[scenario] ? {} : null; } };
   const bodyHit = { tagName: 'BODY', closest() { return null; } };
   const clippedParent = { matches() { return false; }, parentElement: null, getBoundingClientRect() { return { left: 0, top: 0, width: 5, height: 5 }; } };
   const sourceClipParent = { matches(selector) { return selector === '[data-sticky-prompt-clip]'; },
@@ -88,7 +95,7 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
         : scenario === 'inert' ? 'inert' : null;
     },
     async elementHandle() { return {
-      async evaluate(callback) { sampleCount++; hitButton.isConnected = scenario !== 'retry-detached'; hitButton.disabled = scenario === 'retry-disabled'; hitButton.offsetWidth = scenario === 'retry-transformed' ? 40 : 20; hitButton.type = scenario === 'retry-wrong-type' ? 'submit' : 'button'; hitButton.ownerDocument = scenario === 'retry-foreign-document' ? {} : fixtureDocument; return callback(hitButton); },
+      async evaluate(callback) { sampleCount++; hitButton.isConnected = scenario !== 'retry-detached' && !(scenario === 'command-detached' && escapes > 0); hitButton.disabled = scenario === 'retry-disabled'; hitButton.offsetWidth = scenario === 'retry-transformed' ? 40 : 20; hitButton.type = scenario === 'retry-wrong-type' ? 'submit' : 'button'; hitButton.ownerDocument = scenario === 'retry-foreign-document' ? {} : fixtureDocument; return callback(hitButton); },
       async click(options) { return send.click(options); },
     }; },
     async scrollIntoViewIfNeeded() {},
@@ -116,7 +123,7 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
   };
   const errorCards = {
     async evaluate(callback, prompt) {
-      const user = { innerText: (['foreign-error-turn', 'delayed-foreign-error'].includes(scenario) || scenario === 'foreign-card-after-settle' && frames === 2) ? 'Older unrelated user turn' : request.prompt,
+      const user = { innerText: (['foreign-error-turn', 'delayed-foreign-error'].includes(scenario) || scenario === 'foreign-card-after-settle' && frames === 2 || scenario === 'foreign-card-during-wait' && sampleCount >= 2) ? 'Older unrelated user turn' : request.prompt,
         closest() { return pair; } };
       const pair = { querySelectorAll(selector) { assert.equal(selector, '[data-role="user"]'); return [user]; },
         closest() { return {}; } };
@@ -147,7 +154,20 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
     return [scenario === 'foreign-response-turn' ? foreignResponseUser : responseUser];
   } };
   const responseAssistant = { innerText: request.expectedMarker, getBoundingClientRect: rect, closest() { return responsePair; } };
+  const commandContent = { matches: selector => selector.includes('[role="dialog"]'), querySelector: () => scenario === 'command-missing-content' ? null : ({}),
+    getBoundingClientRect: rect };
+  const commandBackdrop = { tagName: 'DIV', closest: () => null, contains: () => false,
+    classList: { contains: name => name === 'z-(--z-over-modal)' && scenario !== 'command-forged-class' }, getAttribute: () => 'open', parentElement: null };
+  commandBackdrop.parentElement = { children: [commandBackdrop, commandContent], parentElement: null,
+    classList: { contains: () => false }, getAttribute: () => null };
+  for (const element of [hitButton, overlay, foreignHit, ancestorFront, bodyHit, hitChild, dockStrip, sourceRegionHit, threadBackground]) {
+    element.classList ??= { contains: () => false }; element.getAttribute ??= () => null;
+  }
   const page = {
+    keyboard: { async press(key) { assert.equal(key, 'Escape'); escapes++;
+      if (scenario === 'command-escape-failed') throw new Error('PRIVATE_SYNTHETIC_VALUE');
+      if (scenario !== 'command-remaining') commandVisible = false;
+    } },
     url() { return rendererUrl; },
     on(event, callback) {
       assert(['requestfailed', 'response'].includes(event));
@@ -164,7 +184,7 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
     } }; } }; },
     async evaluate(_callback, args) {
       if (_callback.toString().includes('requestAnimationFrame')) return _callback();
-      if (!args) return true;
+      if (!args) return _callback.toString().includes('classList.contains') || _callback.toString().includes('openCommands') ? _callback() : true;
       assert.equal(args.prompt, request.prompt);
       assert.equal(args.marker, request.expectedMarker);
       observations++;
@@ -218,14 +238,16 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
         getPropertyValue: property => property === '--sticky-prompt-clip' && element === sourceClipParent ? scenario === 'retry-frame-settle' && frames >= 2 ? '0px' : '25px'
           : property === '-webkit-app-region' && scenario === 'retry-native-drag' ? 'drag' : '' }),
       document: fixtureDocument = { hasFocus() { return true; }, get activeElement() { if (scenario === 'retry-focus-reclaimed') return reclaimedComposer; return focused && scenario !== 'focus-failed' && !(scenario === 'retry-focus-lost' && focusChecks > 1) ? focusButton : null; }, querySelectorAll: selector => {
+        if (selector === '[data-state]') return commandVisible ? [commandBackdrop] : [];
+        if (selector === '[role="dialog"][data-state="open"]') return commandVisible ? [commandContent] : [];
         if (!submits) return selector.includes('composer-root') ? [{ value: '', getBoundingClientRect: rect }] : [];
         if (selector === '[data-role="user"]') return [responseUser];
         if (selector === '[data-role="assistant"]') return [responseAssistant];
         if (selector.includes('composer-root')) return scenario === 'missing-editor' ? [] : [{ value: '', getBoundingClientRect: rect }];
         return [];
       }, elementFromPoint: (x, y) =>
-        scenario === 'retry-center-covered' && x === 20 && y === 20 || scenario === 'retry-overlay' || (scenario === 'retry-centering' && centers === 0)
-          || (scenario === 'retry-intercepted' && clicks > 0) ? overlay : ['retry-ancestor-cover', 'retry-composer-cover'].includes(scenario) ? ancestorFront : (scenario === 'retry-all-covered' || scenario === 'retry-covered-at-final' && sampleCount >= 3) ? foreignHit : sourceRegionSelectors[scenario] ? sourceRegionHit : scenario === 'retry-frame-settle' && frames < 2 ? threadBackground : scenario === 'retry-source-clipped' ? threadBackground : scenario === 'retry-offviewport' ? null : scenario === 'retry-private-hit' ? foreignHit : scenario === 'retry-body-hit' ? bodyHit : scenario === 'retry-dock-strip' ? dockStrip : scenario === 'retry-child-hit' ? hitChild : hitButton },
+        commandVisible ? commandBackdrop : scenario === 'retry-center-covered' && x === 20 && y === 20 || scenario === 'retry-overlay' || (scenario === 'retry-centering' && centers === 0)
+          || (scenario === 'retry-intercepted' && clicks > 0) ? overlay : scenario === 'retry-fading-overlay' && sampleCount <= 2 ? foreignHit : ['retry-ancestor-cover', 'retry-composer-cover'].includes(scenario) ? ancestorFront : (scenario === 'retry-all-covered' || scenario === 'retry-covered-at-final' && sampleCount >= 3) ? foreignHit : (sourceRegionSelectors[scenario] || ['gateway-connecting', 'gateway-forged'].includes(scenario)) ? sourceRegionHit : scenario === 'retry-frame-settle' && frames < 2 ? threadBackground : scenario === 'retry-source-clipped' ? threadBackground : scenario === 'retry-offviewport' ? null : scenario === 'retry-private-hit' ? foreignHit : scenario === 'retry-body-hit' ? bodyHit : scenario === 'retry-dock-strip' ? dockStrip : scenario === 'retry-child-hit' ? hitChild : hitButton },
       process: { argv: ['node', 'helper', qualify ? '--qualify' : '--drive', '/request', '/output'], exit: resolve },
     });
     setTimeout(() => reject(new Error('bounded helper fixture timed out')), 1000).unref();
@@ -234,7 +256,7 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
   const facts = JSON.parse(output.get('/output'));
   if (qualify) {
     assert(!output.get('/output').includes(request.expectedMarker));
-    return { facts, submits, fills, clicks, keys, centers, frames, focuses };
+    return { facts, submits, fills, clicks, keys, centers, frames, focuses, escapes };
   }
   assert.equal(facts.inputSubmitted, ['happy', 'delayed', 'missing-editor', 'transient-context', 'keyboard'].includes(scenario));
   assert.equal(facts.responseVerified, ['happy', 'delayed', 'missing-editor', 'transient-context', 'keyboard'].includes(scenario));
@@ -341,6 +363,45 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
     assert.equal(front.facts.retryHitSharesTurnPair, true);
     assert.equal(front.facts.retryHitContainsComposer, scenario === 'retry-composer-cover');
     assert.equal(front.clicks, 0);
+  }
+  const dismissed = await trial({ ...retryRequest, timeoutMs: 700 }, {}, 'command-dismissed', true);
+  assert.equal(dismissed.escapes, 1);
+  assert.equal(dismissed.clicks, 1);
+  assert.equal(dismissed.keys, 0);
+  assert.equal(dismissed.facts.retryReveal, 'command-dismissed');
+  for (const scenario of ['command-remaining', 'command-escape-failed']) {
+    const blocked = await trial(retryRequest, {}, scenario, true);
+    assert.equal(blocked.escapes, 1);
+    assert.equal(blocked.clicks, 0);
+    assert.equal(blocked.facts.retryReveal, 'none');
+  }
+  const detachedAfterDismiss = await trial(retryRequest, {}, 'command-detached', true);
+  assert.equal(detachedAfterDismiss.escapes, 1);
+  assert.equal(detachedAfterDismiss.clicks, 0);
+  for (const scenario of ['command-forged-class', 'command-missing-content']) {
+    const forged = await trial({ ...retryRequest, timeoutMs: 150 }, {}, scenario, true);
+    assert.equal(forged.escapes, 0);
+    assert.equal(forged.clicks, 0);
+  }
+  for (const region of ['pane-overlay', 'pane-host', 'narrow-overlay', 'floating-pane', 'tree-group', 'panel-header',
+    'panel-page-header', 'zone-tabstrip', 'window-drag-handle', 'dialog-overlay']) {
+    const classified = await trial({ ...retryRequest, timeoutMs: 150 }, {}, region, true);
+    assert.equal(classified.facts.retryHitRegion, region);
+    assert.equal(classified.clicks, 0);
+    assert.equal(classified.escapes, 0);
+  }
+  const fade = await trial(retryRequest, {}, 'retry-fading-overlay', true);
+  assert.equal(fade.clicks, 1);
+  assert.equal(fade.escapes, 0);
+  assert.equal(fade.facts.retryReveal, 'none');
+  const changedDuringWait = await trial(retryRequest, {}, 'foreign-card-during-wait', true);
+  assert.equal(changedDuringWait.clicks, 0);
+  assert.equal(changedDuringWait.escapes, 0);
+  for (const scenario of ['gateway-connecting', 'gateway-forged']) {
+    const gateway = await trial({ ...retryRequest, timeoutMs: 150 }, {}, scenario, true);
+    assert.equal(gateway.facts.retryHitRegion, scenario === 'gateway-connecting' ? scenario : 'other');
+    assert.equal(gateway.clicks, 0);
+    assert.equal(gateway.escapes, 0);
   }
   const uncertain = await trial(retryRequest, {}, 'retry-intercepted', true);
   assert.equal(uncertain.clicks, 1);

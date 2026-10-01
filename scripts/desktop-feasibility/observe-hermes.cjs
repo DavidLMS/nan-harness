@@ -1,5 +1,31 @@
 // Read-only button sampling. Coordinates remain private and never enter facts.
 function sampleRetryInterior(button) {
+function sourceFrontRegion(front) {
+  if (!front) return 'none';
+  const glass = front.closest('[data-glass-opaque]');
+  if (glass?.classList.contains('z-(--z-connecting)')) return 'gateway-connecting';
+  let ancestor = front;
+  for (let depth = 0; ancestor && depth < 16; depth++, ancestor = ancestor.parentElement) {
+    if (ancestor.classList.contains('z-(--z-over-modal)') && ancestor.getAttribute('data-state') === 'open'
+        && [...(ancestor.parentElement?.children ?? [])].some(sibling => sibling !== ancestor
+          && sibling.matches('[role="dialog"][data-state="open"]')
+          && sibling.querySelector('[data-slot="command"]'))) return 'command-backdrop';
+  }
+  const fixed = [
+    ['[data-slot="dialog-overlay"]', 'dialog-overlay'],
+    ['[data-narrow-overlay]', 'narrow-overlay'],
+    ['[data-floating-pane]', 'floating-pane'],
+    ['[data-pane-overlay]', 'pane-overlay'],
+    ['[data-window-drag-handle]', 'window-drag-handle'],
+    ['[data-panel-page-header]', 'panel-page-header'],
+    ['[data-panel-header]', 'panel-header'],
+    ['[data-zone-tabstrip]', 'zone-tabstrip'],
+    ['[data-pane-host]', 'pane-host'],
+    ['[data-tree-group]', 'tree-group'],
+  ];
+  return fixed.find(([selector]) => front.closest(selector))?.[1] ?? 'other';
+}
+
   const doc = button.ownerDocument;
   const rect = button.getBoundingClientRect();
   const closed = { buttonTag: button.tagName === 'BUTTON' ? 'button' : 'other',
@@ -59,7 +85,8 @@ function sampleRetryInterior(button) {
   const front = representative;
   const tag = front?.tagName?.toLowerCase();
   closed.frontTag = !front ? 'none' : ['html', 'body', 'button', 'div', 'span', 'svg'].includes(tag) ? tag : 'other';
-  closed.frontRegion = !front ? 'none'
+  const sourceRegion = sourceFrontRegion(front);
+  closed.frontRegion = sourceRegion !== 'other' && sourceRegion !== 'none' ? sourceRegion : !front ? 'none'
     : front.closest('[data-slot="composer-root"]') ? 'composer-root'
     : front.closest('[data-slot="composer-drag-region"]') ? 'composer-drag-region'
     : front.closest('[data-slot="composer-dock"]') ? 'composer-dock'
@@ -139,7 +166,7 @@ async function driveDom() {
     retryPointerEventsNone: false, retryHitTag: 'unmeasured', retryHitRegion: 'unmeasured',
     retryFocusAfterAcquire: false, retryFocusBeforeAction: false, retryButtonConnected: false,
     retryAncestorHidden: false, retryAncestorInert: false, retryFieldsetDisabled: false,
-    retryDocumentFocused: false, retryActiveTag: 'unmeasured', retryActiveRegion: 'unmeasured', retryHitOwnedPoints: 0, retryPointStable: false, retrySampleStatus: 'unmeasured', retryHitAncestor: false, retryHitSharesTurnPair: false, retryHitContainsComposer: false });
+    retryDocumentFocused: false, retryActiveTag: 'unmeasured', retryActiveRegion: 'unmeasured', retryHitOwnedPoints: 0, retryPointStable: false, retrySampleStatus: 'unmeasured', retryHitAncestor: false, retryHitSharesTurnPair: false, retryHitContainsComposer: false, retryReveal: 'none' });
   saveFacts();
   const exactKeys = (value, keys) => value && typeof value === 'object' && !Array.isArray(value) &&
     Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
@@ -296,7 +323,7 @@ async function driveDom() {
     const visible = e => { const r = e.getBoundingClientRect();
       const style = getComputedStyle(e); return r.width > 0 && r.height > 0 &&
         style.visibility !== 'hidden' && style.display !== 'none'; };
-    if ([...document.querySelectorAll('[aria-modal="true"],[role="alertdialog"]')].some(visible)) return 'modal';
+    if ([...document.querySelectorAll('[aria-modal="true"],[role="alertdialog"],[role="dialog"]')].some(visible)) return 'modal';
     if ([...document.querySelectorAll('[role="menu"]')].some(visible)) return 'menu';
     if (button.disabled || button.getAttribute('aria-disabled') === 'true') return 'disabled';
     if (button.closest('[inert]')) return 'inert';
@@ -304,7 +331,7 @@ async function driveDom() {
     return null;
   }, retryAction, { timeout: Math.max(1, Math.min(1000, deadline - Date.now())) });
   facts.sendBlocker = await readiness();
-  if (facts.sendBlocker !== null) {
+  if (facts.sendBlocker !== null && !(retryAction && facts.sendBlocker === 'modal')) {
     facts.errorCategory = 'submit-action-intercepted'; saveFacts(); return;
   }
   await send.scrollIntoViewIfNeeded({ timeout: Math.max(1, deadline - Date.now()) });
@@ -314,11 +341,55 @@ async function driveDom() {
   if (retryAction) {
     retryHandle = await send.elementHandle({ timeout: Math.max(1, deadline - Date.now()) });
     if (!retryHandle) { facts.errorCategory = 'send-unavailable'; saveFacts(); return; }
-    const first = await retryHandle.evaluate(sampleRetryInterior);
-    await delay(Math.min(100, Math.max(0, deadline - Date.now())));
-    const second = await retryHandle.evaluate(sampleRetryInterior);
-    retryPosition = stableCandidate(first, second);
-    secondCandidate = second.candidate;
+    let first;
+    let second;
+    let revealAttempted = false;
+    const settleDeadline = Math.min(deadline, Date.now() + 5000);
+    const reprove = async () => ownedEndpoint() && await send.count() === 1 && await send.isEnabled()
+      && await retryUser.count() === 1
+      && await retryUser.evaluate((e, prompt) => e.innerText.trim() === prompt, request.prompt)
+      && await errorProof() && await send.evaluate((button, sampled) => button === sampled, retryHandle);
+    while (Date.now() < settleDeadline) {
+      if (!await reprove()) { facts.errorCategory = 'send-unavailable'; saveFacts(); return; }
+      first = await retryHandle.evaluate(sampleRetryInterior);
+      await delay(Math.min(100, Math.max(0, settleDeadline - Date.now())));
+      second = await retryHandle.evaluate(sampleRetryInterior);
+      retryPosition = stableCandidate(first, second);
+      secondCandidate = second.candidate;
+      if (retryPosition || second.closed.status !== 'no-owned-point') break;
+      if (second.closed.frontRegion === 'command-backdrop' && !revealAttempted) {
+        revealAttempted = true;
+        if (!await reprove()) { facts.errorCategory = 'send-unavailable'; saveFacts(); return; }
+        // Exact source CommandPalette backdrop only; one ordinary dismissal.
+        // Rejection or uncertain input stops here, never another action.
+        const liveFront = await retryHandle.evaluate(sampleRetryInterior);
+        if (liveFront.closed.status !== 'no-owned-point' || liveFront.closed.frontRegion !== 'command-backdrop') {
+          facts.errorCategory = 'submit-action-intercepted'; saveFacts(); return;
+        }
+        const dismissible = await page.evaluate(() => {
+          const openCommands = [...document.querySelectorAll('[role="dialog"][data-state="open"]')]
+            .filter(dialog => dialog.querySelector('[data-slot="command"]'));
+          const visible = element => { const rect = element.getBoundingClientRect(); const style = getComputedStyle(element);
+            return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden'; };
+          return openCommands.length === 1 && visible(openCommands[0]) && ![...document.querySelectorAll('[aria-modal="true"],[role="alertdialog"],[role="dialog"],[role="menu"]')]
+            .some(element => visible(element) && element !== openCommands[0]);
+        });
+        if (!dismissible) { facts.errorCategory = 'submit-action-intercepted'; saveFacts(); return; }
+        try { await page.keyboard.press('Escape'); }
+        catch { facts.errorCategory = 'submit-action-failed'; saveFacts(); return; }
+        let absent = false;
+        while (Date.now() < Math.min(deadline, settleDeadline)) {
+          absent = await page.evaluate(() => ![...document.querySelectorAll('[data-state]')].some(element =>
+            element.classList.contains('z-(--z-over-modal)') && [...(element.parentElement?.children ?? [])]
+              .some(sibling => sibling !== element && sibling.matches('[role="dialog"]') && sibling.querySelector('[data-slot="command"]'))));
+          if (absent) break;
+          await delay(20);
+        }
+        if (!absent || !await reprove()) { facts.errorCategory = 'submit-action-intercepted'; saveFacts(); return; }
+        facts.retryReveal = 'command-dismissed';
+      }
+    }
+    if (!second) { facts.errorCategory = 'submit-action-timeout'; saveFacts(); return; }
     facts.retryHitOwnedPoints = second.closed.hitOwnedPoints;
     facts.retryPointStable = Boolean(retryPosition);
     facts.retryHitOwned = Boolean(retryPosition);
