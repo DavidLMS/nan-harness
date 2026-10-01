@@ -147,7 +147,7 @@ class QualificationTests(unittest.TestCase):
             native = dict(schemaVersion=1, mechanism='zed-native-copy', stage='response-control',
                           substage='retry-control-query', guardKind=None, guardCategory=None,
                           blocker='selector-not-matched', clipboardCleanup='passed',
-                          retryControlCount=0, retrySelector='retry-name-or-description',
+                          retryControlCount=0, retrySelector='retry-name-or-description', retryActionReceipt='completion-unknown',
                           input={'submitted': True, 'clipboardVerified': True, 'private': 'PRIVATE'},
                           response={'clipboardVerified': False, 'providerVerified': True})
             path.write_text(json.dumps(native))
@@ -157,7 +157,7 @@ class QualificationTests(unittest.TestCase):
             self.assertEqual(public[0]['retryControlCount'], 0)
             self.assertEqual(public[0]['retrySelector'], 'retry-name-or-description')
             for field, invalid in [('retryControlCount', True), ('retryControlCount', 4097),
-                                   ('retrySelector', 'PRIVATE_SYNTHETIC')]:
+                                   ('retrySelector', 'PRIVATE_SYNTHETIC'), ('retryActionReceipt', 'PRIVATE')]:
                 path.write_text(json.dumps({**native, field: invalid}))
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'zed-desktop')
@@ -366,7 +366,7 @@ class QualificationTests(unittest.TestCase):
             path = root / 'dom.json'
             value = dict(schemaVersion=1, mechanism='hermes-renderer-qualification',
                          retryRectInViewport=True, retryAncestorClipped=True,
-                         retryPointerEventsNone=False, retryHitOwned=False,
+                         retryPointerEventsNone=False, retryHitOwned=False, retryHitOwnedPoints=0, retryPointStable=False,
                          retryHitTarget='other', retryHitTag='div',
                          retryHitRegion='thread-viewport', className='PRIVATE', rectangle=[1, 2, 3, 4])
             path.write_text(json.dumps(value))
@@ -377,7 +377,9 @@ class QualificationTests(unittest.TestCase):
             self.assertNotIn('rectangle', public)
             for key, invalid in [('retryRectInViewport', 1), ('retryAncestorClipped', 'true'),
                                  ('retryPointerEventsNone', None), ('retryHitTag', 'custom-private-tag'),
-                                 ('retryHitRegion', 'PRIVATE')]:
+                                 ('retryHitRegion', 'PRIVATE'), ('retryPointStable', 1),
+                                 ('retryHitOwnedPoints', True), ('retryHitOwnedPoints', 10),
+                                 ('retryHitOwnedPoints', -1)]:
                 path.write_text(json.dumps({**value, key: invalid}))
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'hermes-desktop')

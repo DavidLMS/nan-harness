@@ -1,3 +1,56 @@
+// Read-only button sampling. Coordinates remain private and never enter facts.
+function sampleRetryInterior(button) {
+  const doc = button.ownerDocument;
+  const rect = button.getBoundingClientRect();
+  const closed = { buttonTag: button.tagName === 'BUTTON' ? 'button' : 'other',
+    ownerDocumentSame: doc === document, hitOwnedPoints: 0, clipped: false,
+    rectInViewport: rect.left >= 0 && rect.top >= 0 && rect.right <= innerWidth && rect.bottom <= innerHeight,
+    pointerEventsNone: getComputedStyle(button).pointerEvents === 'none' };
+  if (!button.isConnected || doc !== document || button.tagName !== 'BUTTON'
+      || button.type !== 'button' || button.disabled || button.matches(':disabled')
+      || button.getAttribute('aria-disabled') === 'true' || button.closest('[inert]')
+      || rect.width <= 0 || rect.height <= 0 || rect.left < 0 || rect.top < 0
+      || rect.right > innerWidth || rect.bottom > innerHeight) return { closed, candidate: null };
+  let ancestor = button;
+  for (let depth = 0; ancestor && depth < 64; depth++, ancestor = ancestor.parentElement) {
+    const style = getComputedStyle(ancestor);
+    if (style.pointerEvents === 'none') closed.pointerEventsNone = true;
+    if (style.display === 'none' || ['hidden', 'collapse'].includes(style.visibility)
+        || style.contentVisibility === 'hidden' || style.pointerEvents === 'none') return { closed, candidate: null };
+    if ((style.clipPath !== 'none' && !/^inset\(0(?:px)?(?:\s+0(?:px)?){0,3}\)$/.test(style.clipPath)) || style.maskImage !== 'none') {
+      closed.clipped = true; return { closed, candidate: null };
+    }
+    if (ancestor !== button) {
+      const a = ancestor.getBoundingClientRect();
+      const clips = value => ['hidden', 'clip', 'scroll', 'auto'].includes(value);
+      if ((clips(style.overflowX) && (rect.left < a.left || rect.right > a.right))
+          || (clips(style.overflowY) && (rect.top < a.top || rect.bottom > a.bottom))) {
+        closed.clipped = true; return { closed, candidate: null };
+      }
+    }
+  }
+  if (ancestor) return { closed, candidate: null };
+  // Position for ordinary Playwright click is relative to the padding box.
+  // A scale/rotation would invalidate this simple CSS-coordinate conversion.
+  if (Math.abs(rect.width - button.offsetWidth) > 1 || Math.abs(rect.height - button.offsetHeight) > 1)
+    return { closed, candidate: null };
+  let candidate = null;
+  for (const [fx, fy] of [[.5,.5],[.25,.25],[.75,.25],[.25,.75],[.75,.75],[.5,.25],[.5,.75],[.25,.5],[.75,.5]]) {
+    const x = button.clientWidth * fx;
+    const y = button.clientHeight * fy;
+    const hit = doc.elementFromPoint(rect.left + button.clientLeft + x, rect.top + button.clientTop + y);
+    if (hit === button || (hit && button.contains(hit))) {
+      closed.hitOwnedPoints++;
+      candidate ??= { x, y, left: rect.left, top: rect.top, width: rect.width, height: rect.height };
+    }
+  }
+  return { closed, candidate };
+}
+function stableCandidate(first, second) {
+  if (!first.candidate || !second.candidate) return null;
+  return ['x', 'y', 'left', 'top', 'width', 'height'].every(key => first.candidate[key] === second.candidate[key])
+    ? { x: second.candidate.x, y: second.candidate.y } : null;
+}
 // Owned renderer observation and opt-in input. Publish only closed facts.
 const fs = require('node:fs');
 const { chromium } = require('../../.github/web-check/node_modules/playwright');
@@ -54,7 +107,7 @@ async function driveDom() {
     retryPointerEventsNone: false, retryHitTag: 'unmeasured', retryHitRegion: 'unmeasured',
     retryFocusAfterAcquire: false, retryFocusBeforeAction: false, retryButtonConnected: false,
     retryAncestorHidden: false, retryAncestorInert: false, retryFieldsetDisabled: false,
-    retryDocumentFocused: false, retryActiveTag: 'unmeasured', retryActiveRegion: 'unmeasured' });
+    retryDocumentFocused: false, retryActiveTag: 'unmeasured', retryActiveRegion: 'unmeasured', retryHitOwnedPoints: 0, retryPointStable: false });
   saveFacts();
   const exactKeys = (value, keys) => value && typeof value === 'object' && !Array.isArray(value) &&
     Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
@@ -206,7 +259,7 @@ async function driveDom() {
   if (!facts.inputReadback) { facts.errorCategory = 'input-mismatch'; saveFacts(); return; }
   }
   const retryAction = qualify && request.action === 'retry';
-  if (retryAction) facts.sendMechanism = 'semantic-keyboard';
+  if (retryAction) facts.sendMechanism = 'pointer';
   const readiness = () => send.evaluate((button, retryControlAction) => {
     const visible = e => { const r = e.getBoundingClientRect();
       const style = getComputedStyle(e); return r.width > 0 && r.height > 0 &&
@@ -218,107 +271,64 @@ async function driveDom() {
     if (!retryControlAction && button.tabIndex < 0) return 'focus';
     return null;
   }, retryAction, { timeout: Math.max(1, Math.min(1000, deadline - Date.now())) });
-  async function retryFocusSnapshot(beforeAction) {
-    const snapshot = await send.evaluate(button => {
-      const active = document.activeElement;
-      const tag = active?.tagName?.toLowerCase();
-      let hidden = false;
-      let ancestor = button;
-      for (let depth = 0; ancestor && depth < 64; depth++, ancestor = ancestor.parentElement) {
-        const style = getComputedStyle(ancestor);
-        hidden ||= style.display === 'none' || ['hidden', 'collapse'].includes(style.visibility)
-          || style.contentVisibility === 'hidden';
-      }
-      // A bounded walk that does not reach the root cannot establish visibility.
-      hidden ||= Boolean(ancestor);
-      const region = !active ? 'none'
-        : active.closest('[data-slot="composer-root"]') ? 'composer-root'
-        : active.closest('[data-slot="composer-drag-region"]') ? 'composer-drag-region'
-        : active.closest('[data-slot="composer-dock"]') ? 'composer-dock'
-        : active.closest('[role="dialog"],[role="alertdialog"]') ? 'dialog'
-        : active.closest('[data-slot="popover-content"]') ? 'popover'
-        : active.closest('[role="tooltip"]') ? 'tooltip'
-        : active.closest('[data-slot="aui_thread-viewport"]') ? 'thread-viewport'
-        : active.closest('[data-slot="chat-drop-overlay"]') ? 'chat-drop-overlay'
-        : active.closest('.particle-field') ? 'particle-field'
-        : active.closest('[data-composer-owner]') ? 'composer-portal'
-        : active.closest('[data-slot="composer-bounds"]') ? 'composer-bounds' : 'other';
-      return { focused: active === button, retryButtonConnected: button.isConnected === true,
-        retryAncestorHidden: hidden, retryAncestorInert: Boolean(button.closest('[inert]')),
-        retryFieldsetDisabled: button.matches(':disabled'), retryDocumentFocused: document.hasFocus(),
-        retryActiveTag: !active ? 'none' : ['html', 'body', 'button', 'div', 'span', 'svg'].includes(tag) ? tag : 'other',
-        retryActiveRegion: region };
-    });
-    const { focused, ...closed } = snapshot;
-    Object.assign(facts, closed);
-    facts[beforeAction ? 'retryFocusBeforeAction' : 'retryFocusAfterAcquire'] = focused;
-    return focused && snapshot.retryButtonConnected && !snapshot.retryAncestorHidden
-      && !snapshot.retryAncestorInert && !snapshot.retryFieldsetDisabled;
-  }
   facts.sendBlocker = await readiness();
   if (facts.sendBlocker !== null) {
     facts.errorCategory = 'submit-action-intercepted'; saveFacts(); return;
   }
   await send.scrollIntoViewIfNeeded({ timeout: Math.max(1, deadline - Date.now()) });
+  let retryHandle;
+  let retryPosition;
+  let secondCandidate;
   if (retryAction) {
-    // Frozen composer focus.ts schedules sync, animation-frame and timer
-    // restoration when the failed turn re-enables input. Let that lifecycle
-    // finish before our single focus attempt; never refocus or resubmit.
-    const settleBudget = Math.max(0, Math.min(500, deadline - Date.now()));
-    let settled = false;
-    if (settleBudget > 0) {
-      try {
-        settled = await Promise.race([
-          page.evaluate(() => new Promise(resolve => {
-            setTimeout(() => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))), 0);
-          })),
-          delay(settleBudget).then(() => false),
-        ]);
-      } catch { /* Context replacement cannot authorize an action. */ }
+    retryHandle = await send.elementHandle({ timeout: Math.max(1, deadline - Date.now()) });
+    if (!retryHandle) { facts.errorCategory = 'send-unavailable'; saveFacts(); return; }
+    const first = await retryHandle.evaluate(sampleRetryInterior);
+    await delay(Math.min(100, Math.max(0, deadline - Date.now())));
+    const second = await retryHandle.evaluate(sampleRetryInterior);
+    retryPosition = stableCandidate(first, second);
+    secondCandidate = second.candidate;
+    facts.retryHitOwnedPoints = second.closed.hitOwnedPoints;
+    facts.retryPointStable = Boolean(retryPosition);
+    facts.retryHitOwned = Boolean(retryPosition);
+    facts.retryHitTarget = retryPosition ? 'self' : 'other';
+    facts.retryHitTag = second.closed.buttonTag;
+    facts.retryAncestorClipped = second.closed.clipped;
+    facts.retryRectInViewport = second.closed.rectInViewport;
+    facts.retryPointerEventsNone = second.closed.pointerEventsNone;
+    if (!retryPosition || !ownedEndpoint() || Date.now() >= deadline) {
+      facts.sendBlocker = 'other'; facts.errorCategory = 'submit-action-intercepted'; saveFacts(); return;
     }
-    if (!settled) {
-      facts.errorCategory = 'submit-action-timeout'; facts.sendBlocker = 'unmeasured'; saveFacts(); return;
+  } else {
+    await send.focus({ timeout: Math.max(1, deadline - Date.now()) });
+    facts.sendBlocker = await readiness();
+    if (facts.sendBlocker === null && !await send.evaluate(button => document.activeElement === button)) facts.sendBlocker = 'focus';
+    if (facts.sendBlocker !== null || !ownedEndpoint()) {
+      facts.errorCategory = 'submit-action-intercepted'; saveFacts(); return;
     }
+    facts.inputReadback = await candidates.evaluate((e, prompt) => (e.value ?? e.textContent) === prompt, request.prompt);
+    if (!facts.inputReadback) { facts.errorCategory = 'input-mismatch'; saveFacts(); return; }
+  }
+  if (retryAction) {
+    // Bind the final current semantic locator to the SAME sampled DOM element.
     if (!ownedEndpoint() || await send.count() !== 1 || !await send.isEnabled()
         || await retryUser.count() !== 1
         || !await retryUser.evaluate((e, prompt) => e.innerText.trim() === prompt, request.prompt)
-        || !await errorProof()) {
+        || !await errorProof() || !await send.evaluate((button, sampled) => button === sampled, retryHandle)) {
       facts.errorCategory = 'send-unavailable'; saveFacts(); return;
     }
     facts.sendBlocker = await readiness();
-    if (facts.sendBlocker !== null) { facts.errorCategory = 'submit-action-intercepted'; saveFacts(); return; }
-  }
-  await send.focus({ timeout: Math.max(1, deadline - Date.now()) });
-  facts.sendBlocker = await readiness();
-  if (facts.sendBlocker === null && !(retryAction ? await retryFocusSnapshot(false)
-    : await send.evaluate(button => document.activeElement === button))) facts.sendBlocker = 'focus';
-  saveFacts();
-  if (facts.sendBlocker !== null || !ownedEndpoint()) {
-    facts.errorCategory = 'submit-action-intercepted'; saveFacts(); return;
-  }
-  if (!(qualify && request.action === 'retry')) {
-    facts.inputReadback = await candidates.evaluate((e, prompt) =>
-      (e.value ?? e.textContent) === prompt, request.prompt);
-    if (!facts.inputReadback) { facts.errorCategory = 'input-mismatch'; saveFacts(); return; }
-  } else {
-    if (await retryUser.count() !== 1 || !await retryUser.evaluate((e, prompt) => e.innerText.trim() === prompt, request.prompt)) {
-      facts.errorCategory = 'input-mismatch'; saveFacts(); return;
-    }
-    if (!await errorProof()) { facts.errorCategory = 'send-unavailable'; saveFacts(); return; }
-  }
-  if (retryAction) {
-    // Async turn/error checks can remount or defocus the control. Verify the
-    // current unique enabled Retry and actual focus at the action boundary.
-    facts.sendBlocker = await readiness();
-    if (facts.sendBlocker === null && !await retryFocusSnapshot(true)) facts.sendBlocker = 'focus';
-    if (facts.sendBlocker !== null || !ownedEndpoint() || await send.count() !== 1 || !await send.isEnabled()) {
+    const finalSample = await retryHandle.evaluate(sampleRetryInterior);
+    const stillStable = stableCandidate({ candidate: { ...retryPosition, ...secondCandidate } }, finalSample);
+    if (facts.sendBlocker !== null || !stillStable || !ownedEndpoint()) {
+      facts.retryPointStable = false; facts.retryHitOwned = false;
       facts.errorCategory = 'submit-action-intercepted'; saveFacts(); return;
     }
   }
   try {
-    // Frozen assistant-message.tsx uses a real button with Reload asChild.
-    // Enter activates the native button; no forced click or event injection.
-    await send.press('Enter', { timeout: Math.max(1, deadline - Date.now()) });
+    // Real native Reload button; Playwright enforces ordinary actionability.
+    // One stable owned interior position, never force or a keyboard fallback.
+    if (retryAction) await retryHandle.click({ position: retryPosition, timeout: Math.max(1, deadline - Date.now()) });
+    else await send.press('Enter', { timeout: Math.max(1, deadline - Date.now()) });
   } catch (error) {
     try { facts.sendBlocker = await readiness(); } catch { facts.sendBlocker = 'unmeasured'; }
     const detail = String(error?.message ?? '');

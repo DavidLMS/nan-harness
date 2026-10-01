@@ -315,6 +315,10 @@ struct QualificationFacts {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     retry_hit_owned: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    retry_hit_owned_points: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    retry_point_stable: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     retry_hit_target: Option<RetryHitTarget>,
     #[serde(flatten)]
     geometry: RetryGeometryFacts,
@@ -323,6 +327,25 @@ struct QualificationFacts {
 }
 
 impl QualificationFacts {
+    fn pointer_verified(&self) -> bool {
+        self.retry_hit_owned == Some(true)
+            && self.retry_hit_target == Some(RetryHitTarget::Control)
+            && self
+                .retry_hit_owned_points
+                .is_some_and(|count| (1..=9).contains(&count))
+            && self.retry_point_stable == Some(true)
+            && self.geometry.rect_in_viewport == Some(true)
+            && self.geometry.ancestor_clipped == Some(false)
+            && self.geometry.pointer_events_none == Some(false)
+    }
+
+    fn retry_verified(&self, mechanism: &SendMechanism) -> bool {
+        match mechanism {
+            SendMechanism::Pointer => self.pointer_verified(),
+            SendMechanism::SemanticKeyboard => self.focus.verified(),
+        }
+    }
+
     fn valid_action(
         &self,
         qualification: bool,
@@ -334,6 +357,8 @@ impl QualificationFacts {
             (false, None, None) | (true, Some(_), Some(_))
         ) && (!qualification
             || self.retry_hit_owned.is_some()
+                && self.retry_hit_owned_points.is_some_and(|count| count <= 9)
+                && self.retry_point_stable.is_some()
                 && self.geometry.rect_in_viewport.is_some()
                 && self.geometry.ancestor_clipped.is_some()
                 && self.geometry.pointer_events_none.is_some()
@@ -343,7 +368,7 @@ impl QualificationFacts {
             && (!qualification
                 || !input.input_submitted
                 || !matches!(submission.send_mechanism, SendMechanism::Pointer)
-                || self.retry_hit_owned == Some(true))
+                || self.pointer_verified())
     }
 }
 
@@ -401,6 +426,8 @@ const DOM_FACT_KEYS: &[&str] = &[
     "errorObserved",
     "retryControl",
     "retryHitOwned",
+    "retryHitOwnedPoints",
+    "retryPointStable",
     "retryHitTarget",
     "retryRectInViewport",
     "retryAncestorClipped",
@@ -429,7 +456,7 @@ fn read_facts(path: &Path, qualification: bool) -> Result<Facts, Reason> {
     let value: serde_json::Value =
         serde_json::from_slice(&bytes).map_err(|_| Reason::IsolationUnavailable)?;
     let object = value.as_object().ok_or(Reason::IsolationUnavailable)?;
-    let count = if qualification { 42..=44 } else { 24..=26 };
+    let count = if qualification { 44..=46 } else { 24..=26 };
     if !count.contains(&object.len())
         || object
             .keys()
@@ -441,6 +468,8 @@ fn read_facts(path: &Path, qualification: bool) -> Result<Facts, Reason> {
         "errorObserved",
         "retryControl",
         "retryHitOwned",
+        "retryHitOwnedPoints",
+        "retryPointStable",
         "retryHitTarget",
         "retryRectInViewport",
         "retryAncestorClipped",
@@ -568,7 +597,10 @@ impl Gui {
             .map_err(|_| Reason::IsolationUnavailable)?;
         if !facts.input.input_submitted
             || facts.error_category.is_some()
-            || matches!(turn.action, DomAction::Retry) && !facts.qualification.focus.verified()
+            || matches!(turn.action, DomAction::Retry)
+                && !facts
+                    .qualification
+                    .retry_verified(&facts.submission.send_mechanism)
         {
             return Err(Reason::ResponseMismatch);
         }
@@ -726,6 +758,8 @@ mod tests {
         ] {
             value[key] = json!(false);
         }
+        value["retryHitOwnedPoints"] = json!(0);
+        value["retryPointStable"] = json!(false);
         value["retryActiveTag"] = json!("unmeasured");
         value["retryActiveRegion"] = json!("unmeasured");
     }
@@ -775,7 +809,20 @@ mod tests {
         value["inputSubmitted"] = json!(true);
         value["sendMechanism"] = json!("pointer");
         focus_facts(&mut value);
+        value["retryHitOwnedPoints"] = json!(1);
+        value["retryPointStable"] = json!(true);
+        value["retryRectInViewport"] = json!(true);
         assert!(read(&value, true).is_ok());
+        for key in ["retryPointStable", "retryRectInViewport"] {
+            value[key] = json!(false);
+            assert!(read(&value, true).is_err());
+            value[key] = json!(true);
+        }
+        for count in [0, 10] {
+            value["retryHitOwnedPoints"] = json!(count);
+            assert!(read(&value, true).is_err());
+        }
+        value["retryHitOwnedPoints"] = json!(1);
         for target in ["composer", "error-card", "other", "unmeasured", "PRIVATE"] {
             value["retryHitTarget"] = json!(target);
             assert!(read(&value, true).is_err());

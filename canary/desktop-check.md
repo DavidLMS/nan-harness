@@ -111,19 +111,25 @@ registered `Desktop semantic automation feasibility` workflow on the integration
 branch with `experiment=deterministic-full`. Select `native_only=true` while
 iterating; select `quality_only=true` for the final repository gate. The older
 `native-copy-dom` experiment remains feasibility evidence and cannot satisfy
-the full acceptance gate. Neither semantic adapter has completed recovery
-qualification yet; implemented adapters are not accepted cells.
+the full acceptance gate. Implemented adapters are accepted only when their
+full native result meets the gate; implementation and feasibility alone do not
+qualify a cell.
 
 `--verification semantic-only` requires a disposable GitHub-hosted deterministic
 session and a supported adapter. It never falls back to OCR. Zed uses native
 clipboard input readback and its native thread export; Hermes uses an owned
-renderer DOM connection and normal keyboard activation of Send and Retry.
-Retry must hold actual DOM focus before its single Enter keypress, including
-after the asynchronous error checks. Hermes binds error, Retry and assistant
+renderer DOM connection, keyboard activation of Send, and one ordinary pointer
+activation of Retry. Retry samples nine interior points on the actual button and
+requires a stable owned hit after rechecking the failed turn. It never forces a
+click through an overlay or falls back to another activation after uncertainty.
+Coordinates remain private. Hermes binds error, Retry and assistant
 response to the expected user's renderer turn pair. A passing probe must
 verify the assistant response, a real file-tool round trip, an observed provider
 failure, and recovery through exactly one UI Retry in the failed turn. Each
-response also needs independent completed-provider evidence. Three passing
+response also needs independent completed-provider evidence. Zed treats the
+exact AX completion timeout as an ambiguous receipt and observes recovery
+without repeating the press; a fresh resumed export and provider response must
+still pass. Three passing
 probes and successful app/global cleanup are required per accepted cell.
 
 Hermes's UI Retry trial sets the supported `agent.auto_recovery_cycles: 0` in

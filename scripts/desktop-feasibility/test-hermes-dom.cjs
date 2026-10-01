@@ -15,6 +15,8 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
   let keys = 0;
   let centers = 0;
   let frames = 0;
+  let fixtureDocument;
+  let sampleCount = 0;
   let focusChecks = 0;
   let focused = false;
   let focuses = 0;
@@ -40,9 +42,10 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
   const threadBackground = { tagName: 'DIV', closest(selector) { return selector === '[data-slot="aui_thread-viewport"]' ? {} : null; } };
   const hitChild = { tagName: 'SVG', privateLabel: 'PRIVATE_SYNTHETIC_VALUE', closest() { return null; } };
   const hitButton = {
-    tagName: 'BUTTON', parentElement: scenario === 'retry-clipped' ? clippedParent : ['retry-source-clipped', 'retry-frame-settle'].includes(scenario) ? sourceClipParent : null,
+    tagName: 'BUTTON', type: 'button', isConnected: true, disabled: false, offsetWidth: 20, offsetHeight: 20, clientWidth: 20, clientHeight: 20, clientLeft: 0, clientTop: 0,
+    getAttribute() { return null; }, matches() { return false; }, parentElement: scenario === 'retry-clipped' ? clippedParent : ['retry-source-clipped', 'retry-frame-settle'].includes(scenario) ? sourceClipParent : null,
     closest(selector) { return selector === '[data-slot="aui_thread-viewport"]' ? {} : null; },
-    getBoundingClientRect() { return { left: scenario === 'retry-offviewport' ? 200 : 10, top: 10, width: 20, height: 20 }; },
+    getBoundingClientRect() { const left = scenario === 'retry-offviewport' ? 200 : scenario === 'retry-unstable' && sampleCount > 1 ? 11 : 10; return { left, right: left + 20, top: 10, bottom: 30, width: 20, height: 20 }; },
     contains(element) { return element === hitChild; },
     scrollIntoView(options) {
       assert.equal(options.block, 'center');
@@ -69,6 +72,7 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
     async count() { return scenario === 'send-duplicate' ? 2 : 1; },
     async isEnabled() { return scenario !== 'send-disabled'; },
     async evaluate(callback, pointerRetry) {
+      if (callback.toString().includes('button === sampled')) return scenario !== 'retry-remounted';
       if (callback.toString().includes('document.elementFromPoint')) return callback(hitButton);
       if (callback.toString().includes('button.scrollIntoView')) return callback(hitButton);
       if (scenario === 'retry-not-focusable' && !callback.toString().includes('document.activeElement')) {
@@ -79,15 +83,21 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
       return scenario === 'blocked-modal' ? 'modal' : scenario === 'blocked-menu' ? 'menu'
         : scenario === 'inert' ? 'inert' : null;
     },
+    async elementHandle() { return {
+      async evaluate(callback) { sampleCount++; hitButton.type = scenario === 'retry-wrong-type' ? 'submit' : 'button'; hitButton.ownerDocument = scenario === 'retry-foreign-document' ? {} : fixtureDocument; return callback(hitButton); },
+      async click(options) { return send.click(options); },
+    }; },
     async scrollIntoViewIfNeeded() {},
     async focus() {
-      if (qualify && request.action === 'retry') { assert.equal(frames, 2); assert(settleTimerObserved); }
+      assert(!(qualify && request.action === 'retry'));
       focuses++; focused = true;
     },
     async click(options) {
       assert(qualify && request.action === 'retry');
       assert.equal(options.force, undefined);
       assert(options.timeout > 0);
+      assert(options.position.x > 0 && options.position.x < 20);
+      assert(options.position.y > 0 && options.position.y < 20);
       clicks++;
       if (scenario === 'retry-intercepted') throw new Error('subtree intercepts pointer events PRIVATE_SYNTHETIC_VALUE');
       submits++; value = '';
@@ -198,20 +208,20 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
       },
       URL, setTimeout: (callback, delayMs) => { if (delayMs === 0) settleTimerObserved = true; return setTimeout(callback, delayMs); }, requestAnimationFrame: callback => {
         if (scenario !== 'retry-no-frames') setTimeout(() => { frames++; callback(); }, 0);
-      }, window: { innerWidth: 100, innerHeight: 100 },
-      getComputedStyle: element => ({ display: scenario === 'retry-ancestor-hidden' ? 'none' : 'block', visibility: 'visible', contentVisibility: 'visible', pointerEvents: scenario === 'retry-pointer-none' && element === hitButton ? 'none' : 'auto',
+      }, window: { innerWidth: 100, innerHeight: 100 }, innerWidth: 100, innerHeight: 100,
+      getComputedStyle: element => ({ display: scenario === 'retry-ancestor-hidden' ? 'none' : 'block', visibility: 'visible', contentVisibility: 'visible', clipPath: scenario === 'retry-source-clipped' ? 'inset(25px 0px 0px)' : 'inset(0px 0px 0px 0px)', maskImage: 'none', pointerEvents: scenario === 'retry-pointer-none' && element === hitButton ? 'none' : 'auto',
         overflowX: element === clippedParent ? 'hidden' : 'visible', overflowY: 'visible', contain: '',
         getPropertyValue: property => property === '--sticky-prompt-clip' && element === sourceClipParent ? scenario === 'retry-frame-settle' && frames >= 2 ? '0px' : '25px'
           : property === '-webkit-app-region' && scenario === 'retry-native-drag' ? 'drag' : '' }),
-      document: { hasFocus() { return true; }, get activeElement() { if (scenario === 'retry-focus-reclaimed') return reclaimedComposer; return focused && scenario !== 'focus-failed' && !(scenario === 'retry-focus-lost' && focusChecks > 1) ? focusButton : null; }, querySelectorAll: selector => {
+      document: fixtureDocument = { hasFocus() { return true; }, get activeElement() { if (scenario === 'retry-focus-reclaimed') return reclaimedComposer; return focused && scenario !== 'focus-failed' && !(scenario === 'retry-focus-lost' && focusChecks > 1) ? focusButton : null; }, querySelectorAll: selector => {
         if (!submits) return [];
         if (selector === '[data-role="user"]') return [responseUser];
         if (selector === '[data-role="assistant"]') return [responseAssistant];
         if (selector.includes('composer-root')) return scenario === 'missing-editor' ? [] : [{ value: '', getBoundingClientRect: rect }];
         return [];
-      }, elementFromPoint: () =>
-        scenario === 'retry-overlay' || (scenario === 'retry-centering' && centers === 0)
-          || (scenario === 'retry-intercepted' && clicks > 0) ? overlay : sourceRegionSelectors[scenario] ? sourceRegionHit : scenario === 'retry-frame-settle' && frames < 2 ? threadBackground : scenario === 'retry-source-clipped' ? threadBackground : scenario === 'retry-offviewport' ? null : scenario === 'retry-private-hit' ? foreignHit : scenario === 'retry-body-hit' ? bodyHit : scenario === 'retry-dock-strip' ? dockStrip : scenario === 'retry-child-hit' ? hitChild : hitButton },
+      }, elementFromPoint: (x, y) =>
+        scenario === 'retry-center-covered' && x === 20 && y === 20 || scenario === 'retry-overlay' || (scenario === 'retry-centering' && centers === 0)
+          || (scenario === 'retry-intercepted' && clicks > 0) ? overlay : (scenario === 'retry-all-covered' || scenario === 'retry-covered-at-final' && sampleCount >= 3) ? foreignHit : sourceRegionSelectors[scenario] ? sourceRegionHit : scenario === 'retry-frame-settle' && frames < 2 ? threadBackground : scenario === 'retry-source-clipped' ? threadBackground : scenario === 'retry-offviewport' ? null : scenario === 'retry-private-hit' ? foreignHit : scenario === 'retry-body-hit' ? bodyHit : scenario === 'retry-dock-strip' ? dockStrip : scenario === 'retry-child-hit' ? hitChild : hitButton },
       process: { argv: ['node', 'helper', qualify ? '--qualify' : '--drive', '/request', '/output'], exit: resolve },
     });
     setTimeout(() => reject(new Error('bounded helper fixture timed out')), 1000).unref();
@@ -291,50 +301,27 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
   assert.equal(retry.facts.uniqueComposer, true);
   assert.equal(retry.submits, 1);
   assert.equal(retry.fills, 0);
-  assert.equal(retry.clicks, 0);
-  assert.equal(retry.keys, 1);
-  assert.equal(retry.facts.sendMechanism, 'semantic-keyboard');
-  assert.equal(retry.facts.retryHitTarget, 'unmeasured');
-  const nonTabstop = await trial(retryRequest, {}, 'retry-not-focusable', true);
-  assert.equal(nonTabstop.keys, 1);
-  assert.equal(nonTabstop.clicks, 0);
-  assert.equal(nonTabstop.fills, 0);
-  assert.equal(nonTabstop.facts.responseVerified, true);
-  assert.equal(nonTabstop.facts.retryFocusAfterAcquire, true);
-  assert.equal(nonTabstop.facts.retryFocusBeforeAction, true);
-  assert.equal(nonTabstop.facts.retryButtonConnected, true);
-  assert.equal(nonTabstop.facts.retryDocumentFocused, true);
-  assert.equal(nonTabstop.facts.retryActiveTag, 'button');
-  assert.equal(nonTabstop.facts.retryActiveRegion, 'other');
-  for (const scenario of ['focus-failed', 'retry-focus-lost', 'retry-disconnected', 'retry-ancestor-hidden', 'retry-ancestor-inert', 'retry-fieldset-disabled', 'retry-focus-reclaimed']) {
-    const lost = await trial(retryRequest, {}, scenario, true);
-    assert.equal(lost.keys, 0);
-    assert.equal(lost.clicks, 0);
-    assert.equal(lost.facts.sendBlocker, 'focus');
+  assert.equal(retry.clicks, 1);
+  assert.equal(retry.keys, 0);
+  assert.equal(retry.focuses, 0);
+  assert.equal(retry.facts.sendMechanism, 'pointer');
+  assert.equal(retry.facts.retryPointStable, true);
+  assert.equal(retry.facts.retryHitOwnedPoints, 9);
+  assert.equal(retry.facts.retryRectInViewport, true);
+  const edge = await trial(retryRequest, {}, 'retry-center-covered', true);
+  assert.equal(edge.clicks, 1);
+  assert.equal(edge.keys, 0);
+  assert.equal(edge.facts.retryHitOwnedPoints, 8);
+  for (const scenario of ['retry-all-covered', 'retry-unstable', 'retry-remounted', 'retry-source-clipped', 'retry-foreign-document', 'retry-wrong-type', 'retry-covered-at-final']) {
+    const blocked = await trial(retryRequest, {}, scenario, true);
+    assert.equal(blocked.clicks, 0, scenario);
+    assert.equal(blocked.keys, 0, scenario);
   }
-  const reclaimed = await trial(retryRequest, {}, 'retry-focus-reclaimed', true);
-  assert.equal(reclaimed.facts.retryActiveTag, 'div');
-  assert.equal(reclaimed.facts.retryActiveRegion, 'composer-root');
-  assert.equal(reclaimed.facts.retryFocusAfterAcquire, false);
-  assert.equal(reclaimed.facts.retryFocusBeforeAction, false);
-  assert.equal(reclaimed.keys, 0);
-  const stalled = await trial({ ...retryRequest, timeoutMs: 20 }, {}, 'retry-no-frames', true);
-  assert.equal(stalled.focuses, 0);
-  assert.equal(stalled.keys, 0);
-  assert.equal(stalled.facts.errorCategory, 'submit-action-timeout');
-  for (const scenario of ['owner-after-settle', 'foreign-card-after-settle']) {
-    const changed = await trial(retryRequest, {}, scenario, true);
-    assert.equal(changed.frames, 2);
-    assert.equal(changed.focuses, 0);
-    assert.equal(changed.keys, 0);
-    assert.equal(changed.facts.inputSubmitted, false);
-  }
-  assert.equal(nonTabstop.focuses, 1);
-  const timeout = await trial(retryRequest, {}, 'click-timeout', true);
-  assert.equal(timeout.keys, 1);
-  assert.equal(timeout.submits, 0);
-  assert.equal(timeout.clicks, 0);
-  assert.equal(timeout.facts.errorCategory, 'submit-action-timeout');
+  const uncertain = await trial(retryRequest, {}, 'retry-intercepted', true);
+  assert.equal(uncertain.clicks, 1);
+  assert.equal(uncertain.keys, 0);
+  assert.equal(uncertain.submits, 0);
+  assert.equal(uncertain.facts.inputSubmitted, false);
   for (const scenario of ['missing-error', 'duplicate-error', 'missing-retry', 'foreign-error-turn', 'foreign-user', 'blocked-modal', 'blocked-menu', 'inert', 'stale', 'duplicate', 'duplicate-retry', 'send-disabled']) {
     const rejected = await trial(retryRequest, {}, scenario, true);
     assert.equal(rejected.submits, 0, scenario);
@@ -345,7 +332,7 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
   assert.equal(delayedForeign.facts.errorObserved, false);
   assert.equal(delayedForeign.facts.retryControl, false);
   assert.equal(delayedForeign.facts.errorCategory, 'response-timeout');
-  const foreignResponse = await trial({ ...retryRequest, timeoutMs: 10 }, {}, 'foreign-response-turn', true);
+  const foreignResponse = await trial({ ...retryRequest, timeoutMs: 250 }, {}, 'foreign-response-turn', true);
   assert.equal(foreignResponse.submits, 1);
   assert.equal(foreignResponse.facts.userTurnObserved, true);
   assert.equal(foreignResponse.facts.responseVerified, false);

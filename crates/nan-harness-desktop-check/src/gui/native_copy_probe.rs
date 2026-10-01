@@ -71,6 +71,7 @@ struct Facts {
     response_control_count: Option<usize>,
     retry_control_count: Option<usize>,
     retry_selector: Option<&'static str>,
+    retry_action_receipt: Option<&'static str>,
     retry_title_count: Option<usize>,
     retry_label_count: Option<usize>,
     retry_inventory_status: Option<&'static str>,
@@ -321,11 +322,26 @@ fn observe_settling(
 }
 
 fn control_count(control: &xa11y::Locator) -> Result<usize, Reason> {
-    let count = control.count().map_err(map_error)?;
+    let count = match control.count() {
+        Ok(count) => count,
+        Err(xa11y::Error::SelectorNotMatched { .. }) => 0,
+        Err(error) => return Err(map_error(error)),
+    };
     if count > 4096 {
         return Err(Reason::ActionUnsupported);
     }
     Ok(count)
+}
+
+// AXPress can time out after the application has executed its callback.
+// Never repeat that action: only the fresh export and provider oracle can
+// establish recovery after this one ambiguous receipt.
+fn retry_press_receipt(result: Result<(), xa11y::Error>) -> Result<&'static str, Reason> {
+    match result {
+        Ok(()) => Ok("acknowledged"),
+        Err(xa11y::Error::Platform { code: -25204, .. }) => Ok("completion-unknown"),
+        Err(error) => Err(map_error(error)),
+    }
 }
 
 fn native_copy_facts() -> Facts {
@@ -379,6 +395,7 @@ fn native_copy_facts() -> Facts {
         response_control_count: None,
         retry_control_count: None,
         retry_selector: None,
+        retry_action_receipt: None,
         retry_title_count: None,
         retry_label_count: None,
         retry_inventory_status: None,
@@ -873,7 +890,7 @@ impl NativeClipboardSession<'_> {
                 }
                 self.gui
                     .native_copy_guard(&mut self.facts, "retry-before")?;
-                button.press().map_err(map_error)?;
+                self.facts.retry_action_receipt = Some(retry_press_receipt(button.press())?);
                 return self.gui.native_copy_guard(&mut self.facts, "retry-after");
             }
             let app = self.gui.app.as_ref().ok_or(Reason::SelectorNotMatched)?;
@@ -900,7 +917,7 @@ impl NativeClipboardSession<'_> {
             }
             self.gui
                 .native_copy_guard(&mut self.facts, "retry-before")?;
-            matches[0].press().map_err(map_error)?;
+            self.facts.retry_action_receipt = Some(retry_press_receipt(matches[0].press())?);
             return self.gui.native_copy_guard(&mut self.facts, "retry-after");
         }
         let app = self.gui.app.as_ref().ok_or(Reason::SelectorNotMatched)?;
@@ -912,7 +929,7 @@ impl NativeClipboardSession<'_> {
         }
         self.gui
             .native_copy_guard(&mut self.facts, "retry-before")?;
-        retry.press().map_err(map_error)?;
+        self.facts.retry_action_receipt = Some(retry_press_receipt(retry.press())?);
         self.gui.native_copy_guard(&mut self.facts, "retry-after")
     }
 
@@ -1497,6 +1514,31 @@ mod tests {
         assert!(!exact_readback("input-nonce-old", expected, sentinel));
         assert!(!exact_readback("", expected, sentinel));
         assert!(exact_readback(expected, expected, sentinel));
+    }
+
+    #[test]
+    fn retry_receipt_allows_observation_only_for_exact_ax_completion_timeout() {
+        assert_eq!(retry_press_receipt(Ok(())), Ok("acknowledged"));
+        assert_eq!(
+            retry_press_receipt(Err(xa11y::Error::Platform {
+                code: -25204,
+                message: String::new(),
+            })),
+            Ok("completion-unknown")
+        );
+        assert_eq!(
+            retry_press_receipt(Err(xa11y::Error::Platform {
+                code: -25202,
+                message: String::new(),
+            })),
+            Err(Reason::DesktopUnavailable)
+        );
+        assert_eq!(
+            retry_press_receipt(Err(xa11y::Error::PermissionDenied {
+                instructions: String::new(),
+            })),
+            Err(Reason::PermissionRequired)
+        );
     }
 
     #[test]

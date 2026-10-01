@@ -176,11 +176,16 @@ def semantic_observations(directory, app):
         elif mechanism == 'hermes-renderer-qualification':
             for key in ('endpointOwned', 'attached', 'targetVerified', 'uniqueComposer', 'inputReadback',
                         'inputSubmitted', 'responseVerified', 'providerResponseVerified', 'errorObserved',
-                        'retryControl', 'retryHitOwned', 'retryRectInViewport', 'retryAncestorClipped',
+                        'retryControl', 'retryHitOwned', 'retryPointStable', 'retryRectInViewport', 'retryAncestorClipped',
                         'retryPointerEventsNone', 'inputCleared', 'userTurnObserved',
                         'retryFocusAfterAcquire', 'retryFocusBeforeAction', 'retryButtonConnected',
                         'retryAncestorHidden', 'retryAncestorInert', 'retryFieldsetDisabled', 'retryDocumentFocused'):
                 flag(record, value, key)
+            if 'retryHitOwnedPoints' in value:
+                count = value['retryHitOwnedPoints']
+                if count is not None and (type(count) is not int or not 0 <= count <= 9):
+                    raise ValueError('invalid retry hit count')
+                record['retryHitOwnedPoints'] = count
             for key in ('retryHitTag', 'retryActiveTag'):
                 enum(record, value, key, DOM_TAGS)
             for key in ('retryHitRegion', 'retryActiveRegion'):
@@ -203,6 +208,7 @@ def semantic_observations(directory, app):
             enum(record, value, 'guardKind', {'native-window', 'direct-foreground'})
             enum(record, value, 'guardCategory', CATEGORIES)
             enum(record, value, 'clipboardCleanup', {'passed', 'failed', 'not-run'})
+            enum(record, value, 'retryActionReceipt', {'acknowledged', 'completion-unknown'})
             enum(record, value, 'retrySelector', {'retry-name-or-description', 'retry-tooltip', 'retry-label'})
             enum(record, value, 'retryInventoryStatus', {'complete', 'budget-exceeded', 'query-error'})
             for key in ('retryControlCount', 'retryTitleCount', 'retryCandidateCount', 'retryTooltipCount', 'retryLabelCount',
