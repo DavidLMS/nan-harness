@@ -34,6 +34,11 @@ enum DriverError {
     StaleResponse,
     InputMismatch,
     ResponseTimeout,
+    SubmitActionTimeout,
+    SubmitActionIntercepted,
+    SubmitActionDetached,
+    SubmitActionFailed,
+    ResponseObservationFailed,
     AttachmentOrActionFailed,
 }
 

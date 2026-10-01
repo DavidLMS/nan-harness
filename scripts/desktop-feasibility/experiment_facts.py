@@ -5,7 +5,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "canary/actions"))
 from desktop_diagnostics import CATEGORIES
 
-DOM_ERRORS = set('unclassified invalid-request launcher-unowned endpoint-unowned target-ambiguous target-invalid composer-ambiguous send-unavailable stale-response input-mismatch response-timeout attachment-or-action-failed'.split())
+DOM_ERRORS = set('unclassified invalid-request launcher-unowned endpoint-unowned target-ambiguous target-invalid composer-ambiguous send-unavailable stale-response input-mismatch response-timeout submit-action-timeout submit-action-intercepted submit-action-detached submit-action-failed response-observation-failed attachment-or-action-failed'.split())
 STARTUP_CATEGORIES = set('sandbox-helper namespace-denied root-without-sandbox display-unavailable missing-library gpu-fatal native-module unclassified'.split())
 
 

@@ -12,19 +12,26 @@ async function trial(overrides, connectionOverrides = {}, scenario = null) {
   let submits = 0;
   let fills = 0;
   let pageEnumerations = 0;
+  let observations = 0;
   let value = '';
   const rendererUrl = 'file:///synthetic/resources/app.asar.unpacked/dist/index.html';
   const composer = {
     async count() { return scenario === 'duplicate' ? 2 : 1; },
     async isEditable() { return true; },
     async fill(prompt) { fills++; value = scenario === 'mismatch' ? 'different synthetic input' : prompt; },
-    async evaluate(callback, prompt) { return callback({ value }, prompt); },
+    async evaluate(callback, prompt) {
+      if (submits > 0) throw new Error('Editable locator is disabled or detached after submission');
+      return callback({ value }, prompt);
+    },
     async press(key) { assert.equal(key, 'Enter'); submits++; },
   };
   const send = {
     async count() { return scenario === 'send-duplicate' ? 2 : 1; },
     async isEnabled() { return scenario !== 'send-disabled'; },
-    async click() { submits++; value = ''; },
+    async click() {
+      if (scenario === 'click-timeout') throw new Error('Timeout 100ms exceeded PRIVATE_SYNTHETIC_VALUE');
+      submits++; value = '';
+    },
   };
   const users = { filter({ hasText }) { assert.equal(hasText, request.prompt); return {
     async count() { return submits === 1 ? 1 : 0; },
@@ -55,7 +62,15 @@ async function trial(overrides, connectionOverrides = {}, scenario = null) {
       assert.equal(method, 'Target.getTargetInfo');
       return { targetInfo: { type: 'page', url: rendererUrl } };
     } }; } }; },
-    async evaluate() { return true; },
+    async evaluate(_callback, args) {
+      if (!args) return true;
+      assert.equal(args.prompt, request.prompt);
+      assert.equal(args.marker, request.expectedMarker);
+      observations++;
+      if (scenario === 'transient-context' && observations === 1) throw new Error('Execution context was destroyed');
+      return { inputCleared: scenario !== 'missing-editor', userTurnObserved: submits === 1,
+        assistantTurnCount: submits, responseVerified: submits === 1 };
+    },
     locator(selector) {
       if (selector === '[data-role="assistant"]:visible') return assistant;
       if (selector === '[data-role="user"]:visible') return users;
@@ -97,18 +112,19 @@ async function trial(overrides, connectionOverrides = {}, scenario = null) {
   });
   assert.equal(attaches, scenario ? 1 : 0);
   const facts = JSON.parse(output.get('/output'));
-  assert.equal(facts.inputSubmitted, ['happy', 'delayed'].includes(scenario));
-  assert.equal(facts.responseVerified, ['happy', 'delayed'].includes(scenario));
+  assert.equal(facts.inputSubmitted, ['happy', 'delayed', 'missing-editor', 'transient-context'].includes(scenario));
+  assert.equal(facts.responseVerified, ['happy', 'delayed', 'missing-editor', 'transient-context'].includes(scenario));
   assert.equal(facts.attached, Boolean(scenario));
-  assert.equal(submits, ['happy', 'delayed'].includes(scenario) ? 1 : 0);
+  assert.equal(submits, ['happy', 'delayed', 'missing-editor', 'transient-context'].includes(scenario) ? 1 : 0);
   if (scenario === 'stale' || scenario === 'duplicate') assert.equal(fills, 0);
-  if (['mismatch', 'happy', 'delayed', 'send-disabled', 'send-duplicate'].includes(scenario)) assert.equal(fills, 1);
+  if (['mismatch', 'happy', 'delayed', 'missing-editor', 'transient-context', 'click-timeout', 'send-disabled', 'send-duplicate'].includes(scenario)) assert.equal(fills, 1);
   if (scenario) {
     assert.equal(facts.endpointOwned, true);
     assert.equal(facts.targetVerified, true);
-    assert.equal(facts.inputReadback, ['happy', 'delayed', 'send-disabled', 'send-duplicate'].includes(scenario));
+    assert.equal(facts.inputReadback, ['happy', 'delayed', 'missing-editor', 'transient-context', 'click-timeout', 'send-disabled', 'send-duplicate'].includes(scenario));
   }
   assert(!output.get('/output').includes(request.expectedMarker));
+  assert(!output.get('/output').includes('PRIVATE_SYNTHETIC_VALUE'));
   return facts;
 }
 (async () => {
@@ -135,5 +151,10 @@ async function trial(overrides, connectionOverrides = {}, scenario = null) {
   assert.equal((await trial({ timeoutMs: 100 }, {}, 'send-duplicate')).errorCategory, 'send-unavailable');
   const delayed = await trial({ timeoutMs: 500 }, {}, 'delayed');
   assert.equal(delayed.responseVerified, true);
-  console.log('Hermes DOM guards and submission: 11 synthetic cases passed');
+  assert.equal((await trial({ timeoutMs: 500 }, {}, 'click-timeout')).errorCategory, 'submit-action-timeout');
+  const missing = await trial({ timeoutMs: 500 }, {}, 'missing-editor');
+  assert.equal(missing.inputCleared, false);
+  assert.equal(missing.responseVerified, true);
+  assert.equal((await trial({ timeoutMs: 500 }, {}, 'transient-context')).responseVerified, true);
+  console.log('Hermes DOM guards and submission: 14 synthetic cases passed');
 })().catch(error => { console.error(error.message); process.exitCode = 1; });

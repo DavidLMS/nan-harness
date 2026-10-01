@@ -152,22 +152,49 @@ async function driveDom() {
   facts.inputReadback = await candidates.evaluate((e, prompt) =>
     (e.value ?? e.textContent) === prompt, request.prompt);
   if (!facts.inputReadback) { facts.errorCategory = 'input-mismatch'; saveFacts(); return; }
+  try {
+    await send.click({ timeout: Math.max(1, deadline - Date.now()) });
+  } catch (error) {
+    const detail = String(error?.message ?? '');
+    facts.errorCategory = /intercepts pointer events|subtree intercepts/i.test(detail) ? 'submit-action-intercepted'
+      : /detached|not attached/i.test(detail) ? 'submit-action-detached'
+      : /timeout/i.test(detail) ? 'submit-action-timeout' : 'submit-action-failed';
+    saveFacts(); return;
+  }
   facts.inputSubmitted = true; saveFacts();
-  await send.click({ timeout: Math.max(1, deadline - Date.now()) });
   while (Date.now() < deadline) {
-    facts.inputCleared ||= await candidates.evaluate(e => (e.value ?? e.textContent).trim() === '');
-    const users = page.locator('[data-role="user"]:visible').filter({ hasText: request.prompt });
-    if (await users.count() === 1) {
-      facts.userTurnObserved ||= await users.evaluate((e, prompt) => e.innerText.trim() === prompt, request.prompt);
-    }
-    facts.assistantTurnCount = Math.min(4096, await assistant.count());
-    const matching = assistant.filter({ hasText: request.expectedMarker });
-    if (await matching.count() === 1 && await matching.evaluate((e, marker) =>
-        e.innerText.includes(marker), request.expectedMarker)) {
-      facts.responseVerified = true; facts.syntheticTextPresent = true;
-      facts.errorCategory = null; saveFacts(); return;
-    }
     if (!ownedEndpoint()) break;
+    try {
+      // A submission may disable or replace the editor. Read a single snapshot
+      // instead of waiting on a now-missing editable locator after the click.
+      const observation = await page.evaluate(({ prompt, marker }) => {
+        const visible = e => { const r = e.getBoundingClientRect();
+          const style = getComputedStyle(e); return r.width > 0 && r.height > 0 &&
+            style.visibility !== 'hidden' && style.display !== 'none'; };
+        const editors = [...document.querySelectorAll('[data-slot="composer-root"] [role="textbox"]')].filter(visible);
+        const users = [...document.querySelectorAll('[data-role="user"]')].filter(visible);
+        const assistants = [...document.querySelectorAll('[data-role="assistant"]')].filter(visible);
+        return {
+          inputCleared: editors.length === 1 && (editors[0].value ?? editors[0].textContent).trim() === '',
+          userTurnObserved: users.filter(e => e.innerText.trim() === prompt).length === 1,
+          assistantTurnCount: Math.min(4096, assistants.length),
+          responseVerified: assistants.filter(e => e.innerText.includes(marker)).length === 1,
+        };
+      }, { prompt: request.prompt, marker: request.expectedMarker });
+      facts.inputCleared ||= observation.inputCleared;
+      facts.userTurnObserved ||= observation.userTurnObserved;
+      facts.assistantTurnCount = observation.assistantTurnCount;
+      if (observation.responseVerified) {
+        facts.responseVerified = true; facts.syntheticTextPresent = true;
+        facts.errorCategory = null; saveFacts(); return;
+      }
+    } catch (error) {
+      if (!/execution context was destroyed|cannot find context with specified id/i.test(String(error?.message ?? ''))) {
+        facts.errorCategory = 'response-observation-failed'; saveFacts(); return;
+      }
+      // Context replacement is a read-only retry; never submit the prompt again.
+    }
+    saveFacts();
     await delay(100);
   }
   facts.errorCategory = 'response-timeout'; saveFacts();
