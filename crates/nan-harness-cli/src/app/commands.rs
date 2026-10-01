@@ -16,117 +16,122 @@ pub(crate) use telemetry::TelemetryCommand;
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum Command {
+    #[command(about = nan_harness_i18n::messages::help_show_or_change_the_terminal_language(nan_harness_i18n::locale()))]
+    Language {
+        #[arg(value_name = "LANGUAGE")]
+        language: Option<String>,
+    },
     #[command(
         name = "chatgpt-desktop",
         visible_alias = "codex-desktop",
-        about = "Run ChatGPT Desktop through NaN (experimental)"
+        about = nan_harness_i18n::messages::help_run_chatgpt_desktop_through_nan_experimental(nan_harness_i18n::locale())
     )]
     ChatGptDesktop(ChatGptDesktopArgs),
     #[command(
         name = "claude-desktop",
-        about = "Run Claude Desktop through NaN (experimental)"
+        about = nan_harness_i18n::messages::help_run_claude_desktop_through_nan_experimental(nan_harness_i18n::locale())
     )]
     ClaudeDesktop(ClaudeDesktopArgs),
     #[command(
         name = "claude",
         visible_alias = "claude-code",
-        about = "Run Claude Code through the local nan-harness bridge"
+        about = nan_harness_i18n::messages::help_run_claude_code_through_the_local_nan_harness_bridge(nan_harness_i18n::locale())
     )]
     Claude(BridgedHarnessRunArgs),
-    #[command(about = "Run Codex through the local nan-harness Responses bridge")]
+    #[command(about = nan_harness_i18n::messages::help_run_codex_through_the_local_nan_harness_responses_bridge(nan_harness_i18n::locale()))]
     Codex(BridgedHarnessRunArgs),
-    #[command(name = "opencode", about = "Run OpenCode through NaN Chat Completions")]
+    #[command(name = "opencode", about = nan_harness_i18n::messages::help_run_opencode_through_nan_chat_completions(nan_harness_i18n::locale()))]
     OpenCode(DirectHarnessRunArgs),
-    #[command(about = "Run Hermes Agent through NaN Chat Completions")]
+    #[command(about = nan_harness_i18n::messages::help_run_hermes_agent_through_nan_chat_completions(nan_harness_i18n::locale()))]
     Hermes(DirectHarnessRunArgs),
     #[command(
         name = "hermes-desktop",
-        about = "Run Hermes Desktop through a managed NaN profile (experimental)"
+        about = nan_harness_i18n::messages::help_run_hermes_desktop_through_a_managed_nan_profile_experimental(nan_harness_i18n::locale())
     )]
     HermesDesktop(HermesDesktopArgs),
     #[command(
         name = "pen",
         visible_alias = "pen-desktop",
-        about = "Run Pen Desktop through a managed NaN model provider (experimental)"
+        about = nan_harness_i18n::messages::help_run_pen_desktop_through_a_managed_nan_model_provider_experimental(nan_harness_i18n::locale())
     )]
     PenDesktop(PenDesktopArgs),
     #[command(
         name = "zed",
         visible_alias = "zed-desktop",
-        about = "Run Zed through a temporary NaN model provider (experimental)"
+        about = nan_harness_i18n::messages::help_run_zed_through_a_temporary_nan_model_provider_experimental(nan_harness_i18n::locale())
     )]
     ZedDesktop(ZedDesktopArgs),
-    #[command(about = "Run Pi through a NaN provider extension")]
+    #[command(about = nan_harness_i18n::messages::help_run_pi_through_a_nan_provider_extension(nan_harness_i18n::locale()))]
     Pi(DirectHarnessRunArgs),
     #[command(
         name = "omp",
         visible_alias = "oh-my-pi",
-        about = "Run Oh My Pi through a NaN provider extension"
+        about = nan_harness_i18n::messages::help_run_oh_my_pi_through_a_nan_provider_extension(nan_harness_i18n::locale())
     )]
     Omp(DirectHarnessRunArgs),
     #[command(
         name = "prime-agent",
         visible_alias = "prime",
-        about = "Run Prime Agent through a NaN provider extension"
+        about = nan_harness_i18n::messages::help_run_prime_agent_through_a_nan_provider_extension(nan_harness_i18n::locale())
     )]
     Prime(DirectHarnessRunArgs),
     #[command(
         name = "dsh",
         visible_aliases = ["deepseek", "deepseek-harness"],
-        about = "Run DeepSeek Harness through a temporary NaN provider patch"
+        about = nan_harness_i18n::messages::help_run_deepseek_harness_through_a_temporary_nan_provider_patch(nan_harness_i18n::locale())
     )]
     DeepSeek(DirectHarnessRunArgs),
     #[command(
         name = "openclaw",
-        about = "Run OpenClaw through a temporary linked configuration"
+        about = nan_harness_i18n::messages::help_run_openclaw_through_a_temporary_linked_configuration(nan_harness_i18n::locale())
     )]
     OpenClaw(DirectHarnessRunArgs),
-    #[command(about = "Run Cline through a temporary linked configuration")]
+    #[command(about = nan_harness_i18n::messages::help_run_cline_through_a_temporary_linked_configuration(nan_harness_i18n::locale()))]
     Cline(DirectHarnessRunArgs),
     #[command(
         name = "qwen",
         visible_alias = "qwen-code",
-        about = "Run Qwen Code through NaN Chat Completions"
+        about = nan_harness_i18n::messages::help_run_qwen_code_through_nan_chat_completions(nan_harness_i18n::locale())
     )]
     Qwen(DirectHarnessRunArgs),
     #[command(
         name = "kimi",
         visible_alias = "kimi-code",
-        about = "Run Kimi Code through its in-memory NaN model configuration"
+        about = nan_harness_i18n::messages::help_run_kimi_code_through_its_in_memory_nan_model_configuration(nan_harness_i18n::locale())
     )]
     Kimi(DirectHarnessRunArgs),
-    #[command(about = "Run Aider through NaN Chat Completions")]
+    #[command(about = nan_harness_i18n::messages::help_run_aider_through_nan_chat_completions(nan_harness_i18n::locale()))]
     Aider(DirectHarnessRunArgs),
-    #[command(about = "Run Goose through NaN Chat Completions")]
+    #[command(about = nan_harness_i18n::messages::help_run_goose_through_nan_chat_completions(nan_harness_i18n::locale()))]
     Goose(DirectHarnessRunArgs),
-    #[command(about = "Run fx through the local nan-harness AI Gateway bridge")]
+    #[command(about = nan_harness_i18n::messages::help_run_fx_through_the_local_nan_harness_ai_gateway_bridge(nan_harness_i18n::locale()))]
     Fx(BridgedHarnessRunArgs),
-    #[command(about = "Diagnose nan-harness or inspect one harness in detail")]
+    #[command(about = nan_harness_i18n::messages::help_diagnose_nan_harness_or_inspect_one_harness_in_detail(nan_harness_i18n::locale()))]
     Doctor(DoctorArgs),
-    #[command(about = "Manage the saved NaN provider API key")]
+    #[command(about = nan_harness_i18n::messages::help_manage_the_saved_nan_provider_api_key(nan_harness_i18n::locale()))]
     Auth {
         #[command(subcommand)]
         command: AuthCommand,
     },
-    #[command(about = "Configure NaN natively in a supported harness")]
+    #[command(about = nan_harness_i18n::messages::help_configure_nan_natively_in_a_supported_harness(nan_harness_i18n::locale()))]
     Config(ConfigArgs),
-    #[command(about = "Update nan-harness to the latest stable release")]
+    #[command(about = nan_harness_i18n::messages::help_update_nan_harness_to_the_latest_stable_release(nan_harness_i18n::locale()))]
     Update,
-    #[command(about = "Configure and manage NaN web search")]
+    #[command(about = nan_harness_i18n::messages::help_configure_and_manage_nan_web_search(nan_harness_i18n::locale()))]
     Search {
         #[command(subcommand)]
         command: SearchCommand,
     },
-    #[command(about = "Remove nan-harness and its managed harness integrations")]
+    #[command(about = nan_harness_i18n::messages::help_remove_nan_harness_and_its_managed_harness_integrations(nan_harness_i18n::locale()))]
     Uninstall(UninstallArgs),
-    #[command(about = "Control anonymous telemetry")]
+    #[command(about = nan_harness_i18n::messages::help_control_anonymous_telemetry(nan_harness_i18n::locale()))]
     Telemetry {
         #[command(subcommand)]
         command: TelemetryCommand,
     },
     #[command(
-        about = "Generate shell completion scripts for nanh",
-        after_help = "Load for the current session:\n  bash:       source <(nanh completions bash)\n  zsh:        source <(nanh completions zsh)\n  fish:       nanh completions fish | source\n  PowerShell: nanh completions powershell | Out-String | Invoke-Expression"
+        about = nan_harness_i18n::messages::help_generate_shell_completion_scripts_for_nanh(nan_harness_i18n::locale()),
+        after_help = nan_harness_i18n::messages::help_load_for_the_current_session_bash_source_nanh_completions_bash_zsh_source_nanh_completions(nan_harness_i18n::locale())
     )]
     Completions {
         #[arg(value_enum)]

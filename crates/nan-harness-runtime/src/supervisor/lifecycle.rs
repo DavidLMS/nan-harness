@@ -278,8 +278,14 @@ mod tests {
         ))
         .expect("fixture should be valid");
         plan.harness.executable = "/definitely/missing/nan-harness-test".to_owned();
-        let prepared = PreparedLaunch::prepare(&plan, "http://127.0.0.1:9/v1", None, None)
-            .expect("launch should prepare");
+        let prepared = PreparedLaunch::prepare(
+            &plan,
+            "http://127.0.0.1:9/v1",
+            None,
+            None,
+            &SecretStore::new(),
+        )
+        .expect("launch should prepare");
         let temporary_root = prepared
             .temporary_root(true)
             .expect("fixture should prepare a temporary artifact");

@@ -1,13 +1,6 @@
 name: Desktop checker qualification
 
 on:
-  push:
-    branches: [feat/desktop-check-actions]
-    paths:
-      - '.github/workflows/desktop-check-qualification.yml'
-      - 'crates/**'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
   workflow_dispatch:
     inputs:
       app:

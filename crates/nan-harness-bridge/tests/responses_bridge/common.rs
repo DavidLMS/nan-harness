@@ -133,7 +133,11 @@ pub(crate) async fn start_servers_with_budget(
             launch_id: "responses_test".to_owned(),
             provider_base_url: format!("http://{upstream_address}/v1"),
             models: CodexModelCatalog::from_provider_ids(
-                ["qwen3.6".to_owned(), "mimo-v2.5".to_owned()],
+                [
+                    "qwen3.6".to_owned(),
+                    "mimo-v2.6-flash".to_owned(),
+                    "qwen3.8-flash".to_owned(),
+                ],
                 "qwen3.6",
             )
             .expect("model catalog should build"),

@@ -96,6 +96,153 @@ fn persistent_search_plugins_have_valid_source_syntax() {
         "Hermes provider syntax failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
+
+    persistent_media_plugins_have_valid_source_syntax();
+}
+
+fn persistent_media_plugins_have_valid_source_syntax() {
+    use std::io::Write as _;
+    use std::process::{Command, Stdio};
+
+    let mut python = Command::new("python3")
+        .args([
+            "-c",
+            "import sys; compile(sys.stdin.read(), 'image_provider.py', 'exec')",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("Python image provider syntax check should start");
+    python
+        .stdin
+        .take()
+        .expect("Python image provider stdin should be available")
+        .write_all(
+            render_hermes_image_plugin(
+                "https://api.nan.test/v1",
+                nan_harness_core::ImageModel::default(),
+            )
+            .as_bytes(),
+        )
+        .expect("image provider source should write");
+    let output = python
+        .wait_with_output()
+        .expect("Python image provider syntax check should finish");
+    assert!(
+        output.status.success(),
+        "Hermes image provider syntax failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let mut node = Command::new("node")
+        .args(["--input-type=module", "--check"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("OpenClaw media plugin syntax check should start");
+    node.stdin
+        .take()
+        .expect("OpenClaw media plugin stdin should be available")
+        .write_all(
+            render_openclaw_media_plugin(
+                "https://api.nan.test/v1",
+                nan_harness_core::ImageModel::default(),
+            )
+            .as_bytes(),
+        )
+        .expect("OpenClaw media plugin source should write");
+    let output = node
+        .wait_with_output()
+        .expect("OpenClaw media plugin syntax check should finish");
+    assert!(
+        output.status.success(),
+        "OpenClaw media plugin syntax failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn hermes_image_provider_preserves_credentials_and_output() {
+    use std::io::Write as _;
+    use std::process::{Command, Stdio};
+
+    let mut contract = match Command::new("python3")
+        .args([
+            "-c",
+            r#"
+import sys
+import types
+
+agent = types.ModuleType("agent")
+provider_module = types.ModuleType("agent.image_gen_provider")
+class ImageGenProvider:
+    pass
+def success_response(**kwargs):
+    return kwargs
+provider_module.ImageGenProvider = ImageGenProvider
+provider_module.success_response = success_response
+sys.modules["agent"] = agent
+sys.modules["agent.image_gen_provider"] = provider_module
+namespace = {}
+exec(sys.stdin.read(), namespace)
+provider = namespace["NanHarnessImageProvider"]()
+assert callable(provider.capabilities)
+assert provider.capabilities()["max_reference_images"] == 4
+assert provider.list_models()[0]["id"] == "flux-2-klein"
+
+import os
+import tempfile
+from pathlib import Path
+from unittest.mock import patch
+
+for credentials in [
+    {"NAN_API_KEY": "native-key"},
+    {"NAN_API_KEY": "session-token", "NAN_MEDIA_API_KEY": "provider-key"},
+    {},
+]:
+    with tempfile.TemporaryDirectory() as home:
+        expected_env = {"HERMES_HOME": home, **credentials}
+        def run_media(command, **kwargs):
+            assert kwargs["env"] == expected_env
+            Path(command[command.index("--output") + 1]).write_bytes(b"synthetic-image")
+            return types.SimpleNamespace(returncode=0)
+        with patch.dict(os.environ, expected_env, clear=True):
+            with patch.object(namespace["subprocess"], "run", side_effect=run_media):
+                result = provider.generate("synthetic prompt")
+        assert Path(result["image"]).read_bytes() == b"synthetic-image"
+"#,
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
+        Err(error) => panic!("Hermes image provider contract check should start: {error}"),
+    };
+    contract
+        .stdin
+        .take()
+        .expect("Hermes image provider contract stdin should be available")
+        .write_all(
+            render_hermes_image_plugin(
+                "https://api.nan.test/v1",
+                nan_harness_core::ImageModel::default(),
+            )
+            .as_bytes(),
+        )
+        .expect("Hermes image provider contract source should write");
+    let output = contract
+        .wait_with_output()
+        .expect("Hermes image provider contract check should finish");
+    assert!(
+        output.status.success(),
+        "Hermes image provider contract failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[test]
@@ -243,6 +390,10 @@ fn native_search_plugins_execute_through_a_lifecycle_helper_and_release_it() {
 }
 
 #[cfg(unix)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "keep the three native plugin fixtures beside their shared lifecycle assertions"
+)]
 fn run_node_native_plugins(config: &Path, helper: &Path, marker: &Path) {
     let node_sources = [
         (
@@ -293,8 +444,8 @@ if (retried.details.results[0].title !== "Synthetic result") throw new Error("he
                     1,
                 )
                 .replacen(
-                    "import { getSearchProvider, setExcludedSearchProviders } from \"@oh-my-pi/pi-coding-agent/web/search\";",
-                    "const getSearchProvider = async () => ({ isAvailable: async () => false }); const setExcludedSearchProviders = () => {};",
+                    "import * as searchProviders from \"@oh-my-pi/pi-coding-agent/web/search\";",
+                    "const searchProviders = {};",
                     1,
                 )
                 .replacen(
@@ -319,7 +470,11 @@ if (result.details.results[0].title !== "Synthetic result") throw new Error("OMP
                     "const definePluginEntry = (entry) => entry;",
                     1,
                 )
-                .replacen("export default definePluginEntry", "const plugin = definePluginEntry", 1),
+                .replacen(
+                    "export default definePluginEntry",
+                    "const plugin = definePluginEntry",
+                    1,
+                ),
             r#"
 let provider;
 plugin.register({ registerWebSearchProvider(value) { provider = value; } });

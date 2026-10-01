@@ -204,3 +204,87 @@ impl ZedDesktopError {
 #[cfg(test)]
 #[path = "error/tests.rs"]
 mod tests;
+
+// Terminal localization is separate from canonical Display used by machine contracts.
+impl nan_harness_i18n::TerminalMessage for ZedDesktopError {
+    fn terminal_message(&self, locale: nan_harness_i18n::Locale) -> String {
+        use nan_harness_i18n::messages as m;
+        if locale == nan_harness_i18n::Locale::En {
+            return self.to_string();
+        }
+        match self {
+            Self::UnsupportedPlatform => m::error_zed_desktop_unsupported_platform(locale),
+            Self::Compatibility(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+            Self::OlderUnsupported => m::error_zed_desktop_older_unsupported(locale),
+            Self::AppNotFound => m::error_zed_desktop_app_not_found(locale),
+            Self::InvalidInstallation => m::error_zed_desktop_invalid_installation(locale),
+            Self::AlreadyRunning => m::error_zed_desktop_already_running(locale),
+            Self::PendingRecovery => m::error_zed_desktop_pending_recovery(locale),
+            Self::OrphanBackup => m::error_zed_desktop_orphan_backup(locale),
+            Self::DidNotStart => m::error_zed_desktop_did_not_start(locale),
+            Self::DidNotTerminate => m::error_zed_desktop_did_not_terminate(locale),
+            Self::MissingHomeDirectory => m::error_zed_desktop_missing_home_directory(locale),
+            Self::MissingStateDirectory => m::error_zed_desktop_missing_state_directory(locale),
+            Self::MissingPlatformDirectory => {
+                m::error_zed_desktop_missing_platform_directory(locale)
+            }
+            Self::InvalidPath => m::error_zed_desktop_invalid_path(locale),
+            Self::InvalidWorkspace => m::error_zed_desktop_invalid_workspace(locale),
+            Self::ReservedArgument => m::error_zed_desktop_reserved_argument(locale),
+            Self::SettingsChangedBeforeWrite => {
+                m::error_zed_desktop_settings_changed_before_write(locale)
+            }
+            Self::SettingsUtf8(_) => m::error_zed_desktop_settings_utf8(locale),
+            Self::ParseSettings(_) => m::error_zed_desktop_parse_settings(locale),
+            Self::SettingsRootNotObject => m::error_zed_desktop_settings_root_not_object(locale),
+            Self::SettingsFieldNotObject(field_0) => {
+                m::error_zed_desktop_settings_field_not_object(locale, &(field_0))
+            }
+            Self::InvalidDefaultModel => m::error_zed_desktop_invalid_default_model(locale),
+            Self::UnmanagedProviderConflict => {
+                m::error_zed_desktop_unmanaged_provider_conflict(locale)
+            }
+            Self::ManagedConfigurationChanged => {
+                m::error_zed_desktop_managed_configuration_changed(locale)
+            }
+            Self::GenerateSettings(_) => m::error_zed_desktop_generate_settings(locale),
+            Self::Serialize(field_0) => m::error_zed_desktop_serialize(locale, &(field_0)),
+            Self::ParseReceipt(field_0) => m::error_zed_desktop_parse_receipt(locale, &(field_0)),
+            Self::InvalidReceipt => m::error_zed_desktop_invalid_receipt(locale),
+            Self::ReadSettings(field_0) => m::error_zed_desktop_read_settings(locale, &(field_0)),
+            Self::ReadBackup(field_0) => m::error_zed_desktop_read_backup(locale, &(field_0)),
+            Self::BackupHashMismatch => m::error_zed_desktop_backup_hash_mismatch(locale),
+            Self::RemoveBackup(field_0) => m::error_zed_desktop_remove_backup(locale, &(field_0)),
+            Self::BindGateway(field_0) => m::error_zed_desktop_bind_gateway(locale, &(field_0)),
+            Self::Gateway(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+            Self::GatewayExited => m::error_zed_desktop_gateway_exited(locale),
+            Self::State(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+            Self::VersionCommand(field_0) => {
+                m::error_zed_desktop_version_command(locale, &(field_0))
+            }
+            Self::VersionCommandFailed(field_0) => {
+                m::error_zed_desktop_version_command_failed(locale, &(format!("{field_0:?}")))
+            }
+            Self::Launch(field_0) => m::error_zed_desktop_launch(locale, &(field_0)),
+            Self::Wait(field_0) => m::error_zed_desktop_wait(locale, &(field_0)),
+            Self::ProcessCheck(field_0) => m::error_zed_desktop_process_check(locale, &(field_0)),
+            Self::ProcessCheckFailed(field_0) => {
+                m::error_zed_desktop_process_check_failed(locale, &(format!("{field_0:?}")))
+            }
+            Self::Terminate(field_0) => m::error_zed_desktop_terminate(locale, &(field_0)),
+            Self::TerminateFailed(field_0) => {
+                m::error_zed_desktop_terminate_failed(locale, &(format!("{field_0:?}")))
+            }
+            Self::ModelUnavailable { model, available } => {
+                m::error_zed_desktop_model_unavailable(locale, &(model), &(available.join(", ")))
+            }
+            Self::EmptyModelCatalog => m::error_zed_desktop_empty_model_catalog(locale),
+        }
+    }
+}

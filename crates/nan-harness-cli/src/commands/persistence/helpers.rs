@@ -27,11 +27,12 @@ pub(super) struct ManagedBlockFormat<'a> {
     pub(super) conflicting_keys: &'a [&'a str],
 }
 
-pub(super) struct PreparedFileChange {
-    pub(super) path: PathBuf,
-    pub(super) original: Option<Vec<u8>>,
-    pub(super) original_permissions: Option<Permissions>,
-    pub(super) replacement: Option<Vec<u8>>,
+pub(crate) struct PreparedFileChange {
+    pub(crate) path: PathBuf,
+    pub(crate) original: Option<Vec<u8>>,
+    pub(crate) original_permissions: Option<Permissions>,
+    pub(crate) replacement: Option<Vec<u8>>,
+    pub(crate) replacement_permissions: Option<Permissions>,
 }
 
 pub(super) fn opencode_provider(

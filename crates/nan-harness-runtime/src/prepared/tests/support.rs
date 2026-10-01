@@ -18,7 +18,7 @@ pub(super) fn known_models() -> Vec<CodingModelProfile> {
     [
         "qwen3.6",
         "deepseek-v4-flash",
-        "mimo-v2.5",
+        "mimo-v2.6-flash",
         "gemma4",
         "glm5.2",
     ]

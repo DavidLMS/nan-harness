@@ -9,7 +9,7 @@ pub(crate) enum DoctorTarget {
 }
 
 impl FromStr for DoctorTarget {
-    type Err = String;
+    type Err = nan_harness_i18n::DiagnosticText;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         if let Ok(kind) = DesktopHarnessKind::from_str(value) {
@@ -17,7 +17,11 @@ impl FromStr for DoctorTarget {
         }
         HarnessKind::from_str(value)
             .map(Self::Stable)
-            .map_err(|error| error.to_string())
+            .map_err(|error| {
+                nan_harness_i18n::DiagnosticText::new(|locale| {
+                    nan_harness_i18n::TerminalMessage::terminal_message(&error, locale)
+                })
+            })
     }
 }
 
@@ -54,7 +58,9 @@ impl fmt::Display for ConfigTarget {
     }
 }
 
-pub(super) fn parse_config_harness(value: &str) -> Result<ConfigTarget, String> {
+pub(super) fn parse_config_harness(
+    value: &str,
+) -> Result<ConfigTarget, nan_harness_i18n::DiagnosticText> {
     if matches!(value, "pen" | "pen-desktop") {
         return Ok(ConfigTarget::Pen);
     }
@@ -63,5 +69,9 @@ pub(super) fn parse_config_harness(value: &str) -> Result<ConfigTarget, String> 
     }
     HarnessKind::from_str(value)
         .map(ConfigTarget::Stable)
-        .map_err(|error| error.to_string())
+        .map_err(|error| {
+            nan_harness_i18n::DiagnosticText::new(|locale| {
+                nan_harness_i18n::TerminalMessage::terminal_message(&error, locale)
+            })
+        })
 }

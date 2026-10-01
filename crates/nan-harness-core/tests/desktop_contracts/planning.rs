@@ -48,6 +48,7 @@ fn context_for(plan: &LaunchPlan, user_arguments: Vec<String>) -> PlanContext {
         working_directory: plan.process.working_directory.clone(),
         user_arguments,
         web_search_policy: WebSearchPolicy::Auto,
+        media: nan_harness_core::MediaSelection::none(),
         observability_format: plan.observability.format,
         session_max_tokens: None,
         context_limit: None,
@@ -77,7 +78,7 @@ fn adapter_mismatch_is_typed_before_the_adapter_plans() {
         HarnessKind::OpenCode,
         Err(PlanError::InvalidField {
             field: "adapter",
-            message: "adapter must not be called".to_owned(),
+            message: "adapter must not be called".into(),
         }),
     );
 
@@ -97,7 +98,7 @@ fn adapter_mismatch_is_typed_before_the_adapter_plans() {
 fn typed_adapter_plan_errors_are_returned_before_validation() {
     let adapter_error = PlanError::InvalidField {
         field: "synthetic-adapter-field",
-        message: "adapter error has typed precedence".to_owned(),
+        message: "adapter error has typed precedence".into(),
     };
     let adapter = FakeAdapter::new(HarnessKind::OpenCode, Err(adapter_error));
     let context = context_for(&direct_plan(), Vec::new());
@@ -109,7 +110,7 @@ fn typed_adapter_plan_errors_are_returned_before_validation() {
         Err(PlanError::InvalidField {
             field: "synthetic-adapter-field",
             message
-        }) if message == "adapter error has typed precedence"
+        }) if message.to_string() == "adapter error has typed precedence"
     ));
     assert_eq!(adapter.calls.get(), 1);
 }

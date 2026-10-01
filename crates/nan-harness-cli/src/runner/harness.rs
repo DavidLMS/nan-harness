@@ -89,8 +89,11 @@ pub(super) async fn run_harness(
     if arguments.dry_run {
         let discovery = inspect_harness(kind, &executable, discovery_options(arguments))
             .map_err(CliError::Discovery)?;
-        for warning in &discovery.warnings {
-            eprintln!("warning: {warning}");
+        for warning in discovery.terminal_warnings(nan_harness_i18n::locale()) {
+            eprintln!(
+                "{}",
+                nan_harness_i18n::messages::harness_warning(nan_harness_i18n::locale(), &(warning))
+            );
         }
         return run_discovered_harness(
             arguments,
@@ -117,8 +120,11 @@ pub(super) async fn run_harness(
         result => result,
     };
     let discovery = inspection.map_err(CliError::Discovery)?;
-    for warning in &discovery.warnings {
-        eprintln!("warning: {warning}");
+    for warning in discovery.terminal_warnings(nan_harness_i18n::locale()) {
+        eprintln!(
+            "{}",
+            nan_harness_i18n::messages::harness_warning(nan_harness_i18n::locale(), &(warning))
+        );
     }
     let result = match launch_preparation {
         Ok(launch) => {
@@ -269,6 +275,15 @@ pub(super) fn build_launch_plan(
         working_directory: working_directory.to_owned(),
         user_arguments: arguments.arguments.clone(),
         web_search_policy: web_search_policy(arguments),
+        media: commands::media_policy::launch_media(
+            adapter.kind(),
+            arguments,
+            &std::env::var_os("HOME")
+                .or_else(|| std::env::var_os("USERPROFILE"))
+                .map(PathBuf::from)
+                .unwrap_or_default(),
+            Path::new(working_directory),
+        ),
         observability_format: ObservabilityFormat::Human,
         session_max_tokens: arguments.session_max_tokens,
         context_limit,
@@ -324,10 +339,7 @@ pub(super) async fn execute_with_fallback(
     };
 
     eprintln!(
-        "warning: model '{}' is no longer available for this credential; using '{fallback}'.",
-        launch_model.id,
-        fallback = fallback.id
-    );
+        "{}", nan_harness_i18n::messages::harness_warning_model_is_no_longer_available_for_this_credential_using(nan_harness_i18n::locale(), &(fallback.id), &(launch_model.id)));
     let fallback_plan = build_launch_plan(
         adapter,
         launch_id,
@@ -401,7 +413,17 @@ pub(super) fn finish_harness_run(
         && let Ok(manager) = PersistenceManager::from_environment()
         && let Err(error) = manager.save_last_selection(kind, &selection.model, selection.reasoning)
     {
-        eprintln!("warning: could not save the last {kind} model: {error}");
+        eprintln!(
+            "{}",
+            nan_harness_i18n::messages::harness_warning_could_not_save_the_last_model(
+                nan_harness_i18n::locale(),
+                &(nan_harness_i18n::TerminalMessage::terminal_message(
+                    &error,
+                    nan_harness_i18n::locale()
+                )),
+                &(kind)
+            )
+        );
     }
     bridge_diagnostics.extend(report.bridge_diagnostics);
     if let Some(usage_summary) = usage_summary {

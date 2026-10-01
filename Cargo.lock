@@ -1659,6 +1659,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6877bb514081ee2a7ff5ef9de3281f14a4dd4bceac4c09388074a6b5df8a139a"
 
 [[package]]
+name = "mime_guess"
+version = "2.0.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f7c44f8e672c00fe5308fa235f821cb4198414e1c77935c1ab6948d3fd78550e"
+dependencies = [
+ "mime",
+ "unicase",
+]
+
+[[package]]
 name = "minimal-lexical"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1697,15 +1707,16 @@ dependencies = [
 
 [[package]]
 name = "nan-harness-adapters"
-version = "0.1.6"
+version = "0.1.12"
 dependencies = [
  "nan-harness-core",
+ "nan-harness-i18n",
  "serde_json",
 ]
 
 [[package]]
 name = "nan-harness-bridge"
-version = "0.1.6"
+version = "0.1.12"
 dependencies = [
  "async-stream",
  "axum",
@@ -1716,6 +1727,7 @@ dependencies = [
  "httpdate",
  "nan-harness-coordinator",
  "nan-harness-core",
+ "nan-harness-i18n",
  "nan-harness-search",
  "reqwest",
  "serde",
@@ -1730,12 +1742,14 @@ dependencies = [
 
 [[package]]
 name = "nan-harness-canary"
-version = "0.1.6"
+version = "0.1.12"
 dependencies = [
  "clap",
  "jsonschema",
+ "nan-harness-bridge",
  "nan-harness-core",
  "nan-harness-diagnostics",
+ "nan-harness-private-fs",
  "nan-harness-test-support",
  "reqwest",
  "semver",
@@ -1753,8 +1767,9 @@ dependencies = [
 
 [[package]]
 name = "nan-harness-cli"
-version = "0.1.6"
+version = "0.1.12"
 dependencies = [
+ "base64",
  "clap",
  "clap_complete",
  "getrandom 0.4.3",
@@ -1764,6 +1779,7 @@ dependencies = [
  "nan-harness-coordinator",
  "nan-harness-core",
  "nan-harness-diagnostics",
+ "nan-harness-i18n",
  "nan-harness-private-fs",
  "nan-harness-runtime",
  "nan-harness-telemetry",
@@ -1787,11 +1803,13 @@ dependencies = [
 
 [[package]]
 name = "nan-harness-coordinator"
-version = "0.1.6"
+version = "0.1.12"
 dependencies = [
  "base64",
  "getrandom 0.4.3",
  "nan-harness-core",
+ "nan-harness-detach",
+ "nan-harness-i18n",
  "nan-harness-private-fs",
  "nan-harness-test-support",
  "serde",
@@ -1806,8 +1824,9 @@ dependencies = [
 
 [[package]]
 name = "nan-harness-core"
-version = "0.1.6"
+version = "0.1.12"
 dependencies = [
+ "nan-harness-i18n",
  "semver",
  "serde",
  "serde_json",
@@ -1848,15 +1867,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "nan-harness-detach"
+version = "0.1.12"
+dependencies = [
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "nan-harness-diagnostics"
-version = "0.1.6"
+version = "0.1.12"
 dependencies = [
  "serde",
 ]
 
 [[package]]
+name = "nan-harness-i18n"
+version = "0.1.12"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "nan-harness-private-fs"
-version = "0.1.6"
+version = "0.1.12"
 dependencies = [
  "nan-harness-test-support",
  "tempfile",
@@ -1866,7 +1900,7 @@ dependencies = [
 
 [[package]]
 name = "nan-harness-runtime"
-version = "0.1.6"
+version = "0.1.12"
 dependencies = [
  "axum",
  "futures-util",
@@ -1874,6 +1908,8 @@ dependencies = [
  "jsonc-parser",
  "nan-harness-bridge",
  "nan-harness-core",
+ "nan-harness-detach",
+ "nan-harness-i18n",
  "nan-harness-private-fs",
  "nan-harness-search",
  "nan-harness-test-support",
@@ -1897,9 +1933,10 @@ dependencies = [
 
 [[package]]
 name = "nan-harness-search"
-version = "0.1.6"
+version = "0.1.12"
 dependencies = [
  "axum",
+ "nan-harness-i18n",
  "nan-harness-private-fs",
  "reqwest",
  "serde",
@@ -1912,11 +1949,12 @@ dependencies = [
 
 [[package]]
 name = "nan-harness-telemetry"
-version = "0.1.6"
+version = "0.1.12"
 dependencies = [
  "axum",
  "getrandom 0.4.3",
  "jsonschema",
+ "nan-harness-i18n",
  "nan-harness-private-fs",
  "nan-harness-test-support",
  "reqwest",
@@ -1931,11 +1969,13 @@ dependencies = [
 
 [[package]]
 name = "nan-harness-test-support"
-version = "0.1.6"
+version = "0.1.12"
 dependencies = [
  "axum",
  "nan-harness-core",
+ "nan-harness-private-fs",
  "nix 0.31.3",
+ "process-wrap",
  "semver",
  "serde",
  "serde_json",
@@ -2461,6 +2501,7 @@ dependencies = [
  "hyper-util",
  "js-sys",
  "log",
+ "mime_guess",
  "percent-encoding",
  "pin-project-lite",
  "quinn",
@@ -2548,9 +2589,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.23.43"
+version = "0.23.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0283386ce02abc0151e1761d08802dfe86c173b0b494af5cbc086574e453da06"
+checksum = "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634"
 dependencies = [
  "aws-lc-rs",
  "once_cell",
@@ -3310,6 +3351,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "unicase"
+version = "2.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dbc4bc3a9f746d862c45cb89d705aa10f187bb96c76001afab07a0d35ce60142"
+
+[[package]]
 name = "unicode-general-category"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3979,13 +4026,14 @@ checksum = "b9cc00251562a284751c9973bace760d86c0276c471b4be569fe6b068ee97a56"
 
 [[package]]
 name = "xtask"
-version = "0.1.6"
+version = "0.1.12"
 dependencies = [
  "nan-harness-core",
  "semver",
  "serde",
  "serde_json",
  "sha2 0.11.0",
+ "syn 2.0.119",
  "tempfile",
  "time",
 ]

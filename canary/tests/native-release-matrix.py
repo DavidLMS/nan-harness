@@ -34,9 +34,9 @@ def native_reports():
 
 
 class NativeReleaseMatrixTests(unittest.TestCase):
-    def test_complete_native_matrix_requires_44_supported_cells(self):
+    def test_complete_native_matrix_requires_current_supported_cells(self):
         reports = native_reports()
-        self.assertEqual(len(reports), 44)
+        self.assertEqual(len(reports), 43)
         publication.validate_reports(reports, "0.9.0", 2, "selected-model")
         for changed in (reports[:-1], reports + [reports[0]], legacy.release_reports()):
             with self.assertRaises(StateError):

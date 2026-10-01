@@ -122,6 +122,12 @@ impl FromStr for HarnessKind {
 #[error("unknown harness '{0}'")]
 pub struct ParseHarnessKindError(String);
 
+impl nan_harness_i18n::TerminalMessage for ParseHarnessKindError {
+    fn terminal_message(&self, locale: nan_harness_i18n::Locale) -> String {
+        nan_harness_i18n::messages::parser_unknown_harness(locale, &self.0)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum VersionStatus {

@@ -58,6 +58,9 @@ jobs:
           cache-bin: true
       - name: Validate changelog
         run: cargo xtask changelog-check
+
+      - name: Validate translations
+        run: cargo xtask i18n-check
       - name: Verify GitHub shell contracts
         run: bash .github/tests/all.sh
       - name: Verify canary host contracts
@@ -113,6 +116,8 @@ jobs:
           cache-bin: true
       - name: Verify private filesystem ACL primitive
         run: cargo test --locked -p nan-harness-private-fs --all-features
+      - name: Verify Hermes command providers on Windows
+        run: cargo test --locked -p nan-harness-adapters --all-features --lib --test direct hermes
       - name: Verify Windows local search installation and lifecycle
         shell: pwsh
         run: |

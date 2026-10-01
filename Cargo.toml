@@ -6,9 +6,11 @@ members = [
     "crates/nan-harness-cli",
     "crates/nan-harness-coordinator",
     "crates/nan-harness-core",
+    "crates/nan-harness-detach",
     "crates/nan-harness-diagnostics",
     "crates/nan-harness-desktop-check",
     "crates/nan-harness-private-fs",
+    "crates/nan-harness-i18n",
     "crates/nan-harness-runtime",
     "crates/nan-harness-search",
     "crates/nan-harness-telemetry",
@@ -19,7 +21,7 @@ default-members = ["crates/nan-harness-cli"]
 resolver = "3"
 
 [workspace.package]
-version = "0.1.6"
+version = "0.1.12"
 edition = "2024"
 rust-version = "1.97.1"
 license = "Apache-2.0"
@@ -29,7 +31,7 @@ async-stream = "0.3.6"
 axum = { version = "0.8.9", features = ["json"] }
 base64 = "0.22.1"
 bytes = "1.12.1"
-clap = { version = "4.6.6", features = ["color", "derive", "suggestions", "wrap_help"] }
+clap = { version = "4.6.6", features = ["color", "derive", "suggestions", "wrap_help", "string"] }
 clap_complete = "4.6"
 eventsource-stream = "0.2.3"
 futures-util = "0.3.34"
@@ -39,7 +41,7 @@ jsonc-parser = { version = "0.33.1", features = ["cst", "serde_json"] }
 jsonschema = { version = "0.49.9", default-features = false }
 keyring = "4.1.6"
 nix = { version = "0.31.3", features = ["process", "signal"] }
-reqwest = { version = "0.13.4", default-features = false, features = ["json", "rustls", "stream"] }
+reqwest = { version = "0.13.4", default-features = false, features = ["json", "multipart", "rustls", "stream"] }
 rpassword = "7.5.4"
 self-replace = "1.5.0"
 semver = { version = "1.0.28", features = ["serde"] }
@@ -49,6 +51,7 @@ serde_yaml_ng = "0.10.0"
 sha2 = "0.11.0"
 static_assertions = "1.1.0"
 subtle = "2.6.1"
+syn = { version = "2.0.119", features = ["full", "visit"] }
 tempfile = "3.27.0"
 thiserror = "2.0.20"
 time = { version = "0.3.55", features = ["formatting", "parsing"] }
@@ -60,7 +63,10 @@ url = { version = "2.5.8", features = ["serde"] }
 zeroize = "1.9.0"
 
 [workspace.lints.rust]
-unsafe_code = "forbid"
+# Denied everywhere and forbidden again inside every crate. `nan-harness-detach` is the only
+# crate that carries a reason-scoped `expect`; see the "Unsafe code exceptions" section in
+# CONTRIBUTING.md before changing either level.
+unsafe_code = "deny"
 unused_lifetimes = "deny"
 unused_qualifications = "deny"
 

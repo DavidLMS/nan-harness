@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use tokio::sync::mpsc;
 
-fn request(records: usize, bytes: usize) -> (CaptureRequest, mpsc::Receiver<Record>) {
+pub(super) fn request(records: usize, bytes: usize) -> (CaptureRequest, mpsc::Receiver<Record>) {
     let (sender, receiver) = mpsc::channel(records);
     let writer = Arc::new(Writer {
         sender,

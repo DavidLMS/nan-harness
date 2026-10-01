@@ -1,5 +1,5 @@
 use super::*;
-use crate::app::{HarnessRunArgs, WebSearchArgs};
+use crate::app::{HarnessRunArgs, MediaArgs, WebSearchArgs};
 
 fn hermes_arguments() -> HermesDesktopArgs {
     HermesDesktopArgs {
@@ -10,6 +10,7 @@ fn hermes_arguments() -> HermesDesktopArgs {
             allow_unsupported: false,
             allow_untested: false,
             search: WebSearchArgs::default(),
+            media: MediaArgs::default(),
             dry_run: false,
             session_max_tokens: None,
             context: None,

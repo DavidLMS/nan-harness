@@ -47,6 +47,7 @@ pub(super) async fn execute_responses_bridge(
             web_search_enabled,
         }),
         Some(discovered_models),
+        &config.secrets,
     )?;
     let mut bridge = spawn_responses(
         listener,

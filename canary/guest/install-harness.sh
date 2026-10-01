@@ -8,7 +8,6 @@ fi
 
 harness="$1"
 version="${2:-latest}"
-# Only commit-pinned harnesses accept a frozen 40-hex source commit.
 ref="${3:-}"
 if [ -n "$ref" ]; then
   if [ "$harness" != hermes ] || [ "$version" = latest ] \
@@ -22,7 +21,32 @@ elif [ "$harness" = hermes ] && [ "$version" != latest ]; then
 fi
 temporary_directory="$(mktemp -d)"
 trap 'rm -rf "$temporary_directory"' EXIT
-export PATH="$HOME/.local/bin:$HOME/.kimi-code/bin:$HOME/.hermes/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+legacy_prefix="${NAN_CANARY_LEGACY_PATHS:-/opt/homebrew/bin:/usr/local/bin}"
+if [ "${NAN_CANARY_HOSTED:-0}" = 1 ]; then
+  # Hosted setup-node's PATH is authoritative. Keep isolated install bins
+  # available, but append them so a legacy Homebrew/Tart Node cannot win.
+  export PATH="${PATH:-}:$HOME/.local/bin:$HOME/.kimi-code/bin:$HOME/.hermes/bin"
+else
+  export PATH="$HOME/.local/bin:$HOME/.kimi-code/bin:$HOME/.hermes/bin:$legacy_prefix:${PATH:-}"
+fi
+
+verify_hosted_node() {
+  [ "${NAN_CANARY_HOSTED:-0}" = 1 ] || return 0
+  expected="${NAN_CANARY_EXPECTED_NODE_VERSION:-}"
+  actual="$(node -p 'process.versions.node' 2>/dev/null || true)"
+  if [ -z "$expected" ] || [ -z "$actual" ]; then
+    printf 'hosted Node runtime is missing\n' >&2
+    return 125
+  fi
+  if [ "$actual" != "$expected" ]; then
+    printf 'hosted Node runtime version mismatch\n' >&2
+    return 125
+  fi
+  command -v npm >/dev/null 2>&1 || {
+    printf 'hosted npm runtime could not be found\n' >&2
+    return 125
+  }
+}
 
 download() {
   curl --fail --silent --show-error --location \
@@ -32,7 +56,9 @@ download() {
 }
 
 global_npm_install() {
+  verify_hosted_node
   npm install --global "$@"
+  verify_hosted_node
 }
 
 run_with_bounded_curl() {
@@ -100,9 +126,6 @@ case "$harness" in
     if [ "$version" = latest ]; then
       download 'https://hermes-agent.nousresearch.com/install.sh' "$installer"
     else
-      # Release tags are dates, not the product version. Use the installer from
-      # the frozen commit and force the pin: a fresh main clone already contains
-      # the release commit, which the installer otherwise treats as a rollback.
       download "https://raw.githubusercontent.com/NousResearch/hermes-agent/$ref/scripts/install.sh" "$installer"
       arguments+=(--commit "$ref" --force-commit)
     fi
@@ -116,7 +139,9 @@ case "$harness" in
     binary="$temporary_directory/$asset"
     release_path=latest/download
     if [ "$version" != latest ]; then release_path="download/v$version"; fi
-    download "https://github.com/can1357/oh-my-pi/releases/$release_path/$asset" "$binary"
+    download \
+      "https://github.com/can1357/oh-my-pi/releases/$release_path/$asset" \
+      "$binary"
     chmod 755 "$binary"
     "$binary" --version >/dev/null
     mkdir -p "$HOME/.local/bin"
@@ -133,8 +158,14 @@ case "$harness" in
     fi
     ;;
   deepseek-harness)
+    arguments=(--allow-scripts='@deepseek-ai/dsh-subprocess-local,koffi,node-pty,@google/genai,protobufjs')
+    # rc.2 ranges admit rc.3, whose dependency publication is incomplete.
+    # Bound only this affected version to the last complete registry snapshot.
+    if [ "$version" = '0.1.5-rc.2' ]; then
+      arguments+=(--before=2026-09-22T00:00:00Z)
+    fi
     global_npm_install \
-      --allow-scripts='@deepseek-ai/dsh-subprocess-local,koffi,node-pty,@google/genai,protobufjs' \
+      "${arguments[@]}" \
       "@deepseek-ai/dsh@$version"
     ;;
   openclaw)
@@ -177,7 +208,6 @@ case "$harness" in
   fx)
     installer="$temporary_directory/fx-install.sh"
     download 'https://fx.sh/setup.sh' "$installer"
-    # The official CDN uses v-prefixed directory names; doctor reports semver.
     arguments=()
     if [ "$version" != latest ]; then arguments=("v$version"); fi
     FX_INSTALL_DIR="$HOME/.local/bin" bash "$installer" "${arguments[@]}"

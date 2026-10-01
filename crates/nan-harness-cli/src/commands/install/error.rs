@@ -130,14 +130,26 @@ impl InstallError {
         "NH-INSTALL-001"
     }
 
-    pub(crate) const fn is_runtime_precondition(&self) -> bool {
-        matches!(
-            self,
-            Self::RuntimeCommandStart { .. }
-                | Self::RuntimeCommandFailed { .. }
-                | Self::RuntimeUnsupported { .. }
-                | Self::RuntimeUnparseable { .. }
-        )
+    fn missing_npm(&self) -> Option<HarnessKind> {
+        match self {
+            Self::CommandStart {
+                harness,
+                program: "npm",
+                source,
+            } if source.kind() == io::ErrorKind::NotFound => Some(*harness),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn is_runtime_precondition(&self) -> bool {
+        self.missing_npm().is_some()
+            || matches!(
+                self,
+                Self::RuntimeCommandStart { .. }
+                    | Self::RuntimeCommandFailed { .. }
+                    | Self::RuntimeUnsupported { .. }
+                    | Self::RuntimeUnparseable { .. }
+            )
     }
 }
 
@@ -145,5 +157,154 @@ fn exit_code_suffix(code: Option<i32>) -> String {
     match code {
         Some(code) => format!(" with exit code {code}"),
         None => String::new(),
+    }
+}
+
+// Terminal localization is separate from canonical Display used by machine contracts.
+impl nan_harness_i18n::TerminalMessage for InstallError {
+    #[expect(
+        clippy::too_many_lines,
+        reason = "exhaustive terminal projection keeps every error variant visible"
+    )]
+    fn terminal_message(&self, locale: nan_harness_i18n::Locale) -> String {
+        use nan_harness_i18n::messages as m;
+        if let Some(harness) = self.missing_npm() {
+            return super::runtime::npm_hint_for(harness, locale);
+        }
+        if locale == nan_harness_i18n::Locale::En {
+            return self.to_string();
+        }
+        match self {
+            Self::Prompt(field_0) => m::error_install_prompt(locale, &(field_0)),
+            Self::UnsupportedPlatform(field_0) => {
+                m::error_install_unsupported_platform(locale, &(field_0))
+            }
+            Self::UnsupportedHarness(field_0) => {
+                m::error_install_unsupported_harness(locale, &(field_0))
+            }
+            Self::CompatibilityManifest(field_0) => {
+                m::error_install_compatibility_manifest(locale, &(field_0))
+            }
+            Self::InvalidRuntimeCommand { harness, command } => {
+                m::error_install_invalid_runtime_command(locale, &(command), &(harness))
+            }
+            Self::RuntimeCommandStart {
+                harness,
+                command,
+                minimum,
+                hint: _,
+                source,
+            } => m::error_install_runtime_command_start(
+                locale,
+                &(command),
+                &(harness),
+                &(super::runtime::runtime_hint_for(*harness, minimum, locale)),
+                &(minimum),
+                &(source),
+            ),
+            Self::RuntimeCommandFailed {
+                harness,
+                command,
+                minimum,
+                exit_code,
+                hint: _,
+            } => m::error_install_runtime_command_failed(
+                locale,
+                &(command),
+                &(harness),
+                &(super::runtime::runtime_hint_for(*harness, minimum, locale)),
+                &(minimum),
+                &(exit_code.map_or_else(String::new, |code| m::error_exit_code(locale, &code))),
+            ),
+            Self::RuntimeUnsupported {
+                harness,
+                detected,
+                minimum,
+                hint: _,
+            } => m::error_install_runtime_unsupported(
+                locale,
+                &(detected),
+                &(harness),
+                &(super::runtime::runtime_hint_for(*harness, minimum, locale)),
+                &(minimum),
+            ),
+            Self::RuntimeUnparseable {
+                harness,
+                detected,
+                minimum,
+                hint: _,
+            } => m::error_install_runtime_unparseable(
+                locale,
+                &(detected),
+                &(harness),
+                &(super::runtime::runtime_hint_for(*harness, minimum, locale)),
+                &(minimum),
+            ),
+            Self::DownloadStart {
+                harness,
+                url,
+                source,
+            } => m::error_install_download_start(locale, &(harness), &(source), &(url)),
+            Self::PrepareInstaller { harness, source } => {
+                m::error_install_prepare_installer(locale, &(harness), &(source))
+            }
+            Self::InstallerStart {
+                harness,
+                interpreter,
+                source,
+            } => m::error_install_installer_start(locale, &(harness), &(interpreter), &(source)),
+            Self::DownloadFailed { harness, exit_code } => m::error_install_download_failed(
+                locale,
+                &(harness),
+                &(exit_code.map_or_else(String::new, |code| m::error_exit_code(locale, &code))),
+            ),
+            Self::InstallerFailed {
+                harness,
+                interpreter,
+                exit_code,
+            } => m::error_install_installer_failed(
+                locale,
+                &(harness),
+                &(interpreter),
+                &(exit_code.map_or_else(String::new, |code| m::error_exit_code(locale, &code))),
+            ),
+            Self::CommandStart {
+                harness,
+                program,
+                source,
+            } => m::error_install_command_start(locale, &(harness), &(program), &(source)),
+            Self::CommandFailed {
+                harness,
+                program,
+                exit_code,
+            } => m::error_install_command_failed(
+                locale,
+                &(harness),
+                &(program),
+                &(exit_code.map_or_else(String::new, |code| m::error_exit_code(locale, &code))),
+            ),
+            Self::PostInstallCheckStart {
+                harness,
+                command,
+                source,
+            } => {
+                m::error_install_post_install_check_start(locale, &(command), &(harness), &(source))
+            }
+            Self::PostInstallCheckPrepare { harness, source } => {
+                m::error_install_post_install_check_prepare(locale, &(harness), &(source))
+            }
+            Self::PostInstallCheckFailed {
+                harness,
+                command,
+                exit_code,
+                details,
+            } => m::error_install_post_install_check_failed(
+                locale,
+                &(command),
+                &(details),
+                &(harness),
+                &(exit_code.map_or_else(String::new, |code| m::error_exit_code(locale, &code))),
+            ),
+        }
     }
 }

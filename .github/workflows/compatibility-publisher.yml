@@ -12,11 +12,13 @@ permissions:
 # Every request is durable before this mutex. GitHub may replace a pending job,
 # but its next writer still drains all unfinished requests from the state branch.
 concurrency:
-  group: compatibility-publication-writer
+  group: release-channel-${{ github.repository }}
   cancel-in-progress: false
 
 jobs:
   drain:
+    # Quarantined: main owns the active daily/release publication writer.
+    if: ${{ false }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 120
     environment: compatibility-publication

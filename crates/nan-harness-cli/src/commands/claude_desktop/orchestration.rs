@@ -38,9 +38,19 @@ pub(super) fn restore_command(
         return Err(ClaudeDesktopError::AlreadyRunning.into());
     }
     match restore_receipt(paths) {
-        Ok(()) => eprintln!("Claude Desktop configuration restored."),
+        Ok(()) => eprintln!(
+            "{}",
+            nan_harness_i18n::messages::orchestration_claude_desktop_configuration_restored(
+                nan_harness_i18n::locale()
+            )
+        ),
         Err(ClaudeDesktopError::NoReceipt) => {
-            eprintln!("No Claude Desktop session needs recovery.");
+            eprintln!(
+                "{}",
+                nan_harness_i18n::messages::orchestration_no_claude_desktop_session_needs_recovery(
+                    nan_harness_i18n::locale()
+                )
+            );
         }
         Err(error) => return Err(error.into()),
     }
@@ -89,9 +99,11 @@ pub(super) async fn run_ready_session(
 
 pub(super) fn launch_message(show_auto: bool) -> &'static str {
     if show_auto {
-        "Claude Desktop launched through NaN. Auto traces will appear here and may contain private data."
+        nan_harness_i18n::messages::terminal_claude_desktop_launched_through_nan_auto_traces_will_appear_here_and_may_contain_priv_text(nan_harness_i18n::locale())
     } else {
-        "Claude Desktop launched through NaN."
+        nan_harness_i18n::messages::terminal_claude_desktop_launched_through_nan_text(
+            nan_harness_i18n::locale(),
+        )
     }
 }
 
@@ -100,7 +112,7 @@ async fn log_bridge_activities(mut activities: tokio::sync::broadcast::Receiver<
         match activities.recv().await {
             Ok(activity) => eprintln!("{}", render_bridge_activity(&activity)),
             Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
-                eprintln!("[Auto] {skipped} permission review events were omitted.");
+                eprintln!("{}", nan_harness_i18n::messages::orchestration_auto_permission_review_events_were_omitted(nan_harness_i18n::locale(), &(skipped)));
             }
             Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
         }
@@ -110,7 +122,7 @@ async fn log_bridge_activities(mut activities: tokio::sync::broadcast::Receiver<
 pub(super) fn render_bridge_activity(activity: &BridgeActivity) -> String {
     match activity {
         BridgeActivity::AuthenticatedClient => {
-            "[Bridge] Claude Desktop authenticated to the isolated NaN bridge.".to_owned()
+            nan_harness_i18n::messages::terminal_bridge_claude_desktop_authenticated_to_the_isolated_nan_bridge_text(nan_harness_i18n::locale()).to_owned()
         }
         BridgeActivity::ClaudeAutoModeReview {
             review_id,
@@ -119,31 +131,23 @@ pub(super) fn render_bridge_activity(activity: &BridgeActivity) -> String {
             request,
         } => {
             let stage = match stage {
-                ClaudeAutoModeReviewStage::Initial => "stage 1",
-                ClaudeAutoModeReviewStage::FollowUp => "stage 2",
+                ClaudeAutoModeReviewStage::Initial => nan_harness_i18n::messages::terminal_stage_1_text(nan_harness_i18n::locale()),
+                ClaudeAutoModeReviewStage::FollowUp => nan_harness_i18n::messages::terminal_stage_2_text(nan_harness_i18n::locale()),
             };
-            format!(
-                "[Auto #{review_id}] Claude requested a permission review ({stage}, classifier {model_id}).\n[Auto #{review_id}] NaN request:\n{}",
-                render_trace_payload(request)
-            )
+            nan_harness_i18n::messages::terminal_auto_claude_requested_a_permission_review_classifier_auto_nan_request(nan_harness_i18n::locale(), &(model_id), &(review_id), &(stage), &(render_trace_payload(request)))
         }
         BridgeActivity::ClaudeAutoModeReviewResponse {
             review_id,
             status,
             response,
         } => {
-            format!(
-                "[Auto #{review_id}] NaN response (HTTP {status}):\n{}",
-                render_trace_payload(response)
-            )
+            nan_harness_i18n::messages::terminal_auto_nan_response_http(nan_harness_i18n::locale(), &(review_id), &(status), &(render_trace_payload(response)))
         }
         BridgeActivity::ClaudeAutoModeReviewFailed {
             review_id,
             error_code,
         } => {
-            format!(
-                "[Auto #{review_id}] NaN request failed before a response was received ({error_code})."
-            )
+            nan_harness_i18n::messages::terminal_auto_nan_request_failed_before_a_response_was_received(nan_harness_i18n::locale(), &(error_code), &(review_id))
         }
     }
 }

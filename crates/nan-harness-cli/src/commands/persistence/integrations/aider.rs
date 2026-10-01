@@ -1,24 +1,35 @@
 use super::super::{
     AIDER_BLOCK_BEGIN, AIDER_BLOCK_END, AIDER_METADATA_RELATIVE_PATH, AIDER_SETTINGS_RELATIVE_PATH,
     IntegrationChange, ManagedAider, ManagedBlockFormat, PersistenceError, PersistenceManager,
-    RemovalOutcome, aider_model_metadata, aider_model_settings, apply_prepared_file_change,
-    inspect_managed_block, inspect_managed_json_entries, optional_utf8, permissions,
-    prepare_json_entries, prepare_json_entries_removal, prepare_managed_block,
-    prepare_managed_block_removal, read_optional, rollback_file, rollback_prepared_file_change,
-    write_private_file,
+    RemovalOutcome, aider_model_metadata, aider_model_settings, inspect_managed_block,
+    inspect_managed_json_entries, optional_utf8, permissions, prepare_json_entries,
+    prepare_json_entries_removal, prepare_managed_block, prepare_managed_block_removal,
+    read_optional,
 };
 use crate::commands::persistence::ConfigurationHealth;
+use crate::commands::persistence::PreparedFileChange;
 use nan_harness_core::CodingModelProfile;
 
 impl PersistenceManager {
+    #[cfg(test)]
     pub(crate) fn configure_aider(
         &self,
         models: &[CodingModelProfile],
         provider_base_url: &str,
     ) -> Result<IntegrationChange, PersistenceError> {
+        let (files, change) = self.prepare_aider(models, provider_base_url)?;
+        self.publish_configuration_files(&files)?;
+        Ok(change)
+    }
+
+    pub(crate) fn prepare_aider(
+        &self,
+        models: &[CodingModelProfile],
+        provider_base_url: &str,
+    ) -> Result<(Vec<PreparedFileChange>, IntegrationChange), PersistenceError> {
         let settings_body = aider_model_settings(models, provider_base_url)?;
         let metadata_entries = aider_model_metadata(models);
-        let mut state = self.load_state()?;
+        let (mut state, receipt) = self.prepare_state()?;
         let settings_path = state.aider.as_ref().map_or_else(
             || self.home_directory.join(AIDER_SETTINGS_RELATIVE_PATH),
             |managed| managed.settings.path.clone(),
@@ -54,72 +65,66 @@ impl PersistenceManager {
         )?;
         let settings_changed = settings_source != rendered_settings;
         let metadata_changed = metadata_source != rendered_metadata;
-        if settings_changed {
-            write_private_file(
-                &settings_path,
-                rendered_settings.as_bytes(),
-                settings_permissions.as_ref(),
-            )?;
-        }
-        if metadata_changed
-            && let Err(error) = write_private_file(
-                &metadata_path,
-                rendered_metadata.as_bytes(),
-                metadata_permissions.as_ref(),
-            )
-        {
-            rollback_file(
-                &settings_path,
-                original_settings.as_deref(),
-                settings_permissions.as_ref(),
-            );
-            return Err(error);
-        }
         state.aider = Some(ManagedAider {
             settings: managed_settings,
             metadata: managed_metadata,
         });
-        if let Err(error) = self.save_state(&state) {
-            rollback_file(
-                &settings_path,
-                original_settings.as_deref(),
-                settings_permissions.as_ref(),
-            );
-            rollback_file(
-                &metadata_path,
-                original_metadata.as_deref(),
-                metadata_permissions.as_ref(),
-            );
-            return Err(error);
-        }
-        Ok(IntegrationChange {
-            path: settings_path,
-            additional_paths: vec![metadata_path],
-            backup: None,
-            changed: settings_changed || metadata_changed,
-        })
+        let files = Self::prepare_integration_files(
+            vec![
+                PreparedFileChange {
+                    path: settings_path.clone(),
+                    original: original_settings,
+                    replacement_permissions: settings_permissions.clone(),
+                    original_permissions: settings_permissions,
+                    replacement: Some(rendered_settings.into_bytes()),
+                },
+                PreparedFileChange {
+                    path: metadata_path.clone(),
+                    original: original_metadata,
+                    replacement_permissions: metadata_permissions.clone(),
+                    original_permissions: metadata_permissions,
+                    replacement: Some(rendered_metadata.into_bytes()),
+                },
+            ],
+            &state,
+            receipt,
+        )?;
+        Ok((
+            files,
+            IntegrationChange {
+                path: settings_path,
+                additional_paths: vec![metadata_path],
+                backup: None,
+                changed: settings_changed || metadata_changed,
+            },
+        ))
     }
 
     pub(crate) fn unpersist_aider(&self) -> Result<RemovalOutcome, PersistenceError> {
-        let mut state = self.load_state()?;
+        let (files, outcome) = self.prepare_remove_aider()?;
+        self.publish_configuration_files(&files)?;
+        Ok(outcome)
+    }
+
+    pub(crate) fn prepare_remove_aider(
+        &self,
+    ) -> Result<(Vec<PreparedFileChange>, RemovalOutcome), PersistenceError> {
+        let (mut state, receipt) = self.prepare_state()?;
         let Some(managed) = state.aider.clone() else {
-            return Ok(RemovalOutcome::NotConfigured);
+            return Ok((Vec::new(), RemovalOutcome::NotConfigured));
         };
         let settings_change =
             prepare_managed_block_removal(&managed.settings, AIDER_BLOCK_BEGIN, AIDER_BLOCK_END)?;
         let metadata_change = prepare_json_entries_removal(&managed.metadata)?;
-        apply_prepared_file_change(&settings_change)?;
-        if let Err(error) = apply_prepared_file_change(&metadata_change) {
-            rollback_prepared_file_change(&settings_change);
-            return Err(error);
-        }
         state.aider = None;
-        if let Err(error) = self.save_state(&state) {
-            rollback_prepared_file_change(&settings_change);
-            rollback_prepared_file_change(&metadata_change);
-            return Err(error);
-        }
-        Ok(RemovalOutcome::Removed)
+        Ok((
+            Self::prepare_integration_files(
+                vec![settings_change, metadata_change],
+                &state,
+                receipt,
+            )?,
+            RemovalOutcome::Removed,
+        ))
     }
 
     #[cfg(test)]

@@ -12,6 +12,8 @@ use std::fmt;
 pub const BRIDGE_BASE_URL_PLACEHOLDER: &str = "{runtime:bridge_base_url}";
 pub const FX_GATEWAY_CHAT_URL_PLACEHOLDER: &str = "{runtime:bridge_chat_url}";
 pub const PROVIDER_BASE_URL_PLACEHOLDER: &str = "{runtime:provider_base_url}";
+pub const MEDIA_PROVIDER_BASE_URL_PLACEHOLDER: &str = "{runtime:media_provider_base_url}";
+pub const MEDIA_CREDENTIAL_ENVIRONMENT: &str = "NAN_MEDIA_API_KEY";
 pub const CLAUDE_AVAILABLE_MODELS_PLACEHOLDER: &str = "{runtime:claude_available_models}";
 pub const CLAUDE_MODEL_PICKER_PLACEHOLDER: &str = "{runtime:claude_model_picker}";
 pub const CLAUDE_MODEL_PRESENTATIONS_PLACEHOLDER: &str = "{runtime:claude_model_presentations}";
@@ -90,15 +92,17 @@ impl ContextLimit {
         if requested_tokens == 0 {
             return Err(PlanError::InvalidField {
                 field: "context",
-                message: "must be a positive token count".to_owned(),
+                message: nan_harness_i18n::DiagnosticText::new(
+                    nan_harness_i18n::messages::detail_must_be_a_positive_token_count,
+                ),
             });
         }
         if effective_context_window == 0 || requested_tokens >= effective_context_window {
             return Err(PlanError::InvalidField {
                 field: "context",
-                message: format!(
-                    "must be less than the effective context window ({effective_context_window} tokens)"
-                ),
+                message: nan_harness_i18n::DiagnosticText::new(|locale| {
+                    nan_harness_i18n::messages::detail_must_be_less_than_the_effective_context_window_effective_context_window_tokens(locale, &(effective_context_window))
+                }),
             });
         }
         let native = match kind {
@@ -111,7 +115,9 @@ impl ContextLimit {
             _ => {
                 return Err(PlanError::InvalidField {
                     field: "context",
-                    message: format!("{kind} does not support native compaction overrides"),
+                    message: nan_harness_i18n::DiagnosticText::new(|locale| {
+                        nan_harness_i18n::messages::detail_kind_does_not_support_native_compaction_overrides(locale, &(kind))
+                    }),
                 });
             }
         };
@@ -136,15 +142,17 @@ impl ContextLimit {
         if requested_tokens == 0 {
             return Err(PlanError::InvalidField {
                 field: "context",
-                message: "must be a positive token count".to_owned(),
+                message: nan_harness_i18n::DiagnosticText::new(
+                    nan_harness_i18n::messages::detail_must_be_a_positive_token_count,
+                ),
             });
         }
         if effective_context_window == 0 || requested_tokens >= effective_context_window {
             return Err(PlanError::InvalidField {
                 field: "context",
-                message: format!(
-                    "must be less than the effective context window ({effective_context_window} tokens)"
-                ),
+                message: nan_harness_i18n::DiagnosticText::new(|locale| {
+                    nan_harness_i18n::messages::detail_must_be_less_than_the_effective_context_window_effective_context_window_tokens(locale, &(effective_context_window))
+                }),
             });
         }
         let native = match kind {
@@ -190,7 +198,9 @@ impl ContextLimit {
             | HarnessKind::Fx => {
                 return Err(PlanError::InvalidField {
                     field: "context",
-                    message: format!("{kind} does not support native compaction overrides"),
+                    message: nan_harness_i18n::DiagnosticText::new(|locale| {
+                        nan_harness_i18n::messages::detail_kind_does_not_support_native_compaction_overrides(locale, &(kind))
+                    }),
                 });
             }
         };
@@ -247,7 +257,9 @@ impl LaunchId {
         } else {
             Err(PlanError::InvalidField {
                 field: "launchId",
-                message: "must match ^launch_[a-z0-9]{12,64}$".to_owned(),
+                message: nan_harness_i18n::DiagnosticText::new(
+                    nan_harness_i18n::messages::detail_must_match_launch_a_z0_9_12_64,
+                ),
             })
         }
     }

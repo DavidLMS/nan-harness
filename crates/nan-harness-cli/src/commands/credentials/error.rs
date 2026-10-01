@@ -60,7 +60,7 @@ pub(crate) enum CredentialError {
     #[error("logout choice must be 1, 2, or 3")]
     InvalidLogoutChoice,
     #[error("could not update managed harness configurations: {0}")]
-    ConfigurationOperation(String),
+    ConfigurationOperation(#[source] nan_harness_i18n::ErrorCause),
     #[error("could not store the NaN API key: {0}")]
     State(#[from] PersistenceError),
     #[error("the NaN API key is invalid: {0}")]
@@ -108,6 +108,83 @@ impl CredentialError {
             | Self::InvalidLogoutChoice
             | Self::ConfigurationOperation(_)
             | Self::State(_) => "NH-CREDENTIAL-003",
+        }
+    }
+}
+
+// Terminal localization is separate from canonical Display used by machine contracts.
+impl nan_harness_i18n::TerminalMessage for CredentialError {
+    fn terminal_message(&self, locale: nan_harness_i18n::Locale) -> String {
+        use nan_harness_i18n::messages as m;
+        if locale == nan_harness_i18n::Locale::En {
+            return self.to_string();
+        }
+        match self {
+            Self::MissingCredential => m::error_credential_missing_credential(locale),
+            Self::MissingSavedCredential => m::error_credential_missing_saved_credential(locale),
+            Self::InteractiveLoginRequired => {
+                m::error_credential_interactive_login_required(locale)
+            }
+            Self::MissingConfigDirectory => m::error_credential_missing_config_directory(locale),
+            Self::InvalidConfigDirectory(field_0) => {
+                m::error_credential_invalid_config_directory(locale, &(field_0.display()))
+            }
+            Self::InvalidBackend(field_0) => {
+                m::error_credential_invalid_backend(locale, &(field_0))
+            }
+            Self::NonUnicodeBackend => m::error_credential_non_unicode_backend(locale),
+            Self::Prompt(field_0) => m::error_credential_prompt(locale, &(field_0)),
+            Self::Keyring(field_0) => m::error_credential_keyring(locale, &(field_0)),
+            Self::ReadFile { path, source } => {
+                m::error_credential_read_file(locale, &(source), &(path.display()))
+            }
+            Self::RemoveFile { path, source } => {
+                m::error_credential_remove_file(locale, &(source), &(path.display()))
+            }
+            Self::ParseReceipt(field_0) => m::error_credential_parse_receipt(locale, &(field_0)),
+            Self::UnsupportedReceiptSchema(field_0) => {
+                m::error_credential_unsupported_receipt_schema(locale, &(field_0))
+            }
+            Self::SerializeReceipt(field_0) => {
+                m::error_credential_serialize_receipt(locale, &(field_0))
+            }
+            Self::ParseVerificationReceipt(field_0) => {
+                m::error_credential_parse_verification_receipt(locale, &(field_0))
+            }
+            Self::SerializeVerificationReceipt(field_0) => {
+                m::error_credential_serialize_verification_receipt(locale, &(field_0))
+            }
+            Self::SystemTime(field_0) => m::error_credential_system_time(locale, &(field_0)),
+            Self::LogoutConfirmationRequired => {
+                m::error_credential_logout_confirmation_required(locale)
+            }
+            Self::LogoutModeRequired => m::error_credential_logout_mode_required(locale),
+            Self::InvalidLogoutChoice => m::error_credential_invalid_logout_choice(locale),
+            Self::ConfigurationOperation(field_0) => m::error_credential_configuration_operation(
+                locale,
+                &(nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)),
+            ),
+            Self::State(field_0) => m::error_credential_state(
+                locale,
+                &(nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)),
+            ),
+            Self::Secret(field_0) => m::error_credential_secret(
+                locale,
+                &(nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)),
+            ),
+            Self::Config(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+            Self::Verification(field_0) => m::error_credential_verification(
+                locale,
+                &(if super::verification::is_rejected(self) {
+                    m::credential_recovery_hint(locale)
+                } else {
+                    String::new()
+                }),
+                &(nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)),
+            ),
+            Self::VerificationTimeout => m::error_credential_verification_timeout(locale),
         }
     }
 }

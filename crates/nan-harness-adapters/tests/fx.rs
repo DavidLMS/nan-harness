@@ -54,6 +54,7 @@ fn context(arguments: Vec<String>) -> PlanContext {
         working_directory: "/tmp".to_owned(),
         user_arguments: arguments,
         web_search_policy: WebSearchPolicy::Auto,
+        media: nan_harness_core::MediaSelection::none(),
         observability_format: ObservabilityFormat::Human,
         session_max_tokens: None,
         context_limit: None,

@@ -99,10 +99,10 @@ pub(super) async fn wait_for_relaunch(
             signal = signals.recv() => {
                 let code = signal.unwrap_or(143);
                 if update_interrupt_requests_exit(code, &mut interrupt_seen) {
-                    eprintln!("NaN is exiting before Hermes Desktop relaunches. Run `nanh hermes-desktop --restore` after the update finishes.");
+                    eprintln!("{}", nan_harness_i18n::messages::supervision_nan_is_exiting_before_hermes_desktop_relaunches_run_nanh_hermes_desktop_res(nan_harness_i18n::locale()));
                     return Ok(RelaunchWaitCompletion::PreserveRecovery(code));
                 }
-                eprintln!("Hermes has finished updating and is relaunching. Press Ctrl+C again to exit NaN and preserve recovery state.");
+                eprintln!("{}", nan_harness_i18n::messages::supervision_hermes_has_finished_updating_and_is_relaunching_press_ctrl_c_again_to_exit(nan_harness_i18n::locale()));
             }
             gateway_result = gateway.wait() => {
                 return Err(gateway_result.err().unwrap_or(HermesDesktopError::GatewayExited));

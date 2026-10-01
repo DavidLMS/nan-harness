@@ -42,10 +42,58 @@ pub enum SearchPolicyError {
         #[source]
         source: toml::de::Error,
     },
+    #[error("web search configuration '{}' is not valid YAML", path.display())]
+    ParseYaml {
+        path: PathBuf,
+        #[source]
+        source: serde_yaml_ng::Error,
+    },
     #[error("could not inspect TOML web search configuration '{}': {source}", path.display())]
     ConvertToml {
         path: PathBuf,
         #[source]
         source: serde_json::Error,
     },
+}
+
+// Terminal localization is separate from canonical Display used by machine contracts.
+impl nan_harness_i18n::TerminalMessage for SearchPolicyError {
+    fn terminal_message(&self, locale: nan_harness_i18n::Locale) -> String {
+        use nan_harness_i18n::messages as m;
+        if locale == nan_harness_i18n::Locale::En {
+            return self.to_string();
+        }
+        match self {
+            Self::LoadConfiguration(field_0) => m::error_search_policy_load_configuration(
+                locale,
+                &(nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)),
+            ),
+            Self::MissingHomeDirectory => m::error_search_policy_missing_home_directory(locale),
+            Self::UnsupportedHarness(field_0) => {
+                m::error_search_policy_unsupported_harness(locale, &(field_0))
+            }
+            Self::RequiresDirectGateway => m::error_search_policy_requires_direct_gateway(locale),
+            Self::McpNameCollision(field_0) => {
+                m::error_search_policy_mcp_name_collision(locale, &(field_0.display()))
+            }
+            Self::ReadConfiguration { path, source } => {
+                m::error_search_policy_read_configuration(locale, &(source), &(path.display()))
+            }
+            Self::ConfigurationTooLarge(field_0) => {
+                m::error_search_policy_configuration_too_large(locale, &(field_0.display()))
+            }
+            Self::ParseJson { path, source } => {
+                m::error_search_policy_parse_json(locale, &(source), &(path.display()))
+            }
+            Self::ParseToml { path, source } => {
+                m::error_search_policy_parse_toml(locale, &(source), &(path.display()))
+            }
+            Self::ParseYaml { path, .. } => {
+                m::error_search_policy_parse_yaml(locale, &(path.display()))
+            }
+            Self::ConvertToml { path, source } => {
+                m::error_search_policy_convert_toml(locale, &(source), &(path.display()))
+            }
+        }
+    }
 }

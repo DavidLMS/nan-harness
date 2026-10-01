@@ -23,7 +23,8 @@ the harness's own experience; prefer useful feedback and less user friction.
   prompts and output private. Distinguish actionable compatibility failures
   from advisory ecosystem drift. Test observable behavior and meaningful
   failure cases, rather than implementation details or incidental wording.
-- Keep code, documentation, user-facing copy and Git history in English.
+- Keep code, documentation, source messages and Git history in English.
+  Translated terminal messages belong in the locale catalogs.
   Use focused imperative Conventional Commits (`type(scope): summary`).
   Match the repository's author identity; do not add AI/coauthor/session trailers.
 

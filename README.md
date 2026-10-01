@@ -21,6 +21,10 @@ start the harness directly.
 
 It works with the harnesses you already use.
 
+For Hermes and OpenClaw, `--image-model qwen-image-2.1` enables NaN image
+generation with Qwen as the default. Use `--image` for Flux, or ask the agent
+to use either model for an individual image. See [image generation](#image-generation).
+
 ## Supported harnesses
 
 | Recommended command | Harness | Transport | Native setup |
@@ -40,6 +44,12 @@ It works with the harnesses you already use.
 | `nanh prime-agent` | [Prime Agent](https://github.com/PrimeIntellect-ai/prime-agent) | OpenAI Chat Completions | Optional |
 | `nanh dsh` | [DeepSeek Harness](https://deepseek.com/harness/en/) | OpenAI Chat Completions | Optional |
 | `nanh fx` | [fx](https://fx.sh/) | fx AI Gateway bridge | Not available |
+
+Prime Agent and fx do not yet support Windows upstream. On Windows,
+`nanh prime` and `nanh fx` explain this before searching for an executable or
+trying to install one. When a Windows build becomes available, you can try it
+with `nanh <harness> --executable <path>`; the usual version and launch checks
+still apply. Linux and macOS launches are unchanged.
 
 Harnesses that use OpenAI Chat Completions use an authenticated local gateway by
 default. This enables features such as reporting token usage when a session ends.
@@ -283,7 +293,7 @@ instance you trust.
 Choose one backend:
 
 - `--local` installs and supervises a private loopback SearXNG instance on
-  supported macOS, Linux, and Windows x64 targets. Python 3.10 or newer and
+  supported macOS, Linux, and Windows x64 targets. Python 3.11 or newer and
   `tar` must be on `PATH` (`python.exe` on Windows, `python3` elsewhere).
 - `--docker` creates and manages an owned SearXNG container through Docker.
 - `--url https://...` uses an HTTPS SearXNG endpoint managed elsewhere.
@@ -402,6 +412,41 @@ Older Desktop clients need a one-time upgrade to support this feed. New evidence
 can confirm compatibility with a newer harness, but protocol changes that require
 an adapter fix still need a nan-harness release. See the
 [compatibility feed reference](canary/compatibility-feed.md).
+
+## Image generation
+
+Hermes and OpenClaw use their native image tool with NaN. Choose the default
+image model independently of the conversation's text model:
+
+```sh
+nanh hermes --image-model qwen-image-2.1
+nanh openclaw --image-model qwen-image-2.1
+nanh hermes --image
+```
+
+`--image-model` also enables images; no extra switch is needed. `--image` uses
+Flux 2 Klein, and the existing `--force-image` name remains supported.
+`--force-media --image-model qwen-image-2.1` enables speech and images together.
+
+Ask the agent "Generate a realistic product photo with Qwen Image" or "Edit
+this image with Flux" to select a model for that tool call. Omitting the model
+uses the configured default. A per-call selection does not change that default.
+
+| Model | Generate | Edit / references |
+| --- | --- | --- |
+| `flux-2-klein` | Yes | Yes, up to four references |
+| `qwen-image-2.1` | Yes | No |
+
+Qwen edits return an error directing the agent to Flux; the NaN plugin does not
+silently switch models. OpenClaw's native tool uses provider-qualified names:
+`nan-harness/flux-2-klein` and `nan-harness/qwen-image-2.1`.
+
+To save the default for direct native launches, use
+`nanh config hermes --image-model qwen-image-2.1` or the equivalent OpenClaw
+command. Refresh preserves the selection; removal restores prior user settings.
+Hermes's managed image plugin extends `image_generate` with a model parameter,
+using its scoped tool override permission and retaining native reference
+confinement and result delivery.
 
 ## Advanced: native setup
 

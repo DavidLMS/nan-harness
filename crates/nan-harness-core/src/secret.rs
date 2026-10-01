@@ -155,3 +155,20 @@ fn is_valid_secret_ref(value: &str) -> bool {
             character.is_ascii_lowercase() || character.is_ascii_digit() || character == '_'
         })
 }
+
+// Terminal localization is separate from canonical Display used by machine contracts.
+impl nan_harness_i18n::TerminalMessage for SecretError {
+    fn terminal_message(&self, locale: nan_harness_i18n::Locale) -> String {
+        use nan_harness_i18n::messages as m;
+        if locale == nan_harness_i18n::Locale::En {
+            return self.to_string();
+        }
+        match self {
+            Self::InvalidReference(_) => m::error_secret_invalid_reference(locale),
+            Self::EmptyValue => m::error_secret_empty_value(locale),
+            Self::MissingReference(field_0) => {
+                m::error_secret_missing_reference(locale, &(field_0))
+            }
+        }
+    }
+}

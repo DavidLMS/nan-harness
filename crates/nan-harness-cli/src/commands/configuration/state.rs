@@ -1,5 +1,5 @@
 use super::STATE_SCHEMA_VERSION;
-use nan_harness_core::WebSearchPolicy;
+use nan_harness_core::{MediaSelection, WebSearchPolicy};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use serde_yaml_ng::Value as YamlValue;
@@ -33,6 +33,8 @@ pub(crate) struct HarnessReceipt {
     pub(crate) search_policy: WebSearchPolicy,
     #[serde(default)]
     pub(crate) search_managed: bool,
+    #[serde(default)]
+    pub(crate) media: MediaSelection,
     pub(crate) documents: Vec<DocumentReceipt>,
 }
 
@@ -141,6 +143,7 @@ pub(crate) struct ConfigurationChange {
     pub(crate) paths: Vec<PathBuf>,
     pub(crate) model_count: usize,
     pub(crate) search: ManagedSearchStatus,
+    pub(crate) media: MediaSelection,
 }
 
 #[derive(Debug, Clone, Copy)]

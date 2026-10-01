@@ -1,5 +1,7 @@
 use nan_harness_core::CodingModelProfile;
 use nan_harness_core::model::ReasoningPolicy;
+use nan_harness_i18n::DiagnosticText;
+use nan_harness_i18n::messages as detail_messages;
 
 use super::{effort_name, model_input, reasoning_capable};
 
@@ -108,14 +110,20 @@ pub(in crate::prepared) fn replace_json_placeholder(
     target: &mut String,
     placeholder: &str,
     value: &serde_json::Value,
-) -> Result<(), String> {
+) -> Result<(), DiagnosticText> {
     if !target.contains(placeholder) {
         return Ok(());
     }
-    let encoded = serde_json::to_string(value)
-        .map_err(|error| format!("could not serialize the NaN model catalog: {error}"))?;
-    let quoted = serde_json::to_string(placeholder)
-        .map_err(|error| format!("could not serialize a model catalog placeholder: {error}"))?;
+    let encoded = serde_json::to_string(value).map_err(|error| {
+        DiagnosticText::new(|locale| {
+            detail_messages::detail_serialize_the_nan_model_catalog_failed(locale, &(error))
+        })
+    })?;
+    let quoted = serde_json::to_string(placeholder).map_err(|error| {
+        DiagnosticText::new(|locale| {
+            detail_messages::detail_serialize_a_model_catalog_placeholder_failed(locale, &(error))
+        })
+    })?;
     *target = target
         .replace(&quoted, &encoded)
         .replace(placeholder, &encoded);

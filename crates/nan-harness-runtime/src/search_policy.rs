@@ -5,6 +5,8 @@ mod errors;
 mod inspection;
 mod policy;
 mod signal;
+#[cfg(test)]
+mod yaml_tests;
 
 use nan_harness_core::HarnessKind;
 use std::collections::BTreeSet;

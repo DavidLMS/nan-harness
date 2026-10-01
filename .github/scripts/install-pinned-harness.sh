@@ -201,8 +201,13 @@ case "$harness_id" in
     append_path "$HOME/.local/bin"
     ;;
   deepseek-harness)
+    arguments=(--allow-scripts='@deepseek-ai/dsh-subprocess-local,koffi,node-pty,@google/genai,protobufjs')
+    # Keep the rc.2 dependency graph before the incomplete rc.3 publication.
+    if [ "$(package_version)" = '0.1.5-rc.2' ]; then
+      arguments+=(--before=2026-09-22T00:00:00Z)
+    fi
     npm install --global \
-      --allow-scripts='@deepseek-ai/dsh-subprocess-local,koffi,node-pty,@google/genai,protobufjs' \
+      "${arguments[@]}" \
       "@deepseek-ai/dsh@$(package_version)"
     ;;
   openclaw)

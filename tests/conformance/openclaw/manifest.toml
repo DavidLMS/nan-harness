@@ -1,9 +1,10 @@
 schema_version = 1
 harness = "openclaw"
-profile = "Local agent mode with optional media credentials cleared"
+profile = "Local agent mode with NaN media enabled and optional external media credentials cleared"
 last_verified_version = "2026.9.2"
 inventory = [
   "agents_list",
+  "agents_wait",
   "apply_patch",
   "ask_user",
   "automations",
@@ -23,6 +24,7 @@ inventory = [
   "file_write",
   "gateway",
   "get_goal",
+  "image_generate",
   "intent",
   "memory_get",
   "memory_search",

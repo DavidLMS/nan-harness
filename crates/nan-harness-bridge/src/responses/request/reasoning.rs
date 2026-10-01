@@ -67,7 +67,9 @@ pub(super) fn apply_reasoning_parameter(
 ) {
     match selection {
         ReasoningSelection::Toggle(enabled)
-            if model_id.starts_with("qwen") || model_id.starts_with("gemma") =>
+            if model_id.starts_with("qwen")
+                || model_id.starts_with("gemma")
+                || model_id == "mimo-v2.6-flash" =>
         {
             body.insert(
                 "chat_template_kwargs".to_owned(),

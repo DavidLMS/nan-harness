@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Select bounded native suite jobs before reserving their runners."""
+"""Validate and expand the hosted CLI matrix before runner use."""
 
 import argparse
 import json
@@ -12,31 +12,105 @@ CLI_HARNESSES = (
     "deepseek-harness", "openclaw", "cline", "qwen-code", "kimi-code", "aider",
     "goose", "fx",
 )
-DESKTOP_HARNESSES = (
-    "chatgpt-desktop", "claude-desktop", "hermes-desktop", "pen-desktop", "zed-desktop",
-)
-SYSTEMS = ("linux", "macos", "windows")
+# One entry per hosted platform: the runner label that provides it, the architecture
+# a cell must prove on that runner, and the Rust target whose release asset carries it.
+PLATFORMS = {
+    "linux": {"runner": "ubuntu-24.04-arm", "architecture": "aarch64",
+              "target": "aarch64-unknown-linux-musl"},
+    "macos": {"runner": "macos-14", "architecture": "aarch64",
+              "target": "aarch64-apple-darwin"},
+    "windows": {"runner": "windows-2025", "architecture": "x86_64",
+                "target": "x86_64-pc-windows-msvc"},
+}
+SYSTEMS = tuple(PLATFORMS)
+# Explicit maintainer policy until official native Windows distributions exist.
+# This is availability, not qualification: other Windows harnesses still need live evidence.
+WINDOWS_UNAVAILABLE = frozenset(("prime-agent", "fx"))
+WINDOWS_SKIP_REASON = "official-windows-distribution-unavailable"
 DEFAULT_MODEL = "qwen3.6"
 MODEL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}\Z")
-# Official support declaration reviewed 2026-09-12. Installer failures are not
-# grounds for adding an exclusion; reassess this entry if upstream adds Windows.
-UNSUPPORTED = {("cli", "windows", "fx"): "https://fx.sh/docs/getting-started/installation"}
+
+# Platforms whose evidence a harness must supply before its compatibility feed may
+# advance. The published feed keeps one platform-independent record per harness, so
+# a harness is qualified only when every available platform listed here passes.
+_BASE_PLATFORMS = ("linux", "macos")
+HARNESS_PLATFORMS = {
+    harness: _BASE_PLATFORMS if harness in WINDOWS_UNAVAILABLE else (*_BASE_PLATFORMS, "windows")
+    for harness in CLI_HARNESSES
+}
 
 
-def select_names(value, known, label):
-    """Accept all or a nonempty, duplicate-free comma-separated selection."""
-    names = [part.strip() for part in value.split(",")]
-    if names == ["all"]:
+def supported_platforms(harness):
+    """Platforms a harness must satisfy before the feed may advance it."""
+    if harness not in HARNESS_PLATFORMS:
+        raise ValueError("unknown CLI harness: " + harness)
+    return HARNESS_PLATFORMS[harness]
+
+
+def platform(architecture_system):
+    """The hosted platform table entry for a canonical system name."""
+    if architecture_system not in PLATFORMS:
+        raise ValueError("unknown hosted platform: " + str(architecture_system))
+    return PLATFORMS[architecture_system]
+
+
+def identity(system, architecture):
+    """Validate a platform/architecture pair and return its canonical table entry."""
+    entry = platform(system)
+    if architecture != entry["architecture"]:
+        raise ValueError(
+            "architecture must be " + entry["architecture"] + " on " + system)
+    return entry
+
+
+# Release assets one cell needs: the harness binary it qualifies plus the canary binary
+# that produces the evidence. A ``None`` canary records that the platform publishes no
+# canary asset yet, so qualifying a harness there fails closed until it exists.
+PLATFORM_ASSETS = {
+    "linux": {"harness": "nan-harness-aarch64-unknown-linux-musl",
+              "canary": "nan-harness-canary-aarch64-unknown-linux-musl"},
+    "macos": {"harness": "nan-harness-aarch64-apple-darwin",
+              "canary": "nan-harness-canary-aarch64-apple-darwin"},
+    "windows": {"harness": "nan-harness-x86_64-pc-windows-msvc.exe",
+                "canary": "nan-harness-canary-x86_64-pc-windows-msvc.exe"},
+}
+
+
+def qualified_platforms():
+    """Platforms the compatibility feed requires, from every harness support list."""
+    return tuple(sorted({system for harness in CLI_HARNESSES
+                         for system in supported_platforms(harness)}))
+
+
+def required_assets():
+    """Every release asset the qualified platforms need before qualification runs."""
+    assets = []
+    for system in qualified_platforms():
+        entry = PLATFORM_ASSETS[system]
+        assets.append(entry["harness"])
+        if entry["canary"] is not None:
+            assets.append(entry["canary"])
+    return tuple(assets)
+
+
+def qualified_identities():
+    """Canonical ``platform/harness`` identities the feed requires, one per cell."""
+    return {f"{system}/{harness}" for harness in CLI_HARNESSES
+            for system in supported_platforms(harness)}
+
+
+def _names(value, known, label):
+    values = [part.strip() for part in value.split(",")]
+    if values == ["all"]:
         return list(known)
-    if (not names or any(not name or name not in known for name in names)
-            or len(names) != len(set(names))):
+    if (not values or any(not value or value not in known for value in values)
+            or len(values) != len(set(values))):
         raise ValueError(f"{label} must be all or distinct known identifiers")
-    # Stable catalog order makes equivalent requests share the same identity.
-    return [name for name in known if name in names]
+    return [name for name in known if name in values]
 
 
 def resolve_model(requested="", configured=None):
-    """An explicit model wins over the repository default; never substitute one."""
+    """Resolve a bounded model identifier without accepting shell syntax."""
     if configured is None:
         configured = os.environ.get("CANARY_MODEL", "")
     model = requested or configured or DEFAULT_MODEL
@@ -45,39 +119,81 @@ def resolve_model(requested="", configured=None):
     return model
 
 
+def select_cli(platforms="all", harnesses="all", mode="deterministic", model=""):
+    """Return one independent cell per selected platform and harness.
+
+    An explicit dispatch may select any harness on any hosted platform, including a
+    harness that is not yet qualified there: the cell reports what it finds and the
+    feed keeps requiring only `supported_platforms`.
+    """
+    if mode not in ("deterministic", "live"):
+        raise ValueError("mode must be deterministic or live")
+    systems = _names(platforms.replace("both", "linux,macos") if platforms == "both" else platforms,
+                     SYSTEMS, "platforms")
+    selected = _names(harnesses, CLI_HARNESSES, "harnesses")
+    cells = []
+    skipped = []
+    for system in systems:
+        entry = PLATFORMS[system]
+        for harness in selected:
+            if system == "windows" and harness in WINDOWS_UNAVAILABLE:
+                skipped.append({"system": system, "harness": harness,
+                                "status": "skipped", "reason": WINDOWS_SKIP_REASON})
+                continue
+            cells.append({"system": system, "runner": entry["runner"],
+                          "architecture": entry["architecture"], "target": entry["target"],
+                          "harness": harness, "mode": mode})
+    return {"mode": mode, "model": resolve_model(model), "cells": cells, "skipped": skipped}
+
+
+# Desktop suites retain their native x64 Linux GUI target independently of the
+# CLI release matrix. The target suffix is consumed with architecture by desktop
+# release staging; CLI callers continue to use the full main target from platform().
+DESKTOP_HARNESSES = (
+    "chatgpt-desktop", "claude-desktop", "hermes-desktop", "pen-desktop", "zed-desktop",
+)
+
+
+def select_names(value, known, label):
+    """Canonical names for standalone suite and detector callers."""
+    return _names(value, known, label)
+
+
 def native_platform(suite, system):
-    if system == "linux":
-        if suite == "cli":
-            return {"system": system, "runner": "ubuntu-24.04-arm",
-                    "architecture": "aarch64", "target": "unknown-linux-musl"}
-        return {"system": system, "runner": "ubuntu-24.04",
-                "architecture": "x86_64", "target": "unknown-linux-musl"}
-    if system == "macos":
-        return {"system": system, "runner": "macos-15",
-                "architecture": "aarch64", "target": "apple-darwin"}
-    return {"system": system, "runner": "windows-2025",
-            "architecture": "x86_64", "target": "pc-windows-msvc"}
+    """Suite platform metadata, without altering the CLI release table."""
+    if suite not in ("cli", "desktop"):
+        raise ValueError("suite must be cli or desktop")
+    entry = dict(platform(system))
+    if suite == "desktop":
+        if system == "linux":
+            entry.update(runner="ubuntu-24.04", architecture="x86_64")
+        elif system == "macos":
+            entry["runner"] = "macos-15"
+    # Desktop staging and legacy grouped consumers combine arch and suffix.
+    entry["target"] = entry["target"].split("-", 1)[1]
+    return {"system": system, **entry}
 
 
 def select_suite(suite, platforms="all", harnesses="all", mode="deterministic", model=""):
+    """Grouped standalone suites; CLI availability follows the main policy."""
     if suite not in ("cli", "desktop"):
         raise ValueError("suite must be cli or desktop")
     if mode not in ("deterministic", "live"):
         raise ValueError("mode must be deterministic or live")
     catalog = CLI_HARNESSES if suite == "cli" else DESKTOP_HARNESSES
-    selected = select_names(harnesses, catalog, "harnesses")
-    systems = select_names(platforms, SYSTEMS, "platforms")
+    selected = _names(harnesses, catalog, "harnesses")
+    systems = _names(platforms, SYSTEMS, "platforms")
     jobs, unsupported = [], []
     for system in systems:
-        supported = []
+        available = []
         for harness in selected:
-            source = UNSUPPORTED.get((suite, system, harness))
-            if source:
-                unsupported.append({"platform": system, "harness": harness, "source": source})
+            if suite == "cli" and system == "windows" and harness in WINDOWS_UNAVAILABLE:
+                unsupported.append({"platform": system, "harness": harness,
+                                    "reason": WINDOWS_SKIP_REASON})
             else:
-                supported.append(harness)
-        if supported:
-            jobs.append({**native_platform(suite, system), "harnesses": supported})
+                available.append(harness)
+        if available:
+            jobs.append({**native_platform(suite, system), "harnesses": available})
     if not jobs:
         raise ValueError("selected harnesses have no upstream-supported native platform")
     return {"suite": suite, "mode": mode, "model": resolve_model(model),
@@ -86,17 +202,18 @@ def select_suite(suite, platforms="all", harnesses="all", mode="deterministic", 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--suite", required=True, choices=("cli", "desktop"))
+    parser.add_argument("--suite", choices=("cli", "desktop"))
     parser.add_argument("--platforms", default="all")
     parser.add_argument("--harnesses", default="all")
     parser.add_argument("--mode", default="deterministic")
     parser.add_argument("--model", default="")
     args = parser.parse_args()
     try:
-        selected = select_suite(args.suite, args.platforms, args.harnesses, args.mode, args.model)
+        result = (select_suite(args.suite, args.platforms, args.harnesses, args.mode, args.model)
+                  if args.suite else select_cli(args.platforms, args.harnesses, args.mode, args.model))
     except ValueError as error:
         parser.error(str(error))
-    print(json.dumps(selected, sort_keys=True))
+    print(json.dumps(result, sort_keys=True))
 
 
 if __name__ == "__main__":

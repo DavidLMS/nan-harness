@@ -116,14 +116,24 @@ where
         };
 
         let Ok(installation_id) = self.settings.diagnostic_installation_id() else {
-            let _ = writeln!(output, "{ERROR_REPORT_PREPARATION_FAILED_MESSAGE}");
+            let _ = writeln!(
+                output,
+                "{}",
+                nan_harness_i18n::messages::report_preparation_failed(nan_harness_i18n::locale())
+            );
             return DeliveryOutcome::Failed;
         };
 
         let mut overall = DeliveryOutcome::Sent;
         for context in contexts {
             let Some(report) = sanitized_report(context, consent, installation_id.clone()) else {
-                let _ = writeln!(output, "{ERROR_REPORT_PREPARATION_FAILED_MESSAGE}");
+                let _ = writeln!(
+                    output,
+                    "{}",
+                    nan_harness_i18n::messages::report_preparation_failed(
+                        nan_harness_i18n::locale()
+                    )
+                );
                 overall = DeliveryOutcome::Failed;
                 continue;
             };
@@ -245,16 +255,22 @@ fn write_delivery_status<W: Write>(
         DeliveryOutcome::Sent => {
             let _ = writeln!(
                 output,
-                "{ERROR_REPORT_SENT_MESSAGE}{}",
-                report.as_report().report_id()
+                "{}",
+                nan_harness_i18n::messages::report_sent(
+                    nan_harness_i18n::locale(),
+                    &report.as_report().report_id()
+                )
             );
         }
         DeliveryOutcome::Unavailable | DeliveryOutcome::Failed => {
             if pending.save(report).is_ok() {
                 let _ = writeln!(
                     output,
-                    "{ERROR_REPORT_QUEUED_MESSAGE}{}",
-                    report.as_report().report_id()
+                    "{}",
+                    nan_harness_i18n::messages::report_queued(
+                        nan_harness_i18n::locale(),
+                        &report.as_report().report_id()
+                    )
                 );
             }
         }
@@ -272,8 +288,11 @@ fn finalize_pending<W: Write>(
         let _ = pending.delete();
         let _ = writeln!(
             output,
-            "{ERROR_REPORT_SENT_MESSAGE}{}",
-            report.as_report().report_id()
+            "{}",
+            nan_harness_i18n::messages::report_sent(
+                nan_harness_i18n::locale(),
+                &report.as_report().report_id()
+            )
         );
     }
 }

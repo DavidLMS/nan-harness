@@ -82,7 +82,7 @@ fn runtime_errors_map_to_closed_typed_diagnostics() {
             Diagnostic::general(DiagnosticReason::BridgeExited),
         ),
         (
-            RuntimeError::Prepared(PreparedError::UnresolvedPlaceholder(FAKE_TOKEN.to_owned())),
+            RuntimeError::Prepared(PreparedError::UnresolvedPlaceholder(FAKE_TOKEN.into())),
             Diagnostic::general(DiagnosticReason::LaunchPreparationFailed),
         ),
         (
@@ -190,6 +190,11 @@ fn every_constructible_search_policy_error_has_a_safe_configuration_diagnostic()
         SearchPolicyError::ParseJson {
             path: PathBuf::from(FAKE_PATH),
             source: json_source,
+        },
+        SearchPolicyError::ParseYaml {
+            path: PathBuf::from(FAKE_PATH),
+            source: serde_yaml_ng::from_str::<serde_yaml_ng::Value>(&format!("{FAKE_TOKEN}: ["))
+                .expect_err("fixture must be invalid YAML"),
         },
         SearchPolicyError::ParseToml {
             path: PathBuf::from(FAKE_PATH),

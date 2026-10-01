@@ -8,6 +8,8 @@ use nan_harness_core::launch_plan::{
     TemporaryArtifactMode,
 };
 use nan_harness_core::{HarnessAdapter, HarnessKind, LaunchPlan, PlanContext, PlanError};
+use nan_harness_i18n::DiagnosticText;
+use nan_harness_i18n::messages as detail_messages;
 use std::collections::BTreeSet;
 
 const CREDENTIAL_TARGET: &str = "NAN_API_KEY";
@@ -60,7 +62,9 @@ fn deepseek_arguments(user_arguments: &[String]) -> Result<Vec<String>, PlanErro
         if user_arguments.get(1).is_none_or(String::is_empty) {
             return Err(PlanError::InvalidField {
                 field: "process.arguments",
-                message: "DeepSeek Harness --profile requires a profile name".to_owned(),
+                message: DiagnosticText::new(
+                    detail_messages::detail_deepseek_harness_profile_requires_a_profile_name,
+                ),
             });
         }
         let mut arguments = user_arguments[..2].to_vec();
@@ -87,6 +91,11 @@ fn provider_patch(model_id: &str) -> Result<String, PlanError> {
 fn serialization_error(error: &serde_json::Error) -> PlanError {
     PlanError::InvalidField {
         field: "temporaryArtifacts.contentTemplate",
-        message: format!("could not serialize DeepSeek Harness model configuration: {error}"),
+        message: DiagnosticText::new(|locale| {
+            detail_messages::detail_serialize_deepseek_harness_model_configuration_failed(
+                locale,
+                &(error),
+            )
+        }),
     }
 }

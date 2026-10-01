@@ -6,6 +6,8 @@ use crate::launch_plan::{
     Transport, TransportKind,
 };
 use crate::secret::SecretRef;
+use nan_harness_i18n::DiagnosticText;
+use nan_harness_i18n::messages as detail_messages;
 
 pub(super) fn validate(plan: &LaunchPlan) -> Result<(), PlanError> {
     let expected = match plan.harness.kind {
@@ -43,11 +45,16 @@ pub(super) fn validate(plan: &LaunchPlan) -> Result<(), PlanError> {
             if protocol != &Protocol::ChatCompletions {
                 return invalid(
                     "transport.protocol",
-                    "direct transport requires chat-completions",
+                    DiagnosticText::new(
+                        detail_messages::detail_direct_transport_requires_chat_completions,
+                    ),
                 );
             }
             if base_url != PROVIDER_BASE_URL_PLACEHOLDER && !is_http_url(base_url) {
-                return invalid("transport.baseUrl", "must be an HTTP or HTTPS URL");
+                return invalid(
+                    "transport.baseUrl",
+                    DiagnosticText::new(detail_messages::detail_must_be_an_http_or_https_url),
+                );
             }
             if !plan.environment.secrets.contains_key(credential_target) {
                 return Err(PlanError::MissingSecretReference {
@@ -93,7 +100,10 @@ pub(super) fn validate(plan: &LaunchPlan) -> Result<(), PlanError> {
             ..
         } => {
             if listen.host != "127.0.0.1" {
-                return invalid("transport.listen.host", "bridges must bind to 127.0.0.1");
+                return invalid(
+                    "transport.listen.host",
+                    DiagnosticText::new(detail_messages::detail_bridges_must_bind_to_127_0_0_1),
+                );
             }
             validate_child_secret_ref(&plan.environment, session_token_ref)?;
         }
@@ -115,7 +125,10 @@ fn validate_bridge_protocols(
         );
     }
     if listen.host != "127.0.0.1" {
-        return invalid("transport.listen.host", "bridges must bind to 127.0.0.1");
+        return invalid(
+            "transport.listen.host",
+            DiagnosticText::new(detail_messages::detail_bridges_must_bind_to_127_0_0_1),
+        );
     }
     Ok(())
 }

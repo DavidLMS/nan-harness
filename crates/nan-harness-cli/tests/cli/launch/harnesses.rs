@@ -1,4 +1,5 @@
 use crate::support::{fake_harness, run, run_with_embedded_compatibility};
+use nan_harness_core::launch_plan::{NAN_SEARCH_BLOCK_BEGIN, NAN_SEARCH_BLOCK_END};
 use std::process::Command;
 
 #[cfg(unix)]
@@ -174,4 +175,66 @@ fn codex_dry_run_builds_a_safe_responses_bridge_plan() {
     assert!(stdout.contains("NAN_HARNESS_SESSION_TOKEN"));
     assert!(stdout.contains("supports_standalone_web_search=true"));
     assert!(!stdout.contains("nan-secret-value"));
+}
+
+#[test]
+fn image_model_alone_activates_native_images_in_dry_run() {
+    for (harness, version, path, pointer, expected) in [
+        (
+            "hermes",
+            "0.21.0",
+            "config.yaml",
+            "/image_gen/model",
+            "qwen-image-2.1",
+        ),
+        (
+            "openclaw",
+            "2026.7.1-2",
+            "nan-harness.json",
+            "/agents/defaults/mediaModels/image/primary",
+            "nan-harness/qwen-image-2.1",
+        ),
+    ] {
+        let directory = tempfile::tempdir().expect("home");
+        let executable = fake_harness(directory.path(), version);
+        let result = Command::new(env!("CARGO_BIN_EXE_nanh"))
+            .args([
+                harness,
+                "--dry-run",
+                "--no-search",
+                "--image-model",
+                "qwen-image-2.1",
+                "--executable",
+            ])
+            .arg(executable)
+            .env("HOME", directory.path())
+            .env_remove("HERMES_HOME")
+            .env("NAN_HARNESS_CONFIG_DIR", directory.path().join("state"))
+            .output()
+            .expect("dry run");
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let plan: serde_json::Value = serde_json::from_slice(&result.stdout).expect("plan");
+        let file = plan["configurationOverlays"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|overlay| overlay["files"].as_array().unwrap())
+            .find(|file| file["path"] == path)
+            .expect("native config");
+        let mut template = file["contentTemplate"].as_str().unwrap().to_owned();
+        while let Some(begin) = template.find(NAN_SEARCH_BLOCK_BEGIN) {
+            let end = template[begin..]
+                .find(NAN_SEARCH_BLOCK_END)
+                .expect("search block end")
+                + begin;
+            template.replace_range(begin..end + NAN_SEARCH_BLOCK_END.len(), "");
+        }
+        let config: serde_json::Value =
+            serde_json::from_str(&template).expect("native JSON template");
+        assert_eq!(config.pointer(pointer).unwrap(), expected);
+    }
 }

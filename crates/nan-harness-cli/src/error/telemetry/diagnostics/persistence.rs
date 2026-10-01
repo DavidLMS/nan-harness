@@ -4,6 +4,7 @@ use nan_harness_telemetry::event::FailureCause;
 
 pub(super) fn classify(error: &PersistenceError) -> Classification {
     match error {
+        PersistenceError::RollbackIncomplete { .. } => (FailureCause::Filesystem, None),
         PersistenceError::DiscoverModels(source) if source.is_timeout() => {
             (FailureCause::Timeout, None)
         }

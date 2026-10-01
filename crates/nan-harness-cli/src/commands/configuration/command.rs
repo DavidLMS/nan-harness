@@ -2,7 +2,7 @@ use super::*;
 use crate::app::{ConfigArgs, ConfigTarget};
 use crate::commands::credentials;
 use crate::commands::pen_desktop::{self, PenDesktopError};
-use nan_harness_core::WebSearchPolicy;
+use nan_harness_core::{MediaSelection, WebSearchPolicy};
 use std::io::{BufRead as _, Write as _};
 
 pub(crate) async fn run(
@@ -61,14 +61,24 @@ fn run_remove_all(
     interactive: bool,
 ) -> Result<(), ConfigurationError> {
     if !confirm_remove_all(manager, yes, interactive)? {
-        println!("Configuration removal cancelled.");
+        println!(
+            "{}",
+            nan_harness_i18n::messages::command_configuration_removal_cancelled(
+                nan_harness_i18n::locale()
+            )
+        );
         return Ok(());
     }
     for (harness, outcome) in manager.remove_all()? {
         print_removal(harness, outcome);
     }
     if pen_desktop::remove_persistent_configuration()? {
-        println!("NaN configuration removed from Pen Desktop.");
+        println!(
+            "{}",
+            nan_harness_i18n::messages::command_nan_configuration_removed_from_pen_desktop(
+                nan_harness_i18n::locale()
+            )
+        );
     }
     Ok(())
 }
@@ -89,20 +99,18 @@ async fn run_refresh_all(
     let configured = manager.configured_harnesses()?;
     let pen_configured = pen_desktop::persistent_configuration_exists()?;
     if configured.is_empty() && !pen_configured {
-        println!("No harness configurations are managed by nan-harness.");
+        println!("{}", nan_harness_i18n::messages::command_no_harness_configurations_are_managed_by_nan_harness(nan_harness_i18n::locale()));
         return Ok(());
     }
     let (config, models) = credentials::resolve_saved_or_onboard(None, interactive).await?;
     for harness in configured {
-        let change = manager.configure(harness, &config, &models, None)?;
+        let change = manager.configure_with_media(harness, &config, &models, None, None)?;
         print_change(harness, &change, true);
     }
     if pen_configured {
         pen_desktop::refresh_persistent_with_config(&config, &models)?;
         println!(
-            "NaN was refreshed for Pen Desktop with {} available models.",
-            models.len()
-        );
+            "{}", nan_harness_i18n::messages::command_nan_was_refreshed_for_pen_desktop_with_available_models(nan_harness_i18n::locale(), &(models.len())));
     }
     Ok(())
 }
@@ -120,9 +128,20 @@ async fn configure_harness(
     if arguments.refresh && !already_configured {
         return Err(ConfigurationError::RefreshRequiresConfiguration(harness));
     }
-    if already_configured && !arguments.refresh && requested_search_policy(arguments).is_none() {
+    let requested_media = requested_media(arguments);
+    if already_configured
+        && !arguments.refresh
+        && requested_search_policy(arguments).is_none()
+        && requested_media.is_none()
+    {
         print_status(manager, harness)?;
-        println!("Refresh it with `nanh config {harness} --refresh`.");
+        println!(
+            "{}",
+            nan_harness_i18n::messages::command_refresh_it_with_nanh_config_refresh(
+                nan_harness_i18n::locale(),
+                &(harness)
+            )
+        );
         return Ok(());
     }
     if !already_configured
@@ -131,18 +150,23 @@ async fn configure_harness(
             manager,
             harness,
             requested_search_policy(arguments).unwrap_or_default(),
+            requested_media,
             interactive,
         )?
     {
-        println!("Configuration cancelled.");
+        println!(
+            "{}",
+            nan_harness_i18n::messages::command_configuration_cancelled(nan_harness_i18n::locale())
+        );
         return Ok(());
     }
     let (config, models) = credentials::resolve_saved_or_onboard(None, interactive).await?;
-    let change = manager.configure(
+    let change = manager.configure_with_media(
         harness,
         &config,
         &models,
         requested_search_policy(arguments),
+        requested_media,
     )?;
     print_change(harness, &change, arguments.refresh || already_configured);
     Ok(())
@@ -170,6 +194,11 @@ fn validate_arguments(arguments: &ConfigArgs) -> Result<(), ConfigurationError> 
     {
         return Err(ConfigurationError::UnusedSearchPolicy);
     }
+    if requested_media(arguments).is_some()
+        && (arguments.status || arguments.remove || arguments.remove_all || arguments.refresh_all)
+    {
+        return Err(ConfigurationError::UnusedMediaPolicy);
+    }
     Ok(())
 }
 
@@ -183,21 +212,39 @@ fn requested_search_policy(arguments: &ConfigArgs) -> Option<WebSearchPolicy> {
     }
 }
 
+fn requested_media(arguments: &ConfigArgs) -> Option<MediaSelection> {
+    crate::commands::media_policy::requested_media(&arguments.media)
+}
+
 fn confirm_configuration(
     manager: &ConfigurationManager,
     harness: HarnessKind,
     search_policy: WebSearchPolicy,
+    media_request: Option<MediaSelection>,
     interactive: bool,
 ) -> Result<bool, ConfigurationError> {
     if !interactive {
         return Err(ConfigurationError::ConfirmationRequired);
     }
-    eprintln!("nan-harness will configure NaN directly in {harness}.");
     eprintln!(
-        "This copies the API key saved by nan-harness into the harness's native credential storage."
+        "{}",
+        nan_harness_i18n::messages::command_nan_harness_will_configure_nan_directly_in(
+            nan_harness_i18n::locale(),
+            &(harness)
+        )
     );
-    eprintln!("NAN_API_KEY from the current environment will not be copied.");
+    eprintln!(
+        "{}", nan_harness_i18n::messages::command_this_copies_the_api_key_saved_by_nan_harness_into_the_harness_s_native_cred(nan_harness_i18n::locale()));
+    eprintln!("{}", nan_harness_i18n::messages::command_nan_api_key_from_the_current_environment_will_not_be_copied(nan_harness_i18n::locale()));
     let search_managed = manager.resolve_managed_search(harness, search_policy, false)?;
+    let working_directory = env::current_dir().map_err(ConfigurationError::CurrentDirectory)?;
+    let media = crate::commands::media_policy::configuration_media(
+        harness,
+        media_request,
+        MediaSelection::none(),
+        &manager.paths.home_directory,
+        &working_directory,
+    );
     explain_search_confirmation(
         harness,
         ManagedSearchStatus {
@@ -205,11 +252,18 @@ fn confirm_configuration(
             managed: search_managed,
         },
     );
-    eprintln!("Files nan-harness will manage:");
-    for path in manager.paths_for_search(harness, search_managed)? {
+    eprintln!(
+        "{}",
+        nan_harness_i18n::messages::command_files_nan_harness_will_manage(
+            nan_harness_i18n::locale()
+        )
+    );
+    for path in manager.paths_for_media(harness, search_managed, media)? {
         eprintln!("  - {}", path.display());
     }
-    prompt_yes_no("Continue? [y/N] ")
+    prompt_yes_no(&nan_harness_i18n::messages::prompt_continue(
+        nan_harness_i18n::locale(),
+    ))
 }
 
 fn confirm_remove_all(
@@ -226,8 +280,10 @@ fn confirm_remove_all(
     if !interactive {
         return Err(ConfigurationError::ConfirmationRequired);
     }
-    eprintln!("Remove every harness configuration managed by nan-harness?");
-    prompt_yes_no("Continue? [y/N] ")
+    eprintln!("{}", nan_harness_i18n::messages::command_remove_every_harness_configuration_managed_by_nan_harness(nan_harness_i18n::locale()));
+    prompt_yes_no(&nan_harness_i18n::messages::prompt_continue(
+        nan_harness_i18n::locale(),
+    ))
 }
 
 fn prompt_yes_no(prompt: &str) -> Result<bool, ConfigurationError> {
@@ -239,44 +295,82 @@ fn prompt_yes_no(prompt: &str) -> Result<bool, ConfigurationError> {
         .lock()
         .read_line(&mut response)
         .map_err(ConfigurationError::Prompt)?;
-    Ok(matches!(
-        response.trim().to_ascii_lowercase().as_str(),
-        "y" | "yes"
-    ))
+    Ok(nan_harness_i18n::yes_no(nan_harness_i18n::locale(), &response) == Some(true))
 }
 
 fn print_change(harness: HarnessKind, change: &ConfigurationChange, refreshed: bool) {
-    let action = if !change.changed {
-        "is already up to date"
+    let locale = nan_harness_i18n::locale();
+    let count = change.model_count;
+    let quantity = u64::try_from(count).unwrap_or(u64::MAX);
+    let message = if !change.changed {
+        nan_harness_i18n::messages::configuration_current_models(locale, quantity, &count, &harness)
     } else if refreshed {
-        "was refreshed"
+        nan_harness_i18n::messages::configuration_refreshed_models(
+            locale, quantity, &count, &harness,
+        )
     } else {
-        "was configured"
+        nan_harness_i18n::messages::configuration_configured_models(
+            locale, quantity, &count, &harness,
+        )
     };
+    println!("{message}");
     println!(
-        "NaN {action} for {harness} with {} available models.",
-        change.model_count
+        "{}",
+        nan_harness_i18n::messages::command_web_search(
+            nan_harness_i18n::locale(),
+            &(search_status_summary(harness, change.search))
+        )
     );
     println!(
-        "Web search: {}.",
-        search_status_summary(harness, change.search)
+        "{}",
+        nan_harness_i18n::messages::command_native_media(
+            nan_harness_i18n::locale(),
+            &media_status_summary(change.media)
+        )
     );
     for path in &change.paths {
-        println!("Managed: {}", path.display());
+        println!(
+            "{}",
+            nan_harness_i18n::messages::command_managed(
+                nan_harness_i18n::locale(),
+                &(path.display())
+            )
+        );
     }
     println!(
-        "Run `{}` directly to use this native configuration.",
-        harness.binary_name()
+        "{}",
+        nan_harness_i18n::messages::command_run_directly_to_use_this_native_configuration(
+            nan_harness_i18n::locale(),
+            &(harness.binary_name())
+        )
     );
-    println!("Refresh later with `nanh config {harness} --refresh`.");
-    println!("Remove it with `nanh config {harness} --remove`.");
+    println!(
+        "{}",
+        nan_harness_i18n::messages::command_refresh_later_with_nanh_config_refresh(
+            nan_harness_i18n::locale(),
+            &(harness)
+        )
+    );
+    println!(
+        "{}",
+        nan_harness_i18n::messages::command_remove_it_with_nanh_config_remove(
+            nan_harness_i18n::locale(),
+            &(harness)
+        )
+    );
 }
 
 fn print_removal(harness: HarnessKind, outcome: RemovalOutcome) {
     match outcome {
-        RemovalOutcome::Removed => println!("NaN configuration removed from {harness}."),
+        RemovalOutcome::Removed => println!(
+            "{}",
+            nan_harness_i18n::messages::command_nan_configuration_removed_from(
+                nan_harness_i18n::locale(),
+                &(harness)
+            )
+        ),
         RemovalOutcome::NotConfigured => {
-            println!("No NaN configuration managed by nan-harness was found for {harness}.");
+            println!("{}", nan_harness_i18n::messages::command_no_nan_configuration_managed_by_nan_harness_was_found_for(nan_harness_i18n::locale(), &(harness)));
         }
     }
 }
@@ -287,40 +381,69 @@ fn print_status(
 ) -> Result<(), ConfigurationError> {
     ensure_supported(harness)?;
     let Some(health) = manager.inspect(harness)? else {
-        println!("{harness}: not configured by nan-harness");
+        println!(
+            "{}",
+            nan_harness_i18n::messages::command_not_configured_by_nan_harness(
+                nan_harness_i18n::locale(),
+                &(harness)
+            )
+        );
         return Ok(());
     };
     if health.is_active() {
         let saved_fingerprint = credentials::saved_credential_fingerprint()?;
         if manager.credential_is_current(harness, saved_fingerprint.as_deref())? == Some(true) {
-            println!("{harness}: configured, unchanged, and using the current saved key");
+            println!("{}", nan_harness_i18n::messages::command_configured_unchanged_and_using_the_current_saved_key(nan_harness_i18n::locale(), &(harness)));
         } else {
             println!(
-                "{harness}: configured and unchanged, but its copied key needs `nanh config {harness} --refresh`"
-            );
+                "{}", nan_harness_i18n::messages::command_configured_and_unchanged_but_its_copied_key_needs_nanh_config_refresh(nan_harness_i18n::locale(), &(harness)));
         }
     } else {
-        println!("{harness}: managed configuration {}", health.as_str());
+        println!(
+            "{}",
+            nan_harness_i18n::messages::command_managed_configuration(
+                nan_harness_i18n::locale(),
+                &(harness),
+                &(health.terminal_label(nan_harness_i18n::locale()))
+            )
+        );
         if let Some(code) = health.error_code() {
-            println!("  Error: {code}");
+            println!(
+                "{}",
+                nan_harness_i18n::messages::command_error(nan_harness_i18n::locale(), &(code))
+            );
         }
         if let Some(hint) = health.recovery_hint() {
             println!("  {hint}");
         }
     }
     match manager.search_status(harness)? {
-        Some(search) => println!("  Web search: {}.", search_status_summary(harness, search)),
+        Some(search) => println!("{}", nan_harness_i18n::messages::command_web_search_details(nan_harness_i18n::locale(), &(search_status_summary(harness, search)))),
         None => println!(
-            "  Web search: policy not recorded; refresh this configuration to record automatic selection."
-        ),
+            "{}", nan_harness_i18n::messages::command_web_search_policy_not_recorded_refresh_this_configuration_to_record_automat(nan_harness_i18n::locale())),
+    }
+    if let Some(media) = manager.media_status(harness)? {
+        println!(
+            "{}",
+            nan_harness_i18n::messages::command_native_media(
+                nan_harness_i18n::locale(),
+                &media_status_summary(media)
+            )
+        );
     }
     Ok(())
 }
 
 fn print_bridge_only(harness: HarnessKind) {
-    println!("{harness} uses launch-scoped routing and is not modified by `nanh config`.");
-    println!("Launch it with `nanh {}`.", harness.binary_name());
-    println!("Use --no-search or --force-search on that launch when needed.");
+    println!("{}", nan_harness_i18n::messages::command_uses_launch_scoped_routing_and_is_not_modified_by_nanh_config(nan_harness_i18n::locale(), &(harness)));
+    println!(
+        "{}",
+        nan_harness_i18n::messages::command_launch_it_with_nanh(
+            nan_harness_i18n::locale(),
+            &(harness.binary_name())
+        )
+    );
+    println!("{}", nan_harness_i18n::messages::command_use_no_search_or_force_search_on_that_launch_when_needed(nan_harness_i18n::locale()));
 }
 
 fn explain_search_confirmation(harness: HarnessKind, search: ManagedSearchStatus) {
@@ -330,34 +453,34 @@ fn explain_search_confirmation(harness: HarnessKind, search: ManagedSearchStatus
 fn search_confirmation_message(harness: HarnessKind, search: ManagedSearchStatus) -> &'static str {
     match (harness, search.policy, search.managed) {
         (_, WebSearchPolicy::Disabled, _) => {
-            "NaN web search will not be added; existing search configuration will be preserved."
+            nan_harness_i18n::messages::terminal_nan_web_search_will_not_be_added_existing_search_configuration_will_be_preserved_text(nan_harness_i18n::locale())
         }
         (HarnessKind::Aider, WebSearchPolicy::Auto, false) => {
-            "Aider does not support the NaN web search fallback; existing search configuration will be preserved."
+            nan_harness_i18n::messages::terminal_aider_does_not_support_the_nan_web_search_fallback_existing_search_configuration_will_text(nan_harness_i18n::locale())
         }
         (HarnessKind::Pi | HarnessKind::PrimeAgent, WebSearchPolicy::Auto, true) => {
-            "A runtime-aware NaN web search fallback will be installed; it activates only when no loaded extension provides web_search."
+            nan_harness_i18n::messages::terminal_a_runtime_aware_nan_web_search_fallback_will_be_installed_it_activates_only_when_no_l_text(nan_harness_i18n::locale())
         }
         (HarnessKind::Pi | HarnessKind::PrimeAgent, WebSearchPolicy::Force, true) => {
-            "NaN web search will replace any package-provided web_search tool for this harness."
+            nan_harness_i18n::messages::terminal_nan_web_search_will_replace_any_package_provided_web_search_tool_for_this_harness_text(nan_harness_i18n::locale())
         }
         (HarnessKind::Omp, WebSearchPolicy::Auto, true) => {
-            "An authenticated native OMP search provider will be preferred; NaN web search will be used when none is available or native search fails."
+            nan_harness_i18n::messages::terminal_an_authenticated_native_omp_search_provider_will_be_preferred_nan_web_search_will_be_text(nan_harness_i18n::locale())
         }
         (HarnessKind::Omp, WebSearchPolicy::Force, true) => {
-            "NaN web search will replace OMP's native web_search provider for this harness."
+            nan_harness_i18n::messages::terminal_nan_web_search_will_replace_omp_s_native_web_search_provider_for_this_harness_text(nan_harness_i18n::locale())
         }
         (_, WebSearchPolicy::Auto, true) => {
-            "No other web search provider was detected, so the NaN fallback will be added."
+            nan_harness_i18n::messages::terminal_no_other_web_search_provider_was_detected_so_the_nan_fallback_will_be_added_text(nan_harness_i18n::locale())
         }
         (_, WebSearchPolicy::Auto, false) => {
-            "An existing web search configuration was detected, so nan-harness will preserve it."
+            nan_harness_i18n::messages::terminal_an_existing_web_search_configuration_was_detected_so_nan_harness_will_preserve_it_text(nan_harness_i18n::locale())
         }
         (_, WebSearchPolicy::Force, true) => {
-            "NaN web search will be added even if another provider is configured."
+            nan_harness_i18n::messages::terminal_nan_web_search_will_be_added_even_if_another_provider_is_configured_text(nan_harness_i18n::locale())
         }
         (_, WebSearchPolicy::Force, false) => {
-            "NaN web search is already configured, so nan-harness will leave that entry untouched."
+            nan_harness_i18n::messages::terminal_nan_web_search_is_already_configured_so_nan_harness_will_leave_that_entry_untouched_text(nan_harness_i18n::locale())
         }
     }
 }
@@ -369,38 +492,68 @@ mod search_confirmation_tests;
 fn search_status_summary(harness: HarnessKind, search: ManagedSearchStatus) -> &'static str {
     match (harness, search.policy, search.managed) {
         (_, WebSearchPolicy::Disabled, _) => {
-            "NaN fallback disabled; existing search configuration preserved"
+            nan_harness_i18n::messages::terminal_nan_fallback_disabled_existing_search_configuration_preserved_text(nan_harness_i18n::locale())
         }
-        (HarnessKind::Aider, WebSearchPolicy::Auto, false) => "NaN fallback unavailable for Aider",
+        (HarnessKind::Aider, WebSearchPolicy::Auto, false) => nan_harness_i18n::messages::terminal_nan_fallback_unavailable_for_aider_text(nan_harness_i18n::locale()),
         (HarnessKind::Pi | HarnessKind::PrimeAgent, WebSearchPolicy::Auto, true) => {
-            "runtime-aware automatic NaN fallback installed"
+            nan_harness_i18n::messages::terminal_runtime_aware_automatic_nan_fallback_installed_text(nan_harness_i18n::locale())
         }
         (
             HarnessKind::Pi | HarnessKind::Omp | HarnessKind::PrimeAgent,
             WebSearchPolicy::Force,
             true,
-        ) => "forced NaN search override installed",
+        ) => nan_harness_i18n::messages::terminal_forced_nan_search_override_installed_text(nan_harness_i18n::locale()),
         (HarnessKind::Omp, WebSearchPolicy::Auto, true) => {
-            "authenticated-native-first NaN fallback installed"
+            nan_harness_i18n::messages::terminal_authenticated_native_first_nan_fallback_installed_text(nan_harness_i18n::locale())
         }
-        (_, WebSearchPolicy::Auto, true) => "automatic NaN fallback active",
+        (_, WebSearchPolicy::Auto, true) => nan_harness_i18n::messages::terminal_automatic_nan_fallback_active_text(nan_harness_i18n::locale()),
         (_, WebSearchPolicy::Auto, false) => {
-            "automatic policy; existing search configuration preserved"
+            nan_harness_i18n::messages::terminal_automatic_policy_existing_search_configuration_preserved_text(nan_harness_i18n::locale())
         }
-        (_, WebSearchPolicy::Force, true) => "forced NaN search active",
+        (_, WebSearchPolicy::Force, true) => nan_harness_i18n::messages::terminal_forced_nan_search_active_text(nan_harness_i18n::locale()),
         (_, WebSearchPolicy::Force, false) => {
-            "force policy satisfied by an existing NaN search entry"
+            nan_harness_i18n::messages::terminal_force_policy_satisfied_by_an_existing_nan_search_entry_text(nan_harness_i18n::locale())
         }
     }
+}
+
+fn media_status_summary(media: MediaSelection) -> String {
+    format!(
+        "STT={}, TTS={}, image={}",
+        if media.stt {
+            "NaN Whisper"
+        } else {
+            "preserved"
+        },
+        if media.tts { "NaN Kokoro" } else { "preserved" },
+        if media.image {
+            media.image_model.unwrap_or_default().as_str()
+        } else {
+            "preserved"
+        },
+    )
 }
 
 fn print_all_statuses(manager: &ConfigurationManager) -> Result<(), ConfigurationError> {
     for harness in SUPPORTED_HARNESSES {
         print_status(manager, harness)?;
     }
-    println!("claude-code: launch-only; use `nanh claude`");
-    println!("codex: launch-only; use `nanh codex`");
-    println!("fx: launch-only; use `nanh fx`");
+    println!(
+        "{}",
+        nan_harness_i18n::messages::command_claude_code_launch_only_use_nanh_claude(
+            nan_harness_i18n::locale()
+        )
+    );
+    println!(
+        "{}",
+        nan_harness_i18n::messages::command_codex_launch_only_use_nanh_codex(
+            nan_harness_i18n::locale()
+        )
+    );
+    println!(
+        "{}",
+        nan_harness_i18n::messages::command_fx_launch_only_use_nanh_fx(nan_harness_i18n::locale())
+    );
     print_pen_status()?;
     Ok(())
 }
@@ -409,14 +562,27 @@ async fn run_pen(arguments: &ConfigArgs, interactive: bool) -> Result<(), Config
     if arguments.search.no_search || arguments.search.force_search {
         return Err(ConfigurationError::UnusedSearchPolicy);
     }
+    if requested_media(arguments).is_some() {
+        return Err(ConfigurationError::UnusedMediaPolicy);
+    }
     if arguments.status {
         return print_pen_status();
     }
     if arguments.remove {
         if pen_desktop::remove_persistent_configuration()? {
-            println!("NaN configuration removed from Pen Desktop.");
+            println!(
+                "{}",
+                nan_harness_i18n::messages::command_nan_configuration_removed_from_pen_desktop(
+                    nan_harness_i18n::locale()
+                )
+            );
         } else {
-            println!("Pen Desktop: not configured by nan-harness");
+            println!(
+                "{}",
+                nan_harness_i18n::messages::command_pen_desktop_not_configured_by_nan_harness(
+                    nan_harness_i18n::locale()
+                )
+            );
         }
         return Ok(());
     }
@@ -426,23 +592,50 @@ async fn run_pen(arguments: &ConfigArgs, interactive: bool) -> Result<(), Config
     }
     if configured && !arguments.refresh {
         print_pen_status()?;
-        println!("Refresh it with `nanh config pen --refresh`.");
+        println!(
+            "{}",
+            nan_harness_i18n::messages::command_refresh_it_with_nanh_config_pen_refresh(
+                nan_harness_i18n::locale()
+            )
+        );
         return Ok(());
     }
     match pen_desktop::configure_persistent(arguments.refresh, arguments.yes, interactive).await {
         Ok(count) => {
-            let action = if arguments.refresh {
-                "refreshed"
+            let locale = nan_harness_i18n::locale();
+            let quantity = u64::try_from(count).unwrap_or(u64::MAX);
+            let message = if arguments.refresh {
+                nan_harness_i18n::messages::configuration_refreshed_models(
+                    locale,
+                    quantity,
+                    &count,
+                    "Pen Desktop",
+                )
             } else {
-                "configured"
+                nan_harness_i18n::messages::configuration_configured_models(
+                    locale,
+                    quantity,
+                    &count,
+                    "Pen Desktop",
+                )
             };
-            println!("NaN was {action} for Pen Desktop with {count} available models.");
-            println!("Restart Pen completely to reload its model catalog.");
-            println!("Remove it with `nanh config pen --remove`.");
+            println!("{message}");
+            println!("{}", nan_harness_i18n::messages::command_restart_pen_completely_to_reload_its_model_catalog(nan_harness_i18n::locale()));
+            println!(
+                "{}",
+                nan_harness_i18n::messages::command_remove_it_with_nanh_config_pen_remove(
+                    nan_harness_i18n::locale()
+                )
+            );
             Ok(())
         }
         Err(PenDesktopError::ConfigurationCancelled) => {
-            println!("Configuration cancelled.");
+            println!(
+                "{}",
+                nan_harness_i18n::messages::command_configuration_cancelled(
+                    nan_harness_i18n::locale()
+                )
+            );
             Ok(())
         }
         Err(error) => Err(error.into()),
@@ -451,7 +644,12 @@ async fn run_pen(arguments: &ConfigArgs, interactive: bool) -> Result<(), Config
 
 fn print_pen_status() -> Result<(), ConfigurationError> {
     let Some(model_count) = pen_desktop::persistent_model_count()? else {
-        println!("Pen Desktop: not configured by nan-harness");
+        println!(
+            "{}",
+            nan_harness_i18n::messages::command_pen_desktop_not_configured_by_nan_harness(
+                nan_harness_i18n::locale()
+            )
+        );
         return Ok(());
     };
     let health =
@@ -462,17 +660,24 @@ fn print_pen_status() -> Result<(), ConfigurationError> {
             == Some(true)
         {
             println!(
-                "Pen Desktop: configured, unchanged, and using the current saved key ({model_count} models)"
-            );
+                "{}", nan_harness_i18n::messages::command_pen_desktop_configured_unchanged_and_using_the_current_saved_key_models(nan_harness_i18n::locale(), &(model_count)));
         } else {
             println!(
-                "Pen Desktop: configured and unchanged, but its copied key needs `nanh config pen --refresh` ({model_count} models)"
-            );
+                "{}", nan_harness_i18n::messages::command_pen_desktop_configured_and_unchanged_but_its_copied_key_needs_nanh_config_p(nan_harness_i18n::locale(), &(model_count)));
         }
     } else {
-        println!("Pen Desktop: managed configuration {}", health.as_str());
+        println!(
+            "{}",
+            nan_harness_i18n::messages::command_pen_desktop_managed_configuration(
+                nan_harness_i18n::locale(),
+                &(health.terminal_label(nan_harness_i18n::locale()))
+            )
+        );
         if let Some(code) = health.error_code() {
-            println!("  Error: {code}");
+            println!(
+                "{}",
+                nan_harness_i18n::messages::command_error(nan_harness_i18n::locale(), &(code))
+            );
         }
         if let Some(hint) = health.recovery_hint() {
             println!("  {hint}");

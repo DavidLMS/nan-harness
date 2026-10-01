@@ -31,7 +31,8 @@ fn opencode_merge_preserves_comments_and_removes_only_nan() {
     let providers = root_object
         .object_value("provider")
         .expect("providers should exist");
-    let models = coding_models_from_provider_ids(["qwen3.6".to_owned(), "mimo-v2.5".to_owned()]);
+    let models =
+        coding_models_from_provider_ids(["qwen3.6".to_owned(), "mimo-v2.6-flash".to_owned()]);
     let provider = opencode_provider(&models, "https://api.nan.builders/v1");
     let hash = hash_input_value(&provider).expect("provider should hash");
     providers.append("nan", provider);
@@ -109,7 +110,7 @@ async fn opencode_persistence_discovers_the_current_credential_catalog() {
         .expect("OpenCode integration should persist");
     let persisted =
         std::fs::read_to_string(&change.path).expect("OpenCode configuration should be readable");
-    for model in ["qwen3.6", "deepseek-v4-flash", "mimo-v2.5", "gemma4"] {
+    for model in ["qwen3.6", "deepseek-v4-flash", "mimo-v2.6-flash", "gemma4"] {
         assert!(
             persisted.contains(model),
             "missing discovered model {model}"

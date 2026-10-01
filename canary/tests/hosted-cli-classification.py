@@ -258,7 +258,7 @@ def fake_metadata(unavailable=()):
     texts = {
         f"https://raw.githubusercontent.com/NousResearch/hermes-agent/{COMMIT}/pyproject.toml":
             '[project]\nname = "hermes-agent"\nversion = "0.21.2"\n',
-        "https://code.kimi.com/kimi-code/latest": "0.42.0",
+        "https://cdn.kimi.com/kimi-code/latest": "0.42.0",
     }
 
     def lookup(table):
@@ -282,7 +282,8 @@ class ResolutionTests(unittest.TestCase):
         self.assertEqual([item.harness for item in resolved], ["codex", "kimi-code"])
         self.assertEqual([item.as_dict() for item in unresolved], [{
             "harness": "hermes", "system": "linux", "architecture": "aarch64",
-            "source": "github:NousResearch/hermes-agent", "package": "", "model": "m"}])
+            "source": "github:NousResearch/hermes-agent", "package": "", "model": "m",
+            "diagnostic": {"category": "unknown"}}])
         with self.assertRaises(ValueError):
             cli_suite.resolve_frozen_versions(["codex", "hermes"], "linux", "aarch64", "m",
                                               **fake_metadata(("hermes-agent",)))
@@ -320,7 +321,8 @@ class ResolutionTests(unittest.TestCase):
             invalid = {
                 "duplicate": {"harnesses": entries + entries[:1], "unresolved": missing},
                 "crossed": {"harnesses": entries, "unresolved": missing + [
-                    {key: entries[0][key] for key in missing[0]}]},
+                    {**{key: entries[0][key] for key in missing[0] if key != "diagnostic"},
+                     "diagnostic": missing[0]["diagnostic"]}]},
                 "missing": {"harnesses": entries},
                 "reordered": {"harnesses": entries[::-1], "unresolved": missing},
                 "unknown field": {"harnesses": entries, "unresolved": missing, "extra": []},

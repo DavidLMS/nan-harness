@@ -72,8 +72,7 @@ pub(crate) async fn run(
         desktop_compatibility(DesktopHarnessKind::Claude).map_err(ClaudeDesktopError::from)?;
     match classify_desktop_version(&compatibility, None) {
         DesktopCompatibilityStatus::ContractOnly => eprintln!(
-            "warning: Claude Desktop compatibility on this platform is based on deterministic contracts, not a live verification"
-        ),
+            "{}", nan_harness_i18n::messages::claude_desktop_warning_claude_desktop_compatibility_on_this_platform_is_based_on_determini(nan_harness_i18n::locale())),
         DesktopCompatibilityStatus::Unavailable => {
             return Err(ClaudeDesktopError::UnsupportedPlatform.into());
         }
@@ -128,7 +127,7 @@ pub(crate) async fn run(
             if let Err(error) =
                 manager.save_last_desktop_selection(DesktopHarnessKind::Claude, &selected_model)
             {
-                eprintln!("warning: could not save the last Desktop model: {error}");
+                eprintln!("{}", nan_harness_i18n::messages::claude_desktop_warning_could_not_save_the_last_desktop_model(nan_harness_i18n::locale(), &(nan_harness_i18n::TerminalMessage::terminal_message(&error, nan_harness_i18n::locale()))));
             }
             let outcome = if code == 0 {
                 nan_harness_runtime::ExecutionOutcome::Succeeded

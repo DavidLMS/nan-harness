@@ -23,7 +23,9 @@ pub const AVAILABLE_UPDATE_MANIFEST_ENVIRONMENT_VARIABLE: &str =
 pub const DISABLE_UPDATE_CHECK_ENVIRONMENT_VARIABLE: &str = "NAN_NO_UPDATE_CHECK";
 pub const CONFIG_DIRECTORY_ENVIRONMENT_VARIABLE: &str = "NAN_HARNESS_CONFIG_DIR";
 
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(3);
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
+const METADATA_TIMEOUT: Duration = Duration::from_secs(3);
+const ARTIFACT_TIMEOUT: Duration = Duration::from_mins(5);
 const BUILD_UPDATE_MANIFEST_URL: Option<&str> = option_env!("NAN_UPDATE_MANIFEST_URL");
 const BUILD_AVAILABLE_UPDATE_MANIFEST_URL: Option<&str> =
     option_env!("NAN_UPDATE_AVAILABLE_MANIFEST_URL");
@@ -36,7 +38,8 @@ pub struct UpdateManager {
     current_version: Version,
     recommended_manifest_url: Option<String>,
     available_manifest_url: Option<String>,
-    client: reqwest::Client,
+    metadata_client: reqwest::Client,
+    artifact_client: reqwest::Client,
     state: UpdateStateStore,
 }
 
@@ -77,17 +80,15 @@ impl UpdateManager {
         if let Some(url) = available_manifest_url.as_deref() {
             validate_https_url(url, "available update manifest")?;
         }
-        let client = reqwest::Client::builder()
-            .connect_timeout(REQUEST_TIMEOUT)
-            .timeout(REQUEST_TIMEOUT)
-            .user_agent(format!("nan/{current_version}"))
-            .build()
-            .map_err(UpdateError::BuildClient)?;
+        let user_agent = format!("nan/{current_version}");
+        let metadata_client = build_client(&user_agent, METADATA_TIMEOUT)?;
+        let artifact_client = build_client(&user_agent, ARTIFACT_TIMEOUT)?;
         Ok(Self {
             current_version,
             recommended_manifest_url,
             available_manifest_url,
-            client,
+            metadata_client,
+            artifact_client,
             state,
         })
     }
@@ -126,7 +127,7 @@ impl UpdateManager {
         let release = if !force_refresh && cache_is_fresh(&state) {
             state.cached_release.clone()
         } else {
-            let release = fetch_release(&self.client, manifest_url).await?;
+            let release = fetch_release(&self.metadata_client, manifest_url).await?;
             state.last_checked_unix_seconds = Some(unix_seconds()?);
             state.cached_release = Some(release.clone());
             if state
@@ -169,7 +170,7 @@ impl UpdateManager {
     /// Returns [`UpdateError`] when release metadata cannot be downloaded or validated.
     pub async fn available_release(&self) -> Result<Option<ReleaseManifest>, UpdateError> {
         let release = match self.available_manifest_url.as_deref() {
-            Some(manifest_url) => match fetch_release(&self.client, manifest_url).await {
+            Some(manifest_url) => match fetch_release(&self.metadata_client, manifest_url).await {
                 Ok(release) => release,
                 Err(error) if is_missing_feed(&error) => self.fetch_recommended_manifest().await?,
                 Err(error) => return Err(error),
@@ -187,7 +188,7 @@ impl UpdateManager {
             .recommended_manifest_url
             .as_deref()
             .ok_or(UpdateError::UpdateChannelUnavailable)?;
-        fetch_release(&self.client, manifest_url).await
+        fetch_release(&self.metadata_client, manifest_url).await
     }
 
     /// Suppresses one exact release while allowing later versions to prompt normally.
@@ -210,12 +211,21 @@ impl UpdateManager {
     pub async fn install(&self, release: &ReleaseManifest) -> Result<(), UpdateError> {
         release.validate()?;
         let artifact = release.artifact_for_current_target()?;
-        let candidate = artifact::download(&self.client, artifact).await?;
+        let candidate = artifact::download(&self.artifact_client, artifact).await?;
         let candidate_path: &Path = candidate.as_ref();
         verify_candidate(candidate_path, &release.version)?;
         replace_running_executable(candidate_path).map_err(UpdateError::ReplaceExecutable)?;
         candidate.close().map_err(UpdateError::RemoveCandidate)
     }
+}
+
+fn build_client(user_agent: &str, timeout: Duration) -> Result<reqwest::Client, UpdateError> {
+    reqwest::Client::builder()
+        .connect_timeout(CONNECT_TIMEOUT)
+        .timeout(timeout)
+        .user_agent(user_agent)
+        .build()
+        .map_err(UpdateError::BuildClient)
 }
 
 fn configured_url(variable: &str, build_default: Option<&str>) -> Option<String> {
@@ -362,3 +372,68 @@ impl UpdateError {
 
 #[cfg(test)]
 mod tests;
+
+// Terminal localization is separate from canonical Display used by machine contracts.
+impl nan_harness_i18n::TerminalMessage for UpdateError {
+    fn terminal_message(&self, locale: nan_harness_i18n::Locale) -> String {
+        use nan_harness_i18n::messages as m;
+        if locale == nan_harness_i18n::Locale::En {
+            return self.to_string();
+        }
+        match self {
+            Self::UpdateChannelUnavailable => m::error_update_update_channel_unavailable(locale),
+            Self::MissingConfigDirectory => m::error_update_missing_config_directory(locale),
+            Self::Version(field_0) => m::error_update_version(locale, &(field_0)),
+            Self::BuildClient(field_0) => m::error_update_build_client(locale, &(field_0)),
+            Self::InvalidUrl { purpose, source } => {
+                m::error_update_invalid_url(locale, &(purpose), &(source))
+            }
+            Self::InsecureUrl(field_0) => m::error_update_insecure_url(locale, &(field_0)),
+            Self::FetchManifest(field_0) => m::error_update_fetch_manifest(locale, &(field_0)),
+            Self::ManifestStatus(field_0) => m::error_update_manifest_status(locale, &(field_0)),
+            Self::ManifestTooLarge => m::error_update_manifest_too_large(locale),
+            Self::ParseManifest(field_0) => m::error_update_parse_manifest(locale, &(field_0)),
+            Self::UnsupportedManifestSchema(field_0) => {
+                m::error_update_unsupported_manifest_schema(locale, &(field_0))
+            }
+            Self::EmptyArtifactCatalog => m::error_update_empty_artifact_catalog(locale),
+            Self::InvalidChecksum => m::error_update_invalid_checksum(locale),
+            Self::MissingArtifact(field_0) => m::error_update_missing_artifact(locale, &(field_0)),
+            Self::DownloadArtifact(field_0) => {
+                m::error_update_download_artifact(locale, &(field_0))
+            }
+            Self::ArtifactStatus(field_0) => m::error_update_artifact_status(locale, &(field_0)),
+            Self::ArtifactTooLarge => m::error_update_artifact_too_large(locale),
+            Self::CreateCandidate(field_0) => m::error_update_create_candidate(locale, &(field_0)),
+            Self::WriteCandidate(field_0) => m::error_update_write_candidate(locale, &(field_0)),
+            Self::SetCandidatePermissions(field_0) => {
+                m::error_update_set_candidate_permissions(locale, &(field_0))
+            }
+            Self::ChecksumMismatch => m::error_update_checksum_mismatch(locale),
+            Self::ExecuteCandidate(field_0) => {
+                m::error_update_execute_candidate(locale, &(field_0))
+            }
+            Self::CandidateRejected => m::error_update_candidate_rejected(locale),
+            Self::CandidateVersionMismatch { expected, output } => {
+                m::error_update_candidate_version_mismatch(locale, &(expected), &(output))
+            }
+            Self::ReplaceExecutable(field_0) => {
+                m::error_update_replace_executable(locale, &(field_0))
+            }
+            Self::RemoveCandidate(field_0) => m::error_update_remove_candidate(locale, &(field_0)),
+            Self::CreateConfigDirectory(field_0) => {
+                m::error_update_create_config_directory(locale, &(field_0))
+            }
+            Self::ReadState(field_0) => m::error_update_read_state(locale, &(field_0)),
+            Self::ParseState(field_0) => m::error_update_parse_state(locale, &(field_0)),
+            Self::UnsupportedStateSchema(field_0) => {
+                m::error_update_unsupported_state_schema(locale, &(field_0))
+            }
+            Self::SerializeState(field_0) => m::error_update_serialize_state(locale, &(field_0)),
+            Self::WriteState(field_0) => m::error_update_write_state(locale, &(field_0)),
+            Self::SystemClock(field_0) => m::error_update_system_clock(locale, &(field_0)),
+            Self::Prompt(field_0) => m::error_update_prompt(locale, &(field_0)),
+            Self::Restart(field_0) => m::error_update_restart(locale, &(field_0)),
+        }
+    }
+}

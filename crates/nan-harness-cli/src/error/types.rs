@@ -10,13 +10,17 @@ use crate::commands::search::SearchCommandError;
 use crate::commands::uninstall::UninstallError;
 use crate::commands::zed_desktop::ZedDesktopError;
 use crate::usage_evidence::UsageEvidenceError;
-use nan_harness_core::PlanError;
+use nan_harness_core::{HarnessKind, PlanError};
 use nan_harness_runtime::{DiscoveryError, RuntimeError};
 use nan_harness_telemetry::consent::SettingsError;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub(crate) enum CliError {
+    #[error(
+        "{0} does not yet support Windows. Windows support depends on the harness publishing a compatible build. Once available, you can try it with nan-harness using --executable <path>."
+    )]
+    HarnessWindowsUnavailable(HarnessKind),
     #[error(transparent)]
     Discovery(#[from] DiscoveryError),
     #[error(transparent)]
@@ -66,6 +70,7 @@ pub(crate) enum CliError {
 impl CliError {
     pub(crate) const fn code(&self) -> &'static str {
         match self {
+            Self::HarnessWindowsUnavailable(_) => "NH-CLI-007",
             Self::Discovery(error) => error.code(),
             Self::Install(_) => InstallError::code(),
             Self::Credential(error) => error.code(),
@@ -88,6 +93,81 @@ impl CliError {
             Self::Search(error) => error.code(),
             Self::Uninstall(error) => error.code(),
             Self::UsageEvidence(_) => "NH-CLI-006",
+        }
+    }
+}
+
+// Terminal localization is separate from canonical Display used by machine contracts.
+impl nan_harness_i18n::TerminalMessage for CliError {
+    fn terminal_message(&self, locale: nan_harness_i18n::Locale) -> String {
+        use nan_harness_i18n::messages as m;
+        if let Self::Install(error) = self {
+            return error.terminal_message(locale);
+        }
+        if locale == nan_harness_i18n::Locale::En {
+            return self.to_string();
+        }
+        match self {
+            Self::HarnessWindowsUnavailable(harness) => {
+                m::error_cli_harness_windows_unavailable(locale, harness)
+            }
+            Self::Discovery(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+            Self::Install(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+            Self::Credential(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+            Self::Configuration(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+            Self::ChatGptDesktop(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+            Self::ClaudeDesktop(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+            Self::HermesDesktop(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+            Self::PenDesktop(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+            Self::ZedDesktop(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+            Self::CredentialInvariant => m::error_cli_credential_invariant(locale),
+            Self::PreflightTaskFailed(_) => m::error_cli_preflight_task_failed(locale),
+            Self::Runtime(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+            Self::CurrentDirectory(field_0) => m::error_cli_current_directory(locale, &(field_0)),
+            Self::Random(field_0) => m::error_cli_random(locale, &(field_0)),
+            Self::InvalidPlan(field_0) => m::error_cli_invalid_plan(
+                locale,
+                &(nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)),
+            ),
+            Self::SerializePlan(field_0) => m::error_cli_serialize_plan(locale, &(field_0)),
+            Self::TelemetrySettings(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+            Self::Update(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+            Self::Persistence(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+            Self::Search(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+            Self::Uninstall(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+            Self::UsageEvidence(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
         }
     }
 }

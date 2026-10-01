@@ -28,6 +28,8 @@ permissions:
 
 jobs:
   enqueue:
+    # Quarantined: main owns the active daily/release publication writer.
+    if: ${{ false }}
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -73,7 +75,8 @@ jobs:
             *) exit 2 ;;
           esac
   publish:
-    if: inputs.operation != 'initialize'
+    # Quarantined: main owns the active daily/release publication writer.
+    if: ${{ false }}
     needs: enqueue
     permissions:
       contents: write

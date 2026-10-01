@@ -11,6 +11,8 @@ use nan_harness_core::launch_plan::{
     SELECTED_MODEL_DISPLAY_NAME_PLACEHOLDER, SELECTED_MODEL_MAX_OUTPUT_TOKENS_PLACEHOLDER,
     SELECTED_MODEL_REASONING_EFFORT_PLACEHOLDER,
 };
+use nan_harness_i18n::DiagnosticText;
+use nan_harness_i18n::messages as detail_messages;
 
 mod claude;
 mod json;
@@ -60,12 +62,15 @@ pub(super) fn render_model_catalogs(
     provider_base_url: &str,
     selected_model_id: &str,
     model_catalog: Option<&[CodingModelProfile]>,
-) -> Result<String, String> {
+) -> Result<String, DiagnosticText> {
     if !contains_model_catalog_placeholder(template) {
         return Ok(template.to_owned());
     }
-    let models = model_catalog
-        .ok_or_else(|| "model catalog placeholders require live NaN model discovery".to_owned())?;
+    let models = model_catalog.ok_or_else(|| {
+        DiagnosticText::new(
+            detail_messages::detail_model_catalog_placeholders_require_live_nan_model_discovery,
+        )
+    })?;
     let models = unique_models(models);
     let mut rendered = template.to_owned();
     render_selected_model(&mut rendered, selected_model_id, &models)?;

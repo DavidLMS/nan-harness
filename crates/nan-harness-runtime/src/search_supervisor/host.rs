@@ -188,11 +188,12 @@ fn host_command(executable: &Path, request: &Path) -> Command {
     command
 }
 
+/// Starts the host so that it owns neither a stream nor a handle of this launcher.
 #[cfg(unix)]
 fn spawn_host_process(executable: &Path, request: &Path) -> io::Result<Child> {
     let mut command = host_command(executable, request);
     command.process_group(0);
-    command.spawn()
+    nan_harness_detach::without_inherited_standard_handles(|| command.spawn())
 }
 
 #[cfg(windows)]
@@ -207,14 +208,14 @@ fn spawn_host_process(executable: &Path, request: &Path) -> io::Result<Child> {
     // Keep the helper detached from console control events while allowing it to escape
     // the launcher's job when the OS permits it.
     command.creation_flags(CREATE_BREAKAWAY_FROM_JOB | CREATE_NO_WINDOW);
-    match command.spawn() {
+    match nan_harness_detach::without_inherited_standard_handles(|| command.spawn()) {
         Ok(child) => Ok(child),
         Err(error) if error.kind() == ErrorKind::PermissionDenied => {
             // A job may forbid breakaway, but the host must still avoid inheriting the
             // launcher's console: closing it must not stop another session's backend.
             let mut fallback = host_command(executable, request);
             fallback.creation_flags(CREATE_NO_WINDOW);
-            fallback.spawn()
+            nan_harness_detach::without_inherited_standard_handles(|| fallback.spawn())
         }
         Err(error) => Err(error),
     }
@@ -222,7 +223,8 @@ fn spawn_host_process(executable: &Path, request: &Path) -> io::Result<Child> {
 
 #[cfg(not(any(unix, windows)))]
 fn spawn_host_process(executable: &Path, request: &Path) -> io::Result<Child> {
-    host_command(executable, request).spawn()
+    let mut command = host_command(executable, request);
+    nan_harness_detach::without_inherited_standard_handles(|| command.spawn())
 }
 
 /// Runs the private host entry point dispatched by the CLI.

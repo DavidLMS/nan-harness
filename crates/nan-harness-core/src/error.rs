@@ -1,4 +1,5 @@
 use crate::{HarnessKind, TransportKind};
+use nan_harness_i18n::DiagnosticText;
 use thiserror::Error;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -14,7 +15,7 @@ pub enum PlanError {
     #[error("invalid field '{field}': {message}")]
     InvalidField {
         field: &'static str,
-        message: String,
+        message: DiagnosticText,
     },
     #[error("adapter for {adapter} cannot plan a {requested} harness")]
     AdapterMismatch {
@@ -32,7 +33,10 @@ pub enum PlanError {
     #[error("environment variable '{variable}' has conflicting instructions")]
     ConflictingEnvironment { variable: String },
     #[error("temporary artifact '{artifact_id}' is unsafe: {reason}")]
-    UnsafeTemporaryArtifact { artifact_id: String, reason: String },
+    UnsafeTemporaryArtifact {
+        artifact_id: String,
+        reason: DiagnosticText,
+    },
 }
 
 impl PlanError {
@@ -57,6 +61,45 @@ impl PlanError {
             Self::MissingSecretReference { .. }
             | Self::ConflictingEnvironment { .. }
             | Self::UnsafeTemporaryArtifact { .. } => ErrorCategory::Security,
+        }
+    }
+}
+
+// Terminal localization is separate from canonical Display used by machine contracts.
+impl nan_harness_i18n::TerminalMessage for PlanError {
+    fn terminal_message(&self, locale: nan_harness_i18n::Locale) -> String {
+        use nan_harness_i18n::messages as m;
+        if locale == nan_harness_i18n::Locale::En {
+            return self.to_string();
+        }
+        match self {
+            Self::InvalidField { field, message } => m::error_plan_invalid_field(
+                locale,
+                &(field),
+                &(nan_harness_i18n::TerminalMessage::terminal_message(message, locale)),
+            ),
+            Self::AdapterMismatch { adapter, requested } => {
+                m::error_plan_adapter_mismatch(locale, &(adapter), &(requested))
+            }
+            Self::TransportMismatch {
+                harness,
+                expected,
+                actual,
+            } => m::error_plan_transport_mismatch(locale, &(actual), &(expected), &(harness)),
+            Self::MissingSecretReference { reference } => {
+                m::error_plan_missing_secret_reference(locale, &(reference))
+            }
+            Self::ConflictingEnvironment { variable } => {
+                m::error_plan_conflicting_environment(locale, &(variable))
+            }
+            Self::UnsafeTemporaryArtifact {
+                artifact_id,
+                reason,
+            } => m::error_plan_unsafe_temporary_artifact(
+                locale,
+                &(artifact_id),
+                &(nan_harness_i18n::TerminalMessage::terminal_message(reason, locale)),
+            ),
         }
     }
 }

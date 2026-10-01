@@ -47,6 +47,7 @@ pub(super) async fn execute_fx_gateway(
             web_search_enabled,
         }),
         Some(discovered_models),
+        &config.secrets,
     )?;
     let mut bridge = spawn_fx_gateway(
         listener,

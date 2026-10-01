@@ -29,20 +29,25 @@ impl ConfigurationHealth {
         }
     }
 
-    pub(crate) const fn as_str(self) -> &'static str {
+    pub(crate) fn terminal_label(self, locale: nan_harness_i18n::Locale) -> &'static str {
+        use nan_harness_i18n::messages;
         match self {
-            Self::Active => "active",
-            Self::Missing => "missing",
-            Self::Changed => "changed",
-            Self::Invalid => "invalid",
-            Self::Unreadable => "unreadable",
+            Self::Active => messages::configuration_active_text(locale),
+            Self::Missing => messages::configuration_missing_text(locale),
+            Self::Changed => messages::configuration_changed_text(locale),
+            Self::Invalid => messages::configuration_invalid_text(locale),
+            Self::Unreadable => messages::configuration_unreadable_text(locale),
         }
     }
 
-    pub(crate) const fn recovery_hint(self) -> Option<&'static str> {
+    pub(crate) fn recovery_hint(self) -> Option<&'static str> {
         match self {
-            Self::Invalid => Some("Review the managed document's syntax and structure."),
-            Self::Unreadable => Some("Check the managed file's type, access and permissions."),
+            Self::Invalid => Some(nan_harness_i18n::messages::configuration_syntax_hint_text(
+                nan_harness_i18n::locale(),
+            )),
+            Self::Unreadable => Some(nan_harness_i18n::messages::configuration_access_hint_text(
+                nan_harness_i18n::locale(),
+            )),
             Self::Active | Self::Missing | Self::Changed => None,
         }
     }

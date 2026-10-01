@@ -89,15 +89,15 @@ pub(crate) async fn run(
         require_app_stopped()?;
         let profile = ManagedProfile::for_manager(&manager);
         if !profile.root.exists() {
-            println!("No managed ChatGPT Desktop session needs recovery.");
+            println!("{}", nan_harness_i18n::messages::chatgpt_desktop_no_managed_chatgpt_desktop_session_needs_recovery(nan_harness_i18n::locale()));
             return Ok(0);
         }
         validate_managed_profile(&profile)?;
         if restore_session(&profile)? {
-            println!("Recovered the managed ChatGPT Desktop profile.");
+            println!("{}", nan_harness_i18n::messages::chatgpt_desktop_recovered_the_managed_chatgpt_desktop_profile(nan_harness_i18n::locale()));
         } else {
             reject_orphaned_session_files(&profile)?;
-            println!("No managed ChatGPT Desktop session needs recovery.");
+            println!("{}", nan_harness_i18n::messages::chatgpt_desktop_no_managed_chatgpt_desktop_session_needs_recovery(nan_harness_i18n::locale()));
         }
         return Ok(0);
     }
@@ -304,6 +304,89 @@ impl ChatGptDesktopError {
             | Self::StartApp(_)
             | Self::WaitForApp(_)
             | Self::StopApp(_) => "NH-DESKTOP-010",
+        }
+    }
+}
+
+// Terminal localization is separate from canonical Display used by machine contracts.
+impl nan_harness_i18n::TerminalMessage for ChatGptDesktopError {
+    fn terminal_message(&self, locale: nan_harness_i18n::Locale) -> String {
+        use nan_harness_i18n::messages as m;
+        if locale == nan_harness_i18n::Locale::En {
+            return self.to_string();
+        }
+        match self {
+            Self::UnsupportedPlatform => m::error_chat_gpt_desktop_unsupported_platform(locale),
+            Self::AppNotFound => m::error_chat_gpt_desktop_app_not_found(locale),
+            Self::InvalidInstallation => m::error_chat_gpt_desktop_invalid_installation(locale),
+            Self::VersionCommand(field_0) => {
+                m::error_chat_gpt_desktop_version_command(locale, &(field_0))
+            }
+            Self::VersionCommandFailed => m::error_chat_gpt_desktop_version_command_failed(locale),
+            Self::UnparseableVersion => m::error_chat_gpt_desktop_unparseable_version(locale),
+            Self::Compatibility(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+            Self::OlderUnsupported {
+                minimum_app,
+                minimum_codex,
+            } => m::error_chat_gpt_desktop_older_unsupported(
+                locale,
+                &(minimum_app),
+                &(minimum_codex),
+            ),
+            Self::AppAlreadyRunning => m::error_chat_gpt_desktop_app_already_running(locale),
+            Self::SingletonRace => m::error_chat_gpt_desktop_singleton_race(locale),
+            Self::AppDidNotTerminate => m::error_chat_gpt_desktop_app_did_not_terminate(locale),
+            Self::AppExitedDuringStartup => {
+                m::error_chat_gpt_desktop_app_exited_during_startup(locale)
+            }
+            Self::InspectProcess(field_0) => {
+                m::error_chat_gpt_desktop_inspect_process(locale, &(field_0))
+            }
+            Self::ProcessInspectionFailed => {
+                m::error_chat_gpt_desktop_process_inspection_failed(locale)
+            }
+            Self::State(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+            Self::Persistence(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+            Self::UnmanagedProfile => m::error_chat_gpt_desktop_unmanaged_profile(locale),
+            Self::InvalidMarker => m::error_chat_gpt_desktop_invalid_marker(locale),
+            Self::InvalidReceipt => m::error_chat_gpt_desktop_invalid_receipt(locale),
+            Self::BackupHashMismatch => m::error_chat_gpt_desktop_backup_hash_mismatch(locale),
+            Self::MissingBackup => m::error_chat_gpt_desktop_missing_backup(locale),
+            Self::MalformedConfig => m::error_chat_gpt_desktop_malformed_config(locale),
+            Self::IncompatibleConfigSetting => {
+                m::error_chat_gpt_desktop_incompatible_config_setting(locale)
+            }
+            Self::OrphanedSessionFiles => m::error_chat_gpt_desktop_orphaned_session_files(locale),
+            Self::InspectProfile(field_0) => {
+                m::error_chat_gpt_desktop_inspect_profile(locale, &(field_0))
+            }
+            Self::ReadState(field_0) => m::error_chat_gpt_desktop_read_state(locale, &(field_0)),
+            Self::WriteState(field_0) => m::error_chat_gpt_desktop_write_state(locale, &(field_0)),
+            Self::ParseMarker(field_0) => {
+                m::error_chat_gpt_desktop_parse_marker(locale, &(field_0))
+            }
+            Self::ParseReceipt(field_0) => {
+                m::error_chat_gpt_desktop_parse_receipt(locale, &(field_0))
+            }
+            Self::SerializeState(field_0) => {
+                m::error_chat_gpt_desktop_serialize_state(locale, &(field_0))
+            }
+            Self::Bridge(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+            Self::BridgeExited => m::error_chat_gpt_desktop_bridge_exited(locale),
+            Self::BridgeHandshakeTimeout => {
+                m::error_chat_gpt_desktop_bridge_handshake_timeout(locale)
+            }
+            Self::StartApp(field_0) => m::error_chat_gpt_desktop_start_app(locale, &(field_0)),
+            Self::WaitForApp(field_0) => m::error_chat_gpt_desktop_wait_for_app(locale, &(field_0)),
+            Self::StopApp(field_0) => m::error_chat_gpt_desktop_stop_app(locale, &(field_0)),
         }
     }
 }

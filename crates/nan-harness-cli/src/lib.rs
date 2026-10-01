@@ -26,6 +26,9 @@ pub async fn main_entry() -> ExitCode {
     if let Some(exit_code) = commands::search_mcp::run_if_requested().await {
         return exit_code;
     }
+    if let Some(exit_code) = commands::media::run_if_requested().await {
+        return exit_code;
+    }
     if let Some(exit_code) = commands::searxng_host::run_if_requested().await {
         return exit_code;
     }
@@ -33,7 +36,17 @@ pub async fn main_entry() -> ExitCode {
 }
 
 async fn regular_main_entry() -> ExitCode {
+    let locale = commands::persistence::PreferencesStore::from_environment()
+        .and_then(|store| store.language())
+        .ok()
+        .flatten()
+        .and_then(|language| nan_harness_i18n::Locale::parse(&language))
+        .unwrap_or_default();
+    nan_harness_i18n::initialize(locale);
     let cli = Cli::parse_checked();
+    if let Command::Language { language } = &cli.command {
+        return commands::language::run(language.as_deref());
+    }
     if matches!(&cli.command, Command::Coordinator) {
         return match nan_harness_coordinator::run_daemon().await {
             Ok(()) => ExitCode::SUCCESS,
@@ -44,7 +57,17 @@ async fn regular_main_entry() -> ExitCode {
         return match commands::local_diagnostics::run(*command) {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => {
-                eprintln!("error [{}]: {error}", error.code());
+                eprintln!(
+                    "{}",
+                    nan_harness_i18n::messages::lib_error(
+                        nan_harness_i18n::locale(),
+                        &(nan_harness_i18n::TerminalMessage::terminal_message(
+                            &error,
+                            nan_harness_i18n::locale()
+                        )),
+                        &(error.code())
+                    )
+                );
                 ExitCode::FAILURE
             }
         };
@@ -197,9 +220,7 @@ fn process_update_result(
         Some(Ok(None)) | None => Ok(None),
         Some(Err(error)) => {
             eprintln!(
-                "warning [{}]: update failed; continuing with the installed version: {error}",
-                error.code()
-            );
+                "{}", nan_harness_i18n::messages::lib_warning_update_failed_continuing_with_the_installed_version(nan_harness_i18n::locale(), &(nan_harness_i18n::TerminalMessage::terminal_message(&error, nan_harness_i18n::locale())), &(error.code())));
             Ok(Some(error))
         }
     }
@@ -250,14 +271,10 @@ async fn report_compatibility_result(
     };
     if aggregate_doctor {
         eprintln!(
-            "warning [{}]: compatibility metadata refresh failed; continuing with cached or embedded values",
-            error.code()
-        );
+            "{}", nan_harness_i18n::messages::lib_warning_compatibility_metadata_refresh_failed_continuing_with_cached_or_emb(nan_harness_i18n::locale(), &(error.code())));
     } else {
         eprintln!(
-            "warning [{}]: compatibility metadata refresh failed; continuing with cached or embedded values: {error}",
-            error.code()
-        );
+            "{}", nan_harness_i18n::messages::lib_warning_compatibility_metadata_refresh_failed_continuing_with_cached_or_emb_details(nan_harness_i18n::locale(), &(nan_harness_i18n::TerminalMessage::terminal_message(&error, nan_harness_i18n::locale())), &(error.code())));
     }
     if let Some(reporter) = telemetry
         && reporter.enabled()
@@ -321,7 +338,7 @@ async fn report_run_result(
                 discovery_exit(error),
             );
             let message = error.user_message(cli);
-            eprintln!("{}", message.render_terminal());
+            eprintln!("{}", error.render_terminal(cli));
             let mut contexts = bridge_diagnostic_contexts(&bridge_diagnostics, cli, interactive);
             if message.is_reportable() && error.should_report_telemetry(cli) {
                 contexts.push(error.telemetry_context(cli, interactive, run_error.harness()));

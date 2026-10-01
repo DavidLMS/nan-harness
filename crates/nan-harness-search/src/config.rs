@@ -136,6 +136,22 @@ pub enum SearchConfigError {
     LocalRequiresLoopback,
 }
 
+// Terminal localization is separate from canonical Display used by machine contracts.
+impl nan_harness_i18n::TerminalMessage for SearchConfigError {
+    fn terminal_message(&self, locale: nan_harness_i18n::Locale) -> String {
+        use nan_harness_i18n::messages as m;
+        if locale == nan_harness_i18n::Locale::En {
+            return self.to_string();
+        }
+        match self {
+            Self::Whitespace => m::error_search_config_whitespace(locale),
+            Self::InvalidUrl => m::error_search_config_invalid_url(locale),
+            Self::RemoteRequiresHttps => m::error_search_config_remote_requires_https(locale),
+            Self::LocalRequiresLoopback => m::error_search_config_local_requires_loopback(locale),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{SearchConfigError, SearxngConfig, SearxngMode};

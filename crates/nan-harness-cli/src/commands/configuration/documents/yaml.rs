@@ -88,13 +88,7 @@ pub(crate) fn prepare_yaml_entries(
     plan: &YamlPlan,
     previous: Option<&YamlReceipt>,
 ) -> Result<Vec<YamlEntryReceipt>, ConfigurationError> {
-    let previous_entries = previous.map_or_else(BTreeMap::new, |receipt| {
-        receipt
-            .entries
-            .iter()
-            .map(|entry| (entry.path.clone(), entry))
-            .collect::<BTreeMap<_, _>>()
-    });
+    let previous_entries = merged_yaml_receipts(previous.map_or(&[], |receipt| &receipt.entries));
     for prior in previous_entries.values() {
         let current = get_yaml_path(document, &prior.path)
             .ok_or_else(|| ConfigurationError::ManagedDocumentChanged(plan.path.clone()))?;
@@ -120,9 +114,9 @@ pub(crate) fn prepare_yaml_entries(
             remove_yaml_path(document, &prior.path);
         }
     }
-    let mut entries = Vec::with_capacity(plan.entries.len());
+    let mut entries: Vec<YamlEntryReceipt> = Vec::with_capacity(plan.entries.len());
     for planned in &plan.entries {
-        let prior = previous_entries.get(&planned.path).copied();
+        let prior = previous_entries.get(&planned.path);
         let current = get_yaml_path(document, &planned.path).cloned();
         if prior.is_none() && matches!(planned.mode, YamlEntryMode::Exclusive) && current.is_some()
         {
@@ -130,17 +124,24 @@ pub(crate) fn prepare_yaml_entries(
                 plan.path.clone(),
             ));
         }
-        let previous_value = prior.and_then(|entry| entry.previous.clone()).or_else(|| {
-            matches!(
+        let previous_value = match prior {
+            Some(entry) => entry.previous.clone(),
+            None => matches!(
                 planned.mode,
                 YamlEntryMode::Override | YamlEntryMode::AppendUnique
             )
             .then_some(current.clone())
-            .flatten()
-        });
+            .flatten(),
+        };
+        let already_appended = entries.iter().any(|entry| entry.path == planned.path);
+        let append_base = if prior.is_some() && !already_appended {
+            previous_value.as_ref()
+        } else {
+            current.as_ref()
+        };
         let desired = match planned.mode {
             YamlEntryMode::AppendUnique => append_unique_yaml_value(
-                current.as_ref(),
+                append_base,
                 &planned.value,
                 &plan.path,
                 planned.path.last().map_or("", String::as_str),
@@ -148,11 +149,15 @@ pub(crate) fn prepare_yaml_entries(
             YamlEntryMode::Exclusive | YamlEntryMode::Override => planned.value.clone(),
         };
         set_yaml_path(document, &planned.path, desired.clone(), &plan.path)?;
-        entries.push(YamlEntryReceipt {
-            path: planned.path.clone(),
-            value_sha256: hash_yaml(&desired)?,
-            previous: previous_value,
-        });
+        if let Some(entry) = entries.iter_mut().find(|entry| entry.path == planned.path) {
+            entry.value_sha256 = hash_yaml(&desired)?;
+        } else {
+            entries.push(YamlEntryReceipt {
+                path: planned.path.clone(),
+                value_sha256: hash_yaml(&desired)?,
+                previous: previous_value,
+            });
+        }
     }
     Ok(entries)
 }
@@ -203,7 +208,8 @@ pub(crate) fn prepare_yaml_removal(
             source,
         }
     })?;
-    for entry in &receipt.entries {
+    let entries = merged_yaml_receipts(&receipt.entries);
+    for entry in entries.values() {
         let current = get_yaml_path(&document, &entry.path)
             .ok_or_else(|| ConfigurationError::ManagedDocumentChanged(receipt.path.clone()))?;
         if hash_yaml(current)? != entry.value_sha256 {
@@ -212,7 +218,7 @@ pub(crate) fn prepare_yaml_removal(
             ));
         }
     }
-    for entry in receipt.entries.iter().rev() {
+    for entry in entries.values().rev() {
         if let Some(previous) = &entry.previous {
             set_yaml_path(&mut document, &entry.path, previous.clone(), &receipt.path)?;
         } else {
@@ -239,4 +245,17 @@ pub(crate) fn prepare_yaml_removal(
         replacement,
         receipt: DocumentReceipt::Yaml(receipt.clone()),
     })
+}
+
+fn merged_yaml_receipts(entries: &[YamlEntryReceipt]) -> BTreeMap<Vec<String>, YamlEntryReceipt> {
+    let mut previous_entries: BTreeMap<Vec<String>, YamlEntryReceipt> = BTreeMap::new();
+    for entry in entries {
+        // Older receipts can contain multiple appends to the same plugin list.
+        // Its first baseline and final hash describe the actual owned change.
+        previous_entries
+            .entry(entry.path.clone())
+            .and_modify(|prior| prior.value_sha256.clone_from(&entry.value_sha256))
+            .or_insert_with(|| entry.clone());
+    }
+    previous_entries
 }

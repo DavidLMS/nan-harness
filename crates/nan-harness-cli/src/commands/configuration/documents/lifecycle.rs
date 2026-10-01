@@ -1,5 +1,6 @@
 use super::*;
 
+#[cfg(test)]
 pub(crate) fn apply_prepared(documents: &[PreparedDocument]) -> Result<(), ConfigurationError> {
     for (index, document) in documents.iter().enumerate() {
         let result = match &document.replacement {
@@ -16,6 +17,7 @@ pub(crate) fn apply_prepared(documents: &[PreparedDocument]) -> Result<(), Confi
     Ok(())
 }
 
+#[cfg(test)]
 pub(crate) fn rollback_prepared(documents: &[PreparedDocument]) {
     for document in documents.iter().rev() {
         match &document.original {

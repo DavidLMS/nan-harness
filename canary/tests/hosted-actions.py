@@ -573,8 +573,9 @@ class CellTests(unittest.TestCase):
                 if output:
                     output.write_text(json.dumps({"version": "9.9.9"}))
             with patch.object(cell, "private_command", side_effect=fake_command):
-                with self.assertRaisesRegex(RuntimeError, "installed version"):
+                with self.assertRaises(cell.InstallFailure) as failure:
                     cell.install(args, state)
+                self.assertEqual(failure.exception.phase, cell.DOCTOR_VERSION_FAILURE_PHASE)
 
     def test_suite_driver_builds_fresh_argv_and_keeps_running_after_failure(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -662,16 +663,16 @@ if stage == 'report':
             with self.assertRaisesRegex(RuntimeError, "identity changed"):
                 cell.run(args)
 
-    def test_x86_architecture_is_limited_to_linux_manual_smoke(self):
+    def test_runner_architecture_mismatch_is_rejected(self):
         args = argparse.Namespace(trigger="manual")
         with patch.object(cell.sys, "platform", "darwin"), patch.object(
                 cell.os, "uname", return_value=SimpleNamespace(machine="x86_64")):
-            with self.assertRaisesRegex(RuntimeError, "Linux manual"):
+            with self.assertRaisesRegex(RuntimeError, "native runner"):
                 cell.initial_state(args)
         args.trigger = "release"
         with patch.object(cell.sys, "platform", "linux"), patch.object(
                 cell.os, "uname", return_value=SimpleNamespace(machine="x86_64")):
-            with self.assertRaisesRegex(RuntimeError, "Linux manual"):
+            with self.assertRaisesRegex(RuntimeError, "native runner"):
                 cell.initial_state(args)
 
     def test_failure_never_exposes_child_output(self):

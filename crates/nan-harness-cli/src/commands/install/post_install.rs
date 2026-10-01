@@ -1,8 +1,10 @@
 use super::discovery::executable_from_known_locations;
 use super::error::InstallError;
+use super::installer::run_command;
 use super::output::{first_non_empty_output_line, summarize_output};
 use nan_harness_core::HarnessKind;
 use nan_harness_runtime::is_executable_file;
+use std::ffi::OsStr;
 use std::path::PathBuf;
 use std::process::Command;
 use tempfile::TempDir;
@@ -68,9 +70,7 @@ fn verify_post_install_with_executable(
 
 pub(super) fn refresh_cline_binary_cache() -> Result<(), InstallError> {
     let root_command = "npm root --global";
-    let root_output = Command::new("npm")
-        .args(["root", "--global"])
-        .output()
+    let root_output = run_command(OsStr::new("npm"), &["root", "--global"], Command::output)
         .map_err(|source| InstallError::PostInstallCheckStart {
             harness: HarnessKind::Cline,
             command: root_command.to_owned(),
@@ -97,14 +97,17 @@ pub(super) fn refresh_cline_binary_cache() -> Result<(), InstallError> {
     let package_root = global_root.join("cline");
     let postinstall = package_root.join("postinstall.mjs");
     let command = format!("node {}", postinstall.display());
-    let output = Command::new("node")
-        .arg(&postinstall)
-        .output()
-        .map_err(|source| InstallError::PostInstallCheckStart {
-            harness: HarnessKind::Cline,
-            command: command.clone(),
-            source,
-        })?;
+    let postinstall_argument = postinstall.to_string_lossy().into_owned();
+    let output = run_command(
+        OsStr::new("node"),
+        &[postinstall_argument.as_str()],
+        Command::output,
+    )
+    .map_err(|source| InstallError::PostInstallCheckStart {
+        harness: HarnessKind::Cline,
+        command: command.clone(),
+        source,
+    })?;
     if !output.status.success() {
         return Err(InstallError::PostInstallCheckFailed {
             harness: HarnessKind::Cline,

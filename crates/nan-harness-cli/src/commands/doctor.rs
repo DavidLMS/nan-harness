@@ -10,9 +10,8 @@ use nan_harness_runtime::DiscoveryError;
 pub(crate) async fn run(arguments: &DoctorArgs) -> Result<i32, DiscoveryError> {
     if arguments.offline && !arguments.json {
         println!(
-            "[INFO] Offline: nan-harness network activity and credential resolution skipped; local executable probes still run."
-        );
-        println!("[INFO] Compatibility data: local cached or embedded evidence; not refreshed.");
+            "{}", nan_harness_i18n::messages::doctor_info_offline_nan_harness_network_activity_and_credential_resolution_skipped(nan_harness_i18n::locale()));
+        println!("{}", nan_harness_i18n::messages::doctor_info_compatibility_data_local_cached_or_embedded_evidence_not_refreshed(nan_harness_i18n::locale()));
     }
     match arguments.harness {
         Some(DoctorTarget::Stable(harness)) if arguments.json => {

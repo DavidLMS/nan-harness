@@ -298,7 +298,9 @@ fn apply_reasoning(
     })?;
     match selection {
         ReasoningSelection::Toggle(enabled)
-            if model.id.starts_with("qwen") || model.id.starts_with("gemma") =>
+            if model.id.starts_with("qwen")
+                || model.id.starts_with("gemma")
+                || model.id == "mimo-v2.6-flash" =>
         {
             body["chat_template_kwargs"] = json!({"enable_thinking": enabled});
         }
@@ -352,11 +354,13 @@ mod tests {
             .expect("catalog effort policy should not depend on model family names");
         assert_eq!(future_effort_body["reasoning_effort"], "low");
 
-        let mimo = nan_harness_core::coding_model_profile("mimo-v2.5").expect("known model");
+        let mimo = nan_harness_core::coding_model_profile("mimo-v2.6-flash").expect("known model");
         let mut mimo_body = json!({});
         apply_reasoning(&mut mimo_body, &mimo, "medium")
-            .expect("positive effort should preserve always-on reasoning");
-        assert_eq!(mimo_body, json!({}));
+            .expect("positive effort should enable MiMo reasoning");
+        assert_eq!(mimo_body["chat_template_kwargs"]["enable_thinking"], true);
+        apply_reasoning(&mut mimo_body, &mimo, "none").expect("MiMo reasoning can be disabled");
+        assert_eq!(mimo_body["chat_template_kwargs"]["enable_thinking"], false);
 
         let generic = CodingModelProfile::generic("future-coding-model");
         let mut generic_body = json!({});

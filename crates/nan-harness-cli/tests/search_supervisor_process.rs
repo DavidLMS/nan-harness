@@ -131,20 +131,46 @@ async fn child_session() {
 }
 
 fn spawn_child(directory: &std::path::Path, port: u16) -> Child {
+    child_command(directory, port)
+        .spawn()
+        .expect("child session should start")
+}
+
+fn child_command(directory: &std::path::Path, port: u16) -> Command {
     let mut command = Command::new(std::env::current_exe().expect("test executable"));
     command
-        .args(["--exact", "child_session", "--nocapture"])
+        // Keep libtest's output thread separate from the interactive fixture: an inherited
+        // single-thread runner can hold stdout while the fixture waits for its stdin release.
+        .args(["--exact", "child_session", "--nocapture", "--test-threads=2"])
         .env(CHILD_ENVIRONMENT, "1")
         .env("TOKIO_WORKER_THREADS", "2")
         .env("NAN_HARNESS_SEARCH_TEST_DIRECTORY", directory)
         .env("NAN_HARNESS_SEARCH_TEST_PORT", port.to_string())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::inherit());
+        .stderr(Stdio::inherit())
+        .kill_on_drop(true);
     command
-        .kill_on_drop(true)
+}
+
+#[tokio::test]
+async fn inherited_single_thread_runner_does_not_block_readiness() {
+    let directory = tempfile::tempdir().expect("coordination directory");
+    let port = free_port();
+    let mut session = child_command(directory.path(), port)
+        .env("RUST_TEST_THREADS", "1")
         .spawn()
-        .expect("child session should start")
+        .expect("child session should start");
+    wait_ready(&mut session).await;
+    session
+        .stdin
+        .as_mut()
+        .expect("session stdin")
+        .write_all(b"\n")
+        .await
+        .expect("release session");
+    wait_for_exit(&mut session).await;
+    assert_backend_state(port, false).await;
 }
 
 async fn wait_ready(child: &mut Child) {

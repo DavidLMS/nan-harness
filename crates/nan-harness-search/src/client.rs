@@ -243,6 +243,27 @@ impl SearchError {
     }
 }
 
+// Terminal localization is separate from canonical Display used by machine contracts.
+impl nan_harness_i18n::TerminalMessage for SearchError {
+    fn terminal_message(&self, locale: nan_harness_i18n::Locale) -> String {
+        use nan_harness_i18n::messages as m;
+        if locale == nan_harness_i18n::Locale::En {
+            return self.to_string();
+        }
+        match self {
+            Self::ClientBuild => m::error_search_client_build(locale),
+            Self::InvalidQuery => m::error_search_invalid_query(locale),
+            Self::QueryTooLarge => m::error_search_query_too_large(locale),
+            Self::InvalidDomainFilter => m::error_search_invalid_domain_filter(locale),
+            Self::Timeout => m::error_search_timeout(locale),
+            Self::Transport => m::error_search_transport(locale),
+            Self::HttpStatus(field_0) => m::error_search_http_status(locale, &(field_0)),
+            Self::ResponseTooLarge => m::error_search_response_too_large(locale),
+            Self::InvalidResponse => m::error_search_invalid_response(locale),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{SearchError, SearxngClient};

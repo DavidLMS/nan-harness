@@ -50,7 +50,12 @@ pub(crate) fn run(arguments: &UninstallArgs, interactive: bool) -> Result<(), Un
             )?
         };
         if !confirmed {
-            println!("Uninstall cancelled.");
+            println!(
+                "{}",
+                nan_harness_i18n::messages::uninstall_uninstall_cancelled(
+                    nan_harness_i18n::locale()
+                )
+            );
             return Ok(());
         }
     }
@@ -58,31 +63,56 @@ pub(crate) fn run(arguments: &UninstallArgs, interactive: bool) -> Result<(), Un
     search::cleanup_owned_search_resources_for_uninstall()?;
 
     if has_hermes_profile && hermes_desktop::remove_persistent_profile()? {
-        println!("Hermes CLI/Desktop shared NaN profile removed.");
+        println!(
+            "{}",
+            nan_harness_i18n::messages::uninstall_hermes_cli_desktop_shared_nan_profile_removed(
+                nan_harness_i18n::locale()
+            )
+        );
     }
     if has_pen_configuration && pen_desktop::remove_persistent_configuration()? {
-        println!("NaN configuration removed from Pen Desktop.");
+        println!(
+            "{}",
+            nan_harness_i18n::messages::uninstall_nan_configuration_removed_from_pen_desktop(
+                nan_harness_i18n::locale()
+            )
+        );
     }
 
     for (harness, outcome) in configuration_manager.remove_all()? {
         if outcome == RemovalOutcome::Removed {
-            println!("NaN configuration removed from {harness}.");
+            println!(
+                "{}",
+                nan_harness_i18n::messages::uninstall_nan_configuration_removed_from(
+                    nan_harness_i18n::locale(),
+                    &(harness)
+                )
+            );
         }
     }
     for integration in integrations {
         if manager.unpersist(integration)? == RemovalOutcome::Removed {
-            println!("NaN provider removed from {integration}.");
+            println!(
+                "{}",
+                nan_harness_i18n::messages::uninstall_nan_provider_removed_from(
+                    nan_harness_i18n::locale(),
+                    &(integration)
+                )
+            );
         }
     }
     if credential_manager.remove_saved()? {
-        println!("Saved NaN provider API key removed.");
+        println!(
+            "{}",
+            nan_harness_i18n::messages::uninstall_saved_nan_provider_api_key_removed(
+                nan_harness_i18n::locale()
+            )
+        );
     }
 
     if !installation.remove_alias && installation.alias_path.exists() {
         eprintln!(
-            "warning: preserving '{}' because it is no longer managed by nan-harness",
-            installation.alias_path.display()
-        );
+            "{}", nan_harness_i18n::messages::uninstall_warning_preserving_because_it_is_no_longer_managed_by_nan_harness(nan_harness_i18n::locale(), &(installation.alias_path.display())));
     }
 
     cleanup::remove_installation(&installation, &data_directory)?;

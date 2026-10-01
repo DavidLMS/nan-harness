@@ -1,6 +1,8 @@
 use super::invalid;
 use crate::error::PlanError;
 use crate::launch_plan::LaunchPlan;
+use nan_harness_i18n::DiagnosticText;
+use nan_harness_i18n::messages as detail_messages;
 
 pub(super) fn validate(plan: &LaunchPlan) -> Result<(), PlanError> {
     for variable in plan
@@ -13,7 +15,12 @@ pub(super) fn validate(plan: &LaunchPlan) -> Result<(), PlanError> {
         if !is_valid_environment_name(variable) {
             return invalid(
                 "environment",
-                format!("'{variable}' is not a valid variable name"),
+                DiagnosticText::new(|locale| {
+                    detail_messages::detail_variable_is_not_a_valid_variable_name(
+                        locale,
+                        &(variable),
+                    )
+                }),
             );
         }
     }
@@ -40,7 +47,12 @@ pub(super) fn validate(plan: &LaunchPlan) -> Result<(), PlanError> {
         {
             return invalid(
                 "observability.redactEnvironmentNames",
-                format!("must include secret environment variable '{variable}'"),
+                DiagnosticText::new(|locale| {
+                    detail_messages::detail_must_include_secret_environment_variable_variable(
+                        locale,
+                        &(variable),
+                    )
+                }),
             );
         }
     }

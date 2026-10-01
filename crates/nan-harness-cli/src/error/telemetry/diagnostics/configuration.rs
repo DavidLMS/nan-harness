@@ -7,7 +7,6 @@ pub(super) fn classify(error: &ConfigurationError) -> Classification {
         ConfigurationError::Credential(error) => credentials::classify(error),
         ConfigurationError::Persistence(error) => persistence::classify(error),
         ConfigurationError::ReadDocument { source, .. }
-        | ConfigurationError::RemoveDocument { source, .. }
         | ConfigurationError::ReadState { source, .. }
         | ConfigurationError::Prompt(source) => (io::classify(source), None),
         ConfigurationError::ParseDocument { .. }

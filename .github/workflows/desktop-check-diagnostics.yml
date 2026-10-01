@@ -1,0 +1,58 @@
+name: Desktop branch diagnostics
+
+on:
+  workflow_dispatch:
+    inputs:
+      platforms:
+        description: all or comma-separated native platforms
+        type: string
+        default: all
+      desktop_harnesses:
+        description: all or comma-separated Desktop integration IDs
+        type: string
+        default: all
+      desktop_diagnostics:
+        description: Isolated deterministic Desktop diagnosis using branch binaries, never hosted release evidence
+        type: boolean
+        default: false
+      chatgpt_sandbox_synthetic_only:
+        description: Run only offline Linux subprocess and workflow contracts
+        type: boolean
+        default: false
+      mode:
+        description: Live checks require the protected canary environment
+        type: choice
+        options: [deterministic, live]
+        default: deterministic
+      model:
+        description: One model identifier; blank uses CANARY_MODEL
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: ${{ inputs.chatgpt_sandbox_synthetic_only && format('chatgpt-sandbox-synthetic-{0}', github.ref) || inputs.desktop_diagnostics && format('desktop-native-diagnostics-{0}', github.ref) || format('desktop-native-diagnostics-{0}', github.ref) }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CI: 1
+
+jobs:
+  desktop-diagnostics:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.desktop_diagnostics && !inputs.chatgpt_sandbox_synthetic_only }}
+    uses: ./.github/workflows/desktop-check-suite.yml
+    with:
+      source: branch
+      platforms: ${{ inputs.platforms || 'all' }}
+      harnesses: ${{ inputs.desktop_harnesses || 'all' }}
+      model: ${{ inputs.model }}
+      mode: deterministic
+      diagnostics: true
+      hosted_evidence: false
+
+  chatgpt-sandbox-synthetic:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.chatgpt_sandbox_synthetic_only }}
+    uses: ./.github/workflows/desktop-check-chatgpt-wave29-synthetic.yml

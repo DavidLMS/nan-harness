@@ -130,19 +130,14 @@ pub(super) fn should_attempt_fallback(selected: &LaunchModel, error: &RuntimeErr
 }
 
 pub(super) fn format_launch_announcement(kind: HarnessKind, model: &LaunchModel) -> String {
-    let qualifier = match model.source {
-        LaunchModelSource::Explicit | LaunchModelSource::ExplicitUndiscovered => None,
-        LaunchModelSource::Remembered => {
-            Some("(remembered from your last session; override with --model)")
+    use nan_harness_i18n::{locale, messages};
+    match model.source {
+        LaunchModelSource::Explicit | LaunchModelSource::ExplicitUndiscovered => {
+            messages::launch_explicit(locale(), &kind, &model.id)
         }
-        LaunchModelSource::Default => Some("(default; override with --model)"),
-        LaunchModelSource::Fallback => Some("(provider-selected fallback)"),
-    };
-    match qualifier {
-        Some(qualifier) => {
-            format!("Starting {kind} with model '{}' {qualifier}.", model.id)
-        }
-        None => format!("Starting {kind} with model '{}'.", model.id),
+        LaunchModelSource::Remembered => messages::launch_remembered(locale(), &kind, &model.id),
+        LaunchModelSource::Default => messages::launch_default(locale(), &kind, &model.id),
+        LaunchModelSource::Fallback => messages::launch_fallback(locale(), &kind, &model.id),
     }
 }
 
@@ -155,7 +150,7 @@ pub(super) fn format_exit_bookend(
         return None;
     }
     Some((
-        format!("{kind} exited with code {exit_code}."),
-        format!("If this looks like a setup problem, run `nanh doctor {kind}`."),
+        nan_harness_i18n::messages::launch_exit(nan_harness_i18n::locale(), &exit_code, &kind),
+        nan_harness_i18n::messages::launch_setup_hint(nan_harness_i18n::locale(), &kind),
     ))
 }

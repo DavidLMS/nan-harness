@@ -42,14 +42,16 @@ pub(crate) fn file_permissions(path: &Path) -> Result<Option<Permissions>, Confi
     }
 }
 
+#[cfg(test)]
 pub(crate) fn remove_optional_file(path: &Path) -> Result<(), ConfigurationError> {
     match fs::remove_file(path) {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(source) => Err(ConfigurationError::RemoveDocument {
+        Err(source) => Err(PersistenceError::RemoveFile {
             path: path.to_path_buf(),
             source,
-        }),
+        }
+        .into()),
     }
 }
 

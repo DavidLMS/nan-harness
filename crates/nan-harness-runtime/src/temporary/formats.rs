@@ -1,5 +1,7 @@
 use super::TemporaryError;
 use super::paths::invalid_artifact;
+use nan_harness_i18n::DiagnosticText;
+use nan_harness_i18n::messages as detail_messages;
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
@@ -93,13 +95,21 @@ pub(super) fn parse_json_object(
     let value: serde_json::Value = serde_json::from_str(content).map_err(|error| {
         invalid_artifact(
             overlay_id,
-            format!("{label} JSON overlay is invalid: {error}"),
+            DiagnosticText::new(|locale| {
+                detail_messages::detail_label_json_overlay_is_invalid_failed(
+                    locale,
+                    &(error),
+                    &(label),
+                )
+            }),
         )
     })?;
     value.as_object().cloned().ok_or_else(|| {
         invalid_artifact(
             overlay_id,
-            format!("{label} JSON overlay must be an object"),
+            DiagnosticText::new(|locale| {
+                detail_messages::detail_label_json_overlay_must_be_an_object(locale, &(label))
+            }),
         )
     })
 }
@@ -129,7 +139,13 @@ pub(super) fn parse_toml_table(
     toml::from_str(content).map_err(|error| {
         invalid_artifact(
             overlay_id,
-            format!("{label} TOML overlay is invalid: {error}"),
+            DiagnosticText::new(|locale| {
+                detail_messages::detail_label_toml_overlay_is_invalid_failed(
+                    locale,
+                    &(error),
+                    &(label),
+                )
+            }),
         )
     })
 }

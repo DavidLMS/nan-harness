@@ -63,6 +63,8 @@ mod tests {
                 duration_milliseconds: 0,
             }],
             observations: Vec::new(),
+            inventory_failure_reasons: Vec::new(),
+            inventory_process: None,
             outcome: ConformanceOutcome::Passed,
             duration_milliseconds: 0,
         };
@@ -94,6 +96,8 @@ mod tests {
                 duration_milliseconds: 1,
             }],
             observations: Vec::new(),
+            inventory_failure_reasons: Vec::new(),
+            inventory_process: None,
             outcome: ConformanceOutcome::Passed,
             duration_milliseconds: 2,
         };

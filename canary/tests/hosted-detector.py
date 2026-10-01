@@ -21,7 +21,7 @@ class DetectorTests(unittest.TestCase):
         self.assertEqual(selected["model"], "chosen-model")
         jobs = json.loads(selected["matrix"])["include"]
         self.assertEqual([(job["system"], job["architecture"], len(job["harnesses"])) for job in jobs],
-                         [("linux", "aarch64", 15), ("macos", "aarch64", 15), ("windows", "x86_64", 14)])
+                         [("linux", "aarch64", 15), ("macos", "aarch64", 15), ("windows", "x86_64", 13)])
         self.assertEqual(selected["desktop_platforms"], "linux,macos,windows")
         self.assertEqual(len(selected["desktop_harnesses"].split(",")), 5)
 
@@ -71,24 +71,23 @@ class DetectorTests(unittest.TestCase):
                 self.assertEqual([call.args[0][1] for call in validate.call_args_list],
                                  ["hosted-compatibility-feed", "validate-hosted-compatibility-feed"])
 
-    def test_workflow_keeps_one_schedule_and_credentials_out_of_setup(self):
+    def test_main_daily_workflow_owns_schedule_and_publishing_boundary(self):
         workflow = (ROOT / ".github/workflows/harness-canary.yml").read_text()
-        self.assertEqual(workflow.count('cron: "47 5 * * *"'), 1)
+        self.assertEqual(workflow.count('cron: "0 5 * * *"'), 1)
         self.assertEqual(workflow.count("cron:"), 1)
-        self.assertEqual(workflow.count("NAN_API_KEY:"), 1)
-        setup, live = workflow.split("      - name: Check selected harnesses", 1)
-        self.assertNotIn("NAN_API_KEY", setup)
-        self.assertIn("canary-live", setup)
-        self.assertNotIn("contents: write", workflow)
-        self.assertIn("hosted-evidence-cli-${{ matrix.system }}", live)
-        self.assertIn("evidence.py pack", live)
-        self.assertIn("persist-credentials: false", setup)
-        self.assertIn("uses: ./.github/workflows/desktop-check-suite.yml", setup)
-        self.assertIn("hosted_evidence: true", setup)
-        self.assertIn("timeout-minutes: 90", setup)
+        self.assertIn("group: release-channel-${{ github.repository }}", workflow)
+        self.assertIn("cancel-in-progress: false", workflow)
+        self.assertIn("daily_compatibility.py prepare", workflow)
+        self.assertIn("persist-credentials: false", workflow)
         self.assertNotIn("secrets: inherit", workflow)
-        self.assertIn("if: needs.select.outputs.cli == 'true'", setup)
-        self.assertIn("if: needs.select.outputs.desktop == 'true'", setup)
+        setup, live = workflow.split("  cell:\n", 1)
+        self.assertNotIn("NAN_API_KEY", setup)
+        self.assertIn("environment: compatibility-live", live)
+        diagnostic = (ROOT / ".github/workflows/desktop-check-diagnostics.yml").read_text()
+        self.assertNotIn("schedule:", diagnostic)
+        self.assertNotIn("NAN_API_KEY", diagnostic)
+        self.assertIn("hosted_evidence: false", diagnostic)
+        self.assertNotIn("contents: write", diagnostic)
 
 
 if __name__ == "__main__":

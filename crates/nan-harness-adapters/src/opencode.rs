@@ -9,6 +9,8 @@ use nan_harness_core::launch_plan::{
 use nan_harness_core::{
     HarnessAdapter, HarnessKind, LaunchPlan, NativeContextLimit, PlanContext, PlanError,
 };
+use nan_harness_i18n::DiagnosticText;
+use nan_harness_i18n::messages as detail_messages;
 use serde_json::json;
 use std::collections::BTreeSet;
 
@@ -55,7 +57,12 @@ impl HarnessAdapter for OpenCodeAdapter {
         let mut config =
             serde_json::to_string(&config_value).map_err(|error| PlanError::InvalidField {
                 field: "environment.public.OPENCODE_CONFIG_CONTENT",
-                message: format!("could not serialize OpenCode configuration: {error}"),
+                message: DiagnosticText::new(|locale| {
+                    detail_messages::detail_serialize_opencode_configuration_failed(
+                        locale,
+                        &(error),
+                    )
+                }),
             })?;
         config.pop();
         let search = serde_json::to_string(&json!({
@@ -67,7 +74,9 @@ impl HarnessAdapter for OpenCodeAdapter {
         }))
         .map_err(|error| PlanError::InvalidField {
             field: "environment.public.OPENCODE_CONFIG_CONTENT",
-            message: format!("could not serialize OpenCode configuration: {error}"),
+            message: DiagnosticText::new(|locale| {
+                detail_messages::detail_serialize_opencode_configuration_failed(locale, &(error))
+            }),
         })?;
         config.push_str(NAN_SEARCH_BLOCK_BEGIN);
         config.push_str(",\"mcp\":");

@@ -2,47 +2,51 @@ use super::{
     CodingModelProfile, ConfigurationError, ConfigurationManager, HarnessKind, IntegrationChange,
     PersistentIntegration, RemovalOutcome,
 };
+use crate::commands::persistence::PreparedFileChange;
 
 impl ConfigurationManager {
-    pub(crate) fn configure_catalogs(
+    pub(crate) fn prepare_catalogs(
         &self,
         harness: HarnessKind,
         models: &[CodingModelProfile],
         provider_base_url: &str,
         _api_key: &str,
         search_managed: bool,
-    ) -> Result<Option<IntegrationChange>, ConfigurationError> {
+    ) -> Result<(Vec<PreparedFileChange>, Option<IntegrationChange>), ConfigurationError> {
         let change = match harness {
-            HarnessKind::OpenCode => Some(self.legacy.configure_opencode(
+            HarnessKind::OpenCode => Some(self.legacy.prepare_opencode(
                 models,
                 provider_base_url,
                 search_managed,
             )?),
             HarnessKind::QwenCode => {
-                Some(self.legacy.configure_qwen_code(models, provider_base_url)?)
+                Some(self.legacy.prepare_qwen_code(models, provider_base_url)?)
             }
             HarnessKind::DeepSeekHarness => Some(
                 self.legacy
-                    .configure_deepseek_harness(models, provider_base_url)?,
+                    .prepare_deepseek_harness(models, provider_base_url)?,
             ),
-            HarnessKind::Aider => Some(self.legacy.configure_aider(models, provider_base_url)?),
+            HarnessKind::Aider => Some(self.legacy.prepare_aider(models, provider_base_url)?),
             _ => None,
         };
-        Ok(change)
+        Ok(change.map_or_else(
+            || (Vec::new(), None),
+            |(files, change)| (files, Some(change)),
+        ))
     }
 
-    pub(crate) fn remove_legacy(
+    pub(crate) fn prepare_remove_legacy(
         &self,
         harness: HarnessKind,
-    ) -> Result<RemovalOutcome, ConfigurationError> {
+    ) -> Result<(Vec<PreparedFileChange>, RemovalOutcome), ConfigurationError> {
         let outcome = match harness {
-            HarnessKind::OpenCode => self.legacy.unpersist_opencode()?,
-            HarnessKind::Pi => self.legacy.unpersist_pi()?,
-            HarnessKind::PrimeAgent => self.legacy.unpersist_prime_agent()?,
-            HarnessKind::QwenCode => self.legacy.unpersist_qwen_code()?,
-            HarnessKind::DeepSeekHarness => self.legacy.unpersist_deepseek_harness()?,
-            HarnessKind::Aider => self.legacy.unpersist_aider()?,
-            _ => RemovalOutcome::NotConfigured,
+            HarnessKind::OpenCode => self.legacy.prepare_remove_opencode()?,
+            HarnessKind::Pi => self.legacy.prepare_remove_pi()?,
+            HarnessKind::PrimeAgent => self.legacy.prepare_remove_prime_agent()?,
+            HarnessKind::QwenCode => self.legacy.prepare_remove_qwen_code()?,
+            HarnessKind::DeepSeekHarness => self.legacy.prepare_remove_deepseek_harness()?,
+            HarnessKind::Aider => self.legacy.prepare_remove_aider()?,
+            _ => (Vec::new(), RemovalOutcome::NotConfigured),
         };
         Ok(outcome)
     }

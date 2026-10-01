@@ -12,13 +12,6 @@ run-name: ChatGPT wave10 Linux startup diagnostic
 # no system-policy change, no package edit and no credential.
 
 on:
-  push:
-    branches:
-      - DavidLMS/desktop-chatgpt-probe-wave10
-    paths:
-      - '.github/workflows/desktop-check-chatgpt-wave10.yml'
-      - 'scripts/chatgpt-wave10-startup.sh'
-      - 'scripts/test-chatgpt-wave10-startup.sh'
   workflow_dispatch:
 
 permissions:

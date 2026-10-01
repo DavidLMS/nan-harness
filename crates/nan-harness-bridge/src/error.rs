@@ -299,6 +299,58 @@ impl IntoResponse for ApiError {
 #[path = "error/content_filter_tests.rs"]
 mod content_filter_tests;
 
+// Terminal localization is separate from canonical Display used by machine contracts.
+impl nan_harness_i18n::TerminalMessage for BridgeError {
+    fn terminal_message(&self, locale: nan_harness_i18n::Locale) -> String {
+        use nan_harness_i18n::messages as m;
+        if locale == nan_harness_i18n::Locale::En {
+            return self.to_string();
+        }
+        match self {
+            Self::ListenerAddress(field_0) => m::error_bridge_listener_address(locale, &(field_0)),
+            Self::NonLoopbackAddress(field_0) => {
+                m::error_bridge_non_loopback_address(locale, &(field_0))
+            }
+            Self::BuildClient(field_0) => m::error_bridge_build_client(locale, &(field_0)),
+            Self::BuildSearchClient => m::error_bridge_build_search_client(locale),
+            Self::Coordinator(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+            Self::ModelDiscoveryTransport(field_0) => {
+                m::error_bridge_model_discovery_transport(locale, &(field_0))
+            }
+            Self::ModelDiscoveryStatus { status, message } => {
+                m::error_bridge_model_discovery_status(locale, &(message), &(status))
+            }
+            Self::ModelDiscoveryTooLarge => m::error_bridge_model_discovery_too_large(locale),
+            Self::InvalidModelDiscoveryResponse(field_0) => {
+                m::error_bridge_invalid_model_discovery_response(locale, &(field_0))
+            }
+            Self::NoCompatibleModels => m::error_bridge_no_compatible_models(locale),
+            Self::SelectedModelUnavailable { model, available } => {
+                m::error_bridge_selected_model_unavailable(
+                    locale,
+                    &(if available.is_empty() {
+                        m::error_no_models(locale)
+                    } else {
+                        m::error_available_models(
+                            locale,
+                            &available
+                                .iter()
+                                .map(|model| format!("'{model}'"))
+                                .collect::<Vec<_>>()
+                                .join(", "),
+                        )
+                    }),
+                    &(model),
+                )
+            }
+            Self::Serve(field_0) => m::error_bridge_serve(locale, &(field_0)),
+            Self::TaskJoin(field_0) => m::error_bridge_task_join(locale, &(field_0)),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{ApiError, BridgeError};

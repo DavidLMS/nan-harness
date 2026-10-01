@@ -198,3 +198,25 @@ fn pen_configuration_accepts_desktop_and_short_names() {
         assert!(arguments.status);
     }
 }
+
+#[test]
+fn image_model_is_scoped_to_native_image_integrations() {
+    for command in [
+        vec!["hermes"],
+        vec!["openclaw"],
+        vec!["hermes-desktop"],
+        vec!["config", "hermes"],
+        vec!["config", "openclaw"],
+    ] {
+        let mut args = vec!["nanh"];
+        args.extend(command);
+        args.extend(["--image-model", "qwen-image-2.1"]);
+        Cli::try_parse_checked_from(args).expect("supported image integration");
+    }
+    for command in [vec!["codex"], vec!["config", "pi"]] {
+        let mut args = vec!["nanh"];
+        args.extend(command);
+        args.extend(["--image-model", "qwen-image-2.1"]);
+        assert!(Cli::try_parse_checked_from(args).is_err());
+    }
+}

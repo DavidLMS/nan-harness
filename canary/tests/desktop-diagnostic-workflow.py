@@ -56,12 +56,14 @@ class DiagnosticWorkflowTests(unittest.TestCase):
             self.assertIsNone(matrix)
 
     def test_manual_entry_never_reaches_detector_publication(self):
-        workflow = (ROOT / ".github/workflows/harness-canary.yml").read_text()
-        diagnostic = workflow.split("  desktop-diagnostics:\n", 1)[1].split("  desktop:\n", 1)[0]
+        workflow = (ROOT / ".github/workflows/desktop-check-diagnostics.yml").read_text()
+        diagnostic = workflow.split("  desktop-diagnostics:\n", 1)[1].split("  chatgpt-sandbox-synthetic:\n", 1)[0]
         for contract in ("github.event_name == 'workflow_dispatch'", "source: branch", "mode: deterministic",
                          "diagnostics: true", "hosted_evidence: false"):
             self.assertIn(contract, diagnostic)
-        self.assertIn("if: ${{ !inputs.desktop_diagnostics && !inputs.chatgpt_sandbox_synthetic_only }}", workflow)
+        self.assertNotIn("  select:\n", workflow)
+        self.assertNotIn("  cli:\n", workflow)
+        self.assertNotIn("  desktop:\n", workflow)
         self.assertIn("max-parallel: 3", WORKFLOW)
         self.assertNotIn("secrets:", diagnostic)
 
@@ -72,18 +74,15 @@ class DiagnosticWorkflowTests(unittest.TestCase):
         self.assertIn("default: false", inputs)
         self.assertNotIn("default: true", inputs)
 
-        select = self.scoped_block(workflow, "  select:\n", "  desktop-diagnostics:\n")
         desktop_diagnostics = self.scoped_block(workflow, "  desktop-diagnostics:\n", "  chatgpt-sandbox-synthetic:\n")
-        synthetic_caller = self.scoped_block(workflow, "  chatgpt-sandbox-synthetic:\n", "  desktop:\n")
-        self.assertIn("if: ${{ !inputs.desktop_diagnostics && !inputs.chatgpt_sandbox_synthetic_only }}", select)
+        synthetic_caller = self.scoped_block(workflow, "  chatgpt-sandbox-synthetic:\n")
         self.assertIn("if: ${{ github.event_name == 'workflow_dispatch' && inputs.desktop_diagnostics && !inputs.chatgpt_sandbox_synthetic_only }}", desktop_diagnostics)
         self.assertIn("if: ${{ github.event_name == 'workflow_dispatch' && inputs.chatgpt_sandbox_synthetic_only }}", synthetic_caller)
         self.assertIn("uses: ./.github/workflows/desktop-check-chatgpt-wave29-synthetic.yml", synthetic_caller)
         self.assertNotIn("secrets:", synthetic_caller)
 
-        for job in (self.scoped_block(workflow, "  desktop:\n", "  cli:\n"),
-                    self.scoped_block(workflow, "  cli:\n")):
-            self.assertIn("needs: select", job)
+        for forbidden in ("  select:\n", "  desktop:\n", "  cli:\n", "schedule:", "NAN_API_KEY", "contents: write"):
+            self.assertNotIn(forbidden, workflow)
 
         self.assertIn("runs-on: ubuntu-24.04", SYNTHETIC_WORKFLOW)
         self.assertIn("timeout-minutes: 10", SYNTHETIC_WORKFLOW)
@@ -99,21 +98,18 @@ class DiagnosticWorkflowTests(unittest.TestCase):
             self.assertNotIn(forbidden, SYNTHETIC_WORKFLOW.lower())
 
     def test_synthetic_route_is_opt_in_and_excludes_normal_jobs(self):
-        workflow = (ROOT / ".github/workflows/harness-canary.yml").read_text()
+        workflow = (ROOT / ".github/workflows/desktop-check-diagnostics.yml").read_text()
         self.assert_synthetic_route(workflow)
 
     def test_synthetic_route_gate_mutations_fail_scoped_validation(self):
-        workflow = (ROOT / ".github/workflows/harness-canary.yml").read_text()
+        workflow = (ROOT / ".github/workflows/desktop-check-diagnostics.yml").read_text()
         inputs = self.scoped_block(workflow, "      chatgpt_sandbox_synthetic_only:\n", "      mode:\n")
         bad_default = workflow.replace(inputs, inputs.replace("default: false", "default: true", 1), 1)
         with self.assertRaises(AssertionError):
             self.assert_synthetic_route(bad_default)
 
-        select_start = "  select:\n"
-        select = self.scoped_block(workflow, select_start, "  desktop-diagnostics:\n")
-        bad_select = workflow.replace(select, select.replace(" && !inputs.chatgpt_sandbox_synthetic_only", "", 1), 1)
         with self.assertRaises(AssertionError):
-            self.assert_synthetic_route(bad_select)
+            self.assert_synthetic_route(workflow + "\n  cli:\n")
 
         desktop_start = "  desktop-diagnostics:\n"
         desktop = self.scoped_block(workflow, desktop_start, "  chatgpt-sandbox-synthetic:\n")

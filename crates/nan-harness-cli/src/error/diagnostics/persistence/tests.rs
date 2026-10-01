@@ -412,3 +412,28 @@ fn state_document_cases() -> Vec<(PersistenceError, Diagnostic, &'static [&'stat
 
     cases
 }
+
+#[test]
+fn incomplete_configuration_recovery_reports_only_closed_diagnostic_values() {
+    let error = PersistenceError::RollbackIncomplete {
+        source: Box::new(PersistenceError::WriteFile {
+            path: fake_path(),
+            source: fake_io(io::ErrorKind::PermissionDenied),
+        }),
+        failures: 2,
+        recovery_files: vec![fake_path()],
+    };
+    let diagnostic = typed(&error);
+    assert_eq!(
+        diagnostic,
+        Diagnostic::general(DiagnosticReason::ConfigurationRecoveryIncomplete)
+    );
+    for rendered in [
+        error.to_string(),
+        serde_json::to_string(&diagnostic).unwrap(),
+    ] {
+        for secret in [FAKE_PATH, FAKE_TOKEN, FAKE_SOURCE] {
+            assert!(!rendered.contains(secret));
+        }
+    }
+}

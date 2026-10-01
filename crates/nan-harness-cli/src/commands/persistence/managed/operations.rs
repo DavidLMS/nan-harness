@@ -1,11 +1,13 @@
 use super::super::{
     ManagedBlock, ManagedJsonEntries, ManagedJsonProperty, ManagedQwenAuthSelection,
-    ManagedQwenListDirectory, ManagedQwenModelSelection, PersistenceError, PreparedFileChange,
-    hash_json_value, rollback_file, sha256, write_private_file,
+    ManagedQwenListDirectory, ManagedQwenModelSelection, hash_json_value, sha256,
 };
+#[cfg(test)]
+use super::super::{PersistenceError, PreparedFileChange, rollback_file, write_private_file};
 use super::blocks_json::managed_block_range;
 use crate::commands::persistence::health::read_managed_jsonc;
 use crate::commands::persistence::{ConfigurationHealth, read_managed_document};
+#[cfg(test)]
 use std::fs;
 use std::path::Path;
 
@@ -120,6 +122,7 @@ pub(in super::super) fn inspect_qwen_list_directory(
     )
 }
 
+#[cfg(test)]
 pub(in super::super) fn apply_prepared_file_change(
     change: &PreparedFileChange,
 ) -> Result<(), PersistenceError> {
@@ -137,6 +140,7 @@ pub(in super::super) fn apply_prepared_file_change(
     }
 }
 
+#[cfg(test)]
 pub(in super::super) fn rollback_prepared_file_change(change: &PreparedFileChange) {
     rollback_file(
         &change.path,
@@ -182,6 +186,7 @@ mod tests {
         let change = PreparedFileChange {
             path: path.clone(),
             original: Some(original.to_vec()),
+            replacement_permissions: Some(original_permissions.clone()),
             original_permissions: Some(original_permissions),
             replacement: Some(replacement.into_bytes()),
         };

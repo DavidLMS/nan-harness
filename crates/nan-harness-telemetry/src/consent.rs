@@ -311,3 +311,24 @@ pub enum SettingsError {
     #[error("could not generate a telemetry installation identifier: {0}")]
     Random(getrandom::Error),
 }
+
+// Terminal localization is separate from canonical Display used by machine contracts.
+impl nan_harness_i18n::TerminalMessage for SettingsError {
+    fn terminal_message(&self, locale: nan_harness_i18n::Locale) -> String {
+        use nan_harness_i18n::messages as m;
+        if locale == nan_harness_i18n::Locale::En {
+            return self.to_string();
+        }
+        match self {
+            Self::MissingConfigDirectory => m::error_settings_missing_config_directory(locale),
+            Self::CreateDirectory(field_0) => {
+                m::error_settings_create_directory(locale, &(field_0))
+            }
+            Self::Read(field_0) => m::error_settings_read(locale, &(field_0)),
+            Self::Parse(field_0) => m::error_settings_parse(locale, &(field_0)),
+            Self::Serialize(field_0) => m::error_settings_serialize(locale, &(field_0)),
+            Self::Write(field_0) => m::error_settings_write(locale, &(field_0)),
+            Self::Random(field_0) => m::error_settings_random(locale, &(field_0)),
+        }
+    }
+}

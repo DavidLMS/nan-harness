@@ -7,13 +7,43 @@ if [ "$#" -ne 1 ]; then
 fi
 
 harness="$1"
-export PATH="$HOME/.local/bin:$HOME/.kimi-code/bin:$HOME/.hermes/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+original_home="$HOME"
+if [ "${NAN_CANARY_HOSTED:-}" = 1 ]; then
+  export PATH="$original_home/.local/bin:$original_home/.kimi-code/bin:$original_home/.hermes/bin:$PATH"
+else
+  export PATH="$original_home/.local/bin:$original_home/.kimi-code/bin:$original_home/.hermes/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+fi
 nan_command="${NAN_CANARY_NAN_COMMAND:-nanh}"
-model="${NAN_CANARY_MODEL:?NAN_CANARY_MODEL must be resolved before a live probe}"
+model="${NAN_CANARY_MODEL:-qwen3.6}"
 workspace="$(mktemp -d)"
 output=''
 stderr_output=''
 probe_stage='setup'
+probe_diagnostic=''
+marker_path="${NAN_CANARY_PROBE_RESULT:-}"
+write_marker() {
+  marker_stage="$1"
+  marker_status="$2"
+  marker_diagnostic="${3:-}"
+  [ -n "$marker_path" ] || return 0
+  marker_parent="$(dirname "$marker_path")"
+  marker_tmp=''
+  marker_tmp="$(mktemp "$marker_parent/.probe-result.XXXXXX")" || return 1
+  if ! chmod 600 "$marker_tmp" \
+    || ! if [ -n "$marker_diagnostic" ]; then
+         printf '{"schemaVersion":1,"stage":"%s","status":"%s","diagnostic":"%s"}\n' \
+           "$marker_stage" "$marker_status" "$marker_diagnostic" > "$marker_tmp"
+       else
+         printf '{"schemaVersion":1,"stage":"%s","status":"%s"}\n' \
+           "$marker_stage" "$marker_status" > "$marker_tmp"
+       fi \
+    || ! mv -f "$marker_tmp" "$marker_path"; then
+    rm -f "$marker_tmp" 2>/dev/null || true
+    marker_tmp=''
+    return 1
+  fi
+  marker_tmp=''
+}
 cleanup() {
   result="$?"
   trap - EXIT
@@ -37,15 +67,18 @@ cleanup() {
   done
   if [ -e "$workspace" ]; then
     printf 'could not remove the ephemeral live-probe workspace\n' >&2
-    result=1
     probe_stage='cleanup'
+    probe_diagnostic=''
+    result=1
   fi
-  # The cell classifies only this closed stage marker, never harness output.
-  if [ -n "${NAN_CANARY_PROBE_RESULT:-}" ]; then
-    probe_status='failed'
-    if [ "$result" -eq 0 ]; then probe_status='passed'; fi
-    printf '{"schemaVersion":1,"stage":"%s","status":"%s"}\n' "$probe_stage" "$probe_status" \
-      >"$NAN_CANARY_PROBE_RESULT" 2>/dev/null || true
+  if [ "$result" -eq 0 ]; then
+    probe_stage='complete'
+    if ! write_marker complete passed; then
+      printf 'could not write the live-probe result marker\n' >&2
+      result=1
+    fi
+  elif ! write_marker "$probe_stage" failed "$probe_diagnostic"; then
+    printf 'could not write the live-probe result marker\n' >&2
   fi
   exit "$result"
 }
@@ -58,7 +91,7 @@ usage_evidence="$workspace/usage-evidence.json"
 export NAN_HARNESS_INTERNAL_CANARY_USAGE_FILE="$usage_evidence"
 marker="NAN_CANARY_READ_$(date +%s)_$RANDOM"
 printf '%s\n' "$marker" > read-target.txt
-prompt="Use the available file-reading tool to read '$workspace/read-target.txt'. Include the exact file content, then reply exactly NAN_CANARY_OK. Do not answer before the tool succeeds."
+prompt="Use the available file-reading tool to read '$workspace/read-target.txt'. After the read succeeds, respond with two lines: the exact file content on the first line and NAN_CANARY_OK on the second line. Do not answer before the tool succeeds."
 output="$workspace/harness-output.txt"
 stderr_output="$workspace/harness-stderr.txt"
 verify_read_marker=true
@@ -178,7 +211,7 @@ case "$harness" in
     verify_read_marker=false
     printf '%s\n' 'AIDER_CANARY_BEFORE' > edit-target.txt
     "$nan_command" aider --model "$model" -- \
-      --message 'Replace the entire file content with exactly AIDER_CANARY_TOOL_OK, then reply exactly NAN_CANARY_OK.' \
+      --message 'Replace the entire file content with exactly AIDER_CANARY_TOOL_OK. After the edit succeeds, respond with the standalone token NAN_CANARY_OK as the final line of your response.' \
       --yes-always --no-auto-commits --no-git --edit-format whole \
       --no-show-model-warnings --no-check-update --map-tokens 0 edit-target.txt \
       >"$output" 2>"$stderr_output"
@@ -210,7 +243,25 @@ if [ "$verify_read_marker" = true ]; then
   grep -F "$marker" "$output" "$stderr_output" >/dev/null
 fi
 probe_stage='completion-marker'
-grep -F 'NAN_CANARY_OK' "$output" "$stderr_output" >/dev/null
+if ! grep -F 'NAN_CANARY_OK' "$output" "$stderr_output" >/dev/null; then
+  if [ "$harness" = aider ]; then
+    stdout_empty=true
+    stderr_empty=true
+    [ -s "$output" ] && stdout_empty=false
+    [ -s "$stderr_output" ] && stderr_empty=false
+    if [ "$stdout_empty" = true ] && [ "$stderr_empty" = true ]; then
+      probe_diagnostic='aider-completion-marker-stdout-empty-stderr-empty'
+    elif [ "$stdout_empty" = true ]; then
+      probe_diagnostic='aider-completion-marker-stdout-empty-stderr-nonempty'
+    elif [ "$stderr_empty" = true ]; then
+      probe_diagnostic='aider-completion-marker-stdout-nonempty-stderr-empty'
+    else
+      probe_diagnostic='aider-completion-marker-stdout-nonempty-stderr-nonempty'
+    fi
+    printf '%s\n' "$probe_diagnostic" >&2
+  fi
+  exit 1
+fi
 probe_stage='bridge-sentinel'
 if grep -F 'NH-BRIDGE-' "$output" "$stderr_output" >/dev/null; then
   exit 1
@@ -224,4 +275,39 @@ if ! grep -E '^(🔥 Tokens burned — this session|NaN usage \()' "$stderr_outp
   fi
   exit 1
 fi
-probe_stage='complete'
+
+if [ "$harness" = hermes ] || [ "$harness" = openclaw ]; then
+  probe_stage='media-plan'
+  media_plan="$workspace/media-plan.json"
+  "$nan_command" "$harness" --model "$model" --dry-run --force-media \
+    --allow-unsupported --allow-untested >"$media_plan" 2>/dev/null
+  jq -e '[.. | strings | select(test("nan-whisper|nan-kokoro|image_gen/nan_harness|nan-harness-media"))] | length >= 3' \
+    "$media_plan" >/dev/null
+  media_directory="$workspace/media"
+  mkdir -p "$media_directory"
+  printf '%s\n' 'NaN media canary speech' >"$media_directory/tts-input.txt"
+  probe_stage='media-tts'
+  "$nan_command" __media tts --input "$media_directory/tts-input.txt" \
+    --output "$media_directory/tts-output.mp3" >/dev/null 2>/dev/null
+  test -s "$media_directory/tts-output.mp3"
+  python3 - "$media_directory/stt-input.wav" <<'PY'
+import sys
+import wave
+
+with wave.open(sys.argv[1], "wb") as stream:
+    stream.setnchannels(1)
+    stream.setsampwidth(2)
+    stream.setframerate(16_000)
+    stream.writeframes(b"\0\0" * 16_000)
+PY
+  probe_stage='media-stt'
+  "$nan_command" __media stt --input "$media_directory/stt-input.wav" \
+    --output "$media_directory/stt-output.txt" >/dev/null 2>/dev/null
+  test -f "$media_directory/stt-output.txt"
+  if [ "${NAN_CANARY_MEDIA_MODE:-}" = weekly ]; then
+    probe_stage='media-image'
+    "$nan_command" __media image --prompt 'A simple blue square on a white background' \
+      --output "$media_directory/image-output.png" >/dev/null 2>/dev/null
+    test -s "$media_directory/image-output.png"
+  fi
+fi

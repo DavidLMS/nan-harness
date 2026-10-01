@@ -8,17 +8,7 @@ name: Zed macOS occlusion diagnostic (wave10)
 # this run does NOT apply or validate any product repair.
 
 on:
-  push:
-    branches:
-      - DavidLMS/desktop-zed-macos-wave10
-    paths:
-      - '.github/workflows/desktop-check-macos-wave10.yml'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - 'crates/**'
-      - 'canary/actions/prepare-desktop-macos.sh'
-      - 'scripts/run-desktop-check-session.sh'
-
+  workflow_dispatch:
 permissions:
   contents: read
 

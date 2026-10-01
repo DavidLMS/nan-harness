@@ -149,6 +149,66 @@ an internal state machine. Their `expect` attributes include reasons and become
 unfulfilled if the lint no longer applies; the exceptions do not waive other
 quality requirements.
 
+`run_node_native_plugins` in
+`crates/nan-harness-cli/src/commands/configuration/tests/plugin_syntax.rs` has
+102 lines, mostly a three-entry table of generated JavaScript fixtures. Keep
+each plugin's import stubs and invocation beside the shared lifecycle assertions
+so the test remains reviewable as one contract. Reassess if another plugin or
+independent behavior is added; the scoped `expect` does not waive test coverage.
+
+`CompatibilityError::terminal_message` in
+`crates/nan-harness-runtime/src/compatibility/error.rs` has 139 lines. Its
+exhaustive variant-to-message projection remains together so missing cases are
+compiler errors. Reassess if behavior or side effects enter this mapping.
+
+The CLI terminal projections in `commands/configuration/error.rs` (110 lines),
+`commands/hermes_desktop/diagnostics.rs` (211), `commands/install/error.rs` (136),
+and `commands/persistence/error.rs` (136) have the same scoped exception and
+review conditions: exhaustive error mappings, with no side effects.
+
+The generated i18n function
+`search_nan_web_search_is_enabled_at_mode_version_state_interested_sessions_problem`
+has nine arguments (language plus eight named status fields), above Clippy's
+limit of seven. Its scoped `expect` preserves a complete translatable message
+and compile-time parameter checking. Reassess when the status message or the
+catalog API changes.
+
+`openclaw_plans` in `commands/configuration/plans/openclaw.rs` has 101 lines.
+Keep its native settings and owned plugin files together so configuration and
+removal ownership remain reviewable in one plan. Reassess if another capability
+or independent behavior is added. This scoped exception does not waive tests
+or other quality requirements.
+
+### Unsafe code exceptions
+
+`unsafe_code` is denied workspace-wide and every other crate forbids it again with an inner
+`#![forbid(unsafe_code)]`. One crate is the single, audited exception:
+
+- `crates/nan-harness-detach` calls `GetStdHandle`, `GetHandleInformation`, and
+  `SetHandleInformation` so a launcher withholds its own standard handles while it starts a
+  long-lived helper — the shared request coordinator and the standalone `SearXNG` host. Windows
+  copies every inheritable handle of the launcher into a new process, so a helper started with null
+  streams still receives a copy of the launcher's stdout and keeps a caller's pipe open after the
+  launcher exits; pipelines, scripts, and CI steps then wait for a launcher that already exited. The
+  crate carries a reason-scoped `#![expect(unsafe_code, reason = "...")]`, exposes one safe function
+  that configures and starts the child, and only narrows inheritance where the platform does not
+  already replace the child's descriptors.
+
+Reassess this exception when the standard library offers stable handle-inheritance control
+(`CommandExt::inherit_handles` is unstable today), when the detached helpers stop outliving their
+launcher, or when the crate grows beyond those three Windows API calls. Any further
+`expect(unsafe_code)` needs its own recorded entry here, and the workspace level must stay `deny` so
+every other crate keeps its inner `forbid`.
+
+## Terminal languages
+
+Keep English source messages in `crates/nan-harness-i18n/locales/en.json` with
+stable semantic keys, named parameters and context in `contexts.json`. Update
+`es.json` with matching parameters and `one`/`other` variants. To add a language,
+add its catalog and `locales.json` metadata (currently `one-other` plurals).
+Run `cargo xtask i18n-check` and the normal quality gates. `nanh language es`
+saves the language in `preferences.json`; English is the default.
+
 ## Preparing a release
 
 Use this checklist when a release is ready. The [release workflow](.github/workflows/release.yml)
@@ -170,40 +230,74 @@ verifies the draft before publication.
 - [ ] Push the release commit to `main` and wait for the exact commit's CI run
       to succeed. From this point until tagging, do not change code or release
       metadata.
-- [ ] Push the tag to GitHub and confirm that the release workflow creates a
-      draft with the expected assets and notes.
-- [ ] Keep the draft unpublished until the compatibility gate completes
-      successfully.
+- [ ] Push the matching tag to GitHub and confirm that `release.yml` creates a
+      draft with the expected assets, checksums, attestations, and notes.
+- [ ] Ensure exactly one release names the tag. GitHub permits duplicate drafts;
+      tag-based downloads can select an obsolete draft. Resolve duplicates before
+      retrying verification, and require the checksum attestation's source digest
+      to match the exact tag commit, not only the tag name.
+- [ ] Confirm the protected `canary-live` environment exists with
+      `NAN_API_KEY` configured and appropriate required reviewers. Confirm the
+      protected `release-publication` environment exists for the publisher;
+      this checklist does not configure either environment or assert that it
+      is already present.
+- [ ] Confirm draft creation automatically dispatches verification-only live
+      checks from the default branch. For a manual retry or publication, dispatch
+      [`.github/workflows/release-gate.yml`](.github/workflows/release-gate.yml)
+      with `tag`, `tag_commit`, and bounded `model`. Use `mode=live` for a
+      release qualification; use `verification_only=true` (the default) for a
+      safe check that cannot publish. The workflow must use the exact draft
+      tag's commit, the six Linux/macOS ARM64 and Windows x64 release assets,
+      and the trusted workflow
+      source rather than executing tag-controlled code.
+- [ ] Keep the draft unpublished until the live hosted gate reports all 43
+      unique cells passed (15 Linux, 15 macOS, 13 Windows) and emits its complete provenance
+      handoff. A deterministic verification-only run is useful evidence but
+      does not satisfy the live release criterion and cannot publish.
+      Prime Agent and FX are skipped only on Windows until official native
+      distributions exist; skips never count as passes.
+- [ ] Allow publication only through the gate's explicit live,
+      `verification_only=false` path after protected-environment approval.
+      Confirm that the result is public, non-latest, non-prerelease, and has
+      the expected assets, checksums, attestations, and compatibility/available
+      feed updates.
 - [ ] After publication, confirm that the release is public, is not a
       prerelease, is *not* marked as latest, and contains the expected assets,
       checksums, and attestations.
 - [ ] Confirm that the available-release feed
       (`releases/download/available/update-manifest.json`) now describes this
       version, so an explicit `nanh update` can install it.
-- [ ] When the release should also become the recommended one (the version new
-      installations, startup discovery, and older clients receive), run
-      `canary/host/recommend-release.sh --tag v<VERSION>` from an authenticated
-      machine. It dispatches and waits for the central Actions writer, which
-      marks the same immutable tag as latest;
-      nothing is rebuilt or re-versioned. The release gate never does this on
-      its own, and the command refuses to run without that gate's complete
-      receipt, a revalidated tag, checksum manifest and attestation, and
-      downloaded proof that the release still carries the very manifest and
-      installable binaries the gate validated.
+- [ ] When the release should also become recommended (the version new
+      installations, startup discovery, and older clients receive), manually
+      dispatch [`.github/workflows/recommend-release.yml`](.github/workflows/recommend-release.yml)
+      from the default branch with its exact `tag` and `tag_commit` inputs. It
+      recovers the original gate identity from the durable receipt/evidence,
+      then revalidates that evidence and the
+      immutable tag before moving `latest`; it does not rebuild or re-version
+      anything. The recommendation workflow is separate from publication and
+      requires the protected `release-publication` environment.
 
-Publication and recommendation are separate steps. The compatibility gate
-publishes a validated draft as a public, non-latest release and adds it to the
-available-release feed; a maintainer decides later, explicitly, which published
-release is recommended. Both steps use a durable request queue and a single
-serialized Actions publication writer. Receipts and sanitized evidence survive
-runner disposal in the data-only `compatibility-state` branch. Tart is an
-explicit manual emergency handover only after hosted writers are disabled and
-idle; see the [canary runbook](canary/README.md) for that boundary.
+Publication and recommendation are separate steps. The hosted compatibility
+gate publishes a validated draft as a public, non-latest release and updates
+the compatibility and available-release feeds; a maintainer decides later,
+explicitly, which published release is recommended. Both workflows use the
+repository-wide non-canceling release-channel concurrency group, and the
+publisher retains its crash-recoverable receipt/evidence rules.
 
 The tag workflow reuses the successful `main` CI result for the exact release
 commit and fails closed if that result is missing or unsuccessful. Re-running
 the release workflow is safe when CI had not finished yet. Documentation-only
-changes are excluded from Rust CI by the workflow path filter.
+changes are excluded from Rust CI by the workflow path filter. This hosted
+replacement and main-branch integration were validated by hosted run
+[34830826982](https://github.com/DavidLMS/nan-harness/actions/runs/34830826982)
+with 30/30 live ARM64 cells and aggregate evidence passing. Repo-owned local
+Tart launchd schedules were retired on 2026-09-14; no release was published by
+that verification-only run. See the [retirement record](docs/canary-tart-retirement-2026-09-14.md)
+for the preserved evidence and exact local inventory.
+The existing 30/30 CLI live evidence and separate deterministic evidence remain
+historical records; retain the documented Aider completion-marker intermittency
+and bounded diagnostic, and do not treat a later pass as proof of its cause
+without a new exact-source run.
 
 ## Adding a new harness
 
@@ -349,11 +443,12 @@ For a new harness PR:
 - [ ] The PR states which evidence level is complete and which roadmap level
       remains.
 
-The current CI runs workspace quality gates, pinned conformance for all
-supported harnesses, and a latest-version deterministic matrix. The private Mac
-mini canary adds clean Linux and macOS installation plus live `qwen3.6` tool
-probes. Release assets remain in a GitHub draft until all 15 harnesses pass that
-gate. New harnesses must add a versioned
+The current CI runs workspace quality gates and pinned conformance for all
+supported harnesses. The daily hosted canary checks pending upstream CLI versions
+against published nan-harness binaries on every supported native platform and
+refreshes both compatibility feeds from complete per-harness live evidence.
+Release assets remain in a GitHub draft until the separate full live release
+gate passes. New harnesses must add a versioned
 `tests/conformance/<harness>/manifest.toml`, deterministic coverage, a clean-VM
 installer path, and a live tool probe instead of a one-off workflow.
 

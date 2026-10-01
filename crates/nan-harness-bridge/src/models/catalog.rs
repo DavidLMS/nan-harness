@@ -254,7 +254,7 @@ fn desktop_model_priority(model_id: &str) -> usize {
         "qwen3.6" => 0,
         "qwen3.8-flash" => 1,
         "deepseek-v4-flash" => 2,
-        "mimo-v2.5" => 3,
+        "mimo-v2.6-flash" => 3,
         "gemma4" => 4,
         "glm5.2" => 5,
         "glm5.3-flash" => 6,
@@ -359,8 +359,9 @@ mod tests {
 
     #[test]
     fn catalog_rejects_an_unavailable_default() {
-        let error = ClaudeModelCatalog::from_provider_ids(["qwen3.6".to_owned()], "mimo-v2.5")
-            .expect_err("default should be rejected");
+        let error =
+            ClaudeModelCatalog::from_provider_ids(["qwen3.6".to_owned()], "mimo-v2.6-flash")
+                .expect_err("default should be rejected");
 
         assert_eq!(error.code(), "NH-BRIDGE-005");
     }
@@ -368,34 +369,34 @@ mod tests {
     #[test]
     fn catalog_routes_claude_aliases_to_the_selected_default() {
         let catalog = ClaudeModelCatalog::from_provider_ids(
-            ["qwen3.6".to_owned(), "mimo-v2.5".to_owned()],
-            "mimo-v2.5",
+            ["qwen3.6".to_owned(), "mimo-v2.6-flash".to_owned()],
+            "mimo-v2.6-flash",
         )
         .expect("catalog should build");
 
         assert_eq!(
             catalog.resolve("default").map(ClaudeModel::provider_id),
-            Some("mimo-v2.5")
+            Some("mimo-v2.6-flash")
         );
         assert_eq!(
             catalog
                 .resolve("claude-sonnet-4-6")
                 .map(ClaudeModel::provider_id),
-            Some("mimo-v2.5")
+            Some("mimo-v2.6-flash")
         );
         assert_eq!(
             catalog
                 .resolve("claude-opus-4-6")
                 .map(ClaudeModel::provider_id),
-            Some("mimo-v2.5")
+            Some("mimo-v2.6-flash")
         );
         assert_eq!(
             catalog.resolve("haiku").map(ClaudeModel::provider_id),
-            Some("mimo-v2.5")
+            Some("mimo-v2.6-flash")
         );
         assert_eq!(
             catalog.resolve("opusplan").map(ClaudeModel::provider_id),
-            Some("mimo-v2.5")
+            Some("mimo-v2.6-flash")
         );
         assert!(catalog.resolve("anthropic/untrusted-model").is_none());
     }
@@ -403,7 +404,7 @@ mod tests {
     #[test]
     fn catalog_routes_the_auto_mode_alias_to_qwen_when_selected() {
         let catalog = ClaudeModelCatalog::from_provider_ids(
-            ["qwen3.6".to_owned(), "mimo-v2.5".to_owned()],
+            ["qwen3.6".to_owned(), "mimo-v2.6-flash".to_owned()],
             "qwen3.6",
         )
         .expect("catalog should build");

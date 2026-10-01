@@ -13,6 +13,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -56,7 +57,7 @@ if os.name == "nt":
                     ("active_processes", wintypes.DWORD), ("terminated_processes", wintypes.DWORD)]
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from selection import CLI_HARNESSES, resolve_model
+from selection import CLI_HARNESSES, PLATFORMS as HOSTED_PLATFORMS, resolve_model
 
 HARNESSES = CLI_HARNESSES
 SEMVER = re.compile(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?\Z")
@@ -102,6 +103,263 @@ class ProbeCleanupError(RuntimeError):
     """The live probe could not remove its private workspace; nothing is certified."""
 
 
+class ProbeFailure(RuntimeError):
+    """The live probe closed a safe stage marker but did not pass."""
+
+    def __init__(self, stage, status, diagnostic=None):
+        super().__init__("hosted live probe failed at a closed stage")
+        self.stage = stage
+        self.status = status
+        self.diagnostic = diagnostic
+
+
+INSTALLER_FAILURE_PHASE = "install-package"
+DOCTOR_FAILURE_PHASE = "doctor-command"
+DOCTOR_VERSION_FAILURE_PHASE = "doctor-version-mismatch"
+INSTALL_FAILURE_CODES = {
+    "npm-network", "npm-package-not-found", "npm-permission",
+    "npm-engine-mismatch", "npm-script-failure", "npm-openclaw-preinstall",
+    "npm-openclaw-postinstall", "npm-openclaw-preinstall-signal",
+    "npm-openclaw-postinstall-signal", "npm-dependency-script-failure",
+    "npm-openclaw-preinstall-runtime", "npm-openclaw-preinstall-runtime-signal",
+    "npm-openclaw-preinstall-legacy-guard", "npm-openclaw-preinstall-legacy-guard-signal",
+    "npm-openclaw-preinstall-module", "npm-openclaw-preinstall-module-signal",
+    "npm-openclaw-preinstall-permission", "npm-openclaw-preinstall-permission-signal",
+    "npm-dependency-script-exit",
+    "npm-dependency-script-signal", "exit-nonzero", "signal-terminated",
+    "hosted-node-missing", "hosted-node-version-mismatch", "hosted-npm-missing",
+    "diagnostic-unknown", "unknown",
+}
+WINDOWS_INSTALL_CATEGORIES = frozenset({
+    "git-ownership", "git-path-length", "git-config", "git-checkout", "git-download",
+    "installer-argument", "installer-path", "git-native-error",
+    "network-dns", "network-timeout", "network-connection", "tls-certificate", "permission",
+    "disk-space", "tool-missing", "package-not-found", "installer-refused",
+})
+HERMES_INSTALL_STAGES = frozenset({
+    "uv", "git", "node", "system-packages", "repository", "python", "venv", "dependencies",
+    "node-deps", "path", "config-templates", "platform-sdks", "bootstrap-marker", "setup", "gateway",
+})
+INSTALL_FAILURE_CODES.update("windows-installer-hermes-" + stage for stage in HERMES_INSTALL_STAGES)
+INSTALL_FAILURE_CODES.update("windows-installer-hermes-" + stage + "-" + category
+                             for stage in HERMES_INSTALL_STAGES for category in WINDOWS_INSTALL_CATEGORIES)
+INSTALL_FAILURE_CODES.update("windows-installer-" + code for code in WINDOWS_INSTALL_CATEGORIES)
+WINDOWS_INSTALL_DETAILS = frozenset({
+    "launcher-missing", "expected-executable-missing", "invalid-ref", "invalid-version",
+    "empty-download", "metadata-request-failed", "invalid-archive",
+    "official-asset-missing", "official-metadata-probe-failed", "invalid-frozen-ref",
+    "marker-missing", "marker-invalid", "marker-passed", "download-failed", "native-exit",
+})
+INSTALL_FAILURE_CODES.update("windows-installer-" + code for code in WINDOWS_INSTALL_DETAILS)
+PRIVATE_DIAGNOSTIC_LIMIT = 64 * 1024
+NPM_ERROR_LINE = re.compile(r"^\s*npm\s+(?:err!|error)\s?(.*)$", re.IGNORECASE)
+# Reviewed against npm metadata for pinned openclaw@2026.9.2: its 65 direct
+# dependencies plus optional sqlite-vec. These names validate one npm path
+# record; they are not copied into public diagnostics.
+OPENCLAW_DEPENDENCIES = frozenset({
+    "@agentclientprotocol/sdk", "@anthropic-ai/sdk", "@clack/core",
+    "@clack/prompts", "@earendil-works/pi-tui", "@google/genai",
+    "@grammyjs/runner", "@grammyjs/transformer-throttler", "@homebridge/ciao",
+    "@lydell/node-pty", "@mistralai/mistralai", "@modelcontextprotocol/sdk",
+    "@mozilla/readability", "@openclaw/ai", "@openclaw/fs-safe",
+    "@openclaw/proxyline", "@silvia-odwyer/photon-node", "@trycua/cua-driver",
+    "acorn", "chalk", "chokidar", "clawpdf", "commander", "croner", "diff",
+    "dotenv", "entities", "execa", "express", "file-type", "grammy",
+    "highlight.js", "hosted-git-info", "iconv-lite", "ignore", "jiti", "json5",
+    "jszip", "koffi", "kysely", "linkedom", "minimatch", "ms", "node-edge-tts",
+    "openai", "p-limit", "p-map", "partial-json", "playwright-core", "pretty-ms",
+    "qrcode", "quickjs-wasi", "rastermill", "semver", "sqlite-vec", "tar",
+    "tree-sitter-bash", "tslog", "typebox", "typescript", "undici", "web-push",
+    "web-tree-sitter", "ws", "yaml", "zod",
+})
+
+DEPENDENCY_EXECUTABLES = frozenset({"bash", "node", "npm", "sh"})
+DEPENDENCY_TERMINATIONS = frozenset({"exit", "signal"})
+
+
+def _dependency_token(package):
+    token = package[1:].replace("/", "-") if package.startswith("@") else package
+    normalized = re.sub(r"[^A-Za-z0-9-]", "-", token)
+    if normalized != token or len(token) > 24:
+        token = normalized
+        token = token[:17] + "-" + hashlib.sha256(package.encode()).hexdigest()[:6]
+    return token
+
+
+def dependency_failure_code(package, executable, termination):
+    """Return a closed telemetry-safe code for one reviewed npm record."""
+    package = package.lower()
+    executable = executable.lower()
+    if (package not in OPENCLAW_DEPENDENCIES or executable not in DEPENDENCY_EXECUTABLES
+            or termination not in DEPENDENCY_TERMINATIONS):
+        return None
+    scope, token = ("S", _dependency_token(package)) if package.startswith("@") else ("U", _dependency_token(package))
+    code = f"NH-CLI-DEP-{scope}-{token.upper()}-{executable.upper()}-{termination.upper()}"
+    if len(code) > 51 or not re.fullmatch(r"NH-[A-Z0-9-]+", code):
+        return None
+    return code
+
+
+DEPENDENCY_FAILURE_CODES = frozenset(code for code in (
+    dependency_failure_code(package, executable, termination)
+    for package in OPENCLAW_DEPENDENCIES
+    for executable in DEPENDENCY_EXECUTABLES
+    for termination in DEPENDENCY_TERMINATIONS
+) if code is not None)
+INSTALL_FAILURE_CODES.update(DEPENDENCY_FAILURE_CODES)
+
+NPM_RECORD_PACKAGE = re.compile(
+    r"^path\s+[^\n]*node_modules[\\/]"
+    r"(?P<package>@[^/\\\s]+[\\/][^/\\\s]+|[^/\\\s]+)(?=[/\\\s]|$)", re.IGNORECASE)
+NPM_RECORD_CODE = re.compile(r"^code\s+([a-z][a-z0-9_]*|[0-9]+)\b", re.IGNORECASE)
+NPM_RECORD_COMMAND = re.compile(
+    r"^command\s+(?P<executable>sh|bash|node|npm)\s+-c\s+(?P<script>.+)$",
+    re.IGNORECASE)
+NPM_RECORD_ACTION = re.compile(r"^(?:command failed|lifecycle script)\b", re.IGNORECASE)
+NPM_RECORD_LIFECYCLE = re.compile(
+    r"^command\s+(?:sh|bash)\s+-c\s+node\s+scripts/"
+    r"(?P<script>preinstall-package-manager-warning|postinstall-bundled-plugins)\.mjs\b",
+    re.IGNORECASE)
+
+# Fixed markers emitted by OpenClaw's pinned preinstall script. Interpolated
+# versions, paths, URLs, and exception text are intentionally not retained.
+OPENCLAW_PREINSTALL_DIAGNOSTICS = (
+    ("npm-openclaw-preinstall-runtime", ("[openclaw] error: this OpenClaw release requires Node ",
+                                          "[openclaw] detected Node missing")),
+    ("npm-openclaw-preinstall-legacy-guard", ("could not remove the legacy package install guard",)),
+    ("npm-openclaw-preinstall-module", ("ERR_MODULE_NOT_FOUND", "Cannot find module")),
+    ("npm-openclaw-preinstall-permission", ("EACCES", "EPERM")),
+)
+HOSTED_INSTALL_DIAGNOSTICS = (
+    ("hosted-node-missing", "hosted Node runtime is missing"),
+    ("hosted-node-version-mismatch", "hosted Node runtime version mismatch"),
+    ("hosted-npm-missing", "hosted npm runtime could not be found"),
+)
+
+
+def classify_install_failure(log, status, expected_package=None):
+    """Classify bounded private installer evidence without retaining its text."""
+    if status is None:
+        return "diagnostic-unknown"
+    try:
+        log.seek(0)
+        evidence = log.read(PRIVATE_DIAGNOSTIC_LIMIT + 1).decode("utf-8", "replace")
+    except (OSError, UnicodeError):
+        return "diagnostic-unknown"
+    evidence = evidence[:PRIVATE_DIAGNOSTIC_LIMIT]
+    direct_categories = [code for code, marker in HOSTED_INSTALL_DIAGNOSTICS
+                         if any(line.strip() == marker for line in evidence.splitlines())]
+    if len(direct_categories) == 1:
+        return direct_categories[0]
+    if direct_categories:
+        return "diagnostic-unknown"
+    records = []
+    current = []
+    for line in evidence.splitlines():
+        match = NPM_ERROR_LINE.match(line)
+        if match:
+            current.append(match.group(1).strip())
+        elif current:
+            records.append(current)
+            current = []
+    if current:
+        records.append(current)
+    if not records:
+        return "diagnostic-unknown"
+    categories = {
+        "npm-package-not-found": {"E404", "ETARGET", "ENOTARGET"},
+        "npm-network": {"EAI_AGAIN", "ENOTFOUND", "ETIMEDOUT", "ENETUNREACH"},
+        "npm-permission": {"EACCES", "EPERM"},
+        "npm-engine-mismatch": {"EBADENGINE"},
+    }
+    record_categories = []
+    for record in records:
+        codes = {match.group(1).upper() for line in record
+                 for match in [NPM_RECORD_CODE.match(line)] if match}
+        known_category = None
+        ambiguous_code = False
+        for category, markers in categories.items():
+            if codes & markers:
+                if known_category is not None and known_category != category:
+                    ambiguous_code = True
+                    break
+                known_category = category
+        if ambiguous_code:
+            record_categories.append("diagnostic-unknown")
+            continue
+        if known_category is not None:
+            record_categories.append(known_category)
+            continue
+        if codes and any(not code.isdigit() for code in codes):
+            record_categories.append("diagnostic-unknown")
+            continue
+        action = any(NPM_RECORD_ACTION.match(line) for line in record)
+        package_matches = [NPM_RECORD_PACKAGE.match(line) for line in record
+                           if NPM_RECORD_PACKAGE.match(line)]
+        command_matches = [NPM_RECORD_COMMAND.match(line) for line in record
+                           if NPM_RECORD_COMMAND.match(line)]
+        lifecycle_match = next((NPM_RECORD_LIFECYCLE.match(line) for line in record
+                                if NPM_RECORD_LIFECYCLE.match(line)), None)
+        if not action and not lifecycle_match:
+            continue
+        if len(package_matches) != 1 or len(command_matches) != 1:
+            record_categories.append("diagnostic-unknown")
+            continue
+        package = package_matches[0].group("package").lower()
+        if expected_package == "openclaw" and package == "openclaw" and lifecycle_match:
+            script = lifecycle_match.group(1).lower()
+            if script == "preinstall-package-manager-warning":
+                record_text = "\n".join(record)
+                # The guard's explicit failure message may include EACCES or
+                # EPERM; retain the more specific cleanup condition.
+                if "could not remove the legacy package install guard" in record_text:
+                    matches = ["npm-openclaw-preinstall-legacy-guard"]
+                else:
+                    matches = [code for code, markers in OPENCLAW_PREINSTALL_DIAGNOSTICS
+                               if any(marker in record_text for marker in markers)]
+                record_categories.append(matches[0] if len(matches) == 1 else "npm-openclaw-preinstall")
+            else:
+                record_categories.append("npm-openclaw-postinstall")
+        elif package in OPENCLAW_DEPENDENCIES:
+            record_categories.append(dependency_failure_code(
+                package, command_matches[0].group("executable"),
+                "signal" if status < 0 else "exit") or "diagnostic-unknown")
+        else:
+            record_categories.append("diagnostic-unknown")
+    if len(record_categories) != 1 or record_categories[0] == "diagnostic-unknown":
+        return "diagnostic-unknown"
+    result = record_categories[0]
+    if status < 0:
+        if result.startswith("NH-CLI-DEP-"):
+            return result
+        if result == "npm-openclaw-preinstall":
+            return "npm-openclaw-preinstall-signal"
+        if result == "npm-openclaw-postinstall":
+            return "npm-openclaw-postinstall-signal"
+        if result.startswith("npm-openclaw-preinstall-"):
+            return result + "-signal"
+        if result == "npm-dependency-script-failure":
+            return "npm-dependency-script-signal"
+        return "signal-terminated"
+    if result == "npm-dependency-script-failure":
+        return "npm-dependency-script-exit"
+    return result
+
+
+class InstallFailure(RuntimeError):
+    """A bounded installation substage failed without exposing child output."""
+
+    def __init__(self, phase, code="unknown"):
+        if phase not in {INSTALLER_FAILURE_PHASE, DOCTOR_FAILURE_PHASE,
+                         DOCTOR_VERSION_FAILURE_PHASE}:
+            raise ValueError("unknown installation failure phase")
+        if code not in INSTALL_FAILURE_CODES:
+            raise ValueError("unknown installation failure code")
+        super().__init__("hosted installation substage failed")
+        self.phase = phase
+        self.code = code
+
+
 CONFORMANCE_SCENARIOS = ("inventory", "tool-round-trip", "sentinel", "external-prerequisite")
 CONFORMANCE_ATTEMPTS = 2
 # Probe stages whose failure is deterministic after every provider check passed:
@@ -112,7 +370,45 @@ CONFORMANCE_ATTEMPTS = 2
 # nan-harness output contract failure rather than a provider result.
 LIVE_MISMATCH_STAGES = frozenset({"usage-summary"})
 PROBE_STAGES = frozenset({"setup", "harness-run", "tool-evidence", "read-marker", "completion-marker",
-                          "bridge-sentinel", "usage-evidence", "usage-summary", "cleanup", "complete"})
+                          "bridge-sentinel", "usage-evidence", "usage-summary", "media-capabilities", "media-plan", "media-tts", "media-stt", "media-image",
+                          "cleanup", "complete"})
+PROBE_DIAGNOSTICS = frozenset({
+    "aider-completion-marker-stdout-empty-stderr-empty",
+    "aider-completion-marker-stdout-empty-stderr-nonempty",
+    "aider-completion-marker-stdout-nonempty-stderr-empty",
+    "aider-completion-marker-stdout-nonempty-stderr-nonempty",
+})
+PROBE_DIAGNOSTIC_CODES = {
+    diagnostic: f"live-{diagnostic}-exit-1" for diagnostic in PROBE_DIAGNOSTICS
+}
+# The PowerShell probe publishes its own closed marker (schema 2) with the stage the
+# native run reached and a bounded diagnostic list.
+WINDOWS_PROBE_STAGES = frozenset({"live-tool", "harness-run", "read-marker", "completion-marker",
+                                  "bridge-sentinel", "usage-evidence", "usage-summary",
+                                  "media-capabilities", "media-plan", "media-tts", "media-stt", "media-image", "complete"})
+WINDOWS_LIVE_DIAGNOSTICS = frozenset({
+    "live-error-auth", "live-error-network", "live-error-arguments", "live-error-permission",
+    "live-error-provider", "live-error-config",
+    "live-child-launch", "live-exit-nonzero", "live-exit-missing", "live-credential-missing",
+    "live-tool-evidence-missing", "live-read-marker-missing", "live-completion-marker-missing",
+    "live-bridge-sentinel", "live-usage-invalid", "live-usage-missing", "live-usage-unreadable", "live-usage-malformed", "live-usage-schema-invalid", "live-usage-not-observed", "live-usage-unsupported", "live-usage-summary-missing",
+    "probe-unexpected-failure",
+})
+
+
+def detected_identity():
+    """The hosted platform and architecture this process runs on, in canonical names."""
+    if os.name == "nt":
+        system = "windows"
+        machine = os.environ.get("PROCESSOR_ARCHITECTURE", "")
+    else:
+        system = {"linux": "linux", "darwin": "macos"}.get(sys.platform)
+        machine = getattr(os, "uname")().machine
+    architecture = {"arm64": "aarch64", "aarch64": "aarch64",
+                    "amd64": "x86_64", "x86_64": "x86_64"}.get(machine.strip().lower())
+    if system is None or architecture is None:
+        raise RuntimeError("this gate requires a supported hosted runner")
+    return system, architecture
 
 
 def select_coverage(coverage, harnesses, ordinal, release_commit, workflow_commit):
@@ -301,6 +597,18 @@ def remove_private_log(path):
             time.sleep(0.02)
 
 
+def runner_toolcache_bin(node_path, version):
+    """Accept only the runner's standard setup-node toolcache bin."""
+    if node_path.name != "node" or not version:
+        return None
+    parts = node_path.parent.parts
+    if (len(parts) < 5 or parts[-5] != "hostedtoolcache" or parts[-4] != "node"
+            or parts[-3] != version or parts[-1] != "bin"
+            or parts[-2] not in {"arm64", "aarch64"}):
+        return None
+    return node_path.parent
+
+
 def cell_environment(directory):
     """Keep each harness's installation, caches and configuration in its cell."""
     env = os.environ.copy()
@@ -317,18 +625,48 @@ def cell_environment(directory):
         "NAN_HARNESS_CONFIG_DIR": home / ".config/nan-harness",
         "TMPDIR": directory / "tmp", "TEMP": directory / "tmp", "TMP": directory / "tmp",
     }
+    if os.name == "nt":
+        # The native installer stages Hermes outside HOME, unlike its Unix recipe.
+        locations["HERMES_HOME"] = directory / "hermes"
     for location in set(locations.values()):
         ensure_private_directory(location, reusable=True)
     # Keep runner-provisioned runtimes, but do not discover a harness left in the
     # shared user profile or in a sibling cell by an earlier cell or installer.
+    caller_node = Path(shutil.which("node") or "").resolve()
+    caller_node_version = subprocess.run(
+        ["node", "-p", "process.versions.node"], check=True,
+        capture_output=True, text=True, timeout=10).stdout.strip()
+    # setup-node installs its selected runtime below the runner HOME on macOS.
+    # Keep only that standard toolcache bin after HOME filtering; arbitrary
+    # user-managed tools under the same HOME remain excluded.
+    trusted_runtime_bin = runner_toolcache_bin(caller_node, caller_node_version)
     hidden = [Path(env[key]).resolve() for key in ("HOME", "USERPROFILE") if env.get(key)]
     hidden.append(directory.resolve().parent)
     inherited = [entry for entry in env.get("PATH", "").split(os.pathsep)
                  if entry and not any(Path(entry).resolve().is_relative_to(old) for old in hidden)]
     bins = [home / ".local/bin", home / ".local", home / ".kimi-code/bin",
             home / ".hermes/bin", home / ".local/share/nan-harness-canary-uv/bin"]
+    if os.name == "nt":
+        bins = [directory / "bin", directory / "hermes/bin",
+                home / ".nan-harness-canary-venv/Scripts",
+                home / "AppData/Roaming/npm"] + bins
     env.update({key: str(value) for key, value in locations.items()})
-    env["PATH"] = os.pathsep.join([str(path) for path in bins] + inherited)
+    retained = [str(path) for path in bins]
+    if trusted_runtime_bin is not None and str(trusted_runtime_bin) not in inherited:
+        retained.append(str(trusted_runtime_bin))
+    env["PATH"] = os.pathsep.join(retained + inherited)
+    if os.name == "nt":
+        git = shutil.which("git.exe", path=env["PATH"])
+        bash = Path(git).parent.parent / "usr/bin/bash.exe" if git else None
+        if bash is not None and bash.is_file():
+            for name in ("NAN_HARNESS_GIT_BASH", "KIMI_SHELL_PATH", "KIMI_CLI_GIT_BASH_PATH"):
+                env[name] = str(bash)
+    # Hosted installers must retain the runner-selected Node/npm ahead of the
+    # legacy Tart/Homebrew prefixes; the guest script uses this only as an
+    # explicit hosted-mode contract. Tart's historical one-argument callers
+    # do not set it and retain their existing installer semantics.
+    env["NAN_CANARY_HOSTED"] = "1"
+    env["NAN_CANARY_EXPECTED_NODE_VERSION"] = caller_node_version
     return env
 
 
@@ -352,6 +690,7 @@ def private_command(command, directory, timeout=900, output=None, live=False, al
                                      env=env, cwd=directory, start_new_session=os.name != "nt",
                                      creationflags=creationflags)
             job = None
+            status = None
             try:
                 # Keep resume inside this try: setup failures must close the job
                 # before any child can run outside its kill-on-close boundary.
@@ -366,7 +705,7 @@ def private_command(command, directory, timeout=900, output=None, live=False, al
                     finish_stage(child, job)
                 finally:
                     if diagnostic_callback is not None:
-                        diagnostic_callback(log)
+                        diagnostic_callback(log, status if status is not None else child.returncode)
             if status and not allow_failure:
                 raise RuntimeError("stage did not pass")
             return status
@@ -523,26 +862,94 @@ class WindowsJob:
 def installer_command(harness, version, ref=""):
     """Exact-version installer argv; a ref is the frozen immutable source commit."""
     if os.name == "nt":
-        command = ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File",
+        command = ["pwsh", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File",
                    str(ROOT / "canary/guest/install-harness.ps1"), "-Harness", harness, "-Version", version]
         return command + (["-Ref", ref] if ref else [])
     return ["bash", str(ROOT / "canary/guest/install-harness.sh"), harness, version] + ([ref] if ref else [])
 
 
+def windows_install_failure(marker, fallback):
+    """Project one closed installer category; discard all private marker content."""
+    try:
+        if marker.stat().st_size > PRIVATE_DIAGNOSTIC_LIMIT:
+            return "windows-installer-marker-invalid"
+        value = json.loads(marker.read_bytes())
+        if not isinstance(value, dict) or value.get("schemaVersion") != 2 or value.get("status") not in ("failed", "passed"):
+            return "windows-installer-marker-invalid"
+        if value["status"] == "passed":
+            return "windows-installer-marker-passed"
+        diagnostic = value.get("diagnostic")
+        code = diagnostic.get("processCategory") if isinstance(diagnostic, dict) else None
+        stage = diagnostic.get("upstreamStage") if isinstance(diagnostic, dict) else None
+        if isinstance(stage, str) and stage in HERMES_INSTALL_STAGES:
+            if code == "installer-refused":
+                return "windows-installer-hermes-" + stage
+            if isinstance(code, str) and code in WINDOWS_INSTALL_CATEGORIES:
+                return "windows-installer-hermes-" + stage + "-" + code
+        if isinstance(code, str) and code in WINDOWS_INSTALL_CATEGORIES:
+            return "windows-installer-" + code
+        if isinstance(diagnostic, dict):
+            asset = diagnostic.get("assetReason")
+            if isinstance(asset, str) and asset in WINDOWS_INSTALL_DETAILS:
+                return "windows-installer-" + asset
+            if diagnostic.get("subphase") == "download":
+                return "windows-installer-download-failed"
+            if diagnostic.get("processReason") == "exit-nonzero":
+                return "windows-installer-native-exit"
+        reason = value.get("reason")
+        if isinstance(reason, str) and reason in WINDOWS_INSTALL_DETAILS:
+            return "windows-installer-" + reason
+        return fallback
+    except FileNotFoundError:
+        return "windows-installer-marker-missing"
+    except (OSError, ValueError):
+        return "windows-installer-marker-invalid"
+    finally:
+        marker.unlink(missing_ok=True)
+
+
 def install(args, state):
     command = installer_command(args.harness, args.harness_version, getattr(args, "harness_ref", "") or "")
     environment = cell_environment(args.directory)
-    private_command(command, args.directory, environment=environment)
+    installer_marker = args.directory / "installer-result.json"
+    if os.name == "nt":
+        installer_marker.unlink(missing_ok=True)
+    installer_code = "unknown"
+
+    def capture_installer(log, status):
+        nonlocal installer_code
+        installer_code = classify_install_failure(log, status,
+                                                  "openclaw" if args.harness == "openclaw" else None)
+
+    try:
+        status = private_command(command, args.directory, allow_failure=True,
+                                 environment=environment, diagnostic_callback=capture_installer)
+    except CleanupError:
+        raise
+    except (OSError, RuntimeError, subprocess.SubprocessError) as error:
+        raise InstallFailure(INSTALLER_FAILURE_PHASE, installer_code) from error
+    if status:
+        if os.name == "nt":
+            installer_code = windows_install_failure(installer_marker, installer_code)
+        raise InstallFailure(INSTALLER_FAILURE_PHASE, installer_code)
     doctor = args.directory / "doctor.json"
-    private_command([str(args.binary), "doctor", args.harness, "--allow-unsupported",
-                     "--allow-untested", "--json"], args.directory, output=doctor, environment=environment)
+    try:
+        status = private_command([str(args.binary), "doctor", args.harness, "--allow-unsupported",
+                                  "--allow-untested", "--json"], args.directory, output=doctor,
+                                 allow_failure=True, environment=environment)
+    except CleanupError:
+        raise
+    except (OSError, RuntimeError, subprocess.SubprocessError) as error:
+        raise InstallFailure(DOCTOR_FAILURE_PHASE) from error
+    if status:
+        raise InstallFailure(DOCTOR_FAILURE_PHASE, "exit-nonzero")
     try:
         version = json.loads(doctor.read_bytes())["version"]
         if not isinstance(version, str) or not SEMVER.fullmatch(version) or version != args.harness_version:
             raise ValueError()
         state["harness"]["version"] = version
     except (KeyError, ValueError, TypeError):
-        raise RuntimeError("installed version could not be verified") from None
+        raise InstallFailure(DOCTOR_VERSION_FAILURE_PHASE) from None
     finally:
         doctor.unlink(missing_ok=True)
 
@@ -614,10 +1021,35 @@ def probe_result(path):
         value = json.loads(path.read_bytes())
     except (OSError, ValueError):
         return None
-    if (not isinstance(value, dict) or set(value) != {"schemaVersion", "stage", "status"}
-            or value["schemaVersion"] != 1 or value["stage"] not in PROBE_STAGES
-            or value["status"] not in ("passed", "failed")
+    required = {"schemaVersion", "stage", "status"}
+    if (not isinstance(value, dict) or set(value) not in (required, required | {"diagnostic"})
+            or type(value.get("schemaVersion")) is not int or value["schemaVersion"] != 1
+            or not isinstance(value.get("stage"), str) or value["stage"] not in PROBE_STAGES
+            or not isinstance(value.get("status"), str) or value["status"] not in ("passed", "failed")
+            or (value["status"] == "passed") != (value["stage"] == "complete")
+            or ("diagnostic" in value and
+                (not isinstance(value["diagnostic"], str) or
+                 value["status"] != "failed" or value["stage"] != "completion-marker" or
+                 value["diagnostic"] not in PROBE_DIAGNOSTICS))):
+        return None
+    return value
+
+
+def windows_probe_result(path):
+    """Read the PowerShell probe marker; missing or malformed markers are unproven."""
+    try:
+        value = json.loads(path.read_bytes())
+    except (OSError, ValueError):
+        return None
+    if (not isinstance(value, dict) or type(value.get("schemaVersion")) is not int
+            or value["schemaVersion"] != 2 or value.get("stage") not in WINDOWS_PROBE_STAGES
+            or value.get("status") not in ("passed", "failed")
             or (value["status"] == "passed") != (value["stage"] == "complete")):
+        return None
+    diagnostics = value.get("diagnostics")
+    if diagnostics is not None and (not isinstance(diagnostics, list) or len(diagnostics) > 1
+                                    or any(not isinstance(item, str) or item not in WINDOWS_LIVE_DIAGNOSTICS
+                                           for item in diagnostics)):
         return None
     return value
 
@@ -628,17 +1060,26 @@ def live(args, _state):
     environment = cell_environment(args.directory)
     environment["NAN_CANARY_NAN_COMMAND"] = str(args.binary)
     environment["NAN_CANARY_MODEL"] = args.model
+    environment["NAN_CANARY_MEDIA_MODE"] = getattr(args, "trigger", "manual")
     marker = args.directory / "probe-result.json"
     marker.unlink(missing_ok=True)
     # Forward slashes keep the path valid for Git Bash on native Windows.
     environment["NAN_CANARY_PROBE_RESULT"] = marker.as_posix()
-    probe = ROOT / "canary/guest/probe-harness.ps1" if os.name == "nt" else ROOT / "canary/guest/probe-harness.sh"
-    command = ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File",
-               str(probe), args.harness] if os.name == "nt" else ["bash", str(probe), args.harness]
+    windows = os.name == "nt"
+    probe = ROOT / ("canary/guest/probe-harness.ps1" if windows else "canary/guest/probe-harness.sh")
+    if windows:
+        # Match the native batch runner: PowerShell 7 preserves embedded quotes
+        # when passing the tool prompt to the native nan-harness executable.
+        command = ["pwsh", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+                   "-File", str(probe), "-Harness", args.harness, "-Stage", "live-tool",
+                   "-Model", args.model, "-NanBinary", str(args.binary), "-Canary", str(args.canary),
+                   "-Version", args.harness_version]
+    else:
+        command = ["bash", str(probe), args.harness]
     try:
         status = private_command(command, args.directory, timeout=600, live=True,
                                  allow_failure=True, environment=environment)
-        result = probe_result(marker)
+        result = windows_probe_result(marker) if windows else probe_result(marker)
     finally:
         marker.unlink(missing_ok=True)
     if status == 0 and result is not None and result["status"] == "passed":
@@ -647,24 +1088,31 @@ def live(args, _state):
         raise ProbeCleanupError("live probe workspace cleanup is unproven")
     if status != 0 and result is not None and result["stage"] in LIVE_MISMATCH_STAGES:
         raise CompatibilityMismatch("live:" + result["stage"])
-    raise RuntimeError("live probe did not pass")
+    if result is None:
+        raise ProbeFailure("marker-missing", status)
+    diagnostic = result.get("diagnostic")
+    if diagnostic is None and windows:
+        # The PowerShell reader admits only closed diagnostic codes; never forward
+        # arbitrary child output from the private capture files.
+        codes = result.get("diagnostics") or []
+        diagnostic = codes[0] if len(codes) == 1 else None
+    if diagnostic is not None and args.harness != "aider" and not (
+            windows and diagnostic in WINDOWS_LIVE_DIAGNOSTICS):
+        diagnostic = None
+    raise ProbeFailure(result["stage"], status, diagnostic)
 
 
 def initial_state(args):
-    detected_platform = {"linux": "linux", "darwin": "macos", "win32": "windows"}.get(sys.platform)
+    detected_platform, detected_architecture = detected_identity()
     platform = getattr(args, "system", None) or detected_platform
-    machine = os.environ.get("PROCESSOR_ARCHITECTURE", "") if os.name == "nt" else getattr(os, "uname")().machine
-    if platform is None or machine.lower() not in ("arm64", "aarch64", "x86_64", "amd64"):
-        raise RuntimeError("this gate requires a supported hosted runner")
-    architecture = getattr(args, "architecture", None) or ("x86_64" if machine.lower() in ("x86_64", "amd64") else "aarch64")
-    detected_architecture = "x86_64" if machine.lower() in ("x86_64", "amd64") else "aarch64"
-    if (getattr(args, "system", None) and args.system != detected_platform) or (
-            getattr(args, "architecture", None) and args.architecture != detected_architecture):
+    try:
+        expected_architecture = HOSTED_PLATFORMS[platform]["architecture"]
+    except KeyError:
+        raise RuntimeError("this gate requires a supported hosted runner") from None
+    architecture = getattr(args, "architecture", None) or detected_architecture
+    if (platform != detected_platform or architecture != detected_architecture
+            or architecture != expected_architecture):
         raise RuntimeError("requested hosted identity does not match the native runner")
-    if platform == "windows" and architecture != "x86_64":
-        raise RuntimeError("Windows CLI qualification requires x86_64")
-    if architecture == "x86_64" and platform != "windows" and not (platform == "linux" and args.trigger == "manual"):
-        raise RuntimeError("x86_64 is supported only by the Linux manual smoke gate")
     node = subprocess.run(["node", "-p", "process.versions.node"], check=True,
                           capture_output=True, timeout=10).stdout.decode().strip()
     if node != "24.20.0":
@@ -771,8 +1219,24 @@ def failed_report(args, mismatch=None):
         # Do not let projection mistake a failed live stage for a provider-only
         # failure: cleanup is a terminal boundary for all prior evidence.
         phase = "cleanup"
+    elif isinstance(mismatch, ProbeFailure):
+        phase = "live-tool"
+    elif isinstance(mismatch, InstallFailure):
+        phase = mismatch.phase
     code = None
     summary = "Hosted check did not complete successfully."
+    if isinstance(mismatch, InstallFailure):
+        code = mismatch.code
+    if isinstance(mismatch, ProbeFailure):
+        code = (PROBE_DIAGNOSTIC_CODES.get(mismatch.diagnostic)
+                if args.harness == "aider" and mismatch.stage == "completion-marker"
+                and mismatch.status == 1 else None)
+        if mismatch.diagnostic in WINDOWS_LIVE_DIAGNOSTICS and mismatch.status == 1:
+            code = mismatch.diagnostic + "-exit-1"
+        if code is None:
+            code = f"live-{mismatch.stage}-exit-{mismatch.status}"
+        summary = "Hosted live probe closed at stage " + mismatch.stage \
+            + " with exit status " + str(mismatch.status) + "."
     if isinstance(mismatch, CompatibilityMismatch) and args.stage in ("conformance", "live"):
         failure_class, code = "harness", mismatch.code
         summary = "Hosted check reproduced a typed compatibility mismatch."
@@ -817,7 +1281,7 @@ def main():
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--model", default="")
     parser.add_argument("--mode", choices=("deterministic", "live"), default=None)
-    parser.add_argument("--system", choices=("linux", "macos", "windows"), default=None)
+    parser.add_argument("--system", choices=tuple(HOSTED_PLATFORMS), default=None)
     parser.add_argument("--architecture", choices=("aarch64", "x86_64"), default=None)
     parser.add_argument("--source-kind", choices=("branch", "release"), default="release")
     parser.add_argument("--source-sha", default=None)

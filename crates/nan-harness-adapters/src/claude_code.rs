@@ -9,6 +9,8 @@ use nan_harness_core::{
     HarnessAdapter, HarnessCapability, HarnessKind, LaunchPlan, NativeContextLimit, PlanContext,
     PlanError, SecretRef, VersionStatus, claude_gateway_model_id,
 };
+use nan_harness_i18n::DiagnosticText;
+use nan_harness_i18n::messages as detail_messages;
 use serde_json::json;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -141,7 +143,9 @@ fn settings_template(
 
     serde_json::to_string(&settings).map_err(|error| PlanError::InvalidField {
         field: "temporaryArtifacts.contentTemplate",
-        message: format!("could not serialize Claude Code settings: {error}"),
+        message: DiagnosticText::new(|locale| {
+            detail_messages::detail_serialize_claude_code_settings_failed(locale, &(error))
+        }),
     })
 }
 
@@ -235,17 +239,17 @@ fn validate_user_arguments(
             if !supports_native_auto_mode {
                 return Err(PlanError::InvalidField {
                     field: "process.arguments",
-                    message: format!(
-                        "Claude Code Auto mode requires a supported, parseable Claude Code version; detected '{detected_version}'"
-                    ),
+                    message: DiagnosticText::new(|locale| {
+                        detail_messages::detail_claude_code_auto_mode_requires_a_supported_parseable_claude_code_version_detected_detected(locale, &(detected_version))
+                    }),
                 });
             }
             if provider_model_id != CLAUDE_AUTO_MODE_PROVIDER_MODEL_ID {
                 return Err(PlanError::InvalidField {
                     field: "process.arguments",
-                    message: format!(
-                        "Claude Code Auto mode requires the {CLAUDE_AUTO_MODE_PROVIDER_MODEL_ID} model"
-                    ),
+                    message: DiagnosticText::new(|locale| {
+                        detail_messages::detail_claude_code_auto_mode_requires_the_claude_auto_mode_provider_model_id_model(locale, &(CLAUDE_AUTO_MODE_PROVIDER_MODEL_ID))
+                    }),
                 });
             }
         }
@@ -269,9 +273,9 @@ fn validate_user_arguments(
         if reserved {
             return Err(PlanError::InvalidField {
                 field: "process.arguments",
-                message: format!(
-                    "Claude Code argument '{argument}' conflicts with nan-harness routing"
-                ),
+                message: DiagnosticText::new(|locale| {
+                    detail_messages::detail_claude_code_argument_argument_conflicts_with_nan_harness_routing(locale, &(argument))
+                }),
             });
         }
     }
@@ -281,6 +285,8 @@ fn validate_user_arguments(
 fn secret_ref(value: &str) -> Result<SecretRef, PlanError> {
     SecretRef::new(value).map_err(|error| PlanError::InvalidField {
         field: "transport",
-        message: error.to_string(),
+        message: DiagnosticText::new(|locale| {
+            nan_harness_i18n::TerminalMessage::terminal_message(&error, locale)
+        }),
     })
 }

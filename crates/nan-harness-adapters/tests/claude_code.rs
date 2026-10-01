@@ -96,7 +96,7 @@ fn adapter_enables_the_runtime_model_picker_only_when_discovered() {
 
 #[test]
 fn adapter_defers_the_model_picker_to_live_discovery() {
-    for model in ["qwen3.6", "deepseek-v4-flash", "mimo-v2.5", "gemma4"] {
+    for model in ["qwen3.6", "deepseek-v4-flash", "mimo-v2.6-flash", "gemma4"] {
         let plan = ClaudeCodeAdapter
             .plan(&context_for_model(Vec::new(), model))
             .expect("supported model should plan");
@@ -173,7 +173,7 @@ fn adapter_rejects_auto_mode_for_other_nan_models() {
     let error = ClaudeCodeAdapter
         .plan(&context_for_model(
             vec!["--permission-mode=auto".to_owned()],
-            "mimo-v2.5",
+            "mimo-v2.6-flash",
         ))
         .expect_err("Auto mode should require Qwen");
 
@@ -293,6 +293,7 @@ fn context_for_model(user_arguments: Vec<String>, model: &str) -> PlanContext {
         working_directory: "/workspace/project".to_owned(),
         user_arguments,
         web_search_policy: WebSearchPolicy::Auto,
+        media: nan_harness_core::MediaSelection::none(),
         observability_format: ObservabilityFormat::Human,
         session_max_tokens: None,
         context_limit: None,

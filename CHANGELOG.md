@@ -16,15 +16,111 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the other Desktop integrations and enabling bounded local probe routing.
 - Architecture-scoped Desktop evidence in compatibility feed v4, retaining
   independent deterministic and NaN checks while preserving v2/v3 consumers.
-- Manual Desktop checks, digest-bound report approval, and durable compatibility
-  publication workflows. The CLI release gate can run on hosted Linux and macOS
-  ARM64 runners; operational cutover requires a successful hosted qualification.
+- Manual Desktop checks and digest-bound report approval tooling. Preserve the
+  current hosted CLI gates and quarantine the earlier publication queue while
+  native Desktop qualification remains pending.
 - Offline visual fallback for Desktop checks, using a bundled digest-pinned OCR
   helper and owned-window guards. Report schema v2 distinguishes accessibility
   and visual evidence while retaining legacy report validation.
 - Credential-free Desktop preparation with exact executable identities and
   separate deterministic/live execution. Hosted installation includes official
   Windows packages, Claude Linux DEBs and Hermes source builds.
+
+## [0.1.12] - 2026-09-26
+
+### Added
+
+- Select the default NaN image model with `--image-model`, which also enables
+  images, or use `--image` for Flux. Hermes and OpenClaw can select Flux 2 Klein
+  or Qwen Image 2.1 per tool call without changing the configured default.
+  Qwen Image supports generation only; Flux remains available for editing.
+
+### Changed
+
+- Promote MiMo V2.6 Flash to the curated coding catalog with shared capabilities
+  and descriptions; retain MiMo V2.5 only through live model discovery.
+- Exclude Qwen Image 2.1 from text model catalogs.
+
+- Replace the daily source detector with release-scoped CLI compatibility checks
+  at 05:00 Europe/Madrid. Verify new upstream versions across their supported
+  platforms and publish successful harness results to both compatibility feeds.
+
+### Fixed
+
+- Preserve Chat Completions token usage when a client disconnects after the
+  terminal streaming event but before the HTTP response closes.
+
+## [0.1.11] - 2026-09-22
+
+### Fixed
+
+- Inspect YAML search settings structurally so unrelated text cannot cause reserved
+  MCP name conflicts or establish managed ownership; report malformed YAML safely.
+
+- Move diagnostic capture disk writes off async routing workers, with bounded
+  concurrent storage batches and no blocking threads reserved for idle writers.
+- Recover native configuration, model catalogs and both receipts together when
+  configure, refresh or removal fails. Preserve intervening user edits and retain
+  private recovery snapshots when restoration cannot complete.
+
+- Load the NaN provider on OMP 18.2 after its search API change, retaining
+  authenticated native search and fallback support for older OMP versions.
+- Send an application User-Agent, a default Kokoro voice, and the NaN Whisper
+  model identifier from the media helper so live speech checks can complete.
+- Distinguish media plan, speech synthesis, transcription, and image failures
+  in canary reports, and clarify the live read probe's required response.
+
+## [0.1.10] - 2026-09-21
+
+### Added
+
+- Require Linux, macOS and available Windows CLI live evidence before release
+  publication, and automatically start verification-only checks for new drafts.
+- Consolidate opt-in native Windows CLI diagnostics and modular hosted checks.
+  Prime Agent and FX are explicitly skipped on Windows until official native
+  distributions are available; skipped coverage never counts as passing.
+- Include the Windows canary executable and its checksum in release assets.
+
+### Fixed
+
+- Select Cline's local session backend for JSON runs without overriding its
+  data directory or enabling sandbox configuration.
+- Generate capability-tagged media models for OpenClaw so transcription-enabled
+  launches pass current configuration validation.
+- Close owned Windows descendants before draining conformance output, and
+  retain operational inventory failures instead of treating them as advisory drift.
+- Preserve native exit codes when Windows PowerShell receives stderr warnings
+  during live compatibility checks.
+
+## [0.1.9] - 2026-09-18
+
+### Fixed
+
+- Allow self-updates to download release artifacts independently of the short
+  metadata request timeout.
+
+## [0.1.8] - 2026-09-18
+
+### Fixed
+
+- Escape paths in generated JSON configuration so OpenClaw can start with the
+  search plugin on Windows, including temporary paths containing `Temp\2`.
+
+- Check npm before offering npm-based harness installation and show platform-specific
+  Node.js setup steps without requesting an error report when npm is missing.
+
+- Explain that fx and Prime Agent do not yet support Windows before searching
+  for executables or offering installation. Allow explicit `--executable` paths
+  to try future compatible builds with nan-harness.
+
+## [0.1.7] - 2026-09-16
+
+### Added
+
+- Add English and Spanish terminal messages, selected explicitly with
+  `nanh language en` or `nanh language es` and stored in `preferences.json`.
+  Machine output and child harness sessions remain language independent.
+
 - Recover model discovery from a private, credential-bound cache when the NaN
   model endpoint is unavailable or returns an unusable catalog.
 
@@ -778,7 +874,13 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   startup update prompts, daily compatibility canaries, and a monotonic remote
   verification feed.
 
-[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.1.6...HEAD
+[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.1.12...HEAD
+[0.1.12]: https://github.com/DavidLMS/nan-harness/compare/v0.1.11...v0.1.12
+[0.1.11]: https://github.com/DavidLMS/nan-harness/compare/v0.1.10...v0.1.11
+[0.1.10]: https://github.com/DavidLMS/nan-harness/compare/v0.1.9...v0.1.10
+[0.1.9]: https://github.com/DavidLMS/nan-harness/compare/v0.1.8...v0.1.9
+[0.1.8]: https://github.com/DavidLMS/nan-harness/compare/v0.1.7...v0.1.8
+[0.1.7]: https://github.com/DavidLMS/nan-harness/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/DavidLMS/nan-harness/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/DavidLMS/nan-harness/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/DavidLMS/nan-harness/compare/v0.1.3...v0.1.4

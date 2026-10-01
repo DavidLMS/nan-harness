@@ -6,17 +6,7 @@ name: Zed macOS checker qualification (wave9)
 # credentials, and never submit or publish beyond this disposable run.
 
 on:
-  push:
-    branches:
-      - DavidLMS/desktop-zed-macos-wave9
-    paths:
-      - '.github/workflows/desktop-check-macos-wave9.yml'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - 'crates/**'
-      - 'canary/actions/prepare-desktop-macos.sh'
-      - 'scripts/run-desktop-check-session.sh'
-
+  workflow_dispatch:
 permissions:
   contents: read
 

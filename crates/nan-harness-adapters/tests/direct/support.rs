@@ -34,9 +34,15 @@ pub(super) fn context(kind: HarnessKind, user_arguments: Vec<String>) -> PlanCon
             qualification: QualificationStatus::Qualified,
             warnings: Vec::new(),
         },
-        working_directory: "/workspace/project".to_owned(),
+        working_directory: if cfg!(windows) {
+            r"C:\workspace\project"
+        } else {
+            "/workspace/project"
+        }
+        .to_owned(),
         user_arguments,
         web_search_policy: WebSearchPolicy::Auto,
+        media: nan_harness_core::MediaSelection::none(),
         observability_format: ObservabilityFormat::Human,
         session_max_tokens: None,
         context_limit: None,
@@ -68,13 +74,16 @@ pub(super) fn assert_direct_secret(plan: &LaunchPlan, target: &str) {
 }
 
 pub(super) fn without_search_block(template: &str) -> String {
-    let begin = template.find(NAN_SEARCH_BLOCK_BEGIN).expect("search begin");
-    let end = template.find(NAN_SEARCH_BLOCK_END).expect("search end");
-    format!(
-        "{}{}",
-        &template[..begin],
-        &template[end + NAN_SEARCH_BLOCK_END.len()..]
-    )
+    let mut rendered = template.to_owned();
+    while let Some(begin) = rendered.find(NAN_SEARCH_BLOCK_BEGIN) {
+        let content_start = begin + NAN_SEARCH_BLOCK_BEGIN.len();
+        let end = rendered[content_start..]
+            .find(NAN_SEARCH_BLOCK_END)
+            .map(|offset| content_start + offset)
+            .expect("search end");
+        rendered.replace_range(begin..end + NAN_SEARCH_BLOCK_END.len(), "");
+    }
+    rendered
 }
 
 pub(super) fn with_search_block(template: &str) -> String {

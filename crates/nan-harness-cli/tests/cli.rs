@@ -10,3 +10,6 @@ mod search;
 mod support;
 #[path = "cli/surface.rs"]
 mod surface;
+
+#[path = "cli/language.rs"]
+mod language;

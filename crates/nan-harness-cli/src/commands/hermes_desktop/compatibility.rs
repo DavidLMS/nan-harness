@@ -76,8 +76,7 @@ fn validate_version(
     let version = extract_semver(detected_version);
     match classify_desktop_version(entry, version.as_ref()) {
         DesktopCompatibilityStatus::ContractOnly => eprintln!(
-            "warning: Hermes Desktop compatibility on this platform is based on deterministic contracts, not a live verification"
-        ),
+            "{}", nan_harness_i18n::messages::compatibility_warning_hermes_desktop_compatibility_on_this_platform_is_based_on_determini(nan_harness_i18n::locale())),
         DesktopCompatibilityStatus::OlderUnsupported if !allow_unsupported => {
             let (Some(detected), Some(minimum)) =
                 (version.as_ref(), entry.minimum_app_version.as_ref())
@@ -90,7 +89,7 @@ fn validate_version(
             });
         }
         DesktopCompatibilityStatus::OlderUnsupported => {
-            eprintln!("warning: running an older unsupported Hermes Desktop version");
+            eprintln!("{}", nan_harness_i18n::messages::compatibility_warning_running_an_older_unsupported_hermes_desktop_version(nan_harness_i18n::locale()));
         }
         DesktopCompatibilityStatus::NewerUntested => {
             eprintln!(

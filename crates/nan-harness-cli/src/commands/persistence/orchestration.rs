@@ -51,7 +51,6 @@ impl std::fmt::Display for PersistentIntegration {
 pub(crate) struct PersistenceManager {
     pub(super) state_directory: PathBuf,
     pub(super) state_path: PathBuf,
-    pub(super) preferences_path: PathBuf,
     pub(super) home_directory: PathBuf,
     pub(super) prime_directory: PathBuf,
     pub(super) qwen_directory: PathBuf,
@@ -109,11 +108,9 @@ impl PersistenceManager {
     ) -> Self {
         let state_directory = state_directory.into();
         let state_path = state_directory.join("integrations.json");
-        let preferences_path = state_directory.join("preferences.json");
         Self {
             state_directory,
             state_path,
-            preferences_path,
             home_directory: home_directory.into(),
             prime_directory: prime_directory.into(),
             qwen_directory: qwen_directory.into(),
@@ -260,16 +257,16 @@ impl PersistenceManager {
         if model.is_empty() {
             return Ok(());
         }
-        let mut preferences = self.load_preferences()?;
-        let key = kind.to_string();
-        preferences.last_selection_by_harness.insert(
-            key,
-            LastSelection {
-                model: model.to_owned(),
-                reasoning,
-            },
-        );
-        self.save_preferences(&preferences)
+        self.update_preferences(|preferences| {
+            let key = kind.to_string();
+            preferences.last_selection_by_harness.insert(
+                key,
+                LastSelection {
+                    model: model.to_owned(),
+                    reasoning,
+                },
+            );
+        })
     }
 
     pub(crate) fn last_desktop_selection(
@@ -292,15 +289,15 @@ impl PersistenceManager {
         if model.is_empty() {
             return Ok(());
         }
-        let mut preferences = self.load_preferences()?;
-        let key = kind.to_string();
-        preferences.last_selection_by_desktop.insert(
-            key,
-            LastSelection {
-                model: model.to_owned(),
-                reasoning: None,
-            },
-        );
-        self.save_preferences(&preferences)
+        self.update_preferences(|preferences| {
+            let key = kind.to_string();
+            preferences.last_selection_by_desktop.insert(
+                key,
+                LastSelection {
+                    model: model.to_owned(),
+                    reasoning: None,
+                },
+            );
+        })
     }
 }

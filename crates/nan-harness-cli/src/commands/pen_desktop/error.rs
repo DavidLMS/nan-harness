@@ -200,3 +200,102 @@ impl PenDesktopError {
         }
     }
 }
+
+// Terminal localization is separate from canonical Display used by machine contracts.
+impl nan_harness_i18n::TerminalMessage for PenDesktopError {
+    fn terminal_message(&self, locale: nan_harness_i18n::Locale) -> String {
+        use nan_harness_i18n::messages as m;
+        if locale == nan_harness_i18n::Locale::En {
+            return self.to_string();
+        }
+        match self {
+            Self::UnsupportedPlatform => m::error_pen_desktop_unsupported_platform(locale),
+            Self::Compatibility(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+            Self::OlderUnsupported => m::error_pen_desktop_older_unsupported(locale),
+            Self::AppNotFound => m::error_pen_desktop_app_not_found(locale),
+            Self::InvalidInstallation => m::error_pen_desktop_invalid_installation(locale),
+            Self::AlreadyRunning => m::error_pen_desktop_already_running(locale),
+            Self::PendingRecovery => m::error_pen_desktop_pending_recovery(locale),
+            Self::OrphanBackup => m::error_pen_desktop_orphan_backup(locale),
+            Self::OrphanPersistentBackup => m::error_pen_desktop_orphan_persistent_backup(locale),
+            Self::DidNotStart => m::error_pen_desktop_did_not_start(locale),
+            Self::DidNotTerminate => m::error_pen_desktop_did_not_terminate(locale),
+            Self::MissingHomeDirectory => m::error_pen_desktop_missing_home_directory(locale),
+            Self::MissingStateDirectory => m::error_pen_desktop_missing_state_directory(locale),
+            Self::InvalidPath => m::error_pen_desktop_invalid_path(locale),
+            Self::BindGateway(field_0) => m::error_pen_desktop_bind_gateway(locale, &(field_0)),
+            Self::Gateway(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+            Self::State(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+            Self::ModelUnavailable { model, available } => {
+                m::error_pen_desktop_model_unavailable(locale, &(model), &(available.join(", ")))
+            }
+            Self::EmptyModelCatalog => m::error_pen_desktop_empty_model_catalog(locale),
+            Self::ReadDocument { path, source } => {
+                m::error_pen_desktop_read_document(locale, &(source), &(path.display()))
+            }
+            Self::ParseDocument { path, source } => {
+                m::error_pen_desktop_parse_document(locale, &(source), &(path.display()))
+            }
+            Self::DocumentRootNotObject(field_0) => {
+                m::error_pen_desktop_document_root_not_object(locale, &(field_0.display()))
+            }
+            Self::FieldNotObject { document, field } => {
+                m::error_pen_desktop_field_not_object(locale, &(format!("{document:?}")), &(field))
+            }
+            Self::Serialize(field_0) => m::error_pen_desktop_serialize(locale, &(field_0)),
+            Self::ParseManagedDocument { document, source } => {
+                m::error_pen_desktop_parse_managed_document(
+                    locale,
+                    &(format!("{document:?}")),
+                    &(source),
+                )
+            }
+            Self::ManagedRootNotObject(field_0) => {
+                m::error_pen_desktop_managed_root_not_object(locale, &(format!("{field_0:?}")))
+            }
+            Self::ManagedEntryMissing(field_0) => {
+                m::error_pen_desktop_managed_entry_missing(locale, &(format!("{field_0:?}")))
+            }
+            Self::ManagedConfigurationChanged(field_0) => {
+                m::error_pen_desktop_managed_configuration_changed(locale, &(field_0.display()))
+            }
+            Self::ParseReceipt(field_0) => m::error_pen_desktop_parse_receipt(locale, &(field_0)),
+            Self::InvalidReceipt => m::error_pen_desktop_invalid_receipt(locale),
+            Self::ReadBackup(field_0) => m::error_pen_desktop_read_backup(locale, &(field_0)),
+            Self::BackupHashMismatch => m::error_pen_desktop_backup_hash_mismatch(locale),
+            Self::RemoveBackup(field_0) => m::error_pen_desktop_remove_backup(locale, &(field_0)),
+            Self::Launch(field_0) => m::error_pen_desktop_launch(locale, &(field_0)),
+            Self::ProcessCheck(field_0) => m::error_pen_desktop_process_check(locale, &(field_0)),
+            Self::ProcessCheckFailed(field_0) => {
+                m::error_pen_desktop_process_check_failed(locale, &(format!("{field_0:?}")))
+            }
+            Self::Terminate(field_0) => m::error_pen_desktop_terminate(locale, &(field_0)),
+            Self::TerminateFailed(field_0) => {
+                m::error_pen_desktop_terminate_failed(locale, &(format!("{field_0:?}")))
+            }
+            Self::Secret(field_0) => m::error_pen_desktop_secret(
+                locale,
+                &(nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)),
+            ),
+            Self::PersistentNotConfigured => m::error_pen_desktop_persistent_not_configured(locale),
+            Self::PersistentConfigurationChanged => {
+                m::error_pen_desktop_persistent_configuration_changed(locale)
+            }
+            Self::ConfirmationRequired => m::error_pen_desktop_confirmation_required(locale),
+            Self::ConfigurationCancelled => m::error_pen_desktop_configuration_cancelled(locale),
+            Self::Prompt(field_0) => m::error_pen_desktop_prompt(locale, &(field_0)),
+            Self::Credential(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+            Self::Persistence(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+        }
+    }
+}

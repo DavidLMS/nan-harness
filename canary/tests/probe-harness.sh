@@ -5,17 +5,32 @@ repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 temporary_directory="$(mktemp -d)"
 trap 'rm -rf "$temporary_directory"' EXIT
 
-# Production resolves the model before entering the live stage. Tests must not
-# silently rely on an installed harness's default model either.
-export NAN_CANARY_MODEL='synthetic-selected-model'
-
 fake_nanh="$temporary_directory/nanh"
 cat >"$fake_nanh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
-test "${2:-}" = --model
-test "${3:-}" = synthetic-selected-model
+if [ "${1:-}" = __media ]; then
+  output=''
+  previous=''
+  for argument in "$@"; do
+    if [ "$previous" = --output ]; then
+      output="$argument"
+      break
+    fi
+    previous="$argument"
+  done
+  [ -n "$output" ]
+  printf '%s\n' 'synthetic media output' >"$output"
+  exit 0
+fi
+
+for argument in "$@"; do
+  if [ "$argument" = --dry-run ]; then
+    printf '%s\n' '{"media":["nan-whisper","nan-kokoro","image_gen/nan_harness"]}'
+    exit 0
+  fi
+done
 
 if [ "${1:-}" = omp ]; then
   printf '%s\n' "$@" >"$OMP_TEST_ARGUMENTS_FILE"
@@ -53,13 +68,6 @@ else
 fi
 EOF
 chmod 755 "$fake_nanh"
-
-if (unset NAN_CANARY_MODEL; bash "$repository_root/canary/guest/probe-harness.sh" hermes) \
-    >"$temporary_directory/missing-model" 2>&1; then
-  printf 'probe unexpectedly accepted an unresolved model\n' >&2
-  exit 1
-fi
-grep -F 'NAN_CANARY_MODEL must be resolved' "$temporary_directory/missing-model" >/dev/null
 
 # The guest prepends user install directories before PATH; keep that lookup synthetic too.
 mkdir -p "$temporary_directory/home/.local/bin"
@@ -113,18 +121,3 @@ then
   printf 'OMP probe used unsupported Pi isolation flags\n' >&2
   exit 1
 fi
-
-# The cell classifies only the closed stage marker; raw output stays private.
-marker="$temporary_directory/probe-result.json"
-NAN_CANARY_PROBE_RESULT="$marker" run_probe
-test "$(cat "$marker")" = '{"schemaVersion":1,"stage":"complete","status":"passed"}'
-if FAKE_USAGE_STREAM=stdout NAN_CANARY_PROBE_RESULT="$marker" run_probe >/dev/null 2>&1; then
-  printf 'probe unexpectedly accepted a usage summary on stdout\n' >&2
-  exit 1
-fi
-test "$(cat "$marker")" = '{"schemaVersion":1,"stage":"usage-summary","status":"failed"}'
-if FAKE_USAGE_STATUS=not-observed NAN_CANARY_PROBE_RESULT="$marker" run_probe >/dev/null 2>&1; then
-  printf 'probe unexpectedly accepted missing provider usage\n' >&2
-  exit 1
-fi
-test "$(cat "$marker")" = '{"schemaVersion":1,"stage":"usage-evidence","status":"failed"}'

@@ -8,6 +8,7 @@ license.workspace = true
 publish = false
 
 [dependencies]
+nan-harness-i18n = { path = "../nan-harness-i18n", version = "0.1.6" }
 semver.workspace = true
 serde.workspace = true
 thiserror.workspace = true

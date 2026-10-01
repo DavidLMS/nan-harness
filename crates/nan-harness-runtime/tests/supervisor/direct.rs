@@ -1,6 +1,9 @@
 use super::support::{DIRECT_PLAN, assert_removed, execute_shell, test_config};
 use nan_harness_core::LaunchPlan;
-use nan_harness_core::launch_plan::{PROVIDER_BASE_URL_PLACEHOLDER, TerminalMode, Transport};
+use nan_harness_core::SecretRef;
+use nan_harness_core::launch_plan::{
+    MEDIA_CREDENTIAL_ENVIRONMENT, PROVIDER_BASE_URL_PLACEHOLDER, TerminalMode, Transport,
+};
 use nan_harness_runtime::{CancellationToken, ExecutionOutcome, Supervisor};
 
 #[tokio::test]
@@ -52,6 +55,34 @@ async fn supervisor_gives_direct_children_only_a_launch_scoped_session_token() {
         None,
     )
     .await;
+
+    assert_eq!(report.outcome, ExecutionOutcome::Succeeded);
+    assert_removed(report.temporary_root);
+}
+
+#[tokio::test]
+async fn supervisor_gives_managed_media_children_the_provider_credential() {
+    let working_directory = tempfile::tempdir().expect("working directory should exist");
+    let mut plan: LaunchPlan = serde_json::from_str(DIRECT_PLAN).expect("valid direct fixture");
+    "/bin/sh".clone_into(&mut plan.harness.executable);
+    plan.environment.secrets.insert(
+        MEDIA_CREDENTIAL_ENVIRONMENT.to_owned(),
+        SecretRef::new("nan_api_key").expect("valid provider secret reference"),
+    );
+    plan.observability
+        .redact_environment_names
+        .insert(MEDIA_CREDENTIAL_ENVIRONMENT.to_owned());
+    plan.process.arguments = vec![
+        "-c".to_owned(),
+        "test \"$NAN_MEDIA_API_KEY\" = test-key && test \"${#NAN_API_KEY}\" -eq 64".to_owned(),
+    ];
+    plan.process.working_directory = working_directory.path().to_string_lossy().into_owned();
+    plan.process.terminal = TerminalMode::Captured;
+
+    let report = Supervisor::new()
+        .execute(&plan, &test_config(), &CancellationToken::new())
+        .await
+        .expect("direct launch should complete");
 
     assert_eq!(report.outcome, ExecutionOutcome::Succeeded);
     assert_removed(report.temporary_root);

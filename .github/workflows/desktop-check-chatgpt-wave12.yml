@@ -8,14 +8,6 @@ run-name: ChatGPT wave12 Linux startup wrapper diagnostic
 # approved diagnostic without registering the workflow on main first. Push
 # that branch once; do not also dispatch or rerun the same experiment.
 on:
-  push:
-    branches:
-      - DavidLMS/desktop-chatgpt-linux-wave14-validation
-    paths:
-      - '.github/workflows/desktop-check-chatgpt-wave12.yml'
-      - 'crates/nan-harness-desktop-check/src/**'
-      - 'scripts/chatgpt-wave12-*'
-      - 'scripts/test-chatgpt-wave12-*'
   workflow_dispatch:
 
 permissions:

@@ -1,21 +1,21 @@
 # Compatibility Canary
 
-The compatibility canary tests CLI harnesses on disposable GitHub-hosted
-native runners. The shared detector selects CLI and Desktop observations
-independently of the release gate. Desktop checks do not block release publication.
-Tart remains a manual emergency execution backend, not a second publisher.
+For the Windows integration candidate, explicit platform skips and remaining
+qualification work, see [Windows integration](windows-integration.md).
 
-The hosted workflows still require native qualification and operator setup
-before operational cutover; local contract tests do not certify real apps or
-live provider behavior on those runners.
+The nan-harness compatibility canary tests all 15 supported CLI harnesses on
+GitHub-hosted native runners without adding commands to the public `nanh`
+binary. Daily checks refresh compatibility evidence for published binaries;
+the separate release gate qualifies new releases.
 
-Hosted release checks verify the attested checksum manifest, source tag, source
-commit, and exact native binaries before execution. The detector builds its
-validators from the selected source and tests the attested release binary.
-Native suite jobs run harnesses sequentially in separate private cells.
-Installation and deterministic stages receive no provider key;
-only the live step receives `NAN_API_KEY`. Child process output stays private,
-including failures and timeouts. Only validated bounded reports are uploaded.
+GitHub Actions provides modular CLI checks and protected live provider probes.
+Each new draft release automatically dispatches verification of its exact
+signed Linux/macOS ARM64 and Windows x64 assets. Publication remains a separate,
+explicit operation after all 43 supported live cells pass; Windows Prime Agent
+and FX are skipped because no official Windows distribution is available.
+Historical 30-cell evidence remains valid only for recommending an already
+published stable release with its complete, bound publication receipt. It cannot
+qualify a new publication. The Tart procedures below remain recovery references.
 
 Deterministic compatibility covers installation, launch, provider traffic,
 process cleanup, sentinel behavior, and one representative tool round-trip.
@@ -24,20 +24,64 @@ block compatibility when those functional contracts pass.
 
 | Trigger | Platforms | Coverage |
 | --- | --- | --- |
-| Shared detector | Linux, macOS, Windows | Frozen official versions for 15 CLI harnesses (14 on Windows) and five Desktop integrations; exact changed/retryable tuples; data-only evidence |
-| Manual daily coverage | Linux ARM64 | Clean install, doctor, and deterministic conformance for all 15; exactly two rotating `qwen3.6` probes; evidence only |
-| Manual weekly coverage | Linux and macOS ARM64 | Deterministic conformance plus live `qwen3.6` probes for all 15 on both platforms; evidence only |
-| Manual smoke | Linux x86-64 and macOS ARM64 | Clean install, doctor, and deterministic conformance for 1-4 selected harnesses; no provider key; evidence only |
-| Release gate | Linux and macOS ARM64 | The same full cross-platform pass; only then initialize both evidence tiers and publish the draft |
+| Daily hosted | Linux/macOS ARM64 and Windows x64 | Pending upstream versions: clean install, doctor, deterministic conformance and live `qwen3.6`; partial feed publication by harness |
+| Hosted release gate | Linux/macOS ARM64 and Windows x64 | Automatic draft verification of 43 supported live cells; publication remains explicit |
 
-Compatibility evidence is release-scoped. Schema v5 adds model-scoped native
-hosted observations while preserving legacy v2/v3 readers and v4 independent,
-exact-platform Desktop checks. A daily Linux deterministic
-pass can advance only that harness's `lastCompatibleVersion` and `compatibleAt`.
-Weekly live evidence advances only when Linux and macOS deterministic and live
-checks pass for the same observed harness version. Release-gate publication is
-all-or-nothing for the release's initial two evidence tiers, while preserving
-older release records.
+Compatibility evidence is release-scoped, with CLI schema v2 and unified CLI /
+Desktop schema v3 assets. Daily publication requires every supported native
+platform to pass for the same upstream version and exact nan-harness release.
+Release-gate publication remains all-or-nothing for its full matrix.
+
+## Daily hosted compatibility
+
+`.github/workflows/harness-canary.yml` runs at 05:00 `Europe/Madrid`, including
+daylight-saving changes. GitHub may delay scheduled execution. It replaces the
+source/main detector, whose reports never updated the feed.
+
+The workflow selects the stable release named by the `available` feed and the
+GitHub-recommended `latest` release, deduplicating equal tags. It verifies unique
+tags, exact commits, signed checksums and all six native CLI/canary assets.
+Missing or invalid assets leave that release pending; they do not certify a
+replacement built from `main` or block an independently usable release.
+
+Official upstream versions are frozen before native cells run. Only versions
+newer than each release's live evidence, or missing that evidence, are tested.
+The shared daily/release resolver retries HTTP 429 metadata reads at most twice
+per URL. It honors `Retry-After` and exhausted GitHub rate-limit reset times;
+without those headers it waits 60, then 120 seconds. A requested wait above
+120 seconds or an invalid cooldown fails without retrying early. Exhausted
+retries retain the sanitized HTTP failure and never substitute a version.
+Unresolved metadata and failed cells are retried on the next daily run. Each
+harness must pass installation, diagnosis, deterministic conformance and live
+`qwen3.6` on Linux, macOS and Windows; Prime Agent and FX remain unavailable on
+Windows. At most three cells run concurrently. Desktop apps are not selected.
+
+The aggregator binds reports to the run attempt, trusted workflow, exact release
+binary, platform and frozen version. Missing or failing cells hold back only
+their harness. Invalid provenance rejects the affected release batch. Successful
+independent results update both `compatibility.json` and `compatibility-v3.json`;
+other CLI entries, Desktop evidence and historical releases are preserved. The
+workflow reports failure after publishing independent successes when any work
+remains pending. Reports and the per-harness summary are retained for 30 days;
+raw child output and credentials are never uploaded.
+
+Manual dispatch defaults to `verification_only=true`. Set `force=true` to
+reverify current versions, including those already certified. A verification-only
+run generates candidates without remote writes, including during backup recovery.
+Scheduled runs publish automatically. All runs share the release-channel
+concurrency group with release publication and recommendation.
+
+Before enabling the schedule, configure `compatibility-live` and
+`compatibility-publication` environments with deployment branch policies allowing
+only the repository's default branch and no per-run reviewer requirement. Store
+the existing provider credential as `NAN_API_KEY` in `compatibility-live` through
+the normal secret-management channel. The live job has read-only GitHub access;
+only the publisher has `contents: write` and it receives no provider credential.
+Do not weaken the separate release-publication environment to enable daily runs.
+
+For rollout, run a manual verification-only pass first, inspect its summary,
+then dispatch with `verification_only=false` and inspect both remote feed assets.
+No new nan-harness release is needed to distribute refreshed evidence.
 
 Safe reports follow
 [`crates/nan-harness-canary/resources/canary-report.schema.json`](../crates/nan-harness-canary/resources/canary-report.schema.json).
@@ -46,190 +90,26 @@ failure fingerprint. They exclude credentials, prompts, responses, tool
 payloads, command output, and local paths. Raw output is retained only in
 private local logs when explicitly requested.
 
+### OMP usage incident comparison
+
+The manual Native Windows CLI diagnostic workflow accepts
+`omp_usage_comparison=true` for the 2026-09-26 usage incident. This runs four
+isolated cells: OMP 18.3.1 and 18.3.2 against the signed v0.1.11 Windows assets
+and against binaries built from the dispatch SHA. It ignores the normal batch
+selection inputs, uses qwen3.6, makes one attempt per pair, and never publishes
+compatibility evidence. The candidate is identified by its source and binary
+hashes, not treated as release evidence. The `canary-live` environment's branch
+policy must authorize the dispatch ref; do not bypass it with a release tag.
+
+The artifacts contain only provenance and sanitized cell reports. Usage failures
+distinguish missing/unreadable evidence, malformed JSON, an invalid schema,
+not-observed usage and unsupported usage. All remain failures. A later passing
+run does not establish the cause of the original incident.
+
 ## Operations
 
-### Shared native detector
-
-`harness-canary.yml` retains the existing daily schedule and accepts manual
-`suites`, `platforms`, `harnesses`, and `desktop_harnesses` selections. It invokes
-one CLI suite job and one Desktop suite job per selected native platform, with
-90-minute job limits. CLI Linux/macOS use ARM64; Desktop Linux and native Windows
-use x86-64. The model is resolved once from the explicit input, `CANARY_MODEL`,
-or the configured fallback, and remains part of live evidence identity.
-
-Official metadata is frozen before installation. An unavailable upstream remains
-a closed diagnostic result without an invented version; it does not discard the
-other selected harnesses. Private installer manifests, signed download URLs,
-application state, and child output are never evidence artifacts.
-
-The validated schema-v5 feed suppresses already-known exact tuples and retries
-infrastructure blocks after at least 24 hours. App/runtime version, model,
-platform, architecture, tested binary digest, and executable specification digest
-are distinct identity inputs. An unknown runtime cannot borrow a historical one.
-
-Only bounded, validated `hosted-evidence-<suite>-<platform>` artifacts containing
-`evidence.json` enter the automatic ingestion contract. Ingestion accepts only
-completed runs from trusted `main` history; qualification branches cannot publish
-through that path. A successful diagnostic job is not proof that every app passed.
-Live calls require the protected `canary-live` environment and explicit live mode;
-do not infer production cutover or permission for another hosted run from a local
-test result.
-
-### Release publication
-
-The shared detector always tests the selected published release binary, even
-when its workflow and checker come from a qualification branch. It does not
-exercise unpublished launcher changes on that branch. To qualify branch
-changes, use `desktop-check-suite.yml` with `source: branch`; its reports remain
-branch diagnostics and must not enter release evidence publication. Use
-`source: release` only to test an exact existing release. Both native execution
-and live provider phases still need their separate operator authorization.
-
-For iterative branch diagnosis, the manual `harness-canary.yml` entry accepts
-`desktop_diagnostics: true` with `platforms` and `desktop_harnesses` selections.
-This route always uses branch binaries and deterministic mode without provider
-credentials. Each application receives its own disposable runner, with at most
-three concurrent cells. The default detector path is unchanged.
-
-Diagnostic cells retain `desktop-diagnostics-<platform>-<app>` artifacts for
-seven days. Only closed, validated resolution, preparation, installer and probe
-facts are eligible: source commit, platform, application, stages, error
-categories, numeric exit/system error codes, bounded runtime versions and
-allowlisted installer failure hints. Failed compatibility does not prevent diagnostic retention. Unknown
-fields or unstructured child output are not uploaded. These sidecars are not
-release evidence; never ingest them into a compatibility feed. Inspect the
-recorded failure stage before adding narrower instrumentation or rerunning a
-selected cell, and do not treat an absent diagnostic as a successful probe.
-
-For example, v0.1.6 lacks the Zed endpoint override and private data-directory
-switches required by the checker. `harness-capability-unavailable` means the
-tested launcher cannot run that isolated probe, not that the Zed application
-version is incompatible. Do not bypass those controls or relabel a branch
-binary as release evidence.
-
-Normal operation resides in GitHub Actions:
-
-1. Configure `NAN_API_KEY` only as a secret of the restricted `canary-live`
-   environment. Only the live cell step resolves it; the release workflow never
-   forwards a key, and no key is added to YAML, reports, or repository state.
-2. Review protection rules for `compatibility-publication` and the data-only
-   `compatibility-state` branch. The writer requires contents write; test jobs
-   remain read-only. Do not execute or check out the state branch as code.
-3. Run **Approve compatibility evidence**, operation `initialize`, once to
-   create the empty data branch. Missing or unreadable state thereafter fails
-   closed; it is never silently recreated.
-4. The release workflow creates its draft, then calls **Hosted CLI compatibility
-   gate** directly. All thirty deterministic/live cells and matching harness
-   versions are required before a durable publication request is committed.
-5. **Compatibility publication writer** drains approved requests under one
-   repository-wide mutex. It can also be run manually to retry pending work.
-
-The state branch holds immutable `requests/`, `completed/` acknowledgements,
-monotonic `receipts/`, and `recommendations/` bound to tag, commit, checksum-manifest digest, and
-sanitized suite evidence. Compare-and-swap Git updates preserve concurrent
-enqueues. Requests are persisted before workflow concurrency applies, so a
-replaced pending workflow cannot lose an approval. A cancelled publication
-resumes from its receipt, or from the pending request's evidence when the writer
-stopped before creating one. Either reuse requires the unchanged attested
-checksum manifest to name the tested binaries, so a gate retry repeats no model
-calls. Prefer re-running **Compatibility publication writer** when a request is
-already pending. A request that can never pass stays pending and fails each
-drain; resolve its cause rather than editing state.
-
-Only release coverage runs the release commit's own cell code and can reach the
-durable queue, writer, or resume path. Daily, weekly, and smoke coverage run the
-dispatched workflow's code against the exact attested release assets, so they
-can also test releases that predate these scripts.
-
-For Desktop, run the checker workflow or review a contributed issue. Select
-`desktop-issue` with its issue number and exact report SHA-256, or `desktop-run`
-with its run ID, artifact name, and SHA-256. The workflow freezes those exact
-bytes, validates the report and official binary identity, and enqueues it.
-For split Desktop artifacts, the digest selects `deterministic.json` or
-`live.json` independently. Legacy `report.json` artifacts remain readable.
-No author allowlist is required: launching the review workflow is approval.
-Issues never trigger code execution or publication. Empty positive evidence
-is a recorded no-op, not a certification.
-
-Use the local wrappers from any authenticated machine to dispatch and wait for
-the matching hosted run:
-
-```sh
-canary/host/run-release-gate.sh --tag vX.Y.Z
-canary/host/recommend-release.sh --tag vX.Y.Z
-```
-
-Publication remains separate from recommendation: successful gates publish
-with `--latest=false`; only explicit recommendation moves GitHub's latest
-pointer. No new schedule is installed. Manual daily/weekly coverage produces
-reports without automatically updating compatibility.
-
-### Hosted qualification
-
-Local contracts do not qualify the hosted migration. Each run below is a
-separately approved operation; neither one recommends a release.
-
-Bootstrap constraints: no existing release tag contains `canary/actions`; the
-release workflow requires green `main` CI for the tagged commit; the writer and
-approval workflows check out `main`; and GitHub may refuse to dispatch a
-workflow that the default branch does not register. Never merge only to test.
-
-**Non-publishing smoke.** Push the candidate branch, then confirm that
-`gh workflow view cli-release-gate.yml --repo <repo> --ref <branch>` resolves.
-If it does not, stop and use a qualification repository. v0.1.6 is the newest
-attested release whose binaries accept the same `doctor`, `conformance`, and
-`validate-report` interface:
-
-```sh
-gh workflow run cli-release-gate.yml --repo <repo> --ref <candidate-branch> \
-  -f tag=v0.1.6 -f coverage=smoke -f harnesses=codex,opencode \
-  -f request_id="$(uuidgen | tr -d - | tr '[:upper:]' '[:lower:]')"
-```
-
-Expect one matrix job and four cells, each 45 minutes or less. The `enqueue`
-and `publish` jobs are skipped. Only `cli-cell-<system>-<harness>` artifacts
-with one validated report each are uploaded. `compatibility-state`, releases,
-and feeds stay unchanged. Stop without a rerun on identity, attestation, or
-runner failure, or if any job other than `matrix` and `cells` starts.
-
-**Full live qualification.** Use a qualification repository whose default
-branch is the candidate commit (or `main` after an approved merge), with green
-CI, both environments, and state initialized once. Push a prerelease tag such
-as `vX.Y.Z-qual.1`. Prereleases skip the available feed and cannot be
-recommended. Expect an attested draft, thirty live cells, one durable request,
-one writer drain, and a complete receipt. Then dispatch release coverage again
-for the same tag: the resume step must skip every cell and the writer must
-leave the receipt unchanged.
-
-Verify, rather than assume, this operator setup:
-
-- `canary-live` holds `NAN_API_KEY` (check its name, never its value) and
-  allows only release tags and approved qualification refs.
-- `compatibility-publication` has its reviewers and allows the refs its callers
-  run in, including release tags.
-- Workflow permissions allow the requested `contents`/`issues` writes, and the
-  `compatibility-state` rules allow non-force updates by Actions only.
-- The state branch was created once by the `initialize` operation, and
-  `ubuntu-24.04-arm`/`macos-15` runners are available.
-- No machine sets `NAN_CANARY_WRITER`. Remove the old Tart launch agents only
-  after hosted qualification passes.
-
-### Tart emergency switchover
-
-First disable `release.yml`, `cli-release-gate.yml`,
-`compatibility-approve.yml`, `hosted-evidence-ingest.yml`, and
-`compatibility-publisher.yml` in GitHub and
-wait for their active/queued runs to finish. Then use
-`NAN_CANARY_WRITER=tart-emergency` with the existing local gate or recommendation
-command. Each entrypoint verifies that those hosted workflows are explicitly
-disabled and idle, restores the same durable receipt, and checkpoints gate
-progress back to the state branch. An uncertain API response blocks writing.
-Do not re-enable hosted writers until local publication has exited. This is
-an operational handover, never an automatic fallback.
-
-The remaining Tart prerequisites, VM diagnostics, and private retention
-procedures apply only to that manual alternative. They do not change the
-public `nanh` command surface or configure the hosted runners.
+This runbook configures and operates the compatibility canary host.
+It does not change the public `nanh` command surface.
 
 ## Prerequisites
 
@@ -277,7 +157,7 @@ checks the host tools, and copies the same API key into the
 prompt. The value is sent to Keychain through stdin and is never printed or
 placed in a process argument.
 
-In Tart mode the key is read by the Mac host and injected into an in-memory live-step
+The key is read only by the Mac host and injected into an in-memory live-step
 environment. It must never be copied into a report, VM image, command output,
 private log, GitHub artifact, issue, or notification.
 
@@ -299,7 +179,14 @@ cargo run --locked -p nan-harness-canary -- setup \
 The URL is stored in each launchd job. The token remains in Keychain under the
 separate `NTFY_TOKEN` account.
 
-## Tart spike
+## Legacy local Tart operations (history and recovery)
+
+The following Tart and launchd procedures are retained for historical evidence,
+receipt recovery, and one-off diagnosis. The hosted replacement is validated
+and local repo-owned launchd schedules are retired; these procedures are not
+the release publication path and must not be re-enabled without explicit
+operational review. The shared Tart binary remains installed because ownership
+is not exclusive to this repository.
 
 Before installing schedules, run the automated Linux VM spike:
 
@@ -360,6 +247,16 @@ GitHub, attach them to issues, or send them through ntfy. Host runners use a
 private umask so new state and diagnostic files are readable only by the canary
 user.
 
+DeepSeek `0.1.5-rc.2` installs use npm's `--before=2026-09-22T00:00:00Z`
+registry cutoff. Its internal caret ranges otherwise select the incomplete
+rc.3 publication, which requests an unpublished
+`@deepseek-ai/dsh-client-ui-sidebar-documentpreview@^0.1.5-rc.3` and fails with
+`ETARGET` before install scripts run. Only this exact version is bounded;
+latest-version checks remain unrestricted. Reassess the workaround when adopting
+a complete upstream release. The cutoff is not a lockfile and cannot protect
+against registry removals. Installation success never substitutes for the
+complete live release gate.
+
 The single-cell wrapper downloads both matching ARM64 asset pairs and runs a
 clean deterministic-plus-live probe for one harness. The central suite wrapper
 requires the exact `v<nan-harness-version>` release tag and all four assets by
@@ -380,11 +277,33 @@ cargo run --locked -p nan-harness-canary -- reproduce \
   --output /path/to/reproduced-report.json
 ```
 
-## Retired Tart schedules
+## Legacy Tart schedules (retired)
 
-`run-scheduled.sh` no longer performs work by default. Do not install new
-launch agents. After qualifying the hosted gate, an operator can remove the
-old daily/weekly agents without deleting VM images or history:
+Check the host before installing schedules:
+
+```sh
+export NAN_CANARY_NTFY_URL='https://ntfy.example.com/nan-harness-canary'
+canary/host/preflight.sh
+```
+
+Install the two user launch agents only after the Tart spike passes:
+
+```sh
+export NAN_CANARY_NTFY_URL='https://ntfy.example.com/nan-harness-canary'
+canary/host/install-launchd.sh
+```
+
+The jobs are:
+
+| Label | Schedule | Work |
+| --- | --- | --- |
+| `dev.nan-harness.canary-daily` | Monday-Saturday at 03:17 | All Linux clean installs, doctor checks, deterministic conformance, and two rotating live tool probes |
+| `dev.nan-harness.canary-weekly` | Sunday at 04:17 | All Linux and macOS deterministic plus live tool probes |
+
+There is no scheduled release poller. A release gate runs only after an
+operator explicitly names a draft tag.
+
+Remove the jobs without deleting history:
 
 ```sh
 canary/host/uninstall-launchd.sh
@@ -396,12 +315,109 @@ Logs and state default to:
 ~/Library/Application Support/nan-harness-canary
 ```
 
-Set `NAN_CANARY_STATE_DIR` for a different private emergency state location.
+Set `NAN_CANARY_STATE_DIR` before installing launchd to use a different
+location.
 
 ## Manual suites
 
-Use the manual hosted workflow for daily/weekly coverage. In an explicit Tart
-emergency, direct `run-suite.sh` and
+### Hosted ARM64 CLI selection
+
+The registered `Hosted ARM64 CLI compatibility` workflow is a manual-only,
+synthetic entry point for migrating the Tart CLI matrix to GitHub-hosted Linux
+and macOS ARM64 runners. Its OS choice is `linux`, `macos`, or `both`, and its
+harness input is `all` or a comma-separated subset of the 15 CLI harness
+identifiers; Windows, desktop identifiers, empty selections, and duplicates
+are rejected before a native runner is reserved. Select `deterministic` for
+installation and conformance without a provider key, or `live` to run the
+explicitly selected real-provider probe with the protected `NAN_API_KEY`
+environment secret; live cells verify the secret is present before building,
+and installation/deterministic steps never receive it.
+
+Manual examples (the workflow dispatch UI supplies the source checkout):
+
+```text
+platforms=linux  harnesses=all  mode=deterministic
+platforms=both   harnesses=codex,claude-code  mode=live
+```
+
+Each OS/harness cell is independent and uses the selected checkout's explicit
+40-character commit identity (a branch or tag is not accepted). Live mode is
+restricted to explicit manual dispatch and has no reusable-call, schedule,
+publication, or cutover behavior. The retired daily and weekly Tart procedures
+remain recovery references only; the daily hosted workflow owns scheduled feed
+refreshes.
+
+### Hosted release gate and publication
+
+The [hosted release gate](../.github/workflows/release-gate.yml) runs automatically
+from the default branch after `release.yml` creates a draft. This automatic run
+uses live inference with `verification_only=true`: it never publishes the draft.
+It can also be dispatched from the default branch with these exact inputs:
+
+```text
+tag=vX.Y.Z  tag_commit=<40 lowercase hex>  model=<bounded identifier>
+mode=live  verification_only=true|false
+```
+
+It requires a draft for publication; verification-only mode also accepts an
+already published stable release. It resolves the tag to the exact supplied
+commit, verifies the signed `SHA256SUMS` and six canonical assets, and runs
+43 unique CLI cells: 15 Linux ARM64, 15 macOS ARM64 and 13 Windows x64.
+Prime Agent and FX are explicitly unavailable on Windows and are not counted
+as passes. The workflow checks out only immutable `GITHUB_SHA` trusted-branch
+code and never executes tag-controlled workflow code. `NAN_API_KEY` is exposed
+only to live cells through the protected `canary-live` environment. The
+`release-publication` environment must be configured with protection rules
+before enabling publication; this documentation does not configure or assert
+that environment.
+
+The default `verification_only=true` mode is safe for testing and produces
+verification evidence without publishing. Publication is allowed only for a
+live run with `verification_only=false`, after the full 43-cell pass and
+provenance handoff succeed. The publisher makes the release public and
+non-latest, updates the compatibility and available-release feeds, and retains
+durable evidence/receipts; a deterministic run never satisfies the live release
+criterion.
+
+There are no scheduled GitHub release jobs. The existing granular hosted CLI
+workflow remains available for selected synthetic/deterministic or live cells;
+it is not a release publication gate.
+
+When a published release should become recommended, dispatch the separate
+[recommendation workflow](../.github/workflows/recommend-release.yml) from the
+default branch with `tag` and `tag_commit`. It recovers the original gate
+identity from durable release evidence and receipts, revalidates the exact tag,
+assets, attestation, and feed state, then explicitly moves `latest`; it does not
+rebuild anything.
+
+The hosted replacement was validated on main by run
+[34830826982](https://github.com/DavidLMS/nan-harness/actions/runs/34830826982)
+with 30/30 live ARM64 cells and aggregate evidence passing. Local repo-owned
+launchd schedules were retired on 2026-09-14; see the
+[retirement record](../docs/canary-tart-retirement-2026-09-14.md). No release
+was published by that verification-only run.
+
+The existing evidence record remains unchanged: the current CLI validation is
+30/30 real live cells (15/15 per platform), while the historical deterministic
+30/30 record remains separate. The Aider completion-marker intermittency and
+its bounded diagnostic remain part of that evidence; a later pass does not
+erase the earlier failure or prove its cause without a new exact-source run.
+
+### Legacy host schedules and release commands (recovery only)
+
+Retain the following procedures for historical evidence and recovery only.
+They are not required to publish a release through the hosted replacement; do
+not install the launchd schedules or run the legacy release gate or
+recommendation command as part of normal post-cutover operations.
+
+Run scheduled verification and publication:
+
+```sh
+canary/host/run-scheduled.sh daily
+canary/host/run-scheduled.sh weekly
+```
+
+Scheduled wrappers pass `--publish-feed`; direct `run-suite.sh` and
 `run-manual.sh` invocations do not. To publish a manually prepared suite, pass
 `--publish-feed` explicitly to `run-suite.sh` after reviewing its safe reports.
 The publication boundary requires an executable report validator and runs its
@@ -410,26 +426,25 @@ checks.
 Every feed write takes an owner-aware crash-recoverable host lock, validates
 non-empty JSON at its own schema, preserves every prior release record, stages a
 uniquely named candidate, keeps a separate validated backup asset, and verifies
-or restores the stable replacement. The publisher writes three assets under that
+or restores the stable replacement. The publisher writes two assets under that
 one lock: the legacy CLI-only `compatibility.json` first, then the unified
-`compatibility-v3.json`, then `compatibility-v4.json`, preserving independent
-Desktop checks. An interrupted run
+`compatibility-v3.json`, which also carries Desktop evidence. An interrupted run
 with a missing stable asset restores that backup before continuing.
-The [compatibility feed reference](compatibility-feed.md) describes these
+The [compatibility feed reference](compatibility-feed.md) describes both
 schemas and what published evidence may change. After the
 stable asset is verified, the publisher removes staged candidates and retains
 the three newest backups. Cleanup failures do not invalidate a verified feed
 and are retried by the next successful publication.
 
-Run one pending draft gate explicitly:
+#### Archived local draft gate (recovery only)
 
 ```sh
-canary/host/run-release-gate.sh --tag vX.Y.Z
+canary/host/run-release-gate.sh --tag vX.Y.Z # legacy recovery only
 canary/host/run-release-gate.sh --tag vX.Y.Z --repo owner/name
 canary/host/run-release-gate.sh --tag vX.Y.Z --force
 ```
 
-The backend gate refuses an omitted tag, a missing release, or a release that is not a
+The gate refuses an omitted tag, a missing release, or a release that is not a
 draft. It runs the orchestration committed in that tag from a temporary detached
 worktree and records an atomic per-tag receipt for asset verification, suite
 success, compatibility feed publication, release publication, and
@@ -443,12 +458,12 @@ blind. Recovering the available-release feed for such a release is
 `publish-available-release.sh`'s job; anything else is a deliberate maintainer
 decision.
 
-In Tart mode only a real suite failure starts the six-hour cooldown. Download, checksum,
+Only a real suite failure starts the six-hour cooldown. Download, checksum,
 attestation, feed, or publication failures can be retried immediately after
 correction. Use `--force` only to bypass a suite cooldown after correcting its
 cause.
 
-A fully green gate publishes the release-scoped compatibility feed, publishes
+Historically, a fully green local gate published the release-scoped compatibility feed, published
 the draft as a public release that is explicitly **not** latest, and copies that
 tag's attested `update-manifest.json` into the standing `available` release.
 That feed is what an explicit `nan-harness update` reads, so a validated release
@@ -456,10 +471,10 @@ is installable on request as soon as the gate finishes.
 
 The gate never recommends. GitHub's `latest` release stays the recommended one,
 which is what startup discovery, both installers, and older clients follow.
-Recommend a published release explicitly:
+#### Archived local recommendation (recovery only)
 
 ```sh
-canary/host/recommend-release.sh --tag vX.Y.Z
+canary/host/recommend-release.sh --tag vX.Y.Z # legacy recovery only
 canary/host/recommend-release.sh --tag vX.Y.Z --repository owner/name
 ```
 
@@ -508,12 +523,11 @@ the last short-lived `gh` or `jq` child that inherited the descriptor is gone �
 never earlier. The feed publisher the gate invokes inherits that descriptor and
 re-enters the gate's own transaction; no environment variable grants ownership.
 
-This lock is **local**. Actions supplies the common outer writer mutex; after an
-explicit switchover it serializes writers on the single emergency host. It
-provides no cross-host atomicity. A lock whose note records
+This lock is **local legacy recovery state**. It serializes the supported writers on the single macOS
+publication host and provides no cross-host atomicity. A lock whose note records
 another host is refused rather than reclaimed, so the boundary fails closed, but
 a writer on another machine — or a manual `gh release edit` — is outside the
-protocol. Never operate hosted and emergency writers concurrently.
+protocol. Publish and recommend only from the supported host.
 
 The lock is a regular file. A `compatibility-feed.lock` **directory** left behind
 by the previous protocol is reported explicitly; delete it once while no
@@ -530,7 +544,8 @@ is nothing to time out.
 | Manual cell | 2-5 minutes | 60 minutes | Reproduce one harness/platform without publication |
 | Daily | 20-30 minutes | 60 minutes | Detect Linux installation and deterministic regressions every non-Sunday day |
 | Weekly | 45-60 minutes (20-30 with a validated two-lane host) | 120 minutes | Verify every harness live on Linux and macOS |
-| Release gate | 45-60 minutes (20-30 with a validated two-lane host) | 120 minutes | Verify a named draft, publish evidence, and publish it |
+| Hosted release gate | Hosted Linux/macOS ARM64 and Windows x64 matrix | 180 minutes per cell | Automatically verify each draft with the exact 43-cell live matrix; publication remains explicit |
+| Legacy local release gate | 45-60 minutes (20-30 with a validated two-lane host) | 120 minutes | Historical Tart release evidence and recovery only |
 
 The first uncached Tart image can add up to 30 minutes per platform. A suite
 runs one VM by default and at most two after the capacity gate: cells remain
@@ -624,7 +639,17 @@ If Tart or the host is interrupted:
 2. Stop and delete only the stale canary VM.
 3. Inspect the safe report and launchd log.
 4. Run the exact failed cell manually.
-5. Resume the manual cell only after cleanup; do not re-enable retired schedules.
+5. Re-enable the launch agent only after the manual cell is green.
 
 If GitHub authentication expires, re-authenticate `gh` interactively before
-restarting a manual operation. Never place a GitHub token in a plist.
+restarting release or scheduled jobs. Never place a GitHub token in a plist.
+
+
+## Desktop qualification on the integration branch
+
+The standalone Desktop checker and `desktop-check-suite.yml` remain an
+integration-branch qualification path. See [Desktop checks](desktop-check.md)
+for frozen app identities, branch versus exact-release launchers, deterministic
+and live prerequisites, privacy boundaries and cleanup. Synthetic or OCR-backed
+checks do not establish semantic/no-OCR qualification. These workflows do not
+replace the current main CLI daily/release workflows or authorize feed writes.

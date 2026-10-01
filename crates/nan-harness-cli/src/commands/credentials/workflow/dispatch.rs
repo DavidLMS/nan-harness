@@ -21,16 +21,31 @@ pub(crate) async fn run(command: &AuthCommand, interactive: bool) -> Result<(), 
         AuthCommand::Status => print_status(&manager).await?,
         AuthCommand::Logout(arguments) => {
             if !prepare_logout(*arguments, interactive)? {
-                println!("Logout cancelled.");
+                println!(
+                    "{}",
+                    nan_harness_i18n::messages::dispatch_logout_cancelled(
+                        nan_harness_i18n::locale()
+                    )
+                );
                 return Ok(());
             }
             if manager.remove_saved()? {
-                println!("Saved NaN API key removed.");
+                println!(
+                    "{}",
+                    nan_harness_i18n::messages::dispatch_saved_nan_api_key_removed(
+                        nan_harness_i18n::locale()
+                    )
+                );
             } else {
-                println!("No saved NaN API key is configured.");
+                println!(
+                    "{}",
+                    nan_harness_i18n::messages::dispatch_no_saved_nan_api_key_is_configured(
+                        nan_harness_i18n::locale()
+                    )
+                );
             }
             if env::var_os("NAN_API_KEY").is_some_and(|value| !value.is_empty()) {
-                println!("NAN_API_KEY remains set and takes precedence.");
+                println!("{}", nan_harness_i18n::messages::dispatch_nan_api_key_remains_set_and_takes_precedence(nan_harness_i18n::locale()));
             }
         }
     }

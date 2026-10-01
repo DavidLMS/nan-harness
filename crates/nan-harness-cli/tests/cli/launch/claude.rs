@@ -59,7 +59,7 @@ fn claude_code_dry_run_accepts_a_supported_non_default_nan_model() {
             "--executable",
             executable.to_str().expect("path should be UTF-8"),
             "--model",
-            "mimo-v2.5",
+            "mimo-v2.6-flash",
             "--dry-run",
         ])
         .env_remove("NAN_API_KEY")
@@ -68,8 +68,8 @@ fn claude_code_dry_run_accepts_a_supported_non_default_nan_model() {
     let stdout = String::from_utf8(output.stdout).expect("output should be UTF-8");
 
     assert!(output.status.success());
-    assert!(stdout.contains("\"resolvedId\": \"mimo-v2.5\""));
-    assert!(stdout.contains("anthropic/nan/mimo-v2.5"));
+    assert!(stdout.contains("\"resolvedId\": \"mimo-v2.6-flash\""));
+    assert!(stdout.contains("anthropic/nan/mimo-v2.6-flash"));
 }
 
 #[cfg(unix)]

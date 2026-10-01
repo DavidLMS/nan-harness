@@ -9,13 +9,6 @@ run-name: ChatGPT wave9 official-package probe
 # probe does not pass.
 
 on:
-  push:
-    branches:
-      - DavidLMS/desktop-chatgpt-probe-wave9
-    paths:
-      - '.github/workflows/desktop-check-chatgpt-wave9.yml'
-      - 'scripts/chatgpt-wave9-probe.sh'
-      - 'scripts/test-chatgpt-wave9-probe.sh'
   workflow_dispatch:
 
 permissions:

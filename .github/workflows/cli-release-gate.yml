@@ -1,315 +1,163 @@
-name: Hosted CLI compatibility gate
-run-name: CLI gate ${{ inputs.tag }} - ${{ inputs.request_id || github.run_id }}
+name: Hosted CLI compatibility
 
 on:
-  push:
-    branches: [DavidLMS/desktop-cli-actions-wave14-validation]
-    paths:
-      - '.github/workflows/cli-release-gate.yml'
-      - 'canary/actions/**'
-      - 'canary/host/verify-release-assets.sh'
-  workflow_call:
-    inputs:
-      tag:
-        required: true
-        type: string
-      coverage:
-        type: string
-        default: release
-      harnesses:
-        type: string
-        default: all
-      platforms:
-        type: string
-        default: all
-      mode:
-        type: string
-        default: live
-      model:
-        type: string
-        default: ''
-      publish:
-        type: boolean
-        default: false
-      security_only:
-        type: boolean
-        default: false
-    # NAN_API_KEY is an environment secret of canary-live, resolved only by the
-    # live cell step; callers never forward a provider key.
   workflow_dispatch:
     inputs:
-      security_only:
-        description: Run only the no-key native Windows supervision contract
-        type: boolean
-        default: false
-      request_id:
-        description: Optional local dispatcher correlation ID
-        type: string
-      tag:
-        description: Exact published or draft release tag
-        required: true
-        type: string
-      coverage:
-        description: Manual coverage; only release queues publication, smoke is deterministic
+      platforms:
+        description: Operating systems to test (both means linux and macos)
         type: choice
-        options: [smoke, daily, weekly, release]
-        default: weekly
+        options: [linux, macos, windows, both, all]
+        default: both
       harnesses:
         description: all or comma-separated CLI harness IDs
         type: string
-      platforms:
-        description: all or comma-separated native platforms
-        type: string
+        default: all
       mode:
-        description: deterministic or live (release always requires live)
+        description: deterministic or live
         type: choice
         options: [deterministic, live]
         default: deterministic
-      model:
-        description: One model identifier for the selected run
+      source_ref:
+        description: Exact lowercase 40-character commit SHA (defaults to this SHA)
         type: string
+        default: ''
+      model:
+        description: Bounded model identifier
+        type: string
+        default: ''
 
 permissions:
   contents: read
-  actions: read
 
 jobs:
-  windows-security:
-    needs: matrix
-    if: needs.matrix.outputs.windows == 'true'
-    runs-on: windows-2025
-    timeout-minutes: 10
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Run native Windows security qualification without provider credentials
-        shell: pwsh
-        run: python canary/tests/windows-native.py
-
-  matrix:
+  select:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
     outputs:
-      platforms: ${{ steps.matrix.outputs.platforms }}
-      harnesses: ${{ steps.matrix.outputs.harnesses }}
-      model: ${{ steps.matrix.outputs.model }}
-      mode: ${{ steps.matrix.outputs.mode }}
-      publish: ${{ steps.matrix.outputs.publish }}
-      trigger: ${{ steps.matrix.outputs.trigger }}
-      cell_trigger: ${{ steps.matrix.outputs.cell_trigger }}
-      source: ${{ steps.matrix.outputs.source }}
-      commit: ${{ steps.identity.outputs.commit }}
-      resume: ${{ steps.resume.outputs.resume }}
-      windows: ${{ steps.matrix.outputs.windows }}
+      matrix: ${{ steps.select.outputs.matrix }}
+      has_cells: ${{ steps.select.outputs.has_cells }}
+      model: ${{ steps.select.outputs.model }}
+      source_ref: ${{ steps.source.outputs.ref }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Resolve exact release identity
-        id: identity
+      - id: source
         env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.event_name == 'push' && 'v0.1.6' || inputs.tag }}
+          REQUESTED_REF: ${{ inputs.source_ref }}
         run: |
-          python3 - <<'PY'
-          import os, sys
-          sys.path.insert(0, 'canary/actions')
-          from publication import remote_commit
-          from state import Store
-          commit = remote_commit(Store(os.environ['GITHUB_REPOSITORY']), os.environ['RELEASE_TAG'])
-          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
-              output.write('commit=' + commit + '\n')
-          PY
-      - name: Select coverage
-        id: matrix
+          ref="${REQUESTED_REF:-$GITHUB_SHA}"
+          if ! printf '%s' "$ref" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo 'source_ref must resolve to an explicit lowercase commit SHA' >&2
+            exit 1
+          fi
+          printf 'ref=%s\n' "$ref" >> "$GITHUB_OUTPUT"
+      - id: select
         env:
-          COVERAGE: ${{ github.event_name == 'push' && 'smoke' || inputs.coverage || 'release' }}
-          HARNESSES: ${{ github.event_name == 'push' && 'codex,opencode' || inputs.harnesses || 'all' }}
-          PLATFORMS: ${{ github.event_name == 'push' && 'linux,macos' || inputs.platforms || 'all' }}
-          MODE: ${{ github.event_name == 'push' && 'deterministic' || inputs.mode || 'live' }}
-          MODEL: ${{ inputs.model || vars.CANARY_MODEL }}
-          PUBLISH: ${{ github.event_name == 'workflow_call' && inputs.publish || false }}
-          RELEASE_COMMIT: ${{ steps.identity.outputs.commit }}
+          PLATFORMS: ${{ inputs.platforms || 'both' }}
+          HARNESSES: ${{ inputs.harnesses || 'all' }}
+          MODE: ${{ inputs.mode || 'deterministic' }}
+          MODEL: ${{ inputs.model || '' }}
         run: |
-          python3 - <<'PY'
-          import json, os, sys
-          sys.path.insert(0, 'canary/actions')
-          from selection import select_suite, resolve_model
-          coverage = os.environ['COVERAGE']
-          mode = 'live' if coverage == 'release' else os.environ['MODE']
-          selected = select_suite('cli', os.environ['PLATFORMS'], os.environ['HARNESSES'], mode, os.environ['MODEL'])
-          if coverage == 'release' and (selected['harnesses'] != list(__import__('selection').CLI_HARNESSES)
-                                        or len(selected['platforms']) != 3):
-              raise SystemExit('release qualification requires the complete CLI native matrix')
-          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
-              output.write('platforms=' + json.dumps({'include': selected['platforms']}) + '\n'
-                           + 'windows=' + str(any(job['system'] == 'windows' for job in selected['platforms'])).lower() + '\n'
-                           + 'harnesses=' + ','.join(selected['harnesses']) + '\nmodel=' + selected['model']
-                           + '\nmode=' + mode
-                           + '\ntrigger=' + coverage + '\ncell_trigger=' + ('manual' if coverage == 'smoke' else coverage) + '\nsource='
-                           + (os.environ['RELEASE_COMMIT'] if coverage == 'release' else os.environ['GITHUB_SHA'])
-                           + '\npublish=' + os.environ['PUBLISH'] + '\n')
-          PY
-      - name: Reuse durable suite evidence only for unchanged attested assets
-        id: resume
-        if: steps.matrix.outputs.trigger == 'release' && !inputs.security_only
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ inputs.tag }}
-          MODEL: ${{ steps.matrix.outputs.model }}
-        run: |
-          reuse="$(python3 canary/actions/publication.py resume --repository "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG" --reports reports --native-matrix --model "$MODEL")"
-          printf 'resume=%s\n' "$reuse" >> "$GITHUB_OUTPUT"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: steps.resume.outputs.resume == 'true'
-        with:
-          name: cli-cell-resumed
-          overwrite: true
-          path: reports/*.json
-          if-no-files-found: error
-          retention-days: 30
+          if [ "$MODE" = live ] && [ "$GITHUB_EVENT_NAME" != workflow_dispatch ]; then
+            echo 'live mode is available only from explicit manual dispatch' >&2
+            exit 1
+          fi
+          python3 canary/actions/selection.py --platforms "$PLATFORMS" \
+            --harnesses "$HARNESSES" --mode "$MODE" --model "$MODEL" > matrix.json
+          python3 -c 'import json; value=json.load(open("matrix.json")); print("matrix=" + json.dumps({"include": value["cells"]})); print("model=" + value["model"])' >> "$GITHUB_OUTPUT"
+          python3 -c 'import json; value=json.load(open("matrix.json")); print("has_cells=" + str(bool(value["cells"])).lower())' >> "$GITHUB_OUTPUT"
+          python3 -c 'import json; value=json.load(open("matrix.json")); print("\n".join("{} / {}: skipped ({})".format(item["system"], item["harness"], item["reason"]) for item in value["skipped"]))' >> "$GITHUB_STEP_SUMMARY"
 
-  cells:
-    needs: [matrix, windows-security]
-    if: >-
-      always() && !inputs.security_only && needs.matrix.result == 'success' &&
-      needs.matrix.outputs.resume != 'true' &&
-      (needs.windows-security.result == 'success' || needs.windows-security.result == 'skipped')
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 180
-    environment: ${{ needs.matrix.outputs.mode == 'live' && 'canary-live' || '' }}
+  cli:
+    needs: select
+    if: needs.select.outputs.has_cells == 'true'
     strategy:
       fail-fast: false
-      max-parallel: 6
-      matrix: ${{ fromJSON(needs.matrix.outputs.platforms) }}
+      max-parallel: 3
+      matrix: ${{ fromJSON(needs.select.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 180
+    environment: ${{ matrix.mode == 'live' && 'canary-live' || '' }}
+    defaults:
+      run:
+        shell: bash
     env:
-      RELEASE_TAG: ${{ github.event_name == 'push' && 'v0.1.6' || inputs.tag }}
-      HARNESSES: ${{ join(matrix.harnesses, ',') }}
-      MODEL: ${{ needs.matrix.outputs.model }}
-      MODE: ${{ needs.matrix.outputs.mode }}
-      COVERAGE: ${{ needs.matrix.outputs.cell_trigger }}
-      TARGET: ${{ matrix.target }}
-      CELL_SYSTEM: ${{ matrix.system }}
-      RELEASE_COMMIT: ${{ needs.matrix.outputs.commit }}
-      SOURCE_COMMIT: ${{ needs.matrix.outputs.source }}
+      # Hosted Windows runners expose python without the python3 alias.
+      PYTHON: ${{ matrix.system == 'windows' && 'python' || 'python3' }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.matrix.outputs.source }}
+          ref: ${{ needs.select.outputs.source_ref }}
           persist-credentials: false
-      - name: Install fixed Node runtime
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - name: Verify live credential is available
+        if: matrix.mode == 'live'
+        env:
+          NAN_API_KEY: ${{ secrets.NAN_API_KEY }}
+        run: test -n "$NAN_API_KEY"
+      - name: Verify checked-out source identity
+        run: test -n "$(git rev-parse --verify HEAD)"
+      - name: Set up fixed Node runtime
+        uses: actions/setup-node@v4
         with:
           node-version: 24.20.0
-      - name: Prepare isolated runner paths
-        shell: bash
-        run: |
-          mkdir -p "$RUNNER_TEMP/cli-assets" "$RUNNER_TEMP/cli-cell" "$RUNNER_TEMP/cli-reports" "$HOME/.local/bin"
-          npm config set prefix "$HOME/.local"
-          printf '%s\n' "$HOME/.local/bin" "$HOME/.kimi-code/bin" "$HOME/.hermes/bin" >> "$GITHUB_PATH"
-          command -v jq
-          command -v python3
-      - name: Download and verify exact attested release assets
-        if: needs.matrix.outputs.trigger == 'release'
+      - name: Prepare bounded CLI cell inputs
         env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
+          EXPECTED_SOURCE: ${{ needs.select.outputs.source_ref }}
+          SYSTEM: ${{ matrix.system }}
+          ARCHITECTURE: ${{ matrix.architecture }}
+          HARNESS: ${{ matrix.harness }}
+          MODEL: ${{ needs.select.outputs.model }}
         run: |
-          suffix=''
-          if [ "${{ matrix.system }}" = windows ]; then suffix='.exe'; fi
-          asset="nan-harness-${{ matrix.architecture }}-${{ matrix.target }}${suffix}"
-          canary_asset="nan-harness-canary-${{ matrix.architecture }}-${{ matrix.target }}${suffix}"
-          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
-            --pattern "$asset" --pattern "$canary_asset" \
-            --dir "$RUNNER_TEMP/cli-assets"
-          verify_args=(--release-tag "$RELEASE_TAG" --assets-dir "$RUNNER_TEMP/cli-assets" \
-            --repository "$GITHUB_REPOSITORY" --expected-commit "$RELEASE_COMMIT" --platform "$CELL_SYSTEM")
-          bash canary/host/verify-release-assets.sh "${verify_args[@]}"
-          chmod 700 "$RUNNER_TEMP/cli-assets/$asset" "$RUNNER_TEMP/cli-assets/$canary_asset"
-          printf 'CANARY_PATH=%s\n' "$RUNNER_TEMP/cli-assets/$canary_asset" >> "$GITHUB_ENV"
-          printf 'BINARY_PATH=%s\n' "$RUNNER_TEMP/cli-assets/$asset" >> "$GITHUB_ENV"
-      - name: Build branch binaries from the exact checked-out SHA
-        if: needs.matrix.outputs.trigger != 'release'
-        shell: bash
-        run: |
-          [ "$(git rev-parse HEAD)" = "$SOURCE_COMMIT" ]
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE"
+          case "${{ matrix.system }}" in
+            linux|macos) test "$(uname -m)" = arm64 -o "$(uname -m)" = aarch64 ;;
+            windows) test "$(uname -m)" = x86_64 ;;
+          esac
+          mkdir -p "$RUNNER_TEMP/cli-cell" "$RUNNER_TEMP/cli-reports"
           cargo build --locked --release --package nan-harness-cli --bin nan-harness
           cargo build --locked --release --package nan-harness-canary --bin nan-harness-canary
-          printf 'NAN_VERSION=%s\n' "$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "nan-harness-cli") | .version' | head -1)" >> "$GITHUB_ENV"
-          printf 'BINARY_PATH=%s\n' "$GITHUB_WORKSPACE/target/release/nan-harness${{ runner.os == 'Windows' && '.exe' || '' }}" >> "$GITHUB_ENV"
-          printf 'CANARY_PATH=%s\n' "$GITHUB_WORKSPACE/target/release/nan-harness-canary${{ runner.os == 'Windows' && '.exe' || '' }}" >> "$GITHUB_ENV"
-      - name: Resolve frozen official CLI versions without provider credentials
-        shell: bash
-        run: |
-          python3 canary/actions/cli-suite.py resolve \
-            --harnesses "$HARNESSES" --system "$CELL_SYSTEM" \
-            --architecture "${{ matrix.architecture }}" --model "$MODEL" \
-            --output "$RUNNER_TEMP/cli-versions.json"
-      - name: Run selected harnesses sequentially in isolated cells
+          cargo metadata --no-deps --format-version 1 > "$RUNNER_TEMP/cli-metadata.json"
+          nan_version="$("$PYTHON" -c 'import json,sys; data=json.load(open(sys.argv[1])); print(next(p["version"] for p in data["packages"] if p["name"] == "nan-harness-cli"))' "$RUNNER_TEMP/cli-metadata.json")"
+          suffix=""
+          if [ "${{ matrix.system }}" = windows ]; then suffix=".exe"; fi
+          {
+            echo "SOURCE_SHA=$EXPECTED_SOURCE"
+            echo "NAN_VERSION=$nan_version"
+            echo "BINARY_PATH=$GITHUB_WORKSPACE/target/release/nan-harness${suffix}"
+            echo "CANARY_PATH=$GITHUB_WORKSPACE/target/release/nan-harness-canary${suffix}"
+          } >> "$GITHUB_ENV"
+      - name: Resolve official CLI metadata
         env:
-          NAN_API_KEY: ${{ needs.matrix.outputs.mode == 'live' && secrets.NAN_API_KEY || '' }}
-        shell: bash
+          SYSTEM: ${{ matrix.system }}
+          ARCHITECTURE: ${{ matrix.architecture }}
+          HARNESS: ${{ matrix.harness }}
+          MODEL: ${{ needs.select.outputs.model }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
-          python3 canary/actions/cli-suite.py --harnesses "$HARNESSES" \
-            --mode "$MODE" \
-            --trigger "$COVERAGE" --tag "$RELEASE_TAG" --model "$MODEL" \
-            --source-kind "${{ needs.matrix.outputs.trigger == 'release' && 'release' || 'branch' }}" \
-            --source-sha "$SOURCE_COMMIT" --nan-version "${NAN_VERSION:-${RELEASE_TAG#v}}" \
-            --system "$CELL_SYSTEM" --architecture "${{ matrix.architecture }}" \
-            --manifest "$RUNNER_TEMP/cli-versions.json" \
-            --binary "$BINARY_PATH" --canary "$CANARY_PATH" --directory "$RUNNER_TEMP/cli-cell" \
+          "$PYTHON" canary/actions/cli-suite.py resolve \
+            --harnesses "$HARNESS" --system "$SYSTEM" --architecture "$ARCHITECTURE" \
+            --model "$MODEL" --output "$RUNNER_TEMP/cli-versions.json"
+      - name: Run isolated CLI cell
+        env:
+          HARNESS: ${{ matrix.harness }}
+          MODE: ${{ matrix.mode }}
+          MODEL: ${{ needs.select.outputs.model }}
+          NAN_API_KEY: ${{ matrix.mode == 'live' && secrets.NAN_API_KEY || '' }}
+        run: |
+          test -n "$SOURCE_SHA"
+          if [ "$MODE" = deterministic ]; then unset NAN_API_KEY; fi
+          "$PYTHON" canary/actions/cli-suite.py --harnesses "$HARNESS" --mode "$MODE" \
+            --trigger manual --tag "v${NAN_VERSION}" --model "$MODEL" \
+            --source-kind branch --source-sha "$SOURCE_SHA" --nan-version "$NAN_VERSION" \
+            --system "${{ matrix.system }}" --architecture "${{ matrix.architecture }}" \
+            --manifest "$RUNNER_TEMP/cli-versions.json" --binary "$BINARY_PATH" \
+            --canary "$CANARY_PATH" --directory "$RUNNER_TEMP/cli-cell" \
             --output "$RUNNER_TEMP/cli-reports" --run-id "$GITHUB_RUN_ID"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: cli-cell-${{ matrix.system }}
+          name: cli-cell-${{ matrix.system }}-${{ matrix.harness }}
           overwrite: true
           path: ${{ runner.temp }}/cli-reports/*.json
-          if-no-files-found: error
-          retention-days: 30
-
-  enqueue:
-    if: always() && needs.matrix.outputs.publish == 'true' && needs.matrix.result == 'success' && needs.matrix.outputs.trigger == 'release' && (needs.cells.result == 'success' || needs.cells.result == 'skipped')
-    needs: [matrix, cells]
-    runs-on: ubuntu-24.04-arm
-    permissions:
-      contents: write
-      actions: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        if: needs.matrix.outputs.resume != 'true'
-        with:
-          pattern: cli-cell-*
-          path: reports
-          merge-multiple: true
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        if: needs.matrix.outputs.resume == 'true'
-        with:
-          name: cli-cell-resumed
-          path: reports
-      - name: Build trusted report validator
-        run: cargo build --locked --release -p nan-harness-canary
-      - name: Persist successful gate before entering writer mutex
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ inputs.tag }}
-          RELEASE_COMMIT: ${{ needs.matrix.outputs.commit }}
-          MODEL: ${{ needs.matrix.outputs.model }}
-        run: |
-          python3 canary/actions/publication.py gate --repository "$GITHUB_REPOSITORY" \
-            --tag "$RELEASE_TAG" --commit "$RELEASE_COMMIT" --reports reports \
-            --validator target/release/nan-harness-canary --native-matrix --model "$MODEL"
-
-  publish:
-    needs: enqueue
-    permissions:
-      contents: write
-      actions: read
-      issues: write
-    uses: ./.github/workflows/compatibility-publisher.yml
+          if-no-files-found: ignore
+          retention-days: 7

@@ -1,218 +1,164 @@
-name: Harness compatibility detector
+name: Daily harness compatibility
 
 on:
   schedule:
-    - cron: "47 5 * * *"
+    - cron: "0 5 * * *"
+      timezone: Europe/Madrid
   workflow_dispatch:
     inputs:
-      suites:
-        description: Native suites to check
-        type: choice
-        options: [all, cli, desktop]
-        default: all
-      platforms:
-        description: all or comma-separated native platforms
-        type: string
-        default: all
-      harnesses:
-        description: all or comma-separated CLI harness IDs
-        type: string
-        default: all
-      desktop_harnesses:
-        description: all or comma-separated Desktop integration IDs
-        type: string
-        default: all
-      desktop_diagnostics:
-        description: Isolated deterministic Desktop diagnosis using branch binaries, never hosted release evidence
+      verification_only:
+        description: Verify without publishing compatibility evidence
+        type: boolean
+        default: true
+      force:
+        description: Recheck current upstream versions even when already verified
         type: boolean
         default: false
-      chatgpt_sandbox_synthetic_only:
-        description: Run only offline Linux subprocess and workflow contracts
-        type: boolean
-        default: false
-      mode:
-        description: Live checks require the protected canary environment
-        type: choice
-        options: [deterministic, live]
-        default: deterministic
-      model:
-        description: One model identifier; blank uses CANARY_MODEL
-        type: string
 
 permissions:
   contents: read
-  actions: read
 
+# Serializes feed read/merge/write with release publication and recommendation.
 concurrency:
-  group: ${{ inputs.chatgpt_sandbox_synthetic_only && format('chatgpt-sandbox-synthetic-{0}', github.ref) || inputs.desktop_diagnostics && format('desktop-native-diagnostics-{0}', github.ref) || 'harness-compatibility-detector' }}
-  cancel-in-progress: true
+  group: release-channel-${{ github.repository }}
+  cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: always
   CI: 1
+  DAILY_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
 
 jobs:
-  select:
-    if: ${{ !inputs.desktop_diagnostics && !inputs.chatgpt_sandbox_synthetic_only }}
+  prepare:
+    if: github.ref_name == github.event.repository.default_branch
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 30
     outputs:
-      matrix: ${{ steps.select.outputs.matrix }}
-      tag: ${{ steps.select.outputs.tag }}
-      commit: ${{ steps.select.outputs.commit }}
-      model: ${{ steps.select.outputs.model }}
-      mode: ${{ steps.select.outputs.mode }}
-      cli: ${{ steps.select.outputs.cli }}
-      desktop: ${{ steps.select.outputs.desktop }}
-      desktop_platforms: ${{ steps.select.outputs.desktop_platforms }}
-      desktop_harnesses: ${{ steps.select.outputs.desktop_harnesses }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - id: select
-        env:
-          GH_TOKEN: ${{ github.token }}
-          CANARY_MODEL: ${{ vars.CANARY_MODEL }}
-          PLATFORMS: ${{ inputs.platforms || 'all' }}
-          HARNESSES: ${{ inputs.harnesses || 'all' }}
-          SUITES: ${{ inputs.suites || 'all' }}
-          DESKTOP_HARNESSES: ${{ inputs.desktop_harnesses || 'all' }}
-          MODE: ${{ inputs.mode || 'deterministic' }}
-          MODEL: ${{ inputs.model }}
-        run: |
-          python3 canary/actions/detector.py select --repository "$GITHUB_REPOSITORY" \
-            --platforms "$PLATFORMS" --harnesses "$HARNESSES" --mode "$MODE" \
-            --suites "$SUITES" --desktop-harnesses "$DESKTOP_HARNESSES" \
-            --model "$MODEL" --output "$GITHUB_OUTPUT"
-
-  desktop-diagnostics:
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.desktop_diagnostics && !inputs.chatgpt_sandbox_synthetic_only }}
-    uses: ./.github/workflows/desktop-check-suite.yml
-    with:
-      source: branch
-      platforms: ${{ inputs.platforms || 'all' }}
-      harnesses: ${{ inputs.desktop_harnesses || 'all' }}
-      model: ${{ inputs.model }}
-      mode: deterministic
-      diagnostics: true
-      hosted_evidence: false
-
-  chatgpt-sandbox-synthetic:
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.chatgpt_sandbox_synthetic_only }}
-    uses: ./.github/workflows/desktop-check-chatgpt-wave29-synthetic.yml
-
-  desktop:
-    needs: select
-    if: needs.select.outputs.desktop == 'true'
-    uses: ./.github/workflows/desktop-check-suite.yml
-    with:
-      source: release
-      release_tag: ${{ needs.select.outputs.tag }}
-      platforms: ${{ needs.select.outputs.desktop_platforms }}
-      harnesses: ${{ needs.select.outputs.desktop_harnesses }}
-      model: ${{ needs.select.outputs.model }}
-      mode: ${{ needs.select.outputs.mode }}
-      hosted_evidence: true
-
-  cli:
-    needs: select
-    if: needs.select.outputs.cli == 'true'
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 90
-    environment: ${{ needs.select.outputs.mode == 'live' && 'canary-live' || '' }}
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJSON(needs.select.outputs.matrix) }}
-    env:
-      RELEASE_TAG: ${{ needs.select.outputs.tag }}
-      RELEASE_COMMIT: ${{ needs.select.outputs.commit }}
-      MODEL: ${{ needs.select.outputs.model }}
-      MODE: ${{ needs.select.outputs.mode }}
-      HARNESSES: ${{ join(matrix.harnesses, ',') }}
-      CELL_SYSTEM: ${{ matrix.system }}
-      CELL_ARCHITECTURE: ${{ matrix.architecture }}
+      matrix: ${{ steps.prepare.outputs.matrix }}
+      has_cells: ${{ steps.prepare.outputs.has_cells }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
-          fetch-depth: 0
           persist-credentials: false
+      - run: rustup show
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          shared-key: detector-cli-${{ matrix.system }}
-          cache-bin: true
+          shared-key: rust-ubuntu
+      - id: prepare
+        name: Select pending versions and verify signed release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+          FORCE: ${{ inputs.force || false }}
+        run: |
+          args=()
+          if [ "$FORCE" = true ]; then args+=(--force); fi
+          python3 canary/actions/daily_compatibility.py prepare \
+            --directory "$RUNNER_TEMP/daily" "${args[@]}"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: daily-plan-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/daily/plan.json
+          if-no-files-found: error
+          retention-days: 30
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: steps.prepare.outputs.has_cells == 'true'
+        with:
+          name: daily-assets-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/daily/assets/
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
+  cell:
+    needs: prepare
+    if: needs.prepare.outputs.has_cells == 'true'
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 180
+    environment: compatibility-live
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: daily-plan-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/daily
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: daily-assets-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/daily/assets
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24.20.0
-      - name: Check native Windows process and privacy boundaries
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: python canary/tests/windows-native.py
-      - name: Build exact source probe and feed validators
-        shell: bash
+      - name: Run exact release against frozen upstream version
+        env:
+          NAN_API_KEY: ${{ secrets.NAN_API_KEY }}
+          CELL_ID: ${{ matrix.id }}
+          PYTHON: ${{ runner.os == 'Windows' && 'python' || 'python3' }}
         run: |
-          cargo build --locked -p nan-harness-canary -p xtask --bins
-          suffix=''
-          if [[ "$RUNNER_OS" == Windows ]]; then suffix='.exe'; fi
-          printf 'CANARY_PATH=%s\nFEED_VALIDATOR=%s\n' \
-            "$GITHUB_WORKSPACE/target/debug/nan-harness-canary$suffix" \
-            "$GITHUB_WORKSPACE/target/debug/xtask$suffix" >> "$GITHUB_ENV"
-      - name: Stage exact native release and resolve official harness versions
+          "$PYTHON" canary/actions/daily_compatibility.py cell --cell "$CELL_ID" \
+            --directory "$RUNNER_TEMP/daily" --reports "$RUNNER_TEMP/daily-reports"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: daily-report-${{ github.run_attempt }}-${{ matrix.id }}
+          path: ${{ runner.temp }}/daily-reports/*.json
+          if-no-files-found: warn
+          retention-days: 30
+
+  publish:
+    needs: [prepare, cell]
+    if: always() && !cancelled() && needs.prepare.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment: compatibility-publication
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: daily-plan-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/daily
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        if: needs.prepare.outputs.has_cells == 'true'
+        with:
+          pattern: daily-report-${{ github.run_attempt }}-*
+          path: ${{ runner.temp }}/daily-reports
+          merge-multiple: true
+      - run: rustup show
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: rust-ubuntu
+      - name: Build trusted evidence validator
+        run: cargo build --locked --package nan-harness-canary --bin nan-harness-canary
+      - name: Publish independent complete harness results
         env:
           GH_TOKEN: ${{ github.token }}
-        shell: bash
+          PUBLISH: ${{ github.event_name == 'schedule' || !inputs.verification_only }}
         run: |
-          python3 canary/actions/desktop_release.py --suite cli --repository "$GITHUB_REPOSITORY" \
-            --tag "$RELEASE_TAG" --commit "$RELEASE_COMMIT" --platform "$CELL_SYSTEM" \
-            --architecture "$CELL_ARCHITECTURE" --directory "$RUNNER_TEMP/detector-assets"
-          python3 canary/actions/cli-suite.py resolve --harnesses "$HARNESSES" \
-            --system "$CELL_SYSTEM" --architecture "$CELL_ARCHITECTURE" --model "$MODEL" \
-            --output "$RUNNER_TEMP/detector-versions.json"
-          python3 canary/actions/detector.py feed --repository "$GITHUB_REPOSITORY" \
-            --validator "$FEED_VALIDATOR" --output "$RUNNER_TEMP/detector-feed.json"
-      - name: Select changed or retryable native tuples
-        id: pending
-        shell: bash
-        run: |
-          pending=$(python3 canary/actions/evidence.py select-cli \
-            --manifest "$RUNNER_TEMP/detector-versions.json" --harnesses "$HARNESSES" \
-            --feed "$RUNNER_TEMP/detector-feed.json" --feed-validator "$FEED_VALIDATOR" \
-            --mode "$MODE" --platform "$CELL_SYSTEM" --architecture "$CELL_ARCHITECTURE" \
-            --model "$MODEL" --source-commit "$GITHUB_SHA" --release-tag "$RELEASE_TAG" \
-            --binary "$NANH_PATH" --output "$RUNNER_TEMP/detector-selected.json")
-          printf 'harnesses=%s\n' "$pending" >> "$GITHUB_OUTPUT"
-      - name: Check selected harnesses in separate private cells
-        if: steps.pending.outputs.harnesses != ''
-        env:
-          NAN_API_KEY: ${{ needs.select.outputs.mode == 'live' && secrets.NAN_API_KEY || '' }}
-          PENDING: ${{ steps.pending.outputs.harnesses }}
-        shell: bash
-        run: |
-          python3 canary/actions/cli-suite.py --harnesses "$PENDING" --mode "$MODE" \
-            --trigger daily --tag "$RELEASE_TAG" --model "$MODEL" --source-kind release \
-            --source-sha "$RELEASE_COMMIT" --nan-version "${RELEASE_TAG#v}" \
-            --system "$CELL_SYSTEM" --architecture "$CELL_ARCHITECTURE" \
-            --manifest "$RUNNER_TEMP/detector-selected.json" --binary "$NANH_PATH" \
-            --canary "$CANARY_PATH" --directory "$RUNNER_TEMP/detector-cells" \
-            --output "$RUNNER_TEMP/detector-reports" --run-id "$GITHUB_RUN_ID"
-      - name: Validate and pack data-only evidence, including failed checks
-        id: evidence
+          args=()
+          if [ "$PUBLISH" = true ]; then args+=(--publish); fi
+          python3 canary/actions/daily_compatibility.py aggregate \
+            --directory "$RUNNER_TEMP/daily" --reports "$RUNNER_TEMP/daily-reports" \
+            --validator "$GITHUB_WORKSPACE/target/debug/nan-harness-canary" "${args[@]}"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
-        shell: bash
-        run: |
-          if [[ ! -d "$RUNNER_TEMP/detector-reports" ]]; then exit 0; fi
-          python3 canary/actions/evidence.py pack --suite cli --platform "$CELL_SYSTEM" \
-            --architecture "$CELL_ARCHITECTURE" --source-commit "$GITHUB_SHA" \
-            --release-tag "$RELEASE_TAG" --release-commit "$RELEASE_COMMIT" --model "$MODEL" \
-            --binary "$NANH_PATH" --reports "$RUNNER_TEMP/detector-reports" \
-            --validator "$CANARY_PATH" --output "$RUNNER_TEMP/detector-evidence/evidence.json"
-          printf 'ready=true\n' >> "$GITHUB_OUTPUT"
-      - name: Upload validated native observations
-        if: always() && steps.evidence.outputs.ready == 'true'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: hosted-evidence-cli-${{ matrix.system }}
-          path: ${{ runner.temp }}/detector-evidence/evidence.json
-          if-no-files-found: error
-          retention-days: 14
+          name: daily-summary-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/daily/summary.json
+          if-no-files-found: warn
+          retention-days: 30

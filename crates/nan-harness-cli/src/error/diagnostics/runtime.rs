@@ -63,6 +63,7 @@ fn search_policy(error: &SearchPolicyError) -> Diagnostic {
         | SearchPolicyError::ConfigurationTooLarge(_)
         | SearchPolicyError::ParseJson { .. }
         | SearchPolicyError::ParseToml { .. }
+        | SearchPolicyError::ParseYaml { .. }
         | SearchPolicyError::ConvertToml { .. } => {
             Diagnostic::general(DiagnosticReason::InvalidConfiguration)
         }

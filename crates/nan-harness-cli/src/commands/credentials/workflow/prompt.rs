@@ -4,7 +4,12 @@ use std::io::{BufRead as _, Write as _};
 
 pub(super) fn prompt_logout_choice() -> Result<Option<bool>, CredentialError> {
     let mut output = std::io::stderr().lock();
-    write!(output, "Choose [1]: ").map_err(CredentialError::Prompt)?;
+    write!(
+        output,
+        "{}",
+        nan_harness_i18n::messages::prompt_choose_1(nan_harness_i18n::locale())
+    )
+    .map_err(CredentialError::Prompt)?;
     output.flush().map_err(CredentialError::Prompt)?;
     let mut response = String::new();
     std::io::stdin()
@@ -27,8 +32,10 @@ pub(super) fn prompt_yes_no(prompt: &str, default: bool) -> Result<bool, Credent
 }
 
 pub(super) fn prompt_api_key() -> Result<SecretValue, CredentialError> {
-    let api_key = rpassword::prompt_password("NaN API key (input hidden): ")
-        .map_err(CredentialError::Prompt)?;
+    let api_key = rpassword::prompt_password(nan_harness_i18n::messages::prompt_api_key(
+        nan_harness_i18n::locale(),
+    ))
+    .map_err(CredentialError::Prompt)?;
     SecretValue::new(api_key).map_err(CredentialError::Secret)
 }
 
@@ -42,11 +49,7 @@ fn parse_logout_choice(response: &str) -> Result<Option<bool>, CredentialError> 
 }
 
 fn parse_yes_no(response: &str, default: bool) -> bool {
-    match response.trim().to_ascii_lowercase().as_str() {
-        "y" | "yes" => true,
-        "n" | "no" => false,
-        _ => default,
-    }
+    nan_harness_i18n::yes_no(nan_harness_i18n::locale(), response).unwrap_or(default)
 }
 
 #[cfg(test)]

@@ -55,12 +55,14 @@ fn live_catalog_excludes_only_known_non_coding_models() {
         "rerank".to_owned(),
         "kokoro".to_owned(),
         "flux-2-klein".to_owned(),
+        "qwen-image-2.1".to_owned(),
         "minimax-h3".to_owned(),
         "future-text-model".to_owned(),
     ]);
 
     assert_eq!(models.len(), 1);
     assert_eq!(models[0].id, "future-text-model");
+    assert!(coding_model_profile("qwen-image-2.1").is_none());
     assert!(coding_model_profile("whisper").is_none());
     assert!(coding_model_profile("minimax-h3").is_none());
 }
@@ -95,10 +97,12 @@ fn bundled_reasoning_policies_are_explicit_model_metadata() {
         }
     );
     assert_eq!(
-        known_coding_model("mimo-v2.5")
+        known_coding_model("mimo-v2.6-flash")
             .expect("known model")
             .reasoning,
-        ReasoningPolicy::AlwaysOn
+        ReasoningPolicy::Toggle {
+            default_enabled: true
+        }
     );
     assert_eq!(
         known_coding_model("glm5.2").expect("known model").reasoning,
@@ -299,4 +303,28 @@ fn reasoning_contract_serializes_with_stable_discriminants() {
         serde_json::to_value(ReasoningSelection::Auto).expect("serializable"),
         serde_json::json!({"kind": "auto"})
     );
+}
+
+#[test]
+fn mimo_upgrade_preserves_discovery_for_the_retired_profile() {
+    let models = coding_models_from_provider_ids([
+        "mimo-v2.5".to_owned(),
+        "qwen-image-2.1".to_owned(),
+        "mimo-v2.6-flash".to_owned(),
+    ]);
+    assert_eq!(models.len(), 2);
+    assert_eq!(models[0].id, "mimo-v2.6-flash");
+    assert_eq!(models[0].source, ProfileSource::Bundled);
+    assert_eq!(models[0].context_window, 1_000_000);
+    assert_eq!(models[0].max_output_tokens, 131_072);
+    assert!(models[0].image_input);
+    assert_eq!(models[1].id, "mimo-v2.5");
+    assert_eq!(models[1].source, ProfileSource::Generic);
+    assert_eq!(models[1].reasoning, ReasoningPolicy::Unknown);
+    assert_eq!(models[1].description, GENERIC_CODING_MODEL_DESCRIPTION);
+    assert!(known_coding_model("mimo-v2.5").is_none());
+
+    let models = coding_models_from_provider_ids(["mimo-v2.6-flash".to_owned()]);
+    assert_eq!(models.len(), 1);
+    assert_eq!(models[0].id, "mimo-v2.6-flash");
 }

@@ -441,13 +441,17 @@ fn spawn_daemon() {
         return;
     };
     let mut command = Command::new(executable);
+    // The daemon outlives this launcher by design, so it starts without the launcher's streams and
+    // without Windows copying the launcher's standard handles into it.
     command
         .arg("__coordinator")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     configure_detached(&mut command);
-    if let Ok(mut child) = command.spawn() {
+    if let Ok(mut child) =
+        nan_harness_detach::without_inherited_standard_handles(|| command.spawn())
+    {
         std::thread::spawn(move || {
             let _ = child.wait();
         });

@@ -129,6 +129,36 @@ pub enum SearchConfigStoreError {
     Write(#[source] std::io::Error),
 }
 
+// Terminal localization is separate from canonical Display used by machine contracts.
+impl nan_harness_i18n::TerminalMessage for SearchConfigStoreError {
+    fn terminal_message(&self, locale: nan_harness_i18n::Locale) -> String {
+        use nan_harness_i18n::messages as m;
+        if locale == nan_harness_i18n::Locale::En {
+            return self.to_string();
+        }
+        match self {
+            Self::Read(_) => m::error_search_config_store_read(locale),
+            Self::Parse(_) => m::error_search_config_store_parse(locale),
+            Self::UnsupportedSchema(field_0) => {
+                m::error_search_config_store_unsupported_schema(locale, &(field_0))
+            }
+            Self::ConfigurationTooLarge => {
+                m::error_search_config_store_configuration_too_large(locale)
+            }
+            Self::InvalidConfiguration(field_0) => {
+                m::error_search_config_store_invalid_configuration(
+                    locale,
+                    &(nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)),
+                )
+            }
+            Self::Serialize(_) => m::error_search_config_store_serialize(locale),
+            Self::MissingParent => m::error_search_config_store_missing_parent(locale),
+            Self::CreateDirectory(_) => m::error_search_config_store_create_directory(locale),
+            Self::Write(_) => m::error_search_config_store_write(locale),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{SearchConfigStore, SearchConfigStoreError};

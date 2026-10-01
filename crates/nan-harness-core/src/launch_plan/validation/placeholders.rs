@@ -7,15 +7,18 @@ use crate::launch_plan::{
     CLINE_MODEL_CATALOG_PLACEHOLDER, CODEX_HOME_PLACEHOLDER, CODEX_MODEL_CATALOG_PLACEHOLDER,
     DEEPSEEK_MODEL_CATALOG_PLACEHOLDER, GOOSE_ADDITIONAL_CONFIG_FILES_PLACEHOLDER,
     GOOSE_MODEL_CATALOG_PLACEHOLDER, HERMES_MODEL_CATALOG_PLACEHOLDER,
-    KIMI_CODE_MODEL_CATALOG_PLACEHOLDER, LaunchPlan, NAN_SEARCH_BLOCK_BEGIN, NAN_SEARCH_BLOCK_END,
-    OPENCLAW_MODEL_ALIASES_PLACEHOLDER, OPENCLAW_MODEL_CATALOG_PLACEHOLDER,
-    OPENCODE_MODEL_CATALOG_PLACEHOLDER, PI_MODEL_CATALOG_PLACEHOLDER,
-    PROVIDER_BASE_URL_PLACEHOLDER, QWEN_CODE_MODEL_CATALOG_PLACEHOLDER,
-    SELECTED_MODEL_CAPABILITIES_PLACEHOLDER, SELECTED_MODEL_CONTEXT_WINDOW_PLACEHOLDER,
-    SELECTED_MODEL_DISPLAY_NAME_PLACEHOLDER, SELECTED_MODEL_MAX_OUTPUT_TOKENS_PLACEHOLDER,
-    SELECTED_MODEL_REASONING_EFFORT_PLACEHOLDER, Transport, USER_HOME_PLACEHOLDER,
+    KIMI_CODE_MODEL_CATALOG_PLACEHOLDER, LaunchPlan, MEDIA_PROVIDER_BASE_URL_PLACEHOLDER,
+    NAN_SEARCH_BLOCK_BEGIN, NAN_SEARCH_BLOCK_END, OPENCLAW_MODEL_ALIASES_PLACEHOLDER,
+    OPENCLAW_MODEL_CATALOG_PLACEHOLDER, OPENCODE_MODEL_CATALOG_PLACEHOLDER,
+    PI_MODEL_CATALOG_PLACEHOLDER, PROVIDER_BASE_URL_PLACEHOLDER,
+    QWEN_CODE_MODEL_CATALOG_PLACEHOLDER, SELECTED_MODEL_CAPABILITIES_PLACEHOLDER,
+    SELECTED_MODEL_CONTEXT_WINDOW_PLACEHOLDER, SELECTED_MODEL_DISPLAY_NAME_PLACEHOLDER,
+    SELECTED_MODEL_MAX_OUTPUT_TOKENS_PLACEHOLDER, SELECTED_MODEL_REASONING_EFFORT_PLACEHOLDER,
+    Transport, USER_HOME_PLACEHOLDER,
 };
 use crate::secret::SecretRef;
+use nan_harness_i18n::DiagnosticText;
+use nan_harness_i18n::messages as detail_messages;
 
 pub(super) fn validate_template_placeholders(
     plan: &LaunchPlan,
@@ -29,6 +32,7 @@ pub(super) fn validate_template_placeholders(
     let mut remainder = template
         .replace(BRIDGE_BASE_URL_PLACEHOLDER, "")
         .replace(PROVIDER_BASE_URL_PLACEHOLDER, "")
+        .replace(MEDIA_PROVIDER_BASE_URL_PLACEHOLDER, "")
         .replace(CLAUDE_AVAILABLE_MODELS_PLACEHOLDER, "")
         .replace(CLAUDE_MODEL_PICKER_PLACEHOLDER, "")
         .replace(CLAUDE_MODEL_PRESENTATIONS_PLACEHOLDER, "")
@@ -59,11 +63,14 @@ pub(super) fn validate_template_placeholders(
     if let Some(session_token_ref) = session_token_reference(&plan.transport) {
         remainder = remainder.replace(&format!("{{secret:{}}}", session_token_ref.as_str()), "");
     }
+    for reference in plan.environment.secrets.values() {
+        remainder = remainder.replace(&format!("{{secret:{}}}", reference.as_str()), "");
+    }
 
     if remainder.contains("{runtime:") || remainder.contains("{secret:") {
         unsafe_resource(
             resource_id,
-            "contentTemplate contains an unknown runtime or secret placeholder",
+            DiagnosticText::new(detail_messages::detail_contenttemplate_contains_an_unknown_runtime_or_secret_placeholder),
         )
     } else {
         Ok(())
@@ -93,7 +100,7 @@ fn validate_nan_search_blocks(resource_id: &str, template: &str) -> Result<(), P
             _ => {
                 return unsafe_resource(
                     resource_id,
-                    "contentTemplate contains malformed or nested NaN search blocks",
+                    DiagnosticText::new(detail_messages::detail_contenttemplate_contains_malformed_or_nested_nan_search_blocks),
                 );
             }
         }

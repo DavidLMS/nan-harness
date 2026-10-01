@@ -7,7 +7,12 @@ use nan_harness_core::{DesktopHarnessKind, HarnessKind};
 pub(crate) fn print_system_report(report: &SystemDoctorReport) -> i32 {
     let exit_code = i32::from(report.has_errors());
     let Ok(serialized) = serde_json::to_string_pretty(&report) else {
-        eprintln!("could not serialize the typed doctor report");
+        eprintln!(
+            "{}",
+            nan_harness_i18n::messages::json_could_not_serialize_the_typed_doctor_report(
+                nan_harness_i18n::locale()
+            )
+        );
         return 1;
     };
     println!("{serialized}");
@@ -24,7 +29,12 @@ pub(crate) fn print_harness_report(harness: HarnessKind, arguments: &DoctorArgs)
     let mut report = report::harness_json_report(harness, discovery);
     report.offline = arguments.offline;
     let Ok(serialized) = serde_json::to_string_pretty(&report) else {
-        eprintln!("could not serialize the typed harness doctor report");
+        eprintln!(
+            "{}",
+            nan_harness_i18n::messages::json_could_not_serialize_the_typed_harness_doctor_report(
+                nan_harness_i18n::locale()
+            )
+        );
         return 1;
     };
     println!("{serialized}");

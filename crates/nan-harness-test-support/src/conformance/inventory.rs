@@ -108,10 +108,7 @@ pub(crate) fn round_trip_probe(
         HarnessKind::Cline => (
             "run_commands",
             json!({
-                "commands": [format!(
-                    "printf NAN_HARNESS_TOOL_OK > '{}'",
-                    workspace.join("tool-output.txt").display()
-                )]
+                "commands": [cline_write_command(&workspace.join("tool-output.txt"))]
             }),
             filesystem_contract(
                 workspace.join("tool-output.txt"),
@@ -158,6 +155,18 @@ pub(crate) fn round_trip_probe(
         },
         filesystem,
     })
+}
+
+fn cline_write_command(path: &Path) -> String {
+    // Cline's default executor uses Windows PowerShell on Windows and bash elsewhere.
+    // WriteAllText avoids PowerShell 5's UTF-16 redirection and does not require printf.
+    if cfg!(windows) {
+        let path = path.to_string_lossy().replace('\'', "''");
+        format!("[System.IO.File]::WriteAllText('{path}', 'NAN_HARNESS_TOOL_OK')")
+    } else {
+        let path = path.to_string_lossy().replace('\'', "'\\''");
+        format!("printf NAN_HARNESS_TOOL_OK > '{path}'")
+    }
 }
 
 fn filesystem_contract(path: PathBuf, text: &str, must_change: bool) -> FilesystemContract {

@@ -25,6 +25,19 @@ pub(crate) enum CredentialSource {
     PrivateFile,
 }
 
+impl CredentialSource {
+    pub(crate) fn terminal_label(self) -> &'static str {
+        let locale = nan_harness_i18n::locale();
+        match self {
+            Self::Environment => "NAN_API_KEY",
+            Self::SystemKeyring => {
+                nan_harness_i18n::messages::credential_source_keyring_text(locale)
+            }
+            Self::PrivateFile => nan_harness_i18n::messages::credential_source_file_text(locale),
+        }
+    }
+}
+
 impl std::fmt::Display for CredentialSource {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {

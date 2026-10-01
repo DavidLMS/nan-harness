@@ -168,15 +168,16 @@ fn translates_and_validates_native_reasoning_effort() {
         true
     );
 
-    let mimo = nan_harness_core::coding_model_profile("mimo-v2.5").expect("model");
-    let translated =
-        translate(request("mimo-v2.5", "high"), &mimo).expect("always-on state accepted");
-    assert!(translated.body.get("reasoning_effort").is_none());
-    assert!(translated.body.get("chat_template_kwargs").is_none());
-    let translated = translate(request("mimo-v2.5", "medium"), &mimo)
-        .expect("plan-mode effort should preserve always-on reasoning");
-    assert!(translated.body.get("reasoning_effort").is_none());
-    assert!(translated.body.get("chat_template_kwargs").is_none());
+    let mimo = nan_harness_core::coding_model_profile("mimo-v2.6-flash").expect("model");
+    for (effort, enabled) in [("high", true), ("medium", true), ("none", false)] {
+        let translated = translate(request("mimo-v2.6-flash", effort), &mimo)
+            .expect("MiMo supports toggle reasoning");
+        assert!(translated.body.get("reasoning_effort").is_none());
+        assert_eq!(
+            translated.body["chat_template_kwargs"]["enable_thinking"],
+            enabled
+        );
+    }
 
     let qwen38 = nan_harness_core::coding_model_profile("qwen3.8-flash").expect("model");
     assert!(translate(request("qwen3.8-flash", "none"), &qwen38).is_err());

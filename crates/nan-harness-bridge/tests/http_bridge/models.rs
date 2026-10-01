@@ -27,7 +27,7 @@ async fn bridge_lists_only_the_configured_claude_code_models() {
     assert_eq!(response["data"][0]["id"], "anthropic/nan/qwen3.6");
     assert_eq!(response["data"][0]["display_name"], "NaN · Qwen 3.6");
     assert_eq!(response["data"][1]["id"], "anthropic/nan/deepseek-v4-flash");
-    assert_eq!(response["data"][2]["id"], "anthropic/nan/mimo-v2.5");
+    assert_eq!(response["data"][2]["id"], "anthropic/nan/mimo-v2.6-flash");
     assert_eq!(response["data"][3]["id"], "anthropic/nan/gemma4");
     servers.shutdown().await;
 }
@@ -39,7 +39,7 @@ async fn bridge_routes_each_gateway_model_to_its_nan_model() {
         &servers,
         "/v1/messages",
         &json!({
-            "model": "anthropic/nan/mimo-v2.5",
+            "model": "anthropic/nan/mimo-v2.6-flash",
             "max_tokens": 1024,
             "messages": [{"role": "user", "content": "hello"}]
         }),
@@ -47,10 +47,10 @@ async fn bridge_routes_each_gateway_model_to_its_nan_model() {
     .await;
     assert_eq!(response.status(), StatusCode::OK);
     let response: Value = response.json().await.expect("response should be JSON");
-    assert_eq!(response["model"], "anthropic/nan/mimo-v2.5");
+    assert_eq!(response["model"], "anthropic/nan/mimo-v2.6-flash");
     assert_eq!(
         servers.state.requests.lock().expect("request lock")[0]["model"],
-        "mimo-v2.5"
+        "mimo-v2.6-flash"
     );
     servers.shutdown().await;
 }

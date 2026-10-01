@@ -10,7 +10,7 @@ fn codex_catalog_reports_exact_reasoning_picker_contracts_in_stable_order() {
         [
             "glm5.2",
             "gemma4",
-            "mimo-v2.5",
+            "mimo-v2.6-flash",
             "deepseek-v4-flash",
             "qwen3.6",
         ]
@@ -51,7 +51,11 @@ fn codex_catalog_reports_exact_reasoning_picker_contracts_in_stable_order() {
     );
     assert_eq!(
         values(2),
-        (json!("mimo-v2.5"), json!("high"), vec![json!("high")])
+        (
+            json!("mimo-v2.6-flash"),
+            json!("high"),
+            vec![json!("none"), json!("high")]
+        )
     );
     assert_eq!(
         values(3),
@@ -84,7 +88,7 @@ async fn responses_bridge_serves_codex_metadata_and_standalone_search() {
     assert_eq!(models.status(), StatusCode::OK);
     let models: Value = models.json().await.expect("models should be JSON");
     assert_eq!(models["models"][0]["slug"], "qwen3.6");
-    assert_eq!(models["models"][1]["slug"], "mimo-v2.5");
+    assert_eq!(models["models"][2]["slug"], "mimo-v2.6-flash");
     for model in models["models"]
         .as_array()
         .expect("models should be a list")

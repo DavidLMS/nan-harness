@@ -4,7 +4,7 @@ use nan_harness_telemetry::event::{FailureCategory, FailureStage};
 
 pub(super) const fn classify(error: &CliError) -> (FailureCategory, FailureStage, bool) {
     match error {
-        CliError::Discovery(_) => (
+        CliError::HarnessWindowsUnavailable(_) | CliError::Discovery(_) => (
             FailureCategory::Discovery,
             FailureStage::HarnessDetection,
             false,

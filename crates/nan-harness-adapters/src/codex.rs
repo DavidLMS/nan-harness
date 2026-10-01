@@ -10,6 +10,8 @@ use nan_harness_core::{
     HarnessAdapter, HarnessCapability, HarnessKind, LaunchPlan, NativeContextLimit, PlanContext,
     PlanError, SecretRef,
 };
+use nan_harness_i18n::DiagnosticText;
+use nan_harness_i18n::messages as detail_messages;
 use std::collections::{BTreeMap, BTreeSet};
 
 const PROVIDER_CREDENTIAL_REFERENCE: &str = "nan_api_key";
@@ -41,7 +43,12 @@ impl HarnessAdapter for CodexAdapter {
         let model_config = serde_json::to_string(&context.model.resolved_id).map_err(|error| {
             PlanError::InvalidField {
                 field: "configurationOverlays.files.contentTemplate",
-                message: format!("could not serialize Codex model configuration: {error}"),
+                message: DiagnosticText::new(|locale| {
+                    detail_messages::detail_serialize_codex_model_configuration_failed(
+                        locale,
+                        &(error),
+                    )
+                }),
             }
         })?;
         let configuration = launch_configuration(context, &model_config);
@@ -248,7 +255,12 @@ fn validate_user_arguments(arguments: &[String]) -> Result<(), PlanError> {
     }) {
         return Err(PlanError::InvalidField {
             field: "process.arguments",
-            message: format!("argument '{argument}' conflicts with nan-harness routing"),
+            message: DiagnosticText::new(|locale| {
+                detail_messages::detail_argument_argument_conflicts_with_nan_harness_routing(
+                    locale,
+                    &(argument),
+                )
+            }),
         });
     }
     Ok(())
@@ -257,6 +269,8 @@ fn validate_user_arguments(arguments: &[String]) -> Result<(), PlanError> {
 fn secret_ref(value: &str) -> Result<SecretRef, PlanError> {
     SecretRef::new(value).map_err(|error| PlanError::InvalidField {
         field: "transport",
-        message: error.to_string(),
+        message: DiagnosticText::new(|locale| {
+            nan_harness_i18n::TerminalMessage::terminal_message(&error, locale)
+        }),
     })
 }

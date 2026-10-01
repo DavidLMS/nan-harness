@@ -1457,6 +1457,44 @@ fn filesystem_error(
     }
 }
 
+// Terminal localization is separate from canonical Display used by machine contracts.
+impl nan_harness_i18n::TerminalMessage for SearchSupervisorError {
+    fn terminal_message(&self, locale: nan_harness_i18n::Locale) -> String {
+        use nan_harness_i18n::messages as m;
+        if locale == nan_harness_i18n::Locale::En {
+            return self.to_string();
+        }
+        match self {
+            Self::InvalidConfiguration(field_0) => {
+                m::error_search_supervisor_invalid_configuration(locale, &(field_0))
+            }
+            Self::ReadinessClient => m::error_search_supervisor_readiness_client(locale),
+            Self::Filesystem {
+                operation,
+                path,
+                source,
+            } => m::error_search_supervisor_filesystem(
+                locale,
+                &(operation),
+                &(source),
+                &(path.display()),
+            ),
+            Self::ForeignRecord => m::error_search_supervisor_foreign_record(locale),
+            Self::InvalidRecord => m::error_search_supervisor_invalid_record(locale),
+            Self::RecordConflict => m::error_search_supervisor_record_conflict(locale),
+            Self::CoordinationTimeout => m::error_search_supervisor_coordination_timeout(locale),
+            Self::Spawn(_) => m::error_search_supervisor_spawn(locale),
+            Self::ReadinessTimeout => m::error_search_supervisor_readiness_timeout(locale),
+            Self::ProcessUnavailable => m::error_search_supervisor_process_unavailable(locale),
+            Self::SupervisorClosed => m::error_search_supervisor_supervisor_closed(locale),
+            Self::Installation(_) => m::error_search_supervisor_installation(locale),
+            Self::InstallationPlatformMismatch => {
+                m::error_search_supervisor_installation_platform_mismatch(locale)
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

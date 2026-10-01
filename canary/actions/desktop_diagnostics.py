@@ -450,7 +450,7 @@ class Capture:
         self.invalid = 0
         self.platform = platform
 
-    def observe(self, log):
+    def observe(self, log, _status=None):
         # This callback must never mask the executor's cleanup failure.
         try:
             log.flush()

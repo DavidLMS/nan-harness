@@ -111,7 +111,9 @@ fn missing_credentials_and_configuration_errors_map_to_typed_causes() {
             (FailureCause::InvalidConfiguration, None),
         ),
         (
-            CredentialError::ConfigurationOperation(format!("{FAKE_TOKEN}: {FAKE_PATH}")),
+            CredentialError::ConfigurationOperation(nan_harness_i18n::ErrorCause::new(
+                SecretError::InvalidReference(format!("{FAKE_TOKEN}: {FAKE_PATH}")),
+            )),
             (FailureCause::InvalidConfiguration, None),
         ),
         (

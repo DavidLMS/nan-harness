@@ -147,6 +147,44 @@ function nanHarnessContentEn({ harnessLink, nanLink, unixInstallCommand, windows
         ['p', 'Claude Code, Codex and fx need nan-harness running because their NaN connection depends on a local bridge or gateway. They cannot be prepared for standalone use with <code>nanh config</code>.'],
         ['p', 'Native setup uses the API key saved by <code>nanh auth login</code>; an environment-only key is never copied into another application. Use <code>--status</code> to inspect it and <code>--refresh</code> after changing your saved key or model catalog. <code>--remove</code> removes what nan-harness added and restores previous settings when it is safe to do so.']
       ]],
+      ['media', 'NATIVE MEDIA', [
+        ['p', 'Hermes Agent and OpenClaw can route native media features through NaN. nan-harness preserves an existing media provider and adds a NaN provider only when that capability is not already configured.'],
+        ['table', ['Capability', 'NaN provider', 'What it does'], [
+          ['Speech to text', 'NaN Whisper', 'Transcribes audio. Large PCM WAV files are split into bounded overlapping chunks and merged.'],
+          ['Text to speech', 'NaN Kokoro', 'Converts text to spoken audio.'],
+          ['Image generation and editing', 'NaN image models', 'Generates images with Flux 2 Klein or Qwen Image 2.1; Flux can also edit reference images.']
+        ]],
+        ['h3', 'Use it during a launch'],
+        ['table', ['Flag', 'What it does'], [
+          ['(default)', 'Adds each NaN media provider only when the harness has no existing provider for that capability.'],
+          ['--force-media', 'Enables all three NaN media providers even when another provider is configured.'],
+          ['--force-stt', 'Uses NaN Whisper for speech to text.'],
+          ['--force-tts', 'Uses NaN Kokoro for text to speech.'],
+          ['--force-image / --image', 'Enables images with Flux 2 Klein.'],
+          ['--image-model &lt;id&gt;', 'Enables images and sets the default to Flux 2 Klein or Qwen Image 2.1.']
+        ]],
+        ['h3', 'Choose an image model'],
+        ['p', 'Use <code>--image-model</code> with Hermes Agent or OpenClaw to choose the default image model. Qwen Image 2.1 is for generation and Flux 2 Klein also supports editing and up to four reference images. The <code>--image</code> and <code>--force-image</code> options use Flux by default.'],
+        ['table', ['Model', 'Generate', 'Edit / reference images'], [
+          ['<code>flux-2-klein</code>', 'Yes', 'Yes, up to four references'],
+          ['<code>qwen-image-2.1</code>', 'Yes', 'No, generation only']
+        ]],
+        ['codes', ['nanh hermes --image-model qwen-image-2.1', 'nanh openclaw --image']],
+        ['p', 'You can choose a model for one image request in the native image tool without changing the configured default. Ask for Qwen Image 2.1 for generation or Flux 2 Klein for editing. A Qwen request with references returns an error.'],
+        ['h3', 'Use it in native setup'],
+        ['p', 'Pass the same flags to <code>nanh config hermes</code> or <code>nanh config openclaw</code> to write the media providers into the harness configuration. The managed media selection, including the image model, is retained when you refresh that configuration.'],
+        ['code', 'nanh config hermes --image-model qwen-image-2.1'],
+        ['note', 'Media requests use your NaN credential. Existing provider credentials remain with the harness, and nan-harness does not replace them unless you explicitly force that capability.']
+      ]],
+      ['platforms', 'PLATFORM NOTES', [
+        ['p', 'Some integrations depend on distributions supplied by the upstream harness. nan-harness reports these limits before it searches for an executable or offers installation.'],
+        ['table', ['Integration', 'Availability'], [
+          ['Prime Agent', 'Linux and macOS. Upstream does not currently provide a native Windows distribution.'],
+          ['fx', 'Linux and macOS. Upstream does not currently provide a native Windows distribution.'],
+          ['Local SearXNG', 'macOS, Linux and Windows x64. Requires Python 3.11 or newer and <code>tar</code> on <code>PATH</code>.']
+        ]],
+        ['p', 'On Windows, you can pass <code>--executable &lt;path&gt;</code> to try a future compatible Prime Agent or fx build. The usual version and launch checks still apply.']
+      ]],
       ['desktop', 'DESKTOP APPS (EXPERIMENTAL)', [
         ['p', 'These integrations are <strong>experimental</strong>. All five apps have been tested on macOS. Other platform combinations are covered by automated compatibility tests.'],
         ['table', ['Command', 'App', 'Available on'], [
@@ -170,7 +208,7 @@ function nanHarnessContentEn({ harnessLink, nanLink, unixInstallCommand, windows
         ['p', 'nan-harness can give your agent a web search tool backed by <a href="https://docs.searxng.org/" target="_blank" rel="noreferrer">SearXNG</a>. It is optional: nothing is installed or contacted until you set up a backend.'],
         ['h3', 'Set it up'],
         ['table', ['Command', 'What it does'], [
-          ['nanh search setup --local', 'Installs a private SearXNG on your machine. Needs Python 3.10+ and <code>tar</code> (macOS, Linux, Windows x64).'],
+          ['nanh search setup --local', 'Installs a private SearXNG on your machine. Needs Python 3.11+ and <code>tar</code> (macOS, Linux, Windows x64).'],
           ['nanh search setup --docker', 'Runs SearXNG in a Docker container.'],
           ['nanh search setup --url https://…', 'Uses a SearXNG server you trust.']
         ]],
@@ -244,6 +282,13 @@ function nanHarnessContentEn({ harnessLink, nanLink, unixInstallCommand, windows
           ['nanh telemetry on|off', 'Turns anonymous telemetry on or off.'],
           ['nanh uninstall', 'Removes nan-harness and everything it left behind.'],
           ['nanh --help', 'The full list, in your terminal.']
+        ]]
+      ]],
+      ['cli', 'CLI UTILITIES', [
+        ['table', ['Command', 'What it does'], [
+          ['nanh language', 'Shows the current terminal language and the available languages.'],
+          ['nanh language en', 'Uses English terminal messages and saves the preference.'],
+          ['nanh language es', 'Uses Spanish terminal messages and saves the preference.']
         ]]
       ]],
       ['help', 'HELP AND PRIVACY', [

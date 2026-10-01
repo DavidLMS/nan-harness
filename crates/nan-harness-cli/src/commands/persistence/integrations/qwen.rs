@@ -6,23 +6,34 @@ use super::super::{
     inspect_managed_json_property, inspect_qwen_auth_selection, inspect_qwen_list_directory,
     inspect_qwen_model_selection, parse_named_jsonc, permissions, qwen_code_provider,
     read_optional, remove_qwen_auth_selection, remove_qwen_list_directory,
-    remove_qwen_model_selection, rollback_file, write_private_file,
+    remove_qwen_model_selection,
 };
 use super::model::preferred_persistent_model;
 use crate::commands::persistence::ConfigurationHealth;
+use crate::commands::persistence::PreparedFileChange;
 use nan_harness_core::CodingModelProfile;
-use std::fs;
 use std::path::Path;
 
 impl PersistenceManager {
+    #[cfg(test)]
     pub(crate) fn configure_qwen_code(
         &self,
         models: &[CodingModelProfile],
         provider_base_url: &str,
     ) -> Result<IntegrationChange, PersistenceError> {
+        let (files, change) = self.prepare_qwen_code(models, provider_base_url)?;
+        self.publish_configuration_files(&files)?;
+        Ok(change)
+    }
+
+    pub(crate) fn prepare_qwen_code(
+        &self,
+        models: &[CodingModelProfile],
+        provider_base_url: &str,
+    ) -> Result<(Vec<PreparedFileChange>, IntegrationChange), PersistenceError> {
         let provider = qwen_code_provider(models, provider_base_url);
         let value_hash = hash_input_value(&provider)?;
-        let mut state = self.load_state()?;
+        let (mut state, receipt) = self.prepare_state()?;
         let path = state.qwen_code.as_ref().map_or_else(
             || self.qwen_directory.join("settings.json"),
             |managed| managed.path.clone(),
@@ -80,9 +91,6 @@ impl PersistenceManager {
         let rendered = root.to_string();
         let changed = original.as_deref() != Some(rendered.as_bytes());
         let backup = None;
-        if changed {
-            write_private_file(&path, rendered.as_bytes(), original_permissions.as_ref())?;
-        }
         state.qwen_code = Some(ManagedQwenCode {
             value_sha256: value_hash,
             path: path.clone(),
@@ -100,28 +108,48 @@ impl PersistenceManager {
             selected_model: Some(selections.model),
             list_directory: Some(selections.list_directory),
         });
-        if let Err(error) = self.save_state(&state) {
-            rollback_file(&path, original.as_deref(), original_permissions.as_ref());
-            return Err(error);
-        }
-        Ok(IntegrationChange {
-            path,
-            additional_paths: Vec::new(),
-            backup,
-            changed,
-        })
+        let files = Self::prepare_integration_files(
+            vec![PreparedFileChange {
+                path: path.clone(),
+                original,
+                replacement_permissions: original_permissions.clone(),
+                original_permissions,
+                replacement: Some(rendered.into_bytes()),
+            }],
+            &state,
+            receipt,
+        )?;
+        Ok((
+            files,
+            IntegrationChange {
+                path,
+                additional_paths: Vec::new(),
+                backup,
+                changed,
+            },
+        ))
     }
 
     pub(crate) fn unpersist_qwen_code(&self) -> Result<RemovalOutcome, PersistenceError> {
-        let mut state = self.load_state()?;
+        let (files, outcome) = self.prepare_remove_qwen_code()?;
+        self.publish_configuration_files(&files)?;
+        Ok(outcome)
+    }
+
+    pub(crate) fn prepare_remove_qwen_code(
+        &self,
+    ) -> Result<(Vec<PreparedFileChange>, RemovalOutcome), PersistenceError> {
+        let (mut state, receipt) = self.prepare_state()?;
         let Some(managed) = state.qwen_code.clone() else {
-            return Ok(RemovalOutcome::NotConfigured);
+            return Ok((Vec::new(), RemovalOutcome::NotConfigured));
         };
         let path = managed.path.clone();
         let Some(contents) = read_optional(&path)? else {
             state.qwen_code = None;
-            self.save_state(&state)?;
-            return Ok(RemovalOutcome::Removed);
+            return Ok((
+                Self::prepare_integration_files(Vec::new(), &state, receipt)?,
+                RemovalOutcome::Removed,
+            ));
         };
         let original_permissions = permissions(&path)?;
         let source = String::from_utf8_lossy(&contents);
@@ -159,23 +187,29 @@ impl PersistenceManager {
             remove_qwen_list_directory(&root_object, &path, list_directory)?;
         }
         let rendered = root.to_string();
-        if managed.created_file
+        let replacement = if managed.created_file
             && root_object.properties().is_empty()
             && empty_jsonc_object_is_disposable(&rendered)
         {
-            fs::remove_file(&path).map_err(|source| PersistenceError::RemoveFile {
-                path: path.clone(),
-                source,
-            })?;
+            None
         } else {
-            write_private_file(&path, rendered.as_bytes(), original_permissions.as_ref())?;
-        }
+            Some(rendered.into_bytes())
+        };
         state.qwen_code = None;
-        if let Err(error) = self.save_state(&state) {
-            rollback_file(&path, Some(&contents), original_permissions.as_ref());
-            return Err(error);
-        }
-        Ok(RemovalOutcome::Removed)
+        Ok((
+            Self::prepare_integration_files(
+                vec![PreparedFileChange {
+                    path,
+                    original: Some(contents),
+                    replacement_permissions: original_permissions.clone(),
+                    original_permissions,
+                    replacement,
+                }],
+                &state,
+                receipt,
+            )?,
+            RemovalOutcome::Removed,
+        ))
     }
 
     #[cfg(test)]

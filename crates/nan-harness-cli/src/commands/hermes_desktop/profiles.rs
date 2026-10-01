@@ -277,8 +277,7 @@ pub(super) fn quarantine_recreated_profile_for_restore(
         return Err(error);
     }
     eprintln!(
-        "warning: Hermes Desktop recreated an empty 'nan' profile from cached UI state; NaN preserved it in the private recovery area and restored the visibility guard."
-    );
+        "{}", nan_harness_i18n::messages::profiles_warning_hermes_desktop_recreated_an_empty_nan_profile_from_cached_ui_state(nan_harness_i18n::locale()));
     Ok(())
 }
 

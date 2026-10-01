@@ -36,7 +36,9 @@ pub(super) fn link_entry(source: &Path, target: &Path) -> std::io::Result<()> {
 pub(super) fn link_entry(_source: &Path, _target: &Path) -> std::io::Result<()> {
     Err(std::io::Error::new(
         ErrorKind::Unsupported,
-        "configuration overlays require symbolic link support",
+        nan_harness_i18n::DiagnosticText::new(
+            nan_harness_i18n::messages::detail_configuration_overlays_require_symbolic_link_support,
+        ),
     ))
 }
 

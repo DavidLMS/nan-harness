@@ -8,10 +8,10 @@ use std::path::Path;
 
 pub(super) const CREDENTIAL_RECEIPT_SCHEMA_VERSION: u8 = 1;
 
-pub(super) const SAVED_KEY_REPAIR_WARNING: &str =
-    "warning: restored private permissions on the saved NaN API key.";
-pub(super) const CREDENTIAL_METADATA_REPAIR_WARNING: &str =
-    "warning: restored private permissions on NaN credential metadata.";
+pub(super) const SAVED_KEY_REPAIR_WARNING: fn(nan_harness_i18n::Locale) -> &'static str =
+    nan_harness_i18n::messages::credential_repair_key_text;
+pub(super) const CREDENTIAL_METADATA_REPAIR_WARNING: fn(nan_harness_i18n::Locale) -> &'static str =
+    nan_harness_i18n::messages::credential_repair_metadata_text;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
@@ -60,7 +60,7 @@ pub(super) fn write_credential_receipt(
 
 pub(super) fn open_private_file_for_read(
     path: &Path,
-    repaired_warning: &'static str,
+    repaired_warning: fn(nan_harness_i18n::Locale) -> &'static str,
 ) -> Result<Option<File>, CredentialError> {
     match open_private_read(path) {
         Ok((file, status)) => {
@@ -79,9 +79,10 @@ pub(super) fn open_private_file_for_read(
 
 pub(super) fn private_file_repair_warning(
     status: PrivateFileReadStatus,
-    repaired_warning: &'static str,
+    repaired_warning: fn(nan_harness_i18n::Locale) -> &'static str,
 ) -> Option<&'static str> {
-    (status == PrivateFileReadStatus::Repaired).then_some(repaired_warning)
+    (status == PrivateFileReadStatus::Repaired)
+        .then(|| repaired_warning(nan_harness_i18n::locale()))
 }
 
 pub(super) fn remove_file_if_present(path: &Path) -> Result<(), CredentialError> {

@@ -96,7 +96,7 @@ pub(super) async fn start_servers() -> TestServers {
                 [
                     "qwen3.6".to_owned(),
                     "deepseek-v4-flash".to_owned(),
-                    "mimo-v2.5".to_owned(),
+                    "mimo-v2.6-flash".to_owned(),
                     "gemma4".to_owned(),
                 ],
                 "qwen3.6",

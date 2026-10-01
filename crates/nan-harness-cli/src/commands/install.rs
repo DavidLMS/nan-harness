@@ -24,6 +24,7 @@ pub(crate) enum InstallDecision {
 
 pub(crate) fn offer_install(kind: HarnessKind) -> Result<InstallDecision, InstallError> {
     let spec = install_spec(kind).ok_or(InstallError::UnsupportedHarness(kind))?;
+    installer::check_install_prerequisites(spec)?;
     if !io::stdin().is_terminal() || !io::stderr().is_terminal() {
         return Ok(InstallDecision::NotInteractive);
     }
@@ -33,17 +34,31 @@ pub(crate) fn offer_install(kind: HarnessKind) -> Result<InstallDecision, Instal
     let mut output = io::stderr().lock();
     writeln!(
         output,
-        "{} was not found. Install the latest official release now?",
-        spec.display_name()
+        "{}",
+        nan_harness_i18n::messages::install_was_not_found_install_the_latest_official_release_now(
+            nan_harness_i18n::locale(),
+            &(spec.display_name())
+        )
     )
     .map_err(InstallError::Prompt)?;
     writeln!(
         output,
-        "Official installer: {}",
-        official_install_command(spec)?
+        "{}",
+        nan_harness_i18n::messages::install_official_installer(
+            nan_harness_i18n::locale(),
+            &(official_install_command(spec)?)
+        )
     )
     .map_err(InstallError::Prompt)?;
-    write!(output, "Install {} [y/N]: ", spec.display_name()).map_err(InstallError::Prompt)?;
+    write!(
+        output,
+        "{}",
+        nan_harness_i18n::messages::install_install_y_n(
+            nan_harness_i18n::locale(),
+            &(spec.display_name())
+        )
+    )
+    .map_err(InstallError::Prompt)?;
     output.flush().map_err(InstallError::Prompt)?;
 
     let mut response = String::new();
@@ -60,7 +75,7 @@ pub(crate) fn offer_install(kind: HarnessKind) -> Result<InstallDecision, Instal
 }
 
 fn is_affirmative(response: &str) -> bool {
-    matches!(response.trim().to_ascii_lowercase().as_str(), "y" | "yes")
+    nan_harness_i18n::yes_no(nan_harness_i18n::locale(), response) == Some(true)
 }
 
 #[cfg(test)]

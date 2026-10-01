@@ -20,7 +20,7 @@ fn search_end_before_begin_is_rejected_even_when_later_markers_are_balanced() {
         LaunchPlanValidator::validate(&plan),
         Err(PlanError::UnsafeTemporaryArtifact { artifact_id, reason })
             if artifact_id == "opencode-config"
-                && reason.contains("NaN search blocks")
+                && reason.to_string().contains("NaN search blocks")
     ));
 }
 
@@ -35,7 +35,7 @@ fn nested_search_begin_is_rejected_before_consuming_following_balanced_markers()
         LaunchPlanValidator::validate(&plan),
         Err(PlanError::UnsafeTemporaryArtifact { artifact_id, reason })
             if artifact_id == "opencode-config"
-                && reason.contains("NaN search blocks")
+                && reason.to_string().contains("NaN search blocks")
     ));
 }
 
@@ -54,7 +54,7 @@ fn unterminated_nested_search_begin_is_rejected_at_end_of_template() {
         error,
         PlanError::UnsafeTemporaryArtifact { artifact_id, reason }
             if artifact_id == "opencode-config"
-                && reason.contains("malformed or nested NaN search blocks")
+                && reason.to_string().contains("malformed or nested NaN search blocks")
     ));
 }
 
@@ -82,7 +82,7 @@ fn non_ascii_unknown_artifact_is_a_typed_field_error_without_panicking() {
         error,
         PlanError::InvalidField { field, message }
             if field == "process.arguments"
-                && message.contains("unknown temporary artifact 'café'")
+                && message.to_string().contains("unknown temporary artifact 'café'")
     ));
 }
 

@@ -167,6 +167,10 @@ for (const relativePath of [
 assert.match(markdownFiles.get('index.md'), /nanh codex --model qwen3\.6/);
 assert.match(markdownFiles.get('docs.md'), /nanh hermes[\s\S]*nanh omp[\s\S]*nanh prime-agent/s);
 assert.match(markdownFiles.get('es/docs.md'), /nanh hermes[\s\S]*nanh omp[\s\S]*nanh prime-agent/s);
+assert.match(markdownFiles.get('docs.md'), /--image-model qwen-image-2\.1/);
+assert.match(markdownFiles.get('docs.md'), /qwen-image-2\.1[\s\S]*generation only/);
+assert.match(markdownFiles.get('es/docs.md'), /--image-model qwen-image-2\.1/);
+assert.match(markdownFiles.get('es/docs.md'), /qwen-image-2\.1[\s\S]*solo generación/);
 
 function assertNoUnsupportedServices(directory) {
   for (const missingPath of [
@@ -322,7 +326,7 @@ assert.match(docs, /<code>nanh &lt;harness&gt;<\/code>/);
 assert.match(docs, /<code>nanh config &lt;harness&gt;<\/code>/);
 assert.match(docs, /nanh hermes.*nanh omp.*nanh prime-agent/s);
 
-const docsSectionIds = ['install', 'first-run', 'harnesses', 'desktop', 'search', 'limits', 'options', 'help'];
+const docsSectionIds = ['install', 'first-run', 'harnesses', 'media', 'platforms', 'desktop', 'search', 'limits', 'options', 'cli', 'help'];
 for (const html of [docs, docsEs]) {
   for (const sectionId of docsSectionIds) {
     assert.equal((html.match(new RegExp(`<section class="docs-section" id="${sectionId}">`, 'g')) ?? []).length, 1);

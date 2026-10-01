@@ -77,6 +77,20 @@ fn native_probe_preserves_streams_exit_status_and_closed_stdin() {
     );
 }
 
+#[cfg(windows)]
+#[test]
+fn cmd_shim_probe_runs_through_the_command_interpreter() {
+    let directory = tempfile::tempdir().unwrap();
+    let shim = directory.path().join("openclaw.CMD");
+    std::fs::write(&shim, "@echo off\r\necho openclaw 3.0.62\r\n").unwrap();
+
+    let output = run_bounded(&shim, &["--version"], Duration::from_secs(2), 1024).unwrap();
+
+    assert!(output.status.success());
+    assert_eq!(output.stdout, b"openclaw 3.0.62\r\n");
+    assert!(output.stderr.is_empty());
+}
+
 #[test]
 fn native_probe_bounds_stdout_stderr_and_combined_output() {
     for mode in ["stdout-flood", "stderr-flood", "combined"] {

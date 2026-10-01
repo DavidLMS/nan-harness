@@ -3,6 +3,7 @@
 mod aggregate;
 mod app;
 mod cell;
+mod codex_diagnostic;
 mod conformance;
 mod credentials;
 mod record;
@@ -46,6 +47,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         }
         Command::Record(arguments) => record::run(&arguments)?,
         Command::Conformance(arguments) => conformance::run(&arguments).await?,
+        Command::CodexDiagnostic(arguments) => codex_diagnostic::run(&arguments).await?,
     }
     Ok(())
 }

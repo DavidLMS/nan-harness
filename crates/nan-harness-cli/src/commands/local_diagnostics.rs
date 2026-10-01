@@ -17,41 +17,76 @@ pub(crate) fn run(command: LocalDiagnosticsCommand) -> Result<(), CoordinatorErr
 
 fn print_enabled(status: &DiagnosticsStatus) {
     eprintln!(
-        "Warning: local diagnostics are ON. Prompts, model output, tool data, and embedded attachments will be stored as unencrypted private files. Logs are never uploaded and are not deleted automatically."
+        "{}", nan_harness_i18n::messages::local_diagnostics_warning_local_diagnostics_are_on_prompts_model_output_tool_data_and_embedde(nan_harness_i18n::locale()));
+    eprintln!(
+        "{}",
+        nan_harness_i18n::messages::local_diagnostics_capture_directory(
+            nan_harness_i18n::locale(),
+            &(status.directory.display())
+        )
     );
-    eprintln!("Capture directory: {}", status.directory.display());
 }
 
 fn print_disabled(status: &DiagnosticsStatus) {
     print_recovery(status);
     eprintln!(
-        "Local diagnostics are OFF. Requests already being captured may finish writing. Existing logs remain at {}.",
-        status.directory.display()
-    );
+        "{}", nan_harness_i18n::messages::local_diagnostics_local_diagnostics_are_off_requests_already_being_captured_may_finish_writin(nan_harness_i18n::locale(), &(status.directory.display())));
 }
 
 fn print_recovery(status: &DiagnosticsStatus) {
     if status.recovered_settings {
         eprintln!(
-            "Invalid diagnostic settings were preserved in a private settings-backups directory before disabling capture. Recovery backups remain after capture purge."
-        );
+            "{}", nan_harness_i18n::messages::local_diagnostics_invalid_diagnostic_settings_were_preserved_in_a_private_settings_backups_di(nan_harness_i18n::locale()));
     }
 }
 
 fn print_status(status: &DiagnosticsStatus) {
     println!(
-        "Local diagnostics: {}",
-        if status.enabled { "on" } else { "off" }
+        "{}",
+        nan_harness_i18n::messages::local_diagnostics_local_diagnostics(
+            nan_harness_i18n::locale(),
+            &(if status.enabled { "on" } else { "off" })
+        )
     );
     if let Some(capture_id) = &status.capture_id {
-        println!("Capture: {capture_id}");
+        println!(
+            "{}",
+            nan_harness_i18n::messages::local_diagnostics_capture(
+                nan_harness_i18n::locale(),
+                &(capture_id)
+            )
+        );
     }
     if let Some(enabled_at) = status.enabled_at_unix_seconds {
-        println!("Enabled at: {}", format_timestamp(enabled_at));
+        println!(
+            "{}",
+            nan_harness_i18n::messages::local_diagnostics_enabled_at(
+                nan_harness_i18n::locale(),
+                &(format_timestamp(enabled_at))
+            )
+        );
     }
-    println!("Directory: {}", status.directory.display());
-    println!("Stored bytes: {}", status.bytes);
-    println!("Incomplete files: {}", status.incomplete_files);
+    println!(
+        "{}",
+        nan_harness_i18n::messages::local_diagnostics_directory(
+            nan_harness_i18n::locale(),
+            &(status.directory.display())
+        )
+    );
+    println!(
+        "{}",
+        nan_harness_i18n::messages::local_diagnostics_stored_bytes(
+            nan_harness_i18n::locale(),
+            &(status.bytes)
+        )
+    );
+    println!(
+        "{}",
+        nan_harness_i18n::messages::local_diagnostics_incomplete_files(
+            nan_harness_i18n::locale(),
+            &(status.incomplete_files)
+        )
+    );
 }
 
 fn format_timestamp(timestamp: u64) -> String {
@@ -68,15 +103,18 @@ fn format_timestamp(timestamp: u64) -> String {
 
 fn purge(yes: bool) -> Result<(), CoordinatorError> {
     if !yes && !confirm_purge()? {
-        eprintln!("Diagnostic logs were not deleted.");
+        eprintln!(
+            "{}",
+            nan_harness_i18n::messages::local_diagnostics_diagnostic_logs_were_not_deleted(
+                nan_harness_i18n::locale()
+            )
+        );
         return Ok(());
     }
     let status = purge_diagnostics()?;
     print_recovery(&status);
     eprintln!(
-        "Diagnostic logs were deleted. Local diagnostics are off; coordinator learning was preserved. Diagnostic state remains at {}.",
-        status.directory.display(),
-    );
+        "{}", nan_harness_i18n::messages::local_diagnostics_diagnostic_logs_were_deleted_local_diagnostics_are_off_coordinator_learning(nan_harness_i18n::locale(), &(status.directory.display())));
     Ok(())
 }
 
@@ -86,7 +124,12 @@ fn confirm_purge() -> Result<bool, CoordinatorError> {
             "purge requires an interactive terminal or --yes",
         ));
     }
-    eprint!("Delete all local diagnostic captures? [y/N] ");
+    eprint!(
+        "{}",
+        nan_harness_i18n::messages::local_diagnostics_delete_all_local_diagnostic_captures_y_n(
+            nan_harness_i18n::locale()
+        )
+    );
     std::io::stderr()
         .flush()
         .map_err(|source| CoordinatorError::State {

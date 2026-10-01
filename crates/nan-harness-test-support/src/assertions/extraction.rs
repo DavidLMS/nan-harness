@@ -115,6 +115,54 @@ pub(super) fn value_is_error(value: &Value) -> bool {
         || value.get("error").is_some_and(|error| !error.is_null())
 }
 
+/// Stable shell error text a tool result can carry without looking like an error object.
+///
+/// `value_is_error` recognises error objects and leading `error` text, but a command that fails in
+/// `cmd`, PowerShell or a POSIX shell reports its own wording and Cline still returns it as a
+/// healthy, non-empty result. These markers name that case without publishing the text.
+const SHELL_ERROR_MARKERS: [&str; 7] = [
+    "is not recognized as an internal or external command",
+    "is not recognized",
+    "the system cannot find the path specified",
+    "cannot find the file specified",
+    "no such file or directory",
+    "command not found",
+    "permission denied",
+];
+
+/// Reports whether a tool result carries shell failure text while looking like a healthy result.
+pub(super) fn result_text_reports_shell_error(value: &Value) -> bool {
+    let mut text = String::new();
+    collect_text(value, &mut text, 0);
+    let text = text.to_ascii_lowercase();
+    SHELL_ERROR_MARKERS
+        .iter()
+        .any(|marker| text.contains(marker))
+}
+
+/// Appends the string leaves of a bounded value; the walk stops at 4 KiB.
+fn collect_text(value: &Value, text: &mut String, depth: u8) {
+    const LIMIT: usize = 4096;
+    if text.len() >= LIMIT || depth > 8 {
+        return;
+    }
+    match value {
+        Value::String(item) => text.push_str(&item.chars().take(LIMIT).collect::<String>()),
+        Value::Array(items) => {
+            for item in items {
+                collect_text(item, text, depth + 1);
+            }
+        }
+        Value::Object(object) => {
+            for item in object.values() {
+                collect_text(item, text, depth + 1);
+            }
+        }
+        _ => {}
+    }
+    text.push('\n');
+}
+
 pub(super) fn value_contains_pair(value: &Value, key: &str, expected: &str) -> bool {
     match value {
         Value::Object(object) => {

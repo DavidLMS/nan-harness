@@ -6,6 +6,7 @@ use crate::commands::persistence::{
     discover_models_live as discover_models,
 };
 use nan_harness_core::{CodingModelProfile, DesktopHarnessKind, HarnessKind};
+use nan_harness_i18n::{locale, messages};
 use nan_harness_runtime::desktop_compatibility::{
     DesktopCompatibilityEntry, DesktopCompatibilityError, desktop_compatibility,
 };
@@ -198,8 +199,8 @@ fn integrations() -> IntegrationDiscovery {
         Ok(manager) => manager,
         Err(error) => {
             return IntegrationDiscovery::Failed {
-                subject: "Configuration state",
-                status: "unavailable",
+                subject: messages::doctor_configuration_state_text(locale()),
+                status: messages::doctor_unavailable_text(locale()),
                 code: error.code(),
             };
         }
@@ -208,8 +209,8 @@ fn integrations() -> IntegrationDiscovery {
         Ok(manager) => manager,
         Err(error) => {
             return IntegrationDiscovery::Failed {
-                subject: "Integration state",
-                status: "unavailable",
+                subject: messages::doctor_integration_state_text(locale()),
+                status: messages::doctor_unavailable_text(locale()),
                 code: error.code(),
             };
         }
@@ -218,8 +219,8 @@ fn integrations() -> IntegrationDiscovery {
         Ok(integrations) => integrations,
         Err(error) => {
             return IntegrationDiscovery::Failed {
-                subject: "Integration state",
-                status: "unreadable",
+                subject: messages::doctor_integration_state_text(locale()),
+                status: messages::doctor_unreadable_text(locale()),
                 code: error.code(),
             };
         }
@@ -228,8 +229,8 @@ fn integrations() -> IntegrationDiscovery {
         Ok(configurations) => configurations,
         Err(error) => {
             return IntegrationDiscovery::Failed {
-                subject: "Configuration state",
-                status: "unreadable",
+                subject: messages::doctor_configuration_state_text(locale()),
+                status: messages::doctor_unreadable_text(locale()),
                 code: error.code(),
             };
         }
@@ -238,8 +239,8 @@ fn integrations() -> IntegrationDiscovery {
         Ok(configured) => configured,
         Err(error) => {
             return IntegrationDiscovery::Failed {
-                subject: "Pen Desktop configuration state",
-                status: "unreadable",
+                subject: messages::doctor_pen_state_text(locale()),
+                status: messages::doctor_unreadable_text(locale()),
                 code: error.code(),
             };
         }

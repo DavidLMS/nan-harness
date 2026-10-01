@@ -1,16 +1,18 @@
 use crate::direct::{
     DirectLaunch, build_direct_plan, provider_environment, validate_routing_arguments,
 };
+use nan_harness_core::MediaSelection;
 use nan_harness_core::launch_plan::{
     ArtifactLifecycle, BRIDGE_BASE_URL_PLACEHOLDER, ConfigurationOverlay,
-    HERMES_MODEL_CATALOG_PLACEHOLDER, NAN_SEARCH_BLOCK_BEGIN, NAN_SEARCH_BLOCK_END, OverlayFile,
-    OverlayFilePolicy, PROVIDER_BASE_URL_PLACEHOLDER, TemporaryArtifactMode, USER_HOME_PLACEHOLDER,
+    HERMES_MODEL_CATALOG_PLACEHOLDER, MEDIA_PROVIDER_BASE_URL_PLACEHOLDER, NAN_SEARCH_BLOCK_BEGIN,
+    NAN_SEARCH_BLOCK_END, OverlayFile, OverlayFilePolicy, PROVIDER_BASE_URL_PLACEHOLDER,
+    TemporaryArtifactMode, USER_HOME_PLACEHOLDER,
 };
 use nan_harness_core::{
     CodingModelProfile, HarnessAdapter, HarnessKind, LaunchPlan, NativeContextLimit, PlanContext,
     PlanError,
 };
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, fmt::Write as _};
 
 const CREDENTIAL_TARGET: &str = "NAN_API_KEY";
 const CONFIG_OVERLAY_ID: &str = "hermes-home";
@@ -58,11 +60,12 @@ register_provider(nan)
 /// Files used by both the stable Hermes adapter and the experimental Desktop profile.
 #[must_use]
 pub fn hermes_search_provider_files() -> Vec<OverlayFile> {
-    hermes_search_provider_files_with_context(None)
+    hermes_search_provider_files_with_context(None, MediaSelection::none())
 }
 
 fn hermes_search_provider_files_with_context(
     context_limit: Option<&nan_harness_core::ContextLimit>,
+    media: MediaSelection,
 ) -> Vec<OverlayFile> {
     vec![
         OverlayFile {
@@ -77,6 +80,8 @@ fn hermes_search_provider_files_with_context(
             mode: TemporaryArtifactMode::OwnerFile,
             content_template: format!(
                 r#"import os
+
+import httpx
 
 from agent.web_search_provider import WebSearchProvider
 
@@ -133,7 +138,7 @@ class NanHarnessWebSearchProvider(WebSearchProvider):
         OverlayFile {
             path: "config.yaml".to_owned(),
             mode: TemporaryArtifactMode::OwnerFile,
-            content_template: hermes_config_template(context_limit),
+            content_template: hermes_config_template(context_limit, media),
             policy: OverlayFilePolicy::MergeYaml,
         },
     ]
@@ -379,7 +384,10 @@ pub fn render_hermes_search_provider() -> String {
     HERMES_SEARCH_PROVIDER.to_owned()
 }
 
-fn hermes_config_template(context_limit: Option<&nan_harness_core::ContextLimit>) -> String {
+fn hermes_config_template(
+    context_limit: Option<&nan_harness_core::ContextLimit>,
+    media: MediaSelection,
+) -> String {
     let compression = context_limit
         .and_then(|limit| match limit.native {
             NativeContextLimit::HermesThreshold { threshold_tokens } => Some(format!(
@@ -388,9 +396,213 @@ fn hermes_config_template(context_limit: Option<&nan_harness_core::ContextLimit>
             _ => None,
         })
         .unwrap_or_default();
+    let mut media_fields = String::new();
+    if media.stt {
+        let _ = write!(
+            media_fields,
+            "\"stt\":{{\"provider\":\"nan-whisper\",\"providers\":{{\"nan-whisper\":{}}}}},",
+            hermes_command_provider("stt", "whisper-1", base_url_placeholder())
+        );
+    }
+    if media.tts {
+        let _ = write!(
+            media_fields,
+            "\"tts\":{{\"provider\":\"nan-kokoro\",\"providers\":{{\"nan-kokoro\":{}}}}},",
+            hermes_command_provider("tts", "kokoro", base_url_placeholder())
+        );
+    }
+    if media.image {
+        let _ = write!(
+            media_fields,
+            "\"image_gen\":{{\"provider\":\"nan-harness\",\"model\":\"{}\"}},",
+            media.image_model.unwrap_or_default().as_str()
+        );
+    }
+    let plugin_field = if media.image {
+        format!(
+            "\"plugins\":{{\"entries\":{{\"image_gen/nan_harness\":{{\"allow_tool_override\":true}}}},\"enabled\":[\"image_gen/nan_harness\"{NAN_SEARCH_BLOCK_BEGIN},\"web/nan_harness\"{NAN_SEARCH_BLOCK_END}]}}"
+        )
+    } else {
+        format!(
+            "\"plugins\":{{\"enabled\":[{NAN_SEARCH_BLOCK_BEGIN}\"web/nan_harness\"{NAN_SEARCH_BLOCK_END}]}}"
+        )
+    };
     format!(
-        "{{{compression}{NAN_SEARCH_BLOCK_BEGIN}\"plugins\": {{\"enabled\": [\"web/nan_harness\"]}}, \"web\": {{\"search_backend\": \"nan-harness\"}}{NAN_SEARCH_BLOCK_END}}}\n"
+        "{{{compression}{media_fields}{plugin_field}{NAN_SEARCH_BLOCK_BEGIN},\"web\":{{\"search_backend\":\"nan-harness\"}}{NAN_SEARCH_BLOCK_END}}}\n"
     )
+}
+
+fn base_url_placeholder() -> &'static str {
+    MEDIA_PROVIDER_BASE_URL_PLACEHOLDER
+}
+
+fn hermes_command_provider(kind: &str, model: &str, base_url: &str) -> String {
+    serde_json::to_string(&hermes_command_provider_config(kind, model, base_url))
+        .unwrap_or_else(|_| "{}".to_owned())
+}
+
+/// Returns the native Hermes command-provider configuration for one media action.
+#[must_use]
+pub fn hermes_command_provider_config(
+    kind: &str,
+    model: &str,
+    base_url: &str,
+) -> serde_json::Value {
+    hermes_command_provider_config_for_platform(kind, model, base_url, cfg!(windows))
+}
+
+fn hermes_command_provider_config_for_platform(
+    kind: &str,
+    model: &str,
+    base_url: &str,
+    windows: bool,
+) -> serde_json::Value {
+    let options = if kind == "tts" {
+        format!(
+            " --voice {} --format {}",
+            shell_quote_for_platform("{voice}", windows),
+            shell_quote_for_platform("{format}", windows)
+        )
+    } else {
+        String::new()
+    };
+    let command = format!(
+        "nanh __media {kind} --provider-base-url {} --input {} --output {}{options}",
+        shell_quote_for_platform(base_url, windows),
+        shell_quote_for_platform("{input_path}", windows),
+        shell_quote_for_platform("{output_path}", windows),
+    );
+    let mut config = serde_json::json!({
+        "type": "command",
+        "command": command,
+        "model": model,
+        "env_passthrough": ["NAN_MEDIA_API_KEY", "NAN_API_KEY"]
+    });
+    if kind == "tts" {
+        config["voice"] = serde_json::json!("af_heart");
+        config["format"] = serde_json::json!("mp3");
+    }
+    config
+}
+
+fn shell_quote_for_platform(value: &str, windows: bool) -> String {
+    if windows {
+        format!("\"{}\"", value.replace('"', "\\\""))
+    } else {
+        format!("'{}'", value.replace('\'', "'\\\"'\\\"'"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::hermes_command_provider_config_for_platform;
+
+    #[test]
+    fn windows_command_provider_quotes_paths_for_cmd() {
+        let provider = hermes_command_provider_config_for_platform(
+            "tts",
+            "kokoro",
+            "https://api.nan.test/v1",
+            true,
+        );
+        let command = provider["command"]
+            .as_str()
+            .expect("command should be a string");
+        assert_eq!(
+            command,
+            "nanh __media tts --provider-base-url \"https://api.nan.test/v1\" --input \"{input_path}\" --output \"{output_path}\" --voice \"{voice}\" --format \"{format}\""
+        );
+    }
+
+    #[test]
+    fn posix_command_provider_keeps_shell_safe_single_quotes() {
+        let provider = hermes_command_provider_config_for_platform(
+            "stt",
+            "whisper-1",
+            "https://api.nan.test/v1",
+            false,
+        );
+        let command = provider["command"]
+            .as_str()
+            .expect("command should be a string");
+        assert_eq!(
+            command,
+            "nanh __media stt --provider-base-url 'https://api.nan.test/v1' --input '{input_path}' --output '{output_path}'"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_command_provider_preserves_arguments_through_cmd() {
+        use std::os::windows::process::CommandExt;
+        use std::process::Command;
+
+        let directory =
+            std::env::temp_dir().join(format!("nanh hermes command {}", std::process::id()));
+        std::fs::create_dir_all(&directory).expect("temporary command directory should exist");
+        let script = directory.join("capture.cmd");
+        let script_body = "@echo off\r\n:next\r\nif \"%~1\"==\"\" exit /b 0\r\necho(%~1\r\nshift\r\ngoto next\r\n";
+        std::fs::write(&script, script_body).expect("capture script should write");
+
+        let provider = hermes_command_provider_config_for_platform(
+            "tts",
+            "kokoro",
+            "https://api.nan.test/v1",
+            true,
+        );
+        let command = provider["command"]
+            .as_str()
+            .expect("command should be a string")
+            .replacen("nanh", "capture.cmd", 1)
+            .replace("{voice}", "af voice")
+            .replace("{format}", "mp3")
+            .replace("{input_path}", r"C:\Audio Files\input.wav")
+            .replace("{output_path}", r"C:\Audio Files\output.mp3");
+        let output = Command::new("cmd.exe")
+            .current_dir(&directory)
+            .args(["/d", "/s", "/c"])
+            .raw_arg(format!("\"{command}\""))
+            .output()
+            .expect("cmd should start");
+        std::fs::remove_dir_all(&directory).expect("capture directory should be removed");
+        let actual = String::from_utf8(output.stdout).expect("arguments should be UTF-8");
+        let actual = actual.lines().collect::<Vec<_>>();
+        assert!(
+            output.status.success(),
+            "cmd should execute the provider command"
+        );
+        assert_eq!(
+            actual,
+            [
+                "__media",
+                "tts",
+                "--provider-base-url",
+                "https://api.nan.test/v1",
+                "--input",
+                r"C:\Audio Files\input.wav",
+                "--output",
+                r"C:\Audio Files\output.mp3",
+                "--voice",
+                "af voice",
+                "--format",
+                "mp3",
+            ]
+        );
+    }
+}
+
+/// Renders the Hermes image generation plugin for a persistent or launch-scoped home.
+#[must_use]
+pub fn render_hermes_image_plugin(
+    base_url: &str,
+    image_model: nan_harness_core::ImageModel,
+) -> String {
+    include_str!("hermes/image_provider.py")
+        .replace(
+            "__NAN_IMAGE_MODEL__",
+            &serde_json::json!(image_model.as_str()).to_string(),
+        )
+        .replace("__NAN_BASE_URL__", &serde_json::json!(base_url).to_string())
 }
 
 /// Render the provider entry shared by the experimental persistent Desktop profile.
@@ -461,11 +673,39 @@ impl HarnessAdapter for HermesAdapter {
                         .into_iter()
                         .chain(hermes_search_provider_files_with_context(
                             context.context_limit.as_ref(),
+                            context.media,
                         ))
+                        .chain(hermes_media_overlay_files(context.media))
                         .collect(),
                     lifecycle: ArtifactLifecycle::Launch,
                 }],
             },
         )
     }
+}
+
+fn hermes_media_overlay_files(media: MediaSelection) -> Vec<OverlayFile> {
+    if !media.image {
+        return Vec::new();
+    }
+    vec![
+        OverlayFile {
+            path: "plugins/image_gen/nan_harness/__init__.py".to_owned(),
+            mode: TemporaryArtifactMode::OwnerFile,
+            content_template: "from .provider import register\n".to_owned(),
+            policy: OverlayFilePolicy::Replace,
+        },
+        OverlayFile {
+            path: "plugins/image_gen/nan_harness/provider.py".to_owned(),
+            mode: TemporaryArtifactMode::OwnerFile,
+            content_template: render_hermes_image_plugin(MEDIA_PROVIDER_BASE_URL_PLACEHOLDER, media.image_model.unwrap_or_default()),
+            policy: OverlayFilePolicy::Replace,
+        },
+        OverlayFile {
+            path: "plugins/image_gen/nan_harness/plugin.yaml".to_owned(),
+            mode: TemporaryArtifactMode::OwnerFile,
+            content_template: "name: nan-image\nkind: backend\nversion: 1.0.0\ndescription: NaN image generation\nauthor: NaN\nprovides_image_gen_providers:\n  - nan-harness\n".to_owned(),
+            policy: OverlayFilePolicy::Replace,
+        },
+    ]
 }

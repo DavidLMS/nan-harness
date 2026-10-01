@@ -25,9 +25,19 @@ pub(super) fn restore_only(paths: &PenPaths, process: &SystemPenProcess) -> Resu
         return Err(PenDesktopError::AlreadyRunning.into());
     }
     if restore_session(paths)? {
-        eprintln!("Pen Desktop configuration restored.");
+        eprintln!(
+            "{}",
+            nan_harness_i18n::messages::launch_pen_desktop_configuration_restored(
+                nan_harness_i18n::locale()
+            )
+        );
     } else {
-        eprintln!("No Pen Desktop session needs recovery.");
+        eprintln!(
+            "{}",
+            nan_harness_i18n::messages::launch_no_pen_desktop_session_needs_recovery(
+                nan_harness_i18n::locale()
+            )
+        );
     }
     Ok(0)
 }
@@ -130,7 +140,16 @@ fn merge_diagnostics(target: &mut Vec<BridgeDiagnostic>, diagnostics: Vec<Bridge
 fn remember_model(manager: &PersistenceManager, selected_model: &str) {
     if let Err(error) = manager.save_last_desktop_selection(DesktopHarnessKind::Pen, selected_model)
     {
-        eprintln!("warning: could not save the last Pen model: {error}");
+        eprintln!(
+            "{}",
+            nan_harness_i18n::messages::launch_warning_could_not_save_the_last_pen_model(
+                nan_harness_i18n::locale(),
+                &(nan_harness_i18n::TerminalMessage::terminal_message(
+                    &error,
+                    nan_harness_i18n::locale()
+                ))
+            )
+        );
     }
 }
 

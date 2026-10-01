@@ -7,6 +7,7 @@ pub mod error;
 pub mod harness;
 pub mod hosted_check;
 pub mod launch_plan;
+pub mod media;
 pub mod model;
 pub mod secret;
 
@@ -25,6 +26,7 @@ pub use launch_plan::{
     ContextLimit, LaunchPlan, LaunchPlanValidator, NativeContextLimit, TransportKind,
     WebSearchPolicy,
 };
+pub use media::{ImageModel, MediaSelection};
 pub use model::{
     CLAUDE_AUTO_MODE_COMPATIBILITY_ALIAS, CLAUDE_AUTO_MODE_PROVIDER_MODEL_ID, CodingModelMetadata,
     CodingModelProfile, GENERIC_CODING_MODEL_CONTEXT_WINDOW, GENERIC_CODING_MODEL_DESCRIPTION,

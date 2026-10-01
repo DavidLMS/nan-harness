@@ -1,14 +1,13 @@
 use crate::conformance::{
-    HarnessRegistration, PrimeCleanupTargets, embedded_manifest, harness_registry,
-    inventory_drift_fingerprint, inventory_matches, owned_prime_pids_from_status,
-    prime_status_path, round_trip_probe, validate_harness_registry,
+    HarnessRegistration, embedded_manifest, harness_registry, inventory_drift_fingerprint,
+    inventory_matches, owned_prime_pids_from_status, round_trip_probe, validate_harness_registry,
 };
 use nan_harness_core::HarnessKind;
 use serde_json::json;
 use std::path::Path;
 
 #[cfg(unix)]
-use crate::conformance::signal_prime_targets_now;
+use crate::conformance::{PrimeCleanupTargets, prime_status_path, signal_prime_targets_now};
 
 #[test]
 fn registry_covers_every_harness_kind_and_manifest() {
@@ -146,6 +145,42 @@ fn published_round_trip_probes_are_declared_by_embedded_manifests() {
             .expect("published probe should satisfy the manifest contract");
         assert!(manifest.tool_names().contains(&probe.call.name));
     }
+}
+
+#[test]
+fn cline_round_trip_probe_writes_the_marker_with_the_native_shell() {
+    let workspace = tempfile::Builder::new()
+        .prefix("cline's workspace ")
+        .tempdir()
+        .expect("workspace should exist");
+    let manifest =
+        embedded_manifest(HarnessKind::Cline).expect("Cline manifest should be embedded");
+    let probe = round_trip_probe(HarnessKind::Cline, workspace.path(), &manifest)
+        .expect("Cline probe should satisfy the manifest contract");
+    assert_eq!(probe.call.name, "run_commands");
+    assert!(crate::conformance::inventory::verify_probe_side_effect(&probe).is_err());
+    let command = probe.call.input["commands"][0]
+        .as_str()
+        .expect("Cline probe should contain a shell command");
+    let mut process = if cfg!(windows) {
+        let mut process = std::process::Command::new("powershell.exe");
+        process.args(["-NoProfile", "-NonInteractive", "-Command"]);
+        process
+    } else {
+        let mut process = std::process::Command::new("/bin/bash");
+        process.arg("-c");
+        process
+    };
+    let output = process
+        .arg(command)
+        .output()
+        .expect("native shell should start");
+    assert!(
+        output.status.success(),
+        "native write command should succeed"
+    );
+    crate::conformance::inventory::verify_probe_side_effect(&probe)
+        .expect("the original filesystem contract should pass");
 }
 
 #[test]

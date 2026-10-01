@@ -260,6 +260,28 @@ async fn health_check(base_url: &str) -> Result<(), CodexDesktopBridgeError> {
     }
 }
 
+// Terminal localization is separate from canonical Display used by machine contracts.
+impl nan_harness_i18n::TerminalMessage for CodexDesktopBridgeError {
+    fn terminal_message(&self, locale: nan_harness_i18n::Locale) -> String {
+        use nan_harness_i18n::messages as m;
+        if locale == nan_harness_i18n::Locale::En {
+            return self.to_string();
+        }
+        match self {
+            Self::Bridge(field_0) => {
+                nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)
+            }
+            Self::Bind(field_0) => m::error_codex_desktop_bridge_bind(locale, &(field_0)),
+            Self::Random(field_0) => m::error_codex_desktop_bridge_random(locale, &(field_0)),
+            Self::Secret(field_0) => m::error_codex_desktop_bridge_secret(
+                locale,
+                &(nan_harness_i18n::TerminalMessage::terminal_message(field_0, locale)),
+            ),
+            Self::HealthCheck => m::error_codex_desktop_bridge_health_check(locale),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{select_model, start_codex_desktop_bridge};

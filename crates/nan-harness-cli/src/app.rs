@@ -1,5 +1,6 @@
 mod args;
 mod commands;
+mod localization;
 mod parser;
 mod targets;
 
@@ -9,7 +10,7 @@ mod tests;
 #[allow(unused_imports)]
 pub(crate) use args::{
     AuthLogoutArgs, BridgedHarnessRunArgs, ChatGptDesktopArgs, ClaudeDesktopArgs, ConfigArgs,
-    DirectHarnessRunArgs, DoctorArgs, HarnessRunArgs, HermesDesktopArgs, PenDesktopArgs,
+    DirectHarnessRunArgs, DoctorArgs, HarnessRunArgs, HermesDesktopArgs, MediaArgs, PenDesktopArgs,
     RecordInstallationArgs, SearchCommand, SearchSetupArgs, SearchStatusArgs, UninstallArgs,
     WebSearchArgs, ZedDesktopArgs,
 };

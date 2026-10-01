@@ -66,7 +66,8 @@ recover_base_feed() {
         cargo_xtask validate-compatibility-feed "$backup_download" >/dev/null
         cp "$backup_download" "$base"
         restored_backup_name="$backup_name"
-        if [ "$publish_feed" != true ]; then
+        if [ -n "${verified_updates:-}" ] && [ "$publish_feed" = false ]; then
+          first_publication=true
           return 0
         fi
         restore_upload_directory="$base_directory/restore"
@@ -188,7 +189,8 @@ recover_unified_base_feed() {
     cargo_xtask validate-unified-compatibility-feed "$backup_download" >/dev/null
     cp "$backup_download" "$base_v3"
     unified_restored_backup_name="$backup_name"
-    if [ "$publish_feed" != true ]; then
+    if [ -n "${verified_updates:-}" ] && [ "$publish_feed" = false ]; then
+      unified_first_publication=true
       return 0
     fi
     restore_upload_directory="$base_directory/unified-restore"
@@ -236,6 +238,11 @@ build_validated_feed_candidate() {
   local preserved_candidate
 
   cargo_xtask "$merge_task" "$feed_base" "$updates_directory" "$feed_candidate"
+  if [ -n "${verified_updates:-}" ]; then
+    python3 "$repository_root/canary/actions/daily_evidence.py" \
+      "$feed_base" "$feed_candidate" "$updates_directory" "$feed_candidate.observed"
+    mv "$feed_candidate.observed" "$feed_candidate"
+  fi
   cargo_xtask "$validate_task" "$feed_candidate"
   jq -e --argjson schema "$schema" 'type == "object" and .schemaVersion == $schema and (.releases | type == "array" and length > 0) and (tostring | length > 2)' "$feed_candidate" >/dev/null
 

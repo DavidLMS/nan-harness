@@ -110,6 +110,7 @@ pub(super) const fn telemetry_harness(cli: &Cli) -> Option<TelemetryHarnessKind>
         | Command::Search { .. }
         | Command::Uninstall(_)
         | Command::Telemetry { .. }
+        | Command::Language { .. }
         | Command::Completions { .. }
         | Command::Diagnostics { .. }
         | Command::Coordinator
@@ -183,6 +184,7 @@ const fn telemetry_harness_for_command(command: &Command) -> Option<TelemetryHar
         | Command::Search { .. }
         | Command::Uninstall(_)
         | Command::Telemetry { .. }
+        | Command::Language { .. }
         | Command::Completions { .. }
         | Command::Diagnostics { .. }
         | Command::Coordinator

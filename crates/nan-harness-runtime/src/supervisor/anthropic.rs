@@ -48,6 +48,7 @@ pub(super) async fn execute_anthropic_bridge(
             web_search_enabled,
         }),
         Some(discovered_models),
+        &config.secrets,
     )?;
     let mut bridge = spawn(
         listener,

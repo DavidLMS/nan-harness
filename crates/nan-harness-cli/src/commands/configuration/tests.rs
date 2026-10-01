@@ -1,7 +1,9 @@
 mod documents;
+mod image_models;
 mod lifecycle;
 mod paths;
 mod plugin_syntax;
+mod recovery;
 mod search_policy;
 
 use super::documents::{

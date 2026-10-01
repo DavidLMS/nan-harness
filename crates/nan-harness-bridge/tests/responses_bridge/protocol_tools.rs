@@ -89,7 +89,7 @@ async fn responses_bridge_routes_each_selected_catalog_model() {
     let client = reqwest::Client::new();
     let endpoint = format!("{}/v1/responses", servers.bridge.base_url());
     let mut request = responses_request();
-    request["model"] = json!("mimo-v2.5");
+    request["model"] = json!("mimo-v2.6-flash");
 
     let response = client
         .post(endpoint)
@@ -107,17 +107,17 @@ async fn responses_bridge_routes_each_selected_catalog_model() {
             .chat_requests
             .lock()
             .expect("chat request lock")[0]["model"],
-        "mimo-v2.5"
+        "mimo-v2.6-flash"
     );
     servers.shutdown().await;
 }
 
 #[tokio::test]
-async fn responses_bridge_accepts_codex_plan_reasoning_for_always_on_models() {
+async fn responses_bridge_accepts_codex_plan_reasoning_for_mimo() {
     let servers = start_servers().await;
     let client = reqwest::Client::new();
     let mut request = responses_request();
-    request["model"] = json!("mimo-v2.5");
+    request["model"] = json!("mimo-v2.6-flash");
     request["reasoning"]["effort"] = json!("medium");
     let response = client
         .post(format!("{}/v1/responses", servers.bridge.base_url()))
@@ -132,9 +132,9 @@ async fn responses_bridge_accepts_codex_plan_reasoning_for_always_on_models() {
     {
         let requests = servers.state.chat_requests.lock().expect("request lock");
         assert_eq!(requests.len(), 1);
-        assert_eq!(requests[0]["model"], "mimo-v2.5");
+        assert_eq!(requests[0]["model"], "mimo-v2.6-flash");
         assert!(requests[0].get("reasoning_effort").is_none());
-        assert!(requests[0].get("chat_template_kwargs").is_none());
+        assert_eq!(requests[0]["chat_template_kwargs"]["enable_thinking"], true);
     }
     servers.shutdown().await;
 }
@@ -145,7 +145,7 @@ async fn responses_bridge_rejects_disabling_always_on_reasoning_before_upstream(
     let mut diagnostics = servers.bridge.take_diagnostics();
     let client = reqwest::Client::new();
     let mut request = responses_request();
-    request["model"] = json!("mimo-v2.5");
+    request["model"] = json!("qwen3.8-flash");
     request["reasoning"]["effort"] = json!("none");
     let response = client
         .post(format!("{}/v1/responses", servers.bridge.base_url()))
@@ -165,7 +165,7 @@ async fn responses_bridge_rejects_disabling_always_on_reasoning_before_upstream(
         diagnostic.reason,
         BridgeDiagnosticReason::ReasoningPolicyMismatch
     );
-    assert_eq!(diagnostic.model_id.as_deref(), Some("mimo-v2.5"));
+    assert_eq!(diagnostic.model_id.as_deref(), Some("qwen3.8-flash"));
     assert_eq!(
         diagnostic.requested_reasoning,
         Some(BridgeReasoningRequest::None)
