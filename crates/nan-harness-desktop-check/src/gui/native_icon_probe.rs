@@ -46,6 +46,7 @@ pub(super) struct IconDiagnostics {
     pub(super) first_clusters: usize,
     pub(super) second_clusters: usize,
     pub(super) new_stable_clusters: usize,
+    pub(super) calibration: Option<IconCalibration>,
 }
 
 impl IconDiagnostics {
@@ -60,8 +61,76 @@ impl IconDiagnostics {
             first_clusters: 0,
             second_clusters: 0,
             new_stable_clusters: 0,
+            calibration: None,
         }
     }
+}
+
+/// Closed image statistics and maxima among the unchanged strict prefilter.
+/// These are diagnostic measurements, never alternative acceptance thresholds.
+#[derive(Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct IconCalibration {
+    scale_milli: u32,
+    gray_range: u32,
+    gray_std_milli: u32,
+    retry: MatchMetrics,
+    copy: MatchMetrics,
+    close: MatchMetrics,
+}
+
+#[derive(Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MatchMetrics {
+    contrast_positions: usize,
+    foreground_positions: usize,
+    max_correlation_milli: u32,
+    max_contrast_milli: u32,
+    max_spread_milli: u32,
+}
+
+#[derive(Default)]
+struct MatchMeasurements {
+    contrast_positions: usize,
+    foreground_positions: usize,
+    max_correlation: f64,
+    max_contrast: f64,
+    max_spread: f64,
+}
+
+impl MatchMeasurements {
+    fn finish(self) -> MatchMetrics {
+        MatchMetrics {
+            contrast_positions: self.contrast_positions,
+            foreground_positions: self.foreground_positions,
+            max_correlation_milli: bounded_integer(self.max_correlation * 1000.0, 1000),
+            max_contrast_milli: bounded_integer(self.max_contrast * 1000.0, 255_000),
+            max_spread_milli: bounded_integer(self.max_spread * 1000.0, 255_000),
+        }
+    }
+}
+
+// Preserve closed integer bounds without float-to-integer narrowing casts.
+fn bounded_integer(value: f64, maximum: u32) -> u32 {
+    if !value.is_finite() || value <= 0.0 {
+        return 0;
+    }
+    let mut lower = 0;
+    let mut upper = maximum;
+    while lower < upper {
+        let midpoint = lower + (upper - lower).div_ceil(2);
+        if f64::from(midpoint) <= value {
+            lower = midpoint;
+        } else {
+            upper = midpoint - 1;
+        }
+    }
+    lower
+}
+
+struct FoundIcon {
+    positions: Vec<Position>,
+    metrics: MatchMetrics,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -187,14 +256,12 @@ fn correlation(frame: &LumaFrame, mask: &[u8], side: u32, at: Position) -> f64 {
     }
 }
 
-fn find(
-    frame: &LumaFrame,
-    mask: &[u8],
-    side: u32,
-    deadline: Instant,
-) -> Result<Vec<Position>, Reason> {
+fn find(frame: &LumaFrame, mask: &[u8], side: u32, deadline: Instant) -> Result<FoundIcon, Reason> {
     if frame.width < side || frame.height < side {
-        return Ok(Vec::new());
+        return Ok(FoundIcon {
+            positions: Vec::new(),
+            metrics: MatchMetrics::default(),
+        });
     }
     let max_alpha = mask.iter().copied().max().unwrap_or(0);
     if max_alpha < 16 {
@@ -224,6 +291,7 @@ fn find(
         probes[3].map_err(|_| Reason::ActionUnsupported)?,
     ];
     let mut matches = Vec::new();
+    let mut measured = MatchMeasurements::default();
     for y in 0..=frame.height - side {
         if Instant::now() >= deadline {
             return Err(Reason::BudgetExceeded);
@@ -231,15 +299,27 @@ fn find(
         for x in 0..=frame.width - side {
             let at = Position { x, y };
             let background = gray(frame, x, y).midpoint(gray(frame, x + side - 1, y + side - 1));
-            if (gray(frame, x + probes[0] % side, y + probes[0] / side) - background).abs() < 24.0 {
+            let contrast =
+                (gray(frame, x + probes[0] % side, y + probes[0] / side) - background).abs();
+            measured.max_contrast = measured.max_contrast.max(contrast);
+            if contrast < 24.0 {
                 continue;
             }
+            measured.contrast_positions += 1;
             let values = probes.map(|i| gray(frame, x + (i % side), y + (i / side)));
             let mean = values.iter().sum::<f64>() / 4.0;
-            if (mean - background).abs() < 24.0 || values.iter().any(|v| (v - mean).abs() > 24.0) {
+            let spread = values
+                .iter()
+                .map(|value| (value - mean).abs())
+                .fold(0.0, f64::max);
+            measured.max_spread = measured.max_spread.max(spread);
+            if (mean - background).abs() < 24.0 || spread > 24.0 {
                 continue;
             }
-            if correlation(frame, mask, side, at) >= 0.985 {
+            measured.foreground_positions += 1;
+            let score = correlation(frame, mask, side, at);
+            measured.max_correlation = measured.max_correlation.max(score);
+            if score >= 0.985 {
                 matches.push(at);
                 if matches.len() > MAX_MATCHES {
                     return Err(Reason::SelectorNotMatched);
@@ -247,7 +327,10 @@ fn find(
             }
         }
     }
-    Ok(matches)
+    Ok(FoundIcon {
+        positions: matches,
+        metrics: measured.finish(),
+    })
 }
 
 fn clusters(
@@ -288,6 +371,7 @@ struct FrameCandidates {
     copy: Vec<Position>,
     close: Vec<Position>,
     grouped: Vec<Cluster>,
+    calibration: IconCalibration,
 }
 
 fn frame_candidates(
@@ -299,12 +383,40 @@ fn frame_candidates(
     let retry = find(&luma, &masks.retry, masks.side, deadline)?;
     let copy = find(&luma, &masks.copy, masks.side, deadline)?;
     let close = find(&luma, &masks.close, masks.side, deadline)?;
-    let grouped = clusters(&retry, &copy, &close, masks.side)?;
+    let grouped = clusters(
+        &retry.positions,
+        &copy.positions,
+        &close.positions,
+        masks.side,
+    )?;
+    let count = f64::from(frame.width) * f64::from(frame.height);
+    let mean = luma.pixels.iter().sum::<f64>() / count;
+    let variance = luma
+        .pixels
+        .iter()
+        .map(|pixel| (pixel - mean).powi(2))
+        .sum::<f64>()
+        / count;
+    let minimum = luma.pixels.iter().copied().fold(255.0, f64::min);
+    let maximum = luma.pixels.iter().copied().fold(0.0, f64::max);
+    let calibration = IconCalibration {
+        scale_milli: if frame.scale.to_bits() == 1.0_f32.to_bits() {
+            1000
+        } else {
+            2000
+        },
+        gray_range: bounded_integer(maximum - minimum, 255),
+        gray_std_milli: bounded_integer(variance.sqrt() * 1000.0, 127_500),
+        retry: retry.metrics,
+        copy: copy.metrics,
+        close: close.metrics,
+    };
     Ok(FrameCandidates {
-        retry,
-        copy,
-        close,
+        retry: retry.positions,
+        copy: copy.positions,
+        close: close.positions,
         grouped,
+        calibration,
     })
 }
 
@@ -348,6 +460,7 @@ pub(super) fn observe(
         first_clusters: one.grouped.len(),
         second_clusters: two.grouped.len(),
         new_stable_clusters: stable,
+        calibration: Some(one.calibration),
     })
 }
 
@@ -400,6 +513,45 @@ mod tests {
             }
         }
         PrivateIconFrame::new(screenshot)
+    }
+
+    #[test]
+    fn calibration_distinguishes_blank_low_contrast_and_strict_matching_pixels() {
+        let masks = synthetic_masks();
+        let empty = frame(&masks, &[]);
+        let blank = observe(&masks, &empty, &empty, &empty)
+            .unwrap()
+            .calibration
+            .unwrap();
+        assert_eq!(blank.scale_milli, 1000);
+        assert_eq!(blank.gray_range, 0);
+        assert_eq!(blank.gray_std_milli, 0);
+        assert_eq!(blank.retry.contrast_positions, 0);
+        assert_eq!(blank.retry.max_correlation_milli, 0);
+        let mut faint = frame(&masks, &[10]);
+        for pixel in faint.0.pixels.chunks_exact_mut(4) {
+            for channel in &mut pixel[..3] {
+                *channel = 20 + (*channel - 20) / 20;
+            }
+        }
+        let measured = observe(&masks, &empty, &faint, &faint).unwrap();
+        assert_eq!(measured.retry_matches, 0);
+        let low = measured.calibration.unwrap();
+        assert_eq!(low.gray_range, 6);
+        assert!(low.gray_std_milli > 0);
+        assert_eq!(low.retry.contrast_positions, 0);
+        assert_eq!(low.retry.foreground_positions, 0);
+        assert_eq!(low.retry.max_contrast_milli, 6000);
+        assert_eq!(low.retry.max_correlation_milli, 0);
+        let one = frame(&masks, &[10]);
+        let positive = observe(&masks, &empty, &one, &one)
+            .unwrap()
+            .calibration
+            .unwrap();
+        assert!(positive.retry.contrast_positions >= positive.retry.foreground_positions);
+        assert!(positive.retry.foreground_positions > 0);
+        assert!(positive.retry.max_correlation_milli >= 985);
+        assert!(positive.gray_std_milli > low.gray_std_milli);
     }
 
     #[test]
@@ -465,10 +617,10 @@ mod tests {
         assert_eq!(validate(&image.0), Err(Reason::ActionUnsupported));
         let image = frame(&masks, &[]);
         let luma = LumaFrame::new(&image.0);
-        assert_eq!(
+        assert!(matches!(
             find(&luma, &masks.retry, 14, Instant::now()),
             Err(Reason::BudgetExceeded)
-        );
+        ));
     }
 
     #[test]
