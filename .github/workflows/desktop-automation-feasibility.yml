@@ -1,0 +1,83 @@
+name: Desktop semantic automation feasibility
+on:
+  workflow_dispatch:
+  push:
+    branches: ['DavidLMS/desktop-integration-wave8']
+    paths: ['.github/workflows/desktop-automation-feasibility.yml', 'scripts/desktop-feasibility/**']
+permissions:
+  contents: read
+concurrency:
+  group: desktop-semantic-feasibility-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            platform: macos
+            architecture: aarch64
+            app: zed-desktop
+          - runner: ubuntu-24.04
+            platform: linux
+            architecture: x86_64
+            app: hermes-desktop
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Prepare macOS GUI session
+        if: runner.os == 'macOS'
+        run: bash canary/actions/prepare-desktop-macos.sh
+      - name: Install Linux desktop dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y cmake xvfb openbox x11-utils dbus-x11 at-spi2-core libx11-dev libxkbcommon-dev libxkbcommon-x11-dev libegl1 libvulkan1 mesa-vulkan-drivers libgtk-3-0 libnss3 libasound2t64 libgbm1 libsecret-1-0 libnotify4
+      - name: Build exact branch binaries
+        run: cargo build --locked -p nan-harness-desktop-check -p nan-harness-cli --bins
+      - name: Install pinned observation client
+        if: runner.os == 'Linux'
+        run: npm ci --prefix .github/web-check --ignore-scripts
+      - name: Freeze and install exact application
+        env:
+          FEASIBILITY_REAL_NANH: ${{ github.workspace }}/target/debug/nan-harness
+          FEASIBILITY_FACTS: ${{ runner.temp }}/semantic-feasibility/facts
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset NAN_API_KEY
+          mkdir -m 700 -p "$RUNNER_TEMP/semantic-feasibility/facts"
+          target/debug/nanh-desktop-check resolve --app '${{ matrix.app }}' --model qwen3.6 --artifacts "$RUNNER_TEMP/semantic-feasibility/artifacts" --output "$RUNNER_TEMP/semantic-feasibility/frozen.json"
+          python3 canary/actions/desktop_install.py --manifest "$RUNNER_TEMP/semantic-feasibility/frozen.json" --artifacts "$RUNNER_TEMP/semantic-feasibility/artifacts" --platform '${{ matrix.platform }}' --architecture '${{ matrix.architecture }}' --model qwen3.6 --harnesses '${{ matrix.app }}'
+          nanh="$FEASIBILITY_REAL_NANH"
+          if [[ "$RUNNER_OS" == Linux ]]; then nanh="$GITHUB_WORKSPACE/scripts/desktop-feasibility/nanh-shim.py"; fi
+          target/debug/nanh-desktop-check prepare --app '${{ matrix.app }}' --model qwen3.6 --yes --non-interactive --ephemeral --nan-harness "$nanh" --frozen "$RUNNER_TEMP/semantic-feasibility/frozen.json" --artifacts "$RUNNER_TEMP/semantic-feasibility/artifacts" --output "$RUNNER_TEMP/semantic-feasibility/prepared.json"
+      - name: Run bounded deterministic measurement
+        shell: bash
+        env:
+          FEASIBILITY_REAL_NANH: ${{ github.workspace }}/target/debug/nan-harness
+          FEASIBILITY_FACTS: ${{ runner.temp }}/semantic-feasibility/facts
+        run: |
+          set -euo pipefail
+          unset NAN_API_KEY
+          nanh="$FEASIBILITY_REAL_NANH"
+          if [[ "$RUNNER_OS" == Linux ]]; then nanh="$GITHUB_WORKSPACE/scripts/desktop-feasibility/nanh-shim.py"; fi
+          bash scripts/run-desktop-check-session.sh target/debug/nanh-desktop-check run --app '${{ matrix.app }}' --model qwen3.6 --yes --non-interactive --ephemeral --mode deterministic --session github-hosted --prepared "$RUNNER_TEMP/semantic-feasibility/prepared.json" --output "$RUNNER_TEMP/semantic-feasibility/report.json"
+      - name: Reduce experiment evidence
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f "$RUNNER_TEMP/semantic-feasibility/report.json" ]]; then target/debug/nanh-desktop-check validate-report "$RUNNER_TEMP/semantic-feasibility/report.json"; fi
+          python3 scripts/desktop-feasibility/summarize.py --report "$RUNNER_TEMP/semantic-feasibility/report.json" --frozen "$RUNNER_TEMP/semantic-feasibility/frozen.json" --real-nanh "$GITHUB_WORKSPACE/target/debug/nan-harness" --checker "$GITHUB_WORKSPACE/target/debug/nanh-desktop-check" --shim scripts/desktop-feasibility/nanh-shim.py --facts "$RUNNER_TEMP/semantic-feasibility/facts" --output "$RUNNER_TEMP/semantic-feasibility/summary.json" --source-sha "$GITHUB_SHA" --platform '${{ matrix.platform }}-${{ matrix.architecture }}' --app '${{ matrix.app }}'
+          cat "$RUNNER_TEMP/semantic-feasibility/summary.json" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: semantic-feasibility-${{ matrix.app }}-${{ matrix.platform }}
+          path: ${{ runner.temp }}/semantic-feasibility/summary.json
+          if-no-files-found: error
+          retention-days: 30
