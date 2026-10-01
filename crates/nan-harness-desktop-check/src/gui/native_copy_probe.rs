@@ -1,6 +1,6 @@
 //! Hosted-only native clipboard readback. No OCR or AX text reads.
 
-use super::{Gui, WAIT, clipboard, map_error, primary_modifier};
+use super::{ComposerErrorCategory, Gui, WAIT, clipboard, map_error, primary_modifier};
 use crate::provider::ProviderGate;
 use crate::report::{CheckStep, ProbeResult, Reason};
 use nan_harness_private_fs::open_private_new;
@@ -38,6 +38,10 @@ struct Facts {
     ocr_used: bool,
     ax_text_used: bool,
     stage: &'static str,
+    substage: &'static str,
+    guard_kind: Option<&'static str>,
+    guard_category: Option<ComposerErrorCategory>,
+    settle_observations: u8,
     blocker: Option<Reason>,
     trust_control_count: Option<usize>,
     panel_control_count: Option<usize>,
@@ -55,6 +59,19 @@ fn nonce() -> Result<String, Reason> {
 
 fn exact_readback(actual: &str, expected: &str, sentinel: &str) -> bool {
     actual == expected && actual != sentinel && !expected.is_empty()
+}
+
+fn observe_settling(
+    mut guard: impl FnMut() -> Result<(), Reason>,
+    mut wait: impl FnMut(),
+) -> Result<(), Reason> {
+    for observation in 0..3 {
+        if observation > 0 {
+            wait();
+        }
+        guard()?;
+    }
+    Ok(())
 }
 
 fn control_count(control: &xa11y::Locator) -> Result<usize, Reason> {
@@ -81,6 +98,10 @@ impl Gui {
             ocr_used: false,
             ax_text_used: false,
             stage: "trust",
+            substage: "trust-query",
+            guard_kind: None,
+            guard_category: None,
+            settle_observations: 0,
             blocker: None,
             trust_control_count: None,
             panel_control_count: None,
@@ -108,15 +129,50 @@ impl Gui {
         cleanup.and(outcome)
     }
 
-    fn guarded_chord(&self, character: char, modifiers: &[xa11y::Key]) -> Result<(), Reason> {
-        self.visual.guard()?;
-        self.require_owned_foreground()?;
+    fn native_copy_guard(&self, facts: &mut Facts, substage: &'static str) -> Result<(), Reason> {
+        facts.substage = substage;
+        self.visual.guard_composer().map_err(|(reason, category)| {
+            facts.guard_kind = Some("native-window");
+            facts.guard_category = Some(category);
+            reason
+        })?;
+        self.require_owned_foreground().inspect_err(|&reason| {
+            facts.guard_kind = Some("direct-foreground");
+            facts.guard_category = Some(match reason {
+                Reason::FocusChanged => ComposerErrorCategory::FocusChanged,
+                _ => ComposerErrorCategory::Other,
+            });
+        })
+    }
+
+    fn guarded_chord(
+        &self,
+        facts: &mut Facts,
+        character: char,
+        modifiers: &[xa11y::Key],
+        before: &'static str,
+        after: &'static str,
+    ) -> Result<(), Reason> {
+        self.native_copy_guard(facts, before)?;
         xa11y::input_sim()
             .map_err(map_error)?
             .keyboard()
             .chord(xa11y::Key::Char(character), modifiers)
             .map_err(map_error)?;
-        self.visual.guard()
+        self.native_copy_guard(facts, after)
+    }
+
+    fn settle_native_copy_panel(&self, facts: &mut Facts) -> Result<(), Reason> {
+        // CGEventPost does not acknowledge application delivery. Observe owned
+        // foreground across a bounded interval; never recover a rejected guard.
+        observe_settling(
+            || {
+                self.native_copy_guard(facts, "panel-settle")?;
+                facts.settle_observations += 1;
+                Ok(())
+            },
+            || std::thread::sleep(Duration::from_millis(100)),
+        )
     }
 
     fn run_native_copy(
@@ -132,13 +188,15 @@ impl Gui {
         match count {
             0 => {}
             1 => {
-                self.visual.guard()?;
+                self.native_copy_guard(facts, "trust-before")?;
                 trust.press().map_err(map_error)?;
                 trust.wait_hidden(WAIT).map_err(map_error)?;
+                self.native_copy_guard(facts, "trust-after")?;
             }
             _ => return Err(Reason::SelectorNotMatched),
         }
         facts.stage = "panel";
+        facts.substage = "panel-query";
         let panel = app.locator("*[name=\"Agent Panel\"]");
         let count = control_count(&panel)?;
         facts.panel_control_count = Some(count);
@@ -147,18 +205,24 @@ impl Gui {
         }
         // The private profile binds the global workspace NewThread handler,
         // which creates the draft and focuses its panel regardless of prior focus.
-        self.guarded_chord('n', &[xa11y::Key::Ctrl, xa11y::Key::Alt])?;
+        self.guarded_chord(
+            facts,
+            'n',
+            &[xa11y::Key::Ctrl, xa11y::Key::Alt],
+            "new-thread-before",
+            "new-thread-after",
+        )?;
+        self.settle_native_copy_panel(facts)?;
         self.native_copy_input(facts)?;
         facts.stage = "submit";
         // Collapse selection before the one source-bound MessageEditor Chat action.
-        self.visual.guard()?;
+        self.native_copy_guard(facts, "collapse-selection-before")?;
         xa11y::input_sim()
             .map_err(map_error)?
             .keyboard()
             .press(xa11y::Key::ArrowRight)
             .map_err(map_error)?;
-        self.require_owned_foreground()?;
-        self.visual.guard()?;
+        self.native_copy_guard(facts, "submit-before")?;
         xa11y::input_sim()
             .map_err(map_error)?
             .keyboard()
@@ -175,20 +239,39 @@ impl Gui {
             "Check this connection. Read read-target.txt. Input nonce {}.",
             nonce()?
         ));
-        self.guarded_chord('a', &[primary_modifier()])?;
-        self.visual.guard()?;
-        self.require_owned_foreground()?;
+        self.guarded_chord(
+            facts,
+            'a',
+            &[primary_modifier()],
+            "select-all-before",
+            "select-all-after",
+        )?;
+        self.native_copy_guard(facts, "type-before")?;
         xa11y::input_sim()
             .map_err(map_error)?
             .keyboard()
             .type_text(&prompt)
             .map_err(map_error)?;
         facts.input.entered = true;
+        self.native_copy_guard(facts, "type-after")?;
         let sentinel = Zeroizing::new(format!("clipboard-sentinel-{}", nonce()?));
+        facts.substage = "input-sentinel-write";
         clipboard::write(&sentinel)?;
-        self.guarded_chord('a', &[primary_modifier()])?;
-        self.guarded_chord('c', &[primary_modifier()])?;
-        facts.input.clipboard_verified = self.wait_native_copy(&prompt, &sentinel)?;
+        self.guarded_chord(
+            facts,
+            'a',
+            &[primary_modifier()],
+            "copy-select-all-before",
+            "copy-select-all-after",
+        )?;
+        self.guarded_chord(
+            facts,
+            'c',
+            &[primary_modifier()],
+            "input-copy-before",
+            "input-copy-after",
+        )?;
+        facts.input.clipboard_verified = self.wait_native_copy(facts, &prompt, &sentinel)?;
         if facts.input.clipboard_verified {
             Ok(())
         } else {
@@ -202,7 +285,7 @@ impl Gui {
         let control = app.locator(RESPONSE_COPY);
         let deadline = Instant::now() + Duration::from_secs(45);
         loop {
-            self.visual.guard()?;
+            self.native_copy_guard(facts, "response-control-query")?;
             let count = control_count(&control)?;
             facts.response_control_count = Some(count);
             if count == 1 {
@@ -215,26 +298,33 @@ impl Gui {
         }
         control.wait_visible(WAIT).map_err(map_error)?;
         let sentinel = Zeroizing::new(format!("response-sentinel-{}", nonce()?));
+        facts.substage = "response-sentinel-write";
         clipboard::write(&sentinel)?;
-        self.visual.guard()?;
-        self.require_owned_foreground()?;
+        self.native_copy_guard(facts, "response-copy-before")?;
         control.press().map_err(map_error)?;
         facts.response.copy_action = true;
+        self.native_copy_guard(facts, "response-copy-after")?;
         facts.stage = "response-readback";
-        facts.response.clipboard_verified = self.wait_native_copy(marker, &sentinel)?;
+        facts.response.clipboard_verified = self.wait_native_copy(facts, marker, &sentinel)?;
         if !facts.response.clipboard_verified {
             return Err(Reason::ResponseMismatch);
         }
         facts.stage = "completed";
+        facts.substage = "completed";
         Ok(())
     }
 
-    fn wait_native_copy(&self, expected: &str, sentinel: &str) -> Result<bool, Reason> {
+    fn wait_native_copy(
+        &self,
+        facts: &mut Facts,
+        expected: &str,
+        sentinel: &str,
+    ) -> Result<bool, Reason> {
         let deadline = Instant::now() + WAIT;
         loop {
-            self.visual.guard()?;
+            self.native_copy_guard(facts, "clipboard-read-before")?;
             let copied = clipboard::read()?;
-            self.visual.guard()?;
+            self.native_copy_guard(facts, "clipboard-read-after")?;
             if exact_readback(&copied, expected, sentinel) {
                 return Ok(true);
             }
@@ -249,6 +339,38 @@ impl Gui {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn settling_stops_on_first_rejected_ownership_without_recovery() {
+        let mut observations = 0;
+        let mut waits = 0;
+        let outcome = observe_settling(
+            || {
+                observations += 1;
+                if observations == 2 {
+                    Err(Reason::FocusChanged)
+                } else {
+                    Ok(())
+                }
+            },
+            || waits += 1,
+        );
+        assert_eq!(outcome, Err(Reason::FocusChanged));
+        assert_eq!((observations, waits), (2, 1));
+        observations = 0;
+        waits = 0;
+        assert_eq!(
+            observe_settling(
+                || {
+                    observations += 1;
+                    Ok(())
+                },
+                || waits += 1
+            ),
+            Ok(())
+        );
+        assert_eq!((observations, waits), (3, 2));
+    }
 
     #[test]
     fn exact_copy_rejects_stale_partial_and_other_response_payloads() {

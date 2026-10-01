@@ -39,6 +39,23 @@ class ShimLifecycle(unittest.TestCase):
             self.assertEqual(spawn.call_args.args[0], ['/synthetic/nanh', *args])
             self.assertTrue((Path(facts) / 'startup-123.json').exists())
 
+    def test_scoped_namespace_uses_upstream_suid_disable_only(self):
+        args = ['hermes-desktop', '--provider-base-url', 'http://127.0.0.1']
+        for policy, expected in [('default', False), ('scoped-apparmor-userns', True)]:
+            child = Mock(pid=123, stderr=io.BytesIO(b''), poll=Mock(return_value=1), wait=Mock(return_value=1))
+            with tempfile.TemporaryDirectory() as facts, \
+                 patch.dict(os.environ, {'FEASIBILITY_REAL_NANH': '/synthetic/nanh',
+                     'FEASIBILITY_HERMES_CDP': 'disabled', 'FEASIBILITY_FACTS': facts,
+                     'FEASIBILITY_HERMES_NAMESPACE_POLICY': policy}), \
+                 patch.object(sys, 'argv', [str(SHIM), *args]), \
+                 patch('subprocess.Popen', return_value=child) as spawn, patch('signal.signal'):
+                with self.assertRaises(SystemExit):
+                    self.invoke(args)
+                command = spawn.call_args.args[0]
+                self.assertEqual('--disable-setuid-sandbox' in command, expected)
+                self.assertNotIn('--no-sandbox', command)
+                self.assertEqual(command.count('--'), int(expected))
+
     def test_observer_failure_terminates_owned_child(self):
         child = Mock(pid=123, stderr=io.BytesIO(b""), poll=Mock(return_value=None))
         with tempfile.TemporaryDirectory() as facts, \

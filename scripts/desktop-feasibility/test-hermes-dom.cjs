@@ -11,6 +11,7 @@ async function trial(overrides, connectionOverrides = {}, scenario = null) {
   let attaches = 0;
   let submits = 0;
   let fills = 0;
+  let pageEnumerations = 0;
   let value = '';
   const rendererUrl = 'file:///synthetic/resources/app.asar.unpacked/dist/index.html';
   const composer = {
@@ -36,10 +37,15 @@ async function trial(overrides, connectionOverrides = {}, scenario = null) {
       return { targetInfo: { type: 'page', url: rendererUrl } };
     } }; } }; },
     async evaluate() { return true; },
-    locator(selector) { return selector === '[data-role="assistant"]:visible' ? assistant : composer; },
+    locator(selector) {
+      if (selector === '[data-role="assistant"]:visible') return assistant;
+      assert.equal(selector, '[data-slot="composer-root"] [role="textbox"][contenteditable="true"]:visible:not([aria-disabled="true"])');
+      return composer;
+    },
   };
   const browser = { version() { return '140.0.7339.80'; },
-    contexts() { return [{ pages() { return [page]; } }]; } };
+    contexts() { return [{ pages() { pageEnumerations++;
+      return scenario === 'delayed' && pageEnumerations === 1 ? [] : [page]; } }]; } };
   const mockFs = {
     readFileSync(path) {
       if (path === '/request') return JSON.stringify(request);
@@ -70,16 +76,16 @@ async function trial(overrides, connectionOverrides = {}, scenario = null) {
   });
   assert.equal(attaches, scenario ? 1 : 0);
   const facts = JSON.parse(output.get('/output'));
-  assert.equal(facts.inputSubmitted, scenario === 'happy');
-  assert.equal(facts.responseVerified, scenario === 'happy');
+  assert.equal(facts.inputSubmitted, ['happy', 'delayed'].includes(scenario));
+  assert.equal(facts.responseVerified, ['happy', 'delayed'].includes(scenario));
   assert.equal(facts.attached, Boolean(scenario));
-  assert.equal(submits, scenario === 'happy' ? 1 : 0);
+  assert.equal(submits, ['happy', 'delayed'].includes(scenario) ? 1 : 0);
   if (scenario === 'stale' || scenario === 'duplicate') assert.equal(fills, 0);
-  if (scenario === 'mismatch' || scenario === 'happy') assert.equal(fills, 1);
+  if (scenario === 'mismatch' || ['happy', 'delayed'].includes(scenario)) assert.equal(fills, 1);
   if (scenario) {
     assert.equal(facts.endpointOwned, true);
     assert.equal(facts.targetVerified, true);
-    assert.equal(facts.inputReadback, scenario === 'happy');
+    assert.equal(facts.inputReadback, ['happy', 'delayed'].includes(scenario));
   }
   assert(!output.get('/output').includes(request.expectedMarker));
   return facts;
@@ -96,5 +102,7 @@ async function trial(overrides, connectionOverrides = {}, scenario = null) {
   assert.equal(happy.errorCategory, null);
   assert.equal(happy.uniqueComposer, true);
   assert.equal(happy.syntheticTextPresent, true);
-  console.log('Hermes DOM guards and submission: 8 synthetic cases passed');
+  const delayed = await trial({ timeoutMs: 500 }, {}, 'delayed');
+  assert.equal(delayed.responseVerified, true);
+  console.log('Hermes DOM guards and submission: 9 synthetic cases passed');
 })().catch(error => { console.error(error.message); process.exitCode = 1; });

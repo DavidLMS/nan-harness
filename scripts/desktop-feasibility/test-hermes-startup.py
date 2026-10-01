@@ -6,6 +6,8 @@ from pathlib import Path
 import runpy
 import tempfile
 import unittest
+import os
+from unittest.mock import patch
 
 MODULE = runpy.run_path(str(Path(__file__).with_name('hermes-startup.py')))
 Capture, classify, LIMIT = MODULE['Capture'], MODULE['classify'], MODULE['CAPTURE_LIMIT']
@@ -23,6 +25,17 @@ class StartupTests(unittest.TestCase):
         for expected, data in cases.items():
             self.assertEqual(classify(data), expected)
         self.assertEqual(classify(b'childExit signal 5 private prompt'), 'unclassified')
+
+    def test_namespace_policy_is_closed(self):
+        for policy, expected in [('scoped-apparmor-userns', 'scoped-apparmor-userns'),
+                                 ('private unknown value', 'default')]:
+            with tempfile.TemporaryDirectory() as root, patch.dict(os.environ, {'FEASIBILITY_HERMES_NAMESPACE_POLICY': policy}):
+                capture = Capture(io.BytesIO(b'Missing X server'))
+                capture.start()
+                output = Path(root) / 'facts.json'
+                capture.save(output, 1)
+                self.assertEqual(json.loads(output.read_text())['namespacePolicy'], expected)
+                self.assertNotIn('private unknown value', output.read_text())
 
     def test_drains_after_budget_and_never_serializes_private_bytes(self):
         private = b'PRIVATE_SYNTHETIC_VALUE'

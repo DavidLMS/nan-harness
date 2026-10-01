@@ -46,7 +46,11 @@ class Capture:
 
     def save(self, destination, exit_code):
         self.thread.join(timeout=2)
-        facts = {'schemaVersion': 1, 'mechanism': 'hermes-startup',
+        policy = os.environ.get('FEASIBILITY_HERMES_NAMESPACE_POLICY', 'default')
+        if policy not in ('default', 'scoped-apparmor-userns'):
+            policy = 'default'
+        facts = {'schemaVersion': 1, 'mechanism': 'hermes-startup', 'namespacePolicy': policy,
+                 'disableSetuidSandbox': policy == 'scoped-apparmor-userns',
                  'startupCategory': classify(bytes(self.data)) if self.complete and self.total <= CAPTURE_LIMIT else 'unclassified',
                  'stderrPresent': self.total > 0, 'captureTruncated': self.total > CAPTURE_LIMIT,
                  'drainComplete': self.complete, 'launcherExitCode': exit_code,

@@ -1,5 +1,9 @@
 """Validate only closed native-copy, startup and DOM observations for publication."""
 import re
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "canary/actions"))
+from desktop_diagnostics import CATEGORIES
 
 DOM_ERRORS = set('unclassified invalid-request launcher-unowned endpoint-unowned target-ambiguous target-invalid composer-ambiguous stale-response input-mismatch response-timeout attachment-or-action-failed'.split())
 STARTUP_CATEGORIES = set('sandbox-helper namespace-denied root-without-sandbox display-unavailable missing-library gpu-fatal native-module unclassified'.split())
@@ -16,12 +20,19 @@ def flags(value, keys):
 
 
 def native_copy(value, reasons):
-    shape(value, 'schemaVersion mechanism experimentOnly ocrUsed axTextUsed navigation stage blocker trustControlCount panelControlCount responseControlCount clipboardCleanup input response', 'zed-native-copy')
+    shape(value, 'schemaVersion mechanism experimentOnly ocrUsed axTextUsed navigation stage substage guardKind guardCategory settleObservations blocker trustControlCount panelControlCount responseControlCount clipboardCleanup input response', 'zed-native-copy')
     flags(value, 'experimentOnly ocrUsed axTextUsed')
     if not value['experimentOnly'] or value['ocrUsed'] or value['axTextUsed'] or value['navigation'] != 'private-keymap-new-thread':
         raise ValueError('invalid native-copy method')
     if value['stage'] not in {'trust', 'panel', 'input', 'submit', 'response-control', 'response-readback', 'completed'} or value['clipboardCleanup'] not in {'passed', 'failed', 'not-run'}:
         raise ValueError('invalid native-copy stage')
+    substages = set('trust-query trust-before trust-after panel-query new-thread-before new-thread-after panel-settle select-all-before select-all-after type-before type-after input-sentinel-write copy-select-all-before copy-select-all-after input-copy-before input-copy-after collapse-selection-before submit-before response-control-query response-sentinel-write response-copy-before response-copy-after clipboard-read-before clipboard-read-after completed'.split())
+    if value['substage'] not in substages or value['guardKind'] not in {None, 'native-window', 'direct-foreground'}:
+        raise ValueError('invalid copy boundary')
+    if value['guardCategory'] is not None and value['guardCategory'] not in CATEGORIES:
+        raise ValueError('invalid copy guard category')
+    if (value['guardKind'] is None) != (value['guardCategory'] is None) or type(value['settleObservations']) is not int or not 0 <= value['settleObservations'] <= 3:
+        raise ValueError('invalid copy guard observation')
     if value['blocker'] is not None and value['blocker'] not in reasons:
         raise ValueError('invalid native-copy blocker')
     for key in ('trustControlCount', 'panelControlCount', 'responseControlCount'):
@@ -40,8 +51,10 @@ def native_copy(value, reasons):
 
 
 def startup(value):
-    shape(value, 'schemaVersion mechanism startupCategory stderrPresent captureTruncated drainComplete launcherExitCode effectiveUserIsRoot apparmor_restrict_unprivileged_userns unprivileged_userns_clone sandboxHelperPresent sandboxHelperOwnerIsRoot sandboxHelperModeIs4755', 'hermes-startup')
-    flags(value, 'stderrPresent captureTruncated drainComplete')
+    shape(value, 'schemaVersion mechanism startupCategory namespacePolicy disableSetuidSandbox stderrPresent captureTruncated drainComplete launcherExitCode effectiveUserIsRoot apparmor_restrict_unprivileged_userns unprivileged_userns_clone sandboxHelperPresent sandboxHelperOwnerIsRoot sandboxHelperModeIs4755', 'hermes-startup')
+    flags(value, 'stderrPresent captureTruncated drainComplete disableSetuidSandbox')
+    if value['namespacePolicy'] not in {'default', 'scoped-apparmor-userns'} or value['disableSetuidSandbox'] and value['namespacePolicy'] != 'scoped-apparmor-userns':
+        raise ValueError('invalid namespace experiment policy')
     if value['startupCategory'] not in STARTUP_CATEGORIES:
         raise ValueError('invalid startup category')
     if (value['captureTruncated'] or not value['drainComplete']) and value['startupCategory'] != 'unclassified':

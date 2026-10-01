@@ -79,10 +79,16 @@ async function driveDom() {
   facts.attached = true;
   const version = browser.version();
   if (/^(?:Chrome\/)?[0-9]+(?:\.[0-9]+){1,3}$/.test(version)) facts.observedRuntimeVersion = version.replace(/^Chrome\//, '');
-  const pages = browser.contexts().flatMap(context => context.pages())
+  let pages = [];
+  while (Date.now() < deadline) {
+    pages = browser.contexts().flatMap(context => context.pages())
     .filter(page => { try { const url = new URL(page.url());
       return url.protocol === 'file:' && /\/resources\/app\.asar(?:\.unpacked)?\/dist\/index\.html$/.test(decodeURIComponent(url.pathname));
     } catch { return false; } });
+    if (pages.length > 0) break;
+    if (!ownedEndpoint()) break;
+    await delay(100);
+  }
   if (pages.length !== 1 || !ownedEndpoint()) {
     facts.errorCategory = 'target-ambiguous'; saveFacts(); return;
   }
@@ -94,9 +100,9 @@ async function driveDom() {
   }
   facts.targetVerified = true;
   // Select only a single visible editable composer, never set application stores.
-  while (Date.now() < deadline && !(await page.evaluate(() => { const fields = [...document.querySelectorAll('textarea,[contenteditable="true"],input[type="text"]')]; return fields.filter(e => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 && !e.disabled && !e.readOnly; }).length === 1; })))
+  while (Date.now() < deadline && !(await page.evaluate(() => { const fields = [...document.querySelectorAll('[data-slot="composer-root"] [role="textbox"][contenteditable="true"]:not([aria-disabled="true"])')]; return fields.filter(e => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 && !e.disabled && !e.readOnly; }).length === 1; })))
     await delay(100);
-  const candidates = page.locator('textarea:visible,[contenteditable="true"]:visible,input[type="text"]:visible');
+  const candidates = page.locator('[data-slot="composer-root"] [role="textbox"][contenteditable="true"]:visible:not([aria-disabled="true"])');
   if (await candidates.count() !== 1 || !await candidates.isEditable()) {
     facts.errorCategory = 'composer-ambiguous'; saveFacts(); return;
   }

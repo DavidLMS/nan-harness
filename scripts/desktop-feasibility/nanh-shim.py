@@ -17,11 +17,14 @@ if not args or args[0] != 'hermes-desktop' or '--provider-base-url' not in args:
     os.execv(real, [real, *args])
 cdp = os.environ.get('FEASIBILITY_HERMES_CDP', 'enabled') != 'disabled'
 command = [real, *args]
+scoped_namespace = os.environ.get('FEASIBILITY_HERMES_NAMESPACE_POLICY') == 'scoped-apparmor-userns'
+if scoped_namespace:
+    command.extend([*([] if '--' in args else ['--']), '--disable-setuid-sandbox'])
 if cdp:
     with socket.socket() as listener:
         listener.bind(('127.0.0.1', 0))
         port = listener.getsockname()[1]
-    delimiter = [] if '--' in args else ['--']
+    delimiter = [] if '--' in command else ['--']
     command.extend([*delimiter, f'--remote-debugging-port={port}',
                     '--remote-debugging-address=127.0.0.1'])
 child = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
