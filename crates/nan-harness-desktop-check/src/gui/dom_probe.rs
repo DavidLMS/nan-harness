@@ -152,8 +152,9 @@ impl Gui {
         result: &mut ProbeResult,
         provider: &ProviderGate,
     ) -> Result<(), Reason> {
+        // DOM targets are owned through native window and socket ancestry proofs.
+        // Requiring an AX foreground provider would defeat this renderer adapter.
         self.visual.guard()?;
-        self.require_owned_foreground()?;
         let driver = std::env::var_os("FEASIBILITY_HERMES_DOM_DRIVER")
             .map(std::path::PathBuf::from)
             .ok_or(Reason::IsolationUnavailable)?;
@@ -183,7 +184,7 @@ impl Gui {
         std::fs::remove_file(&request_path).map_err(|_| Reason::IsolationUnavailable)?;
         outcome?;
         let mut facts = read_facts(&output_path)?;
-        facts.response.provider_response_verified = provider.response_verified();
+        facts.response.provider_response_verified = provider.fixture_response_verified();
         let bytes = serde_json::to_vec(&facts).map_err(|_| Reason::IsolationUnavailable)?;
         let final_path = output_path.with_extension("closed");
         open_private_new(&final_path)

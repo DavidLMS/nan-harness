@@ -36,6 +36,8 @@ class ExperimentLifecycle(unittest.TestCase):
             driven = module.experiment_environment('hermes-desktop', 'playwright-dom', Path('/b'), Path('/nanh'))
             zed = module.experiment_environment('zed-desktop', 'native-copy', Path('/c'), Path('/nanh'))
         self.assertNotIn('FEASIBILITY_HERMES_DOM_INPUT', baseline)
+        self.assertEqual(baseline['FEASIBILITY_HERMES_STARTUP_ONLY'], '1')
+        self.assertNotIn('FEASIBILITY_HERMES_STARTUP_ONLY', driven)
         self.assertEqual(baseline['FEASIBILITY_HERMES_CDP'], 'disabled')
         self.assertEqual(driven['FEASIBILITY_HERMES_DOM_INPUT'], '1')
         self.assertNotIn('FEASIBILITY_HERMES_CDP', zed)

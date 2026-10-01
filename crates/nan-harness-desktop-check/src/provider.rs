@@ -37,6 +37,8 @@ struct GateState {
     tool_marker: String,
     tool_verified: AtomicBool,
     response_verified: AtomicBool,
+    fixture_marker: Mutex<Option<String>>,
+    fixture_response_verified: AtomicBool,
 }
 
 pub(crate) struct ProviderGate {
@@ -73,6 +75,8 @@ impl ProviderGate {
             tool_marker: marker.into(),
             tool_verified: AtomicBool::new(false),
             response_verified: AtomicBool::new(false),
+            fixture_marker: Mutex::new(None),
+            fixture_response_verified: AtomicBool::new(false),
         });
         let router = Router::new()
             .route("/v1/models", get(models))
@@ -115,6 +119,26 @@ impl ProviderGate {
 
     pub(crate) fn response_verified(&self) -> bool {
         self.state.response_verified.load(Ordering::SeqCst)
+    }
+
+    pub(crate) fn expect_fixture_response(&self, marker: &str) -> Result<(), ()> {
+        if self.state.live || marker.is_empty() || marker.len() > 2048 {
+            return Err(());
+        }
+        let mut expected = self
+            .state
+            .fixture_marker
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if expected.is_some() {
+            return Err(());
+        }
+        *expected = Some(marker.into());
+        Ok(())
+    }
+
+    pub(crate) fn fixture_response_verified(&self) -> bool {
+        self.state.fixture_response_verified.load(Ordering::SeqCst)
     }
 
     pub(crate) fn fail_next_scenario(&self, enabled: bool) {
@@ -291,6 +315,23 @@ async fn forward(state: &GateState, body: Option<Value>) -> Response {
         )
     {
         state.response_verified.store(true, Ordering::SeqCst);
+    }
+    if generation && !state.live && status.is_success() {
+        let expected = state
+            .fixture_marker
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if expected.as_ref().is_some_and(|marker| {
+            completed_response(
+                &bytes,
+                content_type.as_ref().and_then(|value| value.to_str().ok()),
+                marker,
+            )
+        }) {
+            state
+                .fixture_response_verified
+                .store(true, Ordering::SeqCst);
+        }
     }
     builder
         .body(Body::from(bytes))
@@ -583,6 +624,100 @@ mod tests {
 
     fn final_json() -> String {
         json!({"choices":[{"index":0,"message":{"role":"assistant","content":"NAN_CHECK_FINAL:marker"},"finish_reason":"stop"}]}).to_string()
+    }
+
+    #[tokio::test]
+    async fn fixture_oracle_requires_authenticated_completed_generation() {
+        let unfinished = "data: {\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"NAN_CHECK_FINAL:marker\"},\"finish_reason\":\"stop\"}]}\n\n";
+        for (status, mime, body, valid) in [
+            (StatusCode::OK, "application/json", final_json(), true),
+            (
+                StatusCode::OK,
+                "application/json",
+                final_json().replace("FINAL:marker", "FINAL:wrong"),
+                false,
+            ),
+            (
+                StatusCode::OK,
+                "application/json",
+                final_json().replace("stop", "length"),
+                false,
+            ),
+            (
+                StatusCode::OK,
+                "text/event-stream",
+                unfinished.to_owned(),
+                false,
+            ),
+            (
+                StatusCode::OK,
+                "text/event-stream",
+                format!("{unfinished}data: [DONE]\n\n"),
+                true,
+            ),
+            (
+                StatusCode::BAD_GATEWAY,
+                "application/json",
+                final_json(),
+                false,
+            ),
+        ] {
+            let (url, task) = upstream(status, mime, body).await;
+            let gate =
+                ProviderGate::start(&url, Zeroizing::new("private-key".into()), false, "marker")
+                    .await
+                    .unwrap();
+            assert!(
+                gate.expect_fixture_response("NAN_CHECK_FINAL:marker")
+                    .is_ok()
+            );
+            assert!(gate.expect_fixture_response("another").is_err());
+            let client = reqwest::Client::new();
+            let _ = client
+                .get(format!("{}/models", gate.base_url))
+                .bearer_auth(gate.session_token())
+                .send()
+                .await
+                .unwrap();
+            assert!(!gate.fixture_response_verified());
+            let unauthorized = client
+                .post(format!("{}/chat/completions", gate.base_url))
+                .json(&json!({"messages":[]}))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+            assert!(!gate.fixture_response_verified());
+            let _ = client
+                .post(format!("{}/chat/completions", gate.base_url))
+                .bearer_auth(gate.session_token())
+                .json(&json!({"messages":[]}))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(gate.fixture_response_verified(), valid);
+            assert!(!gate.response_verified());
+            assert!(!gate.tool_verified());
+            task.abort();
+        }
+    }
+
+    #[tokio::test]
+    async fn fixture_expectation_refuses_live_and_invalid_markers() {
+        for live in [false, true] {
+            let gate = ProviderGate::start(
+                "http://127.0.0.1:1/v1",
+                Zeroizing::new("key".into()),
+                live,
+                "marker",
+            )
+            .await
+            .unwrap();
+            assert!(gate.expect_fixture_response("").is_err());
+            assert!(gate.expect_fixture_response(&"x".repeat(2049)).is_err());
+            assert_eq!(gate.expect_fixture_response("fixture").is_ok(), !live);
+            assert!(!gate.fixture_response_verified());
+        }
     }
 
     #[tokio::test]

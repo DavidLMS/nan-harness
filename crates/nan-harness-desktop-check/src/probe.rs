@@ -705,6 +705,10 @@ async fn scenario(
         .await
         .map_err(|_| Reason::ProviderFailed)?;
     let gate = start_provider_gate(spec, &inventory, &marker).await?;
+    if experiment.is_some() {
+        gate.expect_fixture_response(&final_marker)
+            .map_err(|()| Reason::IsolationUnavailable)?;
+    }
     let mut process = launch(spec, &gate).map_err(|(reason, failure)| {
         launch_observation.failure = Some(failure);
         reason
@@ -796,6 +800,7 @@ enum HostedExperiment {
     Accessibility(PathBuf),
     NativeCopy(PathBuf),
     HermesDom(PathBuf),
+    HermesStartup,
 }
 
 impl HostedExperiment {
@@ -805,6 +810,7 @@ impl HostedExperiment {
             strict_accessibility_directory(spec)?.map(Self::Accessibility),
             native_copy_directory(spec)?.map(Self::NativeCopy),
             hermes_dom_directory(spec)?.map(Self::HermesDom),
+            hermes_startup_opt_in(spec)?.map(|()| Self::HermesStartup),
         ]
         .into_iter()
         .flatten()
@@ -825,6 +831,7 @@ impl HostedExperiment {
         gate: &ProviderGate,
     ) -> Result<(), Reason> {
         match self {
+            Self::HermesStartup => gui.observe_hosted_startup(),
             Self::Accessibility(directory) => {
                 gui.probe_accessibility(directory, marker, result, gate)
             }
@@ -838,6 +845,22 @@ impl HostedExperiment {
             ),
         }
     }
+}
+
+fn hermes_startup_opt_in(spec: &ProbeSpec) -> Result<Option<()>, Reason> {
+    let Some(value) = std::env::var_os("FEASIBILITY_HERMES_STARTUP_ONLY") else {
+        return Ok(None);
+    };
+    if value != "1"
+        || spec.live
+        || spec.kind != DesktopHarnessKind::Hermes
+        || !cfg!(target_os = "linux")
+        || spec.session != crate::cli::SessionMode::GithubHosted
+        || !spec.session.available()
+    {
+        return Err(Reason::IsolationUnavailable);
+    }
+    Ok(Some(()))
 }
 
 fn hermes_dom_directory(spec: &ProbeSpec) -> Result<Option<PathBuf>, Reason> {

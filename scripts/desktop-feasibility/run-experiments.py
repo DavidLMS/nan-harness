@@ -27,10 +27,11 @@ def experiment_environment(app, condition, facts, real_nanh):
                  'FEASIBILITY_ZED_NATIVE_COPY_FACTS', 'FEASIBILITY_HERMES_DOM_FACTS',
                  'FEASIBILITY_HERMES_DOM_INPUT', 'FEASIBILITY_HERMES_CDP',
                  'FEASIBILITY_HERMES_DOM_DRIVER', 'FEASIBILITY_HERMES_STARTUP_CAPTURE',
-                 'FEASIBILITY_HERMES_EXECUTABLE'):
+                 'FEASIBILITY_HERMES_EXECUTABLE', 'FEASIBILITY_HERMES_STARTUP_ONLY'):
         environment.pop(name, None)
     if app != 'zed-desktop':
         environment.pop('FEASIBILITY_ZED_INPUT_DRIVER', None)
+        environment.pop('FEASIBILITY_ZED_INPUT_DRIVER_MODE', None)
     environment['FEASIBILITY_REAL_NANH'] = str(real_nanh)
     environment['FEASIBILITY_FACTS'] = str(facts)
     if condition == 'native-copy':
@@ -40,6 +41,8 @@ def experiment_environment(app, condition, facts, real_nanh):
     else:
         environment['FEASIBILITY_HERMES_CDP'] = 'enabled' if condition in ('with-cdp', 'playwright-dom') else 'disabled'
         environment['FEASIBILITY_HERMES_STARTUP_CAPTURE'] = '1'
+        if condition == 'startup-baseline':
+            environment['FEASIBILITY_HERMES_STARTUP_ONLY'] = '1'
         if condition == 'playwright-dom':
             environment['FEASIBILITY_HERMES_DOM_INPUT'] = '1'
             environment['FEASIBILITY_HERMES_DOM_FACTS'] = str(facts)

@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Synthetic startup classification, bounded drain and privacy tests."""
 import io
+import threading
+import time
 import json
 from pathlib import Path
 import runpy
@@ -25,6 +27,37 @@ class StartupTests(unittest.TestCase):
         for expected, data in cases.items():
             self.assertEqual(classify(data), expected)
         self.assertEqual(classify(b'childExit signal 5 private prompt'), 'unclassified')
+
+    def test_checkpoint_does_not_wait_for_stderr_and_final_overwrites(self):
+        released = threading.Event()
+        class DelayedStream:
+            def read(self, _size):
+                released.wait(timeout=2)
+                if getattr(self, 'sent', False):
+                    return b''
+                self.sent = True
+                return b'Missing X server PRIVATE_SYNTHETIC_VALUE'
+        capture = Capture(DelayedStream())
+        capture.start()
+        try:
+            with tempfile.TemporaryDirectory() as root:
+                output = Path(root) / 'facts.json'
+                started = time.monotonic()
+                capture.save(output, None, join_timeout=0)
+                self.assertLess(time.monotonic() - started, 0.5)
+                facts = json.loads(output.read_text())
+                self.assertFalse(facts['drainComplete'])
+                self.assertEqual(facts['startupCategory'], 'unclassified')
+                self.assertIsNone(facts['launcherExitCode'])
+                released.set()
+                capture.save(output, 1)
+                facts = json.loads(output.read_text())
+                self.assertTrue(facts['drainComplete'])
+                self.assertEqual(facts['startupCategory'], 'display-unavailable')
+                self.assertNotIn('PRIVATE_SYNTHETIC_VALUE', output.read_text())
+        finally:
+            released.set()
+            capture.thread.join(timeout=2)
 
     def test_namespace_policy_is_closed(self):
         for policy, expected in [('scoped-apparmor-userns', 'scoped-apparmor-userns'),

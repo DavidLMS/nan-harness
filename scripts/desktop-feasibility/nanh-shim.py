@@ -32,7 +32,9 @@ capture = Capture(child.stderr)
 capture.start()
 code = None
 observer = None
+startup_output = Path(os.environ['FEASIBILITY_FACTS']) / f'startup-{child.pid}.json'
 def interrupted(number, _frame):
+    capture.save(startup_output, code, join_timeout=0)
     raise SystemExit(128 + number)
 
 signal.signal(signal.SIGTERM, interrupted)
@@ -48,6 +50,7 @@ try:
                                  str(port), str(child.pid),
                                  str(Path(os.environ['FEASIBILITY_FACTS']) / f'{child.pid}.json')],
                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    capture.save(startup_output, code, join_timeout=0)
     code = child.wait()
 finally:
     if child.poll() is None:
@@ -63,5 +66,5 @@ finally:
         except subprocess.TimeoutExpired:
             observer.terminate()
             observer.wait(timeout=5)
-    capture.save(Path(os.environ['FEASIBILITY_FACTS']) / f'startup-{child.pid}.json', code)
+    capture.save(startup_output, code)
 sys.exit(code)

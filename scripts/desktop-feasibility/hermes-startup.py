@@ -44,8 +44,8 @@ class Capture:
     def start(self):
         self.thread.start()
 
-    def save(self, destination, exit_code):
-        self.thread.join(timeout=2)
+    def save(self, destination, exit_code, join_timeout=2):
+        self.thread.join(timeout=join_timeout)
         policy = os.environ.get('FEASIBILITY_HERMES_NAMESPACE_POLICY', 'default')
         if policy not in ('default', 'scoped-apparmor-userns'):
             policy = 'default'

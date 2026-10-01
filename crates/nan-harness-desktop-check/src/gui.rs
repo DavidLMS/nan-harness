@@ -241,6 +241,10 @@ impl Gui {
         })
     }
 
+    pub(crate) fn observe_hosted_startup(&self) -> Result<(), Reason> {
+        self.visual.guard()
+    }
+
     pub(crate) fn prepare_conversation(&self) -> Result<(), GuiFailure> {
         if self.kind != DesktopHarnessKind::Zed {
             return Ok(());

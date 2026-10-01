@@ -36,6 +36,8 @@ struct Facts {
     mechanism: &'static str,
     navigation: &'static str,
     keyboard_transport: &'static str,
+    clipboard_readback: Option<&'static str>,
+    clipboard_character_count: Option<usize>,
     experiment_only: bool,
     ocr_used: bool,
     ax_text_used: bool,
@@ -63,15 +65,21 @@ fn exact_readback(actual: &str, expected: &str, sentinel: &str) -> bool {
     actual == expected && actual != sentinel && !expected.is_empty()
 }
 
-fn neutral_type_text(executable: &Path, prompt: &str) -> Result<(), Reason> {
+fn neutral_input(executable: &Path, mode: &str, prompt: &str) -> Result<(), Reason> {
     if !executable.is_absolute()
         || !executable.is_file()
-        || prompt.is_empty()
         || prompt.len() > 4096
+        || !matches!(
+            mode,
+            "type" | "new-thread" | "select-all" | "copy" | "right" | "submit"
+        )
+        || (mode == "type" && prompt.is_empty())
+        || (mode != "type" && !prompt.is_empty())
     {
         return Err(Reason::IsolationUnavailable);
     }
     let mut child = Command::new(executable)
+        .arg(mode)
         .env_clear()
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
@@ -145,13 +153,19 @@ impl Gui {
             mechanism: "zed-native-copy",
             navigation: "private-keymap-new-thread",
             keyboard_transport: if std::env::var_os("FEASIBILITY_ZED_INPUT_DRIVER").is_some() {
-                "neutral-quartz"
+                if std::env::var("FEASIBILITY_ZED_INPUT_DRIVER_MODE").as_deref() == Ok("all") {
+                    "neutral-quartz-all"
+                } else {
+                    "neutral-quartz"
+                }
             } else {
                 "xa11y"
             },
             experiment_only: true,
             ocr_used: false,
             ax_text_used: false,
+            clipboard_readback: None,
+            clipboard_character_count: None,
             stage: "trust",
             substage: "trust-query",
             guard_kind: None,
@@ -167,7 +181,7 @@ impl Gui {
         };
         let outcome = self.run_native_copy(&mut facts, marker, result);
         facts.blocker = outcome.err();
-        facts.response.provider_verified = provider.response_verified();
+        facts.response.provider_verified = provider.fixture_response_verified();
         let cleanup = clipboard::write("").and_then(|()| {
             if clipboard::read()?.is_empty() {
                 Ok(())
@@ -209,12 +223,40 @@ impl Gui {
         after: &'static str,
     ) -> Result<(), Reason> {
         self.native_copy_guard(facts, before)?;
-        xa11y::input_sim()
-            .map_err(map_error)?
-            .keyboard()
-            .chord(xa11y::Key::Char(character), modifiers)
-            .map_err(map_error)?;
+        if std::env::var("FEASIBILITY_ZED_INPUT_DRIVER_MODE").as_deref() == Ok("all") {
+            let mode = match character {
+                'n' => "new-thread",
+                'a' => "select-all",
+                'c' => "copy",
+                _ => return Err(Reason::ActionUnsupported),
+            };
+            Self::neutral_key(mode)?;
+        } else {
+            xa11y::input_sim()
+                .map_err(map_error)?
+                .keyboard()
+                .chord(xa11y::Key::Char(character), modifiers)
+                .map_err(map_error)?;
+        }
         self.native_copy_guard(facts, after)
+    }
+
+    fn neutral_key(mode: &str) -> Result<(), Reason> {
+        let executable =
+            std::env::var_os("FEASIBILITY_ZED_INPUT_DRIVER").ok_or(Reason::IsolationUnavailable)?;
+        neutral_input(Path::new(&executable), mode, "")
+    }
+
+    fn native_copy_key(mode: &str, key: xa11y::Key) -> Result<(), Reason> {
+        if std::env::var("FEASIBILITY_ZED_INPUT_DRIVER_MODE").as_deref() == Ok("all") {
+            Self::neutral_key(mode)
+        } else {
+            xa11y::input_sim()
+                .map_err(map_error)?
+                .keyboard()
+                .press(key)
+                .map_err(map_error)
+        }
     }
 
     fn settle_native_copy_panel(&self, facts: &mut Facts) -> Result<(), Reason> {
@@ -272,17 +314,9 @@ impl Gui {
         facts.stage = "submit";
         // Collapse selection before the one source-bound MessageEditor Chat action.
         self.native_copy_guard(facts, "collapse-selection-before")?;
-        xa11y::input_sim()
-            .map_err(map_error)?
-            .keyboard()
-            .press(xa11y::Key::ArrowRight)
-            .map_err(map_error)?;
+        Self::native_copy_key("right", xa11y::Key::ArrowRight)?;
         self.native_copy_guard(facts, "submit-before")?;
-        xa11y::input_sim()
-            .map_err(map_error)?
-            .keyboard()
-            .press(xa11y::Key::Enter)
-            .map_err(map_error)?;
+        Self::native_copy_key("submit", xa11y::Key::Enter)?;
         facts.input.submitted = true;
         result.steps.push(CheckStep::InputSubmitted);
         self.native_copy_response(facts, marker)
@@ -303,7 +337,7 @@ impl Gui {
         )?;
         self.native_copy_guard(facts, "type-before")?;
         if let Some(executable) = std::env::var_os("FEASIBILITY_ZED_INPUT_DRIVER") {
-            neutral_type_text(Path::new(&executable), &prompt)?;
+            neutral_input(Path::new(&executable), "type", &prompt)?;
         } else {
             xa11y::input_sim()
                 .map_err(map_error)?
@@ -384,6 +418,16 @@ impl Gui {
             self.native_copy_guard(facts, "clipboard-read-before")?;
             let copied = clipboard::read()?;
             self.native_copy_guard(facts, "clipboard-read-after")?;
+            facts.clipboard_character_count = Some(copied.chars().count());
+            facts.clipboard_readback = Some(if exact_readback(&copied, expected, sentinel) {
+                "exact"
+            } else if copied.as_str() == sentinel {
+                "sentinel"
+            } else if copied.is_empty() {
+                "empty"
+            } else {
+                "nonmatching"
+            });
             if exact_readback(&copied, expected, sentinel) {
                 return Ok(true);
             }
@@ -402,17 +446,27 @@ mod tests {
     #[test]
     fn neutral_transport_rejects_unbounded_or_relative_requests_before_spawn() {
         assert_eq!(
-            neutral_type_text(Path::new("relative"), "nonce"),
+            neutral_input(Path::new("relative"), "type", "nonce"),
             Err(Reason::IsolationUnavailable)
         );
         assert_eq!(
-            neutral_type_text(Path::new("/usr/bin/true"), &"x".repeat(4097)),
+            neutral_input(Path::new("/usr/bin/true"), "type", &"x".repeat(4097)),
             Err(Reason::IsolationUnavailable)
         );
         assert_eq!(
-            neutral_type_text(Path::new("/usr/bin/true"), ""),
+            neutral_input(Path::new("/usr/bin/true"), "type", ""),
             Err(Reason::IsolationUnavailable)
         );
+        for (mode, payload) in [
+            ("arbitrary", ""),
+            ("copy", "synthetic"),
+            ("submit", "synthetic"),
+        ] {
+            assert_eq!(
+                neutral_input(Path::new("/usr/bin/true"), mode, payload),
+                Err(Reason::IsolationUnavailable)
+            );
+        }
     }
 
     #[test]

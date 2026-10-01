@@ -19,7 +19,7 @@ class ClosedFacts(unittest.TestCase):
                         observedRuntimeVersion='144.0.0.0', providerResponseVerified=True)
         self.copy = dict(schemaVersion=1, mechanism='zed-native-copy', experimentOnly=True,
                          ocrUsed=False, axTextUsed=False, navigation='private-keymap-new-thread', keyboardTransport='neutral-quartz',
-                         stage='completed', substage='completed', guardKind=None, guardCategory=None, settleObservations=3, blocker=None, trustControlCount=0, panelControlCount=1,
+                         stage='completed', substage='completed', guardKind=None, guardCategory=None, settleObservations=3, clipboardReadback='exact', clipboardCharacterCount=64, blocker=None, trustControlCount=0, panelControlCount=1,
                          responseControlCount=1, clipboardCleanup='passed',
                          input=dict(entered=True, clipboardVerified=True, submitted=True),
                          response=dict(copyAction=True, clipboardVerified=True, providerVerified=True))

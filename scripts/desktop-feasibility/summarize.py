@@ -3,6 +3,7 @@
 import argparse
 import hashlib
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -122,6 +123,8 @@ def main():
                   if value.get('mechanism') == 'zed-native-copy']
         if len(copies) + len(result['accessibilityInventories']) != len(records):
             raise ValueError('unknown Zed facts')
+        driver = Path(os.environ.get('FEASIBILITY_ZED_INPUT_DRIVER', '/absent'))
+        result['nativeInputDriverSha256'] = hashlib.sha256(driver.read_bytes()).hexdigest() if driver.is_file() else None
         result['nativeCopyObservations'] = copies
         result['nativeCopyReadbackObserved'] = bool(len(copies) == 3 and clean and all(
             value['input']['entered'] and value['input']['clipboardVerified'] and value['input']['submitted']
