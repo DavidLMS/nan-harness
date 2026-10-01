@@ -145,6 +145,11 @@ async function driveDom() {
   let send;
   let retryUser;
   if (qualify && request.action === 'retry') {
+    const retryComposer = page.locator('[data-slot="composer-root"] [role="textbox"]:visible');
+    if (await retryComposer.count() !== 1) {
+      facts.errorCategory = 'composer-ambiguous'; saveFacts(); return;
+    }
+    facts.uniqueComposer = true;
     retryUser = page.locator('[data-role="user"]:visible').filter({ hasText: request.prompt });
     if (await retryUser.count() !== 1 || !await retryUser.evaluate((e, prompt) => e.innerText.trim() === prompt, request.prompt)) {
       facts.errorCategory = 'input-mismatch'; saveFacts(); return;

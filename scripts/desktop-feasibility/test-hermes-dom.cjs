@@ -86,6 +86,7 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
     },
     locator(selector) {
       if (selector === '[data-role="assistant"][data-slot="aui_assistant-message-root"] [role="alert"]:visible') return errorCards;
+      if (selector === '[data-slot="composer-root"] [role="textbox"]:visible') return composer;
       if (selector === '[data-role="assistant"]:visible') return assistant;
       if (selector === '[data-role="user"]:visible') return users;
       if (selector === '[data-slot="composer-root"] button[type="submit"][aria-label="Send"]:visible') return send;
@@ -196,14 +197,15 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
   const retryRequest = { timeoutMs: 500, action: 'retry', purpose: 'response', prompt: phase.prompt };
   const retry = await trial(retryRequest, {}, 'happy', true);
   assert.equal(retry.facts.responseVerified, true);
+  assert.equal(retry.facts.uniqueComposer, true);
   assert.equal(retry.submits, 1);
   assert.equal(retry.fills, 0);
-  for (const scenario of ['missing-error', 'duplicate-error', 'missing-retry', 'foreign-user', 'blocked-modal', 'focus-failed', 'stale']) {
+  for (const scenario of ['missing-error', 'duplicate-error', 'missing-retry', 'foreign-user', 'blocked-modal', 'focus-failed', 'stale', 'duplicate']) {
     const rejected = await trial(retryRequest, {}, scenario, true);
     assert.equal(rejected.submits, 0, scenario);
     assert.equal(rejected.fills, 0, scenario);
   }
   const invalid = await trial({ ...phase, action: 'retry' }, {}, null, true);
   assert.equal(invalid.facts.errorCategory, 'invalid-request');
-  console.log('Hermes DOM feasibility and qualification guards: 31 synthetic cases passed');
+  console.log('Hermes DOM feasibility and qualification guards: 32 synthetic cases passed');
 })().catch(error => { console.error(error.message); process.exitCode = 1; });
