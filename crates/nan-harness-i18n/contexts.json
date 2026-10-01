@@ -1061,6 +1061,13 @@
       "crates/nan-harness-adapters/src/openclaw.rs"
     ]
   },
+  "detail_serialize_mimo_configuration_failed": {
+    "description": "Persistent native configuration and its health. Preserve command names, paths, provider identifiers and diagnostic codes.",
+    "section": "configuration",
+    "sources": [
+      "crates/nan-harness-adapters/src/mimo_code.rs"
+    ]
+  },
   "detail_serialize_opencode_configuration_failed": {
     "description": "Persistent native configuration and its health. Preserve command names, paths, provider identifiers and diagnostic codes.",
     "section": "configuration",
@@ -6349,6 +6356,13 @@
     ]
   },
   "help_run_openclaw_through_a_temporary_linked_configuration": {
+    "description": "Command help and argument validation. Preserve command names, paths, provider identifiers and diagnostic codes.",
+    "section": "help",
+    "sources": [
+      "crates/nan-harness-cli/src/app/commands.rs"
+    ]
+  },
+  "help_run_mimo_code_through_nan_chat_completions": {
     "description": "Command help and argument validation. Preserve command names, paths, provider identifiers and diagnostic codes.",
     "section": "help",
     "sources": [

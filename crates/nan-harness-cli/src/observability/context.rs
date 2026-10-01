@@ -48,6 +48,7 @@ pub(super) fn telemetry_operation(cli: &Cli) -> OperationContext {
             harness_operation(arguments.run.dry_run)
         }
         Command::OpenCode(arguments)
+        | Command::Mimo(arguments)
         | Command::Hermes(arguments)
         | Command::Pi(arguments)
         | Command::Omp(arguments)
@@ -94,6 +95,7 @@ pub(super) const fn telemetry_transport(cli: &Cli) -> Option<TelemetryTransport>
         Command::Claude(_) | Command::ClaudeDesktop(_) => Some(TelemetryTransport::AnthropicBridge),
         Command::Codex(_) | Command::ChatGptDesktop(_) => Some(TelemetryTransport::ResponsesBridge),
         Command::OpenCode(_)
+        | Command::Mimo(_)
         | Command::Hermes(_)
         | Command::HermesDesktop(_)
         | Command::PenDesktop(_)

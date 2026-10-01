@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-  [Parameter(Mandatory=$true)][ValidateSet('claude-code','codex','opencode','hermes','pi','omp','prime-agent','deepseek-harness','openclaw','cline','qwen-code','kimi-code','aider','goose','fx')][string]$Harness,
+  [Parameter(Mandatory=$true)][ValidateSet('claude-code','codex','mimo-code','opencode','hermes','pi','omp','prime-agent','deepseek-harness','openclaw','cline','qwen-code','kimi-code','aider','goose','fx')][string]$Harness,
   [Parameter(Mandatory=$true)][string]$Version,
   [ValidatePattern('^[0-9]+\.[0-9]+$')][string]$PythonVersion = '3.12',
   [string]$Ref = ''
@@ -243,6 +243,15 @@ try {
   switch ($Harness) {
     'claude-code' { Npm "@anthropic-ai/claude-code@$Version" }
     'codex' { Npm "@openai/codex@$Version" }
+    'mimo-code' {
+      $assetVersion = $Version
+      if ($Version -eq 'latest') {
+        $release = Invoke-RestMethod 'https://api.github.com/repos/XiaomiMiMo/MiMo-Code/releases/latest'
+        $assetVersion = $release.tag_name -replace '^v',''
+      }
+      $architecture = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'x64' }
+      Install-ArchiveAsset "https://github.com/XiaomiMiMo/MiMo-Code/releases/download/v$assetVersion/mimocode-windows-$architecture.zip" '(^|[\\/])mimo\.exe$' 'mimo.exe'
+    }
     'opencode' { Npm "opencode-ai@$Version" }
     'pi' { Npm "@earendil-works/pi-coding-agent@$Version" }
     'deepseek-harness' { Npm "@deepseek-ai/dsh@$Version" }

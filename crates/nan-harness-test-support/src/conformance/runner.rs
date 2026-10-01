@@ -160,6 +160,9 @@ impl PublishedConformanceRunner {
                 .env("CLAUDE_CONFIG_DIR", workspace.claude_config_path())
                 .env("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1");
         }
+        if registration.kind == HarnessKind::MimoCode {
+            command = command.env("MIMOCODE_HOME", home.join("mimo"));
+        }
         if registration.kind == HarnessKind::OpenCode {
             command = command
                 .env("XDG_CONFIG_HOME", home.join("config"))

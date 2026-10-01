@@ -5,6 +5,7 @@ mod deepseek_harness;
 mod goose;
 mod hermes;
 mod kimi_code;
+mod mimo_code;
 mod omp;
 mod openclaw;
 mod opencode;

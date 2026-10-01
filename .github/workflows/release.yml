@@ -233,7 +233,7 @@ jobs:
       - name: Record local release gate requirement
         run: |
           printf '%s\n' '## Draft created' >> "$GITHUB_STEP_SUMMARY"
-          printf 'Keep this draft unpublished until the hosted release gate completes its full 43-cell Linux/macOS/Windows live pass for `%s`.\n' "$GITHUB_REF_NAME" >> "$GITHUB_STEP_SUMMARY"
+          printf 'Keep this draft unpublished until the hosted release gate completes its full 46-cell Linux/macOS/Windows live pass for `%s`.\n' "$GITHUB_REF_NAME" >> "$GITHUB_STEP_SUMMARY"
           printf 'Dispatch `.github/workflows/release-gate.yml` from the default branch with this tag and exact tag commit; use verification-only mode for a dry run.\n' >> "$GITHUB_STEP_SUMMARY"
           printf 'After publication, dispatch `.github/workflows/recommend-release.yml` separately when this release should become recommended.\n' >> "$GITHUB_STEP_SUMMARY"
 
@@ -253,4 +253,4 @@ jobs:
           gh workflow run release-gate.yml --repo "$GITHUB_REPOSITORY" \
             --ref "$DEFAULT_BRANCH" -f tag="$GITHUB_REF_NAME" \
             -f tag_commit="$GITHUB_SHA" -f mode=live -f verification_only=true
-          echo 'Live verification dispatched for 43 cells. The release remains a draft; publication requires an explicit gate dispatch.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Live verification dispatched for 46 cells. The release remains a draft; publication requires an explicit gate dispatch.' >> "$GITHUB_STEP_SUMMARY"

@@ -64,7 +64,9 @@ fn assert_persistent_search_contract(harness: HarnessKind, home: &Path) {
             assert!(!config.contains("nan-search"));
             return;
         }
-        HarnessKind::ClaudeCode | HarnessKind::Codex | HarnessKind::Fx => unreachable!(),
+        HarnessKind::ClaudeCode | HarnessKind::Codex | HarnessKind::MimoCode | HarnessKind::Fx => {
+            unreachable!()
+        }
     };
     let combined = paths
         .iter()

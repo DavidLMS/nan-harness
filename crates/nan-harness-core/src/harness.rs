@@ -13,6 +13,7 @@ pub enum HarnessKind {
     Codex,
     #[serde(rename = "opencode")]
     OpenCode,
+    MimoCode,
     Hermes,
     Pi,
     Omp,
@@ -30,10 +31,11 @@ pub enum HarnessKind {
 }
 
 impl HarnessKind {
-    pub const ALL: [Self; 15] = [
+    pub const ALL: [Self; 16] = [
         Self::ClaudeCode,
         Self::Codex,
         Self::OpenCode,
+        Self::MimoCode,
         Self::Hermes,
         Self::Pi,
         Self::Omp,
@@ -54,6 +56,7 @@ impl HarnessKind {
             Self::ClaudeCode => "claude",
             Self::Codex => "codex",
             Self::OpenCode => "opencode",
+            Self::MimoCode => "mimo",
             Self::Hermes => "hermes",
             Self::Pi => "pi",
             Self::Omp => "omp",
@@ -76,6 +79,7 @@ impl fmt::Display for HarnessKind {
             Self::ClaudeCode => "claude-code",
             Self::Codex => "codex",
             Self::OpenCode => "opencode",
+            Self::MimoCode => "mimo-code",
             Self::Hermes => "hermes",
             Self::Pi => "pi",
             Self::Omp => "omp",
@@ -101,6 +105,7 @@ impl FromStr for HarnessKind {
             "claude-code" | "claude" => Ok(Self::ClaudeCode),
             "codex" => Ok(Self::Codex),
             "opencode" => Ok(Self::OpenCode),
+            "mimo" | "mimo-code" => Ok(Self::MimoCode),
             "hermes" => Ok(Self::Hermes),
             "pi" => Ok(Self::Pi),
             "omp" | "oh-my-pi" => Ok(Self::Omp),

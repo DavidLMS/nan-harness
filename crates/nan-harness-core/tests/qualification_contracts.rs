@@ -5,10 +5,11 @@ use nan_harness_core::model::{
 use serde_json::Value;
 use std::collections::BTreeSet;
 
-const WIRE_FIELDS: [&str; 15] = [
+const WIRE_FIELDS: [&str; 16] = [
     "claude-code",
     "codex",
     "opencode",
+    "mimo-code",
     "hermes",
     "pi",
     "omp",
@@ -30,7 +31,7 @@ type ExpectedQualification = (
     &'static str,
 );
 
-const EXPECTED_QUALIFICATIONS: [ExpectedQualification; 15] = [
+const EXPECTED_QUALIFICATIONS: [ExpectedQualification; 16] = [
     (
         HarnessKind::ClaudeCode,
         QualificationStatus::Qualified,
@@ -48,6 +49,12 @@ const EXPECTED_QUALIFICATIONS: [ExpectedQualification; 15] = [
         QualificationStatus::Unqualified,
         QualificationTransport::AnthropicBridge,
         "2026-09-06/opencode",
+    ),
+    (
+        HarnessKind::MimoCode,
+        QualificationStatus::Unknown,
+        QualificationTransport::DirectChat,
+        "2026-10-01/mimo-code",
     ),
     (
         HarnessKind::Hermes,
@@ -155,6 +162,7 @@ fn distinct_matrix() -> QualificationMatrix {
         claude_code,
         codex,
         opencode,
+        mimo_code,
         hermes,
         pi,
         omp,
@@ -173,6 +181,7 @@ fn distinct_matrix() -> QualificationMatrix {
         claude_code,
         codex,
         opencode,
+        mimo_code,
         hermes,
         pi,
         omp,
@@ -244,4 +253,17 @@ fn qualification_matrix_round_trips_published_wire_fields_and_values() {
     let decoded: QualificationMatrix =
         serde_json::from_value(wire).expect("decode published matrix");
     assert_eq!(decoded, matrix);
+}
+
+#[test]
+fn old_qualification_matrices_default_mimo_to_unknown() {
+    let mut wire = serde_json::to_value(distinct_matrix()).expect("serialize");
+    wire.as_object_mut().expect("object").remove("mimo-code");
+    let matrix: QualificationMatrix = serde_json::from_value(wire).expect("legacy matrix");
+    assert_eq!(matrix.mimo_code.status, QualificationStatus::Unknown);
+    assert_eq!(
+        matrix.mimo_code.transport,
+        QualificationTransport::DirectChat
+    );
+    assert_eq!(matrix.mimo_code.tested_at, None);
 }

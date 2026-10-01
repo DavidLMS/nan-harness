@@ -7,6 +7,8 @@ use std::process::Command;
 fn direct_harness_dry_runs_build_safe_native_overlays() {
     let cases = [
         ("opencode", "1.18.4", "NAN_API_KEY", "nan/qwen3.6"),
+        ("mimo", "0.1.14", "NAN_API_KEY", "MIMOCODE_CONFIG_CONTENT"),
+        ("mimo-code", "0.1.14", "NAN_API_KEY", "nan/qwen3.6"),
         ("hermes", "0.20.2", "NAN_API_KEY", "{artifact:hermes-home}"),
         (
             "pi",

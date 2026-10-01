@@ -117,6 +117,16 @@ case "$harness" in
   codex)
     global_npm_install "@openai/codex@$version"
     ;;
+  mimo-code)
+    installer="$temporary_directory/mimo-install.sh"
+    download "https://mimo.xiaomi.com/install" "$installer"
+    if [ "$version" = latest ]; then
+      run_with_bounded_curl bash "$installer"
+    else
+      run_with_bounded_curl bash "$installer" --version "$version"
+    fi
+    export PATH="$HOME/.mimocode/bin:$PATH"
+    ;;
   opencode)
     global_npm_install "opencode-ai@$version"
     ;;

@@ -65,7 +65,7 @@ cargo_xtask() {
   "$cargo_command" xtask "$@"
 }
 harnesses=(
-  claude-code codex opencode hermes pi omp prime-agent deepseek-harness
+  claude-code codex mimo-code opencode hermes pi omp prime-agent deepseek-harness
   openclaw cline qwen-code kimi-code aider goose fx
 )
 [ -n "$release_repository" ] || usage
@@ -112,7 +112,7 @@ if [ -n "$verified_updates" ]; then
     jq -e --arg version "$nan_harness_version" '
       (keys | sort) == (["nanHarnessVersion", "id", "lastCompatibleVersion", "compatibleAt", "lastLiveVerifiedVersion", "liveVerifiedAt"] | sort) and
       .nanHarnessVersion == $version and
-      (.id as $id | ["claude-code","codex","opencode","hermes","pi","omp","prime-agent","deepseek-harness","openclaw","cline","qwen-code","kimi-code","aider","goose","fx"] | index($id) != null) and
+      (.id as $id | ["claude-code","codex","mimo-code","opencode","hermes","pi","omp","prime-agent","deepseek-harness","openclaw","cline","qwen-code","kimi-code","aider","goose","fx"] | index($id) != null) and
       .lastCompatibleVersion == .lastLiveVerifiedVersion and .compatibleAt == .liveVerifiedAt
     ' "$update" >/dev/null
     update_target="$updates_directory/$(jq -r .id "$update").json"

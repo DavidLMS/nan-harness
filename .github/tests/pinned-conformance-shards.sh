@@ -20,7 +20,7 @@ EOF
 chmod 755 "$temporary_directory/installer" "$bin_directory/cargo"
 
 expected=(
-  aider claude-code cline codex deepseek-harness fx goose hermes kimi-code
+  aider claude-code cline codex deepseek-harness fx goose hermes kimi-code mimo-code
   omp openclaw opencode pi prime-agent qwen-code
 )
 configured="$(
@@ -44,6 +44,8 @@ diff -u <(printf '%s\n' "${expected[@]}") "$temporary_directory/install.log"
 grep -Fq 'conformance_claude claude_code_tools_complete_their_conformance_scenarios' "$temporary_directory/cargo.log"
 grep -Fq 'conformance_codex codex_native_inventory_crosses_the_responses_bridge' "$temporary_directory/cargo.log"
 grep -Fq 'conformance_fx fx_' "$temporary_directory/cargo.log"
+grep -Fq 'conformance_direct mimo_' "$temporary_directory/cargo.log"
+grep -Fq 'unset|run --locked --quiet -- doctor mimo' "$temporary_directory/cargo.log"
 grep -Fq 'conformance_direct deepseek_harness_' "$temporary_directory/cargo.log"
 grep -Fq '1|run --locked --quiet -- doctor cline' "$temporary_directory/cargo.log"
 grep -Fq '1|test --locked -p nan-harness-cli --test conformance_direct cline_' "$temporary_directory/cargo.log"

@@ -19,7 +19,7 @@ CELL_SPEC = importlib.util.spec_from_file_location("probe_cell_contract", ROOT /
 CELL = importlib.util.module_from_spec(CELL_SPEC)
 CELL_SPEC.loader.exec_module(CELL)
 HARNESSES = (
-    "claude-code", "codex", "opencode", "hermes", "pi", "omp", "prime-agent",
+    "claude-code", "codex", "mimo-code", "opencode", "hermes", "pi", "omp", "prime-agent",
     "deepseek-harness", "openclaw", "cline", "qwen-code", "kimi-code", "aider",
     "goose", "fx",
 )
@@ -72,7 +72,7 @@ if subcommand == "openclaw":
     print("NAN_CANARY_OK")
 elif os.environ.get("NAN_CANARY_FAKE_MODE") != "toolfailure":
     outputs = {
-        "claude": '{"name":"Read"}', "opencode": '{"tool":"read"}',
+        "claude": '{"name":"Read"}', "opencode": '{"tool":"read"}', "mimo": '{"tool":"read"}',
         "pi": '{"toolName":"read"}', "omp": '{"toolName":"read"}',
         "cline": "read_files", "qwen": '{"name":"read_file"}',
         "kimi": "Read", "goose": '{"name":"shell"}',
@@ -159,7 +159,7 @@ class ProbeHarnessTests(unittest.TestCase):
                 self.assertEqual(CELL.probe_result(marker),
                                  {"schemaVersion": 1, "stage": "complete", "status": "passed"})
                 self.assertEqual(stat.S_IMODE(marker.stat().st_mode), stat.S_IWRITE | stat.S_IREAD)
-        self.assertEqual((self.root / "models.log").read_text().splitlines(), ["synthetic-model"] * 17)
+        self.assertEqual((self.root / "models.log").read_text().splitlines(), ["synthetic-model"] * (len(HARNESSES) + 2))
 
     def test_failures_close_at_failing_stage_without_raw_output(self):
         for mode, stage in (("providerfailure", "harness-run"), ("toolfailure", "tool-evidence"),

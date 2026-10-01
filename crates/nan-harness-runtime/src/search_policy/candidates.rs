@@ -21,6 +21,7 @@ pub(super) fn add_harness_candidates(
         HarnessKind::ClaudeCode => add_claude_candidates(home, working, paths),
         HarnessKind::Codex => add_codex_candidates(home, paths),
         HarnessKind::OpenCode => add_opencode_candidates(home, working, paths),
+        HarnessKind::MimoCode => add_mimo_candidates(home, working, paths),
         HarnessKind::Hermes => add_hermes_candidates(home, paths),
         HarnessKind::Pi => add_pi_candidates(home, working, paths),
         HarnessKind::Omp => add_omp_candidates(home, working, paths),
@@ -162,4 +163,27 @@ fn deepseek_candidate_paths(home: &Path) -> [PathBuf; 4] {
         deepseek_home.join("profiles/default.yaml"),
         deepseek_home.join("profiles/web/cordis.patch.yml"),
     ]
+}
+
+fn add_mimo_candidates(home: &Path, working: &Path, paths: &mut BTreeSet<PathBuf>) {
+    if let Some(path) = env::var_os("MIMOCODE_CONFIG") {
+        paths.insert(PathBuf::from(path));
+    }
+    let global = env::var_os("MIMOCODE_HOME").map_or_else(
+        || config_home(home).join("mimocode"),
+        |path| PathBuf::from(path).join("config"),
+    );
+    for directory in [global, working.join(".mimocode")] {
+        paths.extend([
+            directory.join("mimocode.json"),
+            directory.join("mimocode.jsonc"),
+        ]);
+    }
+    if let Some(path) = env::var_os("MIMOCODE_CONFIG_DIR") {
+        let directory = PathBuf::from(path);
+        paths.extend([
+            directory.join("mimocode.json"),
+            directory.join("mimocode.jsonc"),
+        ]);
+    }
 }

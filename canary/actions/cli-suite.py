@@ -75,6 +75,7 @@ _WINDOWS_PYPI_PACKAGES = {"aider": "aider-chat"}
 _GITHUB_REPOS = {
     "omp": "can1357/oh-my-pi", "goose": "aaif-goose/goose",
     "hermes": "NousResearch/hermes-agent",
+    "mimo-code": "XiaomiMiMo/MiMo-Code",
 }
 # Hermes tags releases by date (v2026.9.11) while `hermes --version` reports the
 # pyproject version (0.21.2). Freeze the tag's commit and read the version there.

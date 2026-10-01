@@ -7,7 +7,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from selection import WINDOWS_UNAVAILABLE, WINDOWS_SKIP_REASON
 from cell import HERMES_INSTALL_STAGES
 
-HARNESSES = frozenset(("claude-code", "codex", "opencode", "hermes", "pi", "omp", "prime-agent", "deepseek-harness", "openclaw", "cline", "qwen-code", "kimi-code", "aider", "goose", "fx"))
+HARNESSES = frozenset(("claude-code", "codex", "mimo-code", "opencode", "hermes", "pi", "omp", "prime-agent", "deepseek-harness", "openclaw", "cline", "qwen-code", "kimi-code", "aider", "goose", "fx"))
 PHASES = ("metadata", "prerequisites", "install", "version-doctor", "deterministic-contract", "live-tool")
 SETUP = frozenset(("checkout", "node", "python", "rust", "source", "fixtures", "rust_fixture", "build", "workflow", "batch", "entrypoint"))
 OUTCOMES = frozenset(("passed", "failed", "blocked", "skipped"))
@@ -261,9 +261,9 @@ def safe_view(report):
     if isinstance(totals, dict):
         totals = {"skipped": 0, **totals}
     keys = ("selected", "passed", "failed", "blocked", "skipped")
-    if not isinstance(totals, dict) or set(totals) - set(keys) - {"phases"} or any(not isinstance(totals.get(k), int) or isinstance(totals[k], bool) or not 0 <= totals[k] <= 15 for k in keys):
+    if not isinstance(totals, dict) or set(totals) - set(keys) - {"phases"} or any(not isinstance(totals.get(k), int) or isinstance(totals[k], bool) or not 0 <= totals[k] <= len(HARNESSES) for k in keys):
         raise UnsafeReport("invalid totals")
-    if "phases" in totals and (not isinstance(totals["phases"], dict) or set(totals["phases"]) - STATUSES or any(not isinstance(v, int) or isinstance(v, bool) or not 0 <= v <= 90 for v in totals["phases"].values())):
+    if "phases" in totals and (not isinstance(totals["phases"], dict) or set(totals["phases"]) - STATUSES or any(not isinstance(v, int) or isinstance(v, bool) or not 0 <= v <= len(HARNESSES) * len(PHASES) for v in totals["phases"].values())):
         raise UnsafeReport("invalid phase totals")
     if totals["selected"] != len(harnesses) or (totals["selected"] and any(
             totals[outcome] != sum(item["outcome"] == outcome for item in harnesses)

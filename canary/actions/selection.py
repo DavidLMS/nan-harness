@@ -8,7 +8,7 @@ import re
 
 
 CLI_HARNESSES = (
-    "claude-code", "codex", "opencode", "hermes", "pi", "omp", "prime-agent",
+    "claude-code", "codex", "mimo-code", "opencode", "hermes", "pi", "omp", "prime-agent",
     "deepseek-harness", "openclaw", "cline", "qwen-code", "kimi-code", "aider",
     "goose", "fx",
 )

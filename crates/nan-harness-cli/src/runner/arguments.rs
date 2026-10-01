@@ -15,6 +15,7 @@ pub(crate) fn harness_run_arguments(cli: &Cli) -> Option<(HarnessKind, &HarnessR
         Command::Claude(arguments) => Some((HarnessKind::ClaudeCode, &arguments.run)),
         Command::Codex(arguments) => Some((HarnessKind::Codex, &arguments.run)),
         Command::OpenCode(arguments) => Some((HarnessKind::OpenCode, &arguments.run)),
+        Command::Mimo(arguments) => Some((HarnessKind::MimoCode, &arguments.run)),
         Command::Hermes(arguments) => Some((HarnessKind::Hermes, &arguments.run)),
         Command::HermesDesktop(arguments) => Some((HarnessKind::Hermes, &arguments.run)),
         Command::Pi(arguments) => Some((HarnessKind::Pi, &arguments.run)),
@@ -75,7 +76,7 @@ fn non_interactive_mode(kind: HarnessKind, arguments: &HarnessRunArgs) -> bool {
         }
         HarnessKind::Aider => has_any_flag(&arguments.arguments, &["-m", "--message"]),
         HarnessKind::Codex => has_subcommand(&arguments.arguments, &["exec", "review"]),
-        HarnessKind::OpenCode | HarnessKind::Goose => {
+        HarnessKind::OpenCode | HarnessKind::MimoCode | HarnessKind::Goose => {
             has_subcommand(&arguments.arguments, &["run"])
         }
         HarnessKind::Fx => has_subcommand(&arguments.arguments, &["ask"]),
@@ -111,6 +112,7 @@ fn has_option_value(arguments: &[String], option: &str, value: &str) -> bool {
 pub(crate) const fn direct_chat_gateway_disabled(cli: &Cli) -> bool {
     match &cli.command {
         Command::OpenCode(arguments)
+        | Command::Mimo(arguments)
         | Command::Hermes(arguments)
         | Command::Pi(arguments)
         | Command::Omp(arguments)
@@ -185,6 +187,7 @@ pub(crate) fn validate_limit_request(
             HarnessKind::ClaudeCode
                 | HarnessKind::Codex
                 | HarnessKind::OpenCode
+                | HarnessKind::MimoCode
                 | HarnessKind::Hermes
                 | HarnessKind::Pi
                 | HarnessKind::Omp
@@ -246,6 +249,7 @@ mod tests {
             ("codex", ["exec", "Hello"].as_slice()),
             ("codex", ["review", "HEAD~1"].as_slice()),
             ("opencode", ["run", "Hello"].as_slice()),
+            ("mimo", ["run", "Hello"].as_slice()),
             ("fx", ["ask", "Hello"].as_slice()),
         ] {
             let mut argv = vec!["nanh", harness, "--"];

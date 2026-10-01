@@ -80,6 +80,16 @@ const INSTALL_SPECS: &[InstallSpec] = &[
         )),
     },
     InstallSpec {
+        kind: HarnessKind::MimoCode,
+        display_name: "MiMo Code",
+        official_url: "https://github.com/XiaomiMiMo/MiMo-Code",
+        unix: command("npm", &["install", "--global", "@mimo-ai/cli@latest"]),
+        windows: Some(command(
+            "npm",
+            &["install", "--global", "@mimo-ai/cli@latest"],
+        )),
+    },
+    InstallSpec {
         kind: HarnessKind::Hermes,
         display_name: "Hermes Agent",
         official_url: HERMES_INSTALL_URL,
@@ -310,6 +320,10 @@ mod tests {
             (HarnessKind::ClaudeCode, CLAUDE_CODE_INSTALL_URL),
             (HarnessKind::Codex, CODEX_INSTALL_URL),
             (HarnessKind::OpenCode, OPENCODE_INSTALL_URL),
+            (
+                HarnessKind::MimoCode,
+                "https://github.com/XiaomiMiMo/MiMo-Code",
+            ),
             (HarnessKind::Hermes, HERMES_INSTALL_URL),
             (HarnessKind::Pi, PI_INSTALL_URL),
             (HarnessKind::Omp, OMP_INSTALL_URL),
@@ -328,6 +342,20 @@ mod tests {
             let spec = install_spec(kind).expect("installable harness should have a spec");
             assert_eq!(spec.official_url, url);
         }
+    }
+
+    #[test]
+    fn mimo_uses_the_official_npm_package_on_each_platform() {
+        let spec = install_spec(HarnessKind::MimoCode).expect("MiMo install spec");
+        assert_eq!(
+            spec.unix,
+            super::command("npm", &["install", "--global", "@mimo-ai/cli@latest"])
+        );
+        assert_eq!(spec.windows, Some(spec.unix));
+        assert_eq!(
+            official_install_command(spec).expect("MiMo install command"),
+            "npm install --global @mimo-ai/cli@latest"
+        );
     }
 
     #[test]

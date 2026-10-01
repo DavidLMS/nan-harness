@@ -15,7 +15,7 @@ SPEC.loader.exec_module(selection)
 class HostedCliSelectionTests(unittest.TestCase):
     def test_windows_unavailable_harnesses_are_explicit_skips_only_on_windows(self):
         result = selection.select_cli("all", "all", "live")
-        self.assertEqual(len(result["cells"]), 43)
+        self.assertEqual(len(result["cells"]), 46)
         self.assertEqual({item["harness"] for item in result["skipped"]}, {"prime-agent", "fx"})
         self.assertTrue(all(item["system"] == "windows" for item in result["skipped"]))
         for harness in ("prime-agent", "fx"):
@@ -25,9 +25,9 @@ class HostedCliSelectionTests(unittest.TestCase):
         self.assertEqual(only_skips["cells"], [])
         self.assertEqual(len(only_skips["skipped"]), 2)
 
-    def test_all_is_fifteen_independent_arm64_cells(self):
+    def test_all_is_sixteen_independent_arm64_cells(self):
         result = selection.select_cli("both", "all")
-        self.assertEqual(len(result["cells"]), 30)
+        self.assertEqual(len(result["cells"]), 32)
         self.assertEqual({cell["architecture"] for cell in result["cells"]}, {"aarch64"})
         self.assertEqual({cell["system"] for cell in result["cells"]}, {"linux", "macos"})
 
@@ -57,7 +57,7 @@ class HostedCliSelectionTests(unittest.TestCase):
 
     def test_every_harness_requires_the_hosted_arm64_platforms(self):
         self.assertEqual(set(selection.HARNESS_PLATFORMS), set(selection.CLI_HARNESSES))
-        self.assertEqual(len(selection.qualified_identities()), 43)
+        self.assertEqual(len(selection.qualified_identities()), 46)
         self.assertEqual(selection.qualified_platforms(), ("linux", "macos", "windows"))
         self.assertEqual(len(selection.required_assets()), 6)
         for harness in selection.CLI_HARNESSES:

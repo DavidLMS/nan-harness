@@ -142,6 +142,16 @@ case "$harness_id" in
   codex)
     npm install --global "@openai/codex@$(package_version)"
     ;;
+  mimo-code)
+    installer="$temporary_directory/mimo-install.sh"
+    download 'https://mimo.xiaomi.com/install' "$installer"
+    if [ "$install_mode" = '--latest' ]; then
+      bash "$installer"
+    else
+      bash "$installer" --version "$version"
+    fi
+    append_path "$HOME/.mimocode/bin"
+    ;;
   opencode)
     npm install --global "opencode-ai@$(package_version)"
     ;;

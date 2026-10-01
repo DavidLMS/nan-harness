@@ -67,6 +67,7 @@ pub enum NativeContextLimit {
     ClaudeAutoCompactPercent { percent: u64 },
     CodexTokenLimit { tokens: u64 },
     OpenCodeBuffer { buffer_tokens: u64 },
+    MimoContext { max_context_tokens: u64 },
     HermesThreshold { threshold_tokens: u64 },
     PiReserve { reserve_tokens: u64 },
     OmpThreshold { threshold_tokens: u64 },
@@ -164,6 +165,9 @@ impl ContextLimit {
             },
             HarnessKind::OpenCode => NativeContextLimit::OpenCodeBuffer {
                 buffer_tokens: effective_context_window - requested_tokens,
+            },
+            HarnessKind::MimoCode => NativeContextLimit::MimoContext {
+                max_context_tokens: requested_tokens,
             },
             HarnessKind::Hermes => NativeContextLimit::HermesThreshold {
                 threshold_tokens: requested_tokens,

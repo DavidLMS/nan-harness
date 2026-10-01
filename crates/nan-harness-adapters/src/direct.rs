@@ -98,6 +98,11 @@ pub(crate) fn validate_routing_arguments(
     if let Some(argument) = arguments.iter().find(|argument| {
         reserved.iter().any(|reserved| {
             argument.as_str() == *reserved
+                || (reserved.len() == 2
+                    && reserved.starts_with('-')
+                    && !reserved.starts_with("--")
+                    && argument.starts_with(reserved)
+                    && argument.len() > reserved.len())
                 || argument
                     .strip_prefix(reserved)
                     .is_some_and(|suffix| suffix.starts_with('='))

@@ -10,8 +10,8 @@ use crate::usage_evidence;
 use crate::usage_summary;
 use nan_harness_adapters::{
     AiderAdapter, ClaudeCodeAdapter, ClineAdapter, CodexAdapter, DeepSeekHarnessAdapter, FxAdapter,
-    GooseAdapter, HermesAdapter, KimiCodeAdapter, OmpAdapter, OpenClawAdapter, OpenCodeAdapter,
-    PiAdapter, PrimeAgentAdapter, QwenCodeAdapter,
+    GooseAdapter, HermesAdapter, KimiCodeAdapter, MimoCodeAdapter, OmpAdapter, OpenClawAdapter,
+    OpenCodeAdapter, PiAdapter, PrimeAgentAdapter, QwenCodeAdapter,
 };
 use nan_harness_core::launch_plan::{LaunchId, ObservabilityFormat};
 use nan_harness_core::model::{

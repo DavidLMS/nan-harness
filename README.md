@@ -34,6 +34,7 @@ to use either model for an individual image. See [image generation](#image-gener
 | `nanh goose` | [Goose](https://github.com/block/goose) | OpenAI Chat Completions | Optional |
 | `nanh claude` | [Claude Code](https://www.anthropic.com/claude-code) | Anthropic Messages bridge | Not available |
 | `nanh codex` | [Codex](https://openai.com/codex/) | OpenAI Responses bridge | Not available |
+| `nanh mimo` | [MiMo Code](https://github.com/XiaomiMiMo/MiMo-Code) | OpenAI Chat Completions | Not available |
 | `nanh opencode` | [OpenCode](https://opencode.ai/) | OpenAI Chat Completions | Optional |
 | `nanh qwen` | [Qwen Code](https://qwenlm.github.io/qwen-code-docs/en/users/overview) | OpenAI Chat Completions | Optional |
 | `nanh pi` | [Pi](https://pi.dev/) | OpenAI Chat Completions | Optional |
@@ -50,6 +51,11 @@ Prime Agent and fx do not yet support Windows upstream. On Windows,
 trying to install one. When a Windows build becomes available, you can try it
 with `nanh <harness> --executable <path>`; the usual version and launch checks
 still apply. Linux and macOS launches are unchanged.
+
+`nanh mimo` (alias `nanh mimo-code`) launches MiMo Code with the selected NaN
+model for the main agent, model tiers and auxiliary requests. It injects the
+provider configuration for that process and keeps MiMo's existing session home.
+This integration supports managed launches; `nanh config mimo` is unavailable.
 
 Harnesses that use OpenAI Chat Completions use an authenticated local gateway by
 default. This enables features such as reporting token usage when a session ends.

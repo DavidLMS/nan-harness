@@ -46,6 +46,11 @@ fn executable_candidates_for_platform(
         | HarnessKind::Omp => vec![home.join(".local/bin")],
         HarnessKind::Codex => vec![home.join(".local/bin"), home.join(".codex/bin")],
         HarnessKind::OpenCode => vec![home.join(".opencode/bin"), home.join(".local/bin")],
+        HarnessKind::MimoCode => vec![
+            home.join(".mimocode/bin"),
+            home.join(".local/bin"),
+            home.join(".npm-global/bin"),
+        ],
         HarnessKind::Pi => vec![
             home.join(".local/bin"),
             home.join(".npm-global/bin"),
@@ -69,6 +74,7 @@ fn executable_candidates_for_platform(
             kind,
             HarnessKind::Codex
                 | HarnessKind::OpenCode
+                | HarnessKind::MimoCode
                 | HarnessKind::Pi
                 | HarnessKind::DeepSeekHarness
                 | HarnessKind::OpenClaw
@@ -221,5 +227,37 @@ mod tests {
 
         assert!(candidates.contains(&home.join(".local/bin/dsh")));
         assert!(candidates.contains(&home.join(".npm-global/bin/dsh")));
+    }
+}
+
+#[cfg(test)]
+mod mimo_tests {
+    use super::executable_candidates_for_platform;
+    use nan_harness_core::HarnessKind;
+    use std::path::Path;
+
+    #[test]
+    fn mimo_discovers_script_and_npm_installations() {
+        let home = Path::new("/nan-home");
+        let unix = executable_candidates_for_platform(
+            HarnessKind::MimoCode,
+            home,
+            false,
+            None,
+            None,
+            None,
+        );
+        assert!(unix.contains(&home.join(".mimocode/bin/mimo")));
+        assert!(unix.contains(&home.join(".npm-global/bin/mimo")));
+        let app_data = home.join("AppData/Roaming");
+        let windows = executable_candidates_for_platform(
+            HarnessKind::MimoCode,
+            home,
+            true,
+            Some(std::ffi::OsStr::new(".EXE;.CMD")),
+            Some(&app_data),
+            None,
+        );
+        assert!(windows.contains(&app_data.join("npm/mimo.CMD")));
     }
 }
