@@ -180,6 +180,7 @@ pub(super) fn parse_version(text: &str) -> Option<Version> {
         .find_map(|part| Version::parse(part.trim_start_matches('v')).ok())
 }
 
+#[cfg(target_os = "macos")]
 pub(super) fn command_output(command: &mut Command) -> Result<String, DiscoveryError> {
     command_output_within(command, Duration::from_secs(5))
 }
@@ -365,6 +366,7 @@ fn parse_runtime_image_fixture(
     )
 }
 
+#[cfg(target_os = "macos")]
 pub(super) fn command_output_within(
     command: &mut Command,
     limit: Duration,

@@ -495,6 +495,7 @@ impl LaunchObservation {
     }
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn identity_capture_allowed(spec: &ProbeSpec, failed_acquisition: bool) -> bool {
     failed_acquisition && cfg!(target_os = "macos") && spec.kind == DesktopHarnessKind::Claude
 }

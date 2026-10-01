@@ -8,6 +8,8 @@ from pathlib import Path
 import unittest
 import sys
 import tempfile
+import subprocess
+import textwrap
 
 spec = importlib.util.spec_from_file_location('freeze', Path(__file__).with_name('freeze-official.py'))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'canary' / 'actions'))
@@ -18,6 +20,20 @@ spec.loader.exec_module(module)
 
 
 class OfficialIdentity(unittest.TestCase):
+    def test_workflow_freeze_arguments_work_with_runner_bash_and_nounset(self):
+        workflow = (Path(__file__).resolve().parents[2] / '.github/workflows/desktop-automation-feasibility.yml').read_text()
+        start = workflow.index('          freeze_args=')
+        fragment = textwrap.dedent(workflow[start:workflow.index('\n      - name: Install exact', start)])
+        for app, tag in [('zed-desktop', 'v1.22.0'), ('hermes-desktop', 'v2026.9.24')]:
+            command = 'python3() { shift; printf "%s\\n" "$@"; }; RUNNER_TEMP=/tmp/fixture; '\
+                + fragment.replace('${{ matrix.app }}', app)
+            result = subprocess.run(['/bin/bash', '-uc', command], capture_output=True,
+                                    text=True, timeout=20, check=True)
+            arguments = result.stdout.splitlines()
+            self.assertEqual(arguments[:2], ['--tag', tag])
+            self.assertEqual('--expected-revision' in arguments, app == 'hermes-desktop')
+            self.assertIn(app, arguments)
+
     def setUp(self):
         self.release = dict(draft=False, prerelease=False, tag_name='v1.2.3', assets=[
             dict(name='Zed-aarch64.dmg', digest='sha256:' + 'a' * 64,

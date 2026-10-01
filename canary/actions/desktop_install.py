@@ -192,7 +192,7 @@ _RUNTIME_FACTS_SCRIPT = (
 def _runtime_facts(python, cwd):
     """Read exact venv interpreter facts through a bounded private subprocess."""
     observed = []
-    def capture(log):
+    def capture(log, _status):
         try:
             log.flush()
             log.seek(0)
@@ -277,7 +277,7 @@ def _resolve_npm_argv(argv):
 
 def _run(argv, *, cwd=None, timeout=600, stage="installer", operation="install", pip_facts=None):
     pip_details = [("other", "read-unavailable", [])]
-    callback = (lambda log: _pip_diagnostic_callback(pip_details, log)) if operation == "pip_install" else None
+    callback = (lambda log, _status: _pip_diagnostic_callback(pip_details, log)) if operation == "pip_install" else None
     try:
         command = _resolve_npm_argv(argv)
         return_code = private_command(command, Path(cwd or "."),

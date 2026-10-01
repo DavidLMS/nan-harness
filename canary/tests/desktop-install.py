@@ -165,7 +165,7 @@ class DesktopInstallTests(unittest.TestCase):
     def test_runtime_facts_are_structured_and_failed_preflight_is_optional(self):
         facts = {"python_major": 3, "python_minor": 12, "pip_major": 25, "pip_minor": 1}
         def command(*args, **kwargs):
-            kwargs["diagnostic_callback"](io.BytesIO(json.dumps(facts).encode()))
+            kwargs["diagnostic_callback"](io.BytesIO(json.dumps(facts).encode()), 0)
             return 0
         with tempfile.TemporaryDirectory() as directory, patch.object(INSTALL, "private_command", side_effect=command):
             self.assertEqual(INSTALL._runtime_facts("synthetic-python", Path(directory)), facts)
@@ -218,6 +218,23 @@ class DesktopInstallTests(unittest.TestCase):
             with patch.object(INSTALL, "private_command", side_effect=error), self.assertRaises(INSTALL.CleanupUncertain):
                 INSTALL._runtime_facts("synthetic", Path("."))
 
+    def test_runtime_and_pip_callbacks_use_the_real_private_executor_contract(self):
+        facts = {"python_major": 3, "python_minor": 12, "pip_major": 25, "pip_minor": 1}
+        with tempfile.TemporaryDirectory() as directory:
+            script = "import json; print(json.dumps(" + repr(facts) + "))"
+            with patch.object(INSTALL, "_RUNTIME_FACTS_SCRIPT", script):
+                self.assertEqual(INSTALL._runtime_facts(sys.executable, Path(directory)), facts)
+            command = (sys.executable, "-c",
+                       "import sys; print('ERROR: ResolutionImpossible', file=sys.stderr); "
+                       "print('private-token', file=sys.stderr); sys.exit(1)")
+            diagnostic = self._diagnostic(
+                lambda: INSTALL._run(command, cwd=directory, stage="hermes_build",
+                                     operation="pip_install", pip_facts=facts), app="hermes-desktop")
+            self.assertEqual(diagnostic["return_code"], 1)
+            self.assertEqual(diagnostic["pip_failure_hint"], "dependency_resolution")
+            self.assertEqual(diagnostic["pip_observation"], "single-signature")
+            self.assertNotIn("private-token", json.dumps(diagnostic))
+
     def test_runtime_fact_reader_is_bounded_and_rejects_invalid_payloads(self):
         class Bounded(io.BytesIO):
             def read(self, size=-1):
@@ -226,7 +243,7 @@ class DesktopInstallTests(unittest.TestCase):
                 return super().read(size)
         for raw in (b"x" * 4097, b"\xff", b'{"python_major":true}', b'{"private":"token"}'):
             def command(*args, **kwargs):
-                kwargs["diagnostic_callback"](Bounded(raw))
+                kwargs["diagnostic_callback"](Bounded(raw), 0)
                 return 0
             with patch.object(INSTALL, "private_command", side_effect=command):
                 self.assertIsNone(INSTALL._runtime_facts("synthetic", Path(".")))
@@ -234,7 +251,7 @@ class DesktopInstallTests(unittest.TestCase):
     def test_pip_failure_callback_attaches_only_the_closed_hint(self):
         def command(*args, **kwargs):
             kwargs["diagnostic_callback"](io.BytesIO(
-                b"ERROR: ResolutionImpossible\nprivate-token=https://secret.invalid/x\n"))
+                b"ERROR: ResolutionImpossible\nprivate-token=https://secret.invalid/x\n"), 1)
             return 1
         with patch.object(INSTALL, "private_command", side_effect=command):
             diagnostic = self._diagnostic(lambda: INSTALL._run(("synthetic",), stage="hermes_build",

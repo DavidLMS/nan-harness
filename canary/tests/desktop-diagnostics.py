@@ -570,7 +570,7 @@ class DiagnosticTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "diagnostic.json"
             def command(*args, **kwargs):
-                kwargs["diagnostic_callback"](io.BytesIO(line(install())))
+                kwargs["diagnostic_callback"](io.BytesIO(line(install())), 0)
                 return 0
             with patch.object(D, "private_command", side_effect=command) as executor:
                 self.assertTrue(D.run(["synthetic"], output, SHA, "windows"))
