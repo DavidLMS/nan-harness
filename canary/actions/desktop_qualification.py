@@ -122,6 +122,7 @@ def semantic_observations(directory, app):
             if app != 'zed-desktop' or value.get('diagnosticsOnly') is not True:
                 raise ValueError('invalid native icon diagnostic identity')
             record['diagnosticsOnly'] = True
+            enum(record, value, 'stage', {'baseline', 'templates', 'first-capture', 'second-capture', 'matching', 'completed'})
             enum(record, value, 'status', {'complete', 'unsupported', 'query-error'})
             enum(record, value, 'reason', REASONS)
             side = value.get('templateSide')

@@ -11,7 +11,7 @@ use std::{
     time::{Duration, Instant},
 };
 use xa11y::Screenshot;
-use zeroize::Zeroize as _;
+use zeroize::{Zeroize as _, Zeroizing};
 
 const MAX_PIXELS: usize = 4_194_304;
 const MAX_MATCHES: usize = 32;
@@ -130,19 +130,41 @@ fn supported_side(scale: f32) -> Result<u32, Reason> {
 fn validate(frame: &Screenshot) -> Result<(), Reason> {
     let pixels = usize::try_from(u64::from(frame.width) * u64::from(frame.height))
         .map_err(|_| Reason::ActionUnsupported)?;
-    if pixels == 0 || pixels > MAX_PIXELS || pixels.checked_mul(4) != Some(frame.pixels.len()) {
+    if pixels > MAX_PIXELS {
+        return Err(Reason::BudgetExceeded);
+    }
+    if pixels == 0 || pixels.checked_mul(4) != Some(frame.pixels.len()) {
         return Err(Reason::ActionUnsupported);
     }
     supported_side(frame.scale).map(|_| ())
 }
 
-fn gray(frame: &Screenshot, x: u32, y: u32) -> f64 {
-    let offset = (y as usize * frame.width as usize + x as usize) * 4;
-    let pixel = &frame.pixels[offset..offset + 3];
-    (f64::from(pixel[0]) + f64::from(pixel[1]) + f64::from(pixel[2])) / 3.0
+struct LumaFrame {
+    width: u32,
+    height: u32,
+    pixels: Zeroizing<Vec<f64>>,
 }
 
-fn correlation(frame: &Screenshot, mask: &[u8], side: u32, at: Position) -> f64 {
+impl LumaFrame {
+    fn new(frame: &Screenshot) -> Self {
+        let pixels = frame
+            .pixels
+            .chunks_exact(4)
+            .map(|pixel| (f64::from(pixel[0]) + f64::from(pixel[1]) + f64::from(pixel[2])) / 3.0)
+            .collect();
+        Self {
+            width: frame.width,
+            height: frame.height,
+            pixels: Zeroizing::new(pixels),
+        }
+    }
+}
+
+fn gray(frame: &LumaFrame, x: u32, y: u32) -> f64 {
+    frame.pixels[y as usize * frame.width as usize + x as usize]
+}
+
+fn correlation(frame: &LumaFrame, mask: &[u8], side: u32, at: Position) -> f64 {
     let mut sum = [0.0; 5];
     for y in 0..side {
         for x in 0..side {
@@ -166,7 +188,7 @@ fn correlation(frame: &Screenshot, mask: &[u8], side: u32, at: Position) -> f64 
 }
 
 fn find(
-    frame: &Screenshot,
+    frame: &LumaFrame,
     mask: &[u8],
     side: u32,
     deadline: Instant,
@@ -174,10 +196,15 @@ fn find(
     if frame.width < side || frame.height < side {
         return Ok(Vec::new());
     }
+    let max_alpha = mask.iter().copied().max().unwrap_or(0);
+    if max_alpha < 16 {
+        return Err(Reason::ActionUnsupported);
+    }
+    let minimum_alpha = max_alpha - max_alpha / 10;
     let foreground: Vec<_> = mask
         .iter()
         .enumerate()
-        .filter(|(_, alpha)| **alpha >= 240)
+        .filter(|(_, alpha)| **alpha >= minimum_alpha)
         .map(|(i, _)| i)
         .collect();
     if foreground.len() < 4 {
@@ -199,11 +226,14 @@ fn find(
     let mut matches = Vec::new();
     for y in 0..=frame.height - side {
         if Instant::now() >= deadline {
-            return Err(Reason::ActionUnsupported);
+            return Err(Reason::BudgetExceeded);
         }
         for x in 0..=frame.width - side {
             let at = Position { x, y };
             let background = gray(frame, x, y).midpoint(gray(frame, x + side - 1, y + side - 1));
+            if (gray(frame, x + probes[0] % side, y + probes[0] / side) - background).abs() < 24.0 {
+                continue;
+            }
             let values = probes.map(|i| gray(frame, x + (i % side), y + (i / side)));
             let mean = values.iter().sum::<f64>() / 4.0;
             if (mean - background).abs() < 24.0 || values.iter().any(|v| (v - mean).abs() > 24.0) {
@@ -265,9 +295,10 @@ fn frame_candidates(
     masks: &Templates,
     deadline: Instant,
 ) -> Result<FrameCandidates, Reason> {
-    let retry = find(frame, &masks.retry, masks.side, deadline)?;
-    let copy = find(frame, &masks.copy, masks.side, deadline)?;
-    let close = find(frame, &masks.close, masks.side, deadline)?;
+    let luma = LumaFrame::new(frame);
+    let retry = find(&luma, &masks.retry, masks.side, deadline)?;
+    let copy = find(&luma, &masks.copy, masks.side, deadline)?;
+    let close = find(&luma, &masks.close, masks.side, deadline)?;
     let grouped = clusters(&retry, &copy, &close, masks.side)?;
     Ok(FrameCandidates {
         retry,
@@ -398,6 +429,45 @@ mod tests {
                 .unwrap()
                 .new_stable_clusters,
             0
+        );
+    }
+
+    #[test]
+    fn antialiased_reference_without_opaque_pixels_still_matches() {
+        let mut masks = synthetic_masks();
+        for mask in [&mut masks.retry, &mut masks.copy, &mut masks.close] {
+            for (index, alpha) in mask.iter_mut().enumerate().filter(|(_, alpha)| **alpha > 0) {
+                *alpha = [238, 220, 214][index % 3];
+            }
+        }
+        let empty = frame(&masks, &[]);
+        let one = frame(&masks, &[10]);
+        assert_eq!(
+            observe(&masks, &empty, &one, &one)
+                .unwrap()
+                .new_stable_clusters,
+            1
+        );
+        masks.retry.fill(0);
+        assert!(observe(&masks, &empty, &one, &one).is_err());
+    }
+
+    #[test]
+    fn pixel_and_deadline_limits_are_distinct_from_malformed_layout() {
+        let masks = synthetic_masks();
+        let mut image = frame(&masks, &[]);
+        image.0.width = u32::try_from(MAX_PIXELS + 1).unwrap();
+        image.0.height = 1;
+        assert_eq!(validate(&image.0), Err(Reason::BudgetExceeded));
+        image.0.width = 120;
+        image.0.height = 80;
+        image.0.pixels.pop();
+        assert_eq!(validate(&image.0), Err(Reason::ActionUnsupported));
+        let image = frame(&masks, &[]);
+        let luma = LumaFrame::new(&image.0);
+        assert_eq!(
+            find(&luma, &masks.retry, 14, Instant::now()),
+            Err(Reason::BudgetExceeded)
         );
     }
 

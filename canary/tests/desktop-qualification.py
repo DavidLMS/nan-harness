@@ -317,17 +317,18 @@ class QualificationTests(unittest.TestCase):
             root = Path(tmp)
             path = root / 'icon.json'
             value = dict(schemaVersion=1, mechanism='zed-native-icons', diagnosticsOnly=True,
-                         status='complete', reason=None, templateSide=28, retryMatches=1,
+                         status='complete', stage='matching', reason=None, templateSide=28, retryMatches=1,
                          copyMatches=1, closeMatches=1, baselineClusters=0, firstClusters=1,
                          secondClusters=1, newStableClusters=1, privateFrame='PRIVATE', x=123)
             path.write_text(json.dumps(value))
             public = q.semantic_observations(root, 'zed-desktop')[0]
             self.assertTrue(public['diagnosticsOnly'])
             self.assertEqual(public['newStableClusters'], 1)
+            self.assertEqual(public['stage'], 'matching')
             self.assertNotIn('PRIVATE', str(public))
             self.assertNotIn('x', public)
             for key, invalid in [('diagnosticsOnly', False), ('templateSide', 27),
-                                 ('retryMatches', 4097), ('status', 'PRIVATE')]:
+                                 ('retryMatches', 4097), ('status', 'PRIVATE'), ('stage', 'PRIVATE')]:
                 path.write_text(json.dumps({**value, key: invalid}))
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'zed-desktop')

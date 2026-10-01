@@ -504,9 +504,21 @@ fn same_retry_element(before: &xa11y::Element, after: &xa11y::Element) -> bool {
         && before.stable_id == after.stable_id
 }
 
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum IconStage {
+    Baseline,
+    Templates,
+    FirstCapture,
+    SecondCapture,
+    Matching,
+    Completed,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct IconObservation {
+    stage: IconStage,
     schema_version: u8,
     mechanism: &'static str,
     status: &'static str,
@@ -560,15 +572,16 @@ impl NativeClipboardSession<'_> {
         self.gui.send_native_copy_turn(&mut self.facts)
     }
 
-    fn record_icon_failure(&self, reason: Reason) -> Result<(), Reason> {
+    fn record_icon_failure(&self, reason: Reason, stage: IconStage) -> Result<(), Reason> {
         record_icon_observation(
             self.directory,
             &IconObservation {
+                stage,
                 schema_version: 1,
                 mechanism: "zed-native-icons",
                 status: if matches!(
                     reason,
-                    Reason::ActionUnsupported | Reason::SelectorNotMatched
+                    Reason::ActionUnsupported | Reason::SelectorNotMatched | Reason::BudgetExceeded
                 ) {
                     "unsupported"
                 } else {
@@ -589,7 +602,7 @@ impl NativeClipboardSession<'_> {
         match self.gui.visual.native_icon_frame() {
             Ok(frame) => self.icon_baseline = Some(frame),
             Err(reason) => {
-                self.record_icon_failure(reason)?;
+                self.record_icon_failure(reason, IconStage::Baseline)?;
                 if icon_guard_failure(reason) {
                     return Err(reason);
                 }
@@ -608,15 +621,19 @@ impl NativeClipboardSession<'_> {
         };
         self.gui
             .native_copy_guard(&mut self.facts, "icon-observation-before")?;
+        let mut stage = IconStage::Templates;
         let outcome = (|| {
             let templates = super::native_icon_probe::Templates::load(directory, baseline.scale())?;
+            stage = IconStage::FirstCapture;
             let first = self.gui.visual.native_icon_frame()?;
             self.gui
                 .native_copy_guard(&mut self.facts, "icon-observation-settle")?;
             std::thread::sleep(Duration::from_millis(200));
             self.gui
                 .native_copy_guard(&mut self.facts, "icon-observation-after")?;
+            stage = IconStage::SecondCapture;
             let second = self.gui.visual.native_icon_frame()?;
+            stage = IconStage::Matching;
             super::native_icon_probe::observe(&templates, baseline, &first, &second)
         })();
         match outcome {
@@ -625,13 +642,14 @@ impl NativeClipboardSession<'_> {
                 &IconObservation {
                     schema_version: 1,
                     mechanism: "zed-native-icons",
+                    stage: IconStage::Completed,
                     status: "complete",
                     reason: None,
                     counts,
                 },
             )?,
             Err(reason) => {
-                self.record_icon_failure(reason)?;
+                self.record_icon_failure(reason, stage)?;
                 if icon_guard_failure(reason) {
                     return Err(reason);
                 }

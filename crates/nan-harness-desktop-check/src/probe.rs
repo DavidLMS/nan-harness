@@ -1469,14 +1469,15 @@ fn prepare_zed_profile(spec: &ProbeSpec) -> Result<(), Reason> {
     }
     let directory = spec.workspace.join("profile").join("zed").join("config");
     create_private_dir_all(&directory).map_err(|_| Reason::IsolationUnavailable)?;
-    // Never let a probe update an existing app or send its diagnostics elsewhere.
-    // Use legible agent text in this private profile; exact OCR checks stay unchanged.
+    // Never let a probe update an existing app or send diagnostics elsewhere.
+    // Semantic probes fix the rem base used by the exact-source icon references.
+    let settings: &[u8] = if spec.verification == crate::cli::VerificationPolicy::SemanticOnly {
+        br#"{"auto_update":false,"telemetry":{"metrics":false,"diagnostics":false},"ui_font_size":16,"agent_ui_font_size":16,"agent_buffer_font_size":16}"#
+    } else {
+        br#"{"auto_update":false,"telemetry":{"metrics":false,"diagnostics":false},"agent_ui_font_size":18,"agent_buffer_font_size":16}"#
+    };
     open_private_new(&directory.join("settings.json"))
-        .and_then(|mut file| {
-            file.write_all(
-                br#"{"auto_update":false,"telemetry":{"metrics":false,"diagnostics":false},"agent_ui_font_size":18,"agent_buffer_font_size":16}"#,
-            )
-        })
+        .and_then(|mut file| file.write_all(settings))
         .map_err(|_| Reason::IsolationUnavailable)?;
     if std::env::var_os("FEASIBILITY_ZED_NATIVE_COPY_FACTS").is_some()
         || spec.verification == crate::cli::VerificationPolicy::SemanticOnly
@@ -2598,6 +2599,21 @@ mod tests {
         assert_eq!(settings["agent_buffer_font_size"], 16);
         assert!(prepare_zed_profile(&spec).is_err());
         assert_eq!(std::fs::read(path).unwrap(), original);
+        let semantic = ProbeSpec {
+            workspace: directory.path().join("semantic-workspace"),
+            verification: crate::cli::VerificationPolicy::SemanticOnly,
+            ..spec
+        };
+        prepare_zed_profile(&semantic).unwrap();
+        let settings: Value = serde_json::from_slice(
+            &std::fs::read(semantic.workspace.join("profile/zed/config/settings.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(settings["ui_font_size"], 16);
+        assert_eq!(settings["agent_ui_font_size"], 16);
+        assert_eq!(settings["auto_update"], false);
+        assert_eq!(settings["telemetry"]["metrics"], false);
+        assert_eq!(settings["telemetry"]["diagnostics"], false);
     }
 
     #[cfg(windows)]
