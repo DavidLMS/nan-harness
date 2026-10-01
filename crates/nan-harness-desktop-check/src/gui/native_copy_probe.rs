@@ -535,7 +535,7 @@ impl NativeClipboardSession<'_> {
             .native_copy_guard(&mut self.facts, "retry-label-query")?;
         let app = self.gui.app.as_ref().ok_or(Reason::SelectorNotMatched)?;
         let labels = app
-            .locator("label[value=\"Retry\"], label[name=\"Retry\"]")
+            .locator("static_text[value=\"Retry\"], static_text[name=\"Retry\"]")
             .elements()
             .map_err(map_error)?;
         self.facts.retry_label_count = Some(labels.len().min(4096));
@@ -562,7 +562,7 @@ impl NativeClipboardSession<'_> {
             .native_copy_guard(&mut self.facts, "retry-title-query")?;
         let app = self.gui.app.as_ref().ok_or(Reason::SelectorNotMatched)?;
         let title = app
-            .locator("label[value=\"An Error Happened\"]")
+            .locator("static_text[value=\"An Error Happened\"]")
             .elements()
             .map_err(map_error)?;
         self.facts.retry_title_count = Some(title.len().min(4096));
@@ -624,7 +624,7 @@ impl NativeClipboardSession<'_> {
             if Instant::now() >= deadline {
                 return Err(Reason::SelectorNotMatched);
             }
-            let count = control_count(&app.locator("label[value=\"Retry Generation\"]"))?;
+            let count = control_count(&app.locator("static_text[value=\"Retry Generation\"]"))?;
             self.facts.retry_tooltip_count = Some(count);
             if count > 1 {
                 return Err(Reason::SelectorNotMatched);
