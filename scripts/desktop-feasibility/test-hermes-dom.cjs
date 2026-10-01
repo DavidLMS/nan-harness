@@ -17,6 +17,8 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
   let frames = 0;
   let focusChecks = 0;
   let focused = false;
+  let focuses = 0;
+  let settleTimerObserved = false;
   const focusButton = { tagName: 'BUTTON', tabIndex: scenario === 'retry-not-focusable' ? -1 : 0,
     isConnected: scenario !== 'retry-disconnected', parentElement: null,
     closest(selector) { return selector === '[inert]' && scenario === 'retry-ancestor-inert' ? {} : null; },
@@ -78,7 +80,10 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
         : scenario === 'inert' ? 'inert' : null;
     },
     async scrollIntoViewIfNeeded() {},
-    async focus() { focused = true; },
+    async focus() {
+      if (qualify && request.action === 'retry') { assert.equal(frames, 2); assert(settleTimerObserved); }
+      focuses++; focused = true;
+    },
     async click(options) {
       assert(qualify && request.action === 'retry');
       assert.equal(options.force, undefined);
@@ -97,7 +102,7 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
   };
   const errorCards = {
     async evaluate(callback, prompt) {
-      const user = { innerText: ['foreign-error-turn', 'delayed-foreign-error'].includes(scenario) ? 'Older unrelated user turn' : request.prompt,
+      const user = { innerText: (['foreign-error-turn', 'delayed-foreign-error'].includes(scenario) || scenario === 'foreign-card-after-settle' && frames === 2) ? 'Older unrelated user turn' : request.prompt,
         closest() { return pair; } };
       const pair = { querySelectorAll(selector) { assert.equal(selector, '[data-role="user"]'); return [user]; },
         closest() { return {}; } };
@@ -172,6 +177,7 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
       if (path === '/request') return JSON.stringify(request);
       if (path === '/connection') return JSON.stringify(connection);
       if (path === '/proc/30/stat') return '30 (synthetic) S 20';
+      if (path === '/proc/net/tcp' && scenario === 'owner-after-settle' && frames === 2) return 'header\n';
       if (path === '/proc/net/tcp') return scenario
         ? `header\n0: 0100007F:${connection.port.toString(16).toUpperCase()} 00000000:0000 0A 0 0 0 0 0 777\n`
         : 'header\n';
@@ -190,8 +196,7 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
         return { chromium: { async connectOverCDP() { attaches++;
           if (!scenario) throw new Error('must not attach'); return browser; } } };
       },
-      URL, setTimeout, requestAnimationFrame: callback => {
-        assert.equal(centers, 1);
+      URL, setTimeout: (callback, delayMs) => { if (delayMs === 0) settleTimerObserved = true; return setTimeout(callback, delayMs); }, requestAnimationFrame: callback => {
         if (scenario !== 'retry-no-frames') setTimeout(() => { frames++; callback(); }, 0);
       }, window: { innerWidth: 100, innerHeight: 100 },
       getComputedStyle: element => ({ display: scenario === 'retry-ancestor-hidden' ? 'none' : 'block', visibility: 'visible', contentVisibility: 'visible', pointerEvents: scenario === 'retry-pointer-none' && element === hitButton ? 'none' : 'auto',
@@ -215,7 +220,7 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
   const facts = JSON.parse(output.get('/output'));
   if (qualify) {
     assert(!output.get('/output').includes(request.expectedMarker));
-    return { facts, submits, fills, clicks, keys, centers, frames };
+    return { facts, submits, fills, clicks, keys, centers, frames, focuses };
   }
   assert.equal(facts.inputSubmitted, ['happy', 'delayed', 'missing-editor', 'transient-context', 'keyboard'].includes(scenario));
   assert.equal(facts.responseVerified, ['happy', 'delayed', 'missing-editor', 'transient-context', 'keyboard'].includes(scenario));
@@ -313,6 +318,18 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
   assert.equal(reclaimed.facts.retryFocusAfterAcquire, false);
   assert.equal(reclaimed.facts.retryFocusBeforeAction, false);
   assert.equal(reclaimed.keys, 0);
+  const stalled = await trial({ ...retryRequest, timeoutMs: 20 }, {}, 'retry-no-frames', true);
+  assert.equal(stalled.focuses, 0);
+  assert.equal(stalled.keys, 0);
+  assert.equal(stalled.facts.errorCategory, 'submit-action-timeout');
+  for (const scenario of ['owner-after-settle', 'foreign-card-after-settle']) {
+    const changed = await trial(retryRequest, {}, scenario, true);
+    assert.equal(changed.frames, 2);
+    assert.equal(changed.focuses, 0);
+    assert.equal(changed.keys, 0);
+    assert.equal(changed.facts.inputSubmitted, false);
+  }
+  assert.equal(nonTabstop.focuses, 1);
   const timeout = await trial(retryRequest, {}, 'click-timeout', true);
   assert.equal(timeout.keys, 1);
   assert.equal(timeout.submits, 0);

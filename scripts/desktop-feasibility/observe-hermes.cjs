@@ -207,7 +207,7 @@ async function driveDom() {
   }
   const retryAction = qualify && request.action === 'retry';
   if (retryAction) facts.sendMechanism = 'semantic-keyboard';
-  const readiness = () => send.evaluate((button, pointerRetry) => {
+  const readiness = () => send.evaluate((button, retryControlAction) => {
     const visible = e => { const r = e.getBoundingClientRect();
       const style = getComputedStyle(e); return r.width > 0 && r.height > 0 &&
         style.visibility !== 'hidden' && style.display !== 'none'; };
@@ -215,7 +215,7 @@ async function driveDom() {
     if ([...document.querySelectorAll('[role="menu"]')].some(visible)) return 'menu';
     if (button.disabled || button.getAttribute('aria-disabled') === 'true') return 'disabled';
     if (button.closest('[inert]')) return 'inert';
-    if (!pointerRetry && button.tabIndex < 0) return 'focus';
+    if (!retryControlAction && button.tabIndex < 0) return 'focus';
     return null;
   }, retryAction, { timeout: Math.max(1, Math.min(1000, deadline - Date.now())) });
   async function retryFocusSnapshot(beforeAction) {
@@ -260,6 +260,34 @@ async function driveDom() {
     facts.errorCategory = 'submit-action-intercepted'; saveFacts(); return;
   }
   await send.scrollIntoViewIfNeeded({ timeout: Math.max(1, deadline - Date.now()) });
+  if (retryAction) {
+    // Frozen composer focus.ts schedules sync, animation-frame and timer
+    // restoration when the failed turn re-enables input. Let that lifecycle
+    // finish before our single focus attempt; never refocus or resubmit.
+    const settleBudget = Math.max(0, Math.min(500, deadline - Date.now()));
+    let settled = false;
+    if (settleBudget > 0) {
+      try {
+        settled = await Promise.race([
+          page.evaluate(() => new Promise(resolve => {
+            setTimeout(() => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))), 0);
+          })),
+          delay(settleBudget).then(() => false),
+        ]);
+      } catch { /* Context replacement cannot authorize an action. */ }
+    }
+    if (!settled) {
+      facts.errorCategory = 'submit-action-timeout'; facts.sendBlocker = 'unmeasured'; saveFacts(); return;
+    }
+    if (!ownedEndpoint() || await send.count() !== 1 || !await send.isEnabled()
+        || await retryUser.count() !== 1
+        || !await retryUser.evaluate((e, prompt) => e.innerText.trim() === prompt, request.prompt)
+        || !await errorProof()) {
+      facts.errorCategory = 'send-unavailable'; saveFacts(); return;
+    }
+    facts.sendBlocker = await readiness();
+    if (facts.sendBlocker !== null) { facts.errorCategory = 'submit-action-intercepted'; saveFacts(); return; }
+  }
   await send.focus({ timeout: Math.max(1, deadline - Date.now()) });
   facts.sendBlocker = await readiness();
   if (facts.sendBlocker === null && !(retryAction ? await retryFocusSnapshot(false)
