@@ -166,6 +166,36 @@ class QualificationTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 q.semantic_observations(root, 'hermes-desktop')
 
+    def test_provider_oracle_and_retry_tooltip_diagnostics_are_closed(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'provider.json'
+            oracle = dict(schemaVersion=1, mechanism='semantic-provider-oracle', stage='tool',
+                          toolCompleted=True, toolRecordingBounded=True, toolVerified=False,
+                          fixtureResponseVerified=True, failureObserved=False, private='PRIVATE')
+            path.write_text(json.dumps(oracle))
+            for app in ('hermes-desktop', 'zed-desktop'):
+                public = q.semantic_observations(root, app)
+                self.assertTrue(public[0]['toolCompleted'])
+                self.assertFalse(public[0]['toolVerified'])
+                self.assertNotIn('PRIVATE', str(public))
+            for field, invalid in [('stage', 'PRIVATE'), ('toolVerified', 'PRIVATE'), ('failureObserved', 0)]:
+                path.write_text(json.dumps({**oracle, field: invalid}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'zed-desktop')
+            native = dict(schemaVersion=1, mechanism='zed-native-copy', substage='retry-tooltip-query',
+                          retrySelector='retry-tooltip', retryTitleCount=0, retryCandidateCount=6,
+                          retryTooltipCount=1)
+            path.write_text(json.dumps(native))
+            public = q.semantic_observations(root, 'zed-desktop')[0]
+            self.assertEqual(public['retryTooltipCount'], 1)
+            self.assertEqual(public['retryCandidateCount'], 6)
+            self.assertEqual(public['retrySelector'], 'retry-tooltip')
+            for field in ('retryTitleCount', 'retryCandidateCount', 'retryTooltipCount'):
+                for invalid in (True, -1, 4097):
+                    path.write_text(json.dumps({**native, field: invalid}))
+                    with self.assertRaises(ValueError):
+                        q.semantic_observations(root, 'zed-desktop')
+
     def test_semantic_observation_bounds_and_symlink_rejection(self):
         with tempfile.TemporaryDirectory() as root:
             path = Path(root) / 'observation.json'

@@ -1,4 +1,4 @@
-//! Hosted-only native clipboard readback. No OCR or AX text reads.
+//! Hosted-only clipboard input/response oracles and native control navigation.
 
 use super::{ComposerErrorCategory, Gui, WAIT, clipboard, map_error, primary_modifier};
 use crate::provider::ProviderGate;
@@ -62,6 +62,9 @@ struct Facts {
     response_control_count: Option<usize>,
     retry_control_count: Option<usize>,
     retry_selector: Option<&'static str>,
+    retry_title_count: Option<usize>,
+    retry_candidate_count: Option<usize>,
+    retry_tooltip_count: Option<usize>,
     clipboard_cleanup: &'static str,
     input: InputFacts,
     response: ResponseFacts,
@@ -343,6 +346,9 @@ fn native_copy_facts() -> Facts {
         response_control_count: None,
         retry_control_count: None,
         retry_selector: None,
+        retry_title_count: None,
+        retry_candidate_count: None,
+        retry_tooltip_count: None,
         clipboard_cleanup: "not-run",
         input: InputFacts::default(),
         response: ResponseFacts::default(),
@@ -377,11 +383,30 @@ fn finish_native_copy(
     cleanup.and(outcome)
 }
 
+fn retry_header_candidate(title: xa11y::Rect, button: &xa11y::Element) -> bool {
+    button.pid.is_some()
+        && button.bounds.is_some_and(|bounds| {
+            bounds.x >= title.x
+                && bounds.width > 0
+                && bounds.height > 0
+                && i64::from(bounds.y) < i64::from(title.y) + i64::from(title.height)
+                && i64::from(bounds.y) + i64::from(bounds.height) > i64::from(title.y)
+        })
+}
+
+fn same_retry_element(before: &xa11y::Element, after: &xa11y::Element) -> bool {
+    before.pid.is_some()
+        && before.pid == after.pid
+        && before.bounds == after.bounds
+        && before.stable_id == after.stable_id
+}
+
 pub(crate) struct NativeClipboardSession<'a> {
     gui: &'a Gui,
     directory: &'a Path,
     facts: Facts,
     retry_ready: bool,
+    retry_element: Option<xa11y::Element>,
 }
 
 impl NativeClipboardSession<'_> {
@@ -390,6 +415,7 @@ impl NativeClipboardSession<'_> {
             return Err(Reason::InputMismatch);
         }
         self.retry_ready = false;
+        self.retry_element = None;
         self.facts.input = InputFacts::default();
         self.facts.response = ResponseFacts::default();
         self.facts.settle_observations = 0;
@@ -426,16 +452,146 @@ impl NativeClipboardSession<'_> {
                 self.retry_ready = true;
                 return Ok(());
             }
-            if count > 1 || Instant::now() >= deadline {
+            if count > 1 {
                 return Err(Reason::SelectorNotMatched);
+            }
+            if Instant::now() >= deadline {
+                return self.discover_retry_tooltip();
             }
             std::thread::sleep(Duration::from_millis(100));
         }
     }
 
+    fn discover_retry_tooltip(&mut self) -> Result<(), Reason> {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        self.facts.retry_selector = Some("retry-tooltip");
+        self.facts.ax_text_used = true;
+        self.gui
+            .native_copy_guard(&mut self.facts, "retry-title-query")?;
+        let app = self.gui.app.as_ref().ok_or(Reason::SelectorNotMatched)?;
+        let title = app
+            .locator("label[value=\"An Error Happened\"]")
+            .elements()
+            .map_err(map_error)?;
+        self.facts.retry_title_count = Some(title.len().min(4096));
+        if title.len() != 1 {
+            return Err(Reason::SelectorNotMatched);
+        }
+        let title_bounds = title[0].bounds.ok_or(Reason::ActionUnsupported)?;
+        self.gui.visual.validate_native_bounds(title_bounds)?;
+        let title_pid = title[0].pid.ok_or(Reason::IsolationUnavailable)?;
+        let buttons = app.locator("button").elements().map_err(map_error)?;
+        if buttons.len() > 64 {
+            return Err(Reason::SelectorNotMatched);
+        }
+        let candidates: Vec<_> = buttons
+            .into_iter()
+            .filter(|button| {
+                button.pid == Some(title_pid) && retry_header_candidate(title_bounds, button)
+            })
+            .collect();
+        self.facts.retry_candidate_count = Some(candidates.len());
+        if candidates.is_empty() || candidates.len() > 8 {
+            return Err(Reason::SelectorNotMatched);
+        }
+        let mut selected = None;
+        for candidate in candidates {
+            if Instant::now() >= deadline {
+                return Err(Reason::SelectorNotMatched);
+            }
+            self.reset_retry_tooltip(deadline)?;
+            self.gui
+                .native_copy_guard(&mut self.facts, "retry-tooltip-hover")?;
+            self.gui
+                .visual
+                .hover_native(candidate.bounds.ok_or(Reason::ActionUnsupported)?)?;
+            self.gui
+                .native_copy_guard(&mut self.facts, "retry-tooltip-query")?;
+            if self.wait_retry_tooltip(true, deadline)? {
+                if selected.is_some() {
+                    return Err(Reason::SelectorNotMatched);
+                }
+                selected = Some(candidate);
+            }
+            self.reset_retry_tooltip(deadline)?;
+        }
+        if Instant::now() >= deadline {
+            return Err(Reason::SelectorNotMatched);
+        }
+        self.retry_element = Some(selected.ok_or(Reason::SelectorNotMatched)?);
+        self.retry_ready = true;
+        Ok(())
+    }
+
+    fn wait_retry_tooltip(&mut self, present: bool, deadline: Instant) -> Result<bool, Reason> {
+        let until = deadline.min(Instant::now() + Duration::from_secs(1));
+        loop {
+            self.gui
+                .native_copy_guard(&mut self.facts, "retry-tooltip-query")?;
+            let app = self.gui.app.as_ref().ok_or(Reason::SelectorNotMatched)?;
+            if Instant::now() >= deadline {
+                return Err(Reason::SelectorNotMatched);
+            }
+            let count = control_count(&app.locator("label[value=\"Retry Generation\"]"))?;
+            self.facts.retry_tooltip_count = Some(count);
+            if count > 1 {
+                return Err(Reason::SelectorNotMatched);
+            }
+            if (count == 1) == present {
+                return Ok(true);
+            }
+            if Instant::now() >= until {
+                return Ok(false);
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    fn reset_retry_tooltip(&mut self, deadline: Instant) -> Result<(), Reason> {
+        self.gui
+            .native_copy_guard(&mut self.facts, "retry-tooltip-reset")?;
+        self.gui.visual.neutral_pointer()?;
+        self.gui
+            .native_copy_guard(&mut self.facts, "retry-tooltip-clear")?;
+        if !self.wait_retry_tooltip(false, deadline)? {
+            return Err(Reason::SelectorNotMatched);
+        }
+        Ok(())
+    }
+
     pub(crate) fn retry_once(&mut self) -> Result<(), Reason> {
         if !std::mem::take(&mut self.retry_ready) {
             return Err(Reason::ActionUnsupported);
+        }
+        if let Some(captured) = self.retry_element.take() {
+            self.gui
+                .native_copy_guard(&mut self.facts, "retry-revalidate")?;
+            let app = self.gui.app.as_ref().ok_or(Reason::SelectorNotMatched)?;
+            let current = app.locator("button").elements().map_err(map_error)?;
+            if current.len() > 64 {
+                return Err(Reason::SelectorNotMatched);
+            }
+            let matches: Vec<_> = current
+                .into_iter()
+                .filter(|element| same_retry_element(&captured, element))
+                .collect();
+            if matches.len() != 1 {
+                return Err(Reason::SelectorNotMatched);
+            }
+            let deadline = Instant::now() + Duration::from_secs(2);
+            self.reset_retry_tooltip(deadline)?;
+            self.gui
+                .native_copy_guard(&mut self.facts, "retry-tooltip-hover")?;
+            self.gui
+                .visual
+                .hover_native(matches[0].bounds.ok_or(Reason::ActionUnsupported)?)?;
+            if !self.wait_retry_tooltip(true, deadline)? {
+                return Err(Reason::SelectorNotMatched);
+            }
+            self.gui
+                .native_copy_guard(&mut self.facts, "retry-before")?;
+            matches[0].press().map_err(map_error)?;
+            return self.gui.native_copy_guard(&mut self.facts, "retry-after");
         }
         let app = self.gui.app.as_ref().ok_or(Reason::SelectorNotMatched)?;
         let retry = app.locator(RETRY_CONTROL);
@@ -479,6 +635,7 @@ impl Gui {
             directory,
             facts,
             retry_ready: false,
+            retry_element: None,
         })
     }
 

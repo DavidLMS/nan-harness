@@ -72,7 +72,7 @@ def bounded_json(path, limit=1024 * 1024):
 
 DOM_ERRORS = set('unclassified invalid-request launcher-unowned endpoint-unowned target-ambiguous target-invalid composer-ambiguous send-unavailable stale-response input-mismatch response-timeout submit-action-timeout submit-action-intercepted submit-action-detached submit-action-failed response-observation-failed attachment-or-action-failed'.split())
 NATIVE_STAGES = set('trust panel input submit response-control response-readback completed'.split())
-NATIVE_SUBSTAGES = set('trust-query trust-before trust-after panel-query new-thread-before new-thread-after panel-settle select-all-before select-all-after type-before type-after paste-before paste-after paste-settle input-sentinel-write copy-select-all-before copy-select-all-after input-copy-before input-copy-after collapse-selection-before submit-before response-control-query response-sentinel-write response-copy-before response-copy-after clipboard-read-before clipboard-read-after export-copy-before export-copy-after export-read-before export-read-after export-parse completed retry-control-query retry-before retry-after'.split())
+NATIVE_SUBSTAGES = set('trust-query trust-before trust-after panel-query new-thread-before new-thread-after panel-settle select-all-before select-all-after type-before type-after paste-before paste-after paste-settle input-sentinel-write copy-select-all-before copy-select-all-after input-copy-before input-copy-after collapse-selection-before submit-before response-control-query response-sentinel-write response-copy-before response-copy-after clipboard-read-before clipboard-read-after export-copy-before export-copy-after export-read-before export-read-after export-parse completed retry-control-query retry-before retry-after retry-title-query retry-tooltip-reset retry-tooltip-hover retry-tooltip-query retry-tooltip-clear retry-revalidate'.split())
 
 
 def semantic_observations(directory, app):
@@ -103,13 +103,18 @@ def semantic_observations(directory, app):
         if type(value) is not dict:
             raise ValueError('invalid semantic observation')
         mechanism = value.get('mechanism')
-        if mechanism not in {'hermes-renderer-qualification', 'zed-native-copy'}:
+        if mechanism not in {'hermes-renderer-qualification', 'zed-native-copy', 'semantic-provider-oracle'}:
             continue
         expected = 'hermes-renderer-qualification' if app == 'hermes-desktop' else 'zed-native-copy'
-        if mechanism != expected or type(value.get('schemaVersion')) is not int or value['schemaVersion'] != 1:
+        if (mechanism != expected and mechanism != 'semantic-provider-oracle') or type(value.get('schemaVersion')) is not int or value['schemaVersion'] != 1:
             raise ValueError('semantic observation identity differs')
         record = {'schemaVersion': 1, 'mechanism': mechanism}
-        if mechanism == 'hermes-renderer-qualification':
+        if mechanism == 'semantic-provider-oracle':
+            enum(record, value, 'stage', {'tool', 'failure'})
+            for key in ('toolCompleted', 'toolRecordingBounded', 'toolVerified',
+                        'fixtureResponseVerified', 'failureObserved'):
+                flag(record, value, key)
+        elif mechanism == 'hermes-renderer-qualification':
             for key in ('endpointOwned', 'attached', 'targetVerified', 'uniqueComposer', 'inputReadback',
                         'inputSubmitted', 'responseVerified', 'providerResponseVerified', 'errorObserved',
                         'retryControl', 'inputCleared', 'userTurnObserved'):
@@ -129,12 +134,13 @@ def semantic_observations(directory, app):
             enum(record, value, 'guardKind', {'native-window', 'direct-foreground'})
             enum(record, value, 'guardCategory', CATEGORIES)
             enum(record, value, 'clipboardCleanup', {'passed', 'failed', 'not-run'})
-            enum(record, value, 'retrySelector', {'retry-name-or-description'})
-            if 'retryControlCount' in value:
-                count = value['retryControlCount']
-                if count is not None and (type(count) is not int or not 0 <= count <= 4096):
-                    raise ValueError('invalid retry control count')
-                record['retryControlCount'] = count
+            enum(record, value, 'retrySelector', {'retry-name-or-description', 'retry-tooltip'})
+            for key in ('retryControlCount', 'retryTitleCount', 'retryCandidateCount', 'retryTooltipCount'):
+                if key in value:
+                    count = value[key]
+                    if count is not None and (type(count) is not int or not 0 <= count <= 4096):
+                        raise ValueError('invalid retry control count')
+                    record[key] = count
             enum(record, value, 'lastExportError', {'request', 'schema', 'user-mismatch', 'assistant-mismatch', 'decompression'})
             enum(record, value, 'lastExportTransportError', {'configuration', 'spawn', 'pipes', 'timeout', 'wait', 'write', 'read', 'exit', 'output-budget', 'json', 'verdict'})
             for nested, fields in (('input', {'submitted': 'inputSubmitted', 'clipboardVerified': 'inputReadback'}),

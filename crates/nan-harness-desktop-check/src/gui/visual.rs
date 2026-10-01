@@ -547,6 +547,33 @@ impl Visual {
         self.guard()
     }
 
+    pub(super) fn validate_native_bounds(&self, bounds: Rect) -> Result<(), Reason> {
+        native_hover_point(self.window.borrow().bounds, bounds).map(|_| ())
+    }
+
+    /// AX bounds already use absolute logical screen coordinates.
+    pub(super) fn hover_native(&self, bounds: Rect) -> Result<(), Reason> {
+        let window = self.window.borrow().bounds;
+        let point = native_hover_point(window, bounds)?;
+        self.guard()?;
+        xa11y::input_sim()
+            .map_err(map_error)?
+            .mouse()
+            .move_to(point)
+            .map_err(map_error)?;
+        self.guard()
+    }
+
+    pub(super) fn neutral_pointer(&self) -> Result<(), Reason> {
+        let window = self.window.borrow().bounds;
+        self.hover_native(Rect {
+            x: window.x + 16,
+            y: window.y + 16,
+            width: 1,
+            height: 1,
+        })
+    }
+
     pub(super) fn click(&self, bounds: Rect, scale: f32) -> Result<(), Reason> {
         let point = point_in_window(self.capture_bounds(), bounds, scale)?;
         self.guard()?;
@@ -1098,6 +1125,26 @@ fn matches_app(kind: DesktopHarnessKind, name: &str) -> bool {
     app_names(kind)
         .iter()
         .any(|expected| expected.eq_ignore_ascii_case(name))
+}
+
+fn native_hover_point(window: Rect, bounds: Rect) -> Result<Point, Reason> {
+    let right = i64::from(bounds.x) + i64::from(bounds.width);
+    let bottom = i64::from(bounds.y) + i64::from(bounds.height);
+    if bounds.width == 0
+        || bounds.height == 0
+        || bounds.x < window.x
+        || bounds.y < window.y
+        || right > i64::from(window.x) + i64::from(window.width)
+        || bottom > i64::from(window.y) + i64::from(window.height)
+    {
+        return Err(Reason::ActionUnsupported);
+    }
+    Ok(Point {
+        x: i32::try_from(i64::from(bounds.x) + i64::from(bounds.width / 2))
+            .map_err(|_| Reason::ActionUnsupported)?,
+        y: i32::try_from(i64::from(bounds.y) + i64::from(bounds.height / 2))
+            .map_err(|_| Reason::ActionUnsupported)?,
+    })
 }
 
 fn point_in_window(window: Rect, pixels: Rect, scale: f32) -> Result<Point, Reason> {
@@ -2034,6 +2081,41 @@ mod tests {
         );
         let changed = modal.replace("Unrecognized", "Unrecognized!");
         assert!(modal_confirm_anchor(&Page::parse(&changed, 300, 100).unwrap()).is_none());
+    }
+
+    #[test]
+    fn native_hover_rejects_empty_outside_and_overflowing_geometry() {
+        let window = Rect {
+            x: -100,
+            y: 20,
+            width: 400,
+            height: 300,
+        };
+        let button = Rect {
+            x: -50,
+            y: 40,
+            width: 20,
+            height: 10,
+        };
+        assert_eq!(
+            native_hover_point(window, button).unwrap(),
+            Point::new(-40, 45)
+        );
+        for bounds in [
+            Rect { width: 0, ..button },
+            Rect { x: -101, ..button },
+            Rect { x: 290, ..button },
+            Rect { y: 315, ..button },
+            Rect {
+                width: u32::MAX,
+                ..button
+            },
+        ] {
+            assert_eq!(
+                native_hover_point(window, bounds),
+                Err(Reason::ActionUnsupported)
+            );
+        }
     }
 
     #[test]

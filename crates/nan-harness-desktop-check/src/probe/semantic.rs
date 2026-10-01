@@ -6,8 +6,10 @@ use crate::gui::{DomAction, DomPurpose, DomTurn, Gui, NativeClipboardSession};
 use crate::provider::ProviderGate;
 use crate::report::{CheckStep, InputMode, ProbeResult, Reason, ResponseVerification};
 use nan_harness_core::DesktopHarnessKind;
-use nan_harness_private_fs::create_private_dir_all;
+use nan_harness_private_fs::{create_private_dir_all, open_private_new};
 use nan_harness_test_support::scripted_provider::{ProviderScenario, ScriptedProvider};
+use serde::Serialize;
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -67,7 +69,7 @@ impl SemanticBackend {
             },
             _ => return Err(Reason::ActionUnsupported),
         };
-        let outcome = complete_scenario(&mut ui, &scenario, result).await;
+        let outcome = complete_scenario(&mut ui, &scenario, &self.directory, result).await;
         ui.finish(scenario.gate, outcome)
     }
 }
@@ -163,6 +165,7 @@ impl SemanticUi<'_> {
 async fn complete_scenario(
     ui: &mut SemanticUi<'_>,
     scenario: &SemanticScenario<'_>,
+    directory: &Path,
     result: &mut ProbeResult,
 ) -> Result<(), Reason> {
     let SemanticScenario {
@@ -200,6 +203,7 @@ async fn complete_scenario(
         DomPurpose::Response,
         gate,
     )?;
+    record_provider_oracle(directory, "tool", &tool, gate)?;
     if !tool.completed()
         || !tool.recording_bounded()
         || !gate.tool_verified()
@@ -209,13 +213,17 @@ async fn complete_scenario(
     }
     result.steps.push(CheckStep::ToolVerified);
 
+    gate.arm_fixture_response("NAN_CHECK_EXPECTED_FAILURE")
+        .map_err(|()| Reason::ProviderFailed)?;
     gate.fail_recoverable_scenario(true);
-    ui.turn(
+    let failure = ui.turn(
         "Check the expected provider failure",
         "NAN_CHECK_EXPECTED_FAILURE",
         DomPurpose::Failure,
         gate,
-    )?;
+    );
+    record_provider_oracle(directory, "failure", &tool, gate)?;
+    failure?;
     if !gate.failure_observed() {
         return Err(Reason::ProviderFailed);
     }
@@ -233,4 +241,51 @@ async fn complete_scenario(
     }
     result.steps.push(CheckStep::ErrorRecovered);
     Ok(())
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ToolOracleFacts {
+    tool_completed: bool,
+    tool_recording_bounded: bool,
+    tool_verified: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProviderOracleFacts {
+    schema_version: u8,
+    mechanism: &'static str,
+    stage: &'static str,
+    #[serde(flatten)]
+    tool: ToolOracleFacts,
+    fixture_response_verified: bool,
+    failure_observed: bool,
+}
+
+fn record_provider_oracle(
+    directory: &Path,
+    stage: &'static str,
+    tool: &ScriptedProvider,
+    gate: &ProviderGate,
+) -> Result<(), Reason> {
+    let facts = ProviderOracleFacts {
+        schema_version: 1,
+        mechanism: "semantic-provider-oracle",
+        stage,
+        tool: ToolOracleFacts {
+            tool_completed: tool.completed(),
+            tool_recording_bounded: tool.recording_bounded(),
+            tool_verified: gate.tool_verified(),
+        },
+        fixture_response_verified: gate.fixture_response_verified(),
+        failure_observed: gate.failure_observed(),
+    };
+    let mut nonce = [0_u8; 8];
+    getrandom::fill(&mut nonce).map_err(|_| Reason::IsolationUnavailable)?;
+    let path = directory.join(format!("provider-{}.json", u64::from_le_bytes(nonce)));
+    let bytes = serde_json::to_vec(&facts).map_err(|_| Reason::IsolationUnavailable)?;
+    open_private_new(&path)
+        .and_then(|mut file| file.write_all(&bytes).and_then(|()| file.sync_all()))
+        .map_err(|_| Reason::IsolationUnavailable)
 }
