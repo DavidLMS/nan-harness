@@ -17,6 +17,59 @@ def thread(parts):
 
 
 class ExportTests(unittest.TestCase):
+    def test_resumed_export_transport_emits_only_the_closed_verdict(self):
+        value = thread([])
+        value["messages"].extend(["Resume", thread([{"Text": "reply-nonce"}])["messages"][1]])
+        with tempfile.TemporaryDirectory() as directory:
+            executable = pathlib.Path(directory) / "synthetic-zstd"
+            executable.write_text("#!" + sys.executable + "\nimport sys\nsys.stdout.write(" + repr(json.dumps(value)) + ")\n")
+            executable.chmod(0o700)
+            request = {"expectedPrompt": "prompt-nonce", "expectedMarker": "reply-nonce", "clipboard": "c3ludGhldGlj"}
+            output = subprocess.run([sys.executable, str(pathlib.Path(__file__).with_name("zed-export.py")), "--zstd", str(executable)], input=json.dumps(request).encode(), stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+            result = json.loads(output.stdout)
+            self.assertTrue(result["verified"])
+            self.assertEqual(result["assistantTextCount"], 1)
+            self.assertEqual(set(result), {"verified", "version", "userCount", "assistantTextCount", "error"})
+            self.assertNotIn(b"nonce", output.stdout + output.stderr)
+
+    def test_native_resume_certifies_only_the_latest_assistant_segment(self):
+        value = thread([])
+        value["messages"].extend([
+            "Resume",
+            {"Agent": {"content": [], "tool_results": {}, "reasoning_details": None}},
+            "Resume",
+            {"Agent": {"content": [{"Text": "reply-nonce"}], "tool_results": {}, "reasoning_details": None}},
+        ])
+        result = module.validate_thread(value, "prompt-nonce", "reply-nonce")
+        self.assertTrue(result["verified"])
+        self.assertEqual(result["userCount"], 1)
+        self.assertEqual(result["assistantTextCount"], 1)
+
+    def test_stale_failed_text_thinking_and_tools_cannot_certify_recovery(self):
+        for latest in [[], [{"Thinking": {"text": "reply-nonce"}}], [{"ToolUse": {"content": "reply-nonce"}}], [{"Text": "different-nonce"}]]:
+            value = thread([{"Text": "reply-nonce"}])
+            value["messages"].extend([
+                "Resume",
+                {"Agent": {"content": latest, "tool_results": {}, "reasoning_details": None}},
+            ])
+            result = module.validate_thread(value, "prompt-nonce", "reply-nonce")
+            self.assertFalse(result["verified"])
+            self.assertEqual(result["error"], "assistant-mismatch")
+
+    def test_resume_does_not_relax_user_identity_or_accept_unknown_variants(self):
+        for invalid in ["resume", "Continue where you left off", {"Resume": None}, {"Compaction": {"Summary": "reply-nonce"}}]:
+            value = thread([{"Text": "reply-nonce"}])
+            value["messages"].insert(1, invalid)
+            self.assertEqual(module.validate_thread(value, "prompt-nonce", "reply-nonce")["error"], "schema")
+        value = thread([{"Text": "reply-nonce"}])
+        value["messages"].insert(0, "Resume")
+        self.assertFalse(module.validate_thread(value, "prompt-nonce", "reply-nonce")["verified"])
+        value = thread([])
+        value["messages"].extend(["Resume", value["messages"][0], thread([{"Text": "reply-nonce"}])["messages"][1]])
+        result = module.validate_thread(value, "prompt-nonce", "reply-nonce")
+        self.assertFalse(result["verified"])
+        self.assertEqual(result["error"], "user-mismatch")
+
     def test_only_independent_assistant_text_can_pass(self):
         self.assertTrue(module.validate_thread(thread([{"Text": "reply-nonce"}]), "prompt-nonce", "reply-nonce")["verified"])
         for parts in [[{"Thinking": {"text": "reply-nonce"}}], [{"ToolUse": {"content": "reply-nonce"}}], [{"Text": "old reply-nonce"}], [{"Text": "reply-nonce"}, {"Text": "reply-nonce"}]]:

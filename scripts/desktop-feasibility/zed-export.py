@@ -20,6 +20,13 @@ def validate_thread(value, prompt, marker):
         return result
     texts = []
     for message in messages:
+        # Pinned Message::Resume is a serde unit variant, exported as a string.
+        # Only the latest resumed segment can certify recovery of this User.
+        if message == "Resume":
+            if result["userCount"] != 1:
+                return result
+            texts.clear()
+            continue
         if not isinstance(message, dict) or len(message) != 1:
             return result
         if "User" in message:
