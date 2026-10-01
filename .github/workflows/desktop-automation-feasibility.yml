@@ -56,6 +56,8 @@ jobs:
         with:
           persist-credentials: false
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          cache-on-failure: true
       - name: Prepare macOS GUI session
         if: runner.os == 'macOS'
         run: bash canary/actions/prepare-desktop-macos.sh
@@ -72,7 +74,7 @@ jobs:
           echo "FEASIBILITY_ZED_RESPONSE_METHOD=thread-export" >> "$GITHUB_ENV"
       - name: Install Linux desktop dependencies
         if: runner.os == 'Linux'
-        timeout-minutes: 12
+        timeout-minutes: 20
         shell: bash
         run: |
           apt_options=(-o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)

@@ -31,6 +31,13 @@ struct ResponseFacts {
     provider_generation_count: Option<usize>,
 }
 
+#[derive(Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ActivationFacts {
+    activation_attempted: bool,
+    activation_succeeded: bool,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Facts {
@@ -48,6 +55,8 @@ struct Facts {
     expected_prompt: Zeroizing<String>,
     clipboard_readback: Option<&'static str>,
     clipboard_character_count: Option<usize>,
+    #[serde(flatten)]
+    activation: ActivationFacts,
     experiment_only: bool,
     ocr_used: bool,
     ax_text_used: bool,
@@ -81,6 +90,19 @@ fn exact_readback(actual: &str, expected: &str, sentinel: &str) -> bool {
     actual == expected && actual != sentinel && !expected.is_empty()
 }
 
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct ActivationRequest {
+    pid: u32,
+    x: i32,
+    y: i32,
+}
+
+fn valid_activation_request(payload: &str) -> bool {
+    serde_json::from_str::<ActivationRequest>(payload)
+        .is_ok_and(|request| request.pid > 0 && request.pid <= i32::MAX.cast_unsigned())
+}
+
 fn neutral_input(executable: &Path, mode: &str, prompt: &str) -> Result<(), Reason> {
     if !executable.is_absolute()
         || !executable.is_file()
@@ -88,6 +110,7 @@ fn neutral_input(executable: &Path, mode: &str, prompt: &str) -> Result<(), Reas
         || !matches!(
             mode,
             "type"
+                | "activate-accessibility"
                 | "new-thread"
                 | "select-all"
                 | "copy"
@@ -97,7 +120,8 @@ fn neutral_input(executable: &Path, mode: &str, prompt: &str) -> Result<(), Reas
                 | "submit"
         )
         || (mode == "type" && prompt.is_empty())
-        || (mode != "type" && !prompt.is_empty())
+        || (mode == "activate-accessibility" && !valid_activation_request(prompt))
+        || (!matches!(mode, "type" | "activate-accessibility") && !prompt.is_empty())
     {
         return Err(Reason::IsolationUnavailable);
     }
@@ -318,6 +342,7 @@ fn native_copy_facts() -> Facts {
         } else {
             "xa11y"
         },
+        activation: ActivationFacts::default(),
         experiment_only: true,
         ocr_used: false,
         ax_text_used: false,
@@ -705,7 +730,10 @@ impl Gui {
         let mut facts = native_copy_facts();
         facts.response_method = "thread-export";
         facts.experiment_only = false;
-        if let Err(reason) = self.prepare_native_copy(&mut facts) {
+        if let Err(reason) = self
+            .activate_native_accessibility(&mut facts)
+            .and_then(|()| self.prepare_native_copy(&mut facts))
+        {
             finish_native_copy(directory, facts, None, Err(reason))?;
             return Err(reason);
         }
@@ -728,6 +756,23 @@ impl Gui {
         let mut facts = native_copy_facts();
         let outcome = self.run_native_copy(&mut facts, marker, result);
         finish_native_copy(directory, facts, Some(provider), outcome)
+    }
+
+    fn activate_native_accessibility(&self, facts: &mut Facts) -> Result<(), Reason> {
+        self.native_copy_guard(facts, "activation-before")?;
+        if let Some(executable) = std::env::var_os("FEASIBILITY_ZED_INPUT_DRIVER") {
+            let (pid, point) = self.visual.accessibility_activation_target()?;
+            let request = serde_json::to_string(&ActivationRequest {
+                pid,
+                x: point.x,
+                y: point.y,
+            })
+            .map_err(|_| Reason::IsolationUnavailable)?;
+            facts.activation.activation_attempted = true;
+            facts.activation.activation_succeeded =
+                neutral_input(Path::new(&executable), "activate-accessibility", &request).is_ok();
+        }
+        self.native_copy_guard(facts, "activation-after")
     }
 
     fn native_copy_guard(&self, facts: &mut Facts, substage: &'static str) -> Result<(), Reason> {
@@ -1135,6 +1180,20 @@ mod tests {
             Ok(())
         );
         assert_eq!((observations, waits), (3, 2));
+    }
+
+    #[test]
+    fn activation_requests_reject_foreign_shapes_and_invalid_process_ids() {
+        assert!(valid_activation_request(r#"{"pid":123,"x":-40,"y":20}"#));
+        for request in [
+            r#"{"pid":0,"x":0,"y":0}"#,
+            r#"{"pid":4294967295,"x":0,"y":0}"#,
+            r#"{"pid":123,"x":0,"y":0,"text":"private"}"#,
+            r#"{"pid":123,"x":1.5,"y":0}"#,
+            "",
+        ] {
+            assert!(!valid_activation_request(request));
+        }
     }
 
     #[test]

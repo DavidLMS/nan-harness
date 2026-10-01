@@ -547,6 +547,12 @@ impl Visual {
         self.guard()
     }
 
+    pub(super) fn accessibility_activation_target(&self) -> Result<(u32, Point), Reason> {
+        let window = self.window.borrow();
+        let point = native_hover_point(window.bounds, window.bounds)?;
+        Ok((window.pid, point))
+    }
+
     pub(super) fn validate_native_bounds(&self, bounds: Rect) -> Result<(), Reason> {
         native_hover_point(self.window.borrow().bounds, bounds).map(|_| ())
     }

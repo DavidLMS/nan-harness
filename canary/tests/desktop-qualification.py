@@ -184,12 +184,21 @@ class QualificationTests(unittest.TestCase):
                     q.semantic_observations(root, 'zed-desktop')
             native = dict(schemaVersion=1, mechanism='zed-native-copy', substage='retry-tooltip-query',
                           retrySelector='retry-tooltip', retryTitleCount=0, retryCandidateCount=6,
-                          retryTooltipCount=1, retryLabelCount=None)
+                          retryTooltipCount=1, retryLabelCount=None, activationAttempted=True,
+                          activationSucceeded=False, privateRole='PRIVATE', privatePid=123)
             path.write_text(json.dumps(native))
             public = q.semantic_observations(root, 'zed-desktop')[0]
             self.assertEqual(public['retryTooltipCount'], 1)
             self.assertEqual(public['retryCandidateCount'], 6)
             self.assertEqual(public['retrySelector'], 'retry-tooltip')
+            self.assertTrue(public['activationAttempted'])
+            self.assertFalse(public['activationSucceeded'])
+            self.assertNotIn('PRIVATE', str(public))
+            self.assertNotIn('privatePid', public)
+            for field in ('activationAttempted', 'activationSucceeded'):
+                path.write_text(json.dumps({**native, field: 1}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'zed-desktop')
             for field in ('retryTitleCount', 'retryCandidateCount', 'retryTooltipCount', 'retryLabelCount'):
                 for invalid in (True, -1, 4097):
                     path.write_text(json.dumps({**native, field: invalid}))
