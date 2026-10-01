@@ -45,7 +45,7 @@ function delay(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 async function driveDom() {
   Object.assign(facts, { mechanism: 'hermes-playwright-dom', targetVerified: false,
     responseVerified: false, inputSubmitted: false, inputCleared: false, userTurnObserved: false,
-    assistantTurnCount: 0, uniqueSendControl: false, canSend: false, sendBlocker: 'unmeasured', requestFailedCount: 0,
+    assistantTurnCount: 0, uniqueSendControl: false, canSend: false, sendBlocker: 'unmeasured', sendMechanism: 'semantic-keyboard', requestFailedCount: 0,
     requestFailureCategory: null, apiErrorStatus: null, apiErrorResponseCount: 0, errorCategory: 'unclassified',
     playwrightVersion: require('../../.github/web-check/node_modules/playwright/package.json').version,
     observedRuntimeVersion: null });
@@ -152,49 +152,37 @@ async function driveDom() {
   facts.inputReadback = await candidates.evaluate((e, prompt) =>
     (e.value ?? e.textContent) === prompt, request.prompt);
   if (!facts.inputReadback) { facts.errorCategory = 'input-mismatch'; saveFacts(); return; }
-  const hitTest = () => send.evaluate(button => {
+  const readiness = () => send.evaluate(button => {
     const visible = e => { const r = e.getBoundingClientRect();
       const style = getComputedStyle(e); return r.width > 0 && r.height > 0 &&
         style.visibility !== 'hidden' && style.display !== 'none'; };
-    if ([...document.querySelectorAll('[aria-modal="true"],[role="alertdialog"]')].some(visible)) return { blocker: 'modal' };
-    if ([...document.querySelectorAll('[role="menu"]')].some(visible)) return { blocker: 'menu' };
-    const rect = button.getBoundingClientRect();
-    const front = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
-    if (front && button.contains(front)) return { blocker: null };
-    let blocker = 'other';
-    if (front?.closest('[role="tooltip"]')) blocker = 'tooltip';
-    else if (front?.closest('[data-slot="composer-drag-region"]')) blocker = 'composer-drag-region';
-    const editor = button.closest('[data-slot="composer-root"]')?.querySelector('[role="textbox"][contenteditable="true"]');
-    const editorRect = editor && visible(editor) ? editor.getBoundingClientRect() : null;
-    return { blocker, move: blocker === 'tooltip' && editorRect
-      ? { x: editorRect.x + editorRect.width / 2, y: editorRect.y + editorRect.height / 2 } : null };
+    if ([...document.querySelectorAll('[aria-modal="true"],[role="alertdialog"]')].some(visible)) return 'modal';
+    if ([...document.querySelectorAll('[role="menu"]')].some(visible)) return 'menu';
+    if (button.disabled || button.getAttribute('aria-disabled') === 'true') return 'disabled';
+    if (button.closest('[inert]')) return 'inert';
+    if (button.tabIndex < 0) return 'focus';
+    return null;
   }, undefined, { timeout: Math.max(1, Math.min(1000, deadline - Date.now())) });
-  let clearSamples = 0;
-  let movedPointer = false;
-  while (Date.now() < deadline && clearSamples < 3) {
-    const hit = await hitTest();
-    facts.sendBlocker = hit.blocker;
-    saveFacts();
-    if (hit.blocker === 'modal' || hit.blocker === 'menu') break;
-    clearSamples = hit.blocker === null ? clearSamples + 1 : 0;
-    if (hit.blocker === 'tooltip' && hit.move && !movedPointer) {
-      // Frozen tooltip.tsx labels follow trigger hover; leave normally rather
-      // than force a click through an overlay or bypass an intended modal.
-      await page.mouse.move(hit.move.x, hit.move.y);
-      movedPointer = true;
-    }
-    if (clearSamples < 3) await delay(100);
+  facts.sendBlocker = await readiness();
+  if (facts.sendBlocker !== null) {
+    facts.errorCategory = 'submit-action-intercepted'; saveFacts(); return;
   }
-  if (clearSamples !== 3 || !ownedEndpoint() || !await send.isEnabled()) {
+  await send.scrollIntoViewIfNeeded({ timeout: Math.max(1, deadline - Date.now()) });
+  await send.focus({ timeout: Math.max(1, deadline - Date.now()) });
+  facts.sendBlocker = await readiness();
+  if (facts.sendBlocker === null && !await send.evaluate(button => document.activeElement === button))
+    facts.sendBlocker = 'focus';
+  saveFacts();
+  if (facts.sendBlocker !== null || !ownedEndpoint()) {
     facts.errorCategory = 'submit-action-intercepted'; saveFacts(); return;
   }
   facts.inputReadback = await candidates.evaluate((e, prompt) =>
     (e.value ?? e.textContent) === prompt, request.prompt);
   if (!facts.inputReadback) { facts.errorCategory = 'input-mismatch'; saveFacts(); return; }
   try {
-    await send.click({ timeout: Math.max(1, deadline - Date.now()) });
+    await send.press('Enter', { timeout: Math.max(1, deadline - Date.now()) });
   } catch (error) {
-    try { facts.sendBlocker = (await hitTest()).blocker; } catch { facts.sendBlocker = 'unmeasured'; }
+    try { facts.sendBlocker = await readiness(); } catch { facts.sendBlocker = 'unmeasured'; }
     const detail = String(error?.message ?? '');
     facts.errorCategory = /intercepts pointer events|subtree intercepts/i.test(detail) ? 'submit-action-intercepted'
       : /detached|not attached/i.test(detail) ? 'submit-action-detached'
@@ -206,7 +194,7 @@ async function driveDom() {
     if (!ownedEndpoint()) break;
     try {
       // A submission may disable or replace the editor. Read a single snapshot
-      // instead of waiting on a now-missing editable locator after the click.
+      // instead of waiting on a now-missing editable locator after submission.
       const observation = await page.evaluate(({ prompt, marker }) => {
         const visible = e => { const r = e.getBoundingClientRect();
           const style = getComputedStyle(e); return r.width > 0 && r.height > 0 &&

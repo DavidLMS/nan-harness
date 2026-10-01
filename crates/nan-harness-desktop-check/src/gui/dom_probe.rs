@@ -65,6 +65,14 @@ struct SubmissionFacts {
     can_send: bool,
     input_cleared: bool,
     send_blocker: Option<SendBlocker>,
+    send_mechanism: SendMechanism,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum SendMechanism {
+    Pointer,
+    SemanticKeyboard,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -76,6 +84,9 @@ enum SendBlocker {
     ComposerDragRegion,
     Other,
     Unmeasured,
+    Focus,
+    Disabled,
+    Inert,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -159,6 +170,7 @@ fn read_facts(path: &Path) -> Result<Facts, Reason> {
         "uniqueSendControl",
         "canSend",
         "sendBlocker",
+        "sendMechanism",
         "requestFailedCount",
         "requestFailureCategory",
         "apiErrorStatus",
@@ -174,7 +186,7 @@ fn read_facts(path: &Path) -> Result<Facts, Reason> {
     let value: serde_json::Value =
         serde_json::from_slice(&bytes).map_err(|_| Reason::IsolationUnavailable)?;
     let object = value.as_object().ok_or(Reason::IsolationUnavailable)?;
-    if !(23..=25).contains(&object.len()) || object.keys().any(|key| !KEYS.contains(&key.as_str()))
+    if !(24..=26).contains(&object.len()) || object.keys().any(|key| !KEYS.contains(&key.as_str()))
     {
         return Err(Reason::IsolationUnavailable);
     }

@@ -102,13 +102,15 @@ def dom(value):
     value = dict(value)
     value.setdefault('providerResponseVerified', False)
     value.setdefault('providerGenerationCount', None)
-    shape(value, 'schemaVersion mechanism endpointOwned attached uniqueComposer inputReadback syntheticTextPresent targetVerified responseVerified inputSubmitted errorCategory playwrightVersion observedRuntimeVersion providerResponseVerified providerGenerationCount inputCleared userTurnObserved assistantTurnCount uniqueSendControl canSend sendBlocker requestFailedCount requestFailureCategory apiErrorStatus apiErrorResponseCount', 'hermes-playwright-dom')
+    shape(value, 'schemaVersion mechanism endpointOwned attached uniqueComposer inputReadback syntheticTextPresent targetVerified responseVerified inputSubmitted errorCategory playwrightVersion observedRuntimeVersion providerResponseVerified providerGenerationCount inputCleared userTurnObserved assistantTurnCount uniqueSendControl canSend sendBlocker sendMechanism requestFailedCount requestFailureCategory apiErrorStatus apiErrorResponseCount', 'hermes-playwright-dom')
     flags(value, 'endpointOwned attached uniqueComposer inputReadback syntheticTextPresent targetVerified responseVerified inputSubmitted providerResponseVerified inputCleared userTurnObserved uniqueSendControl canSend')
     for key in ('assistantTurnCount', 'requestFailedCount', 'apiErrorResponseCount'):
         if type(value[key]) is not int or not 0 <= value[key] <= 4096:
             raise ValueError('invalid DOM observation count')
-    if value['sendBlocker'] not in {None, 'modal', 'menu', 'tooltip', 'composer-drag-region', 'other', 'unmeasured'}:
+    if value['sendBlocker'] not in {None, 'modal', 'menu', 'tooltip', 'composer-drag-region', 'other', 'unmeasured', 'focus', 'disabled', 'inert'}:
         raise ValueError('invalid Send blocker')
+    if value['sendMechanism'] not in {'pointer', 'semantic-keyboard'}:
+        raise ValueError('invalid Send mechanism')
     if value['inputSubmitted'] and value['sendBlocker'] is not None:
         raise ValueError('DOM submission through blocked control')
     if value['requestFailureCategory'] not in {None, 'aborted', 'connection', 'tls', 'other'}:

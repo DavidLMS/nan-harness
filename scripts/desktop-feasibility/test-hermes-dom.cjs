@@ -13,7 +13,6 @@ async function trial(overrides, connectionOverrides = {}, scenario = null) {
   let fills = 0;
   let pageEnumerations = 0;
   let observations = 0;
-  let movedPointer = false;
   let value = '';
   const rendererUrl = 'file:///synthetic/resources/app.asar.unpacked/dist/index.html';
   const composer = {
@@ -24,17 +23,21 @@ async function trial(overrides, connectionOverrides = {}, scenario = null) {
       if (submits > 0) throw new Error('Editable locator is disabled or detached after submission');
       return callback({ value }, prompt);
     },
-    async press(key) { assert.equal(key, 'Enter'); submits++; },
+    async press() { throw new Error('Do not submit through composer keyboard'); },
   };
   const send = {
     async count() { return scenario === 'send-duplicate' ? 2 : 1; },
     async isEnabled() { return scenario !== 'send-disabled'; },
-    async evaluate() {
-      const blocker = scenario === 'blocked-modal' ? 'modal' : scenario === 'blocked-other' ? 'other'
-        : scenario === 'tooltip' && !movedPointer ? 'tooltip' : null;
-      return { blocker, move: blocker === 'tooltip' ? { x: 20, y: 20 } : null };
+    async evaluate(callback) {
+      if (callback.toString().includes('document.activeElement')) return scenario !== 'focus-failed';
+      return scenario === 'blocked-modal' ? 'modal' : scenario === 'blocked-menu' ? 'menu'
+        : scenario === 'inert' ? 'inert' : null;
     },
-    async click() {
+    async scrollIntoViewIfNeeded() {},
+    async focus() {},
+    async click() { throw new Error('Semantic driver must never click'); },
+    async press(key) {
+      assert.equal(key, 'Enter');
       if (scenario === 'click-timeout') throw new Error('Timeout 100ms exceeded PRIVATE_SYNTHETIC_VALUE');
       submits++; value = '';
     },
@@ -55,7 +58,6 @@ async function trial(overrides, connectionOverrides = {}, scenario = null) {
   };
   const page = {
     url() { return rendererUrl; },
-    mouse: { async move(x, y) { assert.equal(x, 20); assert.equal(y, 20); movedPointer = true; } },
     on(event, callback) {
       assert(['requestfailed', 'response'].includes(event));
       if (event === 'response') {
@@ -119,16 +121,16 @@ async function trial(overrides, connectionOverrides = {}, scenario = null) {
   });
   assert.equal(attaches, scenario ? 1 : 0);
   const facts = JSON.parse(output.get('/output'));
-  assert.equal(facts.inputSubmitted, ['happy', 'delayed', 'missing-editor', 'transient-context', 'tooltip'].includes(scenario));
-  assert.equal(facts.responseVerified, ['happy', 'delayed', 'missing-editor', 'transient-context', 'tooltip'].includes(scenario));
+  assert.equal(facts.inputSubmitted, ['happy', 'delayed', 'missing-editor', 'transient-context', 'keyboard'].includes(scenario));
+  assert.equal(facts.responseVerified, ['happy', 'delayed', 'missing-editor', 'transient-context', 'keyboard'].includes(scenario));
   assert.equal(facts.attached, Boolean(scenario));
-  assert.equal(submits, ['happy', 'delayed', 'missing-editor', 'transient-context', 'tooltip'].includes(scenario) ? 1 : 0);
+  assert.equal(submits, ['happy', 'delayed', 'missing-editor', 'transient-context', 'keyboard'].includes(scenario) ? 1 : 0);
   if (scenario === 'stale' || scenario === 'duplicate') assert.equal(fills, 0);
-  if (['mismatch', 'happy', 'delayed', 'missing-editor', 'transient-context', 'tooltip', 'click-timeout', 'blocked-modal', 'blocked-other', 'send-disabled', 'send-duplicate'].includes(scenario)) assert.equal(fills, 1);
+  if (['mismatch', 'happy', 'delayed', 'missing-editor', 'transient-context', 'keyboard', 'click-timeout', 'blocked-modal', 'blocked-menu', 'inert', 'focus-failed', 'send-disabled', 'send-duplicate'].includes(scenario)) assert.equal(fills, 1);
   if (scenario) {
     assert.equal(facts.endpointOwned, true);
     assert.equal(facts.targetVerified, true);
-    assert.equal(facts.inputReadback, ['happy', 'delayed', 'missing-editor', 'transient-context', 'tooltip', 'click-timeout', 'blocked-modal', 'blocked-other', 'send-disabled', 'send-duplicate'].includes(scenario));
+    assert.equal(facts.inputReadback, ['happy', 'delayed', 'missing-editor', 'transient-context', 'keyboard', 'click-timeout', 'blocked-modal', 'blocked-menu', 'inert', 'focus-failed', 'send-disabled', 'send-duplicate'].includes(scenario));
   }
   assert(!output.get('/output').includes(request.expectedMarker));
   assert(!output.get('/output').includes('PRIVATE_SYNTHETIC_VALUE'));
@@ -163,8 +165,11 @@ async function trial(overrides, connectionOverrides = {}, scenario = null) {
   assert.equal(missing.inputCleared, false);
   assert.equal(missing.responseVerified, true);
   assert.equal((await trial({ timeoutMs: 500 }, {}, 'transient-context')).responseVerified, true);
-  assert.equal((await trial({ timeoutMs: 500 }, {}, 'tooltip')).responseVerified, true);
+  assert.equal((await trial({ timeoutMs: 500 }, {}, 'keyboard')).responseVerified, true);
   assert.equal((await trial({ timeoutMs: 500 }, {}, 'blocked-modal')).sendBlocker, 'modal');
-  assert.equal((await trial({ timeoutMs: 500 }, {}, 'blocked-other')).sendBlocker, 'other');
-  console.log('Hermes DOM guards and submission: 17 synthetic cases passed');
+  assert.equal((await trial({ timeoutMs: 500 }, {}, 'focus-failed')).sendBlocker, 'focus');
+  assert.equal((await trial({ timeoutMs: 500 }, {}, 'blocked-menu')).sendBlocker, 'menu');
+  assert.equal((await trial({ timeoutMs: 500 }, {}, 'inert')).sendBlocker, 'inert');
+  assert.equal(happy.sendMechanism, 'semantic-keyboard');
+  console.log('Hermes DOM guards and submission: 19 synthetic cases passed');
 })().catch(error => { console.error(error.message); process.exitCode = 1; });
