@@ -13,6 +13,7 @@ async function trial(overrides, connectionOverrides = {}, scenario = null) {
   let fills = 0;
   let pageEnumerations = 0;
   let observations = 0;
+  let movedPointer = false;
   let value = '';
   const rendererUrl = 'file:///synthetic/resources/app.asar.unpacked/dist/index.html';
   const composer = {
@@ -28,6 +29,11 @@ async function trial(overrides, connectionOverrides = {}, scenario = null) {
   const send = {
     async count() { return scenario === 'send-duplicate' ? 2 : 1; },
     async isEnabled() { return scenario !== 'send-disabled'; },
+    async evaluate() {
+      const blocker = scenario === 'blocked-modal' ? 'modal' : scenario === 'blocked-other' ? 'other'
+        : scenario === 'tooltip' && !movedPointer ? 'tooltip' : null;
+      return { blocker, move: blocker === 'tooltip' ? { x: 20, y: 20 } : null };
+    },
     async click() {
       if (scenario === 'click-timeout') throw new Error('Timeout 100ms exceeded PRIVATE_SYNTHETIC_VALUE');
       submits++; value = '';
@@ -49,6 +55,7 @@ async function trial(overrides, connectionOverrides = {}, scenario = null) {
   };
   const page = {
     url() { return rendererUrl; },
+    mouse: { async move(x, y) { assert.equal(x, 20); assert.equal(y, 20); movedPointer = true; } },
     on(event, callback) {
       assert(['requestfailed', 'response'].includes(event));
       if (event === 'response') {
@@ -112,16 +119,16 @@ async function trial(overrides, connectionOverrides = {}, scenario = null) {
   });
   assert.equal(attaches, scenario ? 1 : 0);
   const facts = JSON.parse(output.get('/output'));
-  assert.equal(facts.inputSubmitted, ['happy', 'delayed', 'missing-editor', 'transient-context'].includes(scenario));
-  assert.equal(facts.responseVerified, ['happy', 'delayed', 'missing-editor', 'transient-context'].includes(scenario));
+  assert.equal(facts.inputSubmitted, ['happy', 'delayed', 'missing-editor', 'transient-context', 'tooltip'].includes(scenario));
+  assert.equal(facts.responseVerified, ['happy', 'delayed', 'missing-editor', 'transient-context', 'tooltip'].includes(scenario));
   assert.equal(facts.attached, Boolean(scenario));
-  assert.equal(submits, ['happy', 'delayed', 'missing-editor', 'transient-context'].includes(scenario) ? 1 : 0);
+  assert.equal(submits, ['happy', 'delayed', 'missing-editor', 'transient-context', 'tooltip'].includes(scenario) ? 1 : 0);
   if (scenario === 'stale' || scenario === 'duplicate') assert.equal(fills, 0);
-  if (['mismatch', 'happy', 'delayed', 'missing-editor', 'transient-context', 'click-timeout', 'send-disabled', 'send-duplicate'].includes(scenario)) assert.equal(fills, 1);
+  if (['mismatch', 'happy', 'delayed', 'missing-editor', 'transient-context', 'tooltip', 'click-timeout', 'blocked-modal', 'blocked-other', 'send-disabled', 'send-duplicate'].includes(scenario)) assert.equal(fills, 1);
   if (scenario) {
     assert.equal(facts.endpointOwned, true);
     assert.equal(facts.targetVerified, true);
-    assert.equal(facts.inputReadback, ['happy', 'delayed', 'missing-editor', 'transient-context', 'click-timeout', 'send-disabled', 'send-duplicate'].includes(scenario));
+    assert.equal(facts.inputReadback, ['happy', 'delayed', 'missing-editor', 'transient-context', 'tooltip', 'click-timeout', 'blocked-modal', 'blocked-other', 'send-disabled', 'send-duplicate'].includes(scenario));
   }
   assert(!output.get('/output').includes(request.expectedMarker));
   assert(!output.get('/output').includes('PRIVATE_SYNTHETIC_VALUE'));
@@ -156,5 +163,8 @@ async function trial(overrides, connectionOverrides = {}, scenario = null) {
   assert.equal(missing.inputCleared, false);
   assert.equal(missing.responseVerified, true);
   assert.equal((await trial({ timeoutMs: 500 }, {}, 'transient-context')).responseVerified, true);
-  console.log('Hermes DOM guards and submission: 14 synthetic cases passed');
+  assert.equal((await trial({ timeoutMs: 500 }, {}, 'tooltip')).responseVerified, true);
+  assert.equal((await trial({ timeoutMs: 500 }, {}, 'blocked-modal')).sendBlocker, 'modal');
+  assert.equal((await trial({ timeoutMs: 500 }, {}, 'blocked-other')).sendBlocker, 'other');
+  console.log('Hermes DOM guards and submission: 17 synthetic cases passed');
 })().catch(error => { console.error(error.message); process.exitCode = 1; });

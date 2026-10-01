@@ -64,6 +64,18 @@ struct SubmissionFacts {
     unique_send_control: bool,
     can_send: bool,
     input_cleared: bool,
+    send_blocker: Option<SendBlocker>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum SendBlocker {
+    Modal,
+    Menu,
+    Tooltip,
+    ComposerDragRegion,
+    Other,
+    Unmeasured,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -146,6 +158,7 @@ fn read_facts(path: &Path) -> Result<Facts, Reason> {
         "assistantTurnCount",
         "uniqueSendControl",
         "canSend",
+        "sendBlocker",
         "requestFailedCount",
         "requestFailureCategory",
         "apiErrorStatus",
@@ -161,7 +174,7 @@ fn read_facts(path: &Path) -> Result<Facts, Reason> {
     let value: serde_json::Value =
         serde_json::from_slice(&bytes).map_err(|_| Reason::IsolationUnavailable)?;
     let object = value.as_object().ok_or(Reason::IsolationUnavailable)?;
-    if !(22..=24).contains(&object.len()) || object.keys().any(|key| !KEYS.contains(&key.as_str()))
+    if !(23..=25).contains(&object.len()) || object.keys().any(|key| !KEYS.contains(&key.as_str()))
     {
         return Err(Reason::IsolationUnavailable);
     }
@@ -193,7 +206,8 @@ fn read_facts(path: &Path) -> Result<Facts, Reason> {
                 && facts.input.unique_composer
                 && facts.input.input_readback
                 && facts.submission.unique_send_control
-                && facts.submission.can_send)
+                && facts.submission.can_send
+                && facts.submission.send_blocker.is_none())
         || facts.response.response_verified
             && !(facts.endpoint.endpoint_owned
                 && facts.endpoint.target_verified
