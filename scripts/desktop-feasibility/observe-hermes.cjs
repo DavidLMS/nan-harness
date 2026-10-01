@@ -44,7 +44,9 @@ function ownedEndpoint() {
 function delay(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 async function driveDom() {
   Object.assign(facts, { mechanism: 'hermes-playwright-dom', targetVerified: false,
-    responseVerified: false, inputSubmitted: false, errorCategory: 'unclassified',
+    responseVerified: false, inputSubmitted: false, inputCleared: false, userTurnObserved: false,
+    assistantTurnCount: 0, uniqueSendControl: false, canSend: false, requestFailedCount: 0,
+    requestFailureCategory: null, apiErrorStatus: null, apiErrorResponseCount: 0, errorCategory: 'unclassified',
     playwrightVersion: require('../../.github/web-check/node_modules/playwright/package.json').version,
     observedRuntimeVersion: null });
   saveFacts();
@@ -93,6 +95,24 @@ async function driveDom() {
     facts.errorCategory = 'target-ambiguous'; saveFacts(); return;
   }
   const page = pages[0];
+  page.on('requestfailed', request => {
+    facts.requestFailedCount = Math.min(4096, facts.requestFailedCount + 1);
+    const error = request.failure()?.errorText ?? '';
+    facts.requestFailureCategory = /ABORTED/i.test(error) ? 'aborted'
+      : /CERT|SSL|TLS/i.test(error) ? 'tls' : /CONNECTION|NAME_NOT_RESOLVED|INTERNET_DISCONNECTED/i.test(error) ? 'connection' : 'other';
+  });
+  page.on('response', response => {
+    const status = response.status();
+    if (!Number.isInteger(status) || status < 400 || status > 599) return;
+    try {
+      const url = new URL(response.url());
+      if (!['http:', 'https:'].includes(url.protocol) ||
+          !['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname) ||
+          !url.pathname.startsWith('/api/')) return;
+      facts.apiErrorStatus = status;
+      facts.apiErrorResponseCount = Math.min(4096, facts.apiErrorResponseCount + 1);
+    } catch { /* Invalid response URL never enters closed evidence. */ }
+  });
   const session = await page.context().newCDPSession(page);
   const target = (await session.send('Target.getTargetInfo')).targetInfo;
   if (target.type !== 'page' || target.url !== page.url()) {
@@ -118,9 +138,29 @@ async function driveDom() {
   if (!facts.inputReadback || !ownedEndpoint()) {
     facts.errorCategory = 'input-mismatch'; saveFacts(); return;
   }
-  facts.inputSubmitted = true; saveFacts();
-  await candidates.press('Enter', { timeout: Math.max(1, deadline - Date.now()) });
+  // Frozen controls.tsx uses c.send; frozen English catalog names it Send.
+  const send = page.locator('[data-slot="composer-root"] button[type="submit"][aria-label="Send"]:visible');
   while (Date.now() < deadline) {
+    facts.uniqueSendControl = await send.count() === 1;
+    facts.canSend = facts.uniqueSendControl && await send.isEnabled();
+    if (facts.canSend) break;
+    await delay(100);
+  }
+  if (!facts.canSend || !ownedEndpoint()) {
+    facts.errorCategory = 'send-unavailable'; saveFacts(); return;
+  }
+  facts.inputReadback = await candidates.evaluate((e, prompt) =>
+    (e.value ?? e.textContent) === prompt, request.prompt);
+  if (!facts.inputReadback) { facts.errorCategory = 'input-mismatch'; saveFacts(); return; }
+  facts.inputSubmitted = true; saveFacts();
+  await send.click({ timeout: Math.max(1, deadline - Date.now()) });
+  while (Date.now() < deadline) {
+    facts.inputCleared ||= await candidates.evaluate(e => (e.value ?? e.textContent).trim() === '');
+    const users = page.locator('[data-role="user"]:visible').filter({ hasText: request.prompt });
+    if (await users.count() === 1) {
+      facts.userTurnObserved ||= await users.evaluate((e, prompt) => e.innerText.trim() === prompt, request.prompt);
+    }
+    facts.assistantTurnCount = Math.min(4096, await assistant.count());
     const matching = assistant.filter({ hasText: request.expectedMarker });
     if (await matching.count() === 1 && await matching.evaluate((e, marker) =>
         e.innerText.includes(marker), request.expectedMarker)) {

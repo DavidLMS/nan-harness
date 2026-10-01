@@ -125,6 +125,12 @@ def main():
             raise ValueError('unknown Zed facts')
         driver = Path(os.environ.get('FEASIBILITY_ZED_INPUT_DRIVER', '/absent'))
         result['nativeInputDriverSha256'] = hashlib.sha256(driver.read_bytes()).hexdigest() if driver.is_file() else None
+        for name, variable in [('nativeExportParserSha256', 'FEASIBILITY_ZED_EXPORT_PARSER'),
+                               ('nativeExportCodecSha256', 'FEASIBILITY_ZED_ZSTD')]:
+            path = Path(os.environ.get(variable, '/absent'))
+            result[name] = hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else None
+        result['responseMethods'] = sorted({value['responseMethod'] for value in copies})
+        result['readbackScope'] = 'stored-assistant-turn' if 'thread-export' in result['responseMethods'] else 'assistant-response-copy'
         result['nativeCopyObservations'] = copies
         result['nativeCopyReadbackObserved'] = bool(len(copies) == 3 and clean and all(
             value['input']['entered'] and value['input']['clipboardVerified'] and value['input']['submitted']

@@ -4,8 +4,8 @@ use super::{ComposerErrorCategory, Gui, WAIT, clipboard, map_error, primary_modi
 use crate::provider::ProviderGate;
 use crate::report::{CheckStep, ProbeResult, Reason};
 use nan_harness_private_fs::open_private_new;
-use serde::Serialize;
-use std::io::Write as _;
+use serde::{Deserialize, Serialize};
+use std::io::{Read as _, Write as _};
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
@@ -27,6 +27,7 @@ struct ResponseFacts {
     copy_action: bool,
     clipboard_verified: bool,
     provider_verified: bool,
+    provider_generation_count: Option<usize>,
 }
 
 #[derive(Debug, Serialize)]
@@ -36,6 +37,13 @@ struct Facts {
     mechanism: &'static str,
     navigation: &'static str,
     keyboard_transport: &'static str,
+    response_method: &'static str,
+    last_export_error: Option<String>,
+    export_version: Option<String>,
+    export_user_count: Option<usize>,
+    export_assistant_text_count: Option<usize>,
+    #[serde(skip)]
+    expected_prompt: Zeroizing<String>,
     clipboard_readback: Option<&'static str>,
     clipboard_character_count: Option<usize>,
     experiment_only: bool,
@@ -71,7 +79,14 @@ fn neutral_input(executable: &Path, mode: &str, prompt: &str) -> Result<(), Reas
         || prompt.len() > 4096
         || !matches!(
             mode,
-            "type" | "new-thread" | "select-all" | "copy" | "paste" | "right" | "submit"
+            "type"
+                | "new-thread"
+                | "select-all"
+                | "copy"
+                | "copy-thread"
+                | "paste"
+                | "right"
+                | "submit"
         )
         || (mode == "type" && prompt.is_empty())
         || (mode != "type" && !prompt.is_empty())
@@ -111,6 +126,108 @@ fn neutral_input(executable: &Path, mode: &str, prompt: &str) -> Result<(), Reas
             return Err(Reason::ActionUnsupported);
         }
         written.map_err(|_| Reason::ActionUnsupported)
+    });
+    if outcome.is_err() {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+    outcome
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct ExportVerdict {
+    verified: bool,
+    version: Option<String>,
+    user_count: usize,
+    assistant_text_count: usize,
+    error: Option<String>,
+}
+
+fn validate_export(prompt: &str, marker: &str, clipboard: &str) -> Result<ExportVerdict, Reason> {
+    let parser =
+        std::env::var_os("FEASIBILITY_ZED_EXPORT_PARSER").ok_or(Reason::IsolationUnavailable)?;
+    let zstd = std::env::var_os("FEASIBILITY_ZED_ZSTD").ok_or(Reason::IsolationUnavailable)?;
+    if !Path::new(&parser).is_absolute()
+        || !Path::new(&parser).is_file()
+        || !Path::new(&zstd).is_absolute()
+        || !Path::new(&zstd).is_file()
+    {
+        return Err(Reason::IsolationUnavailable);
+    }
+    let request = Zeroizing::new(serde_json::to_vec(&serde_json::json!({"expectedPrompt": prompt, "expectedMarker": marker, "clipboard": clipboard})).map_err(|_| Reason::ActionUnsupported)?);
+    let mut child = Command::new("python3")
+        .arg(parser)
+        .arg("--zstd")
+        .arg(zstd)
+        .env_clear()
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|_| Reason::ActionUnsupported)?;
+    let outcome = std::thread::scope(|scope| {
+        let mut stdin = child.stdin.take().ok_or(Reason::ActionUnsupported)?;
+        let stdout = child.stdout.take().ok_or(Reason::ActionUnsupported)?;
+        let writer = scope.spawn(|| {
+            stdin.write_all(&request)?;
+            drop(stdin);
+            Ok::<_, std::io::Error>(())
+        });
+        let reader = scope.spawn(move || {
+            let mut bytes = Vec::new();
+            stdout.take(4097).read_to_end(&mut bytes).map(|_| bytes)
+        });
+        let deadline = Instant::now() + Duration::from_secs(4);
+        let status = loop {
+            match child.try_wait() {
+                Ok(Some(status)) => break Some(status),
+                Err(_) => break None,
+                Ok(None) if Instant::now() >= deadline => break None,
+                Ok(None) => std::thread::sleep(Duration::from_millis(20)),
+            }
+        };
+        if status.is_none() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        writer
+            .join()
+            .map_err(|_| Reason::ActionUnsupported)?
+            .map_err(|_| Reason::ActionUnsupported)?;
+        let bytes = reader
+            .join()
+            .map_err(|_| Reason::ActionUnsupported)?
+            .map_err(|_| Reason::ActionUnsupported)?;
+        if !status.is_some_and(|status| status.success()) || bytes.len() > 4096 {
+            return Err(Reason::ActionUnsupported);
+        }
+        let verdict: ExportVerdict =
+            serde_json::from_slice(&bytes).map_err(|_| Reason::ActionUnsupported)?;
+        if verdict.user_count > 128
+            || verdict.assistant_text_count > 128
+            || !matches!(
+                verdict.error.as_deref(),
+                None | Some(
+                    "request" | "schema" | "user-mismatch" | "assistant-mismatch" | "decompression"
+                )
+            )
+        {
+            return Err(Reason::ActionUnsupported);
+        }
+        if verdict
+            .version
+            .as_deref()
+            .is_some_and(|version| version != "1.0.0")
+            || (verdict.verified
+                && (verdict.version.as_deref() != Some("1.0.0")
+                    || verdict.user_count != 1
+                    || verdict.assistant_text_count != 1
+                    || verdict.error.is_some()))
+        {
+            return Err(Reason::ActionUnsupported);
+        }
+        Ok(verdict)
     });
     if outcome.is_err() {
         let _ = child.kill();
@@ -172,6 +289,18 @@ impl Gui {
             experiment_only: true,
             ocr_used: false,
             ax_text_used: false,
+            response_method: if std::env::var("FEASIBILITY_ZED_RESPONSE_METHOD").as_deref()
+                == Ok("thread-export")
+            {
+                "thread-export"
+            } else {
+                "native-copy"
+            },
+            last_export_error: None,
+            export_version: None,
+            export_user_count: None,
+            export_assistant_text_count: None,
+            expected_prompt: Zeroizing::new(String::new()),
             clipboard_readback: None,
             clipboard_character_count: None,
             stage: "trust",
@@ -190,6 +319,8 @@ impl Gui {
         let outcome = self.run_native_copy(&mut facts, marker, result);
         facts.blocker = outcome.err();
         facts.response.provider_verified = provider.fixture_response_verified();
+        facts.response.provider_generation_count =
+            Some(provider.generation_count()).filter(|count| *count <= 4096);
         let cleanup = clipboard::write("").and_then(|()| {
             if clipboard::read()?.is_empty() {
                 Ok(())
@@ -368,6 +499,7 @@ impl Gui {
                 .type_text(&prompt)
                 .map_err(map_error)?;
         }
+        facts.expected_prompt.clone_from(&prompt);
         facts.input.entered = true;
         self.native_copy_guard(facts, "type-after")?;
         let sentinel = Zeroizing::new(format!("clipboard-sentinel-{}", nonce()?));
@@ -396,6 +528,9 @@ impl Gui {
     }
 
     fn native_copy_response(&self, facts: &mut Facts, marker: &str) -> Result<(), Reason> {
+        if facts.response_method == "thread-export" {
+            return self.native_export_response(facts, marker);
+        }
         facts.stage = "response-control";
         let app = self.app.as_ref().ok_or(Reason::SelectorNotMatched)?;
         let control = app.locator(RESPONSE_COPY);
@@ -428,6 +563,51 @@ impl Gui {
         facts.stage = "completed";
         facts.substage = "completed";
         Ok(())
+    }
+
+    fn native_export_response(&self, facts: &mut Facts, marker: &str) -> Result<(), Reason> {
+        facts.stage = "response-readback";
+        let export_deadline = Instant::now() + WAIT;
+        for attempt in 0..5 {
+            if Instant::now() >= export_deadline {
+                break;
+            }
+            if attempt > 0 {
+                std::thread::sleep(Duration::from_millis(200));
+            }
+            let sentinel = Zeroizing::new(format!("export-sentinel-{}", nonce()?));
+            clipboard::write(&sentinel)?;
+            self.native_copy_guard(facts, "export-copy-before")?;
+            Self::neutral_key("copy-thread")?;
+            facts.response.copy_action = true;
+            self.native_copy_guard(facts, "export-copy-after")?;
+            let deadline = Instant::now() + Duration::from_secs(1);
+            loop {
+                self.native_copy_guard(facts, "export-read-before")?;
+                let copied = clipboard::read()?;
+                self.native_copy_guard(facts, "export-read-after")?;
+                if copied.as_str() != sentinel.as_str() {
+                    facts.substage = "export-parse";
+                    let verdict = validate_export(&facts.expected_prompt, marker, &copied)?;
+                    facts.last_export_error = verdict.error;
+                    facts.export_version = verdict.version;
+                    facts.export_user_count = Some(verdict.user_count);
+                    facts.export_assistant_text_count = Some(verdict.assistant_text_count);
+                    if verdict.verified {
+                        facts.response.clipboard_verified = true;
+                        facts.stage = "completed";
+                        facts.substage = "completed";
+                        return Ok(());
+                    }
+                    break;
+                }
+                if Instant::now() >= deadline {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+        }
+        Err(Reason::ResponseMismatch)
     }
 
     fn wait_native_copy(

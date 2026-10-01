@@ -32,6 +32,8 @@ def experiment_environment(app, condition, facts, real_nanh):
     if app != 'zed-desktop':
         environment.pop('FEASIBILITY_ZED_INPUT_DRIVER', None)
         environment.pop('FEASIBILITY_ZED_INPUT_DRIVER_MODE', None)
+        for name in ('FEASIBILITY_ZED_EXPORT_PARSER', 'FEASIBILITY_ZED_ZSTD', 'FEASIBILITY_ZED_RESPONSE_METHOD'):
+            environment.pop(name, None)
     environment['FEASIBILITY_REAL_NANH'] = str(real_nanh)
     environment['FEASIBILITY_FACTS'] = str(facts)
     if condition == 'native-copy':

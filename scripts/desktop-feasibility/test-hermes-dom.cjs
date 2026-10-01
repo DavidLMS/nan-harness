@@ -21,7 +21,17 @@ async function trial(overrides, connectionOverrides = {}, scenario = null) {
     async evaluate(callback, prompt) { return callback({ value }, prompt); },
     async press(key) { assert.equal(key, 'Enter'); submits++; },
   };
+  const send = {
+    async count() { return scenario === 'send-duplicate' ? 2 : 1; },
+    async isEnabled() { return scenario !== 'send-disabled'; },
+    async click() { submits++; value = ''; },
+  };
+  const users = { filter({ hasText }) { assert.equal(hasText, request.prompt); return {
+    async count() { return submits === 1 ? 1 : 0; },
+    async evaluate(callback, prompt) { return callback({ innerText: request.prompt }, prompt); },
+  }; } };
   const assistant = {
+    async count() { return submits === 1 ? 1 : 0; },
     filter({ hasText }) {
       assert.equal(hasText, request.expectedMarker);
       return {
@@ -32,6 +42,15 @@ async function trial(overrides, connectionOverrides = {}, scenario = null) {
   };
   const page = {
     url() { return rendererUrl; },
+    on(event, callback) {
+      assert(['requestfailed', 'response'].includes(event));
+      if (event === 'response') {
+        callback({ status: () => 401, url: () => 'https://foreign.invalid/api/private' });
+        callback({ status: () => 500, url: () => 'http://127.0.0.1:7777/not-api/private' });
+        callback({ status: () => 200, url: () => 'http://localhost:7777/api/synthetic' });
+        callback({ status: () => 503, url: () => 'http://127.0.0.1:7777/api/synthetic' });
+      }
+    },
     context() { return { async newCDPSession() { return { async send(method) {
       assert.equal(method, 'Target.getTargetInfo');
       return { targetInfo: { type: 'page', url: rendererUrl } };
@@ -39,6 +58,8 @@ async function trial(overrides, connectionOverrides = {}, scenario = null) {
     async evaluate() { return true; },
     locator(selector) {
       if (selector === '[data-role="assistant"]:visible') return assistant;
+      if (selector === '[data-role="user"]:visible') return users;
+      if (selector === '[data-slot="composer-root"] button[type="submit"][aria-label="Send"]:visible') return send;
       assert.equal(selector, '[data-slot="composer-root"] [role="textbox"][contenteditable="true"]:visible:not([aria-disabled="true"])');
       return composer;
     },
@@ -81,11 +102,11 @@ async function trial(overrides, connectionOverrides = {}, scenario = null) {
   assert.equal(facts.attached, Boolean(scenario));
   assert.equal(submits, ['happy', 'delayed'].includes(scenario) ? 1 : 0);
   if (scenario === 'stale' || scenario === 'duplicate') assert.equal(fills, 0);
-  if (scenario === 'mismatch' || ['happy', 'delayed'].includes(scenario)) assert.equal(fills, 1);
+  if (['mismatch', 'happy', 'delayed', 'send-disabled', 'send-duplicate'].includes(scenario)) assert.equal(fills, 1);
   if (scenario) {
     assert.equal(facts.endpointOwned, true);
     assert.equal(facts.targetVerified, true);
-    assert.equal(facts.inputReadback, ['happy', 'delayed'].includes(scenario));
+    assert.equal(facts.inputReadback, ['happy', 'delayed', 'send-disabled', 'send-duplicate'].includes(scenario));
   }
   assert(!output.get('/output').includes(request.expectedMarker));
   return facts;
@@ -102,7 +123,17 @@ async function trial(overrides, connectionOverrides = {}, scenario = null) {
   assert.equal(happy.errorCategory, null);
   assert.equal(happy.uniqueComposer, true);
   assert.equal(happy.syntheticTextPresent, true);
+  assert.equal(happy.uniqueSendControl, true);
+  assert.equal(happy.canSend, true);
+  assert.equal(happy.inputCleared, true);
+  assert.equal(happy.userTurnObserved, true);
+  assert.equal(happy.assistantTurnCount, 1);
+  assert.equal(happy.apiErrorResponseCount, 1);
+  assert.equal(happy.apiErrorStatus, 503);
+  assert.equal(happy.requestFailedCount, 0);
+  assert.equal((await trial({ timeoutMs: 100 }, {}, 'send-disabled')).errorCategory, 'send-unavailable');
+  assert.equal((await trial({ timeoutMs: 100 }, {}, 'send-duplicate')).errorCategory, 'send-unavailable');
   const delayed = await trial({ timeoutMs: 500 }, {}, 'delayed');
   assert.equal(delayed.responseVerified, true);
-  console.log('Hermes DOM guards and submission: 9 synthetic cases passed');
+  console.log('Hermes DOM guards and submission: 11 synthetic cases passed');
 })().catch(error => { console.error(error.message); process.exitCode = 1; });

@@ -33,6 +33,7 @@ if mode == "type" {
     switch mode {
     case "new-thread": key = 45; modifiers = [(59, .maskControl), (58, .maskAlternate)]
     case "select-all": key = 0; modifiers = [(55, .maskCommand)]
+    case "copy-thread": key = 16; modifiers = [(59, .maskControl), (58, .maskAlternate)]
     case "paste": key = 9; modifiers = [(55, .maskCommand)]
     case "copy": key = 8; modifiers = [(55, .maskCommand)]
     case "right": key = 124; modifiers = []

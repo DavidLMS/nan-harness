@@ -16,13 +16,16 @@ class ClosedFacts(unittest.TestCase):
                         attached=True, uniqueComposer=True, inputReadback=True,
                         syntheticTextPresent=True, targetVerified=True, responseVerified=True,
                         inputSubmitted=True, errorCategory=None, playwrightVersion='1.61.1',
-                        observedRuntimeVersion='144.0.0.0', providerResponseVerified=True)
+                        observedRuntimeVersion='144.0.0.0', providerResponseVerified=True, providerGenerationCount=1,
+                        inputCleared=True, userTurnObserved=True, assistantTurnCount=1, uniqueSendControl=True,
+                        canSend=True, requestFailedCount=0, requestFailureCategory=None,
+                        apiErrorStatus=None, apiErrorResponseCount=0)
         self.copy = dict(schemaVersion=1, mechanism='zed-native-copy', experimentOnly=True,
-                         ocrUsed=False, axTextUsed=False, navigation='private-keymap-new-thread', keyboardTransport='neutral-quartz',
+                         ocrUsed=False, axTextUsed=False, navigation='private-keymap-new-thread', keyboardTransport='neutral-quartz', responseMethod='native-copy', lastExportError=None, exportVersion=None, exportUserCount=None, exportAssistantTextCount=None,
                          stage='completed', substage='completed', guardKind=None, guardCategory=None, settleObservations=3, clipboardReadback='exact', clipboardCharacterCount=64, blocker=None, trustControlCount=0, panelControlCount=1,
                          responseControlCount=1, clipboardCleanup='passed',
                          input=dict(entered=True, clipboardVerified=True, submitted=True),
-                         response=dict(copyAction=True, clipboardVerified=True, providerVerified=True))
+                         response=dict(copyAction=True, clipboardVerified=True, providerVerified=True, providerGenerationCount=1))
 
     def test_success_and_interrupted_provider_fact(self):
         dom(self.dom)

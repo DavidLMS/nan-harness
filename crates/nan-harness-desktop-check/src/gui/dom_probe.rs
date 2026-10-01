@@ -30,6 +30,7 @@ enum DriverError {
     TargetAmbiguous,
     TargetInvalid,
     ComposerAmbiguous,
+    SendUnavailable,
     StaleResponse,
     InputMismatch,
     ResponseTimeout,
@@ -54,11 +55,46 @@ struct InputFacts {
 
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+struct SubmissionFacts {
+    unique_send_control: bool,
+    can_send: bool,
+    input_cleared: bool,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TurnFacts {
+    user_turn_observed: bool,
+    assistant_turn_count: usize,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum RequestFailure {
+    Aborted,
+    Connection,
+    Tls,
+    Other,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NetworkFacts {
+    request_failed_count: usize,
+    request_failure_category: Option<RequestFailure>,
+    api_error_status: Option<u16>,
+    api_error_response_count: usize,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct ResponseFacts {
     response_verified: bool,
     synthetic_text_present: bool,
     #[serde(default)]
     provider_response_verified: bool,
+    #[serde(default)]
+    provider_generation_count: Option<usize>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -70,6 +106,12 @@ struct Facts {
     endpoint: EndpointFacts,
     #[serde(flatten)]
     input: InputFacts,
+    #[serde(flatten)]
+    submission: SubmissionFacts,
+    #[serde(flatten)]
+    turns: TurnFacts,
+    #[serde(flatten)]
+    network: NetworkFacts,
     #[serde(flatten)]
     response: ResponseFacts,
     error_category: Option<DriverError>,
@@ -93,6 +135,16 @@ fn read_facts(path: &Path) -> Result<Facts, Reason> {
         "playwrightVersion",
         "observedRuntimeVersion",
         "providerResponseVerified",
+        "providerGenerationCount",
+        "inputCleared",
+        "userTurnObserved",
+        "assistantTurnCount",
+        "uniqueSendControl",
+        "canSend",
+        "requestFailedCount",
+        "requestFailureCategory",
+        "apiErrorStatus",
+        "apiErrorResponseCount",
     ];
     let mut bytes = Vec::new();
     open_private_read(path)
@@ -104,7 +156,7 @@ fn read_facts(path: &Path) -> Result<Facts, Reason> {
     let value: serde_json::Value =
         serde_json::from_slice(&bytes).map_err(|_| Reason::IsolationUnavailable)?;
     let object = value.as_object().ok_or(Reason::IsolationUnavailable)?;
-    if !(13..=14).contains(&object.len()) || object.keys().any(|key| !KEYS.contains(&key.as_str()))
+    if !(22..=24).contains(&object.len()) || object.keys().any(|key| !KEYS.contains(&key.as_str()))
     {
         return Err(Reason::IsolationUnavailable);
     }
@@ -122,12 +174,21 @@ fn read_facts(path: &Path) -> Result<Facts, Reason> {
         || facts.mechanism != "hermes-playwright-dom"
         || !version(&facts.playwright_version)
         || !version(&facts.observed_runtime_version)
+        || facts.turns.assistant_turn_count > 4096
+        || facts.network.request_failed_count > 4096
+        || facts.network.api_error_response_count > 4096
+        || facts
+            .network
+            .api_error_status
+            .is_some_and(|status| !(400..=599).contains(&status))
         || facts.input.input_submitted
             && !(facts.endpoint.endpoint_owned
                 && facts.endpoint.target_verified
                 && facts.endpoint.attached
                 && facts.input.unique_composer
-                && facts.input.input_readback)
+                && facts.input.input_readback
+                && facts.submission.unique_send_control
+                && facts.submission.can_send)
         || facts.response.response_verified
             && !(facts.endpoint.endpoint_owned
                 && facts.endpoint.target_verified
@@ -185,6 +246,8 @@ impl Gui {
         outcome?;
         let mut facts = read_facts(&output_path)?;
         facts.response.provider_response_verified = provider.fixture_response_verified();
+        facts.response.provider_generation_count =
+            Some(provider.generation_count()).filter(|count| *count <= 4096);
         let bytes = serde_json::to_vec(&facts).map_err(|_| Reason::IsolationUnavailable)?;
         let final_path = output_path.with_extension("closed");
         open_private_new(&final_path)

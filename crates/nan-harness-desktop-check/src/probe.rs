@@ -1421,7 +1421,7 @@ fn prepare_zed_profile(spec: &ProbeSpec) -> Result<(), Reason> {
         // NewThread's workspace handler focuses the panel without toggling it.
         open_private_new(&directory.join("keymap.json"))
             .and_then(|mut file| {
-                file.write_all(br#"[{"bindings":{"ctrl-alt-n":"agent::NewThread"}}]"#)
+                file.write_all(br#"[{"bindings":{"ctrl-alt-n":"agent::NewThread","ctrl-alt-y":"agent::CopyThreadToClipboard"}}]"#)
             })
             .map_err(|_| Reason::IsolationUnavailable)?;
     }

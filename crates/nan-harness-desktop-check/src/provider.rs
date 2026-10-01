@@ -137,6 +137,10 @@ impl ProviderGate {
         Ok(())
     }
 
+    pub(crate) fn generation_count(&self) -> usize {
+        self.state.generations.load(Ordering::SeqCst)
+    }
+
     pub(crate) fn fixture_response_verified(&self) -> bool {
         self.state.fixture_response_verified.load(Ordering::SeqCst)
     }
