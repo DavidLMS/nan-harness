@@ -5,6 +5,7 @@ use super::super::{
 use super::combinators::exclusive_json;
 use super::families::{omp_plans, pi_family_plans};
 use super::hermes::hermes_plans;
+use super::mimo::mimo_plans;
 use super::openclaw::openclaw_plans;
 use super::search::search_mcp_plan;
 use super::specific::{cline_plans, deepseek_plans, goose_plans, qwen_plans};
@@ -41,6 +42,7 @@ pub(crate) fn for_harness_with_media(
                 json!({"type": "api", "key": api_key}),
             )],
         })],
+        HarnessKind::MimoCode => mimo_plans(paths, request)?,
         HarnessKind::Pi => pi_family_plans(
             &paths.home_directory.join(".pi/agent"),
             api_key,
@@ -115,7 +117,7 @@ pub(crate) fn for_harness_with_media(
             default_model,
             search.managed,
         )?,
-        HarnessKind::ClaudeCode | HarnessKind::Codex | HarnessKind::MimoCode | HarnessKind::Fx => {
+        HarnessKind::ClaudeCode | HarnessKind::Codex | HarnessKind::Fx => {
             return Err(ConfigurationError::BridgeOnly(harness));
         }
     };

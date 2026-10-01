@@ -18,7 +18,7 @@ use helpers::{
     DEEPSEEK_BLOCK_BEGIN, DEEPSEEK_BLOCK_END, LEGACY_PI_EXTENSION_RELATIVE_PATH,
     ManagedBlockFormat, OPENCODE_CONFIG_DIRECTORY, OPENCODE_JSON, OPENCODE_JSONC,
     PI_EXTENSION_RELATIVE_PATH, PRIME_EXTENSION_RELATIVE_PATH, empty_jsonc_object_is_disposable,
-    hash_input_value, hash_json_value, opencode_provider, parse_jsonc, parse_named_jsonc, sha256,
+    hash_input_value, hash_json_value, opencode_provider, parse_jsonc, sha256,
     validate_opencode_file_name,
 };
 use jsonc_parser::cst::CstObject;
@@ -47,7 +47,7 @@ pub(crate) use state::{LastSelection, PreferencesStore};
 #[cfg(test)]
 mod tests;
 
-pub(crate) use helpers::PreparedFileChange;
+pub(crate) use helpers::{PreparedFileChange, parse_named_jsonc};
 
 #[cfg(test)]
 use filesystem::rollback_file;

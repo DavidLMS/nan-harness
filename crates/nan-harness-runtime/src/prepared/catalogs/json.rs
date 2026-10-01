@@ -151,9 +151,9 @@ pub(in crate::prepared) fn pi_model_catalog(models: &[CodingModelProfile]) -> se
     )
 }
 
-pub(in crate::prepared) fn opencode_model_catalog(
-    models: &[CodingModelProfile],
-) -> serde_json::Value {
+/// Render the native model catalog shared by `OpenCode` and `MiMo Code`.
+#[must_use]
+pub fn opencode_model_catalog(models: &[CodingModelProfile]) -> serde_json::Value {
     serde_json::Value::Object(
         models
             .iter()

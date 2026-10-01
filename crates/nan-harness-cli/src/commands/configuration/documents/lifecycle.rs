@@ -59,7 +59,8 @@ fn inspect_document_result(
     };
     let matches = match receipt {
         DocumentReceipt::Json(receipt) => {
-            let document: Value = serde_json::from_slice(&contents).map_err(|_| Invalid)?;
+            let document = parse_json_document(&contents, &receipt.path, receipt.comments)
+                .map_err(|_| Invalid)?;
             if !document.is_object() {
                 return Err(Invalid);
             }

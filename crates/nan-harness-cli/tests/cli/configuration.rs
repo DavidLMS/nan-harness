@@ -1,3 +1,6 @@
+#[path = "configuration/mimo.rs"]
+mod mimo;
+
 use crate::support::{
     capture_one_http_request, capture_one_http_request_with_response, config_command,
     write_private_credential_fixture,
@@ -76,6 +79,7 @@ fn removing_an_absent_native_configuration_is_idempotent() {
     let directory = tempfile::tempdir().expect("temporary directory should exist");
     for harness in [
         "opencode",
+        "mimo",
         "hermes",
         "pi",
         "prime-agent",

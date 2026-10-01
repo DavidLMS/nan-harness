@@ -68,6 +68,8 @@ pub(crate) struct YamlEntryReceipt {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct JsonReceipt {
+    #[serde(default)]
+    pub(crate) comments: bool,
     pub(crate) path: PathBuf,
     pub(crate) created_file: bool,
     pub(crate) entries: Vec<JsonEntryReceipt>,

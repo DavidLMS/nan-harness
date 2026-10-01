@@ -55,7 +55,9 @@ still apply. Linux and macOS launches are unchanged.
 `nanh mimo` (alias `nanh mimo-code`) launches MiMo Code with the selected NaN
 model for the main agent, model tiers and auxiliary requests. It injects the
 provider configuration for that process and keeps MiMo's existing session home.
-This integration supports managed launches; `nanh config mimo` is unavailable.
+Use `nanh config mimo` to copy the saved credential and model catalog for direct
+launches with `mimo`. Native configuration supports `--status`, `--refresh`, and
+`--remove`, and respects `MIMOCODE_HOME` and the XDG configuration/data paths.
 
 Harnesses that use OpenAI Chat Completions use an authenticated local gateway by
 default. This enables features such as reporting token usage when a session ends.
@@ -462,6 +464,8 @@ nanh config pi
 pi
 nanh config omp
 omp
+nanh config mimo
+mimo
 nanh config pi --status
 nanh config pi --refresh
 nanh config pi --remove

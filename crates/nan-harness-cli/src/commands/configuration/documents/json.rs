@@ -4,18 +4,28 @@ pub(crate) fn prepare_json(
     plan: &JsonPlan,
     previous: Option<&JsonReceipt>,
 ) -> Result<PreparedDocument, ConfigurationError> {
-    if previous.is_some_and(|receipt| receipt.path != plan.path) {
+    prepare_json_format(plan, previous, false)
+}
+
+pub(crate) fn prepare_jsonc(
+    plan: &JsonPlan,
+    previous: Option<&JsonReceipt>,
+) -> Result<PreparedDocument, ConfigurationError> {
+    prepare_json_format(plan, previous, true)
+}
+
+fn prepare_json_format(
+    plan: &JsonPlan,
+    previous: Option<&JsonReceipt>,
+    comments: bool,
+) -> Result<PreparedDocument, ConfigurationError> {
+    if previous.is_some_and(|receipt| receipt.path != plan.path || receipt.comments != comments) {
         return Err(ConfigurationError::ReceiptMismatch);
     }
     let original = read_optional(&plan.path)?;
     let permissions = file_permissions(&plan.path)?;
     let mut document = match original.as_deref() {
-        Some(contents) => serde_json::from_slice::<Value>(contents).map_err(|source| {
-            ConfigurationError::ParseDocument {
-                path: plan.path.clone(),
-                source,
-            }
-        })?,
+        Some(contents) => parse_json_document(contents, &plan.path, comments)?,
         None => Value::Object(Map::new()),
     };
     if !document.is_object() {
@@ -23,21 +33,25 @@ pub(crate) fn prepare_json(
     }
     let entries = prepare_json_entries(&mut document, plan, previous)?;
     let created_file = previous.map_or(original.is_none(), |receipt| receipt.created_file);
-    let replacement = if entries.is_empty()
-        && previous.is_none_or(|receipt| receipt.entries.is_empty())
-    {
-        original.clone()
-    } else if created_file && document.as_object().is_some_and(Map::is_empty) {
-        None
-    } else {
-        Some(serde_json::to_vec_pretty(&document).map_err(ConfigurationError::SerializeDocument)?)
-    };
+    let replacement =
+        if entries.is_empty() && previous.is_none_or(|receipt| receipt.entries.is_empty()) {
+            original.clone()
+        } else {
+            json_replacement(
+                &document,
+                original.as_deref(),
+                &plan.path,
+                comments,
+                created_file,
+            )?
+        };
     Ok(PreparedDocument {
         path: plan.path.clone(),
         original,
         permissions,
         replacement,
         receipt: DocumentReceipt::Json(JsonReceipt {
+            comments,
             path: plan.path.clone(),
             created_file,
             entries,
@@ -143,12 +157,7 @@ pub(crate) fn prepare_json_removal(
             receipt.path.clone(),
         ));
     };
-    let mut document = serde_json::from_slice::<Value>(contents).map_err(|source| {
-        ConfigurationError::ParseDocument {
-            path: receipt.path.clone(),
-            source,
-        }
-    })?;
+    let mut document = parse_json_document(contents, &receipt.path, receipt.comments)?;
     let entries = merged_json_receipts(&receipt.entries);
     for entry in entries.values() {
         let current = get_json_path(&document, &entry.path)
@@ -166,11 +175,13 @@ pub(crate) fn prepare_json_removal(
             remove_json_path(&mut document, &entry.path);
         }
     }
-    let replacement = if receipt.created_file && document.as_object().is_some_and(Map::is_empty) {
-        None
-    } else {
-        Some(serde_json::to_vec_pretty(&document).map_err(ConfigurationError::SerializeDocument)?)
-    };
+    let replacement = json_replacement(
+        &document,
+        original.as_deref(),
+        &receipt.path,
+        receipt.comments,
+        receipt.created_file,
+    )?;
     Ok(PreparedDocument {
         path: receipt.path.clone(),
         original,

@@ -4,6 +4,7 @@ use std::path::PathBuf;
 #[derive(Debug, Clone)]
 pub(crate) enum DocumentPlan {
     Json(JsonPlan),
+    Jsonc(JsonPlan),
     Yaml(YamlPlan),
     TextBlock(TextBlockPlan),
     ExactFile(ExactFilePlan),

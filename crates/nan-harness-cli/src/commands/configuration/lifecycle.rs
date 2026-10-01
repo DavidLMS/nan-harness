@@ -294,8 +294,10 @@ impl ConfigurationManager {
             )?
             .into_iter()
             .filter_map(|plan| match plan {
-                DocumentPlan::Json(plan) if plan.entries.is_empty() => None,
-                DocumentPlan::Json(plan) => Some(plan.path),
+                DocumentPlan::Json(plan) | DocumentPlan::Jsonc(plan) if plan.entries.is_empty() => {
+                    None
+                }
+                DocumentPlan::Json(plan) | DocumentPlan::Jsonc(plan) => Some(plan.path),
                 DocumentPlan::Yaml(plan) => Some(plan.path),
                 DocumentPlan::TextBlock(plan) if plan.body.is_none() => None,
                 DocumentPlan::TextBlock(plan) => Some(plan.path),

@@ -61,7 +61,7 @@ pub use discovery::{
     bundled_compatibility_manifest, discover_harness, inspect_harness, is_executable_file,
     locate_harness_executable,
 };
-pub use prepared::PreparedError;
+pub use prepared::{PreparedError, opencode_model_catalog};
 pub use process::ProcessError;
 pub use search_policy::{
     SearchAvailability, SearchBackend, SearchConfigError, SearchConfigStore,

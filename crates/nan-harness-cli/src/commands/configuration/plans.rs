@@ -2,6 +2,7 @@ mod combinators;
 mod dispatch;
 mod families;
 mod hermes;
+mod mimo;
 mod openclaw;
 mod search;
 mod specific;

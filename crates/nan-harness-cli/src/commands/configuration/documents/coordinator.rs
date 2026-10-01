@@ -23,6 +23,10 @@ pub(crate) fn prepare_documents(
                 (DocumentPlan::Json(plan), Some(DocumentReceipt::Json(receipt))) => {
                     prepare_json(plan, Some(receipt))
                 }
+                (DocumentPlan::Jsonc(plan), None) => prepare_jsonc(plan, None),
+                (DocumentPlan::Jsonc(plan), Some(DocumentReceipt::Json(receipt))) => {
+                    prepare_jsonc(plan, Some(receipt))
+                }
                 (DocumentPlan::Yaml(plan), None) => prepare_yaml(plan, None),
                 (DocumentPlan::Yaml(plan), Some(DocumentReceipt::Yaml(receipt))) => {
                     prepare_yaml(plan, Some(&PreviousYamlReceipt::Yaml(receipt)))
@@ -54,7 +58,9 @@ pub(crate) fn prepare_documents(
 
 pub(crate) fn plan_matches_receipt(plan: &DocumentPlan, receipt: &DocumentReceipt) -> bool {
     match (plan, receipt) {
-        (DocumentPlan::Json(plan), DocumentReceipt::Json(receipt)) => plan.path == receipt.path,
+        (DocumentPlan::Json(plan) | DocumentPlan::Jsonc(plan), DocumentReceipt::Json(receipt)) => {
+            plan.path == receipt.path
+        }
         (DocumentPlan::Yaml(plan), DocumentReceipt::Yaml(receipt)) => plan.path == receipt.path,
         (DocumentPlan::Yaml(plan), DocumentReceipt::TextBlock(receipt)) => {
             plan.path == receipt.path

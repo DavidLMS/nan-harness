@@ -173,6 +173,7 @@ fn add_mimo_candidates(home: &Path, working: &Path, paths: &mut BTreeSet<PathBuf
         || config_home(home).join("mimocode"),
         |path| PathBuf::from(path).join("config"),
     );
+    paths.insert(global.join("config.json"));
     for directory in [global, working.join(".mimocode")] {
         paths.extend([
             directory.join("mimocode.json"),

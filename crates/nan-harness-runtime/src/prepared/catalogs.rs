@@ -20,10 +20,11 @@ mod model;
 mod structured;
 
 pub(super) use claude::{claude_model_picker, render_claude_model_presentations};
+pub use json::opencode_model_catalog;
 pub(super) use json::{
     aider_model_metadata, aider_model_settings, cline_model_catalog, goose_model_catalog,
-    hermes_model_catalog, openclaw_model_aliases, openclaw_model_catalog, opencode_model_catalog,
-    pi_model_catalog, qwen_code_model_catalog, replace_json_placeholder,
+    hermes_model_catalog, openclaw_model_aliases, openclaw_model_catalog, pi_model_catalog,
+    qwen_code_model_catalog, replace_json_placeholder,
 };
 pub(super) use model::{
     effort_name, model_input, reasoning_capable, render_reasoning_effort, render_selected_model,
