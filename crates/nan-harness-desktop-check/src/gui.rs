@@ -1,5 +1,6 @@
 //! Native controls are resolved inside one app; native errors never enter public reports.
 
+mod accessibility_probe;
 mod visual;
 
 use crate::process::Observation;
@@ -173,6 +174,7 @@ pub(crate) enum ComposerGuardContext {
 
 pub(crate) struct Gui {
     app: Option<App>,
+    app_error: Option<Reason>,
     kind: DesktopHarnessKind,
     visual: visual::Visual,
 }
@@ -224,8 +226,16 @@ impl Gui {
         let visual = visual::Visual::wait(kind, process)?;
         // The window can become stable before the accessibility bridge
         // registers the process, especially on Linux CI.
-        let app = App::by_pid(visual.pid(), WAIT).ok();
-        Ok(Self { app, kind, visual })
+        let (app, app_error) = match App::by_pid(visual.pid(), WAIT) {
+            Ok(app) => (Some(app), None),
+            Err(error) => (None, Some(map_error(error))),
+        };
+        Ok(Self {
+            app,
+            app_error,
+            kind,
+            visual,
+        })
     }
 
     pub(crate) fn prepare_conversation(&self) -> Result<(), GuiFailure> {

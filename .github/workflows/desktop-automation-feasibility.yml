@@ -63,7 +63,13 @@ jobs:
         run: |
           set -euo pipefail
           unset NAN_API_KEY
-          python3 scripts/desktop-feasibility/freeze-official.py --app '${{ matrix.app }}' --output "$RUNNER_TEMP/semantic-feasibility/frozen.json"
+          tag=v1.22.0
+          revision_args=()
+          if [[ '${{ matrix.app }}' == hermes-desktop ]]; then
+            tag=v2026.9.24
+            revision_args=(--expected-revision f97608f178d1ffeca59860195ab7da295f7c8e5f)
+          fi
+          python3 scripts/desktop-feasibility/freeze-official.py --tag "$tag" "${revision_args[@]}" --app '${{ matrix.app }}' --output "$RUNNER_TEMP/semantic-feasibility/frozen.json"
       - name: Install exact frozen application without credentials
         env:
           FEASIBILITY_REAL_NANH: ${{ github.workspace }}/target/debug/nan-harness
@@ -85,25 +91,27 @@ jobs:
           nanh="$FEASIBILITY_REAL_NANH"
           if [[ "$RUNNER_OS" == Linux ]]; then nanh="$GITHUB_WORKSPACE/scripts/desktop-feasibility/nanh-shim.py"; fi
           target/debug/nanh-desktop-check prepare --app '${{ matrix.app }}' --model qwen3.6 --yes --non-interactive --ephemeral --nan-harness "$nanh" --frozen "$RUNNER_TEMP/semantic-feasibility/frozen.json" --artifacts "$RUNNER_TEMP/semantic-feasibility/artifacts" --output "$RUNNER_TEMP/semantic-feasibility/prepared.json"
-      - name: Run bounded deterministic measurement
+      - name: Run strict AX inventory or same-runtime Hermes startup A/B
         shell: bash
         env:
           FEASIBILITY_REAL_NANH: ${{ github.workspace }}/target/debug/nan-harness
-          FEASIBILITY_FACTS: ${{ runner.temp }}/semantic-feasibility/facts
         run: |
           set -euo pipefail
           unset NAN_API_KEY GH_TOKEN GITHUB_TOKEN
-          nanh="$FEASIBILITY_REAL_NANH"
-          if [[ "$RUNNER_OS" == Linux ]]; then nanh="$GITHUB_WORKSPACE/scripts/desktop-feasibility/nanh-shim.py"; fi
-          bash scripts/run-desktop-check-session.sh target/debug/nanh-desktop-check run --app '${{ matrix.app }}' --model qwen3.6 --yes --non-interactive --ephemeral --mode deterministic --session github-hosted --prepared "$RUNNER_TEMP/semantic-feasibility/prepared.json" --output "$RUNNER_TEMP/semantic-feasibility/report.json"
-      - name: Reduce experiment evidence
+          tag=v1.22.0
+          if [[ '${{ matrix.app }}' == hermes-desktop ]]; then tag=v2026.9.24; fi
+          bash scripts/run-desktop-check-session.sh python3 scripts/desktop-feasibility/run-experiments.py \
+            --app '${{ matrix.app }}' --platform '${{ matrix.platform }}' --source-sha "$GITHUB_SHA" --release-tag "$tag" \
+            --checker "$GITHUB_WORKSPACE/target/debug/nanh-desktop-check" --real-nanh "$FEASIBILITY_REAL_NANH" \
+            --prepared "$RUNNER_TEMP/semantic-feasibility/prepared.json" --frozen "$RUNNER_TEMP/semantic-feasibility/frozen.json" \
+            --directory "$RUNNER_TEMP/semantic-feasibility"
+      - name: Present completed closed observations
         if: always()
         shell: bash
         run: |
-          set -euo pipefail
-          if [[ -f "$RUNNER_TEMP/semantic-feasibility/report.json" ]]; then target/debug/nanh-desktop-check validate-report "$RUNNER_TEMP/semantic-feasibility/report.json"; fi
-          python3 scripts/desktop-feasibility/summarize.py --report "$RUNNER_TEMP/semantic-feasibility/report.json" --frozen "$RUNNER_TEMP/semantic-feasibility/frozen.json" --real-nanh "$GITHUB_WORKSPACE/target/debug/nan-harness" --checker "$GITHUB_WORKSPACE/target/debug/nanh-desktop-check" --shim scripts/desktop-feasibility/nanh-shim.py --facts "$RUNNER_TEMP/semantic-feasibility/facts" --output "$RUNNER_TEMP/semantic-feasibility/summary.json" --source-sha "$GITHUB_SHA" --platform '${{ matrix.platform }}-${{ matrix.architecture }}' --app '${{ matrix.app }}'
-          cat "$RUNNER_TEMP/semantic-feasibility/summary.json" >> "$GITHUB_STEP_SUMMARY"
+          if [[ -f "$RUNNER_TEMP/semantic-feasibility/summary.json" ]]; then
+            cat "$RUNNER_TEMP/semantic-feasibility/summary.json" >> "$GITHUB_STEP_SUMMARY"
+          fi
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
@@ -111,3 +119,29 @@ jobs:
           path: ${{ runner.temp }}/semantic-feasibility/summary.json
           if-no-files-found: error
           retention-days: 30
+  integration-quality:
+    name: Verify integrated main and desktop tooling
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: rustup show
+      - name: Install native and interactive test dependencies
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y cmake libx11-dev libxkbcommon-dev expect
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: desktop-integration-quality
+          cache-bin: true
+      - name: Install pinned dependency policy checker
+        run: |
+          if ! command -v cargo-deny >/dev/null 2>&1; then
+            cargo install cargo-deny --version 0.19.9 --locked
+          fi
+      - name: Verify final integration tree
+        run: cargo check-all
+      - name: Verify semantic experiment contracts
+        run: |
+          for test in scripts/desktop-feasibility/test-*.py; do python3 "$test"; done
+          node --check scripts/desktop-feasibility/observe-hermes.cjs

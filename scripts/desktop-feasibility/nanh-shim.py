@@ -11,6 +11,8 @@ real = os.environ['FEASIBILITY_REAL_NANH']
 args = sys.argv[1:]
 if not args or args[0] != 'hermes-desktop' or '--provider-base-url' not in args:
     os.execv(real, [real, *args])
+if os.environ.get('FEASIBILITY_HERMES_CDP', 'enabled') == 'disabled':
+    os.execv(real, [real, *args])
 with socket.socket() as listener:
     listener.bind(('127.0.0.1', 0))
     port = listener.getsockname()[1]

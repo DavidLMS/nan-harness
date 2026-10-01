@@ -23,6 +23,18 @@ class ShimLifecycle(unittest.TestCase):
                     self.invoke(args)
                 execute.assert_called_once_with('/synthetic/nanh', ['/synthetic/nanh', *args])
 
+    def test_no_cdp_arm_delegates_without_switches_or_observer(self):
+        args = ['hermes-desktop', '--provider-base-url', 'http://127.0.0.1', '--', '--synthetic']
+        with patch.dict(os.environ, {'FEASIBILITY_REAL_NANH': '/synthetic/nanh',
+                                    'FEASIBILITY_HERMES_CDP': 'disabled'}), \
+             patch.object(sys, 'argv', [str(SHIM), *args]), \
+             patch('os.execv', side_effect=SystemExit) as execute, \
+             patch('subprocess.Popen') as spawn:
+            with self.assertRaises(SystemExit):
+                self.invoke(args)
+            execute.assert_called_once_with('/synthetic/nanh', ['/synthetic/nanh', *args])
+            spawn.assert_not_called()
+
     def test_observer_failure_terminates_owned_child(self):
         child = Mock(pid=123, poll=Mock(return_value=None))
         with patch.dict(os.environ, {'FEASIBILITY_REAL_NANH': '/synthetic/nanh',

@@ -38,10 +38,21 @@ def release_tag(value):
     return tag
 
 
-def freeze_zed(fetch=metadata):
+def release_endpoint(repository, tag):
+    if tag is None:
+        return f'repos/{repository}/releases/latest'
+    if not isinstance(tag, str) or not tag.startswith('v') or not VERSION.fullmatch(tag[1:]):
+        raise ValueError('official-release-version-invalid')
+    return f'repos/{repository}/releases/tags/{tag}'
+
+
+def freeze_zed(fetch=metadata, tag=None):
     repository = 'zed-industries/zed'
-    release = fetch(f'repos/{repository}/releases/latest')
+    requested = tag
+    release = fetch(release_endpoint(repository, tag))
     tag = release_tag(release)
+    if requested is not None and tag != requested:
+        raise ValueError('official-release-tag-mismatch')
     name = 'Zed-aarch64.dmg'
     url = f'https://github.com/{repository}/releases/download/{tag}/{name}'
     assets = [a for a in release.get('assets', []) if a.get('name') == name]
@@ -65,9 +76,12 @@ def git_commit(value):
     return kind, sha
 
 
-def freeze_hermes(fetch=metadata):
+def freeze_hermes(fetch=metadata, tag=None):
     repository = 'NousResearch/hermes-agent'
-    tag = release_tag(fetch(f'repos/{repository}/releases/latest'))
+    requested = tag
+    tag = release_tag(fetch(release_endpoint(repository, tag)))
+    if requested is not None and tag != requested:
+        raise ValueError('official-release-tag-mismatch')
     kind, revision = git_commit(fetch(f'repos/{repository}/git/ref/tags/{tag}'))
     if kind == 'tag':
         kind, revision = git_commit(fetch(f'repos/{repository}/git/tags/{revision}'))
@@ -89,12 +103,16 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--app', choices=['zed-desktop', 'hermes-desktop'], required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--tag')
+    parser.add_argument('--expected-revision')
     args = parser.parse_args()
     if os.environ.get('GITHUB_ACTIONS') != 'true' or os.environ.get('RUNNER_ENVIRONMENT') != 'github-hosted':
         raise ValueError('disposable-hosted-runner-required')
     if not os.environ.get('GH_TOKEN') or os.environ.get('NAN_API_KEY'):
         raise ValueError('metadata-only-credentials-required')
-    entry = freeze_zed() if args.app == 'zed-desktop' else freeze_hermes()
+    entry = freeze_zed(tag=args.tag) if args.app == 'zed-desktop' else freeze_hermes(tag=args.tag)
+    if args.expected_revision is not None and (not SHA.fullmatch(args.expected_revision) or entry.get('revision') != args.expected_revision):
+        raise ValueError('official-source-revision-mismatch')
     platform, architecture = ('macos', 'aarch64') if args.app == 'zed-desktop' else ('linux', 'x86_64')
     manifest = dict(schemaVersion=1, suite='desktop', platform=platform,
                     architecture=architecture, model='qwen3.6', apps=[entry])

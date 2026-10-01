@@ -682,6 +682,7 @@ async fn scenario(
     {
         return Err(Reason::IsolationUnavailable);
     }
+    let accessibility_facts = strict_accessibility_directory(spec)?;
     if binary_digest(&spec.nan_harness)? != spec.nan_harness_sha256 {
         return Err(Reason::InstallationUnreadable);
     }
@@ -728,7 +729,11 @@ async fn scenario(
     let outcome = match &gui {
         Ok(gui) => {
             result.steps.push(CheckStep::Launched);
-            if let Err(failure) = gui.prepare_conversation() {
+            if let Some(directory) = &accessibility_facts {
+                // This partial hosted experiment cannot become compatibility evidence.
+                gui.probe_accessibility(directory, &final_marker, result, &gate)
+                    .and(Err(Reason::NotRun))
+            } else if let Err(failure) = gui.prepare_conversation() {
                 result.gui_stage = Some(failure.stage);
                 Err(failure.reason)
             } else if spec.live {
@@ -775,6 +780,25 @@ async fn scenario(
         diagnostic,
     )
     .await
+}
+
+fn strict_accessibility_directory(spec: &ProbeSpec) -> Result<Option<PathBuf>, Reason> {
+    let Some(directory) = std::env::var_os("FEASIBILITY_ZED_AX_FACTS") else {
+        return Ok(None);
+    };
+    if spec.live
+        || spec.kind != DesktopHarnessKind::Zed
+        || spec.session != crate::cli::SessionMode::GithubHosted
+        || !spec.session.available()
+    {
+        return Err(Reason::IsolationUnavailable);
+    }
+    let directory = PathBuf::from(directory);
+    if !directory.is_absolute() {
+        return Err(Reason::IsolationUnavailable);
+    }
+    create_private_dir_all(&directory).map_err(|_| Reason::IsolationUnavailable)?;
+    Ok(Some(directory))
 }
 
 fn capture_failed_acquisition(

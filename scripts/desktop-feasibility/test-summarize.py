@@ -34,5 +34,39 @@ class SemanticEvidence(unittest.TestCase):
         self.assertFalse(module.semantic_zed(self.report))
 
 
+class AccessibilityPrivacy(unittest.TestCase):
+    def setUp(self):
+        self.facts = dict(schemaVersion=1, mechanism='zed-native-accessibility', experimentOnly=True,
+                          noOcrQualification=False, appByPid=True, appError=None,
+                          stage='after-panel', trustControlCount=0, trustControlError=None,
+                          blocker='selector-not-matched', keyboardEntered=False,
+                          semanticInputVerified=False, semanticResponseVerified=False,
+                          providerResponseVerified=False, inventories=[
+                              dict(stage='after-panel', roleCounts={'window': 1}, rolesError=None,
+                                   namedComposerCount=0, namedComposerError=None,
+                                   editableCount=0, editableError=None,
+                                   valueReadback='no-matching-control', responseMatches=0, responseError=None)])
+
+    def test_zero_matches_are_distinct_from_failed_query(self):
+        module.validate_ax(self.facts)
+        observation = self.facts['inventories'][0]
+        observation['editableCount'] = None
+        observation['editableError'] = 'action-unsupported'
+        module.validate_ax(self.facts)
+        self.assertIsNone(observation['editableCount'])
+
+    def test_raw_text_false_qualification_and_overflow_are_rejected(self):
+        mutations = [lambda facts: facts.update(rawTree='synthetic-private-text'),
+                     lambda facts: facts.update(noOcrQualification=True),
+                     lambda facts: facts.update(schemaVersion=True),
+                     lambda facts: facts['inventories'][0]['roleCounts'].update(synthetic_private_label=1),
+                     lambda facts: facts['inventories'][0].update(editableCount=4097)]
+        for mutation in mutations:
+            facts = copy.deepcopy(self.facts)
+            mutation(facts)
+            with self.assertRaises(ValueError):
+                module.validate_ax(facts)
+
+
 if __name__ == '__main__':
     unittest.main()

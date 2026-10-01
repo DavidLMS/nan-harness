@@ -39,6 +39,18 @@ class OfficialIdentity(unittest.TestCase):
             self.assertEqual(read_frozen_manifest(path, ['zed-desktop'], 'macos',
                                                   'aarch64', 'qwen3.6'), manifest)
 
+    def test_exact_tag_endpoint_and_moved_identity_fail_closed(self):
+        endpoints = []
+        def fetch(endpoint):
+            endpoints.append(endpoint)
+            return self.release
+        module.freeze_zed(fetch, tag='v1.2.3')
+        self.assertEqual(endpoints, ['repos/zed-industries/zed/releases/tags/v1.2.3'])
+        with self.assertRaises(ValueError):
+            module.freeze_zed(fetch, tag='v1.2.4')
+        with self.assertRaises(ValueError):
+            module.freeze_zed(fetch, tag='v1.2.3/../../other')
+
     def test_zed_rejects_channel_duplicate_asset_url_and_digest(self):
         changes = [lambda r: r.update(prerelease=True),
                    lambda r: r['assets'].append(copy.deepcopy(r['assets'][0])),
