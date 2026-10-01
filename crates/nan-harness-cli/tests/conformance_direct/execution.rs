@@ -261,7 +261,20 @@ pub(super) fn harness_command(
     .timeout(Duration::from_mins(2));
     let isolated_home = workspace.join(".conformance-home");
     match harness {
-        "mimo-code" => command = command.env("MIMOCODE_HOME", isolated_home.join("mimo")),
+        "mimo-code" => {
+            let binary_directory = Path::new(env!("CARGO_BIN_EXE_nan-harness"))
+                .parent()
+                .expect("conformance binary should have a parent directory");
+            let parent_path = std::env::var_os("PATH").unwrap_or_default();
+            let paths = std::iter::once(binary_directory.to_path_buf())
+                .chain(std::env::split_paths(&parent_path));
+            command = command
+                .env("MIMOCODE_HOME", isolated_home.join("mimo"))
+                .env(
+                    "PATH",
+                    std::env::join_paths(paths).expect("conformance PATH"),
+                );
+        }
         "opencode" => {
             command = command
                 .env("XDG_CONFIG_HOME", isolated_home.join("config"))
