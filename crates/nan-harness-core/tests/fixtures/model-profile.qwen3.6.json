@@ -34,6 +34,11 @@
       "transport": "direct-chat",
       "testedAt": "2026-08-15"
     },
+    "mimo-code": {
+      "status": "unknown",
+      "transport": "direct-chat",
+      "testedAt": null
+    },
     "hermes": {
       "status": "qualified",
       "transport": "direct-chat",

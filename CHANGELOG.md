@@ -7,6 +7,12 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Launch MiMo Code through NaN with `nanh mimo` (alias `mimo-code`), including
+  dynamic model discovery, context limits, search, and selected-model routing
+  for auxiliary requests. Provider configuration is scoped to the managed launch.
+
 ## [0.1.12] - 2026-09-26
 
 ### Added

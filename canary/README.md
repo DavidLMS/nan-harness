@@ -325,7 +325,7 @@ location.
 The registered `Hosted ARM64 CLI compatibility` workflow is a manual-only,
 synthetic entry point for migrating the Tart CLI matrix to GitHub-hosted Linux
 and macOS ARM64 runners. Its OS choice is `linux`, `macos`, or `both`, and its
-harness input is `all` or a comma-separated subset of the 15 CLI harness
+harness input is `all` or a comma-separated subset of the 16 CLI harness
 identifiers; Windows, desktop identifiers, empty selections, and duplicates
 are rejected before a native runner is reserved. Select `deterministic` for
 installation and conformance without a provider key, or `live` to run the

@@ -179,7 +179,7 @@ mod tests {
             DesktopHarnessKind::from_str("zed"),
             Ok(DesktopHarnessKind::Zed)
         );
-        assert_eq!(HarnessKind::ALL.len(), 15);
+        assert_eq!(HarnessKind::ALL.len(), 16);
         assert!(HarnessKind::from_str("zed").is_err());
     }
 

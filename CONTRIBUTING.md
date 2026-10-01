@@ -118,10 +118,16 @@ The following exhaustive, flat mappings are accepted as clearer than splitting
 them solely to reduce complexity:
 
 - `telemetry_harness_for_command` in
-  `crates/nan-harness-cli/src/observability/identity.rs` (cyclomatic 23,
-  cognitive 22).
+  `crates/nan-harness-cli/src/observability/identity.rs` (cyclomatic 24,
+  cognitive 23).
 - `HarnessKind::as_str` in
-  `crates/nan-harness-telemetry/src/event/schema.rs` (cyclomatic 22).
+  `crates/nan-harness-telemetry/src/event/schema.rs` (cyclomatic 23,
+  cognitive 22).
+
+These values were measured at `47743d21` on 2026-10-01 using the local
+`experiments/metrics/complexity.py` script. MiMo adds one direct mapping case
+to each projection; the existing exception remains appropriate because both
+functions still contain only exhaustive, fixed-value mappings.
 
 These exceptions cover direct variant-to-fixed-value mappings without guards,
 nested decisions, or side effects. Reassess them if behavior is added. They do
@@ -244,8 +250,8 @@ verifies the draft before publication.
       tag's commit, the six Linux/macOS ARM64 and Windows x64 release assets,
       and the trusted workflow
       source rather than executing tag-controlled code.
-- [ ] Keep the draft unpublished until the live hosted gate reports all 43
-      unique cells passed (15 Linux, 15 macOS, 13 Windows) and emits its complete provenance
+- [ ] Keep the draft unpublished until the live hosted gate reports all 46
+      unique cells passed (16 Linux, 16 macOS, 14 Windows) and emits its complete provenance
       handoff. A deterministic verification-only run is useful evidence but
       does not satisfy the live release criterion and cannot publish.
       Prime Agent and FX are skipped only on Windows until official native
