@@ -20,7 +20,7 @@ def flags(value, keys):
 
 
 def native_copy(value, reasons):
-    shape(value, 'schemaVersion mechanism experimentOnly ocrUsed axTextUsed navigation keyboardTransport responseMethod lastExportError exportVersion exportUserCount exportAssistantTextCount stage substage guardKind guardCategory settleObservations clipboardReadback clipboardCharacterCount blocker trustControlCount panelControlCount responseControlCount clipboardCleanup input response', 'zed-native-copy')
+    shape(value, 'schemaVersion mechanism experimentOnly ocrUsed axTextUsed navigation keyboardTransport responseMethod lastExportError lastExportTransportError exportVersion exportUserCount exportAssistantTextCount stage substage guardKind guardCategory settleObservations clipboardReadback clipboardCharacterCount blocker trustControlCount panelControlCount responseControlCount clipboardCleanup input response', 'zed-native-copy')
     flags(value, 'experimentOnly ocrUsed axTextUsed')
     if not value['experimentOnly'] or value['ocrUsed'] or value['axTextUsed'] or value['navigation'] != 'private-keymap-new-thread':
         raise ValueError('invalid native-copy method')
@@ -32,6 +32,8 @@ def native_copy(value, reasons):
         raise ValueError('invalid native response method')
     if value['lastExportError'] not in {None, 'request', 'schema', 'user-mismatch', 'assistant-mismatch', 'decompression'} or value['exportVersion'] not in {None, '1.0.0'}:
         raise ValueError('invalid export diagnostic')
+    if value['lastExportTransportError'] not in {None, 'configuration', 'spawn', 'pipes', 'timeout', 'wait', 'write', 'read', 'exit', 'output-budget', 'json', 'verdict'}:
+        raise ValueError('invalid export transport diagnostic')
     for key in ('exportUserCount', 'exportAssistantTextCount'):
         count = value[key]
         if count is not None and (type(count) is not int or not 0 <= count <= 128):
@@ -66,7 +68,7 @@ def native_copy(value, reasons):
     if value['input']['submitted'] and not value['input']['clipboardVerified']:
         raise ValueError('submission without verified input')
     if value['responseMethod'] == 'thread-export' and value['response']['clipboardVerified'] and not (
-            value['lastExportError'] is None and value['exportVersion'] == '1.0.0'
+            value['lastExportError'] is None and value['lastExportTransportError'] is None and value['exportVersion'] == '1.0.0'
             and value['exportUserCount'] == 1 and value['exportAssistantTextCount'] == 1):
         raise ValueError('invalid assistant export proof')
     if value['response']['clipboardVerified'] and not (value['input']['submitted'] and value['response']['copyAction']):

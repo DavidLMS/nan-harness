@@ -21,7 +21,7 @@ class ClosedFacts(unittest.TestCase):
                         canSend=True, requestFailedCount=0, requestFailureCategory=None,
                         apiErrorStatus=None, apiErrorResponseCount=0)
         self.copy = dict(schemaVersion=1, mechanism='zed-native-copy', experimentOnly=True,
-                         ocrUsed=False, axTextUsed=False, navigation='private-keymap-new-thread', keyboardTransport='neutral-quartz', responseMethod='native-copy', lastExportError=None, exportVersion=None, exportUserCount=None, exportAssistantTextCount=None,
+                         ocrUsed=False, axTextUsed=False, navigation='private-keymap-new-thread', keyboardTransport='neutral-quartz', responseMethod='native-copy', lastExportError=None, lastExportTransportError=None, exportVersion=None, exportUserCount=None, exportAssistantTextCount=None,
                          stage='completed', substage='completed', guardKind=None, guardCategory=None, settleObservations=3, clipboardReadback='exact', clipboardCharacterCount=64, blocker=None, trustControlCount=0, panelControlCount=1,
                          responseControlCount=1, clipboardCleanup='passed',
                          input=dict(entered=True, clipboardVerified=True, submitted=True),

@@ -39,6 +39,7 @@ struct Facts {
     keyboard_transport: &'static str,
     response_method: &'static str,
     last_export_error: Option<String>,
+    last_export_transport_error: Option<&'static str>,
     export_version: Option<String>,
     export_user_count: Option<usize>,
     export_assistant_text_count: Option<usize>,
@@ -144,7 +145,52 @@ struct ExportVerdict {
     error: Option<String>,
 }
 
-fn validate_export(prompt: &str, marker: &str, clipboard: &str) -> Result<ExportVerdict, Reason> {
+fn decode_export_verdict(
+    bytes: &[u8],
+    transport: &mut Option<&'static str>,
+) -> Result<ExportVerdict, Reason> {
+    *transport = Some("output-budget");
+    if bytes.len() > 4096 {
+        return Err(Reason::ActionUnsupported);
+    }
+    *transport = Some("json");
+    let verdict: ExportVerdict =
+        serde_json::from_slice(bytes).map_err(|_| Reason::ActionUnsupported)?;
+    *transport = Some("verdict");
+    if verdict.user_count > 128
+        || verdict.assistant_text_count > 128
+        || !matches!(
+            verdict.error.as_deref(),
+            None | Some(
+                "request" | "schema" | "user-mismatch" | "assistant-mismatch" | "decompression"
+            )
+        )
+    {
+        return Err(Reason::ActionUnsupported);
+    }
+    if verdict
+        .version
+        .as_deref()
+        .is_some_and(|version| version != "1.0.0")
+        || (verdict.verified
+            && (verdict.version.as_deref() != Some("1.0.0")
+                || verdict.user_count != 1
+                || verdict.assistant_text_count != 1
+                || verdict.error.is_some()))
+    {
+        return Err(Reason::ActionUnsupported);
+    }
+    *transport = None;
+    Ok(verdict)
+}
+
+fn validate_export(
+    prompt: &str,
+    marker: &str,
+    clipboard: &str,
+    transport: &mut Option<&'static str>,
+) -> Result<ExportVerdict, Reason> {
+    *transport = Some("configuration");
     let parser =
         std::env::var_os("FEASIBILITY_ZED_EXPORT_PARSER").ok_or(Reason::IsolationUnavailable)?;
     let zstd = std::env::var_os("FEASIBILITY_ZED_ZSTD").ok_or(Reason::IsolationUnavailable)?;
@@ -156,6 +202,7 @@ fn validate_export(prompt: &str, marker: &str, clipboard: &str) -> Result<Export
         return Err(Reason::IsolationUnavailable);
     }
     let request = Zeroizing::new(serde_json::to_vec(&serde_json::json!({"expectedPrompt": prompt, "expectedMarker": marker, "clipboard": clipboard})).map_err(|_| Reason::ActionUnsupported)?);
+    *transport = Some("spawn");
     let mut child = Command::new("python3")
         .arg(parser)
         .arg("--zstd")
@@ -167,6 +214,7 @@ fn validate_export(prompt: &str, marker: &str, clipboard: &str) -> Result<Export
         .spawn()
         .map_err(|_| Reason::ActionUnsupported)?;
     let outcome = std::thread::scope(|scope| {
+        *transport = Some("pipes");
         let mut stdin = child.stdin.take().ok_or(Reason::ActionUnsupported)?;
         let stdout = child.stdout.take().ok_or(Reason::ActionUnsupported)?;
         let writer = scope.spawn(|| {
@@ -178,12 +226,16 @@ fn validate_export(prompt: &str, marker: &str, clipboard: &str) -> Result<Export
             let mut bytes = Vec::new();
             stdout.take(4097).read_to_end(&mut bytes).map(|_| bytes)
         });
-        let deadline = Instant::now() + Duration::from_secs(4);
+        let deadline = Instant::now() + Duration::from_secs(8);
+        *transport = Some("wait");
         let status = loop {
             match child.try_wait() {
                 Ok(Some(status)) => break Some(status),
                 Err(_) => break None,
-                Ok(None) if Instant::now() >= deadline => break None,
+                Ok(None) if Instant::now() >= deadline => {
+                    *transport = Some("timeout");
+                    break None;
+                }
                 Ok(None) => std::thread::sleep(Duration::from_millis(20)),
             }
         };
@@ -191,43 +243,24 @@ fn validate_export(prompt: &str, marker: &str, clipboard: &str) -> Result<Export
             let _ = child.kill();
             let _ = child.wait();
         }
+        if status.is_none() {
+            return Err(Reason::ActionUnsupported);
+        }
+        *transport = Some("write");
         writer
             .join()
             .map_err(|_| Reason::ActionUnsupported)?
             .map_err(|_| Reason::ActionUnsupported)?;
+        *transport = Some("read");
         let bytes = reader
             .join()
             .map_err(|_| Reason::ActionUnsupported)?
             .map_err(|_| Reason::ActionUnsupported)?;
-        if !status.is_some_and(|status| status.success()) || bytes.len() > 4096 {
+        *transport = Some("exit");
+        if !status.is_some_and(|status| status.success()) {
             return Err(Reason::ActionUnsupported);
         }
-        let verdict: ExportVerdict =
-            serde_json::from_slice(&bytes).map_err(|_| Reason::ActionUnsupported)?;
-        if verdict.user_count > 128
-            || verdict.assistant_text_count > 128
-            || !matches!(
-                verdict.error.as_deref(),
-                None | Some(
-                    "request" | "schema" | "user-mismatch" | "assistant-mismatch" | "decompression"
-                )
-            )
-        {
-            return Err(Reason::ActionUnsupported);
-        }
-        if verdict
-            .version
-            .as_deref()
-            .is_some_and(|version| version != "1.0.0")
-            || (verdict.verified
-                && (verdict.version.as_deref() != Some("1.0.0")
-                    || verdict.user_count != 1
-                    || verdict.assistant_text_count != 1
-                    || verdict.error.is_some()))
-        {
-            return Err(Reason::ActionUnsupported);
-        }
-        Ok(verdict)
+        decode_export_verdict(&bytes, transport)
     });
     if outcome.is_err() {
         let _ = child.kill();
@@ -297,6 +330,7 @@ impl Gui {
                 "native-copy"
             },
             last_export_error: None,
+            last_export_transport_error: None,
             export_version: None,
             export_user_count: None,
             export_assistant_text_count: None,
@@ -588,7 +622,12 @@ impl Gui {
                 self.native_copy_guard(facts, "export-read-after")?;
                 if copied.as_str() != sentinel.as_str() {
                     facts.substage = "export-parse";
-                    let verdict = validate_export(&facts.expected_prompt, marker, &copied)?;
+                    let verdict = validate_export(
+                        &facts.expected_prompt,
+                        marker,
+                        &copied,
+                        &mut facts.last_export_transport_error,
+                    )?;
                     facts.last_export_error = verdict.error;
                     facts.export_version = verdict.version;
                     facts.export_user_count = Some(verdict.user_count);
@@ -645,6 +684,25 @@ impl Gui {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn export_transport_distinguishes_budget_json_and_untrusted_verdict() {
+        let mut category = None;
+        assert!(decode_export_verdict(&vec![b'x'; 4097], &mut category).is_err());
+        assert_eq!(category, Some("output-budget"));
+        assert!(decode_export_verdict(b"not-json", &mut category).is_err());
+        assert_eq!(category, Some("json"));
+        let inconsistent = br#"{"verified":true,"version":"1.0.0","userCount":1,"assistantTextCount":2,"error":null}"#;
+        assert!(decode_export_verdict(inconsistent, &mut category).is_err());
+        assert_eq!(category, Some("verdict"));
+        let valid = br#"{"verified":false,"version":"1.0.0","userCount":1,"assistantTextCount":0,"error":"assistant-mismatch"}"#;
+        assert!(
+            !decode_export_verdict(valid, &mut category)
+                .unwrap()
+                .verified
+        );
+        assert_eq!(category, None);
+    }
 
     #[test]
     fn neutral_transport_rejects_unbounded_or_relative_requests_before_spawn() {
