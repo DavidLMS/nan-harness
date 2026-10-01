@@ -15,6 +15,9 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
   let keys = 0;
   let centers = 0;
   let frames = 0;
+  let focusChecks = 0;
+  let focused = false;
+  const focusButton = { tabIndex: scenario === 'retry-not-focusable' ? -1 : 0 };
   const overlay = { tagName: 'DIV', closest(selector) { return ['[data-slot="composer-root"]', '[data-slot="composer-dock"]'].includes(selector) ? {} : null; } };
   const dockStrip = { tagName: 'DIV', privateClass: 'PRIVATE_SYNTHETIC_VALUE', closest(selector) { return selector === '[data-slot="composer-dock"]' ? {} : null; } };
   const foreignHit = { tagName: 'PRIVATE_SYNTHETIC_VALUE', closest() { return null; } };
@@ -65,12 +68,12 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
         assert.equal(pointerRetry, true);
         return callback({ tabIndex: -1, disabled: false, getAttribute: () => null, closest: () => null }, pointerRetry);
       }
-      if (callback.toString().includes('document.activeElement')) return scenario !== 'focus-failed';
+      if (callback.toString().includes('document.activeElement')) { focusChecks++; return callback(focusButton); }
       return scenario === 'blocked-modal' ? 'modal' : scenario === 'blocked-menu' ? 'menu'
         : scenario === 'inert' ? 'inert' : null;
     },
     async scrollIntoViewIfNeeded() {},
-    async focus() { if (qualify && request.action === 'retry') throw new Error('Retry must not require retained keyboard focus'); },
+    async focus() { focused = true; },
     async click(options) {
       assert(qualify && request.action === 'retry');
       assert.equal(options.force, undefined);
@@ -82,7 +85,7 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
     async press(key) {
       assert.equal(key, 'Enter');
       keys++;
-      assert(!(qualify && request.action === 'retry'));
+      assert(focused);
       if (scenario === 'click-timeout') throw new Error('Timeout 100ms exceeded PRIVATE_SYNTHETIC_VALUE');
       submits++; value = '';
     },
@@ -190,7 +193,7 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
         overflowX: element === clippedParent ? 'hidden' : 'visible', overflowY: 'visible', contain: '',
         getPropertyValue: property => property === '--sticky-prompt-clip' && element === sourceClipParent ? scenario === 'retry-frame-settle' && frames >= 2 ? '0px' : '25px'
           : property === '-webkit-app-region' && scenario === 'retry-native-drag' ? 'drag' : '' }),
-      document: { querySelectorAll: selector => {
+      document: { get activeElement() { return focused && scenario !== 'focus-failed' && !(scenario === 'retry-focus-lost' && focusChecks > 1) ? focusButton : null; }, querySelectorAll: selector => {
         if (!submits) return [];
         if (selector === '[data-role="user"]') return [responseUser];
         if (selector === '[data-role="assistant"]') return [responseAssistant];
@@ -278,84 +281,26 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
   assert.equal(retry.facts.uniqueComposer, true);
   assert.equal(retry.submits, 1);
   assert.equal(retry.fills, 0);
-  assert.equal(retry.clicks, 1);
-  assert.equal(retry.keys, 0);
-  assert.equal(retry.facts.sendMechanism, 'pointer');
-  assert.equal(retry.facts.retryHitOwned, true);
-  assert.equal(retry.facts.retryHitTarget, 'self');
-  assert.equal(retry.centers, 1);
-  const childHit = await trial(retryRequest, {}, 'retry-child-hit', true);
-  assert.equal(childHit.facts.retryHitOwned, true);
-  assert.equal(childHit.facts.retryHitTarget, 'self');
-  assert.equal(childHit.clicks, 1);
-  assert.equal(childHit.facts.retryHitTag, 'svg');
-  assert.equal(retry.facts.retryRectInViewport, true);
-  assert.equal(retry.facts.retryAncestorClipped, false);
-  assert.equal(retry.facts.retryPointerEventsNone, false);
-  assert.equal(retry.facts.retryHitTag, 'button');
-  assert.equal(retry.facts.retryHitRegion, 'thread-viewport');
-  const clipped = await trial(retryRequest, {}, 'retry-clipped', true);
-  assert.equal(clipped.facts.retryAncestorClipped, true);
-  const sourceClipped = await trial(retryRequest, {}, 'retry-source-clipped', true);
-  assert.equal(sourceClipped.facts.retryAncestorClipped, true);
-  assert.equal(sourceClipped.facts.retryHitTarget, 'other');
-  assert.equal(sourceClipped.facts.retryHitRegion, 'thread-viewport');
-  assert.equal(sourceClipped.clicks, 0);
-  const pointerNone = await trial(retryRequest, {}, 'retry-pointer-none', true);
-  assert.equal(pointerNone.facts.retryPointerEventsNone, true);
-  const nativeDrag = await trial(retryRequest, {}, 'retry-native-drag', true);
-  assert.equal(nativeDrag.facts.retryHitRegion, 'titlebar-drag');
-  const dock = await trial(retryRequest, {}, 'retry-dock-strip', true);
-  assert.equal(dock.facts.retryHitTarget, 'composer');
-  assert.equal(dock.facts.retryHitRegion, 'composer-dock');
-  assert.equal(dock.clicks, 0);
-  const body = await trial(retryRequest, {}, 'retry-body-hit', true);
-  assert.equal(body.facts.retryHitTag, 'body');
-  assert.equal(body.facts.retryHitTarget, 'other');
-  assert.equal(body.clicks, 0);
-  const unknown = await trial(retryRequest, {}, 'retry-private-hit', true);
-  assert.equal(unknown.facts.retryHitTag, 'other');
-  assert.equal(unknown.clicks, 0);
-  const offviewport = await trial(retryRequest, {}, 'retry-offviewport', true);
-  assert.equal(offviewport.facts.retryRectInViewport, false);
-  assert.equal(offviewport.facts.retryHitTarget, 'none');
-  assert.equal(offviewport.clicks, 0);
-  const settled = await trial(retryRequest, {}, 'retry-frame-settle', true);
-  assert.equal(settled.frames, 2);
-  assert.equal(settled.centers, 1);
-  assert.equal(settled.facts.retryHitOwned, true);
-  assert.equal(settled.facts.retryAncestorClipped, false);
-  assert.equal(settled.clicks, 1);
-  const noFrames = await trial({ ...retryRequest, timeoutMs: 100 }, {}, 'retry-no-frames', true);
-  assert.equal(noFrames.frames, 0);
-  assert.equal(noFrames.facts.retryHitTarget, 'unmeasured');
-  assert.equal(noFrames.facts.errorCategory, 'submit-action-timeout');
-  assert.equal(noFrames.clicks, 0);
-  assert.equal(noFrames.submits, 0);
-  const covered = await trial(retryRequest, {}, 'retry-overlay', true);
-  assert.equal(covered.facts.retryHitOwned, false);
-  assert.equal(covered.facts.retryHitTarget, 'composer');
-  assert.equal(covered.facts.errorCategory, 'submit-action-intercepted');
-  assert.equal(covered.clicks, 0);
-  assert.equal(covered.submits, 0);
-  const centered = await trial(retryRequest, {}, 'retry-centering', true);
-  assert.equal(centered.centers, 1);
-  assert.equal(centered.facts.retryHitOwned, true);
-  assert.equal(centered.clicks, 1);
-  assert.equal(centered.submits, 1);
-  const nonfocusable = await trial(retryRequest, {}, 'retry-not-focusable', true);
-  assert.equal(nonfocusable.submits, 1);
-  assert.equal(nonfocusable.clicks, 1);
-  assert.equal(nonfocusable.keys, 0);
-  assert.equal(nonfocusable.fills, 0);
-  const intercepted = await trial(retryRequest, {}, 'retry-intercepted', true);
-  assert.equal(intercepted.facts.errorCategory, 'submit-action-intercepted');
-  assert.equal(intercepted.facts.inputSubmitted, false);
-  assert.equal(intercepted.submits, 0);
-  assert.equal(intercepted.clicks, 1);
-  assert.equal(intercepted.keys, 0);
-  assert.equal(intercepted.facts.retryHitTarget, 'composer');
-  assert.equal(intercepted.facts.retryHitOwned, false);
+  assert.equal(retry.clicks, 0);
+  assert.equal(retry.keys, 1);
+  assert.equal(retry.facts.sendMechanism, 'semantic-keyboard');
+  assert.equal(retry.facts.retryHitTarget, 'unmeasured');
+  const nonTabstop = await trial(retryRequest, {}, 'retry-not-focusable', true);
+  assert.equal(nonTabstop.keys, 1);
+  assert.equal(nonTabstop.clicks, 0);
+  assert.equal(nonTabstop.fills, 0);
+  assert.equal(nonTabstop.facts.responseVerified, true);
+  for (const scenario of ['focus-failed', 'retry-focus-lost']) {
+    const lost = await trial(retryRequest, {}, scenario, true);
+    assert.equal(lost.keys, 0);
+    assert.equal(lost.clicks, 0);
+    assert.equal(lost.facts.sendBlocker, 'focus');
+  }
+  const timeout = await trial(retryRequest, {}, 'click-timeout', true);
+  assert.equal(timeout.keys, 1);
+  assert.equal(timeout.submits, 0);
+  assert.equal(timeout.clicks, 0);
+  assert.equal(timeout.facts.errorCategory, 'submit-action-timeout');
   for (const scenario of ['missing-error', 'duplicate-error', 'missing-retry', 'foreign-error-turn', 'foreign-user', 'blocked-modal', 'blocked-menu', 'inert', 'stale', 'duplicate', 'duplicate-retry', 'send-disabled']) {
     const rejected = await trial(retryRequest, {}, scenario, true);
     assert.equal(rejected.submits, 0, scenario);
@@ -371,15 +316,7 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
   assert.equal(foreignResponse.facts.userTurnObserved, true);
   assert.equal(foreignResponse.facts.responseVerified, false);
   assert.equal(foreignResponse.facts.errorCategory, 'response-timeout');
-  for (const region of ['composer-bounds', 'composer-portal', 'particle-field', 'chat-drop-overlay']) {
-    const coveredBySourceRegion = await trial(retryRequest, {}, region, true);
-    assert.equal(coveredBySourceRegion.facts.retryHitRegion, region);
-    assert.equal(coveredBySourceRegion.facts.retryHitOwned, false);
-    assert.equal(coveredBySourceRegion.facts.retryHitTarget, 'other');
-    assert.equal(coveredBySourceRegion.clicks, 0);
-    assert.equal(coveredBySourceRegion.submits, 0);
-  }
   const invalid = await trial({ ...phase, action: 'retry' }, {}, null, true);
   assert.equal(invalid.facts.errorCategory, 'invalid-request');
-  console.log('Hermes DOM feasibility and qualification guards: 57 synthetic cases passed');
+  console.log('Hermes DOM feasibility and qualification guards: synthetic cases passed');
 })().catch(error => { console.error(error.message); process.exitCode = 1; });

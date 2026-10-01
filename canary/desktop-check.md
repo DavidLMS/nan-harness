@@ -117,8 +117,9 @@ qualification yet; implemented adapters are not accepted cells.
 `--verification semantic-only` requires a disposable GitHub-hosted deterministic
 session and a supported adapter. It never falls back to OCR. Zed uses native
 clipboard input readback and its native thread export; Hermes uses an owned
-renderer DOM connection, normal keyboard Send activation and an ordinary Retry
-button click with an owned hit test. Hermes binds error, Retry and assistant
+renderer DOM connection and normal keyboard activation of Send and Retry.
+Retry must hold actual DOM focus before its single Enter keypress, including
+after the asynchronous error checks. Hermes binds error, Retry and assistant
 response to the expected user's renderer turn pair. A passing probe must
 verify the assistant response, a real file-tool round trip, an observed provider
 failure, and recovery through exactly one UI Retry in the failed turn. Each

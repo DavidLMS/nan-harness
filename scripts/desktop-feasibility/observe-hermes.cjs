@@ -203,7 +203,7 @@ async function driveDom() {
   if (!facts.inputReadback) { facts.errorCategory = 'input-mismatch'; saveFacts(); return; }
   }
   const retryAction = qualify && request.action === 'retry';
-  if (retryAction) facts.sendMechanism = 'pointer';
+  if (retryAction) facts.sendMechanism = 'semantic-keyboard';
   const readiness = () => send.evaluate((button, pointerRetry) => {
     const visible = e => { const r = e.getBoundingClientRect();
       const style = getComputedStyle(e); return r.width > 0 && r.height > 0 &&
@@ -219,98 +219,10 @@ async function driveDom() {
   if (facts.sendBlocker !== null) {
     facts.errorCategory = 'submit-action-intercepted'; saveFacts(); return;
   }
-  async function retryHitTest() {
-    try {
-      const observation = await send.evaluate(button => {
-        const rect = button.getBoundingClientRect();
-        const x = rect.left + rect.width / 2;
-        const y = rect.top + rect.height / 2;
-        const front = document.elementFromPoint(x, y);
-        const observation = {
-          retryRectInViewport: rect.width > 0 && rect.height > 0 && rect.left >= 0 && rect.top >= 0 &&
-            rect.left + rect.width <= window.innerWidth && rect.top + rect.height <= window.innerHeight,
-          retryAncestorClipped: false,
-          retryPointerEventsNone: getComputedStyle(button).pointerEvents === 'none',
-          retryHitTag: front ? ['html', 'body', 'button', 'div', 'span', 'svg'].includes(front.tagName?.toLowerCase())
-            ? front.tagName.toLowerCase() : 'other' : 'none',
-          retryHitRegion: 'none', retryHitOwned: false, retryHitTarget: 'none',
-        };
-        for (let parent = button.parentElement; parent; parent = parent.parentElement) {
-          const bounds = parent.getBoundingClientRect();
-          const style = getComputedStyle(parent);
-          const clips = value => ['hidden', 'clip', 'scroll', 'auto'].includes(value);
-          if (parent.matches('[data-sticky-prompt-clip]')) {
-            const insetText = style.getPropertyValue('--sticky-prompt-clip');
-            if (/^\d+(?:\.\d+)?px$/.test(insetText)) {
-              const inset = Number.parseFloat(insetText);
-              if (Number.isFinite(inset) && y < bounds.top + inset) observation.retryAncestorClipped = true;
-            }
-          }
-          const paintClip = style.contain?.split(/\s+/).some(value => ['paint', 'strict', 'content'].includes(value));
-          if (((clips(style.overflowX) || paintClip) && (x < bounds.left || x >= bounds.left + bounds.width)) ||
-              ((clips(style.overflowY) || paintClip) && (y < bounds.top || y >= bounds.top + bounds.height)))
-            observation.retryAncestorClipped = true;
-        }
-        if (!front) return observation;
-        observation.retryHitRegion = front.closest('[data-slot="composer-drag-region"]') ? 'composer-drag-region'
-          : front.closest('[data-slot="composer-dock"]') ? 'composer-dock'
-          : front.closest('[role="dialog"],[role="alertdialog"]') ? 'dialog'
-          : front.closest('[data-slot="popover-content"]') ? 'popover'
-          : front.closest('[role="tooltip"]') ? 'tooltip'
-          : getComputedStyle(front).getPropertyValue('-webkit-app-region') === 'drag' ? 'titlebar-drag'
-          : front.closest('[data-slot="aui_thread-viewport"]') ? 'thread-viewport'
-          : front.closest('[data-slot="chat-drop-overlay"]') ? 'chat-drop-overlay'
-          : front.closest('.particle-field') ? 'particle-field'
-          : front.closest('[data-composer-owner]') ? 'composer-portal'
-          : front.closest('[data-slot="composer-bounds"]') ? 'composer-bounds' : 'other';
-        if (front === button || button.contains(front)) {
-          observation.retryHitOwned = true; observation.retryHitTarget = 'self'; return observation;
-        }
-        observation.retryHitTarget = front.closest('[aria-modal="true"],[role="alertdialog"]') ? 'modal'
-          : front.closest('[role="menu"]') ? 'menu'
-          : front.closest('[data-slot="composer-root"]') || front.closest('[data-slot="composer-dock"]') ? 'composer'
-          : front.closest('[role="alert"]')?.closest('[data-role="assistant"][data-slot="aui_assistant-message-root"]') ? 'error-card' : 'other';
-        return observation;
-      }, undefined, { timeout: 500 });
-      Object.assign(facts, observation);
-    } catch {
-      facts.retryHitOwned = false; facts.retryHitTarget = 'unmeasured';
-      facts.retryRectInViewport = false; facts.retryAncestorClipped = false;
-      facts.retryPointerEventsNone = false; facts.retryHitTag = 'unmeasured'; facts.retryHitRegion = 'unmeasured';
-    }
-  }
-  if (retryAction) {
-    await send.evaluate(button => button.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' }),
-      undefined, { timeout: Math.max(1, deadline - Date.now()) });
-    // The frozen sticky-prompt clip reconciles on scroll/IO animation frames.
-    // Observe that ordinary layout lifecycle before testing the click point.
-    const frameBudget = Math.max(0, Math.min(500, deadline - Date.now()));
-    let framesSettled = false;
-    if (frameBudget > 0) {
-      try {
-        framesSettled = await Promise.race([
-          page.evaluate(() => new Promise(resolve => {
-            requestAnimationFrame(() => requestAnimationFrame(() => resolve(true)));
-          })),
-          delay(frameBudget).then(() => false),
-        ]);
-      } catch { /* Context loss is unmeasured, never authorization to click. */ }
-    }
-    if (!framesSettled || !ownedEndpoint()) {
-      facts.sendBlocker = 'unmeasured'; facts.retryHitOwned = false; facts.retryHitTarget = 'unmeasured';
-      facts.errorCategory = 'submit-action-timeout'; saveFacts(); return;
-    }
-    await retryHitTest();
-    saveFacts();
-    if (!facts.retryHitOwned) {
-      facts.sendBlocker = facts.retryHitTarget === 'composer' ? 'composer-drag-region'
-        : ['modal', 'menu'].includes(facts.retryHitTarget) ? facts.retryHitTarget : 'other';
-      facts.errorCategory = 'submit-action-intercepted'; saveFacts(); return;
-    }
-  } else await send.scrollIntoViewIfNeeded({ timeout: Math.max(1, deadline - Date.now()) });
-  if (!retryAction) await send.focus({ timeout: Math.max(1, deadline - Date.now()) });
+  await send.scrollIntoViewIfNeeded({ timeout: Math.max(1, deadline - Date.now()) });
+  await send.focus({ timeout: Math.max(1, deadline - Date.now()) });
   facts.sendBlocker = await readiness();
-  if (!retryAction && facts.sendBlocker === null && !await send.evaluate(button => document.activeElement === button))
+  if (facts.sendBlocker === null && !await send.evaluate(button => document.activeElement === button))
     facts.sendBlocker = 'focus';
   saveFacts();
   if (facts.sendBlocker !== null || !ownedEndpoint()) {
@@ -326,15 +238,22 @@ async function driveDom() {
     }
     if (!await errorProof()) { facts.errorCategory = 'send-unavailable'; saveFacts(); return; }
   }
+  if (retryAction) {
+    // Async turn/error checks can remount or defocus the control. Verify the
+    // current unique enabled Retry and actual focus at the action boundary.
+    facts.sendBlocker = await readiness();
+    if (facts.sendBlocker === null && !await send.evaluate(button => document.activeElement === button))
+      facts.sendBlocker = 'focus';
+    if (facts.sendBlocker !== null || !ownedEndpoint() || await send.count() !== 1 || !await send.isEnabled()) {
+      facts.errorCategory = 'submit-action-intercepted'; saveFacts(); return;
+    }
+  }
   try {
     // Frozen assistant-message.tsx uses a real button with Reload asChild.
-    // Its ordinary click activates Reload without requiring retained keyboard
-    // focus; Playwright still enforces pointer actionability, never force.
-    if (retryAction) await send.click({ timeout: Math.max(1, deadline - Date.now()) });
-    else await send.press('Enter', { timeout: Math.max(1, deadline - Date.now()) });
+    // Enter activates the native button; no forced click or event injection.
+    await send.press('Enter', { timeout: Math.max(1, deadline - Date.now()) });
   } catch (error) {
     try { facts.sendBlocker = await readiness(); } catch { facts.sendBlocker = 'unmeasured'; }
-    if (retryAction) await retryHitTest();
     const detail = String(error?.message ?? '');
     facts.errorCategory = /intercepts pointer events|subtree intercepts/i.test(detail) ? 'submit-action-intercepted'
       : /detached|not attached/i.test(detail) ? 'submit-action-detached'
