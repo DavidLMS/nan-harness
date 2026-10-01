@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const source = fs.readFileSync(`${__dirname}/observe-hermes.cjs`, 'utf8').replace('await driveDom(); process.exit(', 'await driveDom(); return process.exit(');
-async function trial(overrides, connectionOverrides = {}, scenario = null) {
+async function trial(overrides, connectionOverrides = {}, scenario = null, qualify = false) {
   const output = new Map();
   const request = { connectionPath: '/connection', ownerPid: 20, prompt: 'Check this connection',
     expectedMarker: 'NAN CHECK RESPONSE ' + 'APPLE '.repeat(32), timeoutMs: 1, ...overrides };
@@ -42,8 +42,12 @@ async function trial(overrides, connectionOverrides = {}, scenario = null) {
       submits++; value = '';
     },
   };
+  const errorCards = {
+    async count() { return scenario === 'failure-appears' && submits === 0 ? 0 : scenario === 'missing-error' ? 0 : scenario === 'duplicate-error' ? 2 : 1; },
+    getByRole(role, options) { assert.equal(role, 'button'); assert.equal(options.name, 'Retry'); return { ...send, async count() { return scenario === 'missing-retry' ? 0 : 1; } }; },
+  };
   const users = { filter({ hasText }) { assert.equal(hasText, request.prompt); return {
-    async count() { return submits === 1 ? 1 : 0; },
+    async count() { return scenario === 'foreign-user' ? 0 : 1; },
     async evaluate(callback, prompt) { return callback({ innerText: request.prompt }, prompt); },
   }; } };
   const assistant = {
@@ -81,6 +85,7 @@ async function trial(overrides, connectionOverrides = {}, scenario = null) {
         assistantTurnCount: submits, responseVerified: submits === 1 };
     },
     locator(selector) {
+      if (selector === '[data-role="assistant"][data-slot="aui_assistant-message-root"] [role="alert"]:visible') return errorCards;
       if (selector === '[data-role="assistant"]:visible') return assistant;
       if (selector === '[data-role="user"]:visible') return users;
       if (selector === '[data-slot="composer-root"] button[type="submit"][aria-label="Send"]:visible') return send;
@@ -115,12 +120,16 @@ async function trial(overrides, connectionOverrides = {}, scenario = null) {
           if (!scenario) throw new Error('must not attach'); return browser; } } };
       },
       URL, setTimeout,
-      process: { argv: ['node', 'helper', '--drive', '/request', '/output'], exit: resolve },
+      process: { argv: ['node', 'helper', qualify ? '--qualify' : '--drive', '/request', '/output'], exit: resolve },
     });
     setTimeout(() => reject(new Error('bounded helper fixture timed out')), 1000).unref();
   });
   assert.equal(attaches, scenario ? 1 : 0);
   const facts = JSON.parse(output.get('/output'));
+  if (qualify) {
+    assert(!output.get('/output').includes(request.expectedMarker));
+    return { facts, submits, fills };
+  }
   assert.equal(facts.inputSubmitted, ['happy', 'delayed', 'missing-editor', 'transient-context', 'keyboard'].includes(scenario));
   assert.equal(facts.responseVerified, ['happy', 'delayed', 'missing-editor', 'transient-context', 'keyboard'].includes(scenario));
   assert.equal(facts.attached, Boolean(scenario));
@@ -171,5 +180,30 @@ async function trial(overrides, connectionOverrides = {}, scenario = null) {
   assert.equal((await trial({ timeoutMs: 500 }, {}, 'blocked-menu')).sendBlocker, 'menu');
   assert.equal((await trial({ timeoutMs: 500 }, {}, 'inert')).sendBlocker, 'inert');
   assert.equal(happy.sendMechanism, 'semantic-keyboard');
-  console.log('Hermes DOM guards and submission: 19 synthetic cases passed');
+  const phase = { timeoutMs: 500, action: 'submit', purpose: 'failure',
+    prompt: 'Check the expected provider failure', expectedMarker: 'NAN_CHECK_EXPECTED_FAILURE' };
+  const failure = await trial(phase, {}, 'failure-appears', true);
+  assert.equal(failure.facts.errorObserved, true);
+  assert.equal(failure.facts.retryControl, true);
+  assert.equal(failure.facts.responseVerified, false);
+  assert.equal(failure.submits, 1);
+  const staleFailure = await trial(phase, {}, 'happy', true);
+  assert.equal(staleFailure.facts.errorCategory, 'stale-response');
+  assert.equal(staleFailure.submits, 0);
+  const tool = await trial({ timeoutMs: 500, action: 'submit', purpose: 'response', prompt: 'Read read-target.txt using your file tool.' }, {}, 'happy', true);
+  assert.equal(tool.facts.responseVerified, true);
+  assert.equal(tool.submits, 1);
+  const retryRequest = { timeoutMs: 500, action: 'retry', purpose: 'response', prompt: phase.prompt };
+  const retry = await trial(retryRequest, {}, 'happy', true);
+  assert.equal(retry.facts.responseVerified, true);
+  assert.equal(retry.submits, 1);
+  assert.equal(retry.fills, 0);
+  for (const scenario of ['missing-error', 'duplicate-error', 'missing-retry', 'foreign-user', 'blocked-modal', 'focus-failed', 'stale']) {
+    const rejected = await trial(retryRequest, {}, scenario, true);
+    assert.equal(rejected.submits, 0, scenario);
+    assert.equal(rejected.fills, 0, scenario);
+  }
+  const invalid = await trial({ ...phase, action: 'retry' }, {}, null, true);
+  assert.equal(invalid.facts.errorCategory, 'invalid-request');
+  console.log('Hermes DOM feasibility and qualification guards: 31 synthetic cases passed');
 })().catch(error => { console.error(error.message); process.exitCode = 1; });

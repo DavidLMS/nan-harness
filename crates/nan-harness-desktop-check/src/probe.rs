@@ -33,6 +33,8 @@ pub(crate) struct ProbeSpec {
     pub(crate) probe_index: Option<usize>,
     #[serde(default)]
     pub(crate) session: crate::cli::SessionMode,
+    #[serde(default)]
+    pub(crate) verification: crate::cli::VerificationPolicy,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) launch_wrapper: Option<LaunchWrapper>,
 }
@@ -115,6 +117,8 @@ mod windows_process_tests {
         drop(ready);
     }
 }
+
+mod semantic;
 
 /// Opt-in startup diagnostic binding. Only the `chatgpt-desktop` launch runs
 /// through the wrapper; `nan_harness` and its digest remain the tested
@@ -684,6 +688,10 @@ async fn scenario(
         return Err(Reason::IsolationUnavailable);
     }
     let experiment = HostedExperiment::from_spec(spec)?;
+    let semantic = semantic::SemanticBackend::from_spec(spec)?;
+    if semantic.is_some() && experiment.is_some() {
+        return Err(Reason::IsolationUnavailable);
+    }
     if binary_digest(&spec.nan_harness)? != spec.nan_harness_sha256 {
         return Err(Reason::InstallationUnreadable);
     }
@@ -722,36 +730,18 @@ async fn scenario(
     let outcome = match &gui {
         Ok(gui) => {
             result.steps.push(CheckStep::Launched);
-            if let Some(experiment) = &experiment {
-                // This partial hosted experiment cannot become compatibility evidence.
-                experiment
-                    .run(gui, process.id(), &final_marker, result, &gate)
-                    .and(Err(Reason::NotRun))
-            } else if let Err(failure) = gui.prepare_conversation() {
-                result.gui_stage = Some(failure.stage);
-                Err(failure.reason)
-            } else if spec.live {
-                live(
-                    gui,
-                    spec,
-                    &gate,
-                    &fixture,
-                    &marker,
-                    result,
-                    composer_observations,
-                )
-            } else {
-                deterministic(
-                    gui,
-                    &inventory,
-                    &gate,
-                    &fixture,
-                    &final_marker,
-                    result,
-                    composer_observations,
-                )
-                .await
+            ConversationScenario {
+                spec,
+                inventory: &inventory,
+                gate: &gate,
+                fixture: &fixture,
+                marker: &marker,
+                final_marker: &final_marker,
+                experiment: experiment.as_ref(),
+                semantic: semantic.as_ref(),
             }
+            .run(gui, process.id(), result, composer_observations)
+            .await
         }
         Err((reason, acquisition_stage, error_category, foreground_relation, candidate_facts)) => {
             *gui_acquisition = Some(crate::diagnostics::GuiAcquisitionDiagnostic {
@@ -774,6 +764,76 @@ async fn scenario(
         diagnostic,
     )
     .await
+}
+
+// Keep conversation adapters separate from process acquisition and restoration.
+struct ConversationScenario<'a> {
+    spec: &'a ProbeSpec,
+    inventory: &'a ScriptedProvider,
+    gate: &'a ProviderGate,
+    fixture: &'a Path,
+    marker: &'a str,
+    final_marker: &'a str,
+    experiment: Option<&'a HostedExperiment>,
+    semantic: Option<&'a semantic::SemanticBackend>,
+}
+
+impl ConversationScenario<'_> {
+    async fn run(
+        &self,
+        gui: &Gui,
+        owner: Option<u32>,
+        result: &mut ProbeResult,
+        composer_observations: &mut Vec<ComposerFailure>,
+    ) -> Result<(), Reason> {
+        if let Some(experiment) = self.experiment {
+            // Partial hosted experiments cannot become compatibility evidence.
+            return experiment
+                .run(gui, owner, self.final_marker, result, self.gate)
+                .and(Err(Reason::NotRun));
+        }
+        if let Some(semantic) = self.semantic {
+            return semantic
+                .run(
+                    gui,
+                    owner,
+                    semantic::SemanticScenario {
+                        inventory: self.inventory,
+                        gate: self.gate,
+                        fixture: self.fixture,
+                        marker: self.final_marker,
+                    },
+                    result,
+                )
+                .await;
+        }
+        if let Err(failure) = gui.prepare_conversation() {
+            result.gui_stage = Some(failure.stage);
+            return Err(failure.reason);
+        }
+        if self.spec.live {
+            live(
+                gui,
+                self.spec,
+                self.gate,
+                self.fixture,
+                self.marker,
+                result,
+                composer_observations,
+            )
+        } else {
+            deterministic(
+                gui,
+                self.inventory,
+                self.gate,
+                self.fixture,
+                self.final_marker,
+                result,
+                composer_observations,
+            )
+            .await
+        }
+    }
 }
 
 async fn start_provider_gate(
@@ -1416,7 +1476,9 @@ fn prepare_zed_profile(spec: &ProbeSpec) -> Result<(), Reason> {
             )
         })
         .map_err(|_| Reason::IsolationUnavailable)?;
-    if std::env::var_os("FEASIBILITY_ZED_NATIVE_COPY_FACTS").is_some() {
+    if std::env::var_os("FEASIBILITY_ZED_NATIVE_COPY_FACTS").is_some()
+        || spec.verification == crate::cli::VerificationPolicy::SemanticOnly
+    {
         // HostedExperiment admits this opt-in only for an owned deterministic VM.
         // NewThread's workspace handler focuses the panel without toggling it.
         open_private_new(&directory.join("keymap.json"))
@@ -1858,6 +1920,7 @@ mod tests {
             live: false,
             probe_index: Some(0),
             session: crate::cli::SessionMode::default(),
+            verification: crate::cli::VerificationPolicy::default(),
             launch_wrapper: None,
         };
         assert!(read_claude_identity_observation(&spec, true).is_none());
@@ -1875,6 +1938,7 @@ mod tests {
             live: false,
             probe_index: Some(0),
             session: crate::cli::SessionMode::default(),
+            verification: crate::cli::VerificationPolicy::default(),
             launch_wrapper: None,
         };
         assert!(!identity_capture_allowed(&spec, false));
@@ -1925,6 +1989,7 @@ mod tests {
             live: false,
             probe_index: Some(0),
             session: crate::cli::SessionMode::PrivateProfile,
+            verification: crate::cli::VerificationPolicy::default(),
             launch_wrapper: None,
         };
         let path = spec.workspace.join("native-launch-diagnostic.json");
@@ -2053,6 +2118,7 @@ mod tests {
             live: false,
             probe_index: Some(0),
             session: crate::cli::SessionMode::PrivateProfile,
+            verification: crate::cli::VerificationPolicy::default(),
             launch_wrapper: None,
         };
         let path = spec.workspace.join("native-launch-diagnostic.json");
@@ -2360,6 +2426,7 @@ mod tests {
                 live: false,
                 probe_index: None,
                 session: crate::cli::SessionMode::PrivateProfile,
+                verification: crate::cli::VerificationPolicy::default(),
                 launch_wrapper: None,
             };
             let command = launch_command(&spec, &gate).unwrap();
@@ -2407,6 +2474,7 @@ mod tests {
                 live: false,
                 probe_index: None,
                 session: crate::cli::SessionMode::PrivateProfile,
+                verification: crate::cli::VerificationPolicy::default(),
                 launch_wrapper: None,
             };
             let command = launch_command(&spec, &gate).unwrap();
@@ -2500,6 +2568,7 @@ mod tests {
             live: false,
             probe_index: None,
             session: crate::cli::SessionMode::PrivateProfile,
+            verification: crate::cli::VerificationPolicy::default(),
             launch_wrapper: None,
         };
         prepare_zed_profile(&spec).unwrap();
@@ -2530,6 +2599,7 @@ mod tests {
                 live: false,
                 probe_index: None,
                 session: crate::cli::SessionMode::PrivateProfile,
+                verification: crate::cli::VerificationPolicy::default(),
                 launch_wrapper: None,
             };
             let result = execute(&spec).await.result;
@@ -2557,6 +2627,7 @@ mod tests {
             live: false,
             probe_index: None,
             session: crate::cli::SessionMode::PrivateProfile,
+            verification: crate::cli::VerificationPolicy::default(),
             launch_wrapper: None,
         };
         std::fs::write(root.join("spec.json"), serde_json::to_vec(&spec).unwrap()).unwrap();
@@ -2621,6 +2692,7 @@ mod tests {
             live: false,
             probe_index: None,
             session: crate::cli::SessionMode::PrivateProfile,
+            verification: crate::cli::VerificationPolicy::default(),
             launch_wrapper: None,
         };
         let mut value = serde_json::to_value(&spec).unwrap();
@@ -2694,6 +2766,7 @@ mod tests {
                     live: false,
                     probe_index: None,
                     session: crate::cli::SessionMode::PrivateProfile,
+                    verification: crate::cli::VerificationPolicy::default(),
                     launch_wrapper: Some(LaunchWrapper {
                         sha256: binary_digest(&wrapper).unwrap(),
                         path: wrapper,

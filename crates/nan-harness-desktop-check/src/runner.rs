@@ -548,6 +548,7 @@ async fn run_probe(
         live,
         probe_index: (!live).then_some(repetition),
         session: args.session,
+        verification: args.verification,
         launch_wrapper: probe_launch_wrapper(args, &name),
     };
     let outcome = execute_probe(&spec, &root).await;
@@ -1360,6 +1361,7 @@ mod tests {
             live: false,
             probe_index: Some(0),
             session: crate::cli::SessionMode::PrivateProfile,
+            verification: crate::cli::VerificationPolicy::default(),
             launch_wrapper: None,
         };
         let control = read_and_emit_worker_result(&spec, &output, Some(0));

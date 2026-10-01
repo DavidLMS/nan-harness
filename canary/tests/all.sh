@@ -33,6 +33,7 @@ done
 # build it explicitly instead of depending on a binary left by an earlier run.
 cargo build --locked --package nan-harness-canary --bin nan-harness-canary
 for test_script in \
+  desktop-qualification.py \
   hosted-cli-selection.py \
   hosted-cli-workflow.py \
   daily-compatibility.py \

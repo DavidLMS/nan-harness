@@ -93,6 +93,9 @@ pub struct RunArgs {
     /// Declare a fresh GitHub-hosted VM with no personal data; never use on a personal session.
     #[arg(long, value_enum, default_value_t = SessionMode::PrivateProfile)]
     pub session: SessionMode,
+    /// Require a supported native clipboard or renderer DOM verifier, without OCR fallback.
+    #[arg(long, value_enum, default_value_t = VerificationPolicy::AccessibilityOrOcr)]
+    pub verification: VerificationPolicy,
     /// Temporary Linux startup diagnostic: launch only `chatgpt-desktop`
     /// through this wrapper. Help, version and restoration still run the tested nanh.
     #[arg(
@@ -107,6 +110,24 @@ pub struct RunArgs {
     /// Existing owner-only directory for the wrapper's closed per-probe facts.
     #[arg(long, hide = true, requires = "launch_wrapper")]
     pub launch_wrapper_facts: Option<PathBuf>,
+}
+
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    clap::ValueEnum,
+    serde::Serialize,
+    serde::Deserialize,
+)]
+#[serde(rename_all = "kebab-case")]
+pub enum VerificationPolicy {
+    #[default]
+    AccessibilityOrOcr,
+    SemanticOnly,
 }
 
 #[derive(Debug, Args)]

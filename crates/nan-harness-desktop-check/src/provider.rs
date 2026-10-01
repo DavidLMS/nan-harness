@@ -12,7 +12,7 @@ use axum::{
 use serde_json::{Value, json};
 use std::sync::{
     Arc, Mutex,
-    atomic::{AtomicBool, AtomicUsize, Ordering},
+    atomic::{AtomicBool, AtomicU16, AtomicUsize, Ordering},
 };
 use std::time::Duration;
 use subtle::ConstantTimeEq as _;
@@ -22,6 +22,37 @@ use zeroize::Zeroizing;
 const MAX_GENERATIONS: usize = 4;
 const MAX_OUTPUT_TOKENS: u64 = 2048;
 const MAX_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
+
+#[derive(Default)]
+struct FixtureOracle {
+    epoch: u64,
+    marker: Option<String>,
+    verified: bool,
+}
+
+impl FixtureOracle {
+    fn arm(&mut self, marker: &str, live: bool) -> Result<(), ()> {
+        if live || marker.is_empty() || marker.len() > 2048 {
+            return Err(());
+        }
+        self.epoch = self.epoch.checked_add(1).ok_or(())?;
+        self.marker = Some(marker.into());
+        self.verified = false;
+        Ok(())
+    }
+
+    fn snapshot(&self) -> Option<(u64, String)> {
+        self.marker
+            .as_ref()
+            .map(|marker| (self.epoch, marker.clone()))
+    }
+
+    fn complete(&mut self, epoch: u64) {
+        if self.epoch == epoch {
+            self.verified = true;
+        }
+    }
+}
 
 struct GateState {
     client: reqwest::Client,
@@ -37,8 +68,8 @@ struct GateState {
     tool_marker: String,
     tool_verified: AtomicBool,
     response_verified: AtomicBool,
-    fixture_marker: Mutex<Option<String>>,
-    fixture_response_verified: AtomicBool,
+    fixture_oracle: Mutex<FixtureOracle>,
+    expected_failure_status: AtomicU16,
 }
 
 pub(crate) struct ProviderGate {
@@ -75,8 +106,8 @@ impl ProviderGate {
             tool_marker: marker.into(),
             tool_verified: AtomicBool::new(false),
             response_verified: AtomicBool::new(false),
-            fixture_marker: Mutex::new(None),
-            fixture_response_verified: AtomicBool::new(false),
+            fixture_oracle: Mutex::new(FixtureOracle::default()),
+            expected_failure_status: AtomicU16::new(400),
         });
         let router = Router::new()
             .route("/v1/models", get(models))
@@ -122,19 +153,27 @@ impl ProviderGate {
     }
 
     pub(crate) fn expect_fixture_response(&self, marker: &str) -> Result<(), ()> {
-        if self.state.live || marker.is_empty() || marker.len() > 2048 {
-            return Err(());
-        }
-        let mut expected = self
+        let mut oracle = self
             .state
-            .fixture_marker
+            .fixture_oracle
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if expected.is_some() {
+        if oracle.marker.is_some() {
             return Err(());
         }
-        *expected = Some(marker.into());
-        Ok(())
+        oracle.arm(marker, self.state.live)
+    }
+
+    pub(crate) fn arm_fixture_response(&self, marker: &str) -> Result<(), ()> {
+        self.state
+            .fixture_oracle
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .arm(marker, self.state.live)
+    }
+
+    pub(crate) fn reset_tool_verification(&self) {
+        self.state.tool_verified.store(false, Ordering::SeqCst);
     }
 
     pub(crate) fn generation_count(&self) -> usize {
@@ -142,10 +181,24 @@ impl ProviderGate {
     }
 
     pub(crate) fn fixture_response_verified(&self) -> bool {
-        self.state.fixture_response_verified.load(Ordering::SeqCst)
+        self.state
+            .fixture_oracle
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .verified
     }
 
     pub(crate) fn fail_next_scenario(&self, enabled: bool) {
+        self.state
+            .expected_failure_status
+            .store(400, Ordering::SeqCst);
+        self.state.expected_failure.store(enabled, Ordering::SeqCst);
+    }
+
+    pub(crate) fn fail_recoverable_scenario(&self, enabled: bool) {
+        self.state
+            .expected_failure_status
+            .store(503, Ordering::SeqCst);
         self.state.expected_failure.store(enabled, Ordering::SeqCst);
     }
 
@@ -207,7 +260,11 @@ async fn models(State(state): State<Arc<GateState>>) -> Response {
 async fn chat(State(state): State<Arc<GateState>>, Json(mut body): Json<Value>) -> Response {
     if state.expected_failure.load(Ordering::SeqCst) {
         state.failure_observed.store(true, Ordering::SeqCst);
-        return closed_error(StatusCode::BAD_REQUEST, "NAN_CHECK_EXPECTED_FAILURE");
+        return closed_error(
+            StatusCode::from_u16(state.expected_failure_status.load(Ordering::SeqCst))
+                .unwrap_or(StatusCode::BAD_REQUEST),
+            "NAN_CHECK_EXPECTED_FAILURE",
+        );
     }
     let count = state.generations.fetch_add(1, Ordering::SeqCst);
     if state.live && count >= MAX_GENERATIONS {
@@ -265,6 +322,11 @@ fn tool_contains_marker(body: &Value, marker: &str) -> bool {
 
 async fn forward(state: &GateState, body: Option<Value>) -> Response {
     let generation = body.is_some();
+    let fixture = state
+        .fixture_oracle
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .snapshot();
     let upstream = state
         .upstream
         .lock()
@@ -320,22 +382,21 @@ async fn forward(state: &GateState, body: Option<Value>) -> Response {
     {
         state.response_verified.store(true, Ordering::SeqCst);
     }
-    if generation && !state.live && status.is_success() {
-        let expected = state
-            .fixture_marker
+    if generation
+        && !state.live
+        && status.is_success()
+        && let Some((epoch, marker)) = fixture
+        && completed_response(
+            &bytes,
+            content_type.as_ref().and_then(|value| value.to_str().ok()),
+            &marker,
+        )
+    {
+        state
+            .fixture_oracle
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if expected.as_ref().is_some_and(|marker| {
-            completed_response(
-                &bytes,
-                content_type.as_ref().and_then(|value| value.to_str().ok()),
-                marker,
-            )
-        }) {
-            state
-                .fixture_response_verified
-                .store(true, Ordering::SeqCst);
-        }
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .complete(epoch);
     }
     builder
         .body(Body::from(bytes))
@@ -631,6 +692,115 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn rearmed_same_marker_rejects_in_flight_old_completion() {
+        let entered = Arc::new(tokio::sync::Notify::new());
+        let release = Arc::new(tokio::sync::Notify::new());
+        let router = Router::new().fallback({
+            let entered = entered.clone();
+            let release = release.clone();
+            move || {
+                let entered = entered.clone();
+                let release = release.clone();
+                async move {
+                    entered.notify_one();
+                    release.notified().await;
+                    (
+                        StatusCode::OK,
+                        [(axum::http::header::CONTENT_TYPE, "application/json")],
+                        final_json(),
+                    )
+                }
+            }
+        });
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let url = format!("http://{}/v1", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            axum::serve(listener, router).await.unwrap();
+        });
+        let gate = ProviderGate::start(&url, Zeroizing::new("private-key".into()), false, "marker")
+            .await
+            .unwrap();
+        gate.arm_fixture_response("NAN_CHECK_FINAL:marker").unwrap();
+        let request = || {
+            reqwest::Client::new()
+                .post(format!("{}/chat/completions", gate.base_url))
+                .bearer_auth(gate.session_token())
+                .json(&json!({"messages":[]}))
+        };
+        let pending = tokio::spawn(request().send());
+        tokio::time::timeout(Duration::from_secs(3), entered.notified())
+            .await
+            .unwrap();
+        gate.arm_fixture_response("NAN_CHECK_FINAL:marker").unwrap();
+        release.notify_one();
+        assert_eq!(pending.await.unwrap().unwrap().status(), StatusCode::OK);
+        assert!(!gate.fixture_response_verified());
+        release.notify_one();
+        assert_eq!(request().send().await.unwrap().status(), StatusCode::OK);
+        assert!(gate.fixture_response_verified());
+        gate.arm_fixture_response("NAN_CHECK_FINAL:new-marker")
+            .unwrap();
+        assert!(!gate.fixture_response_verified());
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn recoverable_failure_is_observed_before_forwarded_recovery() {
+        let (url, server) = upstream(StatusCode::OK, "application/json", final_json()).await;
+        let gate = ProviderGate::start(&url, Zeroizing::new("private-key".into()), false, "marker")
+            .await
+            .unwrap();
+        gate.arm_fixture_response("NAN_CHECK_FINAL:marker").unwrap();
+        let request = || {
+            reqwest::Client::new()
+                .post(format!("{}/chat/completions", gate.base_url))
+                .bearer_auth(gate.session_token())
+                .json(&json!({"messages":[]}))
+        };
+        gate.fail_recoverable_scenario(true);
+        let failure = request().send().await.unwrap();
+        assert_eq!(failure.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            failure.json::<Value>().await.unwrap()["error"]["message"],
+            "NAN_CHECK_EXPECTED_FAILURE"
+        );
+        assert!(gate.failure_observed());
+        assert_eq!(gate.generation_count(), 0);
+        assert!(!gate.fixture_response_verified());
+        gate.fail_recoverable_scenario(false);
+        assert_eq!(request().send().await.unwrap().status(), StatusCode::OK);
+        assert_eq!(gate.generation_count(), 1);
+        assert!(gate.fixture_response_verified());
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn tool_reset_requires_new_tool_role_evidence() {
+        let gate = ProviderGate::start(
+            "http://127.0.0.1:1/v1",
+            Zeroizing::new("key".into()),
+            false,
+            "tool-marker",
+        )
+        .await
+        .unwrap();
+        for (role, verified) in [("tool", true), ("user", false), ("tool", true)] {
+            if role == "user" {
+                gate.reset_tool_verification();
+                assert!(!gate.tool_verified());
+            }
+            let _ = reqwest::Client::new()
+                .post(format!("{}/chat/completions", gate.base_url))
+                .bearer_auth(gate.session_token())
+                .json(&json!({"messages":[{"role":role,"content":"tool-marker"}]}))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(gate.tool_verified(), verified);
+        }
+    }
+
+    #[tokio::test]
     async fn fixture_oracle_requires_authenticated_completed_generation() {
         let unfinished = "data: {\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"NAN_CHECK_FINAL:marker\"},\"finish_reason\":\"stop\"}]}\n\n";
         for (status, mime, body, valid) in [
@@ -719,7 +889,10 @@ mod tests {
             .unwrap();
             assert!(gate.expect_fixture_response("").is_err());
             assert!(gate.expect_fixture_response(&"x".repeat(2049)).is_err());
+            assert!(gate.arm_fixture_response("").is_err());
+            assert!(gate.arm_fixture_response(&"x".repeat(2049)).is_err());
             assert_eq!(gate.expect_fixture_response("fixture").is_ok(), !live);
+            assert_eq!(gate.arm_fixture_response("rearmed").is_ok(), !live);
             assert!(!gate.fixture_response_verified());
         }
     }

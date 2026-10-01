@@ -20,6 +20,36 @@ struct Request<'a> {
     timeout_ms: u32,
 }
 
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum DomAction {
+    Submit,
+    Retry,
+}
+
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum DomPurpose {
+    Response,
+    Failure,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct DomTurn<'a> {
+    pub(crate) prompt: &'a str,
+    pub(crate) marker: &'a str,
+    pub(crate) action: DomAction,
+    pub(crate) purpose: DomPurpose,
+}
+
+#[derive(Serialize)]
+struct QualificationRequest<'a> {
+    #[serde(flatten)]
+    request: Request<'a>,
+    action: DomAction,
+    purpose: DomPurpose,
+}
+
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 enum DriverError {
@@ -125,6 +155,15 @@ struct ResponseFacts {
     provider_generation_count: Option<usize>,
 }
 
+#[derive(Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct QualificationFacts {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    error_observed: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    retry_control: Option<bool>,
+}
+
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Facts {
@@ -142,12 +181,14 @@ struct Facts {
     network: NetworkFacts,
     #[serde(flatten)]
     response: ResponseFacts,
+    #[serde(flatten)]
+    qualification: QualificationFacts,
     error_category: Option<DriverError>,
     playwright_version: Option<String>,
     observed_runtime_version: Option<String>,
 }
 
-fn read_facts(path: &Path) -> Result<Facts, Reason> {
+fn read_facts(path: &Path, qualification: bool) -> Result<Facts, Reason> {
     const KEYS: &[&str] = &[
         "schemaVersion",
         "mechanism",
@@ -175,6 +216,8 @@ fn read_facts(path: &Path) -> Result<Facts, Reason> {
         "requestFailureCategory",
         "apiErrorStatus",
         "apiErrorResponseCount",
+        "errorObserved",
+        "retryControl",
     ];
     let mut bytes = Vec::new();
     open_private_read(path)
@@ -186,8 +229,8 @@ fn read_facts(path: &Path) -> Result<Facts, Reason> {
     let value: serde_json::Value =
         serde_json::from_slice(&bytes).map_err(|_| Reason::IsolationUnavailable)?;
     let object = value.as_object().ok_or(Reason::IsolationUnavailable)?;
-    if !(24..=26).contains(&object.len()) || object.keys().any(|key| !KEYS.contains(&key.as_str()))
-    {
+    let count = if qualification { 26..=28 } else { 24..=26 };
+    if !count.contains(&object.len()) || object.keys().any(|key| !KEYS.contains(&key.as_str())) {
         return Err(Reason::IsolationUnavailable);
     }
     let facts: Facts = serde_json::from_value(value).map_err(|_| Reason::IsolationUnavailable)?;
@@ -201,7 +244,20 @@ fn read_facts(path: &Path) -> Result<Facts, Reason> {
         })
     };
     if facts.schema_version != 1
-        || facts.mechanism != "hermes-playwright-dom"
+        || facts.mechanism
+            != if qualification {
+                "hermes-renderer-qualification"
+            } else {
+                "hermes-playwright-dom"
+            }
+        || !matches!(
+            (
+                qualification,
+                facts.qualification.error_observed,
+                facts.qualification.retry_control
+            ),
+            (false, None, None) | (true, Some(_), Some(_))
+        )
         || !version(&facts.playwright_version)
         || !version(&facts.observed_runtime_version)
         || facts.turns.assistant_turn_count > 4096
@@ -217,8 +273,8 @@ fn read_facts(path: &Path) -> Result<Facts, Reason> {
                 && facts.endpoint.attached
                 && facts.input.unique_composer
                 && facts.input.input_readback
-                && facts.submission.unique_send_control
-                && facts.submission.can_send
+                && ((facts.submission.unique_send_control && facts.submission.can_send)
+                    || qualification && facts.qualification.retry_control == Some(true))
                 && facts.submission.send_blocker.is_none())
         || facts.response.response_verified
             && !(facts.endpoint.endpoint_owned
@@ -236,6 +292,76 @@ fn read_facts(path: &Path) -> Result<Facts, Reason> {
 }
 
 impl Gui {
+    pub(crate) fn qualify_dom_turn(
+        &self,
+        directory: &Path,
+        owner: u32,
+        turn: DomTurn<'_>,
+        provider: &ProviderGate,
+    ) -> Result<(), Reason> {
+        self.visual.guard()?;
+        let driver = std::env::var_os("FEASIBILITY_HERMES_DOM_DRIVER")
+            .map(std::path::PathBuf::from)
+            .ok_or(Reason::IsolationUnavailable)?;
+        if !driver.is_absolute()
+            || !std::fs::symlink_metadata(&driver)
+                .is_ok_and(|metadata| metadata.file_type().is_file())
+        {
+            return Err(Reason::IsolationUnavailable);
+        }
+        let mut nonce = [0u8; 8];
+        getrandom::fill(&mut nonce).map_err(|_| Reason::IsolationUnavailable)?;
+        let stem = format!("qualification-{owner}-{}", u64::from_le_bytes(nonce));
+        let request_path = directory.join(format!("{stem}.private"));
+        let output_path = directory.join(format!("{stem}.json"));
+        let request = QualificationRequest {
+            request: Request {
+                connection_path: directory.join(format!("connection-{owner}.json")),
+                owner_pid: owner,
+                prompt: turn.prompt,
+                expected_marker: turn.marker,
+                timeout_ms: 30_000,
+            },
+            action: turn.action,
+            purpose: turn.purpose,
+        };
+        let bytes = serde_json::to_vec(&request).map_err(|_| Reason::IsolationUnavailable)?;
+        open_private_new(&request_path)
+            .and_then(|mut file| file.write_all(&bytes))
+            .map_err(|_| Reason::IsolationUnavailable)?;
+        let outcome = self.run_dom_driver(&driver, &request_path, &output_path, true);
+        std::fs::remove_file(&request_path).map_err(|_| Reason::IsolationUnavailable)?;
+        outcome?;
+        let mut facts = read_facts(&output_path, true)?;
+        facts.response.provider_response_verified = provider.fixture_response_verified();
+        facts.response.provider_generation_count =
+            Some(provider.generation_count()).filter(|count| *count <= 4096);
+        let bytes = serde_json::to_vec(&facts).map_err(|_| Reason::IsolationUnavailable)?;
+        let final_path = output_path.with_extension("closed");
+        open_private_new(&final_path)
+            .and_then(|mut file| file.write_all(&bytes))
+            .and_then(|()| std::fs::rename(final_path, &output_path))
+            .map_err(|_| Reason::IsolationUnavailable)?;
+        if !facts.input.input_submitted || facts.error_category.is_some() {
+            return Err(Reason::ResponseMismatch);
+        }
+        match turn.purpose {
+            DomPurpose::Failure
+                if facts.qualification.error_observed == Some(true)
+                    && facts.qualification.retry_control == Some(true)
+                    && provider.failure_observed() =>
+            {
+                Ok(())
+            }
+            DomPurpose::Response
+                if facts.response.response_verified && provider.fixture_response_verified() =>
+            {
+                Ok(())
+            }
+            _ => Err(Reason::ResponseMismatch),
+        }
+    }
+
     pub(crate) fn probe_dom(
         &self,
         directory: &Path,
@@ -272,10 +398,10 @@ impl Gui {
         open_private_new(&request_path)
             .and_then(|mut file| file.write_all(&bytes))
             .map_err(|_| Reason::IsolationUnavailable)?;
-        let outcome = self.run_dom_driver(&driver, &request_path, &output_path);
+        let outcome = self.run_dom_driver(&driver, &request_path, &output_path, false);
         std::fs::remove_file(&request_path).map_err(|_| Reason::IsolationUnavailable)?;
         outcome?;
-        let mut facts = read_facts(&output_path)?;
+        let mut facts = read_facts(&output_path, false)?;
         facts.response.provider_response_verified = provider.fixture_response_verified();
         facts.response.provider_generation_count =
             Some(provider.generation_count()).filter(|count| *count <= 4096);
@@ -298,10 +424,20 @@ impl Gui {
         Ok(())
     }
 
-    fn run_dom_driver(&self, driver: &Path, request: &Path, output: &Path) -> Result<(), Reason> {
+    fn run_dom_driver(
+        &self,
+        driver: &Path,
+        request: &Path,
+        output: &Path,
+        qualification: bool,
+    ) -> Result<(), Reason> {
         let mut child = Command::new("node")
             .arg(driver)
-            .arg("--drive")
+            .arg(if qualification {
+                "--qualify"
+            } else {
+                "--drive"
+            })
             .arg(request)
             .arg(output)
             .stdin(Stdio::null())
@@ -329,5 +465,46 @@ impl Gui {
             child.wait().map_err(|_| Reason::IsolationUnavailable)?;
         }
         outcome
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn base_facts() -> serde_json::Value {
+        json!({"schemaVersion":1,"mechanism":"hermes-playwright-dom","endpointOwned":true,"targetVerified":true,"attached":true,"uniqueComposer":true,"inputReadback":true,"inputSubmitted":false,"responseVerified":false,"syntheticTextPresent":false,"errorCategory":null,"playwrightVersion":"1.61.0","observedRuntimeVersion":"22.0.0","inputCleared":false,"userTurnObserved":false,"assistantTurnCount":0,"uniqueSendControl":false,"canSend":false,"sendBlocker":null,"sendMechanism":"semantic-keyboard","requestFailedCount":0,"requestFailureCategory":null,"apiErrorStatus":null,"apiErrorResponseCount":0})
+    }
+
+    fn read(value: &serde_json::Value, qualification: bool) -> Result<Facts, Reason> {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("facts.json");
+        open_private_new(&path)
+            .unwrap()
+            .write_all(&serde_json::to_vec(value).unwrap())
+            .unwrap();
+        read_facts(&path, qualification)
+    }
+
+    #[test]
+    fn optional_qualification_facts_are_an_atomic_pair() {
+        let basic = base_facts();
+        assert!(read(&basic, false).is_ok());
+        for key in ["errorObserved", "retryControl"] {
+            let mut partial = basic.clone();
+            partial[key] = json!(false);
+            assert!(read(&partial, false).is_err());
+            partial["mechanism"] = json!("hermes-renderer-qualification");
+            assert!(read(&partial, true).is_err());
+        }
+        let mut qualifier = basic;
+        qualifier["mechanism"] = json!("hermes-renderer-qualification");
+        qualifier["errorObserved"] = json!(false);
+        qualifier["retryControl"] = json!(false);
+        assert!(read(&qualifier, true).is_ok());
+        assert!(read(&qualifier, false).is_err());
+        qualifier["retryControl"] = serde_json::Value::Null;
+        assert!(read(&qualifier, true).is_err());
     }
 }

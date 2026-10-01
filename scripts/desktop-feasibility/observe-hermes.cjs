@@ -1,7 +1,8 @@
 // Owned renderer observation and opt-in input. Publish only closed facts.
 const fs = require('node:fs');
 const { chromium } = require('../../.github/web-check/node_modules/playwright');
-const drive = process.argv[2] === '--drive';
+const qualify = process.argv[2] === '--qualify';
+const drive = process.argv[2] === '--drive' || qualify;
 const request = drive ? JSON.parse(fs.readFileSync(process.argv[3], 'utf8')) : null;
 const connection = drive ? JSON.parse(fs.readFileSync(request.connectionPath, 'utf8')) : null;
 const [port, owner, output] = drive
@@ -49,16 +50,22 @@ async function driveDom() {
     requestFailureCategory: null, apiErrorStatus: null, apiErrorResponseCount: 0, errorCategory: 'unclassified',
     playwrightVersion: require('../../.github/web-check/node_modules/playwright/package.json').version,
     observedRuntimeVersion: null });
+  if (qualify) Object.assign(facts, { mechanism: 'hermes-renderer-qualification', errorObserved: false, retryControl: false });
   saveFacts();
   const exactKeys = (value, keys) => value && typeof value === 'object' && !Array.isArray(value) &&
     Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
-  if (!exactKeys(request, ['connectionPath', 'ownerPid', 'prompt', 'expectedMarker', 'timeoutMs']) ||
+  const requestKeys = ['connectionPath', 'ownerPid', 'prompt', 'expectedMarker', 'timeoutMs'];
+  if (qualify) requestKeys.push('action', 'purpose');
+  const qualificationRequest = !qualify || (['submit', 'retry'].includes(request.action) &&
+    ['response', 'failure'].includes(request.purpose) &&
+    (request.purpose !== 'failure' || (request.action === 'submit' && request.expectedMarker === 'NAN_CHECK_EXPECTED_FAILURE')));
+  if (!exactKeys(request, requestKeys) || !qualificationRequest ||
       !exactKeys(connection, ['schemaVersion', 'port', 'launcherPid']) || connection.schemaVersion !== 1 ||
       typeof request.connectionPath !== 'string' || request.connectionPath.length > 4096 || !Number.isInteger(connection.port) || connection.port < 1 || connection.port > 65535 ||
       !Number.isInteger(connection.launcherPid) || connection.launcherPid <= 1 ||
       !Number.isInteger(request.ownerPid) || request.ownerPid <= 1 ||
-      request.prompt !== 'Check this connection' ||
-      typeof request.expectedMarker !== 'string' || request.expectedMarker.length < 32 ||
+      !(qualify ? ['Check this connection', 'Read read-target.txt using your file tool.', 'Check the expected provider failure'].includes(request.prompt) : request.prompt === 'Check this connection') ||
+      typeof request.expectedMarker !== 'string' || request.expectedMarker.length < (qualify && request.purpose === 'failure' ? 1 : 32) ||
       request.expectedMarker.length > 2048 || !Number.isInteger(request.timeoutMs) ||
       request.timeoutMs < 1 || request.timeoutMs > 30000) {
     facts.errorCategory = 'invalid-request'; saveFacts(); return;
@@ -119,19 +126,42 @@ async function driveDom() {
     facts.errorCategory = 'target-invalid'; saveFacts(); return;
   }
   facts.targetVerified = true;
-  // Select only a single visible editable composer, never set application stores.
-  while (Date.now() < deadline && !(await page.evaluate(() => { const fields = [...document.querySelectorAll('[data-slot="composer-root"] [role="textbox"][contenteditable="true"]:not([aria-disabled="true"])')]; return fields.filter(e => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 && !e.disabled && !e.readOnly; }).length === 1; })))
-    await delay(100);
-  const candidates = page.locator('[data-slot="composer-root"] [role="textbox"][contenteditable="true"]:visible:not([aria-disabled="true"])');
-  if (await candidates.count() !== 1 || !await candidates.isEditable()) {
-    facts.errorCategory = 'composer-ambiguous'; saveFacts(); return;
+  const errorCards = page.locator('[data-role="assistant"][data-slot="aui_assistant-message-root"] [role="alert"]:visible');
+  const retryButton = errorCards.getByRole('button', { name: 'Retry', exact: true });
+  async function errorProof() {
+    facts.errorObserved = await errorCards.count() === 1;
+    facts.retryControl = facts.errorObserved && await retryButton.count() === 1 && await retryButton.isEnabled();
+    return facts.errorObserved && facts.retryControl;
   }
-  facts.uniqueComposer = true;
   // Frozen Hermes assistant-message.tsx MessagePrimitive.Root exposes data-role=assistant.
   const assistant = page.locator('[data-role="assistant"]:visible');
   if (await assistant.filter({ hasText: request.expectedMarker }).count() !== 0) {
     facts.errorCategory = 'stale-response'; saveFacts(); return;
   }
+  if (qualify && request.purpose === 'failure' && await errorCards.count() !== 0) {
+    facts.errorCategory = 'stale-response'; saveFacts(); return;
+  }
+  let candidates;
+  let send;
+  let retryUser;
+  if (qualify && request.action === 'retry') {
+    retryUser = page.locator('[data-role="user"]:visible').filter({ hasText: request.prompt });
+    if (await retryUser.count() !== 1 || !await retryUser.evaluate((e, prompt) => e.innerText.trim() === prompt, request.prompt)) {
+      facts.errorCategory = 'input-mismatch'; saveFacts(); return;
+    }
+    if (!await errorProof()) { facts.errorCategory = 'send-unavailable'; saveFacts(); return; }
+    facts.userTurnObserved = true;
+    facts.inputReadback = true;
+    send = retryButton;
+  } else {
+  // Select only a single visible editable composer, never set application stores.
+  while (Date.now() < deadline && !(await page.evaluate(() => { const fields = [...document.querySelectorAll('[data-slot="composer-root"] [role="textbox"][contenteditable="true"]:not([aria-disabled="true"])')]; return fields.filter(e => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 && !e.disabled && !e.readOnly; }).length === 1; })))
+    await delay(100);
+  candidates = page.locator('[data-slot="composer-root"] [role="textbox"][contenteditable="true"]:visible:not([aria-disabled="true"])');
+  if (await candidates.count() !== 1 || !await candidates.isEditable()) {
+    facts.errorCategory = 'composer-ambiguous'; saveFacts(); return;
+  }
+  facts.uniqueComposer = true;
   await candidates.fill(request.prompt, { timeout: Math.max(1, deadline - Date.now()) });
   facts.inputReadback = await candidates.evaluate((e, prompt) =>
     (e.value ?? e.textContent) === prompt, request.prompt);
@@ -139,7 +169,7 @@ async function driveDom() {
     facts.errorCategory = 'input-mismatch'; saveFacts(); return;
   }
   // Frozen controls.tsx uses c.send; frozen English catalog names it Send.
-  const send = page.locator('[data-slot="composer-root"] button[type="submit"][aria-label="Send"]:visible');
+  send = page.locator('[data-slot="composer-root"] button[type="submit"][aria-label="Send"]:visible');
   while (Date.now() < deadline) {
     facts.uniqueSendControl = await send.count() === 1;
     facts.canSend = facts.uniqueSendControl && await send.isEnabled();
@@ -152,6 +182,7 @@ async function driveDom() {
   facts.inputReadback = await candidates.evaluate((e, prompt) =>
     (e.value ?? e.textContent) === prompt, request.prompt);
   if (!facts.inputReadback) { facts.errorCategory = 'input-mismatch'; saveFacts(); return; }
+  }
   const readiness = () => send.evaluate(button => {
     const visible = e => { const r = e.getBoundingClientRect();
       const style = getComputedStyle(e); return r.width > 0 && r.height > 0 &&
@@ -176,9 +207,16 @@ async function driveDom() {
   if (facts.sendBlocker !== null || !ownedEndpoint()) {
     facts.errorCategory = 'submit-action-intercepted'; saveFacts(); return;
   }
-  facts.inputReadback = await candidates.evaluate((e, prompt) =>
-    (e.value ?? e.textContent) === prompt, request.prompt);
-  if (!facts.inputReadback) { facts.errorCategory = 'input-mismatch'; saveFacts(); return; }
+  if (!(qualify && request.action === 'retry')) {
+    facts.inputReadback = await candidates.evaluate((e, prompt) =>
+      (e.value ?? e.textContent) === prompt, request.prompt);
+    if (!facts.inputReadback) { facts.errorCategory = 'input-mismatch'; saveFacts(); return; }
+  } else {
+    if (await retryUser.count() !== 1 || !await retryUser.evaluate((e, prompt) => e.innerText.trim() === prompt, request.prompt)) {
+      facts.errorCategory = 'input-mismatch'; saveFacts(); return;
+    }
+    if (!await errorProof()) { facts.errorCategory = 'send-unavailable'; saveFacts(); return; }
+  }
   try {
     await send.press('Enter', { timeout: Math.max(1, deadline - Date.now()) });
   } catch (error) {
@@ -193,6 +231,10 @@ async function driveDom() {
   while (Date.now() < deadline) {
     if (!ownedEndpoint()) break;
     try {
+      if (qualify && request.purpose === 'failure') {
+        if (await errorProof()) { facts.errorCategory = null; saveFacts(); return; }
+        saveFacts(); await delay(100); continue;
+      }
       // A submission may disable or replace the editor. Read a single snapshot
       // instead of waiting on a now-missing editable locator after submission.
       const observation = await page.evaluate(({ prompt, marker }) => {
@@ -228,7 +270,7 @@ async function driveDom() {
   facts.errorCategory = 'response-timeout'; saveFacts();
 }
 (async () => {
-  if (drive) { await driveDom(); process.exit(facts.responseVerified ? 0 : 1); }
+  if (drive) { await driveDom(); process.exit((qualify && request.purpose === 'failure' ? facts.errorObserved && facts.retryControl : facts.responseVerified) ? 0 : 1); }
   const deadline = Date.now() + 120000;
   let browser;
   while (Date.now() < deadline) {

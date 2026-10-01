@@ -124,6 +124,8 @@ pub enum InputMode {
     Accessibility,
     AccessibilityAndKeyboard,
     VisualAndKeyboard,
+    NativeClipboardAndKeyboard,
+    RendererDomAndKeyboard,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -131,6 +133,8 @@ pub enum InputMode {
 pub enum ResponseVerification {
     Accessibility,
     LocalOcr,
+    NativeThreadExport,
+    RendererDom,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -154,6 +158,13 @@ impl ProbeResult {
         self.input_mode = Some(match (self.input_mode, mode) {
             (Some(InputMode::VisualAndKeyboard), _) | (_, InputMode::VisualAndKeyboard) => {
                 InputMode::VisualAndKeyboard
+            }
+            (
+                Some(InputMode::NativeClipboardAndKeyboard) | None,
+                InputMode::NativeClipboardAndKeyboard,
+            ) => InputMode::NativeClipboardAndKeyboard,
+            (Some(InputMode::RendererDomAndKeyboard) | None, InputMode::RendererDomAndKeyboard) => {
+                InputMode::RendererDomAndKeyboard
             }
             (Some(InputMode::AccessibilityAndKeyboard), _)
             | (_, InputMode::AccessibilityAndKeyboard) => InputMode::AccessibilityAndKeyboard,
@@ -189,6 +200,20 @@ impl ProbeResult {
     }
 
     fn validate(&self, live: bool, schema_version: u8) -> Result<(), ReportError> {
+        let native_export =
+            self.response_verification == Some(ResponseVerification::NativeThreadExport);
+        let renderer = self.response_verification == Some(ResponseVerification::RendererDom);
+        let clipboard = self.input_mode == Some(InputMode::NativeClipboardAndKeyboard);
+        let dom = self.input_mode == Some(InputMode::RendererDomAndKeyboard);
+        if (native_export || renderer || clipboard || dom)
+            && (schema_version < 3
+                || native_export && !clipboard
+                || renderer && !dom
+                || self.response_verification.is_some()
+                    && (clipboard && !native_export || dom && !renderer))
+        {
+            return Err(ReportError::InvalidProbe);
+        }
         if schema_version == 1
             && (self.input_mode == Some(InputMode::VisualAndKeyboard)
                 || self.response_verification.is_some())
@@ -212,7 +237,7 @@ impl ProbeResult {
         ];
         if self.reason.is_some()
             || self.input_mode.is_none()
-            || (schema_version == 2 && self.response_verification.is_none())
+            || (schema_version >= 2 && self.response_verification.is_none())
             || required.iter().any(|step| !steps.contains(step))
             || (!live && !steps.contains(&CheckStep::ErrorRecovered))
         {
@@ -431,6 +456,45 @@ mod tests {
         assert_eq!(Report::parse(&bytes).unwrap().0, value);
         value.results[0].live.response_verification = None;
         assert!(matches!(value.validate(), Err(ReportError::InvalidProbe)));
+    }
+
+    #[test]
+    fn semantic_probes_require_v3_matching_methods_and_complete_recovery() {
+        for (input, response) in [
+            (
+                InputMode::NativeClipboardAndKeyboard,
+                ResponseVerification::NativeThreadExport,
+            ),
+            (
+                InputMode::RendererDomAndKeyboard,
+                ResponseVerification::RendererDom,
+            ),
+        ] {
+            let mut probe = ProbeResult::blocked(Reason::ResponseMismatch);
+            probe.input_mode = Some(input);
+            assert!(probe.validate(false, 3).is_ok());
+            assert!(probe.validate(false, 2).is_err());
+            probe.response_verification = Some(response);
+            probe.status = Status::Passed;
+            probe.reason = None;
+            probe.steps = vec![
+                CheckStep::Launched,
+                CheckStep::InputSubmitted,
+                CheckStep::ResponseVerified,
+                CheckStep::ToolVerified,
+                CheckStep::ErrorRecovered,
+            ];
+            assert!(probe.validate(false, 3).is_ok());
+            assert!(probe.validate(false, 1).is_err());
+            assert!(probe.validate(false, 2).is_err());
+            probe.steps.pop();
+            assert!(probe.validate(false, 3).is_err());
+            probe.steps.push(CheckStep::ErrorRecovered);
+            probe.response_verification = Some(ResponseVerification::LocalOcr);
+            assert!(probe.validate(false, 3).is_err());
+            probe.response_verification = None;
+            assert!(probe.validate(false, 3).is_err());
+        }
     }
 
     #[test]

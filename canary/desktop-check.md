@@ -98,6 +98,28 @@ non-passing outcomes. macOS apps launched through Launch Services may detach
 from the owned process group; the checker refuses to send input without process
 ownership evidence.
 
+## Semantic deterministic qualification
+
+The manual `desktop-check-qualification.yml` workflow evaluates the initial
+Linux x64, macOS ARM64 and Windows x64 matrix. A pending backend remains an
+explicit unqualified cell and prevents aggregate acceptance. Current semantic
+adapters cover Zed on macOS ARM64 and Hermes on Linux x64; additional application
+and platform adapters require their own native evidence.
+
+`--verification semantic-only` requires a disposable GitHub-hosted deterministic
+session and a supported adapter. It never falls back to OCR. Zed uses native
+clipboard input readback and its native thread export; Hermes uses an owned
+renderer DOM connection and normal keyboard activation. A passing probe must
+verify the assistant response, a real file-tool round trip, an observed provider
+failure, and recovery through exactly one UI Retry in the failed turn. Each
+response also needs independent completed-provider evidence. Three passing
+probes and successful app/global cleanup are required per accepted cell.
+
+Qualification artifacts contain closed results and exact binary, application,
+manifest and report hashes. Private prompts, clipboard exports, raw native logs
+and connection details are excluded. These branch-only deterministic results do
+not publish release recommendations or certify live provider behavior.
+
 ## Run and inspect
 
 After the independent checker release has been published:

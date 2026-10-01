@@ -6,6 +6,9 @@ mod dom_probe;
 mod native_copy_probe;
 mod visual;
 
+pub(crate) use dom_probe::{DomAction, DomPurpose, DomTurn};
+pub(crate) use native_copy_probe::NativeClipboardSession;
+
 use crate::process::Observation;
 use crate::report::{GuiStage, InputMode, Reason, ResponseVerification};
 use nan_harness_core::DesktopHarnessKind;

@@ -290,7 +290,188 @@ fn control_count(control: &xa11y::Locator) -> Result<usize, Reason> {
     Ok(count)
 }
 
+fn native_copy_facts() -> Facts {
+    Facts {
+        schema_version: 1,
+        mechanism: "zed-native-copy",
+        navigation: "private-keymap-new-thread",
+        keyboard_transport: if std::env::var_os("FEASIBILITY_ZED_INPUT_DRIVER").is_some() {
+            if matches!(
+                std::env::var("FEASIBILITY_ZED_INPUT_DRIVER_MODE").as_deref(),
+                Ok("all" | "paste")
+            ) {
+                if std::env::var("FEASIBILITY_ZED_INPUT_DRIVER_MODE").as_deref() == Ok("paste") {
+                    "neutral-quartz-paste"
+                } else {
+                    "neutral-quartz-all"
+                }
+            } else {
+                "neutral-quartz"
+            }
+        } else {
+            "xa11y"
+        },
+        experiment_only: true,
+        ocr_used: false,
+        ax_text_used: false,
+        response_method: if std::env::var("FEASIBILITY_ZED_RESPONSE_METHOD").as_deref()
+            == Ok("thread-export")
+        {
+            "thread-export"
+        } else {
+            "native-copy"
+        },
+        last_export_error: None,
+        last_export_transport_error: None,
+        export_version: None,
+        export_user_count: None,
+        export_assistant_text_count: None,
+        expected_prompt: Zeroizing::new(String::new()),
+        clipboard_readback: None,
+        clipboard_character_count: None,
+        stage: "trust",
+        substage: "trust-query",
+        guard_kind: None,
+        guard_category: None,
+        settle_observations: 0,
+        blocker: None,
+        trust_control_count: None,
+        panel_control_count: None,
+        response_control_count: None,
+        clipboard_cleanup: "not-run",
+        input: InputFacts::default(),
+        response: ResponseFacts::default(),
+    }
+}
+
+fn finish_native_copy(
+    directory: &Path,
+    mut facts: Facts,
+    provider: Option<&ProviderGate>,
+    outcome: Result<(), Reason>,
+) -> Result<(), Reason> {
+    facts.blocker = outcome.err();
+    facts.response.provider_verified =
+        provider.is_some_and(ProviderGate::fixture_response_verified);
+    facts.response.provider_generation_count = provider
+        .map(ProviderGate::generation_count)
+        .filter(|count| *count <= 4096);
+    let cleanup = clipboard::write("").and_then(|()| {
+        if clipboard::read()?.is_empty() {
+            Ok(())
+        } else {
+            Err(Reason::IsolationUnavailable)
+        }
+    });
+    facts.clipboard_cleanup = if cleanup.is_ok() { "passed" } else { "failed" };
+    let bytes = serde_json::to_vec(&facts).map_err(|_| Reason::IsolationUnavailable)?;
+    let name = format!("{}-{}.json", std::process::id(), nonce()?);
+    open_private_new(&directory.join(name))
+        .and_then(|mut file| file.write_all(&bytes).and_then(|()| file.sync_all()))
+        .map_err(|_| Reason::IsolationUnavailable)?;
+    cleanup.and(outcome)
+}
+
+pub(crate) struct NativeClipboardSession<'a> {
+    gui: &'a Gui,
+    directory: &'a Path,
+    facts: Facts,
+    retry_ready: bool,
+}
+
+impl NativeClipboardSession<'_> {
+    pub(crate) fn new_turn(&mut self, prompt: &str) -> Result<(), Reason> {
+        if prompt.is_empty() || prompt.len() > 1024 {
+            return Err(Reason::InputMismatch);
+        }
+        self.retry_ready = false;
+        self.facts.input = InputFacts::default();
+        self.facts.response = ResponseFacts::default();
+        self.facts.settle_observations = 0;
+        self.gui.new_native_copy_turn(&mut self.facts, prompt)
+    }
+
+    pub(crate) fn wait_response(&mut self, marker: &str, timeout: Duration) -> Result<(), Reason> {
+        if !self.facts.input.submitted
+            || marker.is_empty()
+            || marker.len() > 2048
+            || timeout > Duration::from_mins(2)
+        {
+            return Err(Reason::ResponseMismatch);
+        }
+        self.gui
+            .native_export_response(&mut self.facts, marker, timeout)
+    }
+
+    pub(crate) fn wait_retry(&mut self, timeout: Duration) -> Result<(), Reason> {
+        if !self.facts.input.submitted || timeout > Duration::from_mins(2) {
+            return Err(Reason::ActionUnsupported);
+        }
+        let app = self.gui.app.as_ref().ok_or(Reason::SelectorNotMatched)?;
+        let retry = app.locator("button[name=\"Retry\"]");
+        let deadline = Instant::now() + timeout;
+        loop {
+            self.gui
+                .native_copy_guard(&mut self.facts, "retry-control-query")?;
+            let count = control_count(&retry)?;
+            if count == 1 {
+                retry.wait_visible(WAIT).map_err(map_error)?;
+                self.retry_ready = true;
+                return Ok(());
+            }
+            if count > 1 || Instant::now() >= deadline {
+                return Err(Reason::SelectorNotMatched);
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    }
+
+    pub(crate) fn retry_once(&mut self) -> Result<(), Reason> {
+        if !std::mem::take(&mut self.retry_ready) {
+            return Err(Reason::ActionUnsupported);
+        }
+        let app = self.gui.app.as_ref().ok_or(Reason::SelectorNotMatched)?;
+        let retry = app.locator("button[name=\"Retry\"]");
+        if control_count(&retry)? != 1 {
+            return Err(Reason::SelectorNotMatched);
+        }
+        self.gui
+            .native_copy_guard(&mut self.facts, "retry-before")?;
+        retry.press().map_err(map_error)?;
+        self.gui.native_copy_guard(&mut self.facts, "retry-after")
+    }
+
+    pub(crate) fn finish(
+        self,
+        provider: &ProviderGate,
+        outcome: Result<(), Reason>,
+    ) -> Result<(), Reason> {
+        finish_native_copy(self.directory, self.facts, Some(provider), outcome)
+    }
+}
+
 impl Gui {
+    pub(crate) fn native_clipboard_session<'a>(
+        &'a self,
+        directory: &'a Path,
+    ) -> Result<NativeClipboardSession<'a>, Reason> {
+        if !cfg!(target_os = "macos") || self.kind != nan_harness_core::DesktopHarnessKind::Zed {
+            return Err(Reason::ActionUnsupported);
+        }
+        let mut facts = native_copy_facts();
+        facts.response_method = "thread-export";
+        if let Err(reason) = self.prepare_native_copy(&mut facts) {
+            finish_native_copy(directory, facts, None, Err(reason))?;
+            return Err(reason);
+        }
+        Ok(NativeClipboardSession {
+            gui: self,
+            directory,
+            facts,
+            retry_ready: false,
+        })
+    }
+
     pub(crate) fn probe_native_copy(
         &self,
         directory: &Path,
@@ -298,77 +479,9 @@ impl Gui {
         result: &mut ProbeResult,
         provider: &ProviderGate,
     ) -> Result<(), Reason> {
-        let mut facts = Facts {
-            schema_version: 1,
-            mechanism: "zed-native-copy",
-            navigation: "private-keymap-new-thread",
-            keyboard_transport: if std::env::var_os("FEASIBILITY_ZED_INPUT_DRIVER").is_some() {
-                if matches!(
-                    std::env::var("FEASIBILITY_ZED_INPUT_DRIVER_MODE").as_deref(),
-                    Ok("all" | "paste")
-                ) {
-                    if std::env::var("FEASIBILITY_ZED_INPUT_DRIVER_MODE").as_deref() == Ok("paste")
-                    {
-                        "neutral-quartz-paste"
-                    } else {
-                        "neutral-quartz-all"
-                    }
-                } else {
-                    "neutral-quartz"
-                }
-            } else {
-                "xa11y"
-            },
-            experiment_only: true,
-            ocr_used: false,
-            ax_text_used: false,
-            response_method: if std::env::var("FEASIBILITY_ZED_RESPONSE_METHOD").as_deref()
-                == Ok("thread-export")
-            {
-                "thread-export"
-            } else {
-                "native-copy"
-            },
-            last_export_error: None,
-            last_export_transport_error: None,
-            export_version: None,
-            export_user_count: None,
-            export_assistant_text_count: None,
-            expected_prompt: Zeroizing::new(String::new()),
-            clipboard_readback: None,
-            clipboard_character_count: None,
-            stage: "trust",
-            substage: "trust-query",
-            guard_kind: None,
-            guard_category: None,
-            settle_observations: 0,
-            blocker: None,
-            trust_control_count: None,
-            panel_control_count: None,
-            response_control_count: None,
-            clipboard_cleanup: "not-run",
-            input: InputFacts::default(),
-            response: ResponseFacts::default(),
-        };
+        let mut facts = native_copy_facts();
         let outcome = self.run_native_copy(&mut facts, marker, result);
-        facts.blocker = outcome.err();
-        facts.response.provider_verified = provider.fixture_response_verified();
-        facts.response.provider_generation_count =
-            Some(provider.generation_count()).filter(|count| *count <= 4096);
-        let cleanup = clipboard::write("").and_then(|()| {
-            if clipboard::read()?.is_empty() {
-                Ok(())
-            } else {
-                Err(Reason::IsolationUnavailable)
-            }
-        });
-        facts.clipboard_cleanup = if cleanup.is_ok() { "passed" } else { "failed" };
-        let bytes = serde_json::to_vec(&facts).map_err(|_| Reason::IsolationUnavailable)?;
-        let name = format!("{}-{}.json", std::process::id(), nonce()?);
-        open_private_new(&directory.join(name))
-            .and_then(|mut file| file.write_all(&bytes).and_then(|()| file.sync_all()))
-            .map_err(|_| Reason::IsolationUnavailable)?;
-        cleanup.and(outcome)
+        finish_native_copy(directory, facts, Some(provider), outcome)
     }
 
     fn native_copy_guard(&self, facts: &mut Facts, substage: &'static str) -> Result<(), Reason> {
@@ -457,6 +570,17 @@ impl Gui {
         marker: &str,
         result: &mut ProbeResult,
     ) -> Result<(), Reason> {
+        self.prepare_native_copy(facts)?;
+        let prompt = Zeroizing::new(format!(
+            "Check this connection. Read read-target.txt. Input nonce {}.",
+            nonce()?
+        ));
+        self.new_native_copy_turn(facts, &prompt)?;
+        result.steps.push(CheckStep::InputSubmitted);
+        self.native_copy_response(facts, marker)
+    }
+
+    fn prepare_native_copy(&self, facts: &mut Facts) -> Result<(), Reason> {
         let app = self.app.as_ref().ok_or(Reason::SelectorNotMatched)?;
         let trust = app.locator("button[name=\"Trust and Continue\"]");
         let count = control_count(&trust)?;
@@ -479,6 +603,10 @@ impl Gui {
         if count > 1 {
             return Err(Reason::SelectorNotMatched);
         }
+        Ok(())
+    }
+
+    fn new_native_copy_turn(&self, facts: &mut Facts, prompt: &str) -> Result<(), Reason> {
         // The private profile binds the global workspace NewThread handler,
         // which creates the draft and focuses its panel regardless of prior focus.
         self.guarded_chord(
@@ -489,7 +617,7 @@ impl Gui {
             "new-thread-after",
         )?;
         self.settle_native_copy_panel(facts)?;
-        self.native_copy_input(facts)?;
+        self.native_copy_input(facts, prompt)?;
         facts.stage = "submit";
         // Collapse selection before the one source-bound MessageEditor Chat action.
         self.native_copy_guard(facts, "collapse-selection-before")?;
@@ -497,16 +625,12 @@ impl Gui {
         self.native_copy_guard(facts, "submit-before")?;
         Self::native_copy_key("submit", xa11y::Key::Enter)?;
         facts.input.submitted = true;
-        result.steps.push(CheckStep::InputSubmitted);
-        self.native_copy_response(facts, marker)
+        Ok(())
     }
 
-    fn native_copy_input(&self, facts: &mut Facts) -> Result<(), Reason> {
+    fn native_copy_input(&self, facts: &mut Facts, prompt: &str) -> Result<(), Reason> {
         facts.stage = "input";
-        let prompt = Zeroizing::new(format!(
-            "Check this connection. Read read-target.txt. Input nonce {}.",
-            nonce()?
-        ));
+        let prompt = Zeroizing::new(prompt.to_owned());
         self.guarded_chord(
             facts,
             'a',
@@ -563,7 +687,7 @@ impl Gui {
 
     fn native_copy_response(&self, facts: &mut Facts, marker: &str) -> Result<(), Reason> {
         if facts.response_method == "thread-export" {
-            return self.native_export_response(facts, marker);
+            return self.native_export_response(facts, marker, WAIT);
         }
         facts.stage = "response-control";
         let app = self.app.as_ref().ok_or(Reason::SelectorNotMatched)?;
@@ -599,9 +723,14 @@ impl Gui {
         Ok(())
     }
 
-    fn native_export_response(&self, facts: &mut Facts, marker: &str) -> Result<(), Reason> {
+    fn native_export_response(
+        &self,
+        facts: &mut Facts,
+        marker: &str,
+        timeout: Duration,
+    ) -> Result<(), Reason> {
         facts.stage = "response-readback";
-        let export_deadline = Instant::now() + WAIT;
+        let export_deadline = Instant::now() + timeout;
         for attempt in 0..5 {
             if Instant::now() >= export_deadline {
                 break;
