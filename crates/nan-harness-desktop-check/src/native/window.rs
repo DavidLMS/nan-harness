@@ -418,6 +418,60 @@ impl Snapshot {
         Ok(())
     }
 
+    /// A focused standard window may have a nonintersecting auxiliary panel above it.
+    /// Both independent public AX proofs must identify this exact retained CG window.
+    #[cfg(any(test, target_os = "macos"))]
+    pub(crate) fn claude_focused_guard_failure(
+        &self,
+        expected: &Window,
+    ) -> Result<(), GuardFailure> {
+        let original = self.guard_failure(expected);
+        if original != Err(GuardFailure::SameProcessWindow) {
+            return original;
+        }
+        if self
+            .windows
+            .iter()
+            .filter(|window| window.id == expected.id && window.pid == expected.pid)
+            .count()
+            != 1
+        {
+            return Err(GuardFailure::IdentityMissing);
+        }
+        if !self
+            .focus_observation(expected)
+            .is_some_and(|value| value.0 == FocusStatus::Proved && value.1 == Some(true))
+            || self.window_focus_observation(expected) != Some((FocusStatus::Proved, Some(true)))
+        {
+            return original;
+        }
+        let index = self
+            .windows
+            .iter()
+            .position(|window| window.id == expected.id && window.pid == expected.pid)
+            .ok_or(GuardFailure::IdentityMissing)?;
+        if self.windows[..index]
+            .iter()
+            .any(|window| window.pid == expected.pid && window.layer == 0)
+        {
+            return original;
+        }
+        if !self
+            .displays
+            .iter()
+            .any(|display| contains(*display, expected.bounds))
+        {
+            return Err(GuardFailure::OffDisplay);
+        }
+        if self.windows[..index]
+            .iter()
+            .any(|window| intersects(window.bounds, expected.bounds))
+        {
+            return Err(GuardFailure::Occluded);
+        }
+        Ok(())
+    }
+
     /// Validate every guard condition except foreground ownership. This is
     /// used only by macOS's initial focus recovery: a foreground mismatch may
     /// be repaired, but identity, geometry, display, same-process stacking,
@@ -938,6 +992,76 @@ mod tests {
         assert_eq!(
             overlap_area(rect(-65536, -65536, 65536, 65536), rect(0, 0, 65536, 65536)),
             0
+        );
+    }
+
+    #[test]
+    fn claude_auxiliary_panel_requires_both_exact_proofs_and_clear_owned_window() {
+        let base = "FG 7 0\nDISPLAY 0 0 2000 2000\nWIN 99 7 1500 1500 10 10 50616e656c 3\nWIN 1 7 10 20 800 600 436c61756465 0\n";
+        let state =
+            Snapshot::parse(&format!("{base}FOCUS proved 1\nFOCUS_WINDOW proved 1\n")).unwrap();
+        let held = state.windows[1].clone();
+        assert_eq!(state.claude_focused_guard_failure(&held), Ok(()));
+        assert_eq!(
+            state.guard_failure(&held),
+            Err(GuardFailure::SameProcessWindow)
+        );
+        assert_eq!(
+            state.non_foreground_failure(&held),
+            Err(GuardFailure::SameProcessWindow)
+        );
+        for proofs in [
+            "",
+            "FOCUS proved 1\n",
+            "FOCUS_WINDOW proved 1\n",
+            "FOCUS query-error 0\nFOCUS_WINDOW proved 1\n",
+            "FOCUS proved 1\nFOCUS_WINDOW ambiguous 0\n",
+            "FOCUS proved 99\nFOCUS_WINDOW proved 1\n",
+        ] {
+            let missing = Snapshot::parse(&format!("{base}{proofs}")).unwrap();
+            assert_eq!(
+                missing.claude_focused_guard_failure(&held),
+                Err(GuardFailure::SameProcessWindow)
+            );
+        }
+        let mut normal = state.clone();
+        normal.windows[0].layer = 0;
+        assert_eq!(
+            normal.claude_focused_guard_failure(&held),
+            Err(GuardFailure::SameProcessWindow)
+        );
+        for pid in [7, 8] {
+            let mut overlap = state.clone();
+            overlap.windows[0].pid = pid;
+            overlap.windows[0].bounds = held.bounds;
+            assert_eq!(
+                overlap.claude_focused_guard_failure(&held),
+                Err(GuardFailure::Occluded)
+            );
+        }
+        let mut changed = state.clone();
+        changed.windows[1].bounds.x += 1;
+        assert_eq!(
+            changed.claude_focused_guard_failure(&held),
+            Err(GuardFailure::BoundsChanged)
+        );
+        let mut foreign = state.clone();
+        foreign.foreground_pid = 8;
+        assert_eq!(
+            foreign.claude_focused_guard_failure(&held),
+            Err(GuardFailure::ForegroundChanged)
+        );
+        let mut off_display = state.clone();
+        off_display.displays.clear();
+        assert_eq!(
+            off_display.claude_focused_guard_failure(&held),
+            Err(GuardFailure::OffDisplay)
+        );
+        let mut duplicate = state.clone();
+        duplicate.windows.push(held.clone());
+        assert_eq!(
+            duplicate.claude_focused_guard_failure(&held),
+            Err(GuardFailure::IdentityMissing)
         );
     }
 

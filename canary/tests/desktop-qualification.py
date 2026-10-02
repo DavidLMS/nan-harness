@@ -895,6 +895,33 @@ class QualificationTests(unittest.TestCase):
                     with self.assertRaises(ValueError):
                         q.semantic_observations(root, app)
 
+    def test_zoom_raw_role_group_rejects_partial_inconsistent_and_private_values(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / 'zoom.json'
+            value = dict(schemaVersion=1, mechanism='zed-panel-zoom', diagnosticsOnly=True,
+                status='observed', maximizeMatches=1, minimizeMatches=0,
+                stableMaximizeMatches=1, stableMinimizeMatches=0, correlatedButtons=1,
+                checkedState='unavailable', uniqueCorrelation=True, activationAttempted=False,
+                matchedPushButtons=1, matchedToggleButtons=0, nestedContainingControls=0,
+                matchedRole='push-button')
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(root, 'zed-desktop'), [value])
+            partial = dict(value)
+            del partial['matchedRole']
+            for changed in (partial, {**value, 'matchedRole': 'PRIVATE'},
+                {**value, 'matchedToggleButtons': True}, {**value, 'matchedPushButtons': 65},
+                {**value, 'matchedToggleButtons': 1}, {**value, 'nestedContainingControls': 2},
+                {**value, 'checkedState': 'on'}, {**value, 'rawRole': 'PRIVATE'}):
+                path.write_text(json.dumps(changed))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'zed-desktop')
+            mixed = {**value, 'correlatedButtons': 2, 'uniqueCorrelation': False,
+                'matchedToggleButtons': 1, 'matchedRole': 'mixed',
+                'nestedContainingControls': 1, 'checkedState': 'ambiguous'}
+            path.write_text(json.dumps(mixed))
+            self.assertEqual(q.semantic_observations(root, 'zed-desktop'), [mixed])
+
     def test_renderer_document_diagnostics_reject_text_and_partial_records(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

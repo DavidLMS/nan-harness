@@ -349,6 +349,24 @@ def semantic_observations(directory, app):
                       'stableMinimizeMatches', 'correlatedButtons'}
             fields = counts | {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'status',
                                'checkedState', 'uniqueCorrelation', 'activationAttempted'}
+            role_fields = {'matchedPushButtons', 'matchedToggleButtons', 'nestedContainingControls', 'matchedRole'}
+            present_roles = role_fields & set(value)
+            if present_roles:
+                if (present_roles != role_fields
+                        or type(value.get('correlatedButtons')) is not int
+                        or any(type(value[key]) is not int or not 0 <= value[key] <= 64 for key in role_fields - {'matchedRole'})
+                        or value['matchedPushButtons'] + value['matchedToggleButtons'] != value.get('correlatedButtons')
+                        or value['nestedContainingControls'] > value.get('correlatedButtons', -1)
+                        or (value['correlatedButtons'] < 2 and value['nestedContainingControls'] != 0)
+                        or type(value.get('checkedState')) is not str
+                        or type(value['matchedRole']) is not str
+                        or value['matchedRole'] != ('none' if value['matchedPushButtons'] + value['matchedToggleButtons'] == 0 else
+                            'push-button' if value['matchedToggleButtons'] == 0 else
+                            'toggle-button' if value['matchedPushButtons'] == 0 else 'mixed')
+                        or (value.get('checkedState') in {'on', 'off', 'mixed'} and
+                            (value['matchedToggleButtons'] != 1 or value['matchedPushButtons'] != 0))):
+                    raise ValueError('invalid Zed matched control roles')
+                fields |= role_fields
             if (app != 'zed-desktop' or set(value) != fields or value['diagnosticsOnly'] is not True
                     or type(value['status']) is not str or value['status'] not in {
                         'observed', 'templates-unavailable', 'unsupported-scale', 'inventory-unavailable',

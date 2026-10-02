@@ -342,7 +342,7 @@ impl Visual {
                 if ready {
                     stability.save();
                     #[cfg(target_os = "macos")]
-                    initial_readiness(&native, &snapshot, window, owner)?;
+                    initial_readiness(&native, &snapshot, window, owner, deadline)?;
                     return Ok(Self {
                         window: RefCell::new((*window).clone()),
                         native,
@@ -377,9 +377,17 @@ impl Visual {
     }
 
     pub(super) fn guard(&self) -> Result<(), Reason> {
-        let snapshot = self.native.windows()?;
         let expected = self.window.borrow().clone();
-        let verdict = snapshot.guard_failure(&expected);
+        let snapshot = if crate::native::claude_focus_policy()
+            && matches_app(DesktopHarnessKind::Claude, &expected.name)
+        {
+            self.native
+                .windows_with_focus(expected.pid)
+                .map_err(FailureCategory::reason)?
+        } else {
+            self.native.windows()?
+        };
+        let verdict = scoped_composer_guard(&snapshot, &expected);
         let reason = verdict.map_err(GuardFailure::reason);
         if reason == Err(Reason::WindowOccluded) {
             // Transient wave10 diagnostic: record closed occluder classification
@@ -398,7 +406,7 @@ impl Visual {
             .native
             .windows_with_focus(expected.pid)
             .map_err(|category| (category.reason(), native_error_category(category)))?;
-        let verdict = snapshot.guard_failure(&expected);
+        let verdict = scoped_composer_guard(&snapshot, &expected);
         #[cfg(target_os = "macos")]
         if verdict == Err(GuardFailure::SameProcessWindow) {
             record_claude_stack(&snapshot, &expected);
@@ -1008,13 +1016,92 @@ fn require_running<P: Observation>(process: &mut P) -> Result<(), Reason> {
     }
 }
 
+fn scoped_composer_guard(snapshot: &Snapshot, window: &Window) -> Result<(), GuardFailure> {
+    #[cfg(target_os = "macos")]
+    if crate::native::claude_focus_policy() && matches_app(DesktopHarnessKind::Claude, &window.name)
+    {
+        return snapshot.claude_focused_guard_failure(window);
+    }
+    snapshot.guard_failure(window)
+}
+
+#[cfg(any(test, target_os = "macos"))]
+fn initial_owned_focus<Query, Own, Now>(
+    window: &Window,
+    deadline: Instant,
+    query: Query,
+    mut ownership: Own,
+    mut now: Now,
+) -> Result<bool, AcquisitionFailure>
+where
+    Query: FnOnce() -> Option<Snapshot>,
+    Own: FnMut() -> Result<(), AcquisitionFailure>,
+    Now: FnMut() -> Instant,
+{
+    let timeout = || {
+        acquisition_failure(
+            Reason::DesktopUnavailable,
+            crate::diagnostics::GuiAcquisitionStage::WindowStability,
+        )
+    };
+    if now() >= deadline {
+        return Err(timeout());
+    }
+    ownership()?;
+    if now() >= deadline {
+        return Err(timeout());
+    }
+    let fresh = query();
+    if now() >= deadline {
+        return Err(timeout());
+    }
+    if fresh.is_some_and(|snapshot| snapshot.claude_focused_guard_failure(window).is_ok()) {
+        ownership()?;
+        if now() >= deadline {
+            return Err(timeout());
+        }
+        return Ok(true);
+    }
+    Ok(false)
+}
+
 #[cfg(target_os = "macos")]
 fn initial_readiness(
     native: &Native,
     snapshot: &Snapshot,
     window: &Window,
     owner: u32,
+    deadline: Instant,
 ) -> Result<(), AcquisitionFailure> {
+    if crate::native::claude_focus_policy()
+        && matches_app(DesktopHarnessKind::Claude, &window.name)
+        && snapshot.guard_failure(window) == Err(GuardFailure::SameProcessWindow)
+    {
+        let ownership = || {
+            super::process_ownership(window.pid, owner).map_err(|failure| {
+                (
+                    Reason::IsolationUnavailable,
+                    crate::diagnostics::GuiAcquisitionStage::WindowStability,
+                    failure.category(),
+                    None,
+                    None,
+                )
+            })
+        };
+        if initial_owned_focus(
+            window,
+            deadline,
+            || {
+                let fresh = native.windows_with_focus(window.pid).ok()?;
+                record_claude_stack(&fresh, window);
+                Some(fresh)
+            },
+            ownership,
+            Instant::now,
+        )? {
+            return Ok(());
+        }
+    }
     if let Err(failure) = snapshot.non_foreground_failure(window) {
         if crate::native::claude_focus_policy()
             && matches_app(DesktopHarnessKind::Claude, &window.name)
@@ -1339,6 +1426,69 @@ mod tests {
         assert_eq!(result, Ok(()));
         assert_eq!(activations.get(), 1);
         assert_eq!(*events.borrow(), ["ownership", "activation", "guard"]);
+    }
+
+    #[test]
+    fn initial_focus_proof_never_accepts_expired_deadline_or_lost_owner() {
+        let snapshot = Snapshot::parse("FG 7 0\nDISPLAY 0 0 2000 2000\nWIN 99 7 1800 1800 10 10 436c61756465 3\nWIN 1 7 10 20 800 600 436c61756465 0\nFOCUS proved 1\nFOCUS_WINDOW proved 1\n").unwrap();
+        let window = snapshot.windows[1].clone();
+        let start = Instant::now();
+        let deadline = start + Duration::from_secs(45);
+        let current = Cell::new(start);
+        let calls = Cell::new(0);
+        let ownership = || {
+            calls.set(calls.get() + 1);
+            Ok(())
+        };
+        let result = initial_owned_focus(
+            &window,
+            deadline,
+            || {
+                current.set(deadline);
+                Some(snapshot.clone())
+            },
+            ownership,
+            || current.get(),
+        );
+        assert!(result.is_err());
+        assert_eq!(calls.get(), 1);
+        calls.set(0);
+        let lost = acquisition_failure(
+            Reason::IsolationUnavailable,
+            crate::diagnostics::GuiAcquisitionStage::WindowStability,
+        );
+        let result = initial_owned_focus(
+            &window,
+            deadline,
+            || Some(snapshot.clone()),
+            || {
+                calls.set(calls.get() + 1);
+                if calls.get() == 2 { Err(lost) } else { Ok(()) }
+            },
+            || start,
+        );
+        assert_eq!(result, Err(lost));
+        assert_eq!(calls.get(), 2);
+        calls.set(0);
+        let result = initial_owned_focus(
+            &window,
+            deadline,
+            || panic!("expired proof must not query"),
+            ownership,
+            || deadline,
+        );
+        assert!(result.is_err());
+        assert_eq!(calls.get(), 0);
+        assert_eq!(
+            initial_owned_focus(
+                &window,
+                deadline,
+                || Some(snapshot.clone()),
+                || Ok(()),
+                || start
+            ),
+            Ok(true)
+        );
     }
 
     #[test]

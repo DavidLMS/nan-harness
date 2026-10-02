@@ -18,9 +18,22 @@ pub(super) struct Observation {
     stable_maximize_matches: usize,
     stable_minimize_matches: usize,
     correlated_buttons: usize,
+    #[serde(skip_serializing_if = "omit_atspi_roles")]
+    matched_push_buttons: usize,
+    #[serde(skip_serializing_if = "omit_atspi_roles")]
+    matched_toggle_buttons: usize,
+    #[serde(skip_serializing_if = "omit_atspi_roles")]
+    nested_containing_controls: usize,
+    #[serde(skip_serializing_if = "omit_atspi_roles")]
+    matched_role: &'static str,
     checked_state: &'static str,
     unique_correlation: bool,
     activation_attempted: bool,
+}
+
+// Raw AT-SPI roles must not be inferred from another platform's semantic role mapping.
+fn omit_atspi_roles<T>(_: &T) -> bool {
+    !cfg!(target_os = "linux")
 }
 
 impl Observation {
@@ -35,6 +48,10 @@ impl Observation {
             stable_maximize_matches: 0,
             stable_minimize_matches: 0,
             correlated_buttons: 0,
+            matched_push_buttons: 0,
+            matched_toggle_buttons: 0,
+            nested_containing_controls: 0,
+            matched_role: "none",
             checked_state: "unavailable",
             unique_correlation: false,
             activation_attempted: false,
@@ -53,6 +70,28 @@ fn contains(outer: Rect, inner: Rect) -> bool {
             <= i64::from(outer.x) + i64::from(outer.width)
         && i64::from(inner.y) + i64::from(inner.height)
             <= i64::from(outer.y) + i64::from(outer.height)
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn describe_controls(result: &mut Observation, controls: &[(u32, Rect)]) {
+    result.matched_push_buttons = controls.iter().filter(|(role, _)| *role == 43).count();
+    result.matched_toggle_buttons = controls.iter().filter(|(role, _)| *role == 62).count();
+    result.matched_role = match (result.matched_push_buttons, result.matched_toggle_buttons) {
+        (0, 0) => "none",
+        (_, 0) => "push-button",
+        (0, _) => "toggle-button",
+        _ => "mixed",
+    };
+    result.nested_containing_controls = controls
+        .iter()
+        .enumerate()
+        .filter(|(index, (_, outer))| {
+            controls
+                .iter()
+                .enumerate()
+                .any(|(other, (_, inner))| other != *index && contains(*outer, *inner))
+        })
+        .count();
 }
 
 fn held_button(before: &ElementData, after: &ElementData) -> bool {
@@ -208,16 +247,33 @@ pub(super) fn correlate_canonical(
     result.minimize_matches = matches.minimize_matches;
     result.stable_maximize_matches = matches.maximize.len();
     result.stable_minimize_matches = matches.minimize.len();
+    describe_controls(
+        &mut result,
+        &candidates
+            .iter()
+            .map(|item| {
+                (
+                    item.role,
+                    Rect {
+                        x: item.bounds[0],
+                        y: item.bounds[1],
+                        width: item.bounds[2].cast_unsigned(),
+                        height: item.bounds[3].cast_unsigned(),
+                    },
+                )
+            })
+            .collect::<Vec<_>>(),
+    );
     result.correlated_buttons = candidates.len();
     result.unique_correlation =
         candidates.len() == 1 && matches.maximize.len() + matches.minimize.len() == 1;
     result.checked_state = match candidates.as_slice() {
-        [item] => match item.toggle.as_str() {
+        [item] if item.role == 62 => match item.toggle.as_str() {
             "on" => "on",
             "off" => "off",
             _ => "unavailable",
         },
-        [] => "unavailable",
+        [] | [_] => "unavailable",
         _ => "ambiguous",
     };
     result
@@ -266,6 +322,40 @@ mod tests {
             correlate_canonical(&matches, &[held.clone()], &[held], &duplicate).status,
             "inventory-unavailable"
         );
+    }
+
+    #[test]
+    fn nested_push_button_and_source_toggle_remain_distinct_and_ambiguous() {
+        let push = button();
+        let mut toggle = button();
+        toggle.role = Role::Switch;
+        toggle.stable_id = Some("separate-held-toggle".into());
+        let inventory = [push, toggle];
+        let records = [
+            CanonicalButton {
+                index: 0,
+                role: 43,
+                bounds: [0, 0, 100, 100],
+                toggle: "on".into(),
+            },
+            CanonicalButton {
+                index: 1,
+                role: 62,
+                bounds: [10, 20, 30, 30],
+                toggle: "off".into(),
+            },
+        ];
+        let result = correlate_canonical(&icons(), &inventory, &inventory, &records);
+        assert_eq!(result.matched_push_buttons, 1);
+        assert_eq!(result.matched_toggle_buttons, 1);
+        assert_eq!(result.nested_containing_controls, 1);
+        assert_eq!(result.matched_role, "mixed");
+        assert_eq!(result.checked_state, "ambiguous");
+        assert!(!result.unique_correlation);
+        let push_only = correlate_canonical(&icons(), &inventory, &inventory, &records[..1]);
+        assert_eq!(push_only.matched_role, "push-button");
+        assert_eq!(push_only.checked_state, "unavailable");
+        assert!(push_only.unique_correlation);
     }
 
     fn button() -> ElementData {

@@ -402,7 +402,7 @@ with one movement and an exact bounded pointer-position readback. It never
 replays uncertain clicks; recovery remains unqualified until fresh full evidence.
 
 Fresh-account credentials are unavailable; qualification must seek supported
-account-free routes. Pen's [official authentication documentation](https://docs.pencil.dev/getting-started/authentication)
+account-free routes. Pen's [official authentication documentation](https://docs.pen.dev/getting-started/authentication)
 describes pen.dev sign-in separately from its optional custom-provider key;
 software rendering does not establish an account-free editor. The frozen UI's
 “Skip for now” belongs to profile completion, rather than bypassing sign-in.
@@ -1370,3 +1370,43 @@ Codex's first probe identifies one source-bound avatar-overlay page and one
 unknown route, both with visible documents. Its second probe instead sees a
 separate modal with no recognized public heading. No auxiliary target is chosen
 and no unknown dialog receives input. Qualification remains 5 of 15 cells.
+
+
+After the workstation restart, the unchanged native trials on `5bc847a6`
+retain the same frozen inputs. macOS Claude
+[37074772135](https://github.com/DavidLMS/nan-harness/actions/runs/37074772135)
+now proves both full focus and the independent window-only identity against the
+held window. Its remaining acquisition failure is the same-process stacking
+rule: one non-normal-layer window precedes it without intersecting its bounds.
+Cleanup passes and diagnostic validation rejects no events. A focused correction
+must retain exact foreground identity, complete display containment and rejection
+of every intersecting window, and continue rejecting another normal-layer window
+from the same process. An accessibility write is unnecessary for this observation.
+Neither catalog activity nor native focus alone qualifies the coding backend.
+
+The Windows trials
+[37074769314](https://github.com/DavidLMS/nan-harness/actions/runs/37074769314)
+and [37074775121](https://github.com/DavidLMS/nan-harness/actions/runs/37074775121)
+stop during compilation, before application launch: the failure-receipt writer
+incorrectly assumes an I/O error converts into a serde JSON error. `9fa9311f`
+handles serialization and flushing separately. The obsolete local gate was stopped
+before changing its source tree; a new final gate is required after the pending
+macOS and Linux diagnostic changes freeze. These runs establish no new native
+qualification result. The matrix remains five qualified cells, eight open native
+cells, and two platforms without an official native distribution.
+
+
+The next frozen tree uses a separate hosted-Claude focus verdict for the measured
+auxiliary-panel case. It requires both exact AX proofs, rejects same-process
+normal-layer windows and every intersecting window, and preserves the original
+guard and foreground-recovery behavior elsewhere. Initial acquisition checks the
+original deadline and revalidates process ownership after its fresh proof.
+Synthetic tests cover missing/stale proofs, overlap, identity duplication, changed
+bounds, lost ownership and late results. This is an acquisition correction, not
+acceptance of a missing composer or coding backend.
+
+The existing Linux Zed pre-Retry observation now reports matched push-button and
+toggle-button counts, nested containing controls and a closed matched-role value.
+Only raw ToggleButton62 can establish toggle state; ordinary Button43 remains
+unavailable. These are observations at the existing measurement point, not a
+before/after ShiftEscape transition proof. No extra input or capture is introduced.
