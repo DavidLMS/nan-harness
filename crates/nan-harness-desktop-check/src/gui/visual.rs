@@ -431,8 +431,16 @@ impl Visual {
         let mut settle = super::stability::InitialSettle::default();
         let mut previous = None;
         let mut stability = super::stability::Stability::default();
+        let mut pending = None;
         loop {
             if Instant::now() >= deadline {
+                if let Some(snapshot) = &pending {
+                    record_claude_snapshot(
+                        snapshot,
+                        final_focus_expected(snapshot, &original),
+                        "final-stability",
+                    );
+                }
                 stability.save();
                 return Err(failure(Reason::DesktopUnavailable));
             }
@@ -442,6 +450,26 @@ impl Visual {
                 .native
                 .windows_with_focus(original.pid)
                 .map_err(|error| failure(error.reason()))?;
+            if eligible_windows(DesktopHarnessKind::Claude, &snapshot.windows)
+                .find(|window| {
+                    window.id == original.id
+                        && window.pid == original.pid
+                        && window.name == original.name
+                })
+                .filter(|_| {
+                    eligible_windows(DesktopHarnessKind::Claude, &snapshot.windows).count() == 1
+                })
+                .is_some_and(|window| snapshot.claude_focus_pending(window))
+            {
+                ownership()?;
+                settle.reset();
+                previous = None;
+                stability.observe(None, None);
+                pending = Some(snapshot.clone());
+                std::thread::sleep(Duration::from_millis(200));
+                continue;
+            }
+            pending = None;
             let candidate = final_initial_candidate(&snapshot, &original).map_err(|error| {
                 record_claude_snapshot(
                     &snapshot,
@@ -1545,6 +1573,23 @@ fn record_claude_snapshot(snapshot: &Snapshot, held: &Window, phase: &str) {
 mod tests {
     use super::*;
     use crate::native::FitFailure;
+
+    #[test]
+    fn incomplete_initial_focus_never_contributes_to_stability_or_extends_deadline() {
+        let now = Instant::now();
+        let deadline = now + Duration::from_secs(5);
+        let mut settle = super::super::stability::InitialSettle::default();
+        assert!(!settle.ready(true, now, false, deadline));
+        assert!(!settle.ready(true, now + Duration::from_secs(1), true, deadline));
+        // An incomplete AX message discards all earlier stable observations.
+        settle.reset();
+        assert!(!settle.ready(true, now + Duration::from_secs(2), false, deadline));
+        assert!(!settle.ready(true, now + Duration::from_secs(3), true, deadline));
+        assert!(settle.ready(true, now + Duration::from_secs(4), true, deadline));
+        settle.reset();
+        assert!(!settle.ready(true, deadline, false, deadline));
+        assert!(!settle.ready(true, deadline + Duration::from_secs(2), true, deadline));
+    }
 
     #[test]
     fn final_focus_diagnostic_uses_only_unique_original_identity() {

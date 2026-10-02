@@ -445,6 +445,40 @@ impl Snapshot {
         {
             return original;
         }
+        self.claude_clear_stack(expected)
+    }
+
+    /// An incomplete AX message is pending only while the native identity and
+    /// complete window stack remain safe. It is never a focus proof.
+    #[cfg(any(test, target_os = "macos"))]
+    pub(crate) fn claude_focus_pending(&self, expected: &Window) -> bool {
+        let pending_status = |proof: &Option<FocusProof>| {
+            proof.as_ref().is_some_and(|proof| {
+                matches!(
+                    proof.status,
+                    FocusStatus::QueryError | FocusStatus::IdentityChanged
+                ) || (proof.status == FocusStatus::Proved && proof.window == expected.id)
+            })
+        };
+        self.windows
+            .iter()
+            .filter(|window| window.id == expected.id && window.pid == expected.pid)
+            .count()
+            == 1
+            && self
+                .focus_query
+                .is_some_and(|query| query.error == FocusQueryError::CannotComplete)
+            && pending_status(&self.focus)
+            && pending_status(&self.window_focus)
+            && matches!(
+                self.guard_failure(expected),
+                Ok(()) | Err(GuardFailure::SameProcessWindow)
+            )
+            && self.claude_clear_stack(expected).is_ok()
+    }
+
+    #[cfg(any(test, target_os = "macos"))]
+    fn claude_clear_stack(&self, expected: &Window) -> Result<(), GuardFailure> {
         let index = self
             .windows
             .iter()
@@ -454,7 +488,7 @@ impl Snapshot {
             .iter()
             .any(|window| window.pid == expected.pid && window.layer == 0)
         {
-            return original;
+            return Err(GuardFailure::SameProcessWindow);
         }
         if !self
             .displays
@@ -993,6 +1027,38 @@ mod tests {
             overlap_area(rect(-65536, -65536, 65536, 65536), rect(0, 0, 65536, 65536)),
             0
         );
+    }
+
+    #[test]
+    fn pending_focus_requires_only_incomplete_queries_and_safe_native_identity() {
+        let base = "FG 7 0\nDISPLAY 0 0 2000 2000\nWIN 99 7 1500 1500 10 10 50616e656c 3\nWIN 1 7 10 20 800 600 436c61756465 0\n";
+        let receipt = format!(
+            "{base}FOCUS identity-changed 0\nFOCUS_QUERY after main-window cannot-complete\nFOCUS_WINDOW identity-changed 0\n"
+        );
+        let state = Snapshot::parse(&receipt).unwrap();
+        let held = state.windows[1].clone();
+        assert!(state.claude_focus_pending(&held));
+        assert!(state.claude_focused_guard_failure(&held).is_err());
+        for changed in [
+            receipt.replace("cannot-complete", "no-value"),
+            receipt.replace(
+                "FOCUS_WINDOW identity-changed 0",
+                "FOCUS_WINDOW focus-mismatch 0",
+            ),
+            receipt.replace("1500 1500 10 10", "10 20 10 10"),
+            receipt.replace("50616e656c 3", "50616e656c 0"),
+            receipt.replace("FG 7 0", "FG 8 0"),
+        ] {
+            assert!(
+                !Snapshot::parse(&changed)
+                    .unwrap()
+                    .claude_focus_pending(&held)
+            );
+        }
+        let proved =
+            Snapshot::parse(&format!("{base}FOCUS proved 1\nFOCUS_WINDOW proved 1\n")).unwrap();
+        assert!(!proved.claude_focus_pending(&held));
+        assert!(proved.claude_focused_guard_failure(&held).is_ok());
     }
 
     #[test]

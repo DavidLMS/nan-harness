@@ -388,7 +388,7 @@ def semantic_observations(directory, app):
             record.update(diagnosticsOnly=True, phase=value['phase'], state=value['state'])
         elif mechanism == 'windows-process-absence':
             fields = {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'app', 'stage'}
-            stages = {'deadline', 'system-root', 'private-output', 'spawn', 'exit', 'read', 'schema', 'oversize'}
+            stages = {'deadline', 'system-root', 'private-output', 'spawn', 'exit', 'read', 'schema', 'oversize', 'snapshot', 'first', 'next'}
             if (set(value) != fields or app not in {'claude-desktop', 'chatgpt-desktop'}
                     or value['app'] != app or value['diagnosticsOnly'] is not True
                     or type(value['stage']) is not str or value['stage'] not in stages):

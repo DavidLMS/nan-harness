@@ -49,7 +49,7 @@ pub(super) fn mark_rejection_observation(
 }
 
 #[cfg(any(windows, test))]
-#[derive(Clone, Copy, serde::Serialize)]
+#[derive(Debug, Clone, Copy, serde::Serialize)]
 #[serde(rename_all = "kebab-case")]
 enum PostStopState {
     Present,
@@ -103,63 +103,54 @@ fn wait_absent(
 }
 
 #[cfg(any(windows, test))]
-fn csv_presence(bytes: &[u8], inspector_pid: u32, image: &[u8]) -> Result<bool, Reason> {
-    if bytes.is_empty() || bytes.len() > 65536 {
-        return Err(Reason::DesktopUnavailable);
-    }
-    let mut found = false;
-    let mut inspector = false;
-    for line in bytes
-        .split(|byte| *byte == b'\n')
-        .filter(|line| !line.is_empty())
-    {
-        let line = line.strip_suffix(b"\r").unwrap_or(line);
-        let mut fields = Vec::new();
-        let mut position = 0;
-        while position < line.len() {
-            if line[position] != b'"' {
-                return Err(Reason::DesktopUnavailable);
-            }
-            position += 1;
-            let start = position;
-            while position < line.len() && line[position] != b'"' {
-                position += 1;
-            }
-            if position == line.len() {
-                return Err(Reason::DesktopUnavailable);
-            }
-            fields.push(&line[start..position]);
-            position += 1;
-            if position < line.len() {
-                if line[position] != b',' || position + 1 == line.len() {
-                    return Err(Reason::DesktopUnavailable);
-                }
-                position += 1;
-            }
-        }
-        if fields.len() != 5 {
-            return Err(Reason::DesktopUnavailable);
-        }
-        found |= fields[0].eq_ignore_ascii_case(image);
-        inspector |= fields[0].eq_ignore_ascii_case(b"tasklist.exe")
-            && fields[1] == inspector_pid.to_string().as_bytes();
-    }
-    if !inspector {
-        return Err(Reason::DesktopUnavailable);
-    }
-    Ok(found)
+#[derive(Default)]
+struct ProcessScan {
+    present: bool,
+    own_seen: bool,
+    count: usize,
 }
 
 #[cfg(any(windows, test))]
-#[derive(Clone, Copy, serde::Serialize)]
+impl ProcessScan {
+    fn observe(
+        &mut self,
+        pid: u32,
+        name: &[u16],
+        own: u32,
+        image: &[u8],
+    ) -> Result<(), InspectionStage> {
+        self.count += 1;
+        if self.count > 65536 {
+            return Err(InspectionStage::Oversize);
+        }
+        let end = name
+            .iter()
+            .position(|unit| *unit == 0)
+            .ok_or(InspectionStage::Schema)?;
+        let name = String::from_utf16(&name[..end]).map_err(|_| InspectionStage::Schema)?;
+        if name.is_empty() || name.contains(['/', '\\']) {
+            return Err(InspectionStage::Schema);
+        }
+        self.own_seen |= pid == own;
+        self.present |= name.as_bytes().eq_ignore_ascii_case(image);
+        Ok(())
+    }
+    fn finish(self, complete: bool) -> Result<bool, InspectionStage> {
+        if !complete || !self.own_seen {
+            return Err(InspectionStage::Schema);
+        }
+        Ok(self.present)
+    }
+}
+
+#[cfg(any(windows, test))]
+#[derive(Debug, Clone, Copy, serde::Serialize)]
 #[serde(rename_all = "kebab-case")]
 enum InspectionStage {
     Deadline,
-    SystemRoot,
-    PrivateOutput,
-    Spawn,
-    Exit,
-    Read,
+    Snapshot,
+    First,
+    Next,
     Schema,
     Oversize,
 }
@@ -230,76 +221,71 @@ fn inspect(deadline: std::time::Instant, image: &[u8]) -> Result<bool, Reason> {
 
 #[cfg(windows)]
 fn inspect_inner(deadline: std::time::Instant, image: &[u8]) -> Result<bool, InspectionStage> {
-    use std::io::{Read as _, Seek as _};
-    use std::os::windows::process::CommandExt as _;
-    use std::process::{Command, Stdio};
-    use std::time::{Duration, Instant};
-    let unavailable = || InspectionStage::SystemRoot;
-    let root = std::path::PathBuf::from(std::env::var_os("SystemRoot").ok_or_else(unavailable)?);
-    let canonical_root = root.canonicalize().map_err(|_| unavailable())?;
-    let path = root.join("System32/tasklist.exe");
-    let executable = path.canonicalize().map_err(|_| unavailable())?;
-    if !root.is_absolute()
-        || !std::fs::symlink_metadata(&path).is_ok_and(|m| m.is_file())
-        || !executable.starts_with(&canonical_root)
-    {
-        return Err(unavailable());
-    }
-    let mut output = tempfile::tempfile().map_err(|_| InspectionStage::PrivateOutput)?;
-    if Instant::now() >= deadline {
-        return Err(InspectionStage::Deadline);
-    }
-    let mut child = Command::new(&executable)
-        .args(["/FO", "CSV", "/NH"])
-        .env_clear()
-        .env("SystemRoot", &root)
-        .creation_flags(0x0800_0000)
-        .stdin(Stdio::null())
-        .stdout(
-            output
-                .try_clone()
-                .map_err(|_| InspectionStage::PrivateOutput)?,
-        )
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|_| InspectionStage::Spawn)?;
-    let outcome = loop {
-        if Instant::now() >= deadline {
-            break Err(InspectionStage::Deadline);
+    use windows_sys::Win32::{
+        Foundation::{
+            CloseHandle, ERROR_NO_MORE_FILES, GetLastError, HANDLE, INVALID_HANDLE_VALUE,
+        },
+        System::Diagnostics::ToolHelp::{
+            CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW,
+            TH32CS_SNAPPROCESS,
+        },
+    };
+    struct Snapshot(HANDLE);
+    impl Drop for Snapshot {
+        fn drop(&mut self) {
+            unsafe {
+                CloseHandle(self.0);
+            }
         }
-        match output.metadata() {
-            Err(_) => break Err(InspectionStage::PrivateOutput),
-            Ok(metadata) if metadata.len() > 65536 => break Err(InspectionStage::Oversize),
-            Ok(_) => {}
-        }
-        match child.try_wait() {
-            Ok(Some(status)) if status.success() => break Ok(()),
-            Ok(Some(_)) | Err(_) => break Err(InspectionStage::Exit),
-            Ok(None) => std::thread::sleep(
-                Duration::from_millis(10).min(deadline.saturating_duration_since(Instant::now())),
-            ),
+    }
+    let check = || {
+        if std::time::Instant::now() >= deadline {
+            Err(InspectionStage::Deadline)
+        } else {
+            Ok(())
         }
     };
-    if outcome.is_err() {
-        // Only this inspector Child is terminated; app termination belongs to
-        // the pre-existing owned JobObject cleanup, never an enumerated PID.
-        let _ = child.kill();
-        let _ = child.wait();
+    check()?;
+    // The read-only snapshot is the only handle opened; enumerated PIDs are never opened.
+    let handle = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
+    if handle == INVALID_HANDLE_VALUE {
+        return Err(InspectionStage::Snapshot);
     }
-    outcome?;
-    output.rewind().map_err(|_| InspectionStage::Read)?;
-    let mut bytes = zeroize::Zeroizing::new(Vec::new());
-    output
-        .take(65537)
-        .read_to_end(&mut bytes)
-        .map_err(|_| InspectionStage::Read)?;
-    if bytes.len() > 65536 {
-        return Err(InspectionStage::Oversize);
+    let snapshot = Snapshot(handle);
+    check()?;
+    let mut entry = PROCESSENTRY32W {
+        dwSize: u32::try_from(std::mem::size_of::<PROCESSENTRY32W>())
+            .map_err(|_| InspectionStage::Schema)?,
+        ..Default::default()
+    };
+    let mut valid = unsafe { Process32FirstW(snapshot.0, &mut entry) };
+    if valid == 0 {
+        return Err(InspectionStage::First);
     }
-    if Instant::now() >= deadline {
-        return Err(InspectionStage::Deadline);
+    let mut scan = ProcessScan::default();
+    loop {
+        check()?;
+        scan.observe(
+            entry.th32ProcessID,
+            &entry.szExeFile,
+            std::process::id(),
+            image,
+        )?;
+        check()?;
+        valid = unsafe { Process32NextW(snapshot.0, &mut entry) };
+        let end_error = if valid == 0 {
+            unsafe { GetLastError() }
+        } else {
+            0
+        };
+        check()?;
+        if valid == 0 {
+            if end_error != ERROR_NO_MORE_FILES {
+                return Err(InspectionStage::Next);
+            }
+            return scan.finish(true);
+        }
     }
-    csv_presence(&bytes, child.id(), image).map_err(|_| InspectionStage::Schema)
 }
 
 #[cfg(test)]
@@ -309,7 +295,6 @@ mod tests {
         cell::Cell,
         time::{Duration, Instant},
     };
-    const INSPECTOR: &[u8] = b"\"tasklist.exe\",\"123\",\"Console\",\"1\",\"1,000 K\"\r\n";
     #[test]
     fn independent_observation_only_claims_first_ax_presence_with_original_budget() {
         let now = Instant::now();
@@ -362,23 +347,14 @@ mod tests {
     fn inspection_failures_serialize_only_closed_stages_and_selected_app() {
         let stages = [
             InspectionStage::Deadline,
-            InspectionStage::SystemRoot,
-            InspectionStage::PrivateOutput,
-            InspectionStage::Spawn,
-            InspectionStage::Exit,
-            InspectionStage::Read,
+            InspectionStage::Snapshot,
+            InspectionStage::First,
+            InspectionStage::Next,
             InspectionStage::Schema,
             InspectionStage::Oversize,
         ];
         let expected = [
-            "deadline",
-            "system-root",
-            "private-output",
-            "spawn",
-            "exit",
-            "read",
-            "schema",
-            "oversize",
+            "deadline", "snapshot", "first", "next", "schema", "oversize",
         ];
         for (stage, expected) in stages.into_iter().zip(expected) {
             let value = failure_facts(b"Claude.exe", stage).unwrap();
@@ -388,46 +364,42 @@ mod tests {
             let encoded = serde_json::to_string(&value).unwrap();
             assert!(!encoded.contains("PRIVATE_SENTINEL"));
         }
-        assert!(failure_facts(b"PRIVATE_SENTINEL.exe", InspectionStage::Exit).is_none());
+        assert!(failure_facts(b"PRIVATE_SENTINEL.exe", InspectionStage::Next).is_none());
         assert_eq!(
-            failure_facts(b"ChatGPT.exe", InspectionStage::Spawn).unwrap()["app"],
+            failure_facts(b"ChatGPT.exe", InspectionStage::Snapshot).unwrap()["app"],
             "chatgpt-desktop"
         );
     }
 
     #[test]
-    fn exact_image_and_owned_inspector_are_required() {
-        assert_eq!(csv_presence(INSPECTOR, 123, b"ChatGPT.exe"), Ok(false));
-        let mut rows = INSPECTOR.to_vec();
-        rows.extend_from_slice(b"\"cHaTgPt.exe\",\"456\",\"Console\",\"1\",\"100 K\"\r\n");
-        assert_eq!(csv_presence(&rows, 123, b"ChatGPT.exe"), Ok(true));
-        assert!(csv_presence(&rows, 124, b"ChatGPT.exe").is_err());
-        let mut foreign = INSPECTOR.to_vec();
-        foreign.extend_from_slice(
-            b"\"ChatGPTHelper.exe\",\"456\",\"ChatGPT.exe\",\"1\",\"100 K\"\r\n",
-        );
-        assert_eq!(csv_presence(&foreign, 123, b"ChatGPT.exe"), Ok(false));
-        for row in [
-            b"".as_slice(),
-            b"INFO: No tasks are running",
-            b"INFORMATION: Keine Aufgaben",
-            b"\"ChatGPT.exe\",\"456\"",
-            b"\"broken",
+    fn complete_utf16_scan_requires_self_and_exact_basename() {
+        let name = |s: &str| s.encode_utf16().chain([0]).collect::<Vec<_>>();
+        let mut scan = ProcessScan::default();
+        scan.observe(42, &name("checker.exe"), 42, b"Claude.exe")
+            .unwrap();
+        scan.observe(99, &name("cLaUdE.exe"), 42, b"Claude.exe")
+            .unwrap();
+        assert!(scan.finish(true).unwrap());
+        let mut scan = ProcessScan::default();
+        scan.observe(42, &name("checker.exe"), 42, b"Claude.exe")
+            .unwrap();
+        scan.observe(99, &name("ClaudeHelper.exe"), 42, b"Claude.exe")
+            .unwrap();
+        assert!(!scan.finish(true).unwrap());
+        assert!(ProcessScan::default().finish(true).is_err());
+        assert!(ProcessScan::default().finish(false).is_err());
+        for invalid in [
+            vec![0xd800, 0],
+            vec![65; 260],
+            name("C:/Claude.exe"),
+            name(""),
         ] {
-            assert!(csv_presence(row, 123, b"ChatGPT.exe").is_err());
+            assert!(
+                ProcessScan::default()
+                    .observe(42, &invalid, 42, b"Claude.exe")
+                    .is_err()
+            );
         }
-        assert!(csv_presence(&vec![b'x'; 65537], 123, b"ChatGPT.exe").is_err());
-    }
-    #[test]
-    fn claude_exact_image_is_case_insensitive_and_helpers_do_not_match() {
-        let mut rows = INSPECTOR.to_vec();
-        rows.extend_from_slice(b"\"cLaUdE.exe\",\"456\",\"Console\",\"1\",\"100 K\"\r\n");
-        assert_eq!(csv_presence(&rows, 123, b"Claude.exe"), Ok(true));
-        assert_eq!(csv_presence(&rows, 123, b"ChatGPT.exe"), Ok(false));
-        let mut helpers = INSPECTOR.to_vec();
-        helpers
-            .extend_from_slice(b"\"ClaudeHelper.exe\",\"456\",\"Claude.exe\",\"1\",\"100 K\"\r\n");
-        assert_eq!(csv_presence(&helpers, 123, b"Claude.exe"), Ok(false));
     }
 
     #[test]

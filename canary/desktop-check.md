@@ -1467,3 +1467,30 @@ misidentified as Alt or Super; unknown bits remain unknown. This requires no ext
 query or action and cannot certify GPUI callback consumption or Retry recovery.
 The matrix still has five qualified cells; new diagnostics and acquisition fixes
 remain subject to native runner acceptance.
+
+
+Native trials on `36f5999c` supply two useful negative observations. macOS Claude
+[37078536365](https://github.com/DavidLMS/nan-harness/actions/runs/37078536365)
+proves initial focus but its final receipt records an incomplete AX `main-window`
+query during confirmation. That is not proof of a changed focused window. Initial
+acquisition now treats only `CannotComplete` as pending while the exact native
+candidate, foreground, ownership, display and clear-stack checks remain safe.
+Pending discards earlier stability, keeps the original deadline and authorizes
+no input. Other proof failures and all later guards remain immediate failures.
+
+Windows Claude
+[37078533986](https://github.com/DavidLMS/nan-harness/actions/runs/37078533986)
+still exhausts process inspection after retained-helper reuse. The next frozen
+implementation enumerates the read-only Toolhelp process snapshot directly,
+without invoking tasklist. It requires complete `ERROR_NO_MORE_FILES` termination,
+the checker's own entry, exact executable names, and no late result. Only its
+snapshot handle is opened/closed; application processes are never opened or killed.
+The same two/five-second process/whole-chain deadlines remain in effect. Legacy
+failure receipts remain decodable; new API failures use closed snapshot/first/next
+stages. The actual Windows API body has been typechecked without executing it.
+
+Linux Zed
+[37078539019](https://github.com/DavidLMS/nan-harness/actions/runs/37078539019)
+observes no held modifiers or mouse buttons in all three Retry dispatches. Server
+delivery, first reply/tool acceptance and cleanup pass; Retry recovery does not.
+This eliminates held-input-state as the cause in these probes. No cell is promoted.

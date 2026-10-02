@@ -986,7 +986,7 @@ class QualificationTests(unittest.TestCase):
             value = dict(schemaVersion=1, mechanism='windows-process-absence', diagnosticsOnly=True,
                          app='claude-desktop', stage='deadline')
             path = root / 'process.json'
-            for stage in ('deadline', 'system-root', 'private-output', 'spawn', 'exit', 'read', 'schema', 'oversize'):
+            for stage in ('deadline', 'system-root', 'private-output', 'spawn', 'exit', 'read', 'schema', 'oversize', 'snapshot', 'first', 'next'):
                 record = {**value, 'stage': stage}
                 path.write_text(json.dumps(record))
                 self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [record])
