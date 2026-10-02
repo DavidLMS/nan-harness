@@ -1,6 +1,19 @@
 // Bound native ancestry and listener ownership; no application data is read.
 exports.proof = function(owner, port) {
 const fs = require("node:fs");
+function saveWindowsProof(category) {
+  const directory = process.env?.NANH_DESKTOP_QUALIFICATION_FACTS;
+  if (process.env?.GITHUB_ACTIONS !== 'true' || process.env?.RUNNER_ENVIRONMENT !== 'github-hosted'
+      || !directory) return;
+  try {
+    const path = require('node:path');
+    if (!path.isAbsolute(directory) || !fs.lstatSync(directory).isDirectory()) return;
+    const output = path.join(directory, `windows-proof-${process.pid}.json`);
+    const value = { schemaVersion: 1, mechanism: 'windows-endpoint-proof', diagnosticsOnly: true, category };
+    fs.writeFileSync(`${output}.tmp`, JSON.stringify(value) + '\n', { mode: 0o600 });
+    fs.renameSync(`${output}.tmp`, output);
+  } catch { /* A missing diagnostic never authorizes an action. */ }
+}
 function windowsProof(mode, value, root) {
   if (!['endpoint', 'descendant'].includes(mode) || !Number.isSafeInteger(value)
       || value <= 1 || value > (mode === 'endpoint' ? 65535 : 2147483647)
@@ -11,8 +24,10 @@ function windowsProof(mode, value, root) {
         mode, String(value), String(root)],
       { encoding: 'utf8', timeout: 8000, maxBuffer: 4096,
         stdio: ['ignore', 'pipe', 'ignore'] });
+    const categories = ['true', 'process-budget', 'ancestry-cycle', 'process-unavailable', 'parent-unavailable', 'parent-reused', 'session-mismatch', 'ancestry-limit', 'listener-unavailable', 'query-failed'];
+    saveWindowsProof(categories.includes(result) ? (result === 'true' ? 'owned' : result) : 'unclassified');
     return result === 'true';
-  } catch { return false; }
+  } catch (error) { saveWindowsProof(error?.code === 'ETIMEDOUT' ? 'transport-timeout' : 'transport-failed'); return false; }
 }
 function descendant(pid) {
   if (process.platform === 'win32') return windowsProof('descendant', pid, Number(owner));

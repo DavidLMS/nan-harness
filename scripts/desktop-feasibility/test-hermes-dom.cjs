@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const ownershipSource = fs.readFileSync(`${__dirname}/endpoint-ownership.cjs`, 'utf8');
-const ownershipFunctions = ownershipSource.slice(ownershipSource.indexOf('function windowsProof('), ownershipSource.indexOf('return { ownedEndpoint'));
+const ownershipFunctions = ownershipSource.slice(ownershipSource.indexOf('function saveWindowsProof('), ownershipSource.indexOf('return { ownedEndpoint'));
 const source = fs.readFileSync(`${__dirname}/observe-hermes.cjs`, 'utf8').replace("const { ownedEndpoint, descendant, parentPid, windowsProof } = require('./endpoint-ownership.cjs').proof(owner, port);", ownershipFunctions).replace('await driveDom(); process.exit(', 'await driveDom(); return process.exit(');
 async function trial(overrides, connectionOverrides = {}, scenario = null, qualify = false) {
   const output = new Map();

@@ -95,6 +95,19 @@ class RunnerTests(unittest.TestCase):
 
 
 class QualificationTests(unittest.TestCase):
+    def test_windows_proof_diagnostics_remain_closed(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'proof.json'
+            value = dict(schemaVersion=1, mechanism='windows-endpoint-proof', diagnosticsOnly=True,
+                         category='transport-timeout')
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(Path(root), 'hermes-desktop'), [value])
+            for changed in ({**value, 'category': ['PRIVATE']}, {**value, 'stderr': 'PRIVATE'},
+                            {**value, 'category': None}, {**value, 'diagnosticsOnly': False}):
+                path.write_text(json.dumps(changed))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(Path(root), 'hermes-desktop')
+
     def test_backend_failure_categories_never_export_error_text(self):
         with tempfile.TemporaryDirectory() as root:
             path = Path(root) / 'backend.json'
