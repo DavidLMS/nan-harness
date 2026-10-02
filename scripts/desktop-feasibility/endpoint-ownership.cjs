@@ -27,7 +27,7 @@ function windowsProof(mode, value, root) {
       native ? [`${__dirname}/endpoint-owner-windows.py`, mode, String(value), String(root)]
         : ['-NoProfile', '-NonInteractive', '-File', `${__dirname}/endpoint-owner.ps1`,
            mode, String(value), String(root)],
-      { encoding: 'utf8', timeout: 8000, maxBuffer: 4096,
+      { encoding: 'utf8', timeout: 8000, maxBuffer: 4096, windowsHide: true,
         stdio: ['ignore', 'pipe', 'ignore'] });
     const categories = ['true', 'process-budget', 'ancestry-cycle', 'process-unavailable', 'parent-unavailable', 'parent-reused', 'session-mismatch', 'ancestry-limit', 'listener-unavailable', 'query-failed'];
     saveWindowsProof(categories.includes(result) ? (result === 'true' ? 'owned' : result) : 'unclassified');

@@ -379,3 +379,17 @@ loopback listener, including rejection of concurrent IPv6 listeners. It rechecks
 the listener after ancestry proof and retains no PID map across actions. Native
 metadata contracts run before GUI launch. This aims to remove repeated CIM
 startup from the bounded action deadline; native qualification remains pending.
+
+The same hosted Win32 proof is used during native Windows window acquisition.
+Repeated PowerShell/CIM ancestry startup otherwise consumes the 45-second
+stability deadline before two post-fit snapshots can agree. Native observation
+helpers also use `CREATE_NO_WINDOW`, and the renderer proof uses `windowsHide`,
+so metadata queries do not create foreground consoles. These changes preserve
+window identity, geometry, foreground, ancestry and cleanup acceptance checks.
+
+Run [36982949036](https://github.com/DavidLMS/nan-harness/actions/runs/36982949036)
+passes the X11 client/frame ownership check. Two transports fail while waiting
+for movement and one dispatch still fails recovery. The helper replaces
+`mousemove --sync`, which waits for movement even when already at the target,
+with one movement and an exact bounded pointer-position readback. It never
+replays uncertain clicks; recovery remains unqualified until fresh full evidence.

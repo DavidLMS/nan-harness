@@ -904,6 +904,78 @@ fn process_ownership(pid: u32, owner: u32) -> Result<(), OwnershipFailure> {
 }
 
 #[cfg(windows)]
+fn qualification_process_ownership(pid: u32, owner: u32) -> Option<Result<(), OwnershipFailure>> {
+    use std::io::Read as _;
+    use std::os::windows::process::CommandExt as _;
+    use std::process::{Command, Stdio};
+    if std::env::var("GITHUB_ACTIONS").as_deref() != Ok("true")
+        || std::env::var("RUNNER_ENVIRONMENT").as_deref() != Ok("github-hosted")
+    {
+        return None;
+    }
+    let python = std::env::var_os("FEASIBILITY_WINDOWS_PROOF_PYTHON")?;
+    let script = std::env::var_os("FEASIBILITY_WINDOWS_PROOF_SCRIPT")?;
+    let outcome = (|| {
+        let python = std::path::PathBuf::from(python);
+        let script = std::path::PathBuf::from(script);
+        if !python.is_absolute()
+            || !python.is_file()
+            || python.is_symlink()
+            || !script.is_absolute()
+            || !script.is_file()
+            || script.is_symlink()
+        {
+            return Err(OwnershipFailure::CandidateGroupLookupUnavailable);
+        }
+        let mut command = Command::new(python);
+        command
+            .env_clear()
+            .arg(script)
+            .arg("descendant")
+            .arg(pid.to_string())
+            .arg(owner.to_string())
+            .creation_flags(0x0800_0000)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+        if let Some(root) = std::env::var_os("SystemRoot") {
+            command.env("SystemRoot", root);
+        }
+        let mut child = command
+            .spawn()
+            .map_err(|_| OwnershipFailure::CandidateGroupLookupUnavailable)?;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            match child.try_wait() {
+                Ok(Some(status)) if status.success() => break,
+                Ok(None) if std::time::Instant::now() < deadline => {
+                    std::thread::sleep(std::time::Duration::from_millis(10))
+                }
+                _ => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(OwnershipFailure::CandidateGroupLookupUnavailable);
+                }
+            }
+        }
+        let mut output = Vec::new();
+        child
+            .stdout
+            .take()
+            .ok_or(OwnershipFailure::CandidateGroupLookupUnavailable)?
+            .take(64)
+            .read_to_end(&mut output)
+            .map_err(|_| OwnershipFailure::CandidateGroupLookupUnavailable)?;
+        if output == b"true" {
+            Ok(())
+        } else {
+            Err(OwnershipFailure::CandidateGroupLookupUnavailable)
+        }
+    })();
+    Some(outcome)
+}
+
+#[cfg(windows)]
 fn process_ownership(pid: u32, owner: u32) -> Result<(), OwnershipFailure> {
     use std::process::{Command, Stdio};
     if owner == 0 {
@@ -911,6 +983,9 @@ fn process_ownership(pid: u32, owner: u32) -> Result<(), OwnershipFailure> {
     }
     if pid == 0 {
         return Err(OwnershipFailure::CandidateGroupLookupUnavailable);
+    }
+    if let Some(outcome) = qualification_process_ownership(pid, owner) {
+        return outcome;
     }
     Command::new("powershell.exe").args(["-NoProfile", "-NonInteractive", "-Command", "try { $candidateId = [uint32]$env:NAN_CHECK_APP_PID; $ownerId = [uint32]$env:NAN_CHECK_OWNER_PID; for ($depth = 0; $depth -lt 32; $depth++) { if ($candidateId -eq $ownerId) { exit 0 }; $candidate = Get-CimInstance Win32_Process -Filter \"ProcessId=$candidateId\" -ErrorAction Stop; if ($null -eq $candidate) { exit 43 }; if ($candidate.ParentProcessId -eq 0) { exit 42 }; $candidateId = $candidate.ParentProcessId }; exit 43 } catch { exit 43 }"])
         .env("NAN_CHECK_APP_PID", pid.to_string()).env("NAN_CHECK_OWNER_PID", owner.to_string()).env_remove("NAN_API_KEY").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status().map_or(Err(OwnershipFailure::CandidateGroupLookupUnavailable), |status| if status.success() { Ok(()) } else if status.code() == Some(42) { Err(OwnershipFailure::DifferentGroup) } else { Err(OwnershipFailure::CandidateGroupLookupUnavailable) })

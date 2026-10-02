@@ -43,12 +43,12 @@ class Transport(unittest.TestCase):
             calls.append(args)
             self.assertLessEqual(kwargs['timeout'], 2)
             self.assertEqual(kwargs['stderr'], subprocess.DEVNULL)
-            output = b'40\n' if args[1] == 'getactivewindow' else b'20\n'
+            output = b'X=100\nY=200\nSCREEN=0\nWINDOW=40' if args[1] == 'getmouselocation' else b'40\n' if args[1] == 'getactivewindow' else b'20\n'
             return subprocess.CompletedProcess(args, 0, stdout=output)
         with patch('subprocess.run', side_effect=execute):
             self.assertEqual(self.call('retry-click', request), 0)
         self.assertEqual([args[1] for args in calls],
-                         ['getactivewindow', 'getwindowpid', 'mousemove',
+                         ['getactivewindow', 'getwindowpid', 'mousemove', 'getmouselocation',
                           'getactivewindow', 'getwindowpid', 'click'])
         self.assertEqual(calls[-1], ['/usr/bin/xdotool', 'click', '--clearmodifiers', '1'])
         with patch.dict(module['main'].__globals__, owned_frame=lambda a, b: a == b), patch('subprocess.run', return_value=subprocess.CompletedProcess([], 0, stdout=b'99')) as run:
@@ -58,9 +58,10 @@ class Transport(unittest.TestCase):
                 subprocess.CompletedProcess([], 0, stdout=b'40'),
                 subprocess.CompletedProcess([], 0, stdout=b'20'),
                 subprocess.CompletedProcess([], 0),
+                subprocess.CompletedProcess([], 0, stdout=b'X=100\nY=200\nSCREEN=0\nWINDOW=40'),
                 subprocess.CompletedProcess([], 0, stdout=b'99')]) as run:
             self.assertEqual(self.call('retry-click', request), 11)
-            self.assertEqual(run.call_count, 4)
+            self.assertEqual(run.call_count, 5)
 
     def test_active_client_must_have_the_exact_owned_frame_as_ancestor(self):
         matches = module['matches_owned_frame']
@@ -82,7 +83,7 @@ class Transport(unittest.TestCase):
                 calls.append(args[1])
                 if args[1] == failed:
                     raise subprocess.TimeoutExpired('fixed-helper', 2)
-                output = b'40' if args[1] == 'getactivewindow' else b'20'
+                output = b'X=100\nY=200\nSCREEN=0\nWINDOW=40' if args[1] == 'getmouselocation' else b'40' if args[1] == 'getactivewindow' else b'20'
                 return subprocess.CompletedProcess(args, 0, stdout=output)
             with patch('subprocess.run', side_effect=execute):
                 self.assertEqual(self.call('retry-click', request), code)

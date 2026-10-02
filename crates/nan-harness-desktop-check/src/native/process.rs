@@ -101,6 +101,12 @@ fn run_once(
             command.env(name, value);
         }
     }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt as _;
+        // Read-only helper consoles must not disturb the window being observed.
+        command.creation_flags(0x0800_0000);
+    }
     let mut child = command.spawn().map_err(|_| FailureCategory::Spawn)?;
     let stdin = child.stdin.take().ok_or(FailureCategory::Pipe)?;
     let stdout = child.stdout.take().ok_or(FailureCategory::Pipe)?;

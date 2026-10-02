@@ -79,6 +79,16 @@ def retry_click(payload):
             if not query:
                 return None
             output = result.stdout.strip()
+            if query == 'position':
+                if len(output) > 256:
+                    raise ValueError('invalid pointer observation')
+                parts = [line.split(b'=', 1) for line in output.splitlines()]
+                if len(parts) != 4 or any(len(part) != 2 for part in parts):
+                    raise ValueError('invalid pointer observation')
+                values = dict(parts)
+                if set(values) != {b'X', b'Y', b'SCREEN', b'WINDOW'}:
+                    raise ValueError('invalid pointer observation')
+                return int(values[b'X']), int(values[b'Y'])
             if len(output) > 32 or not output.isdigit():
                 raise ValueError('invalid identity')
             return int(output)
@@ -94,7 +104,11 @@ def retry_click(payload):
         if guard:
             return guard
         stage = 14
-        run(['mousemove', '--sync', '--', str(request['x']), str(request['y'])])
+        # --sync waits for motion and can hang when the pointer is already here.
+        # Dispatch once and prove the resulting position instead.
+        run(['mousemove', '--', str(request['x']), str(request['y'])])
+        if run(['getmouselocation', '--shell'], 'position') != (request['x'], request['y']):
+            return 14
         stage = 15
         guard = owned_foreground()
         if guard:
