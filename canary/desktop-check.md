@@ -18,10 +18,16 @@ Closed startup facts remain separate from the envelope; neither contains raw
 application output.
 
 The runner, report validation and lifecycle contracts have local automated
-tests. The five real applications have **not yet been qualified** on the native
-Actions matrix. Do not interpret the synthetic accessibility experiment or a
-passing unit suite as application compatibility. Complete disposable-runner
-qualification before distributing this checker for personal-machine use.
+tests. Two semantic adapters have passed three complete deterministic native probes:
+Zed 1.22.0 on macOS ARM64 in [run 36940833922](https://github.com/DavidLMS/nan-harness/actions/runs/36940833922)
+and Hermes 0.17.6 on Linux x64 in [run 36947236678](https://github.com/DavidLMS/nan-harness/actions/runs/36947236678).
+Both verify response, real file-tool use, controlled provider failure, UI Retry
+recovery and cleanup without OCR. Hermes observes Chromium 144.0.7559.236;
+Electron's separate version and Zed's runtime version remain unobserved. Exact
+commits and artifact hashes are recorded in each closed result. These results
+qualify two cells; the other thirteen cells in the five-application, three-platform
+matrix remain pending. Personal-machine isolation and live-provider behavior
+still require separate evidence.
 
 Native Zed 1.18.1 qualification on 2026-09-08 passed three complete deterministic
 scenarios on both macOS architectures in run 34265009005, but subsequent input
@@ -109,7 +115,9 @@ and platform adapters require their own native evidence.
 Until the qualification workflow is present on the default branch, use the
 registered `Desktop semantic automation feasibility` workflow on the integration
 branch with `experiment=deterministic-full`. Select `native_only=true` while
-iterating; select `quality_only=true` for the final repository gate. The older
+iterating. For the final tree, select `app=all`, `native_only=false` and
+`quality_only=false` to run both native adapters and the repository gate on the
+same commit. Select `quality_only=true` when only the repository gate is needed. The older
 `native-copy-dom` experiment remains feasibility evidence and cannot satisfy
 the full acceptance gate. Implemented adapters are accepted only when their
 full native result meets the gate; implementation and feasibility alone do not
@@ -127,15 +135,13 @@ onboarding cover, Hermes selects its normal “I'll choose a provider later”
 button once, verifies the cover disappeared, and revalidates the same failed
 turn before Retry. It never calls the onboarding store or changes provider
 credentials. The closed report records this UI preparation. Hermes binds
-error, Retry and assistant
-response to the expected user's renderer turn pair. A passing probe must
+error, Retry and assistant response to the expected user's renderer turn pair. A passing probe must
 verify the assistant response, a real file-tool round trip, an observed provider
 failure, and recovery through exactly one UI Retry in the failed turn. Each
 response also needs independent completed-provider evidence. Zed treats the
 exact AX completion timeout as an ambiguous receipt and observes recovery
 without repeating the press; a fresh resumed export and provider response must
-still pass. Three passing
-probes and successful app/global cleanup are required per accepted cell.
+still pass. Three passing probes and successful app/global cleanup are required per accepted cell.
 
 Hermes's UI Retry trial sets the supported `agent.auto_recovery_cycles: 0` in
 its fresh owned profile before the first turn. Ordinary API retries retain the
