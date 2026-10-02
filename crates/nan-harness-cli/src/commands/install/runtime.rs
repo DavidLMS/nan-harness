@@ -42,14 +42,56 @@ pub(super) fn runtime_hint_for(
     locale: nan_harness_i18n::Locale,
 ) -> String {
     if cfg!(windows) {
-        nan_harness_i18n::messages::install_runtime_windows(locale, kind.binary_name(), minimum)
-    } else {
+        return nan_harness_i18n::messages::install_runtime_windows(
+            locale,
+            kind.binary_name(),
+            minimum,
+        );
+    }
+    let nvm_dir = std::env::var_os("NVM_DIR");
+    let path = std::env::var_os("PATH");
+    unix_runtime_hint(
+        kind,
+        minimum,
+        locale,
+        nvm_dir.as_deref(),
+        path.as_deref(),
+        cfg!(target_os = "macos"),
+    )
+}
+
+fn unix_runtime_hint(
+    kind: HarnessKind,
+    minimum: &Version,
+    locale: nan_harness_i18n::Locale,
+    nvm_dir: Option<&std::ffi::OsStr>,
+    path: Option<&std::ffi::OsStr>,
+    macos: bool,
+) -> String {
+    if nvm_dir.is_some_and(|path| {
+        let directory = std::path::Path::new(path);
+        directory.is_absolute() && directory.join("nvm.sh").is_file()
+    }) {
         nan_harness_i18n::messages::install_runtime_nvm(
             locale,
             kind.binary_name(),
             &minimum.major,
             minimum,
         )
+    } else if macos
+        && path.is_some_and(|path| {
+            std::env::split_paths(path)
+                .any(|directory| nan_harness_runtime::is_executable_file(&directory.join("brew")))
+        })
+    {
+        nan_harness_i18n::messages::install_runtime_homebrew(
+            locale,
+            kind.binary_name(),
+            &minimum.major,
+            minimum,
+        )
+    } else {
+        nan_harness_i18n::messages::install_runtime_official(locale, kind.binary_name(), minimum)
     }
 }
 
@@ -127,6 +169,47 @@ mod tests {
     use nan_harness_core::HarnessKind;
 
     #[test]
+    fn unix_recovery_requires_installed_tools_and_loads_nvm_before_using_it() {
+        let directory = tempfile::tempdir().expect("temporary tool directory");
+        let minimum = semver::Version::new(24, 14, 0);
+        let hint = |nvm, path, macos| {
+            super::unix_runtime_hint(
+                HarnessKind::ZCode,
+                &minimum,
+                nan_harness_i18n::Locale::En,
+                nvm,
+                path,
+                macos,
+            )
+        };
+        let fallback = hint(None, None, true);
+        assert!(fallback.contains("https://nodejs.org/en/download"));
+        assert!(!fallback.contains("nvm install"));
+        assert!(!fallback.contains("brew install"));
+        let nvm = Some(directory.path().as_os_str());
+        assert_eq!(hint(nvm, None, true), fallback);
+        std::fs::write(directory.path().join("nvm.sh"), "# synthetic nvm").expect("nvm script");
+        let installed = hint(nvm, None, false);
+        assert!(installed.contains(". \"$NVM_DIR/nvm.sh\"\n  nvm install 24"));
+        assert!(installed.contains("nvm use 24"));
+        let brew = directory.path().join("brew");
+        std::fs::write(&brew, "#!/bin/sh\n").expect("synthetic Homebrew");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            std::fs::set_permissions(&brew, std::fs::Permissions::from_mode(0o755))
+                .expect("Homebrew executable");
+        }
+        let path = Some(directory.path().as_os_str());
+        let homebrew = hint(None, path, true);
+        assert!(homebrew.contains("brew install node@24"));
+        assert!(homebrew.contains("export PATH=\"$(brew --prefix node@24)/bin:$PATH\""));
+        assert!(!homebrew.contains("nvm install"));
+        assert_eq!(hint(None, path, false), fallback);
+        assert_eq!(hint(nvm, path, true), installed);
+    }
+
+    #[test]
     fn deepseek_harness_declares_the_node_runtime_requirement() {
         let requirement = runtime_requirement(HarnessKind::DeepSeekHarness)
             .expect("embedded compatibility manifest should be valid")
@@ -147,10 +230,6 @@ mod tests {
             assert!(hint.contains("https://nodejs.org/en/download"));
             assert!(hint.contains("where.exe node"));
             assert!(hint.contains("Open a new terminal"));
-        } else {
-            assert!(hint.contains("nvm install 22"));
-            assert!(hint.contains("nvm use 22"));
-            assert!(hint.contains("official Node.js installer"));
         }
         assert!(hint.contains("node --version"));
         assert!(hint.contains("nanh dsh"));

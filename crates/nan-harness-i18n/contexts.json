@@ -6563,7 +6563,21 @@
       "crates/nan-harness-cli/src/commands/install.rs"
     ]
   },
+  "install_runtime_homebrew": {
+    "description": "Installation, updates and removal. Preserve command names, paths, provider identifiers and diagnostic codes.",
+    "section": "install",
+    "sources": [
+      "crates/nan-harness-cli/src/commands/install/runtime.rs"
+    ]
+  },
   "install_runtime_nvm": {
+    "description": "Installation, updates and removal. Preserve command names, paths, provider identifiers and diagnostic codes.",
+    "section": "install",
+    "sources": [
+      "crates/nan-harness-cli/src/commands/install/runtime.rs"
+    ]
+  },
+  "install_runtime_official": {
     "description": "Installation, updates and removal. Preserve command names, paths, provider identifiers and diagnostic codes.",
     "section": "install",
     "sources": [
