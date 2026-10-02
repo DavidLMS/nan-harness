@@ -18,16 +18,20 @@ Closed startup facts remain separate from the envelope; neither contains raw
 application output.
 
 The runner, report validation and lifecycle contracts have local automated
-tests. Two semantic adapters have passed three complete deterministic native probes:
-Zed 1.22.0 on macOS ARM64 in [run 36940833922](https://github.com/DavidLMS/nan-harness/actions/runs/36940833922)
-and Hermes 0.17.6 on Linux x64 in [run 36947236678](https://github.com/DavidLMS/nan-harness/actions/runs/36947236678).
-Both verify response, real file-tool use, controlled provider failure, UI Retry
-recovery and cleanup without OCR. Hermes observes Chromium 144.0.7559.236;
-Electron's separate version and Zed's runtime version remain unobserved. Exact
-commits and artifact hashes are recorded in each closed result. These results
-qualify two cells; the other thirteen cells in the five-application, three-platform
-matrix remain pending. Personal-machine isolation and live-provider behavior
-still require separate evidence.
+tests. Four cells have passed three complete deterministic native probes:
+Zed 1.22.0 on macOS ARM64 in [run 36976970895](https://github.com/DavidLMS/nan-harness/actions/runs/36976970895),
+Zed 1.22.0 on Windows x64 in [run 36996850316](https://github.com/DavidLMS/nan-harness/actions/runs/36996850316),
+and Hermes 0.17.6 on Linux x64 and macOS ARM64 in
+[run 36978761448](https://github.com/DavidLMS/nan-harness/actions/runs/36978761448).
+All verify response, real file-tool use, controlled provider failure, UI Retry
+recovery and application, global and clipboard cleanup without OCR. Hermes
+observes Chromium 144.0.7559.236; Electron's separate version and Zed's runtime
+version remain unobserved. Exact commits and artifact hashes are recorded in
+each closed result. Eleven cells in the five-application, three-platform matrix
+remain unqualified. The three Pen cells are blocked by vendor activation: no
+official account-free route is established, and no test account is authorized.
+Personal-machine isolation and live-provider behavior still require separate
+evidence.
 
 Native Zed 1.18.1 qualification on 2026-09-08 passed three complete deterministic
 scenarios on both macOS architectures in run 34265009005, but subsequent input
@@ -519,3 +523,17 @@ Claude Windows startup run
 now acquires a stable owned window, but observes zero editable, Retry or login
 controls and fails cleanup. Further diagnosis must establish native configuration
 path alignment and accessible web-content availability before a conversation test.
+
+Run [36996850316](https://github.com/DavidLMS/nan-harness/actions/runs/36996850316)
+qualifies Zed Windows on source `25fa3d733d52204dac9b33b007bc1166fbb42afe`:
+all three probes complete all five steps, with one exported Resume and independent
+provider recovery per probe. Application, global and clipboard cleanup pass.
+The native Unicode/invalid-input/clear contract also passes before app installation.
+
+The next Zed Linux trial enables a first-map Openbox maximization rule only in
+that hosted workflow cell. It copies the runner's stock configuration, preserving
+focus and input bindings, and appends an exact normal-window rule matching both
+`dev.zed.Zed` instance and class. The private configuration is removed with the
+owned window manager. No already-bound window is resized, no geometry guard is
+relaxed and no input is replayed. This remains a trial until three complete
+native probes and cleanup pass.

@@ -59,13 +59,13 @@ fn exercise_self_update(invocation: Invocation) {
         .output()
         .expect("copied test process should start");
     let server_result = server.join().expect("artifact server should finish");
-    server_result.expect("artifact server should deliver the candidate");
     assert!(
         output.status.success(),
         "self-update child failed:\nstdout:\n{}\nstderr:\n{}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
+    server_result.expect("artifact server should deliver the candidate");
 
     let version = Command::new(&target)
         .arg("--version")
