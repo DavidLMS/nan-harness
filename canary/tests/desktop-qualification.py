@@ -517,6 +517,26 @@ class QualificationTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'hermes-desktop')
 
+    def test_renderer_document_diagnostics_reject_text_and_partial_records(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            value = dict(schemaVersion=1, mechanism='renderer-inventory', diagnosticsOnly=True,
+                         app='pen-desktop', endpointOwned=True, launcherOwned=True, attached=True,
+                         pageCount=1, textareaCount=0, editableCount=0, sendCount=0,
+                         retryCount=0, newThreadCount=0, loginCount=0, dialogCount=0, errorCategory=None)
+            state = dict(readyState='complete', targetKind='file', bodyPresent=True,
+                         elementCount=10, visibleElementCount=2, inputCount=0, frameCount=1, pageErrorCount=0)
+            path = root / 'inventory.json'
+            value['documentState'] = state
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(root, 'pen-desktop'), [value])
+            for changed in ({**state, 'url': 'PRIVATE'}, {**state, 'targetKind': 'PRIVATE'},
+                            {**state, 'inputCount': True}, {**state, 'readyState': None},
+                            {key: item for key, item in state.items() if key != 'frameCount'}):
+                path.write_text(json.dumps({**value, 'documentState': changed}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'pen-desktop')
+
     def test_renderer_inventory_is_closed_and_cannot_claim_acceptance(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

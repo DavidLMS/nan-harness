@@ -145,7 +145,7 @@ def semantic_observations(directory, app):
                 raise ValueError('invalid renderer exit code')
             for key in ('stderrPresent', 'captureTruncated'):
                 flag(record, value, key)
-            enum(record, value, 'startupCategory', {'unclassified', 'no-usable-sandbox', 'missing-shared-library', 'display-unavailable'})
+            enum(record, value, 'startupCategory', {'unclassified', 'no-usable-sandbox', 'missing-shared-library', 'display-unavailable', 'debugging-configuration', 'missing-runtime-module', 'runtime-exception', 'permission-denied'})
             record.update(app=app, diagnosticsOnly=True, exitCode=code)
         elif mechanism == 'native-window-stability':
             if set(value) != {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'counts'} or value['diagnosticsOnly'] is not True:
@@ -163,7 +163,7 @@ def semantic_observations(directory, app):
             record.update(diagnosticsOnly=True, counts=counts)
         elif mechanism == 'renderer-inventory':
             fields = set('schemaVersion mechanism diagnosticsOnly app endpointOwned launcherOwned attached pageCount textareaCount editableCount sendCount retryCount newThreadCount loginCount dialogCount errorCategory'.split())
-            if set(value) != fields or value['app'] != app or value['diagnosticsOnly'] is not True:
+            if set(value) - {'documentState'} != fields or value['app'] != app or value['diagnosticsOnly'] is not True:
                 raise ValueError('invalid renderer inventory identity')
             for key in ('endpointOwned', 'launcherOwned', 'attached'):
                 flag(record, value, key)
@@ -172,6 +172,22 @@ def semantic_observations(directory, app):
                 if type(count) is not int or not 0 <= count <= 4096:
                     raise ValueError('invalid renderer inventory count')
                 record[key] = count
+            if 'documentState' in value:
+                state = value['documentState']
+                keys = set('readyState targetKind bodyPresent elementCount visibleElementCount inputCount frameCount pageErrorCount'.split())
+                if type(state) is not dict or set(state) != keys:
+                    raise ValueError('invalid renderer document fields')
+                if state['readyState'] is None or state['targetKind'] is None:
+                    raise ValueError('missing renderer document state')
+                closed = {}
+                enum(closed, state, 'readyState', {'unobserved', 'loading', 'interactive', 'complete'})
+                enum(closed, state, 'targetKind', {'unobserved', 'blank', 'file', 'http', 'https', 'browser-error', 'app', 'other'})
+                flag(closed, state, 'bodyPresent')
+                for key in ('elementCount', 'visibleElementCount', 'inputCount', 'frameCount', 'pageErrorCount'):
+                    if type(state[key]) is not int or not 0 <= state[key] <= 4096:
+                        raise ValueError('invalid renderer document count')
+                    closed[key] = state[key]
+                record['documentState'] = closed
             enum(record, value, 'errorCategory', DOM_ERRORS)
             record.update(app=app, diagnosticsOnly=True)
         elif mechanism == 'semantic-inventory':

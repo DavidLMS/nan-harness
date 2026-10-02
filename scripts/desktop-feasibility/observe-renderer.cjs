@@ -9,7 +9,7 @@ const app = process.env.NANH_DESKTOP_RENDERER_APP;
 const facts = { schemaVersion: 1, mechanism: 'renderer-inventory', diagnosticsOnly: true,
   app, endpointOwned: false, launcherOwned: false, attached: false, pageCount: 0,
   textareaCount: 0, editableCount: 0, sendCount: 0, retryCount: 0,
-  newThreadCount: 0, loginCount: 0, dialogCount: 0, errorCategory: 'unclassified' };
+  newThreadCount: 0, loginCount: 0, dialogCount: 0, documentState: { readyState: 'unobserved', targetKind: 'unobserved', bodyPresent: false, elementCount: 0, visibleElementCount: 0, inputCount: 0, frameCount: 0, pageErrorCount: 0 }, errorCategory: 'unclassified' };
 function save() {
   fs.writeFileSync(`${output}.tmp`, JSON.stringify(facts) + '\n', { mode: 0o600 });
   fs.renameSync(`${output}.tmp`, output);
@@ -36,6 +36,8 @@ async function run() {
     facts.pageCount = Math.min(4096, pages.length);
     if (pages.length !== 1) { facts.errorCategory = 'target-ambiguous'; save(); return; }
     const page = pages[0];
+    let pageErrorCount = 0;
+    page.on('pageerror', () => { pageErrorCount = Math.min(4096, pageErrorCount + 1); });
     await new Promise(r => setTimeout(r, 3000));
     if (!ownership.ownedEndpoint()) { facts.endpointOwned = false; facts.errorCategory = 'endpoint-unowned'; save(); return; }
     const counts = await page.evaluate(() => {
@@ -48,8 +50,17 @@ async function run() {
         sendCount: named(/^(send|send message|submit)$/i), retryCount: named(/^(retry|try again)$/i),
         newThreadCount: named(/^(new chat|new thread|new conversation)$/i),
         loginCount: named(/^(log in|sign in|continue with google|continue with apple)$/i),
-        dialogCount: count('[role="dialog"],[role="alertdialog"]') };
+        dialogCount: count('[role="dialog"],[role="alertdialog"]'),
+        documentState: { readyState: document.readyState,
+          targetKind: location.href === 'about:blank' ? 'blank'
+            : ({ 'file:': 'file', 'http:': 'http', 'https:': 'https',
+                 'chrome-error:': 'browser-error', 'app:': 'app' })[location.protocol] || 'other',
+          bodyPresent: document.body !== null,
+          elementCount: Math.min(4096, document.querySelectorAll('*').length),
+          visibleElementCount: count('*'), inputCount: count('input'),
+          frameCount: Math.min(4096, document.querySelectorAll('iframe,frame').length), pageErrorCount: 0 } };
     });
+    counts.documentState.pageErrorCount = pageErrorCount;
     Object.assign(facts, counts, { errorCategory: null }); save();
   } finally { await browser.close(); }
 }

@@ -68,6 +68,17 @@ fn category(bytes: &[u8]) -> &'static str {
         "missing-shared-library"
     } else if text.contains("Missing X server") || text.contains("Missing X server or $DISPLAY") {
         "display-unavailable"
+    } else if text.contains("remote debugging")
+        || text.contains("remote-debugging")
+        || text.contains("Remote debugging")
+    {
+        "debugging-configuration"
+    } else if text.contains("Cannot find module") || text.contains("ERR_MODULE_NOT_FOUND") {
+        "missing-runtime-module"
+    } else if text.contains("Uncaught Exception") || text.contains("UnhandledPromiseRejection") {
+        "runtime-exception"
+    } else if text.contains("EACCES") || text.contains("EPERM") {
+        "permission-denied"
     } else {
         "unclassified"
     }
@@ -95,6 +106,17 @@ mod tests {
             category(b"Missing X server or $DISPLAY PRIVATE"),
             "display-unavailable"
         );
+        for (sample, expected) in [
+            (
+                "PRIVATE remote-debugging-port rejected",
+                "debugging-configuration",
+            ),
+            ("Cannot find module PRIVATE", "missing-runtime-module"),
+            ("Uncaught Exception PRIVATE", "runtime-exception"),
+            ("EACCES PRIVATE", "permission-denied"),
+        ] {
+            assert_eq!(category(sample.as_bytes()), expected);
+        }
         assert_eq!(
             category(b"PRIVATE credentials and arbitrary error"),
             "unclassified"
