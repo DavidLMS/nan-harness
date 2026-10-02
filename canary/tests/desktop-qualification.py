@@ -514,6 +514,24 @@ class QualificationTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 q.semantic_observations(Path(root), 'zed-desktop')
 
+    def test_claude_focus_query_diagnostics_preserve_failure_and_reject_private_data(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'focus.json'
+            value = dict(schemaVersion=1, mechanism='claude-window-focus', diagnosticsOnly=True,
+                         status='query-error', nativeForegroundWindowMatchedHeld=None,
+                         query=dict(phase='before', stage='input-window', error='attribute-unsupported'))
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(Path(root), 'claude-desktop'), [value])
+            for change in ({'phase': 'after'}, {'stage': 'private-label'}, {'error': 123},
+                           {'path': '/private/profile'}):
+                path.write_text(json.dumps({**value, 'query': {**value['query'], **change}}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(Path(root), 'claude-desktop')
+            value['status'] = 'identity-changed'
+            value['query']['phase'] = 'after'
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(Path(root), 'claude-desktop'), [value])
+
     def test_claude_stack_counts_are_closed_and_overflow_is_unknown(self):
         with tempfile.TemporaryDirectory() as root:
             path = Path(root) / 'stack.json'
@@ -878,6 +896,29 @@ class QualificationTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'pen-desktop')
 
+    def test_claude_restore_receipt_preserves_failure_boundaries_without_details(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            value = dict(schemaVersion=1, mechanism='claude-restore', diagnosticsOnly=True,
+                         stage='process-check', outcome='rejected', errorCategory='app-running')
+            path = root / 'restore.json'
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [value])
+            for changed in ({**value, 'errorCategory': 'PRIVATE'}, {**value, 'stage': 'receipt'},
+                            {**value, 'outcome': 'restored'}, {**value, 'message': 'PRIVATE'},
+                            {**value, 'diagnosticsOnly': False}, {**value, 'stage': []},
+                            {**value, 'errorCategory': []}):
+                path.write_text(json.dumps(changed))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'claude-desktop')
+            for outcome, category in [('restored', None), ('nothing-to-restore', 'no-receipt'),
+                                      ('rejected', 'document-restore')]:
+                receipt = {**value, 'stage': 'receipt', 'outcome': outcome, 'errorCategory': category}
+                path.write_text(json.dumps(receipt))
+                self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [receipt])
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'zed-desktop')
+
     def test_claude_configuration_presence_is_closed_diagnostic_evidence(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -1163,6 +1204,14 @@ class QualificationTests(unittest.TestCase):
                      engineeringChecked=True, continueControl=True, continueClickAttempted=True,
                      continueClickCompleted=True, roleScopeAbsent=True, roleProofFailure='unmeasured', sessionProofFailure='unmeasured')
         self.assertEqual(q.public_onboarding(setup, 'chatgpt-desktop'), setup)
+        inventory = dict(status='complete', total=2, held=1, app=1, blank=1, devtools=0, other=0)
+        self.assertEqual(q.public_onboarding({**setup, 'rejectedPageInventory': inventory}, 'chatgpt-desktop')['rejectedPageInventory'], inventory)
+        for invalid in ({**inventory, 'total': 1}, {**inventory, 'held': 2},
+                        {**inventory, 'blank': True}, {**inventory, 'url': 'PRIVATE'},
+                        {**inventory, 'status': []}, {'status': 'overflow', 'total': 33}):
+            with self.assertRaises(ValueError):
+                q.public_onboarding({**setup, 'rejectedPageInventory': invalid}, 'chatgpt-desktop')
+
         blocked = {**setup, 'roleProofFailure': 'control-not-actionable',
                    'actionabilityFailure': 'foreign-overlay'}
         self.assertEqual(q.public_onboarding(blocked, 'chatgpt-desktop'), blocked)

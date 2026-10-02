@@ -67,13 +67,42 @@ class Tests(unittest.TestCase):
         backend = m.Backend.__new__(m.Backend)
         backend.request = {'pid': 71, 'window': 91}
         backend.frame_matches = lambda active, frame: active == 92 and frame == 91
-        values = iter([b'92', b'71', b'X=100\nY=200\nWIDTH=800\nHEIGHT=600\nSCREEN=0\nWINDOW=92'])
+        backend.client_snapshot = lambda active: ((100, 200), (2, 24), (800, 600), 1, 3)
+        values = iter([b'92', b'71', b'X=102\nY=224\nWIDTH=800\nHEIGHT=600\nSCREEN=0\nWINDOW=92', b'92', b'71'])
         backend.query = lambda args: next(values)
         self.assertEqual(backend.guard(), (100, 200, 800, 600))
         values = iter([b'92', b'72'])
         backend.query = lambda args: next(values)
         with self.assertRaises(ValueError):
             backend.guard()
+
+    def test_client_geometry_change_fails_before_canonical_measurement(self):
+        backend = m.Backend.__new__(m.Backend)
+        backend.request = {'pid': 71, 'window': 91}
+        backend.frame_matches = lambda active, frame: True
+        values = iter([b'92', b'71', b'X=102\nY=224\nWIDTH=800\nHEIGHT=600\nSCREEN=0\nWINDOW=92'])
+        backend.query = lambda args: next(values)
+        snapshots = iter([((100, 200), (2, 24), (800, 600), 1, 3),
+                          ((101, 200), (2, 24), (800, 600), 1, 3)])
+        backend.client_snapshot = lambda active: next(snapshots)
+        with self.assertRaises(ValueError):
+            backend.guard()
+
+    def test_canonical_bounds_add_origin_once_and_reject_inconsistent(self):
+        geometry = (100, 200, 800, 600)
+        local = (10, 20, 40, 40)
+        root = (110, 220, 40, 40)
+        self.assertEqual(m.canonical_rectangle(local, local, geometry), root)
+        self.assertEqual(m.canonical_rectangle(root, local, geometry), root)
+        self.assertIsNone(m.canonical_rectangle((111, 220, 40, 40), local, geometry))
+        with self.assertRaises(ValueError):
+            m.canonical_rectangle(local, local, (2**31 - 1, 0, 10, 10))
+        value = (62, (1 << 20) | (1 << 8) | (1 << 30), local, local)
+        private = []
+        result = m.measure(self.request(), Backend([value, value]), 10, lambda: 0, private)
+        self.assertEqual(private, [dict(index=0, role=62, bounds=list(root), toggle='on')])
+        self.assertNotIn('bounds', result)
+        self.assertEqual(result['containmentRejected'], 0)
 
     def test_deadline_no_queries(self):
         result = m.measure(self.request(), Backend([]), 0, lambda: 1)

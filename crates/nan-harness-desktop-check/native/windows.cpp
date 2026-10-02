@@ -87,39 +87,66 @@ static void window_record_with_layer(std::uint64_t id, std::uint32_t pid, double
               << ' ' << layer << '\n';
 }
 
+const char* classify_ax_error(AXError error) {
+    switch (error) {
+        case kAXErrorFailure: return "failure";
+        case kAXErrorIllegalArgument: return "illegal-argument";
+        case kAXErrorInvalidUIElement: return "invalid-element";
+        case kAXErrorCannotComplete: return "cannot-complete";
+        case kAXErrorAttributeUnsupported: return "attribute-unsupported";
+        case kAXErrorNotImplemented: return "not-implemented";
+        case kAXErrorAPIDisabled: return "api-disabled";
+        case kAXErrorNoValue: return "no-value";
+        default: return "other";
+    }
+}
+
 // Public accessibility focus reads only. No actions, attributes or activation are changed.
 struct AxFocus {
     AXUIElementRef focused = nullptr, main = nullptr, input_window = nullptr;
     CGRect bounds = CGRectZero;
     const char* status = "query-error";
+    const char* query_stage = nullptr;
+    const char* query_error = nullptr;
+    void failure(const char* stage, const char* error) { query_stage = stage; query_error = error; }
     ~AxFocus() {
         if (focused) CFRelease(focused);
         if (main) CFRelease(main);
         if (input_window) CFRelease(input_window);
     }
 };
-static bool ax_attribute(AXUIElementRef element, CFStringRef name, CFTypeRef& value) {
-    return AXUIElementCopyAttributeValue(element, name, &value) == kAXErrorSuccess && value;
+static bool ax_attribute(AXUIElementRef element, CFStringRef name, CFTypeRef& value,
+                         AxFocus& result, const char* stage) {
+    AXError error = AXUIElementCopyAttributeValue(element, name, &value);
+    if (error != kAXErrorSuccess) { result.failure(stage, classify_ax_error(error)); return false; }
+    if (!value) { result.failure(stage, "empty-value"); return false; }
+    return true;
+}
+static bool ax_timeout(AXUIElementRef element, AxFocus& result, const char* stage) {
+    AXError error = AXUIElementSetMessagingTimeout(element, 0.1f);
+    if (error != kAXErrorSuccess) { result.failure(stage, classify_ax_error(error)); return false; }
+    return true;
 }
 static void read_ax_focus(pid_t pid, AxFocus& result) {
     if (!AXIsProcessTrusted()) { result.status = "untrusted"; return; }
     AXUIElementRef app = AXUIElementCreateApplication(pid);
-    if (!app) return;
-    if (AXUIElementSetMessagingTimeout(app, 0.1f) != kAXErrorSuccess) { CFRelease(app); return; }
+    if (!app) { result.failure("app-create", "empty-value"); return; }
+    if (!ax_timeout(app, result, "app-timeout")) { CFRelease(app); return; }
     CFTypeRef focused = nullptr, main = nullptr, input = nullptr, input_window = nullptr;
-    bool read = ax_attribute(app, kAXFocusedWindowAttribute, focused)
-        && ax_attribute(app, kAXMainWindowAttribute, main)
-        && ax_attribute(app, kAXFocusedUIElementAttribute, input);
+    bool read = ax_attribute(app, kAXFocusedWindowAttribute, focused, result, "focused-window")
+        && ax_attribute(app, kAXMainWindowAttribute, main, result, "main-window")
+        && ax_attribute(app, kAXFocusedUIElementAttribute, input, result, "focused-element");
     CFRelease(app);
     if (read && CFGetTypeID(input) == AXUIElementGetTypeID()) {
-        read = AXUIElementSetMessagingTimeout(static_cast<AXUIElementRef>(input), 0.1f) == kAXErrorSuccess;
-        read = read && ax_attribute(static_cast<AXUIElementRef>(input), kAXWindowAttribute, input_window);
-    } else read = false;
+        read = ax_timeout(static_cast<AXUIElementRef>(input), result, "input-timeout");
+        read = read && ax_attribute(static_cast<AXUIElementRef>(input), kAXWindowAttribute, input_window, result, "input-window");
+    } else { if (read) result.failure("element-type", "type-mismatch"); read = false; }
     if (input) CFRelease(input);
     if (!read || !focused || !main || !input_window
         || CFGetTypeID(focused) != AXUIElementGetTypeID()
         || CFGetTypeID(main) != AXUIElementGetTypeID()
         || CFGetTypeID(input_window) != AXUIElementGetTypeID()) {
+        if (read) result.failure("element-type", "type-mismatch");
         if (focused) CFRelease(focused);
         if (main) CFRelease(main);
         if (input_window) CFRelease(input_window);
@@ -133,14 +160,16 @@ static void read_ax_focus(pid_t pid, AxFocus& result) {
     }
     for (auto element : {result.focused, result.main, result.input_window}) {
         pid_t owner = 0;
-        if (AXUIElementGetPid(element, &owner) != kAXErrorSuccess || owner != pid) return;
+        AXError error = AXUIElementGetPid(element, &owner);
+        if (error != kAXErrorSuccess) { result.failure("pid", classify_ax_error(error)); return; }
+        if (owner != pid) { result.failure("pid", "owner-mismatch"); return; }
     }
-    if (AXUIElementSetMessagingTimeout(result.focused, 0.1f) != kAXErrorSuccess) return;
+    if (!ax_timeout(result.focused, result, "window-timeout")) return;
     CFTypeRef role = nullptr, subrole = nullptr, position = nullptr, size = nullptr;
-    read = ax_attribute(result.focused, kAXRoleAttribute, role)
-        && ax_attribute(result.focused, kAXSubroleAttribute, subrole)
-        && ax_attribute(result.focused, kAXPositionAttribute, position)
-        && ax_attribute(result.focused, kAXSizeAttribute, size);
+    read = ax_attribute(result.focused, kAXRoleAttribute, role, result, "role")
+        && ax_attribute(result.focused, kAXSubroleAttribute, subrole, result, "subrole")
+        && ax_attribute(result.focused, kAXPositionAttribute, position, result, "position")
+        && ax_attribute(result.focused, kAXSizeAttribute, size, result, "size");
     if (read && (!CFEqual(role, kAXWindowRole) || !CFEqual(subrole, kAXStandardWindowSubrole))) {
         result.status = "not-standard"; read = false;
     }
@@ -154,7 +183,7 @@ static void read_ax_focus(pid_t pid, AxFocus& result) {
         && dimensions.width > 0 && dimensions.height > 0) {
         result.bounds = CGRectMake(origin.x, origin.y, dimensions.width, dimensions.height);
         result.status = "ready";
-    }
+    } else if (read) result.failure("geometry", "geometry-invalid");
     if (role) CFRelease(role);
     if (subrole) CFRelease(subrole);
     if (position) CFRelease(position);
@@ -197,6 +226,11 @@ static void print_ax_focus(pid_t foreground, CFArrayRef windows, const AxFocus& 
         status = classify_focus_agreement(stable, matches);
     }
     std::cout << "FOCUS " << status << ' ' << id << '\n';
+    const AxFocus& failed = before.query_stage ? before : after;
+    if (failed.query_stage) {
+        std::cout << "FOCUS_QUERY " << (before.query_stage ? "before" : "after") << ' '
+                  << failed.query_stage << ' ' << failed.query_error << '\n';
+    }
 }
 
 static int list_mac_windows(bool include_foreground, bool focus_proof, pid_t expected_pid) {

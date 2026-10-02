@@ -60,6 +60,60 @@ pub(crate) enum FocusStatus {
     Ambiguous,
 }
 #[cfg(any(test, target_os = "macos"))]
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct FocusQuery {
+    phase: FocusQueryPhase,
+    stage: FocusQueryStage,
+    error: FocusQueryError,
+}
+#[cfg(any(test, target_os = "macos"))]
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+enum FocusQueryPhase {
+    Before,
+    After,
+}
+#[cfg(any(test, target_os = "macos"))]
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+enum FocusQueryStage {
+    AppCreate,
+    AppTimeout,
+    FocusedWindow,
+    MainWindow,
+    FocusedElement,
+    InputTimeout,
+    InputWindow,
+    ElementType,
+    Pid,
+    WindowTimeout,
+    Role,
+    Subrole,
+    Position,
+    Size,
+    Geometry,
+}
+#[cfg(any(test, target_os = "macos"))]
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+enum FocusQueryError {
+    Failure,
+    IllegalArgument,
+    InvalidElement,
+    CannotComplete,
+    AttributeUnsupported,
+    NotImplemented,
+    ApiDisabled,
+    NoValue,
+    Other,
+    EmptyValue,
+    TypeMismatch,
+    OwnerMismatch,
+    GeometryInvalid,
+}
+
+#[cfg(any(test, target_os = "macos"))]
 #[derive(Clone)]
 struct FocusProof {
     status: FocusStatus,
@@ -72,6 +126,8 @@ pub(crate) struct Snapshot {
     foreground_window: u64,
     #[cfg(any(test, target_os = "macos"))]
     focus: Option<FocusProof>,
+    #[cfg(any(test, target_os = "macos"))]
+    focus_query: Option<FocusQuery>,
     displays: Vec<Rect>,
     pub(crate) windows: Vec<Window>,
 }
@@ -151,7 +207,10 @@ impl Snapshot {
     }
 
     #[cfg(any(test, target_os = "macos"))]
-    pub(crate) fn focus_observation(&self, held: &Window) -> Option<(FocusStatus, Option<bool>)> {
+    pub(crate) fn focus_observation(
+        &self,
+        held: &Window,
+    ) -> Option<(FocusStatus, Option<bool>, Option<FocusQuery>)> {
         self.focus.as_ref().map(|proof| {
             let matches = (proof.status == FocusStatus::Proved).then(|| {
                 proof.window == held.id
@@ -168,7 +227,7 @@ impl Snapshot {
                         .count()
                         == 1
             });
-            (proof.status, matches)
+            (proof.status, matches, self.focus_query)
         })
     }
 
@@ -187,6 +246,8 @@ impl Snapshot {
             foreground_window: parse(fields[2])?,
             #[cfg(any(test, target_os = "macos"))]
             focus: None,
+            #[cfg(any(test, target_os = "macos"))]
+            focus_query: None,
             displays: Vec::new(),
             windows: Vec::new(),
         };
@@ -212,6 +273,15 @@ impl Snapshot {
                     }
                     snapshot.focus = Some(FocusProof { status, window });
                 }
+                #[cfg(any(test, target_os = "macos"))]
+                ["FOCUS_QUERY", phase, stage, error] if snapshot.focus_query.is_none() => {
+                    snapshot.focus_query = Some(
+                        serde_json::from_value(serde_json::json!({
+                            "phase": phase, "stage": stage, "error": error,
+                        }))
+                        .map_err(|_| Reason::DesktopUnavailable)?,
+                    );
+                }
                 ["DISPLAY", x, y, width, height] => {
                     snapshot.displays.push(rect(x, y, width, height)?);
                 }
@@ -236,6 +306,20 @@ impl Snapshot {
                 _ => return Err(Reason::DesktopUnavailable),
             }
             if snapshot.displays.len() > 32 || snapshot.windows.len() > 1024 {
+                return Err(Reason::DesktopUnavailable);
+            }
+        }
+        #[cfg(any(test, target_os = "macos"))]
+        if let Some(query) = snapshot.focus_query {
+            let expected_status = match query.phase {
+                FocusQueryPhase::Before => FocusStatus::QueryError,
+                FocusQueryPhase::After => FocusStatus::IdentityChanged,
+            };
+            if snapshot
+                .focus
+                .as_ref()
+                .is_none_or(|proof| proof.status != expected_status)
+            {
                 return Err(Reason::DesktopUnavailable);
             }
         }
@@ -810,13 +894,34 @@ mod tests {
     }
 
     #[test]
+    fn focus_query_protocol_preserves_stage_and_rejects_inconsistent_receipts() {
+        let base = "FG 7 0\nDISPLAY 0 0 2000 2000\nWIN 1 7 10 20 800 600 436c61756465 0\n";
+        let query = "FOCUS_QUERY before input-window attribute-unsupported\n";
+        let state = Snapshot::parse(&format!("{base}FOCUS query-error 0\n{query}")).unwrap();
+        let observation = state.focus_observation(&state.windows[0]).unwrap();
+        assert_eq!(observation.0, FocusStatus::QueryError);
+        assert_eq!(observation.1, None);
+        let value = serde_json::to_value(observation.2.unwrap()).unwrap();
+        assert_eq!(value["stage"], "input-window");
+        assert_eq!(value["error"], "attribute-unsupported");
+        for receipt in [
+            format!("{base}FOCUS proved 1\n{query}"),
+            format!("{base}FOCUS query-error 0\n{query}{query}"),
+            format!("{base}FOCUS query-error 0\nFOCUS_QUERY before private-label failure\n"),
+            format!("{base}{query}"),
+        ] {
+            assert!(Snapshot::parse(&receipt).is_err());
+        }
+    }
+
+    #[test]
     fn focus_proof_is_advisory_and_rejects_ambiguous_protocols() {
         let base = "FG 7 0\nDISPLAY 0 0 2000 2000\nWIN 1 7 10 20 800 600 436c61756465 0\n";
         let proved = Snapshot::parse(&format!("{base}FOCUS proved 1\n")).unwrap();
         let held = proved.windows[0].clone();
         assert_eq!(
             proved.focus_observation(&held),
-            Some((FocusStatus::Proved, Some(true)))
+            Some((FocusStatus::Proved, Some(true), None))
         );
         assert_eq!(proved.guard_failure(&held), Ok(()));
         let mut with_panel = proved.clone();
@@ -832,7 +937,7 @@ mod tests {
         with_panel.windows.insert(0, panel);
         assert_eq!(
             with_panel.focus_observation(&held),
-            Some((FocusStatus::Proved, Some(true)))
+            Some((FocusStatus::Proved, Some(true), None))
         );
         assert_eq!(
             with_panel.guard_failure(&held),

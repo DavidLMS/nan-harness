@@ -33,11 +33,43 @@ pub(super) fn restore_command(
     paths: &DesktopPaths,
     process: &SystemDesktopProcess,
 ) -> Result<i32, CliError> {
-    let _lock = SessionLock::acquire(&paths.lock)?;
-    if process.is_running()? {
+    let _lock = SessionLock::acquire(&paths.lock).inspect_err(|error| {
+        #[cfg(feature = "desktop-qualification")]
+        qualification_restore::record(
+            paths,
+            qualification_restore::Stage::SessionLock,
+            Some(error),
+        );
+        #[cfg(not(feature = "desktop-qualification"))]
+        let _ = error;
+    })?;
+    let running = process.is_running().inspect_err(|error| {
+        #[cfg(feature = "desktop-qualification")]
+        qualification_restore::record(
+            paths,
+            qualification_restore::Stage::ProcessCheck,
+            Some(error),
+        );
+        #[cfg(not(feature = "desktop-qualification"))]
+        let _ = error;
+    })?;
+    if running {
+        #[cfg(feature = "desktop-qualification")]
+        qualification_restore::record(
+            paths,
+            qualification_restore::Stage::ProcessCheck,
+            Some(&ClaudeDesktopError::AlreadyRunning),
+        );
         return Err(ClaudeDesktopError::AlreadyRunning.into());
     }
-    match restore_receipt(paths) {
+    let restoration = restore_receipt(paths);
+    #[cfg(feature = "desktop-qualification")]
+    qualification_restore::record(
+        paths,
+        qualification_restore::Stage::Receipt,
+        restoration.as_ref().err(),
+    );
+    match restoration {
         Ok(()) => eprintln!(
             "{}",
             nan_harness_i18n::messages::orchestration_claude_desktop_configuration_restored(

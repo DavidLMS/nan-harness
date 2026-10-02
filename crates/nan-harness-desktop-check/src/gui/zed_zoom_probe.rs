@@ -68,6 +68,7 @@ fn held_button(before: &ElementData, after: &ElementData) -> bool {
         && before.states.checked == after.states.checked
 }
 
+#[cfg(any(not(target_os = "linux"), test))]
 pub(super) fn correlate(
     matches: &ZoomMatches,
     before: &[ElementData],
@@ -118,9 +119,153 @@ pub(super) fn correlate(
     result
 }
 
+#[cfg(target_os = "linux")]
+pub(super) fn remap_canonical(
+    mut records: Vec<CanonicalButton>,
+    held: &[&ElementData],
+    inventory: &[ElementData],
+) -> Vec<CanonicalButton> {
+    if records.len() > 64 {
+        return Vec::new();
+    }
+    for record in &mut records {
+        let Some(button) = held.get(record.index) else {
+            return Vec::new();
+        };
+        let Some(index) = inventory
+            .iter()
+            .position(|candidate| std::ptr::eq(candidate, *button))
+        else {
+            return Vec::new();
+        };
+        record.index = index;
+    }
+    records
+}
+
+/// Private handoff: object indices refer only to the fresh held inventory.
+#[cfg(any(target_os = "linux", test))]
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct CanonicalButton {
+    index: usize,
+    role: u32,
+    bounds: [i32; 4],
+    toggle: String,
+}
+
+#[cfg(any(target_os = "linux", test))]
+pub(super) fn correlate_canonical(
+    matches: &ZoomMatches,
+    before: &[ElementData],
+    after: &[ElementData],
+    canonical: &[CanonicalButton],
+) -> Observation {
+    if canonical.len() > 64 || before.len() > 64 || after.len() > 64 {
+        return Observation::unavailable("budget-exceeded");
+    }
+    let mut seen = std::collections::HashSet::new();
+    let mut candidates = Vec::new();
+    for item in canonical {
+        let Some(button) = before.get(item.index) else {
+            return Observation::unavailable("inventory-unavailable");
+        };
+        if !seen.insert(item.index)
+            || !matches!(
+                (item.role, button.role),
+                (43, Role::Button) | (62, Role::Switch)
+            )
+            || !matches!(item.toggle.as_str(), "on" | "off" | "unknown")
+            || item.bounds[2] <= 0
+            || item.bounds[3] <= 0
+        {
+            return Observation::unavailable("inventory-unavailable");
+        }
+        let rect = Rect {
+            x: item.bounds[0],
+            y: item.bounds[1],
+            width: item.bounds[2].cast_unsigned(),
+            height: item.bounds[3].cast_unsigned(),
+        };
+        if after
+            .iter()
+            .filter(|other| held_button(button, other))
+            .count()
+            == 1
+            && matches
+                .maximize
+                .iter()
+                .chain(&matches.minimize)
+                .any(|icon| contains(rect, *icon))
+        {
+            candidates.push(item);
+        }
+    }
+    let mut result = Observation::unavailable("observed");
+    result.maximize_matches = matches.maximize_matches;
+    result.minimize_matches = matches.minimize_matches;
+    result.stable_maximize_matches = matches.maximize.len();
+    result.stable_minimize_matches = matches.minimize.len();
+    result.correlated_buttons = candidates.len();
+    result.unique_correlation =
+        candidates.len() == 1 && matches.maximize.len() + matches.minimize.len() == 1;
+    result.checked_state = match candidates.as_slice() {
+        [item] => match item.toggle.as_str() {
+            "on" => "on",
+            "off" => "off",
+            _ => "unavailable",
+        },
+        [] => "unavailable",
+        _ => "ambiguous",
+    };
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn canonical_root_bounds_correlate_without_double_origin_or_identity_loss() {
+        let mut held = button();
+        held.role = Role::Switch;
+        let mut matches = icons();
+        matches.maximize[0].x += 100;
+        matches.maximize[0].y += 200;
+        let records = vec![CanonicalButton {
+            index: 0,
+            role: 62,
+            bounds: [110, 220, 30, 30],
+            toggle: "on".into(),
+        }];
+        let result = correlate_canonical(&matches, &[held.clone()], &[held.clone()], &records);
+        assert!(result.unique_correlation);
+        assert_eq!(result.checked_state, "on");
+        let mut changed = held.clone();
+        changed.stable_id = Some("replacement".into());
+        assert!(
+            !correlate_canonical(&matches, &[held.clone()], &[changed], &records)
+                .unique_correlation
+        );
+        let duplicate = vec![
+            CanonicalButton {
+                index: 0,
+                role: 62,
+                bounds: [110, 220, 30, 30],
+                toggle: "on".into(),
+            },
+            CanonicalButton {
+                index: 0,
+                role: 62,
+                bounds: [110, 220, 30, 30],
+                toggle: "on".into(),
+            },
+        ];
+        assert_eq!(
+            correlate_canonical(&matches, &[held.clone()], &[held], &duplicate).status,
+            "inventory-unavailable"
+        );
+    }
+
     fn button() -> ElementData {
         let mut element = ElementData {
             role: Role::Button,

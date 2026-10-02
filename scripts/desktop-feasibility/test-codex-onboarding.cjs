@@ -72,7 +72,7 @@ async function trial(options={}) {
  const mainFrame={};
  const page={mainFrame:()=>options.overlayFrameChange&&overlayReads?{}:mainFrame,locator:s=>new Locator(s.startsWith('fieldset > legend')?'legend':'radios'),
   url:()=>options.urlChange&&roleClicks>0?'app://codex/index.html?PRIVATE_ROUTE':'app://codex/index.html',
-  context:()=>({browser:()=>({contexts:()=>[{pages:()=>options.foreignPage?[page,{}]:options.replacedPage?[{}]:[page]}]})})};
+  context:()=>({browser:()=>({contexts:()=>[{pages:()=>options.foreignPage?[page,{url:()=>options.foreignUrl??'about:blank'}]:options.replacedPage?[{}]:[page]}]})})};
  const sandbox={exports:{},process:{platform:options.platform??'win32',env:{GITHUB_ACTIONS:options.noHost?'false':'true',RUNNER_ENVIRONMENT:'github-hosted',RUNNER_OS:'Windows',NANH_CODEX_PUBLIC_ONBOARDING:options.noOptin?undefined:'engineering'}},Date:{now:()=>now},setTimeout:f=>{now+=100;f();}};
  vm.runInNewContext(source,sandbox);
  let guards=0;
@@ -94,6 +94,12 @@ async function trial(options={}) {
   if(opts.guardExhaustsBudget||opts.ownerLossBeforeRole)assert.equal(r.facts.conversationalScope,true);
  }
  const loaded=await trial({loading:true});assert.equal(loaded.roleClicks,1);assert.equal(loaded.continueClicks,1);
+ for(const [url,kind] of [['about:blank','blank'],['app://codex/PRIVATE','app'],['devtools://PRIVATE','devtools'],['https://PRIVATE','other']]){
+  const r=await trial({foreignPage:true,foreignUrl:url});
+  assert.equal(r.facts.roleProofFailure,'page-count');assert.equal(r.facts.rejectedPageInventory.total,2);
+  assert.equal(r.facts.rejectedPageInventory.held,1);assert.equal(r.facts.rejectedPageInventory[kind],kind==='app'?2:1);
+  assert.equal(r.roleClicks,0);assert.equal(r.continueClicks,0);
+ }
  for(const [opts,reason] of [[{foreignPage:true},'page-count'],[{replacedPage:true},'page-changed'],[{guardThrows:true},'query-failed']]) {
   const r=await trial(opts);assert.equal(r.facts.roleProofFailure,reason);assert.equal(r.roleClicks,0);assert.equal(r.continueClicks,0);
  }

@@ -100,7 +100,22 @@ exports.run = async function(page, ownerGuard, deadline) {
       const browser = page.context().browser();
       const pages = browser?.contexts().flatMap(context => context.pages());
       if (!pages) return fail('query-failed');
-      if (pages.length !== 1) return fail('page-count');
+      if (pages.length !== 1) {
+        // Retain only a bounded protocol inventory of the rejected snapshot.
+        // This never authorizes choosing among renderer targets.
+        if (pages.length > 32) facts.rejectedPageInventory={status:'overflow'};
+        else {
+          const inventory={status:'complete',total:pages.length,held:0,app:0,blank:0,devtools:0,other:0};
+          for(const candidate of pages){
+            if(candidate===page)inventory.held++;
+            const url=candidate.url();
+            const kind=url==='about:blank'?'blank':url.startsWith('app:')?'app':url.startsWith('devtools:')?'devtools':'other';
+            inventory[kind]++;
+          }
+          facts.rejectedPageInventory=inventory;
+        }
+        return fail('page-count');
+      }
       if (pages[0] !== page) return fail('page-changed');
       if (page.url() !== originalUrl) return fail('url-changed');
       return true;

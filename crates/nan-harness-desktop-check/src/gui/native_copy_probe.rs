@@ -1128,7 +1128,11 @@ impl NativeClipboardSession<'_> {
         let after = buttons()?;
         let matches = super::native_icon_probe::observe_zoom(directory, &first, &second, capture)?;
         #[cfg(target_os = "linux")]
-        self.observe_atspi_geometry(&matches, &before)?;
+        let canonical = self.observe_atspi_geometry(&matches, &before)?;
+        #[cfg(target_os = "linux")]
+        let result =
+            super::zed_zoom_probe::correlate_canonical(&matches, &before, &after, &canonical);
+        #[cfg(not(target_os = "linux"))]
         let result = super::zed_zoom_probe::correlate(&matches, &before, &after);
         self.gui
             .native_copy_guard(&mut self.facts, "retry-revalidate")?;
@@ -1140,7 +1144,7 @@ impl NativeClipboardSession<'_> {
         &mut self,
         matches: &super::native_icon_probe::ZoomMatches,
         buttons: &[xa11y::ElementData],
-    ) -> Result<(), Reason> {
+    ) -> Result<Vec<super::zed_zoom_probe::CanonicalButton>, Reason> {
         self.gui
             .native_copy_guard(&mut self.facts, "retry-revalidate")?;
         let capture = self.gui.visual.capture_bounds();
@@ -1148,14 +1152,24 @@ impl NativeClipboardSession<'_> {
             Ok(identity) => identity,
             Err(reason) if icon_guard_failure(reason) => return Err(reason),
             Err(_) => {
-                return self
-                    .gui
-                    .native_copy_guard(&mut self.facts, "retry-revalidate");
+                self.gui
+                    .native_copy_guard(&mut self.facts, "retry-revalidate")?;
+                return Ok(Vec::new());
             }
         };
-        let held: Vec<_> = buttons
+        let held_buttons: Vec<_> = buttons
             .iter()
             .filter(|button| button.pid == Some(pid))
+            .filter(|button| {
+                button
+                    .raw
+                    .get("bus_name")
+                    .is_some_and(|value| value.as_str().is_some())
+                    && button.stable_id.is_some()
+            })
+            .collect();
+        let held: Vec<_> = held_buttons
+            .iter()
             .filter_map(|button| {
                 Some(serde_json::json!({
                     "bus": button.raw.get("bus_name")?.as_str()?,
@@ -1170,20 +1184,38 @@ impl NativeClipboardSession<'_> {
             .map(|rect| atspi_icon_rectangle(*rect))
             .collect::<Option<Vec<_>>>()
         else {
-            return self
-                .gui
-                .native_copy_guard(&mut self.facts, "retry-revalidate");
+            self.gui
+                .native_copy_guard(&mut self.facts, "retry-revalidate")?;
+            return Ok(Vec::new());
         };
+        let private_name = format!("zed-canonical-{}.private", nonce()?);
+        let private_path = self.directory.join(&private_name);
         let request = serde_json::to_string(&serde_json::json!({
-            "pid":pid,"window":window,"buttons":held,"icons":icons
+            "pid":pid,"window":window,"buttons":held,"icons":icons,"privateName":private_name
         }))
         .map_err(|_| Reason::IsolationUnavailable)?;
         let executable =
             std::env::var_os("FEASIBILITY_ZED_INPUT_DRIVER").ok_or(Reason::IsolationUnavailable)?;
         // Measurement failure cannot change the existing activation or verdict.
         let _ = neutral_input(Path::new(&executable), "atspi-observe", &request);
+        let parsed = nan_harness_private_fs::open_private_read(&private_path)
+            .ok()
+            .and_then(|(file, _)| {
+                let mut bytes = Vec::new();
+                file.take(16385).read_to_end(&mut bytes).ok()?;
+                (bytes.len() <= 16384).then_some(bytes)
+            })
+            .and_then(|bytes| {
+                serde_json::from_slice::<Vec<super::zed_zoom_probe::CanonicalButton>>(&bytes).ok()
+            });
+        let _ = std::fs::remove_file(&private_path);
         self.gui
-            .native_copy_guard(&mut self.facts, "retry-revalidate")
+            .native_copy_guard(&mut self.facts, "retry-revalidate")?;
+        Ok(super::zed_zoom_probe::remap_canonical(
+            parsed.unwrap_or_default(),
+            &held_buttons,
+            buttons,
+        ))
     }
 
     pub(crate) fn retry_once(&mut self) -> Result<(), Reason> {

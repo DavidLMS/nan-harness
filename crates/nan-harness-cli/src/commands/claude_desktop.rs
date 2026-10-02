@@ -43,6 +43,8 @@ mod qualification_config;
 #[cfg(feature = "desktop-qualification")]
 mod qualification_models;
 #[cfg(feature = "desktop-qualification")]
+mod qualification_restore;
+#[cfg(feature = "desktop-qualification")]
 mod qualification_storage;
 mod session;
 #[cfg(test)]

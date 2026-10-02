@@ -1188,7 +1188,7 @@ held window. This trial does not activate or dismiss a window.
 
 The complete local gate on `38494449` passes. Its hosted Claude macOS trial
 [37062973171](https://github.com/DavidLMS/nan-harness/actions/runs/37062973171)
-again discovers two models and passes cleanup, but detects changed window
+again records two authenticated catalog requests and passes cleanup, but detects changed window
 bounds immediately after acquisition. The next scoped startup trial requires
 two seconds and at least three consecutive unchanged observations before the
 single initial binding, within the original 45-second deadline. Candidate
@@ -1222,7 +1222,7 @@ Claude macOS on `45447e23`
 [37064335977](https://github.com/DavidLMS/nan-harness/actions/runs/37064335977)
 observes seven consecutive present candidates with six stable pairs, then
 rejects the initial readiness guard for another window of the same process.
-It passes cleanup and again discovers two models. Focus diagnostics previously
+It passes cleanup and again records two authenticated catalog requests. Focus diagnostics previously
 ran only after binding, so this earlier rejection has no focus receipt. The
 next diagnostic observes the already selected, process-owned candidate before
 binding while preserving the original rejection and issuing no input.
@@ -1271,3 +1271,32 @@ finally retains its closed cleanup diagnostic: `restore` fails with
 `nonzero-exit`, after an `action-unsupported` startup inventory. The next
 Windows investigation must classify that restore failure, rather than alter
 process ownership or treat cleanup as successful.
+
+
+The hosted Linux quality gate on `9682cb8a`
+[37068168269](https://github.com/DavidLMS/nan-harness/actions/runs/37068168269)
+passes. The local gate reaches 277 passing checker tests and one synthetic
+executable-readiness timeout; that exact failed test passes on a focused rerun.
+The next final tree still requires its complete local gate.
+
+Codex Windows on that revision
+[37068171470](https://github.com/DavidLMS/nan-harness/actions/runs/37068171470)
+preserves `page-count` as the role-proof rejection in all three cleanly restored
+sessions. The final renderer inventory has one page, so it cannot identify the
+transient rejected inventory. The next trial records bounded protocol counts
+of that snapshot without retaining URLs or selecting among renderer targets.
+
+The next Claude Windows trial records a closed restoration stage and typed
+failure category from the CLI itself. It distinguishes session lock, process
+inspection and receipt restoration without exposing error messages or paths;
+the ordinary restoration result is unchanged. macOS focus diagnostics similarly
+identify the precise public AX query stage and error while keeping the initial
+same-process-window rejection. Authenticated model discovery counters count
+catalog requests, not returned models or editor readiness.
+
+Zed Linux diagnostic correlation now uses two independent client-origin reads
+and translates SCREEN/WINDOW bounds exactly once before comparing screenshot
+root coordinates. A bounded private handoff carries only indexed canonical
+rectangles and raw toggle states; public receipts remain closed counts/enums.
+This corrects the measurement rather than asserting a zoom state transition.
+No extra shortcut or input is added. Qualification remains 5 of 15 cells.

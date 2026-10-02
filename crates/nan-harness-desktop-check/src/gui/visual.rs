@@ -1290,14 +1290,14 @@ fn record_claude_stack(snapshot: &Snapshot, held: &Window) {
             return;
         }
     }
-    if let Some((status, matched)) = snapshot.focus_observation(held) {
+    if let Some((status, matched, query)) = snapshot.focus_observation(held) {
         let focus_path = directory.join(format!("claude-window-focus-{}.json", std::process::id()));
         if let Ok(file) = nan_harness_private_fs::open_private_new(&focus_path) {
             let _ = serde_json::to_writer(
                 file,
                 &serde_json::json!({
                     "schemaVersion": 1, "mechanism": "claude-window-focus", "diagnosticsOnly": true,
-                    "status": status, "nativeForegroundWindowMatchedHeld": matched,
+                    "status": status, "nativeForegroundWindowMatchedHeld": matched, "query": query,
                 }),
             );
         }

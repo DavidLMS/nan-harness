@@ -1,5 +1,6 @@
 // Synthetic metadata only; never queries applications, windows or accessibility.
 #import <CoreGraphics/CoreGraphics.h>
+#import <ApplicationServices/ApplicationServices.h>
 #include <cassert>
 #include <cstdint>
 #include <string>
@@ -17,7 +18,12 @@ static CFDictionaryRef record(std::int64_t pid, std::int64_t id, std::int64_t la
     CFRelease(owner); CFRelease(number); CFRelease(level); CFRelease(rectangle);
     return result;
 }
+const char* classify_ax_error(AXError);
 int main() {
+    assert(std::string(classify_ax_error(kAXErrorAttributeUnsupported)) == "attribute-unsupported");
+    assert(std::string(classify_ax_error(kAXErrorCannotComplete)) == "cannot-complete");
+    assert(std::string(classify_ax_error(kAXErrorAPIDisabled)) == "api-disabled");
+    assert(std::string(classify_ax_error(static_cast<AXError>(-999))) == "other");
     CGRect bounds = CGRectMake(10, 20, 800, 600);
     auto owned = record(7, 1, 0, bounds);
     auto duplicate = record(7, 2, 0, bounds);
