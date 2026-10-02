@@ -2,7 +2,9 @@
 
 use super::{ProbeSpec, select_read_tool, visual_marker};
 use crate::cli::{SessionMode, VerificationPolicy};
-use crate::gui::{DomAction, DomPurpose, DomTurn, Gui, NativeClipboardSession, RendererSession};
+use crate::gui::{
+    ComposerFailure, DomAction, DomPurpose, DomTurn, Gui, NativeClipboardSession, RendererSession,
+};
 use crate::provider::ProviderGate;
 use crate::report::{CheckStep, InputMode, ProbeResult, Reason, ResponseVerification};
 use nan_harness_core::DesktopHarnessKind;
@@ -101,6 +103,7 @@ impl SemanticBackend {
         owner: Option<u32>,
         scenario: SemanticScenario<'_>,
         result: &mut ProbeResult,
+        composer_observations: &mut Vec<ComposerFailure>,
     ) -> Result<(), Reason> {
         let mut ui = match self.kind {
             DesktopHarnessKind::Zed => {
@@ -108,8 +111,11 @@ impl SemanticBackend {
             }
             DesktopHarnessKind::Hermes => return Err(Reason::IsolationUnavailable),
             DesktopHarnessKind::ChatGpt | DesktopHarnessKind::Claude | DesktopHarnessKind::Pen => {
-                return gui
-                    .inventory_renderer(&self.directory, owner.ok_or(Reason::ApplicationExited)?);
+                return gui.inventory_renderer(
+                    &self.directory,
+                    owner.ok_or(Reason::ApplicationExited)?,
+                    composer_observations,
+                );
             }
         };
         let outcome = complete_scenario(&mut ui, &scenario, &self.directory, result).await;

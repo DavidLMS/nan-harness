@@ -1,6 +1,6 @@
 //! Hosted renderer experiment with one input owner and no OCR fallback.
 
-use super::Gui;
+use super::{ComposerFailure, Gui};
 use crate::provider::ProviderGate;
 use crate::report::{CheckStep, ProbeResult, Reason};
 use nan_harness_private_fs::{open_private_new, open_private_read};
@@ -836,8 +836,13 @@ fn inventory_driver_limit() -> Duration {
 }
 
 impl Gui {
-    pub(crate) fn inventory_renderer(&self, directory: &Path, owner: u32) -> Result<(), Reason> {
-        self.visual.guard()?;
+    pub(crate) fn inventory_renderer(
+        &self,
+        directory: &Path,
+        owner: u32,
+        composer_observations: &mut Vec<ComposerFailure>,
+    ) -> Result<(), Reason> {
+        self.observe_hosted_startup(composer_observations)?;
         if std::env::var("NANH_DESKTOP_QUALIFICATION_MODE").as_deref() == Ok("startup-baseline") {
             let count = |selector: &str| {
                 self.app.as_ref().and_then(|app| {
@@ -852,7 +857,7 @@ impl Gui {
                 "retryCount": count("button[visible=\"true\"][name=\"Retry\"], button[visible=\"true\"][name=\"Try again\"]"),
                 "loginCount": count("button[visible=\"true\"][name=\"Sign in\"], button[visible=\"true\"][name=\"Log in\"]")});
             // Only role/known-control counts leave memory; this never sends input.
-            self.visual.guard()?;
+            self.observe_hosted_startup(composer_observations)?;
             let value = serde_json::json!({"schemaVersion":1, "mechanism":"renderer-startup-baseline", "diagnosticsOnly":true, "windowAcquired":true, "rendererInstrumented":false, "accessibilityInventory": inventory});
             open_private_new(&directory.join(format!("baseline-{owner}.json")))
                 .and_then(|mut file| file.write_all(value.to_string().as_bytes()))

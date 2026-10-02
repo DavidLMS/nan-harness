@@ -1038,3 +1038,25 @@ and the Zed/Codex native trials
 fail before application launch: the new helper method references `Path`, whose
 import was restricted to macOS. The import is now shared. Those two native trials
 provide no layout or overlay evidence and must be repeated after this correction.
+
+The complete local macOS gate on `d72649af` passes. Linux Zed in
+[37035051703](https://github.com/DavidLMS/nan-harness/actions/runs/37035051703)
+reaches all three native probes: the first four steps and cleanup pass, while
+Retry still fails. Each panel observation now has one stable Maximize icon and
+no Minimize icon or correlated button; this change does not certify zoom.
+The recovery export has no Resume message and the provider oracle sees no
+verified recovery. Ordinary transport acknowledgement still cannot substitute
+for handler activation.
+
+Windows Codex in
+[37035047811](https://github.com/DavidLMS/nan-harness/actions/runs/37035047811)
+still fails before launch: the newly shared `Path` import makes the Windows-only
+fully qualified accessor trigger the existing unnecessary-qualification deny
+lint. The accessor now uses the shared type directly; no lint is weakened.
+macOS Claude in
+[37035049762](https://github.com/DavidLMS/nan-harness/actions/runs/37035049762)
+again passes preflight and cleanup but stops at focus. Its composer diagnostic
+remains empty because the earlier capture was wired to the separate Hermes
+startup experiment. The actual semantic inventory path now passes its existing
+diagnostic vector to both startup guards, preserving their exact single-snapshot
+verdict and closed category.

@@ -910,6 +910,7 @@ impl ConversationScenario<'_> {
                         marker: self.final_marker,
                     },
                     result,
+                    composer_observations,
                 )
                 .await;
         }

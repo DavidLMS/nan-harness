@@ -169,7 +169,7 @@ impl Native {
     }
 
     #[cfg(windows)]
-    pub(crate) fn executable(&self) -> &std::path::Path {
+    pub(crate) fn executable(&self) -> &Path {
         &self.executable
     }
 
