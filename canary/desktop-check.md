@@ -537,3 +537,22 @@ focus and input bindings, and appends an exact normal-window rule matching both
 owned window manager. No already-bound window is resized, no geometry guard is
 relaxed and no input is replayed. This remains a trial until three complete
 native probes and cleanup pass.
+
+Zed Linux first-map trial
+[36999327703](https://github.com/DavidLMS/nan-harness/actions/runs/36999327703)
+on source `3bbcaebc20177a9039fe8d66f6ccb818fc7bfdca` still completes only the first
+four steps in each probe. Each ordinary Retry click is dispatched, but no
+independent provider recovery or exported Resume is observed. All cleanup passes.
+Maximization alone has not resolved the failure; an AT-SPI acknowledgement does
+not prove the application handler ran, because GPUI maps it to center-point input.
+
+The next Codex Windows feasibility trial explicitly opts into the frozen app's
+public conversational work-preferences screen. It verifies the exact native
+Engineering radio and associated label within the unique source-defined scope,
+clicks the label once, checks the selected state and then clicks the scope's
+unique enabled Continue once. Each action requires fresh process/listener
+ownership, the same sole renderer target and stable native hit testing. It stops
+after the role scope disappears, retaining only closed setup receipts; unfamiliar
+screens, intercepted controls and uncertain actions remain blocked. It does not
+set hidden onboarding state, use an account or establish conversation acceptance.
+The canonical qualification workflow does not enable this diagnostic.

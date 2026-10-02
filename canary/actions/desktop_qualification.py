@@ -28,6 +28,27 @@ HASH = re.compile(r'[0-9a-f]{64}\Z')
 VERSION = re.compile(r'[0-9]+(?:\.[0-9]+){2}(?:[-+][A-Za-z0-9.-]+)?\Z')
 
 
+def public_onboarding(setup, app):
+    booleans = {'conversationalScope', 'engineeringControl', 'roleClickAttempted',
+                'roleClickCompleted', 'engineeringChecked', 'continueControl',
+                'continueClickAttempted', 'continueClickCompleted', 'roleScopeAbsent'}
+    fields = booleans | {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'stage', 'errorCategory'}
+    stages = {'session', 'role-proof', 'role-action', 'role-readback', 'continue-action',
+              'scope-transition', 'stopped-after-role'}
+    errors = {None, 'invalid-session', 'scope-not-matched', 'role-already-selected',
+              'action-blocked', 'role-readback-failed', 'continue-not-matched',
+              'ownership-lost', 'scope-remained', 'action-uncertain', 'observation-failed'}
+    if (app != 'chatgpt-desktop' or type(setup) is not dict or set(setup) != fields
+            or type(setup['schemaVersion']) is not int or setup['schemaVersion'] != 1
+            or setup['mechanism'] != 'codex-public-onboarding' or setup['diagnosticsOnly'] is not True
+            or type(setup['stage']) is not str or setup['stage'] not in stages
+            or (setup['errorCategory'] is not None and type(setup['errorCategory']) is not str)
+            or setup['errorCategory'] not in errors
+            or any(type(setup[key]) is not bool for key in booleans)):
+        raise ValueError('invalid public onboarding diagnostic')
+    return setup
+
+
 def matrix():
     return {'include': [dict(app=app, platform=platform, architecture=architecture,
                              runner=runner, backend=BACKENDS.get((app, platform, architecture), 'pending'))
@@ -227,7 +248,7 @@ def semantic_observations(directory, app):
             record.update(diagnosticsOnly=True, counts=counts)
         elif mechanism == 'renderer-inventory':
             fields = set('schemaVersion mechanism diagnosticsOnly app endpointOwned launcherOwned attached pageCount textareaCount editableCount sendCount retryCount newThreadCount loginCount dialogCount errorCategory'.split())
-            if set(value) - {'documentState', 'startupScreen', 'landingCounts', 'onboardingCounts'} != fields or value['app'] != app or value['diagnosticsOnly'] is not True:
+            if set(value) - {'documentState', 'startupScreen', 'landingCounts', 'onboardingCounts', 'publicOnboarding'} != fields or value['app'] != app or value['diagnosticsOnly'] is not True:
                 raise ValueError('invalid renderer inventory identity')
             for key in ('endpointOwned', 'launcherOwned', 'attached'):
                 flag(record, value, key)
@@ -245,6 +266,8 @@ def semantic_observations(directory, app):
                         or any(type(item) is not int or not 0 <= item <= 4096 for item in counts.values())):
                     raise ValueError('invalid renderer onboarding counts')
                 record['onboardingCounts'] = counts
+            if 'publicOnboarding' in value:
+                record['publicOnboarding'] = public_onboarding(value['publicOnboarding'], app)
             if 'startupScreen' in value:
                 if (type(value['startupScreen']) is not str or value['startupScreen'] not in {'unmeasured', 'gpu-unavailable', 'startup-failed', 'other', 'cli-connection-failed'}
                         or (value['startupScreen'] == 'cli-connection-failed' and app != 'chatgpt-desktop')):

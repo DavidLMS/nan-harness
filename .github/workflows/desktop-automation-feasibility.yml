@@ -257,6 +257,10 @@ jobs:
           path: ${{ runner.temp }}/semantic-feasibility/windows-session.json
           if-no-files-found: ignore
           retention-days: 30
+      - name: Enable public Codex work-preferences diagnostic
+        if: runner.os == 'Windows' && matrix.app == 'chatgpt-desktop' && inputs.experiment == 'deterministic-full'
+        shell: bash
+        run: echo 'NANH_CODEX_PUBLIC_ONBOARDING=engineering' >> "$GITHUB_ENV"
       - name: Run full deterministic semantic qualification
         env:
           NANH_DESKTOP_QUALIFICATION_MODE: ${{ inputs.experiment == 'startup-baseline' && 'startup-baseline' || 'renderer' }}

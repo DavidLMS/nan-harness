@@ -61,6 +61,12 @@ def qualification_environment(app, facts, real_nanh, executable, inherited=None)
         mode = source.get('NANH_DESKTOP_QUALIFICATION_MODE', 'renderer')
         if mode not in {'renderer', 'startup-baseline'}:
             raise ValueError('renderer mode is invalid')
+        onboarding = source.get('NANH_CODEX_PUBLIC_ONBOARDING')
+        if onboarding is not None:
+            if (onboarding != 'engineering' or app != 'chatgpt-desktop'
+                    or source.get('RUNNER_OS') != 'Windows' or mode != 'renderer'):
+                raise ValueError('public onboarding diagnostic is unavailable')
+            environment['NANH_CODEX_PUBLIC_ONBOARDING'] = onboarding
         policy = source.get('NANH_DESKTOP_QUALIFICATION_NAMESPACE_POLICY', 'default')
         if policy not in {'default', 'scoped-apparmor-userns'}:
             raise ValueError('namespace policy is invalid')

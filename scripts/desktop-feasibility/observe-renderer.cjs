@@ -53,6 +53,13 @@ async function run() {
       await new Promise(r => setTimeout(r, 250));
     }
     if (!ownership.ownedEndpoint()) { facts.endpointOwned = false; facts.errorCategory = 'endpoint-unowned'; save(); return; }
+    if (process.env.NANH_CODEX_PUBLIC_ONBOARDING !== undefined) {
+      const targetReady = app === 'chatgpt-desktop'
+        && await page.evaluate(() => location.protocol === 'app:' && document.readyState === 'complete');
+      if (!targetReady) { facts.errorCategory = 'invalid-request'; save(); return; }
+      facts.publicOnboarding = await require('./codex-onboarding.cjs').run(page,
+        () => rootProof.descendant(connection.launcherPid) && ownership.ownedEndpoint(), deadline);
+    }
     const counts = await page.evaluate(appName => {
       const visible = e => e.isConnected && e.getBoundingClientRect().width > 0
         && e.getBoundingClientRect().height > 0 && getComputedStyle(e).visibility === 'visible';

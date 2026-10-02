@@ -51,6 +51,23 @@ class RunnerTests(unittest.TestCase):
             for key in runner.WINDOWS_PROOF:
                 self.assertNotIn(key, env)
 
+    def test_public_onboarding_opt_in_is_hosted_windows_codex_renderer_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            helper = root / 'helper'
+            helper.write_text('synthetic helper')
+            source = dict(GITHUB_ACTIONS='true', RUNNER_ENVIRONMENT='github-hosted', RUNNER_OS='Windows',
+                          FEASIBILITY_WINDOWS_PROOF_PYTHON=str(helper), FEASIBILITY_WINDOWS_PROOF_SCRIPT=str(helper),
+                          NANH_CODEX_PUBLIC_ONBOARDING='engineering')
+            env = runner.qualification_environment('chatgpt-desktop', root, helper, str(helper), source)
+            self.assertEqual(env['NANH_CODEX_PUBLIC_ONBOARDING'], 'engineering')
+            for changed, app in (({'NANH_CODEX_PUBLIC_ONBOARDING': 'PRIVATE'}, 'chatgpt-desktop'),
+                                 ({'RUNNER_OS': 'Linux'}, 'chatgpt-desktop'),
+                                 ({'NANH_DESKTOP_QUALIFICATION_MODE': 'startup-baseline'}, 'chatgpt-desktop'),
+                                 ({}, 'claude-desktop'), ({}, 'pen-desktop')):
+                with self.assertRaises(ValueError):
+                    runner.qualification_environment(app, root, helper, str(helper), {**source, **changed})
+
     def test_closed_environment_excludes_credentials_and_experiment_opt_ins(self):
         source = dict(GITHUB_ACTIONS='true', RUNNER_ENVIRONMENT='github-hosted', RUNNER_OS='Linux',
                       PATH='/synthetic/bin', NAN_API_KEY='PRIVATE', AWS_SECRET_ACCESS_KEY='PRIVATE',
@@ -729,6 +746,32 @@ class QualificationTests(unittest.TestCase):
                 path.write_text(json.dumps({**codex, 'onboardingCounts': counts}))
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'chatgpt-desktop')
+
+    def test_public_onboarding_receipts_reject_private_and_untyped_data(self):
+        setup = dict(schemaVersion=1, mechanism='codex-public-onboarding', diagnosticsOnly=True,
+                     stage='stopped-after-role', errorCategory=None, conversationalScope=True,
+                     engineeringControl=True, roleClickAttempted=True, roleClickCompleted=True,
+                     engineeringChecked=True, continueControl=True, continueClickAttempted=True,
+                     continueClickCompleted=True, roleScopeAbsent=True)
+        self.assertEqual(q.public_onboarding(setup, 'chatgpt-desktop'), setup)
+        for changed in ({**setup, 'label': 'PRIVATE'}, {**setup, 'stage': 'PRIVATE'},
+                        {**setup, 'errorCategory': []}, {**setup, 'engineeringChecked': 1},
+                        {**setup, 'schemaVersion': True}, {**setup, 'diagnosticsOnly': False},
+                        {key: value for key, value in setup.items() if key != 'roleScopeAbsent'}):
+            with self.assertRaises(ValueError):
+                q.public_onboarding(changed, 'chatgpt-desktop')
+        with self.assertRaises(ValueError):
+            q.public_onboarding(setup, 'pen-desktop')
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            value = dict(schemaVersion=1, mechanism='renderer-inventory', diagnosticsOnly=True,
+                         app='chatgpt-desktop', endpointOwned=True, launcherOwned=True, attached=True,
+                         pageCount=1, textareaCount=0, editableCount=0, sendCount=0,
+                         retryCount=0, newThreadCount=0, loginCount=0, dialogCount=0,
+                         errorCategory=None, publicOnboarding=setup)
+            (root / 'inventory.json').write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(root, 'chatgpt-desktop'), [value])
+            self.assertEqual(q.envelope('chatgpt-desktop', 'windows', 'x86_64', 'a' * 40)['qualification'], 'unqualified')
 
 if __name__ == '__main__':
     unittest.main()
