@@ -66,3 +66,21 @@ for (const result of ['true', 'false', 'true\n', 'private unexpected value']) {
   assert.equal(calls, 1);
 }
 console.log('Native Windows proof transport: guarded cases passed');
+
+for (const result of ['true', 'true\n', 'query-failed']) {
+  const context = { process: { platform: 'win32', env: { GITHUB_ACTIONS: 'true',
+    RUNNER_ENVIRONMENT: 'github-hosted', FEASIBILITY_WINDOWS_PROOF_PYTHON: 'C:\\owned\\python.exe' } },
+    owner: '20', port: '43210', __dirname: 'C:/owned', require(name) {
+      assert.equal(name, 'node:child_process');
+      return { execFileSync(command, args, options) {
+        assert.equal(command, 'C:\\owned\\python.exe');
+        assert.deepEqual(Array.from(args), ['C:/owned/endpoint-owner-windows.py', 'endpoint', '43210', '20']);
+        assert.equal(options.timeout, 8000);
+        assert.equal(options.stdio[2], 'ignore');
+        return result;
+      } };
+    } };
+  vm.runInNewContext(proof, context);
+  assert.equal(context.ownedEndpoint(), result === 'true');
+}
+console.log('Native Windows Win32 transport: guarded cases passed');

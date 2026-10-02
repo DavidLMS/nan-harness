@@ -368,3 +368,14 @@ identifies Zed Linux's pointer failure as foreground identity mismatch. The
 helper now proves the active client's bounded X11 ancestor chain against the
 owned top-level frame, and checks the active client's PID before and after
 movement; acceptance still requires provider recovery and native Resume evidence.
+
+Run [36981294763](https://github.com/DavidLMS/nan-harness/actions/runs/36981294763)
+confirms Hermes Windows private retry-policy replacement now succeeds. One probe
+also reaches response and file-tool verification, but cold attachment, response
+and failure-observation timeouts and cleanup still prevent acceptance. Windows
+renderer ownership now has a qualification-only Win32 transport using fresh
+Toolhelp process metadata, creation times, session IDs and the unique IPv4
+loopback listener, including rejection of concurrent IPv6 listeners. It rechecks
+the listener after ancestry proof and retains no PID map across actions. Native
+metadata contracts run before GUI launch. This aims to remove repeated CIM
+startup from the bounded action deadline; native qualification remains pending.

@@ -145,6 +145,12 @@ jobs:
           echo "FEASIBILITY_ZED_ZSTD=$RUNNER_TEMP/zed-zstd.exe" >> "$GITHUB_ENV"
           echo "FEASIBILITY_ZED_EXPORT_PARSER=$GITHUB_WORKSPACE/scripts/desktop-feasibility/zed-export.py" >> "$GITHUB_ENV"
           echo 'FEASIBILITY_ZED_RESPONSE_METHOD=thread-export' >> "$GITHUB_ENV"
+      - name: Export fixed Windows native ownership interpreter
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          python3 scripts/desktop-feasibility/test-endpoint-owner-windows.py
+          echo "FEASIBILITY_WINDOWS_PROOF_PYTHON=$(python3 -c 'import sys; print(sys.executable)')" >> "$GITHUB_ENV"
       - name: Build exact branch binaries
         run: cargo build --locked -p nan-harness-desktop-check -p nan-harness-cli --features nan-harness-cli/desktop-qualification --bins
       - name: Install pinned observation client

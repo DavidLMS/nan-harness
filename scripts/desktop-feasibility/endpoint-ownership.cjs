@@ -19,9 +19,14 @@ function windowsProof(mode, value, root) {
       || value <= 1 || value > (mode === 'endpoint' ? 65535 : 2147483647)
       || !Number.isSafeInteger(root) || root <= 1 || root > 2147483647) return false;
   try {
-    const result = require('node:child_process').execFileSync('pwsh',
-      ['-NoProfile', '-NonInteractive', '-File', `${__dirname}/endpoint-owner.ps1`,
-        mode, String(value), String(root)],
+    const python = process.env?.FEASIBILITY_WINDOWS_PROOF_PYTHON;
+    const native = process.env?.GITHUB_ACTIONS === 'true'
+      && process.env?.RUNNER_ENVIRONMENT === 'github-hosted'
+      && typeof python === 'string' && /^[A-Za-z]:[\\/]/.test(python);
+    const result = require('node:child_process').execFileSync(native ? python : 'pwsh',
+      native ? [`${__dirname}/endpoint-owner-windows.py`, mode, String(value), String(root)]
+        : ['-NoProfile', '-NonInteractive', '-File', `${__dirname}/endpoint-owner.ps1`,
+           mode, String(value), String(root)],
       { encoding: 'utf8', timeout: 8000, maxBuffer: 4096,
         stdio: ['ignore', 'pipe', 'ignore'] });
     const categories = ['true', 'process-budget', 'ancestry-cycle', 'process-unavailable', 'parent-unavailable', 'parent-reused', 'session-mismatch', 'ancestry-limit', 'listener-unavailable', 'query-failed'];
