@@ -14,6 +14,8 @@ pub(super) struct Stability {
     bounds_changes: u16,
     name_changes: u16,
     stable_pairs: u16,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) last_window_state: Option<&'static str>,
 }
 
 impl Stability {
@@ -34,6 +36,34 @@ impl Stability {
             self.name_changes += u16::from(current.name != previous.name);
             self.stable_pairs += u16::from(current == previous);
         }
+    }
+
+    pub(super) fn save_failure(
+        &mut self,
+        native: &crate::native::Native,
+        snapshot: &crate::native::Snapshot,
+        previous: Option<&Window>,
+    ) {
+        #[cfg(windows)]
+        if let Some(window) = previous {
+            let observed = snapshot
+                .windows
+                .iter()
+                .find(|candidate| candidate.id == window.id && candidate.pid == window.pid);
+            self.last_window_state = Some(match observed {
+                Some(candidate) if candidate.name != window.name => "candidate-name-mismatch",
+                Some(candidate)
+                    if candidate.bounds.width < 300 || candidate.bounds.height < 200 =>
+                {
+                    "candidate-too-small"
+                }
+                Some(_) => "visible",
+                None => native.missing_window_state(window),
+            });
+        }
+        #[cfg(not(windows))]
+        let _ = (native, snapshot, previous);
+        self.save();
     }
 
     pub(super) fn save(&self) {

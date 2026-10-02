@@ -235,6 +235,23 @@ impl Native {
     }
 
     #[cfg(windows)]
+    pub(crate) fn missing_window_state(&self, window: &Window) -> &'static str {
+        let argument = format!("--window-state {} {}", window.id, window.pid);
+        match process::run_with_category(&self.executable, std::ffi::OsStr::new(&argument), None) {
+            Ok(output) => match output.trim() {
+                "visible" => "visible",
+                "gone" => "gone",
+                "identity-changed" => "identity-changed",
+                "minimized" => "minimized",
+                "hidden" => "hidden",
+                "cloaked" => "cloaked",
+                _ => "query-unavailable",
+            },
+            Err(_) => "query-unavailable",
+        }
+    }
+
+    #[cfg(windows)]
     pub(crate) fn fit_owned_window(&self, window: &Window) -> Result<(), FitWindowError> {
         let argument = format!("--fit-window {} {}", window.id, window.pid);
         let output =

@@ -117,7 +117,10 @@ class QualificationTests(unittest.TestCase):
             value = dict(schemaVersion=1, mechanism='native-window-stability', diagnosticsOnly=True, counts=counts)
             path.write_text(json.dumps(value))
             self.assertEqual(q.semantic_observations(root, 'zed-desktop'), [value])
-            for changed in ({**value, 'title': 'PRIVATE'}, {**value, 'counts': {**counts, 'nameChanges': True}},
+            observed = {**value, 'counts': {**counts, 'lastWindowState': 'minimized'}}
+            path.write_text(json.dumps(observed))
+            self.assertEqual(q.semantic_observations(root, 'zed-desktop'), [observed])
+            for changed in ({**value, 'counts': {**counts, 'lastWindowState': 'PRIVATE'}}, {**value, 'title': 'PRIVATE'}, {**value, 'counts': {**counts, 'nameChanges': True}},
                             {**value, 'counts': {**counts, 'candidatesAbsent': 0}}):
                 path.write_text(json.dumps(changed))
                 with self.assertRaises(ValueError):

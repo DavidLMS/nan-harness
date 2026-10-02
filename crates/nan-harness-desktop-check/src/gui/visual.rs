@@ -344,7 +344,7 @@ impl Visual {
                 previous = Some((*window).clone());
             }
             if Instant::now() >= deadline {
-                stability.save();
+                stability.save_failure(&native, &snapshot, previous.as_ref());
                 let stage = inventory.stage();
                 return Err((
                     Reason::DesktopUnavailable,

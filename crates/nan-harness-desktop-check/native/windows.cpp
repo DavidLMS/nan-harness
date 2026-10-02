@@ -12,6 +12,7 @@
 
 #if !defined(_WIN32)
 int fit_window(const std::string&) { return 5; }
+int window_state(const std::string&) { return 5; }
 #endif
 
 #if !defined(__APPLE__)
@@ -454,6 +455,32 @@ int fit_window(const std::string& request) {
     if (!contains_rect(work, rect))
         return fit_failure("postcondition-geometry");
     return 0;
+}
+
+// Read only the already-owned window's visibility; this never activates it.
+int window_state(const std::string& request) {
+    std::istringstream input(request);
+    std::string id_text, pid_text, extra;
+    if (!(input >> id_text >> pid_text) || (input >> extra)
+        || id_text.empty() || pid_text.empty()
+        || id_text.find_first_not_of("0123456789") != std::string::npos
+        || pid_text.find_first_not_of("0123456789") != std::string::npos) return 5;
+    std::uintmax_t id = 0, pid = 0;
+    std::istringstream id_input(id_text), pid_input(pid_text);
+    if (!(id_input >> id) || !(pid_input >> pid) || !id || !pid
+        || id > (std::numeric_limits<std::uintptr_t>::max)()
+        || pid > (std::numeric_limits<DWORD>::max)()) return 5;
+    HWND window = reinterpret_cast<HWND>(static_cast<std::uintptr_t>(id));
+    const char* state = "visible";
+    DWORD actual_pid = 0, cloaked = 0;
+    if (!IsWindow(window)) state = "gone";
+    else if (!GetWindowThreadProcessId(window, &actual_pid)) state = "query-unavailable";
+    else if (actual_pid != pid) state = "identity-changed";
+    else if (IsIconic(window)) state = "minimized";
+    else if (!IsWindowVisible(window)) state = "hidden";
+    else if (SUCCEEDED(DwmGetWindowAttribute(window, DWMWA_CLOAKED, &cloaked, sizeof(cloaked))) && cloaked) state = "cloaked";
+    std::cout << state << '\n';
+    return std::cout ? 0 : 5;
 }
 
 static std::string process_name(DWORD pid) {
