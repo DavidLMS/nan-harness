@@ -164,8 +164,9 @@ fn save_failure(image: &[u8], stage: InspectionStage) {
         u64::from_le_bytes(nonce)
     ));
     if let Ok(mut file) = nan_harness_private_fs::open_private_new(&path) {
-        let _ = serde_json::to_writer(&mut file, &value)
-            .and_then(|()| file.flush().map_err(Into::into));
+        if serde_json::to_writer(&mut file, &value).is_ok() {
+            let _ = file.flush();
+        }
     }
 }
 
