@@ -301,6 +301,17 @@ pub(crate) struct CleanupDiagnostic {
     absence: Option<crate::gui::AbsenceStage>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     stop: Option<StopDiagnostic>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    restore: Option<RestoreFailure>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+enum RestoreFailure {
+    CommandCreation,
+    ProcessIo,
+    DeadlineExpired,
+    NonzeroExit,
 }
 
 /// Closed observations of each bounded process-stop operation. These facts
@@ -1186,6 +1197,7 @@ async fn finish_scenario(
             reason: Reason::CleanupFailed,
             absence: None,
             stop: Some(failure.diagnostic),
+            restore: None,
         });
         return Err(Reason::CleanupFailed);
     }
@@ -1195,12 +1207,7 @@ async fn finish_scenario(
         outcome.err(),
         diagnostic,
     )?;
-    record_cleanup(
-        restore(spec).await,
-        CleanupStage::Restore,
-        outcome.err(),
-        diagnostic,
-    )?;
+    record_restore(restore_detailed(spec).await, outcome.err(), diagnostic)?;
     record_absence(
         Gui::ensure_absent(spec.kind),
         CleanupStage::AbsenceAfterRestore,
@@ -1230,24 +1237,6 @@ fn launcher_exit(status: std::process::ExitStatus) -> LaunchExit {
     LaunchExit::Unknown
 }
 
-fn record_cleanup(
-    outcome: Result<(), Reason>,
-    stage: CleanupStage,
-    original_reason: Option<Reason>,
-    diagnostic: &mut Option<CleanupDiagnostic>,
-) -> Result<(), Reason> {
-    outcome.map_err(|reason| {
-        *diagnostic = Some(CleanupDiagnostic {
-            stage,
-            original_reason,
-            reason,
-            absence: None,
-            stop: None,
-        });
-        Reason::CleanupFailed
-    })
-}
-
 fn record_absence(
     outcome: Result<(), crate::gui::AbsenceFailure>,
     stage: CleanupStage,
@@ -1261,6 +1250,7 @@ fn record_absence(
             reason: failure.reason,
             absence: Some(failure.stage),
             stop: None,
+            restore: None,
         });
         Reason::CleanupFailed
     })
@@ -1700,16 +1690,45 @@ fn restore_command(spec: &ProbeSpec) -> Result<Command, Reason> {
 }
 
 async fn restore(spec: &ProbeSpec) -> Result<(), Reason> {
-    let mut command = restore_command(spec)?;
-    let status = tokio::time::timeout(Duration::from_secs(30), command.status())
+    restore_detailed(spec)
         .await
-        .map_err(|_| Reason::CleanupFailed)?
-        .map_err(|_| Reason::CleanupFailed)?;
+        .map_err(|_| Reason::CleanupFailed)
+}
+
+async fn restore_detailed(spec: &ProbeSpec) -> Result<(), RestoreFailure> {
+    let command = restore_command(spec).map_err(|_| RestoreFailure::CommandCreation)?;
+    run_restore(command, Duration::from_secs(30)).await
+}
+
+async fn run_restore(mut command: Command, limit: Duration) -> Result<(), RestoreFailure> {
+    command.kill_on_drop(true);
+    let status = tokio::time::timeout(limit, command.status())
+        .await
+        .map_err(|_| RestoreFailure::DeadlineExpired)?
+        .map_err(|_| RestoreFailure::ProcessIo)?;
     if status.success() {
         Ok(())
     } else {
-        Err(Reason::CleanupFailed)
+        Err(RestoreFailure::NonzeroExit)
     }
+}
+
+fn record_restore(
+    outcome: Result<(), RestoreFailure>,
+    original_reason: Option<Reason>,
+    diagnostic: &mut Option<CleanupDiagnostic>,
+) -> Result<(), Reason> {
+    outcome.map_err(|failure| {
+        *diagnostic = Some(CleanupDiagnostic {
+            stage: CleanupStage::Restore,
+            original_reason,
+            reason: Reason::CleanupFailed,
+            absence: None,
+            stop: None,
+            restore: Some(failure),
+        });
+        Reason::CleanupFailed
+    })
 }
 
 #[cfg(unix)]
@@ -2328,44 +2347,57 @@ mod tests {
     }
 
     #[test]
-    fn cleanup_failures_preserve_the_original_reason_and_exact_stage() {
-        for stage in [
-            CleanupStage::Stop,
-            CleanupStage::AbsenceAfterStop,
-            CleanupStage::Restore,
-            CleanupStage::AbsenceAfterRestore,
+    fn restoration_failure_preserves_original_outcome_without_command_details() {
+        for failure in [
+            RestoreFailure::CommandCreation,
+            RestoreFailure::ProcessIo,
+            RestoreFailure::DeadlineExpired,
+            RestoreFailure::NonzeroExit,
         ] {
             let mut diagnostic = None;
             assert_eq!(
-                record_cleanup(
-                    Ok(()),
-                    stage,
-                    Some(Reason::SelectorNotMatched),
-                    &mut diagnostic
-                ),
-                Ok(())
-            );
-            assert!(diagnostic.is_none());
-            assert_eq!(
-                record_cleanup(
-                    Err(Reason::AlreadyRunning),
-                    stage,
-                    Some(Reason::SelectorNotMatched),
+                record_restore(
+                    Err(failure),
+                    Some(Reason::ActionUnsupported),
                     &mut diagnostic
                 ),
                 Err(Reason::CleanupFailed)
             );
+            let value = serde_json::to_value(diagnostic.unwrap()).unwrap();
+            assert_eq!(value.as_object().unwrap().len(), 4);
+            assert_eq!(value["stage"], "restore");
+            assert_eq!(value["reason"], "cleanup-failed");
+            assert_eq!(value["originalReason"], "action-unsupported");
             assert_eq!(
-                diagnostic,
-                Some(CleanupDiagnostic {
-                    stage,
-                    original_reason: Some(Reason::SelectorNotMatched),
-                    reason: Reason::AlreadyRunning,
-                    absence: None,
-                    stop: None,
-                })
+                serde_json::from_value::<RestoreFailure>(value["restore"].clone()).unwrap(),
+                failure
             );
         }
+        let mut diagnostic = None;
+        assert_eq!(record_restore(Ok(()), None, &mut diagnostic), Ok(()));
+        assert!(diagnostic.is_none());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn restoration_distinguishes_process_io_deadline_and_nonzero_exit() {
+        let missing = Command::new("/nanh-synthetic-nonexistent-restore");
+        assert_eq!(
+            run_restore(missing, Duration::from_secs(1)).await,
+            Err(RestoreFailure::ProcessIo)
+        );
+        let mut nonzero = Command::new("sh");
+        nonzero.args(["-c", "exit 7"]);
+        assert_eq!(
+            run_restore(nonzero, Duration::from_secs(1)).await,
+            Err(RestoreFailure::NonzeroExit)
+        );
+        let mut slow = Command::new("sleep");
+        slow.arg("10");
+        assert_eq!(
+            run_restore(slow, Duration::from_millis(10)).await,
+            Err(RestoreFailure::DeadlineExpired)
+        );
     }
 
     #[test]
@@ -2383,6 +2415,7 @@ mod tests {
             original_reason: Some(Reason::SelectorNotMatched),
             reason: Reason::CleanupFailed,
             absence: None,
+            restore: None,
             stop: Some(StopDiagnostic {
                 initial_wait: StopWaitDiagnostic {
                     outcome: StopWaitOutcome::TimedOut,

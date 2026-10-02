@@ -7,7 +7,7 @@ async function trial(options={}) {
  const root={parentElement:null};
  const fieldset={parentElement:root};
  const label={kind:'label',tagName:'LABEL',parentElement:fieldset,innerText:'Engineering'};
- const radio={kind:'radio',parentElement:label,labels:[label],disabled:false};
+ const radio={kind:'radio',parentElement:label,labels:options.badAssociation?[]:[label],disabled:false};
  const button={kind:'continue',parentElement:root,tagName:'BUTTON',disabled:!!options.disabled};
  const foreign={kind:'foreign'};
  const doc={querySelectorAll: selector=>selector.startsWith('input')?[radio]:options.modal?[foreign]:[],
@@ -35,8 +35,8 @@ async function trial(options={}) {
   filter(){return this;}
   locator(s){return new Locator(s==='..'?'fieldset':s.startsWith('xpath=')?'scope':s==='fieldset'?'fieldset':s==='label'?'label':s.includes(':checked')?'checked':s.includes('value=')?'radio':'radios');}
   getByRole(_r,o){return new Locator(o.name==='Continue'?'continue':'login');}
-  async count(){return this.kind==='login'?0:this.kind==='legend'?(options.wrongLegend?0:1):this.kind==='radios'?(absent?0:11):this.kind==='checked'?(checked?(options.multipleChecked?2:1):0):this.kind==='continue'?(options.duplicateContinue?2:1):this.kind==='radio'?(options.duplicateRadio?2:1):1;}
-  async isEnabled(){return this.kind!=='continue'||!options.disabled;}
+  async count(){return this.kind==='label'?(options.duplicateLabel?2:1):this.kind==='scope'?(options.badScope?0:1):this.kind==='fieldset'?(options.extraFieldset?2:1):this.kind==='login'?(options.login?1:0):this.kind==='legend'?(options.wrongLegend?0:1):this.kind==='radios'?(absent||options.noGroup?0:11):this.kind==='checked'?(checked?(options.multipleChecked?2:1):0):this.kind==='continue'?(options.duplicateContinue?2:1):this.kind==='radio'?(options.duplicateRadio?2:1):1;}
+  async isEnabled(){return this.kind==='radio'?!(options.radioDisabled||options.loading&&now<300):this.kind!=='continue'||!options.disabled;}
   async isChecked(){return checked;}
   element(){return this.kind==='label'?label:this.kind==='continue'?button:this.kind==='radio'?radio:this.kind==='fieldset'?fieldset:root;}
   async evaluate(fn,arg){if(options.remount&&arg instanceof Handle&&samples>0)return false;return evaluate(fn,this.element(),arg);}
@@ -45,12 +45,18 @@ async function trial(options={}) {
  const page={locator:s=>new Locator(s.startsWith('fieldset > legend')?'legend':'radios'),url:()=> 'app://codex/index.html',context:()=>({browser:()=>({contexts:()=>[{pages:()=>options.foreignPage?[page,{}]:[page]}]})})};
  const sandbox={exports:{},process:{platform:'win32',env:{GITHUB_ACTIONS:'true',RUNNER_ENVIRONMENT:'github-hosted',RUNNER_OS:'Windows',NANH_CODEX_PUBLIC_ONBOARDING:options.noOptin?undefined:'engineering'}},Date:{now:()=>now},setTimeout:f=>{now+=100;f();}};
  vm.runInNewContext(source,sandbox);
- const facts=await sandbox.exports.run(page,()=>!(options.ownerLoss&&roleClicks>0),1200);
+ let guards=0;
+ const facts=await sandbox.exports.run(page,()=>{guards++;return !(options.ownerLoss&&roleClicks>0)&&!(options.finalLoss&&guards>=2);},1200);
  return {facts,roleClicks,continueClicks};
 }
 (async()=>{
+ const loaded=await trial({loading:true});assert.equal(loaded.roleClicks,1);assert.equal(loaded.continueClicks,1);
+ const scoped=await trial({extraFieldset:true});assert.equal(scoped.facts.roleProofFailure,'fieldset-count');
+ const duplicate=await trial({duplicateRadio:true});assert.equal(duplicate.facts.roleProofFailure,'engineering-count');
+ const legend=await trial({wrongLegend:true});assert.equal(legend.facts.roleProofFailure,'legend-count');
+ for(const [opts,reason] of [[{badScope:true},'scope-count'],[{login:true},'login-present'],[{noGroup:true},'group-absent'],[{duplicateLabel:true},'label-count'],[{badAssociation:true},'label-association'],[{finalLoss:true},'final-ownership']]) {const r=await trial(opts);assert.equal(r.facts.roleProofFailure,reason);assert.equal(r.roleClicks,0);assert.equal(r.continueClicks,0);}
  const good=await trial();assert.equal(good.roleClicks,1);assert.equal(good.continueClicks,1);assert.equal(good.facts.roleScopeAbsent,true);assert.equal(good.facts.stage,'stopped-after-role');assert.equal(good.facts.errorCategory,null);
- for(const opts of [{noOptin:true},{foreignPage:true},{wrongLegend:true},{duplicateRadio:true},{modal:true},{intercepted:'label'},{remount:true}]) {
+ for(const opts of [{noOptin:true},{foreignPage:true},{wrongLegend:true},{duplicateRadio:true},{badScope:true},{extraFieldset:true},{login:true},{radioDisabled:true},{modal:true},{intercepted:'label'},{remount:true}]) {
   const r=await trial(opts);assert.equal(r.roleClicks,0);assert.equal(r.continueClicks,0);
  }
  for(const opts of [{readbackFail:true},{multipleChecked:true},{ownerLoss:true},{disabled:true},{duplicateContinue:true},{intercepted:'continue'},{uncertain:'role'}]) {
@@ -59,5 +65,5 @@ async function trial(options={}) {
  for(const opts of [{remain:true},{uncertain:'continue'}]) {const r=await trial(opts);assert.equal(r.roleClicks,1);assert.equal(r.continueClicks,1);assert.equal(r.facts.roleScopeAbsent,false);}
  assert.equal(JSON.stringify(good.facts).includes('Engineering'),false);
  assert.equal(JSON.stringify(good.facts).includes('private'),false);
- console.log('PASS: public onboarding behavioral guards (17 cases)');
+ console.log('PASS: public onboarding behavioral guards (closed proof branches + guarded loading)');
 })().catch(e=>{console.error(e);process.exitCode=1;});

@@ -752,10 +752,11 @@ class QualificationTests(unittest.TestCase):
                      stage='stopped-after-role', errorCategory=None, conversationalScope=True,
                      engineeringControl=True, roleClickAttempted=True, roleClickCompleted=True,
                      engineeringChecked=True, continueControl=True, continueClickAttempted=True,
-                     continueClickCompleted=True, roleScopeAbsent=True)
+                     continueClickCompleted=True, roleScopeAbsent=True, roleProofFailure='unmeasured')
         self.assertEqual(q.public_onboarding(setup, 'chatgpt-desktop'), setup)
         for changed in ({**setup, 'label': 'PRIVATE'}, {**setup, 'stage': 'PRIVATE'},
                         {**setup, 'errorCategory': []}, {**setup, 'engineeringChecked': 1},
+                        {**setup, 'roleProofFailure': 'PRIVATE'}, {**setup, 'roleProofFailure': []},
                         {**setup, 'schemaVersion': True}, {**setup, 'diagnosticsOnly': False},
                         {key: value for key, value in setup.items() if key != 'roleScopeAbsent'}):
             with self.assertRaises(ValueError):

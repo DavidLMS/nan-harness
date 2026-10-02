@@ -358,13 +358,16 @@ def validate_native(value, platform=None):
                                                 "present-onscreen", "query-unavailable"})
     if "cleanup" in value:
         item = value["cleanup"]
-        fields(item, {"stage", "originalReason", "reason"}, {"absence", "stop"})
+        fields(item, {"stage", "originalReason", "reason"}, {"absence", "stop", "restore"})
         enum(item["stage"], {"stop", "absence-after-stop", "restore", "absence-after-restore"})
         enum(item["reason"], REASONS)
         if item["originalReason"] is not None:
             enum(item["originalReason"], REASONS)
         if "absence" in item:
             enum(item["absence"], {"accessibility-provider", "accessibility-enumeration", "native-windows"})
+        if "restore" in item:
+            require(item["stage"] == "restore" and item["reason"] == "cleanup-failed")
+            enum(item["restore"], {"command-creation", "process-io", "deadline-expired", "nonzero-exit"})
         if "stop" in item:
             require(item["stage"] == "stop")
             validate_stop(item["stop"])

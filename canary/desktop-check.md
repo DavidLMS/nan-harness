@@ -556,3 +556,17 @@ after the role scope disappears, retaining only closed setup receipts; unfamilia
 screens, intercepted controls and uncertain actions remain blocked. It does not
 set hidden onboarding state, use an account or establish conversation acceptance.
 The canonical qualification workflow does not enable this diagnostic.
+
+Codex Windows run
+[37001532086](https://github.com/DavidLMS/nan-harness/actions/runs/37001532086)
+on source `5b08ae425dc81499168e17c027a1464ca012d9bb` positively observes the
+conversational legend and eleven visible role radios, but its scoped setup proof
+does not match. No setup action is attempted. Cleanup fails at restoration,
+stopping the other two probes. The next receipt identifies the exact failed role
+predicate; only the source-confirmed pending disabled control receives bounded
+read-only waiting. Ambiguity remains blocked.
+
+Closed restoration failure receipts now distinguish command creation, process
+I/O, the existing thirty-second deadline and a nonzero exit. They preserve the
+original scenario reason and the cleanup failure verdict; no application output,
+process identity or configuration value is retained.

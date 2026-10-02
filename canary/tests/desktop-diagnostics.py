@@ -33,6 +33,22 @@ def line(record, prefix=b"DESKTOP_INSTALL_DIAGNOSTIC:"):
 
 
 class DiagnosticTests(unittest.TestCase):
+    def test_restore_failure_requires_closed_stage_and_reason(self):
+        record = native()
+        record["cleanup"] = {"stage": "restore", "originalReason": "action-unsupported",
+                             "reason": "cleanup-failed"}
+        D.validate_native(record)  # Older records remain valid.
+        for failure in ("command-creation", "process-io", "deadline-expired", "nonzero-exit"):
+            record["cleanup"]["restore"] = failure
+            D.validate_native(record)
+        for changes in ({"restore": None}, {"restore": "private error"},
+                        {"stage": "stop"}, {"reason": "action-unsupported"},
+                        {"restore": {"failure": "process-io", "message": "private"}}):
+            rejected = json.loads(json.dumps(record))
+            rejected["cleanup"].update(changes)
+            with self.assertRaises(ValueError):
+                D.validate_native(rejected)
+
     def test_unpositioned_marker_is_a_closed_failure_not_success(self):
         record = {**native(), "launchStage": "window-acquired",
                   "composer": [{"operation": "verify-response-visual",

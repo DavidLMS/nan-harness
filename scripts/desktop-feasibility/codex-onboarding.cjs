@@ -44,7 +44,7 @@ exports.run = async function(page, ownerGuard, deadline) {
     stage:'session', errorCategory:null, conversationalScope:false, engineeringControl:false,
     roleClickAttempted:false, roleClickCompleted:false, engineeringChecked:false,
     continueControl:false, continueClickAttempted:false, continueClickCompleted:false,
-    roleScopeAbsent:false};
+    roleScopeAbsent:false, roleProofFailure:'unmeasured'};
   const stop = category => { facts.errorCategory=category; return facts; };
   if (typeof ownerGuard !== 'function' || !Number.isFinite(maxWaitMs) || maxWaitMs < 1 || maxWaitMs > 25000
       || process.platform !== 'win32' || process.env.GITHUB_ACTIONS !== 'true'
@@ -53,23 +53,29 @@ exports.run = async function(page, ownerGuard, deadline) {
       || process.env.NANH_CODEX_PUBLIC_ONBOARDING !== 'engineering') return stop('invalid-session');
   let scope, fieldset, radio, label, button;
   async function proof(needChecked=false) {
-    if (Date.now() >= deadline || !ownedEndpoint()) return false;
+    const fail = reason => { facts.roleProofFailure=reason; return false; };
+    facts.roleProofFailure='unmeasured';
+    if (Date.now() >= deadline || !ownedEndpoint()) return fail('deadline-or-ownership');
     const legends = page.locator('fieldset > legend:visible').filter({hasText:/^Select the kind of work you do$/});
-    if (await legends.count() !== 1) return false;
+    if (await legends.count() !== 1) return fail('legend-count');
     fieldset = legends.locator('..');
-    if (await fieldset.locator(GROUP).count() < 1) return false;
+    if (await fieldset.locator(GROUP).count() < 1) return fail('group-absent');
     scope = fieldset.locator(`xpath=ancestor::div[${TOKENS.map(t=>`contains(concat(' ', normalize-space(@class), ' '), ' ${t} ')`).join(' and ')}][1]`);
-    if (await scope.count() !== 1 || await scope.locator('fieldset').count() !== 1) return false;
-    if (await scope.getByRole('button',{name:/^(Log in|Sign in|Continue with Google|Continue with Apple)$/i}).count() !== 0) return false;
+    if (await scope.count() !== 1) return fail('scope-count');
+    if (await scope.locator('fieldset').count() !== 1) return fail('fieldset-count');
+    if (await scope.getByRole('button',{name:/^(Log in|Sign in|Continue with Google|Continue with Apple)$/i}).count() !== 0) return fail('login-present');
     radio = fieldset.locator(`${GROUP}[value="engineering"]`);
-    if (await radio.count() !== 1 || (!needChecked && !await radio.isEnabled())) return false;
+    if (await radio.count() !== 1) return fail('engineering-count');
     label = fieldset.locator('label').filter({hasText:/^Engineering$/});
-    if (await label.count() !== 1 || !await label.evaluate((e, group) => {
+    if (await label.count() !== 1) return fail('label-count');
+    if (!await label.evaluate((e, group) => {
       const inputs=[...e.ownerDocument.querySelectorAll(group+'[value="engineering"]')];
       return inputs.length===1 && inputs[0].labels?.length===1 && inputs[0].labels[0]===e && e.innerText.trim()==='Engineering';
-    },GROUP)) return false;
-    if (needChecked && (!await radio.isChecked() || await fieldset.locator(GROUP+':checked').count() !== 1)) return false;
-    return ownedEndpoint();
+    },GROUP)) return fail('label-association');
+    if (!needChecked && !await radio.isEnabled()) return fail('engineering-disabled');
+    if (needChecked && (!await radio.isChecked() || await fieldset.locator(GROUP+':checked').count() !== 1)) return fail('checked-mismatch');
+    if (!ownedEndpoint()) return fail('final-ownership');
+    return true;
   }
   async function click(control, reprove, before, after) {
     if (!await reprove()) return false;
@@ -93,7 +99,13 @@ exports.run = async function(page, ownerGuard, deadline) {
   }
   try {
     facts.stage='role-proof';
-    if (!await proof()) return stop('scope-not-matched');
+    // Frozen conversational parent disables controls during its pending work.
+    // Only that positively matched, disabled control is a pollable startup state.
+    while (!await proof()) {
+      if (facts.roleProofFailure !== 'engineering-disabled' || Date.now() >= deadline)
+        return stop('scope-not-matched');
+      await wait(Math.min(100, Math.max(0, deadline-Date.now())));
+    }
     facts.conversationalScope=true; facts.engineeringControl=true;
     if (await fieldset.locator(GROUP+':checked').count() !== 0) return stop('role-already-selected');
     facts.stage='role-action';

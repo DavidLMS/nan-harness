@@ -32,7 +32,10 @@ def public_onboarding(setup, app):
     booleans = {'conversationalScope', 'engineeringControl', 'roleClickAttempted',
                 'roleClickCompleted', 'engineeringChecked', 'continueControl',
                 'continueClickAttempted', 'continueClickCompleted', 'roleScopeAbsent'}
-    fields = booleans | {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'stage', 'errorCategory'}
+    fields = booleans | {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'stage', 'errorCategory', 'roleProofFailure'}
+    failures = {'unmeasured', 'deadline-or-ownership', 'legend-count', 'group-absent', 'scope-count',
+                'fieldset-count', 'login-present', 'engineering-count', 'engineering-disabled',
+                'label-count', 'label-association', 'checked-mismatch', 'final-ownership'}
     stages = {'session', 'role-proof', 'role-action', 'role-readback', 'continue-action',
               'scope-transition', 'stopped-after-role'}
     errors = {None, 'invalid-session', 'scope-not-matched', 'role-already-selected',
@@ -44,6 +47,7 @@ def public_onboarding(setup, app):
             or type(setup['stage']) is not str or setup['stage'] not in stages
             or (setup['errorCategory'] is not None and type(setup['errorCategory']) is not str)
             or setup['errorCategory'] not in errors
+            or type(setup['roleProofFailure']) is not str or setup['roleProofFailure'] not in failures
             or any(type(setup[key]) is not bool for key in booleans)):
         raise ValueError('invalid public onboarding diagnostic')
     return setup
