@@ -170,9 +170,19 @@ def semantic_observations(directory, app):
                 raise ValueError('invalid Hermes backend failure facts')
             record.update(diagnosticsOnly=True, category=value['category'], assistantTurnCount=value['assistantTurnCount'])
         elif mechanism == 'renderer-startup-baseline':
-            if set(value) != set('schemaVersion mechanism diagnosticsOnly windowAcquired rendererInstrumented'.split()) or value['diagnosticsOnly'] is not True or value['windowAcquired'] is not True or value['rendererInstrumented'] is not False:
+            if set(value) - {'accessibilityInventory'} != set('schemaVersion mechanism diagnosticsOnly windowAcquired rendererInstrumented'.split()) or value['diagnosticsOnly'] is not True or value['windowAcquired'] is not True or value['rendererInstrumented'] is not False:
                 raise ValueError('invalid renderer startup baseline')
             record.update(diagnosticsOnly=True, windowAcquired=True, rendererInstrumented=False)
+            if 'accessibilityInventory' in value:
+                inventory = value['accessibilityInventory']
+                fields = {'appPresent', 'editableCount', 'retryCount', 'loginCount'}
+                if type(inventory) is not dict or set(inventory) != fields or type(inventory['appPresent']) is not bool:
+                    raise ValueError('invalid native accessibility inventory')
+                for key in fields - {'appPresent'}:
+                    if inventory[key] is not None and (type(inventory[key]) is not int or not 0 <= inventory[key] <= 4096):
+                        raise ValueError('invalid native accessibility count')
+                record['accessibilityInventory'] = inventory
+
         elif mechanism == 'renderer-startup':
             if set(value) != set('schemaVersion mechanism diagnosticsOnly app exitCode stderrPresent captureTruncated startupCategory'.split()) or value['diagnosticsOnly'] is not True or value['app'] != app:
                 raise ValueError('invalid renderer startup identity')

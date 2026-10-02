@@ -393,3 +393,13 @@ for movement and one dispatch still fails recovery. The helper replaces
 `mousemove --sync`, which waits for movement even when already at the target,
 with one movement and an exact bounded pointer-position readback. It never
 replays uncertain clicks; recovery remains unqualified until fresh full evidence.
+
+Fresh-account credentials are unavailable; qualification must seek supported
+account-free routes. Pen's [official authentication documentation](https://docs.pencil.dev/getting-started/authentication)
+describes pen.dev sign-in separately from its optional custom-provider key;
+software rendering does not establish an account-free editor. The frozen UI's
+“Skip for now” belongs to profile completion, rather than bypassing sign-in.
+Claude's existing `deploymentMode: 3p` gateway profile remains the account-free
+route under test. Startup baselines now retain only native accessibility presence
+and visible editable/Retry/login counts, never labels, field values or trees,
+to assess this route without forbidden CDP switches. These remain diagnostics.

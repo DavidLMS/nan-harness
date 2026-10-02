@@ -805,7 +805,21 @@ impl Gui {
     pub(crate) fn inventory_renderer(&self, directory: &Path, owner: u32) -> Result<(), Reason> {
         self.visual.guard()?;
         if std::env::var("NANH_DESKTOP_QUALIFICATION_MODE").as_deref() == Ok("startup-baseline") {
-            let value = serde_json::json!({"schemaVersion":1, "mechanism":"renderer-startup-baseline", "diagnosticsOnly":true, "windowAcquired":true, "rendererInstrumented":false});
+            let count = |selector: &str| {
+                self.app.as_ref().and_then(|app| {
+                    app.locator(selector)
+                        .elements()
+                        .ok()
+                        .and_then(|elements| (elements.len() <= 4096).then_some(elements.len()))
+                })
+            };
+            let inventory = serde_json::json!({"appPresent": self.app.is_some(),
+                "editableCount": count("text_area[visible=\"true\"][editable=\"true\"], text_field[visible=\"true\"][editable=\"true\"]"),
+                "retryCount": count("button[visible=\"true\"][name=\"Retry\"], button[visible=\"true\"][name=\"Try again\"]"),
+                "loginCount": count("button[visible=\"true\"][name=\"Sign in\"], button[visible=\"true\"][name=\"Log in\"]")});
+            // Only role/known-control counts leave memory; this never sends input.
+            self.visual.guard()?;
+            let value = serde_json::json!({"schemaVersion":1, "mechanism":"renderer-startup-baseline", "diagnosticsOnly":true, "windowAcquired":true, "rendererInstrumented":false, "accessibilityInventory": inventory});
             open_private_new(&directory.join(format!("baseline-{owner}.json")))
                 .and_then(|mut file| file.write_all(value.to_string().as_bytes()))
                 .map_err(|_| Reason::IsolationUnavailable)?;

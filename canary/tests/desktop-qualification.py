@@ -147,6 +147,21 @@ class QualificationTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'claude-desktop')
 
+    def test_baseline_accessibility_inventory_keeps_only_closed_counts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            inventory = dict(appPresent=True, editableCount=1, retryCount=0, loginCount=None)
+            value = dict(schemaVersion=1, mechanism='renderer-startup-baseline', diagnosticsOnly=True,
+                         windowAcquired=True, rendererInstrumented=False, accessibilityInventory=inventory)
+            path = root / 'baseline.json'
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [value])
+            for changed in ({**inventory, 'label': 'PRIVATE'}, {**inventory, 'editableCount': True},
+                            {**inventory, 'retryCount': 4097}):
+                path.write_text(json.dumps({**value, 'accessibilityInventory': changed}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'claude-desktop')
+
     def test_child_startup_receipt_rejects_private_output_and_wrong_app(self):
         with tempfile.TemporaryDirectory() as root:
             path = Path(root) / 'renderer-startup.json'
