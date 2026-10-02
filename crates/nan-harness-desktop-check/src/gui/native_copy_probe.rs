@@ -972,7 +972,7 @@ impl Gui {
         &'a self,
         directory: &'a Path,
     ) -> Result<NativeClipboardSession<'a>, Reason> {
-        if !cfg!(any(target_os = "macos", target_os = "linux"))
+        if !cfg!(any(target_os = "macos", target_os = "linux", windows))
             || self.kind != nan_harness_core::DesktopHarnessKind::Zed
         {
             return Err(Reason::ActionUnsupported);

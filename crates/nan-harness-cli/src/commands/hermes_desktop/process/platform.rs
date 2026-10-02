@@ -199,7 +199,7 @@ pub(crate) fn running_desktop() -> Result<Option<DesktopProcess>, HermesDesktopE
         }
         let started = rest[..24].trim().to_owned();
         let command = rest[24..].trim();
-        if desktop_main_command(command) {
+        if desktop_main_command(command) && macos_desktop_main_process(pid, command)? {
             return Ok(Some(DesktopProcess { pid, started }));
         }
     }
@@ -213,6 +213,38 @@ pub(crate) fn desktop_main_command(command: &str) -> bool {
             || command.contains("/apps/desktop/release/linux-")
                 && (command.ends_with("/hermes") || command.ends_with("/Hermes"))
             || command.contains("/apps/desktop/node_modules/electron/")
+                && command.contains("apps/desktop"))
+}
+
+#[cfg(target_os = "macos")]
+fn macos_desktop_main_process(pid: u32, command: &str) -> Result<bool, HermesDesktopError> {
+    // comm selects the executable name, excluding --desktop-executable and
+    // other launcher arguments that can contain the application's path.
+    let output = Command::new("/bin/ps")
+        .args(["-ww", "-p", &pid.to_string(), "-o", "comm="])
+        .output()
+        .map_err(HermesDesktopError::ProcessCheck)?;
+    if !output.status.success() {
+        if output.status.code() == Some(1) && output.stdout.is_empty() {
+            return Ok(false); // The process exited after the initial inventory.
+        }
+        return Err(HermesDesktopError::ProcessCheckFailed(output.status.code()));
+    }
+    if output.stdout.len() > 4096 {
+        return Err(HermesDesktopError::ProcessCheck(
+            ErrorKind::InvalidData.into(),
+        ));
+    }
+    let executable = std::str::from_utf8(&output.stdout)
+        .map_err(|_| HermesDesktopError::ProcessCheck(ErrorKind::InvalidData.into()))?;
+    Ok(macos_main_identity(executable.trim(), command))
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn macos_main_identity(executable: &str, command: &str) -> bool {
+    !command.contains("--type=")
+        && (executable.ends_with("/Hermes.app/Contents/MacOS/Hermes")
+            || executable.contains("/apps/desktop/node_modules/electron/")
                 && command.contains("apps/desktop"))
 }
 
@@ -412,4 +444,27 @@ pub(crate) fn marker_fingerprint(path: &Path) -> Option<MarkerFingerprint> {
         modified: metadata.modified().ok(),
         length: metadata.len(),
     })
+}
+
+#[cfg(test)]
+mod macos_identity_tests {
+    use super::macos_main_identity;
+    #[test]
+    fn app_path_in_launcher_arguments_cannot_claim_or_terminate_the_launcher() {
+        let app = "/owned path/Hermes.app/Contents/MacOS/Hermes";
+        assert!(macos_main_identity(app, app));
+        assert!(!macos_main_identity(
+            "/owned/nanh",
+            &format!("nanh hermes-desktop --desktop-executable {app}")
+        ));
+        assert!(!macos_main_identity(
+            "/owned/python3",
+            &format!("python3 helper.py {app}")
+        ));
+        assert!(!macos_main_identity(app, &format!("{app} --type=renderer")));
+        assert!(!macos_main_identity(
+            "/owned/Hermes.app/Contents/MacOS/Hermes Helper",
+            app
+        ));
+    }
 }
