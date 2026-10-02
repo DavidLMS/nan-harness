@@ -981,10 +981,10 @@ impl NativeClipboardSession<'_> {
     }
 
     fn press_retry(&self, button: &xa11y::Element) -> Result<&'static str, Reason> {
-        if cfg!(target_os = "macos") {
+        if cfg!(any(target_os = "macos", target_os = "linux")) {
             return retry_press_receipt(button.press());
         }
-        // Linux/Windows use an ordinary pointer as the primary Retry action.
+        // Windows uses an ordinary pointer as the primary Retry action.
         // The named control and its owned native bounds are revalidated first;
         // an uncertain dispatch never triggers another action or a fallback.
         let bounds = button.bounds.ok_or(Reason::ActionUnsupported)?;

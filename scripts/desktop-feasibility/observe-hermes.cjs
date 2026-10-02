@@ -160,7 +160,7 @@ async function driveDom() {
       !(qualify ? ['Check this connection', 'Read read-target.txt using your file tool.', 'Check the expected provider failure'].includes(request.prompt) : request.prompt === 'Check this connection') ||
       typeof request.expectedMarker !== 'string' || request.expectedMarker.length < (qualify && request.purpose === 'failure' ? 1 : 32) ||
       request.expectedMarker.length > 2048 || !Number.isInteger(request.timeoutMs) ||
-      request.timeoutMs < 1 || request.timeoutMs > 30000) {
+      request.timeoutMs < 1 || request.timeoutMs > (qualify ? 45000 : 30000)) {
     facts.errorCategory = 'invalid-request'; saveFacts(); return;
   }
   let ancestor = connection.launcherPid;

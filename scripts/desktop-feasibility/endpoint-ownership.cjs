@@ -27,7 +27,12 @@ function windowsProof(mode, value, root) {
     const categories = ['true', 'process-budget', 'ancestry-cycle', 'process-unavailable', 'parent-unavailable', 'parent-reused', 'session-mismatch', 'ancestry-limit', 'listener-unavailable', 'query-failed'];
     saveWindowsProof(categories.includes(result) ? (result === 'true' ? 'owned' : result) : 'unclassified');
     return result === 'true';
-  } catch (error) { saveWindowsProof(error?.code === 'ETIMEDOUT' ? 'transport-timeout' : 'transport-failed'); return false; }
+  } catch (error) {
+    const closed = error?.stdout?.toString();
+    saveWindowsProof(closed === 'query-failed' ? 'query-failed'
+      : error?.code === 'ETIMEDOUT' ? 'transport-timeout' : 'transport-failed');
+    return false;
+  }
 }
 function descendant(pid) {
   if (process.platform === 'win32') return windowsProof('descendant', pid, Number(owner));

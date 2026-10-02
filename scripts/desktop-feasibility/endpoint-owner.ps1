@@ -34,7 +34,7 @@ try {
         $owned = Test-Descendant $Value $Owner
     } else {
         if ($Value -gt 65535) { throw 'invalid port' }
-        $listeners = @(Get-NetTCPConnection -State Listen -LocalPort $Value -ErrorAction Stop)
+        $listeners = @(Get-NetTCPConnection -State Listen -LocalPort $Value -ErrorAction SilentlyContinue)
         $script:ProofCategory = 'listener-unavailable'
         $owned = $listeners.Count -eq 1 -and $listeners[0].LocalAddress -eq '127.0.0.1' -and
             (Test-Descendant ([int]$listeners[0].OwningProcess) $Owner)

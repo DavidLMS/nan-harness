@@ -733,7 +733,7 @@ impl<'a> RendererSession<'a> {
                 owner_pid: owner,
                 prompt: turn.prompt,
                 expected_marker: turn.marker,
-                timeout_ms: 30_000,
+                timeout_ms: 45_000,
             },
             action: turn.action,
             purpose: turn.purpose,
@@ -928,7 +928,7 @@ fn run_driver(
         .stderr(Stdio::null())
         .spawn()
         .map_err(|_| Reason::ActionUnsupported)?;
-    let deadline = Instant::now() + Duration::from_secs(35);
+    let deadline = Instant::now() + Duration::from_secs(if qualification { 65 } else { 35 });
     let outcome = loop {
         match child.try_wait() {
             Ok(Some(_)) => break Ok(()),

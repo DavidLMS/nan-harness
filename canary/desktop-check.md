@@ -123,8 +123,47 @@ the full acceptance gate. Implemented adapters are accepted only when their
 full native result meets the gate; implementation and feasibility alone do not
 qualify a cell.
 
+The expansion currently attempts all thirteen remaining cells. The following
+observations describe completed runs, rather than additional qualification:
+
+| Application | Linux x64 | macOS ARM64 | Windows x64 |
+| --- | --- | --- | --- |
+| Zed | Response and file-tool steps pass; pointer Retry does not produce provider recovery. Native accessibility activation is under test. | Qualified pilot; two of three probes pass the expanded retry policy. | Owned window is visible but acquisition fails stability. |
+| Hermes | Three complete probes pass with renderer process ownership. | Private native userData binding enables two complete probes; the first response times out. | Renderer ownership proof fails; native diagnostics are under test. |
+| ChatGPT / Codex | Owned document loads; no composer is observed. | Renderer attaches, then endpoint ownership is lost. | Launcher ancestry remains unproved. |
+| Claude | Uninstrumented startup succeeds; instrumented child exits with code 1. | Instrumented child exits with code 1; uninstrumented startup has no eligible window. | Instrumented child exits with code 1; uninstrumented cleanup remains unqualified. |
+| Pen | Owned renderer attaches; conversation adapter remains unimplemented. | Two probes expose composer/Send; another exposes sign-in. Conversation adapter remains unimplemented. | Launcher ancestry remains unproved. |
+
+The completed evidence is available in runs
+[36975359718](https://github.com/DavidLMS/nan-harness/actions/runs/36975359718)
+(Zed Linux), [36975364554](https://github.com/DavidLMS/nan-harness/actions/runs/36975364554)
+(Zed macOS), [36975369406](https://github.com/DavidLMS/nan-harness/actions/runs/36975369406)
+(Hermes macOS), [36973164802](https://github.com/DavidLMS/nan-harness/actions/runs/36973164802)
+(Zed Windows), [36972670961](https://github.com/DavidLMS/nan-harness/actions/runs/36972670961)
+(Hermes), [36974215083](https://github.com/DavidLMS/nan-harness/actions/runs/36974215083)
+(ChatGPT), [36972931753](https://github.com/DavidLMS/nan-harness/actions/runs/36972931753)
+and [36971025105](https://github.com/DavidLMS/nan-harness/actions/runs/36971025105)
+(Claude instrumented/startup baseline), and
+[36974221876](https://github.com/DavidLMS/nan-harness/actions/runs/36974221876) (Pen).
+Each closed artifact records its tested commit, platform, app/runtime version
+when observed, preparation identity, probe steps and cleanup verdict. Renderer
+inventories and startup baselines cannot satisfy full acceptance.
+
 `--verification semantic-only` requires a disposable GitHub-hosted deterministic
-session and a supported adapter. It never falls back to OCR. Zed uses native
+session and a supported adapter. It never falls back to OCR. Renderer input
+requires a live owned launch root, fresh loopback-listener ancestry and one owned
+page. It does not depend on OS foreground because input is dispatched to that
+page. Global keyboard, pointer and clipboard operations retain native window
+and foreground guards. Hermes binds Electron's userData to the same private
+directory that nANH uses for its managed active-profile file.
+
+New scenarios disclose `semantic-failure-policy`: Zed injects HTTP 400 to observe
+explicit UI Retry independently of automatic 503 backoff; Hermes injects HTTP
+503 with its disclosed automatic-recovery policy. Both still require independent
+provider failure evidence, a fresh recovery nonce, rendered recovery output and
+cleanup. This policy change does not retroactively qualify earlier results.
+
+Zed uses native
 clipboard input readback and its native thread export; Hermes uses an owned
 renderer DOM connection, keyboard activation of Send, and one ordinary pointer
 activation of Retry. Retry samples nine interior points on the actual button and

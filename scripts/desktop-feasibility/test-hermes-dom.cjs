@@ -312,6 +312,10 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
   assert.equal((await trial({})).errorCategory, 'endpoint-unowned');
   assert.equal((await trial({}, { port: 0 })).errorCategory, 'invalid-request');
   assert.equal((await trial({ timeoutMs: 500 }, {}, 'mismatch')).errorCategory, 'input-mismatch');
+  const readiness = { ownerPid: 99, action: 'ready', purpose: 'response' };
+  assert.equal((await trial({ ...readiness, timeoutMs: 45000 }, {}, null, true)).facts.errorCategory, 'launcher-unowned');
+  assert.equal((await trial({ ...readiness, timeoutMs: 45001 }, {}, null, true)).facts.errorCategory, 'invalid-request');
+  assert.equal((await trial({ ownerPid: 99, timeoutMs: 30001 })).errorCategory, 'invalid-request');
   assert.equal((await trial({ timeoutMs: 500 }, {}, 'stale')).errorCategory, 'stale-response');
   assert.equal((await trial({ timeoutMs: 500 }, {}, 'duplicate')).errorCategory, 'composer-ambiguous');
   const happy = await trial({ timeoutMs: 500 }, {}, 'happy');
