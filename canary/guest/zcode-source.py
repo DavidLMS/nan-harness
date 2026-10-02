@@ -9,6 +9,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
 CLI = "apps/zcode-cli/packages/cli/dist/zcode.cjs"
@@ -32,10 +33,19 @@ class SourceFailure(ValueError):
 def run(arguments, cwd, environment=None, stage="probe"):
     if stage not in STAGES:
         raise ValueError("unknown source stage")
+    if stage != "probe":
+        print(json.dumps({"stage": stage, "status": "started"}), flush=True)
     try:
-        return subprocess.run([str(a) for a in arguments], cwd=cwd, env=environment,
-                              check=True, timeout=1200, capture_output=True,
-                              encoding="utf-8", errors="replace").stdout.strip()
+        # Windows descendants can retain inherited pipe handles after the direct
+        # child exits. A private file lets the owner finish and close its job tree.
+        with tempfile.TemporaryFile() as output:
+            subprocess.run([str(a) for a in arguments], cwd=cwd, env=environment,
+                           check=True, timeout=1200, stdout=output, stderr=output)
+            output.seek(0)
+            raw = output.read(8 * 1024 * 1024 + 1)
+            if len(raw) > 8 * 1024 * 1024:
+                raise SourceFailure(stage, "output-limit")
+            return raw.decode("utf-8", "replace").strip()
     except (OSError, subprocess.SubprocessError) as error:
         reason = ("stage-timeout" if isinstance(error, subprocess.TimeoutExpired) else
                   "tool-missing" if isinstance(error, OSError) else "exit-nonzero")

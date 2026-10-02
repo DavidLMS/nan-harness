@@ -53,16 +53,16 @@ jobs:
         if: runner.os == 'Windows'
         run: |
           python - <<'PY'
-          import os, subprocess, tempfile
+          import sys, tempfile
           from pathlib import Path
+          sys.path.insert(0, str(Path("canary/actions").resolve()))
+          from cell import cell_environment, private_command
           with tempfile.TemporaryDirectory(prefix="nanh-zcode-canary-install-") as temporary:
               cell = Path(temporary)
-              home = cell / "home"
-              home.mkdir()
-              environment = dict(os.environ, HOME=str(home), USERPROFILE=str(home))
-              environment.pop("NAN_API_KEY", None)
-              subprocess.run(["python", "canary/guest/zcode-source.py", "install", "--version", "0.16.9",
-                              "--directory", str(cell)], env=environment, check=True)
+              environment = cell_environment(cell)
+              private_command([sys.executable, str(Path("canary/guest/zcode-source.py").resolve()),
+                               "install", "--version", "0.16.9", "--directory", str(cell)],
+                              cell, environment=environment)
           PY
       - name: Build exact upstream CLI
         working-directory: upstream-zcode

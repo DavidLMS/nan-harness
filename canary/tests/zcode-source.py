@@ -49,6 +49,26 @@ class SourceContracts(unittest.TestCase):
             for name in ("main.ts", "prompt-command.ts"):
                 self.assertEqual((entries / name).read_bytes().decode("utf-8").splitlines()[0], original.strip())
 
+    def test_source_command_finishes_when_a_descendant_retains_standard_handles(self):
+        import os
+        import signal
+        import sys
+        import time
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            command = ("import subprocess,sys; child=subprocess.Popen([sys.executable,'-c',"
+                       "'import time; time.sleep(10)']); print(child.pid, flush=True)")
+            started = time.monotonic()
+            output = source.run([sys.executable, "-c", command], root)
+            elapsed = time.monotonic() - started
+            try:
+                self.assertLess(elapsed, 5)
+            finally:
+                try:
+                    os.kill(int(output), signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+
     def test_child_failures_keep_only_closed_stage_and_reason(self):
         import subprocess
         failure = subprocess.CalledProcessError(1, ["private-path"], output="private-output",
