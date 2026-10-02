@@ -680,3 +680,20 @@ invoking `/bin/sh` completes promptly. The fixture now uses that interpreter;
 its original deadline and API-key removal assertion remain intact, and all twenty
 focused desktop-suite tests pass. The next final tree still requires the full
 local gate; repository checks do not qualify a native cell.
+
+The complete local repository gate passes on `d7d619a3`. Its macOS Claude trial
+[37011848470](https://github.com/DavidLMS/nan-harness/actions/runs/37011848470)
+exits before an application process is observed in all three probes, with cleanup
+passing. Source inspection identifies a preparation conflict: the new trial
+requires private Claude directories, while ordinary external configuration
+writes create missing parents with general directory defaults. The checker now
+precreates both roots privately only for this hosted opt-in. The strict profile
+guard and ordinary CLI behavior remain intact. This failed run does not test
+whether Electron's argument is accepted by the native application.
+
+Windows Codex on the same commit in
+[37011840857](https://github.com/DavidLMS/nan-harness/actions/runs/37011840857)
+explicitly reports an exhausted onboarding session deadline before any click.
+The first observed document has no inputs; the second has no renderer page.
+The second probe also fails restoration with a nonzero exit, stopping the third
+probe. This is a separate cleanup blocker, not a successful onboarding result.

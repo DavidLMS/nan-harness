@@ -1420,6 +1420,17 @@ fn prepare_launch_wrapper(kind: DesktopHarnessKind, wrapper: &LaunchWrapper) -> 
         .map_err(|_| Reason::IsolationUnavailable)
 }
 
+fn prepare_claude_trial_roots(profile: &Path) -> Result<(), Reason> {
+    // The ordinary CLI writes external config parents with create_dir_all.
+    // This disposable trial needs private native roots before those writes,
+    // without changing permissions or defaults for ordinary user profiles.
+    let support = profile.join("home/Library/Application Support");
+    for name in ["Claude", "Claude-3p"] {
+        create_private_dir_all(&support.join(name)).map_err(|_| Reason::IsolationUnavailable)?;
+    }
+    Ok(())
+}
+
 fn isolated_command(spec: &ProbeSpec, program: &Path) -> Result<Command, Reason> {
     let profile = spec.workspace.join("profile");
     // Match the native Windows profile layout and verify known-folder lookup
@@ -1438,6 +1449,20 @@ fn isolated_command(spec: &ProbeSpec, program: &Path) -> Result<Command, Reason>
         &roaming,
     ] {
         create_private_dir_all(directory).map_err(|_| Reason::IsolationUnavailable)?;
+    }
+    if std::env::var_os("NANH_CLAUDE_MAC_PROFILE_POLICY").is_some() {
+        if !cfg!(target_os = "macos")
+            || spec.kind != DesktopHarnessKind::Claude
+            || spec.session != crate::cli::SessionMode::GithubHosted
+            || std::env::var("GITHUB_ACTIONS").as_deref() != Ok("true")
+            || std::env::var("RUNNER_ENVIRONMENT").as_deref() != Ok("github-hosted")
+            || std::env::var("NANH_DESKTOP_QUALIFICATION_MODE").as_deref() != Ok("startup-baseline")
+            || std::env::var("NANH_CLAUDE_MAC_PROFILE_POLICY").as_deref()
+                != Ok("electron-user-data-dir")
+        {
+            return Err(Reason::IsolationUnavailable);
+        }
+        prepare_claude_trial_roots(&profile)?;
     }
     let mut command = Command::new(program);
     command
@@ -1901,6 +1926,30 @@ fn encode_visual_marker(label: &str, bytes: &[u8; 16]) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    #[test]
+    fn claude_trial_precreates_private_roots_before_external_config_writes() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let workspace = tempfile::tempdir().unwrap();
+        let profile = workspace.path().join("profile");
+        prepare_claude_trial_roots(&profile).unwrap();
+        for name in ["Claude", "Claude-3p"] {
+            let root = profile.join("home/Library/Application Support").join(name);
+            // Match external atomic_write's parent creation: it preserves an
+            // existing directory, rather than making this trial root private.
+            std::fs::create_dir_all(&root).unwrap();
+            std::fs::write(root.join("claude_desktop_config.json"), b"{}").unwrap();
+            assert!(
+                root.metadata()
+                    .unwrap()
+                    .permissions()
+                    .mode()
+                    .trailing_zeros()
+                    >= 6
+            );
+        }
+    }
+
     use super::*;
 
     fn assert_executable_argument(kind: DesktopHarnessKind, spec: &ProbeSpec, args: &[String]) {
