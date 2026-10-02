@@ -601,6 +601,17 @@ impl Visual {
         self.guard()
     }
 
+    #[cfg(target_os = "linux")]
+    pub(super) fn native_pointer_target(&self, bounds: Rect) -> Result<(u32, u64, Point), Reason> {
+        self.guard()?;
+        let window = self.window.borrow();
+        Ok((
+            window.pid,
+            window.id,
+            native_hover_point(window.bounds, bounds)?,
+        ))
+    }
+
     pub(super) fn neutral_pointer(&self) -> Result<(), Reason> {
         let window = self.window.borrow().bounds;
         self.hover_native(Rect {

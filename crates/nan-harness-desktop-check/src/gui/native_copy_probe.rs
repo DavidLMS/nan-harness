@@ -117,6 +117,24 @@ fn valid_activation_request(payload: &str) -> bool {
         .is_ok_and(|request| request.pid > 0 && request.pid <= i32::MAX.cast_unsigned())
 }
 
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct PointerRequest {
+    pid: u32,
+    window: u64,
+    x: i16,
+    y: i16,
+}
+
+fn valid_pointer_request(payload: &str) -> bool {
+    serde_json::from_str::<PointerRequest>(payload).is_ok_and(|request| {
+        request.pid > 1
+            && request.pid <= i32::MAX.cast_unsigned()
+            && request.window > 0
+            && u32::try_from(request.window).is_ok()
+    })
+}
+
 fn neutral_input(executable: &Path, mode: &str, prompt: &str) -> Result<(), Reason> {
     if !executable.is_absolute()
         || !executable.is_file()
@@ -133,10 +151,13 @@ fn neutral_input(executable: &Path, mode: &str, prompt: &str) -> Result<(), Reas
                 | "paste"
                 | "right"
                 | "submit"
+                | "retry-click"
         )
         || (mode == "type" && prompt.is_empty())
         || (mode == "activate-accessibility" && !valid_activation_request(prompt))
-        || (!matches!(mode, "type" | "activate-accessibility") && !prompt.is_empty())
+        || (mode == "retry-click" && (!cfg!(target_os = "linux") || !valid_pointer_request(prompt)))
+        || (!matches!(mode, "type" | "activate-accessibility" | "retry-click")
+            && !prompt.is_empty())
     {
         return Err(Reason::IsolationUnavailable);
     }
@@ -981,15 +1002,34 @@ impl NativeClipboardSession<'_> {
     }
 
     fn press_retry(&self, button: &xa11y::Element) -> Result<&'static str, Reason> {
-        if cfg!(any(target_os = "macos", target_os = "linux")) {
+        if cfg!(target_os = "macos") {
             return retry_press_receipt(button.press());
         }
-        // Windows uses an ordinary pointer as the primary Retry action.
-        // The named control and its owned native bounds are revalidated first;
-        // an uncertain dispatch never triggers another action or a fallback.
-        let bounds = button.bounds.ok_or(Reason::ActionUnsupported)?;
-        self.gui.visual.click_native(bounds)?;
-        Ok("native-pointer-dispatched")
+        #[cfg(target_os = "linux")]
+        {
+            let bounds = button.bounds.ok_or(Reason::ActionUnsupported)?;
+            let (pid, window, point) = self.gui.visual.native_pointer_target(bounds)?;
+            let request = serde_json::to_string(&PointerRequest {
+                pid,
+                window,
+                x: point.x.try_into().map_err(|_| Reason::ActionUnsupported)?,
+                y: point.y.try_into().map_err(|_| Reason::ActionUnsupported)?,
+            })
+            .map_err(|_| Reason::IsolationUnavailable)?;
+            let executable = std::env::var_os("FEASIBILITY_ZED_INPUT_DRIVER")
+                .ok_or(Reason::IsolationUnavailable)?;
+            neutral_input(Path::new(&executable), "retry-click", &request)?;
+            return Ok("native-pointer-dispatched");
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            // Windows uses an ordinary pointer as the primary Retry action.
+            // The named control and its owned native bounds are revalidated first;
+            // an uncertain dispatch never triggers another action or a fallback.
+            let bounds = button.bounds.ok_or(Reason::ActionUnsupported)?;
+            self.gui.visual.click_native(bounds)?;
+            Ok("native-pointer-dispatched")
+        }
     }
 
     pub(crate) fn finish(
@@ -1452,6 +1492,17 @@ mod tests {
 
     #[test]
     fn neutral_transport_rejects_unbounded_or_relative_requests_before_spawn() {
+        assert!(valid_pointer_request(
+            r#"{"pid":20,"window":40,"x":100,"y":200}"#
+        ));
+        for request in [
+            r#"{"pid":1,"window":40,"x":100,"y":200}"#,
+            r#"{"pid":20,"window":0,"x":100,"y":200}"#,
+            r#"{"pid":20,"window":40,"x":32768,"y":200}"#,
+            r#"{"pid":20,"window":40,"x":100,"y":200,"command":"PRIVATE"}"#,
+        ] {
+            assert!(!valid_pointer_request(request));
+        }
         assert_eq!(
             neutral_input(Path::new("relative"), "type", "nonce"),
             Err(Reason::IsolationUnavailable)

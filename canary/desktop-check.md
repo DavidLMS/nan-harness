@@ -129,10 +129,10 @@ observations describe completed runs, rather than additional qualification:
 | Application | Linux x64 | macOS ARM64 | Windows x64 |
 | --- | --- | --- | --- |
 | Zed | Response and file-tool steps pass; pointer and accessibility Retry acknowledgements do not produce provider recovery. | Three complete probes pass the expanded retry policy. | Owned window is visible but acquisition fails stability. |
-| Hermes | Three complete probes pass with renderer process ownership. | Private native userData binding enables two complete probes; the first response times out. | Renderer ownership proof fails; native diagnostics are under test. |
-| ChatGPT / Codex | Owned document loads; no composer is observed. | Renderer attaches, then endpoint ownership is lost. | Launcher ancestry remains unproved. |
+| Hermes | Three complete probes pass with renderer process ownership. | Private native userData binding enables two complete probes; the first response times out. | Owned renderer connects; private retry-policy preparation fails. |
+| ChatGPT / Codex | Owned document loads; no composer is observed. | Renderer attaches, then endpoint ownership is lost. | Launcher ancestry is proved; application exits. |
 | Claude | Uninstrumented startup succeeds; instrumented child exits with code 1. | Instrumented child exits with code 1; uninstrumented startup has no eligible window. | Instrumented child exits with code 1; uninstrumented cleanup remains unqualified. |
-| Pen | Owned renderer attaches; conversation adapter remains unimplemented. | Two probes expose composer/Send; another exposes sign-in. Conversation adapter remains unimplemented. | Launcher ancestry remains unproved. |
+| Pen | Owned renderer loads a small startup document; GPU/startup diagnostics are under test. | Two probes expose composer/Send; another exposes sign-in. Conversation adapter remains unimplemented. | Owned renderer loads sign-in and a dialog; conversation adapter remains unimplemented. |
 
 The completed evidence is available in runs
 [36975359718](https://github.com/DavidLMS/nan-harness/actions/runs/36975359718)
@@ -169,6 +169,20 @@ startup also removes an unapproved `CLAUDE_USER_DATA_DIR` override. CDP therefor
 remains unavailable for this distribution without upstream authorization;
 normal native accessibility is the remaining route to evaluate on disposable
 runners. Do not modify the distribution or fabricate this authorization.
+The inspected archive digest is
+`3cfddb23bf2911e05e27b4ed3856b8e795df94643b2c35b59deb317cf995bca0`, matching
+the frozen native Linux evidence. Run
+[36977329493](https://github.com/DavidLMS/nan-harness/actions/runs/36977329493)
+reconfirms all nine remaining inventory/startup outcomes on commit `3e0bafdf`.
+None completes a conversation scenario.
+
+The next Linux Zed trial uses the same fixed X11 helper as keyboard input for
+its single primary Retry activation. It validates bounded native coordinates,
+rechecks the exact foreground window and PID before and after moving, then uses
+an ordinary click with modifiers cleared. The checker still proves control
+uniqueness, owned bounds and native guards; no uncertain activation receives a
+second attempt. This transport is described in
+[xdotool's upstream manual](https://github.com/jordansissel/xdotool/blob/main/xdotool.pod).
 
 `--verification semantic-only` requires a disposable GitHub-hosted deterministic
 session and a supported adapter. It never falls back to OCR. Renderer input

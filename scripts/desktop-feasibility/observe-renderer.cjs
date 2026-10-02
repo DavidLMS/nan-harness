@@ -10,6 +10,7 @@ const facts = { schemaVersion: 1, mechanism: 'renderer-inventory', diagnosticsOn
   app, endpointOwned: false, launcherOwned: false, attached: false, pageCount: 0,
   textareaCount: 0, editableCount: 0, sendCount: 0, retryCount: 0,
   newThreadCount: 0, loginCount: 0, dialogCount: 0, documentState: { readyState: 'unobserved', targetKind: 'unobserved', bodyPresent: false, elementCount: 0, visibleElementCount: 0, inputCount: 0, frameCount: 0, pageErrorCount: 0 }, errorCategory: 'unclassified' };
+facts.startupScreen = 'unmeasured';
 function save() {
   fs.writeFileSync(`${output}.tmp`, JSON.stringify(facts) + '\n', { mode: 0o600 });
   fs.renameSync(`${output}.tmp`, output);
@@ -52,13 +53,20 @@ async function run() {
       await new Promise(r => setTimeout(r, 250));
     }
     if (!ownership.ownedEndpoint()) { facts.endpointOwned = false; facts.errorCategory = 'endpoint-unowned'; save(); return; }
-    const counts = await page.evaluate(() => {
+    const counts = await page.evaluate(appName => {
       const visible = e => e.isConnected && e.getBoundingClientRect().width > 0
         && e.getBoundingClientRect().height > 0 && getComputedStyle(e).visibility === 'visible';
       const count = selector => Math.min(4096, [...document.querySelectorAll(selector)].filter(visible).length);
       const buttons = [...document.querySelectorAll('button,[role="button"]')].filter(visible);
       const named = pattern => Math.min(4096, buttons.filter(e => pattern.test(e.getAttribute('aria-label') || e.innerText || '')).length);
+      // Exact public distribution headings are classified in memory; never
+      // retain headings, labels, HTML or other application text.
+      const headings = [...document.querySelectorAll('h1')].filter(visible);
+      const startupScreen = appName !== 'pen-desktop' ? 'unmeasured'
+        : headings.length === 1 && headings[0].textContent === 'Hardware acceleration unavailable' ? 'gpu-unavailable'
+        : headings.length === 1 && headings[0].textContent === 'Failed to start pen.dev' ? 'startup-failed' : 'other';
       return { textareaCount: count('textarea'), editableCount: count('[contenteditable="true"]'),
+        startupScreen,
         sendCount: named(/^(send|send message|submit)$/i), retryCount: named(/^(retry|try again)$/i),
         newThreadCount: named(/^(new chat|new thread|new conversation)$/i),
         loginCount: named(/^(log in|sign in|continue with google|continue with apple)$/i),
@@ -71,7 +79,7 @@ async function run() {
           elementCount: Math.min(4096, document.querySelectorAll('*').length),
           visibleElementCount: count('*'), inputCount: count('input'),
           frameCount: Math.min(4096, document.querySelectorAll('iframe,frame').length), pageErrorCount: 0 } };
-    });
+    }, app);
     counts.documentState.pageErrorCount = pageErrorCount;
     Object.assign(facts, counts, { errorCategory: null }); save();
   } finally { await browser.close(); }

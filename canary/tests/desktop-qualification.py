@@ -606,8 +606,12 @@ class QualificationTests(unittest.TestCase):
             path.write_text(json.dumps(value))
             self.assertEqual(q.semantic_observations(root, 'pen-desktop'), [value])
             self.assertEqual(q.envelope('pen-desktop', 'linux', 'x86_64', 'a' * 40)['qualification'], 'unqualified')
+            value['startupScreen'] = 'gpu-unavailable'
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(root, 'pen-desktop'), [value])
             for changed in ({**value, 'html': 'PRIVATE'}, {**value, 'sendCount': True},
-                            {**value, 'app': 'claude-desktop'}):
+                            {**value, 'app': 'claude-desktop'}, {**value, 'startupScreen': 'PRIVATE'},
+                            {**value, 'startupScreen': None}, {**value, 'startupScreen': []}):
                 path.write_text(json.dumps(changed))
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'pen-desktop')
