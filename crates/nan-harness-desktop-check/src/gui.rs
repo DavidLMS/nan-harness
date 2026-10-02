@@ -944,12 +944,12 @@ fn qualification_process_ownership(pid: u32, owner: u32) -> Option<Result<(), Ow
         let mut child = command
             .spawn()
             .map_err(|_| OwnershipFailure::CandidateGroupLookupUnavailable)?;
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let deadline = Instant::now() + Duration::from_secs(5);
         loop {
             match child.try_wait() {
                 Ok(Some(status)) if status.success() => break,
-                Ok(None) if std::time::Instant::now() < deadline => {
-                    std::thread::sleep(std::time::Duration::from_millis(10))
+                Ok(None) if Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(10))
                 }
                 _ => {
                     let _ = child.kill();
