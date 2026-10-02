@@ -1,11 +1,13 @@
 """Exercise the actual nanh installer, managed launcher and native configuration."""
 
 import argparse
+from contextlib import nullcontext
 import json
 import os
 import re
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -13,6 +15,30 @@ from http.server import ThreadingHTTPServer
 
 from native_probe import Scenario, make_handler
 from terminal import Terminal
+
+
+def supervised_windows_probe():
+    # The coordinator outlives individual launches. Own the whole probe tree so
+    # its background processes release the temporary workspace before cleanup.
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "actions"))
+    from cell import WindowsJob
+
+    with tempfile.TemporaryDirectory(prefix="nanh-zcode-integration-") as home:
+        child = subprocess.Popen([sys.executable, __file__, *sys.argv[1:],
+                                  "--worker-home", home], creationflags=0x00000004)
+        job = None
+        try:
+            job = WindowsJob(child.pid)
+            job.resume(child.pid)
+            result = child.wait(timeout=1800)
+        finally:
+            if job:
+                job.close()
+            else:
+                child.kill()
+            child.wait(timeout=10)
+        if result != 0:
+            raise SystemExit(result)
 
 
 def command(arguments, workspace, environment, marker=None):
@@ -31,7 +57,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", type=Path, required=True)
     parser.add_argument("--source", type=Path)
+    parser.add_argument("--worker-home", help=argparse.SUPPRESS)
     args = parser.parse_args()
+    if os.name == "nt" and not args.worker_home:
+        supervised_windows_probe()
+        return
     binary = args.binary.resolve()
     scenario = Scenario()
     searches = []
@@ -59,7 +89,9 @@ def main():
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
-        with tempfile.TemporaryDirectory(prefix="nanh-zcode-integration-") as temporary:
+        temporary_home = (nullcontext(args.worker_home) if args.worker_home else
+                          tempfile.TemporaryDirectory(prefix="nanh-zcode-integration-"))
+        with temporary_home as temporary:
             home = Path(temporary)
             workspace = home / "workspace"
             workspace.mkdir()
