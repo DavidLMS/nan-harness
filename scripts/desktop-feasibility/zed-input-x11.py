@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Fixed native key transport; the checker proves foreground before and after."""
 import json
+import ctypes
 import subprocess
 import time
 import sys
@@ -8,6 +9,55 @@ import sys
 KEYS = {'trust': 'ctrl+alt+t', 'new-thread': 'ctrl+alt+n', 'copy-thread': 'ctrl+alt+y',
         'select-all': 'ctrl+a', 'copy': 'ctrl+c', 'paste': 'ctrl+v',
         'right': 'Right', 'submit': 'Return'}
+
+
+def matches_owned_frame(active, expected, parent_query):
+    # Openbox reports the client as active but the native inventory lists its
+    # top-level frame. Accept only a freshly proved ancestor, never PID alone.
+    visited = set()
+    for _ in range(16):
+        if active == expected:
+            return True
+        if not active or active in visited:
+            return False
+        visited.add(active)
+        root, parent = parent_query(active)
+        if not parent or parent == root:
+            return False
+        active = parent
+    return False
+
+
+def owned_frame(active, expected):
+    if active == expected:
+        return True
+    xlib = ctypes.CDLL('libX11.so.6')
+    xlib.XOpenDisplay.argtypes = [ctypes.c_char_p]
+    xlib.XOpenDisplay.restype = ctypes.c_void_p
+    xlib.XCloseDisplay.argtypes = [ctypes.c_void_p]
+    xlib.XFree.argtypes = [ctypes.c_void_p]
+    pointer = ctypes.POINTER(ctypes.c_ulong)
+    xlib.XQueryTree.argtypes = [ctypes.c_void_p, ctypes.c_ulong, pointer, pointer,
+                               ctypes.POINTER(pointer), ctypes.POINTER(ctypes.c_uint)]
+    xlib.XQueryTree.restype = ctypes.c_int
+    display = xlib.XOpenDisplay(None)
+    if not display:
+        return False
+    def parent_query(window):
+        root, parent = ctypes.c_ulong(), ctypes.c_ulong()
+        children, count = pointer(), ctypes.c_uint()
+        try:
+            if not xlib.XQueryTree(display, window, ctypes.byref(root), ctypes.byref(parent),
+                                  ctypes.byref(children), ctypes.byref(count)):
+                raise ValueError('identity unavailable')
+            return root.value, parent.value
+        finally:
+            if children:
+                xlib.XFree(children)
+    try:
+        return matches_owned_frame(active, expected, parent_query)
+    finally:
+        xlib.XCloseDisplay(display)
 
 
 def retry_click(payload):
@@ -33,9 +83,10 @@ def retry_click(payload):
                 raise ValueError('invalid identity')
             return int(output)
         def owned_foreground():
-            if run(['getactivewindow'], True) != request['window']:
+            active = run(['getactivewindow'], True)
+            if not owned_frame(active, request['window']):
                 return 11
-            if run(['getwindowpid', str(request['window'])], True) != request['pid']:
+            if run(['getwindowpid', str(active)], True) != request['pid']:
                 return 12
             return 0
         stage = 13

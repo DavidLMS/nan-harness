@@ -164,12 +164,13 @@ only static rejection categories. Fresh run
 on commit `e54f1b92` qualifies Hermes Linux x64 and macOS ARM64 with three complete
 probes each, 42 closed semantic records, and application/global/clipboard cleanup.
 
-The qualification-only Codex launch now supplies its own
-`codex-browser-background-networking-disabled` startup switch. Static inspection
-of the frozen official Linux archive identifies an application relaunch when
-this switch disagrees with in-app browser availability. Whether this explains
-the observed macOS ownership loss and Windows exit requires fresh native trials.
-Normal CLI builds do not supply the switch.
+Run [36981298109](https://github.com/DavidLMS/nan-harness/actions/runs/36981298109)
+rejects the Codex startup-switch hypothesis: supplying
+`codex-browser-background-networking-disabled` also loses Linux ownership and
+fails cleanup. The switch has been removed. Static inspection identifies an
+application relaunch when the switch disagrees with in-app browser availability;
+a fixed assumption is insufficient. A supported relaunch supervisor requires
+separate implementation and native evidence.
 
 Static inspection of the official Claude Linux 2.9939.4 archive identifies an
 explicit startup rejection of `remote-debugging-port` and `remote-debugging-pipe`
@@ -357,3 +358,13 @@ This is confined to owned hosted qualification; it does not disable the sandbox.
 Its native outcome remains pending. Zed's X11 pointer helper now emits only a
 closed transport stage to distinguish foreground/process rejection, failed
 movement and failed activation. Neither diagnostic can qualify a probe.
+
+Run [36981736432](https://github.com/DavidLMS/nan-harness/actions/runs/36981736432)
+confirms that software GLES removes Pen's Linux GPU startup failure. Three
+owned documents now expose sign-in and no composer. This is startup progress,
+not conversation qualification. Run
+[36981732926](https://github.com/DavidLMS/nan-harness/actions/runs/36981732926)
+identifies Zed Linux's pointer failure as foreground identity mismatch. The
+helper now proves the active client's bounded X11 ancestor chain against the
+owned top-level frame, and checks the active client's PID before and after
+movement; acceptance still requires provider recovery and native Resume evidence.

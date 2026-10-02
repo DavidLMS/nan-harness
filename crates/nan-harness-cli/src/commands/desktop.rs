@@ -303,12 +303,6 @@ fn renderer_arguments(
             // SwANGLE supplies a software GLES driver on GPU-less hosted runners.
             arguments.extend(["--use-gl=angle".into(), "--use-angle=swiftshader".into()]);
         }
-        if kind == nan_harness_core::DesktopHarnessKind::ChatGpt {
-            // The packaged app otherwise relaunches after discovering that its
-            // API-key session has no in-app browser. Use its own startup switch
-            // so the fresh launch root retains ownership of the same renderer.
-            arguments.push("--codex-browser-background-networking-disabled".into());
-        }
         return arguments;
     }
     Vec::new()
@@ -318,30 +312,6 @@ fn renderer_arguments(
 mod renderer_tests {
     use super::renderer_arguments;
     use nan_harness_core::DesktopHarnessKind;
-    #[test]
-    fn codex_startup_switch_is_scoped_to_owned_qualification() {
-        let directory = tempfile::tempdir().unwrap();
-        let root = Some(directory.path());
-        let codex = renderer_arguments(DesktopHarnessKind::ChatGpt, true, root, Some("43210"));
-        assert_eq!(codex.len(), 3);
-        assert_eq!(codex[2], "--codex-browser-background-networking-disabled");
-        for kind in [DesktopHarnessKind::Claude, DesktopHarnessKind::Pen] {
-            let expected = if kind == DesktopHarnessKind::Pen && cfg!(target_os = "linux") {
-                4
-            } else {
-                2
-            };
-            assert_eq!(
-                renderer_arguments(kind, true, root, Some("43210")).len(),
-                expected
-            );
-        }
-        assert!(
-            renderer_arguments(DesktopHarnessKind::ChatGpt, false, root, Some("43210")).is_empty()
-        );
-        assert!(renderer_arguments(DesktopHarnessKind::ChatGpt, true, root, Some("0")).is_empty());
-    }
-
     #[test]
     fn instrumentation_requires_owned_hosted_context_and_numeric_loopback_port() {
         let directory = tempfile::tempdir().unwrap();

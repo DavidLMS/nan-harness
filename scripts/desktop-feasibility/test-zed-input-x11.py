@@ -51,16 +51,28 @@ class Transport(unittest.TestCase):
                          ['getactivewindow', 'getwindowpid', 'mousemove',
                           'getactivewindow', 'getwindowpid', 'click'])
         self.assertEqual(calls[-1], ['/usr/bin/xdotool', 'click', '--clearmodifiers', '1'])
-        with patch('subprocess.run', return_value=subprocess.CompletedProcess([], 0, stdout=b'99')) as run:
+        with patch.dict(module['main'].__globals__, owned_frame=lambda a, b: a == b), patch('subprocess.run', return_value=subprocess.CompletedProcess([], 0, stdout=b'99')) as run:
             self.assertEqual(self.call('retry-click', request), 11)
             self.assertEqual(run.call_count, 1)
-        with patch('subprocess.run', side_effect=[
+        with patch.dict(module['main'].__globals__, owned_frame=lambda a, b: a == b), patch('subprocess.run', side_effect=[
                 subprocess.CompletedProcess([], 0, stdout=b'40'),
                 subprocess.CompletedProcess([], 0, stdout=b'20'),
                 subprocess.CompletedProcess([], 0),
                 subprocess.CompletedProcess([], 0, stdout=b'99')]) as run:
             self.assertEqual(self.call('retry-click', request), 11)
             self.assertEqual(run.call_count, 4)
+
+    def test_active_client_must_have_the_exact_owned_frame_as_ancestor(self):
+        matches = module['matches_owned_frame']
+        self.assertTrue(matches(41, 40, lambda window: (1, 40)))
+        self.assertFalse(matches(41, 40, lambda window: (1, 1)))
+        self.assertFalse(matches(41, 40, lambda window: (1, 41)))
+        calls = []
+        def unbounded(window):
+            calls.append(window)
+            return 1, window + 1
+        self.assertFalse(matches(41, 99, unbounded))
+        self.assertEqual(len(calls), 16)
 
     def test_pointer_failure_stage_never_replays_input(self):
         request = json.dumps(dict(pid=20, window=40, x=100, y=200)).encode()
