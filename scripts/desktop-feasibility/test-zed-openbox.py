@@ -116,7 +116,7 @@ class PolicyTests(unittest.TestCase):
         # the OS to execute temporary shebang fixtures directly.
         startup = directory / 'shell-environment'
         startup.write_text(
-            'env() { [[ "$1" == -u && "$2" == NAN_API_KEY && "$3" == openbox ]] || return 93; command env "$1" "$2" /bin/sh "$SYNTHETIC_OPENBOX/openbox" "${@:4}"; }\n'
+            'env() { [[ "$1" == -u && "$2" == NAN_API_KEY && "$3" == openbox ]] || return 93; exec env "$1" "$2" /bin/sh "$SYNTHETIC_OPENBOX/openbox" "${@:4}"; }\n'
             'xprop() { /bin/sh "$SYNTHETIC_OPENBOX/xprop" "$@"; }\n'
             'python3() { /bin/sh "$SYNTHETIC_OPENBOX/python3" "$@"; }\n'
         )

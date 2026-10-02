@@ -85,7 +85,7 @@ class NativeRecorder:
         try:
             self.x = C.CDLL('libX11.so.6')
             self.record = C.CDLL('libXtst.so.6')
-            self.res = C.CDLL('libXres.so.1')
+            self.res = C.CDLL('libXRes.so.1')
             self._bind()
             self.stage = 'display'
             self.control = self.x.XOpenDisplay(None)

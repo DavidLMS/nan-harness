@@ -56,7 +56,7 @@ class DesktopSessionTests(unittest.TestCase):
                 path.chmod(0o700)
             shell_environment = root / "shell-environment"
             shell_environment.write_text(
-                'env() { [[ "$1" == -u && "$2" == NAN_API_KEY && "$3" == openbox ]] || return 93; command env "$1" "$2" /bin/sh "$SYNTHETIC_SESSION/openbox" "${@:4}"; }\n'
+                'env() { [[ "$1" == -u && "$2" == NAN_API_KEY && "$3" == openbox ]] || return 93; exec env "$1" "$2" /bin/sh "$SYNTHETIC_SESSION/openbox" "${@:4}"; }\n'
                 'xprop() { /bin/sh "$SYNTHETIC_SESSION/xprop" "$@"; }\n'
             )
             # Explicit interpreters avoid platform handling of temporary

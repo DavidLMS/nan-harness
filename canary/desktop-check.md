@@ -835,3 +835,41 @@ storage use, but never gateway configuration consumption or editor acceptance.
 Unsafe metadata invalidates that advisory observation; file contents and paths
 are not emitted. The inspected bootstrap deliberately changes its user-data
 directory to the private `Claude-3p` sibling after parsing third-party mode.
+
+On `c5707f50`, Linux Zed in
+[37021920391](https://github.com/DavidLMS/nan-harness/actions/runs/37021920391)
+passes launch, input, response and file-tool checks in all three probes, then
+fails Retry; all cleanup passes. The observer reports `unavailable` at the
+`library` boundary in every probe. Its XRes SONAME incorrectly used `libXres`
+instead of `libXRes`; the next trial corrects that spelling and verifies the
+three observer libraries and required symbols before creating a display.
+This is not measured evidence of missing input events.
+
+Windows Hermes in
+[37021928975](https://github.com/DavidLMS/nan-harness/actions/runs/37021928975)
+now passes the document guard and observes a complete composer in all three
+probes. It stops at `menu-unavailable` before model refresh or provider requests;
+all cleanup passes. The next investigation concerns the ordinary model menu.
+
+Windows Codex in
+[37021938863](https://github.com/DavidLMS/nan-harness/actions/runs/37021938863)
+reports `control-not-actionable` before any role click. Restoration then reports
+the typed `APP-RUNNING` process failure, so cleanup fails and the two remaining
+probes are not run. This run cannot count as acceptance or safe restoration.
+
+macOS Claude in
+[37021947961](https://github.com/DavidLMS/nan-harness/actions/runs/37021947961)
+again has a matching finished process without windows. None of the four measured
+storage files exists before or after any probe; all cleanup passes. This leaves
+private storage use and configuration consumption unproved. The next official
+account-free hypothesis uses native Application Support folders on a disposable
+hosted macOS runner, with explicit fresh-directory ownership and cleanup guards.
+
+The clean Linux quality run
+[37022007039](https://github.com/DavidLMS/nan-harness/actions/runs/37022007039)
+fails the synthetic session fixture's process-cleanup assertion: its Bash `env`
+wrapper leaves an intermediate shell. The wrapper now uses `exec env`, preserving
+the real credential-removal command, original deadline and cleanup assertion.
+The corresponding local session and Openbox tests pass. The local full gate on
+`c5707f50` was interrupted before completion while synthetic checks were stalled;
+it is not a passing gate. The final tree still requires the complete gate.

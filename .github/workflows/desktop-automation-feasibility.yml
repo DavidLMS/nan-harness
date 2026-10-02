@@ -121,7 +121,17 @@ jobs:
         run: |
           apt_options=(-o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
           sudo apt-get "${apt_options[@]}" update
-          sudo apt-get "${apt_options[@]}" install --no-install-recommends -y cmake xvfb openbox x11-utils xclip xdotool zstd dbus-x11 python3-dbus at-spi2-core libx11-dev libxres1 libxkbcommon-dev libxkbcommon-x11-dev libegl1 libvulkan1 mesa-vulkan-drivers libgtk-3-0 libnss3 libasound2t64 libgbm1 libsecret-1-0 libnotify4
+          sudo apt-get "${apt_options[@]}" install --no-install-recommends -y cmake xvfb openbox x11-utils xclip xdotool zstd dbus-x11 python3-dbus at-spi2-core libx11-dev libxres1 libxtst6 libxkbcommon-dev libxkbcommon-x11-dev libegl1 libvulkan1 mesa-vulkan-drivers libgtk-3-0 libnss3 libasound2t64 libgbm1 libsecret-1-0 libnotify4
+      - name: Verify passive observer runtime libraries without a display
+        if: runner.os == 'Linux' && matrix.app == 'zed-desktop'
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import ctypes
+          for library, symbol in [('libX11.so.6', 'XOpenDisplay'), ('libXtst.so.6', 'XRecordQueryVersion'), ('libXRes.so.1', 'XResQueryClientIds')]:
+              getattr(ctypes.CDLL(library), symbol)
+          print('PASS: passive observer runtime libraries')
+          PY
       - name: Prepare fixed X11 Zed input and export helpers
         if: runner.os == 'Linux' && matrix.app == 'zed-desktop'
         shell: bash
