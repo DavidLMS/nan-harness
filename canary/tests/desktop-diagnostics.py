@@ -33,6 +33,17 @@ def line(record, prefix=b"DESKTOP_INSTALL_DIAGNOSTIC:"):
 
 
 class DiagnosticTests(unittest.TestCase):
+    def test_process_absence_is_a_closed_cleanup_failure_boundary(self):
+        record = native()
+        record['cleanup'] = dict(stage='absence-after-stop', originalReason='action-unsupported',
+                                 reason='cleanup-failed', absence='process-enumeration')
+        D.validate_native(record)
+        for changed in ('PRIVATE', True, {'pid': 123}):
+            rejected = json.loads(json.dumps(record))
+            rejected['cleanup']['absence'] = changed
+            with self.assertRaises(ValueError):
+                D.validate_native(rejected)
+
     def test_restore_failure_requires_closed_stage_and_reason(self):
         record = native()
         record["cleanup"] = {"stage": "restore", "originalReason": "action-unsupported",

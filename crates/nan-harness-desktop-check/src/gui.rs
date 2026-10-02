@@ -5,6 +5,8 @@ mod clipboard;
 mod dom_probe;
 mod native_copy_probe;
 mod native_icon_probe;
+#[cfg(any(windows, test))]
+mod process_absence;
 mod stability;
 mod visual;
 
@@ -26,6 +28,7 @@ pub(crate) enum AbsenceStage {
     AccessibilityProvider,
     AccessibilityEnumeration,
     NativeWindows,
+    ProcessEnumeration,
 }
 
 pub(crate) struct AbsenceFailure {
@@ -224,7 +227,13 @@ impl Gui {
         visual::Visual::ensure_absent(kind).map_err(|reason| AbsenceFailure {
             stage: AbsenceStage::NativeWindows,
             reason,
-        })
+        })?;
+        #[cfg(windows)]
+        process_absence::ensure_absent(kind).map_err(|reason| AbsenceFailure {
+            stage: AbsenceStage::ProcessEnumeration,
+            reason,
+        })?;
+        Ok(())
     }
 
     pub(crate) fn wait<P: Observation>(

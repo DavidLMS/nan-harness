@@ -364,7 +364,7 @@ def validate_native(value, platform=None):
         if item["originalReason"] is not None:
             enum(item["originalReason"], REASONS)
         if "absence" in item:
-            enum(item["absence"], {"accessibility-provider", "accessibility-enumeration", "native-windows"})
+            enum(item["absence"], {"accessibility-provider", "accessibility-enumeration", "native-windows", "process-enumeration"})
         if "restore" in item:
             require(item["stage"] == "restore" and item["reason"] == "cleanup-failed")
             enum(item["restore"], {"command-creation", "process-io", "deadline-expired", "nonzero-exit"})

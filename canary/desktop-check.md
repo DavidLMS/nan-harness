@@ -134,9 +134,9 @@ observations describe completed runs, rather than additional qualification:
 | Application | Linux x64 | macOS ARM64 | Windows x64 |
 | --- | --- | --- | --- |
 | Zed | Response and file-tool steps pass; pointer and accessibility Retry acknowledgements do not produce provider recovery. | Three complete probes pass the expanded retry policy. | Three complete probes pass with direct native clipboard transport and all cleanup checks. |
-| Hermes | Three complete probes pass with renderer process ownership. | Three complete probes pass with private native userData and bounded cold-start waits. | One complete probe passes all five stages and cleanup. Two others fail attachment or initial response; three-pass acceptance remains unmet. |
-| ChatGPT / Codex | Owned document loads without a composer; the latest completed startup diagnostic passes cleanup. | Renderer observation remains intermittent; cleanup passes. | Three owned documents load with twelve visible inputs and no composer; cleanup passes. |
-| Claude | Three uninstrumented windows acquired. Explicit native accessibility returns zero visible editors or login buttons. Official account-free gateway remains unqualified. | Instrumented child exits with code 1; uninstrumented startup has no eligible window. | Stable owned window acquired; no editable controls observed and cleanup fails. |
+| Hermes | Three complete probes pass with renderer process ownership. | Three complete probes pass with private native userData and bounded cold-start waits. | All three latest probes find a complete composer and pass the document guard, then stop before model refresh at the public menu action; cleanup passes. |
+| ChatGPT / Codex | Owned document loads without a composer; the latest completed startup diagnostic passes cleanup. | Renderer observation remains intermittent; cleanup passes. | The latest project-entry trial finds the public role form but blocks the Engineering action; restoration detects a remaining app process and cleanup fails. |
+| Claude | Three uninstrumented windows acquired. Explicit native accessibility returns zero visible editors or login buttons. Official account-free gateway remains unqualified. | The latest ordinary trial has a finished matching process without windows; neither measured private profile creates storage files. Cleanup passes; native-folder acquisition is the next official trial. | Stable owned window acquired; no editable controls observed and cleanup fails. |
 | Pen | Software GLES removes GPU startup failure; three fresh sessions show sign-in and no editor. No official account-free route found for the frozen release. | Two probes expose composer/Send; another exposes sign-in. Conversation adapter remains unimplemented. | Owned renderer loads sign-in and a dialog; conversation adapter remains unimplemented. |
 
 The completed evidence is available in runs
@@ -873,3 +873,18 @@ the real credential-removal command, original deadline and cleanup assertion.
 The corresponding local session and Openbox tests pass. The local full gate on
 `c5707f50` was interrupted before completion while synthetic checks were stalled;
 it is not a passing gate. The final tree still requires the complete gate.
+
+Linux Zed on `70efffba` in
+[37024793430](https://github.com/DavidLMS/nan-harness/actions/runs/37024793430)
+loads all observer libraries and reports one ordered press/release pair delivered
+to the exact owned X11 client in every probe. All first four acceptance steps and
+cleanup pass, but Retry still produces no verified recovery. Server delivery does
+not prove GPUI handler activation; the remaining investigation is inside the
+source-defined UI hit test and recovery action.
+
+The next Windows Codex cleanup check supplements window enumeration with a
+bounded, read-only process snapshot. It requires a strictly parsed exact image
+match and the inspector's own row, never treats localized or malformed output as
+absence, and never kills an enumerated app process. Only the existing owned job
+controls application termination. Synthetic parsing and deadline tests pass;
+native Windows verification remains pending.
