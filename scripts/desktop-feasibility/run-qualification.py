@@ -27,6 +27,7 @@ ZED_HELPERS = {'FEASIBILITY_ZED_INPUT_DRIVER', 'FEASIBILITY_ZED_INPUT_DRIVER_MOD
                'FEASIBILITY_ZED_RESPONSE_METHOD', 'NANH_ZED_ICON_TEMPLATES', 'FEASIBILITY_ZED_INPUT_SCRIPT'}
 WINDOWS_PROOF = {'FEASIBILITY_WINDOWS_PROOF_PYTHON', 'FEASIBILITY_WINDOWS_PROOF_SCRIPT'}
 HERMES_RUNTIME = {'HERMES_DESKTOP_HERMES_ROOT', 'HERMES_DESKTOP_HERMES'}
+CLAUDE_BOOTSTRAP_SHA256 = '83126565df48e98691a3845f27bb7ee78d0632aa14b5881adad8c7ac4f0a3adf'
 
 
 def validate_claude_bundle(executable):
@@ -49,17 +50,21 @@ def validate_claude_bundle(executable):
         prefix = archive.read(16)
         if len(prefix) != 16:
             raise ValueError('Claude bootstrap is invalid')
-        _, header_size, _, json_size = struct.unpack('<4I', prefix)
-        if not 0 < json_size <= 16 * 1024 * 1024 or header_size < json_size + 8:
+        size_payload, header_size, header_payload, json_size = struct.unpack('<4I', prefix)
+        if (size_payload != 4 or not 0 < json_size <= 16 * 1024 * 1024
+                or header_payload != header_size - 4
+                or header_size != 8 + (json_size + 3) // 4 * 4):
             raise ValueError('Claude bootstrap is invalid')
         header = json.loads(archive.read(json_size))
         entry = header['files']['.vite']['files']['build']['files']['index.pre.js']
         size, offset = entry.get('size'), entry.get('offset')
-        if type(size) is not int or not 0 < size <= 16 * 1024 * 1024 or not isinstance(offset, str) or not offset.isdecimal():
+        if (type(size) is not int or not 0 < size <= 16 * 1024 * 1024
+                or type(offset) is not str or not offset.isascii() or not offset.isdecimal()
+                or len(offset) > 20 or entry.get('unpacked') is True or 'link' in entry):
             raise ValueError('Claude bootstrap is invalid')
         archive.seek(8 + header_size + int(offset))
         bootstrap = archive.read(size)
-        if len(bootstrap) != size or hashlib.sha256(bootstrap).hexdigest() != '83126565df48e98691a3845f27bb7ee78d0632aa14b5881adad8c7ac4f0a3adf':
+        if len(bootstrap) != size or hashlib.sha256(bootstrap).hexdigest() != CLAUDE_BOOTSTRAP_SHA256:
             raise ValueError('Claude bootstrap differs from the inspected release')
 
 

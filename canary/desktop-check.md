@@ -902,3 +902,21 @@ failure. Partial creation can roll back only its own empty directories. Syntheti
 ownership, policy and path tests and focused Clippy pass; native acceptance is
 still pending. Existing storage-presence diagnostics never establish gateway
 configuration consumption or a working conversation.
+
+The first native-folder Claude trial on `479f34ac` in
+[37026402040](https://github.com/DavidLMS/nan-harness/actions/runs/37026402040)
+proves native path alignment and fresh `Claude-3p/Local State` creation. One probe
+acquires a window, then returns `window-changed`; another blocks before launch
+and the third is not run. The window receipt has 21 observations, two present,
+19 absent and one stable pair, with no measured identity or bounds changes.
+Application and global cleanup pass. Configuration consumption remains unknown;
+this is progress in native acquisition, not conversation acceptance.
+
+The full local gate on that commit fails the existing Claude policy fixture,
+which still supplies a plain text placeholder where the new frozen bootstrap
+check requires an ASAR container. The fixture now has the real padded ASAR
+structure and a separately pinned synthetic digest. A new contract checks padding,
+truncation, invalid header lengths and digest mismatch while retaining the exact
+production pin. All 47 reducer and runner tests pass; the complete gate must be
+rerun after the correction. The preceding Linux quality gate on `70efffba` passes
+in [37024794192](https://github.com/DavidLMS/nan-harness/actions/runs/37024794192).

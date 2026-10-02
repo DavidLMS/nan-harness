@@ -6,6 +6,8 @@ import argparse
 from pathlib import Path
 import sys
 import json
+import hashlib
+import struct
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -21,6 +23,23 @@ spec.loader.exec_module(runner)
 
 
 class RunnerTests(unittest.TestCase):
+    @staticmethod
+    def synthetic_claude_bundle(root, payload=b'synthetic bootstrap'):
+        contents = root / 'Claude.app/Contents'
+        executable = contents / 'MacOS/Claude'
+        for document in (executable, contents / 'Info.plist'):
+            document.parent.mkdir(parents=True, exist_ok=True)
+            document.write_bytes(b'synthetic')
+        archive = contents / 'Resources/app.asar'
+        archive.parent.mkdir(parents=True, exist_ok=True)
+        header = json.dumps({'files': {'.vite': {'files': {'build': {'files': {
+            'index.pre.js': {'size': len(payload), 'offset': '0'}}}}}}}, separators=(',', ':')).encode()
+        padding = b'\0' * (-len(header) % 4)
+        header_size = 8 + len(header) + len(padding)
+        archive.write_bytes(struct.pack('<4I', 4, header_size, header_size - 4, len(header))
+                            + header + padding + payload)
+        return executable, archive
+
     def test_zed_delivery_policy_is_explicit_and_linux_only(self):
         source = {key: 'synthetic' for key in runner.ZED_HELPERS}
         source.update(GITHUB_ACTIONS='true', RUNNER_ENVIRONMENT='github-hosted',
@@ -41,14 +60,13 @@ class RunnerTests(unittest.TestCase):
             root = Path(tmp).resolve()
             contents = root / 'Claude.app/Contents'
             executable = contents / 'MacOS/Claude'
-            for document in (executable, contents / 'Info.plist', contents / 'Resources/app.asar'):
-                document.parent.mkdir(parents=True, exist_ok=True)
-                document.write_bytes(b'synthetic')
+            executable, archive = self.synthetic_claude_bundle(root)
             source = dict(GITHUB_ACTIONS='true', RUNNER_ENVIRONMENT='github-hosted', RUNNER_OS='macOS',
                           NANH_DESKTOP_QUALIFICATION_MODE='startup-baseline',
                           NANH_CLAUDE_MAC_PROFILE_POLICY='electron-user-data-dir',
                           CLAUDE_USER_DATA_DIR='PRIVATE', CLAUDE_CDP_AUTH='PRIVATE')
-            env = runner.qualification_environment('claude-desktop', root, root / 'nanh', executable, source)
+            with patch.object(runner, 'CLAUDE_BOOTSTRAP_SHA256', hashlib.sha256(b'synthetic bootstrap').hexdigest()):
+                env = runner.qualification_environment('claude-desktop', root, root / 'nanh', executable, source)
             self.assertEqual(env['NANH_CLAUDE_MAC_PROFILE_POLICY'], 'electron-user-data-dir')
             self.assertNotIn('PRIVATE', str(env))
             for changes, app in (({'RUNNER_OS': 'Linux'}, 'claude-desktop'),
@@ -63,6 +81,23 @@ class RunnerTests(unittest.TestCase):
             (contents / 'Resources/app.asar').symlink_to(contents / 'Info.plist')
             with self.assertRaises(ValueError):
                 runner.validate_claude_bundle(executable)
+
+    def test_claude_bootstrap_uses_padded_asar_structure_and_exact_digest(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            executable, archive = self.synthetic_claude_bundle(Path(tmp).resolve())
+            valid = archive.read_bytes()
+            expected = hashlib.sha256(b'synthetic bootstrap').hexdigest()
+            with self.assertRaises(ValueError):
+                runner.validate_claude_bundle(executable)  # Production pin rejects synthetic bytes.
+            with patch.object(runner, 'CLAUDE_BOOTSTRAP_SHA256', expected):
+                runner.validate_claude_bundle(executable)
+                for data in (valid[:15], valid[:-1], struct.pack('<I', 8) + valid[4:],
+                             valid[:8] + struct.pack('<I', 1) + valid[12:],
+                             valid[:12] + struct.pack('<I', 2 ** 32 - 1) + valid[16:],
+                             valid[:-1] + b'X'):
+                    archive.write_bytes(data)
+                    with self.assertRaises(ValueError):
+                        runner.validate_claude_bundle(executable)
 
     def test_windows_native_ownership_helpers_survive_the_closed_environment(self):
         with tempfile.TemporaryDirectory() as tmp:
