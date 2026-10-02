@@ -1486,6 +1486,13 @@ fn isolated_command(spec: &ProbeSpec, program: &Path) -> Result<Command, Reason>
     // signalling an unrelated application in the runner's process group.
     #[cfg(unix)]
     command.process_group(0);
+    if spec.kind == DesktopHarnessKind::ChatGpt {
+        let user_data = profile.join("codex-desktop");
+        create_private_dir_all(&user_data).map_err(|_| Reason::IsolationUnavailable)?;
+        // Codex's supported Electron override also isolates UI onboarding and
+        // singleton state; CODEX_HOME alone redirects only runtime settings.
+        command.env("CODEX_ELECTRON_USER_DATA_PATH", user_data);
+    }
     if spec.kind == DesktopHarnessKind::Hermes {
         let user_data = hermes_user_data(&profile, &roaming);
         create_private_dir_all(&user_data).map_err(|_| Reason::IsolationUnavailable)?;
@@ -2523,6 +2530,37 @@ mod tests {
                 .then_some(expected_observation_path.as_os_str());
             assert_eq!(observation, Some(expected_observation));
         }
+    }
+
+    #[test]
+    fn codex_launch_isolates_electron_data_as_well_as_runtime_settings() {
+        let directory = tempfile::tempdir().unwrap();
+        let spec = ProbeSpec {
+            kind: DesktopHarnessKind::ChatGpt,
+            nan_harness: directory.path().join("nanh"),
+            nan_harness_sha256: "a".repeat(64),
+            executable: directory.path().join("app"),
+            workspace: directory.path().join("workspace"),
+            model: "qwen3.6".into(),
+            live: false,
+            probe_index: None,
+            session: crate::cli::SessionMode::PrivateProfile,
+            verification: crate::cli::VerificationPolicy::default(),
+            launch_wrapper: None,
+        };
+        let command = isolated_command(&spec, &spec.nan_harness).unwrap();
+        let data = command
+            .as_std()
+            .get_envs()
+            .find(|(key, _)| *key == "CODEX_ELECTRON_USER_DATA_PATH")
+            .unwrap()
+            .1
+            .unwrap();
+        assert_eq!(
+            Path::new(data),
+            spec.workspace.join("profile/codex-desktop")
+        );
+        assert!(Path::new(data).is_dir());
     }
 
     #[test]

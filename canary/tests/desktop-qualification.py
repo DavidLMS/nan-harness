@@ -637,6 +637,16 @@ class QualificationTests(unittest.TestCase):
             path.write_text(json.dumps(value))
             self.assertEqual(q.semantic_observations(root, 'pen-desktop'), [value])
             self.assertEqual(q.envelope('pen-desktop', 'linux', 'x86_64', 'a' * 40)['qualification'], 'unqualified')
+            value['landingCounts'] = dict(importHeading=1, importDismiss=1, createProject=0,
+                                         sourceFolders=0, projectName=0)
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(root, 'pen-desktop'), [value])
+            for counts in ({**value['landingCounts'], 'PRIVATE': 1},
+                           {**value['landingCounts'], 'importHeading': True},
+                           {**value['landingCounts'], 'importHeading': 4097}):
+                path.write_text(json.dumps({**value, 'landingCounts': counts}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'pen-desktop')
             value['startupScreen'] = 'gpu-unavailable'
             path.write_text(json.dumps(value))
             self.assertEqual(q.semantic_observations(root, 'pen-desktop'), [value])

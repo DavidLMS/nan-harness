@@ -418,3 +418,10 @@ queries fail. macOS still has no eligible visible window. Linux baseline launche
 now request Chromium's native renderer accessibility explicitly; CDP remains off.
 The vendor's frozen debugging-switch denylist does not forbid this accessibility
 switch. This is a diagnostic trial, not conversation qualification.
+
+Codex's frozen official bootstrap supports `CODEX_ELECTRON_USER_DATA_PATH`.
+Each checker probe now binds it to a fresh private directory, in addition to its
+private `CODEX_HOME`, so Electron singleton and onboarding state cannot escape
+the probe profile. Read-only renderer inventories retain bounded counts for
+known import and project-creation controls, without retaining labels or taking
+navigation actions. These observations cannot qualify a conversation backend.

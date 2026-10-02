@@ -67,6 +67,15 @@ async function run() {
         : headings.length === 1 && headings[0].textContent === 'Failed to start pen.dev' ? 'startup-failed' : 'other';
       return { textareaCount: count('textarea'), editableCount: count('[contenteditable="true"]'),
         startupScreen,
+        landingCounts: {
+          importHeading: Math.min(4096, [...document.querySelectorAll('h1,h2,h3,[role="heading"]')]
+            .filter(visible).filter(e => /^(Import other AI setup|Import work from other AI apps)$/.test(e.textContent || '')).length),
+          importDismiss: named(/^(Not now|Skip)$/),
+          createProject: named(/^Create project$/),
+          sourceFolders: named(/^(Choose source folders|Add folder)$/),
+          projectName: Math.min(4096, [...document.querySelectorAll('input')].filter(visible)
+            .filter(e => e.getAttribute('aria-label') === 'Project name' || e.placeholder === 'Project name').length),
+        },
         sendCount: named(/^(send|send message|submit)$/i), retryCount: named(/^(retry|try again)$/i),
         newThreadCount: named(/^(new chat|new thread|new conversation)$/i),
         loginCount: named(/^(log in|sign in|continue with google|continue with apple)$/i),
