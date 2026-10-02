@@ -69,7 +69,7 @@ fn creates_the_complete_release_contract() {
             .as_array()
             .expect("verifications should be an array")
             .len(),
-        16
+        17
     );
 
     let citation = fs::read_to_string(directory.path().join(CITATION_FILE_NAME))
