@@ -1,0 +1,61 @@
+name: ZCode feasibility
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/zai-code]
+    paths:
+      - canary/research/zcode/**
+      - .github/workflows/zcode-feasibility.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: zcode-feasibility-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04-arm, windows-latest]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    env:
+      ZCODE_SOURCE_ROOT: ${{ github.workspace }}/upstream-zcode
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zai-org/ZCode
+          ref: 29628c9acdb81b703bbd4080c207a0e7ce5e276e
+          path: upstream-zcode
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.14.0
+          package-manager-cache: false
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version: '3.11'
+      - name: Build exact upstream CLI
+        working-directory: upstream-zcode
+        run: |
+          npm install --global --ignore-scripts --no-audit --no-fund pnpm@10.33.2
+          pnpm --filter '@zcode/cli...' install --ignore-scripts --frozen-lockfile
+          pnpm --filter '@zcode/cli...' build
+          node apps/zcode-cli/packages/cli/dist/zcode.cjs --version
+      - name: Verify source contracts and native tool lifecycle
+        run: |
+          output=$(mktemp -d)
+          node canary/research/zcode/build-probes.mjs "$output"
+          node "$output/config-probe.mjs"
+          node "$output/protocol-probe.mjs"
+          python canary/research/zcode/native_probe.py --source "$ZCODE_SOURCE_ROOT" --node "$(command -v node)"

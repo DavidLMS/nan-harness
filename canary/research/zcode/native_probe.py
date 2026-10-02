@@ -142,6 +142,8 @@ def exercise_native(source, node, scenario, port):
         restricted_builtin.write_text(json.dumps(builtin))
         env = {
             "HOME": temporary, "PATH": os.environ["PATH"], "TMPDIR": temporary,
+            "USERPROFILE": temporary, "TEMP": temporary, "TMP": temporary,
+            "APPDATA": temporary, "LOCALAPPDATA": temporary,
             "ZCODE_DATA_BASE_DIR": temporary,
             "ZCODE_PERSONAL_PROVIDER_CONFIG_FILE": str(personal),
             "ZCODE_BUILTIN_PROVIDER_CONFIG_FILE": str(restricted_builtin),
@@ -150,6 +152,9 @@ def exercise_native(source, node, scenario, port):
             "HTTP_PROXY": "http://127.0.0.1:9", "HTTPS_PROXY": "http://127.0.0.1:9",
             "NO_PROXY": "127.0.0.1,localhost",
         }
+        for name in ("SYSTEMROOT", "SystemRoot", "WINDIR", "COMSPEC", "PATHEXT", "SystemDrive"):
+            if name in os.environ:
+                env[name] = os.environ[name]
         run_prompt(node, cli, workspace, env)
         assert len(scenario.completed) == len(scenario.steps), "Tool continuation incomplete"
         assert scenario.child_seen, "Child agent did not reach the synthetic provider"

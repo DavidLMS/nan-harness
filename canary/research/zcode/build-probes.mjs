@@ -1,6 +1,6 @@
 import { readFile, readdir, mkdir } from "node:fs/promises";
 import { resolve, join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const sourceRoot = process.env.ZCODE_SOURCE_ROOT;
 if (!sourceRoot || !process.argv[2]) {
@@ -51,7 +51,7 @@ const sourcePlugin = {
 await mkdir(output, { recursive: true });
 for (const probe of ["config-probe", "protocol-probe"]) {
   await build({
-    entryPoints: [new URL(`./${probe}.mjs`, import.meta.url).pathname],
+    entryPoints: [fileURLToPath(new URL(`./${probe}.mjs`, import.meta.url))],
     bundle: true,
     platform: "node",
     format: "esm",
