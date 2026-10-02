@@ -221,8 +221,72 @@ where
     continuation()
 }
 
+#[cfg(any(windows, test))]
+fn settle_absence(
+    mut query: impl FnMut(Instant) -> Result<(), AbsenceFailure>,
+    mut now: impl FnMut() -> Instant,
+    mut pause: impl FnMut(Duration),
+    deadline: Instant,
+) -> Result<(), AbsenceFailure> {
+    let mut last = AbsenceFailure {
+        stage: AbsenceStage::AccessibilityEnumeration,
+        reason: Reason::AlreadyRunning,
+    };
+    loop {
+        if now() >= deadline {
+            return Err(last);
+        }
+        let result = query(deadline);
+        if now() >= deadline {
+            return Err(match result {
+                Err(failure) => failure,
+                Ok(()) => last,
+            });
+        }
+        match result {
+            Ok(()) => return Ok(()),
+            Err(failure) if failure.reason == Reason::AlreadyRunning => last = failure,
+            Err(failure) => return Err(failure),
+        }
+        pause(Duration::from_millis(50).min(deadline.saturating_duration_since(now())));
+    }
+}
+
 impl Gui {
     pub(crate) fn ensure_absent(kind: DesktopHarnessKind) -> Result<(), AbsenceFailure> {
+        Self::absence_snapshot(kind, None)
+    }
+
+    pub(crate) fn ensure_absent_after_stop(kind: DesktopHarnessKind) -> Result<(), AbsenceFailure> {
+        #[cfg(windows)]
+        {
+            let deadline = Instant::now() + Duration::from_secs(2);
+            settle_absence(
+                |bound| Self::absence_snapshot(kind, Some(bound)),
+                Instant::now,
+                std::thread::sleep,
+                deadline,
+            )
+        }
+        #[cfg(not(windows))]
+        Self::ensure_absent(kind)
+    }
+
+    fn absence_snapshot(
+        kind: DesktopHarnessKind,
+        deadline: Option<Instant>,
+    ) -> Result<(), AbsenceFailure> {
+        let require_budget = |stage| {
+            if deadline.is_some_and(|bound| Instant::now() >= bound) {
+                Err(AbsenceFailure {
+                    stage,
+                    reason: Reason::AlreadyRunning,
+                })
+            } else {
+                Ok(())
+            }
+        };
+        require_budget(AbsenceStage::AccessibilityProvider)?;
         // App::list also queries focus. On AT-SPI, closing the final window can
         // make that unrelated query unsupported even when enumeration succeeds.
         let apps = xa11y::provider()
@@ -243,12 +307,18 @@ impl Gui {
                 reason,
             },
         )?;
+        require_budget(AbsenceStage::NativeWindows)?;
         visual::Visual::ensure_absent(kind).map_err(|reason| AbsenceFailure {
             stage: AbsenceStage::NativeWindows,
             reason,
         })?;
+        require_budget(AbsenceStage::ProcessEnumeration)?;
         #[cfg(windows)]
-        process_absence::ensure_absent(kind).map_err(|reason| AbsenceFailure {
+        match deadline {
+            Some(bound) => process_absence::inspect_absent(kind, bound),
+            None => process_absence::ensure_absent(kind),
+        }
+        .map_err(|reason| AbsenceFailure {
             stage: AbsenceStage::ProcessEnumeration,
             reason,
         })?;
@@ -1166,6 +1236,91 @@ fn unique_accessible_match(count: Result<usize, Reason>) -> Result<bool, Reason>
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn post_stop_settles_only_presence_with_one_shared_deadline() {
+        use std::cell::Cell;
+        let start = Instant::now();
+        let clock = Cell::new(start);
+        let calls = Cell::new(0);
+        let deadline = start + Duration::from_millis(100);
+        let result = settle_absence(
+            |bound| {
+                assert_eq!(bound, deadline);
+                calls.set(calls.get() + 1);
+                if calls.get() == 1 {
+                    Err(AbsenceFailure {
+                        stage: AbsenceStage::AccessibilityEnumeration,
+                        reason: Reason::AlreadyRunning,
+                    })
+                } else {
+                    Ok(())
+                }
+            },
+            || clock.get(),
+            |duration| clock.set(clock.get() + duration),
+            deadline,
+        );
+        assert!(result.is_ok());
+        assert_eq!(calls.get(), 2);
+    }
+
+    #[test]
+    fn post_stop_query_error_and_late_success_never_pass() {
+        use std::cell::Cell;
+        let start = Instant::now();
+        let clock = Cell::new(start);
+        let deadline = start + Duration::from_millis(100);
+        let calls = Cell::new(0);
+        let result = settle_absence(
+            |_| {
+                calls.set(calls.get() + 1);
+                Err(AbsenceFailure {
+                    stage: AbsenceStage::ProcessEnumeration,
+                    reason: Reason::DesktopUnavailable,
+                })
+            },
+            || clock.get(),
+            |_| panic!("query errors must not retry"),
+            deadline,
+        );
+        assert_eq!(result.err().unwrap().reason, Reason::DesktopUnavailable);
+        assert_eq!(calls.get(), 1);
+        let result = settle_absence(
+            |_| {
+                clock.set(deadline);
+                Ok(())
+            },
+            || clock.get(),
+            |_| panic!("late result must stop"),
+            deadline,
+        );
+        assert_eq!(result.err().unwrap().reason, Reason::AlreadyRunning);
+    }
+
+    #[test]
+    fn post_stop_persistent_presence_never_queries_after_deadline() {
+        use std::cell::Cell;
+        let start = Instant::now();
+        let clock = Cell::new(start);
+        let calls = Cell::new(0);
+        let deadline = start + Duration::from_millis(100);
+        let result = settle_absence(
+            |_| {
+                calls.set(calls.get() + 1);
+                Err(AbsenceFailure {
+                    stage: AbsenceStage::NativeWindows,
+                    reason: Reason::AlreadyRunning,
+                })
+            },
+            || clock.get(),
+            |duration| clock.set(clock.get() + duration),
+            deadline,
+        );
+        let failure = result.err().unwrap();
+        assert_eq!(failure.stage, AbsenceStage::NativeWindows);
+        assert_eq!(calls.get(), 2);
+    }
+
     #[test]
     fn startup_guard_records_only_the_exact_rejected_snapshot_without_requery() {
         use super::*;

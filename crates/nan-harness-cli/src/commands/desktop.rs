@@ -258,13 +258,15 @@ pub(crate) fn qualification_renderer_arguments(
         );
         if std::env::var("NANH_DESKTOP_QUALIFICATION_MODE").as_deref() == Ok("startup-baseline") {
             arguments.clear();
-            if kind == nan_harness_core::DesktopHarnessKind::Claude
-                && cfg!(target_os = "linux")
-                && qualification_capture_enabled()
-            {
-                // Request Chromium's native accessibility tree without CDP.
-                arguments.push("--force-renderer-accessibility".into());
-            }
+            arguments.extend(startup_accessibility_arguments(
+                kind,
+                std::env::consts::OS,
+                std::env::var("RUNNER_OS").ok().as_deref(),
+                qualification_capture_enabled(),
+                std::env::var("NANH_CLAUDE_MAC_PROFILE_POLICY")
+                    .ok()
+                    .as_deref(),
+            ));
         }
         if qualification_capture_enabled()
             && cfg!(target_os = "linux")
@@ -278,6 +280,26 @@ pub(crate) fn qualification_renderer_arguments(
     #[cfg(not(feature = "desktop-qualification"))]
     {
         let _ = kind;
+        Vec::new()
+    }
+}
+
+#[cfg(feature = "desktop-qualification")]
+fn startup_accessibility_arguments(
+    kind: nan_harness_core::DesktopHarnessKind,
+    platform: &str,
+    runner_os: Option<&str>,
+    capture_enabled: bool,
+    mac_policy: Option<&str>,
+) -> Vec<String> {
+    // Chromium's public flag exposes native semantics without enabling CDP.
+    let supported = platform == "linux"
+        || (platform == "macos"
+            && runner_os == Some("macOS")
+            && mac_policy == Some("native-known-folders"));
+    if kind == nan_harness_core::DesktopHarnessKind::Claude && capture_enabled && supported {
+        vec!["--force-renderer-accessibility".into()]
+    } else {
         Vec::new()
     }
 }
@@ -319,8 +341,63 @@ fn renderer_arguments(
 
 #[cfg(all(test, feature = "desktop-qualification"))]
 mod renderer_tests {
-    use super::renderer_arguments;
+    use super::{renderer_arguments, startup_accessibility_arguments};
     use nan_harness_core::DesktopHarnessKind;
+    #[test]
+    fn startup_accessibility_preserves_linux_and_scopes_the_mac_trial() {
+        let claude = DesktopHarnessKind::Claude;
+        let flag = vec!["--force-renderer-accessibility".to_owned()];
+        assert_eq!(
+            startup_accessibility_arguments(claude, "linux", None, true, None),
+            flag
+        );
+        assert_eq!(
+            startup_accessibility_arguments(
+                claude,
+                "macos",
+                Some("macOS"),
+                true,
+                Some("native-known-folders")
+            ),
+            flag
+        );
+        for (kind, platform, runner, capture, policy) in [
+            (claude, "macos", None, true, Some("native-known-folders")),
+            (
+                claude,
+                "macos",
+                Some("macOS"),
+                false,
+                Some("native-known-folders"),
+            ),
+            (
+                claude,
+                "macos",
+                Some("macOS"),
+                true,
+                Some("electron-user-data-dir"),
+            ),
+            (
+                claude,
+                "windows",
+                Some("Windows"),
+                true,
+                Some("native-known-folders"),
+            ),
+            (
+                DesktopHarnessKind::Pen,
+                "macos",
+                Some("macOS"),
+                true,
+                Some("native-known-folders"),
+            ),
+            (claude, "linux", None, false, None),
+        ] {
+            assert!(
+                startup_accessibility_arguments(kind, platform, runner, capture, policy).is_empty()
+            );
+        }
+    }
     #[test]
     fn instrumentation_requires_owned_hosted_context_and_numeric_loopback_port() {
         let directory = tempfile::tempdir().unwrap();

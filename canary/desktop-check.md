@@ -1300,3 +1300,48 @@ root coordinates. A bounded private handoff carries only indexed canonical
 rectangles and raw toggle states; public receipts remain closed counts/enums.
 This corrects the measurement rather than asserting a zoom state transition.
 No extra shortcut or input is added. Qualification remains 5 of 15 cells.
+
+
+On `a4f95f1a`, all four scoped native trials retain valid closed diagnostics;
+none adds a qualified cell. macOS Claude
+[37069925452](https://github.com/DavidLMS/nan-harness/actions/runs/37069925452)
+reports `focused-element/no-value` before input-window lookup. Focused and main
+window queries succeed, and cleanup passes. This supports a separate official
+Chromium renderer-accessibility flag trial, not an AXWindow self-parent fallback.
+The flag remains hosted-only, startup-baseline-only, and scoped to Claude under
+the macOS native-known-folders policy; ownership/focus guards are unchanged.
+See Chromium's [assistive technology detection documentation](https://www.chromium.org/developers/design-documents/accessibility/#how-chrome-detects-the-presence-of-assistive-technology).
+
+Windows Claude
+[37069922557](https://github.com/DavidLMS/nan-harness/actions/runs/37069922557)
+fails `absence-after-stop/accessibility-enumeration/already-running`, before the
+CLI restoration command can run. There is consequently no restoration receipt,
+rather than a lost diagnostic. Job termination behaves like per-process
+termination, which can return before exit completes; the next bounded Windows
+trial must prove absence before restoration, without adding another kill or
+accepting a late/failed query. See Microsoft's
+[TerminateJobObject](https://learn.microsoft.com/en-us/windows/win32/api/jobapi2/nf-jobapi2-terminatejobobject)
+and [TerminateProcess](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-terminateprocess) contracts.
+
+Linux Zed
+[37069928393](https://github.com/DavidLMS/nan-harness/actions/runs/37069928393)
+now uniquely correlates one stable Maximize glyph with canonical button bounds
+in each probe. Its state remains unavailable, so the measurement does not prove
+AgentPanel zoom. All first four steps and cleanup pass; Retry still produces no
+verified recovery. The pinned fullscreen-control source exports ToggleButton62
+with PRESSED20, so ordinary-button containment cannot certify its toggle state.
+
+Windows Codex
+[37069931417](https://github.com/DavidLMS/nan-harness/actions/runs/37069931417)
+rejects snapshots with two app-protocol pages, one the held page, in all three
+cleanly restored probes. The exact frozen MSIX's app.asar creates prewarmed
+auxiliary pages. The next read-only diagnostic classifies fixed public routes
+and document visibility without retaining URLs or selecting an auxiliary target.
+Document visibility alone cannot establish a harmless window.
+
+The Linux quality gate
+[37069934214](https://github.com/DavidLMS/nan-harness/actions/runs/37069934214)
+rejects the now-unused `Toggled` import on non-test Linux. That import is scoped
+to its consumers. The obsolete local gate was stopped during canary fixtures
+rather than continuing to certify a known platform failure; the corrected final
+tree requires a new complete gate. Qualification remains 5 of 15 cells.

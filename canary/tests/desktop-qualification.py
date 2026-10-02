@@ -1212,6 +1212,18 @@ class QualificationTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 q.public_onboarding({**setup, 'rejectedPageInventory': invalid}, 'chatgpt-desktop')
 
+        route_counts = dict.fromkeys(('avatarOverlay', 'hotkeyWindow', 'quickChat', 'quickChatPrewarm',
+                                      'detachedWindow', 'globalDictation', 'debug', 'unknown'), 0)
+        route_counts.update(quickChatPrewarm=1, unknown=1)
+        source = dict(status='complete', routes=route_counts, visibility=dict(visible=1, hidden=1, unavailable=0))
+        measured = {**inventory, 'source': source}
+        self.assertEqual(q.public_onboarding({**setup, 'rejectedPageInventory': measured}, 'chatgpt-desktop')['rejectedPageInventory'], measured)
+        for invalid in ({**source, 'url': 'PRIVATE'}, {**source, 'status': []},
+                        {**source, 'routes': {**route_counts, 'unknown': True}},
+                        {**source, 'visibility': dict(visible=2, hidden=1, unavailable=0)}):
+            with self.assertRaises(ValueError):
+                q.public_onboarding({**setup, 'rejectedPageInventory': {**inventory, 'source': invalid}}, 'chatgpt-desktop')
+
         blocked = {**setup, 'roleProofFailure': 'control-not-actionable',
                    'actionabilityFailure': 'foreign-overlay'}
         self.assertEqual(q.public_onboarding(blocked, 'chatgpt-desktop'), blocked)

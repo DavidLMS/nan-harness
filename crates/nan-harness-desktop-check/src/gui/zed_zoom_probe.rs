@@ -2,7 +2,9 @@
 //! Cairo candidates cannot authorize zoom input or establish a native toggle state.
 use super::native_icon_probe::ZoomMatches;
 use serde::Serialize;
-use xa11y::{ElementData, Rect, Role, Toggled};
+#[cfg(any(not(target_os = "linux"), test))]
+use xa11y::Toggled;
+use xa11y::{ElementData, Rect, Role};
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]

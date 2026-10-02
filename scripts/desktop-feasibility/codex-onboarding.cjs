@@ -88,7 +88,7 @@ function candidate(a, b) {
   return a && b && !a.blocked && !b.blocked && JSON.stringify(a.rect) === JSON.stringify(b.rect)
     && a.points.find(p => b.points.some(q => p.x === q.x && p.y === q.y));
 }
-exports.run = async function(page, ownerGuard, deadline) {
+async function run(page, ownerGuard, deadline, rejected) {
   const maxWaitMs = deadline - Date.now();
   const originalUrl = page.url();
   const ownedEndpoint = () => {
@@ -113,6 +113,7 @@ exports.run = async function(page, ownerGuard, deadline) {
             inventory[kind]++;
           }
           facts.rejectedPageInventory=inventory;
+          rejected(pages.slice());
         }
         return fail('page-count');
       }
@@ -286,6 +287,50 @@ exports.run = async function(page, ownerGuard, deadline) {
     return stop('scope-remained');
   } catch { return stop(facts.roleClickAttempted || facts.continueClickAttempted ? 'action-uncertain':'observation-failed'); }
 };
+// These routes are bound to the frozen Windows MSIX's app-protocol and main chunks.
+function sourceRoute(raw) {
+  try {
+    const url=new URL(raw);
+    if(url.protocol!=='app:'||url.hostname!=='-'||url.searchParams.getAll('initialRoute').length!==1)return 'unknown';
+    const route=url.searchParams.get('initialRoute');
+    if(url.pathname==='/detached-window.html'&&route==='/detached-window')return 'detachedWindow';
+    if(url.pathname!=='/index.html')return 'unknown';
+    return new Map([['/avatar-overlay','avatarOverlay'],['/hotkey-window','hotkeyWindow'],
+      ['/chatgpt/quick-chat','quickChat'],['/chatgpt/quick-chat-prewarm','quickChatPrewarm'],
+      ['/global-dictation','globalDictation'],['/debug','debug']]).get(route)??'unknown';
+  } catch { return 'unknown'; }
+}
+exports.run=async function(page, ownerGuard, deadline) {
+  let rejectedPages, rejectedUrls;
+  const facts=await run(page,ownerGuard,deadline,pages=>{rejectedPages=pages;rejectedUrls=pages.map(p=>p.url());});
+  if(!rejectedPages)return facts;
+  const unavailable=()=>{facts.rejectedPageInventory.source={status:'unavailable'};return facts;};
+  const stable=()=>{
+    if(Date.now()>=deadline||ownerGuard()!==true)return false;
+    const current=page.context().browser().contexts().flatMap(context=>context.pages());
+    return Date.now()<deadline&&current.length===rejectedPages.length&&current.every((p,i)=>p===rejectedPages[i]&&p.url()===rejectedUrls[i]);
+  };
+  try {
+    if(!stable())return unavailable();
+    const routes=Object.fromEntries(['avatarOverlay','hotkeyWindow','quickChat','quickChatPrewarm',
+      'detachedWindow','globalDictation','debug','unknown'].map(key=>[key,0]));
+    const visibility={visible:0,hidden:0,unavailable:0};
+    for(const candidate of rejectedPages){
+      if(!stable())return unavailable();
+      const before=candidate.url();
+      let timer;
+      const state=await Promise.race([candidate.evaluate(()=>document.visibilityState).catch(()=>null),
+        new Promise(resolve=>{timer=setTimeout(()=>resolve(null),Math.max(1,deadline-Date.now()));})])
+        .finally(()=>clearTimeout(timer));
+      if(!stable()||candidate.url()!==before)return unavailable();
+      routes[sourceRoute(before)]++;
+      visibility[state==='visible'||state==='hidden'?state:'unavailable']++;
+    }
+    facts.rejectedPageInventory.source={status:'complete',routes,visibility};
+    return facts;
+  } catch { return unavailable(); }
+};
+exports.sourceRoute=sourceRoute;
 exports.sample = sample;
 exports.candidate = candidate;
 exports.scopeFingerprint = SCOPE;

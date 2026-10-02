@@ -3,6 +3,7 @@ const fs=require('node:fs');
 const vm=require('node:vm');
 const source=fs.readFileSync(`${__dirname}/codex-onboarding.cjs`,'utf8');
 async function trial(options={}) {
+ let inventoryOwnerLost=false;
  let now=0,checked=false,absent=false,roleClicks=0,continueClicks=0,samples=0,overlayReads=0,legendReads=0;
  const root={parentElement:null};
  const fieldset={parentElement:root};
@@ -70,13 +71,14 @@ async function trial(options={}) {
   async elementHandle(){return new Handle(this.element());}
  }
  const mainFrame={};
- const page={mainFrame:()=>options.overlayFrameChange&&overlayReads?{}:mainFrame,locator:s=>new Locator(s.startsWith('fieldset > legend')?'legend':'radios'),
+ const extraPage={url:()=>options.foreignUrl??'about:blank',evaluate:async()=>{if(options.inventoryOwnerLoss)inventoryOwnerLost=true;if(options.inventoryDeadline)now=1201;return options.visibility??'hidden';}};
+ const page={evaluate:async()=> 'visible',mainFrame:()=>options.overlayFrameChange&&overlayReads?{}:mainFrame,locator:s=>new Locator(s.startsWith('fieldset > legend')?'legend':'radios'),
   url:()=>options.urlChange&&roleClicks>0?'app://codex/index.html?PRIVATE_ROUTE':'app://codex/index.html',
-  context:()=>({browser:()=>({contexts:()=>[{pages:()=>options.foreignPage?[page,{url:()=>options.foreignUrl??'about:blank'}]:options.replacedPage?[{}]:[page]}]})})};
- const sandbox={exports:{},process:{platform:options.platform??'win32',env:{GITHUB_ACTIONS:options.noHost?'false':'true',RUNNER_ENVIRONMENT:'github-hosted',RUNNER_OS:'Windows',NANH_CODEX_PUBLIC_ONBOARDING:options.noOptin?undefined:'engineering'}},Date:{now:()=>now},setTimeout:f=>{now+=100;f();}};
+  context:()=>({browser:()=>({contexts:()=>[{pages:()=>options.foreignPage?[page,extraPage]:options.replacedPage?[{}]:[page]}]})})};
+ const sandbox={exports:{},URL,process:{platform:options.platform??'win32',env:{GITHUB_ACTIONS:options.noHost?'false':'true',RUNNER_ENVIRONMENT:'github-hosted',RUNNER_OS:'Windows',NANH_CODEX_PUBLIC_ONBOARDING:options.noOptin?undefined:'engineering'}},Date:{now:()=>now},clearTimeout:()=>{},setTimeout:(f,ms)=>{if(ms<=100){now+=100;f();}}};
  vm.runInNewContext(source,sandbox);
  let guards=0;
- const guard=()=>{guards++;if(options.guardThrows)throw Error('PRIVATE');if(options.guardExhaustsBudget&&guards>=3||options.overlayBudgetExpired&&overlayReads>0)now=1201;return !(options.overlayOwnerDuringProof&&legendReads>=3)&&!(options.overlayOwnerLoss&&overlayReads>0)&&!options.initialOwnerLoss&&!(options.ownerLossBeforeRole&&guards>=3)&&!(options.ownerLoss&&roleClicks>0)&&!(options.finalLoss&&guards>=2);};
+ const guard=()=>{guards++;if(options.guardThrows)throw Error('PRIVATE');if(options.guardExhaustsBudget&&guards>=3||options.overlayBudgetExpired&&overlayReads>0)now=1201;return !inventoryOwnerLost&&!(options.overlayOwnerDuringProof&&legendReads>=3)&&!(options.overlayOwnerLoss&&overlayReads>0)&&!options.initialOwnerLoss&&!(options.ownerLossBeforeRole&&guards>=3)&&!(options.ownerLoss&&roleClicks>0)&&!(options.finalLoss&&guards>=2);};
  const budget=options.expired?0:options.invalidDeadline?NaN:options.excessBudget?25001:1200;
  const facts=await sandbox.exports.run(page,options.noGuard?undefined:guard,budget);
  assert(!JSON.stringify(facts).includes('PRIVATE'));
@@ -102,6 +104,22 @@ async function trial(options={}) {
  }
  for(const [opts,reason] of [[{foreignPage:true},'page-count'],[{replacedPage:true},'page-changed'],[{guardThrows:true},'query-failed']]) {
   const r=await trial(opts);assert.equal(r.facts.roleProofFailure,reason);assert.equal(r.roleClicks,0);assert.equal(r.continueClicks,0);
+ }
+ for(const [url,kind] of [['app://-/index.html?initialRoute=/chatgpt/quick-chat-prewarm','quickChatPrewarm'],
+  ['app://-/detached-window.html?initialRoute=/detached-window','detachedWindow'],
+  ['app://foreign/index.html?initialRoute=/avatar-overlay','unknown'],
+  ['app://-/index.html?initialRoute=/debug&initialRoute=/avatar-overlay','unknown']]){
+  const r=await trial({foreignPage:true,foreignUrl:url});
+  assert.equal(r.facts.rejectedPageInventory.source.routes[kind],1+(kind==='unknown'?1:0));
+  assert.equal(r.facts.rejectedPageInventory.source.visibility.hidden,1);
+  assert.equal(r.facts.rejectedPageInventory.source.visibility.visible,1);
+  assert.equal(r.roleClicks,0);assert.equal(r.continueClicks,0);
+ }
+ for(const opts of [{inventoryOwnerLoss:true},{inventoryDeadline:true}]){
+  const r=await trial({foreignPage:true,...opts});
+  assert.equal(r.facts.rejectedPageInventory.source.status,'unavailable');
+  assert.equal(Object.keys(r.facts.rejectedPageInventory.source).length,1);
+  assert.equal(r.roleClicks,0);assert.equal(r.continueClicks,0);
  }
  const route=await trial({urlChange:true});assert.equal(route.facts.roleProofFailure,'url-changed');
  assert.equal(route.roleClicks,1);assert.equal(route.continueClicks,0);

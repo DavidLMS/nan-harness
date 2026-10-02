@@ -8,13 +8,30 @@ pub(super) fn ensure_absent(kind: DesktopHarnessKind) -> Result<(), Reason> {
     if kind == DesktopHarnessKind::ChatGpt {
         use std::time::{Duration, Instant};
         return wait_absent(
-            inspect,
+            |deadline| inspect(deadline, b"ChatGPT.exe"),
             Instant::now,
             std::thread::sleep,
             Instant::now() + Duration::from_secs(2),
         );
     }
     Ok(())
+}
+
+#[cfg(windows)]
+pub(super) fn inspect_absent(
+    kind: DesktopHarnessKind,
+    deadline: std::time::Instant,
+) -> Result<(), Reason> {
+    let image: &[u8] = match kind {
+        DesktopHarnessKind::ChatGpt => b"ChatGPT.exe",
+        DesktopHarnessKind::Claude => b"Claude.exe",
+        _ => return Ok(()),
+    };
+    if inspect(deadline, image)? {
+        Err(Reason::AlreadyRunning)
+    } else {
+        Ok(())
+    }
 }
 
 #[cfg(any(windows, test))]
@@ -40,7 +57,7 @@ fn wait_absent(
 }
 
 #[cfg(any(windows, test))]
-fn csv_presence(bytes: &[u8], inspector_pid: u32) -> Result<bool, Reason> {
+fn csv_presence(bytes: &[u8], inspector_pid: u32, image: &[u8]) -> Result<bool, Reason> {
     if bytes.is_empty() || bytes.len() > 65536 {
         return Err(Reason::DesktopUnavailable);
     }
@@ -77,7 +94,7 @@ fn csv_presence(bytes: &[u8], inspector_pid: u32) -> Result<bool, Reason> {
         if fields.len() != 5 {
             return Err(Reason::DesktopUnavailable);
         }
-        found |= fields[0].eq_ignore_ascii_case(b"ChatGPT.exe");
+        found |= fields[0].eq_ignore_ascii_case(image);
         inspector |= fields[0].eq_ignore_ascii_case(b"tasklist.exe")
             && fields[1] == inspector_pid.to_string().as_bytes();
     }
@@ -88,7 +105,7 @@ fn csv_presence(bytes: &[u8], inspector_pid: u32) -> Result<bool, Reason> {
 }
 
 #[cfg(windows)]
-fn inspect(deadline: std::time::Instant) -> Result<bool, Reason> {
+fn inspect(deadline: std::time::Instant, image: &[u8]) -> Result<bool, Reason> {
     use std::io::{Read as _, Seek as _};
     use std::os::windows::process::CommandExt as _;
     use std::process::{Command, Stdio};
@@ -148,7 +165,7 @@ fn inspect(deadline: std::time::Instant) -> Result<bool, Reason> {
         .take(65537)
         .read_to_end(&mut bytes)
         .map_err(|_| unavailable())?;
-    csv_presence(&bytes, child.id())
+    csv_presence(&bytes, child.id(), image)
 }
 
 #[cfg(test)]
@@ -161,16 +178,16 @@ mod tests {
     const INSPECTOR: &[u8] = b"\"tasklist.exe\",\"123\",\"Console\",\"1\",\"1,000 K\"\r\n";
     #[test]
     fn exact_image_and_owned_inspector_are_required() {
-        assert_eq!(csv_presence(INSPECTOR, 123), Ok(false));
+        assert_eq!(csv_presence(INSPECTOR, 123, b"ChatGPT.exe"), Ok(false));
         let mut rows = INSPECTOR.to_vec();
         rows.extend_from_slice(b"\"cHaTgPt.exe\",\"456\",\"Console\",\"1\",\"100 K\"\r\n");
-        assert_eq!(csv_presence(&rows, 123), Ok(true));
-        assert!(csv_presence(&rows, 124).is_err());
+        assert_eq!(csv_presence(&rows, 123, b"ChatGPT.exe"), Ok(true));
+        assert!(csv_presence(&rows, 124, b"ChatGPT.exe").is_err());
         let mut foreign = INSPECTOR.to_vec();
         foreign.extend_from_slice(
             b"\"ChatGPTHelper.exe\",\"456\",\"ChatGPT.exe\",\"1\",\"100 K\"\r\n",
         );
-        assert_eq!(csv_presence(&foreign, 123), Ok(false));
+        assert_eq!(csv_presence(&foreign, 123, b"ChatGPT.exe"), Ok(false));
         for row in [
             b"".as_slice(),
             b"INFO: No tasks are running",
@@ -178,10 +195,22 @@ mod tests {
             b"\"ChatGPT.exe\",\"456\"",
             b"\"broken",
         ] {
-            assert!(csv_presence(row, 123).is_err());
+            assert!(csv_presence(row, 123, b"ChatGPT.exe").is_err());
         }
-        assert!(csv_presence(&vec![b'x'; 65537], 123).is_err());
+        assert!(csv_presence(&vec![b'x'; 65537], 123, b"ChatGPT.exe").is_err());
     }
+    #[test]
+    fn claude_exact_image_is_case_insensitive_and_helpers_do_not_match() {
+        let mut rows = INSPECTOR.to_vec();
+        rows.extend_from_slice(b"\"cLaUdE.exe\",\"456\",\"Console\",\"1\",\"100 K\"\r\n");
+        assert_eq!(csv_presence(&rows, 123, b"Claude.exe"), Ok(true));
+        assert_eq!(csv_presence(&rows, 123, b"ChatGPT.exe"), Ok(false));
+        let mut helpers = INSPECTOR.to_vec();
+        helpers
+            .extend_from_slice(b"\"ClaudeHelper.exe\",\"456\",\"Claude.exe\",\"1\",\"100 K\"\r\n");
+        assert_eq!(csv_presence(&helpers, 123, b"Claude.exe"), Ok(false));
+    }
+
     #[test]
     fn polling_uses_one_deadline_and_never_queries_after_it() {
         let start = Instant::now();

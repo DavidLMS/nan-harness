@@ -60,11 +60,26 @@ def public_onboarding(setup, app):
                 or inventory['status'] not in {'complete', 'overflow'}
                 or (inventory['status'] == 'overflow' and set(inventory) != {'status'})
                 or (inventory['status'] == 'complete' and (
-                    set(inventory) != counts | {'status'}
+                    set(inventory) not in (counts | {'status'}, counts | {'status', 'source'})
                     or any(type(inventory[key]) is not int or not 0 <= inventory[key] <= 32 for key in counts)
                     or inventory['held'] > min(1, inventory['total']) or inventory['total'] == 1
                     or sum(inventory[key] for key in counts - {'total', 'held'}) != inventory['total']))):
             raise ValueError('invalid rejected renderer inventory')
+        if 'source' in inventory:
+            source = inventory['source']
+            routes = {'avatarOverlay', 'hotkeyWindow', 'quickChat', 'quickChatPrewarm',
+                      'detachedWindow', 'globalDictation', 'debug', 'unknown'}
+            visibility = {'visible', 'hidden', 'unavailable'}
+            if (inventory['status'] != 'complete' or type(source) is not dict
+                    or type(source.get('status')) is not str or source['status'] not in {'complete', 'unavailable'}
+                    or (source['status'] == 'unavailable' and set(source) != {'status'})
+                    or (source['status'] == 'complete' and (
+                        set(source) != {'status', 'routes', 'visibility'}
+                        or any(type(source.get(key)) is not dict or set(source[key]) != fields
+                               or any(type(count) is not int or not 0 <= count <= 32 for count in source[key].values())
+                               or sum(source[key].values()) != inventory['total']
+                               for key, fields in (('routes', routes), ('visibility', visibility)))))):
+                raise ValueError('invalid rejected renderer source inventory')
     specific_overlay_failures = {
         'deadline-expired': {'deadline-expired'},
         'ownership-lost': {'ownership-lost', 'final-ownership', 'page-count', 'page-changed', 'url-changed', 'query-failed'},
