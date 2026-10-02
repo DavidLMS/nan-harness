@@ -16,7 +16,8 @@ module = runpy.run_path(str(Path(__file__).with_name('zed-input-x11.py')))
 class Transport(unittest.TestCase):
     def setUp(self):
         replacement = patch.dict(module['main'].__globals__,
-            normalized_retry_point=lambda request, active, geometry: (request['x'], request['y']))
+            normalized_retry_point=lambda request, active, geometry, facts: (request['x'], request['y']),
+            maximized_observation=lambda *args: None, publish_observation=lambda facts: None)
         replacement.start()
         self.addCleanup(replacement.stop)
 
@@ -120,6 +121,37 @@ class Transport(unittest.TestCase):
 
 
 class AccessibilityIdentity(unittest.TestCase):
+    def test_observation_reduces_native_state_and_never_exposes_coordinates(self):
+        facts = module['pointer_observation']()
+        calls = []
+        component = types.SimpleNamespace(GetState=lambda **kwargs: [(1 << 7) | (1 << 24) | (1 << 25) | (1 << 30), 0],
+            Contains=lambda *args, **kwargs: calls.append(args) or True)
+        module['accessibility_observation'](component,
+            types.SimpleNamespace(Int32=int, UInt32=int, DBusException=RuntimeError),
+            (100, 200, 40, 20), facts)
+        self.assertTrue(all(facts[key] for key in ('enabled', 'sensitive', 'showing', 'visible', 'retryContains')))
+        self.assertFalse(facts['defunct'])
+        self.assertEqual(calls, [(120, 210, 1)])
+        self.assertNotIn('120', json.dumps(facts))
+        component.GetState = lambda **kwargs: (_ for _ in ()).throw(RuntimeError('PRIVATE'))
+        unavailable = module['pointer_observation']()
+        module['accessibility_observation'](component,
+            types.SimpleNamespace(DBusException=RuntimeError), (0, 0, 1, 1), unavailable)
+        self.assertIsNone(unavailable['enabled'])
+        self.assertNotIn('PRIVATE', json.dumps(unavailable))
+
+    def test_maximization_uses_only_the_fixed_property(self):
+        for output, expected in [(b'_NET_WM_STATE(ATOM) = _NET_WM_STATE_MAXIMIZED_VERT, _NET_WM_STATE_MAXIMIZED_HORZ\n', True),
+                                 (b'_NET_WM_STATE(ATOM) = \n', False),
+                                 (b'PRIVATE\n', None)]:
+            facts = module['pointer_observation']()
+            with patch('subprocess.run', return_value=subprocess.CompletedProcess([], 0, stdout=output)) as run:
+                module['maximized_observation'](40, facts, module['time'].monotonic() + 1)
+            self.assertIs(facts['maximizedHorizontal'], expected)
+            self.assertIs(facts['maximizedVertical'], expected)
+            self.assertEqual(run.call_args.args[0], ['/usr/bin/xprop', '-id', '40', '_NET_WM_STATE'])
+            self.assertNotIn('PRIVATE', json.dumps(facts))
+
     def test_changed_retry_identity_or_failed_queries_never_supply_coordinates(self):
         class QueryFailure(Exception):
             pass

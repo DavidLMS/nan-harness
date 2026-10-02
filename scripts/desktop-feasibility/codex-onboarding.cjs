@@ -62,7 +62,12 @@ exports.run = async function(page, ownerGuard, deadline) {
     if (await fieldset.locator(GROUP).count() < 1) return fail('group-absent');
     scope = fieldset.locator(`xpath=ancestor::div[${TOKENS.map(t=>`contains(concat(' ', normalize-space(@class), ' '), ' ${t} ')`).join(' and ')}][1]`);
     if (await scope.count() !== 1) return fail('scope-count');
-    if (await scope.locator('fieldset').count() !== 1) return fail('fieldset-count');
+    // The same public role page also has a footer fieldset for the optional
+    // personalized-suggestions checkbox. Only the live role group is unique.
+    const roleFieldsets = scope.locator('fieldset:visible')
+      .filter({has: page.locator('legend').filter({hasText:/^Select the kind of work you do$/})})
+      .filter({has: page.locator(GROUP)});
+    if (await roleFieldsets.count() !== 1) return fail('fieldset-count');
     if (await scope.getByRole('button',{name:/^(Log in|Sign in|Continue with Google|Continue with Apple)$/i}).count() !== 0) return fail('login-present');
     radio = fieldset.locator(`${GROUP}[value="engineering"]`);
     if (await radio.count() !== 1) return fail('engineering-count');

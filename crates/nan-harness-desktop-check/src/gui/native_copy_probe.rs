@@ -219,7 +219,15 @@ fn neutral_input(executable: &Path, mode: &str, prompt: &str) -> Result<(), Reas
         command.env("SystemRoot", root);
     }
     #[cfg(target_os = "linux")]
-    for key in ["DISPLAY", "XAUTHORITY", "DBUS_SESSION_BUS_ADDRESS"] {
+    for key in [
+        "DISPLAY",
+        "XAUTHORITY",
+        "DBUS_SESSION_BUS_ADDRESS",
+        "GITHUB_ACTIONS",
+        "RUNNER_ENVIRONMENT",
+        "RUNNER_OS",
+        "NANH_DESKTOP_QUALIFICATION_FACTS",
+    ] {
         if let Some(value) = std::env::var_os(key) {
             command.env(key, value);
         }

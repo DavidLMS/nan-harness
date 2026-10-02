@@ -2,10 +2,13 @@
 """Fixed native key transport; the checker proves foreground before and after."""
 import json
 import ctypes
+import os
+from pathlib import Path
 import re
 import subprocess
 import time
 import sys
+import uuid
 
 KEYS = {'trust': 'ctrl+alt+t', 'new-thread': 'ctrl+alt+n', 'copy-thread': 'ctrl+alt+y',
         'select-all': 'ctrl+a', 'copy': 'ctrl+c', 'paste': 'ctrl+v',
@@ -61,7 +64,69 @@ def owned_frame(active, expected):
         xlib.XCloseDisplay(display)
 
 
-def normalized_retry_point(request, active, geometry):
+def pointer_observation():
+    return dict(schemaVersion=1, mechanism='zed-pointer-observation', diagnosticsOnly=True,
+                maximizedHorizontal=None, maximizedVertical=None, enabled=None,
+                sensitive=None, showing=None, visible=None, defunct=None,
+                retryContains=None, pointerTarget='unavailable')
+
+
+def publish_observation(facts):
+    # Only closed facts reach the existing private qualification directory.
+    if (os.environ.get('GITHUB_ACTIONS') != 'true'
+            or os.environ.get('RUNNER_ENVIRONMENT') != 'github-hosted'
+            or os.environ.get('RUNNER_OS') != 'Linux'):
+        return
+    directory = Path(os.environ.get('NANH_DESKTOP_QUALIFICATION_FACTS', ''))
+    if not directory.is_absolute() or directory.is_symlink() or not directory.is_dir():
+        return
+    try:
+        path = directory / ('zed-pointer-observation-' + uuid.uuid4().hex + '.json')
+        with os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'w') as output:
+            json.dump(facts, output)
+    except OSError:
+        pass
+
+
+def maximized_observation(active, facts, deadline):
+    try:
+        remaining = min(0.5, deadline - time.monotonic())
+        if remaining <= 0:
+            return
+        result = subprocess.run(['/usr/bin/xprop', '-id', str(active), '_NET_WM_STATE'],
+                                timeout=remaining, stdout=subprocess.PIPE,
+                                stderr=subprocess.DEVNULL, check=True)
+        if len(result.stdout) > 2048:
+            return
+        text = result.stdout.decode('ascii')
+        if not re.fullmatch(r'_NET_WM_STATE\(ATOM\) =\s*(?:_NET_WM_STATE_[A-Z_]+(?:, _NET_WM_STATE_[A-Z_]+)*)?\s*', text):
+            return
+        atoms = set(re.findall(r'_NET_WM_STATE_[A-Z_]+', text))
+        facts['maximizedHorizontal'] = '_NET_WM_STATE_MAXIMIZED_HORZ' in atoms
+        facts['maximizedVertical'] = '_NET_WM_STATE_MAXIMIZED_VERT' in atoms
+    except (OSError, subprocess.SubprocessError, UnicodeError):
+        pass
+
+
+def accessibility_observation(component, dbus, window, facts):
+    # These are advisory measurements, not substitutes for provider recovery.
+    try:
+        states = tuple(int(value) for value in component.GetState(
+            dbus_interface='org.a11y.atspi.Accessible', timeout=0.2))
+        if len(states) == 2 and all(0 <= value <= 0xffffffff for value in states):
+            bits = states[0] | states[1] << 32
+            for name, bit in [('defunct', 6), ('enabled', 7), ('sensitive', 24),
+                              ('showing', 25), ('visible', 30)]:
+                facts[name] = bool(bits & 1 << bit)
+        x, y, width, height = window
+        facts['retryContains'] = bool(component.Contains(dbus.Int32(x + width // 2),
+            dbus.Int32(y + height // 2), dbus.UInt32(1),
+            dbus_interface='org.a11y.atspi.Component', timeout=0.2))
+    except (dbus.DBusException, ValueError, TypeError):
+        pass
+
+
+def normalized_retry_point(request, active, geometry, facts=None):
     import dbus
     bus = None
     try:
@@ -83,6 +148,8 @@ def normalized_retry_point(request, active, geometry):
             dbus_interface='org.a11y.atspi.Component', timeout=0.5))
         window = tuple(int(value) for value in component.GetExtents(dbus.UInt32(1),
             dbus_interface='org.a11y.atspi.Component', timeout=0.5))
+        if facts is not None:
+            accessibility_observation(component, dbus, window, facts)
         return coordinate_point(screen, window, geometry)
     except dbus.DBusException:
         raise ValueError('accessibility query unavailable') from None
@@ -106,6 +173,7 @@ def coordinate_point(screen, window, geometry):
 
 
 def retry_click(payload):
+    facts = pointer_observation()
     try:
         request = json.loads(payload)
         if (type(request) is not dict or set(request) != {'pid', 'window', 'x', 'y', 'bus', 'path'}
@@ -137,7 +205,7 @@ def retry_click(payload):
                 if len(parts) != len(expected) or set(values) != expected:
                     raise ValueError('invalid pointer observation')
                 point = (int(values[b'X']), int(values[b'Y']))
-                return point if query == 'position' else (*point, int(values[b'WIDTH']), int(values[b'HEIGHT']))
+                return (*point, int(values[b'WINDOW'])) if query == 'position' else (*point, int(values[b'WIDTH']), int(values[b'HEIGHT']))
             if len(output) > 32 or not output.isdigit():
                 raise ValueError('invalid identity')
             return int(output)
@@ -152,15 +220,20 @@ def retry_click(payload):
         failure, active = owned_foreground()
         if failure:
             return failure
+        maximized_observation(active, facts, deadline)
         stage = 18
         geometry = run(['getwindowgeometry', '--shell', str(active)], 'geometry')
-        point = normalized_retry_point(request, active, geometry)
+        point = normalized_retry_point(request, active, geometry, facts)
         stage = 14
         # --sync waits for motion and can hang when the pointer is already here.
         # Dispatch once and prove the resulting position instead.
         run(['mousemove', '--', str(point[0]), str(point[1])])
-        if run(['getmouselocation', '--shell'], 'position') != point:
+        px, py, pointer_window = run(['getmouselocation', '--shell'], 'position')
+        if (px, py) != point:
             return 14
+        facts['pointerTarget'] = ('client' if pointer_window == active else
+            'owned-frame' if pointer_window == request['window'] else
+            'client-descendant' if owned_frame(pointer_window, active) else 'foreign')
         stage = 15
         if owned_foreground() != (0, active):
             return 11
@@ -170,6 +243,8 @@ def retry_click(payload):
         return 0
     except (ValueError, TypeError, OSError, subprocess.SubprocessError, ImportError):
         return locals().get("stage", 2)
+    finally:
+        publish_observation(facts)
 
 
 def main():

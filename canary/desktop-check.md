@@ -112,9 +112,10 @@ ownership evidence.
 
 The manual `desktop-check-qualification.yml` workflow evaluates the initial
 Linux x64, macOS ARM64 and Windows x64 matrix. A pending backend remains an
-explicit unqualified cell and prevents aggregate acceptance. Current semantic
-adapters cover Zed on macOS ARM64 and Hermes on Linux x64 and macOS ARM64; additional application
-and platform adapters require their own native evidence.
+explicit unqualified cell and prevents aggregate acceptance. Current qualified semantic
+adapters cover Zed on macOS ARM64 and Windows x64, and Hermes on Linux x64 and
+macOS ARM64; additional application and platform adapters require their own
+native evidence.
 
 Until the qualification workflow is present on the default branch, use the
 registered `Desktop semantic automation feasibility` workflow on the integration
@@ -127,12 +128,12 @@ the full acceptance gate. Implemented adapters are accepted only when their
 full native result meets the gate; implementation and feasibility alone do not
 qualify a cell.
 
-The expansion has qualified Hermes macOS ARM64, leaving twelve remaining cells. The following
+Four cells are qualified, leaving eleven remaining cells. The following
 observations describe completed runs, rather than additional qualification:
 
 | Application | Linux x64 | macOS ARM64 | Windows x64 |
 | --- | --- | --- | --- |
-| Zed | Response and file-tool steps pass; pointer and accessibility Retry acknowledgements do not produce provider recovery. | Three complete probes pass the expanded retry policy. | All three probes acquire stable owned windows; clipboard write and cleanup fail before submission. |
+| Zed | Response and file-tool steps pass; pointer and accessibility Retry acknowledgements do not produce provider recovery. | Three complete probes pass the expanded retry policy. | Three complete probes pass with direct native clipboard transport and all cleanup checks. |
 | Hermes | Three complete probes pass with renderer process ownership. | Three complete probes pass with private native userData and bounded cold-start waits. | One complete probe passes all five stages and cleanup. Two others fail attachment or initial response; three-pass acceptance remains unmet. |
 | ChatGPT / Codex | Owned document loads without a composer; latest longer startup fails cleanup. | Renderer observation remains intermittent; cleanup passes. | Three owned documents load with twelve visible inputs and no composer; cleanup passes. |
 | Claude | Three uninstrumented windows acquired. Explicit native accessibility returns zero visible editors or login buttons. Official account-free gateway remains unqualified. | Instrumented child exits with code 1; uninstrumented startup has no eligible window. | Stable owned window acquired; no editable controls observed and cleanup fails. |
@@ -570,3 +571,31 @@ Closed restoration failure receipts now distinguish command creation, process
 I/O, the existing thirty-second deadline and a nonzero exit. They preserve the
 original scenario reason and the cleanup failure verdict; no application output,
 process identity or configuration value is retained.
+
+The final repository gate passes locally and on the clean Linux runner in
+[run 37003910826](https://github.com/DavidLMS/nan-harness/actions/runs/37003910826)
+for commit `0e56c41c`. These are repository checks, not additional native cell
+qualification. Codex Windows diagnostics on that same commit in
+[run 37003904340](https://github.com/DavidLMS/nan-harness/actions/runs/37003904340)
+record an owned role-selection screen with one role legend and eleven radios,
+but reject the all-fieldset uniqueness check before any click. All three
+application and global cleanups pass; the earlier restoration failure does not
+recur and its underlying cause remains unestablished.
+
+The frozen official conversational-onboarding source contains a second,
+legitimate fieldset for the optional personalized-suggestions checkbox. The
+next diagnostic counts only visible fieldsets containing the exact role legend
+and named radio group, preserving independent global legend, associated label,
+owner and scoped Continue checks. It still performs at most one ordinary role
+selection and one Continue click; passing this diagnostic would not qualify the
+conversation backend.
+
+The next Linux Zed Retry diagnostic observes the active client's maximization
+flags, the accessible button's enabled/sensitive/showing/visible/defunct state,
+its window-coordinate containment, and the pointer's relation to the owned
+client immediately before the existing single click. Measurements use closed
+booleans, nulls and enums only; no coordinates, window identities, accessible
+paths or application text are retained. These observations do not prove input
+delivery or recovery. The unchanged provider and native export oracles remain
+the acceptance boundary. The [AT-SPI component contract](https://gnome.pages.gitlab.gnome.org/at-spi2-core/libatspi/method.Component.get_accessible_at_point.html)
+distinguishes accessible containment from actual activation.

@@ -31,11 +31,11 @@ async function trial(options={}) {
   async dispose(){}
  }
  class Locator {
-  constructor(kind){this.kind=kind;}
-  filter(){return this;}
-  locator(s){return new Locator(s==='..'?'fieldset':s.startsWith('xpath=')?'scope':s==='fieldset'?'fieldset':s==='label'?'label':s.includes(':checked')?'checked':s.includes('value=')?'radio':'radios');}
+  constructor(kind){this.kind=kind;if(kind==='roleFieldsets')this.members=[{legend:true,group:true},...(options.extraFieldset?[{legend:false,group:false}]:[]),...(options.duplicateRoleFieldset?[{legend:true,group:true}]:[])];}
+  filter(predicate){if(this.members&&predicate.has)this.members=this.members.filter(e=>predicate.has.kind==='legend'?e.legend:e.group);return this;}
+  locator(s){return new Locator(s==='..'?'fieldset':s.startsWith('xpath=')?'scope':s==='fieldset:visible'?'roleFieldsets':s==='fieldset'?'fieldset':s==='label'?'label':s.includes(':checked')?'checked':s.includes('value=')?'radio':'radios');}
   getByRole(_r,o){return new Locator(o.name==='Continue'?'continue':'login');}
-  async count(){return this.kind==='label'?(options.duplicateLabel?2:1):this.kind==='scope'?(options.badScope?0:1):this.kind==='fieldset'?(options.extraFieldset?2:1):this.kind==='login'?(options.login?1:0):this.kind==='legend'?(options.wrongLegend?0:1):this.kind==='radios'?(absent||options.noGroup?0:11):this.kind==='checked'?(checked?(options.multipleChecked?2:1):0):this.kind==='continue'?(options.duplicateContinue?2:1):this.kind==='radio'?(options.duplicateRadio?2:1):1;}
+  async count(){return this.kind==='label'?(options.duplicateLabel?2:1):this.kind==='scope'?(options.badScope?0:1):this.kind==='fieldset'?(options.extraFieldset?2:1):this.kind==='login'?(options.login?1:0):this.kind==='roleFieldsets'?this.members.length:this.kind==='legend'?(options.wrongLegend?0:options.duplicateRoleFieldset?2:1):this.kind==='radios'?(absent||options.noGroup?0:11):this.kind==='checked'?(checked?(options.multipleChecked?2:1):0):this.kind==='continue'?(options.duplicateContinue?2:1):this.kind==='radio'?(options.duplicateRadio?2:1):1;}
   async isEnabled(){return this.kind==='radio'?!(options.radioDisabled||options.loading&&now<300):this.kind!=='continue'||!options.disabled;}
   async isChecked(){return checked;}
   element(){return this.kind==='label'?label:this.kind==='continue'?button:this.kind==='radio'?radio:this.kind==='fieldset'?fieldset:root;}
@@ -51,12 +51,13 @@ async function trial(options={}) {
 }
 (async()=>{
  const loaded=await trial({loading:true});assert.equal(loaded.roleClicks,1);assert.equal(loaded.continueClicks,1);
- const scoped=await trial({extraFieldset:true});assert.equal(scoped.facts.roleProofFailure,'fieldset-count');
+ const scoped=await trial({extraFieldset:true});assert.equal(scoped.roleClicks,1);assert.equal(scoped.continueClicks,1);assert.equal(scoped.facts.roleScopeAbsent,true);
+ const duplicateScope=await trial({duplicateRoleFieldset:true});assert.equal(duplicateScope.facts.roleProofFailure,'legend-count');assert.equal(duplicateScope.roleClicks,0);assert.equal(duplicateScope.continueClicks,0);
  const duplicate=await trial({duplicateRadio:true});assert.equal(duplicate.facts.roleProofFailure,'engineering-count');
  const legend=await trial({wrongLegend:true});assert.equal(legend.facts.roleProofFailure,'legend-count');
  for(const [opts,reason] of [[{badScope:true},'scope-count'],[{login:true},'login-present'],[{noGroup:true},'group-absent'],[{duplicateLabel:true},'label-count'],[{badAssociation:true},'label-association'],[{finalLoss:true},'final-ownership']]) {const r=await trial(opts);assert.equal(r.facts.roleProofFailure,reason);assert.equal(r.roleClicks,0);assert.equal(r.continueClicks,0);}
  const good=await trial();assert.equal(good.roleClicks,1);assert.equal(good.continueClicks,1);assert.equal(good.facts.roleScopeAbsent,true);assert.equal(good.facts.stage,'stopped-after-role');assert.equal(good.facts.errorCategory,null);
- for(const opts of [{noOptin:true},{foreignPage:true},{wrongLegend:true},{duplicateRadio:true},{badScope:true},{extraFieldset:true},{login:true},{radioDisabled:true},{modal:true},{intercepted:'label'},{remount:true}]) {
+ for(const opts of [{noOptin:true},{foreignPage:true},{wrongLegend:true},{duplicateRadio:true},{badScope:true},{duplicateRoleFieldset:true},{login:true},{radioDisabled:true},{modal:true},{intercepted:'label'},{remount:true}]) {
   const r=await trial(opts);assert.equal(r.roleClicks,0);assert.equal(r.continueClicks,0);
  }
  for(const opts of [{readbackFail:true},{multipleChecked:true},{ownerLoss:true},{disabled:true},{duplicateContinue:true},{intercepted:'continue'},{uncertain:'role'}]) {

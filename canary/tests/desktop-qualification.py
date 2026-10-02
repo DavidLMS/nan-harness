@@ -656,6 +656,24 @@ class QualificationTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'pen-desktop')
 
+    def test_pointer_observation_never_accepts_private_native_details(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            value = dict(schemaVersion=1, mechanism='zed-pointer-observation', diagnosticsOnly=True,
+                         maximizedHorizontal=True, maximizedVertical=True, enabled=True, sensitive=True,
+                         showing=None, visible=None, defunct=False, retryContains=True, pointerTarget='client')
+            path = root / 'pointer.json'
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(root, 'zed-desktop'), [value])
+            with self.assertRaises(ValueError):
+                q.semantic_observations(root, 'hermes-desktop')
+            for changed in ({**value, 'x': 100}, {**value, 'pointerTarget': 'PRIVATE'},
+                            {**value, 'enabled': 1}, {**value, 'diagnosticsOnly': False},
+                            {key: item for key, item in value.items() if key != 'visible'}):
+                path.write_text(json.dumps(changed))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'zed-desktop')
+
     def test_pointer_diagnostic_is_closed_and_app_scoped(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
