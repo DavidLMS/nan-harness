@@ -41,18 +41,18 @@ async function trial(options={}) {
  const globals={document:doc,innerWidth:800,innerHeight:600,getComputedStyle:()=>({display:'block',visibility:'visible',pointerEvents:'auto'})};
  function evaluate(fn,e,arg) {
   if(fn.name==='sample') {lastKind=e.kind;samples++;}
-  if(fn.name==='classifyForeign')overlayReads++;
+  if(fn.name==='classifyForeign'){overlayReads++;if(options.overlayQueryFail)throw Error('PRIVATE query failed');}
   if(options.overlayReplacement&&fn.name==='classifyForeign'&&overlayReads>1)globals.document={...doc};
   const f=vm.runInNewContext(`(${fn.toString()})`,globals);
   return f(e,arg?.element??arg?.value??arg);
  }
  class Handle {
-  constructor(e){this.element=e;}
-  async evaluate(fn,arg){return evaluate(fn,this.element,arg);}
+  constructor(e){this.element=e;this.disposed=false;}
+  async evaluate(fn,arg){if(this.disposed)throw Error('PRIVATE disposed handle');return evaluate(fn,this.element,arg);}
   async click(params){assert.equal(params.force,undefined);assert.ok(params.position);if(this.element===label){roleClicks++;if(options.uncertain==='role')throw Error('private');checked=!options.readbackFail;}
    else {continueClicks++;if(options.uncertain==='continue')throw Error('private');absent=!options.remain;}}
   async evaluateHandle(fn){return {value:evaluate(fn,this.element),dispose:async()=>{}};}
-  async dispose(){}
+  async dispose(){this.disposed=true;}
  }
  class Locator {
   constructor(kind){this.kind=kind;if(kind==='roleFieldsets')this.members=[{legend:true,group:true},...(options.extraFieldset?[{legend:false,group:false}]:[]),...(options.duplicateRoleFieldset?[{legend:true,group:true}]:[])];}
@@ -73,7 +73,7 @@ async function trial(options={}) {
  const sandbox={exports:{},process:{platform:options.platform??'win32',env:{GITHUB_ACTIONS:options.noHost?'false':'true',RUNNER_ENVIRONMENT:'github-hosted',RUNNER_OS:'Windows',NANH_CODEX_PUBLIC_ONBOARDING:options.noOptin?undefined:'engineering'}},Date:{now:()=>now},setTimeout:f=>{now+=100;f();}};
  vm.runInNewContext(source,sandbox);
  let guards=0;
- const guard=()=>{guards++;if(options.guardThrows)throw Error('PRIVATE');if(options.guardExhaustsBudget&&guards>=3)now=1201;return !(options.overlayOwnerLoss&&overlayReads>0)&&!options.initialOwnerLoss&&!(options.ownerLossBeforeRole&&guards>=3)&&!(options.ownerLoss&&roleClicks>0)&&!(options.finalLoss&&guards>=2);};
+ const guard=()=>{guards++;if(options.guardThrows)throw Error('PRIVATE');if(options.guardExhaustsBudget&&guards>=3||options.overlayBudgetExpired&&overlayReads>0)now=1201;return !(options.overlayOwnerLoss&&overlayReads>0)&&!options.initialOwnerLoss&&!(options.ownerLossBeforeRole&&guards>=3)&&!(options.ownerLoss&&roleClicks>0)&&!(options.finalLoss&&guards>=2);};
  const budget=options.expired?0:options.invalidDeadline?NaN:options.excessBudget?25001:1200;
  const facts=await sandbox.exports.run(page,options.noGuard?undefined:guard,budget);
  assert(!JSON.stringify(facts).includes('PRIVATE'));
@@ -104,12 +104,19 @@ async function trial(options={}) {
  const good=await trial();assert.equal(good.roleClicks,1);assert.equal(good.continueClicks,1);assert.equal(good.facts.roleScopeAbsent,true);assert.equal(good.facts.stage,'stopped-after-role');assert.equal(good.facts.errorCategory,null);
  const completeOverlay=await trial({modal:true});
  assert.equal(completeOverlay.facts.foreignOverlay,'chatgpt-onboarding-complete');
+ assert.equal(completeOverlay.facts.foreignOverlayProof,'classified');
  assert.equal(completeOverlay.roleClicks,0);assert.equal(completeOverlay.continueClicks,0);
  for(const [opts,category] of [[{overlayLookalike:true},'other'],[{overlayWrongLink:true},'other'],[{overlayWrongLayout:true},'other'],
    [{overlayDialogReplacement:true},'guard-rejected'],[{overlayFrameChange:true},'guard-rejected'],
    [{overlayReplacement:true},'guard-rejected'],[{overlayMultiple:true},'ambiguous'],[{overlayOwnerLoss:true},'guard-rejected']]) {
   const r=await trial({modal:true,...opts});assert.equal(r.facts.foreignOverlay,category);
   assert.equal(r.roleClicks,0);assert.equal(r.continueClicks,0);
+ }
+ for(const [opts,proof] of [[{overlayDialogReplacement:true},'dialog-replaced'],[{overlayFrameChange:true},'frame-replaced'],
+   [{overlayReplacement:true},'document-replaced'],[{overlayOwnerLoss:true},'ownership-lost'],[{overlayQueryFail:true},'query-failed'],[{overlayBudgetExpired:true},'deadline-expired']]) {
+  const r=await trial({modal:true,...opts});assert.equal(r.facts.foreignOverlay,'guard-rejected');
+  assert.equal(r.facts.foreignOverlayProof,proof);assert.equal(r.roleClicks,0);assert.equal(r.continueClicks,0);
+  assert(!JSON.stringify(r.facts).includes('PRIVATE'));
  }
  assert(!JSON.stringify(completeOverlay.facts).includes("You're all set"));
  assert(!JSON.stringify(completeOverlay.facts).includes('openai.com'));

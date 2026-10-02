@@ -481,6 +481,29 @@ class QualificationTests(unittest.TestCase):
                     with self.assertRaises(ValueError):
                         q.semantic_observations(root, 'zed-desktop')
 
+    def test_claude_stack_counts_are_closed_and_overflow_is_unknown(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'stack.json'
+            value = dict(schemaVersion=1, mechanism='claude-window-stack', diagnosticsOnly=True,
+                         status='complete', samePidAheadCount=2, samePidAheadEligibleCount=1,
+                         samePidAheadIntersectsHeldCount=0, samePidAheadNormalLayerCount=1,
+                         samePidAheadOtherLayerCount=1, foregroundPidMatchesHeld=True,
+                         frontmostWindowSamePid=True)
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(Path(root), 'claude-desktop'), [value])
+            for change in ({'samePidAheadCount': True}, {'samePidAheadOtherLayerCount': 2},
+                           {'samePidAheadEligibleCount': 3}, {'windowId': 1}, {'status': 'overflow'}):
+                path.write_text(json.dumps({**value, **change}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(Path(root), 'claude-desktop')
+            unknown = {**value, 'status': 'overflow'}
+            for key in list(unknown):
+                if key.startswith('samePidAhead'): unknown[key] = None
+            path.write_text(json.dumps(unknown))
+            self.assertEqual(q.semantic_observations(Path(root), 'claude-desktop'), [unknown])
+            with self.assertRaises(ValueError):
+                q.semantic_observations(Path(root), 'zed-desktop')
+
     def test_private_retry_policy_has_only_fixed_settings_and_hashes(self):
         with tempfile.TemporaryDirectory() as root:
             path = Path(root) / 'policy.json'
@@ -1089,6 +1112,17 @@ class QualificationTests(unittest.TestCase):
         self.assertEqual(q.public_onboarding(blocked, 'chatgpt-desktop'), blocked)
         fingerprint = {**blocked, 'foreignOverlay': 'chatgpt-onboarding-complete'}
         self.assertEqual(q.public_onboarding(fingerprint, 'chatgpt-desktop'), fingerprint)
+        proved = {**fingerprint, 'foreignOverlayProof': 'classified'}
+        self.assertEqual(q.public_onboarding(proved, 'chatgpt-desktop'), proved)
+        rejected = {**blocked, 'foreignOverlay': 'guard-rejected', 'foreignOverlayProof': 'query-failed'}
+        self.assertEqual(q.public_onboarding(rejected, 'chatgpt-desktop'), rejected)
+        for changed in ({**proved, 'foreignOverlayProof': 'PRIVATE'},
+                        {**proved, 'foreignOverlayProof': True},
+                        {**proved, 'foreignOverlayProof': 'query-failed'},
+                        {**rejected, 'foreignOverlayProof': 'classified'},
+                        {**setup, 'foreignOverlayProof': 'query-failed'}):
+            with self.assertRaises(ValueError):
+                q.public_onboarding(changed, 'chatgpt-desktop')
         for changed in ({**fingerprint, 'foreignOverlay': 'PRIVATE'},
                         {**fingerprint, 'foreignOverlay': True},
                         {**fingerprint, 'rawHeading': "You're all set"},

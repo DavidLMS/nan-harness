@@ -7,7 +7,8 @@ use crate::native::{FitFailureStage, FitWindowError};
 use crate::process::Observation;
 use crate::{
     native::{
-        DisplayRelation, FailureCategory, ForegroundRelation, GuardFailure, Native, Page, Window,
+        DisplayRelation, FailureCategory, ForegroundRelation, GuardFailure, Native, Page, Snapshot,
+        Window,
     },
     report::{GuiStage, Reason},
 };
@@ -223,7 +224,7 @@ fn wait_snapshot(
     native: &Native,
     retry_unsupported: bool,
     deadline: Instant,
-) -> Result<Option<crate::native::Snapshot>, AcquisitionFailure> {
+) -> Result<Option<Snapshot>, AcquisitionFailure> {
     match native.windows() {
         Err(Reason::ActionUnsupported) if retry_unsupported => {
             if Instant::now() >= deadline {
@@ -388,6 +389,10 @@ impl Visual {
             .map_err(|category| (category.reason(), native_error_category(category)))?;
         let expected = self.window.borrow().clone();
         let verdict = snapshot.guard_failure(&expected);
+        #[cfg(target_os = "macos")]
+        if verdict == Err(GuardFailure::SameProcessWindow) {
+            record_claude_stack(&snapshot, &expected);
+        }
         if verdict == Err(GuardFailure::Occluded)
             && let Some(diagnostic) = snapshot.occluders(&expected)
         {
@@ -996,7 +1001,7 @@ fn require_running<P: Observation>(process: &mut P) -> Result<(), Reason> {
 #[cfg(target_os = "macos")]
 fn initial_readiness(
     native: &Native,
-    snapshot: &crate::native::Snapshot,
+    snapshot: &Snapshot,
     window: &Window,
     owner: u32,
 ) -> Result<(), AcquisitionFailure> {
@@ -1214,6 +1219,42 @@ fn point_in_window(window: Rect, pixels: Rect, scale: f32) -> Result<Point, Reas
             .checked_add(y)
             .ok_or(Reason::IsolationUnavailable)?,
     })
+}
+
+#[cfg(target_os = "macos")]
+fn record_claude_stack(snapshot: &Snapshot, held: &Window) {
+    if !cfg!(target_os = "macos")
+        || !matches_app(DesktopHarnessKind::Claude, &held.name)
+        || std::env::var("GITHUB_ACTIONS").as_deref() != Ok("true")
+        || std::env::var("RUNNER_ENVIRONMENT").as_deref() != Ok("github-hosted")
+        || std::env::var("RUNNER_OS").as_deref() != Ok("macOS")
+        || std::env::var("NANH_DESKTOP_QUALIFICATION_MODE").as_deref() != Ok("startup-baseline")
+        || std::env::var("NANH_CLAUDE_MAC_PROFILE_POLICY").as_deref() != Ok("native-known-folders")
+    {
+        return;
+    }
+    let Some(directory) =
+        std::env::var_os("NANH_DESKTOP_QUALIFICATION_FACTS").map(std::path::PathBuf::from)
+    else {
+        return;
+    };
+    let Ok(metadata) = std::fs::symlink_metadata(&directory) else {
+        return;
+    };
+    if !metadata.is_dir() || directory.canonicalize().ok().as_deref() != Some(directory.as_path()) {
+        return;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        if metadata.permissions().mode() & 0o077 != 0 {
+            return;
+        }
+    }
+    let path = directory.join(format!("claude-window-stack-{}.json", std::process::id()));
+    if let Ok(file) = nan_harness_private_fs::open_private_new(&path) {
+        let _ = serde_json::to_writer(file, &snapshot.stack_observation(held));
+    }
 }
 
 #[cfg(test)]

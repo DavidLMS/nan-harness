@@ -54,7 +54,80 @@ pub(crate) struct Snapshot {
     pub(crate) windows: Vec<Window>,
 }
 
+#[cfg(any(test, target_os = "macos"))]
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct StackObservation {
+    schema_version: u8,
+    mechanism: &'static str,
+    diagnostics_only: bool,
+    status: &'static str,
+    same_pid_ahead_count: Option<usize>,
+    same_pid_ahead_eligible_count: Option<usize>,
+    same_pid_ahead_intersects_held_count: Option<usize>,
+    same_pid_ahead_normal_layer_count: Option<usize>,
+    same_pid_ahead_other_layer_count: Option<usize>,
+    foreground_pid_matches_held: bool,
+    frontmost_window_same_pid: bool,
+}
+
 impl Snapshot {
+    #[cfg(any(test, target_os = "macos"))]
+    pub(crate) fn stack_observation(&self, held: &Window) -> StackObservation {
+        let index = self
+            .windows
+            .iter()
+            .position(|window| window.id == held.id && window.pid == held.pid);
+        let ahead = index.map(|index| {
+            self.windows[..index]
+                .iter()
+                .filter(|window| window.pid == held.pid)
+                .collect::<Vec<_>>()
+        });
+        let complete = ahead.as_ref().is_some_and(|windows| windows.len() <= 32);
+        let count = |predicate: fn(&Window) -> bool| {
+            complete.then(|| {
+                ahead
+                    .as_ref()
+                    .unwrap()
+                    .iter()
+                    .filter(|window| predicate(window))
+                    .count()
+            })
+        };
+        StackObservation {
+            schema_version: 1,
+            mechanism: "claude-window-stack",
+            diagnostics_only: true,
+            status: if complete {
+                "complete"
+            } else if ahead.is_some() {
+                "overflow"
+            } else {
+                "unavailable"
+            },
+            same_pid_ahead_count: count(|_| true),
+            same_pid_ahead_eligible_count: count(|window| {
+                window.bounds.width >= 300 && window.bounds.height >= 200
+            }),
+            same_pid_ahead_intersects_held_count: complete.then(|| {
+                ahead
+                    .as_ref()
+                    .unwrap()
+                    .iter()
+                    .filter(|window| intersects(window.bounds, held.bounds))
+                    .count()
+            }),
+            same_pid_ahead_normal_layer_count: count(|window| window.layer == 0),
+            same_pid_ahead_other_layer_count: count(|window| window.layer != 0),
+            foreground_pid_matches_held: self.foreground_pid == held.pid,
+            frontmost_window_same_pid: self
+                .windows
+                .first()
+                .is_some_and(|window| window.pid == held.pid),
+        }
+    }
+
     pub(super) fn parse(text: &str) -> Result<Self, Reason> {
         let mut lines = text.lines();
         let fields = lines
@@ -669,6 +742,40 @@ mod tests {
             overlap_area(rect(-65536, -65536, 65536, 65536), rect(0, 0, 65536, 65536)),
             0
         );
+    }
+
+    #[test]
+    fn stack_observation_separates_tiny_panels_and_closes_overflow() {
+        let mut state = snapshot();
+        let held = state.windows[0].clone();
+        let mut tiny = held.clone();
+        tiny.id = 99;
+        tiny.bounds = Rect {
+            x: 2000,
+            y: 2000,
+            width: 10,
+            height: 10,
+        };
+        tiny.layer = 3;
+        state.windows.insert(0, tiny.clone());
+        let value = serde_json::to_value(state.stack_observation(&held)).unwrap();
+        assert_eq!(value["samePidAheadCount"], 1);
+        assert_eq!(value["samePidAheadEligibleCount"], 0);
+        assert_eq!(value["samePidAheadIntersectsHeldCount"], 0);
+        assert_eq!(value["samePidAheadOtherLayerCount"], 1);
+        assert_eq!(
+            state.guard_failure(&held),
+            Err(GuardFailure::SameProcessWindow)
+        );
+        for id in 100..132 {
+            tiny.id = id;
+            state.windows.insert(0, tiny.clone());
+        }
+        let overflow = serde_json::to_value(state.stack_observation(&held)).unwrap();
+        assert_eq!(overflow["status"], "overflow");
+        assert!(overflow["samePidAheadCount"].is_null());
+        assert!(overflow.get("bounds").is_none());
+        assert!(overflow.get("pid").is_none());
     }
 
     #[test]

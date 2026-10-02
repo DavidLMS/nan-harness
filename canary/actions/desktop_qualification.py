@@ -42,7 +42,7 @@ def public_onboarding(setup, app):
     errors = {None, 'invalid-session', 'scope-not-matched', 'role-already-selected',
               'action-blocked', 'role-readback-failed', 'continue-not-matched',
               'ownership-lost', 'scope-remained', 'action-uncertain', 'observation-failed'}
-    if (app != 'chatgpt-desktop' or type(setup) is not dict or set(setup) not in (fields, fields | {'actionabilityFailure'}, fields | {'actionabilityFailure', 'foreignOverlay'})
+    if (app != 'chatgpt-desktop' or type(setup) is not dict or set(setup) not in (fields, fields | {'actionabilityFailure'}, fields | {'actionabilityFailure', 'foreignOverlay'}, fields | {'actionabilityFailure', 'foreignOverlay', 'foreignOverlayProof'})
             or type(setup['schemaVersion']) is not int or setup['schemaVersion'] != 1
             or setup['mechanism'] != 'codex-public-onboarding' or setup['diagnosticsOnly'] is not True
             or type(setup['stage']) is not str or setup['stage'] not in stages
@@ -63,6 +63,14 @@ def public_onboarding(setup, app):
                 or type(setup['foreignOverlay']) is not str or setup['foreignOverlay'] not in {
                     'unmeasured', 'chatgpt-onboarding-complete', 'other', 'ambiguous', 'guard-rejected'}):
             raise ValueError('invalid public onboarding foreign overlay')
+    if 'foreignOverlayProof' in setup:
+        if (type(setup['foreignOverlayProof']) is not str or setup['foreignOverlayProof'] not in {
+                'unmeasured', 'classified', 'deadline-expired', 'ownership-lost', 'role-proof-rejected',
+                'control-replaced', 'frame-replaced', 'document-replaced', 'scope-missing',
+                'role-group-changed', 'dialog-absent', 'dialog-replaced', 'unstable-classification', 'query-failed'}
+                or (setup['foreignOverlayProof'] == 'classified') != (setup['foreignOverlay'] in {
+                    'chatgpt-onboarding-complete', 'other', 'ambiguous'})):
+            raise ValueError('invalid public onboarding overlay proof')
     return setup
 
 
@@ -169,10 +177,10 @@ def semantic_observations(directory, app):
         if type(value) is not dict:
             raise ValueError('invalid semantic observation')
         mechanism = value.get('mechanism')
-        if mechanism not in {'hermes-windows-catalog-readiness', 'hermes-renderer-qualification', 'zed-native-copy', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'claude-owned-configuration', 'claude-model-discovery', 'claude-storage-use', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}:
+        if mechanism not in {'hermes-windows-catalog-readiness', 'hermes-renderer-qualification', 'zed-native-copy', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'claude-owned-configuration', 'claude-model-discovery', 'claude-window-stack', 'claude-storage-use', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}:
             continue
         expected = 'hermes-renderer-qualification' if app == 'hermes-desktop' else 'zed-native-copy'
-        if (mechanism != expected and mechanism not in {'hermes-windows-catalog-readiness', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'claude-owned-configuration', 'claude-model-discovery', 'claude-storage-use', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}) or type(value.get('schemaVersion')) is not int or value['schemaVersion'] != 1:
+        if (mechanism != expected and mechanism not in {'hermes-windows-catalog-readiness', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'claude-owned-configuration', 'claude-model-discovery', 'claude-window-stack', 'claude-storage-use', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}) or type(value.get('schemaVersion')) is not int or value['schemaVersion'] != 1:
             raise ValueError('semantic observation identity differs')
         record = {'schemaVersion': 1, 'mechanism': mechanism}
         if mechanism == 'hermes-windows-catalog-readiness':
@@ -310,6 +318,22 @@ def semantic_observations(directory, app):
                     raise ValueError('invalid Claude configuration observation flag')
                 record[key] = value[key]
             record['diagnosticsOnly'] = True
+        elif mechanism == 'claude-window-stack':
+            counts = set('samePidAheadCount samePidAheadEligibleCount samePidAheadIntersectsHeldCount samePidAheadNormalLayerCount samePidAheadOtherLayerCount'.split())
+            flags = {'foregroundPidMatchesHeld', 'frontmostWindowSamePid'}
+            fields = counts | flags | {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'status'}
+            if (app != 'claude-desktop' or set(value) != fields or value['diagnosticsOnly'] is not True
+                    or value['status'] not in {'complete', 'overflow', 'unavailable'}
+                    or any(type(value[key]) is not bool for key in flags)
+                    or any((type(value[key]) is not int or not 0 <= value[key] <= 32)
+                           if value['status'] == 'complete' else value[key] is not None for key in counts)):
+                raise ValueError('invalid Claude window stack observation')
+            if value['status'] == 'complete':
+                total = value['samePidAheadCount']
+                if (any(value[key] > total for key in counts)
+                        or value['samePidAheadNormalLayerCount'] + value['samePidAheadOtherLayerCount'] != total):
+                    raise ValueError('invalid Claude window stack counts')
+            record.update({key: value[key] for key in fields - {'schemaVersion', 'mechanism'}})
         elif mechanism == 'claude-model-discovery':
             fields = {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'authenticatedModelsCount', 'complete', 'modelDiscoverySeen'}
             count = value.get('authenticatedModelsCount')

@@ -49,28 +49,29 @@ function foreignSurface(control) {
   return {document,scope,dialog:dialogs.length===1?dialogs[0]:null};
 }
 function classifyForeign(control,held) {
+  const result=(category,proof='classified')=>({category,proof});
   const visible=e=>{if(!e)return false;const r=e.getBoundingClientRect(),s=getComputedStyle(e);
     return e.isConnected&&r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden';};
-  if(control.ownerDocument!==document||!control.isConnected||held.document!==document
-      ||!visible(held.scope)||!held.scope.contains(control))return 'guard-rejected';
+  if(control.ownerDocument!==document||!control.isConnected||held.document!==document) return result('guard-rejected','document-replaced');
+  if(!visible(held.scope)||!held.scope.contains(control))return result('guard-rejected','scope-missing');
   const group='input[type="radio"][name="conversational-onboarding-inline-role"][value="engineering"]';
   if(held.scope.querySelectorAll(group).length!==1
-      ||[...held.scope.querySelectorAll('fieldset > legend')].filter(e=>visible(e)&&e.innerText.trim()==='Select the kind of work you do').length!==1)return 'guard-rejected';
+      ||[...held.scope.querySelectorAll('fieldset > legend')].filter(e=>visible(e)&&e.innerText.trim()==='Select the kind of work you do').length!==1)return result('guard-rejected','role-group-changed');
   const dialogs=[...document.querySelectorAll('[role="dialog"],[aria-modal="true"],[role="alertdialog"],[role="menu"]')].filter(visible);
-  if(dialogs.length!==1)return dialogs.length>1?'ambiguous':'guard-rejected';
+  if(dialogs.length!==1)return dialogs.length>1?result('ambiguous'):result('guard-rejected','dialog-absent');
   const dialog=dialogs[0];
-  if(dialog!==held.dialog)return 'guard-rejected';
-  if(dialog.getAttribute('role')!=='dialog'||dialog.contains(control)||dialog.querySelectorAll(group).length)return 'other';
+  if(dialog!==held.dialog)return result('guard-rejected','dialog-replaced');
+  if(dialog.getAttribute('role')!=='dialog'||dialog.contains(control)||dialog.querySelectorAll(group).length)return result('other');
   const headings=[...dialog.querySelectorAll('[class~="text-3xl"][class~="leading-9"][class~="font-normal"]')].filter(e=>visible(e)&&e.innerText.trim()==="You're all set");
   const forms=[...dialog.querySelectorAll('form')].filter(e=>visible(e)&&['m-auto','flex','w-full','shrink-0','flex-col','items-center','justify-between','py-4'].every(t=>e.classList.contains(t)));
-  if(headings.length!==1||forms.length!==1||!forms[0].contains(headings[0]))return 'other';
+  if(headings.length!==1||forms.length!==1||!forms[0].contains(headings[0]))return result('other');
   const form=forms[0];
   const buttons=[...form.querySelectorAll('button')].filter(visible);
   const terms=[...form.querySelectorAll('a')].filter(e=>visible(e)&&e.classList.contains('underline')&&e.getAttribute('href')==='https://openai.com/terms');
   const privacy=[...form.querySelectorAll('a')].filter(e=>visible(e)&&e.classList.contains('underline')&&e.getAttribute('href')==='https://openai.com/privacy');
   return buttons.length===1&&buttons[0].getAttribute('type')==='submit'&&buttons[0].innerText.trim()==='Continue'
     &&!buttons[0].disabled&&buttons[0].getAttribute('aria-disabled')!=='true'&&terms.length===1&&privacy.length===1
-    ?'chatgpt-onboarding-complete':'other';
+    ?result('chatgpt-onboarding-complete'):result('other');
 }
 function candidate(a, b) {
   return a && b && !a.blocked && !b.blocked && JSON.stringify(a.rect) === JSON.stringify(b.rect)
@@ -151,38 +152,57 @@ exports.run = async function(page, ownerGuard, deadline) {
       facts.actionabilityFailure=reason;
       if(reason==='foreign-overlay') {
         facts.foreignOverlay='guard-rejected';
+        facts.foreignOverlayProof='unmeasured';
         let held;
+        const guard=async frame=>{
+          if(Date.now()>=deadline){facts.foreignOverlayProof='deadline-expired';return false;}
+          if(!ownedEndpoint()){facts.foreignOverlayProof='ownership-lost';return false;}
+          if(Date.now()>=deadline){facts.foreignOverlayProof='deadline-expired';return false;}
+          if(page.mainFrame()!==frame){facts.foreignOverlayProof='frame-replaced';return false;}
+          if(!await reprove()){facts.foreignOverlayProof='role-proof-rejected';return false;}
+          if(!await control.evaluate((e,original)=>e===original,handle)){
+            facts.foreignOverlayProof='control-replaced';return false;
+          }
+          if(!ownedEndpoint()){facts.foreignOverlayProof='ownership-lost';return false;}
+          if(Date.now()>=deadline){facts.foreignOverlayProof='deadline-expired';return false;}
+          return true;
+        };
         try {
           const frame=page.mainFrame();
-          if(await reprove() && await control.evaluate((e,original)=>e===original,handle) && ownedEndpoint() && Date.now()<deadline) {
+          if(await guard(frame)) {
             held=await handle.evaluateHandle(foreignSurface);
             const first=await handle.evaluate(classifyForeign,held);
-            if(await reprove() && page.mainFrame()===frame && await control.evaluate((e,original)=>e===original,handle) && ownedEndpoint() && Date.now()<deadline) {
+            if(await guard(frame)) {
               const second=await handle.evaluate(classifyForeign,held);
-              if(first===second && ownedEndpoint() && Date.now()<deadline && page.mainFrame()===frame) facts.foreignOverlay=second;
+              if(first.category===second.category && first.proof===second.proof && await guard(frame)) {
+                facts.foreignOverlay=second.category;
+                facts.foreignOverlayProof=second.proof;
+              } else if(second.category==='guard-rejected' && facts.foreignOverlayProof==='unmeasured') {
+                facts.foreignOverlayProof=second.proof;
+              } else if(facts.foreignOverlayProof==='unmeasured') facts.foreignOverlayProof='unstable-classification';
             }
           }
-        } catch { facts.foreignOverlay='guard-rejected'; }
+        } catch { facts.foreignOverlayProof='query-failed'; }
         finally { if(held) await held.dispose(); }
       }
       facts.roleProofFailure='control-not-actionable';
       return false;
     };
     const handle = await control.elementHandle();
-    if (!handle) return blocked('detached-or-inert');
+    if (!handle) return await blocked('detached-or-inert');
     try {
       const first = await handle.evaluate(sample);
-      if (first?.blocked) return blocked(first.blocked);
+      if (first?.blocked) return await blocked(first.blocked);
       await wait(Math.min(100,Math.max(0,deadline-Date.now())));
       if (!await reprove() || !await control.evaluate((e, held)=>e===held,handle)) return false;
       const second=await handle.evaluate(sample);
-      if (second?.blocked) return blocked(second.blocked);
+      if (second?.blocked) return await blocked(second.blocked);
       const point = candidate(first,second);
-      if (!point) return blocked(first?.points?.length && second?.points?.length?'unstable':'no-owned-point');
+      if (!point) return await blocked(first?.points?.length && second?.points?.length?'unstable':'no-owned-point');
       if (!await reprove() || !await control.evaluate((e, held)=>e===held,handle)) return false;
       const final=await handle.evaluate(sample);
-      if (final?.blocked) return blocked(final.blocked);
-      if (!candidate(first,final) || !final.points.some(p=>p.x===point.x&&p.y===point.y)) return blocked('unstable');
+      if (final?.blocked) return await blocked(final.blocked);
+      if (!candidate(first,final) || !final.points.some(p=>p.x===point.x&&p.y===point.y)) return await blocked('unstable');
       if (!ownedEndpoint()) return false;
       if (Date.now() >= deadline) { facts.roleProofFailure='deadline-expired'; return false; }
       facts[before]=true;

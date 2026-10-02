@@ -1115,3 +1115,15 @@ Its compiled renderer still sets `skipActivation=false`. The current
 separates application sign-in from the optional custom-provider API key; no
 supported account-free desktop route has been established. This remains an
 external blocker under the user's no-account constraint.
+
+The next Codex classifier fixes an asynchronous handle-lifetime bug: returning
+the diagnostic promise allowed the enclosing `finally` to dispose its control
+before classification completed. Awaiting that promise retains the original
+control throughout the guarded observation. Synthetic handles now enforce
+disposal and reproduce the failure. A closed `foreignOverlayProof` enum records
+the specific rejection; unidentified dialogs still receive no input.
+The next macOS Claude diagnostic reduces the exact rejected guard snapshot to
+bounded same-process window counts: eligibility, intersection and normal versus
+other layer, plus foreground ownership booleans. It issues no additional native
+query and never waives the guard. Focused Rust/Node tests, checker Clippy and all
+52 reducer contracts pass; native results remain pending.
