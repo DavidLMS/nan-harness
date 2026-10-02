@@ -28,6 +28,9 @@ class RunnerTests(unittest.TestCase):
                       FEASIBILITY_HERMES_STARTUP_ONLY='1', FEASIBILITY_ZED_NATIVE_COPY_FACTS='/old',
                       HERMES_DESKTOP_HERMES='/frozen/venv/bin/hermes')
         env = runner.qualification_environment('hermes-desktop', Path('/facts'), Path('/nanh'), '/app', source)
+        state_source = {**source, 'XDG_STATE_HOME': '/private/checker-state'}
+        state_env = runner.qualification_environment('hermes-desktop', Path('/facts'), Path('/nanh'), '/app', state_source)
+        self.assertEqual(state_env['XDG_STATE_HOME'], '/private/checker-state')
         self.assertNotIn('PRIVATE', str(env))
         self.assertNotIn('/old', str(env))
         self.assertEqual(env['NANH_DESKTOP_QUALIFICATION_FACTS'], '/facts')

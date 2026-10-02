@@ -44,18 +44,12 @@ def cleanup(state):
     state.unlink()
 
 
-def executable_owned(executable, runner_root, app):
+def executable_owned(executable, runner_root):
     try:
         executable.relative_to(runner_root)
         return True
     except ValueError:
-        # Official Debian packages are installed into these exact system paths
-        # in the disposable hosted runner; no wildcard policy is authorized.
-        return executable == {
-            'chatgpt-desktop': Path('/usr/lib/chatgpt/ChatGPT'),
-            'claude-desktop': Path('/usr/lib/claude-desktop/claude-desktop'),
-            'pen-desktop': Path('/opt/Pen/Pen'),
-        }.get(app)
+        return False
 
 
 def prepare(prepared, state, runner_root, app="hermes-desktop"):
@@ -71,7 +65,7 @@ def prepare(prepared, state, runner_root, app="hermes-desktop"):
     if executable.is_symlink() or not executable.is_file():
         raise ValueError('invalid installed executable')
     executable = executable.resolve(strict=True)
-    if not executable_owned(executable, runner_root, app):
+    if not executable_owned(executable, runner_root):
         raise ValueError('installed executable is outside its owned layout')
     identity = hashlib.sha256()
     with executable.open('rb') as source:
