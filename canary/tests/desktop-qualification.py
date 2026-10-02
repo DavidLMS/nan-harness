@@ -367,7 +367,7 @@ class QualificationTests(unittest.TestCase):
             value = dict(schemaVersion=1, mechanism='hermes-renderer-qualification',
                          retryRectInViewport=True, retryAncestorClipped=True,
                          retryPointerEventsNone=False, retryHitOwned=False, retryHitOwnedPoints=0, retryPointStable=False,
-                         retrySampleStatus="no-owned-point", retryReveal="none", retryHitAncestor=False,
+                         retrySampleStatus="no-owned-point", retryReveal="onboarding-skipped", retryHitAncestor=False,
                          retryHitSharesTurnPair=False, retryHitContainsComposer=False,
                          retryHitTarget='other', retryHitTag='div',
                          retryHitRegion='thread-viewport', className='PRIVATE', rectangle=[1, 2, 3, 4])

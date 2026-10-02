@@ -122,7 +122,12 @@ renderer DOM connection, keyboard activation of Send, and one ordinary pointer
 activation of Retry. Retry samples nine interior points on the actual button and
 requires a stable owned hit after rechecking the failed turn. It never forces a
 click through an overlay or falls back to another activation after uncertainty.
-Coordinates remain private. Hermes binds error, Retry and assistant
+Coordinates remain private. If the fresh profile shows the fixed provider
+onboarding cover, Hermes selects its normal “I'll choose a provider later”
+button once, verifies the cover disappeared, and revalidates the same failed
+turn before Retry. It never calls the onboarding store or changes provider
+credentials. The closed report records this UI preparation. Hermes binds
+error, Retry and assistant
 response to the expected user's renderer turn pair. A passing probe must
 verify the assistant response, a real file-tool round trip, an observed provider
 failure, and recovery through exactly one UI Retry in the failed turn. Each

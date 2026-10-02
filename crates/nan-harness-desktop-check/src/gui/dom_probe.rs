@@ -197,6 +197,7 @@ enum RetryHitRegion {
     ZoneTabstrip,
     WindowDragHandle,
     GatewayConnecting,
+    Onboarding,
     CommandBackdrop,
     DialogOverlay,
     ComposerRoot,
@@ -340,6 +341,7 @@ enum RetrySampleStatus {
 enum RetryReveal {
     None,
     CommandDismissed,
+    OnboardingSkipped,
 }
 
 #[derive(Default, Deserialize, Serialize)]

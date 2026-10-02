@@ -17,7 +17,11 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
   let frames = 0;
   let fixtureDocument;
   let sampleCount = 0;
+  let retryHandles = 0;
   let escapes = 0;
+  let skips = 0;
+  let onboardingVisible = scenario?.startsWith('onboarding-') ?? false;
+  let samplingChoice = false;
   let commandVisible = scenario?.startsWith('command-') ?? false;
   let focusChecks = 0;
   let focused = false;
@@ -94,8 +98,8 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
       return scenario === 'blocked-modal' ? 'modal' : scenario === 'blocked-menu' ? 'menu'
         : scenario === 'inert' ? 'inert' : null;
     },
-    async elementHandle() { return {
-      async evaluate(callback) { sampleCount++; hitButton.isConnected = scenario !== 'retry-detached' && !(scenario === 'command-detached' && escapes > 0); hitButton.disabled = scenario === 'retry-disabled'; hitButton.offsetWidth = scenario === 'retry-transformed' ? 40 : 20; hitButton.type = scenario === 'retry-wrong-type' ? 'submit' : 'button'; hitButton.ownerDocument = scenario === 'retry-foreign-document' ? {} : fixtureDocument; return callback(hitButton); },
+    async elementHandle() { retryHandles++; return {
+      async evaluate(callback) { samplingChoice = false; sampleCount++; hitButton.isConnected = scenario !== 'retry-detached' && !(scenario === 'command-detached' && escapes > 0); hitButton.disabled = scenario === 'retry-disabled'; hitButton.offsetWidth = scenario === 'retry-transformed' ? 40 : 20; hitButton.type = scenario === 'retry-wrong-type' ? 'submit' : 'button'; hitButton.ownerDocument = scenario === 'retry-foreign-document' ? {} : fixtureDocument; return callback(hitButton); },
       async click(options) { return send.click(options); },
     }; },
     async scrollIntoViewIfNeeded() {},
@@ -123,7 +127,7 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
   };
   const errorCards = {
     async evaluate(callback, prompt) {
-      const user = { innerText: (['foreign-error-turn', 'delayed-foreign-error'].includes(scenario) || scenario === 'foreign-card-after-settle' && frames === 2 || scenario === 'foreign-card-during-wait' && sampleCount >= 2) ? 'Older unrelated user turn' : request.prompt,
+      const user = { innerText: (['foreign-error-turn', 'delayed-foreign-error'].includes(scenario) || scenario === 'foreign-card-after-settle' && frames === 2 || scenario === 'foreign-card-during-wait' && sampleCount >= 2 || scenario === 'onboarding-foreign-pair' && skips > 0) ? 'Older unrelated user turn' : request.prompt,
         closest() { return pair; } };
       const pair = { querySelectorAll(selector) { assert.equal(selector, '[data-role="user"]'); return [user]; },
         closest() { return {}; } };
@@ -154,6 +158,23 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
     return [scenario === 'foreign-response-turn' ? foreignResponseUser : responseUser];
   } };
   const responseAssistant = { innerText: request.expectedMarker, getBoundingClientRect: rect, closest() { return responsePair; } };
+  const onboardingRoot = { tagName: 'DIV', contains: () => false, parentElement: null,
+    classList: { contains: name => name === 'z-(--z-onboarding)' && scenario !== 'onboarding-forged' },
+    closest(selector) { return selector === '[data-glass-opaque]' ? this : null; }, getAttribute: () => null };
+  const choiceButton = { ...hitButton, parentElement: null, contains: () => false,
+    closest(selector) { return selector === '[data-glass-opaque]' ? onboardingRoot : null; } };
+  const choiceHandle = {
+    async evaluate(callback) { samplingChoice = true; choiceButton.ownerDocument = fixtureDocument; return callback(choiceButton); },
+    async click(options) { assert.equal(options.force, undefined); assert(options.position.x > 0); skips++;
+      if (scenario === 'onboarding-uncertain') throw new Error('PRIVATE_SYNTHETIC_VALUE');
+      if (scenario !== 'onboarding-remaining') onboardingVisible = false;
+    },
+  };
+  const choice = { async count() { return scenario === 'onboarding-missing' ? 0 : scenario === 'onboarding-duplicate' ? 2 : 1; },
+    async isEnabled() { return scenario !== 'onboarding-disabled'; }, async elementHandle() { return choiceHandle; },
+    async evaluate(callback) { return callback(choiceButton, choiceButton); } };
+  const onboardingCover = { async count() { return onboardingVisible ? 1 : 0; }, async isVisible() { return onboardingVisible; },
+    getByRole(role, options) { assert.equal(role, 'button'); assert.equal(options.name, "I'll choose a provider later"); return choice; } };
   const commandContent = { matches: selector => selector.includes('[role="dialog"]'), querySelector: () => scenario === 'command-missing-content' ? null : ({}),
     getBoundingClientRect: rect };
   const commandBackdrop = { tagName: 'DIV', closest: () => null, contains: () => false,
@@ -202,6 +223,7 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
         assistantTurnCount: submits, responseVerified: submits === 1 };
     },
     locator(selector) {
+      if (selector === '[data-glass-opaque][class~="z-(--z-onboarding)"]') return onboardingCover;
       if (selector === '[data-role="assistant"][data-slot="aui_assistant-message-root"] [role="alert"]:visible') return errorCards;
       if (selector === '[data-slot="composer-root"] [role="textbox"]:visible') return composer;
       if (selector === '[data-role="assistant"]:visible') return assistant;
@@ -255,7 +277,7 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
         if (selector.includes('composer-root')) return scenario === 'missing-editor' ? [] : [{ value: '', getBoundingClientRect: rect }];
         return [];
       }, elementFromPoint: (x, y) =>
-        commandVisible ? commandBackdrop : scenario === 'retry-center-covered' && x === 20 && y === 20 || scenario === 'retry-overlay' || (scenario === 'retry-centering' && centers === 0)
+        samplingChoice ? choiceButton : onboardingVisible ? onboardingRoot : commandVisible ? commandBackdrop : scenario === 'retry-center-covered' && x === 20 && y === 20 || scenario === 'retry-overlay' || (scenario === 'retry-centering' && centers === 0)
           || (scenario === 'retry-intercepted' && clicks > 0) ? overlay : scenario === 'retry-fading-overlay' && sampleCount <= 2 ? foreignHit : ['retry-ancestor-cover', 'retry-composer-cover'].includes(scenario) ? ancestorFront : (['retry-all-covered', 'aux-write-failed'].includes(scenario) || scenario === 'retry-covered-at-final' && sampleCount >= 3) ? foreignHit : (sourceRegionSelectors[scenario] || ['gateway-connecting', 'gateway-forged'].includes(scenario)) ? sourceRegionHit : scenario === 'retry-frame-settle' && frames < 2 ? threadBackground : scenario === 'retry-source-clipped' ? threadBackground : scenario === 'retry-offviewport' ? null : scenario === 'retry-private-hit' ? foreignHit : scenario === 'retry-body-hit' ? bodyHit : scenario === 'retry-dock-strip' ? dockStrip : scenario === 'retry-child-hit' ? hitChild : hitButton },
       process: { argv: ['node', 'helper', qualify ? '--qualify' : '--drive', '/request', '/output'], exit: resolve },
     });
@@ -265,7 +287,7 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
   const facts = JSON.parse(output.get('/output'));
   if (qualify) {
     assert(!output.get('/output').includes(request.expectedMarker));
-    return { facts, submits, fills, clicks, keys, centers, frames, focuses, escapes, auxiliary: output.get('/output.front.json') };
+    return { facts, submits, fills, clicks, keys, centers, frames, focuses, escapes, skips, retryHandles, auxiliary: output.get('/output.front.json') };
   }
   assert.equal(facts.inputSubmitted, ['happy', 'delayed', 'missing-editor', 'transient-context', 'keyboard'].includes(scenario));
   assert.equal(facts.responseVerified, ['happy', 'delayed', 'missing-editor', 'transient-context', 'keyboard'].includes(scenario));
@@ -338,6 +360,7 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
   assert.equal(retry.fills, 0);
   assert.equal(retry.clicks, 1);
   assert.equal(retry.keys, 0);
+  assert.equal(retry.skips, 0);
   assert.equal(retry.focuses, 0);
   assert.equal(retry.facts.sendMechanism, 'pointer');
   assert.equal(retry.facts.retryPointStable, true);
@@ -437,6 +460,18 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
   assert.equal(failedAux.clicks, 0);
   assert.equal(failedAux.keys, 0);
   assert.equal(failedAux.facts.inputSubmitted, false);
+  const skipped = await trial({ ...retryRequest, timeoutMs: 700 }, {}, 'onboarding-normal', true);
+  assert.equal(skipped.skips, 1);
+  assert.equal(skipped.retryHandles, 2);
+  assert.equal(skipped.clicks, 1);
+  assert.equal(skipped.escapes, 0);
+  assert.equal(skipped.facts.retryReveal, 'onboarding-skipped');
+  for (const scenario of ['onboarding-remaining', 'onboarding-uncertain', 'onboarding-foreign-pair', 'onboarding-duplicate', 'onboarding-disabled', 'onboarding-missing', 'onboarding-forged']) {
+    const blocked = await trial({ ...retryRequest, timeoutMs: 350 }, {}, scenario, true);
+    assert.equal(blocked.clicks, 0, scenario);
+    assert.equal(blocked.escapes, 0, scenario);
+    assert.equal(blocked.facts.inputSubmitted, false, scenario);
+  }
   const uncertain = await trial(retryRequest, {}, 'retry-intercepted', true);
   assert.equal(uncertain.clicks, 1);
   assert.equal(uncertain.keys, 0);

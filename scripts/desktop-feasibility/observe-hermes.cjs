@@ -3,6 +3,7 @@ function sampleRetryInterior(button) {
 function sourceFrontRegion(front) {
   if (!front) return 'none';
   const glass = front.closest('[data-glass-opaque]');
+  if (glass?.classList.contains('z-(--z-onboarding)')) return 'onboarding';
   if (glass?.classList.contains('z-(--z-connecting)')) return 'gateway-connecting';
   let ancestor = front;
   for (let depth = 0; ancestor && depth < 16; depth++, ancestor = ancestor.parentElement) {
@@ -388,6 +389,49 @@ async function driveDom() {
       retryPosition = stableCandidate(first, second);
       secondCandidate = second.candidate;
       if (retryPosition || second.closed.status !== 'no-owned-point') break;
+      if (second.closed.frontRegion === 'onboarding' && !revealAttempted) {
+        revealAttempted = true;
+        const cover = page.locator('[data-glass-opaque][class~="z-(--z-onboarding)"]');
+        const choice = cover.getByRole('button', { name: "I'll choose a provider later", exact: true });
+        while (Date.now() < settleDeadline && await choice.count() === 0) {
+          if (!await reprove()) { facts.errorCategory = 'send-unavailable'; saveFacts(); return; }
+          await delay(100);
+        }
+        if (!await reprove() || await cover.count() !== 1 || !await cover.isVisible()
+            || await choice.count() !== 1 || !await choice.isEnabled()) {
+          facts.errorCategory = 'send-unavailable'; saveFacts(); return;
+        }
+        const choiceHandle = await choice.elementHandle();
+        const choiceFirst = await choiceHandle.evaluate(sampleRetryInterior);
+        await delay(Math.min(100, Math.max(0, settleDeadline - Date.now())));
+        const choiceSecond = await choiceHandle.evaluate(sampleRetryInterior);
+        const choicePosition = stableCandidate(choiceFirst, choiceSecond);
+        if (!choicePosition || !await reprove() || await cover.count() !== 1 || await choice.count() !== 1
+            || !await choice.isEnabled() || !await choice.evaluate((button, sampled) => button === sampled, choiceHandle)
+            || await readiness() !== null) {
+          facts.errorCategory = 'submit-action-intercepted'; saveFacts(); return;
+        }
+        const finalChoice = await choiceHandle.evaluate(sampleRetryInterior);
+        if (!stableCandidate(choiceSecond, finalChoice) || !ownedEndpoint()) {
+          facts.errorCategory = 'submit-action-intercepted'; saveFacts(); return;
+        }
+        // Frozen ChooseLaterLink's ordinary click only dismisses first-run UI.
+        try { await choiceHandle.click({ position: choicePosition, timeout: Math.max(1, settleDeadline - Date.now()) }); }
+        catch { facts.errorCategory = 'submit-action-failed'; saveFacts(); return; }
+        while (Date.now() < settleDeadline && await cover.count() !== 0) {
+          if (!ownedEndpoint()) break;
+          await delay(20);
+        }
+        if (await cover.count() !== 0 || !ownedEndpoint() || !await errorProof()
+            || await retryUser.count() !== 1 || !await retryUser.evaluate((e, prompt) => e.innerText.trim() === prompt, request.prompt)
+            || await send.count() !== 1 || !await send.isEnabled()) {
+          facts.errorCategory = 'submit-action-intercepted'; saveFacts(); return;
+        }
+        facts.retryReveal = 'onboarding-skipped';
+        retryHandle = await send.elementHandle();
+        if (!retryHandle) { facts.errorCategory = 'send-unavailable'; saveFacts(); return; }
+        continue;
+      }
       if (second.closed.frontRegion === 'command-backdrop' && !revealAttempted) {
         revealAttempted = true;
         if (!await reprove()) { facts.errorCategory = 'send-unavailable'; saveFacts(); return; }
