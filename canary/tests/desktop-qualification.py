@@ -95,6 +95,19 @@ class RunnerTests(unittest.TestCase):
 
 
 class QualificationTests(unittest.TestCase):
+    def test_backend_failure_categories_never_export_error_text(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'backend.json'
+            value = dict(schemaVersion=1, mechanism='hermes-backend-failure', diagnosticsOnly=True,
+                         category='python-import-failure', assistantTurnCount=2)
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(Path(root), 'hermes-desktop'), [value])
+            for changed in ({**value, 'category': 'PRIVATE'}, {**value, 'text': 'PRIVATE'},
+                            {**value, 'assistantTurnCount': True}, {**value, 'diagnosticsOnly': False}):
+                path.write_text(json.dumps(changed))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(Path(root), 'hermes-desktop')
+
     def test_baseline_is_diagnostic_and_cannot_claim_renderer_instrumentation(self):
         with tempfile.TemporaryDirectory() as root:
             path = Path(root) / 'baseline.json'
