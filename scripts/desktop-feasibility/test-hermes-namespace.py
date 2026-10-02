@@ -11,6 +11,15 @@ module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 
 class NamespacePolicy(unittest.TestCase):
+    def test_system_installs_require_exact_official_app_path(self):
+        root = Path('/tmp/owned')
+        self.assertTrue(module.executable_owned(root / 'Hermes', root, 'hermes-desktop'))
+        for app, path in [('chatgpt-desktop', '/usr/lib/chatgpt/ChatGPT'), ('claude-desktop', '/usr/lib/claude-desktop/claude-desktop'), ('pen-desktop', '/opt/Pen/Pen')]:
+            self.assertTrue(module.executable_owned(Path(path), root, app))
+            self.assertFalse(module.executable_owned(Path(path), root, 'hermes-desktop'))
+            self.assertFalse(module.executable_owned(Path(path + '-other'), root, app))
+        self.assertFalse(module.executable_owned(Path('/usr/bin/unrelated'), root, 'pen-desktop'))
+
     def test_non_electron_app_is_rejected_before_reading_or_mutating(self):
         with patch.object(module, 'run') as run:
             with self.assertRaises(ValueError):

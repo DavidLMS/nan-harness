@@ -2,6 +2,7 @@
 """Install and remove one hosted-only executable-scoped namespace policy."""
 import argparse
 import json
+import hashlib
 import os
 from pathlib import Path
 import re
@@ -43,6 +44,20 @@ def cleanup(state):
     state.unlink()
 
 
+def executable_owned(executable, runner_root, app):
+    try:
+        executable.relative_to(runner_root)
+        return True
+    except ValueError:
+        # Official Debian packages are installed into these exact system paths
+        # in the disposable hosted runner; no wildcard policy is authorized.
+        return executable == {
+            'chatgpt-desktop': Path('/usr/lib/chatgpt/ChatGPT'),
+            'claude-desktop': Path('/usr/lib/claude-desktop/claude-desktop'),
+            'pen-desktop': Path('/opt/Pen/Pen'),
+        }.get(app)
+
+
 def prepare(prepared, state, runner_root, app="hermes-desktop"):
     if app not in {"hermes-desktop", "chatgpt-desktop", "claude-desktop", "pen-desktop"}:
         raise ValueError("unsupported Electron application")
@@ -56,7 +71,14 @@ def prepare(prepared, state, runner_root, app="hermes-desktop"):
     if executable.is_symlink() or not executable.is_file():
         raise ValueError('invalid installed executable')
     executable = executable.resolve(strict=True)
-    executable.relative_to(runner_root)
+    if not executable_owned(executable, runner_root, app):
+        raise ValueError('installed executable is outside its owned layout')
+    identity = hashlib.sha256()
+    with executable.open('rb') as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b''):
+            identity.update(chunk)
+    if identity.hexdigest() != apps[0]['executable']['sha256']:
+        raise ValueError('installed executable identity changed')
     if Path('/proc/sys/kernel/unprivileged_userns_clone').read_text().strip() != '1':
         raise ValueError('user namespaces unavailable')
     name = 'nanh-hermes-feasibility-' + uuid.uuid4().hex
