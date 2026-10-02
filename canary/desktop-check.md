@@ -888,3 +888,17 @@ match and the inspector's own row, never treats localized or malformed output as
 absence, and never kills an enumerated app process. Only the existing owned job
 controls application termination. Synthetic parsing and deadline tests pass;
 native Windows verification remains pending.
+
+The Claude macOS `native-known-folders` startup trial follows the official
+[single-machine third-party setup](https://claude.com/docs/third-party/claude-desktop/installation#single-machine-setup)
+without an Anthropic account. It is restricted to the inspected frozen release
+and a disposable GitHub-hosted session. It verifies Foundation's native folder
+alignment independently, requires both app folders and matching processes to be
+absent, preserves native HOME, and supplies no signed environment token or
+Electron profile override. Private nANH receipts remain in the probe workspace.
+Explicit cleanup runs after every prepared outcome, requires process absence,
+matching directory identities and restored configuration, and propagates any
+failure. Partial creation can roll back only its own empty directories. Synthetic
+ownership, policy and path tests and focused Clippy pass; native acceptance is
+still pending. Existing storage-presence diagnostics never establish gateway
+configuration consumption or a working conversation.

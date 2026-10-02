@@ -95,9 +95,13 @@ fn observe(roots: &[PathBuf; 2]) -> Option<Presence> {
 }
 impl Snapshot {
     pub(super) fn capture(paths: &DesktopPaths) -> Option<Self> {
-        if std::env::var("NANH_CLAUDE_MAC_PROFILE_POLICY").as_deref()
-            != Ok("electron-user-data-dir")
-            || std::env::var("NANH_DESKTOP_QUALIFICATION_MODE").as_deref() != Ok("startup-baseline")
+        let policy = std::env::var("NANH_CLAUDE_MAC_PROFILE_POLICY");
+        let native = policy.as_deref() == Ok("native-known-folders");
+        if !matches!(
+            policy.as_deref(),
+            Ok("electron-user-data-dir" | "native-known-folders")
+        ) || std::env::var("NANH_DESKTOP_QUALIFICATION_MODE").as_deref()
+            != Ok("startup-baseline")
             || std::env::var("GITHUB_ACTIONS").as_deref() != Ok("true")
             || std::env::var("RUNNER_ENVIRONMENT").as_deref() != Ok("github-hosted")
             || std::env::var("RUNNER_OS").as_deref() != Ok("macOS")
@@ -108,10 +112,15 @@ impl Snapshot {
         }
         let workspace = std::env::current_dir().ok()?;
         let profile = workspace.join("profile");
-        let home = profile.join("home");
+        let home = if native {
+            PathBuf::from(std::env::var_os("HOME")?)
+        } else {
+            profile.join("home")
+        };
         let directory = PathBuf::from(std::env::var_os("NANH_DESKTOP_QUALIFICATION_FACTS")?);
         if std::env::var_os("HOME").map(PathBuf::from).as_ref() != Some(&home)
-            || [&profile, &home, &directory]
+            || (!native && !private_directory(&home))
+            || [&profile, &directory]
                 .iter()
                 .any(|path| !private_directory(path))
         {

@@ -118,6 +118,7 @@ mod windows_process_tests {
     }
 }
 
+mod claude_native_roots;
 mod hermes_policy;
 pub(crate) mod hermes_readiness;
 mod semantic;
@@ -693,34 +694,39 @@ async fn scenario(
     diagnostic_allowed: &mut bool,
     gui_acquisition: &mut Option<crate::diagnostics::GuiAcquisitionDiagnostic>,
 ) -> Result<(), Reason> {
-    // Windows known folders and credential stores follow the OS identity, not
-    // HOME. Only an explicitly declared disposable hosted VM may use that account.
-    if !spec.session.available()
-        || (cfg!(windows) && spec.session != crate::cli::SessionMode::GithubHosted)
-    {
-        return Err(Reason::IsolationUnavailable);
+    *diagnostic_allowed = validate_launch_binding(spec)?;
+    prepare_scenario(spec).await?;
+    let mut native_roots = claude_native_roots::NativeRoots::prepare(spec).await?;
+    let outcome = scenario_owned(
+        spec,
+        result,
+        launch_observation,
+        diagnostic,
+        composer_observations,
+        gui_acquisition,
+    )
+    .await;
+    if let Some(roots) = &mut native_roots {
+        roots.cleanup()?;
     }
+    outcome
+}
+
+async fn scenario_owned(
+    spec: &ProbeSpec,
+    result: &mut ProbeResult,
+    launch_observation: &mut LaunchObservation,
+    diagnostic: &mut Option<CleanupDiagnostic>,
+    composer_observations: &mut Vec<ComposerFailure>,
+    gui_acquisition: &mut Option<crate::diagnostics::GuiAcquisitionDiagnostic>,
+) -> Result<(), Reason> {
     let experiment = HostedExperiment::from_spec(spec)?;
     let semantic = semantic::SemanticBackend::from_spec(spec)?;
     if semantic.is_some() && experiment.is_some() {
         return Err(Reason::IsolationUnavailable);
     }
-    if binary_digest(&spec.nan_harness)? != spec.nan_harness_sha256 {
-        return Err(Reason::InstallationUnreadable);
-    }
-    if let Some(wrapper) = &spec.launch_wrapper {
-        prepare_launch_wrapper(spec.kind, wrapper)?;
-        *diagnostic_allowed = true;
-    }
-    Gui::ensure_absent(spec.kind).map_err(|failure| failure.reason)?;
-    require_endpoint_override(spec).await?;
-    create_private_dir_all(&spec.workspace).map_err(|_| Reason::IsolationUnavailable)?;
-    prepare_zed_profile(spec)?;
     let marker = visual_marker("NAN CHECK READ")?;
-    let fixture = spec.workspace.join("read-target.txt");
-    open_private_new(&fixture)
-        .and_then(|mut file| file.write_all(marker.as_bytes()))
-        .map_err(|_| Reason::IsolationUnavailable)?;
+    let fixture = prepare_read_fixture(spec, &marker)?;
     let final_marker = visual_marker("NAN CHECK RESPONSE")?;
     let inventory = ScriptedProvider::start(ProviderScenario::inventory(&final_marker))
         .await
@@ -791,6 +797,39 @@ async fn scenario(
         diagnostic,
     )
     .await
+}
+
+async fn prepare_scenario(spec: &ProbeSpec) -> Result<(), Reason> {
+    // Windows known folders and credential stores follow the OS identity, not
+    // HOME. Only an explicitly declared disposable hosted VM may use that account.
+    if !spec.session.available()
+        || (cfg!(windows) && spec.session != crate::cli::SessionMode::GithubHosted)
+    {
+        return Err(Reason::IsolationUnavailable);
+    }
+    Gui::ensure_absent(spec.kind).map_err(|failure| failure.reason)?;
+    require_endpoint_override(spec).await?;
+    create_private_dir_all(&spec.workspace).map_err(|_| Reason::IsolationUnavailable)?;
+    prepare_zed_profile(spec)?;
+    Ok(())
+}
+
+fn validate_launch_binding(spec: &ProbeSpec) -> Result<bool, Reason> {
+    if binary_digest(&spec.nan_harness)? != spec.nan_harness_sha256 {
+        return Err(Reason::InstallationUnreadable);
+    }
+    if let Some(wrapper) = &spec.launch_wrapper {
+        prepare_launch_wrapper(spec.kind, wrapper)?;
+    }
+    Ok(spec.launch_wrapper.is_some())
+}
+
+fn prepare_read_fixture(spec: &ProbeSpec, marker: &str) -> Result<PathBuf, Reason> {
+    let fixture = spec.workspace.join("read-target.txt");
+    open_private_new(&fixture)
+        .and_then(|mut file| file.write_all(marker.as_bytes()))
+        .map_err(|_| Reason::IsolationUnavailable)?;
+    Ok(fixture)
 }
 
 // Keep conversation adapters separate from process acquisition and restoration.
@@ -1450,7 +1489,8 @@ fn isolated_command(spec: &ProbeSpec, program: &Path) -> Result<Command, Reason>
     ] {
         create_private_dir_all(directory).map_err(|_| Reason::IsolationUnavailable)?;
     }
-    if std::env::var_os("NANH_CLAUDE_MAC_PROFILE_POLICY").is_some() {
+    let native_policy = claude_native_roots::enabled(spec)?;
+    if std::env::var_os("NANH_CLAUDE_MAC_PROFILE_POLICY").is_some() && !native_policy {
         if !cfg!(target_os = "macos")
             || spec.kind != DesktopHarnessKind::Claude
             || spec.session != crate::cli::SessionMode::GithubHosted
@@ -1469,14 +1509,11 @@ fn isolated_command(spec: &ProbeSpec, program: &Path) -> Result<Command, Reason>
         .arg(spec.kind.to_string())
         // Upstream apps discover global skills and credentials outside their
         // config directory. Redirect their home too, never the parent process.
-        .env("HOME", profile.join("home"))
-        .env("USERPROFILE", profile.join("home"))
         .env("CODEX_HOME", profile.join("home").join(".codex"))
         .env("NAN_HARNESS_CONFIG_DIR", profile.join("nanh"))
         // The probe owns its provider budget. A detached per-profile coordinator
         // would outlive the app and keep Windows recovery files locked.
         .env("NAN_HARNESS_INTERNAL_DISABLE_COORDINATOR", "1")
-        .env("XDG_CONFIG_HOME", profile.join("config"))
         .env("APPDATA", &roaming)
         .env("LOCALAPPDATA", &local)
         .env("HERMES_HOME", profile.join("hermes"))
@@ -1497,6 +1534,17 @@ fn isolated_command(spec: &ProbeSpec, program: &Path) -> Result<Command, Reason>
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .kill_on_drop(true);
+    if native_policy {
+        command
+            .env_remove("XDG_CONFIG_HOME")
+            .env_remove("XDG_DATA_HOME")
+            .env_remove("XDG_STATE_HOME");
+    } else {
+        command
+            .env("HOME", profile.join("home"))
+            .env("USERPROFILE", profile.join("home"))
+            .env("XDG_CONFIG_HOME", profile.join("config"));
+    }
     // Keep the launched desktop app and any helper descendants in a probe-owned
     // group. Cleanup must be able to prove and remove the whole tree without
     // signalling an unrelated application in the runner's process group.

@@ -1,4 +1,4 @@
-//! Frozen hosted trial of Electron's native user-data-dir argument.
+//! Frozen hosted trials of Claude's isolated and default-native storage.
 use std::{io, path::Path};
 
 fn rejected() -> io::Error {
@@ -12,7 +12,7 @@ pub(super) fn arguments(executable: Option<&Path>) -> io::Result<Vec<String>> {
     let Some(policy) = std::env::var_os("NANH_CLAUDE_MAC_PROFILE_POLICY") else {
         return Ok(Vec::new());
     };
-    if policy != "electron-user-data-dir"
+    if (policy != "electron-user-data-dir" && policy != "native-known-folders")
         || !cfg!(target_os = "macos")
         || std::env::var("GITHUB_ACTIONS").as_deref() != Ok("true")
         || std::env::var("RUNNER_ENVIRONMENT").as_deref() != Ok("github-hosted")
@@ -27,7 +27,16 @@ pub(super) fn arguments(executable: Option<&Path>) -> io::Result<Vec<String>> {
     let workspace = std::env::current_dir()?;
     let home = std::env::var_os("HOME").ok_or_else(rejected)?;
     let facts = std::env::var_os("NANH_DESKTOP_QUALIFICATION_FACTS").ok_or_else(rejected)?;
-    let root = validated_root(&workspace, Path::new(&home), Path::new(&facts), executable)?;
+    let root = validated_root(
+        &workspace,
+        Path::new(&home),
+        Path::new(&facts),
+        executable,
+        policy == "native-known-folders",
+    )?;
+    if policy == "native-known-folders" {
+        return Ok(Vec::new());
+    }
     // Claude's frozen bootstrap derives its third-party root by appending -3p.
     Ok(vec![format!(
         "--user-data-dir={}",
@@ -63,11 +72,13 @@ fn validated_root(
     home: &Path,
     facts: &Path,
     executable: &Path,
+    native: bool,
 ) -> io::Result<std::path::PathBuf> {
     let profile = workspace.join("profile");
-    if home != profile.join("home")
+    if (!native && home != profile.join("home"))
         || !private_directory(&profile)
-        || !private_directory(home)
+        || (!native && !private_directory(home))
+        || (native && home.canonicalize().ok().as_deref() != Some(home))
         || !private_directory(facts)
         || !regular(executable)
     {
@@ -139,14 +150,32 @@ mod tests {
             std::fs::write(root.join("claude_desktop_config.json"), b"{}").unwrap();
         }
         assert_eq!(
-            validated_root(&workspace, &home, &facts, &executable).unwrap(),
+            validated_root(&workspace, &home, &facts, &executable, false).unwrap(),
             home.join("Library/Application Support/Claude")
         );
-        assert!(validated_root(&workspace, temp.path(), &facts, &executable).is_err());
+        assert!(validated_root(&workspace, temp.path(), &facts, &executable, false).is_err());
+        let native_home = workspace.join("native-home");
+        for name in ["Claude", "Claude-3p"] {
+            let root = native_home.join("Library/Application Support").join(name);
+            std::fs::create_dir_all(&root).unwrap();
+            std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700)).unwrap();
+            std::fs::write(root.join("claude_desktop_config.json"), b"{}").unwrap();
+        }
+        assert!(validated_root(&workspace, &native_home, &facts, &executable, false).is_err());
+        assert_eq!(
+            validated_root(&workspace, &native_home, &facts, &executable, true).unwrap(),
+            native_home.join("Library/Application Support/Claude")
+        );
+        std::fs::set_permissions(
+            native_home.join("Library/Application Support/Claude"),
+            std::fs::Permissions::from_mode(0o755),
+        )
+        .unwrap();
+        assert!(validated_root(&workspace, &native_home, &facts, &executable, true).is_err());
         let config = home.join("Library/Application Support/Claude-3p/claude_desktop_config.json");
         std::fs::remove_file(&config).unwrap();
-        assert!(validated_root(&workspace, &home, &facts, &executable).is_err());
+        assert!(validated_root(&workspace, &home, &facts, &executable, false).is_err());
         symlink(contents.join("Info.plist"), config).unwrap();
-        assert!(validated_root(&workspace, &home, &facts, &executable).is_err());
+        assert!(validated_root(&workspace, &home, &facts, &executable, false).is_err());
     }
 }

@@ -207,14 +207,37 @@ pub(super) async fn record(paths: &DesktopPaths, base_url: &str, token: &str) {
     let Ok(profile) = profile.canonicalize() else {
         return;
     };
+    let owned_root = if std::env::var("NANH_CLAUDE_MAC_PROFILE_POLICY").as_deref()
+        == Ok("native-known-folders")
+    {
+        if !cfg!(target_os = "macos") || native_alignment().await != Some(true) {
+            return;
+        }
+        let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
+            return;
+        };
+        let support = home.join("Library/Application Support");
+        if paths.normal_config != support.join("Claude/claude_desktop_config.json")
+            || paths.third_party_config != support.join("Claude-3p/claude_desktop_config.json")
+            || !private_directory(&support.join("Claude"))
+            || !private_directory(&support.join("Claude-3p"))
+        {
+            return;
+        }
+        support
+    } else {
+        profile
+    };
     if paths.documents().iter().any(|p| {
         p.parent()
             .and_then(|parent| parent.canonicalize().ok())
-            .is_none_or(|parent| !parent.starts_with(&profile))
+            .is_none_or(|parent| !parent.starts_with(&owned_root))
     }) {
         return;
     }
-    let mut documents = paths.documents().map(|path| owned_document(path, &profile));
+    let mut documents = paths
+        .documents()
+        .map(|path| owned_document(path, &owned_root));
     let mut facts = observations(&documents, base_url, token);
     for document in documents.iter_mut().flatten() {
         if let Some(Value::String(credential)) = document.get_mut("inferenceGatewayApiKey") {

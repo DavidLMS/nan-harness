@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Run full deterministic qualification only inside a disposable hosted session."""
 import argparse
+import hashlib
+import json
+import struct
 import os
 from pathlib import Path
 import subprocess
@@ -40,6 +43,24 @@ def validate_claude_bundle(executable):
         document = contents / relative
         if document.is_symlink() or not document.is_file() or document.resolve() != document:
             raise ValueError('Claude native bundle is invalid')
+
+    asar = contents / 'Resources/app.asar'
+    with asar.open('rb') as archive:
+        prefix = archive.read(16)
+        if len(prefix) != 16:
+            raise ValueError('Claude bootstrap is invalid')
+        _, header_size, _, json_size = struct.unpack('<4I', prefix)
+        if not 0 < json_size <= 16 * 1024 * 1024 or header_size < json_size + 8:
+            raise ValueError('Claude bootstrap is invalid')
+        header = json.loads(archive.read(json_size))
+        entry = header['files']['.vite']['files']['build']['files']['index.pre.js']
+        size, offset = entry.get('size'), entry.get('offset')
+        if type(size) is not int or not 0 < size <= 16 * 1024 * 1024 or not isinstance(offset, str) or not offset.isdecimal():
+            raise ValueError('Claude bootstrap is invalid')
+        archive.seek(8 + header_size + int(offset))
+        bootstrap = archive.read(size)
+        if len(bootstrap) != size or hashlib.sha256(bootstrap).hexdigest() != '83126565df48e98691a3845f27bb7ee78d0632aa14b5881adad8c7ac4f0a3adf':
+            raise ValueError('Claude bootstrap differs from the inspected release')
 
 
 def validate_codex_project_release(release, executable_hash):
@@ -115,7 +136,7 @@ def qualification_environment(app, facts, real_nanh, executable, inherited=None)
             environment['NANH_CODEX_PROJECT_POLICY'] = project_policy
         profile_policy = source.get('NANH_CLAUDE_MAC_PROFILE_POLICY')
         if profile_policy is not None:
-            if (profile_policy != 'electron-user-data-dir' or app != 'claude-desktop'
+            if (profile_policy not in {'electron-user-data-dir', 'native-known-folders'} or app != 'claude-desktop'
                     or source.get('RUNNER_OS') != 'macOS' or mode != 'startup-baseline'):
                 raise ValueError('Claude native profile policy is unavailable')
             validate_claude_bundle(Path(executable))
