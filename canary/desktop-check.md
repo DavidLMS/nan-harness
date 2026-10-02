@@ -425,3 +425,13 @@ private `CODEX_HOME`, so Electron singleton and onboarding state cannot escape
 the probe profile. Read-only renderer inventories retain bounded counts for
 known import and project-creation controls, without retaining labels or taking
 navigation actions. These observations cannot qualify a conversation backend.
+
+Run [36987032897](https://github.com/DavidLMS/nan-harness/actions/runs/36987032897)
+still fails Zed Windows acquisition after two eligible snapshots; cleanup passes.
+The full qualification environment had discarded both fixed Win32 ownership
+helper paths, leaving the legacy PowerShell lookup active. The environment now
+requires and preserves those absolute regular helper paths on Windows, while
+continuing to remove credentials and unrelated opt-ins. Native evidence for the
+corrected environment is pending. Two observations before expiry do not prove
+window instability: fitting consumes the first and the second establishes a
+post-fit baseline.

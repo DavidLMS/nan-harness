@@ -22,6 +22,7 @@ SESSION_ENV = {'PATH', 'HOME', 'TMPDIR', 'TMP', 'TEMP', 'USER', 'LOGNAME', 'SHEL
 ZED_HELPERS = {'FEASIBILITY_ZED_INPUT_DRIVER', 'FEASIBILITY_ZED_INPUT_DRIVER_MODE',
                'FEASIBILITY_ZED_EXPORT_PARSER', 'FEASIBILITY_ZED_ZSTD',
                'FEASIBILITY_ZED_RESPONSE_METHOD', 'NANH_ZED_ICON_TEMPLATES', 'FEASIBILITY_ZED_INPUT_SCRIPT'}
+WINDOWS_PROOF = {'FEASIBILITY_WINDOWS_PROOF_PYTHON', 'FEASIBILITY_WINDOWS_PROOF_SCRIPT'}
 HERMES_RUNTIME = {'HERMES_DESKTOP_HERMES_ROOT', 'HERMES_DESKTOP_HERMES'}
 
 
@@ -30,6 +31,15 @@ def qualification_environment(app, facts, real_nanh, executable, inherited=None)
     if source.get('GITHUB_ACTIONS') != 'true' or source.get('RUNNER_ENVIRONMENT') != 'github-hosted':
         raise ValueError('disposable hosted session required')
     environment = {key: value for key, value in source.items() if key in SESSION_ENV}
+    if source.get('RUNNER_OS') == 'Windows':
+        for key in WINDOWS_PROOF:
+            value = source.get(key)
+            if not value:
+                raise ValueError('Windows ownership helper is missing')
+            path = Path(value)
+            if not path.is_absolute() or not path.is_file() or path.is_symlink():
+                raise ValueError('Windows ownership helper is invalid')
+            environment[key] = value
     environment.update(NANH_DESKTOP_QUALIFICATION_FACTS=str(facts),
                        FEASIBILITY_FACTS=str(facts), FEASIBILITY_REAL_NANH=str(real_nanh))
     if app == 'zed-desktop':

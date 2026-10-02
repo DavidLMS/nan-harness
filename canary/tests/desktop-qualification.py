@@ -21,6 +21,36 @@ spec.loader.exec_module(runner)
 
 
 class RunnerTests(unittest.TestCase):
+    def test_windows_native_ownership_helpers_survive_the_closed_environment(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            python = root / 'python.exe'
+            script = root / 'endpoint-owner-windows.py'
+            python.write_text('synthetic interpreter')
+            script.write_text('synthetic read-only helper')
+            source = dict(GITHUB_ACTIONS='true', RUNNER_ENVIRONMENT='github-hosted', RUNNER_OS='Windows',
+                          FEASIBILITY_WINDOWS_PROOF_PYTHON=str(python),
+                          FEASIBILITY_WINDOWS_PROOF_SCRIPT=str(script), OPENAI_API_KEY='PRIVATE',
+                          FEASIBILITY_RETRY_FORCE='PRIVATE')
+            for app in ('hermes-desktop', 'chatgpt-desktop', 'claude-desktop', 'pen-desktop'):
+                env = runner.qualification_environment(app, root, python, str(python), source)
+                for key in runner.WINDOWS_PROOF:
+                    self.assertEqual(env[key], source[key])
+                self.assertNotIn('PRIVATE', str(env))
+            for value in (None, 'relative.py', str(root), str(root / 'absent')):
+                invalid = {**source, 'FEASIBILITY_WINDOWS_PROOF_SCRIPT': value}
+                with self.assertRaises(ValueError):
+                    runner.qualification_environment('claude-desktop', root, python, str(python), invalid)
+            link = root / 'symlink.py'
+            link.symlink_to(script)
+            with self.assertRaises(ValueError):
+                runner.qualification_environment('claude-desktop', root, python, str(python),
+                    {**source, 'FEASIBILITY_WINDOWS_PROOF_SCRIPT': str(link)})
+            env = runner.qualification_environment('claude-desktop', root, python, str(python),
+                    {**source, 'RUNNER_OS': 'Linux'})
+            for key in runner.WINDOWS_PROOF:
+                self.assertNotIn(key, env)
+
     def test_closed_environment_excludes_credentials_and_experiment_opt_ins(self):
         source = dict(GITHUB_ACTIONS='true', RUNNER_ENVIRONMENT='github-hosted', RUNNER_OS='Linux',
                       PATH='/synthetic/bin', NAN_API_KEY='PRIVATE', AWS_SECRET_ACCESS_KEY='PRIVATE',
