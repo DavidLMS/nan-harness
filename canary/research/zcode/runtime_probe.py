@@ -266,7 +266,8 @@ class Runtime:
             wait_for(lambda: b"NATIVE_PROBE_OK" in output)
             terminal.write(b"\x03")
             time.sleep(0.2)
-            terminal.write(b"\x03")
+            if terminal.alive():
+                terminal.write(b"\x03")
             terminal.wait_exit()
             print(
                 "PASS: rendered TUI, native /model switch, selected-model request, streamed answer and Ctrl-C exit"
