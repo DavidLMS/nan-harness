@@ -33,6 +33,18 @@ def line(record, prefix=b"DESKTOP_INSTALL_DIAGNOSTIC:"):
 
 
 class DiagnosticTests(unittest.TestCase):
+    def test_unknown_launcher_exit_preserves_closed_cleanup_without_masking_capture(self):
+        record = {**native(), 'app': 'claude-desktop', 'launchExit': 'unknown'}
+        capture = D.Capture('windows')
+        capture.observe(io.BytesIO(line(record, b'DESKTOP_DIAGNOSTIC:')))
+        self.assertEqual(capture.events, [{'kind': 'native', 'record': record}])
+        self.assertEqual(capture.invalid, 0)
+        for invalid in ({'unknown': 0}, {'code': True}, {'signal': 0}, 'PRIVATE'):
+            capture = D.Capture('windows')
+            capture.observe(io.BytesIO(line({**record, 'launchExit': invalid}, b'DESKTOP_DIAGNOSTIC:')))
+            self.assertEqual(capture.events, [])
+            self.assertEqual(capture.invalid, 1)
+
     def test_process_absence_is_a_closed_cleanup_failure_boundary(self):
         record = native()
         record['cleanup'] = dict(stage='absence-after-stop', originalReason='action-unsupported',

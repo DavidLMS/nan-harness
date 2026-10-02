@@ -1185,3 +1185,27 @@ finite exact bounds must identify one owned normal-layer window. The exported
 receipt contains only a status and a nullable match boolean. The existing
 same-process-window guard remains enforced, including when focus matches the
 held window. This trial does not activate or dismiss a window.
+
+The complete local gate on `38494449` passes. Its hosted Claude macOS trial
+[37062973171](https://github.com/DavidLMS/nan-harness/actions/runs/37062973171)
+again discovers two models and passes cleanup, but detects changed window
+bounds immediately after acquisition. The next scoped startup trial requires
+two seconds and at least three consecutive unchanged observations before the
+single initial binding, within the original 45-second deadline. Candidate
+absence breaks continuity; no post-acquisition rebinding is introduced.
+Windows Claude
+[37062977467](https://github.com/DavidLMS/nan-harness/actions/runs/37062977467)
+again fails cleanup and has no diagnostic bundle. A synthetic event identifies
+a capture defect: a valid `launchExit: "unknown"` raised an unbound-variable
+exception before bundle publication. The decoder now accepts that closed
+variant and preserves cleanup facts. This does not establish which payload
+caused the historical missing bundle.
+
+Linux Zed
+[37062969515](https://github.com/DavidLMS/nan-harness/actions/runs/37062969515)
+passes the first four steps and cleanup in all three probes. The exact Retry
+control has the missing-origin relation, and all three independent client
+origin checks disagree with xdotool. Retry still produces no provider recovery.
+The installed transport version and its reparented-client translation need
+verification before correcting coordinates; adding the existing offset twice
+is still unsupported.

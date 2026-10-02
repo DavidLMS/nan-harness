@@ -330,7 +330,7 @@ impl Native {
     }
 }
 
-fn claude_focus_policy() -> bool {
+pub(crate) fn claude_focus_policy() -> bool {
     let Some(directory) = std::env::var_os("NANH_DESKTOP_QUALIFICATION_FACTS").map(PathBuf::from)
     else {
         return false;

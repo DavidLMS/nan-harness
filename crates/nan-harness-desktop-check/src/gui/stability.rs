@@ -3,6 +3,7 @@
 use crate::native::Window;
 use serde::Serialize;
 use std::io::Write as _;
+use std::time::{Duration, Instant};
 
 #[derive(Default, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -91,6 +92,78 @@ impl Stability {
         {
             let _ = file.write_all(&bytes).and_then(|()| file.sync_all());
         }
+    }
+}
+
+/// Initial observation only: readiness never authorizes rebinding an acquired window.
+#[derive(Default)]
+pub(super) struct InitialSettle {
+    since: Option<Instant>,
+    observations: u16,
+}
+impl InitialSettle {
+    pub(super) fn ready(
+        &mut self,
+        extended: bool,
+        now: Instant,
+        unchanged: bool,
+        deadline: Instant,
+    ) -> bool {
+        if extended {
+            self.observe(now, unchanged, deadline)
+        } else {
+            unchanged && now < deadline
+        }
+    }
+    pub(super) fn reset(&mut self) {
+        self.since = None;
+        self.observations = 0;
+    }
+    pub(super) fn observe(&mut self, now: Instant, unchanged: bool, deadline: Instant) -> bool {
+        if !unchanged || self.since.is_none() {
+            self.since = Some(now);
+            self.observations = 1;
+        } else {
+            self.observations = self.observations.saturating_add(1);
+        }
+        now < deadline
+            && self.observations >= 3
+            && self
+                .since
+                .is_some_and(|since| now.saturating_duration_since(since) >= Duration::from_secs(2))
+    }
+}
+#[cfg(test)]
+mod initial_settle_tests {
+    use super::*;
+    #[test]
+    fn readiness_requires_time_continuity_and_original_deadline() {
+        let now = Instant::now();
+        let deadline = now + Duration::from_secs(45);
+        let mut state = InitialSettle::default();
+        assert!(!state.ready(false, now, false, deadline));
+        assert!(state.ready(false, now + Duration::from_millis(200), true, deadline));
+        assert!(!state.ready(false, deadline, true, deadline));
+        assert!(!state.observe(now, false, deadline));
+        assert!(!state.observe(now + Duration::from_millis(200), true, deadline));
+        assert!(!state.observe(now + Duration::from_millis(400), true, deadline));
+        assert!(state.observe(now + Duration::from_secs(2), true, deadline));
+        assert!(!state.observe(deadline, true, deadline));
+    }
+    #[test]
+    fn missing_snapshot_or_changed_candidate_starts_a_new_sequence() {
+        let now = Instant::now();
+        let deadline = now + Duration::from_secs(45);
+        let mut state = InitialSettle::default();
+        state.observe(now, false, deadline);
+        state.observe(now + Duration::from_secs(1), true, deadline);
+        state.reset();
+        assert!(!state.observe(now + Duration::from_secs(2), true, deadline));
+        assert!(!state.observe(now + Duration::from_secs(3), true, deadline));
+        assert!(state.observe(now + Duration::from_secs(4), true, deadline));
+        assert!(!state.observe(now + Duration::from_secs(5), false, deadline));
+        assert!(!state.observe(now + Duration::from_secs(6), true, deadline));
+        assert!(state.observe(now + Duration::from_secs(7), true, deadline));
     }
 }
 

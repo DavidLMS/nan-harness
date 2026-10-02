@@ -286,6 +286,9 @@ impl Visual {
             )
         })?;
         let deadline = Instant::now() + Duration::from_secs(45);
+        let extended_settle =
+            kind == DesktopHarnessKind::Claude && crate::native::claude_focus_policy();
+        let mut settle = super::stability::InitialSettle::default();
         let mut previous = None;
         let mut inventory = CandidateInventory::default();
         let mut stability = super::stability::Stability::default();
@@ -297,6 +300,8 @@ impl Visual {
             })?;
             inventory.clear_facts();
             let Some(snapshot) = wait_snapshot(&native, previous.is_none(), deadline)? else {
+                previous = None;
+                settle.reset();
                 std::thread::sleep(Duration::from_millis(200));
                 continue;
             };
@@ -332,7 +337,9 @@ impl Visual {
                 if fitted && !snapshot.contains_display(window) {
                     return Err(postcondition_geometry_failure());
                 }
-                if previous.as_ref() == Some(*window) {
+                let unchanged = previous.as_ref() == Some(*window);
+                let ready = settle.ready(extended_settle, Instant::now(), unchanged, deadline);
+                if ready {
                     stability.save();
                     #[cfg(target_os = "macos")]
                     initial_readiness(&native, &snapshot, window, owner)?;
@@ -343,6 +350,9 @@ impl Visual {
                     });
                 }
                 previous = Some((*window).clone());
+            } else {
+                previous = None;
+                settle.reset();
             }
             if Instant::now() >= deadline {
                 stability.save_failure(&native, &snapshot, previous.as_ref());
