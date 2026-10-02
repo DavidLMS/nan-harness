@@ -24,8 +24,12 @@ fn run() -> Result<i32, ()> {
         return Err(());
     }
     let args: Vec<_> = env::args_os().skip(1).collect();
-    let observe = args.first().is_some_and(|arg| arg == "hermes-desktop")
-        && args.iter().any(|arg| arg == "--provider-base-url");
+    let observe = args.first().is_some_and(|arg| {
+        matches!(
+            arg.to_str(),
+            Some("hermes-desktop" | "chatgpt-desktop" | "claude-desktop" | "pen-desktop")
+        )
+    }) && args.iter().any(|arg| arg == "--provider-base-url");
     let port = if observe {
         if env::var("GITHUB_ACTIONS").as_deref() != Ok("true")
             || env::var("RUNNER_ENVIRONMENT").as_deref() != Ok("github-hosted")
@@ -42,11 +46,20 @@ fn run() -> Result<i32, ()> {
     } else {
         None
     };
-    let mut child = Command::new(real)
-        .args(port.map_or_else(
+    let hermes = args.first().is_some_and(|arg| arg == "hermes-desktop");
+    let mut command = Command::new(real);
+    command.args(if hermes {
+        port.map_or_else(
             || args.clone(),
             |port| command_arguments(args.clone(), port),
-        ))
+        )
+    } else {
+        args
+    });
+    if !hermes && let Some(port) = port {
+        command.env("NANH_DESKTOP_QUALIFICATION_CDP_PORT", port.to_string());
+    }
+    let mut child = command
         .stdin(Stdio::null())
         .stdout(if observe {
             Stdio::null()

@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 import re
 
-from desktop_diagnostics import CATEGORIES, REASONS
+from desktop_diagnostics import CATEGORIES, REASONS, validate_bundle
 from desktop_startup import startup
 from desktop_suite import read_frozen_manifest, validated_report
 
@@ -19,6 +19,9 @@ BACKENDS = {('zed-desktop', 'macos', 'aarch64'): 'native-thread-export',
             ('hermes-desktop', 'linux', 'x86_64'): 'renderer-dom',
             ('hermes-desktop', 'macos', 'aarch64'): 'renderer-dom',
             ('hermes-desktop', 'windows', 'x86_64'): 'renderer-dom'}
+BACKENDS.update({(app, platform, architecture): 'renderer-inventory'
+                 for app in ('chatgpt-desktop', 'claude-desktop', 'pen-desktop')
+                 for platform, architecture, _ in TARGETS})
 STEPS = {'launched', 'input-submitted', 'response-verified', 'tool-verified', 'error-recovered'}
 COMMIT = re.compile(r'[0-9a-f]{40}\Z')
 HASH = re.compile(r'[0-9a-f]{64}\Z')
@@ -61,7 +64,7 @@ def envelope(app, platform, architecture, source_sha):
                 realNanhSha256=None, frozenManifestSha256=None, preparedSha256=None,
                 reportSha256=None, applicationSha256=None, upstreamRevision=None,
                 upstreamArtifactSha256=None, appVersion=None, runtimeVersion=None,
-                appCleanup=None, globalCleanup=None, probes=[], semanticObservations=[])
+                appCleanup=None, globalCleanup=None, probes=[], semanticObservations=[], nativeDiagnostics=[])
 
 
 def bounded_json(path, limit=1024 * 1024):
@@ -94,7 +97,8 @@ def semantic_observations(directory, app):
     # separately so they cannot consume or bypass the closed-record budget.
     if len(private) > 12:
         raise ValueError('too many private semantic metadata files')
-    paths = [path for path in all_paths if not path.name.startswith(('connection-', 'startup-', 'closed-startup-'))]
+    paths = [path for path in all_paths if path.name != 'native-diagnostics.json'
+             and not path.name.startswith(('connection-', 'startup-', 'closed-startup-'))]
     if len(paths) > 32:
         raise ValueError('too many semantic observations')
     startup_paths = [path for path in private if path.name.startswith('closed-startup-')]
@@ -123,13 +127,26 @@ def semantic_observations(directory, app):
         if type(value) is not dict:
             raise ValueError('invalid semantic observation')
         mechanism = value.get('mechanism')
-        if mechanism not in {'hermes-renderer-qualification', 'zed-native-copy', 'semantic-provider-oracle', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'hermes-front-source'}:
+        if mechanism not in {'hermes-renderer-qualification', 'zed-native-copy', 'semantic-provider-oracle', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'hermes-front-source', 'renderer-inventory'}:
             continue
         expected = 'hermes-renderer-qualification' if app == 'hermes-desktop' else 'zed-native-copy'
-        if (mechanism != expected and mechanism not in {'semantic-provider-oracle', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'hermes-front-source'}) or type(value.get('schemaVersion')) is not int or value['schemaVersion'] != 1:
+        if (mechanism != expected and mechanism not in {'semantic-provider-oracle', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'hermes-front-source', 'renderer-inventory'}) or type(value.get('schemaVersion')) is not int or value['schemaVersion'] != 1:
             raise ValueError('semantic observation identity differs')
         record = {'schemaVersion': 1, 'mechanism': mechanism}
-        if mechanism == 'semantic-inventory':
+        if mechanism == 'renderer-inventory':
+            fields = set('schemaVersion mechanism diagnosticsOnly app endpointOwned launcherOwned attached pageCount textareaCount editableCount sendCount retryCount newThreadCount loginCount dialogCount errorCategory'.split())
+            if set(value) != fields or value['app'] != app or value['diagnosticsOnly'] is not True:
+                raise ValueError('invalid renderer inventory identity')
+            for key in ('endpointOwned', 'launcherOwned', 'attached'):
+                flag(record, value, key)
+            for key in ('pageCount', 'textareaCount', 'editableCount', 'sendCount', 'retryCount', 'newThreadCount', 'loginCount', 'dialogCount'):
+                count = value[key]
+                if type(count) is not int or not 0 <= count <= 4096:
+                    raise ValueError('invalid renderer inventory count')
+                record[key] = count
+            enum(record, value, 'errorCategory', DOM_ERRORS)
+            record.update(app=app, diagnosticsOnly=True)
+        elif mechanism == 'semantic-inventory':
             for key in ('requestCount', 'toolCount', 'knownReadToolCount'):
                 count = value.get(key)
                 if type(count) is not int or not 0 <= count <= 4096:
@@ -277,6 +294,11 @@ def reduce_report(*, app, platform, architecture, source_sha, model, frozen, pre
                   checker, launcher, real_nanh, report, facts=None):
     result = envelope(app, platform, architecture, source_sha)
     result['semanticObservations'] = semantic_observations(facts, app)
+    if facts is not None and (Path(facts) / 'native-diagnostics.json').exists():
+        bundle = validate_bundle(Path(facts) / 'native-diagnostics.json', source_sha, platform)
+        if any(event['record'].get('app') != app for event in bundle['events']):
+            raise ValueError('native diagnostic application differs')
+        result['nativeDiagnostics'] = bundle['events']
     if result['backend'] == 'pending':
         raise ValueError('native backend is not qualified for this cell')
     manifest = read_frozen_manifest(frozen, [app], platform, architecture, model)
@@ -328,7 +350,7 @@ def reduce_report(*, app, platform, architecture, source_sha, model, frozen, pre
     policy_disclosed = app != 'hermes-desktop' or sum(
         observation['mechanism'] == 'hermes-retry-policy'
         for observation in result['semanticObservations']) == 3
-    accepted = (policy_disclosed and len(probes) == 3 and result['appCleanup'] == 'passed' and result['globalCleanup'] == 'passed'
+    accepted = (result['backend'] != 'renderer-inventory' and policy_disclosed and len(probes) == 3 and result['appCleanup'] == 'passed' and result['globalCleanup'] == 'passed'
                 and all(probe.get('status') == 'passed' and len(probe.get('steps', [])) == 5
                         and set(probe.get('steps', [])) == STEPS
                         and (probe.get('inputMode'), probe.get('responseVerification')) in semantic_pairs for probe in probes))

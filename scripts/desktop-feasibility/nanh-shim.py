@@ -13,20 +13,24 @@ Capture = runpy.run_path(str(Path(__file__).with_name("hermes-startup.py")))["Ca
 
 real = os.environ['FEASIBILITY_REAL_NANH']
 args = sys.argv[1:]
-if not args or args[0] != 'hermes-desktop' or '--provider-base-url' not in args:
+if not args or args[0] not in {'hermes-desktop', 'chatgpt-desktop', 'claude-desktop', 'pen-desktop'} or '--provider-base-url' not in args:
     os.execv(real, [real, *args])
+hermes = args[0] == 'hermes-desktop'
 cdp = os.environ.get('FEASIBILITY_HERMES_CDP', 'enabled') != 'disabled'
 command = [real, *args]
 scoped_namespace = os.environ.get('FEASIBILITY_HERMES_NAMESPACE_POLICY') == 'scoped-apparmor-userns'
-if scoped_namespace:
+if scoped_namespace and hermes:
     command.extend([*([] if '--' in args else ['--']), '--disable-setuid-sandbox'])
 if cdp:
     with socket.socket() as listener:
         listener.bind(('127.0.0.1', 0))
         port = listener.getsockname()[1]
     delimiter = [] if '--' in command else ['--']
-    command.extend([*delimiter, f'--remote-debugging-port={port}',
-                    '--remote-debugging-address=127.0.0.1'])
+    if hermes:
+        command.extend([*delimiter, f'--remote-debugging-port={port}',
+                        '--remote-debugging-address=127.0.0.1'])
+    else:
+        os.environ['NANH_DESKTOP_QUALIFICATION_CDP_PORT'] = str(port)
 child = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
 capture = Capture(child.stderr)
 capture.start()
@@ -34,13 +38,14 @@ code = None
 observer = None
 startup_output = Path(os.environ['FEASIBILITY_FACTS']) / f'closed-startup-{child.pid}.json'
 def interrupted(number, _frame):
-    capture.save(startup_output, code, join_timeout=0)
+    if hermes:
+        capture.save(startup_output, code, join_timeout=0)
     raise SystemExit(128 + number)
 
 signal.signal(signal.SIGTERM, interrupted)
 signal.signal(signal.SIGINT, interrupted)
 try:
-    if cdp and os.environ.get('FEASIBILITY_HERMES_DOM_INPUT') == '1':
+    if cdp and (not hermes or os.environ.get('FEASIBILITY_HERMES_DOM_INPUT') == '1'):
         connection = Path(os.environ['FEASIBILITY_FACTS']) / f'connection-{os.getpid()}.json'
         with connection.open('x') as output:
             os.chmod(connection, 0o600)
@@ -50,7 +55,8 @@ try:
                                  str(port), str(child.pid),
                                  str(Path(os.environ['FEASIBILITY_FACTS']) / f'{child.pid}.json')],
                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    capture.save(startup_output, code, join_timeout=0)
+    if hermes:
+        capture.save(startup_output, code, join_timeout=0)
     code = child.wait()
 finally:
     if child.poll() is None:
@@ -66,5 +72,6 @@ finally:
         except subprocess.TimeoutExpired:
             observer.terminate()
             observer.wait(timeout=5)
-    capture.save(startup_output, code)
+    if hermes:
+        capture.save(startup_output, code)
 sys.exit(code)

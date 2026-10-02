@@ -185,7 +185,7 @@ impl SystemPenProcess {
         let executable = self
             .resolve_executable()
             .ok_or(PenDesktopError::AppNotFound)?;
-        let command = if self.platform == PenPlatform::Macos && !owned_app {
+        let mut command = if self.platform == PenPlatform::Macos && !owned_app {
             let app = executable
                 .parent()
                 .and_then(Path::parent)
@@ -197,6 +197,9 @@ impl SystemPenProcess {
         } else {
             Command::new(executable)
         };
+        if self.platform != PenPlatform::Macos || owned_app {
+            command.args(crate::commands::desktop::qualification_renderer_arguments());
+        }
         Ok(command)
     }
 

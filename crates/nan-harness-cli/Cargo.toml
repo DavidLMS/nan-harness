@@ -16,6 +16,10 @@ path = "src/main.rs"
 name = "nanh"
 path = "src/bin/nanh.rs"
 
+[features]
+# Disposable hosted desktop qualification only; omitted from released builds.
+desktop-qualification = []
+
 [dependencies]
 base64.workspace = true
 nan-harness-i18n = { path = "../nan-harness-i18n", version = "0.1.6" }

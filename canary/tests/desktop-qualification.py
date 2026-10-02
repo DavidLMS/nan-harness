@@ -92,11 +92,11 @@ class RunnerTests(unittest.TestCase):
 
 
 class QualificationTests(unittest.TestCase):
-    def test_exact_initial_matrix_and_two_explicit_backends(self):
+    def test_exact_initial_matrix_separates_scenario_backends_and_inventories(self):
         cells = q.matrix()['include']
         self.assertEqual(len(cells), 15)
         self.assertEqual(len({(c['app'], c['platform'], c['architecture']) for c in cells}), 15)
-        self.assertEqual(sum(c['backend'] != 'pending' for c in cells), 6)
+        self.assertEqual(sum(c['backend'] != 'renderer-inventory' for c in cells), 6)
         self.assertEqual({(c['platform'], c['architecture']) for c in cells},
                          {('linux', 'x86_64'), ('macos', 'aarch64'), ('windows', 'x86_64')})
         with self.assertRaises(ValueError):
@@ -469,6 +469,23 @@ class QualificationTests(unittest.TestCase):
                 path.write_text(json.dumps(changed))
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'hermes-desktop')
+
+    def test_renderer_inventory_is_closed_and_cannot_claim_acceptance(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            value = dict(schemaVersion=1, mechanism='renderer-inventory', diagnosticsOnly=True,
+                         app='pen-desktop', endpointOwned=True, launcherOwned=True, attached=True,
+                         pageCount=1, textareaCount=1, editableCount=0, sendCount=1,
+                         retryCount=0, newThreadCount=0, loginCount=0, dialogCount=0, errorCategory=None)
+            path = root / 'inventory.json'
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(root, 'pen-desktop'), [value])
+            self.assertEqual(q.envelope('pen-desktop', 'linux', 'x86_64', 'a' * 40)['qualification'], 'unqualified')
+            for changed in ({**value, 'html': 'PRIVATE'}, {**value, 'sendCount': True},
+                            {**value, 'app': 'claude-desktop'}):
+                path.write_text(json.dumps(changed))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'pen-desktop')
 
 if __name__ == '__main__':
     unittest.main()

@@ -6,12 +6,12 @@ on:
         description: One bounded native experiment
         type: choice
         default: all
-        options: [all, zed-desktop, hermes-desktop]
+        options: [all, zed-desktop, hermes-desktop, chatgpt-desktop, claude-desktop, pen-desktop]
       platform:
         description: Native target; pilots keeps the previously qualified pair
         type: choice
         default: pilots
-        options: [pilots, expansion, macos, linux, windows]
+        options: [pilots, expansion, remaining, all, macos, linux, windows]
       quality_only:
         description: Verify integration without repeating native measurements
         type: boolean
@@ -57,7 +57,8 @@ jobs:
                    and (selected == 'all' or c['app'] == selected)
                    and (platform == 'pilots' and (c['app'], c['platform']) in
                         {('zed-desktop', 'macos'), ('hermes-desktop', 'linux')}
-                        or platform == c['platform']
+                        or platform == 'all' or platform == c['platform']
+                        or platform == 'remaining' and c['app'] in {'chatgpt-desktop', 'claude-desktop', 'pen-desktop'}
                         or platform == 'expansion' and (c['app'], c['platform']) not in
                         {('zed-desktop', 'macos'), ('hermes-desktop', 'linux')})]
           if not cells:
@@ -143,9 +144,9 @@ jobs:
           echo "FEASIBILITY_ZED_EXPORT_PARSER=$GITHUB_WORKSPACE/scripts/desktop-feasibility/zed-export.py" >> "$GITHUB_ENV"
           echo 'FEASIBILITY_ZED_RESPONSE_METHOD=thread-export' >> "$GITHUB_ENV"
       - name: Build exact branch binaries
-        run: cargo build --locked -p nan-harness-desktop-check -p nan-harness-cli --bins
+        run: cargo build --locked -p nan-harness-desktop-check -p nan-harness-cli --features nan-harness-cli/desktop-qualification --bins
       - name: Install pinned observation client
-        if: matrix.app == 'hermes-desktop'
+        if: matrix.app != 'zed-desktop'
         run: npm ci --prefix .github/web-check --ignore-scripts
       - name: Remove Linux debug symbols before bounded identity hashing
         if: runner.os == 'Linux'
@@ -158,7 +159,7 @@ jobs:
           echo "FEASIBILITY_REAL_NANH=$GITHUB_WORKSPACE/target/debug/nan-harness$suffix" >> "$GITHUB_ENV"
           echo "FEASIBILITY_CHECKER=$GITHUB_WORKSPACE/target/debug/nanh-desktop-check$suffix" >> "$GITHUB_ENV"
       - name: Build fixed Windows Hermes launcher
-        if: runner.os == 'Windows' && matrix.app == 'hermes-desktop'
+        if: runner.os == 'Windows' && matrix.app != 'zed-desktop'
         shell: bash
         run: |
           rustc --edition 2024 scripts/desktop-feasibility/nanh-shim.rs -o "$RUNNER_TEMP/nanh-hermes-launcher.exe"
@@ -174,7 +175,11 @@ jobs:
           if [[ '${{ matrix.app }}' == hermes-desktop ]]; then
             freeze_args=(--tag v2026.9.24 --expected-revision f97608f178d1ffeca59860195ab7da295f7c8e5f)
           fi
-          python3 scripts/desktop-feasibility/freeze-official.py "${freeze_args[@]}" --app '${{ matrix.app }}' --platform '${{ matrix.platform }}' --output "$RUNNER_TEMP/semantic-feasibility/frozen.json"
+          if [[ '${{ matrix.app }}' == zed-desktop || '${{ matrix.app }}' == hermes-desktop ]]; then
+            python3 scripts/desktop-feasibility/freeze-official.py "${freeze_args[@]}" --app '${{ matrix.app }}' --platform '${{ matrix.platform }}' --output "$RUNNER_TEMP/semantic-feasibility/frozen.json"
+          else
+            "$FEASIBILITY_CHECKER" resolve --app '${{ matrix.app }}' --model qwen3.6 --artifacts "$RUNNER_TEMP/semantic-feasibility/artifacts" --output "$RUNNER_TEMP/semantic-feasibility/frozen.json"
+          fi
       - name: Install exact frozen application without credentials
         env:
           FEASIBILITY_FACTS: ${{ runner.temp }}/semantic-feasibility/facts
@@ -192,7 +197,7 @@ jobs:
           set -euo pipefail
           unset NAN_API_KEY GH_TOKEN GITHUB_TOKEN
           nanh="$FEASIBILITY_REAL_NANH"
-          if [[ '${{ matrix.app }}' == hermes-desktop ]]; then
+          if [[ '${{ matrix.app }}' != zed-desktop ]]; then
             nanh="${FEASIBILITY_HERMES_LAUNCHER:-$GITHUB_WORKSPACE/scripts/desktop-feasibility/nanh-shim.py}"
           fi
           "$FEASIBILITY_CHECKER" prepare --app '${{ matrix.app }}' --model qwen3.6 --yes --non-interactive --ephemeral --nan-harness "$nanh" --frozen "$RUNNER_TEMP/semantic-feasibility/frozen.json" --artifacts "$RUNNER_TEMP/semantic-feasibility/artifacts" --output "$RUNNER_TEMP/semantic-feasibility/prepared.json"
@@ -236,7 +241,7 @@ jobs:
           set -euo pipefail
           if [[ -f "$RUNNER_TEMP/semantic-feasibility/report.json" ]]; then
             launcher="$FEASIBILITY_REAL_NANH"
-            if [[ '${{ matrix.app }}' == hermes-desktop ]]; then
+            if [[ '${{ matrix.app }}' != zed-desktop ]]; then
               launcher="${FEASIBILITY_HERMES_LAUNCHER:-$GITHUB_WORKSPACE/scripts/desktop-feasibility/nanh-shim.py}"
             fi
             python3 canary/actions/desktop_qualification.py reduce --app '${{ matrix.app }}' --platform '${{ matrix.platform }}' --architecture '${{ matrix.architecture }}' --source-sha "$GITHUB_SHA" --model qwen3.6 --checker "$FEASIBILITY_CHECKER" --launcher "$launcher" --real-nanh "$FEASIBILITY_REAL_NANH" --prepared "$RUNNER_TEMP/semantic-feasibility/prepared.json" --frozen "$RUNNER_TEMP/semantic-feasibility/frozen.json" --report "$RUNNER_TEMP/semantic-feasibility/report.json" --facts "$RUNNER_TEMP/semantic-feasibility/qualification-facts" --output "$RUNNER_TEMP/semantic-feasibility/qualification.json"

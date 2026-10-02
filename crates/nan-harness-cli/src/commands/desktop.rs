@@ -214,3 +214,60 @@ mod warning_tests {
         assert!(!warning.contains("--allow-untested"));
     }
 }
+
+/// Fixed loopback renderer instrumentation, absent from normal CLI builds.
+pub(crate) fn qualification_renderer_arguments() -> Vec<String> {
+    #[cfg(feature = "desktop-qualification")]
+    {
+        let hosted = std::env::var("GITHUB_ACTIONS").as_deref() == Ok("true")
+            && std::env::var("RUNNER_ENVIRONMENT").as_deref() == Ok("github-hosted");
+        renderer_arguments(
+            hosted,
+            std::env::var_os("NANH_DESKTOP_QUALIFICATION_FACTS")
+                .map(std::path::PathBuf::from)
+                .as_deref(),
+            std::env::var("NANH_DESKTOP_QUALIFICATION_CDP_PORT")
+                .ok()
+                .as_deref(),
+        )
+    }
+    #[cfg(not(feature = "desktop-qualification"))]
+    Vec::new()
+}
+
+#[cfg(feature = "desktop-qualification")]
+fn renderer_arguments(hosted: bool, directory: Option<&Path>, port: Option<&str>) -> Vec<String> {
+    if hosted
+        && directory.is_some_and(|path| path.is_absolute() && path.is_dir() && !path.is_symlink())
+        && let Some(port) = port.and_then(|value| value.parse::<u16>().ok())
+        && port > 1024
+    {
+        return vec![
+            format!("--remote-debugging-port={port}"),
+            "--remote-debugging-address=127.0.0.1".into(),
+        ];
+    }
+    Vec::new()
+}
+
+#[cfg(all(test, feature = "desktop-qualification"))]
+mod renderer_tests {
+    use super::renderer_arguments;
+    #[test]
+    fn instrumentation_requires_owned_hosted_context_and_numeric_loopback_port() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = Some(directory.path());
+        assert!(renderer_arguments(false, root, Some("43210")).is_empty());
+        assert!(renderer_arguments(true, None, Some("43210")).is_empty());
+        for port in ["0", "1024", "65536", "43210 --no-sandbox", "*:43210"] {
+            assert!(renderer_arguments(true, root, Some(port)).is_empty());
+        }
+        assert_eq!(
+            renderer_arguments(true, root, Some("43210")),
+            [
+                "--remote-debugging-port=43210",
+                "--remote-debugging-address=127.0.0.1"
+            ]
+        );
+    }
+}

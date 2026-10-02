@@ -136,6 +136,7 @@ impl DesktopProcess for SystemDesktopProcess {
                 return run_launcher("/usr/bin/open", &[executable.as_os_str()]);
             }
             return Command::new(executable)
+                .args(crate::commands::desktop::qualification_renderer_arguments())
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())

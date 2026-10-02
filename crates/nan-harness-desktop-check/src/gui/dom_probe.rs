@@ -626,6 +626,28 @@ fn read_facts(path: &Path, qualification: bool) -> Result<Facts, Reason> {
 }
 
 impl Gui {
+    pub(crate) fn inventory_renderer(&self, directory: &Path, owner: u32) -> Result<(), Reason> {
+        self.visual.guard()?;
+        let driver = std::env::var_os("NANH_DESKTOP_RENDERER_DRIVER")
+            .map(std::path::PathBuf::from)
+            .ok_or(Reason::IsolationUnavailable)?;
+        if !driver.is_absolute() || !driver.is_file() || driver.is_symlink() {
+            return Err(Reason::IsolationUnavailable);
+        }
+        let request_path = directory.join(format!("renderer-inventory-{owner}.private"));
+        let output_path = directory.join(format!("renderer-inventory-{owner}.json"));
+        let request = serde_json::json!({"ownerPid": owner,
+            "connectionPath": directory.join(format!("connection-{owner}.json"))});
+        open_private_new(&request_path)
+            .and_then(|mut file| file.write_all(request.to_string().as_bytes()))
+            .map_err(|_| Reason::IsolationUnavailable)?;
+        let outcome = self.run_dom_driver(&driver, &request_path, &output_path, false);
+        std::fs::remove_file(request_path).map_err(|_| Reason::IsolationUnavailable)?;
+        outcome?;
+        // An inventory can never satisfy input, response, tool or recovery acceptance.
+        Err(Reason::ActionUnsupported)
+    }
+
     pub(crate) fn qualify_dom_turn(
         &self,
         directory: &Path,

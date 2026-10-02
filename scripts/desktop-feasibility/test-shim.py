@@ -37,7 +37,7 @@ class ShimLifecycle(unittest.TestCase):
                 self.invoke(args)
             self.assertEqual(spawn.call_count, 1)
             self.assertEqual(spawn.call_args.args[0], ['/synthetic/nanh', *args])
-            self.assertTrue((Path(facts) / 'startup-123.json').exists())
+            self.assertTrue((Path(facts) / 'closed-startup-123.json').exists())
 
     def test_scoped_namespace_uses_upstream_suid_disable_only(self):
         args = ['hermes-desktop', '--provider-base-url', 'http://127.0.0.1']

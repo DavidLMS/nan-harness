@@ -33,11 +33,6 @@ impl SemanticBackend {
         if spec.live || spec.session != SessionMode::GithubHosted || !spec.session.available() {
             return Err(Reason::IsolationUnavailable);
         }
-        let supported = matches!(spec.kind, DesktopHarnessKind::Zed)
-            || matches!(spec.kind, DesktopHarnessKind::Hermes);
-        if !supported {
-            return Err(Reason::ActionUnsupported);
-        }
         let directory = std::env::var_os("NANH_DESKTOP_QUALIFICATION_FACTS")
             .map(PathBuf::from)
             .ok_or(Reason::IsolationUnavailable)?;
@@ -77,7 +72,10 @@ impl SemanticBackend {
                     owner: owner.ok_or(Reason::ApplicationExited)?,
                 }
             }
-            _ => return Err(Reason::ActionUnsupported),
+            DesktopHarnessKind::ChatGpt | DesktopHarnessKind::Claude | DesktopHarnessKind::Pen => {
+                return gui
+                    .inventory_renderer(&self.directory, owner.ok_or(Reason::ApplicationExited)?);
+            }
         };
         let outcome = complete_scenario(&mut ui, &scenario, &self.directory, result).await;
         ui.finish(scenario.gate, outcome)

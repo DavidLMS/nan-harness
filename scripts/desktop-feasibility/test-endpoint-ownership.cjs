@@ -2,8 +2,8 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
-const source = fs.readFileSync(`${__dirname}/observe-hermes.cjs`, 'utf8');
-const proof = source.slice(source.indexOf('function windowsProof('), source.indexOf('function delay('));
+const source = fs.readFileSync(`${__dirname}/endpoint-ownership.cjs`, 'utf8');
+const proof = source.slice(source.indexOf('function windowsProof('), source.indexOf('return { ownedEndpoint'));
 function trial(listing, parents, failure = false) {
   let calls = 0;
   const context = { owner: '20', port: '43210', process: { platform: 'darwin' }, require(name) {

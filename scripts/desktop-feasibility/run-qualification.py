@@ -8,8 +8,9 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'canary/actions'))
-from cell import private_command, ensure_private_directory
-from desktop_qualification import bounded_json, cell, digest, envelope
+from cell import private_command, ensure_private_directory, write_json
+from desktop_diagnostics import Capture
+from desktop_qualification import APPS, bounded_json, cell, digest, envelope
 from desktop_suite import read_frozen_manifest
 
 # Start from a session allowlist, rather than attempting to enumerate every
@@ -46,6 +47,9 @@ def qualification_environment(app, facts, real_nanh, executable, inherited=None)
                            FEASIBILITY_HERMES_CDP='enabled', FEASIBILITY_HERMES_DOM_INPUT='1',
                            FEASIBILITY_HERMES_EXECUTABLE=str(executable),
                            FEASIBILITY_HERMES_DOM_DRIVER=str(Path(__file__).with_name('observe-hermes.cjs').resolve()))
+    elif app in {'chatgpt-desktop', 'claude-desktop', 'pen-desktop'}:
+        environment.update(NANH_DESKTOP_RENDERER_APP=app,
+                           NANH_DESKTOP_RENDERER_DRIVER=str(Path(__file__).with_name('observe-renderer.cjs').resolve()))
     else:
         raise ValueError('qualification backend is unavailable')
     return environment
@@ -93,9 +97,12 @@ def run(args):
                '--yes', '--non-interactive', '--ephemeral', '--mode', 'deterministic',
                '--session', 'github-hosted', '--verification', 'semantic-only',
                '--prepared', str(args.prepared), '--output', str(report)]
+    capture = Capture(args.platform)
     try:
         status = private_command(command, args.directory, timeout=1200, allow_failure=True,
-                                 environment=environment)
+                                 environment=environment, diagnostic_callback=capture.observe)
+        write_json(facts / "native-diagnostics.json", dict(schemaVersion=1, sourceSha=args.source_sha,
+                   platform=args.platform, events=capture.events, invalidEvents=capture.invalid))
         if report.exists():
             report_hash = digest(report)
             subprocess.run([str(args.checker), 'validate-report', str(report)], env=environment,
@@ -119,7 +126,7 @@ def run(args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--app', choices=['zed-desktop', 'hermes-desktop'], required=True)
+    parser.add_argument('--app', choices=APPS, required=True)
     parser.add_argument('--platform', choices=['linux', 'macos', 'windows'], required=True)
     parser.add_argument('--source-sha', required=True)
     parser.add_argument('--release-tag')
