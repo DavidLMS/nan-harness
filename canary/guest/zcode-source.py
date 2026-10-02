@@ -17,9 +17,29 @@ SEMVER = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+\Z")
 COMMIT = re.compile(r"[0-9a-f]{40}\Z")
 
 
-def run(arguments, cwd, environment=None):
-    return subprocess.run([str(a) for a in arguments], cwd=cwd, env=environment,
-                          check=True, timeout=1200, capture_output=True, text=True).stdout.strip()
+STAGES = frozenset({"git-init", "git-fetch", "git-checkout", "node-install", "pnpm-install",
+                    "runtime-verify", "dependencies", "build", "command-verify", "terminal-driver", "probe"})
+
+
+class SourceFailure(ValueError):
+    """A source stage failed; its private child output never enters a report."""
+
+    def __init__(self, stage, reason="exit-nonzero"):
+        super().__init__("ZCode source stage failed")
+        self.stage, self.reason = stage, reason
+
+
+def run(arguments, cwd, environment=None, stage="probe"):
+    if stage not in STAGES:
+        raise ValueError("unknown source stage")
+    try:
+        return subprocess.run([str(a) for a in arguments], cwd=cwd, env=environment,
+                              check=True, timeout=1200, capture_output=True,
+                              encoding="utf-8", errors="replace").stdout.strip()
+    except (OSError, subprocess.SubprocessError) as error:
+        reason = ("stage-timeout" if isinstance(error, subprocess.TimeoutExpired) else
+                  "tool-missing" if isinstance(error, OSError) else "exit-nonzero")
+        raise SourceFailure(stage, reason) from error
 
 
 def bind(source):
@@ -57,10 +77,10 @@ def install(version, ref, destination):
     source = destination / "zcode-source"
     # Cells own this directory; never reuse or replace a caller's source checkout.
     source.mkdir(parents=True, exist_ok=False)
-    run(["git", "init", "-q"], source)
+    run(["git", "init", "-q"], source, stage="git-init")
     run(["git", "remote", "add", "origin", "https://github.com/zai-org/ZCode.git"], source)
-    run(["git", "fetch", "--depth", "1", "origin", ref], source)
-    run(["git", "checkout", "--detach", "FETCH_HEAD"], source)
+    run(["git", "fetch", "--depth", "1", "origin", ref], source, stage="git-fetch")
+    run(["git", "checkout", "--detach", "FETCH_HEAD"], source, stage="git-checkout")
     if run(["git", "rev-parse", "HEAD"], source) != ref:
         raise ValueError("ZCode source identity changed")
     project = json.loads((source / "apps/zcode-cli/package.json").read_bytes())
@@ -73,18 +93,18 @@ def install(version, ref, destination):
     npm = npm_command()
     # Node's npm package downloads its platform runtime in its install script.
     # All tools and caches are cell-owned; no global runtime is changed.
-    run([*npm, "install", "--prefix", tools, "--no-audit", "--no-fund", "node@" + node_version], source)
-    run([*npm, "install", "--prefix", tools, "--ignore-scripts", "--no-audit", "--no-fund", manager], source)
+    run([*npm, "install", "--prefix", tools, "--no-audit", "--no-fund", "node@" + node_version], source, stage="node-install")
+    run([*npm, "install", "--prefix", tools, "--ignore-scripts", "--no-audit", "--no-fund", manager], source, stage="pnpm-install")
     node = tools / "node_modules/node/bin" / ("node.exe" if os.name == "nt" else "node")
     pnpm = tools / "node_modules/pnpm/bin/pnpm.cjs"
     environment = dict(os.environ, PATH=str(node.parent) + os.pathsep + os.environ.get("PATH", ""))
-    if run([node, "--version"], source, environment) != "v" + node_version:
+    if run([node, "--version"], source, environment, stage="runtime-verify") != "v" + node_version:
         raise ValueError("ZCode source runtime could not be verified")
-    run([node, pnpm, "--filter", "@zcode/cli...", "install", "--ignore-scripts", "--frozen-lockfile"], source, environment)
+    run([node, pnpm, "--filter", "@zcode/cli...", "install", "--ignore-scripts", "--frozen-lockfile"], source, environment, stage="dependencies")
     bind(source)
-    run([node, pnpm, "--filter", "@zcode/cli...", "build"], source, environment)
+    run([node, pnpm, "--filter", "@zcode/cli...", "build"], source, environment, stage="build")
     for argument, expected in (("version", version), ("--nanh-source-info", "nanh-zcode-config-v1")):
-        if expected not in run([node, source / CLI, argument], source, environment):
+        if expected not in run([node, source / CLI, argument], source, environment, stage="command-verify"):
             raise ValueError("ZCode built command failed verification")
     bin_directory = Path(os.environ.get("HOME", "")) / ".local/bin"
     bin_directory.mkdir(parents=True, exist_ok=True)
@@ -97,7 +117,7 @@ def install(version, ref, destination):
     launcher.chmod(0o755)
     if os.name == "nt":
         run([sys.executable, "-m", "pip", "install", "--only-binary=:all:", "--target",
-             source / ".python-tools", "pywinpty==3.0.5"], source)
+             source / ".python-tools", "pywinpty==3.0.5"], source, stage="terminal-driver")
     (destination / "zcode-source.json").write_text(json.dumps({"ref": ref, "version": version,
                                                             "source": str(source), "node": str(node)}))
 
@@ -145,6 +165,11 @@ def main():
             install(args.version, args.ref, args.directory.resolve())
         else:
             check(args.directory.resolve(), args.binary.resolve())
+    except SourceFailure as error:
+        marker = {"stage": error.stage, "reason": error.reason}
+        (args.directory / "zcode-source-failure.json").write_text(json.dumps(marker))
+        print(json.dumps(marker), file=sys.stderr)
+        return 1
     except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
         print("ZCode source compatibility stage failed; private child output is withheld.", file=sys.stderr)
         return 1

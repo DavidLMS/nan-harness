@@ -31,6 +31,17 @@ class SourceContracts(unittest.TestCase):
             with self.assertRaises(ValueError):
                 source.bind(root)
 
+    def test_child_failures_keep_only_closed_stage_and_reason(self):
+        import subprocess
+        failure = subprocess.CalledProcessError(1, ["private-path"], output="private-output",
+                                                stderr="private-secret")
+        with patch.object(source.subprocess, "run", side_effect=failure):
+            with self.assertRaises(source.SourceFailure) as caught:
+                source.run(["private-path"], ROOT, stage="node-install")
+        self.assertEqual(caught.exception.stage, "node-install")
+        self.assertEqual(caught.exception.reason, "exit-nonzero")
+        self.assertNotIn("private", str(caught.exception))
+
     def test_bad_identity_never_starts_an_installer(self):
         for version, ref in (('latest', 'a' * 40), ('0.16.9', 'main'),
                              ('../0.16.9', 'a' * 40)):

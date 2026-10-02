@@ -130,6 +130,9 @@ INSTALL_FAILURE_CODES = {
     "hosted-node-missing", "hosted-node-version-mismatch", "hosted-npm-missing",
     "diagnostic-unknown", "unknown",
 }
+ZCODE_INSTALL_STAGES = frozenset({"git-init", "git-fetch", "git-checkout", "node-install", "pnpm-install",
+                                  "runtime-verify", "dependencies", "build", "command-verify", "terminal-driver"})
+INSTALL_FAILURE_CODES.update("zcode-source-" + stage for stage in ZCODE_INSTALL_STAGES)
 WINDOWS_INSTALL_CATEGORIES = frozenset({
     "git-ownership", "git-path-length", "git-config", "git-checkout", "git-download",
     "installer-argument", "installer-path", "git-native-error",
@@ -930,6 +933,16 @@ def install(args, state):
     if status:
         if os.name == "nt":
             installer_code = windows_install_failure(installer_marker, installer_code)
+        if args.harness == "zcode":
+            marker = args.directory / "zcode-source-failure.json"
+            try:
+                stage = json.loads(marker.read_bytes()).get("stage")
+                if isinstance(stage, str) and stage in ZCODE_INSTALL_STAGES:
+                    installer_code = "zcode-source-" + stage
+            except (OSError, ValueError, AttributeError):
+                pass
+            finally:
+                marker.unlink(missing_ok=True)
         raise InstallFailure(INSTALLER_FAILURE_PHASE, installer_code)
     doctor = args.directory / "doctor.json"
     try:
