@@ -28,7 +28,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: desktop-semantic-feasibility-${{ github.ref }}
+  group: desktop-semantic-feasibility-${{ github.ref }}-${{ inputs.app }}-${{ inputs.platform }}
   cancel-in-progress: false
 jobs:
   select:
