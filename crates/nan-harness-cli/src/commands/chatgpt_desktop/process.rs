@@ -29,7 +29,9 @@ pub(super) async fn supervise_desktop(
     diagnostics: &mut Vec<BridgeDiagnostic>,
 ) -> Result<i32, ChatGptDesktopError> {
     let mut command = Command::new(&installation.executable);
-    command.args(crate::commands::desktop::qualification_renderer_arguments());
+    command.args(crate::commands::desktop::qualification_renderer_arguments(
+        nan_harness_core::DesktopHarnessKind::ChatGpt,
+    ));
     let mut activities = bridge.subscribe_activities();
     command
         .env("CODEX_HOME", &profile.root)

@@ -137,7 +137,9 @@ impl DesktopProcess for SystemDesktopProcess {
             }
             let mut command = Command::new(executable);
             command
-                .args(crate::commands::desktop::qualification_renderer_arguments())
+                .args(crate::commands::desktop::qualification_renderer_arguments(
+                    DesktopHarnessKind::Claude,
+                ))
                 .stdin(Stdio::null())
                 .stdout(Stdio::null());
             return crate::commands::desktop::spawn_observed_desktop(

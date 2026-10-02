@@ -109,7 +109,7 @@ ownership evidence.
 The manual `desktop-check-qualification.yml` workflow evaluates the initial
 Linux x64, macOS ARM64 and Windows x64 matrix. A pending backend remains an
 explicit unqualified cell and prevents aggregate acceptance. Current semantic
-adapters cover Zed on macOS ARM64 and Hermes on Linux x64; additional application
+adapters cover Zed on macOS ARM64 and Hermes on Linux x64 and macOS ARM64; additional application
 and platform adapters require their own native evidence.
 
 Until the qualification workflow is present on the default branch, use the
@@ -123,16 +123,16 @@ the full acceptance gate. Implemented adapters are accepted only when their
 full native result meets the gate; implementation and feasibility alone do not
 qualify a cell.
 
-The expansion currently attempts all thirteen remaining cells. The following
+The expansion has qualified Hermes macOS ARM64, leaving twelve remaining cells. The following
 observations describe completed runs, rather than additional qualification:
 
 | Application | Linux x64 | macOS ARM64 | Windows x64 |
 | --- | --- | --- | --- |
 | Zed | Response and file-tool steps pass; pointer and accessibility Retry acknowledgements do not produce provider recovery. | Three complete probes pass the expanded retry policy. | Owned window is visible but acquisition fails stability. |
-| Hermes | Three complete probes pass with renderer process ownership. | Private native userData binding enables two complete probes; the first response times out. | Owned renderer connects; private retry-policy preparation fails. |
+| Hermes | Three complete probes pass with renderer process ownership. | Three complete probes pass with private native userData and bounded cold-start waits. | Owned renderer connects; private retry-policy replacement fails. A private Windows file-handle fix awaits native evidence. |
 | ChatGPT / Codex | Owned document loads; no composer is observed. | Renderer attaches, then endpoint ownership is lost. | Launcher ancestry is proved; application exits. |
 | Claude | Uninstrumented startup succeeds; instrumented child exits with code 1. | Instrumented child exits with code 1; uninstrumented startup has no eligible window. | Instrumented child exits with code 1; uninstrumented cleanup remains unqualified. |
-| Pen | Owned renderer loads a small startup document; GPU/startup diagnostics are under test. | Two probes expose composer/Send; another exposes sign-in. Conversation adapter remains unimplemented. | Owned renderer loads sign-in and a dialog; conversation adapter remains unimplemented. |
+| Pen | Three owned startup documents report unavailable hardware acceleration; software rendering needs a native trial. | Two probes expose composer/Send; another exposes sign-in. Conversation adapter remains unimplemented. | Owned renderer loads sign-in and a dialog; conversation adapter remains unimplemented. |
 
 The completed evidence is available in runs
 [36975359718](https://github.com/DavidLMS/nan-harness/actions/runs/36975359718)
@@ -159,7 +159,17 @@ cannot establish either success or an application failure. Complete renderer
 probes can exceed the former 32-record budget once policy, provider, backend,
 frontend and Windows ownership diagnostics are retained. The reducer now bounds
 64 records, each still subject to its closed schema and size limit, and exposes
-only static rejection categories. This requires fresh native evidence.
+only static rejection categories. Fresh run
+[36978761448](https://github.com/DavidLMS/nan-harness/actions/runs/36978761448)
+on commit `e54f1b92` qualifies Hermes Linux x64 and macOS ARM64 with three complete
+probes each, 42 closed semantic records, and application/global/clipboard cleanup.
+
+The qualification-only Codex launch now supplies its own
+`codex-browser-background-networking-disabled` startup switch. Static inspection
+of the frozen official Linux archive identifies an application relaunch when
+this switch disagrees with in-app browser availability. Whether this explains
+the observed macOS ownership loss and Windows exit requires fresh native trials.
+Normal CLI builds do not supply the switch.
 
 Static inspection of the official Claude Linux 2.9939.4 archive identifies an
 explicit startup rejection of `remote-debugging-port` and `remote-debugging-pipe`

@@ -198,7 +198,9 @@ impl SystemPenProcess {
             Command::new(executable)
         };
         if self.platform != PenPlatform::Macos || owned_app {
-            command.args(crate::commands::desktop::qualification_renderer_arguments());
+            command.args(crate::commands::desktop::qualification_renderer_arguments(
+                nan_harness_core::DesktopHarnessKind::Pen,
+            ));
         }
         Ok(command)
     }

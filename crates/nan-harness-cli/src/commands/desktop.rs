@@ -237,12 +237,15 @@ mod warning_tests {
 }
 
 /// Fixed loopback renderer instrumentation, absent from normal CLI builds.
-pub(crate) fn qualification_renderer_arguments() -> Vec<String> {
+pub(crate) fn qualification_renderer_arguments(
+    kind: nan_harness_core::DesktopHarnessKind,
+) -> Vec<String> {
     #[cfg(feature = "desktop-qualification")]
     {
         let hosted = std::env::var("GITHUB_ACTIONS").as_deref() == Ok("true")
             && std::env::var("RUNNER_ENVIRONMENT").as_deref() == Ok("github-hosted");
         let mut arguments = renderer_arguments(
+            kind,
             hosted,
             std::env::var_os("NANH_DESKTOP_QUALIFICATION_FACTS")
                 .map(std::path::PathBuf::from)
@@ -264,7 +267,10 @@ pub(crate) fn qualification_renderer_arguments() -> Vec<String> {
         arguments
     }
     #[cfg(not(feature = "desktop-qualification"))]
-    Vec::new()
+    {
+        let _ = kind;
+        Vec::new()
+    }
 }
 
 #[cfg(feature = "desktop-qualification")]
@@ -278,16 +284,28 @@ fn qualification_capture_enabled() -> bool {
 }
 
 #[cfg(feature = "desktop-qualification")]
-fn renderer_arguments(hosted: bool, directory: Option<&Path>, port: Option<&str>) -> Vec<String> {
+fn renderer_arguments(
+    kind: nan_harness_core::DesktopHarnessKind,
+    hosted: bool,
+    directory: Option<&Path>,
+    port: Option<&str>,
+) -> Vec<String> {
     if hosted
         && directory.is_some_and(|path| path.is_absolute() && path.is_dir() && !path.is_symlink())
         && let Some(port) = port.and_then(|value| value.parse::<u16>().ok())
         && port > 1024
     {
-        return vec![
+        let mut arguments = vec![
             format!("--remote-debugging-port={port}"),
             "--remote-debugging-address=127.0.0.1".into(),
         ];
+        if kind == nan_harness_core::DesktopHarnessKind::ChatGpt {
+            // The packaged app otherwise relaunches after discovering that its
+            // API-key session has no in-app browser. Use its own startup switch
+            // so the fresh launch root retains ownership of the same renderer.
+            arguments.push("--codex-browser-background-networking-disabled".into());
+        }
+        return arguments;
     }
     Vec::new()
 }
@@ -295,17 +313,34 @@ fn renderer_arguments(hosted: bool, directory: Option<&Path>, port: Option<&str>
 #[cfg(all(test, feature = "desktop-qualification"))]
 mod renderer_tests {
     use super::renderer_arguments;
+    use nan_harness_core::DesktopHarnessKind;
+    #[test]
+    fn codex_startup_switch_is_scoped_to_owned_qualification() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = Some(directory.path());
+        let codex = renderer_arguments(DesktopHarnessKind::ChatGpt, true, root, Some("43210"));
+        assert_eq!(codex.len(), 3);
+        assert_eq!(codex[2], "--codex-browser-background-networking-disabled");
+        for kind in [DesktopHarnessKind::Claude, DesktopHarnessKind::Pen] {
+            assert_eq!(renderer_arguments(kind, true, root, Some("43210")).len(), 2);
+        }
+        assert!(
+            renderer_arguments(DesktopHarnessKind::ChatGpt, false, root, Some("43210")).is_empty()
+        );
+        assert!(renderer_arguments(DesktopHarnessKind::ChatGpt, true, root, Some("0")).is_empty());
+    }
+
     #[test]
     fn instrumentation_requires_owned_hosted_context_and_numeric_loopback_port() {
         let directory = tempfile::tempdir().unwrap();
         let root = Some(directory.path());
-        assert!(renderer_arguments(false, root, Some("43210")).is_empty());
-        assert!(renderer_arguments(true, None, Some("43210")).is_empty());
+        assert!(renderer_arguments(DesktopHarnessKind::Pen, false, root, Some("43210")).is_empty());
+        assert!(renderer_arguments(DesktopHarnessKind::Pen, true, None, Some("43210")).is_empty());
         for port in ["0", "1024", "65536", "43210 --no-sandbox", "*:43210"] {
-            assert!(renderer_arguments(true, root, Some(port)).is_empty());
+            assert!(renderer_arguments(DesktopHarnessKind::Pen, true, root, Some(port)).is_empty());
         }
         assert_eq!(
-            renderer_arguments(true, root, Some("43210")),
+            renderer_arguments(DesktopHarnessKind::Pen, true, root, Some("43210")),
             [
                 "--remote-debugging-port=43210",
                 "--remote-debugging-address=127.0.0.1"

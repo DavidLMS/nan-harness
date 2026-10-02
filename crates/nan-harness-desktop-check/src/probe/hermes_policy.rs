@@ -1,7 +1,7 @@
 //! The disposable Hermes qualification profile disables only automatic recovery.
 
 use crate::report::Reason;
-use nan_harness_private_fs::{open_private_read, restrict_file};
+use nan_harness_private_fs::{open_private_new, open_private_read};
 use serde::Deserialize;
 use std::{
     io::{Read as _, Write as _},
@@ -118,9 +118,12 @@ fn fresh_config(bytes: &[u8]) -> Result<(), Reason> {
 
 fn replace(path: &Path, before: &[u8], after: &[u8]) -> Result<(), Reason> {
     let parent = path.parent().ok_or(Reason::IsolationUnavailable)?;
-    let mut temporary =
-        tempfile::NamedTempFile::new_in(parent).map_err(|_| Reason::IsolationUnavailable)?;
-    restrict_file(temporary.as_file_mut()).map_err(|_| Reason::IsolationUnavailable)?;
+    // Create with the same private native handle rights as managed CLI writes.
+    // A standard Windows tempfile handle need not grant WRITE_DAC, so trying
+    // to harden it afterwards can fail even in a correctly owned directory.
+    let mut temporary = tempfile::Builder::new()
+        .make_in(parent, open_private_new)
+        .map_err(|_| Reason::IsolationUnavailable)?;
     temporary
         .write_all(after)
         .map_err(|_| Reason::IsolationUnavailable)?;
@@ -145,7 +148,7 @@ pub(super) fn prepare(workspace: &Path, facts: &Path) -> Result<(), Reason> {
         if getrandom::fill(&mut nonce).is_ok() {
             let diagnostic = serde_json::json!({"schemaVersion":1,
                 "mechanism":"hermes-policy-preparation", "diagnosticsOnly":true, "stage":stage});
-            if let Ok(mut file) = nan_harness_private_fs::open_private_new(&facts.join(format!(
+            if let Ok(mut file) = open_private_new(&facts.join(format!(
                 "hermes-policy-failure-{}.json",
                 u64::from_le_bytes(nonce)
             ))) {
@@ -188,8 +191,7 @@ fn prepare_owned(workspace: &Path, facts: &Path, stage: &mut &'static str) -> Re
         "hermes-retry-policy-{}.json",
         u64::from_le_bytes(nonce)
     ));
-    let mut file = nan_harness_private_fs::open_private_new(&destination)
-        .map_err(|_| Reason::IsolationUnavailable)?;
+    let mut file = open_private_new(&destination).map_err(|_| Reason::IsolationUnavailable)?;
     serde_json::to_writer(&mut file, &policy).map_err(|_| Reason::IsolationUnavailable)?;
     file.write_all(b"\n")
         .map_err(|_| Reason::IsolationUnavailable)
