@@ -133,9 +133,15 @@ fn neutral_input(executable: &Path, mode: &str, prompt: &str) -> Result<(), Reas
     {
         return Err(Reason::IsolationUnavailable);
     }
-    let mut child = Command::new(executable)
-        .arg(mode)
-        .env_clear()
+    let mut command = Command::new(executable);
+    command.arg(mode).env_clear();
+    #[cfg(target_os = "linux")]
+    for key in ["DISPLAY", "XAUTHORITY"] {
+        if let Some(value) = std::env::var_os(key) {
+            command.env(key, value);
+        }
+    }
+    let mut child = command
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -355,7 +361,11 @@ fn native_copy_facts() -> Facts {
                 Ok("all" | "paste")
             ) {
                 if std::env::var("FEASIBILITY_ZED_INPUT_DRIVER_MODE").as_deref() == Ok("paste") {
-                    "neutral-quartz-paste"
+                    if cfg!(target_os = "linux") {
+                        "neutral-x11-paste"
+                    } else {
+                        "neutral-quartz-paste"
+                    }
                 } else {
                     "neutral-quartz-all"
                 }
@@ -947,7 +957,9 @@ impl Gui {
         &'a self,
         directory: &'a Path,
     ) -> Result<NativeClipboardSession<'a>, Reason> {
-        if !cfg!(target_os = "macos") || self.kind != nan_harness_core::DesktopHarnessKind::Zed {
+        if !cfg!(any(target_os = "macos", target_os = "linux"))
+            || self.kind != nan_harness_core::DesktopHarnessKind::Zed
+        {
             return Err(Reason::ActionUnsupported);
         }
         let mut facts = native_copy_facts();
@@ -987,7 +999,9 @@ impl Gui {
 
     fn activate_native_accessibility(&self, facts: &mut Facts) -> Result<(), Reason> {
         self.native_copy_guard(facts, "activation-before")?;
-        if let Some(executable) = std::env::var_os("FEASIBILITY_ZED_INPUT_DRIVER") {
+        if cfg!(target_os = "macos")
+            && let Some(executable) = std::env::var_os("FEASIBILITY_ZED_INPUT_DRIVER")
+        {
             let (pid, point) = self.visual.accessibility_activation_target()?;
             let request = serde_json::to_string(&ActivationRequest {
                 pid,

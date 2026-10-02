@@ -235,7 +235,7 @@ async function driveDom() {
   while (Date.now() < deadline) {
     pages = browser.contexts().flatMap(context => context.pages())
     .filter(page => { try { const url = new URL(page.url());
-      return url.protocol === 'file:' && /\/resources\/app\.asar(?:\.unpacked)?\/dist\/index\.html$/.test(decodeURIComponent(url.pathname));
+      return url.protocol === 'file:' && /\/(?:Contents\/Resources|resources)\/app\.asar(?:\.unpacked)?\/dist\/index\.html$/.test(decodeURIComponent(url.pathname));
     } catch { return false; } });
     if (pages.length > 0) break;
     if (!ownedEndpoint()) break;

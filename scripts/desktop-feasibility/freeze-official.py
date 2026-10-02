@@ -52,14 +52,16 @@ def release_endpoint(repository, tag):
     return f'repos/{repository}/releases/tags/{tag}'
 
 
-def freeze_zed(fetch=metadata, tag=None):
+def freeze_zed(fetch=metadata, tag=None, platform='macos'):
     repository = 'zed-industries/zed'
     requested = tag
     release = fetch(release_endpoint(repository, tag))
     tag = release_tag(release)
     if requested is not None and tag != requested:
         raise ValueError('official-release-tag-mismatch')
-    name = 'Zed-aarch64.dmg'
+    name = {'macos': 'Zed-aarch64.dmg', 'linux': 'zed-linux-x86_64.tar.gz',
+            'windows': 'Zed-x86_64.exe'}[platform]
+    format_name = {'macos': 'dmg', 'linux': 'tar-gz', 'windows': 'windows-setup'}[platform]
     url = f'https://github.com/{repository}/releases/download/{tag}/{name}'
     assets = [a for a in release.get('assets', []) if a.get('name') == name]
     if len(assets) != 1 or assets[0].get('browser_download_url') != url:
@@ -70,8 +72,8 @@ def freeze_zed(fetch=metadata, tag=None):
     # Existing GithubAsset policy requires staged=false. The checker downloads
     # this immutable public URL and verifies this digest during preparation.
     return dict(status='frozen', app='zed-desktop', version=tag[1:],
-                channel=f'github-release:{repository}', url=url, format='dmg',
-                digest=digest, staged=False, installer='checker')
+                channel=f'github-release:{repository}', url=url, format=format_name,
+                digest=digest, staged=False, installer='external' if platform == 'windows' else 'checker')
 
 
 def git_commit(value):
@@ -117,13 +119,12 @@ def main():
         raise ValueError('disposable-hosted-runner-required')
     if not os.environ.get('GH_TOKEN') or os.environ.get('NAN_API_KEY'):
         raise ValueError('metadata-only-credentials-required')
-    entry = freeze_zed(tag=args.tag) if args.app == 'zed-desktop' else freeze_hermes(tag=args.tag)
+    platform = args.platform or ('macos' if args.app == 'zed-desktop' else 'linux')
+    entry = freeze_zed(tag=args.tag, platform=platform) if args.app == 'zed-desktop' else freeze_hermes(tag=args.tag)
     if args.expected_revision is not None and (not SHA.fullmatch(args.expected_revision) or entry.get('revision') != args.expected_revision):
         raise ValueError('official-source-revision-mismatch')
     platform = args.platform or ('macos' if args.app == 'zed-desktop' else 'linux')
     architecture = 'aarch64' if platform == 'macos' else 'x86_64'
-    if args.app == 'zed-desktop' and platform != 'macos':
-        raise ValueError('official-asset-platform-unsupported')
     manifest = dict(schemaVersion=1, suite='desktop', platform=platform,
                     architecture=architecture, model='qwen3.6', apps=[entry])
     args.output.parent.mkdir(mode=0o700, parents=True, exist_ok=True)

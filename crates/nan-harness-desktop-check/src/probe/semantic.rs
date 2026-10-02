@@ -33,7 +33,8 @@ impl SemanticBackend {
         if spec.live || spec.session != SessionMode::GithubHosted || !spec.session.available() {
             return Err(Reason::IsolationUnavailable);
         }
-        let supported = matches!(spec.kind, DesktopHarnessKind::Zed) && cfg!(target_os = "macos")
+        let supported = matches!(spec.kind, DesktopHarnessKind::Zed)
+            && cfg!(any(target_os = "macos", target_os = "linux"))
             || matches!(spec.kind, DesktopHarnessKind::Hermes)
                 && cfg!(any(target_os = "linux", target_os = "macos"));
         if !supported {

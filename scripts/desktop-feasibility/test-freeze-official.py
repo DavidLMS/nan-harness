@@ -45,6 +45,20 @@ class OfficialIdentity(unittest.TestCase):
         self.assertEqual(entry['digest'], 'sha256:' + 'a' * 64)
         self.assertFalse(entry['staged'])
 
+    def test_zed_native_assets_match_platform_manifest_policy(self):
+        for platform, name in [('linux', 'zed-linux-x86_64.tar.gz'), ('windows', 'Zed-x86_64.exe')]:
+            release = copy.deepcopy(self.release)
+            release['assets'][0]['name'] = name
+            release['assets'][0]['browser_download_url'] = f'https://github.com/zed-industries/zed/releases/download/v1.2.3/{name}'
+            entry = module.freeze_zed(lambda _: release, platform=platform)
+            manifest = dict(schemaVersion=1, suite='desktop', platform=platform,
+                            architecture='x86_64', model='qwen3.6', apps=[entry])
+            with tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / 'frozen.json'
+                path.write_text(json.dumps(manifest))
+                self.assertEqual(read_frozen_manifest(path, ['zed-desktop'], platform,
+                                                      'x86_64', 'qwen3.6'), manifest)
+
     def test_frozen_zed_is_accepted_by_existing_manifest_contract(self):
         entry = module.freeze_zed(lambda _: self.release)
         manifest = dict(schemaVersion=1, suite='desktop', platform='macos',
