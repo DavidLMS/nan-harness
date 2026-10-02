@@ -23,6 +23,8 @@ root = Path(os.environ["NANH_ZED_ICON_TEMPLATES"]).resolve()
 root.mkdir(mode=0o700, parents=True, exist_ok=True)
 root.chmod(0o700)
 source_hashes = {'close.svg': '698d46fcdfd3be6bec156f5223f70436a4044b871c411ac9f65abb0dd7c4b619', 'copy.svg': '91a44e5c8af0e9b0fed70c22483b55d5de5a8cbeb5682b9a0c976cefec374c8b', 'rotate_cw.svg': '981ac36ab677c57bb59909dfd0d86cf8e326f2fa282cb99da013fb0811d2f6fe'}
+source_hashes.update({'maximize.svg': 'f72db80db3a7d86c023ea4cc1b57b950d6179091ace7b4758b98449d40761a93',
+                      'minimize.svg': '401a0f593c4d616f91421ebdcdc9e3179942e75cebcc20e29be331d8a16f82a8'})
 for name, digest in source_hashes.items():
     url = "https://raw.githubusercontent.com/zed-industries/zed/76659a55a8c10ed355a070f8764a0b1733e3c115/assets/icons/" + name
     with urllib.request.urlopen(url, timeout=10) as response:
@@ -35,7 +37,11 @@ for name, digest in source_hashes.items():
 manifest = {"sourceCommit": "76659a55a8c10ed355a070f8764a0b1733e3c115", "diagnosticsOnly": True,
             "rasterizer": {"CairoSVG": "2.8.2", "Pillow": "11.3.0", "Cairo": cairo_version, "referenceCairo": "1.18.4"}, "files": {}}
 mask_hashes = {'close-14.alpha': 'ca9478e6d5ad466f0b930723ddeec769e2a0a818e5d48b01d990318c809be870', 'close-28.alpha': '79d36e9f7728628480497c0f559f273b4ed96d6454c9f18316729c91cfd96a56', 'copy-14.alpha': 'fd141505ee35387d2022907d97676d0e8442a7c0df7c555594e1e11f6d549495', 'copy-28.alpha': '5b8e649ba9854408f5938edd843875c5c5ef031900fff389e888ffb15619b146', 'rotate_cw-14.alpha': 'c653a9b025e2112e1b68c084da89d0f7e7e5488447f7e7072dddeae8946fdf44', 'rotate_cw-28.alpha': '81d4300229176b9070aea15f2d6758a4c6d578a51e5554d02a3d6af1001249ce'}
-for name in ("rotate_cw", "copy", "close"):
+mask_hashes.update({'maximize-14.alpha': '909e9097e14d4eb8979c1bf3a6364fdfe78e2d3af304d1271dfac1e4ec7eee92',
+                    'maximize-28.alpha': 'a6ccfa3e880c52701b83aa3904e1c6da97b43f04ef58e429a6212f4edb6af567',
+                    'minimize-14.alpha': '8ea16a5bff909b7c9038d29d14584ec9a4e71cef3ea22d6fd63ef76cbdfb99bb',
+                    'minimize-28.alpha': '630adb7db0c8c33ca94c981cba0468750ea8ab3372f42f03a615f432f24c925c'})
+for name in ("rotate_cw", "copy", "close", "maximize", "minimize"):
     source = root / f"{name}.svg"
     manifest["files"][source.name] = hashlib.sha256(source.read_bytes()).hexdigest()
     for side in (14, 28):

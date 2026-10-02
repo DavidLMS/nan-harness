@@ -80,6 +80,9 @@ def qualification_environment(app, facts, real_nanh, executable, inherited=None)
     source = os.environ if inherited is None else inherited
     if source.get('GITHUB_ACTIONS') != 'true' or source.get('RUNNER_ENVIRONMENT') != 'github-hosted':
         raise ValueError('disposable hosted session required')
+    zoom = source.get('NANH_ZED_PANEL_ZOOM')
+    if zoom is not None and (app != 'zed-desktop' or source.get('RUNNER_OS') != 'Linux' or zoom != 'observe'):
+        raise ValueError('Zed panel zoom diagnostic is unavailable')
     if source.get('NANH_CODEX_PROJECT_POLICY') is not None and app != 'chatgpt-desktop':
         raise ValueError('Codex native project policy is unavailable')
     environment = {key: value for key, value in source.items() if key in SESSION_ENV}
@@ -96,6 +99,8 @@ def qualification_environment(app, facts, real_nanh, executable, inherited=None)
                        FEASIBILITY_FACTS=str(facts), FEASIBILITY_REAL_NANH=str(real_nanh))
     if app == 'zed-desktop':
         environment.update({key: value for key, value in source.items() if key in ZED_HELPERS})
+        if zoom is not None:
+            environment['NANH_ZED_PANEL_ZOOM'] = zoom
         delivery = source.get('NANH_ZED_XRECORD')
         if delivery is not None:
             if delivery != '1' or source.get('RUNNER_OS') != 'Linux':

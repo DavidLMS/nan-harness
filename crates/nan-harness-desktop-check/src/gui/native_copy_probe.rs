@@ -994,10 +994,80 @@ impl NativeClipboardSession<'_> {
         Ok(())
     }
 
+    fn observe_panel_zoom(&mut self) -> Result<(), Reason> {
+        let policy = std::env::var("NANH_ZED_PANEL_ZOOM").ok();
+        if policy.is_none() {
+            return Ok(());
+        }
+        if policy.as_deref() != Some("observe")
+            || !cfg!(target_os = "linux")
+            || self.gui.kind != nan_harness_core::DesktopHarnessKind::Zed
+            || std::env::var("GITHUB_ACTIONS").as_deref() != Ok("true")
+            || std::env::var("RUNNER_ENVIRONMENT").as_deref() != Ok("github-hosted")
+            || std::env::var("RUNNER_OS").as_deref() != Ok("Linux")
+        {
+            return Err(Reason::IsolationUnavailable);
+        }
+        let observation = self.panel_zoom_observation();
+        let (record, failure) = match observation {
+            Ok(record) => (record, None),
+            Err(reason) => (
+                super::zed_zoom_probe::Observation::unavailable(match reason {
+                    Reason::BudgetExceeded => "budget-exceeded",
+                    Reason::SelectorNotMatched => "inventory-unavailable",
+                    _ if icon_guard_failure(reason) => "guard-rejected",
+                    _ => "templates-unavailable",
+                }),
+                Some(reason),
+            ),
+        };
+        let bytes = serde_json::to_vec(&record).map_err(|_| Reason::IsolationUnavailable)?;
+        let name = format!("panel-zoom-{}-{}.json", std::process::id(), nonce()?);
+        open_private_new(&self.directory.join(name))
+            .and_then(|mut file| file.write_all(&bytes).and_then(|()| file.sync_all()))
+            .map_err(|_| Reason::IsolationUnavailable)?;
+        if let Some(reason) = failure.filter(|reason| icon_guard_failure(*reason)) {
+            return Err(reason);
+        }
+        Ok(())
+    }
+
+    fn panel_zoom_observation(&mut self) -> Result<super::zed_zoom_probe::Observation, Reason> {
+        self.gui
+            .native_copy_guard(&mut self.facts, "retry-revalidate")?;
+        let directory = self
+            .icon_directory
+            .as_ref()
+            .ok_or(Reason::ActionUnsupported)?;
+        let buttons = || -> Result<Vec<xa11y::ElementData>, Reason> {
+            let app = self.gui.app.as_ref().ok_or(Reason::SelectorNotMatched)?;
+            let elements = app.locator("button").elements().map_err(map_error)?;
+            if elements.len() > 64 {
+                return Err(Reason::BudgetExceeded);
+            }
+            Ok(elements
+                .iter()
+                .map(|element| element.data().clone())
+                .collect())
+        };
+        let before = buttons()?;
+        let capture = self.gui.visual.capture_bounds();
+        let first = self.gui.visual.native_icon_frame()?;
+        std::thread::sleep(Duration::from_millis(200));
+        let second = self.gui.visual.native_icon_frame()?;
+        let after = buttons()?;
+        let matches = super::native_icon_probe::observe_zoom(directory, &first, &second, capture)?;
+        let result = super::zed_zoom_probe::correlate(&matches, &before, &after);
+        self.gui
+            .native_copy_guard(&mut self.facts, "retry-revalidate")?;
+        Ok(result)
+    }
+
     pub(crate) fn retry_once(&mut self) -> Result<(), Reason> {
         if !std::mem::take(&mut self.retry_ready) {
             return Err(Reason::ActionUnsupported);
         }
+        self.observe_panel_zoom()?;
         if let Some(captured) = self.retry_element.take() {
             self.gui
                 .native_copy_guard(&mut self.facts, "retry-revalidate")?;

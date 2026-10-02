@@ -2,7 +2,9 @@
 const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
 const {EventEmitter}=require('node:events');
 async function trial(scenario) {
- let clock=0,opened=false,owner=true,refreshClicks=0,pillClicks=0,escapes=0;
+ let clock=0,opened=false,owner=true,refreshClicks=0,pillClicks=0,escapes=0,skipClicks=0;
+ let onboardingPresent=scenario.startsWith('onboarding-');
+ let pageReplacedByOwner=false;
  const session=new EventEmitter(); session.send=async method=>{
    if(method!=='Page.getFrameTree')return;
    if(scenario==='stalled-frame')return new Promise(()=>{});
@@ -14,12 +16,23 @@ async function trial(scenario) {
  };
  const point={x:5,y:5,left:0,top:0,width:20,height:20};
  const editorHandle={},rootHandle={};
- const handle={evaluate:async(_callback,diagnostic)=>{const status=scenario==='covered'?'no-owned-point':scenario==='hidden-control'?'hidden':scenario==='outside-control'?'outside-viewport':'owned';const blocker=scenario==='covered'?'onboarding':status==='owned'?'none':'unmeasured';return diagnostic?{sampleStatus:status,blocker,point:status==='owned'?point:null}:status==='owned'?point:null;},click:async()=>{if(scenario==='menu-click-uncertain')throw new Error('PRIVATE');if(opened){refreshClicks++; if(scenario==='uncertain')throw new Error('PRIVATE');
+ const handle={dispose:async()=>{},evaluate:async(_callback,diagnostic)=>{const covered=scenario==='covered'||onboardingPresent;const status=covered?'no-owned-point':scenario==='hidden-control'?'hidden':scenario==='outside-control'?'outside-viewport':'owned';const blocker=covered?'onboarding':status==='owned'?'none':'unmeasured';return diagnostic?{sampleStatus:status,blocker,point:status==='owned'?point:null}:status==='owned'?point:null;},click:async()=>{if(scenario==='menu-click-uncertain')throw new Error('PRIVATE');if(opened){refreshClicks++; if(scenario==='uncertain')throw new Error('PRIVATE');
  const send=(dir,obj)=>session.emit('Network.webSocketFrame'+dir,{requestId:'socket',response:{opcode:1,payloadData:JSON.stringify(obj)}});
  send('Sent',{jsonrpc:'2.0',id:1,method:'model.options',params:{profile:'default',explicit_only:true,refresh:true}});
  send('Received',{jsonrpc:'2.0',id:1,result:{providers:[{models:['qwen3.6']}]}});
  }else{pillClicks++;opened=true;if(scenario==='owner-loss')owner=false;}}};
  const control={count:async()=>scenario==='duplicate'?2:1,isEnabled:async()=>scenario!=='disabled',elementHandle:async()=>handle,evaluate:async()=>true};
+ const heldCover={dispose:async()=>{}};
+ const choiceHandle={dispose:async()=>{},evaluate:async()=>({sampleStatus:'owned',blocker:'none',point}),click:async()=>{
+   skipClicks++;if(scenario==='onboarding-uncertain')throw new Error('PRIVATE');
+   if(scenario!=='onboarding-remains')onboardingPresent=false;
+   if(scenario==='onboarding-owner-loss')owner=false;
+ }};
+ const choice={count:async()=>scenario==='onboarding-missing-choice'?0:scenario==='onboarding-duplicate-choice'?2:1,
+   isEnabled:async()=>scenario!=='onboarding-disabled',elementHandle:async()=>choiceHandle,evaluate:async()=>true};
+ const cover={count:async()=>onboardingPresent?(scenario==='onboarding-duplicate-cover'?2:1):0,
+   isVisible:async()=>onboardingPresent,getByRole:()=>choice,elementHandle:async()=>heldCover,
+   evaluate:async()=>scenario!=='onboarding-replaced'};
  const editor={count:async()=>1,elementHandle:async()=>editorHandle,evaluate:async()=>scenario!=='composer-changed' && !(scenario==='composer-remount' && clock>=100)};
  const row={...control,filter(){return this;},count:async()=>scenario==='wrong-row'?0:1};
  const menu={filter(){return this;},count:async()=>opened?1:0,getByRole(_role,options){return options?.name?control:row;}};
@@ -42,9 +55,9 @@ async function trial(scenario) {
  if(scenario==='hash-transition' && clock>=100)return base+'#/foreign';
  if(scenario==='post-freeze' && clock>=200)return base+'#/';
  return base;
- },locator(selector){return selector.includes('composer-root')?roots:selector.includes('dialog')?{count:async()=>scenario==='modal'?1:0}:{filter(){return this;}};},getByRole:()=>menu,
+ },locator(selector){return selector.includes('composer-root')?roots:selector.includes('data-glass-opaque')?cover:selector.includes('dialog')?{count:async()=>scenario==='modal'?1:0}:{filter(){return this;}};},getByRole:()=>menu,
  keyboard:{press:async key=>{assert.equal(key,'Escape');escapes++;if(scenario!=='menu-remains')opened=false;}},
- context:()=>({browser:()=>({contexts:()=>[{pages:()=>scenario==='startup-page-count' && clock>=200?[page,page]:scenario==='page-replaced' && clock>=100?[{}]:[page]}]})})};
+ context:()=>({browser:()=>({contexts:()=>[{pages:()=>scenario==='startup-page-count' && clock>=200?[page,page]:pageReplacedByOwner||scenario==='page-replaced' && clock>=100?[{}]:[page]}]})})};
  const exports={};
  const context={exports,require:p=>require(p==='./hermes-catalog-readiness.cjs'?__dirname+'/hermes-catalog-readiness.cjs':p),
  process:{platform:'win32',env:{GITHUB_ACTIONS:'true',RUNNER_ENVIRONMENT:'github-hosted',RUNNER_OS:'Windows',FEASIBILITY_HERMES_READINESS_POLICY:'current-catalog'}},
@@ -52,10 +65,11 @@ async function trial(scenario) {
  vm.runInNewContext(fs.readFileSync(__dirname+'/hermes-windows-ready.cjs','utf8'),context);
  const facts=await exports.run(page,session,()=>{
    if(scenario==='owner-query-exhausts-budget')clock=3001;
+   if(scenario==='owner-query-replaces-page')pageReplacedByOwner=true;
    return owner && !(scenario==='startup-owner-loss' && clock>=200) && !(scenario==='stability-owner-loss' && clock>=100);
  },3000,'default');
  assert(!JSON.stringify(facts).includes('PRIVATE'));
- return {facts,pillClicks,refreshClicks,escapes};
+ return {facts,pillClicks,refreshClicks,escapes,skipClicks};
 }
 // Execute the serialized browser callback without Node helper bindings.
 function sampled(blocker) {
@@ -104,6 +118,10 @@ assert.equal(sampled('self').sampleStatus,'owned');
  assert.equal(exhausted.facts.guardFailure,'deadline-expired');
  assert.equal(exhausted.facts.composerObservation,null);
  assert.equal(exhausted.pillClicks,0);assert.equal(exhausted.refreshClicks,0);
+ const replacedByOwner=await trial('owner-query-replaces-page');
+ assert.equal(replacedByOwner.facts.composerObservation,null);
+ assert.equal(replacedByOwner.facts.guardFailure,'url-changed');
+ assert.equal(replacedByOwner.pillClicks,0);assert.equal(replacedByOwner.refreshClicks,0);
  for(const [scenario,reason] of [['startup-url-change','url-changed'],['startup-page-count','page-count']]) {
    const result=await trial(scenario);assert.equal(result.facts.guardFailure,reason);
    assert.equal(result.pillClicks,0);assert.equal(result.refreshClicks,0);
@@ -115,9 +133,19 @@ assert.equal(sampled('self').sampleStatus,'owned');
  const result=await trial(scenario);assert.notEqual(result.facts.stage,'ready',scenario);assert.equal(result.pillClicks,0,scenario);assert.equal(result.refreshClicks,0,scenario);
  }
  const covered=await trial('covered');
- assert.equal(covered.facts.actionObservation.action,'menu');
- assert.equal(covered.facts.actionObservation.sampleStatus,'no-owned-point');
- assert.equal(covered.facts.actionObservation.blocker,'onboarding');
+ assert.equal(covered.facts.stage,'onboarding');assert.equal(covered.facts.onboardingSkipped,false);
+ assert.equal(covered.skipClicks,0);
+ const skipped=await trial('onboarding-success');
+ assert.equal(skipped.facts.stage,'ready');assert.equal(skipped.facts.onboardingSkipped,true);
+ assert.equal(skipped.skipClicks,1);assert.equal(skipped.pillClicks,1);assert.equal(skipped.refreshClicks,1);
+ for(const scenario of ['onboarding-missing-choice','onboarding-duplicate-choice','onboarding-duplicate-cover','onboarding-disabled','onboarding-replaced']) {
+   const result=await trial(scenario);assert.equal(result.skipClicks,0,scenario);
+   assert.equal(result.pillClicks,0);assert.equal(result.refreshClicks,0);assert.equal(result.facts.onboardingSkipped,false);
+ }
+ for(const scenario of ['onboarding-uncertain','onboarding-remains','onboarding-owner-loss']) {
+   const result=await trial(scenario);assert.equal(result.skipClicks,1,scenario);
+   assert.equal(result.pillClicks,0);assert.equal(result.refreshClicks,0);assert.equal(result.facts.onboardingSkipped,false);
+ }
  for(const [scenario,status] of [['hidden-control','hidden'],['outside-control','outside-viewport'],['menu-click-uncertain','click-failed']]) {
  const result=await trial(scenario);assert.equal(result.facts.actionObservation.sampleStatus,status);
  assert.equal(result.refreshClicks,0);assert.equal(result.facts.menuOpened,false);

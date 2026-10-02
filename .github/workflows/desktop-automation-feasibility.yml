@@ -121,7 +121,19 @@ jobs:
         run: |
           apt_options=(-o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
           sudo apt-get "${apt_options[@]}" update
-          sudo apt-get "${apt_options[@]}" install --no-install-recommends -y cmake xvfb openbox x11-utils xclip xdotool zstd dbus-x11 python3-dbus at-spi2-core libx11-dev libxres1 libxtst6 libxkbcommon-dev libxkbcommon-x11-dev libegl1 libvulkan1 mesa-vulkan-drivers libgtk-3-0 libnss3 libasound2t64 libgbm1 libsecret-1-0 libnotify4
+          sudo apt-get "${apt_options[@]}" install --no-install-recommends -y cmake xvfb openbox x11-utils xclip xdotool zstd dbus-x11 python3-dbus at-spi2-core libx11-dev libxres1 libxtst6 libcairo2 libxkbcommon-dev libxkbcommon-x11-dev libegl1 libvulkan1 mesa-vulkan-drivers libgtk-3-0 libnss3 libasound2t64 libgbm1 libsecret-1-0 libnotify4
+      - name: Prepare exact-source Linux Zed panel diagnostics
+        if: runner.os == 'Linux' && matrix.app == 'zed-desktop' && inputs.experiment == 'deterministic-full'
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset NAN_API_KEY GH_TOKEN GITHUB_TOKEN
+          python3 -m venv "$RUNNER_TEMP/zed-icon-build"
+          "$RUNNER_TEMP/zed-icon-build/bin/python" -m pip install --disable-pip-version-check -r scripts/desktop-feasibility/zed-icon-requirements.txt
+          export NANH_ZED_ICON_TEMPLATES="$RUNNER_TEMP/zed-icon-templates"
+          "$RUNNER_TEMP/zed-icon-build/bin/python" scripts/desktop-feasibility/zed-icon-templates.py
+          echo "NANH_ZED_ICON_TEMPLATES=$NANH_ZED_ICON_TEMPLATES" >> "$GITHUB_ENV"
       - name: Verify passive observer runtime libraries without a display
         if: runner.os == 'Linux' && matrix.app == 'zed-desktop'
         shell: bash
@@ -281,7 +293,9 @@ jobs:
       - name: Enable passive owned-client Zed event delivery observation
         if: runner.os == 'Linux' && matrix.app == 'zed-desktop' && inputs.experiment == 'deterministic-full'
         shell: bash
-        run: echo 'NANH_ZED_XRECORD=1' >> "$GITHUB_ENV"
+        run: |
+          echo 'NANH_ZED_XRECORD=1' >> "$GITHUB_ENV"
+          echo 'NANH_ZED_PANEL_ZOOM=observe' >> "$GITHUB_ENV"
       - name: Enable Hermes Windows current-catalog readiness
         if: runner.os == 'Windows' && matrix.app == 'hermes-desktop' && inputs.experiment == 'deterministic-full'
         shell: bash

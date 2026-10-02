@@ -5,6 +5,68 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use tokio::io::AsyncReadExt as _;
 
+#[derive(Clone, Copy, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum Stage {
+    ProcessAbsence,
+    FoundationQuery,
+    NativeAlignment,
+    RootsAbsent,
+    RootsCreated,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum Failure {
+    QueryFailed,
+    ProcessPresent,
+    AlignmentMismatch,
+    ExistingRoot,
+    CreationFailed,
+}
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Preflight {
+    schema_version: u8,
+    mechanism: &'static str,
+    diagnostics_only: bool,
+    stage: Stage,
+    failure: Option<Failure>,
+}
+fn record(stage: Stage, failure: Option<Failure>) {
+    let Some(directory) = std::env::var_os("NANH_DESKTOP_QUALIFICATION_FACTS").map(PathBuf::from)
+    else {
+        return;
+    };
+    if identity(&directory).is_none() {
+        return;
+    }
+    let facts = Preflight {
+        schema_version: 1,
+        mechanism: "claude-native-root-preflight",
+        diagnostics_only: true,
+        stage,
+        failure,
+    };
+    let path = directory.join(format!(
+        "claude-native-root-preflight-{}.json",
+        std::process::id()
+    ));
+    if let Ok(file) = nan_harness_private_fs::open_private_new(&path) {
+        let _ = serde_json::to_writer(file, &facts);
+    }
+}
+fn reject(stage: Stage, failure: Failure) -> Reason {
+    record(stage, Some(failure));
+    Reason::IsolationUnavailable
+}
+fn process_exit(code: Option<i32>) -> Result<(), Failure> {
+    match code {
+        Some(1) => Ok(()),
+        Some(0) => Err(Failure::ProcessPresent),
+        _ => Err(Failure::QueryFailed),
+    }
+}
+
 pub(super) fn enabled(spec: &ProbeSpec) -> Result<bool, Reason> {
     if std::env::var("NANH_CLAUDE_MAC_PROFILE_POLICY").as_deref() != Ok("native-known-folders") {
         return Ok(false);
@@ -64,23 +126,19 @@ fn identity(path: &Path) -> Option<(u64, u64)> {
         None
     }
 }
-fn require_process_absence() -> Result<(), Reason> {
+fn require_process_absence() -> Result<(), Failure> {
     let mut child = std::process::Command::new("/usr/bin/pgrep")
         .args(["-f", "Claude.app/Contents/MacOS/Claude"])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
-        .map_err(|_| Reason::IsolationUnavailable)?;
+        .map_err(|_| Failure::QueryFailed)?;
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
     loop {
         match child.try_wait() {
             Ok(Some(status)) => {
-                return if status.code() == Some(1) {
-                    Ok(())
-                } else {
-                    Err(Reason::IsolationUnavailable)
-                };
+                return process_exit(status.code());
             }
             Ok(None) if std::time::Instant::now() < deadline => {
                 std::thread::sleep(std::time::Duration::from_millis(10));
@@ -88,7 +146,7 @@ fn require_process_absence() -> Result<(), Reason> {
             _ => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return Err(Reason::IsolationUnavailable);
+                return Err(Failure::QueryFailed);
             }
         }
     }
@@ -99,9 +157,21 @@ impl NativeRoots {
         if !enabled(spec)? {
             return Ok(None);
         }
-        require_process_absence()?;
-        Gui::ensure_absent(DesktopHarnessKind::Claude).map_err(|_| Reason::IsolationUnavailable)?;
-        let home = PathBuf::from(std::env::var_os("HOME").ok_or(Reason::IsolationUnavailable)?);
+        require_process_absence().map_err(|failure| reject(Stage::ProcessAbsence, failure))?;
+        Gui::ensure_absent(DesktopHarnessKind::Claude).map_err(|failure| {
+            reject(
+                Stage::ProcessAbsence,
+                if failure.reason == Reason::AlreadyRunning {
+                    Failure::ProcessPresent
+                } else {
+                    Failure::QueryFailed
+                },
+            )
+        })?;
+        let home = PathBuf::from(
+            std::env::var_os("HOME")
+                .ok_or_else(|| reject(Stage::FoundationQuery, Failure::QueryFailed))?,
+        );
         let support = home.join("Library/Application Support");
         let script = "import Foundation\nlet home = FileManager.default.homeDirectoryForCurrentUser.path\nlet support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?.path\nlet expected = ProcessInfo.processInfo.environment[\"HOME\"]\nprint(home == expected && support == expected.map { $0 + \"/Library/Application Support\" } ? \"true\" : \"false\")";
         let mut child = tokio::process::Command::new("/usr/bin/swift")
@@ -111,21 +181,43 @@ impl NativeRoots {
             .stderr(Stdio::null())
             .kill_on_drop(true)
             .spawn()
-            .map_err(|_| Reason::IsolationUnavailable)?;
-        let stdout = child.stdout.take().ok_or(Reason::IsolationUnavailable)?;
+            .map_err(|_| reject(Stage::FoundationQuery, Failure::QueryFailed))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| reject(Stage::FoundationQuery, Failure::QueryFailed))?;
         let valid = tokio::time::timeout(std::time::Duration::from_secs(5), async {
             let mut bytes = Vec::new();
             stdout.take(16).read_to_end(&mut bytes).await.ok()?;
-            Some(child.wait().await.ok()?.success() && bytes == b"true\n")
+            if !child.wait().await.ok()?.success() {
+                return None;
+            }
+            match bytes.as_slice() {
+                b"true\n" => Some(true),
+                b"false\n" => Some(false),
+                _ => None,
+            }
         })
         .await
         .ok()
-        .flatten()
-            == Some(true);
-        if !valid || support.canonicalize().ok().as_deref() != Some(&support) {
-            return Err(Reason::IsolationUnavailable);
+        .flatten();
+        if valid.is_none() {
+            return Err(reject(Stage::FoundationQuery, Failure::QueryFailed));
         }
-        Ok(Some(Self::create(&support)?))
+        if valid != Some(true) || support.canonicalize().ok().as_deref() != Some(&support) {
+            return Err(reject(Stage::NativeAlignment, Failure::AlignmentMismatch));
+        }
+        for name in ["Claude", "Claude-3p"] {
+            match std::fs::symlink_metadata(support.join(name)) {
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Ok(_) => return Err(reject(Stage::RootsAbsent, Failure::ExistingRoot)),
+                Err(_) => return Err(reject(Stage::RootsAbsent, Failure::QueryFailed)),
+            }
+        }
+        let roots = Self::create(&support)
+            .inspect_err(|_| record(Stage::RootsCreated, Some(Failure::CreationFailed)))?;
+        record(Stage::RootsCreated, None);
+        Ok(Some(roots))
     }
     fn create(support: &Path) -> Result<Self, Reason> {
         let paths = [support.join("Claude"), support.join("Claude-3p")];
@@ -202,6 +294,26 @@ impl NativeRoots {
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+    #[test]
+    fn distinguishes_process_presence_from_query_failure_and_keeps_receipts_closed() {
+        assert_eq!(process_exit(Some(1)), Ok(()));
+        assert_eq!(process_exit(Some(0)), Err(Failure::ProcessPresent));
+        assert_eq!(process_exit(Some(2)), Err(Failure::QueryFailed));
+        assert_eq!(process_exit(None), Err(Failure::QueryFailed));
+        let value = serde_json::to_value(Preflight {
+            schema_version: 1,
+            mechanism: "claude-native-root-preflight",
+            diagnostics_only: true,
+            stage: Stage::FoundationQuery,
+            failure: Some(Failure::QueryFailed),
+        })
+        .unwrap();
+        assert_eq!(value["stage"], "foundation-query");
+        assert_eq!(value["failure"], "query-failed");
+        assert_eq!(value.as_object().unwrap().len(), 5);
+        assert!(value.get("path").is_none());
+        assert!(value.get("pid").is_none());
+    }
     #[test]
     fn refuses_existing_roots_without_adopting_them() {
         let temp = tempfile::tempdir().unwrap();

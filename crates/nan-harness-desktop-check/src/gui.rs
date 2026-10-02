@@ -9,6 +9,7 @@ mod native_icon_probe;
 mod process_absence;
 mod stability;
 mod visual;
+mod zed_zoom_probe;
 
 pub(crate) use dom_probe::{DomAction, DomPurpose, DomTurn, RendererSession};
 pub(crate) use native_copy_probe::NativeClipboardSession;

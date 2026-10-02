@@ -57,9 +57,11 @@ exports.run = async function run(page, session, ownedEndpoint, deadline, expecte
   }
   const guard=()=>{
     try {
+      const owned=Date.now()<deadline && ownedEndpoint();
+      // The native proof can block; read page identity only after it returns.
       const pages=page.context().browser().contexts().flatMap(context=>context.pages());
       const failure = Date.now()>=deadline ? 'deadline-expired'
-        : !ownedEndpoint() ? 'ownership-lost'
+        : !owned ? 'ownership-lost'
         : !urlValid() ? 'url-changed'
         : pages.length!==1 ? 'page-count'
         : pages[0]!==page ? 'url-changed'
@@ -139,7 +141,7 @@ exports.run = async function run(page, session, ownedEndpoint, deadline, expecte
     }
     if (!guard() || await roots.count()!==1 || await editor.count()!==1 || await pill.count()!==1) throw new Error('composer');
     if (startup || !original || !originalRoot) throw new Error('unstable composer');
-    async function click(locator,action) {
+    async function click(locator,action,additionalProof=async()=>true) {
       const observation={action,sampleStatus:'guard-rejected',blocker:'unmeasured'};
       facts.actionObservation=observation;
       await frame();
@@ -149,6 +151,9 @@ exports.run = async function run(page, session, ownedEndpoint, deadline, expecte
           || await locator.count()!==1 || !await locator.isEnabled()) throw new Error('control');
       const handle=await locator.elementHandle();
       const inspect=async()=>{
+        if (!guard() || !await additionalProof()) {
+          observation.sampleStatus='guard-rejected';return null;
+        }
         const value=await handle.evaluate(sample,true);
         observation.sampleStatus=value.sampleStatus;observation.blocker=value.blocker;
         return value.point;
@@ -171,6 +176,36 @@ exports.run = async function run(page, session, ownedEndpoint, deadline, expecte
       try {
         await handle.click({position:{x:last.x,y:last.y},timeout:Math.min(5000,Math.max(1,deadline-Date.now()))});
       } catch {observation.sampleStatus='click-failed';throw new Error('action');}
+    }
+    const pillHandle=await pill.elementHandle();
+    const initialSample=await pillHandle.evaluate(sample,true);
+    await pillHandle.dispose();
+    if (initialSample.sampleStatus==='no-owned-point' && initialSample.blocker==='onboarding') {
+      facts.stage='onboarding'; facts.errorCategory='onboarding-unavailable';
+      facts.onboardingSkipped=false;
+      const cover=page.locator('[data-glass-opaque][class~="z-(--z-onboarding)"]');
+      const choice=cover.getByRole('button',{name:"I'll choose a provider later",exact:true});
+      const settleDeadline=Math.min(deadline,Date.now()+5000);
+      while (guard() && Date.now()<settleDeadline && await choice.count()===0) await delay(100);
+      if (!guard() || await cover.count()!==1 || !await cover.isVisible()
+          || await choice.count()!==1 || !await choice.isEnabled()) throw new Error('onboarding');
+      const heldCover=await cover.elementHandle();
+      try {
+        const coverProof=async()=>await cover.count()===1 && await cover.isVisible()
+          && await cover.evaluate((element,held)=>element===held,heldCover)
+          && await choice.count()===1 && await choice.isEnabled();
+        // Frozen ChooseLaterLink only dismisses first-run provider selection.
+        // It does not connect an account or change the managed provider.
+        await click(choice,'onboarding',coverProof);
+        while (guard() && Date.now()<settleDeadline && await cover.count()!==0) await delay(20);
+        if (!guard() || await cover.count()!==0 || await roots.count()!==1 || await editor.count()!==1
+            || !await roots.evaluate((element,held)=>element===held,originalRoot)
+            || !await editor.evaluate((element,held)=>element===held,original)) throw new Error('onboarding');
+        await frame();
+        const counts=await observeComposer();
+        if (counts.some(count=>count!==1) || facts.composerObservation.readyState!=='complete') throw new Error('composer');
+        facts.onboardingSkipped=true;
+      } finally { await heldCover.dispose(); }
     }
     facts.stage='menu'; facts.errorCategory='menu-unavailable';
     await click(pill,'menu'); facts.menuOpened=true;

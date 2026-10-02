@@ -23,6 +23,26 @@ spec.loader.exec_module(runner)
 
 
 class RunnerTests(unittest.TestCase):
+    def test_zed_panel_zoom_diagnostic_is_explicit_linux_only_and_private(self):
+        source = {key: 'synthetic' for key in runner.ZED_HELPERS}
+        source.update(GITHUB_ACTIONS='true', RUNNER_ENVIRONMENT='github-hosted',
+                      RUNNER_OS='Linux', NANH_ZED_PANEL_ZOOM='observe',
+                      FEASIBILITY_ZED_INPUT_DRIVER_MODE='paste',
+                      FEASIBILITY_ZED_RESPONSE_METHOD='thread-export', OPENAI_API_KEY='PRIVATE')
+        environment = runner.qualification_environment('zed-desktop', Path('/tmp'), Path('/tmp/nanh'),
+                                                       '/tmp/zed', source)
+        self.assertEqual(environment['NANH_ZED_PANEL_ZOOM'], 'observe')
+        self.assertNotIn('OPENAI_API_KEY', environment)
+        source.pop('NANH_ZED_PANEL_ZOOM')
+        self.assertNotIn('NANH_ZED_PANEL_ZOOM', runner.qualification_environment(
+            'zed-desktop', Path('/tmp'), Path('/tmp/nanh'), '/tmp/zed', source))
+        for app, changes in (('zed-desktop', {'RUNNER_OS': 'macOS'}),
+                             ('zed-desktop', {'RUNNER_OS': 'Windows'}),
+                             ('hermes-desktop', {}), ('zed-desktop', {'NANH_ZED_PANEL_ZOOM': 'activate'})):
+            with self.assertRaises(ValueError):
+                runner.qualification_environment(app, Path('/tmp'), Path('/tmp/nanh'), '/tmp/zed',
+                                                {**source, 'NANH_ZED_PANEL_ZOOM': 'observe', **changes})
+
     @staticmethod
     def synthetic_claude_bundle(root, payload=b'synthetic bootstrap'):
         contents = root / 'Claude.app/Contents'
@@ -708,6 +728,11 @@ class QualificationTests(unittest.TestCase):
             path = root / 'closed-startup-1.json'
             path.write_text(json.dumps(value))
             self.assertEqual(q.semantic_observations(root, 'hermes-desktop'), [value])
+            for changed in ({**value, 'stderr': 'PRIVATE'}, {**value, 'launcherExitCode': True},
+                            {**value, 'startupCategory': 'PRIVATE'}):
+                path.write_text(json.dumps(changed))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'hermes-desktop')
 
     def test_hermes_action_diagnostics_reject_private_or_untyped_values(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -722,17 +747,43 @@ class QualificationTests(unittest.TestCase):
             item = {**value, 'actionObservation': action}
             path.write_text(json.dumps(item))
             self.assertEqual(q.semantic_observations(root, 'hermes-desktop'), [item])
+            skipped = {**item, 'onboardingSkipped': True}
+            path.write_text(json.dumps(skipped))
+            self.assertEqual(q.semantic_observations(root, 'hermes-desktop'), [skipped])
+            path.write_text(json.dumps({**item, 'onboardingSkipped': 'PRIVATE'}))
+            with self.assertRaises(ValueError):
+                q.semantic_observations(root, 'hermes-desktop')
             for changed in ({**action, 'label': 'PRIVATE'}, {**action, 'action': 'PRIVATE'},
                             {**action, 'sampleStatus': True}, {**action, 'blocker': 'PRIVATE'},
                             {key: val for key, val in action.items() if key != 'blocker'}, None):
                 path.write_text(json.dumps({**value, 'actionObservation': changed}))
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'hermes-desktop')
-            for changed in ({**value, 'stderr': 'PRIVATE'}, {**value, 'launcherExitCode': True},
-                            {**value, 'startupCategory': 'PRIVATE'}):
-                path.write_text(json.dumps(changed))
+
+    def test_native_root_preflight_and_zoom_observations_are_closed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / 'observation.json'
+            preflight = dict(schemaVersion=1, mechanism='claude-native-root-preflight',
+                             diagnosticsOnly=True, stage='roots-created', failure=None)
+            zoom = dict(schemaVersion=1, mechanism='zed-panel-zoom', diagnosticsOnly=True,
+                        status='observed', maximizeMatches=1, minimizeMatches=0,
+                        stableMaximizeMatches=1, stableMinimizeMatches=0, correlatedButtons=1,
+                        checkedState='unavailable', uniqueCorrelation=True, activationAttempted=False)
+            for item, app, invalid in ((preflight, 'claude-desktop', (
+                    {**preflight, 'stage': 'PRIVATE'}, {**preflight, 'stage': 'foundation-query'},
+                    {**preflight, 'failure': 'PRIVATE'}, {**preflight, 'path': 'PRIVATE'})),
+                    (zoom, 'zed-desktop', ({**zoom, 'activationAttempted': True},
+                    {**zoom, 'maximizeMatches': 65}, {**zoom, 'checkedState': 'PRIVATE'},
+                    {**zoom, 'correlatedButtons': 2}, {**zoom, 'label': 'PRIVATE'}))):
+                path.write_text(json.dumps(item))
+                self.assertEqual(q.semantic_observations(root, app), [item])
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'hermes-desktop')
+                for changed in invalid:
+                    path.write_text(json.dumps(changed))
+                    with self.assertRaises(ValueError):
+                        q.semantic_observations(root, app)
 
     def test_renderer_document_diagnostics_reject_text_and_partial_records(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -995,6 +1046,14 @@ class QualificationTests(unittest.TestCase):
                      engineeringChecked=True, continueControl=True, continueClickAttempted=True,
                      continueClickCompleted=True, roleScopeAbsent=True, roleProofFailure='unmeasured', sessionProofFailure='unmeasured')
         self.assertEqual(q.public_onboarding(setup, 'chatgpt-desktop'), setup)
+        blocked = {**setup, 'roleProofFailure': 'control-not-actionable',
+                   'actionabilityFailure': 'foreign-overlay'}
+        self.assertEqual(q.public_onboarding(blocked, 'chatgpt-desktop'), blocked)
+        for changed in ({**blocked, 'actionabilityFailure': 'PRIVATE'},
+                        {**blocked, 'actionabilityFailure': True},
+                        {**blocked, 'roleProofFailure': 'unmeasured'}):
+            with self.assertRaises(ValueError):
+                q.public_onboarding(changed, 'chatgpt-desktop')
         for changed in ({**setup, 'label': 'PRIVATE'}, {**setup, 'stage': 'PRIVATE'},
                         {**setup, 'errorCategory': []}, {**setup, 'engineeringChecked': 1},
                         {**setup, 'roleProofFailure': 'PRIVATE'}, {**setup, 'roleProofFailure': []}, {**setup, 'sessionProofFailure': 'PRIVATE'}, {**setup, 'sessionProofFailure': None},

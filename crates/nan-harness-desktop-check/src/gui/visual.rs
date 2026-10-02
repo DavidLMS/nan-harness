@@ -513,7 +513,7 @@ impl Visual {
         find_in_pages(|interpolate| self.page(interpolate), find)
     }
 
-    fn capture_bounds(&self) -> Rect {
+    pub(super) fn capture_bounds(&self) -> Rect {
         // Keep rounded corners and transparent decoration outside the captured pixels.
         Rect {
             x: self.window.borrow().bounds.x + 8,

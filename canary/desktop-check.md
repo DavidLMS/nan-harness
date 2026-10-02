@@ -135,7 +135,7 @@ observations describe completed runs, rather than additional qualification:
 | --- | --- | --- | --- |
 | Zed | Response and file-tool steps pass; pointer and accessibility Retry acknowledgements do not produce provider recovery. | Three complete probes pass the expanded retry policy. | Three complete probes pass with direct native clipboard transport and all cleanup checks. |
 | Hermes | Three complete probes pass with renderer process ownership. | Three complete probes pass with private native userData and bounded cold-start waits. | All three latest probes find a complete composer and pass the document guard, then stop before model refresh at the public menu action; cleanup passes. |
-| ChatGPT / Codex | Owned document loads without a composer; the latest completed startup diagnostic passes cleanup. | Renderer observation remains intermittent; cleanup passes. | The latest project-entry trial finds the public role form but blocks the Engineering action; restoration detects a remaining app process and cleanup fails. |
+| ChatGPT / Codex | Owned document loads without a composer; the latest completed startup diagnostic passes cleanup. | Renderer observation remains intermittent; cleanup passes. | The latest trial blocks the public role action or initial attachment; process absence and all cleanup pass in three probes. |
 | Claude | Three uninstrumented windows acquired. Explicit native accessibility returns zero visible editors or login buttons. Official account-free gateway remains unqualified. | The latest ordinary trial has a finished matching process without windows; neither measured private profile creates storage files. Cleanup passes; native-folder acquisition is the next official trial. | Stable owned window acquired; no editable controls observed and cleanup fails. |
 | Pen | Software GLES removes GPU startup failure; three fresh sessions show sign-in and no editor. No official account-free route found for the frozen release. | Two probes expose composer/Send; another exposes sign-in. Conversation adapter remains unimplemented. | Owned renderer loads sign-in and a dialog; conversation adapter remains unimplemented. |
 
@@ -920,3 +920,36 @@ truncation, invalid header lengths and digest mismatch while retaining the exact
 production pin. All 47 reducer and runner tests pass; the complete gate must be
 rerun after the correction. The preceding Linux quality gate on `70efffba` passes
 in [37024794192](https://github.com/DavidLMS/nan-harness/actions/runs/37024794192).
+
+Windows Codex on `a7e1f524` in
+[37025953559](https://github.com/DavidLMS/nan-harness/actions/runs/37025953559)
+passes application and global cleanup in all three probes after the process
+absence check. Two probes acquire the renderer and stop at the public role
+control's actionability guard; another does not acquire a renderer. The next
+closed field distinguishes foreign overlays, disabled pointer paths, hidden
+controls and unstable or intercepted points without admitting new actions.
+
+Hermes Windows on `aa84ca13` in
+[37025045302](https://github.com/DavidLMS/nan-harness/actions/runs/37025045302)
+reports the source-defined first-run onboarding overlay intercepting every model
+pill point in all three probes. All cleanup passes. The next trial uses its
+ordinary unique "I'll choose a provider later" control once, proves the overlay
+absent and the original composer/document unchanged, then opens the model menu.
+Ambiguous, disabled, replaced or uncertain dismissal blocks before refresh;
+no account or provider setting is changed by that source-defined control.
+
+The next Claude trial names a closed native-root preflight boundary and captures
+existing process/readiness/window observations immediately after an acquired
+window is lost, before cleanup. The preceding launcher's zero exit may follow
+cleanup and does not establish spontaneous application termination. The third
+probe was skipped by the checker's deliberate `WindowChanged` stop policy.
+
+The next Linux Zed panel experiment correlates immutable Maximize/Minimize icon
+candidates with two fresh owned accessible-button snapshots. Its exact source
+assets and alpha masks are pinned; native calibration is not established.
+The receipt contains bounded counts and an explicitly unavailable toggle state
+when the platform adapter omits it. It never activates zoom or substitutes icon
+correlation for acceptance. The existing single Retry action and provider oracle
+remain unchanged. Source inspection rules out an unguarded keyboard shortcut:
+this Retry is not configured as keyboard-focusable, and the editor/panel does not
+export the accessibility identity needed to prove panel keyboard focus.

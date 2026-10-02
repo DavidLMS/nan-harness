@@ -1,0 +1,204 @@
+//! Closed, diagnostic-only correlation of immutable source icons and owned AX buttons.
+//! Cairo candidates cannot authorize zoom input or establish a native toggle state.
+use super::native_icon_probe::ZoomMatches;
+use serde::Serialize;
+use xa11y::{ElementData, Rect, Role, Toggled};
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct Observation {
+    schema_version: u8,
+    mechanism: &'static str,
+    diagnostics_only: bool,
+    pub(super) status: &'static str,
+    maximize_matches: usize,
+    minimize_matches: usize,
+    stable_maximize_matches: usize,
+    stable_minimize_matches: usize,
+    correlated_buttons: usize,
+    checked_state: &'static str,
+    unique_correlation: bool,
+    activation_attempted: bool,
+}
+
+impl Observation {
+    pub(super) fn unavailable(status: &'static str) -> Self {
+        Self {
+            schema_version: 1,
+            mechanism: "zed-panel-zoom",
+            diagnostics_only: true,
+            status,
+            maximize_matches: 0,
+            minimize_matches: 0,
+            stable_maximize_matches: 0,
+            stable_minimize_matches: 0,
+            correlated_buttons: 0,
+            checked_state: "unavailable",
+            unique_correlation: false,
+            activation_attempted: false,
+        }
+    }
+}
+
+fn contains(outer: Rect, inner: Rect) -> bool {
+    outer.width > 0
+        && outer.height > 0
+        && inner.width > 0
+        && inner.height > 0
+        && inner.x >= outer.x
+        && inner.y >= outer.y
+        && i64::from(inner.x) + i64::from(inner.width)
+            <= i64::from(outer.x) + i64::from(outer.width)
+        && i64::from(inner.y) + i64::from(inner.height)
+            <= i64::from(outer.y) + i64::from(outer.height)
+}
+
+fn held_button(before: &ElementData, after: &ElementData) -> bool {
+    before.role == Role::Button
+        && after.role == Role::Button
+        && before.pid.is_some()
+        && before.pid == after.pid
+        && before.stable_id.as_ref().is_some_and(|id| !id.is_empty())
+        && before.stable_id == after.stable_id
+        && before.bounds == after.bounds
+        && before.states.enabled
+        && after.states.enabled
+        && before.states.visible
+        && after.states.visible
+        && before.states.checked == after.states.checked
+}
+
+pub(super) fn correlate(
+    matches: &ZoomMatches,
+    before: &[ElementData],
+    after: &[ElementData],
+) -> Observation {
+    if before.len() > 64 || after.len() > 64 {
+        return Observation::unavailable("budget-exceeded");
+    }
+    let mut result = Observation::unavailable("observed");
+    result.maximize_matches = matches.maximize_matches;
+    result.minimize_matches = matches.minimize_matches;
+    result.stable_maximize_matches = matches.maximize.len();
+    result.stable_minimize_matches = matches.minimize.len();
+    let candidates: Vec<_> = before
+        .iter()
+        .filter(|button| {
+            let Some(bounds) = button.bounds else {
+                return false;
+            };
+            after
+                .iter()
+                .filter(|other| held_button(button, other))
+                .count()
+                == 1
+                && matches
+                    .maximize
+                    .iter()
+                    .chain(&matches.minimize)
+                    .any(|icon| contains(bounds, *icon))
+        })
+        .collect();
+    result.correlated_buttons = candidates.len();
+    result.unique_correlation =
+        candidates.len() == 1 && matches.maximize.len() + matches.minimize.len() == 1;
+    result.checked_state = match candidates.as_slice() {
+        [button] => match button.states.checked {
+            Some(Toggled::Off) => "off",
+            Some(Toggled::On) => "on",
+            Some(Toggled::Mixed) => "mixed",
+            None => "unavailable",
+        },
+        [] => "unavailable",
+        _ => "ambiguous",
+    };
+    result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn button() -> ElementData {
+        let mut element = ElementData {
+            role: Role::Button,
+            name: None,
+            value: None,
+            description: None,
+            bounds: None,
+            actions: Vec::new(),
+            states: xa11y::StateSet::default(),
+            numeric_value: None,
+            min_value: None,
+            max_value: None,
+            stable_id: None,
+            pid: None,
+            raw: std::collections::HashMap::default(),
+            handle: 0,
+        };
+        element.pid = Some(17);
+        element.stable_id = Some("private-object-identity".into());
+        element.bounds = Some(Rect {
+            x: 10,
+            y: 20,
+            width: 30,
+            height: 30,
+        });
+        element.states.enabled = true;
+        element.states.visible = true;
+        element
+    }
+    fn icons() -> ZoomMatches {
+        ZoomMatches {
+            maximize: vec![Rect {
+                x: 15,
+                y: 25,
+                width: 14,
+                height: 14,
+            }],
+            minimize: vec![],
+            maximize_matches: 1,
+            minimize_matches: 0,
+        }
+    }
+    #[test]
+    fn stable_owned_button_correlation_does_not_infer_toggle_or_authorize_input() {
+        let button = button();
+        let observation = correlate(
+            &icons(),
+            std::slice::from_ref(&button),
+            std::slice::from_ref(&button),
+        );
+        assert!(observation.unique_correlation);
+        assert_eq!(observation.checked_state, "unavailable");
+        assert!(!observation.activation_attempted);
+        let bytes = serde_json::to_string(&observation).unwrap();
+        assert!(!bytes.contains("private-object-identity"));
+        assert!(!bytes.contains("bounds"));
+        assert!(!bytes.contains("pid"));
+    }
+    #[test]
+    fn foreign_changed_disabled_or_duplicate_identity_is_not_unique() {
+        let before = button();
+        for changed in ["pid", "identity", "bounds", "disabled", "hidden"] {
+            let mut after = before.clone();
+            match changed {
+                "pid" => after.pid = Some(99),
+                "identity" => after.stable_id = Some("foreign".into()),
+                "bounds" => after.bounds.as_mut().unwrap().x += 1,
+                "disabled" => after.states.enabled = false,
+                _ => after.states.visible = false,
+            }
+            assert!(
+                !correlate(&icons(), std::slice::from_ref(&before), &[after]).unique_correlation
+            );
+        }
+        assert!(
+            !correlate(
+                &icons(),
+                &[before.clone(), before.clone()],
+                &[before.clone(), before]
+            )
+            .unique_correlation
+        );
+    }
+}

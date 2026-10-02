@@ -84,6 +84,9 @@ async function trial(options={}) {
  const good=await trial();assert.equal(good.roleClicks,1);assert.equal(good.continueClicks,1);assert.equal(good.facts.roleScopeAbsent,true);assert.equal(good.facts.stage,'stopped-after-role');assert.equal(good.facts.errorCategory,null);
  const ownDialog=await trial({onboardingDialog:true});assert.equal(ownDialog.roleClicks,1);assert.equal(ownDialog.continueClicks,1);assert.equal(ownDialog.facts.roleScopeAbsent,true);
  assert.equal((await trial({modal:true})).facts.roleProofFailure,'control-not-actionable');
+ assert.equal((await trial({modal:true})).facts.actionabilityFailure,'foreign-overlay');
+ assert.equal((await trial({duplicateDialog:true})).facts.actionabilityFailure,'ambiguous-overlays');
+ assert.equal((await trial({intercepted:'label'})).facts.actionabilityFailure,'no-owned-point');
  for(const opts of [{noOptin:true},{foreignPage:true},{wrongLegend:true},{duplicateRadio:true},{badScope:true},{duplicateRoleFieldset:true},{login:true},{radioDisabled:true},{modal:true},{alertDialog:true},{ambiguousDialog:true},{duplicateDialog:true},{intercepted:'label'},{remount:true}]) {
   const r=await trial(opts);assert.equal(r.roleClicks,0);assert.equal(r.continueClicks,0);
  }

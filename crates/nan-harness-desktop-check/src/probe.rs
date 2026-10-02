@@ -787,6 +787,14 @@ async fn scenario_owned(
             }
         }
     };
+    if outcome == Err(Reason::WindowChanged)
+        && cfg!(target_os = "macos")
+        && spec.kind == DesktopHarnessKind::Claude
+        && std::env::var("NANH_CLAUDE_MAC_PROFILE_POLICY").as_deref() == Ok("native-known-folders")
+        && std::env::var("NANH_DESKTOP_QUALIFICATION_MODE").as_deref() == Ok("startup-baseline")
+    {
+        capture_failed_acquisition(true, &mut process, spec, launch_observation);
+    }
     finish_scenario(
         spec,
         &mut process,

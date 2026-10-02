@@ -42,7 +42,7 @@ def public_onboarding(setup, app):
     errors = {None, 'invalid-session', 'scope-not-matched', 'role-already-selected',
               'action-blocked', 'role-readback-failed', 'continue-not-matched',
               'ownership-lost', 'scope-remained', 'action-uncertain', 'observation-failed'}
-    if (app != 'chatgpt-desktop' or type(setup) is not dict or set(setup) != fields
+    if (app != 'chatgpt-desktop' or type(setup) is not dict or set(setup) not in (fields, fields | {'actionabilityFailure'})
             or type(setup['schemaVersion']) is not int or setup['schemaVersion'] != 1
             or setup['mechanism'] != 'codex-public-onboarding' or setup['diagnosticsOnly'] is not True
             or type(setup['stage']) is not str or setup['stage'] not in stages
@@ -52,6 +52,12 @@ def public_onboarding(setup, app):
             or type(setup['sessionProofFailure']) is not str or setup['sessionProofFailure'] not in sessions
             or any(type(setup[key]) is not bool for key in booleans)):
         raise ValueError('invalid public onboarding diagnostic')
+    if 'actionabilityFailure' in setup:
+        if (type(setup['actionabilityFailure']) is not str or setup['actionabilityFailure'] not in {
+                'unsupported-control', 'detached-or-inert', 'ambiguous-overlays', 'foreign-overlay',
+                'pointer-disabled', 'hidden', 'disabled', 'unstable', 'no-owned-point'}
+                or setup['roleProofFailure'] != 'control-not-actionable'):
+            raise ValueError('invalid public onboarding actionability')
     return setup
 
 
@@ -158,10 +164,10 @@ def semantic_observations(directory, app):
         if type(value) is not dict:
             raise ValueError('invalid semantic observation')
         mechanism = value.get('mechanism')
-        if mechanism not in {'hermes-windows-catalog-readiness', 'hermes-renderer-qualification', 'zed-native-copy', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'claude-owned-configuration', 'claude-storage-use'}:
+        if mechanism not in {'hermes-windows-catalog-readiness', 'hermes-renderer-qualification', 'zed-native-copy', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'claude-owned-configuration', 'claude-storage-use', 'claude-native-root-preflight', 'zed-panel-zoom'}:
             continue
         expected = 'hermes-renderer-qualification' if app == 'hermes-desktop' else 'zed-native-copy'
-        if (mechanism != expected and mechanism not in {'hermes-windows-catalog-readiness', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'claude-owned-configuration', 'claude-storage-use'}) or type(value.get('schemaVersion')) is not int or value['schemaVersion'] != 1:
+        if (mechanism != expected and mechanism not in {'hermes-windows-catalog-readiness', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'claude-owned-configuration', 'claude-storage-use', 'claude-native-root-preflight', 'zed-panel-zoom'}) or type(value.get('schemaVersion')) is not int or value['schemaVersion'] != 1:
             raise ValueError('semantic observation identity differs')
         record = {'schemaVersion': 1, 'mechanism': mechanism}
         if mechanism == 'hermes-windows-catalog-readiness':
@@ -169,11 +175,11 @@ def semantic_observations(directory, app):
                         'menuDismissed', 'composerReverified'}
             fields = booleans | {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'stage', 'errorCategory'}
             diagnostics = {'composerObservation', 'guardFailure'}
-            stages = {'policy', 'menu', 'refresh', 'catalog', 'dismiss', 'composer', 'ready'}
-            errors = {None, 'policy-rejected', 'menu-unavailable', 'refresh-uncertain',
+            optional = {'actionObservation', 'onboardingSkipped'}
+            stages = {'policy', 'onboarding', 'menu', 'refresh', 'catalog', 'dismiss', 'composer', 'ready'}
+            errors = {None, 'policy-rejected', 'onboarding-unavailable', 'menu-unavailable', 'refresh-uncertain',
                       'catalog-unavailable', 'dismiss-uncertain', 'composer-changed', 'composer-unavailable'}
-            action_fields = {'actionObservation'}
-            if (app != 'hermes-desktop' or set(value) not in (fields, fields | diagnostics, fields | diagnostics | action_fields) or value['diagnosticsOnly'] is not True
+            if (app != 'hermes-desktop' or (set(value) != fields and not (diagnostics <= set(value) and fields <= set(value) and set(value) <= fields | diagnostics | optional)) or value['diagnosticsOnly'] is not True
                     or type(value['stage']) is not str or value['stage'] not in stages
                     or (value['errorCategory'] is not None and type(value['errorCategory']) is not str)
                     or value['errorCategory'] not in errors
@@ -203,7 +209,7 @@ def semantic_observations(directory, app):
             if 'actionObservation' in value:
                 action = value['actionObservation']
                 if (type(action) is not dict or set(action) != {'action', 'sampleStatus', 'blocker'}
-                        or type(action['action']) is not str or action['action'] not in {'menu', 'refresh'}
+                        or type(action['action']) is not str or action['action'] not in {'onboarding', 'menu', 'refresh'}
                         or type(action['sampleStatus']) is not str or action['sampleStatus'] not in {
                             'unmeasured', 'guard-rejected', 'hidden', 'outside-viewport',
                             'no-owned-point', 'owned', 'unstable', 'control-replaced', 'click-failed'}
@@ -211,6 +217,10 @@ def semantic_observations(directory, app):
                             'unmeasured', 'none', 'onboarding', 'modal', 'other'}):
                     raise ValueError('invalid Hermes action observation')
                 record['actionObservation'] = action
+            if 'onboardingSkipped' in value:
+                if type(value['onboardingSkipped']) is not bool:
+                    raise ValueError('invalid Hermes onboarding observation')
+                record['onboardingSkipped'] = value['onboardingSkipped']
         elif mechanism == 'semantic-failure-policy':
             if set(value) != set('schemaVersion mechanism failureStatus recoveryAction'.split()) or type(value['failureStatus']) is not int or value['failureStatus'] not in {400, 503} or value['recoveryAction'] != 'explicit-ui-retry':
                 raise ValueError('invalid semantic failure policy')
@@ -241,6 +251,36 @@ def semantic_observations(directory, app):
             if type(value['category']) is not str or value['category'] not in allowed:
                 raise ValueError('invalid Windows endpoint proof category')
             record.update(diagnosticsOnly=True, category=value['category'])
+        elif mechanism == 'claude-native-root-preflight':
+            fields = {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'stage', 'failure'}
+            failures = {'process-absence': {'query-failed', 'process-present'},
+                        'foundation-query': {'query-failed'},
+                        'native-alignment': {'alignment-mismatch'},
+                        'roots-absent': {'existing-root', 'query-failed'},
+                        'roots-created': {None, 'creation-failed'}}
+            if (app != 'claude-desktop' or set(value) != fields or value['diagnosticsOnly'] is not True
+                    or type(value['stage']) is not str or value['stage'] not in failures
+                    or (value['failure'] is not None and type(value['failure']) is not str)
+                    or value['failure'] not in failures[value['stage']]):
+                raise ValueError('invalid Claude native root preflight')
+            record.update(diagnosticsOnly=True, stage=value['stage'], failure=value['failure'])
+        elif mechanism == 'zed-panel-zoom':
+            counts = {'maximizeMatches', 'minimizeMatches', 'stableMaximizeMatches',
+                      'stableMinimizeMatches', 'correlatedButtons'}
+            fields = counts | {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'status',
+                               'checkedState', 'uniqueCorrelation', 'activationAttempted'}
+            if (app != 'zed-desktop' or set(value) != fields or value['diagnosticsOnly'] is not True
+                    or type(value['status']) is not str or value['status'] not in {
+                        'observed', 'templates-unavailable', 'unsupported-scale', 'inventory-unavailable',
+                        'budget-exceeded', 'guard-rejected'}
+                    or type(value['checkedState']) is not str or value['checkedState'] not in {
+                        'off', 'on', 'mixed', 'unavailable', 'ambiguous'}
+                    or any(type(value[key]) is not int or not 0 <= value[key] <= 64 for key in counts)
+                    or type(value['uniqueCorrelation']) is not bool or value['activationAttempted'] is not False
+                    or value['uniqueCorrelation'] != (value['correlatedButtons'] == 1
+                        and value['stableMaximizeMatches'] + value['stableMinimizeMatches'] == 1)):
+                raise ValueError('invalid Zed panel zoom observation')
+            record.update({key: value[key] for key in fields - {'schemaVersion', 'mechanism'}})
         elif mechanism == 'claude-owned-configuration':
             flags = set('configurationPresent objectSchema deploymentModeMatches profileMatches providerGateway loopbackBaseUrlMatches authMatches modelDiscoveryEnabled chatEnabled chooserDisabled'.split())
             nullable = {'nativePathAlignment', 'configurationConsumed', 'modelDiscoverySeen'}

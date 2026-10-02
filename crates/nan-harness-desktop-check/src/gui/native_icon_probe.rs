@@ -464,6 +464,91 @@ pub(super) fn observe(
     })
 }
 
+/// Exact-source zoom candidates remain diagnostic-only; no input uses these bounds.
+pub(super) struct ZoomMatches {
+    pub(super) maximize: Vec<xa11y::Rect>,
+    pub(super) minimize: Vec<xa11y::Rect>,
+    pub(super) maximize_matches: usize,
+    pub(super) minimize_matches: usize,
+}
+
+pub(super) fn observe_zoom(
+    directory: &Path,
+    first: &PrivateIconFrame,
+    second: &PrivateIconFrame,
+    capture: xa11y::Rect,
+) -> Result<ZoomMatches, Reason> {
+    validate(&first.0)?;
+    validate(&second.0)?;
+    let side = supported_side(first.scale())?;
+    if first.0.width != second.0.width
+        || first.0.height != second.0.height
+        || first.scale().to_bits() != second.scale().to_bits()
+        || !directory.is_absolute()
+    {
+        return Err(Reason::WindowChanged);
+    }
+    let load = |name| {
+        let path = directory.join(format!("{name}-{side}.alpha"));
+        let metadata = std::fs::symlink_metadata(&path).map_err(|_| Reason::ActionUnsupported)?;
+        if !metadata.is_file() || metadata.len() != u64::from(side * side) {
+            return Err(Reason::ActionUnsupported);
+        }
+        let mut bytes = Vec::new();
+        std::fs::File::open(path)
+            .map_err(|_| Reason::ActionUnsupported)?
+            .take(u64::from(side * side) + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|_| Reason::ActionUnsupported)?;
+        if bytes.len() != (side * side) as usize {
+            return Err(Reason::ActionUnsupported);
+        }
+        Ok(bytes)
+    };
+    let deadline = Instant::now() + Duration::from_secs(8);
+    let one = LumaFrame::new(&first.0);
+    let two = LumaFrame::new(&second.0);
+    let measure = |name| -> Result<(usize, Vec<xa11y::Rect>), Reason> {
+        let mask = load(name)?;
+        let before = find(&one, &mask, side, deadline)?.positions;
+        let after = find(&two, &mask, side, deadline)?.positions;
+        let scale = if side == 14 { 1 } else { 2 };
+        let stable = before
+            .iter()
+            .filter(|at| after.contains(at))
+            .map(|at| {
+                Ok(xa11y::Rect {
+                    x: capture
+                        .x
+                        .checked_add(
+                            i32::try_from(at.x / scale).map_err(|_| Reason::ActionUnsupported)?,
+                        )
+                        .ok_or(Reason::ActionUnsupported)?,
+                    y: capture
+                        .y
+                        .checked_add(
+                            i32::try_from(at.y / scale).map_err(|_| Reason::ActionUnsupported)?,
+                        )
+                        .ok_or(Reason::ActionUnsupported)?,
+                    // Round the far edge outwards at 2x; a half-point icon
+                    // must not appear contained merely through integer flooring.
+                    width: 14 + at.x % scale,
+                    height: 14 + at.y % scale,
+                })
+            })
+            .collect::<Result<Vec<_>, Reason>>()?;
+        Ok((before.len(), stable))
+    };
+    let (maximize_matches, maximize) = measure("maximize")?;
+    let (minimize_matches, minimize) = measure("minimize")?;
+    Ok(ZoomMatches {
+        maximize,
+        minimize,
+        maximize_matches,
+        minimize_matches,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -513,6 +598,43 @@ mod tests {
             }
         }
         PrivateIconFrame::new(screenshot)
+    }
+
+    #[test]
+    fn zoom_candidates_require_stable_pixels_exact_scale_and_map_capture_origin() {
+        let masks = synthetic_masks();
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::write(directory.path().join("maximize-14.alpha"), &masks.retry).unwrap();
+        std::fs::write(directory.path().join("minimize-14.alpha"), &masks.copy).unwrap();
+        let one = frame(&masks, &[10]);
+        let two = frame(&masks, &[10]);
+        let capture = xa11y::Rect {
+            x: 100,
+            y: 200,
+            width: 120,
+            height: 80,
+        };
+        let result = observe_zoom(directory.path(), &one, &two, capture).unwrap();
+        assert_eq!(result.maximize_matches, 1);
+        assert_eq!(result.minimize_matches, 1);
+        assert_eq!(
+            result.maximize,
+            vec![xa11y::Rect {
+                x: 110,
+                y: 210,
+                width: 14,
+                height: 14
+            }]
+        );
+        let moved = frame(&masks, &[35]);
+        let result = observe_zoom(directory.path(), &one, &moved, capture).unwrap();
+        assert!(result.maximize.is_empty());
+        assert!(result.minimize.is_empty());
+        let mut changed = frame(&masks, &[10]);
+        changed.0.scale = 1.25;
+        assert!(observe_zoom(directory.path(), &changed, &changed, capture).is_err());
+        std::fs::write(directory.path().join("maximize-14.alpha"), [0; 195]).unwrap();
+        assert!(observe_zoom(directory.path(), &one, &two, capture).is_err());
     }
 
     #[test]

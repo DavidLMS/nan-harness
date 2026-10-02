@@ -7,24 +7,26 @@ const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 // Standalone browser callback: no Node helpers or application internals.
 function sample(control) {
-  if (!['LABEL','BUTTON'].includes(control.tagName)) return null;
-  if (!control.isConnected || control.ownerDocument !== document || control.closest('[inert]')) return null;
+  const blocked=reason=>({blocked:reason});
+  if (!['LABEL','BUTTON'].includes(control.tagName)) return blocked('unsupported-control');
+  if (!control.isConnected || control.ownerDocument !== document || control.closest('[inert]')) return blocked('detached-or-inert');
   const visible = e => { const r = e.getBoundingClientRect(); const s = getComputedStyle(e);
     return r.width > 0 && r.height > 0 && s.display !== 'none' && s.visibility !== 'hidden'; };
   const overlays=[...document.querySelectorAll('[role="dialog"],[aria-modal="true"],[role="alertdialog"],[role="menu"]')].filter(visible);
-  if (overlays.length>1) return null;
+  if (overlays.length>1) return blocked('ambiguous-overlays');
   if (overlays.length===1) {
     const dialog=overlays[0];
     // Native project entry can present the same verified public role form in
     // a dialog. Only its own enclosing dialog can admit an ordinary click.
     if (dialog.getAttribute('role')!=='dialog' || !dialog.contains(control)
         || dialog.querySelectorAll('input[type="radio"][name="conversational-onboarding-inline-role"][value="engineering"]').length!==1
-        || [...dialog.querySelectorAll('fieldset > legend')].filter(e=>visible(e)&&e.innerText.trim()==='Select the kind of work you do').length!==1) return null;
+        || [...dialog.querySelectorAll('fieldset > legend')].filter(e=>visible(e)&&e.innerText.trim()==='Select the kind of work you do').length!==1) return blocked('foreign-overlay');
   }
   for (let e = control, depth = 0; e; e = e.parentElement) {
-    if (++depth > 64 || getComputedStyle(e).pointerEvents === 'none') return null;
+    if (++depth > 64 || getComputedStyle(e).pointerEvents === 'none') return blocked('pointer-disabled');
   }
-  if (!visible(control) || control.disabled || control.getAttribute('aria-disabled') === 'true') return null;
+  if (!visible(control)) return blocked('hidden');
+  if (control.disabled || control.getAttribute('aria-disabled') === 'true') return blocked('disabled');
   const r = control.getBoundingClientRect();
   const points = [];
   for (const fy of [0.25, 0.5, 0.75]) for (const fx of [0.25, 0.5, 0.75]) {
@@ -37,7 +39,7 @@ function sample(control) {
   return {rect: [r.left,r.top,r.width,r.height], points};
 }
 function candidate(a, b) {
-  return a && b && JSON.stringify(a.rect) === JSON.stringify(b.rect)
+  return a && b && !a.blocked && !b.blocked && JSON.stringify(a.rect) === JSON.stringify(b.rect)
     && a.points.find(p => b.points.some(q => p.x === q.x && p.y === q.y));
 }
 exports.run = async function(page, ownerGuard, deadline) {
@@ -111,18 +113,22 @@ exports.run = async function(page, ownerGuard, deadline) {
   }
   async function click(control, reprove, before, after) {
     if (!await reprove()) return false;
-    const blocked=()=>{facts.roleProofFailure='control-not-actionable';return false;};
+    const blocked=reason=>{facts.roleProofFailure='control-not-actionable';facts.actionabilityFailure=reason;return false;};
     const handle = await control.elementHandle();
-    if (!handle) return blocked();
+    if (!handle) return blocked('detached-or-inert');
     try {
       const first = await handle.evaluate(sample);
+      if (first?.blocked) return blocked(first.blocked);
       await wait(Math.min(100,Math.max(0,deadline-Date.now())));
       if (!await reprove() || !await control.evaluate((e, held)=>e===held,handle)) return false;
-      const point = candidate(first,await handle.evaluate(sample));
-      if (!point) return blocked();
+      const second=await handle.evaluate(sample);
+      if (second?.blocked) return blocked(second.blocked);
+      const point = candidate(first,second);
+      if (!point) return blocked(first?.points?.length && second?.points?.length?'unstable':'no-owned-point');
       if (!await reprove() || !await control.evaluate((e, held)=>e===held,handle)) return false;
       const final=await handle.evaluate(sample);
-      if (!candidate(first,final) || !final.points.some(p=>p.x===point.x&&p.y===point.y)) return blocked();
+      if (final?.blocked) return blocked(final.blocked);
+      if (!candidate(first,final) || !final.points.some(p=>p.x===point.x&&p.y===point.y)) return blocked('unstable');
       if (!ownedEndpoint()) return false;
       if (Date.now() >= deadline) { facts.roleProofFailure='deadline-expired'; return false; }
       facts[before]=true;
