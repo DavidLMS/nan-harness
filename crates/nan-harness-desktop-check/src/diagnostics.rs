@@ -25,6 +25,7 @@ pub(crate) enum LaunchStage {
     ExitedBeforeWindow,
     WindowUnavailable,
     WindowAcquired,
+    RendererAcquired,
 }
 
 /// Closed launch failure sources. These identify the boundary that failed,

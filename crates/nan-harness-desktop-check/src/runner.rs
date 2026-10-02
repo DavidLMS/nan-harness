@@ -730,7 +730,14 @@ fn read_and_emit_worker_result(
             .steps
             .contains(&crate::report::CheckStep::Launched)
     }) {
-        crate::diagnostics::LaunchStage::WindowAcquired
+        if spec.verification == crate::cli::VerificationPolicy::SemanticOnly
+            && spec.kind != DesktopHarnessKind::Zed
+            && std::env::var("NANH_DESKTOP_QUALIFICATION_MODE").as_deref() != Ok("startup-baseline")
+        {
+            crate::diagnostics::LaunchStage::RendererAcquired
+        } else {
+            crate::diagnostics::LaunchStage::WindowAcquired
+        }
     } else {
         crate::diagnostics::LaunchStage::NotStarted
     };

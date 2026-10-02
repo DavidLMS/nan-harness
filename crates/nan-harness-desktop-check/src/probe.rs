@@ -726,39 +726,53 @@ async fn scenario(
     let process_group = process.id().and_then(|pid| i32::try_from(pid).ok());
     #[cfg(windows)]
     let process_group = None;
-    let gui = Gui::wait(spec.kind, &mut process);
-    capture_failed_acquisition(gui.is_err(), &mut process, spec, launch_observation);
-    let outcome = match &gui {
-        Ok(gui) => {
-            result.steps.push(CheckStep::Launched);
-            ConversationScenario {
-                spec,
-                inventory: &inventory,
-                gate: &gate,
-                fixture: &fixture,
-                marker: &marker,
-                final_marker: &final_marker,
-                experiment: experiment.as_ref(),
-                semantic: semantic.as_ref(),
+    let conversation = ConversationScenario {
+        spec,
+        inventory: &inventory,
+        gate: &gate,
+        fixture: &fixture,
+        marker: &marker,
+        final_marker: &final_marker,
+        experiment: experiment.as_ref(),
+        semantic: semantic.as_ref(),
+    };
+    let mut gui = None;
+    let outcome = if conversation.uses_renderer() {
+        conversation.run_renderer(&mut process, result).await
+    } else {
+        let acquired = Gui::wait(spec.kind, &mut process);
+        capture_failed_acquisition(acquired.is_err(), &mut process, spec, launch_observation);
+        match acquired {
+            Ok(native_gui) => {
+                result.steps.push(CheckStep::Launched);
+                let outcome = conversation
+                    .run(&native_gui, process.id(), result, composer_observations)
+                    .await;
+                gui = Some(native_gui);
+                outcome
             }
-            .run(gui, process.id(), result, composer_observations)
-            .await
-        }
-        Err((reason, acquisition_stage, error_category, foreground_relation, candidate_facts)) => {
-            *gui_acquisition = Some(crate::diagnostics::GuiAcquisitionDiagnostic {
-                stage: *acquisition_stage,
-                error_category: *error_category,
-                reason: *reason,
-                foreground_relation: *foreground_relation,
-                candidate_facts: *candidate_facts,
-            });
-            Err(*reason)
+            Err((
+                reason,
+                acquisition_stage,
+                error_category,
+                foreground_relation,
+                candidate_facts,
+            )) => {
+                *gui_acquisition = Some(crate::diagnostics::GuiAcquisitionDiagnostic {
+                    stage: acquisition_stage,
+                    error_category,
+                    reason,
+                    foreground_relation,
+                    candidate_facts,
+                });
+                Err(reason)
+            }
         }
     };
     finish_scenario(
         spec,
         &mut process,
-        gui.as_ref().ok(),
+        gui.as_ref(),
         process_group,
         outcome,
         &gate,
@@ -780,6 +794,31 @@ struct ConversationScenario<'a> {
 }
 
 impl ConversationScenario<'_> {
+    fn uses_renderer(&self) -> bool {
+        self.semantic
+            .is_some_and(semantic::SemanticBackend::uses_renderer)
+    }
+
+    async fn run_renderer(
+        &self,
+        process: &mut ProbeProcess,
+        result: &mut ProbeResult,
+    ) -> Result<(), Reason> {
+        self.semantic
+            .ok_or(Reason::IsolationUnavailable)?
+            .run_renderer(
+                process,
+                semantic::SemanticScenario {
+                    inventory: self.inventory,
+                    gate: self.gate,
+                    fixture: self.fixture,
+                    marker: self.final_marker,
+                },
+                result,
+            )
+            .await
+    }
+
     async fn run(
         &self,
         gui: &Gui,

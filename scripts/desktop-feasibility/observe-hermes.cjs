@@ -148,8 +148,9 @@ async function driveDom() {
     Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
   const requestKeys = ['connectionPath', 'ownerPid', 'prompt', 'expectedMarker', 'timeoutMs'];
   if (qualify) requestKeys.push('action', 'purpose');
-  const qualificationRequest = !qualify || (['submit', 'retry'].includes(request.action) &&
+  const qualificationRequest = !qualify || (['submit', 'retry', 'ready'].includes(request.action) &&
     ['response', 'failure'].includes(request.purpose) &&
+    (request.action !== 'ready' || request.purpose === 'response') &&
     (request.purpose !== 'failure' || (request.action === 'submit' && request.expectedMarker === 'NAN_CHECK_EXPECTED_FAILURE')));
   if (!exactKeys(request, requestKeys) || !qualificationRequest ||
       !exactKeys(connection, ['schemaVersion', 'port', 'launcherPid']) || connection.schemaVersion !== 1 ||
@@ -218,6 +219,7 @@ async function driveDom() {
     facts.errorCategory = 'target-invalid'; saveFacts(); return;
   }
   facts.targetVerified = true;
+  if (qualify && request.action === 'ready') { facts.errorCategory = null; saveFacts(); return; }
   const errorCards = page.locator('[data-role="assistant"][data-slot="aui_assistant-message-root"] [role="alert"]:visible');
   const retryButton = errorCards.getByRole('button', { name: 'Retry', exact: true });
   async function errorProof() {
@@ -272,6 +274,7 @@ async function driveDom() {
     facts.errorCategory = 'composer-ambiguous'; saveFacts(); return;
   }
   facts.uniqueComposer = true;
+  if (!ownedEndpoint()) { facts.errorCategory = 'endpoint-unowned'; saveFacts(); return; }
   await candidates.fill(request.prompt, { timeout: Math.max(1, deadline - Date.now()) });
   facts.inputReadback = await candidates.evaluate((e, prompt) =>
     (e.value ?? e.textContent) === prompt, request.prompt);
@@ -554,7 +557,7 @@ async function driveDom() {
   facts.errorCategory = 'response-timeout'; saveFacts();
 }
 (async () => {
-  if (drive) { await driveDom(); process.exit((qualify && request.purpose === 'failure' ? facts.errorObserved && facts.retryControl : facts.responseVerified) ? 0 : 1); }
+  if (drive) { await driveDom(); process.exit((qualify && request.action === 'ready' ? facts.endpointOwned && facts.attached && facts.targetVerified : qualify && request.purpose === 'failure' ? facts.errorObserved && facts.retryControl : facts.responseVerified) ? 0 : 1); }
   const deadline = Date.now() + 120000;
   let browser;
   while (Date.now() < deadline) {

@@ -8,7 +8,7 @@ mod native_icon_probe;
 mod stability;
 mod visual;
 
-pub(crate) use dom_probe::{DomAction, DomPurpose, DomTurn};
+pub(crate) use dom_probe::{DomAction, DomPurpose, DomTurn, RendererSession};
 pub(crate) use native_copy_probe::NativeClipboardSession;
 
 use crate::process::Observation;

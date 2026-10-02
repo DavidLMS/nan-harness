@@ -211,7 +211,7 @@ def validate_native(value, platform=None):
         integer(value["probeIndex"], 0, 2)
     else:
         require(value["probeIndex"] is None)
-    enum(value["launchStage"], {"not-started", "started", "exited-before-window", "window-unavailable", "window-acquired"})
+    enum(value["launchStage"], {"not-started", "started", "exited-before-window", "window-unavailable", "window-acquired", "renderer-acquired"})
     require(type(value["truncated"]) is bool)
     if "launchFailure" in value:
         enum(value["launchFailure"], set("""argument-validation-failed launch-setup-failed provider-routing-failed

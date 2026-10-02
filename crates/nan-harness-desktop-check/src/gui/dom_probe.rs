@@ -23,6 +23,7 @@ struct Request<'a> {
 #[derive(Clone, Copy, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum DomAction {
+    Ready,
     Submit,
     Retry,
 }
@@ -625,16 +626,47 @@ fn read_facts(path: &Path, qualification: bool) -> Result<Facts, Reason> {
     Ok(facts)
 }
 
-impl Gui {
-    pub(crate) fn inventory_renderer(&self, directory: &Path, owner: u32) -> Result<(), Reason> {
-        self.visual.guard()?;
-        if std::env::var("NANH_DESKTOP_QUALIFICATION_MODE").as_deref() == Ok("startup-baseline") {
-            let value = serde_json::json!({"schemaVersion":1, "mechanism":"renderer-startup-baseline", "diagnosticsOnly":true, "windowAcquired":true, "rendererInstrumented":false});
-            open_private_new(&directory.join(format!("baseline-{owner}.json")))
-                .and_then(|mut file| file.write_all(value.to_string().as_bytes()))
-                .map_err(|_| Reason::IsolationUnavailable)?;
-            return Err(Reason::ActionUnsupported);
-        }
+pub(crate) struct RendererSession<'a> {
+    process: &'a mut crate::process::ProbeProcess,
+    directory: &'a Path,
+    owner: u32,
+}
+
+fn renderer_guard(
+    process: &mut impl crate::process::Observation,
+    owner: u32,
+) -> Result<(), Reason> {
+    if process.id() != Some(owner) {
+        return Err(Reason::IsolationUnavailable);
+    }
+    if process
+        .try_wait()
+        .map_err(|_| Reason::ActionUnsupported)?
+        .is_some()
+    {
+        return Err(Reason::ApplicationExited);
+    }
+    Ok(())
+}
+
+impl<'a> RendererSession<'a> {
+    pub(crate) fn new(
+        process: &'a mut crate::process::ProbeProcess,
+        directory: &'a Path,
+    ) -> Result<Self, Reason> {
+        let owner = process.id().ok_or(Reason::ApplicationExited)?;
+        renderer_guard(process, owner)?;
+        Ok(Self {
+            process,
+            directory,
+            owner,
+        })
+    }
+
+    pub(crate) fn inventory(&mut self) -> Result<(), Reason> {
+        let directory = self.directory;
+        let owner = self.owner;
+        renderer_guard(self.process, owner)?;
         let driver = std::env::var_os("NANH_DESKTOP_RENDERER_DRIVER")
             .map(std::path::PathBuf::from)
             .ok_or(Reason::IsolationUnavailable)?;
@@ -643,26 +675,44 @@ impl Gui {
         }
         let request_path = directory.join(format!("renderer-inventory-{owner}.private"));
         let output_path = directory.join(format!("renderer-inventory-{owner}.json"));
-        let request = serde_json::json!({"ownerPid": owner,
-            "connectionPath": directory.join(format!("connection-{owner}.json"))});
+        let request = serde_json::json!({"ownerPid": owner, "connectionPath": directory.join(format!("connection-{owner}.json"))});
         open_private_new(&request_path)
             .and_then(|mut file| file.write_all(request.to_string().as_bytes()))
             .map_err(|_| Reason::IsolationUnavailable)?;
-        let outcome = self.run_dom_driver(&driver, &request_path, &output_path, false);
+        let outcome = run_driver(&driver, &request_path, &output_path, false, || {
+            renderer_guard(self.process, owner)
+        });
         std::fs::remove_file(request_path).map_err(|_| Reason::IsolationUnavailable)?;
         outcome?;
-        // An inventory can never satisfy input, response, tool or recovery acceptance.
-        Err(Reason::ActionUnsupported)
+        let mut bytes = Vec::new();
+        open_private_read(&output_path)
+            .and_then(|(file, _)| file.take(8193).read_to_end(&mut bytes))
+            .map_err(|_| Reason::IsolationUnavailable)?;
+        if bytes.len() > 8192 {
+            return Err(Reason::IsolationUnavailable);
+        }
+        let value: serde_json::Value =
+            serde_json::from_slice(&bytes).map_err(|_| Reason::IsolationUnavailable)?;
+        if value["schemaVersion"] != 1
+            || value["mechanism"] != "renderer-inventory"
+            || value["endpointOwned"] != true
+            || value["launcherOwned"] != true
+            || value["attached"] != true
+            || value["pageCount"] != 1
+        {
+            return Err(Reason::ActionUnsupported);
+        }
+        Ok(())
     }
 
-    pub(crate) fn qualify_dom_turn(
-        &self,
-        directory: &Path,
-        owner: u32,
+    pub(crate) fn turn(
+        &mut self,
         turn: DomTurn<'_>,
         provider: &ProviderGate,
     ) -> Result<(), Reason> {
-        self.visual.guard()?;
+        renderer_guard(self.process, self.owner)?;
+        let directory = self.directory;
+        let owner = self.owner;
         let driver = std::env::var_os("FEASIBILITY_HERMES_DOM_DRIVER")
             .map(std::path::PathBuf::from)
             .ok_or(Reason::IsolationUnavailable)?;
@@ -692,7 +742,9 @@ impl Gui {
         open_private_new(&request_path)
             .and_then(|mut file| file.write_all(&bytes))
             .map_err(|_| Reason::IsolationUnavailable)?;
-        let outcome = self.run_dom_driver(&driver, &request_path, &output_path, true);
+        let outcome = run_driver(&driver, &request_path, &output_path, true, || {
+            renderer_guard(self.process, owner)
+        });
         std::fs::remove_file(&request_path).map_err(|_| Reason::IsolationUnavailable)?;
         // Failed actions still retain independent provider evidence. This is
         // observation only and never grants a second submission.
@@ -710,6 +762,18 @@ impl Gui {
             .and_then(|()| std::fs::rename(final_path, &output_path))
             .map_err(|_| Reason::IsolationUnavailable)?;
         outcome?;
+        if matches!(turn.action, DomAction::Ready) {
+            return if facts.endpoint.endpoint_owned
+                && facts.endpoint.target_verified
+                && facts.endpoint.attached
+                && facts.error_category.is_none()
+                && !facts.input.input_submitted
+            {
+                Ok(())
+            } else {
+                Err(Reason::IsolationUnavailable)
+            };
+        }
         if !facts.input.input_submitted
             || facts.error_category.is_some()
             || matches!(turn.action, DomAction::Retry)
@@ -734,6 +798,37 @@ impl Gui {
             }
             _ => Err(Reason::ResponseMismatch),
         }
+    }
+}
+
+impl Gui {
+    pub(crate) fn inventory_renderer(&self, directory: &Path, owner: u32) -> Result<(), Reason> {
+        self.visual.guard()?;
+        if std::env::var("NANH_DESKTOP_QUALIFICATION_MODE").as_deref() == Ok("startup-baseline") {
+            let value = serde_json::json!({"schemaVersion":1, "mechanism":"renderer-startup-baseline", "diagnosticsOnly":true, "windowAcquired":true, "rendererInstrumented":false});
+            open_private_new(&directory.join(format!("baseline-{owner}.json")))
+                .and_then(|mut file| file.write_all(value.to_string().as_bytes()))
+                .map_err(|_| Reason::IsolationUnavailable)?;
+            return Err(Reason::ActionUnsupported);
+        }
+        let driver = std::env::var_os("NANH_DESKTOP_RENDERER_DRIVER")
+            .map(std::path::PathBuf::from)
+            .ok_or(Reason::IsolationUnavailable)?;
+        if !driver.is_absolute() || !driver.is_file() || driver.is_symlink() {
+            return Err(Reason::IsolationUnavailable);
+        }
+        let request_path = directory.join(format!("renderer-inventory-{owner}.private"));
+        let output_path = directory.join(format!("renderer-inventory-{owner}.json"));
+        let request = serde_json::json!({"ownerPid": owner,
+            "connectionPath": directory.join(format!("connection-{owner}.json"))});
+        open_private_new(&request_path)
+            .and_then(|mut file| file.write_all(request.to_string().as_bytes()))
+            .map_err(|_| Reason::IsolationUnavailable)?;
+        let outcome = self.run_dom_driver(&driver, &request_path, &output_path, false);
+        std::fs::remove_file(request_path).map_err(|_| Reason::IsolationUnavailable)?;
+        outcome?;
+        // An inventory can never satisfy input, response, tool or recovery acceptance.
+        Err(Reason::ActionUnsupported)
     }
 
     pub(crate) fn probe_dom(
@@ -805,47 +900,107 @@ impl Gui {
         output: &Path,
         qualification: bool,
     ) -> Result<(), Reason> {
-        let mut child = Command::new("node")
-            .arg(driver)
-            .arg(if qualification {
-                "--qualify"
-            } else {
-                "--drive"
-            })
-            .arg(request)
-            .arg(output)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .map_err(|_| Reason::ActionUnsupported)?;
-        let deadline = Instant::now() + Duration::from_secs(35);
-        let outcome = loop {
-            match child.try_wait() {
-                Ok(Some(_)) => break Ok(()),
-                Err(_) => break Err(Reason::ActionUnsupported),
-                Ok(None) => {}
-            }
-            if let Err(reason) = self.visual.guard() {
-                break Err(reason);
-            }
-            if Instant::now() >= deadline {
-                break Err(Reason::Timeout);
-            }
-            std::thread::sleep(Duration::from_millis(100));
-        };
-        if outcome.is_err() {
-            let _ = child.kill();
-            child.wait().map_err(|_| Reason::IsolationUnavailable)?;
-        }
-        outcome
+        run_driver(driver, request, output, qualification, || {
+            self.visual.guard()
+        })
     }
 }
 
+fn run_driver(
+    driver: &Path,
+    request: &Path,
+    output: &Path,
+    qualification: bool,
+    mut guard: impl FnMut() -> Result<(), Reason>,
+) -> Result<(), Reason> {
+    guard()?;
+    let mut child = Command::new("node")
+        .arg(driver)
+        .arg(if qualification {
+            "--qualify"
+        } else {
+            "--drive"
+        })
+        .arg(request)
+        .arg(output)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|_| Reason::ActionUnsupported)?;
+    let deadline = Instant::now() + Duration::from_secs(35);
+    let outcome = loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break Ok(()),
+            Err(_) => break Err(Reason::ActionUnsupported),
+            Ok(None) => {}
+        }
+        if let Err(reason) = guard() {
+            break Err(reason);
+        }
+        if Instant::now() >= deadline {
+            break Err(Reason::Timeout);
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    };
+    if outcome.is_err() {
+        let _ = child.kill();
+        child.wait().map_err(|_| Reason::IsolationUnavailable)?;
+    }
+    outcome
+}
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    struct ProcessObservation {
+        owner: Option<u32>,
+        exited: bool,
+        unavailable: bool,
+    }
+
+    impl crate::process::Observation for ProcessObservation {
+        fn id(&self) -> Option<u32> {
+            self.owner
+        }
+        fn try_wait(&mut self) -> std::io::Result<Option<std::process::ExitStatus>> {
+            if self.unavailable {
+                return Err(std::io::Error::other("unavailable"));
+            }
+            if !self.exited {
+                return Ok(None);
+            }
+            #[cfg(unix)]
+            {
+                use std::os::unix::process::ExitStatusExt;
+                Ok(Some(std::process::ExitStatus::from_raw(0)))
+            }
+            #[cfg(windows)]
+            {
+                use std::os::windows::process::ExitStatusExt;
+                Ok(Some(std::process::ExitStatus::from_raw(0)))
+            }
+        }
+    }
+
+    #[test]
+    fn renderer_session_rejects_changed_dead_or_unobservable_owner() {
+        for (owner, exited, unavailable, expected) in [
+            (Some(42), false, false, Ok(())),
+            (Some(43), false, false, Err(Reason::IsolationUnavailable)),
+            (None, false, false, Err(Reason::IsolationUnavailable)),
+            (Some(42), true, false, Err(Reason::ApplicationExited)),
+            (Some(42), false, true, Err(Reason::ActionUnsupported)),
+        ] {
+            let mut observation = ProcessObservation {
+                owner,
+                exited,
+                unavailable,
+            };
+            assert_eq!(renderer_guard(&mut observation, 42), expected);
+        }
+    }
 
     fn base_facts() -> serde_json::Value {
         json!({"schemaVersion":1,"mechanism":"hermes-playwright-dom","endpointOwned":true,"targetVerified":true,"attached":true,"uniqueComposer":true,"inputReadback":true,"inputSubmitted":false,"responseVerified":false,"syntheticTextPresent":false,"errorCategory":null,"playwrightVersion":"1.61.0","observedRuntimeVersion":"22.0.0","inputCleared":false,"userTurnObserved":false,"assistantTurnCount":0,"uniqueSendControl":false,"canSend":false,"sendBlocker":null,"sendMechanism":"semantic-keyboard","requestFailedCount":0,"requestFailureCategory":null,"apiErrorStatus":null,"apiErrorResponseCount":0})

@@ -2,7 +2,7 @@
 
 use super::{ProbeSpec, select_read_tool, visual_marker};
 use crate::cli::{SessionMode, VerificationPolicy};
-use crate::gui::{DomAction, DomPurpose, DomTurn, Gui, NativeClipboardSession};
+use crate::gui::{DomAction, DomPurpose, DomTurn, Gui, NativeClipboardSession, RendererSession};
 use crate::provider::ProviderGate;
 use crate::report::{CheckStep, InputMode, ProbeResult, Reason, ResponseVerification};
 use nan_harness_core::DesktopHarnessKind;
@@ -46,6 +46,46 @@ impl SemanticBackend {
         }))
     }
 
+    pub(super) fn uses_renderer(&self) -> bool {
+        self.kind != DesktopHarnessKind::Zed
+            && std::env::var("NANH_DESKTOP_QUALIFICATION_MODE").as_deref() != Ok("startup-baseline")
+    }
+
+    pub(super) async fn run_renderer(
+        &self,
+        process: &mut crate::process::ProbeProcess,
+        scenario: SemanticScenario<'_>,
+        result: &mut ProbeResult,
+    ) -> Result<(), Reason> {
+        let mut session = RendererSession::new(process, &self.directory)?;
+        if self.kind != DesktopHarnessKind::Hermes {
+            session.inventory()?;
+            result.steps.push(CheckStep::Launched);
+            // A read-only inventory never qualifies the application.
+            return Err(Reason::ActionUnsupported);
+        }
+        // Endpoint readiness proves the launcher has applied the fresh profile
+        // and spawned its GUI; no user input occurs before the retry policy.
+        session.turn(
+            DomTurn {
+                prompt: "Check this connection",
+                marker: scenario.marker,
+                action: DomAction::Ready,
+                purpose: DomPurpose::Response,
+            },
+            scenario.gate,
+        )?;
+        super::hermes_policy::prepare(
+            scenario
+                .fixture
+                .parent()
+                .ok_or(Reason::IsolationUnavailable)?,
+            &self.directory,
+        )?;
+        let mut ui = SemanticUi::Renderer(session);
+        complete_scenario(&mut ui, &scenario, &self.directory, result).await
+    }
+
     pub(super) async fn run(
         &self,
         gui: &Gui,
@@ -57,21 +97,7 @@ impl SemanticBackend {
             DesktopHarnessKind::Zed => {
                 SemanticUi::Zed(Box::new(gui.native_clipboard_session(&self.directory)?))
             }
-            DesktopHarnessKind::Hermes => {
-                // Configure the owned fresh profile before Hermes creates its first agent.
-                super::hermes_policy::prepare(
-                    scenario
-                        .fixture
-                        .parent()
-                        .ok_or(Reason::IsolationUnavailable)?,
-                    &self.directory,
-                )?;
-                SemanticUi::Hermes {
-                    gui,
-                    directory: &self.directory,
-                    owner: owner.ok_or(Reason::ApplicationExited)?,
-                }
-            }
+            DesktopHarnessKind::Hermes => return Err(Reason::IsolationUnavailable),
             DesktopHarnessKind::ChatGpt | DesktopHarnessKind::Claude | DesktopHarnessKind::Pen => {
                 return gui
                     .inventory_renderer(&self.directory, owner.ok_or(Reason::ApplicationExited)?);
@@ -84,11 +110,7 @@ impl SemanticBackend {
 
 enum SemanticUi<'a> {
     Zed(Box<NativeClipboardSession<'a>>),
-    Hermes {
-        gui: &'a Gui,
-        directory: &'a Path,
-        owner: u32,
-    },
+    Renderer(RendererSession<'a>),
 }
 
 impl SemanticUi<'_> {
@@ -98,7 +120,7 @@ impl SemanticUi<'_> {
                 InputMode::NativeClipboardAndKeyboard,
                 ResponseVerification::NativeThreadExport,
             ),
-            Self::Hermes { .. } => (
+            Self::Renderer(_) => (
                 InputMode::RendererDomAndKeyboard,
                 ResponseVerification::RendererDom,
             ),
@@ -122,13 +144,7 @@ impl SemanticUi<'_> {
                     DomPurpose::Failure => session.wait_retry(Duration::from_secs(90)),
                 }
             }
-            Self::Hermes {
-                gui,
-                directory,
-                owner,
-            } => gui.qualify_dom_turn(
-                directory,
-                *owner,
+            Self::Renderer(session) => session.turn(
                 DomTurn {
                     prompt,
                     marker,
@@ -146,13 +162,7 @@ impl SemanticUi<'_> {
                 session.retry_once()?;
                 session.wait_response(marker, Duration::from_secs(30))
             }
-            Self::Hermes {
-                gui,
-                directory,
-                owner,
-            } => gui.qualify_dom_turn(
-                directory,
-                *owner,
+            Self::Renderer(session) => session.turn(
                 DomTurn {
                     prompt: "Check the expected provider failure",
                     marker,
@@ -167,7 +177,7 @@ impl SemanticUi<'_> {
     fn finish(self, gate: &ProviderGate, outcome: Result<(), Reason>) -> Result<(), Reason> {
         match self {
             Self::Zed(session) => session.finish(gate, outcome),
-            Self::Hermes { .. } => outcome,
+            Self::Renderer(_) => outcome,
         }
     }
 }
@@ -188,6 +198,9 @@ async fn complete_scenario(
     gate.arm_fixture_response(marker)
         .map_err(|()| Reason::ProviderFailed)?;
     ui.turn("Check this connection", marker, DomPurpose::Response, gate)?;
+    if !result.steps.contains(&CheckStep::Launched) {
+        result.steps.push(CheckStep::Launched);
+    }
     if !gate.fixture_response_verified() || !inventory.recording_bounded() {
         return Err(Reason::ProviderFailed);
     }
