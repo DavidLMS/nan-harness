@@ -426,7 +426,7 @@ def semantic_observations(directory, app):
             fields = {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'status', 'nativeForegroundWindowMatchedHeld'}
             statuses = {'proved', 'untrusted', 'query-error', 'focus-mismatch', 'not-standard',
                         'identity-changed', 'no-match', 'ambiguous'}
-            if (app != 'claude-desktop' or set(value) not in (fields, fields | {'query'}, fields | {'windowOnlyStatus', 'windowOnlyMatchedHeld'}, fields | {'query', 'windowOnlyStatus', 'windowOnlyMatchedHeld'}) or value['diagnosticsOnly'] is not True
+            if (app != 'claude-desktop' or set(value) - {'phase'} not in (fields, fields | {'query'}, fields | {'windowOnlyStatus', 'windowOnlyMatchedHeld'}, fields | {'query', 'windowOnlyStatus', 'windowOnlyMatchedHeld'}) or value['diagnosticsOnly'] is not True
                     or type(value['status']) is not str or value['status'] not in statuses
                     or (type(value['nativeForegroundWindowMatchedHeld']) is not bool
                         if value['status'] == 'proved' else value['nativeForegroundWindowMatchedHeld'] is not None)):
@@ -438,6 +438,10 @@ def semantic_observations(directory, app):
                         or (type(window_matched) is not bool if window_status == 'proved' else window_matched is not None)):
                     raise ValueError('invalid Claude window-only focus observation')
                 record.update(windowOnlyStatus=window_status, windowOnlyMatchedHeld=window_matched)
+            if 'phase' in value:
+                if type(value['phase']) is not str or value['phase'] not in {'initial', 'final-stability'}:
+                    raise ValueError('invalid Claude focus phase')
+                record['phase'] = value['phase']
             query = value.get('query')
             if query is not None:
                 stages = set('app-create app-timeout focused-window main-window focused-element input-timeout input-window element-type pid window-timeout role subrole position size geometry'.split())
@@ -498,11 +502,20 @@ def semantic_observations(directory, app):
             base = flags | {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'pointerTarget', 'pointerChild'}
             coordinate_fields = {'clientOriginVerified', 'retryOffsetRelation'}
             authority_fields = {'coordinatePackage', 'coordinateRelation', 'coordinateAuthority'}
-            if (set(value) not in (base, base | {'inputDelivery'}, base | coordinate_fields,
+            modifier_fields = {'modifierState', 'buttonsHeld'}
+            present_modifiers = modifier_fields & set(value)
+            if (set(value) - modifier_fields not in (base, base | {'inputDelivery'}, base | coordinate_fields,
                                   base | coordinate_fields | {'inputDelivery'}, base | coordinate_fields | authority_fields,
                                   base | coordinate_fields | authority_fields | {'inputDelivery'})
+                    or present_modifiers and present_modifiers != modifier_fields
                     or app != 'zed-desktop' or value['diagnosticsOnly'] is not True):
                 raise ValueError('invalid Zed pointer observation identity')
+            if present_modifiers:
+                state = value['modifierState']
+                if (type(state) is not str or state not in {'none', 'shift', 'control', 'lock', 'other-modifier', 'mixed', 'unknown'}
+                        or (value['buttonsHeld'] is not None if state == 'unknown' else type(value['buttonsHeld']) is not bool)):
+                    raise ValueError('invalid Zed pointer modifier observation')
+                record.update(modifierState=state, buttonsHeld=value['buttonsHeld'])
             for key in flags:
                 if value[key] is not None and type(value[key]) is not bool:
                     raise ValueError('invalid Zed pointer observation flag')

@@ -1439,3 +1439,31 @@ all three pre-Retry observations. Pinned ThreadView source also uses Maximize in
 an ordinary message-editor ExpandMessageEditor control; that glyph is not proof
 of panel zoom. Reply/tool acceptance and all cleanup still pass; explicit Retry
 recovery remains unverified. No new native cell is qualified.
+
+
+Both the complete local gate and hosted Linux quality gate
+[37077307516](https://github.com/DavidLMS/nan-harness/actions/runs/37077307516)
+pass on `5042debe`. macOS Claude
+[37076922575](https://github.com/DavidLMS/nan-harness/actions/runs/37076922575)
+rejects final acquisition on focus validation. The initial exact AX proofs pass,
+but the existing private new-file writer retains only that initial receipt; it
+does not explain the final rejection. The next trial preserves one separate
+`final-stability` receipt from the rejected snapshot, with unchanged guards.
+
+Windows Claude
+[37076925536](https://github.com/DavidLMS/nan-harness/actions/runs/37076925536)
+passes AX absence and fails process inspection with the newly measured `deadline`
+stage. There is no first-AX-rejection receipt in this run because AX absence
+succeeds. Native absence previously re-created its bundled helper and opened
+nested five/15-second deadlines. The corrected Claude post-stop path borrows the
+already-owned helper, keeps one absolute five-second budget and performs a single
+complete native inventory. If no Gui exists, helper preparation happens once
+inside that same budget. AX/window/exact-process absence still all have to pass.
+Ordinary native transport retry and timeout behavior remains unchanged.
+
+Zed's existing pre-click XQueryPointer result now retains only a closed modifier
+category and nullable button-held flag. Configurable Mod1..Mod5 bits are not
+misidentified as Alt or Super; unknown bits remain unknown. This requires no extra
+query or action and cannot certify GPUI callback consumption or Retry recovery.
+The matrix still has five qualified cells; new diagnostics and acquisition fixes
+remain subject to native runner acceptance.

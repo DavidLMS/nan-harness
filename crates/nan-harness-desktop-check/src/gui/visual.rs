@@ -266,6 +266,30 @@ impl Visual {
         )
     }
 
+    #[cfg(windows)]
+    pub(super) fn absence_native(&self) -> &Native {
+        &self.native
+    }
+
+    #[cfg(windows)]
+    pub(super) fn ensure_absent_using(
+        native: &Native,
+        kind: DesktopHarnessKind,
+        deadline: Instant,
+    ) -> Result<(), Reason> {
+        if Instant::now() >= deadline {
+            return Err(Reason::ActionUnsupported);
+        }
+        let windows = native.windows_for_absence_until(deadline)?;
+        if windows.iter().any(|window| matches_app(kind, &window.name)) {
+            return Err(Reason::AlreadyRunning);
+        }
+        if Instant::now() >= deadline {
+            return Err(Reason::ActionUnsupported);
+        }
+        Ok(())
+    }
+
     // Keep acquisition as one bounded state machine so process-liveness,
     // candidate ownership, and stability transitions cannot be reordered.
     pub(super) fn wait<P: Observation>(
@@ -418,8 +442,14 @@ impl Visual {
                 .native
                 .windows_with_focus(original.pid)
                 .map_err(|error| failure(error.reason()))?;
-            let candidate = final_initial_candidate(&snapshot, &original)
-                .map_err(|error| failure(error.reason()))?;
+            let candidate = final_initial_candidate(&snapshot, &original).map_err(|error| {
+                record_claude_snapshot(
+                    &snapshot,
+                    final_focus_expected(&snapshot, &original),
+                    "final-stability",
+                );
+                failure(error.reason())
+            })?;
             ownership()?;
             let now = Instant::now();
             if now >= deadline {
@@ -1439,6 +1469,22 @@ fn point_in_window(window: Rect, pixels: Rect, scale: f32) -> Result<Point, Reas
 
 #[cfg(target_os = "macos")]
 fn record_claude_stack(snapshot: &Snapshot, held: &Window) {
+    record_claude_snapshot(snapshot, held, "initial");
+}
+
+#[cfg(any(test, target_os = "macos"))]
+fn final_focus_expected<'a>(snapshot: &'a Snapshot, original: &'a Window) -> &'a Window {
+    let mut matching = snapshot.windows.iter().filter(|window| {
+        window.id == original.id && window.pid == original.pid && window.name == original.name
+    });
+    match (matching.next(), matching.next()) {
+        (Some(candidate), None) => candidate,
+        _ => original,
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn record_claude_snapshot(snapshot: &Snapshot, held: &Window, phase: &str) {
     if !cfg!(target_os = "macos")
         || !matches_app(DesktopHarnessKind::Claude, &held.name)
         || std::env::var("GITHUB_ACTIONS").as_deref() != Ok("true")
@@ -1469,18 +1515,25 @@ fn record_claude_stack(snapshot: &Snapshot, held: &Window) {
     }
     if let Some((status, matched, query)) = snapshot.focus_observation(held) {
         let window_only = snapshot.window_focus_observation(held);
-        let focus_path = directory.join(format!("claude-window-focus-{}.json", std::process::id()));
+        let suffix = if phase == "initial" { "" } else { "-final" };
+        let focus_path = directory.join(format!(
+            "claude-window-focus-{}{suffix}.json",
+            std::process::id()
+        ));
         if let Ok(file) = nan_harness_private_fs::open_private_new(&focus_path) {
             let _ = serde_json::to_writer(
                 file,
                 &serde_json::json!({
                     "schemaVersion": 1, "mechanism": "claude-window-focus", "diagnosticsOnly": true,
-                    "status": status, "nativeForegroundWindowMatchedHeld": matched, "query": query,
+                    "status": status, "nativeForegroundWindowMatchedHeld": matched, "query": query, "phase": phase,
                     "windowOnlyStatus": window_only.map(|value| value.0),
                     "windowOnlyMatchedHeld": window_only.and_then(|value| value.1),
                 }),
             );
         }
+    }
+    if phase != "initial" {
+        return;
     }
     let path = directory.join(format!("claude-window-stack-{}.json", std::process::id()));
     if let Ok(file) = nan_harness_private_fs::open_private_new(&path) {
@@ -1492,6 +1545,25 @@ fn record_claude_stack(snapshot: &Snapshot, held: &Window) {
 mod tests {
     use super::*;
     use crate::native::FitFailure;
+
+    #[test]
+    fn final_focus_diagnostic_uses_only_unique_original_identity() {
+        let mut state = Snapshot::parse(
+            "FG 7 0\nDISPLAY 0 0 2000 2000\nWIN 1 7 10 20 800 600 436c61756465 0\n",
+        )
+        .unwrap();
+        let original = state.windows[0].clone();
+        state.windows[0].bounds.width += 20;
+        assert_eq!(final_focus_expected(&state, &original).bounds.width, 820);
+        state.windows.push(state.windows[0].clone());
+        assert_eq!(final_focus_expected(&state, &original), &original);
+        state.windows.clear();
+        assert_eq!(final_focus_expected(&state, &original), &original);
+        let mut foreign = original.clone();
+        foreign.pid = 8;
+        state.windows.push(foreign);
+        assert_eq!(final_focus_expected(&state, &original), &original);
+    }
 
     #[test]
     fn initial_activation_requires_ownership_and_issues_one_activation() {

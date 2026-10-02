@@ -79,12 +79,40 @@ pub(super) fn run_with_category_input(
     run_once(executable, argument, None, input)
 }
 
+#[cfg(any(windows, test))]
+pub(super) fn run_absence_until(
+    executable: &Path,
+    deadline: Instant,
+) -> Result<Zeroizing<String>, Reason> {
+    run_once_until(
+        executable,
+        OsStr::new("--windows-absence"),
+        None,
+        &[],
+        Some(deadline),
+    )
+    .map_err(FailureCategory::reason)
+}
+
 fn run_once(
     executable: &Path,
     argument: &OsStr,
     screenshot: Option<&Screenshot>,
     input: &[u8],
 ) -> Result<Zeroizing<String>, FailureCategory> {
+    run_once_until(executable, argument, screenshot, input, None)
+}
+
+fn run_once_until(
+    executable: &Path,
+    argument: &OsStr,
+    screenshot: Option<&Screenshot>,
+    input: &[u8],
+    absolute_deadline: Option<Instant>,
+) -> Result<Zeroizing<String>, FailureCategory> {
+    if absolute_deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+        return Err(FailureCategory::Timeout);
+    }
     if let Some(image) = screenshot {
         validate_image(image).map_err(|_| FailureCategory::InvalidInput)?;
     }
@@ -125,13 +153,22 @@ fn run_once(
                 .map(Zeroizing::new)
                 .map_err(|_| FailureCategory::Output)
         });
-        let deadline = Instant::now() + Duration::from_secs(15);
+        let deadline =
+            absolute_deadline.unwrap_or_else(|| Instant::now() + Duration::from_secs(15));
         let status = loop {
+            if absolute_deadline.is_some() && Instant::now() >= deadline {
+                break None;
+            }
             match child.try_wait() {
                 Ok(Some(status)) => break Some(status),
                 Err(_) => break None,
                 Ok(None) if Instant::now() >= deadline => break None,
-                Ok(None) => std::thread::sleep(Duration::from_millis(20)),
+                Ok(None) => std::thread::sleep(if absolute_deadline.is_some() {
+                    Duration::from_millis(20)
+                        .min(deadline.saturating_duration_since(Instant::now()))
+                } else {
+                    Duration::from_millis(20)
+                }),
             }
         };
         if status.is_none() {
@@ -140,7 +177,7 @@ fn run_once(
         }
         let written = writer.join().map_err(|_| FailureCategory::Pipe)?;
         let output = reader.join().map_err(|_| FailureCategory::Pipe)?;
-        if status.is_none() {
+        if status.is_none() || absolute_deadline.is_some_and(|bound| Instant::now() >= bound) {
             return Err(FailureCategory::Timeout);
         }
         if !status.is_some_and(|status| status.success()) {
@@ -202,6 +239,33 @@ pub(super) fn validate_image(image: &Screenshot) -> Result<(), Reason> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn bounded_absence_never_spawns_expired_or_retries_incomplete_inventory() {
+        let (root, executable) = inventory_fixture(1, 6);
+        assert!(run_absence_until(&executable, Instant::now()).is_err());
+        assert!(!root.path().join("count").exists());
+        assert!(run_absence_until(&executable, Instant::now() + Duration::from_secs(1)).is_err());
+        assert_eq!(
+            std::fs::read_to_string(root.path().join("count")).unwrap(),
+            "1\n"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bounded_absence_kills_only_synthetic_child_and_rejects_late_success() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let directory = tempfile::tempdir().unwrap();
+        let executable = directory.path().join("synthetic-helper");
+        std::fs::write(&executable, "#!/bin/sh\n[ \"$1\" = --version ] && exit 0\nprintf 'DISPLAY 0 0 800 600\\n'\nexec /bin/sleep 1\n").unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+        nan_harness_test_support::executable_fixture::wait_until_ready(&executable).unwrap();
+        assert!(
+            run_absence_until(&executable, Instant::now() + Duration::from_millis(50)).is_err()
+        );
+    }
 
     #[cfg(unix)]
     fn inventory_fixture(failures: u32, code: i32) -> (tempfile::TempDir, std::path::PathBuf) {

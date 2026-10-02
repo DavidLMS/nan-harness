@@ -1259,7 +1259,7 @@ async fn finish_scenario(
         return Err(Reason::CleanupFailed);
     }
     record_absence(
-        Gui::ensure_absent_after_stop(spec.kind),
+        Gui::ensure_absent_after_stop(spec.kind, gui),
         CleanupStage::AbsenceAfterStop,
         outcome.err(),
         diagnostic,

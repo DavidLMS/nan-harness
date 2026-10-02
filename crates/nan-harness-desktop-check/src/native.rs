@@ -237,6 +237,19 @@ impl Native {
         Ok(Snapshot::parse(&output)?.windows)
     }
 
+    #[cfg(any(windows, test))]
+    pub(crate) fn windows_for_absence_until(
+        &self,
+        deadline: std::time::Instant,
+    ) -> Result<Vec<Window>, Reason> {
+        let output = process::run_absence_until(&self.executable, deadline)?;
+        let windows = Snapshot::parse(&output)?.windows;
+        if std::time::Instant::now() >= deadline {
+            return Err(Reason::ActionUnsupported);
+        }
+        Ok(windows)
+    }
+
     #[cfg(target_os = "macos")]
     pub(crate) fn claude_identity_observation(
         &self,
@@ -358,6 +371,34 @@ pub(crate) fn claude_focus_policy() -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    #[test]
+    fn bounded_absence_reuses_prepared_synthetic_helper_and_parses_complete_inventory() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let directory = tempfile::tempdir().unwrap();
+        let executable = directory.path().join("synthetic-helper");
+        std::fs::write(&executable, "#!/bin/sh\n[ \"$1\" = --version ] && exit 0\n[ \"$1\" = --windows-absence ] || exit 1\nprintf 'FG 0 0\\nDISPLAY 0 0 800 600\\n'\n").unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+        nan_harness_test_support::executable_fixture::wait_until_ready(&executable).unwrap();
+        let native = Native {
+            directory,
+            executable,
+        };
+        assert!(
+            native
+                .windows_for_absence_until(
+                    std::time::Instant::now() + std::time::Duration::from_secs(1)
+                )
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            native
+                .windows_for_absence_until(std::time::Instant::now())
+                .is_err()
+        );
+    }
+
     #[test]
     fn known_folder_protocol_rejects_partial_and_extra_output() {
         assert_eq!(parse_known_folders(b"true\n"), Some(true));

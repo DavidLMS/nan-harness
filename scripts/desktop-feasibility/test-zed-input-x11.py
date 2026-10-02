@@ -260,6 +260,16 @@ class Transport(unittest.TestCase):
 
 
 class AccessibilityIdentity(unittest.TestCase):
+    def test_pointer_mask_preserves_configurable_modifiers_and_unknown_bits(self):
+        classify = module['pointer_mask']
+        for mask, expected in ((0, ('none', False)), (1, ('shift', False)),
+                               (2, ('lock', False)), (4, ('control', False)),
+                               (8, ('other-modifier', False)), (5, ('mixed', False)),
+                               (256, ('none', True)), (4096 | 4, ('control', True)),
+                               (8192, ('unknown', None)), (-1, ('unknown', None)),
+                               (True, ('unknown', None))):
+            self.assertEqual(classify(mask), expected)
+
     def test_pointer_child_distinguishes_client_from_frame_decoration(self):
         class Function:
             def __init__(self, callback):
@@ -270,12 +280,15 @@ class AccessibilityIdentity(unittest.TestCase):
             closed = []
             def query(*args):
                 args[3]._obj.value = child
+                args[8]._obj.value = 4 | 256
                 return 1
             xlib = types.SimpleNamespace(XOpenDisplay=Function(lambda _: 1),
                 XCloseDisplay=Function(lambda _: closed.append(True)), XQueryPointer=Function(query))
             with patch('ctypes.CDLL', return_value=xlib), patch.dict(module['pointer_child'].__globals__,
                     owned_frame=lambda candidate, active: candidate == 41 and active == 40):
-                self.assertEqual(module['pointer_child'](50, 40), expected)
+                facts = module['pointer_observation']()
+                self.assertEqual(module['pointer_child'](50, 40, facts), expected)
+                self.assertEqual((facts['modifierState'], facts['buttonsHeld']), ('control', True))
             self.assertEqual(closed, [True])
 
     def test_closed_receipt_requires_hosted_metadata_and_private_new_file(self):

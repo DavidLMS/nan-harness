@@ -70,7 +70,8 @@ def pointer_observation():
                 sensitive=None, showing=None, visible=None, defunct=None,
                 retryContains=None, pointerTarget='unavailable', pointerChild='unavailable',
                 clientOriginVerified=None, retryOffsetRelation=None, coordinatePackage=None,
-                coordinateRelation=None, coordinateAuthority=None)
+                coordinateRelation=None, coordinateAuthority=None,
+                modifierState='unknown', buttonsHeld=None)
 
 
 def independent_client_snapshot(active):
@@ -156,7 +157,17 @@ def retry_offset_relation(screen, window, geometry):
     return 'expected-origin' if screen == expected else 'missing-origin' if screen == window else 'inconsistent'
 
 
-def pointer_child(frame, active):
+def pointer_mask(mask):
+    # Mod1..Mod5 have configurable meanings; never infer Alt or Super from them.
+    if type(mask) is not int or mask < 0 or mask & ~0x1fff:
+        return 'unknown', None
+    modifiers = mask & 0xff
+    state = ({0: 'none', 1: 'shift', 2: 'lock', 4: 'control'}.get(modifiers)
+             or ('other-modifier' if modifiers.bit_count() == 1 else 'mixed'))
+    return state, bool(mask & 0x1f00)
+
+
+def pointer_child(frame, active, facts=None):
     # xdotool's root query reports the Openbox frame. Query that frame directly
     # to distinguish its client from decoration without publishing window IDs.
     xlib = ctypes.CDLL('libX11.so.6')
@@ -177,6 +188,8 @@ def pointer_child(frame, active):
         if not xlib.XQueryPointer(display, frame, ctypes.byref(root), ctypes.byref(child),
             ctypes.byref(rx), ctypes.byref(ry), ctypes.byref(wx), ctypes.byref(wy), ctypes.byref(mask)):
             return 'unavailable'
+        if facts is not None:
+            facts['modifierState'], facts['buttonsHeld'] = pointer_mask(mask.value)
         return ('client' if child.value == active or not child.value and frame == active
                 else 'decoration-or-empty' if not child.value
                 else 'client-descendant' if owned_frame(child.value, active) else 'other')
@@ -360,7 +373,7 @@ def retry_click(payload):
         facts['pointerTarget'] = ('client' if pointer_window == active else
             'owned-frame' if pointer_window == request['window'] else
             'client-descendant' if owned_frame(pointer_window, active) else 'foreign')
-        facts['pointerChild'] = pointer_child(request['window'], active)
+        facts['pointerChild'] = pointer_child(request['window'], active, facts)
         stage = 15
         if owned_foreground() != (0, active):
             return 11

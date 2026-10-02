@@ -532,6 +532,28 @@ class QualificationTests(unittest.TestCase):
             path.write_text(json.dumps(value))
             self.assertEqual(q.semantic_observations(Path(root), 'claude-desktop'), [value])
 
+    def test_claude_focus_phases_are_optional_closed_and_never_promote_failure(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'focus.json'
+            value = dict(schemaVersion=1, mechanism='claude-window-focus', diagnosticsOnly=True,
+                         status='query-error', nativeForegroundWindowMatchedHeld=None,
+                         query=dict(phase='before', stage='focused-element', error='no-value'),
+                         windowOnlyStatus='proved', windowOnlyMatchedHeld=True)
+            for phase in (None, 'initial', 'final-stability'):
+                receipt = value if phase is None else {**value, 'phase': phase}
+                path.write_text(json.dumps(receipt))
+                self.assertEqual(q.semantic_observations(Path(root), 'claude-desktop'), [receipt])
+            for phase in ('PRIVATE', True, [], None):
+                path.write_text(json.dumps({**value, 'phase': phase}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(Path(root), 'claude-desktop')
+            proved = {**value, 'status': 'proved', 'nativeForegroundWindowMatchedHeld': True,
+                      'query': None, 'phase': 'final-stability'}
+            path.write_text(json.dumps(proved))
+            self.assertEqual(q.semantic_observations(Path(root), 'claude-desktop'), [proved])
+            with self.assertRaises(ValueError):
+                q.semantic_observations(Path(root), 'zed-desktop')
+
     def test_claude_window_only_proof_does_not_promote_full_focus_failure(self):
         with tempfile.TemporaryDirectory() as root:
             path = Path(root) / 'focus.json'
@@ -1424,6 +1446,27 @@ class HermesReadinessTests(unittest.TestCase):
             path.write_text(json.dumps(value))
             with self.assertRaises(ValueError):
                 q.semantic_observations(root, 'zed-desktop')
+
+    def test_zed_pointer_modifier_receipts_are_atomic_and_closed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            value = dict(schemaVersion=1, mechanism='zed-pointer-observation', diagnosticsOnly=True,
+                         maximizedHorizontal=True, maximizedVertical=True, enabled=True, sensitive=True,
+                         showing=True, visible=True, defunct=False, retryContains=True,
+                         pointerTarget='client', pointerChild='client')
+            path = root / 'pointer.json'
+            for state in ('none', 'shift', 'control', 'lock', 'other-modifier', 'mixed', 'unknown'):
+                measured = {**value, 'modifierState': state, 'buttonsHeld': None if state == 'unknown' else False}
+                path.write_text(json.dumps(measured))
+                self.assertEqual(q.semantic_observations(root, 'zed-desktop'), [measured])
+            for changed in ({'modifierState': 'PRIVATE', 'buttonsHeld': False},
+                            {'modifierState': 'none'}, {'buttonsHeld': True},
+                            {'modifierState': 'unknown', 'buttonsHeld': True},
+                            {'modifierState': 'control', 'buttonsHeld': 1},
+                            {'modifierState': 'none', 'buttonsHeld': False, 'rawMask': 4}):
+                path.write_text(json.dumps({**value, **changed}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'zed-desktop')
 
 if __name__ == '__main__':
     unittest.main()
