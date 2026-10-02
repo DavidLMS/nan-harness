@@ -943,6 +943,19 @@ class QualificationTests(unittest.TestCase):
             measured = {**value, 'clientOriginVerified': True, 'retryOffsetRelation': 'missing-origin'}
             path.write_text(json.dumps(measured))
             self.assertEqual(q.semantic_observations(root, 'zed-desktop'), [measured])
+            corrected = {**measured, 'clientOriginVerified': False, 'coordinatePackage': 'noble-5build1',
+                         'coordinateRelation': 'parent-offset', 'coordinateAuthority': 'verified-xtranslate'}
+            path.write_text(json.dumps(corrected))
+            self.assertEqual(q.semantic_observations(root, 'zed-desktop'), [corrected])
+            for changed in ({**corrected, 'coordinatePackage': 'PRIVATE'},
+                            {**corrected, 'coordinatePackage': 'unverified'},
+                            {**corrected, 'coordinateRelation': 'other'},
+                            {**corrected, 'coordinateAuthority': True},
+                            {**corrected, 'clientOriginVerified': True},
+                            {key: item for key, item in corrected.items() if key != 'coordinateRelation'}):
+                path.write_text(json.dumps(changed))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'zed-desktop')
             for changed in ({**measured, 'clientOriginVerified': 1},
                             {**measured, 'retryOffsetRelation': 'PRIVATE'},
                             {**measured, 'retryOffsetRelation': False},
@@ -1159,6 +1172,15 @@ class QualificationTests(unittest.TestCase):
         self.assertEqual(q.public_onboarding(proved, 'chatgpt-desktop'), proved)
         surface = {**proved, 'foreignOverlaySurface': 'separate-dialog', 'foreignOverlayFingerprint': 'matched'}
         self.assertEqual(q.public_onboarding(surface, 'chatgpt-desktop'), surface)
+        for heading in ('all-set', 'external-import', 'skip-confirmation', 'unknown', 'ambiguous'):
+            measured = {**surface, 'foreignOverlayHeading': heading}
+            self.assertEqual(q.public_onboarding(measured, 'chatgpt-desktop'), measured)
+        for invalid in ('PRIVATE heading', True, None):
+            with self.assertRaises(ValueError):
+                q.public_onboarding({**surface, 'foreignOverlayHeading': invalid}, 'chatgpt-desktop')
+        with self.assertRaises(ValueError):
+            q.public_onboarding({**blocked, 'foreignOverlayHeading': 'unknown'}, 'chatgpt-desktop')
+
         for changed in ({**surface, 'foreignOverlaySurface': 'PRIVATE'},
                         {**surface, 'foreignOverlayFingerprint': True},
                         {**surface, 'foreignOverlaySurface': 'enclosing-role-dialog'},

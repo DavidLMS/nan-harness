@@ -1209,3 +1209,38 @@ origin checks disagree with xdotool. Retry still produces no provider recovery.
 The installed transport version and its reparented-client translation need
 verification before correcting coordinates; adding the existing offset twice
 is still unsupported.
+
+Codex Windows
+[37062965739](https://github.com/DavidLMS/nan-harness/actions/runs/37062965739)
+passes cleanup in all three sessions. Two classify the blocker as a separate
+dialog whose heading does not match the inspected final-onboarding fingerprint;
+the third loses the role-form proof during classification. No unknown modal
+receives input. Source fingerprints for other shipped startup dialogs remain
+under investigation.
+
+Claude macOS on `45447e23`
+[37064335977](https://github.com/DavidLMS/nan-harness/actions/runs/37064335977)
+observes seven consecutive present candidates with six stable pairs, then
+rejects the initial readiness guard for another window of the same process.
+It passes cleanup and again discovers two models. Focus diagnostics previously
+ran only after binding, so this earlier rejection has no focus receipt. The
+next diagnostic observes the already selected, process-owned candidate before
+binding while preserving the original rejection and issuing no input.
+
+The Ubuntu Noble source for `xdotool` and `libxdo3`
+`1:3.20160805.1-5build1` retains the reparented-client translation bug: it
+translates the parent's client offset instead of the client origin. The next
+Linux Retry trial requires both installed package versions to match, two
+unchanged independent X11 geometry snapshots, equal dimensions, and an origin
+discrepancy exactly equal to the measured parent offset. Only then may the
+existing single click use the directly translated origin. Unknown discrepancies
+fail before the click; no pixel scale or extra activation is guessed.
+
+Windows Claude on `45447e23`
+[37064339922](https://github.com/DavidLMS/nan-harness/actions/runs/37064339922)
+still fails cleanup and has no native diagnostic bundle after the unknown-exit
+decoder fix. The executor publishes the bundle only after its owned-process
+cleanup returns; an executor cleanup exception can therefore discard already
+captured closed events. The next trial publishes those events on failure too,
+while preserving the executor failure and blocking further probes. No process
+output is added to the artifact.

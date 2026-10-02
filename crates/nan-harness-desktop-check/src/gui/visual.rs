@@ -1016,6 +1016,16 @@ fn initial_readiness(
     owner: u32,
 ) -> Result<(), AcquisitionFailure> {
     if let Err(failure) = snapshot.non_foreground_failure(window) {
+        if crate::native::claude_focus_policy()
+            && matches_app(DesktopHarnessKind::Claude, &window.name)
+        {
+            observe_initial_rejection(
+                failure,
+                window,
+                || native.windows_with_focus(window.pid),
+                |fresh| record_claude_stack(fresh, window),
+            );
+        }
         return Err((
             failure.reason(),
             crate::diagnostics::GuiAcquisitionStage::WindowStability,
@@ -1059,6 +1069,25 @@ fn initial_readiness(
             None,
         )
     })
+}
+
+#[cfg(any(test, target_os = "macos"))]
+fn observe_initial_rejection<Query, Emit>(
+    failure: GuardFailure,
+    window: &Window,
+    query: Query,
+    emit: Emit,
+) where
+    Query: FnOnce() -> Result<Snapshot, FailureCategory>,
+    Emit: FnOnce(&Snapshot),
+{
+    // Observation cannot replace the original acquisition verdict or bind a new candidate.
+    if failure == GuardFailure::SameProcessWindow
+        && let Ok(fresh) = query()
+        && fresh.guard_failure(window) == Err(GuardFailure::SameProcessWindow)
+    {
+        emit(&fresh);
+    }
 }
 
 #[cfg(any(test, target_os = "macos"))]
@@ -1307,6 +1336,45 @@ mod tests {
         assert_eq!(result, Ok(()));
         assert_eq!(activations.get(), 1);
         assert_eq!(*events.borrow(), ["ownership", "activation", "guard"]);
+    }
+
+    #[test]
+    fn initial_rejection_diagnostic_requires_same_owned_candidate_without_actions() {
+        let snapshot = Snapshot::parse("FG 7 0\nDISPLAY 0 0 2000 2000\nWIN 99 7 1800 1800 10 10 436c61756465 3\nWIN 1 7 10 20 800 600 436c61756465 0\n").unwrap();
+        let window = snapshot.windows[1].clone();
+        let records = Cell::new(0);
+        observe_initial_rejection(
+            GuardFailure::SameProcessWindow,
+            &window,
+            || Ok(snapshot.clone()),
+            |_| records.set(records.get() + 1),
+        );
+        assert_eq!(records.get(), 1);
+        let mut changed = snapshot.clone();
+        changed.windows[1].bounds.width += 1;
+        observe_initial_rejection(
+            GuardFailure::SameProcessWindow,
+            &window,
+            || Ok(changed),
+            |_| records.set(records.get() + 1),
+        );
+        observe_initial_rejection(
+            GuardFailure::SameProcessWindow,
+            &window,
+            || Err(FailureCategory::Timeout),
+            |_| records.set(records.get() + 1),
+        );
+        observe_initial_rejection(
+            GuardFailure::BoundsChanged,
+            &window,
+            || panic!("unrelated failure must not query"),
+            |_| panic!("must not emit"),
+        );
+        assert_eq!(records.get(), 1);
+        assert_eq!(
+            snapshot.guard_failure(&window),
+            Err(GuardFailure::SameProcessWindow)
+        );
     }
 
     #[test]

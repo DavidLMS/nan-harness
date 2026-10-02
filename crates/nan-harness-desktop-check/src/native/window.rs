@@ -168,7 +168,7 @@ impl Snapshot {
         })
     }
 
-    pub(super) fn parse(text: &str) -> Result<Self, Reason> {
+    pub(crate) fn parse(text: &str) -> Result<Self, Reason> {
         let mut lines = text.lines();
         let fields = lines
             .next()

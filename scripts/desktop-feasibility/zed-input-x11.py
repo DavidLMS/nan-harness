@@ -69,10 +69,11 @@ def pointer_observation():
                 maximizedHorizontal=None, maximizedVertical=None, enabled=None,
                 sensitive=None, showing=None, visible=None, defunct=None,
                 retryContains=None, pointerTarget='unavailable', pointerChild='unavailable',
-                clientOriginVerified=None, retryOffsetRelation=None)
+                clientOriginVerified=None, retryOffsetRelation=None, coordinatePackage=None,
+                coordinateRelation=None, coordinateAuthority=None)
 
 
-def independent_client_origin(active):
+def independent_client_snapshot(active):
     """Translate the fresh owned client origin directly, without xdotool."""
     xlib = ctypes.CDLL('libX11.so.6')
     pointer = ctypes.POINTER(ctypes.c_ulong)
@@ -86,23 +87,68 @@ def independent_client_origin(active):
     xlib.XTranslateCoordinates.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_ulong,
         ctypes.c_int, ctypes.c_int, ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int), pointer]
     xlib.XTranslateCoordinates.restype = ctypes.c_int
+    xlib.XGetGeometry.argtypes = [ctypes.c_void_p, ctypes.c_ulong, pointer,
+        ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_uint),
+        ctypes.POINTER(ctypes.c_uint), ctypes.POINTER(ctypes.c_uint), ctypes.POINTER(ctypes.c_uint)]
+    xlib.XGetGeometry.restype = ctypes.c_int
     display = xlib.XOpenDisplay(None)
     if not display:
         raise ValueError('origin unavailable')
     children, count = pointer(), ctypes.c_uint()
     root, parent, child = ctypes.c_ulong(), ctypes.c_ulong(), ctypes.c_ulong()
-    x, y = ctypes.c_int(), ctypes.c_int()
+    x, y, px, py = (ctypes.c_int() for _ in range(4))
+    width, height, border, depth = (ctypes.c_uint() for _ in range(4))
+    geometry_root = ctypes.c_ulong()
     try:
         if (not xlib.XQueryTree(display, active, ctypes.byref(root), ctypes.byref(parent),
                 ctypes.byref(children), ctypes.byref(count)) or not root.value
                 or not xlib.XTranslateCoordinates(display, active, root.value, 0, 0,
                     ctypes.byref(x), ctypes.byref(y), ctypes.byref(child))):
             raise ValueError('origin unavailable')
-        return x.value, y.value
+        if (not xlib.XGetGeometry(display, active, ctypes.byref(geometry_root), ctypes.byref(px),
+                ctypes.byref(py), ctypes.byref(width), ctypes.byref(height), ctypes.byref(border), ctypes.byref(depth))
+                or geometry_root.value != root.value or not parent.value
+                or not 0 < width.value <= 2147483647 or not 0 < height.value <= 2147483647):
+            raise ValueError('geometry unavailable')
+        return ((x.value, y.value), (px.value, py.value), (width.value, height.value), root.value, parent.value)
     finally:
         if children:
             xlib.XFree(children)
         xlib.XCloseDisplay(display)
+
+
+def independent_client_origin(active):
+    return independent_client_snapshot(active)[0]
+
+
+def geometry_authority(geometry, first, second, package):
+    if first != second or first[2] != geometry[2:]:
+        raise ValueError('client geometry changed')
+    origin, parent_offset = first[:2]
+    delta = (geometry[0] - origin[0], geometry[1] - origin[1])
+    if delta == (0, 0):
+        return geometry, 'equal', 'unchanged-xdotool'
+    if delta != parent_offset or package != 'noble-5build1' or first[3] == first[4]:
+        raise ValueError('unproved origin correction')
+    return (*origin, *first[2]), 'parent-offset', 'verified-xtranslate'
+
+
+def coordinate_package(deadline):
+    if (os.environ.get('GITHUB_ACTIONS') != 'true'
+            or os.environ.get('RUNNER_ENVIRONMENT') != 'github-hosted'
+            or os.environ.get('RUNNER_OS') != 'Linux'):
+        return 'unverified'
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise subprocess.TimeoutExpired('fixed-helper', 0)
+    result = subprocess.run(['/usr/bin/dpkg-query', '-W', '-f=${Package} ${Version}\n',
+        'xdotool', 'libxdo3:amd64'], timeout=min(.5, remaining), stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL, check=True)
+    if len(result.stdout) > 128:
+        return 'unverified'
+    return 'noble-5build1' if set(result.stdout.splitlines()) == {
+        b'xdotool 1:3.20160805.1-5build1', b'libxdo3 1:3.20160805.1-5build1'
+    } and len(result.stdout.splitlines()) == 2 else 'unverified'
 
 
 def retry_offset_relation(screen, window, geometry):
@@ -291,13 +337,18 @@ def retry_click(payload):
             return failure
         maximized_observation(active, facts, deadline)
         stage = 18
-        geometry = run(['getwindowgeometry', '--shell', str(active)], 'geometry')
-        # A failed advisory measurement does not alter the established target.
-        try:
-            if active != request['window']:
-                facts['clientOriginVerified'] = independent_client_origin(active) == geometry[:2]
-        except (OSError, ValueError):
-            pass
+        raw_geometry = run(['getwindowgeometry', '--shell', str(active)], 'geometry')
+        first_geometry = independent_client_snapshot(active)
+        facts['coordinatePackage'] = coordinate_package(deadline) if first_geometry[0] != raw_geometry[:2] else 'unverified'
+        second_geometry = independent_client_snapshot(active)
+        if owned_foreground() != (0, active) or time.monotonic() >= deadline:
+            return 11
+        facts['clientOriginVerified'] = first_geometry[0] == raw_geometry[:2]
+        if active == request['window'] and first_geometry[0] != raw_geometry[:2]:
+            return 18
+        geometry, relation, authority = geometry_authority(raw_geometry, first_geometry,
+            second_geometry, facts['coordinatePackage'])
+        facts['coordinateRelation'], facts['coordinateAuthority'] = relation, authority
         point = normalized_retry_point(request, active, geometry, facts)
         stage = 14
         # --sync waits for motion and can hang when the pointer is already here.
@@ -325,7 +376,8 @@ def retry_click(payload):
             def record_scope():
                 try:
                     return (owned_foreground() == (0, active)
-                            and run(['getwindowgeometry', '--shell', str(active)], 'geometry') == geometry
+                            and run(['getwindowgeometry', '--shell', str(active)], 'geometry') == raw_geometry
+                            and independent_client_snapshot(active) == second_geometry
                             and pointer_child(request['window'], active) == 'client')
                 except (OSError, ValueError, subprocess.SubprocessError):
                     return False
@@ -342,6 +394,10 @@ def retry_click(payload):
                 if observer is not None:
                     facts['inputDelivery'] = observer.finish()
                 return 18
+        if (independent_client_snapshot(active) != second_geometry
+                or run(['getwindowgeometry', '--shell', str(active)], 'geometry') != raw_geometry
+                or owned_foreground() != (0, active) or time.monotonic() >= deadline):
+            return 18
         stage = 16
         # One ordinary activation, never another press after an uncertain receipt.
         run(['click', '--clearmodifiers', '1'])

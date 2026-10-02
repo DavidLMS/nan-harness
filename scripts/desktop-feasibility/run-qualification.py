@@ -265,12 +265,9 @@ def run(args):
                '--yes', '--non-interactive', '--ephemeral', '--mode', 'deterministic',
                '--session', 'github-hosted', '--verification', 'semantic-only',
                '--prepared', str(args.prepared), '--output', str(report)]
-    capture = Capture(args.platform)
     try:
-        status = private_command(command, args.directory, timeout=1200, allow_failure=True,
-                                 environment=environment, diagnostic_callback=capture.observe)
-        write_json(facts / "native-diagnostics.json", dict(schemaVersion=1, sourceSha=args.source_sha,
-                   platform=args.platform, events=capture.events, invalidEvents=capture.invalid))
+        status = execute_with_diagnostics(command, args.directory, facts, args.platform,
+                                          args.source_sha, environment)
         if report.exists():
             report_hash = digest(report)
             subprocess.run([str(args.checker), 'validate-report', str(report)], env=environment,
@@ -290,6 +287,26 @@ def run(args):
     finally:
         if digest(args.frozen) != frozen_hash:
             raise ValueError('frozen manifest changed during qualification')
+
+
+def execute_with_diagnostics(command, directory, facts, platform, source_sha, environment):
+    """Publish closed observations even when executor cleanup or its deadline fails."""
+    capture = Capture(platform)
+    completed = False
+    try:
+        status = private_command(command, directory, timeout=1200, allow_failure=True,
+                                 environment=environment, diagnostic_callback=capture.observe)
+        completed = True
+        return status
+    finally:
+        try:
+            write_json(facts / 'native-diagnostics.json', dict(schemaVersion=1, sourceSha=source_sha,
+                       platform=platform, events=capture.events, invalidEvents=capture.invalid))
+        except Exception:
+            # Publication must not replace an already pending executor failure.
+            # Without that failure, a publication error remains an error.
+            if completed:
+                raise
 
 
 def main():

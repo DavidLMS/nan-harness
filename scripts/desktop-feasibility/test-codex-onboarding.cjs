@@ -23,7 +23,7 @@ async function trial(options={}) {
  if(options.onboardingDialog||options.alertDialog||options.ambiguousDialog||options.duplicateDialog)
   doc.querySelectorAll=selector=>selector.startsWith('input')?[radio]:options.duplicateDialog?[dialog,foreign]:[dialog];
  const form={classList:{contains:t=>['m-auto','flex','w-full','shrink-0','flex-col','items-center','justify-between','py-4'].includes(t)&&!(options.overlayWrongLayout&&t==='m-auto')}};
- const heading={innerText:options.overlayLookalike?'All set':"You're all set"};
+ const heading={innerText:options.overlayHeading??(options.overlayLookalike?'All set':"You're all set")};
  const finish={innerText:'Continue',disabled:false,getAttribute:k=>k==='type'?'submit':null};
  const terms={classList:{contains:()=>true},getAttribute:()=>options.overlayWrongLink?'https://example.invalid':'https://openai.com/terms'};
  const privacy={classList:{contains:()=>true},getAttribute:()=> 'https://openai.com/privacy'};
@@ -35,13 +35,13 @@ async function trial(options={}) {
  root.querySelectorAll=s=>s.startsWith('input')?[radio]:[legend];
  label.closest=s=>s.startsWith('div')?root:null;
  foreign.getAttribute=k=>k==='role'?'dialog':null;
- foreign.querySelectorAll=s=>s.startsWith('input')?[]:s==='form'?[form]:s.startsWith('[class')?[heading]:[];
+ foreign.querySelectorAll=s=>s.startsWith('input')?[]:s==='form'?[form]:s.startsWith('[class')?(options.overlayWrongHeadingStyle?[]:[heading]):s==='[role="heading"],h1,h2,h3'?(options.overlayDuplicateHeading?[heading,heading]:[heading]):[];
  if(options.overlayDialogReplacement)doc.querySelectorAll=s=>s.startsWith('input')?[radio]:overlayReads?[{...foreign}]:[foreign];
  if(options.overlayMultiple)doc.querySelectorAll=s=>s.startsWith('input')?[radio]:overlayReads?[foreign,dialog]:[foreign];
  const globals={document:doc,innerWidth:800,innerHeight:600,getComputedStyle:()=>({display:'block',visibility:'visible',pointerEvents:'auto'})};
  function evaluate(fn,e,arg) {
   if(fn.name==='sample') {lastKind=e.kind;samples++;}
-  if(fn.name==='classifyForeign'){overlayReads++;if(options.overlayQueryFail)throw Error('PRIVATE query failed');}
+  if(fn.name==='classifyForeign'){overlayReads++;if(options.overlayHeadingChanges&&overlayReads>1)heading.innerText='Skip setup?';if(options.overlayQueryFail)throw Error('PRIVATE query failed');}
   if(options.overlayReplacement&&fn.name==='classifyForeign'&&overlayReads>1)globals.document={...doc};
   const f=vm.runInNewContext(`(${fn.toString()})`,globals);
   return f(e,arg?.element??arg?.value??arg);
@@ -107,6 +107,20 @@ async function trial(options={}) {
  assert.equal(completeOverlay.facts.foreignOverlayProof,'classified');
  assert.equal(completeOverlay.facts.foreignOverlaySurface,'separate-dialog');
  assert.equal(completeOverlay.facts.foreignOverlayFingerprint,'matched');
+ assert.equal(completeOverlay.facts.foreignOverlayHeading,'all-set');
+ for(const [label,expected] of [["You're all set",'all-set'],['Import from other AI apps','external-import'],['Skip setup?','skip-confirmation'],['PRIVATE unknown heading','unknown']]) {
+  const r=await trial({modal:true,overlayHeading:label,overlayWrongHeadingStyle:true});
+  assert.equal(r.facts.foreignOverlayHeading,expected);
+  assert.equal(r.facts.foreignOverlayFingerprint,'heading-mismatch');
+  assert.equal(r.roleClicks,0);assert.equal(r.continueClicks,0);
+ }
+ const duplicateHeading=await trial({modal:true,overlayDuplicateHeading:true});
+ assert.equal(duplicateHeading.facts.foreignOverlayHeading,'ambiguous');
+ assert.equal(duplicateHeading.roleClicks,0);assert.equal(duplicateHeading.continueClicks,0);
+ const changedHeading=await trial({modal:true,overlayHeadingChanges:true});
+ assert.equal(changedHeading.facts.foreignOverlayProof,'unstable-classification');
+ assert.equal(changedHeading.facts.foreignOverlayHeading,undefined);
+ assert.equal(changedHeading.roleClicks,0);assert.equal(changedHeading.continueClicks,0);
  for(const [opts,fingerprint] of [[{overlayLookalike:true},'heading-mismatch'],[{overlayWrongLink:true},'legal-links-mismatch'],[{overlayWrongLayout:true},'form-mismatch']]) {
   const r=await trial({modal:true,...opts});
   assert.equal(r.facts.foreignOverlaySurface,'separate-dialog');assert.equal(r.facts.foreignOverlayFingerprint,fingerprint);

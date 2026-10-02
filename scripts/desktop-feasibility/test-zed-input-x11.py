@@ -13,6 +13,8 @@ import types
 from unittest.mock import patch
 
 module = runpy.run_path(str(Path(__file__).with_name('zed-input-x11.py')))
+native_snapshot = module['independent_client_snapshot']
+native_package = module['coordinate_package']
 
 
 class Transport(unittest.TestCase):
@@ -20,6 +22,8 @@ class Transport(unittest.TestCase):
         replacement = patch.dict(module['main'].__globals__,
             normalized_retry_point=lambda request, active, geometry, facts: (request['x'], request['y']),
             independent_client_origin=lambda active: (10, 30),
+            independent_client_snapshot=lambda active: ((0,0),(0,0),(1280,800),77,88),
+            coordinate_package=lambda deadline: 'noble-5build1',
             maximized_observation=lambda *args: None, publish_observation=lambda facts: None,
             pointer_child=lambda *args: 'unavailable')
         replacement.start()
@@ -29,6 +33,61 @@ class Transport(unittest.TestCase):
         stdin = io.TextIOWrapper(io.BytesIO(payload))
         with patch.object(sys, 'argv', ['helper', mode]), patch.object(sys, 'stdin', stdin):
             return module['main']()
+
+    def test_corrected_transport_clicks_once_at_measured_client_point_or_not_at_all(self):
+        request = json.dumps(dict(pid=20,window=40,x=137,y=269,bus=':1.2',path='/org/a11y/atspi/accessible/3')).encode()
+        for case, package, expected_clicks in [('correct','noble-5build1',1),('unknown-package','unverified',0),('changed-before-click','noble-5build1',0)]:
+            actions, pointer = [], [0,0]
+            snapshots = [0]
+            def snapshot(active):
+                snapshots[0] += 1
+                return ((101 if case=='changed-before-click' and snapshots[0]>2 else 100,200),(2,24),(800,600),77,88)
+            def execute(args,**kwargs):
+                if args[1]=='mousemove': pointer[:]=map(int,args[3:]);actions.append(args)
+                if args[1]=='click': actions.append(args)
+                output = (b'X=102\nY=224\nSCREEN=0\nWINDOW=41\nWIDTH=800\nHEIGHT=600' if args[1]=='getwindowgeometry'
+                    else ('X=%s\nY=%s\nSCREEN=0\nWINDOW=41'%tuple(pointer)).encode() if args[1]=='getmouselocation'
+                    else b'41' if args[1]=='getactivewindow' else b'20')
+                return subprocess.CompletedProcess(args,0,stdout=output)
+            with patch('subprocess.run',side_effect=execute), patch.dict(module['main'].__globals__,
+                owned_frame=lambda a,b:a==41 and b==40,
+                independent_client_snapshot=snapshot,
+                coordinate_package=lambda deadline:package,
+                normalized_retry_point=lambda request,active,geometry,facts=None:module['coordinate_point']((20,40,30,10),(20,40,30,10),geometry)):
+                self.assertEqual(self.call('retry-click',request),0 if expected_clicks else 18)
+            clicks=[a for a in actions if a[1]=='click']
+            self.assertEqual(len(clicks),expected_clicks)
+            if expected_clicks:self.assertEqual(pointer,[135,245])
+            elif case=='unknown-package':self.assertEqual(actions,[])
+            else:self.assertEqual([a[1] for a in actions],['mousemove'])
+
+    def test_origin_authority_corrects_only_pinned_measured_parent_offset(self):
+        authority = module['geometry_authority']
+        snapshot = ((100,200),(2,24),(800,600),77,88)
+        self.assertEqual(authority((102,224,800,600),snapshot,snapshot,'noble-5build1'),
+                         ((100,200,800,600),'parent-offset','verified-xtranslate'))
+        self.assertEqual(authority((100,200,800,600),snapshot,snapshot,'unverified'),
+                         ((100,200,800,600),'equal','unchanged-xdotool'))
+        for geometry, before, after, package in [
+            ((102,224,800,600),snapshot,snapshot,'unverified'),
+            ((103,224,800,600),snapshot,snapshot,'noble-5build1'),
+            ((102,224,801,600),snapshot,snapshot,'noble-5build1'),
+            ((102,224,800,600),snapshot,((101,200),*snapshot[1:]),'noble-5build1'),
+            ((102,224,800,600),(*snapshot[:4],77),(*snapshot[:4],77),'noble-5build1'),
+        ]:
+            with self.assertRaises(ValueError): authority(geometry,before,after,package)
+
+    def test_package_proof_requires_both_exact_versions_and_original_deadline(self):
+        env = dict(GITHUB_ACTIONS='true',RUNNER_ENVIRONMENT='github-hosted',RUNNER_OS='Linux')
+        with patch.dict(os.environ,env), patch('time.monotonic',return_value=1):
+            for output, expected in [(b'libxdo3 1:3.20160805.1-5build1\nxdotool 1:3.20160805.1-5build1\n','noble-5build1'),
+                    (b'libxdo3 1:3.20160805.1-5build1\nxdotool NEW\n','unverified'),
+                    (b'xdotool 1:3.20160805.1-5build1\n','unverified'),(b'PRIVATE'*30,'unverified')]:
+                with patch('subprocess.run',return_value=subprocess.CompletedProcess([],0,stdout=output)):
+                    self.assertEqual(native_package(2),expected)
+            with patch('subprocess.run') as query:
+                with self.assertRaises(subprocess.TimeoutExpired): native_package(1)
+                query.assert_not_called()
 
     def test_exact_retry_offset_relation_never_double_translates(self):
         relation = module['retry_offset_relation']
@@ -46,16 +105,21 @@ class Transport(unittest.TestCase):
             def __call__(self, *args): return self.call(*args)
         def tree(*args):
             args[2]._obj.value = 77
+            args[3]._obj.value = 88
             return 1
         def translate(*args):
             self.assertEqual(args[1:5], (90, 77, 0, 0))
             args[5]._obj.value, args[6]._obj.value = 100, 200
             return 1
-        library = types.SimpleNamespace(XOpenDisplay=Function(lambda _: 1),
+        def geometry(*args):
+            args[2]._obj.value = 77
+            args[5]._obj.value, args[6]._obj.value = 800, 600
+            return 1
+        library = types.SimpleNamespace(XGetGeometry=Function(geometry), XOpenDisplay=Function(lambda _: 1),
             XCloseDisplay=Function(lambda _: closed.append(True)), XFree=Function(lambda _: None),
             XQueryTree=Function(tree), XTranslateCoordinates=Function(translate))
         with patch('ctypes.CDLL', return_value=library):
-            self.assertEqual(module['independent_client_origin'](90), (100, 200))
+            self.assertEqual(native_snapshot(90)[0], (100, 200))
         self.assertEqual(closed, [True])
 
     def test_readonly_sampler_mode_never_dispatches_native_input(self):
@@ -128,8 +192,9 @@ class Transport(unittest.TestCase):
         with patch('subprocess.run', side_effect=execute):
             self.assertEqual(self.call('retry-click', request), 0)
         self.assertEqual([args[1] for args in calls],
-                         ['getactivewindow', 'getwindowpid', 'getwindowgeometry', 'mousemove', 'getmouselocation',
-                          'getactivewindow', 'getwindowpid', 'click'])
+                         ['getactivewindow', 'getwindowpid', 'getwindowgeometry', 'getactivewindow', 'getwindowpid',
+                          'mousemove', 'getmouselocation', 'getactivewindow', 'getwindowpid',
+                          'getwindowgeometry', 'getactivewindow', 'getwindowpid', 'click'])
         self.assertEqual(calls[-1], ['/usr/bin/xdotool', 'click', '--clearmodifiers', '1'])
         with patch.dict(module['main'].__globals__, owned_frame=lambda a, b: a == b), patch('subprocess.run', return_value=subprocess.CompletedProcess([], 0, stdout=b'99')) as run:
             self.assertEqual(self.call('retry-click', request), 11)
@@ -138,11 +203,13 @@ class Transport(unittest.TestCase):
                 subprocess.CompletedProcess([], 0, stdout=b'40'),
                 subprocess.CompletedProcess([], 0, stdout=b'20'),
                 subprocess.CompletedProcess([], 0, stdout=b'X=0\nY=0\nSCREEN=0\nWINDOW=40\nWIDTH=1280\nHEIGHT=800'),
+                subprocess.CompletedProcess([], 0, stdout=b'40'),
+                subprocess.CompletedProcess([], 0, stdout=b'20'),
                 subprocess.CompletedProcess([], 0),
                 subprocess.CompletedProcess([], 0, stdout=b'X=100\nY=200\nSCREEN=0\nWINDOW=40'),
                 subprocess.CompletedProcess([], 0, stdout=b'99')]) as run:
             self.assertEqual(self.call('retry-click', request), 11)
-            self.assertEqual(run.call_count, 6)
+            self.assertEqual(run.call_count, 8)
 
     def test_active_client_must_have_the_exact_owned_frame_as_ancestor(self):
         matches = module['matches_owned_frame']

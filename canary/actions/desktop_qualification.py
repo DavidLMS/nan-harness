@@ -42,7 +42,7 @@ def public_onboarding(setup, app):
     errors = {None, 'invalid-session', 'scope-not-matched', 'role-already-selected',
               'action-blocked', 'role-readback-failed', 'continue-not-matched',
               'ownership-lost', 'scope-remained', 'action-uncertain', 'observation-failed'}
-    if (app != 'chatgpt-desktop' or type(setup) is not dict or set(setup) not in (fields, fields | {'actionabilityFailure'}, fields | {'actionabilityFailure', 'foreignOverlay'}, fields | {'actionabilityFailure', 'foreignOverlay', 'foreignOverlayProof'}, fields | {'actionabilityFailure', 'foreignOverlay', 'foreignOverlayProof', 'foreignOverlaySurface', 'foreignOverlayFingerprint'})
+    if (app != 'chatgpt-desktop' or type(setup) is not dict or set(setup) not in (fields, fields | {'actionabilityFailure'}, fields | {'actionabilityFailure', 'foreignOverlay'}, fields | {'actionabilityFailure', 'foreignOverlay', 'foreignOverlayProof'}, fields | {'actionabilityFailure', 'foreignOverlay', 'foreignOverlayProof', 'foreignOverlaySurface', 'foreignOverlayFingerprint'}, fields | {'actionabilityFailure', 'foreignOverlay', 'foreignOverlayProof', 'foreignOverlaySurface', 'foreignOverlayFingerprint', 'foreignOverlayHeading'})
             or type(setup['schemaVersion']) is not int or setup['schemaVersion'] != 1
             or setup['mechanism'] != 'codex-public-onboarding' or setup['diagnosticsOnly'] is not True
             or type(setup['stage']) is not str or setup['stage'] not in stages
@@ -81,6 +81,11 @@ def public_onboarding(setup, app):
                 or (setup['foreignOverlayFingerprint'] != 'not-applicable' and setup['foreignOverlaySurface'] != 'separate-dialog')
                 or (setup['foreignOverlayFingerprint'] == 'matched') != (setup['foreignOverlay'] == 'chatgpt-onboarding-complete')):
             raise ValueError('invalid public onboarding overlay surface')
+    if 'foreignOverlayHeading' in setup:
+        if (setup.get('foreignOverlayProof') != 'classified'
+                or type(setup['foreignOverlayHeading']) is not str or setup['foreignOverlayHeading'] not in {
+                    'all-set', 'external-import', 'skip-confirmation', 'unknown', 'ambiguous'}):
+            raise ValueError('invalid public onboarding overlay heading')
     return setup
 
 
@@ -385,8 +390,10 @@ def semantic_observations(directory, app):
             flags = set('maximizedHorizontal maximizedVertical enabled sensitive showing visible defunct retryContains'.split())
             base = flags | {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'pointerTarget', 'pointerChild'}
             coordinate_fields = {'clientOriginVerified', 'retryOffsetRelation'}
+            authority_fields = {'coordinatePackage', 'coordinateRelation', 'coordinateAuthority'}
             if (set(value) not in (base, base | {'inputDelivery'}, base | coordinate_fields,
-                                  base | coordinate_fields | {'inputDelivery'})
+                                  base | coordinate_fields | {'inputDelivery'}, base | coordinate_fields | authority_fields,
+                                  base | coordinate_fields | authority_fields | {'inputDelivery'})
                     or app != 'zed-desktop' or value['diagnosticsOnly'] is not True):
                 raise ValueError('invalid Zed pointer observation identity')
             for key in flags:
@@ -405,6 +412,19 @@ def semantic_observations(directory, app):
                                 'expected-origin', 'missing-origin', 'inconsistent'}))):
                     raise ValueError('invalid Zed Retry coordinate observation')
                 record.update({key: value[key] for key in coordinate_fields})
+            if 'coordinateAuthority' in value:
+                enums = {'coordinatePackage': {'noble-5build1', 'unverified'},
+                         'coordinateRelation': {'equal', 'parent-offset', 'other'},
+                         'coordinateAuthority': {'unchanged-xdotool', 'verified-xtranslate'}}
+                if (any(value[key] is not None and (type(value[key]) is not str or value[key] not in allowed)
+                        for key, allowed in enums.items())
+                        or value['coordinateAuthority'] == 'verified-xtranslate' and (
+                            value['coordinatePackage'] != 'noble-5build1' or value['coordinateRelation'] != 'parent-offset'
+                            or value['clientOriginVerified'] is not False)
+                        or value['coordinateAuthority'] == 'unchanged-xdotool' and (
+                            value['coordinateRelation'] != 'equal' or value['clientOriginVerified'] is not True)):
+                    raise ValueError('invalid Zed coordinate authority')
+                record.update({key: value[key] for key in authority_fields})
             if 'inputDelivery' in value:
                 delivery = value['inputDelivery']
                 fields = {'status', 'pressCount', 'releaseCount', 'orderedPair'}

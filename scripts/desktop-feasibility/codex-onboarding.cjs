@@ -49,8 +49,8 @@ function foreignSurface(control) {
   return {document,scope,dialog:dialogs.length===1?dialogs[0]:null};
 }
 function classifyForeign(control,held) {
-  let surface='unknown';
-  const result=(category,proof='classified',fingerprint='not-applicable')=>({category,proof,surface,fingerprint});
+  let surface='unknown', heading='unknown';
+  const result=(category,proof='classified',fingerprint='not-applicable')=>({category,proof,surface,fingerprint,heading});
   const visible=e=>{if(!e)return false;const r=e.getBoundingClientRect(),s=getComputedStyle(e);
     return e.isConnected&&r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden';};
   if(control.ownerDocument!==document||!control.isConnected||held.document!==document) return result('guard-rejected','document-replaced');
@@ -62,6 +62,11 @@ function classifyForeign(control,held) {
   if(dialogs.length!==1)return dialogs.length>1?result('ambiguous'):result('guard-rejected','dialog-absent');
   const dialog=dialogs[0];
   if(dialog!==held.dialog)return result('guard-rejected','dialog-replaced');
+  // Public heading text is classified independently of the stronger style fingerprint.
+  const publicHeadings=[...dialog.querySelectorAll('[role="heading"],h1,h2,h3')].filter(visible);
+  const known=new Map([["You're all set",'all-set'],['Import from other AI apps','external-import'],['Skip setup?','skip-confirmation']]);
+  const matches=publicHeadings.map(e=>known.get(e.innerText.trim())).filter(Boolean);
+  heading=matches.length>1?'ambiguous':matches[0]??'unknown';
   const role=dialog.getAttribute('role'), enclosing=dialog.contains(control);
   surface=enclosing ? (role==='dialog'?'enclosing-role-dialog':role==='alertdialog'?'enclosing-role-alertdialog':role===null&&dialog.getAttribute('aria-modal')==='true'?'enclosing-role-aria-modal':'unknown')
     : role==='dialog'?'separate-dialog':role==='alertdialog'?'separate-alertdialog':role==='menu'?'separate-menu':'unknown';
@@ -186,6 +191,7 @@ exports.run = async function(page, ownerGuard, deadline) {
                 if(second.proof==='classified') {
                   facts.foreignOverlaySurface=second.surface;
                   facts.foreignOverlayFingerprint=second.fingerprint;
+                  facts.foreignOverlayHeading=second.heading;
                 }
               } else if(second.category==='guard-rejected' && facts.foreignOverlayProof==='unmeasured') {
                 facts.foreignOverlayProof=second.proof;
