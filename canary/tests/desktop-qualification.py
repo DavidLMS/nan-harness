@@ -532,6 +532,25 @@ class QualificationTests(unittest.TestCase):
             path.write_text(json.dumps(value))
             self.assertEqual(q.semantic_observations(Path(root), 'claude-desktop'), [value])
 
+    def test_claude_window_only_proof_does_not_promote_full_focus_failure(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'focus.json'
+            value = dict(schemaVersion=1, mechanism='claude-window-focus', diagnosticsOnly=True,
+                         status='query-error', nativeForegroundWindowMatchedHeld=None,
+                         query=dict(phase='before', stage='focused-element', error='no-value'),
+                         windowOnlyStatus='proved', windowOnlyMatchedHeld=True)
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(Path(root), 'claude-desktop'), [value])
+            for change in ({'windowOnlyStatus': 'ambiguous'}, {'windowOnlyMatchedHeld': None},
+                           {'windowOnlyStatus': 'PRIVATE'}, {'windowOnlyMatchedHeld': 1}):
+                path.write_text(json.dumps({**value, **change}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(Path(root), 'claude-desktop')
+            del value['windowOnlyMatchedHeld']
+            path.write_text(json.dumps(value))
+            with self.assertRaises(ValueError):
+                q.semantic_observations(Path(root), 'claude-desktop')
+
     def test_claude_stack_counts_are_closed_and_overflow_is_unknown(self):
         with tempfile.TemporaryDirectory() as root:
             path = Path(root) / 'stack.json'
@@ -895,6 +914,26 @@ class QualificationTests(unittest.TestCase):
                 path.write_text(json.dumps({**value, 'documentState': changed}))
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'pen-desktop')
+
+    def test_windows_process_absence_error_is_closed_and_bound_to_application(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            value = dict(schemaVersion=1, mechanism='windows-process-absence', diagnosticsOnly=True,
+                         app='claude-desktop', stage='deadline')
+            path = root / 'process.json'
+            for stage in ('deadline', 'system-root', 'private-output', 'spawn', 'exit', 'read', 'schema', 'oversize'):
+                record = {**value, 'stage': stage}
+                path.write_text(json.dumps(record))
+                self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [record])
+            for changed in ({**value, 'stage': 'PRIVATE'}, {**value, 'stage': []},
+                            {**value, 'app': 'chatgpt-desktop'}, {**value, 'pid': 42},
+                            {**value, 'diagnosticsOnly': False}, {**value, 'schemaVersion': True}):
+                path.write_text(json.dumps(changed))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'claude-desktop')
+            path.write_text(json.dumps(value))
+            with self.assertRaises(ValueError):
+                q.semantic_observations(root, 'pen-desktop')
 
     def test_claude_restore_receipt_preserves_failure_boundaries_without_details(self):
         with tempfile.TemporaryDirectory() as tmp:

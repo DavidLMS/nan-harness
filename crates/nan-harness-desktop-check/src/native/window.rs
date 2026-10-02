@@ -120,6 +120,29 @@ struct FocusProof {
     window: u64,
 }
 
+#[cfg(any(test, target_os = "macos"))]
+impl FocusProof {
+    // A proved receipt must carry one private window identity; failures carry none.
+    fn parse(status: &str, id: &str) -> Result<Self, Reason> {
+        let status = match status {
+            "proved" => FocusStatus::Proved,
+            "untrusted" => FocusStatus::Untrusted,
+            "query-error" => FocusStatus::QueryError,
+            "focus-mismatch" => FocusStatus::FocusMismatch,
+            "not-standard" => FocusStatus::NotStandard,
+            "identity-changed" => FocusStatus::IdentityChanged,
+            "no-match" => FocusStatus::NoMatch,
+            "ambiguous" => FocusStatus::Ambiguous,
+            _ => return Err(Reason::DesktopUnavailable),
+        };
+        let window = parse(id)?;
+        if (status == FocusStatus::Proved) != (window != 0) {
+            return Err(Reason::DesktopUnavailable);
+        }
+        Ok(Self { status, window })
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct Snapshot {
     foreground_pid: u32,
@@ -128,6 +151,8 @@ pub(crate) struct Snapshot {
     focus: Option<FocusProof>,
     #[cfg(any(test, target_os = "macos"))]
     focus_query: Option<FocusQuery>,
+    #[cfg(any(test, target_os = "macos"))]
+    window_focus: Option<FocusProof>,
     displays: Vec<Rect>,
     pub(crate) windows: Vec<Window>,
 }
@@ -231,6 +256,31 @@ impl Snapshot {
         })
     }
 
+    #[cfg(any(test, target_os = "macos"))]
+    pub(crate) fn window_focus_observation(
+        &self,
+        held: &Window,
+    ) -> Option<(FocusStatus, Option<bool>)> {
+        self.window_focus.as_ref().map(|proof| {
+            let matched = (proof.status == FocusStatus::Proved).then(|| {
+                proof.window == held.id
+                    && self.foreground_pid == held.pid
+                    && self
+                        .windows
+                        .iter()
+                        .filter(|window| {
+                            window.id == proof.window
+                                && window.pid == held.pid
+                                && window.bounds == held.bounds
+                                && window.layer == 0
+                        })
+                        .count()
+                        == 1
+            });
+            (proof.status, matched)
+        })
+    }
+
     pub(crate) fn parse(text: &str) -> Result<Self, Reason> {
         let mut lines = text.lines();
         let fields = lines
@@ -248,6 +298,8 @@ impl Snapshot {
             focus: None,
             #[cfg(any(test, target_os = "macos"))]
             focus_query: None,
+            #[cfg(any(test, target_os = "macos"))]
+            window_focus: None,
             displays: Vec::new(),
             windows: Vec::new(),
         };
@@ -255,23 +307,19 @@ impl Snapshot {
             let fields = line.split_whitespace().collect::<Vec<_>>();
             match fields.as_slice() {
                 #[cfg(any(test, target_os = "macos"))]
-                ["FOCUS", status, id] if snapshot.focus.is_none() => {
-                    let status = match *status {
-                        "proved" => FocusStatus::Proved,
-                        "untrusted" => FocusStatus::Untrusted,
-                        "query-error" => FocusStatus::QueryError,
-                        "focus-mismatch" => FocusStatus::FocusMismatch,
-                        "not-standard" => FocusStatus::NotStandard,
-                        "identity-changed" => FocusStatus::IdentityChanged,
-                        "no-match" => FocusStatus::NoMatch,
-                        "ambiguous" => FocusStatus::Ambiguous,
-                        _ => return Err(Reason::DesktopUnavailable),
-                    };
-                    let window = parse(id)?;
-                    if (status == FocusStatus::Proved) != (window != 0) {
-                        return Err(Reason::DesktopUnavailable);
+                [tag @ ("FOCUS" | "FOCUS_WINDOW"), status, id]
+                    if if *tag == "FOCUS" {
+                        snapshot.focus.is_none()
+                    } else {
+                        snapshot.window_focus.is_none()
+                    } =>
+                {
+                    let proof = Some(FocusProof::parse(status, id)?);
+                    if *tag == "FOCUS" {
+                        snapshot.focus = proof;
+                    } else {
+                        snapshot.window_focus = proof;
                     }
-                    snapshot.focus = Some(FocusProof { status, window });
                 }
                 #[cfg(any(test, target_os = "macos"))]
                 ["FOCUS_QUERY", phase, stage, error] if snapshot.focus_query.is_none() => {
@@ -891,6 +939,32 @@ mod tests {
             overlap_area(rect(-65536, -65536, 65536, 65536), rect(0, 0, 65536, 65536)),
             0
         );
+    }
+
+    #[test]
+    fn independent_window_proof_preserves_failed_input_and_occlusion_guard() {
+        let base = "FG 7 0\nDISPLAY 0 0 2000 2000\nWIN 99 7 1500 1500 10 10 50616e656c 3\nWIN 1 7 10 20 800 600 436c61756465 0\n";
+        let state = Snapshot::parse(&format!("{base}FOCUS query-error 0\nFOCUS_QUERY before focused-element no-value\nFOCUS_WINDOW proved 1\n")).unwrap();
+        let held = &state.windows[1];
+        assert_eq!(
+            state.window_focus_observation(held),
+            Some((FocusStatus::Proved, Some(true)))
+        );
+        assert_eq!(
+            state.focus_observation(held).unwrap().0,
+            FocusStatus::QueryError
+        );
+        assert_eq!(
+            state.guard_failure(held),
+            Err(GuardFailure::SameProcessWindow)
+        );
+        for receipt in [
+            "FOCUS_WINDOW proved 0\n",
+            "FOCUS_WINDOW ambiguous 1\n",
+            "FOCUS_WINDOW proved 1\nFOCUS_WINDOW proved 1\n",
+        ] {
+            assert!(Snapshot::parse(&format!("{base}{receipt}")).is_err());
+        }
     }
 
     #[test]

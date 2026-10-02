@@ -127,7 +127,7 @@ static bool ax_timeout(AXUIElementRef element, AxFocus& result, const char* stag
     if (error != kAXErrorSuccess) { result.failure(stage, classify_ax_error(error)); return false; }
     return true;
 }
-static void read_ax_focus(pid_t pid, AxFocus& result) {
+static void read_ax_focus(pid_t pid, AxFocus& result, bool window_only = false) {
     if (!AXIsProcessTrusted()) { result.status = "untrusted"; return; }
     AXUIElementRef app = AXUIElementCreateApplication(pid);
     if (!app) { result.failure("app-create", "empty-value"); return; }
@@ -135,9 +135,14 @@ static void read_ax_focus(pid_t pid, AxFocus& result) {
     CFTypeRef focused = nullptr, main = nullptr, input = nullptr, input_window = nullptr;
     bool read = ax_attribute(app, kAXFocusedWindowAttribute, focused, result, "focused-window")
         && ax_attribute(app, kAXMainWindowAttribute, main, result, "main-window")
-        && ax_attribute(app, kAXFocusedUIElementAttribute, input, result, "focused-element");
+        && (window_only || ax_attribute(app, kAXFocusedUIElementAttribute, input, result, "focused-element"));
     CFRelease(app);
-    if (read && CFGetTypeID(input) == AXUIElementGetTypeID()) {
+    if (window_only && read) {
+        // Reuse the ownership/geometry checks without asserting any focused input.
+        // This separate diagnostic never substitutes for the full focus proof.
+        input_window = focused;
+        if (input_window) CFRetain(input_window);
+    } else if (read && CFGetTypeID(input) == AXUIElementGetTypeID()) {
         read = ax_timeout(static_cast<AXUIElementRef>(input), result, "input-timeout");
         read = read && ax_attribute(static_cast<AXUIElementRef>(input), kAXWindowAttribute, input_window, result, "input-window");
     } else { if (read) result.failure("element-type", "type-mismatch"); read = false; }
@@ -211,9 +216,9 @@ const char* classify_focus_agreement(bool stable_identity, unsigned matches) {
     return matches == 1 ? "proved" : matches == 0 ? "no-match" : "ambiguous";
 }
 
-static void print_ax_focus(pid_t foreground, CFArrayRef windows, const AxFocus& before) {
+static void print_ax_focus(pid_t foreground, CFArrayRef windows, const AxFocus& before, bool window_only = false) {
     AxFocus after;
-    if (std::string(before.status) == "ready") read_ax_focus(foreground, after);
+    if (std::string(before.status) == "ready") read_ax_focus(foreground, after, window_only);
     const char* status = before.status;
     std::uint64_t id = 0;
     if (std::string(status) == "ready") {
@@ -225,9 +230,9 @@ static void print_ax_focus(pid_t foreground, CFArrayRef windows, const AxFocus& 
         if (stable) id = match_focus_window(windows, foreground, before.bounds, matches);
         status = classify_focus_agreement(stable, matches);
     }
-    std::cout << "FOCUS " << status << ' ' << id << '\n';
+    std::cout << (window_only ? "FOCUS_WINDOW " : "FOCUS ") << status << ' ' << id << '\n';
     const AxFocus& failed = before.query_stage ? before : after;
-    if (failed.query_stage) {
+    if (failed.query_stage && !window_only) {
         std::cout << "FOCUS_QUERY " << (before.query_stage ? "before" : "after") << ' '
                   << failed.query_stage << ' ' << failed.query_error << '\n';
     }
@@ -237,7 +242,9 @@ static int list_mac_windows(bool include_foreground, bool focus_proof, pid_t exp
     @autoreleasepool {
         auto foreground = include_foreground
             ? [[[NSWorkspace sharedWorkspace] frontmostApplication] processIdentifier] : 0;
-        AxFocus focus;
+        AxFocus focus, window_focus;
+        if (focus_proof && foreground == expected_pid) read_ax_focus(foreground, window_focus, true);
+        else if (focus_proof) window_focus.status = "focus-mismatch";
         if (focus_proof && foreground == expected_pid) read_ax_focus(foreground, focus);
         else if (focus_proof) focus.status = "focus-mismatch";
         std::cout << "FG " << foreground << " 0\n";
@@ -275,7 +282,10 @@ static int list_mac_windows(bool include_foreground, bool focus_proof, pid_t exp
                                      bounds.origin.y, bounds.size.width, bounds.size.height,
                                      name, number(window, kCGWindowLayer));
         }
-        if (focus_proof) print_ax_focus(foreground, windows, focus);
+        if (focus_proof) {
+            print_ax_focus(foreground, windows, focus);
+            print_ax_focus(foreground, windows, window_focus, true);
+        }
         CFRelease(windows);
         return std::cout ? 0 : 5;
     }

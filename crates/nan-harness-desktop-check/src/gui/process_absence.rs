@@ -104,13 +104,86 @@ fn csv_presence(bytes: &[u8], inspector_pid: u32, image: &[u8]) -> Result<bool, 
     Ok(found)
 }
 
+#[cfg(any(windows, test))]
+#[derive(Clone, Copy, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum InspectionStage {
+    Deadline,
+    SystemRoot,
+    PrivateOutput,
+    Spawn,
+    Exit,
+    Read,
+    Schema,
+    Oversize,
+}
+
+#[cfg(any(windows, test))]
+fn failure_facts(image: &[u8], stage: InspectionStage) -> Option<serde_json::Value> {
+    let app = match image {
+        b"Claude.exe" => "claude-desktop",
+        b"ChatGPT.exe" => "chatgpt-desktop",
+        _ => return None,
+    };
+    Some(
+        serde_json::json!({"schemaVersion":1,"mechanism":"windows-process-absence",
+        "diagnosticsOnly":true,"app":app,"stage":stage}),
+    )
+}
+
+#[cfg(windows)]
+fn save_failure(image: &[u8], stage: InspectionStage) {
+    use std::io::Write as _;
+    if std::env::var("GITHUB_ACTIONS").as_deref() != Ok("true")
+        || std::env::var("RUNNER_ENVIRONMENT").as_deref() != Ok("github-hosted")
+        || std::env::var("RUNNER_OS").as_deref() != Ok("Windows")
+    {
+        return;
+    }
+    let Some(directory) = std::env::var_os("NANH_DESKTOP_QUALIFICATION_FACTS") else {
+        return;
+    };
+    let directory = std::path::PathBuf::from(directory);
+    if !directory.is_absolute()
+        || !std::fs::symlink_metadata(&directory).is_ok_and(|metadata| metadata.is_dir())
+    {
+        return;
+    }
+    let Ok(directory) = directory.canonicalize() else {
+        return;
+    };
+    let Some(value) = failure_facts(image, stage) else {
+        return;
+    };
+    let mut nonce = [0; 8];
+    if getrandom::fill(&mut nonce).is_err() {
+        return;
+    }
+    let path = directory.join(format!(
+        "windows-process-absence-{}.json",
+        u64::from_le_bytes(nonce)
+    ));
+    if let Ok(mut file) = nan_harness_private_fs::open_private_new(&path) {
+        let _ = serde_json::to_writer(&mut file, &value)
+            .and_then(|()| file.flush().map_err(Into::into));
+    }
+}
+
 #[cfg(windows)]
 fn inspect(deadline: std::time::Instant, image: &[u8]) -> Result<bool, Reason> {
+    inspect_inner(deadline, image).map_err(|stage| {
+        save_failure(image, stage);
+        Reason::DesktopUnavailable
+    })
+}
+
+#[cfg(windows)]
+fn inspect_inner(deadline: std::time::Instant, image: &[u8]) -> Result<bool, InspectionStage> {
     use std::io::{Read as _, Seek as _};
     use std::os::windows::process::CommandExt as _;
     use std::process::{Command, Stdio};
     use std::time::{Duration, Instant};
-    let unavailable = || Reason::DesktopUnavailable;
+    let unavailable = || InspectionStage::SystemRoot;
     let root = std::path::PathBuf::from(std::env::var_os("SystemRoot").ok_or_else(unavailable)?);
     let canonical_root = root.canonicalize().map_err(|_| unavailable())?;
     let path = root.join("System32/tasklist.exe");
@@ -121,9 +194,9 @@ fn inspect(deadline: std::time::Instant, image: &[u8]) -> Result<bool, Reason> {
     {
         return Err(unavailable());
     }
-    let mut output = tempfile::tempfile().map_err(|_| unavailable())?;
+    let mut output = tempfile::tempfile().map_err(|_| InspectionStage::PrivateOutput)?;
     if Instant::now() >= deadline {
-        return Err(unavailable());
+        return Err(InspectionStage::Deadline);
     }
     let mut child = Command::new(&executable)
         .args(["/FO", "CSV", "/NH"])
@@ -131,22 +204,26 @@ fn inspect(deadline: std::time::Instant, image: &[u8]) -> Result<bool, Reason> {
         .env("SystemRoot", &root)
         .creation_flags(0x0800_0000)
         .stdin(Stdio::null())
-        .stdout(output.try_clone().map_err(|_| unavailable())?)
+        .stdout(
+            output
+                .try_clone()
+                .map_err(|_| InspectionStage::PrivateOutput)?,
+        )
         .stderr(Stdio::null())
         .spawn()
-        .map_err(|_| unavailable())?;
+        .map_err(|_| InspectionStage::Spawn)?;
     let outcome = loop {
-        if Instant::now() >= deadline
-            || output
-                .metadata()
-                .ok()
-                .is_none_or(|metadata| metadata.len() > 65536)
-        {
-            break Err(unavailable());
+        if Instant::now() >= deadline {
+            break Err(InspectionStage::Deadline);
+        }
+        match output.metadata() {
+            Err(_) => break Err(InspectionStage::PrivateOutput),
+            Ok(metadata) if metadata.len() > 65536 => break Err(InspectionStage::Oversize),
+            Ok(_) => {}
         }
         match child.try_wait() {
             Ok(Some(status)) if status.success() => break Ok(()),
-            Ok(Some(_)) | Err(_) => break Err(unavailable()),
+            Ok(Some(_)) | Err(_) => break Err(InspectionStage::Exit),
             Ok(None) => std::thread::sleep(
                 Duration::from_millis(10).min(deadline.saturating_duration_since(Instant::now())),
             ),
@@ -159,13 +236,19 @@ fn inspect(deadline: std::time::Instant, image: &[u8]) -> Result<bool, Reason> {
         let _ = child.wait();
     }
     outcome?;
-    output.rewind().map_err(|_| unavailable())?;
+    output.rewind().map_err(|_| InspectionStage::Read)?;
     let mut bytes = zeroize::Zeroizing::new(Vec::new());
     output
         .take(65537)
         .read_to_end(&mut bytes)
-        .map_err(|_| unavailable())?;
-    csv_presence(&bytes, child.id(), image)
+        .map_err(|_| InspectionStage::Read)?;
+    if bytes.len() > 65536 {
+        return Err(InspectionStage::Oversize);
+    }
+    if Instant::now() >= deadline {
+        return Err(InspectionStage::Deadline);
+    }
+    csv_presence(&bytes, child.id(), image).map_err(|_| InspectionStage::Schema)
 }
 
 #[cfg(test)]
@@ -176,6 +259,43 @@ mod tests {
         time::{Duration, Instant},
     };
     const INSPECTOR: &[u8] = b"\"tasklist.exe\",\"123\",\"Console\",\"1\",\"1,000 K\"\r\n";
+    #[test]
+    fn inspection_failures_serialize_only_closed_stages_and_selected_app() {
+        let stages = [
+            InspectionStage::Deadline,
+            InspectionStage::SystemRoot,
+            InspectionStage::PrivateOutput,
+            InspectionStage::Spawn,
+            InspectionStage::Exit,
+            InspectionStage::Read,
+            InspectionStage::Schema,
+            InspectionStage::Oversize,
+        ];
+        let expected = [
+            "deadline",
+            "system-root",
+            "private-output",
+            "spawn",
+            "exit",
+            "read",
+            "schema",
+            "oversize",
+        ];
+        for (stage, expected) in stages.into_iter().zip(expected) {
+            let value = failure_facts(b"Claude.exe", stage).unwrap();
+            assert_eq!(value["stage"], expected);
+            assert_eq!(value["app"], "claude-desktop");
+            assert_eq!(value.as_object().unwrap().len(), 5);
+            let encoded = serde_json::to_string(&value).unwrap();
+            assert!(!encoded.contains("PRIVATE_SENTINEL"));
+        }
+        assert!(failure_facts(b"PRIVATE_SENTINEL.exe", InspectionStage::Exit).is_none());
+        assert_eq!(
+            failure_facts(b"ChatGPT.exe", InspectionStage::Spawn).unwrap()["app"],
+            "chatgpt-desktop"
+        );
+    }
+
     #[test]
     fn exact_image_and_owned_inspector_are_required() {
         assert_eq!(csv_presence(INSPECTOR, 123, b"ChatGPT.exe"), Ok(false));

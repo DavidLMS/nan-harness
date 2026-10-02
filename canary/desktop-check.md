@@ -1345,3 +1345,28 @@ rejects the now-unused `Toggled` import on non-test Linux. That import is scoped
 to its consumers. The obsolete local gate was stopped during canary fixtures
 rather than continuing to certify a known platform failure; the corrected final
 tree requires a new complete gate. Qualification remains 5 of 15 cells.
+
+
+Both the complete local gate and hosted Linux quality gate on `7b119970`
+[37072140449](https://github.com/DavidLMS/nan-harness/actions/runs/37072140449)
+pass. Native qualification remains separate. The macOS accessibility-flag trial
+[37072133814](https://github.com/DavidLMS/nan-harness/actions/runs/37072133814)
+reports `focused-window/cannot-complete` under the existing 100-ms AX timeout;
+cleanup and authenticated catalog requests pass, but editor readiness is unproved.
+The next read-only observation independently checks focused/main window identity
+without relying on a focused UI element and cannot authorize input or waive a guard.
+
+Windows Claude
+[37072131094](https://github.com/DavidLMS/nan-harness/actions/runs/37072131094)
+fails after stop at process enumeration with `desktop-unavailable`. Windows Codex
+[37072136816](https://github.com/DavidLMS/nan-harness/actions/runs/37072136816)
+has one cleanly restored probe, then the same enumeration failure. The shared
+whole-chain budget is therefore restricted to Claude, with a five-second bound;
+other applications recover their original absence path. Failure-only typed
+inspector stages distinguish deadline, environment, spawn, exit, read, schema
+and size failures; the present error is not assumed to be a timeout.
+
+Codex's first probe identifies one source-bound avatar-overlay page and one
+unknown route, both with visible documents. Its second probe instead sees a
+separate modal with no recognized public heading. No auxiliary target is chosen
+and no unknown dialog receives input. Qualification remains 5 of 15 cells.

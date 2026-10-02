@@ -1291,6 +1291,7 @@ fn record_claude_stack(snapshot: &Snapshot, held: &Window) {
         }
     }
     if let Some((status, matched, query)) = snapshot.focus_observation(held) {
+        let window_only = snapshot.window_focus_observation(held);
         let focus_path = directory.join(format!("claude-window-focus-{}.json", std::process::id()));
         if let Ok(file) = nan_harness_private_fs::open_private_new(&focus_path) {
             let _ = serde_json::to_writer(
@@ -1298,6 +1299,8 @@ fn record_claude_stack(snapshot: &Snapshot, held: &Window) {
                 &serde_json::json!({
                     "schemaVersion": 1, "mechanism": "claude-window-focus", "diagnosticsOnly": true,
                     "status": status, "nativeForegroundWindowMatchedHeld": matched, "query": query,
+                    "windowOnlyStatus": window_only.map(|value| value.0),
+                    "windowOnlyMatchedHeld": window_only.and_then(|value| value.1),
                 }),
             );
         }

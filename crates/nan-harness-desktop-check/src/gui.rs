@@ -259,16 +259,15 @@ impl Gui {
 
     pub(crate) fn ensure_absent_after_stop(kind: DesktopHarnessKind) -> Result<(), AbsenceFailure> {
         #[cfg(windows)]
-        {
-            let deadline = Instant::now() + Duration::from_secs(2);
-            settle_absence(
+        if kind == DesktopHarnessKind::Claude {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            return settle_absence(
                 |bound| Self::absence_snapshot(kind, Some(bound)),
                 Instant::now,
                 std::thread::sleep,
                 deadline,
-            )
+            );
         }
-        #[cfg(not(windows))]
         Self::ensure_absent(kind)
     }
 
