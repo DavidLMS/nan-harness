@@ -151,8 +151,8 @@ jobs:
         shell: bash
         run: |
           python3 scripts/desktop-feasibility/test-endpoint-owner-windows.py
-          echo "FEASIBILITY_WINDOWS_PROOF_SCRIPT=$GITHUB_WORKSPACE/scripts/desktop-feasibility/endpoint-owner-windows.py" >> "$GITHUB_ENV"
-          echo "FEASIBILITY_WINDOWS_PROOF_PYTHON=$(python3 -c 'import sys; print(sys.executable)')" >> "$GITHUB_ENV"
+          echo "FEASIBILITY_WINDOWS_PROOF_SCRIPT=$(python3 -c 'from pathlib import Path; print(Path("scripts/desktop-feasibility/endpoint-owner-windows.py").resolve(strict=True))')" >> "$GITHUB_ENV"
+          echo "FEASIBILITY_WINDOWS_PROOF_PYTHON=$(python3 -c 'import sys; from pathlib import Path; print(Path(sys.executable).resolve(strict=True))')" >> "$GITHUB_ENV"
       - name: Build exact branch binaries
         run: cargo build --locked -p nan-harness-desktop-check -p nan-harness-cli --features nan-harness-cli/desktop-qualification --bins
       - name: Install pinned observation client

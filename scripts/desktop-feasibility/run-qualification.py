@@ -157,6 +157,8 @@ def main():
         return run(args)
     except ValueError as error:
         categories = {
+            'Windows ownership helper is missing': 'windows-ownership-helper-missing',
+            'Windows ownership helper is invalid': 'windows-ownership-helper-invalid',
             'prepared identities differ': 'prepared-identity-mismatch',
             'prepared app is unavailable': 'prepared-app-unavailable',
             'prepared executable identity is missing': 'prepared-executable-missing',
