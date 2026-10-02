@@ -953,3 +953,33 @@ correlation for acceptance. The existing single Retry action and provider oracle
 remain unchanged. Source inspection rules out an unguarded keyboard shortcut:
 this Retry is not configured as keyboard-focusable, and the editor/panel does not
 export the accessibility identity needed to prove panel keyboard focus.
+
+The complete local gate on `8c869ab0` passes, as does the clean Linux quality
+run [37028862949](https://github.com/DavidLMS/nan-harness/actions/runs/37028862949).
+Its native trials retain four qualified cells; the following observations do
+not add conversation acceptance:
+
+- Linux Zed in [37028839806](https://github.com/DavidLMS/nan-harness/actions/runs/37028839806)
+  again passes its first four steps and cleanup in all three probes, but Retry
+  fails. Each observer reports one ordered press/release pair. Panel diagnostics
+  find two stable Maximize icons, no Minimize icon and no correlated accessible
+  button; toggle state is unavailable and no zoom action is attempted.
+- macOS Claude in [37028844846](https://github.com/DavidLMS/nan-harness/actions/runs/37028844846)
+  first fails the bounded Foundation query. The next probe proves native folder
+  alignment, creates `Claude-3p/Local State`, acquires a window and stops at
+  `focus-changed`; the third is not run. Cleanup passes. The 20 window observations
+  contain two present and 18 absent snapshots, without establishing their order.
+  A compiled closed Foundation query will replace cold Swift compilation, and
+  post-acquisition diagnostics will cover both focus and window changes.
+- Windows Codex in [37028846253](https://github.com/DavidLMS/nan-harness/actions/runs/37028846253)
+  acquires the renderer in all three probes. Its role form is blocked by a
+  foreign overlay before any role action. No editor or login control is observed;
+  cleanup passes. The overlay's identity and account-free dismissal remain
+  unproved, so its presence does not authorize an unknown modal action.
+- Windows Hermes in [37028845305](https://github.com/DavidLMS/nan-harness/actions/runs/37028845305)
+  dismisses onboarding and verifies a freshly requested catalog in two probes.
+  Both fail the model-row check; the third fails a startup document query.
+  Cleanup passes. The frozen source places reasoning metadata inside the model
+  label span, so the next check compares only the exact model name and waits
+  read-only for React's row update within the existing deadline. It never repeats
+  refresh or selects a model to manufacture readiness.

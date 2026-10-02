@@ -23,6 +23,22 @@ function sample(element, diagnostic=false) {
   }
   return result('no-owned-point',blocker);
 }
+// Frozen model-catalog-menu renders the name and a nested reasoning/tag span
+// inside one label. Compare only the name's direct text/HighlightMatches marks;
+// no application text leaves this browser callback.
+function modelRowLabel(element) {
+  if (element.getAttribute('data-slot')!=='dropdown-menu-sub-trigger'
+      || element.getAttribute('role')!=='menuitem') return false;
+  const labels=element.querySelectorAll(':scope > span[class~="min-w-0"][class~="flex-1"][class~="truncate"]');
+  if (labels.length!==1) return false;
+  let name='';
+  for (const child of labels[0].childNodes) {
+    if (child.nodeType===3 || child.nodeType===1 && child.tagName==='MARK') name+=child.textContent;
+    else if (child.nodeType!==1 || child.tagName!=='SPAN'
+        || !child.classList.contains('text-(--ui-text-tertiary)')) return false;
+  }
+  return name==='Qwen3.6';
+}
 exports.run = async function run(page, session, ownedEndpoint, deadline, expectedProfile) {
   const facts={schemaVersion:1,mechanism:'hermes-windows-catalog-readiness',diagnosticsOnly:true,
     stage:'policy',errorCategory:'policy-rejected',menuOpened:false,refreshAttempted:false,
@@ -220,8 +236,24 @@ exports.run = async function run(page, session, ownedEndpoint, deadline, expecte
     while (guard() && !evidence.verified()) await delay(Math.min(100,Math.max(0,deadline-Date.now())));
     if (!evidence.verified()) throw new Error('catalog');
     facts.catalogVerified=true;
-    const row=menu.getByRole('menuitem').filter({has:page.locator('span').filter({hasText:/^Qwen3\.6$/})});
-    if (!guard() || await row.count()!==1 || !await row.isEnabled()) throw new Error('row');
+    const row=menu.getByRole('menuitem').filter({has:page.locator(
+      'span[class~="min-w-0"][class~="flex-1"][class~="truncate"]'
+    ).filter({hasText:/^Qwen3\.6(?:\s|$)/})});
+    // A fresh wire acknowledgement precedes React's query-driven row update.
+    // Wait read-only within the original deadline; never refresh or select twice.
+    let rowReady=false;
+    while (guard()) {
+      await frame();
+      if (await menu.count()!==1) throw new Error('menu');
+      const count=await row.count();
+      if (count>1) throw new Error('ambiguous row');
+      if (count===1) {
+        if (!await row.evaluate(modelRowLabel)) throw new Error('row label');
+        if (await row.isVisible() && await row.isEnabled()) {rowReady=true;break;}
+      }
+      await delay(Math.min(100,Math.max(0,deadline-Date.now())));
+    }
+    if (!rowReady || !guard()) throw new Error('row');
     facts.modelRowVerified=true;
     facts.stage='dismiss'; facts.errorCategory='dismiss-uncertain';
     if (!guard() || await menu.count()!==1
@@ -245,3 +277,4 @@ exports.run = async function run(page, session, ownedEndpoint, deadline, expecte
   return facts;
 };
 exports.sample=sample;
+exports.modelRowLabel=modelRowLabel;

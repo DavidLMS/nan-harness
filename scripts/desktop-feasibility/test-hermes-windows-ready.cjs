@@ -2,7 +2,7 @@
 const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
 const {EventEmitter}=require('node:events');
 async function trial(scenario) {
- let clock=0,opened=false,owner=true,refreshClicks=0,pillClicks=0,escapes=0,skipClicks=0;
+ let clock=0,opened=false,owner=true,refreshClicks=0,pillClicks=0,escapes=0,skipClicks=0,rowReads=0;
  let onboardingPresent=scenario.startsWith('onboarding-');
  let pageReplacedByOwner=false;
  const session=new EventEmitter(); session.send=async method=>{
@@ -34,7 +34,10 @@ async function trial(scenario) {
    isVisible:async()=>onboardingPresent,getByRole:()=>choice,elementHandle:async()=>heldCover,
    evaluate:async()=>scenario!=='onboarding-replaced'};
  const editor={count:async()=>1,elementHandle:async()=>editorHandle,evaluate:async()=>scenario!=='composer-changed' && !(scenario==='composer-remount' && clock>=100)};
- const row={...control,filter(){return this;},count:async()=>scenario==='wrong-row'?0:1};
+ const row={...control,filter(){return this;},isVisible:async()=>true,
+   evaluate:async()=>scenario!=='wrong-row-label',
+   count:async()=>{rowReads++;return scenario==='wrong-row'?0:scenario==='duplicate-row'?2:
+     scenario==='row-pending' && rowReads<3?0:1;}};
  const menu={filter(){return this;},count:async()=>opened?1:0,getByRole(_role,options){return options?.name?control:row;}};
  const roots={elementHandle:async()=>rootHandle,evaluate:async()=>scenario!=='root-remount' || clock<100,count:async()=>scenario==='missing-root' || scenario==='composer-pending' && clock<200?0:1,
  locator:()=>scenario==='missing-editor'?{...editor,count:async()=>0}:editor,
@@ -69,7 +72,7 @@ async function trial(scenario) {
    return owner && !(scenario==='startup-owner-loss' && clock>=200) && !(scenario==='stability-owner-loss' && clock>=100);
  },3000,'default');
  assert(!JSON.stringify(facts).includes('PRIVATE'));
- return {facts,pillClicks,refreshClicks,escapes,skipClicks};
+ return {facts,pillClicks,refreshClicks,escapes,skipClicks,rowReads};
 }
 // Execute the serialized browser callback without Node helper bindings.
 function sampled(blocker) {
@@ -89,9 +92,28 @@ for(const blocker of ['onboarding','modal','other']) {
 }
 assert.equal(sampled('forged-onboarding').blocker,'other');
 assert.equal(sampled('self').sampleStatus,'owned');
+// The frozen row label adds reasoning metadata without changing the model name.
+const {modelRowLabel}=require('./hermes-windows-ready.cjs');
+const text=value=>({nodeType:3,textContent:value});
+const meta={nodeType:1,tagName:'SPAN',textContent:' Medium',classList:{contains:c=>c==='text-(--ui-text-tertiary)'}};
+function modelElement(children,slot='dropdown-menu-sub-trigger',role='menuitem') {
+ return {getAttribute:key=>key==='data-slot'?slot:role,
+   querySelectorAll:()=>[{childNodes:children}]};
+}
+assert.equal(modelRowLabel(modelElement([text('Qwen3.6'),meta])),true);
+assert.equal(modelRowLabel(modelElement([{nodeType:1,tagName:'MARK',textContent:'Qwen'},text('3.6'),meta])),true);
+for(const element of [modelElement([text('Qwen3.6 27B'),meta]),modelElement([text('Qwen3.6-fast')]),
+ modelElement([text('Qwen3.6')],'dropdown-menu-item'),modelElement([text('Qwen3.6')],undefined,'button'),
+ modelElement([text('Qwen3.6'),{...meta,tagName:'A'}])]) assert.equal(modelRowLabel(element),false);
 (async()=>{
  for(const scenario of ['composer-pending','document-pending']) assert.equal((await trial(scenario)).facts.stage,'ready');
  const good=await trial('good');assert.equal(good.facts.stage,'ready');assert.equal(good.pillClicks,1);assert.equal(good.refreshClicks,1);assert.equal(good.escapes,1);
+ const pending=await trial('row-pending');assert.equal(pending.facts.stage,'ready');assert.equal(pending.rowReads,3);
+ assert.equal(pending.refreshClicks,1);assert.equal(pending.escapes,1);
+ for(const scenario of ['duplicate-row','wrong-row-label']) {
+   const result=await trial(scenario);assert.equal(result.facts.catalogVerified,true);
+   assert.equal(result.facts.modelRowVerified,false);assert.equal(result.refreshClicks,1);assert.equal(result.escapes,0);
+ }
  for(const s of ['covered','hidden-control','outside-control','duplicate','disabled','modal']){const r=await trial(s);assert.equal(r.pillClicks,0);assert.equal(r.refreshClicks,0);assert.notEqual(r.facts.stage,'ready');}
  const lost=await trial('owner-loss');assert.equal(lost.refreshClicks,0);assert.equal(lost.escapes,0);
  const uncertain=await trial('uncertain');assert.equal(uncertain.refreshClicks,1);assert.equal(uncertain.escapes,0);assert.notEqual(uncertain.facts.stage,'ready');
