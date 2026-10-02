@@ -42,13 +42,16 @@ async function trial(options={}) {
   async evaluate(fn,arg){if(options.remount&&arg instanceof Handle&&samples>0)return false;return evaluate(fn,this.element(),arg);}
   async elementHandle(){return new Handle(this.element());}
  }
- const page={locator:s=>new Locator(s.startsWith('fieldset > legend')?'legend':'radios'),url:()=> 'app://codex/index.html',context:()=>({browser:()=>({contexts:()=>[{pages:()=>options.foreignPage?[page,{}]:[page]}]})})};
+ const page={locator:s=>new Locator(s.startsWith('fieldset > legend')?'legend':'radios'),
+  url:()=>options.urlChange&&roleClicks>0?'app://codex/index.html?PRIVATE_ROUTE':'app://codex/index.html',
+  context:()=>({browser:()=>({contexts:()=>[{pages:()=>options.foreignPage?[page,{}]:options.replacedPage?[{}]:[page]}]})})};
  const sandbox={exports:{},process:{platform:options.platform??'win32',env:{GITHUB_ACTIONS:options.noHost?'false':'true',RUNNER_ENVIRONMENT:'github-hosted',RUNNER_OS:'Windows',NANH_CODEX_PUBLIC_ONBOARDING:options.noOptin?undefined:'engineering'}},Date:{now:()=>now},setTimeout:f=>{now+=100;f();}};
  vm.runInNewContext(source,sandbox);
  let guards=0;
- const guard=()=>{guards++;if(options.guardExhaustsBudget&&guards>=3)now=1201;return !options.initialOwnerLoss&&!(options.ownerLossBeforeRole&&guards>=3)&&!(options.ownerLoss&&roleClicks>0)&&!(options.finalLoss&&guards>=2);};
+ const guard=()=>{guards++;if(options.guardThrows)throw Error('PRIVATE');if(options.guardExhaustsBudget&&guards>=3)now=1201;return !options.initialOwnerLoss&&!(options.ownerLossBeforeRole&&guards>=3)&&!(options.ownerLoss&&roleClicks>0)&&!(options.finalLoss&&guards>=2);};
  const budget=options.expired?0:options.invalidDeadline?NaN:options.excessBudget?25001:1200;
  const facts=await sandbox.exports.run(page,options.noGuard?undefined:guard,budget);
+ assert(!JSON.stringify(facts).includes('PRIVATE'));
  return {facts,roleClicks,continueClicks};
 }
 (async()=>{
@@ -63,6 +66,11 @@ async function trial(options={}) {
   if(opts.guardExhaustsBudget||opts.ownerLossBeforeRole)assert.equal(r.facts.conversationalScope,true);
  }
  const loaded=await trial({loading:true});assert.equal(loaded.roleClicks,1);assert.equal(loaded.continueClicks,1);
+ for(const [opts,reason] of [[{foreignPage:true},'page-count'],[{replacedPage:true},'page-changed'],[{guardThrows:true},'query-failed']]) {
+  const r=await trial(opts);assert.equal(r.facts.roleProofFailure,reason);assert.equal(r.roleClicks,0);assert.equal(r.continueClicks,0);
+ }
+ const route=await trial({urlChange:true});assert.equal(route.facts.roleProofFailure,'url-changed');
+ assert.equal(route.roleClicks,1);assert.equal(route.continueClicks,0);
  const scoped=await trial({extraFieldset:true});assert.equal(scoped.roleClicks,1);assert.equal(scoped.continueClicks,1);assert.equal(scoped.facts.roleScopeAbsent,true);
  const duplicateScope=await trial({duplicateRoleFieldset:true});assert.equal(duplicateScope.facts.roleProofFailure,'legend-count');assert.equal(duplicateScope.roleClicks,0);assert.equal(duplicateScope.continueClicks,0);
  const duplicate=await trial({duplicateRadio:true});assert.equal(duplicate.facts.roleProofFailure,'engineering-count');

@@ -17,6 +17,10 @@ use super::profile::ManagedProfile;
 #[path = "qualification_restart.rs"]
 mod qualification_restart;
 
+#[cfg(feature = "desktop-qualification")]
+#[path = "qualification_project.rs"]
+mod qualification_project;
+
 #[derive(Clone, Copy)]
 pub(super) enum StopCause {
     StartupTimeout,
@@ -50,6 +54,8 @@ pub(super) async fn supervise_desktop(
     command.args(crate::commands::desktop::qualification_renderer_arguments(
         nan_harness_core::DesktopHarnessKind::ChatGpt,
     ));
+    #[cfg(feature = "desktop-qualification")]
+    qualification_project::apply(&mut command, installation, profile, debug)?;
     let mut activities = bridge.subscribe_activities();
     command
         .env("CODEX_HOME", &profile.root)

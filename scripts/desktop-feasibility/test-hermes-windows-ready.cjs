@@ -3,19 +3,20 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('nod
 const {EventEmitter}=require('node:events');
 async function trial(scenario) {
  let clock=0,opened=false,owner=true,refreshClicks=0,pillClicks=0,escapes=0;
- const session=new EventEmitter(); session.send=async()=>{};
+ const session=new EventEmitter(); session.send=async method=>method==='Page.getFrameTree'
+   ? scenario==='stalled-frame'?new Promise(()=>{}):{frameTree:{frame:{id:scenario==='frame-replaced' && clock>=100?'other':'main',loaderId:scenario==='reload' && clock>=100?'new':'original',url:page.url()}}}:undefined;
  const point={x:5,y:5,left:0,top:0,width:20,height:20};
- const editorHandle={};
+ const editorHandle={},rootHandle={};
  const handle={evaluate:async()=>scenario==='covered'?null:point,click:async()=>{if(opened){refreshClicks++; if(scenario==='uncertain')throw new Error('PRIVATE');
  const send=(dir,obj)=>session.emit('Network.webSocketFrame'+dir,{requestId:'socket',response:{opcode:1,payloadData:JSON.stringify(obj)}});
  send('Sent',{jsonrpc:'2.0',id:1,method:'model.options',params:{profile:'default',explicit_only:true,refresh:true}});
  send('Received',{jsonrpc:'2.0',id:1,result:{providers:[{models:['qwen3.6']}]}});
  }else{pillClicks++;opened=true;if(scenario==='owner-loss')owner=false;}}};
  const control={count:async()=>scenario==='duplicate'?2:1,isEnabled:async()=>scenario!=='disabled',elementHandle:async()=>handle,evaluate:async()=>true};
- const editor={count:async()=>1,elementHandle:async()=>editorHandle,evaluate:async()=>scenario!=='composer-changed'};
+ const editor={count:async()=>1,elementHandle:async()=>editorHandle,evaluate:async()=>scenario!=='composer-changed' && !(scenario==='composer-remount' && clock>=100)};
  const row={...control,filter(){return this;},count:async()=>scenario==='wrong-row'?0:1};
  const menu={filter(){return this;},count:async()=>opened?1:0,getByRole(_role,options){return options?.name?control:row;}};
- const roots={count:async()=>scenario==='missing-root' || scenario==='composer-pending' && clock<200?0:1,
+ const roots={elementHandle:async()=>rootHandle,evaluate:async()=>scenario!=='root-remount' || clock<100,count:async()=>scenario==='missing-root' || scenario==='composer-pending' && clock<200?0:1,
  locator:()=>scenario==='missing-editor'?{...editor,count:async()=>0}:editor,
  getByRole(_role,options){
    if(options.name==='Open model picker')return {...control,count:async()=>scenario==='picker-only'?1:0};
@@ -23,17 +24,28 @@ async function trial(scenario) {
    if(options.name.source==='^Model · [^\\n]+')return {...control,count:async()=>scenario==='picker-only'?0:1};
    return {...control,count:async()=>scenario==='picker-only' || scenario==='label-variant'?0:scenario==='duplicate'?2:1};
  }};
- const page={evaluate:async()=>['startup-owner-loss','startup-url-change','startup-page-count'].includes(scenario) || scenario==='loading' || scenario==='document-pending' && clock<200?'loading':'complete',url:()=>scenario==='startup-url-change' && clock>=200?'file:///synthetic/other.html':'file:///synthetic/resources/app.asar/dist/index.html',locator(selector){return selector.includes('composer-root')?roots:selector.includes('dialog')?{count:async()=>scenario==='modal'?1:0}:{filter(){return this;}};},getByRole:()=>menu,
+ const page={evaluate:async()=>['startup-owner-loss','startup-url-change','startup-page-count'].includes(scenario) || scenario==='loading' || scenario==='document-pending' && clock<200?'loading':'complete',url:()=>{
+ const base='file:///synthetic/resources/app.asar/dist/index.html';
+ if(scenario==='startup-url-change' && clock>=200)return 'file:///synthetic/other.html';
+ if(scenario==='warm-root')return base+'#/';
+ if(scenario==='root-transition' && clock>=100)return base+'#/';
+ if(scenario==='second-transition' && clock>=100 && clock<200)return base+'#/';
+ if(scenario==='query-transition' && clock>=100)return base+'?profile=nan#/';
+ if(scenario==='path-transition' && clock>=100)return 'file:///synthetic/resources/app.asar/dist/other.html';
+ if(scenario==='hash-transition' && clock>=100)return base+'#/foreign';
+ if(scenario==='post-freeze' && clock>=200)return base+'#/';
+ return base;
+ },locator(selector){return selector.includes('composer-root')?roots:selector.includes('dialog')?{count:async()=>scenario==='modal'?1:0}:{filter(){return this;}};},getByRole:()=>menu,
  keyboard:{press:async key=>{assert.equal(key,'Escape');escapes++;if(scenario!=='menu-remains')opened=false;}},
- context:()=>({browser:()=>({contexts:()=>[{pages:()=>scenario==='startup-page-count' && clock>=200?[page,page]:[page]}]})})};
+ context:()=>({browser:()=>({contexts:()=>[{pages:()=>scenario==='startup-page-count' && clock>=200?[page,page]:scenario==='page-replaced' && clock>=100?[{}]:[page]}]})})};
  const exports={};
  const context={exports,require:p=>require(p==='./hermes-catalog-readiness.cjs'?__dirname+'/hermes-catalog-readiness.cjs':p),
  process:{platform:'win32',env:{GITHUB_ACTIONS:'true',RUNNER_ENVIRONMENT:'github-hosted',RUNNER_OS:'Windows',FEASIBILITY_HERMES_READINESS_POLICY:'current-catalog'}},
- Date:{now:()=>clock},setTimeout:fn=>{clock+=100;fn();},JSON,Number,Error};
+ Date:{now:()=>clock},setTimeout:(fn,ms)=>{if(ms<=100 || scenario==='stalled-frame'){clock+=ms;fn();return null;}return setTimeout(fn,ms);},clearTimeout,URL,JSON,Number,Error};
  vm.runInNewContext(fs.readFileSync(__dirname+'/hermes-windows-ready.cjs','utf8'),context);
  const facts=await exports.run(page,session,()=>{
    if(scenario==='owner-query-exhausts-budget')clock=3001;
-   return owner && !(scenario==='startup-owner-loss' && clock>=200);
+   return owner && !(scenario==='startup-owner-loss' && clock>=200) && !(scenario==='stability-owner-loss' && clock>=100);
  },3000,'default');
  assert(!JSON.stringify(facts).includes('PRIVATE'));
  return {facts,pillClicks,refreshClicks,escapes};
@@ -71,5 +83,11 @@ async function trial(scenario) {
    const result=await trial(scenario);assert.equal(result.facts.guardFailure,reason);
    assert.equal(result.pillClicks,0);assert.equal(result.refreshClicks,0);
  }
+ for(const scenario of ['root-transition','warm-root']) {
+ const result=await trial(scenario);assert.equal(result.facts.stage,'ready',scenario);assert.equal(result.pillClicks,1);assert.equal(result.refreshClicks,1);
+ }
+ for(const scenario of ['query-transition','path-transition','hash-transition','second-transition','post-freeze','reload','frame-replaced','page-replaced','composer-remount','root-remount','stability-owner-loss','stalled-frame']) {
+ const result=await trial(scenario);assert.notEqual(result.facts.stage,'ready',scenario);assert.equal(result.pillClicks,0,scenario);assert.equal(result.refreshClicks,0,scenario);
+ }
  console.log('PASS Windows ordinary catalog UI behavioral guards');
-})().catch(()=>process.exitCode=1);
+})().catch(error=>{console.error(error);process.exitCode=1;});

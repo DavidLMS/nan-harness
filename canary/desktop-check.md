@@ -730,3 +730,47 @@ Each remains blocked because no eligible visible window appears during native
 acquisition; all cleanup passes. The owned configuration contract remains valid,
 but consumption and model discovery are still unmeasured. A running process
 does not establish that the account-free editor is available.
+
+The complete local repository gate passes on `abca075c`. Native trials on that
+commit still leave four of fifteen cells qualified. Linux Zed in
+[37014555336](https://github.com/DavidLMS/nan-harness/actions/runs/37014555336)
+passes the first four scenario steps in all three probes, but manual Retry fails.
+Its pointer preflight passes; XRecord supplies no delivery evidence because the
+input subprocess environment omitted its opt-in flag. The next trial preserves
+that flag across the credential-clearing boundary, tests the actual subprocess
+boundary with a synthetic fixture, and installs the required XRes library.
+
+Windows Hermes in
+[37014563397](https://github.com/DavidLMS/nan-harness/actions/runs/37014563397)
+has an editor in every probe, but its exact URL guard blocks before any input.
+The pinned bootstrap loads the renderer without a hash, and the ordinary fresh
+session route subsequently changes it to `#/`. The next trial permits only that
+initial transition on the same owned file document, with no query change, then
+requires stable composer observations and freezes the exact URL for all actions.
+Provider requests remain absent and all cleanup passes in the failed run.
+
+Windows Codex in
+[37014570767](https://github.com/DavidLMS/nan-harness/actions/runs/37014570767)
+selects Engineering through the public control and verifies its checked state in
+two probes. Continue remains blocked in all three; all cleanup passes. The next
+receipt separates native ownership failure from page replacement, page count,
+URL changes and failed queries. A source-verified native `--open-project`
+argument targets only the existing owned fixture directory in an exact-version,
+exact-artifact hosted Windows trial. This is project-entry feasibility, not a
+complete conversation or recovery adapter.
+
+The macOS Claude readiness receipt needs a parser correction: its complete
+closed protocol includes an optional inventory line that the readiness-only
+parser previously rejected. The null readiness fields in the preceding trial
+therefore do not establish a native readiness state. The next trial changes the
+parser without guessing a different launch or graphics policy. Complete typed
+inventory input is accepted; unknown fields and extra raw lines remain rejected.
+Pen's three cells remain externally blocked by mandatory vendor activation;
+the user has requested an official route without test accounts.
+
+The synthetic Zed export round-trip now uses real `zstd` compression and
+decompression, preserving its bounded transport and private-output assertions.
+On this Mac, direct execution of a temporary Python script repeatedly times out
+while explicitly invoking its interpreter completes promptly. The unrelated
+synthetic Openbox launch fixtures encounter the same temporary-script boundary
+on macOS; their authoritative Linux workflow check remains required.

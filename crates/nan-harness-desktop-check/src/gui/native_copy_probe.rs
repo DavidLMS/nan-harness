@@ -227,6 +227,7 @@ fn neutral_input(executable: &Path, mode: &str, prompt: &str) -> Result<(), Reas
         "RUNNER_ENVIRONMENT",
         "RUNNER_OS",
         "NANH_DESKTOP_QUALIFICATION_FACTS",
+        "NANH_ZED_XRECORD",
     ] {
         if let Some(value) = std::env::var_os(key) {
             command.env(key, value);
@@ -1532,6 +1533,74 @@ impl Gui {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn neutral_input_environment_child() {
+        if std::env::var("NANH_TEST_INPUT_ENV_CHILD").as_deref() != Ok("1") {
+            return;
+        }
+        assert_eq!(
+            neutral_input(Path::new("/bin/sh"), "select-all", ""),
+            Ok(())
+        );
+        let script = PathBuf::from(std::env::var_os("FEASIBILITY_ZED_INPUT_SCRIPT").unwrap());
+        std::fs::write(script.with_extension("passed"), b"passed").unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn neutral_input_preserves_delivery_policy_without_provider_credentials() {
+        let directory = tempfile::tempdir().unwrap();
+        let script = directory.path().join("input.sh");
+        let expected = if cfg!(target_os = "linux") {
+            "1"
+        } else {
+            "unset"
+        };
+        std::fs::write(
+            &script,
+            format!(
+                "[ \"${{NANH_ZED_XRECORD-unset}}\" = \"{expected}\" ] && \
+                 [ \"${{NAN_API_KEY-unset}}\" = unset ] && [ \"$1\" = select-all ]\n"
+            ),
+        )
+        .unwrap();
+        // A separate test process supplies ambient values without mutating the
+        // parallel test suite's environment. The child invokes only this shell
+        // fixture, never a desktop app or input API.
+        let mut child = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "gui::native_copy_probe::tests::neutral_input_environment_child",
+            ])
+            .env("NANH_TEST_INPUT_ENV_CHILD", "1")
+            .env("FEASIBILITY_ZED_INPUT_SCRIPT", &script)
+            .env("NANH_ZED_XRECORD", "1")
+            .env("NAN_API_KEY", "synthetic-provider-key")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(15);
+        let status = loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                break status;
+            }
+            if Instant::now() >= deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("input environment proof exceeded its deadline");
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        };
+        assert!(status.success());
+        assert_eq!(
+            std::fs::read(script.with_extension("passed")).unwrap(),
+            b"passed"
+        );
+    }
 
     #[test]
     fn export_transport_distinguishes_budget_json_and_untrusted_verdict() {

@@ -5,6 +5,7 @@ import subprocess
 import tempfile
 import sys
 import json
+import base64
 import unittest
 
 spec = importlib.util.spec_from_file_location("zed_export", pathlib.Path(__file__).with_name("zed-export.py"))
@@ -17,20 +18,19 @@ def thread(parts):
 
 
 class ExportTests(unittest.TestCase):
+    @unittest.skipUnless(shutil.which("zstd"), "zstd unavailable")
     def test_resumed_export_transport_emits_only_the_closed_verdict(self):
         value = thread([])
         value["messages"].extend(["Resume", thread([{"Text": "reply-nonce"}])["messages"][1]])
-        with tempfile.TemporaryDirectory() as directory:
-            executable = pathlib.Path(directory) / "synthetic-zstd"
-            executable.write_text("#!" + sys.executable + "\nimport sys\nsys.stdout.write(" + repr(json.dumps(value)) + ")\n")
-            executable.chmod(0o700)
-            request = {"expectedPrompt": "prompt-nonce", "expectedMarker": "reply-nonce", "clipboard": "c3ludGhldGlj"}
-            output = subprocess.run([sys.executable, str(pathlib.Path(__file__).with_name("zed-export.py")), "--zstd", str(executable)], input=json.dumps(request).encode(), stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
-            result = json.loads(output.stdout)
-            self.assertTrue(result["verified"])
-            self.assertEqual(result["assistantTextCount"], 1)
-            self.assertEqual(set(result), {"verified", "version", "userCount", "assistantTextCount", "resumeCount", "agentCount", "totalAssistantTextCount", "error"})
-            self.assertNotIn(b"nonce", output.stdout + output.stderr)
+        zstd = shutil.which("zstd")
+        compressed = subprocess.run([zstd, "-q", "-c"], input=json.dumps(value).encode(), stdout=subprocess.PIPE, check=True).stdout
+        request = {"expectedPrompt": "prompt-nonce", "expectedMarker": "reply-nonce", "clipboard": base64.b64encode(compressed).decode()}
+        output = subprocess.run([sys.executable, str(pathlib.Path(__file__).with_name("zed-export.py")), "--zstd", zstd], input=json.dumps(request).encode(), stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+        result = json.loads(output.stdout)
+        self.assertTrue(result["verified"])
+        self.assertEqual(result["assistantTextCount"], 1)
+        self.assertEqual(set(result), {"verified", "version", "userCount", "assistantTextCount", "resumeCount", "agentCount", "totalAssistantTextCount", "error"})
+        self.assertNotIn(b"nonce", output.stdout + output.stderr)
 
     def test_latest_empty_segment_keeps_only_closed_history_counts(self):
         value = thread([{"Text": "reply-nonce"}])

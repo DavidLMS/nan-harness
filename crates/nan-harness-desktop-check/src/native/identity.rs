@@ -93,6 +93,9 @@ impl ClaudeIdentityObservation {
     }
 
     pub(crate) fn parse_readiness(output: &str) -> Result<ClaudeReadiness, Reason> {
+        // Validate the complete closed protocol, including optional inventory,
+        // before extracting readiness from its required first line.
+        Self::parse(output)?;
         let mut lines = output.lines();
         let mut fields = lines
             .next()
@@ -122,7 +125,7 @@ impl ClaudeIdentityObservation {
                 _ => return Err(Reason::DesktopUnavailable),
             };
         }
-        if fields.next().is_some() || lines.next().is_some() {
+        if fields.next().is_some() {
             return Err(Reason::DesktopUnavailable);
         }
         Ok(ClaudeReadiness {
@@ -135,6 +138,32 @@ impl ClaudeIdentityObservation {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn readiness_accepts_only_complete_typed_inventory_protocol() {
+        let prefix = "READY finished-launching=1 hidden=0 active=1\nOBS matching-process-no-visible-window\n";
+        for inventory in [
+            "absent",
+            "present-offscreen",
+            "present-onscreen",
+            "query-unavailable",
+        ] {
+            let output = format!("{prefix}INV {inventory}\n");
+            let readiness = ClaudeIdentityObservation::parse_readiness(&output).unwrap();
+            assert_eq!(readiness.finished_launching, Some(true));
+            assert_eq!(readiness.hidden, Some(false));
+            assert_eq!(readiness.active, Some(true));
+        }
+        for output in [
+            format!("{prefix}INV private-value\n"),
+            format!("{prefix}PRIVATE\n"),
+            format!("{prefix}INV absent\nPRIVATE\n"),
+            "READY finished-launching=1 hidden=0 active=1\nOBS window-eligible\nINV absent\n"
+                .into(),
+        ] {
+            assert!(ClaudeIdentityObservation::parse_readiness(&output).is_err());
+        }
+    }
+
     use super::*;
 
     #[test]

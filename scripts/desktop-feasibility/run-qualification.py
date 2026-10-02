@@ -42,10 +42,20 @@ def validate_claude_bundle(executable):
             raise ValueError('Claude native bundle is invalid')
 
 
+def validate_codex_project_release(release, executable_hash):
+    # The ordinary native flag was inspected in these exact official bytes.
+    if (release.get('version') != '26.930.21537'
+            or release.get('digest') != 'sha256:4c70df5417fcee1f004a1356f6d48f6b084abdcf1da349e154a7f593f2360b19'
+            or executable_hash != '27d4a13c2557cfb9b5d3360b0977828103b774b87295198abc7b901d4c223325'):
+        raise ValueError('Codex project trial requires the inspected official release')
+
+
 def qualification_environment(app, facts, real_nanh, executable, inherited=None):
     source = os.environ if inherited is None else inherited
     if source.get('GITHUB_ACTIONS') != 'true' or source.get('RUNNER_ENVIRONMENT') != 'github-hosted':
         raise ValueError('disposable hosted session required')
+    if source.get('NANH_CODEX_PROJECT_POLICY') is not None and app != 'chatgpt-desktop':
+        raise ValueError('Codex native project policy is unavailable')
     environment = {key: value for key, value in source.items() if key in SESSION_ENV}
     if source.get('RUNNER_OS') == 'Windows':
         for key in WINDOWS_PROOF:
@@ -96,6 +106,13 @@ def qualification_environment(app, facts, real_nanh, executable, inherited=None)
                     or source.get('RUNNER_OS') != 'Windows' or mode != 'renderer'):
                 raise ValueError('public onboarding diagnostic is unavailable')
             environment['NANH_CODEX_PUBLIC_ONBOARDING'] = onboarding
+        project_policy = source.get('NANH_CODEX_PROJECT_POLICY')
+        if project_policy is not None:
+            if (project_policy != 'open-project' or app != 'chatgpt-desktop'
+                    or source.get('RUNNER_OS') != 'Windows' or mode != 'renderer'
+                    or onboarding != 'engineering'):
+                raise ValueError('Codex native project policy is unavailable')
+            environment['NANH_CODEX_PROJECT_POLICY'] = project_policy
         profile_policy = source.get('NANH_CLAUDE_MAC_PROFILE_POLICY')
         if profile_policy is not None:
             if (profile_policy != 'electron-user-data-dir' or app != 'claude-desktop'
@@ -156,6 +173,11 @@ def run(args):
     if report.exists() or report.is_symlink():
         raise ValueError('report destination already exists')
     environment = qualification_environment(args.app, facts, args.real_nanh, executable)
+    if environment.get('NANH_CODEX_PROJECT_POLICY') is not None:
+        if args.app != 'chatgpt-desktop' or args.platform != 'windows':
+            raise ValueError('Codex native project trial platform differs')
+        validate_codex_project_release(manifest['apps'][0], digest(Path(executable)))
+        environment['NANH_CODEX_PROJECT_ARTIFACT_SHA256'] = '4c70df5417fcee1f004a1356f6d48f6b084abdcf1da349e154a7f593f2360b19'
     expected_os = {'macos': ('macOS', 'darwin'), 'linux': ('Linux', 'linux'), 'windows': ('Windows', 'win32')}[args.platform]
     if environment.get('RUNNER_OS') != expected_os[0] or sys.platform != expected_os[1]:
         raise ValueError('host platform differs')

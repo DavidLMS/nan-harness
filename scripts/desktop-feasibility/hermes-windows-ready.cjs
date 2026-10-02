@@ -25,12 +25,36 @@ exports.run = async function run(page, session, ownedEndpoint, deadline, expecte
       || process.env.FEASIBILITY_HERMES_READINESS_POLICY!=='current-catalog'
       || !Number.isFinite(deadline) || deadline<=Date.now() || deadline-Date.now()>120000) return facts;
   const initialUrl=page.url();
+  let boundUrl=initialUrl, startup=true, transitioned=false;
+  // Frozen main.ts loads the primary file without a query/fragment. Its
+  // HashRouter fresh-draft action then replaces that route with exactly '/'.
+  function rootUrl(value) {
+    try {
+      const url=new URL(value);
+      if (value.endsWith('#')) return null;
+      if (url.protocol!=='file:' || url.search!=='' || url.username || url.password
+          || !['','#/'].includes(url.hash) || url.href!==value) return null;
+      return url.hash==='#/' ? value.slice(0,-2) : value;
+    } catch { return null; }
+  }
+  const base=rootUrl(initialUrl);
+  function urlValid() {
+    const current=page.url();
+    if (base===null) return false;
+    if (current===boundUrl) return true;
+    if (startup && !transitioned && initialUrl===base && current===`${base}#/`) {
+      transitioned=true; boundUrl=current; return true;
+    }
+    return false;
+  }
   const guard=()=>{
     try {
+      const pages=page.context().browser().contexts().flatMap(context=>context.pages());
       const failure = Date.now()>=deadline ? 'deadline-expired'
         : !ownedEndpoint() ? 'ownership-lost'
-        : page.url()!==initialUrl ? 'url-changed'
-        : page.context().browser().contexts().flatMap(context=>context.pages()).length!==1 ? 'page-count'
+        : !urlValid() ? 'url-changed'
+        : pages.length!==1 ? 'page-count'
+        : pages[0]!==page ? 'url-changed'
         : Date.now()>=deadline ? 'deadline-expired'
         : null;
       facts.guardFailure=failure;
@@ -40,8 +64,29 @@ exports.run = async function run(page, session, ownedEndpoint, deadline, expecte
       return false;
     }
   };
-  let evidence;
+  let evidence, documentIdentity;
+  async function frame() {
+    if (!guard()) throw new Error('guard');
+    let timer;
+    try {
+      const reply=await Promise.race([session.send('Page.getFrameTree'), new Promise((_,reject)=>{
+        timer=setTimeout(()=>reject(new Error('frame deadline')),Math.min(5000,Math.max(1,deadline-Date.now())));
+      })]);
+      const current=reply?.frameTree?.frame;
+      if (!current || current.url!==page.url() || !['id','loaderId'].every(key=>typeof current[key]==='string'
+          && current[key].length>0 && current[key].length<=256)) throw new Error('frame');
+      if (documentIdentity && (current.id!==documentIdentity.id || current.loaderId!==documentIdentity.loaderId)) {
+        facts.guardFailure='url-changed'; throw new Error('document changed');
+      }
+      if (!guard()) throw new Error('guard');
+      return {id:current.id,loaderId:current.loaderId};
+    } catch {
+      if (facts.guardFailure===null) facts.guardFailure=Date.now()>=deadline?'deadline-expired':'query-failed';
+      throw new Error('frame');
+    } finally { clearTimeout(timer); }
+  }
   try {
+    documentIdentity=await frame();
     evidence=monitor(session,guard,'qwen3.6',expectedProfile);
     await session.send('Network.enable');
     facts.stage='composer'; facts.errorCategory='composer-unavailable';
@@ -65,17 +110,26 @@ exports.run = async function run(page, session, ownedEndpoint, deadline, expecte
         pickerButtons,switchButtons,readyState};
       return values.slice(0,3);
     }
+    let original=null, originalRoot=null, stableUrl=null;
     while (guard()) {
       if (await page.locator('[role="dialog"]:visible, [role="alertdialog"]:visible').count()!==0) throw new Error('modal');
       const counts=await observeComposer();
       const complete=facts.composerObservation.readyState==='complete';
       if (counts.some(count=>count>1)) throw new Error('ambiguous composer');
-      if (complete && counts.every(count=>count===1) && await pill.isEnabled()) break;
+      if (complete && counts.every(count=>count===1) && await pill.isEnabled()) {
+        await frame();
+        if (original && (!await editor.evaluate((element,held)=>element===held,original)
+            || !await roots.evaluate((element,held)=>element===held,originalRoot))) throw new Error('composer replaced');
+        if (original && stableUrl===page.url()) { startup=false; break; }
+        if (!original) { original=await editor.elementHandle(); originalRoot=await roots.elementHandle(); }
+        stableUrl=page.url();
+      }
       await delay(Math.min(100,Math.max(0,deadline-Date.now())));
     }
     if (!guard() || await roots.count()!==1 || await editor.count()!==1 || await pill.count()!==1) throw new Error('composer');
-    const original=await editor.elementHandle();
+    if (startup || !original || !originalRoot) throw new Error('unstable composer');
     async function click(locator) {
+      await frame();
       if (!guard() || await roots.count()!==1 || await editor.count()!==1
           || !await editor.evaluate((element,held)=>element===held,original)
           || await page.locator('[role="dialog"]:visible, [role="alertdialog"]:visible').count()!==0
@@ -86,6 +140,7 @@ exports.run = async function run(page, session, ownedEndpoint, deadline, expecte
       if (!guard() || !first || !second || JSON.stringify(first)!==JSON.stringify(second)
           || await locator.count()!==1 || !await locator.evaluate((element,held)=>element===held,handle)) throw new Error('actionability');
       const last=await handle.evaluate(sample);
+      await frame();
       if (!last || JSON.stringify(second)!==JSON.stringify(last) || !guard()) throw new Error('actionability');
       await handle.click({position:{x:last.x,y:last.y},timeout:Math.min(5000,Math.max(1,deadline-Date.now()))});
     }
@@ -108,6 +163,7 @@ exports.run = async function run(page, session, ownedEndpoint, deadline, expecte
     facts.stage='dismiss'; facts.errorCategory='dismiss-uncertain';
     if (!guard() || await menu.count()!==1
         || await page.locator('[role="dialog"]:visible, [role="alertdialog"]:visible').count()!==0) throw new Error('menu');
+    await frame();
     await page.keyboard.press('Escape');
     while (guard() && await menu.count()!==0) await delay(100);
     if (!guard() || await menu.count()!==0) throw new Error('dismiss');
@@ -115,6 +171,8 @@ exports.run = async function run(page, session, ownedEndpoint, deadline, expecte
     facts.stage='composer'; facts.errorCategory='composer-changed';
     if (await roots.count()!==1 || await editor.count()!==1 || await pill.count()!==1
         || !await editor.evaluate((element,held)=>element===held,original) || !guard() || !evidence.verified()) throw new Error('composer');
+    await frame();
+    if (!await roots.evaluate((element,held)=>element===held,originalRoot)) throw new Error('composer');
     const finalCounts=await observeComposer();
     if (!guard() || finalCounts.some(count=>count!==1)
         || facts.composerObservation.readyState!=='complete') throw new Error('composer');

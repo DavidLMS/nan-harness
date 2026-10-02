@@ -35,10 +35,19 @@ exports.run = async function(page, ownerGuard, deadline) {
   const maxWaitMs = deadline - Date.now();
   const originalUrl = page.url();
   const ownedEndpoint = () => {
-    const browser = page.context().browser();
-    const pages = browser?.contexts().flatMap(context => context.pages());
-    return typeof ownerGuard === 'function' && ownerGuard() && pages?.length === 1
-      && pages[0] === page && page.url() === originalUrl;
+    const fail = reason => { facts.roleProofFailure=reason; return false; };
+    try {
+      if (typeof ownerGuard !== 'function' || ownerGuard() !== true) return fail('ownership-lost');
+      // Read renderer identity after the synchronous native proof, which can
+      // block while a page or route changes. Never reuse its earlier snapshot.
+      const browser = page.context().browser();
+      const pages = browser?.contexts().flatMap(context => context.pages());
+      if (!pages) return fail('query-failed');
+      if (pages.length !== 1) return fail('page-count');
+      if (pages[0] !== page) return fail('page-changed');
+      if (page.url() !== originalUrl) return fail('url-changed');
+      return true;
+    } catch { return fail('query-failed'); }
   };
   const facts = {schemaVersion:1, mechanism:'codex-public-onboarding', diagnosticsOnly:true,
     stage:'session', errorCategory:null, conversationalScope:false, engineeringControl:false,
@@ -62,7 +71,7 @@ exports.run = async function(page, ownerGuard, deadline) {
     const fail = reason => { facts.roleProofFailure=reason; return false; };
     facts.roleProofFailure='unmeasured';
     if (Date.now() >= deadline) return fail('deadline-expired');
-    if (!ownedEndpoint()) return fail('ownership-lost');
+    if (!ownedEndpoint()) return false;
     if (Date.now() >= deadline) return fail('deadline-expired');
     const legends = page.locator('fieldset > legend:visible').filter({hasText:/^Select the kind of work you do$/});
     if (await legends.count() !== 1) return fail('legend-count');
@@ -87,7 +96,7 @@ exports.run = async function(page, ownerGuard, deadline) {
     },GROUP)) return fail('label-association');
     if (!needChecked && !await radio.isEnabled()) return fail('engineering-disabled');
     if (needChecked && (!await radio.isChecked() || await fieldset.locator(GROUP+':checked').count() !== 1)) return fail('checked-mismatch');
-    if (!ownedEndpoint()) return fail('ownership-lost');
+    if (!ownedEndpoint()) return false;
     if (Date.now() >= deadline) return fail('deadline-expired');
     return true;
   }
@@ -104,7 +113,7 @@ exports.run = async function(page, ownerGuard, deadline) {
       if (!await reprove() || !await control.evaluate((e, held)=>e===held,handle)) return false;
       const final=await handle.evaluate(sample);
       if (!candidate(first,final) || !final.points.some(p=>p.x===point.x&&p.y===point.y)) return false;
-      if (!ownedEndpoint()) { facts.roleProofFailure='ownership-lost'; return false; }
+      if (!ownedEndpoint()) return false;
       if (Date.now() >= deadline) { facts.roleProofFailure='deadline-expired'; return false; }
       facts[before]=true;
       await handle.click({position:point,timeout:Math.max(1,Math.min(2000,deadline-Date.now()))});
