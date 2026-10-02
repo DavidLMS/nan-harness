@@ -1049,6 +1049,15 @@ class QualificationTests(unittest.TestCase):
         blocked = {**setup, 'roleProofFailure': 'control-not-actionable',
                    'actionabilityFailure': 'foreign-overlay'}
         self.assertEqual(q.public_onboarding(blocked, 'chatgpt-desktop'), blocked)
+        fingerprint = {**blocked, 'foreignOverlay': 'chatgpt-onboarding-complete'}
+        self.assertEqual(q.public_onboarding(fingerprint, 'chatgpt-desktop'), fingerprint)
+        for changed in ({**fingerprint, 'foreignOverlay': 'PRIVATE'},
+                        {**fingerprint, 'foreignOverlay': True},
+                        {**fingerprint, 'rawHeading': "You're all set"},
+                        {**fingerprint, 'actionabilityFailure': 'hidden'},
+                        {key: value for key, value in fingerprint.items() if key != 'actionabilityFailure'}):
+            with self.assertRaises(ValueError):
+                q.public_onboarding(changed, 'chatgpt-desktop')
         for changed in ({**blocked, 'actionabilityFailure': 'PRIVATE'},
                         {**blocked, 'actionabilityFailure': True},
                         {**blocked, 'roleProofFailure': 'unmeasured'}):

@@ -3,7 +3,7 @@ const fs=require('node:fs');
 const vm=require('node:vm');
 const source=fs.readFileSync(`${__dirname}/codex-onboarding.cjs`,'utf8');
 async function trial(options={}) {
- let now=0,checked=false,absent=false,roleClicks=0,continueClicks=0,samples=0;
+ let now=0,checked=false,absent=false,roleClicks=0,continueClicks=0,samples=0,overlayReads=0;
  const root={parentElement:null};
  const fieldset={parentElement:root};
  const label={kind:'label',tagName:'LABEL',parentElement:fieldset,innerText:'Engineering'};
@@ -22,17 +22,36 @@ async function trial(options={}) {
  dialog.querySelectorAll=selector=>selector.startsWith('input')?(options.ambiguousDialog?[radio,radio]:[radio]):[legend];
  if(options.onboardingDialog||options.alertDialog||options.ambiguousDialog||options.duplicateDialog)
   doc.querySelectorAll=selector=>selector.startsWith('input')?[radio]:options.duplicateDialog?[dialog,foreign]:[dialog];
+ const form={classList:{contains:t=>['m-auto','flex','w-full','shrink-0','flex-col','items-center','justify-between','py-4'].includes(t)&&!(options.overlayWrongLayout&&t==='m-auto')}};
+ const heading={innerText:options.overlayLookalike?'All set':"You're all set"};
+ const finish={innerText:'Continue',disabled:false,getAttribute:k=>k==='type'?'submit':null};
+ const terms={classList:{contains:()=>true},getAttribute:()=>options.overlayWrongLink?'https://example.invalid':'https://openai.com/terms'};
+ const privacy={classList:{contains:()=>true},getAttribute:()=> 'https://openai.com/privacy'};
+ for(const e of [form,heading,finish,terms,privacy]) Object.assign(e,{isConnected:true,
+  getBoundingClientRect:()=>({left:10,top:10,width:80,height:40})});
+ form.contains=e=>e===heading;
+ form.querySelectorAll=s=>s==='button'?[finish]:s==='a'?[terms,privacy]:[];
+ root.contains=e=>[label,radio,button].includes(e);
+ root.querySelectorAll=s=>s.startsWith('input')?[radio]:[legend];
+ label.closest=s=>s.startsWith('div')?root:null;
+ foreign.getAttribute=k=>k==='role'?'dialog':null;
+ foreign.querySelectorAll=s=>s.startsWith('input')?[]:s==='form'?[form]:s.startsWith('[class')?[heading]:[];
+ if(options.overlayDialogReplacement)doc.querySelectorAll=s=>s.startsWith('input')?[radio]:overlayReads?[{...foreign}]:[foreign];
+ if(options.overlayMultiple)doc.querySelectorAll=s=>s.startsWith('input')?[radio]:overlayReads?[foreign,dialog]:[foreign];
  const globals={document:doc,innerWidth:800,innerHeight:600,getComputedStyle:()=>({display:'block',visibility:'visible',pointerEvents:'auto'})};
  function evaluate(fn,e,arg) {
   if(fn.name==='sample') {lastKind=e.kind;samples++;}
+  if(fn.name==='classifyForeign')overlayReads++;
+  if(options.overlayReplacement&&fn.name==='classifyForeign'&&overlayReads>1)globals.document={...doc};
   const f=vm.runInNewContext(`(${fn.toString()})`,globals);
-  return f(e,arg?.element??arg);
+  return f(e,arg?.element??arg?.value??arg);
  }
  class Handle {
   constructor(e){this.element=e;}
   async evaluate(fn,arg){return evaluate(fn,this.element,arg);}
   async click(params){assert.equal(params.force,undefined);assert.ok(params.position);if(this.element===label){roleClicks++;if(options.uncertain==='role')throw Error('private');checked=!options.readbackFail;}
    else {continueClicks++;if(options.uncertain==='continue')throw Error('private');absent=!options.remain;}}
+  async evaluateHandle(fn){return {value:evaluate(fn,this.element),dispose:async()=>{}};}
   async dispose(){}
  }
  class Locator {
@@ -47,13 +66,14 @@ async function trial(options={}) {
   async evaluate(fn,arg){if(options.remount&&arg instanceof Handle&&samples>0)return false;return evaluate(fn,this.element(),arg);}
   async elementHandle(){return new Handle(this.element());}
  }
- const page={locator:s=>new Locator(s.startsWith('fieldset > legend')?'legend':'radios'),
+ const mainFrame={};
+ const page={mainFrame:()=>options.overlayFrameChange&&overlayReads?{}:mainFrame,locator:s=>new Locator(s.startsWith('fieldset > legend')?'legend':'radios'),
   url:()=>options.urlChange&&roleClicks>0?'app://codex/index.html?PRIVATE_ROUTE':'app://codex/index.html',
   context:()=>({browser:()=>({contexts:()=>[{pages:()=>options.foreignPage?[page,{}]:options.replacedPage?[{}]:[page]}]})})};
  const sandbox={exports:{},process:{platform:options.platform??'win32',env:{GITHUB_ACTIONS:options.noHost?'false':'true',RUNNER_ENVIRONMENT:'github-hosted',RUNNER_OS:'Windows',NANH_CODEX_PUBLIC_ONBOARDING:options.noOptin?undefined:'engineering'}},Date:{now:()=>now},setTimeout:f=>{now+=100;f();}};
  vm.runInNewContext(source,sandbox);
  let guards=0;
- const guard=()=>{guards++;if(options.guardThrows)throw Error('PRIVATE');if(options.guardExhaustsBudget&&guards>=3)now=1201;return !options.initialOwnerLoss&&!(options.ownerLossBeforeRole&&guards>=3)&&!(options.ownerLoss&&roleClicks>0)&&!(options.finalLoss&&guards>=2);};
+ const guard=()=>{guards++;if(options.guardThrows)throw Error('PRIVATE');if(options.guardExhaustsBudget&&guards>=3)now=1201;return !(options.overlayOwnerLoss&&overlayReads>0)&&!options.initialOwnerLoss&&!(options.ownerLossBeforeRole&&guards>=3)&&!(options.ownerLoss&&roleClicks>0)&&!(options.finalLoss&&guards>=2);};
  const budget=options.expired?0:options.invalidDeadline?NaN:options.excessBudget?25001:1200;
  const facts=await sandbox.exports.run(page,options.noGuard?undefined:guard,budget);
  assert(!JSON.stringify(facts).includes('PRIVATE'));
@@ -82,6 +102,17 @@ async function trial(options={}) {
  const legend=await trial({wrongLegend:true});assert.equal(legend.facts.roleProofFailure,'legend-count');
  for(const [opts,reason] of [[{badScope:true},'scope-count'],[{login:true},'login-present'],[{noGroup:true},'group-absent'],[{duplicateLabel:true},'label-count'],[{badAssociation:true},'label-association'],[{finalLoss:true},'ownership-lost']]) {const r=await trial(opts);assert.equal(r.facts.roleProofFailure,reason);assert.equal(r.roleClicks,0);assert.equal(r.continueClicks,0);}
  const good=await trial();assert.equal(good.roleClicks,1);assert.equal(good.continueClicks,1);assert.equal(good.facts.roleScopeAbsent,true);assert.equal(good.facts.stage,'stopped-after-role');assert.equal(good.facts.errorCategory,null);
+ const completeOverlay=await trial({modal:true});
+ assert.equal(completeOverlay.facts.foreignOverlay,'chatgpt-onboarding-complete');
+ assert.equal(completeOverlay.roleClicks,0);assert.equal(completeOverlay.continueClicks,0);
+ for(const [opts,category] of [[{overlayLookalike:true},'other'],[{overlayWrongLink:true},'other'],[{overlayWrongLayout:true},'other'],
+   [{overlayDialogReplacement:true},'guard-rejected'],[{overlayFrameChange:true},'guard-rejected'],
+   [{overlayReplacement:true},'guard-rejected'],[{overlayMultiple:true},'ambiguous'],[{overlayOwnerLoss:true},'guard-rejected']]) {
+  const r=await trial({modal:true,...opts});assert.equal(r.facts.foreignOverlay,category);
+  assert.equal(r.roleClicks,0);assert.equal(r.continueClicks,0);
+ }
+ assert(!JSON.stringify(completeOverlay.facts).includes("You're all set"));
+ assert(!JSON.stringify(completeOverlay.facts).includes('openai.com'));
  const ownDialog=await trial({onboardingDialog:true});assert.equal(ownDialog.roleClicks,1);assert.equal(ownDialog.continueClicks,1);assert.equal(ownDialog.facts.roleScopeAbsent,true);
  assert.equal((await trial({modal:true})).facts.roleProofFailure,'control-not-actionable');
  assert.equal((await trial({modal:true})).facts.actionabilityFailure,'foreign-overlay');

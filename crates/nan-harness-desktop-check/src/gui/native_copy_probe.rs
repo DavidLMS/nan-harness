@@ -195,6 +195,7 @@ fn neutral_input(executable: &Path, mode: &str, prompt: &str) -> Result<(), Reas
                 | "right"
                 | "submit"
                 | "retry-click"
+                | "panel-zoom"
         )
         || (mode == "type" && prompt.is_empty())
         || (mode == "activate-accessibility" && !valid_activation_request(prompt))
@@ -683,11 +684,54 @@ fn icon_guard_failure(reason: Reason) -> bool {
     )
 }
 
+#[derive(Default)]
+struct LayoutTrial {
+    attempted: bool,
+}
+
+impl LayoutTrial {
+    fn begin(&mut self, enabled: bool, input_verified: bool) -> Result<bool, Reason> {
+        if !enabled || self.attempted {
+            return Ok(false);
+        }
+        if !input_verified {
+            return Err(Reason::InputMismatch);
+        }
+        // Consume the one action before transport; failures cannot authorize replay.
+        self.attempted = true;
+        Ok(true)
+    }
+}
+
+fn layout_policy_enabled() -> Result<bool, Reason> {
+    let policy = std::env::var("NANH_ZED_LAYOUT_POLICY").ok();
+    validate_layout_policy(
+        policy.as_deref(),
+        cfg!(target_os = "linux"),
+        std::env::var("GITHUB_ACTIONS").as_deref() == Ok("true"),
+        std::env::var("RUNNER_ENVIRONMENT").as_deref() == Ok("github-hosted"),
+    )
+}
+
+fn validate_layout_policy(
+    policy: Option<&str>,
+    linux: bool,
+    actions: bool,
+    hosted: bool,
+) -> Result<bool, Reason> {
+    match policy {
+        None => Ok(false),
+        Some("zoom-before-send") if linux && actions && hosted => Ok(true),
+        _ => Err(Reason::IsolationUnavailable),
+    }
+}
+
 pub(crate) struct NativeClipboardSession<'a> {
     gui: &'a Gui,
     directory: &'a Path,
     facts: Facts,
     retry_ready: bool,
+    layout: LayoutTrial,
     retry_element: Option<xa11y::Element>,
     icon_directory: Option<PathBuf>,
     icon_baseline: Option<super::native_icon_probe::PrivateIconFrame>,
@@ -705,6 +749,18 @@ impl NativeClipboardSession<'_> {
         self.facts.settle_observations = 0;
         self.icon_baseline = None;
         self.gui.compose_native_copy_turn(&mut self.facts, prompt)?;
+        if self.layout.begin(
+            layout_policy_enabled()?,
+            self.facts.input.clipboard_verified,
+        )? {
+            self.gui
+                .native_copy_guard(&mut self.facts, "layout-zoom-before")?;
+            Gui::neutral_key("panel-zoom")?;
+            self.gui
+                .native_copy_guard(&mut self.facts, "layout-zoom-after")?;
+            self.facts.input.clipboard_verified = false;
+            self.gui.verify_native_copy_input(&mut self.facts, prompt)?;
+        }
         self.capture_icon_baseline()?;
         self.gui.send_native_copy_turn(&mut self.facts)
     }
@@ -1199,6 +1255,7 @@ impl Gui {
             directory,
             facts,
             retry_ready: false,
+            layout: LayoutTrial::default(),
             retry_element: None,
             icon_directory: std::env::var_os("NANH_ZED_ICON_TEMPLATES")
                 .map(PathBuf::from)
@@ -1444,6 +1501,10 @@ impl Gui {
         facts.expected_prompt.clone_from(&prompt);
         facts.input.entered = true;
         self.native_copy_guard(facts, "type-after")?;
+        self.verify_native_copy_input(facts, &prompt)
+    }
+
+    fn verify_native_copy_input(&self, facts: &mut Facts, prompt: &str) -> Result<(), Reason> {
         let sentinel = Zeroizing::new(format!("clipboard-sentinel-{}", nonce()?));
         facts.substage = "input-sentinel-write";
         clipboard::write(&sentinel)?;
@@ -1461,7 +1522,7 @@ impl Gui {
             "input-copy-before",
             "input-copy-after",
         )?;
-        facts.input.clipboard_verified = self.wait_native_copy(facts, &prompt, &sentinel)?;
+        facts.input.clipboard_verified = self.wait_native_copy(facts, prompt, &sentinel)?;
         if facts.input.clipboard_verified {
             Ok(())
         } else {
@@ -1805,6 +1866,37 @@ mod tests {
                 ..Default::default()
             }
         );
+    }
+
+    #[test]
+    fn layout_attempt_requires_exact_input_and_is_consumed_before_transport() {
+        let mut trial = LayoutTrial::default();
+        assert_eq!(trial.begin(true, false), Err(Reason::InputMismatch));
+        assert_eq!(trial.begin(false, true), Ok(false));
+        assert_eq!(trial.begin(true, true), Ok(true));
+        // Even a failed transport or failed second copy must never replay zoom.
+        assert_eq!(trial.begin(true, false), Ok(false));
+        assert_eq!(trial.begin(true, true), Ok(false));
+    }
+
+    #[test]
+    fn layout_trial_is_explicit_and_hosted_linux_only() {
+        assert_eq!(validate_layout_policy(None, true, true, true), Ok(false));
+        assert_eq!(
+            validate_layout_policy(Some("zoom-before-send"), true, true, true),
+            Ok(true)
+        );
+        for (policy, linux, actions, hosted) in [
+            ("zoom-before-send", false, true, true),
+            ("zoom-before-send", true, false, true),
+            ("zoom-before-send", true, true, false),
+            ("observe", true, true, true),
+        ] {
+            assert_eq!(
+                validate_layout_policy(Some(policy), linux, actions, hosted),
+                Err(Reason::IsolationUnavailable)
+            );
+        }
     }
 
     #[test]

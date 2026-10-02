@@ -80,6 +80,9 @@ def qualification_environment(app, facts, real_nanh, executable, inherited=None)
     source = os.environ if inherited is None else inherited
     if source.get('GITHUB_ACTIONS') != 'true' or source.get('RUNNER_ENVIRONMENT') != 'github-hosted':
         raise ValueError('disposable hosted session required')
+    layout = source.get('NANH_ZED_LAYOUT_POLICY')
+    if layout is not None and (app != 'zed-desktop' or source.get('RUNNER_OS') != 'Linux' or layout != 'zoom-before-send'):
+        raise ValueError('Zed layout trial is unavailable')
     zoom = source.get('NANH_ZED_PANEL_ZOOM')
     if zoom is not None and (app != 'zed-desktop' or source.get('RUNNER_OS') != 'Linux' or zoom != 'observe'):
         raise ValueError('Zed panel zoom diagnostic is unavailable')
@@ -99,6 +102,8 @@ def qualification_environment(app, facts, real_nanh, executable, inherited=None)
                        FEASIBILITY_FACTS=str(facts), FEASIBILITY_REAL_NANH=str(real_nanh))
     if app == 'zed-desktop':
         environment.update({key: value for key, value in source.items() if key in ZED_HELPERS})
+        if layout is not None:
+            environment['NANH_ZED_LAYOUT_POLICY'] = layout
         if zoom is not None:
             environment['NANH_ZED_PANEL_ZOOM'] = zoom
         delivery = source.get('NANH_ZED_XRECORD')

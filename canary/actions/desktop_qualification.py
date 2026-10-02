@@ -42,7 +42,7 @@ def public_onboarding(setup, app):
     errors = {None, 'invalid-session', 'scope-not-matched', 'role-already-selected',
               'action-blocked', 'role-readback-failed', 'continue-not-matched',
               'ownership-lost', 'scope-remained', 'action-uncertain', 'observation-failed'}
-    if (app != 'chatgpt-desktop' or type(setup) is not dict or set(setup) not in (fields, fields | {'actionabilityFailure'})
+    if (app != 'chatgpt-desktop' or type(setup) is not dict or set(setup) not in (fields, fields | {'actionabilityFailure'}, fields | {'actionabilityFailure', 'foreignOverlay'})
             or type(setup['schemaVersion']) is not int or setup['schemaVersion'] != 1
             or setup['mechanism'] != 'codex-public-onboarding' or setup['diagnosticsOnly'] is not True
             or type(setup['stage']) is not str or setup['stage'] not in stages
@@ -58,6 +58,11 @@ def public_onboarding(setup, app):
                 'pointer-disabled', 'hidden', 'disabled', 'unstable', 'no-owned-point'}
                 or setup['roleProofFailure'] != 'control-not-actionable'):
             raise ValueError('invalid public onboarding actionability')
+    if 'foreignOverlay' in setup:
+        if (setup.get('actionabilityFailure') != 'foreign-overlay'
+                or type(setup['foreignOverlay']) is not str or setup['foreignOverlay'] not in {
+                    'unmeasured', 'chatgpt-onboarding-complete', 'other', 'ambiguous', 'guard-rejected'}):
+            raise ValueError('invalid public onboarding foreign overlay')
     return setup
 
 
@@ -113,7 +118,7 @@ def bounded_json(path, limit=1024 * 1024):
 
 DOM_ERRORS = set('unclassified invalid-request launcher-unowned endpoint-unowned target-ambiguous target-invalid composer-ambiguous send-unavailable stale-response input-mismatch response-timeout submit-action-timeout submit-action-intercepted submit-action-detached submit-action-failed response-observation-failed attachment-or-action-failed'.split())
 NATIVE_STAGES = set('trust panel input submit response-control response-readback completed'.split())
-NATIVE_SUBSTAGES = set('trust-query trust-before trust-after panel-query new-thread-before new-thread-after panel-settle select-all-before select-all-after type-before type-after paste-before paste-after paste-settle input-sentinel-write copy-select-all-before copy-select-all-after input-copy-before input-copy-after collapse-selection-before submit-before response-control-query response-sentinel-write response-copy-before response-copy-after clipboard-read-before clipboard-read-after export-copy-before export-copy-after export-read-before export-read-after export-parse completed retry-control-query retry-before retry-after retry-title-query retry-tooltip-reset retry-tooltip-hover retry-tooltip-query retry-tooltip-clear retry-revalidate retry-label-query retry-label-parent activation-before activation-after retry-inventory-before retry-inventory-after icon-baseline-before icon-baseline-after icon-observation-before icon-observation-settle icon-observation-after icon-observation-completed'.split())
+NATIVE_SUBSTAGES = set('trust-query trust-before trust-after panel-query layout-zoom-before layout-zoom-after new-thread-before new-thread-after panel-settle select-all-before select-all-after type-before type-after paste-before paste-after paste-settle input-sentinel-write copy-select-all-before copy-select-all-after input-copy-before input-copy-after collapse-selection-before submit-before response-control-query response-sentinel-write response-copy-before response-copy-after clipboard-read-before clipboard-read-after export-copy-before export-copy-after export-read-before export-read-after export-parse completed retry-control-query retry-before retry-after retry-title-query retry-tooltip-reset retry-tooltip-hover retry-tooltip-query retry-tooltip-clear retry-revalidate retry-label-query retry-label-parent activation-before activation-after retry-inventory-before retry-inventory-after icon-baseline-before icon-baseline-after icon-observation-before icon-observation-settle icon-observation-after icon-observation-completed'.split())
 DOM_TAGS = {'html', 'body', 'button', 'div', 'span', 'svg', 'other', 'none', 'unmeasured'}
 DOM_REGIONS = {'thread-viewport', 'composer-root', 'composer-dock', 'composer-drag-region', 'composer-bounds', 'composer-portal', 'particle-field', 'chat-drop-overlay', 'titlebar-drag', 'pane-overlay', 'pane-host', 'narrow-overlay', 'floating-pane', 'tree-group', 'panel-header', 'panel-page-header', 'zone-tabstrip', 'window-drag-handle', 'gateway-connecting', 'onboarding', 'command-backdrop', 'dialog-overlay', 'dialog', 'popover', 'tooltip', 'other', 'none', 'unmeasured'}
 

@@ -38,6 +38,40 @@ function sample(control) {
   }
   return {rect: [r.left,r.top,r.width,r.height], points};
 }
+
+// Exact immutable final-onboarding surface. No arbitrary app payload is returned.
+function foreignSurface(control) {
+  const visible=e=>{const r=e.getBoundingClientRect(),s=getComputedStyle(e);
+    return e.isConnected&&r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden';};
+  const dialogs=[...document.querySelectorAll('[role="dialog"],[aria-modal="true"],[role="alertdialog"],[role="menu"]')].filter(visible);
+  const tokens=['relative','flex','h-full','min-h-0','w-full','flex-col','bg-transparent','tracking-normal','text-default','select-text'];
+  const scope=control.closest('div'+tokens.map(t=>`[class~="${t}"]`).join(''));
+  return {document,scope,dialog:dialogs.length===1?dialogs[0]:null};
+}
+function classifyForeign(control,held) {
+  const visible=e=>{if(!e)return false;const r=e.getBoundingClientRect(),s=getComputedStyle(e);
+    return e.isConnected&&r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden';};
+  if(control.ownerDocument!==document||!control.isConnected||held.document!==document
+      ||!visible(held.scope)||!held.scope.contains(control))return 'guard-rejected';
+  const group='input[type="radio"][name="conversational-onboarding-inline-role"][value="engineering"]';
+  if(held.scope.querySelectorAll(group).length!==1
+      ||[...held.scope.querySelectorAll('fieldset > legend')].filter(e=>visible(e)&&e.innerText.trim()==='Select the kind of work you do').length!==1)return 'guard-rejected';
+  const dialogs=[...document.querySelectorAll('[role="dialog"],[aria-modal="true"],[role="alertdialog"],[role="menu"]')].filter(visible);
+  if(dialogs.length!==1)return dialogs.length>1?'ambiguous':'guard-rejected';
+  const dialog=dialogs[0];
+  if(dialog!==held.dialog)return 'guard-rejected';
+  if(dialog.getAttribute('role')!=='dialog'||dialog.contains(control)||dialog.querySelectorAll(group).length)return 'other';
+  const headings=[...dialog.querySelectorAll('[class~="text-3xl"][class~="leading-9"][class~="font-normal"]')].filter(e=>visible(e)&&e.innerText.trim()==="You're all set");
+  const forms=[...dialog.querySelectorAll('form')].filter(e=>visible(e)&&['m-auto','flex','w-full','shrink-0','flex-col','items-center','justify-between','py-4'].every(t=>e.classList.contains(t)));
+  if(headings.length!==1||forms.length!==1||!forms[0].contains(headings[0]))return 'other';
+  const form=forms[0];
+  const buttons=[...form.querySelectorAll('button')].filter(visible);
+  const terms=[...form.querySelectorAll('a')].filter(e=>visible(e)&&e.classList.contains('underline')&&e.getAttribute('href')==='https://openai.com/terms');
+  const privacy=[...form.querySelectorAll('a')].filter(e=>visible(e)&&e.classList.contains('underline')&&e.getAttribute('href')==='https://openai.com/privacy');
+  return buttons.length===1&&buttons[0].getAttribute('type')==='submit'&&buttons[0].innerText.trim()==='Continue'
+    &&!buttons[0].disabled&&buttons[0].getAttribute('aria-disabled')!=='true'&&terms.length===1&&privacy.length===1
+    ?'chatgpt-onboarding-complete':'other';
+}
 function candidate(a, b) {
   return a && b && !a.blocked && !b.blocked && JSON.stringify(a.rect) === JSON.stringify(b.rect)
     && a.points.find(p => b.points.some(q => p.x === q.x && p.y === q.y));
@@ -113,7 +147,27 @@ exports.run = async function(page, ownerGuard, deadline) {
   }
   async function click(control, reprove, before, after) {
     if (!await reprove()) return false;
-    const blocked=reason=>{facts.roleProofFailure='control-not-actionable';facts.actionabilityFailure=reason;return false;};
+    const blocked=async reason=>{
+      facts.actionabilityFailure=reason;
+      if(reason==='foreign-overlay') {
+        facts.foreignOverlay='guard-rejected';
+        let held;
+        try {
+          const frame=page.mainFrame();
+          if(await reprove() && await control.evaluate((e,original)=>e===original,handle) && ownedEndpoint() && Date.now()<deadline) {
+            held=await handle.evaluateHandle(foreignSurface);
+            const first=await handle.evaluate(classifyForeign,held);
+            if(await reprove() && page.mainFrame()===frame && await control.evaluate((e,original)=>e===original,handle) && ownedEndpoint() && Date.now()<deadline) {
+              const second=await handle.evaluate(classifyForeign,held);
+              if(first===second && ownedEndpoint() && Date.now()<deadline && page.mainFrame()===frame) facts.foreignOverlay=second;
+            }
+          }
+        } catch { facts.foreignOverlay='guard-rejected'; }
+        finally { if(held) await held.dispose(); }
+      }
+      facts.roleProofFailure='control-not-actionable';
+      return false;
+    };
     const handle = await control.elementHandle();
     if (!handle) return blocked('detached-or-inert');
     try {

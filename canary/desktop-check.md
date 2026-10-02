@@ -983,3 +983,28 @@ not add conversation acceptance:
   label span, so the next check compares only the exact model name and waits
   read-only for React's row update within the existing deadline. It never repeats
   refresh or selects a model to manufacture readiness.
+
+The next hosted Linux Zed layout trial uses a stronger source-backed boundary
+than anonymous accessibility focus metadata. The frozen global NewThread handler
+focuses AgentPanel's current conversation editor, and the first native Copy must
+replace a fresh clipboard sentinel with the exact private unsent prompt. Only
+then may one public Shift-Escape toggle zoom. A fresh sentinel and a second Copy
+must prove that same unsent prompt unchanged before Send; there is no repaste,
+refocus or action replay. Failed transport or readback blocks Send, and later
+turns and recovery never toggle again. Icon measurements remain advisory. Native
+acceptance still requires the original complete provider, tool, Retry and cleanup
+oracle. Focused Rust, synthetic X11 transport and runner-policy tests pass; the
+native result is pending.
+
+The next Windows Codex diagnostic fingerprints the foreign overlay without
+acting on it. It holds the original document, role scope and actual dialog
+objects across two fresh owned observations and compares the frozen final
+onboarding heading, form, single Continue and legal-link layout privately.
+Only a closed classification leaves the browser. Lookalikes, changed objects,
+ambiguous overlays and ownership loss remain blocked. Public source inspection
+shows that this final dialog's handler can update onboarding state and attempt
+an announcement metadata request, whose failure is ignored; it does not create
+an account or sign in. That source finding does not establish the measured
+overlay's identity or authorize an unknown action. Synthetic callback and
+behavioral tests and all 49 reducer contracts pass; native classification is
+pending.
