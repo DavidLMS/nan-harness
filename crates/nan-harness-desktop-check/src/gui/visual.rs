@@ -577,6 +577,17 @@ impl Visual {
         self.guard()
     }
 
+    pub(super) fn click_native(&self, bounds: Rect) -> Result<(), Reason> {
+        let point = native_hover_point(self.window.borrow().bounds, bounds)?;
+        self.guard()?;
+        xa11y::input_sim()
+            .map_err(map_error)?
+            .mouse()
+            .click(point)
+            .map_err(map_error)?;
+        self.guard()
+    }
+
     pub(super) fn neutral_pointer(&self) -> Result<(), Reason> {
         let window = self.window.borrow().bounds;
         self.hover_native(Rect {

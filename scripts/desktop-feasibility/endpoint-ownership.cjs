@@ -44,9 +44,13 @@ function ownedEndpoint() {
           stdio: ['ignore', 'pipe', 'ignore'] });
       const listeners = [];
       let pid = 0;
+      let descriptor = null;
       for (const field of listing.trim().split('\n')) {
-        if (/^p[0-9]+$/.test(field)) pid = Number(field.slice(1));
-        else if (field.startsWith('n')) listeners.push({ pid, endpoint: field.slice(1) });
+        if (/^p[0-9]+$/.test(field)) { pid = Number(field.slice(1)); descriptor = null; }
+        else if (/^f[0-9]+$/.test(field)) descriptor = Number(field.slice(1));
+        else if (field.startsWith('n') && pid > 1 && descriptor !== null) {
+          listeners.push({ pid, endpoint: field.slice(1) }); descriptor = null;
+        }
         else return false;
       }
       return listeners.length === 1 && listeners[0].endpoint === `127.0.0.1:${port}`

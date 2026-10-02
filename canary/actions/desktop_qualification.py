@@ -266,7 +266,7 @@ def semantic_observations(directory, app):
             enum(record, value, 'guardKind', {'native-window', 'direct-foreground'})
             enum(record, value, 'guardCategory', CATEGORIES)
             enum(record, value, 'clipboardCleanup', {'passed', 'failed', 'not-run'})
-            enum(record, value, 'retryActionReceipt', {'acknowledged', 'completion-unknown'})
+            enum(record, value, 'retryActionReceipt', {'acknowledged', 'completion-unknown', 'native-pointer-dispatched'})
             enum(record, value, 'retrySelector', {'retry-name-or-description', 'retry-tooltip', 'retry-label'})
             enum(record, value, 'retryInventoryStatus', {'complete', 'budget-exceeded', 'query-error'})
             for key in ('exportUserCount', 'exportAssistantTextCount', 'trustControlCount', 'panelControlCount', 'retryControlCount', 'retryTitleCount', 'retryCandidateCount', 'retryTooltipCount', 'retryLabelCount',

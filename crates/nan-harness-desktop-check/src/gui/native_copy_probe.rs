@@ -915,7 +915,7 @@ impl NativeClipboardSession<'_> {
                 }
                 self.gui
                     .native_copy_guard(&mut self.facts, "retry-before")?;
-                self.facts.retry_action_receipt = Some(retry_press_receipt(button.press())?);
+                self.facts.retry_action_receipt = Some(self.press_retry(&button)?);
                 return self.gui.native_copy_guard(&mut self.facts, "retry-after");
             }
             let app = self.gui.app.as_ref().ok_or(Reason::SelectorNotMatched)?;
@@ -942,7 +942,7 @@ impl NativeClipboardSession<'_> {
             }
             self.gui
                 .native_copy_guard(&mut self.facts, "retry-before")?;
-            self.facts.retry_action_receipt = Some(retry_press_receipt(matches[0].press())?);
+            self.facts.retry_action_receipt = Some(self.press_retry(&matches[0])?);
             return self.gui.native_copy_guard(&mut self.facts, "retry-after");
         }
         let app = self.gui.app.as_ref().ok_or(Reason::SelectorNotMatched)?;
@@ -954,8 +954,24 @@ impl NativeClipboardSession<'_> {
         }
         self.gui
             .native_copy_guard(&mut self.facts, "retry-before")?;
-        self.facts.retry_action_receipt = Some(retry_press_receipt(retry.press())?);
+        let elements = retry.elements().map_err(map_error)?;
+        if elements.len() != 1 {
+            return Err(Reason::SelectorNotMatched);
+        }
+        self.facts.retry_action_receipt = Some(self.press_retry(&elements[0])?);
         self.gui.native_copy_guard(&mut self.facts, "retry-after")
+    }
+
+    fn press_retry(&self, button: &xa11y::Element) -> Result<&'static str, Reason> {
+        if cfg!(target_os = "macos") {
+            return retry_press_receipt(button.press());
+        }
+        // Linux/Windows use an ordinary pointer as the primary Retry action.
+        // The named control and its owned native bounds are revalidated first;
+        // an uncertain dispatch never triggers another action or a fallback.
+        let bounds = button.bounds.ok_or(Reason::ActionUnsupported)?;
+        self.gui.visual.click_native(bounds)?;
+        Ok("native-pointer-dispatched")
     }
 
     pub(crate) fn finish(

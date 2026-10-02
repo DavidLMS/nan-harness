@@ -27,16 +27,18 @@ function trial(listing, parents, failure = false) {
   assert(calls <= 33);
   return owned;
 }
-assert(trial('p40\nn127.0.0.1:43210\n', { 40: 30, 30: 20 }));
-assert(!trial('p40\nn127.0.0.1:43210\n', { 40: 1 }));
-assert(!trial('p40\nn*:43210\n', { 40: 20 }));
-assert(!trial('p40\nn[::1]:43210\n', { 40: 20 }));
-assert(!trial('p40\nn127.0.0.1:43211\n', { 40: 20 }));
-assert(!trial('p40\nn127.0.0.1:43210\np41\nn127.0.0.1:43210\n', { 40: 20, 41: 20 }));
-assert(!trial('p40\nn127.0.0.1:43210\n', { 40: 41, 41: 40 }));
-assert(!trial('p40\nn127.0.0.1:43210\n', { 40: 'private-invalid' }));
-assert(!trial('p40\nn127.0.0.1:43210\n', { 40: 20 }, true));
+assert(trial('p40\nf3\nn127.0.0.1:43210\n', { 40: 30, 30: 20 }));
+assert(!trial('p40\nf3\nn127.0.0.1:43210\n', { 40: 1 }));
+assert(!trial('p40\nf3\nn*:43210\n', { 40: 20 }));
+assert(!trial('p40\nf3\nn[::1]:43210\n', { 40: 20 }));
+assert(!trial('p40\nf3\nn127.0.0.1:43211\n', { 40: 20 }));
+assert(!trial('p40\nf3\nn127.0.0.1:43210\np41\nf4\nn127.0.0.1:43210\n', { 40: 20, 41: 20 }));
+assert(!trial('p40\nf3\nn127.0.0.1:43210\n', { 40: 41, 41: 40 }));
+assert(!trial('p40\nf3\nn127.0.0.1:43210\n', { 40: 'private-invalid' }));
+assert(!trial('p40\nf3\nn127.0.0.1:43210\n', { 40: 20 }, true));
 assert(!trial('n127.0.0.1:43210\n', {}));
+assert(!trial('p40\nn127.0.0.1:43210\n', { 40: 20 }));
+assert(!trial('p40\nfPRIVATE\nn127.0.0.1:43210\n', { 40: 20 }));
 console.log('Native macOS endpoint ownership: guarded cases passed');
 
 for (const result of ['true', 'false', 'true\n', 'private unexpected value']) {
