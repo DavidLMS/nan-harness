@@ -132,12 +132,40 @@ saveFacts();
 function descendant(pid) {
   for (let depth = 0; depth < 32 && pid > 1; depth++) {
     if (String(pid) === owner) return true;
-    const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
-    pid = Number(stat.slice(stat.lastIndexOf(')') + 2).split(' ')[1]);
+    pid = parentPid(pid);
   }
   return false;
 }
+function parentPid(pid) {
+  if (!Number.isSafeInteger(pid) || pid <= 1) return 0;
+  if (process.platform === 'darwin') {
+    const parent = require('node:child_process').execFileSync('/bin/ps',
+      ['-o', 'ppid=', '-p', String(pid)], { encoding: 'utf8', timeout: 2000,
+        maxBuffer: 4096, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    return /^[0-9]+$/.test(parent) ? Number(parent) : 0;
+  }
+  const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
+  return Number(stat.slice(stat.lastIndexOf(')') + 2).split(' ')[1]);
+}
 function ownedEndpoint() {
+  if (process.platform === 'darwin') {
+    // lsof selects listeners by port; reject wildcard/non-loopback bindings.
+    try {
+      const listing = require('node:child_process').execFileSync('/usr/sbin/lsof',
+        ['-nP', '-a', `-iTCP:${port}`, '-sTCP:LISTEN', '-Fpn'],
+        { encoding: 'utf8', timeout: 2000, maxBuffer: 65536,
+          stdio: ['ignore', 'pipe', 'ignore'] });
+      const listeners = [];
+      let pid = 0;
+      for (const field of listing.trim().split('\n')) {
+        if (/^p[0-9]+$/.test(field)) pid = Number(field.slice(1));
+        else if (field.startsWith('n')) listeners.push({ pid, endpoint: field.slice(1) });
+        else return false;
+      }
+      return listeners.length === 1 && listeners[0].endpoint === `127.0.0.1:${port}`
+        && descendant(listeners[0].pid);
+    } catch { return false; }
+  }
   // Associate the LISTEN socket inode with a child of the nanh launcher.
   const hexPort = Number(port).toString(16).toUpperCase().padStart(4, '0');
   const sockets = fs.readFileSync('/proc/net/tcp', 'utf8').trim().split('\n').slice(1)
@@ -191,9 +219,7 @@ async function driveDom() {
   let launcherOwned = false;
   for (let depth = 0; depth < 32 && ancestor > 1; depth++) {
     if (ancestor === request.ownerPid) { launcherOwned = true; break; }
-    try { const stat = fs.readFileSync(`/proc/${ancestor}/stat`, 'utf8');
-      ancestor = Number(stat.slice(stat.lastIndexOf(')') + 2).split(' ')[1]);
-    } catch { break; }
+    try { ancestor = parentPid(ancestor); } catch { break; }
   }
   if (!launcherOwned) { facts.errorCategory = 'launcher-unowned'; saveFacts(); return; }
   const deadline = Date.now() + request.timeoutMs;

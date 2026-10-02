@@ -109,6 +109,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--app', choices=['zed-desktop', 'hermes-desktop'], required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--platform', choices=['linux', 'macos', 'windows'])
     parser.add_argument('--tag')
     parser.add_argument('--expected-revision')
     args = parser.parse_args()
@@ -119,7 +120,10 @@ def main():
     entry = freeze_zed(tag=args.tag) if args.app == 'zed-desktop' else freeze_hermes(tag=args.tag)
     if args.expected_revision is not None and (not SHA.fullmatch(args.expected_revision) or entry.get('revision') != args.expected_revision):
         raise ValueError('official-source-revision-mismatch')
-    platform, architecture = ('macos', 'aarch64') if args.app == 'zed-desktop' else ('linux', 'x86_64')
+    platform = args.platform or ('macos' if args.app == 'zed-desktop' else 'linux')
+    architecture = 'aarch64' if platform == 'macos' else 'x86_64'
+    if args.app == 'zed-desktop' and platform != 'macos':
+        raise ValueError('official-asset-platform-unsupported')
     manifest = dict(schemaVersion=1, suite='desktop', platform=platform,
                     architecture=architecture, model='qwen3.6', apps=[entry])
     args.output.parent.mkdir(mode=0o700, parents=True, exist_ok=True)

@@ -34,7 +34,8 @@ impl SemanticBackend {
             return Err(Reason::IsolationUnavailable);
         }
         let supported = matches!(spec.kind, DesktopHarnessKind::Zed) && cfg!(target_os = "macos")
-            || matches!(spec.kind, DesktopHarnessKind::Hermes) && cfg!(target_os = "linux");
+            || matches!(spec.kind, DesktopHarnessKind::Hermes)
+                && cfg!(any(target_os = "linux", target_os = "macos"));
         if !supported {
             return Err(Reason::ActionUnsupported);
         }
