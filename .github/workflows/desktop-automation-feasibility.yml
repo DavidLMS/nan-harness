@@ -265,6 +265,10 @@ jobs:
         if: runner.os == 'Windows' && matrix.app == 'hermes-desktop' && inputs.experiment == 'deterministic-full'
         shell: bash
         run: echo 'FEASIBILITY_HERMES_READINESS_POLICY=current-catalog' >> "$GITHUB_ENV"
+      - name: Enable Claude macOS native Electron profile trial
+        if: runner.os == 'macOS' && matrix.app == 'claude-desktop' && inputs.experiment == 'startup-baseline'
+        shell: bash
+        run: echo 'NANH_CLAUDE_MAC_PROFILE_POLICY=electron-user-data-dir' >> "$GITHUB_ENV"
       - name: Run full deterministic semantic qualification
         env:
           NANH_DESKTOP_QUALIFICATION_MODE: ${{ inputs.experiment == 'startup-baseline' && 'startup-baseline' || 'renderer' }}

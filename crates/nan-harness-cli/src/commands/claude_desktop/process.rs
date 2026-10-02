@@ -131,6 +131,9 @@ impl DesktopProcess for SystemDesktopProcess {
         if std::env::var_os(crate::native_diagnostic::PROCESS_OBSERVATION_ENV_PATH).is_some() {
             self.observation_started.set(true);
         }
+        let profile_arguments =
+            crate::commands::desktop::claude_profile_arguments(self.executable.as_deref())
+                .map_err(ClaudeDesktopError::Launch)?;
         if let Some(executable) = &self.executable {
             if self.platform == DesktopPlatform::Macos && executable.is_dir() {
                 return run_launcher("/usr/bin/open", &[executable.as_os_str()]);
@@ -140,6 +143,7 @@ impl DesktopProcess for SystemDesktopProcess {
                 .args(crate::commands::desktop::qualification_renderer_arguments(
                     DesktopHarnessKind::Claude,
                 ))
+                .args(profile_arguments)
                 .stdin(Stdio::null())
                 .stdout(Stdio::null());
             return crate::commands::desktop::spawn_observed_desktop(

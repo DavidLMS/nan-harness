@@ -26,6 +26,22 @@ WINDOWS_PROOF = {'FEASIBILITY_WINDOWS_PROOF_PYTHON', 'FEASIBILITY_WINDOWS_PROOF_
 HERMES_RUNTIME = {'HERMES_DESKTOP_HERMES_ROOT', 'HERMES_DESKTOP_HERMES'}
 
 
+def validate_claude_bundle(executable):
+    # Prepared/frozen receipts bind bytes; this additionally rejects arbitrary
+    # adopted binaries and ensures the direct official bundle entry point.
+    if (executable.is_symlink() or not executable.is_file()
+            or executable.name != 'Claude' or executable.parent.name != 'MacOS'
+            or executable.parent.parent.name != 'Contents'
+            or executable.parent.parent.parent.name != 'Claude.app'
+            or executable.resolve() != executable):
+        raise ValueError('Claude native bundle is invalid')
+    contents = executable.parent.parent
+    for relative in ('Info.plist', 'Resources/app.asar'):
+        document = contents / relative
+        if document.is_symlink() or not document.is_file() or document.resolve() != document:
+            raise ValueError('Claude native bundle is invalid')
+
+
 def qualification_environment(app, facts, real_nanh, executable, inherited=None):
     source = os.environ if inherited is None else inherited
     if source.get('GITHUB_ACTIONS') != 'true' or source.get('RUNNER_ENVIRONMENT') != 'github-hosted':
@@ -75,6 +91,13 @@ def qualification_environment(app, facts, real_nanh, executable, inherited=None)
                     or source.get('RUNNER_OS') != 'Windows' or mode != 'renderer'):
                 raise ValueError('public onboarding diagnostic is unavailable')
             environment['NANH_CODEX_PUBLIC_ONBOARDING'] = onboarding
+        profile_policy = source.get('NANH_CLAUDE_MAC_PROFILE_POLICY')
+        if profile_policy is not None:
+            if (profile_policy != 'electron-user-data-dir' or app != 'claude-desktop'
+                    or source.get('RUNNER_OS') != 'macOS' or mode != 'startup-baseline'):
+                raise ValueError('Claude native profile policy is unavailable')
+            validate_claude_bundle(Path(executable))
+            environment['NANH_CLAUDE_MAC_PROFILE_POLICY'] = profile_policy
         policy = source.get('NANH_DESKTOP_QUALIFICATION_NAMESPACE_POLICY', 'default')
         if policy not in {'default', 'scoped-apparmor-userns'}:
             raise ValueError('namespace policy is invalid')
@@ -97,6 +120,12 @@ def run(args):
     manifest = read_frozen_manifest(args.frozen, [args.app], args.platform, architecture, 'qwen3.6')
     if manifest['apps'][0]['status'] != 'frozen':
         raise ValueError('official frozen application is unavailable')
+    if os.environ.get('NANH_CLAUDE_MAC_PROFILE_POLICY') is not None:
+        release = manifest['apps'][0]
+        if (args.app != 'claude-desktop' or args.platform != 'macos'
+                or release.get('version') != '2.19675.0'
+                or release.get('digest') != 'sha256:86f1460ca694313223a0b524da4f411bbccf6531c2271698d1ffc29a2131e392'):
+            raise ValueError('Claude native profile trial requires the inspected official release')
     prepared = bounded_json(args.prepared)
     launcher = args.real_nanh if args.app == 'zed-desktop' else (
         Path(os.environ['FEASIBILITY_HERMES_LAUNCHER']) if args.platform == 'windows'

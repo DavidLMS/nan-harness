@@ -21,6 +21,34 @@ spec.loader.exec_module(runner)
 
 
 class RunnerTests(unittest.TestCase):
+    def test_claude_mac_profile_trial_requires_direct_bundle_and_scoped_policy(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            contents = root / 'Claude.app/Contents'
+            executable = contents / 'MacOS/Claude'
+            for document in (executable, contents / 'Info.plist', contents / 'Resources/app.asar'):
+                document.parent.mkdir(parents=True, exist_ok=True)
+                document.write_bytes(b'synthetic')
+            source = dict(GITHUB_ACTIONS='true', RUNNER_ENVIRONMENT='github-hosted', RUNNER_OS='macOS',
+                          NANH_DESKTOP_QUALIFICATION_MODE='startup-baseline',
+                          NANH_CLAUDE_MAC_PROFILE_POLICY='electron-user-data-dir',
+                          CLAUDE_USER_DATA_DIR='PRIVATE', CLAUDE_CDP_AUTH='PRIVATE')
+            env = runner.qualification_environment('claude-desktop', root, root / 'nanh', executable, source)
+            self.assertEqual(env['NANH_CLAUDE_MAC_PROFILE_POLICY'], 'electron-user-data-dir')
+            self.assertNotIn('PRIVATE', str(env))
+            for changes, app in (({'RUNNER_OS': 'Linux'}, 'claude-desktop'),
+                                 ({'NANH_DESKTOP_QUALIFICATION_MODE': 'renderer'}, 'claude-desktop'),
+                                 ({'NANH_CLAUDE_MAC_PROFILE_POLICY': 'unknown'}, 'claude-desktop'),
+                                 ({}, 'pen-desktop')):
+                with self.assertRaises(ValueError):
+                    runner.qualification_environment(app, root, root / 'nanh', executable, {**source, **changes})
+            (contents / 'Resources/app.asar').unlink()
+            with self.assertRaises(ValueError):
+                runner.qualification_environment('claude-desktop', root, root / 'nanh', executable, source)
+            (contents / 'Resources/app.asar').symlink_to(contents / 'Info.plist')
+            with self.assertRaises(ValueError):
+                runner.validate_claude_bundle(executable)
+
     def test_windows_native_ownership_helpers_survive_the_closed_environment(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

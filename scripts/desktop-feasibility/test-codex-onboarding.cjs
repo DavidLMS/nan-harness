@@ -46,7 +46,7 @@ async function trial(options={}) {
  const sandbox={exports:{},process:{platform:options.platform??'win32',env:{GITHUB_ACTIONS:options.noHost?'false':'true',RUNNER_ENVIRONMENT:'github-hosted',RUNNER_OS:'Windows',NANH_CODEX_PUBLIC_ONBOARDING:options.noOptin?undefined:'engineering'}},Date:{now:()=>now},setTimeout:f=>{now+=100;f();}};
  vm.runInNewContext(source,sandbox);
  let guards=0;
- const guard=()=>{guards++;return !(options.ownerLoss&&roleClicks>0)&&!(options.finalLoss&&guards>=2);};
+ const guard=()=>{guards++;if(options.guardExhaustsBudget&&guards>=3)now=1201;return !options.initialOwnerLoss&&!(options.ownerLossBeforeRole&&guards>=3)&&!(options.ownerLoss&&roleClicks>0)&&!(options.finalLoss&&guards>=2);};
  const budget=options.expired?0:options.invalidDeadline?NaN:options.excessBudget?25001:1200;
  const facts=await sandbox.exports.run(page,options.noGuard?undefined:guard,budget);
  return {facts,roleClicks,continueClicks};
@@ -58,12 +58,16 @@ async function trial(options={}) {
   const r=await trial(opts);assert.equal(r.facts.errorCategory,'invalid-session');assert.equal(r.facts.sessionProofFailure,reason);
   assert.equal(r.facts.roleProofFailure,'unmeasured');assert.equal(r.roleClicks,0);assert.equal(r.continueClicks,0);
  }
+ for(const [opts,reason] of [[{guardExhaustsBudget:true},'deadline-expired'],[{initialOwnerLoss:true},'ownership-lost'],[{ownerLossBeforeRole:true},'ownership-lost']]) {
+  const r=await trial(opts);assert.equal(r.facts.roleProofFailure,reason);assert.equal(r.roleClicks,0);assert.equal(r.continueClicks,0);
+  if(opts.guardExhaustsBudget||opts.ownerLossBeforeRole)assert.equal(r.facts.conversationalScope,true);
+ }
  const loaded=await trial({loading:true});assert.equal(loaded.roleClicks,1);assert.equal(loaded.continueClicks,1);
  const scoped=await trial({extraFieldset:true});assert.equal(scoped.roleClicks,1);assert.equal(scoped.continueClicks,1);assert.equal(scoped.facts.roleScopeAbsent,true);
  const duplicateScope=await trial({duplicateRoleFieldset:true});assert.equal(duplicateScope.facts.roleProofFailure,'legend-count');assert.equal(duplicateScope.roleClicks,0);assert.equal(duplicateScope.continueClicks,0);
  const duplicate=await trial({duplicateRadio:true});assert.equal(duplicate.facts.roleProofFailure,'engineering-count');
  const legend=await trial({wrongLegend:true});assert.equal(legend.facts.roleProofFailure,'legend-count');
- for(const [opts,reason] of [[{badScope:true},'scope-count'],[{login:true},'login-present'],[{noGroup:true},'group-absent'],[{duplicateLabel:true},'label-count'],[{badAssociation:true},'label-association'],[{finalLoss:true},'final-ownership']]) {const r=await trial(opts);assert.equal(r.facts.roleProofFailure,reason);assert.equal(r.roleClicks,0);assert.equal(r.continueClicks,0);}
+ for(const [opts,reason] of [[{badScope:true},'scope-count'],[{login:true},'login-present'],[{noGroup:true},'group-absent'],[{duplicateLabel:true},'label-count'],[{badAssociation:true},'label-association'],[{finalLoss:true},'ownership-lost']]) {const r=await trial(opts);assert.equal(r.facts.roleProofFailure,reason);assert.equal(r.roleClicks,0);assert.equal(r.continueClicks,0);}
  const good=await trial();assert.equal(good.roleClicks,1);assert.equal(good.continueClicks,1);assert.equal(good.facts.roleScopeAbsent,true);assert.equal(good.facts.stage,'stopped-after-role');assert.equal(good.facts.errorCategory,null);
  for(const opts of [{noOptin:true},{foreignPage:true},{wrongLegend:true},{duplicateRadio:true},{badScope:true},{duplicateRoleFieldset:true},{login:true},{radioDisabled:true},{modal:true},{intercepted:'label'},{remount:true}]) {
   const r=await trial(opts);assert.equal(r.roleClicks,0);assert.equal(r.continueClicks,0);

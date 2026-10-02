@@ -326,7 +326,7 @@ class DesktopSuiteTests(unittest.TestCase):
             os.environ["MARKER"] = str(marker)
             try:
                 with patch.dict(os.environ, {"NAN_API_KEY": "synthetic"}):
-                    self.assertTrue(SUITE.run_stage([str(fake)], live=False, timeout=5))
+                    self.assertTrue(SUITE.run_stage(["/bin/sh", str(fake)], live=False, timeout=5))
                 self.assertEqual(marker.read_text(), "unset")
             finally:
                 if old is None:

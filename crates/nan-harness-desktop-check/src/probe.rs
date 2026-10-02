@@ -1477,6 +1477,11 @@ fn isolated_command(spec: &ProbeSpec, program: &Path) -> Result<Command, Reason>
     // signalling an unrelated application in the runner's process group.
     #[cfg(unix)]
     command.process_group(0);
+    // Claude only accepts its signed environment override. This trial uses the
+    // native Electron argument, never inherited vendor authorization tokens.
+    command
+        .env_remove("CLAUDE_USER_DATA_DIR")
+        .env_remove("CLAUDE_CDP_AUTH");
     if spec.kind == DesktopHarnessKind::ChatGpt {
         let user_data = profile.join("codex-desktop");
         create_private_dir_all(&user_data).map_err(|_| Reason::IsolationUnavailable)?;
@@ -1620,8 +1625,7 @@ fn launch_command(spec: &ProbeSpec, gate: &ProviderGate) -> Result<Command, Reas
         "--model",
         &spec.model,
     ]);
-    if (spec.kind == DesktopHarnessKind::ChatGpt
-        || (spec.kind == DesktopHarnessKind::Hermes && hermes_readiness::enabled()))
+    if spec.kind == DesktopHarnessKind::ChatGpt
         && spec.session == crate::cli::SessionMode::GithubHosted
     {
         // Cold-start observation can exceed the CLI's noninteractive default.

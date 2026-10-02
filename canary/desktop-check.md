@@ -638,3 +638,45 @@ path. It never reads the independently resolved native directory. Presence
 and path alignment are separate from consumption: `configurationConsumed` and
 `modelDiscoverySeen` remain unknown until independently observed. No vendor
 authentication state, signed debugging token or application bootstrap is changed.
+
+The four native trials on commit `a4cc7954` remain unqualified:
+
+- Linux Zed [37008709193](https://github.com/DavidLMS/nan-harness/actions/runs/37008709193)
+  passes the first four scenario steps in all three probes, with cleanup passing.
+  Retry is enabled and contained, both maximization flags are set, and the pointer
+  is over the owned application client. No independent recovery is observed.
+  These measurements exclude the previously suspected decoration/state causes;
+  they do not establish event delivery or GPUI handler execution.
+- Windows Codex [37008710412](https://github.com/DavidLMS/nan-harness/actions/runs/37008710412)
+  positively proves the conversational role scope and Engineering control, then
+  rejects fresh action proof before any click. All cleanup passes. Its combined
+  deadline/ownership reason is split in the next diagnostic, including a deadline
+  check after synchronous ownership queries. The 25-second budget is unchanged.
+- macOS Claude [37008711197](https://github.com/DavidLMS/nan-harness/actions/runs/37008711197)
+  validates all configuration contracts in three probes, with cleanup passing.
+  Foundation path alignment is false twice and unmeasured once. Configuration
+  consumption and model discovery remain unmeasured; no eligible editor is found.
+- Windows Hermes [37008711106](https://github.com/DavidLMS/nan-harness/actions/runs/37008711106)
+  exits before the observer attaches in all three probes, with cleanup passing.
+  The checker incorrectly forwarded the ChatGPT-only `--startup-timeout` option
+  to Hermes. Removing that unsupported argument restores Hermes' existing CLI
+  interface; this run supplies no evidence about the catalog readiness trial.
+
+The next macOS Claude startup trial pins official version 2.19675.0 and its
+inspected archive digest. It launches the canonical bundle executable directly
+with Electron's native `--user-data-dir` argument targeting the owned private
+configuration pair. Electron 44.4.3 supports this path override and the inspected
+Claude bootstrap derives its third-party directory from that path. Claude does
+not document this argument as a vendor deployment contract; native evidence is
+still required. The trial rejects other versions, noncanonical bundles, unsigned
+vendor overrides and other platforms/modes. Foundation path alignment continues
+to describe the original native directory, not the effective Electron override.
+
+The clean Linux repository gate passes for `a4cc7954` in
+[37009642401](https://github.com/DavidLMS/nan-harness/actions/runs/37009642401).
+The local gate fails at a synthetic five-second shell fixture. A controlled
+comparison reproduces the direct temporary executable timeout while explicitly
+invoking `/bin/sh` completes promptly. The fixture now uses that interpreter;
+its original deadline and API-key removal assertion remain intact, and all twenty
+focused desktop-suite tests pass. The next final tree still requires the full
+local gate; repository checks do not qualify a native cell.

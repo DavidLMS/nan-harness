@@ -33,7 +33,7 @@ def public_onboarding(setup, app):
                 'roleClickCompleted', 'engineeringChecked', 'continueControl',
                 'continueClickAttempted', 'continueClickCompleted', 'roleScopeAbsent'}
     fields = booleans | {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'stage', 'errorCategory', 'roleProofFailure', 'sessionProofFailure'}
-    failures = {'unmeasured', 'deadline-or-ownership', 'legend-count', 'group-absent', 'scope-count',
+    failures = {'unmeasured', 'deadline-or-ownership', 'deadline-expired', 'ownership-lost', 'legend-count', 'group-absent', 'scope-count',
                 'fieldset-count', 'login-present', 'engineering-count', 'engineering-disabled',
                 'label-count', 'label-association', 'checked-mismatch', 'final-ownership'}
     sessions = {'unmeasured', 'guard-missing', 'deadline-invalid', 'deadline-expired', 'platform', 'host-policy', 'onboarding-policy'}

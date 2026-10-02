@@ -1,4 +1,6 @@
 #[cfg(feature = "desktop-qualification")]
+mod claude_profile;
+#[cfg(feature = "desktop-qualification")]
 mod qualification;
 
 pub(crate) fn spawn_observed_desktop(
@@ -335,5 +337,18 @@ mod renderer_tests {
                 "--remote-debugging-address=127.0.0.1"
             ]
         );
+    }
+}
+
+/// A qualification-only native Electron profile override; ordinary launches are unchanged.
+pub(crate) fn claude_profile_arguments(executable: Option<&Path>) -> std::io::Result<Vec<String>> {
+    #[cfg(feature = "desktop-qualification")]
+    {
+        claude_profile::arguments(executable)
+    }
+    #[cfg(not(feature = "desktop-qualification"))]
+    {
+        let _ = executable;
+        Ok(Vec::new())
     }
 }
