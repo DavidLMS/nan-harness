@@ -32,13 +32,25 @@ async function run() {
   const browser = await chromium.connectOverCDP(`http://127.0.0.1:${connection.port}`, { timeout: 2000, noDefaults: true });
   try {
     facts.attached = true;
-    const pages = browser.contexts().flatMap(context => context.pages());
+    let pages = browser.contexts().flatMap(context => context.pages());
+    // The debugger can listen before the application creates its first page.
+    // Wait for that page, but never choose among multiple application targets.
+    while (pages.length === 0 && Date.now() < deadline && ownership.ownedEndpoint()) {
+      await new Promise(r => setTimeout(r, 250));
+      pages = browser.contexts().flatMap(context => context.pages());
+    }
     facts.pageCount = Math.min(4096, pages.length);
     if (pages.length !== 1) { facts.errorCategory = 'target-ambiguous'; save(); return; }
     const page = pages[0];
     let pageErrorCount = 0;
     page.on('pageerror', () => { pageErrorCount = Math.min(4096, pageErrorCount + 1); });
-    await new Promise(r => setTimeout(r, 3000));
+    const documentDeadline = Math.min(deadline, Date.now() + 10000);
+    while (Date.now() < documentDeadline && ownership.ownedEndpoint()) {
+      const loaded = await page.evaluate(() => document.readyState === 'complete'
+        && document.body !== null && document.querySelectorAll('button,input,textarea,[contenteditable="true"]').length > 0);
+      if (loaded) break;
+      await new Promise(r => setTimeout(r, 250));
+    }
     if (!ownership.ownedEndpoint()) { facts.endpointOwned = false; facts.errorCategory = 'endpoint-unowned'; save(); return; }
     const counts = await page.evaluate(() => {
       const visible = e => e.isConnected && e.getBoundingClientRect().width > 0
