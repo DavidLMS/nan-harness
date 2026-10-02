@@ -29,8 +29,16 @@ class ExportTests(unittest.TestCase):
             result = json.loads(output.stdout)
             self.assertTrue(result["verified"])
             self.assertEqual(result["assistantTextCount"], 1)
-            self.assertEqual(set(result), {"verified", "version", "userCount", "assistantTextCount", "error"})
+            self.assertEqual(set(result), {"verified", "version", "userCount", "assistantTextCount", "resumeCount", "agentCount", "totalAssistantTextCount", "error"})
             self.assertNotIn(b"nonce", output.stdout + output.stderr)
+
+    def test_latest_empty_segment_keeps_only_closed_history_counts(self):
+        value = thread([{"Text": "reply-nonce"}])
+        value['messages'].append('Resume')
+        result = module.validate_thread(value, 'prompt-nonce', 'reply-nonce')
+        self.assertFalse(result['verified'])
+        self.assertEqual((result['assistantTextCount'], result['resumeCount'], result['agentCount'], result['totalAssistantTextCount']), (0, 1, 1, 1))
+        self.assertNotIn('nonce', json.dumps(result))
 
     def test_native_resume_certifies_only_the_latest_assistant_segment(self):
         value = thread([])
@@ -89,7 +97,7 @@ class ExportTests(unittest.TestCase):
             self.assertEqual(value["error"], "decompression")
             self.assertFalse(value["verified"])
             self.assertNotIn(b"private", output.stdout + output.stderr)
-            self.assertEqual(set(value), {"verified", "version", "userCount", "assistantTextCount", "error"})
+            self.assertEqual(set(value), {"verified", "version", "userCount", "assistantTextCount", "resumeCount", "agentCount", "totalAssistantTextCount", "error"})
 
     @unittest.skipUnless(shutil.which("zstd"), "zstd unavailable")
     def test_decompression_is_bounded_and_rejects_truncation(self):

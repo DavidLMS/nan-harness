@@ -20,6 +20,14 @@ def flags(value, keys):
 
 
 def native_copy(value, reasons):
+    value = dict(value)
+    history = {}
+    for key, bound in [('exportResumeCount', 128), ('exportAgentCount', 128), ('exportTotalAssistantTextCount', 16384)]:
+        if key in value:
+            count = value.pop(key)
+            if type(count) is not int or not 0 <= count <= bound:
+                raise ValueError('invalid closed export history count')
+            history[key] = count
     shape(value, 'schemaVersion mechanism experimentOnly ocrUsed axTextUsed navigation keyboardTransport responseMethod lastExportError lastExportTransportError exportVersion exportUserCount exportAssistantTextCount stage substage guardKind guardCategory settleObservations clipboardReadback clipboardCharacterCount blocker trustControlCount panelControlCount responseControlCount clipboardCleanup input response', 'zed-native-copy')
     flags(value, 'experimentOnly ocrUsed axTextUsed')
     if not value['experimentOnly'] or value['ocrUsed'] or value['axTextUsed'] or value['navigation'] != 'private-keymap-new-thread':
@@ -73,7 +81,7 @@ def native_copy(value, reasons):
         raise ValueError('invalid assistant export proof')
     if value['response']['clipboardVerified'] and not (value['input']['submitted'] and value['response']['copyAction']):
         raise ValueError('response without native copy')
-    return value
+    return {**value, **history}
 
 
 def dom(value):

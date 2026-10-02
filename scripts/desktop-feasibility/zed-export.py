@@ -11,7 +11,7 @@ LIMIT = 1024 * 1024
 
 
 def validate_thread(value, prompt, marker):
-    result = {"verified": False, "version": None, "userCount": 0, "assistantTextCount": 0, "error": "schema"}
+    result = {"verified": False, "version": None, "userCount": 0, "assistantTextCount": 0, "resumeCount": 0, "agentCount": 0, "totalAssistantTextCount": 0, "error": "schema"}
     if not isinstance(value, dict) or set(value) - {"title", "messages", "updated_at", "model", "version"} or value.get("version") != "1.0.0":
         return result
     result["version"] = "1.0.0"
@@ -25,6 +25,7 @@ def validate_thread(value, prompt, marker):
         if message == "Resume":
             if result["userCount"] != 1:
                 return result
+            result["resumeCount"] += 1
             texts.clear()
             continue
         if not isinstance(message, dict) or len(message) != 1:
@@ -39,6 +40,7 @@ def validate_thread(value, prompt, marker):
                 result["error"] = "user-mismatch"
                 return result
         elif "Agent" in message:
+            result["agentCount"] += 1
             agent = message["Agent"]
             if result["userCount"] != 1 or not isinstance(agent, dict) or set(agent) != {"content", "tool_results", "reasoning_details"} or not isinstance(agent.get("content"), list) or len(agent["content"]) > 128:
                 return result
@@ -48,6 +50,7 @@ def validate_thread(value, prompt, marker):
                 if "Text" in part:
                     if not isinstance(part["Text"], str):
                         return result
+                    result["totalAssistantTextCount"] += 1
                     texts.append(part["Text"])
                     if len(texts) > 128:
                         return result
@@ -93,7 +96,7 @@ def decompress(zstd, data):
 
 
 def main():
-    result = {"verified": False, "version": None, "userCount": 0, "assistantTextCount": 0, "error": "request"}
+    result = {"verified": False, "version": None, "userCount": 0, "assistantTextCount": 0, "resumeCount": 0, "agentCount": 0, "totalAssistantTextCount": 0, "error": "request"}
     try:
         if len(sys.argv) != 3 or sys.argv[1] != "--zstd" or not pathlib.Path(sys.argv[2]).is_absolute():
             raise ValueError("request")

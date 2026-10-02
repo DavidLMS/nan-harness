@@ -291,12 +291,13 @@ def semantic_observations(directory, app):
             enum(record, value, 'retryActionReceipt', {'acknowledged', 'completion-unknown', 'native-pointer-dispatched'})
             enum(record, value, 'retrySelector', {'retry-name-or-description', 'retry-tooltip', 'retry-label'})
             enum(record, value, 'retryInventoryStatus', {'complete', 'budget-exceeded', 'query-error'})
-            for key in ('exportUserCount', 'exportAssistantTextCount', 'trustControlCount', 'panelControlCount', 'retryControlCount', 'retryTitleCount', 'retryCandidateCount', 'retryTooltipCount', 'retryLabelCount',
+            for key in ('exportResumeCount', 'exportAgentCount', 'exportTotalAssistantTextCount', 'exportUserCount', 'exportAssistantTextCount', 'trustControlCount', 'panelControlCount', 'retryControlCount', 'retryTitleCount', 'retryCandidateCount', 'retryTooltipCount', 'retryLabelCount',
                         'retryInventoryTotal', 'retryInventoryButtons', 'retryInventoryStaticText',
                         'retryInventoryTitleMatches', 'retryInventoryGenerationMatches', 'retryInventoryRetryMatches'):
                 if key in value:
                     count = value[key]
-                    if count is not None and (type(count) is not int or not 0 <= count <= 4096):
+                    bound = 16384 if key == 'exportTotalAssistantTextCount' else 4096
+                    if count is not None and (type(count) is not int or not 0 <= count <= bound):
                         raise ValueError('invalid retry control count')
                     record[key] = count
             enum(record, value, 'lastExportError', {'request', 'schema', 'user-mismatch', 'assistant-mismatch', 'decompression'})

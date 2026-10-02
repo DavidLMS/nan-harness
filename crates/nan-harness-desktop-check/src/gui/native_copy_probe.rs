@@ -51,6 +51,12 @@ struct Facts {
     export_version: Option<String>,
     export_user_count: Option<usize>,
     export_assistant_text_count: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    export_resume_count: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    export_agent_count: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    export_total_assistant_text_count: Option<usize>,
     #[serde(skip)]
     expected_prompt: Zeroizing<String>,
     clipboard_readback: Option<&'static str>,
@@ -200,6 +206,12 @@ struct ExportVerdict {
     version: Option<String>,
     user_count: usize,
     assistant_text_count: usize,
+    #[serde(default)]
+    resume_count: usize,
+    #[serde(default)]
+    agent_count: usize,
+    #[serde(default)]
+    total_assistant_text_count: usize,
     error: Option<String>,
 }
 
@@ -217,6 +229,9 @@ fn decode_export_verdict(
     *transport = Some("verdict");
     if verdict.user_count > 128
         || verdict.assistant_text_count > 128
+        || verdict.resume_count > 128
+        || verdict.agent_count > 128
+        || verdict.total_assistant_text_count > 16_384
         || !matches!(
             verdict.error.as_deref(),
             None | Some(
@@ -406,6 +421,9 @@ fn native_copy_facts() -> Facts {
         export_version: None,
         export_user_count: None,
         export_assistant_text_count: None,
+        export_resume_count: None,
+        export_agent_count: None,
+        export_total_assistant_text_count: None,
         expected_prompt: Zeroizing::new(String::new()),
         clipboard_readback: None,
         clipboard_character_count: None,
@@ -1356,6 +1374,10 @@ impl Gui {
                     facts.export_version = verdict.version;
                     facts.export_user_count = Some(verdict.user_count);
                     facts.export_assistant_text_count = Some(verdict.assistant_text_count);
+                    facts.export_resume_count = Some(verdict.resume_count);
+                    facts.export_agent_count = Some(verdict.agent_count);
+                    facts.export_total_assistant_text_count =
+                        Some(verdict.total_assistant_text_count);
                     if verdict.verified {
                         facts.response.clipboard_verified = true;
                         facts.stage = "completed";
