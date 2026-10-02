@@ -62,7 +62,8 @@ jobs:
           python canary/research/zcode/native_probe.py --source "$ZCODE_SOURCE_ROOT" --node "$(command -v node)"
       - name: Install pinned Windows terminal driver
         if: runner.os == 'Windows'
-        run: python -m pip install --only-binary=:all: pywinpty==3.0.5
+        run: |
+          python -m pip install --only-binary=:all: pywinpty==3.0.5
       - name: Verify native session resumption and actual TUI
         run: |
           python canary/research/zcode/runtime_probe.py --source "$ZCODE_SOURCE_ROOT" --node "$(command -v node)" --case sessions
