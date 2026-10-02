@@ -83,8 +83,13 @@ def semantic_observations(directory, app):
     directory = Path(directory)
     if directory.is_symlink() or not directory.is_dir():
         raise ValueError('semantic facts directory is invalid')
-    paths = sorted(path for path in directory.glob('*.json')
-                   if not path.name.startswith(('connection-', 'startup-')))
+    all_paths = sorted(directory.glob('*.json'))
+    private = [path for path in all_paths if path.name.startswith(('connection-', 'startup-'))]
+    # Three fresh profiles produce connection/startup metadata. Bound those
+    # separately so they cannot consume or bypass the closed-record budget.
+    if len(private) > 12:
+        raise ValueError('too many private semantic metadata files')
+    paths = [path for path in all_paths if not path.name.startswith(('connection-', 'startup-'))]
     if len(paths) > 32:
         raise ValueError('too many semantic observations')
     observations = []
