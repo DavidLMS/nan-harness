@@ -71,6 +71,8 @@ fn category(bytes: &[u8]) -> &'static str {
     } else if text.contains("remote debugging")
         || text.contains("remote-debugging")
         || text.contains("Remote debugging")
+        || text.contains("Claude: refusing to start")
+            && text.contains("a debugging or network-override switch")
     {
         "debugging-configuration"
     } else if text.contains("Cannot find module") || text.contains("ERR_MODULE_NOT_FOUND") {
@@ -109,6 +111,10 @@ mod tests {
         for (sample, expected) in [
             (
                 "PRIVATE remote-debugging-port rejected",
+                "debugging-configuration",
+            ),
+            (
+                "Claude: refusing to start — a debugging or network-override switch is present on the command line. PRIVATE",
                 "debugging-configuration",
             ),
             ("Cannot find module PRIVATE", "missing-runtime-module"),

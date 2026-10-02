@@ -128,7 +128,7 @@ observations describe completed runs, rather than additional qualification:
 
 | Application | Linux x64 | macOS ARM64 | Windows x64 |
 | --- | --- | --- | --- |
-| Zed | Response and file-tool steps pass; pointer Retry does not produce provider recovery. Native accessibility activation is under test. | Qualified pilot; two of three probes pass the expanded retry policy. | Owned window is visible but acquisition fails stability. |
+| Zed | Response and file-tool steps pass; pointer and accessibility Retry acknowledgements do not produce provider recovery. | Three complete probes pass the expanded retry policy. | Owned window is visible but acquisition fails stability. |
 | Hermes | Three complete probes pass with renderer process ownership. | Private native userData binding enables two complete probes; the first response times out. | Renderer ownership proof fails; native diagnostics are under test. |
 | ChatGPT / Codex | Owned document loads; no composer is observed. | Renderer attaches, then endpoint ownership is lost. | Launcher ancestry remains unproved. |
 | Claude | Uninstrumented startup succeeds; instrumented child exits with code 1. | Instrumented child exits with code 1; uninstrumented startup has no eligible window. | Instrumented child exits with code 1; uninstrumented cleanup remains unqualified. |
@@ -148,6 +148,27 @@ and [36971025105](https://github.com/DavidLMS/nan-harness/actions/runs/369710251
 Each closed artifact records its tested commit, platform, app/runtime version
 when observed, preparation identity, probe steps and cleanup verdict. Renderer
 inventories and startup baselines cannot satisfy full acceptance.
+
+Run [36976970895](https://github.com/DavidLMS/nan-harness/actions/runs/36976970895)
+reconfirms Zed macOS with three complete probes on commit `3e0bafdf`. Its Linux
+probes still reject recovery despite acknowledged accessibility activation.
+The Hermes jobs in run
+[36976968063](https://github.com/DavidLMS/nan-harness/actions/runs/36976968063)
+reach reduction but reject their evidence; their placeholder `not-run` artifacts
+cannot establish either success or an application failure. Complete renderer
+probes can exceed the former 32-record budget once policy, provider, backend,
+frontend and Windows ownership diagnostics are retained. The reducer now bounds
+64 records, each still subject to its closed schema and size limit, and exposes
+only static rejection categories. This requires fresh native evidence.
+
+Static inspection of the official Claude Linux 2.9939.4 archive identifies an
+explicit startup rejection of `remote-debugging-port` and `remote-debugging-pipe`
+in `.vite/build/index.pre.js`. Its exception requires a short-lived, signed
+developer authorization token bound to the userData path. Ordinary packaged
+startup also removes an unapproved `CLAUDE_USER_DATA_DIR` override. CDP therefore
+remains unavailable for this distribution without upstream authorization;
+normal native accessibility is the remaining route to evaluate on disposable
+runners. Do not modify the distribution or fabricate this authorization.
 
 `--verification semantic-only` requires a disposable GitHub-hosted deterministic
 session and a supported adapter. It never falls back to OCR. Renderer input

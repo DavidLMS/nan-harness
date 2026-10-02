@@ -99,7 +99,11 @@ def semantic_observations(directory, app):
         raise ValueError('too many private semantic metadata files')
     paths = [path for path in all_paths if path.name != 'native-diagnostics.json'
              and not path.name.startswith(('connection-', 'startup-', 'closed-startup-'))]
-    if len(paths) > 32:
+    # Three complete renderer probes also retain policy, provider, frontend,
+    # backend and fresh Windows ownership receipts. These can exceed 32 even
+    # when every probe succeeds; each record still has its own closed schema
+    # and 8 KiB bound, and private connection metadata remains separate.
+    if len(paths) > 64:
         raise ValueError('too many semantic observations')
     startup_paths = [path for path in private if path.name.startswith('closed-startup-')]
     if len(startup_paths) > 3:
@@ -127,10 +131,10 @@ def semantic_observations(directory, app):
         if type(value) is not dict:
             raise ValueError('invalid semantic observation')
         mechanism = value.get('mechanism')
-        if mechanism not in {'hermes-renderer-qualification', 'zed-native-copy', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'hermes-front-source', 'hermes-backend-failure', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline'}:
+        if mechanism not in {'hermes-renderer-qualification', 'zed-native-copy', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline'}:
             continue
         expected = 'hermes-renderer-qualification' if app == 'hermes-desktop' else 'zed-native-copy'
-        if (mechanism != expected and mechanism not in {'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'hermes-front-source', 'hermes-backend-failure', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline'}) or type(value.get('schemaVersion')) is not int or value['schemaVersion'] != 1:
+        if (mechanism != expected and mechanism not in {'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline'}) or type(value.get('schemaVersion')) is not int or value['schemaVersion'] != 1:
             raise ValueError('semantic observation identity differs')
         record = {'schemaVersion': 1, 'mechanism': mechanism}
         if mechanism == 'semantic-failure-policy':
@@ -144,6 +148,13 @@ def semantic_observations(directory, app):
             if type(value['category']) is not str or value['category'] not in allowed:
                 raise ValueError('invalid Windows endpoint proof category')
             record.update(diagnosticsOnly=True, category=value['category'])
+        elif mechanism == 'hermes-policy-preparation':
+            if set(value) != set('schemaVersion mechanism diagnosticsOnly stage'.split()) or app != 'hermes-desktop' or value['diagnosticsOnly'] is not True:
+                raise ValueError('invalid Hermes policy preparation identity')
+            stages = {'ownership', 'facts-directory', 'config-read', 'config-shape', 'ownership-recheck', 'config-replace', 'policy-receipt'}
+            if type(value['stage']) is not str or value['stage'] not in stages:
+                raise ValueError('invalid Hermes policy preparation stage')
+            record.update(diagnosticsOnly=True, stage=value['stage'])
         elif mechanism == 'hermes-backend-failure':
             if set(value) != set('schemaVersion mechanism diagnosticsOnly category assistantTurnCount'.split()) or app != 'hermes-desktop' or value['diagnosticsOnly'] is not True:
                 raise ValueError('invalid Hermes backend failure identity')
@@ -486,8 +497,16 @@ def main():
         destination.chmod(0o600)
         if args.command == 'aggregate' and result['qualification'] != 'deterministic-full':
             raise SystemExit('desktop qualification matrix remains incomplete')
-    except (OSError, ValueError, TypeError, KeyError):
-        raise SystemExit('desktop qualification evidence rejected') from None
+    except (OSError, ValueError, TypeError, KeyError) as error:
+        categories = {
+            'too many semantic observations': 'observation-budget',
+            'too many private semantic metadata files': 'metadata-budget',
+            'semantic observation identity differs': 'observation-identity',
+            'runtime version is not closed': 'runtime-version',
+            'prepared provenance differs': 'prepared-provenance',
+        }
+        category = categories.get(str(error), 'invalid-evidence')
+        raise SystemExit('desktop qualification evidence rejected: ' + category) from None
 
 
 if __name__ == '__main__':

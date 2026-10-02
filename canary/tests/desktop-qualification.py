@@ -484,7 +484,10 @@ class QualificationTests(unittest.TestCase):
                 for index in range(3):
                     (root / f'{prefix}{index}.json').write_text('PRIVATE_INVALID_JSON')
             self.assertEqual(len(q.semantic_observations(root, 'hermes-desktop')), 30)
-            for index in range(30, 33):
+            for index in range(30, 64):
+                (root / f'fact-{index}.json').write_text(json.dumps(value))
+            self.assertEqual(len(q.semantic_observations(root, 'hermes-desktop')), 64)
+            for index in range(64, 65):
                 (root / f'fact-{index}.json').write_text(json.dumps(value))
             with self.assertRaises(ValueError):
                 q.semantic_observations(root, 'hermes-desktop')
@@ -575,6 +578,22 @@ class QualificationTests(unittest.TestCase):
                 path.write_text(json.dumps({**value, 'documentState': changed}))
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'pen-desktop')
+
+    def test_policy_preparation_failures_keep_only_the_closed_stage(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            value = dict(schemaVersion=1, mechanism='hermes-policy-preparation',
+                         diagnosticsOnly=True, stage='ownership')
+            path = root / 'failure.json'
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(root, 'hermes-desktop'), [value])
+            with self.assertRaises(ValueError):
+                q.semantic_observations(root, 'pen-desktop')
+            for changed in ({**value, 'stage': 'PRIVATE'}, {**value, 'path': 'PRIVATE'},
+                            {**value, 'diagnosticsOnly': False}):
+                path.write_text(json.dumps(changed))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'hermes-desktop')
 
     def test_renderer_inventory_is_closed_and_cannot_claim_acceptance(self):
         with tempfile.TemporaryDirectory() as tmp:

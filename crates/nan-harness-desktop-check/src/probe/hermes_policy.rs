@@ -138,22 +138,47 @@ fn replace(path: &Path, before: &[u8], after: &[u8]) -> Result<(), Reason> {
 }
 
 pub(super) fn prepare(workspace: &Path, facts: &Path) -> Result<(), Reason> {
+    let mut stage = "ownership";
+    let outcome = prepare_owned(workspace, facts, &mut stage);
+    if outcome.is_err() && facts.is_absolute() && facts.is_dir() && !facts.is_symlink() {
+        let mut nonce = [0_u8; 8];
+        if getrandom::fill(&mut nonce).is_ok() {
+            let diagnostic = serde_json::json!({"schemaVersion":1,
+                "mechanism":"hermes-policy-preparation", "diagnosticsOnly":true, "stage":stage});
+            if let Ok(mut file) = nan_harness_private_fs::open_private_new(&facts.join(format!(
+                "hermes-policy-failure-{}.json",
+                u64::from_le_bytes(nonce)
+            ))) {
+                let _ = serde_json::to_writer(&mut file, &diagnostic);
+            }
+        }
+    }
+    outcome
+}
+
+fn prepare_owned(workspace: &Path, facts: &Path, stage: &mut &'static str) -> Result<(), Reason> {
     verify_owner(workspace)?;
+    *stage = "facts-directory";
     if !facts.is_absolute()
         || !std::fs::symlink_metadata(facts).is_ok_and(|metadata| metadata.is_dir())
     {
         return Err(Reason::IsolationUnavailable);
     }
     let path = workspace.join("profile/hermes/profiles/nan/config.yaml");
+    *stage = "config-read";
     let before = read(&path)?;
+    *stage = "config-shape";
     fresh_config(&before)?;
     let mut after = before.clone();
     after.extend_from_slice(POLICY.as_bytes());
     if after.len() as u64 > LIMIT {
         return Err(Reason::IsolationUnavailable);
     }
+    *stage = "ownership-recheck";
     verify_owner(workspace)?;
+    *stage = "config-replace";
     replace(&path, &before, &after)?;
+    *stage = "policy-receipt";
     let policy = serde_json::json!({"schemaVersion": 1, "mechanism": "hermes-retry-policy",
         "policy": "explicit-ui-retry", "autoRecoveryCycles": 0, "apiMaxRetries": 3,
         "configBeforeSha256": crate::report::digest(&before), "configAfterSha256": crate::report::digest(&after)});
@@ -247,12 +272,24 @@ mod tests {
             let before = read(&config).unwrap();
             assert!(prepare(directory.path(), &directory.path().join("facts")).is_err());
             assert_eq!(read(&config).unwrap(), before);
-            assert!(
-                !directory
-                    .path()
-                    .join("facts/hermes-retry-policy.json")
-                    .exists()
+            let entries = std::fs::read_dir(directory.path().join("facts"))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
+            assert_eq!(entries.len(), 1);
+            let bytes = read(&entries[0].path()).unwrap();
+            let diagnostic: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(diagnostic["mechanism"], "hermes-policy-preparation");
+            assert_eq!(diagnostic["diagnosticsOnly"], true);
+            assert_eq!(
+                diagnostic["stage"],
+                if relative.ends_with("config.yaml") {
+                    "config-shape"
+                } else {
+                    "ownership"
+                }
             );
+            assert!(!String::from_utf8(bytes).unwrap().contains("foreign"));
         }
     }
     #[test]
