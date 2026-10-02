@@ -22,14 +22,17 @@ named community CLIs or GLM integrations.
 
 - Source commit: `29628c9acdb81b703bbd4080c207a0e7ce5e276e`.
 - Built agent CLI: `0.16.9`, confirmed with its actual `--version` command.
-- Product/distribution version: `3.14.3`. The unified distribution wrapper
-  prints this version, while the underlying agent prints `0.16.9`.
+- Product/distribution version: `3.14.3`. The installed wrapper's `--version`
+  prints this version; `zcode version` prints the agent version `0.16.9`.
+  Use the latter when checking the agent's compatibility contract.
 - Runtime used for final probes: Node.js `24.14.0`.
 - Build: upstream's locked pnpm installation, then
   `pnpm --filter '@zcode/cli...' build`. Installation lifecycle scripts were
   disabled; the native probes exercised the headless CLI.
-- The full distribution wrapper, installer, graphical TUI and Web mode were
-  not exercised. No minimum supported version has been established.
+- The full distribution wrapper and unmodified Unix installer were exercised
+  with a locally built package on macOS arm64. This is not an upstream
+  released artifact. The rendered terminal UI was also exercised locally.
+  Web mode was not exercised. No minimum supported version has been established.
 
 The [official source at the investigated commit](https://github.com/zai-org/ZCode/tree/29628c9acdb81b703bbd4080c207a0e7ce5e276e)
 is the reference. Older examples that put `provider`, `model.main` and
@@ -47,13 +50,26 @@ generation and are not the integration contract for this revision.
 | Explicit built-in provider isolation | Only NaN selectable | Real registry resolver |
 | Authenticated direct Chat Completions and selected model | Pass | Actual upstream model factory and loopback HTTP |
 | SSE termination and usage | Pass | `[DONE]`, streamed usage and `include_usage` |
-| Tool execution and result continuation | Pass | Actual SDK tool loop against synthetic provider |
+| Fragmented tool arguments, execution and result continuation | Pass | Arguments span separate SSE writes; actual SDK tool loop |
+| Image serialization | Pass | Actual model factory emits a PNG data URL; no claim about native attachment gates or model vision quality |
 | HTTP 401 and cancellation | Pass | Model factory/SDK; not OS signal handling |
 | Native Read → Write → Read → Edit → Bash → Agent | Pass | Built official CLI; file effect, tool continuations and child request verified |
 | Native provider/model confinement | Pass | Eight requests in the tested sequence, all to the loopback provider and selected model |
 | Model catalog replacement and credential rotation | Pass | A fresh native process reads the replacement private configuration |
 | Child model inheritance and resumed pin retention | Pass | Actual upstream policy; an old non-NaN pin is retained rather than silently replaced |
 | Auxiliary reasoning/output policy | Pass | Lowest advertised reasoning level and bounded output budget |
+| Official Unix installer and repeat installation | Pass | Locally built full distribution; default/custom paths; existing CLI settings preserved |
+| Installed full wrapper's native tools | Pass | Same real tool sequence and rotation probe through the installed entry point |
+| Rendered TUI and `/model` | Pass on macOS arm64, Linux arm64 and Windows x64 | Real terminal, persisted selection, request using new model, streamed answer and Ctrl-C exit |
+| Real `--continue` and explicit `--resume` | Pass on all three tested platforms | Subsequent provider requests contain previous session history |
+| Resume after selected model removal | Safe failure | Nonzero exit and zero additional provider requests |
+| NaN search MCP | Pass on local macOS | Actual `nan-harness __search-mcp`, inventory, execution and result continuation; CLI config unchanged |
+| Linux arm64 and Windows x64 native tools | Pass | [Pinned hosted run](https://github.com/DavidLMS/nan-harness/actions/runs/36968640065), including config, transport, child, rotation, session and TUI probes |
+
+The branch-only [feasibility workflow](../../../.github/workflows/zcode-feasibility.yml)
+exercises the pinned source on Linux arm64 and Windows x64 (ConPTY). The final
+run tested branch commit `0156c472`; both platform jobs passed. macOS results
+come from local execution. The workflow does not publish compatibility feeds.
 
 Every key, prompt, file and response in these probes is synthetic. Native runs
 use temporary homes, data directories and Git workspaces, a private provider
@@ -85,8 +101,9 @@ contains assertions and counts, not request bodies or credentials.
    Preserve conservative generic behavior. Auxiliary calls and new children
    inherit the active model in this revision; the old independent lite-model
    configuration is obsolete.
-4. **Resumption and overrides:** test `--resume`, `--continue`, `/resume`,
-   `/model`, workflow-pinned models and explicit child-model selection.
+4. **Resumption and overrides:** `--resume`, `--continue` and rendered `/model`
+   have been exercised. Extend adapter coverage to `/resume`, workflow-pinned
+   models and explicit child-model selection.
    Restrict the registry so a retained foreign pin fails safely. Do not rewrite
    user session history or silently send a request to another provider.
    Guard or explicitly exclude the distribution wrapper's `--web` mode, which
@@ -97,18 +114,24 @@ contains assertions and counts, not request bodies or credentials.
    Establish and test native model switching semantics separately from the
    managed launch's restricted registry. Do not advertise strict native
    provider confinement until it has been demonstrated.
-6. **Discovery and installation:** account for the two version surfaces before
-   choosing a compatibility manifest pin and command. The documented Unix
+6. **Discovery and installation:** use `zcode version` for the agent version,
+   and choose a compatibility manifest pin against an established released
+   artifact. The tested Unix
    installer creates `~/.local/bin/zcode` and installs under
    `~/.zcode/runtime`, with `ZCODE_DIST_HOME`/`ZCODE_DIST_BIN_DIR` overrides.
    The README's distribution base URL is a placeholder; this investigation
-   has not established a public, reproducible upstream download channel.
+   has not established a public, reproducible standalone CLI download channel.
+   The [official product site](https://zcode.z.ai/en) advertised desktop
+   `3.14.4` packages for macOS, Linux and Windows when checked; these are not
+   evidence of a standalone CLI package or Windows CLI installer.
    Do not invent one or treat a source build as a released package.
 7. **Full coverage:** integrate a pinned probe and latest canary only after
-   the installation/version contract is settled. Cover NaN search MCP,
-   native configuration lifecycle, actual TUI model selection, streaming
-   fragmentation, images/reasoning where supported, OS signals and cleanup,
-   upgrades, legacy/project configuration conflicts, and Linux/Windows.
+   the installation/version contract is settled. Remaining adapter tests
+   include native configuration receipts and rollback, managed artifact
+   cleanup, upgrades, legacy/project configuration conflicts, native image
+   attachment gates and per-model reasoning option rendering. Research tests
+   already cover search MCP, actual TUI selection and Ctrl-C exit, real
+   resumption, fragmented tools and image transport serialization.
    These research probes are not substitutes for that complete daily gate.
 
 Relevant official code: [provider schema](https://github.com/zai-org/ZCode/blob/29628c9acdb81b703bbd4080c207a0e7ce5e276e/packages/provider/src/config/provider-data-schema.ts),
@@ -137,7 +160,7 @@ node canary/research/zcode/build-probes.mjs "$zcode_probe_output"
 node "$zcode_probe_output/config-probe.mjs"
 node "$zcode_probe_output/protocol-probe.mjs"
 python3 canary/research/zcode/native_probe.py \
-  --source "$ZCODE_SOURCE_ROOT" --node "$(command -v node)"
+  --source "$ZCODE_SOURCE_ROOT" --node "$(node -p 'process.execPath')"
 ```
 
 The build helper bundles the real upstream source functions without altering
@@ -145,3 +168,44 @@ them; it resolves workspace source exports and uses the checkout's installed
 dependencies. The protocol probe contacts only its own loopback server. The
 native probe has a 60-second limit per process and deletes its isolated state.
 Keep generated bundles and upstream dependencies outside the repository.
+
+Additional real runtime probes:
+
+```sh
+python3 canary/research/zcode/runtime_probe.py \
+  --source "$ZCODE_SOURCE_ROOT" --node "$(node -p 'process.execPath')" --case sessions
+python3 canary/research/zcode/runtime_probe.py \
+  --source "$ZCODE_SOURCE_ROOT" --node "$(node -p 'process.execPath')" --case tui
+cargo build --locked -p nan-harness-cli
+python3 canary/research/zcode/runtime_probe.py \
+  --source "$ZCODE_SOURCE_ROOT" --node "$(node -p 'process.execPath')" \
+  --nan-binary "$PWD/target/debug/nan-harness" --case mcp
+```
+
+On Windows the TUI probe requires `pywinpty==3.0.5`; other platforms use
+Python's standard PTY transport. Terminal output is retained only in memory.
+
+To reproduce the **locally built** full distribution and installer probe,
+run these commands in the upstream checkout. A CLI-only filtered install is
+insufficient for the server/Web distribution. The shared package must be
+compiled explicitly before packaging at this source revision:
+
+```sh
+pnpm install --ignore-scripts --frozen-lockfile
+pnpm exec tsc -p packages/shared/tsconfig.json
+node scripts/build-zcode.mjs --base-url http://127.0.0.1:18762/
+```
+
+Then, from nan-harness:
+
+```sh
+python3 canary/research/zcode/installer_probe.py \
+  --source "$ZCODE_SOURCE_ROOT" --node "$(node -p 'process.execPath')"
+```
+
+The installer probe serves that package on loopback, injects the temporary
+distribution URL, tests default/custom directories twice, verifies both
+version commands and runs real native tools through the installed wrapper.
+It does not install into the user's home. Automatic download and Windows CLI
+installation remain unverified external contracts; `nanh zcode` and
+`nanh config zcode` still require implementation and their own lifecycle gate.
