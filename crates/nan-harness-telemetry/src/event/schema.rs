@@ -76,6 +76,7 @@ pub enum HarnessKind {
     #[serde(rename = "opencode")]
     OpenCode,
     MimoCode,
+    ZCode,
     Hermes,
     HermesDesktop,
     PenDesktop,
@@ -105,6 +106,7 @@ impl HarnessKind {
             Self::Codex => "codex",
             Self::OpenCode => "opencode",
             Self::MimoCode => "mimo-code",
+            Self::ZCode => "zcode",
             Self::Hermes => "hermes",
             Self::HermesDesktop => "hermes-desktop",
             Self::PenDesktop => "pen-desktop",

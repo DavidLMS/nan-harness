@@ -65,9 +65,15 @@ fn inspect_document_result(
                 return Err(Invalid);
             }
             receipt.entries.iter().all(|entry| {
-                get_json_path(&document, &entry.path)
-                    .and_then(|value| hash_json(value).ok())
-                    .is_some_and(|hash| hash == entry.value_sha256)
+                get_json_entry(
+                    &document,
+                    &entry.path,
+                    entry.selector.as_ref(),
+                    &receipt.path,
+                )
+                .ok()
+                .flatten()
+                .is_some_and(|value| json_entry_matches(value, entry).unwrap_or(false))
             })
         }
         DocumentReceipt::Yaml(receipt) => {

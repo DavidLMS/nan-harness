@@ -13,6 +13,7 @@ pub(crate) struct ConfigurationPaths {
     pub(crate) goose_directory: PathBuf,
     pub(crate) mimo_config_directory: PathBuf,
     pub(crate) mimo_auth_path: PathBuf,
+    pub(crate) zcode_provider_path: PathBuf,
 }
 
 impl ConfigurationPaths {
@@ -44,6 +45,7 @@ impl ConfigurationPaths {
             goose_directory,
             mimo_config_directory,
             mimo_auth_path,
+            zcode_provider_path: zcode_provider_path(&home_directory),
             home_directory,
         })
     }
@@ -62,6 +64,7 @@ impl ConfigurationPaths {
             goose_directory: home_directory.join(".config/goose"),
             mimo_config_directory: home_directory.join(".config/mimocode"),
             mimo_auth_path: home_directory.join(".local/share/mimocode/auth.json"),
+            zcode_provider_path: home_directory.join(".zcode/v2/provider_config.json"),
         }
     }
 }
@@ -121,4 +124,18 @@ fn mimo_paths(home: &Path) -> (PathBuf, PathBuf) {
         .map_or_else(|| home.join(".local/share"), PathBuf::from)
         .join("mimocode/auth.json");
     (config, auth)
+}
+
+fn zcode_provider_path(home: &Path) -> PathBuf {
+    env::var_os("ZCODE_PERSONAL_PROVIDER_CONFIG_FILE")
+        .filter(|value| !value.is_empty())
+        .map_or_else(
+            || {
+                env::var_os("ZCODE_DATA_BASE_DIR")
+                    .filter(|value| !value.is_empty())
+                    .map_or_else(|| home.to_path_buf(), PathBuf::from)
+                    .join(".zcode/v2/provider_config.json")
+            },
+            PathBuf::from,
+        )
 }

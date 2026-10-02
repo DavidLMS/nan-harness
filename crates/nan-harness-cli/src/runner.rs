@@ -11,7 +11,7 @@ use crate::usage_summary;
 use nan_harness_adapters::{
     AiderAdapter, ClaudeCodeAdapter, ClineAdapter, CodexAdapter, DeepSeekHarnessAdapter, FxAdapter,
     GooseAdapter, HermesAdapter, KimiCodeAdapter, MimoCodeAdapter, OmpAdapter, OpenClawAdapter,
-    OpenCodeAdapter, PiAdapter, PrimeAgentAdapter, QwenCodeAdapter,
+    OpenCodeAdapter, PiAdapter, PrimeAgentAdapter, QwenCodeAdapter, ZCodeAdapter,
 };
 use nan_harness_core::launch_plan::{LaunchId, ObservabilityFormat};
 use nan_harness_core::model::{

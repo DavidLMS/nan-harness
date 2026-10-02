@@ -34,6 +34,7 @@ to use either model for an individual image. See [image generation](#image-gener
 | `nanh goose` | [Goose](https://github.com/block/goose) | OpenAI Chat Completions | Optional |
 | `nanh claude` | [Claude Code](https://www.anthropic.com/claude-code) | Anthropic Messages bridge | Not available |
 | `nanh codex` | [Codex](https://openai.com/codex/) | OpenAI Responses bridge | Not available |
+| `nanh zcode` | [ZCode](https://github.com/zai-org/ZCode) | OpenAI Chat Completions | Optional |
 | `nanh mimo` | [MiMo Code](https://github.com/XiaomiMiMo/MiMo-Code) | OpenAI Chat Completions | Optional |
 | `nanh opencode` | [OpenCode](https://opencode.ai/) | OpenAI Chat Completions | Optional |
 | `nanh qwen` | [Qwen Code](https://qwenlm.github.io/qwen-code-docs/en/users/overview) | OpenAI Chat Completions | Optional |
@@ -58,6 +59,25 @@ provider configuration for that process and keeps MiMo's existing session home.
 Use `nanh config mimo` to copy the saved credential and model catalog for direct
 launches with `mimo`. Native configuration supports `--status`, `--refresh`, and
 `--remove`, and respects `MIMOCODE_HOME` and the XDG configuration/data paths.
+
+`nanh zcode` (aliases `nanh zai` and `nanh zai-code`) uses ZCode's native
+terminal interface and session history. If the command is missing, nanh offers
+to build the verified official source revision with Git, Node.js 24.14 or later,
+and pnpm 10.33.2. It installs an independent `zcode` command in `~/.local/bin`
+(on Windows, `%USERPROFILE%\.local\bin\zcode.cmd`); no CLI is embedded in nanh.
+The build adds a small entrypoint binding to ZCode's public configuration API
+so managed search settings remain private to each launch. Ordinary `zcode`
+invocations retain the upstream startup behavior. Add the installation directory
+to `PATH` to use that command directly; nanh also discovers it without a PATH change.
+
+Use `nanh config zcode` for native setup, with the usual `--status`, `--refresh`,
+and `--remove` lifecycle. It preserves unrelated providers and settings and
+respects `ZCODE_PERSONAL_PROVIDER_CONFIG_FILE` and `ZCODE_DATA_BASE_DIR`.
+Managed launches require the local chat gateway because ZCode needs an inline
+credential in its provider file; nanh writes a launch token there instead of
+the real NaN key. An independently built, unadapted CLI can run through nanh
+with `--no-search`. A native compaction override through `--context` is not
+supported in this version.
 
 Harnesses that use OpenAI Chat Completions use an authenticated local gateway by
 default. This enables features such as reporting token usage when a session ends.

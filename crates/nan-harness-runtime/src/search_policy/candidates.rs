@@ -22,6 +22,14 @@ pub(super) fn add_harness_candidates(
         HarnessKind::Codex => add_codex_candidates(home, paths),
         HarnessKind::OpenCode => add_opencode_candidates(home, working, paths),
         HarnessKind::MimoCode => add_mimo_candidates(home, working, paths),
+        HarnessKind::ZCode => {
+            paths.insert(home.join(".zcode/cli/config.json"));
+            paths.extend(
+                working
+                    .ancestors()
+                    .map(|directory| directory.join(".zcode/config.json")),
+            );
+        }
         HarnessKind::Hermes => add_hermes_candidates(home, paths),
         HarnessKind::Pi => add_pi_candidates(home, working, paths),
         HarnessKind::Omp => add_omp_candidates(home, working, paths),

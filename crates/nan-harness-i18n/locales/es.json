@@ -1329,5 +1329,12 @@
   "zed_desktop_warning_could_not_save_the_last_zed_model": "aviso: no se ha podido guardar el último modelo de Zed: {error}",
   "zed_desktop_warning_this_zed_version_is_older_than_the_supported_version": "aviso: esta versión de Zed es anterior a la versión compatible",
   "zed_desktop_warning_zed_compatibility_on_this_platform_is_contract_tested_not_live_veri": "aviso: la compatibilidad de Zed en esta plataforma se ha comprobado mediante pruebas de contrato, sin verificación en vivo",
-  "zed_desktop_zed_settings_restored": "Se ha restaurado la configuración de Zed."
+  "zed_desktop_zed_settings_restored": "Se ha restaurado la configuración de Zed.",
+  "help_run_zcode_through_nan_chat_completions": "Ejecutar ZCode a través de Chat Completions de NaN",
+  "install_source_dependency": "ZCode necesita {value_1}. Instala Git desde https://git-scm.com/downloads y pnpm con 'npm install --global pnpm@10.33.2'. Después, vuelve a ejecutar 'nanh zcode'.",
+  "install_source_offer": "No se ha encontrado ZCode. Compila el CLI verificado desde las fuentes oficiales con la adaptación de configuración privada de nanh.",
+  "install_source_commands": "Compilación desde fuentes: {value_1}",
+  "installer_building_source": "Compilando ZCode desde las fuentes oficiales...",
+  "detail_zcode_private_configuration_required": "Esta instalación de ZCode no permite una configuración privada por ejecución. Usa la instalación desde fuentes que ofrece nanh o ejecuta con --no-search.",
+  "detail_zcode_requires_chat_gateway": "ZCode necesita la pasarela local para mantener la credencial de NaN fuera de sus archivos de ejecución. Quita --no-chat-gateway."
 }

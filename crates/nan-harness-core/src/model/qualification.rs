@@ -34,6 +34,8 @@ pub struct QualificationMatrix {
     pub opencode: ModelQualification,
     #[serde(rename = "mimo-code", default = "unknown_direct_qualification")]
     pub mimo_code: ModelQualification,
+    #[serde(default = "unknown_direct_qualification")]
+    pub zcode: ModelQualification,
     pub hermes: ModelQualification,
     pub pi: ModelQualification,
     pub omp: ModelQualification,
@@ -61,6 +63,7 @@ impl QualificationMatrix {
             HarnessKind::Codex => &self.codex,
             HarnessKind::OpenCode => &self.opencode,
             HarnessKind::MimoCode => &self.mimo_code,
+            HarnessKind::ZCode => &self.zcode,
             HarnessKind::Hermes => &self.hermes,
             HarnessKind::Pi => &self.pi,
             HarnessKind::Omp => &self.omp,

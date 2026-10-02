@@ -1329,5 +1329,12 @@
   "zed_desktop_warning_could_not_save_the_last_zed_model": "warning: could not save the last Zed model: {error}",
   "zed_desktop_warning_this_zed_version_is_older_than_the_supported_version": "warning: this Zed version is older than the supported version",
   "zed_desktop_warning_zed_compatibility_on_this_platform_is_contract_tested_not_live_veri": "warning: Zed compatibility on this platform is contract-tested, not live-verified",
-  "zed_desktop_zed_settings_restored": "Zed settings restored."
+  "zed_desktop_zed_settings_restored": "Zed settings restored.",
+  "help_run_zcode_through_nan_chat_completions": "Run ZCode through NaN Chat Completions",
+  "install_source_dependency": "ZCode requires {value_1}. Install Git from https://git-scm.com/downloads and pnpm with 'npm install --global pnpm@10.33.2', then retry 'nanh zcode'.",
+  "install_source_offer": "ZCode was not found. Build the verified CLI from official sources with the nanh private-configuration binding.",
+  "install_source_commands": "Source build: {value_1}",
+  "installer_building_source": "Building ZCode from official sources...",
+  "detail_zcode_private_configuration_required": "This ZCode installation does not support private launch configuration. Use the source installation offered by nanh, or run with --no-search.",
+  "detail_zcode_requires_chat_gateway": "ZCode requires the local chat gateway to keep the NaN credential out of its launch files. Remove --no-chat-gateway."
 }

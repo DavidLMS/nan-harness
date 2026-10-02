@@ -49,6 +49,7 @@ pub(super) fn telemetry_operation(cli: &Cli) -> OperationContext {
         }
         Command::OpenCode(arguments)
         | Command::Mimo(arguments)
+        | Command::ZCode(arguments)
         | Command::Hermes(arguments)
         | Command::Pi(arguments)
         | Command::Omp(arguments)
@@ -96,6 +97,7 @@ pub(super) const fn telemetry_transport(cli: &Cli) -> Option<TelemetryTransport>
         Command::Codex(_) | Command::ChatGptDesktop(_) => Some(TelemetryTransport::ResponsesBridge),
         Command::OpenCode(_)
         | Command::Mimo(_)
+        | Command::ZCode(_)
         | Command::Hermes(_)
         | Command::HermesDesktop(_)
         | Command::PenDesktop(_)

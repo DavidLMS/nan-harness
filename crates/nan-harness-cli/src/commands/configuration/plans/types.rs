@@ -47,6 +47,7 @@ pub(crate) struct JsonPlan {
 #[derive(Debug, Clone)]
 pub(crate) struct JsonEntryPlan {
     pub(crate) path: Vec<String>,
+    pub(crate) selector: Option<std::collections::BTreeMap<String, String>>,
     pub(crate) value: super::super::Value,
     pub(crate) mode: JsonEntryMode,
 }
@@ -56,6 +57,7 @@ pub(crate) enum JsonEntryMode {
     Exclusive,
     Override,
     AppendUnique,
+    EnsureArray,
 }
 
 #[derive(Debug, Clone)]

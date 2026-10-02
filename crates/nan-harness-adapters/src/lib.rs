@@ -17,6 +17,7 @@ mod opencode;
 mod pi;
 mod qwen_code;
 mod search;
+mod zcode;
 
 pub use aider::AiderAdapter;
 pub use claude_code::ClaudeCodeAdapter;
@@ -38,3 +39,4 @@ pub use openclaw::{OpenClawAdapter, render_openclaw_media_plugin, render_opencla
 pub use opencode::OpenCodeAdapter;
 pub use pi::{PiAdapter, PiSearchMode, PrimeAgentAdapter, render_pi_search_extension};
 pub use qwen_code::QwenCodeAdapter;
+pub use zcode::ZCodeAdapter;

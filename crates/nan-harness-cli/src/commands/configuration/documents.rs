@@ -1,6 +1,8 @@
 use super::*;
 
+mod array;
 mod common;
+use array::{get_json_entry, restore_json_entry, set_json_entry};
 mod coordinator;
 mod exact;
 mod json;

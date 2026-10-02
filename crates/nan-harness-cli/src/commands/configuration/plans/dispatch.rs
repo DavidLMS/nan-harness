@@ -43,6 +43,7 @@ pub(crate) fn for_harness_with_media(
             )],
         })],
         HarnessKind::MimoCode => mimo_plans(paths, request)?,
+        HarnessKind::ZCode => super::zcode::zcode_plans(paths, request)?,
         HarnessKind::Pi => pi_family_plans(
             &paths.home_directory.join(".pi/agent"),
             api_key,

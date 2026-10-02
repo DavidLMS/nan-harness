@@ -8,6 +8,8 @@ on:
       - canary/research/zcode/*.py
       - canary/research/zcode/*.mjs
       - .github/workflows/zcode-feasibility.yml
+      - crates/**
+      - tests/conformance/zcode/**
 
 permissions:
   contents: read
@@ -21,9 +23,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: [ubuntu-24.04-arm, windows-latest]
+        runner: [ubuntu-24.04-arm, windows-latest, macos-14]
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
+    timeout-minutes: 50
     defaults:
       run:
         shell: bash
@@ -68,3 +70,9 @@ jobs:
         run: |
           python canary/research/zcode/runtime_probe.py --source "$ZCODE_SOURCE_ROOT" --node "$(node -p 'process.execPath')" --case sessions
           python canary/research/zcode/runtime_probe.py --source "$ZCODE_SOURCE_ROOT" --node "$(node -p 'process.execPath')" --case tui
+      - name: Build nanh and verify the automatic source installer and integrations
+        run: |
+          cargo build --locked --all-features
+          suffix=""
+          if [ "$RUNNER_OS" = Windows ]; then suffix=.exe; fi
+          python canary/research/zcode/integration_probe.py --binary "target/debug/nanh${suffix}"

@@ -99,11 +99,16 @@ Rechecked on 2026-10-02 before starting command implementation:
   no first-party PowerShell installer or Windows command shim was found.
 
 The confirmed official route for the tested standalone agent is therefore a
-source build. Windows runtime support has passed the hosted probes, but that
-does not establish official Windows CLI installation. Integrating a manually
-installed source build is a different scope from automatic installation of a
-released CLI package. Do not substitute desktop installers, npm namesakes or
-third-party repackaging for an official CLI release.
+source build. The user authorized automatic installation from that official
+source, including Windows, rather than bundling a CLI or waiting for a binary
+release. nanh installs the pinned revision independently and adds a checked
+entrypoint binding to the upstream `run` API's `projectConfigPath`; this enables
+private, per-launch MCP configuration while preserving ordinary startup. The
+headless app also forwards that public option; upstream currently forwards it
+only in its TUI app creation. Both source anchors are checked before building.
+This is a nanh-managed source build, not an upstream Windows binary installer.
+Do not substitute desktop installers, npm namesakes or third-party repackaging
+for the official source.
 
 1. **Provider configuration:** use
    `ZCODE_PERSONAL_PROVIDER_CONFIG_FILE` to point at a schema-version-1 file.
@@ -235,3 +240,41 @@ version commands and runs real native tools through the installed wrapper.
 It does not install into the user's home. Automatic download and Windows CLI
 installation remain unverified external contracts; `nanh zcode` and
 `nanh config zcode` still require implementation and their own lifecycle gate.
+
+## Production integration and remaining matrix dimensions
+
+The `feat/zai-code` implementation provides managed `nanh zcode` launches
+(`zai` and `zai-code` aliases), native `nanh config zcode` lifecycle commands,
+and an independent source installer pinned to the revision above. The installer
+requires Git, Node.js 24.14 or later and pnpm 10.33.2, and publishes a Unix
+launcher or a Windows `.cmd` command only after verifying the agent version and
+configuration binding. Failed builds remain temporary; reinstalls verify the
+owned receipt and preserve unrelated commands and user configuration.
+
+Managed provider files contain a gateway session token, complete shared model
+capabilities and only the current NaN catalog. Their empty built-in release has
+schema version 1 and revision 0. The bundled-config environment override is
+removed so upstream remote built-in refresh cannot reintroduce another provider.
+Native configuration retains foreign providers and individual array members;
+required empty rule containers do not take ownership of later user additions.
+
+The repeatable production probe is:
+
+```sh
+python3 canary/research/zcode/integration_probe.py --binary target/debug/nanh
+```
+
+It installs from a fresh home through the actual terminal prompt, then checks
+managed Write/Read/Edit/Agent behavior, private search MCP execution, native
+configure/status/refresh/key rotation/remove and standalone command execution.
+The `ZCode feasibility` workflow runs it on Linux ARM64, macOS ARM64 and Windows
+x64. All provider payloads and credentials in these probes are synthetic.
+
+This first implementation does not yet claim live NaN account qualification or
+integration into the shared release publication matrix. A latest-source daily
+canary is proposed after the hosted production matrix passes: resolve the
+upstream main commit and agent package version together, build that exact commit
+with its declared Node/pnpm versions, and run the same protocol, session, TUI,
+managed/native and search probes. Report source contract drift independently of
+provider regressions; never substitute the desktop product version for the
+agent CLI version or silently change the installation pin.

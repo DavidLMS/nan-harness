@@ -66,9 +66,10 @@ const DEFAULT_MODEL_ID: &str = "qwen3.6";
 const SEARCH_MCP_ID: &str = "nan-search";
 const PI_SEARCH_EXTENSION_FILE: &str = "extensions/nan-search.js";
 const OMP_SEARCH_EXTENSION_FILE: &str = "extensions/nan-search.mjs";
-const SUPPORTED_HARNESSES: [HarnessKind; 13] = [
+const SUPPORTED_HARNESSES: [HarnessKind; 14] = [
     HarnessKind::OpenCode,
     HarnessKind::MimoCode,
+    HarnessKind::ZCode,
     HarnessKind::Hermes,
     HarnessKind::Pi,
     HarnessKind::Omp,

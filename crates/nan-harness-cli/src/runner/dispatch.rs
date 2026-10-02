@@ -107,6 +107,7 @@ pub(super) async fn dispatch(
         | Command::Codex(_)
         | Command::OpenCode(_)
         | Command::Mimo(_)
+        | Command::ZCode(_)
         | Command::Hermes(_)
         | Command::HermesDesktop(_)
         | Command::PenDesktop(_)

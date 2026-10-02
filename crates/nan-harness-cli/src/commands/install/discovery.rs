@@ -5,7 +5,11 @@ use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 
 pub(crate) fn executable_from_known_locations(kind: HarnessKind) -> Option<PathBuf> {
-    let home = env::var_os("HOME").or_else(|| env::var_os("USERPROFILE"))?;
+    let home = if kind == HarnessKind::ZCode && cfg!(windows) {
+        env::var_os("USERPROFILE")
+    } else {
+        env::var_os("HOME").or_else(|| env::var_os("USERPROFILE"))
+    }?;
     find_executable(kind, &PathBuf::from(home))
 }
 
@@ -38,7 +42,8 @@ fn executable_candidates_for_platform(
     local_app_data: Option<&Path>,
 ) -> Vec<PathBuf> {
     let mut directories = match kind {
-        HarnessKind::ClaudeCode
+        HarnessKind::ZCode
+        | HarnessKind::ClaudeCode
         | HarnessKind::Hermes
         | HarnessKind::Aider
         | HarnessKind::Goose

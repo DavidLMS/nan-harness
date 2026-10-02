@@ -5,6 +5,7 @@ mod installer;
 mod output;
 mod post_install;
 mod runtime;
+mod source;
 
 pub(crate) use catalog::install_spec;
 pub(crate) use discovery::executable_from_known_locations;
@@ -35,19 +36,28 @@ pub(crate) fn offer_install(kind: HarnessKind) -> Result<InstallDecision, Instal
     writeln!(
         output,
         "{}",
-        nan_harness_i18n::messages::install_was_not_found_install_the_latest_official_release_now(
+        if kind == HarnessKind::ZCode {
+            nan_harness_i18n::messages::install_source_offer(nan_harness_i18n::locale())
+        } else { nan_harness_i18n::messages::install_was_not_found_install_the_latest_official_release_now(
             nan_harness_i18n::locale(),
             &(spec.display_name())
-        )
+        ) }
     )
     .map_err(InstallError::Prompt)?;
     writeln!(
         output,
         "{}",
-        nan_harness_i18n::messages::install_official_installer(
-            nan_harness_i18n::locale(),
-            &(official_install_command(spec)?)
-        )
+        if kind == HarnessKind::ZCode {
+            nan_harness_i18n::messages::install_source_commands(
+                nan_harness_i18n::locale(),
+                &official_install_command(spec)?,
+            )
+        } else {
+            nan_harness_i18n::messages::install_official_installer(
+                nan_harness_i18n::locale(),
+                &(official_install_command(spec)?),
+            )
+        }
     )
     .map_err(InstallError::Prompt)?;
     write!(

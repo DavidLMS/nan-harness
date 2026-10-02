@@ -9,7 +9,7 @@ use nan_harness_core::launch_plan::{
     PI_MODEL_CATALOG_PLACEHOLDER, QWEN_CODE_MODEL_CATALOG_PLACEHOLDER,
     SELECTED_MODEL_CAPABILITIES_PLACEHOLDER, SELECTED_MODEL_CONTEXT_WINDOW_PLACEHOLDER,
     SELECTED_MODEL_DISPLAY_NAME_PLACEHOLDER, SELECTED_MODEL_MAX_OUTPUT_TOKENS_PLACEHOLDER,
-    SELECTED_MODEL_REASONING_EFFORT_PLACEHOLDER,
+    SELECTED_MODEL_REASONING_EFFORT_PLACEHOLDER, ZCODE_PROVIDER_CONFIG_PLACEHOLDER,
 };
 use nan_harness_i18n::DiagnosticText;
 use nan_harness_i18n::messages as detail_messages;
@@ -18,6 +18,8 @@ mod claude;
 mod json;
 mod model;
 mod structured;
+mod zcode;
+pub use zcode::zcode_provider_config;
 
 pub(super) use claude::{claude_model_picker, render_claude_model_presentations};
 pub use json::opencode_model_catalog;
@@ -41,6 +43,7 @@ pub(super) fn contains_model_catalog_placeholder(value: &str) -> bool {
         GOOSE_MODEL_CATALOG_PLACEHOLDER,
         HERMES_MODEL_CATALOG_PLACEHOLDER,
         OPENCODE_MODEL_CATALOG_PLACEHOLDER,
+        ZCODE_PROVIDER_CONFIG_PLACEHOLDER,
         OPENCLAW_MODEL_ALIASES_PLACEHOLDER,
         OPENCLAW_MODEL_CATALOG_PLACEHOLDER,
         PI_MODEL_CATALOG_PLACEHOLDER,
@@ -75,6 +78,19 @@ pub(super) fn render_model_catalogs(
     let models = unique_models(models);
     let mut rendered = template.to_owned();
     render_selected_model(&mut rendered, selected_model_id, &models)?;
+    let mut zcode_config = zcode_provider_config(
+        &models,
+        provider_base_url,
+        "{secret-json:nan_api_key}",
+        selected_model_id,
+    );
+    zcode_config["config"]["defaultModelSelection"]["options"]["reasoningLevel"] =
+        serde_json::json!(nan_harness_core::launch_plan::ZCODE_REASONING_LEVEL_PLACEHOLDER);
+    replace_json_placeholder(
+        &mut rendered,
+        ZCODE_PROVIDER_CONFIG_PLACEHOLDER,
+        &zcode_config,
+    )?;
     replace_json_placeholder(
         &mut rendered,
         AIDER_MODEL_METADATA_PLACEHOLDER,
@@ -148,7 +164,7 @@ mod tests {
         aider_model_metadata, aider_model_settings, claude_model_picker, cline_model_catalog,
         deepseek_model_catalog, goose_model_catalog, hermes_model_catalog, kimi_code_model_catalog,
         openclaw_model_aliases, openclaw_model_catalog, opencode_model_catalog, pi_model_catalog,
-        qwen_code_model_catalog, render_model_catalogs, unique_models,
+        qwen_code_model_catalog, render_model_catalogs, unique_models, zcode_provider_config,
     };
     use nan_harness_core::coding_model_profile;
     use nan_harness_core::launch_plan::{
@@ -158,7 +174,7 @@ mod tests {
         HERMES_MODEL_CATALOG_PLACEHOLDER, KIMI_CODE_MODEL_CATALOG_PLACEHOLDER,
         OPENCLAW_MODEL_ALIASES_PLACEHOLDER, OPENCLAW_MODEL_CATALOG_PLACEHOLDER,
         OPENCODE_MODEL_CATALOG_PLACEHOLDER, PI_MODEL_CATALOG_PLACEHOLDER,
-        QWEN_CODE_MODEL_CATALOG_PLACEHOLDER,
+        QWEN_CODE_MODEL_CATALOG_PLACEHOLDER, ZCODE_PROVIDER_CONFIG_PLACEHOLDER,
     };
 
     #[test]
@@ -195,6 +211,18 @@ mod tests {
                 OPENCODE_MODEL_CATALOG_PLACEHOLDER,
                 opencode_model_catalog(&unique),
             ),
+            (ZCODE_PROVIDER_CONFIG_PLACEHOLDER, {
+                let mut config = zcode_provider_config(
+                    &unique,
+                    provider_base_url,
+                    "{secret-json:nan_api_key}",
+                    selected_model_id,
+                );
+                config["config"]["defaultModelSelection"]["options"]["reasoningLevel"] = serde_json::json!(
+                    nan_harness_core::launch_plan::ZCODE_REASONING_LEVEL_PLACEHOLDER
+                );
+                config
+            }),
             (
                 OPENCLAW_MODEL_ALIASES_PLACEHOLDER,
                 openclaw_model_aliases(&unique),

@@ -246,6 +246,10 @@ pub fn embedded_manifest_sources() -> &'static [(HarnessKind, &'static str)] {
             include_str!("../../../tests/conformance/opencode/manifest.toml"),
         ),
         (
+            HarnessKind::ZCode,
+            include_str!("../../../tests/conformance/zcode/manifest.toml"),
+        ),
+        (
             HarnessKind::MimoCode,
             include_str!("../../../tests/conformance/mimo-code/manifest.toml"),
         ),

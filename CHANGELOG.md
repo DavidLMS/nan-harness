@@ -7,6 +7,16 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Launch ZCode through NaN with `nanh zcode` (aliases `zai` and `zai-code`),
+  private provider routing, live model discovery, native tools and managed search.
+- Offer an independent ZCode installation from verified official sources on
+  Linux, macOS and Windows, with dependency checks and a private configuration
+  entrypoint binding.
+- Configure ZCode for direct use with `nanh config zcode`, including reversible
+  defaults, provider preservation, credential rotation and model catalog refresh.
+
 ## [0.1.13] - 2026-10-01
 
 ### Added

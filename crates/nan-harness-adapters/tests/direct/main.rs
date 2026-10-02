@@ -13,3 +13,4 @@ mod pi;
 mod qwen_code;
 mod routing;
 mod support;
+mod zcode;

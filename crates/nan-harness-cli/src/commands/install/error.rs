@@ -5,6 +5,8 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub(crate) enum InstallError {
+    #[error("ZCode requires {program}; install Git and pnpm 10.33.2, then retry 'nanh zcode'")]
+    SourcePrerequisite { program: &'static str },
     #[error("could not prompt for installation: {0}")]
     Prompt(io::Error),
     #[error("{0} does not have an official installer for this platform")]
@@ -145,7 +147,8 @@ impl InstallError {
         self.missing_npm().is_some()
             || matches!(
                 self,
-                Self::RuntimeCommandStart { .. }
+                Self::SourcePrerequisite { .. }
+                    | Self::RuntimeCommandStart { .. }
                     | Self::RuntimeCommandFailed { .. }
                     | Self::RuntimeUnsupported { .. }
                     | Self::RuntimeUnparseable { .. }
@@ -175,6 +178,7 @@ impl nan_harness_i18n::TerminalMessage for InstallError {
             return self.to_string();
         }
         match self {
+            Self::SourcePrerequisite { program } => m::install_source_dependency(locale, program),
             Self::Prompt(field_0) => m::error_install_prompt(locale, &(field_0)),
             Self::UnsupportedPlatform(field_0) => {
                 m::error_install_unsupported_platform(locale, &(field_0))

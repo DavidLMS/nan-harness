@@ -56,6 +56,7 @@ const REGISTRY: [HarnessRegistration; HarnessKind::ALL.len()] = [
     registration(HarnessKind::ALL[13]),
     registration(HarnessKind::ALL[14]),
     registration(HarnessKind::ALL[15]),
+    registration(HarnessKind::ALL[16]),
 ];
 
 #[must_use]

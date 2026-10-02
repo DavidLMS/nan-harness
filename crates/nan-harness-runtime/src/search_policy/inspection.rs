@@ -111,6 +111,14 @@ fn inspect_value_at(
         if matches!(normalized.as_str(), "mcp" | "mcpservers" | "mcpserver")
             && let Value::Object(servers) = value
         {
+            let servers = if normalized == "mcp" {
+                servers
+                    .get("servers")
+                    .and_then(Value::as_object)
+                    .unwrap_or(servers)
+            } else {
+                servers
+            };
             detected = detected.combine(inspect_mcp_servers(servers, path));
             if yaml_components {
                 // MCP entries own their enabled state; do not rediscover disabled

@@ -316,7 +316,7 @@ pub(crate) fn fake_claude_with_version(
     let executable = directory.join("claude");
     std::fs::write(
         &executable,
-        format!("#!/bin/sh\nprintf '%s\\n' '{version}'\n"),
+        format!("#!/bin/sh\nif [ \"${{1-}}\" = \"--nanh-source-info\" ]; then printf 'nanh-zcode-config-v1\\n'; else printf '%s\\n' '{version}'; fi\n"),
     )
     .expect("fake executable should be written");
     std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700))
@@ -331,7 +331,7 @@ pub(crate) fn fake_harness(directory: &std::path::Path, version: &str) -> std::p
     let executable = directory.join("fake-harness");
     std::fs::write(
         &executable,
-        format!("#!/bin/sh\nprintf '%s\\n' '{version}'\n"),
+        format!("#!/bin/sh\nif [ \"${{1-}}\" = \"--nanh-source-info\" ]; then printf 'nanh-zcode-config-v1\\n'; else printf '%s\\n' '{version}'; fi\n"),
     )
     .expect("fake executable should be written");
     std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700))

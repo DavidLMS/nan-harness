@@ -5,11 +5,12 @@ use nan_harness_core::model::{
 use serde_json::Value;
 use std::collections::BTreeSet;
 
-const WIRE_FIELDS: [&str; 16] = [
+const WIRE_FIELDS: [&str; 17] = [
     "claude-code",
     "codex",
     "opencode",
     "mimo-code",
+    "zcode",
     "hermes",
     "pi",
     "omp",
@@ -31,7 +32,7 @@ type ExpectedQualification = (
     &'static str,
 );
 
-const EXPECTED_QUALIFICATIONS: [ExpectedQualification; 16] = [
+const EXPECTED_QUALIFICATIONS: [ExpectedQualification; 17] = [
     (
         HarnessKind::ClaudeCode,
         QualificationStatus::Qualified,
@@ -55,6 +56,12 @@ const EXPECTED_QUALIFICATIONS: [ExpectedQualification; 16] = [
         QualificationStatus::Unknown,
         QualificationTransport::DirectChat,
         "2026-10-01/mimo-code",
+    ),
+    (
+        HarnessKind::ZCode,
+        QualificationStatus::Unknown,
+        QualificationTransport::DirectChat,
+        "2026-10-02/zcode",
     ),
     (
         HarnessKind::Hermes,
@@ -163,6 +170,7 @@ fn distinct_matrix() -> QualificationMatrix {
         codex,
         opencode,
         mimo_code,
+        zcode,
         hermes,
         pi,
         omp,
@@ -182,6 +190,7 @@ fn distinct_matrix() -> QualificationMatrix {
         codex,
         opencode,
         mimo_code,
+        zcode,
         hermes,
         pi,
         omp,

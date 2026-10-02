@@ -24,6 +24,7 @@ pub(super) const FX_INSTALL_URL: &str = "https://fx.sh/setup.sh";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum InstallMethod {
+    SourceBuild,
     ShellScript {
         url: &'static str,
         interpreter: &'static str,
@@ -88,6 +89,13 @@ const INSTALL_SPECS: &[InstallSpec] = &[
             "npm",
             &["install", "--global", "@mimo-ai/cli@latest"],
         )),
+    },
+    InstallSpec {
+        kind: HarnessKind::ZCode,
+        display_name: "ZCode",
+        official_url: "https://github.com/zai-org/ZCode",
+        unix: InstallMethod::SourceBuild,
+        windows: Some(InstallMethod::SourceBuild),
     },
     InstallSpec {
         kind: HarnessKind::Hermes,
@@ -283,6 +291,7 @@ impl InstallSpec {
 
 pub(super) fn official_install_command(spec: &InstallSpec) -> Result<String, InstallError> {
     Ok(match spec.method()? {
+        InstallMethod::SourceBuild => super::source::build_description(),
         InstallMethod::ShellScript {
             url,
             interpreter,

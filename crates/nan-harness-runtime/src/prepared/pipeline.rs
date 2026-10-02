@@ -4,7 +4,9 @@ use nan_harness_core::launch_plan::{
     CODEX_MODEL_CATALOG_PLACEHOLDER, MEDIA_PROVIDER_BASE_URL_PLACEHOLDER,
     PROVIDER_BASE_URL_PLACEHOLDER,
 };
-use nan_harness_core::{CodingModelProfile, LaunchPlan, SecretRef, SecretStore};
+use nan_harness_core::{
+    CodingModelProfile, LaunchPlan, ReasoningSelection, SecretRef, SecretStore,
+};
 use std::collections::BTreeMap;
 
 use super::{BridgePreparation, PreparedError, PreparedLaunch, catalogs, values};
@@ -21,16 +23,7 @@ pub(super) fn prepare(
         .as_ref()
         .and_then(|values| values.client_base_url.as_deref())
         .unwrap_or(provider_base_url);
-    let selected_reasoning_effort = model_catalog
-        .map(|models| {
-            catalogs::selected_model_reasoning_effort(
-                &plan.model.resolved_id,
-                plan.model.reasoning_selection,
-                models,
-            )
-        })
-        .transpose()
-        .map_err(PreparedError::ModelCatalog)?;
+    let template_reasoning = TemplateReasoning::for_plan(plan, model_catalog)?;
     let runtime_values = values::RuntimeRenderValues {
         provider_base_url: client_base_url,
         media_provider_base_url: provider_base_url,
@@ -38,7 +31,7 @@ pub(super) fn prepare(
         bridge_chat_url: bridge
             .as_ref()
             .and_then(|values| values.chat_url.as_deref()),
-        selected_reasoning_effort: selected_reasoning_effort.as_deref(),
+        selected_reasoning_effort: template_reasoning.effort.as_deref(),
         web_search_enabled: bridge
             .as_ref()
             .is_some_and(|values| values.web_search_enabled),
@@ -54,7 +47,7 @@ pub(super) fn prepare(
                 client_base_url,
                 provider_base_url,
                 &plan.model.resolved_id,
-                selected_reasoning_effort.as_deref(),
+                &template_reasoning,
                 bridge.as_ref(),
                 model_catalog,
             )
@@ -119,12 +112,48 @@ pub(super) fn prepare(
     })
 }
 
+struct TemplateReasoning {
+    effort: Option<String>,
+    zcode_level: &'static str,
+}
+
+impl TemplateReasoning {
+    fn for_plan(
+        plan: &LaunchPlan,
+        models: Option<&[CodingModelProfile]>,
+    ) -> Result<Self, PreparedError> {
+        let effort = models
+            .map(|models| {
+                catalogs::selected_model_reasoning_effort(
+                    &plan.model.resolved_id,
+                    plan.model.reasoning_selection,
+                    models,
+                )
+            })
+            .transpose()
+            .map_err(PreparedError::ModelCatalog)?;
+        Ok(Self {
+            effort,
+            zcode_level: zcode_reasoning_level(plan.model.reasoning_selection),
+        })
+    }
+}
+
+fn zcode_reasoning_level(selection: Option<ReasoningSelection>) -> &'static str {
+    match selection {
+        None | Some(ReasoningSelection::Auto) => "auto",
+        Some(ReasoningSelection::Toggle(false)) => "disabled",
+        Some(ReasoningSelection::Toggle(true)) => "enabled",
+        Some(ReasoningSelection::Effort(effort)) => catalogs::effort_name(effort),
+    }
+}
+
 fn render_template(
     template: &str,
     provider_base_url: &str,
     media_provider_base_url: &str,
     selected_model_id: &str,
-    selected_reasoning_effort: Option<&str>,
+    reasoning: &TemplateReasoning,
     bridge: Option<&BridgePreparation>,
     model_catalog: Option<&[CodingModelProfile]>,
 ) -> Result<String, nan_harness_i18n::DiagnosticText> {
@@ -140,7 +169,11 @@ fn render_template(
         selected_model_id,
         model_catalog,
     )?;
-    let rendered = catalogs::render_reasoning_effort(&rendered, selected_reasoning_effort)?;
+    let rendered = catalogs::render_reasoning_effort(&rendered, reasoning.effort.as_deref())?;
+    let rendered = rendered.replace(
+        nan_harness_core::launch_plan::ZCODE_REASONING_LEVEL_PLACEHOLDER,
+        reasoning.zcode_level,
+    );
     let rendered = if let Some(bridge) = bridge {
         let rendered = rendered.replace(BRIDGE_BASE_URL_PLACEHOLDER, &bridge.base_url);
         let available_models =
@@ -178,7 +211,8 @@ fn render_secret_placeholders(
 ) -> Result<String, nan_harness_i18n::DiagnosticText> {
     for reference in secret_references {
         let placeholder = format!("{{secret:{}}}", reference.as_str());
-        if !rendered.contains(&placeholder) {
+        let json_placeholder = format!("\"{{secret-json:{}}}\"", reference.as_str());
+        if !rendered.contains(&placeholder) && !rendered.contains(&json_placeholder) {
             continue;
         }
         let value = if let Some(bridge) =
@@ -194,9 +228,19 @@ fn render_secret_placeholders(
                     )
                 })?
         };
-        rendered = rendered.replace(&placeholder, &value);
+        let json = serde_json::to_string(&value).map_err(|error| {
+            nan_harness_i18n::DiagnosticText::new(|locale| {
+                nan_harness_i18n::messages::detail_serialize_claude_model_ids_failed(
+                    locale,
+                    &(error),
+                )
+            })
+        })?;
+        rendered = rendered
+            .replace(&placeholder, &value)
+            .replace(&json_placeholder, &json);
     }
-    if rendered.contains("{secret:") {
+    if rendered.contains("{secret:") || rendered.contains("{secret-json:") {
         Err(nan_harness_i18n::DiagnosticText::new(
             nan_harness_i18n::messages::detail_content_contains_an_unresolved_runtime_placeholder,
         ))
@@ -244,7 +288,10 @@ mod tests {
             "https://api.nan.builders/v1",
             "https://api.nan.builders/v1",
             "qwen3.6",
-            None,
+            &super::TemplateReasoning {
+                effort: None,
+                zcode_level: "auto",
+            },
             None,
             None,
         )
@@ -257,13 +304,76 @@ mod tests {
     }
 
     #[test]
+    fn json_secret_placeholders_escape_credentials_without_changing_the_value() {
+        let reference = SecretRef::new("nan_api_key").unwrap();
+        let credential = "synthetic-\"key\\with\ncontrols";
+        let mut secrets = SecretStore::new();
+        secrets.insert(reference.clone(), SecretValue::new(credential).unwrap());
+        let rendered = super::render_secret_placeholders(
+            r#"{"apiKey":"{secret-json:nan_api_key}"}"#.to_owned(),
+            None,
+            &[&reference],
+            &secrets,
+        )
+        .unwrap();
+        let value: serde_json::Value = serde_json::from_str(&rendered).unwrap();
+        assert_eq!(value["apiKey"], credential);
+        assert!(
+            super::render_secret_placeholders(
+                "{secret-json:unknown}".to_owned(),
+                None,
+                &[&reference],
+                &secrets
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn zcode_requested_reasoning_is_preserved_without_serializing_an_automatic_default() {
+        use nan_harness_core::{CodingModelProfile, ReasoningEffort, ReasoningSelection};
+        let models = [CodingModelProfile::generic("synthetic")];
+        for (selection, level) in [
+            (None, "auto"),
+            (Some(ReasoningSelection::Toggle(false)), "disabled"),
+            (Some(ReasoningSelection::Toggle(true)), "enabled"),
+            (
+                Some(ReasoningSelection::Effort(ReasoningEffort::Low)),
+                "low",
+            ),
+        ] {
+            let rendered = render_template(
+                nan_harness_core::launch_plan::ZCODE_PROVIDER_CONFIG_PLACEHOLDER,
+                "http://127.0.0.1:1234/v1",
+                "https://nan.invalid/v1",
+                "synthetic",
+                &super::TemplateReasoning {
+                    effort: None,
+                    zcode_level: super::zcode_reasoning_level(selection),
+                },
+                None,
+                Some(&models),
+            )
+            .unwrap();
+            let config: serde_json::Value = serde_json::from_str(&rendered).unwrap();
+            assert_eq!(
+                config["config"]["defaultModelSelection"]["options"]["reasoningLevel"],
+                level
+            );
+        }
+    }
+
+    #[test]
     fn media_provider_placeholder_keeps_the_direct_endpoint_when_chat_uses_a_gateway() {
         let rendered = render_template(
             r#"{"chat":"{runtime:provider_base_url}","media":"{runtime:media_provider_base_url}"}"#,
             "http://127.0.0.1:3210/v1",
             "https://api.nan.builders/v1",
             "qwen3.6",
-            None,
+            &super::TemplateReasoning {
+                effort: None,
+                zcode_level: "auto",
+            },
             None,
             None,
         )

@@ -28,6 +28,8 @@ pub const GOOSE_MODEL_CATALOG_PLACEHOLDER: &str = "{runtime:goose_model_catalog}
 pub const GOOSE_ADDITIONAL_CONFIG_FILES_PLACEHOLDER: &str =
     "{runtime:goose_additional_config_files}";
 pub const HERMES_MODEL_CATALOG_PLACEHOLDER: &str = "{runtime:hermes_model_catalog}";
+pub const ZCODE_REASONING_LEVEL_PLACEHOLDER: &str = "{runtime:zcode_reasoning_level}";
+pub const ZCODE_PROVIDER_CONFIG_PLACEHOLDER: &str = "{runtime:zcode_provider_config}";
 pub const OPENCODE_MODEL_CATALOG_PLACEHOLDER: &str = "{runtime:opencode_model_catalog}";
 pub const OPENCLAW_MODEL_ALIASES_PLACEHOLDER: &str = "{runtime:openclaw_model_aliases}";
 pub const OPENCLAW_MODEL_CATALOG_PLACEHOLDER: &str = "{runtime:openclaw_model_catalog}";
@@ -196,7 +198,8 @@ impl ContextLimit {
                     effective_context_window,
                 ),
             },
-            HarnessKind::DeepSeekHarness
+            HarnessKind::ZCode
+            | HarnessKind::DeepSeekHarness
             | HarnessKind::OpenClaw
             | HarnessKind::Cline
             | HarnessKind::Fx => {

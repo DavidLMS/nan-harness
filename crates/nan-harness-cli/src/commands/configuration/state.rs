@@ -79,6 +79,12 @@ pub(crate) struct JsonReceipt {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct JsonEntryReceipt {
     pub(crate) path: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) selector: Option<BTreeMap<String, String>>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) created_array: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) container_only: bool,
     pub(crate) value_sha256: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) previous: Option<Value>,

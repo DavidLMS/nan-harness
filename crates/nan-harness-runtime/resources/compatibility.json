@@ -50,6 +50,19 @@
       "status": "verified"
     },
     {
+      "id": "zcode",
+      "command": "zcode version",
+      "runtime": {
+        "command": "node --version",
+        "minimumVersion": "24.14.0"
+      },
+      "lastCompatibleVersion": "0.16.9",
+      "compatibleAt": "2026-10-02T10:31:09Z",
+      "minimumVersion": "0.16.9",
+      "transport": "direct-chat",
+      "status": "verified"
+    },
+    {
       "id": "hermes",
       "command": "hermes --version",
       "lastCompatibleVersion": "0.21.0",
