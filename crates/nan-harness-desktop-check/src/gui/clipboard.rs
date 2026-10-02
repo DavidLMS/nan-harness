@@ -98,7 +98,9 @@ mod transport {
                     .map_err(|_| "read")?;
                 super::decode(&bytes).map_err(|_| "decode")
             });
-            let deadline = Instant::now() + Duration::from_secs(3);
+            // Hosted Windows exhausted three seconds even for an empty clear.
+            // Keep a single bounded attempt; other transports retain their budget.
+            let deadline = Instant::now() + Duration::from_secs(if cfg!(windows) { 15 } else { 3 });
             let mut wait_failed = false;
             let status = loop {
                 match child.try_wait() {

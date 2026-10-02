@@ -79,6 +79,13 @@ async function run() {
           projectName: Math.min(4096, [...document.querySelectorAll('input')].filter(visible)
             .filter(e => e.getAttribute('aria-label') === 'Project name' || e.placeholder === 'Project name').length),
         },
+        onboardingCounts: {
+          roleRadios: count('input[type="radio"][name="conversational-onboarding-inline-role"]'),
+          roleLegend: Math.min(4096, [...document.querySelectorAll('legend')].filter(visible)
+            .filter(e => e.textContent === 'Select the kind of work you do').length),
+          workHeading: Math.min(4096, headings.filter(e => e.textContent === 'What type of work do you do?').length),
+          suggestionsCheckbox: count('input[type="checkbox"][id="personalized-suggestions"]'),
+        },
         sendCount: named(/^(send|send message|submit)$/i), retryCount: named(/^(retry|try again)$/i),
         newThreadCount: named(/^(new chat|new thread|new conversation)$/i),
         loginCount: named(/^(log in|sign in|continue with google|continue with apple)$/i),

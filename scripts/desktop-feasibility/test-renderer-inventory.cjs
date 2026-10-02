@@ -5,12 +5,15 @@ const vm = require('node:vm');
 const source = fs.readFileSync(`${__dirname}/observe-renderer.cjs`, 'utf8');
 const start = source.indexOf('const counts = await page.evaluate(') + 'const counts = await page.evaluate('.length;
 const end = source.indexOf('}, app);', start) + 1;
-function trial(headings, app = 'pen-desktop', bodyText = '') {
+function trial(headings, app = 'pen-desktop', bodyText = '', roleCount = 0) {
   const nodes = headings.map(textContent => ({textContent, isConnected: true,
     getBoundingClientRect: () => ({width: 10, height: 10})}));
   const read = vm.runInNewContext(`(${source.slice(start, end)})`, {
     document: {readyState: 'complete', body: {innerText: bodyText},
-      querySelectorAll: selector => selector === 'h1' || selector === '*' ? nodes : []},
+      querySelectorAll: selector => selector === 'h1' || selector === '*' ? nodes
+        : selector === 'input[type="radio"][name="conversational-onboarding-inline-role"]'
+          ? Array.from({length: roleCount}, () => ({textContent: 'PRIVATE_ROLE', isConnected: true,
+              getBoundingClientRect: () => ({width: 1, height: 1})})) : []},
     location: {href: 'pen:synthetic', protocol: 'pen:'},
     getComputedStyle: () => ({visibility: 'visible'}),
   });
@@ -19,6 +22,8 @@ function trial(headings, app = 'pen-desktop', bodyText = '') {
   for (const heading of headings) assert(!output.includes(heading));
   if (bodyText) assert(!output.includes(bodyText));
   assert(!output.includes('synthetic'));
+  assert(!output.includes('PRIVATE_ROLE'));
+  assert.equal(facts.onboardingCounts.roleRadios, roleCount);
   return facts.startupScreen;
 }
 assert.equal(trial(['Hardware acceleration unavailable']), 'gpu-unavailable');
@@ -30,4 +35,5 @@ const connectionError = 'Something went wrong connecting to the Codex CLI. Try r
 assert.equal(trial([], 'chatgpt-desktop', connectionError), 'cli-connection-failed');
 assert.equal(trial([], 'chatgpt-desktop', 'PRIVATE_UNKNOWN_ERROR'), 'unmeasured');
 assert.equal(trial([], 'claude-desktop', connectionError), 'unmeasured');
+assert.equal(trial([], 'chatgpt-desktop', '', 11), 'unmeasured');
 console.log('Renderer inventory: closed startup headings passed');

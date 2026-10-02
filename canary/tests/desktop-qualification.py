@@ -720,8 +720,15 @@ class QualificationTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'pen-desktop')
             codex = {**value, 'app': 'chatgpt-desktop', 'startupScreen': 'cli-connection-failed'}
+            codex['onboardingCounts'] = dict(roleRadios=11, roleLegend=1, workHeading=0, suggestionsCheckbox=1)
             path.write_text(json.dumps(codex))
             self.assertEqual(q.semantic_observations(root, 'chatgpt-desktop'), [codex])
+            for counts in ({**codex['onboardingCounts'], 'label': 'PRIVATE'},
+                           {**codex['onboardingCounts'], 'roleRadios': True},
+                           {**codex['onboardingCounts'], 'roleLegend': 4097}):
+                path.write_text(json.dumps({**codex, 'onboardingCounts': counts}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'chatgpt-desktop')
 
 if __name__ == '__main__':
     unittest.main()

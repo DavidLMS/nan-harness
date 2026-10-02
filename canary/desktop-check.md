@@ -130,8 +130,8 @@ observations describe completed runs, rather than additional qualification:
 | --- | --- | --- | --- |
 | Zed | Response and file-tool steps pass; pointer and accessibility Retry acknowledgements do not produce provider recovery. | Three complete probes pass the expanded retry policy. | All three probes acquire stable owned windows; clipboard write and cleanup fail before submission. |
 | Hermes | Three complete probes pass with renderer process ownership. | Three complete probes pass with private native userData and bounded cold-start waits. | One complete probe passes all five stages and cleanup. Two others fail attachment or initial response; three-pass acceptance remains unmet. |
-| ChatGPT / Codex | Owned document loads; no composer is observed. | Renderer attaches, then endpoint ownership is lost. | Launcher ancestry is proved; application exits. |
-| Claude | Three uninstrumented windows acquired. Explicit native accessibility returns zero visible editors or login buttons. Official account-free gateway remains unqualified. | Instrumented child exits with code 1; uninstrumented startup has no eligible window. | Uninstrumented owned window is seen but stability and cleanup remain unqualified. |
+| ChatGPT / Codex | Owned document loads without a composer; latest longer startup fails cleanup. | Renderer observation remains intermittent; cleanup passes. | Three owned documents load with twelve visible inputs and no composer; cleanup passes. |
+| Claude | Three uninstrumented windows acquired. Explicit native accessibility returns zero visible editors or login buttons. Official account-free gateway remains unqualified. | Instrumented child exits with code 1; uninstrumented startup has no eligible window. | Stable owned window acquired; no editable controls observed and cleanup fails. |
 | Pen | Software GLES removes GPU startup failure; three fresh sessions show sign-in and no editor. No official account-free route found for the frozen release. | Two probes expose composer/Send; another exposes sign-in. Conversation adapter remains unimplemented. | Owned renderer loads sign-in and a dialog; conversation adapter remains unimplemented. |
 
 The completed evidence is available in runs
@@ -480,10 +480,29 @@ and global cleanup pass, but clipboard cleanup fails. The next transport uses an
 absolute validated PowerShell executable and hides its console. Failure-only
 `zed-clipboard-transport` diagnostics retain operation, closed failure stage and
 elapsed bucket, never clipboard content or subprocess errors. The three-second
-deadline and failure verdict remain unchanged pending native evidence.
+deadline and failure verdict were unchanged in that trial. Run
+[36992541877](https://github.com/DavidLMS/nan-harness/actions/runs/36992541877)
+then records `wait-timeout` at or above three seconds for all three writes and
+clears. The next Windows-only trial allows fifteen seconds for one process;
+macOS and Linux retain three seconds. No operation is replayed.
 
 Run [36990312437](https://github.com/DavidLMS/nan-harness/actions/runs/36990312437)
 confirms Hermes Windows cleanup passes and one probe completes all five steps.
 The other probes fail before attachment or after submitting the first prompt with
 zero provider generations. Owned renderer readiness alone does not prove backend
 readiness; input must not be replayed after submission.
+
+Run [36992549952](https://github.com/DavidLMS/nan-harness/actions/runs/36992549952)
+with the explicit Codex startup deadline acquires owned loaded documents in all
+three Windows probes. Each has twelve visible inputs and no composer; cleanup
+passes. macOS remains intermittent, while Linux stops on failed cleanup. The
+frozen official onboarding chunk provides exact role-radio, legend and optional
+suggestions-checkbox selectors; closed `onboardingCounts` measure their presence
+without retaining labels or choosing a role. A matching total input count alone
+does not authorize a setup action or establish authentication requirements.
+
+Claude Windows startup run
+[36992611042](https://github.com/DavidLMS/nan-harness/actions/runs/36992611042)
+now acquires a stable owned window, but observes zero editable, Retry or login
+controls and fails cleanup. Further diagnosis must establish native configuration
+path alignment and accessible web-content availability before a conversation test.
