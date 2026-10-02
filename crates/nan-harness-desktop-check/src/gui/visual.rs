@@ -271,6 +271,7 @@ impl Visual {
     pub(super) fn wait<P: Observation>(
         kind: DesktopHarnessKind,
         process: &mut P,
+        acquisition_deadline: Option<Instant>,
     ) -> Result<Self, AcquisitionFailure> {
         require_running(process).map_err(|reason| {
             acquisition_failure(reason, crate::diagnostics::GuiAcquisitionStage::ProcessLive)
@@ -285,7 +286,8 @@ impl Visual {
                 crate::diagnostics::GuiAcquisitionStage::NativeHelper,
             )
         })?;
-        let deadline = Instant::now() + Duration::from_secs(45);
+        let deadline =
+            acquisition_deadline.unwrap_or_else(|| Instant::now() + Duration::from_secs(45));
         let extended_settle =
             kind == DesktopHarnessKind::Claude && crate::native::claude_focus_policy();
         let mut settle = super::stability::InitialSettle::default();
@@ -368,6 +370,70 @@ impl Visual {
                     .flatten(),
                 ));
             }
+            std::thread::sleep(Duration::from_millis(200));
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(super) fn finish_initial_acquisition<P: Observation>(
+        &self,
+        process: &mut P,
+        deadline: Instant,
+    ) -> Result<(), AcquisitionFailure> {
+        let original = self.window.borrow().clone();
+        let owner = process.id().ok_or_else(|| {
+            acquisition_failure(
+                Reason::ApplicationExited,
+                crate::diagnostics::GuiAcquisitionStage::ProcessLive,
+            )
+        })?;
+        let failure = |reason| {
+            acquisition_failure(
+                reason,
+                crate::diagnostics::GuiAcquisitionStage::WindowStability,
+            )
+        };
+        let ownership = || {
+            super::process_ownership(original.pid, owner).map_err(|error| {
+                (
+                    Reason::IsolationUnavailable,
+                    crate::diagnostics::GuiAcquisitionStage::WindowOwnership,
+                    error.category(),
+                    None,
+                    None,
+                )
+            })
+        };
+        let mut settle = super::stability::InitialSettle::default();
+        let mut previous = None;
+        let mut stability = super::stability::Stability::default();
+        loop {
+            if Instant::now() >= deadline {
+                stability.save();
+                return Err(failure(Reason::DesktopUnavailable));
+            }
+            require_running(process).map_err(failure)?;
+            ownership()?;
+            let snapshot = self
+                .native
+                .windows_with_focus(original.pid)
+                .map_err(|error| failure(error.reason()))?;
+            let candidate = final_initial_candidate(&snapshot, &original)
+                .map_err(|error| failure(error.reason()))?;
+            ownership()?;
+            let now = Instant::now();
+            if now >= deadline {
+                stability.save();
+                return Err(failure(Reason::DesktopUnavailable));
+            }
+            stability.observe(Some(&candidate), previous.as_ref());
+            if settle.ready(true, now, previous.as_ref() == Some(&candidate), deadline) {
+                // This is the final initial binding, before GuiReady or any input.
+                *self.window.borrow_mut() = candidate;
+                stability.save();
+                return Ok(());
+            }
+            previous = Some(candidate);
             std::thread::sleep(Duration::from_millis(200));
         }
     }
@@ -1016,6 +1082,30 @@ fn require_running<P: Observation>(process: &mut P) -> Result<(), Reason> {
     }
 }
 
+#[cfg(any(test, target_os = "macos"))]
+fn final_initial_candidate(snapshot: &Snapshot, original: &Window) -> Result<Window, GuardFailure> {
+    let candidates =
+        eligible_windows(DesktopHarnessKind::Claude, &snapshot.windows).collect::<Vec<_>>();
+    if candidates.len() != 1 {
+        return Err(GuardFailure::IdentityMissing);
+    }
+    let current = candidates[0];
+    if current.id != original.id || current.pid != original.pid || current.name != original.name {
+        return Err(GuardFailure::IdentityMissing);
+    }
+    if snapshot
+        .focus_observation(current)
+        .is_none_or(|value| value.1 != Some(true))
+        || snapshot
+            .window_focus_observation(current)
+            .is_none_or(|value| value.1 != Some(true))
+    {
+        return Err(GuardFailure::ForegroundChanged);
+    }
+    snapshot.claude_focused_guard_failure(current)?;
+    Ok(current.clone())
+}
+
 fn scoped_composer_guard(snapshot: &Snapshot, window: &Window) -> Result<(), GuardFailure> {
     #[cfg(target_os = "macos")]
     if crate::native::claude_focus_policy() && matches_app(DesktopHarnessKind::Claude, &window.name)
@@ -1426,6 +1516,54 @@ mod tests {
         assert_eq!(result, Ok(()));
         assert_eq!(activations.get(), 1);
         assert_eq!(*events.borrow(), ["ownership", "activation", "guard"]);
+    }
+
+    #[test]
+    fn final_initial_binding_accepts_only_same_proved_target_before_input() {
+        let state = Snapshot::parse("FG 7 0\nDISPLAY 0 0 2000 2000\nWIN 99 7 1800 1800 10 10 436c61756465 3\nWIN 1 7 10 20 800 600 436c61756465 0\nFOCUS proved 1\nFOCUS_WINDOW proved 1\n").unwrap();
+        let original = state.windows[1].clone();
+        let mut resized = state.clone();
+        resized.windows[1].bounds.width += 20;
+        assert_eq!(
+            final_initial_candidate(&resized, &original)
+                .unwrap()
+                .bounds
+                .width,
+            820
+        );
+        // The established held-window guard still rejects that same change.
+        assert_eq!(
+            resized.claude_focused_guard_failure(&original),
+            Err(GuardFailure::BoundsChanged)
+        );
+        for change in 0..4 {
+            let mut invalid = resized.clone();
+            match change {
+                0 => invalid.windows[1].id = 2,
+                1 => invalid.windows[1].pid = 8,
+                2 => invalid.windows[1].name = "Other".into(),
+                _ => invalid.windows.push(original.clone()),
+            }
+            assert_eq!(
+                final_initial_candidate(&invalid, &original),
+                Err(GuardFailure::IdentityMissing)
+            );
+        }
+        let missing = Snapshot::parse(
+            "FG 7 0\nDISPLAY 0 0 2000 2000\nWIN 1 7 10 20 800 600 436c61756465 0\n",
+        )
+        .unwrap();
+        assert_eq!(
+            final_initial_candidate(&missing, &original),
+            Err(GuardFailure::ForegroundChanged)
+        );
+        let mut hidden = resized;
+        hidden.windows[0].bounds.x = original.bounds.x;
+        hidden.windows[0].bounds.y = original.bounds.y;
+        assert_eq!(
+            final_initial_candidate(&hidden, &original),
+            Err(GuardFailure::Occluded)
+        );
     }
 
     #[test]
@@ -2271,7 +2409,7 @@ mod tests {
         let mut process = command.spawn().unwrap();
         process.wait().await.unwrap();
         assert!(matches!(
-            Visual::wait(DesktopHarnessKind::Zed, &mut process),
+            Visual::wait(DesktopHarnessKind::Zed, &mut process, None),
             Err((
                 Reason::ApplicationExited,
                 crate::diagnostics::GuiAcquisitionStage::ProcessLive,

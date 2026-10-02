@@ -895,6 +895,22 @@ class QualificationTests(unittest.TestCase):
                     with self.assertRaises(ValueError):
                         q.semantic_observations(root, app)
 
+    def test_post_stop_process_observation_cannot_waive_cleanup_or_leak_identity(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / 'post-stop.json'
+            value = dict(schemaVersion=1, mechanism='windows-post-stop-process', diagnosticsOnly=True,
+                phase='first-accessibility-rejection', state='absent')
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [value])
+            with self.assertRaises(ValueError):
+                q.semantic_observations(root, 'chatgpt-desktop')
+            for changed in ({**value, 'pid': 'PRIVATE'}, {**value, 'state': 'PRIVATE'},
+                {**value, 'phase': 'PRIVATE'}, {**value, 'diagnosticsOnly': False}):
+                path.write_text(json.dumps(changed))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'claude-desktop')
+
     def test_zoom_raw_role_group_rejects_partial_inconsistent_and_private_values(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

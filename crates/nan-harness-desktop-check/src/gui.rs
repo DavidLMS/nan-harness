@@ -40,6 +40,22 @@ fn observe_startup_guard(
 }
 
 const WAIT: Duration = Duration::from_secs(10);
+fn attachment_budget(deadline: Option<Instant>) -> Result<Duration, visual::AcquisitionFailure> {
+    deadline.map_or(Ok(WAIT), |deadline| {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            Err((
+                Reason::DesktopUnavailable,
+                crate::diagnostics::GuiAcquisitionStage::WindowStability,
+                ComposerErrorCategory::Other,
+                None,
+                None,
+            ))
+        } else {
+            Ok(remaining.min(WAIT))
+        }
+    })
+}
 
 #[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
@@ -261,8 +277,25 @@ impl Gui {
         #[cfg(windows)]
         if kind == DesktopHarnessKind::Claude {
             let deadline = Instant::now() + Duration::from_secs(5);
+            let mut observed = false;
             return settle_absence(
-                |bound| Self::absence_snapshot(kind, Some(bound)),
+                |bound| {
+                    let result = Self::absence_snapshot(kind, Some(bound));
+                    let ax_presence = result.as_ref().err().is_some_and(|failure| {
+                        failure.stage == AbsenceStage::AccessibilityEnumeration
+                            && failure.reason == Reason::AlreadyRunning
+                    });
+                    if process_absence::mark_rejection_observation(
+                        &mut observed,
+                        ax_presence,
+                        Instant::now(),
+                        bound,
+                    ) {
+                        process_absence::observe_after_accessibility_rejection(bound);
+                    }
+                    // Independent evidence never overrides the original absence verdict.
+                    result
+                },
                 Instant::now,
                 std::thread::sleep,
                 deadline,
@@ -328,13 +361,19 @@ impl Gui {
         kind: DesktopHarnessKind,
         process: &mut P,
     ) -> Result<Self, visual::AcquisitionFailure> {
-        let visual = visual::Visual::wait(kind, process)?;
+        let deadline = (kind == DesktopHarnessKind::Claude && crate::native::claude_focus_policy())
+            .then(|| Instant::now() + Duration::from_secs(45));
+        let visual = visual::Visual::wait(kind, process, deadline)?;
         // The window can become stable before the accessibility bridge
         // registers the process, especially on Linux CI.
-        let (app, app_error) = match App::by_pid(visual.pid(), WAIT) {
+        let (app, app_error) = match App::by_pid(visual.pid(), attachment_budget(deadline)?) {
             Ok(app) => (Some(app), None),
             Err(error) => (None, Some(map_error(error))),
         };
+        #[cfg(target_os = "macos")]
+        if let Some(deadline) = deadline {
+            visual.finish_initial_acquisition(process, deadline)?;
+        }
         Ok(Self {
             app,
             app_error,
@@ -1235,6 +1274,14 @@ fn unique_accessible_match(count: Result<usize, Reason>) -> Result<bool, Reason>
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn accessibility_attachment_uses_only_remaining_original_acquisition_budget() {
+        assert_eq!(attachment_budget(None).unwrap(), WAIT);
+        assert!(attachment_budget(Some(Instant::now())).is_err());
+        let budget = attachment_budget(Some(Instant::now() + Duration::from_secs(2))).unwrap();
+        assert!(budget > Duration::ZERO && budget <= Duration::from_secs(2));
+    }
+
     #[test]
     fn post_stop_settles_only_presence_with_one_shared_deadline() {
         use std::cell::Cell;

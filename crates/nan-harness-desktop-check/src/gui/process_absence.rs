@@ -35,6 +35,52 @@ pub(super) fn inspect_absent(
 }
 
 #[cfg(any(windows, test))]
+pub(super) fn mark_rejection_observation(
+    observed: &mut bool,
+    ax_presence: bool,
+    now: std::time::Instant,
+    deadline: std::time::Instant,
+) -> bool {
+    if *observed || !ax_presence || now >= deadline {
+        return false;
+    }
+    *observed = true;
+    true
+}
+
+#[cfg(any(windows, test))]
+#[derive(Clone, Copy, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum PostStopState {
+    Present,
+    Absent,
+    QueryFailed,
+}
+
+#[cfg(any(windows, test))]
+fn post_stop_facts(state: PostStopState) -> serde_json::Value {
+    serde_json::json!({"schemaVersion":1,"mechanism":"windows-post-stop-process",
+        "diagnosticsOnly":true,"phase":"first-accessibility-rejection","state":state})
+}
+
+#[cfg(windows)]
+pub(super) fn observe_after_accessibility_rejection(deadline: std::time::Instant) {
+    if std::env::var("GITHUB_ACTIONS").as_deref() != Ok("true")
+        || std::env::var("RUNNER_ENVIRONMENT").as_deref() != Ok("github-hosted")
+        || std::env::var("RUNNER_OS").as_deref() != Ok("Windows")
+        || std::time::Instant::now() >= deadline
+    {
+        return;
+    }
+    let state = match inspect(deadline, b"Claude.exe") {
+        Ok(true) => PostStopState::Present,
+        Ok(false) => PostStopState::Absent,
+        Err(_) => PostStopState::QueryFailed,
+    };
+    save_facts(post_stop_facts(state));
+}
+
+#[cfg(any(windows, test))]
 fn wait_absent(
     mut query: impl FnMut(std::time::Instant) -> Result<bool, Reason>,
     mut now: impl FnMut() -> std::time::Instant,
@@ -132,7 +178,7 @@ fn failure_facts(image: &[u8], stage: InspectionStage) -> Option<serde_json::Val
 }
 
 #[cfg(windows)]
-fn save_failure(image: &[u8], stage: InspectionStage) {
+fn save_facts(value: serde_json::Value) {
     use std::io::Write as _;
     if std::env::var("GITHUB_ACTIONS").as_deref() != Ok("true")
         || std::env::var("RUNNER_ENVIRONMENT").as_deref() != Ok("github-hosted")
@@ -152,9 +198,6 @@ fn save_failure(image: &[u8], stage: InspectionStage) {
     let Ok(directory) = directory.canonicalize() else {
         return;
     };
-    let Some(value) = failure_facts(image, stage) else {
-        return;
-    };
     let mut nonce = [0; 8];
     if getrandom::fill(&mut nonce).is_err() {
         return;
@@ -167,6 +210,13 @@ fn save_failure(image: &[u8], stage: InspectionStage) {
         if serde_json::to_writer(&mut file, &value).is_ok() {
             let _ = file.flush();
         }
+    }
+}
+
+#[cfg(windows)]
+fn save_failure(image: &[u8], stage: InspectionStage) {
+    if let Some(value) = failure_facts(image, stage) {
+        save_facts(value);
     }
 }
 
@@ -260,6 +310,54 @@ mod tests {
         time::{Duration, Instant},
     };
     const INSPECTOR: &[u8] = b"\"tasklist.exe\",\"123\",\"Console\",\"1\",\"1,000 K\"\r\n";
+    #[test]
+    fn independent_observation_only_claims_first_ax_presence_with_original_budget() {
+        let now = Instant::now();
+        let deadline = now + Duration::from_secs(5);
+        let mut observed = false;
+        assert!(!mark_rejection_observation(
+            &mut observed,
+            false,
+            now,
+            deadline
+        ));
+        assert!(!observed);
+        assert!(!mark_rejection_observation(
+            &mut observed,
+            true,
+            deadline,
+            deadline
+        ));
+        assert!(!observed);
+        assert!(mark_rejection_observation(
+            &mut observed,
+            true,
+            now,
+            deadline
+        ));
+        assert!(!mark_rejection_observation(
+            &mut observed,
+            true,
+            now,
+            deadline
+        ));
+        for (state, expected) in [
+            (PostStopState::Present, "present"),
+            (PostStopState::Absent, "absent"),
+            (PostStopState::QueryFailed, "query-failed"),
+        ] {
+            let value = post_stop_facts(state);
+            assert_eq!(value["state"], expected);
+            assert_eq!(value["phase"], "first-accessibility-rejection");
+            assert_eq!(value.as_object().unwrap().len(), 5);
+            assert!(
+                !serde_json::to_string(&value)
+                    .unwrap()
+                    .contains("PRIVATE_SENTINEL")
+            );
+        }
+    }
+
     #[test]
     fn inspection_failures_serialize_only_closed_stages_and_selected_app() {
         let stages = [

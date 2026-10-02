@@ -1410,3 +1410,32 @@ toggle-button counts, nested containing controls and a closed matched-role value
 Only raw ToggleButton62 can establish toggle state; ordinary Button43 remains
 unavailable. These are observations at the existing measurement point, not a
 before/after ShiftEscape transition proof. No extra input or capture is introduced.
+
+
+The complete local gate on `039d4585` passes. Windows Codex
+[37075370575](https://github.com/DavidLMS/nan-harness/actions/runs/37075370575)
+again restores all three probes; role/renderer ownership still blocks coding
+acceptance. Windows Claude
+[37075368043](https://github.com/DavidLMS/nan-harness/actions/runs/37075368043)
+acquires its window but still fails the AX absence check after stop, before an
+independent process inspection. A once-only hosted diagnostic now inspects exact
+Claude executable presence at the first AX rejection within the same five-second
+budget. Its closed observation cannot override the failed cleanup verdict.
+
+macOS Claude
+[37075778336](https://github.com/DavidLMS/nan-harness/actions/runs/37075778336)
+passes initial focus acquisition, then the first startup guard rejects changed
+window bounds. Cleanup passes. AX attachment follows the initial geometry binding
+and can take ten seconds; its causing the resize is not established. Acquisition
+now retains the original 45-second deadline through attachment and final stability
+checks. Before any input, the same original CG identity/PID/name must pass both
+focus proofs, ownership, display and occlusion checks for three observations over
+two seconds. Only then is final initial geometry bound. Later guards remain strict.
+
+Linux Zed
+[37075781409](https://github.com/DavidLMS/nan-harness/actions/runs/37075781409)
+reports one ordinary push button, no toggle and no nested matching controls in
+all three pre-Retry observations. Pinned ThreadView source also uses Maximize in
+an ordinary message-editor ExpandMessageEditor control; that glyph is not proof
+of panel zoom. Reply/tool acceptance and all cleanup still pass; explicit Retry
+recovery remains unverified. No new native cell is qualified.
