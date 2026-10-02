@@ -888,7 +888,14 @@ impl ConversationScenario<'_> {
         if let Some(experiment) = self.experiment {
             // Partial hosted experiments cannot become compatibility evidence.
             return experiment
-                .run(gui, owner, self.final_marker, result, self.gate)
+                .run(
+                    gui,
+                    owner,
+                    self.final_marker,
+                    result,
+                    self.gate,
+                    composer_observations,
+                )
                 .and(Err(Reason::NotRun));
         }
         if let Some(semantic) = self.semantic {
@@ -988,9 +995,10 @@ impl HostedExperiment {
         marker: &str,
         result: &mut ProbeResult,
         gate: &ProviderGate,
+        composer_observations: &mut Vec<ComposerFailure>,
     ) -> Result<(), Reason> {
         match self {
-            Self::HermesStartup => gui.observe_hosted_startup(),
+            Self::HermesStartup => gui.observe_hosted_startup(composer_observations),
             Self::Accessibility(directory) => {
                 gui.probe_accessibility(directory, marker, result, gate)
             }

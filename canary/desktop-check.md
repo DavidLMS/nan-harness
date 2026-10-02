@@ -18,16 +18,18 @@ Closed startup facts remain separate from the envelope; neither contains raw
 application output.
 
 The runner, report validation and lifecycle contracts have local automated
-tests. Four cells have passed three complete deterministic native probes:
+tests. Five cells have passed three complete deterministic native probes:
 Zed 1.22.0 on macOS ARM64 in [run 36976970895](https://github.com/DavidLMS/nan-harness/actions/runs/36976970895),
 Zed 1.22.0 on Windows x64 in [run 36996850316](https://github.com/DavidLMS/nan-harness/actions/runs/36996850316),
 and Hermes 0.17.6 on Linux x64 and macOS ARM64 in
-[run 36978761448](https://github.com/DavidLMS/nan-harness/actions/runs/36978761448).
+[run 36978761448](https://github.com/DavidLMS/nan-harness/actions/runs/36978761448),
+plus Hermes 0.17.6 on Windows x64 in
+[run 37031874268](https://github.com/DavidLMS/nan-harness/actions/runs/37031874268).
 All verify response, real file-tool use, controlled provider failure, UI Retry
 recovery and application, global and clipboard cleanup without OCR. Hermes
 observes Chromium 144.0.7559.236; Electron's separate version and Zed's runtime
 version remain unobserved. Exact commits and artifact hashes are recorded in
-each closed result. Eleven cells in the five-application, three-platform matrix
+each closed result. Ten cells in the five-application, three-platform matrix
 remain unqualified. The three Pen cells are blocked by vendor activation: no
 official account-free route is established, and no test account is authorized.
 Personal-machine isolation and live-provider behavior still require separate
@@ -128,15 +130,15 @@ the full acceptance gate. Implemented adapters are accepted only when their
 full native result meets the gate; implementation and feasibility alone do not
 qualify a cell.
 
-Four cells are qualified, leaving eleven remaining cells. The following
+Five cells are qualified, leaving ten remaining cells. The following
 observations describe completed runs, rather than additional qualification:
 
 | Application | Linux x64 | macOS ARM64 | Windows x64 |
 | --- | --- | --- | --- |
 | Zed | Response and file-tool steps pass; pointer and accessibility Retry acknowledgements do not produce provider recovery. | Three complete probes pass the expanded retry policy. | Three complete probes pass with direct native clipboard transport and all cleanup checks. |
-| Hermes | Three complete probes pass with renderer process ownership. | Three complete probes pass with private native userData and bounded cold-start waits. | Two probes dismiss onboarding and verify a fresh catalog, then fail the model-row check; another fails the startup document query. Cleanup passes. |
+| Hermes | Three complete probes pass with renderer process ownership. | Three complete probes pass with private native userData and bounded cold-start waits. | Three complete probes pass after ordinary onboarding dismissal and fresh catalog readiness, including explicit UI Retry and cleanup. |
 | ChatGPT / Codex | Owned document loads without a composer; the latest completed startup diagnostic passes cleanup. | Renderer observation remains intermittent; cleanup passes. | All three probes acquire a renderer, but a foreign overlay blocks the public role form before action. Process absence and all cleanup pass. |
-| Claude | Three uninstrumented windows acquired. Explicit native accessibility returns zero visible editors or login buttons. Official account-free gateway remains unqualified. | Native-folder setup proves alignment and storage creation in one probe, which acquires a window then loses focus. Another fails the Foundation query; cleanup passes. Configuration consumption remains unproved. | Stable owned window acquired; no editable controls observed and cleanup fails. |
+| Claude | Three uninstrumented windows acquired. Explicit native accessibility returns zero visible editors or login buttons. Official account-free gateway remains unqualified. | Compiled Foundation preflight passes; native-folder storage is created and a window is acquired, then the focus guard rejects. The process is active with an eligible window at failure; cleanup passes. Configuration consumption remains unproved. | Stable owned window acquired; no editable controls observed and cleanup fails. |
 | Pen | Software GLES removes GPU startup failure; three fresh sessions show sign-in and no editor. No official account-free route found for the frozen release. | Two probes expose composer/Send; another exposes sign-in. Conversation adapter remains unimplemented. | Owned renderer loads sign-in and a dialog; conversation adapter remains unimplemented. |
 
 The completed evidence is available in runs
@@ -1008,3 +1010,31 @@ an account or sign in. That source finding does not establish the measured
 overlay's identity or authorize an unknown action. Synthetic callback and
 behavioral tests and all 49 reducer contracts pass; native classification is
 pending.
+
+Hermes Windows on `82e6c52c` qualifies in
+[37031874268](https://github.com/DavidLMS/nan-harness/actions/runs/37031874268):
+all three probes pass all five acceptance steps and application/global cleanup.
+Each uses the ordinary onboarding dismissal, one explicit catalog refresh, exact
+model-name readback excluding nested reasoning metadata, and a verified unchanged
+composer. Chromium is observed as `144.0.7559.236`; Electron remains unobserved.
+This raises the matrix to five qualified cells, covering Hermes on all three
+platforms. No further Hermes rerun is required by an unrelated change.
+
+Claude macOS on `7349d8cd` in
+[37032550333](https://github.com/DavidLMS/nan-harness/actions/runs/37032550333)
+passes the compiled Foundation preflight, creates fresh third-party storage and
+acquires a window. It stops at `focus-changed`, skips the remaining probes and
+passes cleanup. The new pre-cleanup observation sees a matching active, visible,
+finished process and an eligible window. The next diagnostic retains the exact
+rejected startup snapshot's existing closed guard category; it does not activate,
+reacquire or loosen the window guard.
+
+The complete local macOS gate on `2a3cdfb7` passes after an initial sandboxed
+attempt is blocked by the synthetic Tart test's `ps` invocation. The clean Linux
+quality run [37033466249](https://github.com/DavidLMS/nan-harness/actions/runs/37033466249)
+and the Zed/Codex native trials
+[37033428517](https://github.com/DavidLMS/nan-harness/actions/runs/37033428517) and
+[37033433279](https://github.com/DavidLMS/nan-harness/actions/runs/37033433279)
+fail before application launch: the new helper method references `Path`, whose
+import was restricted to macOS. The import is now shared. Those two native trials
+provide no layout or overlay evidence and must be repeated after this correction.

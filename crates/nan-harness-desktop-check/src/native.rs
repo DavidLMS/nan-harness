@@ -124,9 +124,7 @@ impl FitFailure {
 use crate::report::Reason;
 use nan_harness_private_fs::{create_private_dir_all, open_private_new};
 use std::io::Write as _;
-#[cfg(target_os = "macos")]
-use std::path::Path;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use xa11y::Screenshot;
 
 pub(crate) struct Native {

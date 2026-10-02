@@ -21,6 +21,24 @@ use std::cell::Cell;
 use std::time::{Duration, Instant};
 use xa11y::{App, AppExt as _, Locator};
 
+// One rejected native snapshot supplies both the verdict and closed category.
+// A later foreground query could describe recovery rather than the rejection.
+fn observe_startup_guard(
+    guard: impl FnOnce() -> Result<(), (Reason, ComposerErrorCategory)>,
+    observations: &mut Vec<ComposerFailure>,
+) -> Result<(), Reason> {
+    guard().map_err(|(reason, error_category)| {
+        observations.push(ComposerFailure {
+            operation: ComposerOperation::Guard,
+            error_category,
+            guard_context: None,
+            geometry_relation: None,
+            input_observation: None,
+        });
+        reason
+    })
+}
+
 const WAIT: Duration = Duration::from_secs(10);
 
 #[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
@@ -256,8 +274,11 @@ impl Gui {
         })
     }
 
-    pub(crate) fn observe_hosted_startup(&self) -> Result<(), Reason> {
-        self.visual.guard()
+    pub(crate) fn observe_hosted_startup(
+        &self,
+        observations: &mut Vec<ComposerFailure>,
+    ) -> Result<(), Reason> {
+        observe_startup_guard(|| self.visual.guard_composer(), observations)
     }
 
     pub(crate) fn prepare_conversation(&self) -> Result<(), GuiFailure> {
@@ -1145,6 +1166,69 @@ fn unique_accessible_match(count: Result<usize, Reason>) -> Result<bool, Reason>
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn startup_guard_records_only_the_exact_rejected_snapshot_without_requery() {
+        use super::*;
+        let mut observations = Vec::new();
+        let mut calls = 0;
+        assert_eq!(
+            observe_startup_guard(
+                || {
+                    calls += 1;
+                    Ok(())
+                },
+                &mut observations
+            ),
+            Ok(())
+        );
+        assert_eq!(calls, 1);
+        assert!(observations.is_empty());
+        for category in [
+            ComposerErrorCategory::ForegroundIdentityUnavailable,
+            ComposerErrorCategory::ForegroundProcessDifferent,
+            ComposerErrorCategory::ForegroundWindowDifferent,
+            ComposerErrorCategory::SameProcessWindow,
+        ] {
+            let count = observations.len();
+            assert_eq!(
+                observe_startup_guard(
+                    || {
+                        calls += 1;
+                        Err((Reason::FocusChanged, category))
+                    },
+                    &mut observations
+                ),
+                Err(Reason::FocusChanged)
+            );
+            assert_eq!(observations.len(), count + 1);
+            assert_eq!(observations[count].error_category, category);
+            assert_eq!(observations[count].operation, ComposerOperation::Guard);
+            assert_eq!(observations[count].guard_context, None);
+        }
+        assert_eq!(calls, 5);
+        let prefix = observations.clone();
+        assert_eq!(
+            observe_startup_guard(
+                || Err((
+                    Reason::WindowChanged,
+                    ComposerErrorCategory::WindowIdentityMissing
+                )),
+                &mut observations
+            ),
+            Err(Reason::WindowChanged)
+        );
+        assert_eq!(observations[..prefix.len()], prefix);
+        let serialized = serde_json::to_value(&observations).unwrap();
+        assert_eq!(
+            serialized[0],
+            serde_json::json!({"operation":"guard", "errorCategory":"foreground-identity-unavailable"})
+        );
+        assert_eq!(
+            serialized[3],
+            serde_json::json!({"operation":"guard", "errorCategory":"same-process-window"})
+        );
+    }
+
     use super::*;
 
     #[test]
