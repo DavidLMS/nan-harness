@@ -3,7 +3,6 @@ use super::{Gui, ProbeSpec, Reason};
 use nan_harness_core::DesktopHarnessKind;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use tokio::io::AsyncReadExt as _;
 
 #[derive(Clone, Copy, serde::Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -173,34 +172,9 @@ impl NativeRoots {
                 .ok_or_else(|| reject(Stage::FoundationQuery, Failure::QueryFailed))?,
         );
         let support = home.join("Library/Application Support");
-        let script = "import Foundation\nlet home = FileManager.default.homeDirectoryForCurrentUser.path\nlet support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?.path\nlet expected = ProcessInfo.processInfo.environment[\"HOME\"]\nprint(home == expected && support == expected.map { $0 + \"/Library/Application Support\" } ? \"true\" : \"false\")";
-        let mut child = tokio::process::Command::new("/usr/bin/swift")
-            .args(["-e", script])
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .kill_on_drop(true)
-            .spawn()
+        let native = crate::native::Native::new()
             .map_err(|_| reject(Stage::FoundationQuery, Failure::QueryFailed))?;
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| reject(Stage::FoundationQuery, Failure::QueryFailed))?;
-        let valid = tokio::time::timeout(std::time::Duration::from_secs(5), async {
-            let mut bytes = Vec::new();
-            stdout.take(16).read_to_end(&mut bytes).await.ok()?;
-            if !child.wait().await.ok()?.success() {
-                return None;
-            }
-            match bytes.as_slice() {
-                b"true\n" => Some(true),
-                b"false\n" => Some(false),
-                _ => None,
-            }
-        })
-        .await
-        .ok()
-        .flatten();
+        let valid = native.claude_known_folders(&home).await;
         if valid.is_none() {
             return Err(reject(Stage::FoundationQuery, Failure::QueryFailed));
         }

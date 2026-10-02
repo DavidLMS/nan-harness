@@ -18,6 +18,7 @@ int window_state(const std::string&) { return 5; }
 #if !defined(__APPLE__)
 int activate_window(const std::string&) { return 5; }
 int observe_claude() { return 5; }
+int claude_known_folders() { return 5; }
 #endif
 
 static std::string encode_name(const std::string& name) {
@@ -42,6 +43,22 @@ static void window_record(std::uint64_t id, std::uint32_t pid, double x, double 
 #include <CoreGraphics/CoreGraphics.h>
 #include <libproc.h>
 #include "inventory.hpp"
+
+// Query Foundation directly, without initializing AppKit or inspecting applications.
+int claude_known_folders() {
+    @autoreleasepool {
+        NSString* expected = NSProcessInfo.processInfo.environment[@"HOME"];
+        if (!expected || !expected.isAbsolutePath) return 5;
+        NSFileManager* manager = NSFileManager.defaultManager;
+        NSURL* support = [manager URLsForDirectory:NSApplicationSupportDirectory
+                                        inDomains:NSUserDomainMask].firstObject;
+        if (!support) return 5;
+        bool aligned = [manager.homeDirectoryForCurrentUser.path isEqualToString:expected]
+            && [support.path isEqualToString:[expected stringByAppendingPathComponent:@"Library/Application Support"]];
+        std::cout << (aligned ? "true\n" : "false\n");
+        return 0;
+    }
+}
 
 static bool parse_identity_token(const std::string& text, std::uint64_t& value) {
     if (text.empty() || text.find_first_not_of("0123456789") != std::string::npos) return false;

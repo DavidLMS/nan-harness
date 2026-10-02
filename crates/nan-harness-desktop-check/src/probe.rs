@@ -787,7 +787,7 @@ async fn scenario_owned(
             }
         }
     };
-    if outcome == Err(Reason::WindowChanged)
+    if matches!(outcome, Err(Reason::WindowChanged | Reason::FocusChanged))
         && cfg!(target_os = "macos")
         && spec.kind == DesktopHarnessKind::Claude
         && std::env::var("NANH_CLAUDE_MAC_PROFILE_POLICY").as_deref() == Ok("native-known-folders")

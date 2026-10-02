@@ -28,6 +28,13 @@ no overlapping window above it. Headless sessions and Wayland without a usable
 X11 window inventory fail closed. macOS may require both accessibility and screen
 recording permissions; the checker does not grant them.
 
+The hosted Claude macOS native-folder preflight uses a separate
+`--claude-known-folders` mode. It compares Foundation's user home and Application
+Support directories with the original managed launch HOME and emits only
+`true\n` or `false\n`. It does not initialize AppKit, inspect applications,
+capture pixels or run OCR. The caller clears the helper environment, supplies
+only HOME, rejects any other output and retains the five-second query deadline.
+
 On X11 the helper reads focus, stacking, attributes and ownership inside one
 [server grab](https://www.x.org/releases/X11R7.7/doc/xproto/x11protocol.html),
 so windows destroyed by other clients cannot make a snapshot partial. The grab is

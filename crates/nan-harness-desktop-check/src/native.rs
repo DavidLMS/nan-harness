@@ -134,7 +134,42 @@ pub(crate) struct Native {
     executable: PathBuf,
 }
 
+fn parse_known_folders(bytes: &[u8]) -> Option<bool> {
+    match bytes {
+        b"true\n" => Some(true),
+        b"false\n" => Some(false),
+        _ => None,
+    }
+}
+
 impl Native {
+    /// Compare native Foundation folders with the original managed launch HOME.
+    pub(crate) async fn claude_known_folders(&self, home: &Path) -> Option<bool> {
+        use tokio::io::AsyncReadExt as _;
+        let mut child = tokio::process::Command::new(&self.executable)
+            .env_clear()
+            .env("HOME", home)
+            .arg("--claude-known-folders")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .kill_on_drop(true)
+            .spawn()
+            .ok()?;
+        let stdout = child.stdout.take()?;
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            let mut bytes = Vec::new();
+            stdout.take(16).read_to_end(&mut bytes).await.ok()?;
+            if !child.wait().await.ok()?.success() {
+                return None;
+            }
+            parse_known_folders(&bytes)
+        })
+        .await
+        .ok()
+        .flatten()
+    }
+
     #[cfg(windows)]
     pub(crate) fn executable(&self) -> &std::path::Path {
         &self.executable
@@ -286,6 +321,41 @@ impl Native {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn known_folder_protocol_rejects_partial_and_extra_output() {
+        assert_eq!(parse_known_folders(b"true\n"), Some(true));
+        assert_eq!(parse_known_folders(b"false\n"), Some(false));
+        for bytes in [
+            b"true".as_slice(),
+            b"true\nfalse\n",
+            b"",
+            b" true\n",
+            b"TRUE\n",
+        ] {
+            assert_eq!(parse_known_folders(bytes), None);
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn known_folder_transport_preserves_home_and_rejects_failed_child() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let directory = tempfile::tempdir().unwrap();
+        let executable = directory.path().join("synthetic-helper");
+        let native = Native {
+            directory,
+            executable,
+        };
+        let home = native.directory.path().join("original-home");
+        let script = "#!/bin/sh\n[ \"$1\" = --claude-known-folders ] || exit 1\ncase \"$HOME\" in */original-home) ;; *) exit 1 ;; esac\nprintf 'true\\n'\n";
+        std::fs::write(&native.executable, script).unwrap();
+        std::fs::set_permissions(&native.executable, std::fs::Permissions::from_mode(0o700))
+            .unwrap();
+        assert_eq!(native.claude_known_folders(&home).await, Some(true));
+        std::fs::write(&native.executable, "#!/bin/sh\nprintf 'true\\n'\nexit 1\n").unwrap();
+        assert_eq!(native.claude_known_folders(&home).await, None);
+    }
+
     use super::*;
 
     #[test]
