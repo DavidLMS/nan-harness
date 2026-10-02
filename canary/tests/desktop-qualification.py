@@ -92,6 +92,20 @@ class RunnerTests(unittest.TestCase):
 
 
 class QualificationTests(unittest.TestCase):
+    def test_stability_counts_are_closed_and_never_accept_window_metadata(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'stability.json'
+            counts = dict(observations=2, candidatesPresent=1, candidatesAbsent=1,
+                          identityChanges=0, boundsChanges=0, nameChanges=0, stablePairs=0)
+            value = dict(schemaVersion=1, mechanism='native-window-stability', diagnosticsOnly=True, counts=counts)
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(root, 'zed-desktop'), [value])
+            for changed in ({**value, 'title': 'PRIVATE'}, {**value, 'counts': {**counts, 'nameChanges': True}},
+                            {**value, 'counts': {**counts, 'candidatesAbsent': 0}}):
+                path.write_text(json.dumps(changed))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'zed-desktop')
+
     def test_exact_initial_matrix_separates_scenario_backends_and_inventories(self):
         cells = q.matrix()['include']
         self.assertEqual(len(cells), 15)

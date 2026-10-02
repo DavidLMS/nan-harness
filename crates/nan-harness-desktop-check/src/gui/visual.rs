@@ -287,6 +287,7 @@ impl Visual {
         let deadline = Instant::now() + Duration::from_secs(45);
         let mut previous = None;
         let mut inventory = CandidateInventory::default();
+        let mut stability = super::stability::Stability::default();
         #[cfg(windows)]
         let mut fitted = false;
         loop {
@@ -309,6 +310,7 @@ impl Visual {
                     None,
                 ));
             }
+            stability.observe(windows.first().copied(), previous.as_ref());
             if let Some(window) = windows.first() {
                 if let Err(failure) = super::process_ownership(window.pid, owner) {
                     return Err((
@@ -330,6 +332,7 @@ impl Visual {
                     return Err(postcondition_geometry_failure());
                 }
                 if previous.as_ref() == Some(*window) {
+                    stability.save();
                     #[cfg(target_os = "macos")]
                     initial_readiness(&native, &snapshot, window, owner)?;
                     return Ok(Self {
@@ -341,6 +344,7 @@ impl Visual {
                 previous = Some((*window).clone());
             }
             if Instant::now() >= deadline {
+                stability.save();
                 let stage = inventory.stage();
                 return Err((
                     Reason::DesktopUnavailable,
