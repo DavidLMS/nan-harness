@@ -5,7 +5,7 @@ use std::process::{Command, Stdio};
 use zeroize::Zeroizing;
 
 pub(super) fn spawn(command: &mut Command, app: &'static str) -> std::io::Result<()> {
-    if super::qualification_renderer_arguments().is_empty() {
+    if !super::qualification_capture_enabled() {
         return command.stderr(Stdio::null()).spawn().map(|_| ());
     }
     let directory = std::path::PathBuf::from(

@@ -95,6 +95,19 @@ class RunnerTests(unittest.TestCase):
 
 
 class QualificationTests(unittest.TestCase):
+    def test_baseline_is_diagnostic_and_cannot_claim_renderer_instrumentation(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'baseline.json'
+            value = dict(schemaVersion=1, mechanism='renderer-startup-baseline', diagnosticsOnly=True,
+                         windowAcquired=True, rendererInstrumented=False)
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [value])
+            for changed in ({**value, 'windowAcquired': False}, {**value, 'rendererInstrumented': True},
+                            {**value, 'html': 'PRIVATE'}):
+                path.write_text(json.dumps(changed))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'claude-desktop')
+
     def test_child_startup_receipt_rejects_private_output_and_wrong_app(self):
         with tempfile.TemporaryDirectory() as root:
             path = Path(root) / 'renderer-startup.json'

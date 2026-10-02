@@ -30,12 +30,16 @@ fn run() -> Result<i32, ()> {
             Some("hermes-desktop" | "chatgpt-desktop" | "claude-desktop" | "pen-desktop")
         )
     }) && args.iter().any(|arg| arg == "--provider-base-url");
-    let port = if observe {
-        if env::var("GITHUB_ACTIONS").as_deref() != Ok("true")
-            || env::var("RUNNER_ENVIRONMENT").as_deref() != Ok("github-hosted")
-        {
-            return Err(());
-        }
+    let hermes = args.first().is_some_and(|arg| arg == "hermes-desktop");
+    let baseline =
+        !hermes && env::var("NANH_DESKTOP_QUALIFICATION_MODE").as_deref() == Ok("startup-baseline");
+    if observe
+        && (env::var("GITHUB_ACTIONS").as_deref() != Ok("true")
+            || env::var("RUNNER_ENVIRONMENT").as_deref() != Ok("github-hosted"))
+    {
+        return Err(());
+    }
+    let port = if observe && !baseline {
         Some(
             TcpListener::bind(("127.0.0.1", 0))
                 .map_err(|_| ())?
@@ -46,7 +50,6 @@ fn run() -> Result<i32, ()> {
     } else {
         None
     };
-    let hermes = args.first().is_some_and(|arg| arg == "hermes-desktop");
     let mut command = Command::new(real);
     command.args(if hermes {
         port.map_or_else(

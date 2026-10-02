@@ -48,10 +48,14 @@ def qualification_environment(app, facts, real_nanh, executable, inherited=None)
                            FEASIBILITY_HERMES_EXECUTABLE=str(executable),
                            FEASIBILITY_HERMES_DOM_DRIVER=str(Path(__file__).with_name('observe-hermes.cjs').resolve()))
     elif app in {'chatgpt-desktop', 'claude-desktop', 'pen-desktop'}:
+        mode = source.get('NANH_DESKTOP_QUALIFICATION_MODE', 'renderer')
+        if mode not in {'renderer', 'startup-baseline'}:
+            raise ValueError('renderer mode is invalid')
         policy = source.get('NANH_DESKTOP_QUALIFICATION_NAMESPACE_POLICY', 'default')
         if policy not in {'default', 'scoped-apparmor-userns'}:
             raise ValueError('namespace policy is invalid')
-        environment.update(NANH_DESKTOP_QUALIFICATION_NAMESPACE_POLICY=policy,
+        environment.update(NANH_DESKTOP_QUALIFICATION_MODE=mode,
+                           NANH_DESKTOP_QUALIFICATION_NAMESPACE_POLICY=policy,
                            NANH_DESKTOP_RENDERER_APP=app,
                            NANH_DESKTOP_RENDERER_DRIVER=str(Path(__file__).with_name('observe-renderer.cjs').resolve()))
     else:

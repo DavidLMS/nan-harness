@@ -16,7 +16,7 @@ args = sys.argv[1:]
 if not args or args[0] not in {'hermes-desktop', 'chatgpt-desktop', 'claude-desktop', 'pen-desktop'} or '--provider-base-url' not in args:
     os.execv(real, [real, *args])
 hermes = args[0] == 'hermes-desktop'
-cdp = os.environ.get('FEASIBILITY_HERMES_CDP', 'enabled') != 'disabled'
+cdp = os.environ.get('FEASIBILITY_HERMES_CDP', 'enabled') != 'disabled' and not (not hermes and os.environ.get('NANH_DESKTOP_QUALIFICATION_MODE') == 'startup-baseline')
 command = [real, *args]
 scoped_namespace = os.environ.get('FEASIBILITY_HERMES_NAMESPACE_POLICY') == 'scoped-apparmor-userns'
 if scoped_namespace and hermes:

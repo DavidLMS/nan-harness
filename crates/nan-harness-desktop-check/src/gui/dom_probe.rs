@@ -628,6 +628,13 @@ fn read_facts(path: &Path, qualification: bool) -> Result<Facts, Reason> {
 impl Gui {
     pub(crate) fn inventory_renderer(&self, directory: &Path, owner: u32) -> Result<(), Reason> {
         self.visual.guard()?;
+        if std::env::var("NANH_DESKTOP_QUALIFICATION_MODE").as_deref() == Ok("startup-baseline") {
+            let value = serde_json::json!({"schemaVersion":1, "mechanism":"renderer-startup-baseline", "diagnosticsOnly":true, "windowAcquired":true, "rendererInstrumented":false});
+            open_private_new(&directory.join(format!("baseline-{owner}.json")))
+                .and_then(|mut file| file.write_all(value.to_string().as_bytes()))
+                .map_err(|_| Reason::IsolationUnavailable)?;
+            return Err(Reason::ActionUnsupported);
+        }
         let driver = std::env::var_os("NANH_DESKTOP_RENDERER_DRIVER")
             .map(std::path::PathBuf::from)
             .ok_or(Reason::IsolationUnavailable)?;

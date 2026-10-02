@@ -251,7 +251,10 @@ pub(crate) fn qualification_renderer_arguments() -> Vec<String> {
                 .ok()
                 .as_deref(),
         );
-        if !arguments.is_empty()
+        if std::env::var("NANH_DESKTOP_QUALIFICATION_MODE").as_deref() == Ok("startup-baseline") {
+            arguments.clear();
+        }
+        if qualification_capture_enabled()
             && cfg!(target_os = "linux")
             && std::env::var("NANH_DESKTOP_QUALIFICATION_NAMESPACE_POLICY").as_deref()
                 == Ok("scoped-apparmor-userns")
@@ -262,6 +265,16 @@ pub(crate) fn qualification_renderer_arguments() -> Vec<String> {
     }
     #[cfg(not(feature = "desktop-qualification"))]
     Vec::new()
+}
+
+#[cfg(feature = "desktop-qualification")]
+fn qualification_capture_enabled() -> bool {
+    let hosted = std::env::var("GITHUB_ACTIONS").as_deref() == Ok("true")
+        && std::env::var("RUNNER_ENVIRONMENT").as_deref() == Ok("github-hosted");
+    hosted
+        && std::env::var_os("NANH_DESKTOP_QUALIFICATION_FACTS")
+            .map(std::path::PathBuf::from)
+            .is_some_and(|path| path.is_absolute() && path.is_dir() && !path.is_symlink())
 }
 
 #[cfg(feature = "desktop-qualification")]

@@ -25,6 +25,20 @@ class ShimLifecycle(unittest.TestCase):
                     self.invoke(args)
                 execute.assert_called_once_with('/synthetic/nanh', ['/synthetic/nanh', *args])
 
+    def test_renderer_baseline_omits_debug_flags_and_connection_receipts(self):
+        args = ['claude-desktop', '--provider-base-url', 'http://127.0.0.1']
+        child = Mock(pid=123, stderr=io.BytesIO(b''), poll=Mock(return_value=1), wait=Mock(return_value=1))
+        with tempfile.TemporaryDirectory() as facts, patch.dict(os.environ, {
+                'FEASIBILITY_REAL_NANH': '/synthetic/nanh', 'FEASIBILITY_FACTS': facts,
+                'NANH_DESKTOP_QUALIFICATION_MODE': 'startup-baseline'}), \
+             patch.object(sys, 'argv', [str(SHIM), *args]), \
+             patch('subprocess.Popen', return_value=child) as spawn, patch('signal.signal'):
+            with self.assertRaises(SystemExit):
+                self.invoke(args)
+            self.assertEqual(spawn.call_count, 1)
+            self.assertEqual(spawn.call_args.args[0], ['/synthetic/nanh', *args])
+            self.assertEqual(list(Path(facts).glob('connection-*.json')), [])
+
     def test_no_cdp_arm_wraps_for_classification_without_switches_or_observer(self):
         args = ['hermes-desktop', '--provider-base-url', 'http://127.0.0.1', '--', '--synthetic']
         child = Mock(pid=123, stderr=io.BytesIO(b'Missing X server'), poll=Mock(return_value=1), wait=Mock(return_value=1))
