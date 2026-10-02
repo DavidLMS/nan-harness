@@ -15,6 +15,7 @@ from desktop_suite import read_frozen_manifest
 # Start from a session allowlist, rather than attempting to enumerate every
 # provider, cloud, Actions or user credential an inherited environment can hold.
 SESSION_ENV = {'PATH', 'HOME', 'TMPDIR', 'TMP', 'TEMP', 'USER', 'LOGNAME', 'SHELL',
+               'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'SystemRoot', 'SYSTEMROOT', 'COMSPEC', 'PATHEXT',
                'LANG', 'LC_ALL', 'DISPLAY', 'XAUTHORITY', 'DBUS_SESSION_BUS_ADDRESS',
                'XDG_RUNTIME_DIR', 'GITHUB_ACTIONS', 'RUNNER_ENVIRONMENT', 'RUNNER_OS'}
 ZED_HELPERS = {'FEASIBILITY_ZED_INPUT_DRIVER', 'FEASIBILITY_ZED_INPUT_DRIVER_MODE',
@@ -61,7 +62,9 @@ def run(args):
     if manifest['apps'][0]['status'] != 'frozen':
         raise ValueError('official frozen application is unavailable')
     prepared = bounded_json(args.prepared)
-    launcher = args.real_nanh if args.app == 'zed-desktop' else Path(__file__).with_name('nanh-shim.py')
+    launcher = args.real_nanh if args.app == 'zed-desktop' else (
+        Path(os.environ['FEASIBILITY_HERMES_LAUNCHER']) if args.platform == 'windows'
+        else Path(__file__).with_name('nanh-shim.py'))
     if (prepared.get('schemaVersion') != 2 or prepared.get('platform') != args.platform
             or prepared.get('architecture') != architecture
             or (prepared.get('checker') or {}).get('sha256') != digest(args.checker)
@@ -83,8 +86,8 @@ def run(args):
     if report.exists() or report.is_symlink():
         raise ValueError('report destination already exists')
     environment = qualification_environment(args.app, facts, args.real_nanh, executable)
-    expected_os = 'macOS' if args.platform == 'macos' else 'Linux'
-    if environment.get('RUNNER_OS') != expected_os or sys.platform != ('darwin' if args.platform == 'macos' else 'linux'):
+    expected_os = {'macos': ('macOS', 'darwin'), 'linux': ('Linux', 'linux'), 'windows': ('Windows', 'win32')}[args.platform]
+    if environment.get('RUNNER_OS') != expected_os[0] or sys.platform != expected_os[1]:
         raise ValueError('host platform differs')
     command = [str(args.checker), 'run', '--app', args.app, '--model', 'qwen3.6',
                '--yes', '--non-interactive', '--ephemeral', '--mode', 'deterministic',
@@ -117,7 +120,7 @@ def run(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--app', choices=['zed-desktop', 'hermes-desktop'], required=True)
-    parser.add_argument('--platform', choices=['linux', 'macos'], required=True)
+    parser.add_argument('--platform', choices=['linux', 'macos', 'windows'], required=True)
     parser.add_argument('--source-sha', required=True)
     parser.add_argument('--release-tag')
     for name in ('checker', 'real-nanh', 'prepared', 'frozen', 'directory'):
@@ -127,7 +130,20 @@ def main():
         setattr(args, name, getattr(args, name).absolute())
     try:
         return run(args)
-    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+    except ValueError as error:
+        categories = {
+            'prepared identities differ': 'prepared-identity-mismatch',
+            'prepared app is unavailable': 'prepared-app-unavailable',
+            'prepared executable identity is missing': 'prepared-executable-missing',
+            'prepared executable changed': 'prepared-executable-changed',
+            'host platform differs': 'host-platform-mismatch',
+            'qualification backend is unavailable': 'backend-unavailable',
+            'official frozen application is unavailable': 'frozen-app-unavailable',
+            'qualification report is absent': 'report-absent',
+        }
+        category = categories.get(str(error), 'invalid-preflight')
+        raise SystemExit('desktop qualification failed: ' + category) from None
+    except (OSError, RuntimeError, subprocess.SubprocessError):
         raise SystemExit('desktop qualification failed; private evidence retained') from None
 
 

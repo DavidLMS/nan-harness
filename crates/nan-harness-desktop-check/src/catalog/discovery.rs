@@ -75,10 +75,9 @@ fn candidates(
         }
         Platform::Windows => windows_candidates(kind, home, &mut paths)?,
     }
-    // Hermes' Windows CLI uses the same `Hermes.exe` basename as the Desktop
-    // application. Its cell-owned CLI bin directory is intentionally on PATH,
-    // so PATH is not an installation source for the Windows Desktop catalog.
-    // The exact per-user and Program Files locations above remain authoritative.
+    // Hermes' CLI shares the Desktop basename on Windows and on case-insensitive
+    // macOS filesystems. Its owned venv is on PATH for the agent runtime, so use
+    // exact bundles/install roots instead of treating that CLI as a GUI candidate.
     if searches_path(kind, platform)
         && let Some(path) = env::var_os("PATH")
     {
@@ -104,7 +103,10 @@ fn candidates(
 const fn searches_path(kind: DesktopHarnessKind, platform: Platform) -> bool {
     !matches!(
         (kind, platform),
-        (DesktopHarnessKind::Hermes, Platform::Windows)
+        (
+            DesktopHarnessKind::Hermes,
+            Platform::Windows | Platform::Macos
+        )
     )
 }
 

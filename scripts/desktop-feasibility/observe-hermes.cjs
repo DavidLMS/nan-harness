@@ -129,7 +129,21 @@ function saveFacts() {
   fs.renameSync(temporary, output);
 }
 saveFacts();
+function windowsProof(mode, value, root) {
+  if (!['endpoint', 'descendant'].includes(mode) || !Number.isSafeInteger(value)
+      || value <= 1 || value > (mode === 'endpoint' ? 65535 : 2147483647)
+      || !Number.isSafeInteger(root) || root <= 1 || root > 2147483647) return false;
+  try {
+    const result = require('node:child_process').execFileSync('pwsh',
+      ['-NoProfile', '-NonInteractive', '-File', `${__dirname}/endpoint-owner.ps1`,
+        mode, String(value), String(root)],
+      { encoding: 'utf8', timeout: 4000, maxBuffer: 4096,
+        stdio: ['ignore', 'pipe', 'ignore'] });
+    return result === 'true';
+  } catch { return false; }
+}
 function descendant(pid) {
+  if (process.platform === 'win32') return windowsProof('descendant', pid, Number(owner));
   for (let depth = 0; depth < 32 && pid > 1; depth++) {
     if (String(pid) === owner) return true;
     pid = parentPid(pid);
@@ -148,6 +162,7 @@ function parentPid(pid) {
   return Number(stat.slice(stat.lastIndexOf(')') + 2).split(' ')[1]);
 }
 function ownedEndpoint() {
+  if (process.platform === 'win32') return windowsProof('endpoint', Number(port), Number(owner));
   if (process.platform === 'darwin') {
     // lsof selects listeners by port; reject wildcard/non-loopback bindings.
     try {
@@ -216,8 +231,10 @@ async function driveDom() {
     facts.errorCategory = 'invalid-request'; saveFacts(); return;
   }
   let ancestor = connection.launcherPid;
-  let launcherOwned = false;
+  let launcherOwned = process.platform === 'win32'
+    && windowsProof('descendant', connection.launcherPid, request.ownerPid);
   for (let depth = 0; depth < 32 && ancestor > 1; depth++) {
+    if (process.platform === 'win32') break;
     if (ancestor === request.ownerPid) { launcherOwned = true; break; }
     try { ancestor = parentPid(ancestor); } catch { break; }
   }

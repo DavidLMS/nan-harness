@@ -183,11 +183,12 @@ fn desktop_catalog_does_not_mistake_cli_names_for_apps() {
 }
 
 #[test]
-fn hermes_windows_discovery_does_not_use_cli_path_entries() {
+fn hermes_discovery_excludes_cli_path_on_case_colliding_platforms() {
     assert!(!searches_path(
         DesktopHarnessKind::Hermes,
         Platform::Windows
     ));
+    assert!(!searches_path(DesktopHarnessKind::Hermes, Platform::Macos));
     assert!(searches_path(DesktopHarnessKind::Hermes, Platform::Linux));
     assert!(searches_path(DesktopHarnessKind::Claude, Platform::Windows));
 }

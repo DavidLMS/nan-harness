@@ -15,7 +15,8 @@ TARGETS = (('linux', 'x86_64', 'ubuntu-24.04'), ('macos', 'aarch64', 'macos-15')
 BACKENDS = {('zed-desktop', 'macos', 'aarch64'): 'native-thread-export',
             ('zed-desktop', 'linux', 'x86_64'): 'native-thread-export',
             ('hermes-desktop', 'linux', 'x86_64'): 'renderer-dom',
-            ('hermes-desktop', 'macos', 'aarch64'): 'renderer-dom'}
+            ('hermes-desktop', 'macos', 'aarch64'): 'renderer-dom',
+            ('hermes-desktop', 'windows', 'x86_64'): 'renderer-dom'}
 STEPS = {'launched', 'input-submitted', 'response-verified', 'tool-verified', 'error-recovered'}
 COMMIT = re.compile(r'[0-9a-f]{40}\Z')
 HASH = re.compile(r'[0-9a-f]{64}\Z')
