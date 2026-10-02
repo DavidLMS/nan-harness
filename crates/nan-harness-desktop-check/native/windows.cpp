@@ -457,6 +457,8 @@ int fit_window(const std::string& request) {
     return 0;
 }
 
+static std::string process_name(DWORD pid);
+
 // Read only the already-owned window's visibility; this never activates it.
 int window_state(const std::string& request) {
     std::istringstream input(request);
@@ -473,12 +475,17 @@ int window_state(const std::string& request) {
     HWND window = reinterpret_cast<HWND>(static_cast<std::uintptr_t>(id));
     const char* state = "visible";
     DWORD actual_pid = 0, cloaked = 0;
+    RECT bounds = {};
     if (!IsWindow(window)) state = "gone";
     else if (!GetWindowThreadProcessId(window, &actual_pid)) state = "query-unavailable";
     else if (actual_pid != pid) state = "identity-changed";
     else if (IsIconic(window)) state = "minimized";
     else if (!IsWindowVisible(window)) state = "hidden";
     else if (SUCCEEDED(DwmGetWindowAttribute(window, DWMWA_CLOAKED, &cloaked, sizeof(cloaked))) && cloaked) state = "cloaked";
+    else if (GetAncestor(window, GA_ROOT) != window) state = "child-window";
+    else if (!GetWindowRect(window, &bounds)) state = "query-unavailable";
+    else if (bounds.right - bounds.left < 300 || bounds.bottom - bounds.top < 200) state = "candidate-too-small";
+    else if (process_name(actual_pid).empty()) state = "process-name-unavailable";
     std::cout << state << '\n';
     return std::cout ? 0 : 5;
 }

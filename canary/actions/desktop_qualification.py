@@ -154,7 +154,7 @@ def semantic_observations(directory, app):
             keys = set('observations candidatesPresent candidatesAbsent identityChanges boundsChanges nameChanges stablePairs'.split())
             if type(counts) is not dict or set(counts) - {'lastWindowState'} != keys:
                 raise ValueError('invalid window stability fields')
-            if 'lastWindowState' in counts and counts['lastWindowState'] not in {'visible', 'gone', 'identity-changed', 'minimized', 'hidden', 'cloaked', 'candidate-name-mismatch', 'candidate-too-small', 'query-unavailable'}:
+            if 'lastWindowState' in counts and counts['lastWindowState'] not in {'visible', 'gone', 'identity-changed', 'minimized', 'hidden', 'cloaked', 'child-window', 'process-name-unavailable', 'candidate-name-mismatch', 'candidate-too-small', 'query-unavailable'}:
                 raise ValueError('invalid window visibility state')
             if any(type(counts[key]) is not int or not 0 <= counts[key] <= 512 for key in keys):
                 raise ValueError('invalid window stability counts')
