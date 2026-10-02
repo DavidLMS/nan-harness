@@ -387,6 +387,22 @@ class QualificationTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'hermes-desktop')
 
+    def test_semantic_file_budget_excludes_private_connection_metadata(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            value = dict(schemaVersion=1, mechanism='semantic-inventory', requestCount=1,
+                         toolCount=1, knownReadToolCount=1, readToolSelected=True)
+            for index in range(30):
+                (root / f'fact-{index}.json').write_text(json.dumps(value))
+            for prefix in ('connection-', 'startup-'):
+                for index in range(3):
+                    (root / f'{prefix}{index}.json').write_text('PRIVATE_INVALID_JSON')
+            self.assertEqual(len(q.semantic_observations(root, 'hermes-desktop')), 30)
+            for index in range(30, 33):
+                (root / f'fact-{index}.json').write_text(json.dumps(value))
+            with self.assertRaises(ValueError):
+                q.semantic_observations(root, 'hermes-desktop')
+
     def test_source_fingerprints_publish_bounded_hashes_without_dom_attributes(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

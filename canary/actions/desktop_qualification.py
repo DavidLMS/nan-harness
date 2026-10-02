@@ -83,7 +83,8 @@ def semantic_observations(directory, app):
     directory = Path(directory)
     if directory.is_symlink() or not directory.is_dir():
         raise ValueError('semantic facts directory is invalid')
-    paths = sorted(directory.glob('*.json'))
+    paths = sorted(path for path in directory.glob('*.json')
+                   if not path.name.startswith(('connection-', 'startup-')))
     if len(paths) > 32:
         raise ValueError('too many semantic observations')
     observations = []
@@ -99,8 +100,6 @@ def semantic_observations(directory, app):
                 raise ValueError('invalid semantic enum')
             record[key] = value
     for path in paths:
-        if path.name.startswith(('connection-', 'startup-')):
-            continue
         value = bounded_json(path, 8192)
         if type(value) is not dict:
             raise ValueError('invalid semantic observation')
