@@ -1,4 +1,4 @@
-// Offline OCR boundary. Input is bounded RGBA; recognized text is returned only on stdout.
+// Private native boundary for bounded clipboard data, window metadata and offline OCR.
 #include <tesseract/baseapi.h>
 #include <cstdint>
 #include <iostream>
@@ -16,8 +16,16 @@ int fit_window(const std::string& request);
 int window_state(const std::string& request);
 int activate_window(const std::string& request);
 int observe_claude();
+int clipboard_operation(const std::string& operation);
 
 int main(int argc, char** argv) {
+#ifdef _WIN32
+    _setmode(_fileno(stdin), _O_BINARY);
+    _setmode(_fileno(stdout), _O_BINARY);
+#endif
+    if (argc == 2 && std::string(argv[1]) == "--clipboard-read") return clipboard_operation("read");
+    if (argc == 2 && std::string(argv[1]) == "--clipboard-write") return clipboard_operation("write");
+    if (argc == 2 && std::string(argv[1]) == "--clipboard-clear") return clipboard_operation("clear");
     if (argc == 2 && std::string(argv[1]).rfind("--window-state ", 0) == 0)
         return window_state(std::string(argv[1]).substr(15));
     if (argc == 2 && std::string(argv[1]).rfind("--fit-window ", 0) == 0)
@@ -32,10 +40,6 @@ int main(int argc, char** argv) {
         return 0;
     }
     if (argc != 2) return 2;
-#ifdef _WIN32
-    _setmode(_fileno(stdin), _O_BINARY);
-    _setmode(_fileno(stdout), _O_BINARY);
-#endif
     char header[64] = {};
     if (!std::cin.getline(header, sizeof(header))) return 2;
     std::istringstream dimensions(header);

@@ -155,6 +155,9 @@ jobs:
           echo "FEASIBILITY_WINDOWS_PROOF_PYTHON=$(python3 -c 'import sys; from pathlib import Path; print(Path(sys.executable).resolve(strict=True))')" >> "$GITHUB_ENV"
       - name: Build exact branch binaries
         run: cargo build --locked -p nan-harness-desktop-check -p nan-harness-cli --features nan-harness-cli/desktop-qualification --bins
+      - name: Verify native Windows clipboard contract
+        if: runner.os == 'Windows' && matrix.app == 'zed-desktop'
+        run: cargo test --locked -p nan-harness-desktop-check gui::clipboard::tests::hosted_native_clipboard_contract -- --ignored --exact
       - name: Install pinned observation client
         if: matrix.app != 'zed-desktop'
         run: npm ci --prefix .github/web-check --ignore-scripts

@@ -107,6 +107,9 @@ jobs:
       - name: Build exact branch binaries
         if: matrix.backend != 'pending'
         run: cargo build --locked -p nan-harness-desktop-check -p nan-harness-cli --features nan-harness-cli/desktop-qualification --bins
+      - name: Verify native Windows clipboard contract
+        if: runner.os == 'Windows' && matrix.app == 'zed-desktop' && matrix.backend != 'pending'
+        run: cargo test --locked -p nan-harness-desktop-check gui::clipboard::tests::hosted_native_clipboard_contract -- --ignored --exact
       - name: Install pinned observation client
         if: matrix.backend != 'pending' && matrix.app != 'zed-desktop'
         run: npm ci --prefix .github/web-check --ignore-scripts

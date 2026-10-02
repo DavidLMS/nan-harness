@@ -166,7 +166,7 @@ def semantic_observations(directory, app):
             fields = {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'operation', 'stage', 'elapsed'}
             if set(value) != fields or app != 'zed-desktop' or value['diagnosticsOnly'] is not True:
                 raise ValueError('invalid Zed clipboard transport identity')
-            stages = {'executable', 'spawn', 'pipe', 'write', 'read', 'wait', 'wait-timeout', 'nonzero', 'decode', 'thread'}
+            stages = {'executable', 'spawn', 'pipe', 'write', 'read', 'wait', 'wait-timeout', 'nonzero', 'decode', 'thread', 'invalid-input', 'output-invalid', 'clipboard-api'}
             for key, allowed in [('operation', {'read', 'write', 'clear'}), ('stage', stages),
                                  ('elapsed', {'under-1s', '1-to-3s', 'at-least-3s'})]:
                 if type(value[key]) is not str or value[key] not in allowed:

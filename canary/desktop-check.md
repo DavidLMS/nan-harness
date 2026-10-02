@@ -485,6 +485,12 @@ deadline and failure verdict were unchanged in that trial. Run
 then records `wait-timeout` at or above three seconds for all three writes and
 clears. The next Windows-only trial allows fifteen seconds for one process;
 macOS and Linux retain three seconds. No operation is replayed.
+Run [36994849458](https://github.com/DavidLMS/nan-harness/actions/runs/36994849458)
+still exhausts fifteen seconds for every write and clear. The next Windows
+transport replaces PowerShell with the bundled native helper's direct User32
+clipboard protocol. It retains bounded private UTF-8 pipes, a hidden owner window,
+one attempt, readback and cleanup requirements. The hosted Unicode/invalid-input/
+clear contract must pass before the Zed application is installed or launched.
 
 Run [36990312437](https://github.com/DavidLMS/nan-harness/actions/runs/36990312437)
 confirms Hermes Windows cleanup passes and one probe completes all five steps.
@@ -500,6 +506,13 @@ frozen official onboarding chunk provides exact role-radio, legend and optional
 suggestions-checkbox selectors; closed `onboardingCounts` measure their presence
 without retaining labels or choosing a role. A matching total input count alone
 does not authorize a setup action or establish authentication requirements.
+Run [36994861637](https://github.com/DavidLMS/nan-harness/actions/runs/36994861637)
+positively observes eleven role radios and the exact public legend in one Windows
+session, identifying the conversational work-preferences screen. Other sessions
+do not yet establish the same screen. Linux run
+[36994873060](https://github.com/DavidLMS/nan-harness/actions/runs/36994873060)
+observes none of these controls and cleanup passes. No role or skip action has
+been dispatched; account-free startup remains unqualified.
 
 Claude Windows startup run
 [36992611042](https://github.com/DavidLMS/nan-harness/actions/runs/36992611042)

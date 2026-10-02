@@ -56,6 +56,16 @@ It does not activate another app or change stacking order. The checker then
 acquires stable bounds again and retains every capture/input guard. This uses
 the documented [SetWindowPos flags](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setwindowpos).
 
+Windows clipboard modes use `CF_UNICODETEXT` directly through User32, with a
+private message-only owner window and one `OpenClipboard` attempt. Writes accept
+at most 1 KiB of valid UTF-8 without embedded NULs; reads accept at most 64 KiB
+of UTF-8 after a bounded UTF-16 scan. Private pipe and conversion buffers are
+wiped. A successful write transfers its movable allocation to Windows; the
+checker verifies readback and clears the clipboard before ending the probe.
+These modes do not capture pixels or initialize OCR. A separately selected
+disposable Windows contract checks Unicode roundtrip, invalid-input rejection
+without replacing existing data, and verified clear before launching Zed.
+
 The helper is limited to 16 megapixels per request, 512 KiB of output and a
 15-second process deadline. Low-confidence or ambiguous text is not accepted as
 a control. Response verification also requires a cleared composer; provider and

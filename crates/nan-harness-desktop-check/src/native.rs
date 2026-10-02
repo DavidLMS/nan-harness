@@ -135,6 +135,11 @@ pub(crate) struct Native {
 }
 
 impl Native {
+    #[cfg(windows)]
+    pub(crate) fn executable(&self) -> &std::path::Path {
+        &self.executable
+    }
+
     pub(crate) fn new() -> Result<Self, Reason> {
         let directory = tempfile::Builder::new()
             .prefix("nanh-desktop-native-")

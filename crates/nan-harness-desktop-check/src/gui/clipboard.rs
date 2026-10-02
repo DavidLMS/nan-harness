@@ -11,8 +11,8 @@ fn decode(bytes: &[u8]) -> Result<Zeroizing<String>, Reason> {
     if bytes.len() as u64 > OUTPUT_LIMIT {
         return Err(Reason::ActionUnsupported);
     }
-    String::from_utf8(bytes.to_vec())
-        .map(Zeroizing::new)
+    std::str::from_utf8(bytes)
+        .map(|value| Zeroizing::new(value.to_owned()))
         .map_err(|_| Reason::ActionUnsupported)
 }
 
@@ -24,6 +24,15 @@ mod transport {
     use std::time::{Duration, Instant};
 
     pub(super) fn run(input: Option<&str>) -> Result<Zeroizing<String>, Reason> {
+        let started = Instant::now();
+        #[cfg(windows)]
+        let native = crate::native::Native::new().map_err(|reason| {
+            save_failure(input, "executable", started.elapsed());
+            reason
+        })?;
+        #[cfg(windows)]
+        let executable = native.executable();
+        #[cfg(not(windows))]
         let executable = if cfg!(target_os = "linux") {
             "/usr/bin/xclip"
         } else if input.is_some() {
@@ -31,8 +40,7 @@ mod transport {
         } else {
             "/usr/bin/pbpaste"
         };
-        let started = Instant::now();
-        let outcome = run_once(input, executable);
+        let outcome = run_once(input, std::path::Path::new(executable));
         #[cfg(windows)]
         if let Err(stage) = outcome.as_ref() {
             save_failure(input, stage, started.elapsed());
@@ -42,25 +50,21 @@ mod transport {
         outcome.map_err(|_| Reason::ActionUnsupported)
     }
 
-    fn run_once(input: Option<&str>, executable: &str) -> Result<Zeroizing<String>, &'static str> {
-        #[cfg(windows)]
-        let executable = {
-            let _ = executable;
-            windows_executable()?
-        };
+    fn run_once(
+        input: Option<&str>,
+        executable: &std::path::Path,
+    ) -> Result<Zeroizing<String>, &'static str> {
         let mut command = Command::new(executable);
         command.env_clear();
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt as _;
             command.creation_flags(0x0800_0000);
-            let script = if input.is_some() {
-                "$text=[Console]::In.ReadToEnd(); if ($text.Length -eq 0) { [System.Windows.Forms.Clipboard]::Clear() } else { [System.Windows.Forms.Clipboard]::SetText($text) }"
-            } else {
-                "[Console]::Out.Write([System.Windows.Forms.Clipboard]::GetText())"
-            };
-            command.args(["-NoProfile", "-NonInteractive", "-Sta", "-Command"])
-                .arg(format!("[Console]::InputEncoding=[System.Text.UTF8Encoding]::new($false); [Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false); Add-Type -AssemblyName System.Windows.Forms; {script}"));
+            command.arg(match input {
+                None => "--clipboard-read",
+                Some("") => "--clipboard-clear",
+                Some(_) => "--clipboard-write",
+            });
             if let Some(root) = std::env::var_os("SystemRoot") {
                 command.env("SystemRoot", root);
             }
@@ -98,8 +102,7 @@ mod transport {
                     .map_err(|_| "read")?;
                 super::decode(&bytes).map_err(|_| "decode")
             });
-            // Hosted Windows exhausted three seconds even for an empty clear.
-            // Keep a single bounded attempt; other transports retain their budget.
+            // Keep one bounded native attempt, including a cold hosted process.
             let deadline = Instant::now() + Duration::from_secs(if cfg!(windows) { 15 } else { 3 });
             let mut wait_failed = false;
             let status = loop {
@@ -126,6 +129,14 @@ mod transport {
                 return Err("wait-timeout");
             }
             if !status.is_some_and(|status| status.success()) {
+                #[cfg(windows)]
+                return Err(match status.and_then(|status| status.code()) {
+                    Some(2) => "invalid-input",
+                    Some(4) => "output-invalid",
+                    Some(5) => "clipboard-api",
+                    _ => "nonzero",
+                });
+                #[cfg(not(windows))]
                 return Err("nonzero");
             }
             written.map_err(|_| "write")?;
@@ -137,20 +148,6 @@ mod transport {
         }
         outcome
     }
-    #[cfg(windows)]
-    fn windows_executable() -> Result<std::path::PathBuf, &'static str> {
-        let root = std::env::var_os("SystemRoot").ok_or("executable")?;
-        let executable =
-            std::path::PathBuf::from(root).join("System32/WindowsPowerShell/v1.0/powershell.exe");
-        if !executable.is_absolute()
-            || !std::fs::symlink_metadata(&executable)
-                .is_ok_and(|metadata| metadata.file_type().is_file())
-        {
-            return Err("executable");
-        }
-        Ok(executable)
-    }
-
     #[cfg(any(windows, test))]
     pub(super) fn failure_facts(
         input: Option<&str>,
@@ -319,6 +316,35 @@ pub(super) fn read() -> Result<Zeroizing<String>, Reason> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "Requires an explicitly selected disposable GitHub-hosted Windows session"]
+    fn hosted_native_clipboard_contract() {
+        assert_eq!(std::env::var("GITHUB_ACTIONS").as_deref(), Ok("true"));
+        assert_eq!(
+            std::env::var("RUNNER_ENVIRONMENT").as_deref(),
+            Ok("github-hosted")
+        );
+        struct Clear;
+        impl Drop for Clear {
+            fn drop(&mut self) {
+                let _ = write("");
+            }
+        }
+        let _clear = Clear;
+        write("").unwrap();
+        assert!(read().unwrap().is_empty());
+        let text = "NaNH synthetic clipboard: café λ 🧪\r\nsecond line";
+        write(text).unwrap();
+        assert_eq!(read().unwrap().as_str(), text);
+        assert!(transport::run(Some("invalid\0text")).is_err());
+        assert_eq!(read().unwrap().as_str(), text);
+        assert!(transport::run(Some(&"x".repeat(1025))).is_err());
+        assert_eq!(read().unwrap().as_str(), text);
+        write("").unwrap();
+        assert!(read().unwrap().is_empty());
+    }
 
     #[test]
     fn failure_facts_disclose_only_closed_operation_and_elapsed_buckets() {
