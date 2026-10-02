@@ -57,11 +57,17 @@ class Policy(unittest.TestCase):
             with patch.object(runner, 'CLAUDE_WINDOWS_BOOTSTRAP_SHA256', hashlib.sha256(data).hexdigest()):
                 runner.validate_claude_windows_bundle(executable)
                 asar.write_bytes(archive[:-1])
-                with self.assertRaises(ValueError):
+                with self.assertRaisesRegex(ValueError, '^claude-windows-bootstrap-mismatch$'):
                     runner.validate_claude_windows_bundle(executable)
             asar.write_bytes(archive)
-            with self.assertRaises(ValueError):
+            with self.assertRaisesRegex(ValueError, '^claude-windows-bootstrap-mismatch$'):
                 runner.validate_claude_windows_bundle(executable)
+            for malformed in (b'bad', struct.pack('<4I', 4, 10, 6, 2) + b'{}'):
+                asar.write_bytes(malformed)
+                with self.assertRaisesRegex(ValueError, '^claude-windows-bootstrap-invalid$'):
+                    runner.validate_claude_windows_bundle(executable)
+            with self.assertRaisesRegex(ValueError, '^claude-windows-executable-invalid$'):
+                runner.validate_claude_windows_bundle(root / 'Other.exe')
 
 
 if __name__ == '__main__':

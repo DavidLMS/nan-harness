@@ -178,6 +178,13 @@ fn pointer_transport_diagnostic(code: Option<i32>) {
     }
 }
 
+#[cfg(any(target_os = "linux", test))]
+fn atspi_icon_rectangle(rect: xa11y::Rect) -> Option<[i32; 4]> {
+    let width = i32::try_from(rect.width).ok()?;
+    let height = i32::try_from(rect.height).ok()?;
+    (width > 0 && height > 0).then_some([rect.x, rect.y, width, height])
+}
+
 fn neutral_input(executable: &Path, mode: &str, prompt: &str) -> Result<(), Reason> {
     if !executable.is_absolute()
         || !executable.is_file()
@@ -1156,12 +1163,17 @@ impl NativeClipboardSession<'_> {
                 }))
             })
             .collect();
-        let icons: Vec<_> = matches
+        let Some(icons) = matches
             .maximize
             .iter()
             .chain(&matches.minimize)
-            .map(|rect| [rect.x, rect.y, rect.width, rect.height])
-            .collect();
+            .map(|rect| atspi_icon_rectangle(*rect))
+            .collect::<Option<Vec<_>>>()
+        else {
+            return self
+                .gui
+                .native_copy_guard(&mut self.facts, "retry-revalidate");
+        };
         let request = serde_json::to_string(&serde_json::json!({
             "pid":pid,"window":window,"buttons":held,"icons":icons
         }))
@@ -1718,6 +1730,34 @@ impl Gui {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn atspi_icon_rectangles_preserve_signed_origins_and_reject_oversized_extents() {
+        let rectangle = xa11y::Rect {
+            x: -12,
+            y: 20,
+            width: 14,
+            height: 28,
+        };
+        assert_eq!(atspi_icon_rectangle(rectangle), Some([-12, 20, 14, 28]));
+        let encoded = serde_json::to_string(&atspi_icon_rectangle(rectangle).unwrap()).unwrap();
+        assert_eq!(encoded, "[-12,20,14,28]");
+        for invalid in [
+            xa11y::Rect {
+                width: u32::MAX,
+                ..rectangle
+            },
+            xa11y::Rect {
+                height: u32::MAX,
+                ..rectangle
+            },
+            xa11y::Rect {
+                width: 0,
+                ..rectangle
+            },
+        ] {
+            assert_eq!(atspi_icon_rectangle(invalid), None);
+        }
+    }
     use super::*;
 
     #[cfg(unix)]

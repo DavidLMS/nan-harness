@@ -1083,3 +1083,35 @@ The next Claude trials add private Windows configuration/storage receipts and a
 qualification-only bridge counter for successful authenticated model-catalog
 requests. A positive count establishes that discovery route; zero remains
 unknown and does not establish configuration consumption or mandatory login.
+
+The complete local macOS gate on `0bc487ec` passes. Claude macOS
+[37040050548](https://github.com/DavidLMS/nan-harness/actions/runs/37040050548)
+records two successful authenticated local-catalog requests with a complete
+observation, without an Anthropic account. The remaining startup rejection is
+again `same-process-window`; cleanup passes. This establishes the discovery and
+authentication route, not full coding qualification. Windows Claude
+[37040060071](https://github.com/DavidLMS/nan-harness/actions/runs/37040060071)
+stops in runner preflight before any checker probe. Closed preflight categories
+now distinguish policy, release identity, executable identity, ASAR structure and
+bootstrap digest; no pin is relaxed without evidence. Linux Zed
+[37040042341](https://github.com/DavidLMS/nan-harness/actions/runs/37040042341)
+fails compilation because its new diagnostic array mixes signed origins and
+unsigned extents. Checked conversions now reject zero/overflow advisory geometry;
+a synthetic test compiles this conversion on macOS too. No native geometry was
+measured by that failed build.
+
+Windows Codex's actual renderer experiment on `72cf852e`
+[37039212469](https://github.com/DavidLMS/nan-harness/actions/runs/37039212469)
+acquires all three owned renderer sessions. Each has the public role form and
+one dialog, but the read-only foreign-overlay fingerprint rejects its guard.
+No role or dialog action occurs; application/global cleanup passes. The overlay
+remains unidentified.
+
+The current official Linux Pen download matches the inspected `1.2.15` archive
+by provider checksum and length, with SHA-256
+`62be02efa74085ac97987d4025effce797bb596468279c2dd99a71022d192ba0`.
+Its compiled renderer still sets `skipActivation=false`. The current
+[official authentication guide](https://docs.pen.dev/getting-started/authentication)
+separates application sign-in from the optional custom-provider API key; no
+supported account-free desktop route has been established. This remains an
+external blocker under the user's no-account constraint.

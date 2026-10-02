@@ -80,26 +80,29 @@ def validate_codex_project_release(release, executable_hash):
 def validate_claude_windows_bundle(executable):
     if (not executable.is_absolute() or executable.name != 'Claude.exe' or executable.parent.name != 'app'
             or executable.is_symlink() or not executable.is_file() or executable.resolve() != executable):
-        raise ValueError('Claude Windows native bundle is invalid')
+        raise ValueError('claude-windows-executable-invalid')
     asar = executable.parent / 'resources/app.asar'
     if asar.is_symlink() or not asar.is_file() or asar.resolve() != asar:
-        raise ValueError('Claude Windows bootstrap is invalid')
-    with asar.open('rb') as archive:
-        header = archive.read(16)
-        if len(header) != 16:
-            raise ValueError('Claude Windows bootstrap is invalid')
-        _, header_size, _, json_size = struct.unpack('<4I', header)
-        if not 0 < json_size <= 1024 * 1024 or header_size < json_size:
-            raise ValueError('Claude Windows bootstrap is invalid')
-        metadata = json.loads(archive.read(json_size))
-        entry = metadata['files']['.vite']['files']['build']['files']['index.pre.js']
-        size, offset = entry['size'], int(entry['offset'])
-        if type(size) is not int or not 0 < size <= 2 * 1024 * 1024 or offset < 0:
-            raise ValueError('Claude Windows bootstrap is invalid')
-        archive.seek(8 + header_size + offset)
-        data = archive.read(size)
-        if len(data) != size or hashlib.sha256(data).hexdigest() != CLAUDE_WINDOWS_BOOTSTRAP_SHA256:
-            raise ValueError('Claude Windows bootstrap differs from the inspected release')
+        raise ValueError('claude-windows-bootstrap-invalid')
+    try:
+        with asar.open('rb') as archive:
+            header = archive.read(16)
+            if len(header) != 16:
+                raise ValueError('claude-windows-bootstrap-invalid')
+            _, header_size, _, json_size = struct.unpack('<4I', header)
+            if not 0 < json_size <= 1024 * 1024 or header_size < json_size:
+                raise ValueError('claude-windows-bootstrap-invalid')
+            metadata = json.loads(archive.read(json_size))
+            entry = metadata['files']['.vite']['files']['build']['files']['index.pre.js']
+            size, offset = entry['size'], int(entry['offset'])
+            if type(size) is not int or not 0 < size <= 2 * 1024 * 1024 or offset < 0:
+                raise ValueError('claude-windows-bootstrap-invalid')
+            archive.seek(8 + header_size + offset)
+            data = archive.read(size)
+            if len(data) != size or hashlib.sha256(data).hexdigest() != CLAUDE_WINDOWS_BOOTSTRAP_SHA256:
+                raise ValueError('claude-windows-bootstrap-mismatch')
+    except (KeyError, TypeError, json.JSONDecodeError, struct.error, OverflowError):
+        raise ValueError('claude-windows-bootstrap-invalid') from None
 
 
 def qualification_environment(app, facts, real_nanh, executable, inherited=None):
@@ -186,7 +189,7 @@ def qualification_environment(app, facts, real_nanh, executable, inherited=None)
         if windows_profile is not None:
             if (windows_profile != 'private-env' or app != 'claude-desktop'
                     or source.get('RUNNER_OS') != 'Windows' or mode != 'startup-baseline'):
-                raise ValueError('Claude Windows profile observation is unavailable')
+                raise ValueError('claude-windows-policy-invalid')
             validate_claude_windows_bundle(Path(executable))
             environment['NANH_CLAUDE_WINDOWS_PROFILE_POLICY'] = windows_profile
         policy = source.get('NANH_DESKTOP_QUALIFICATION_NAMESPACE_POLICY', 'default')
@@ -222,7 +225,7 @@ def run(args):
         if (args.app != 'claude-desktop' or args.platform != 'windows'
                 or release.get('version') != '2.19675.0'
                 or release.get('digest') != 'sha256:8355c3d28aa08d2e8d841596b41abce0a4fc3805cc9d74f6836d42176ab6b0f9'):
-            raise ValueError('Claude Windows profile trial requires the inspected official release')
+            raise ValueError('claude-windows-release-mismatch')
     prepared = bounded_json(args.prepared)
     launcher = args.real_nanh if args.app == 'zed-desktop' else (
         Path(os.environ['FEASIBILITY_HERMES_LAUNCHER']) if args.platform == 'windows'
@@ -312,6 +315,10 @@ def main():
             'qualification backend is unavailable': 'backend-unavailable',
             'official frozen application is unavailable': 'frozen-app-unavailable',
             'qualification report is absent': 'report-absent',
+            **{category: category for category in (
+                'claude-windows-executable-invalid', 'claude-windows-bootstrap-invalid',
+                'claude-windows-bootstrap-mismatch', 'claude-windows-release-mismatch',
+                'claude-windows-policy-invalid')},
         }
         category = categories.get(str(error), 'invalid-preflight')
         raise SystemExit('desktop qualification failed: ' + category) from None
