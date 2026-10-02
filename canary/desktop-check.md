@@ -453,3 +453,13 @@ Linux distribution compiles activation as mandatory, and its optional profile
 completion skip does not bypass sign-in. No supported account-free switch was
 found. The three Pen cells remain externally constrained under this requirement;
 the checker does not alter the vendor distribution or fabricate authenticated state.
+
+A hosted-only Codex supervisor now honors the frozen app's own
+`CODEX_ELECTRON_DEV_RELAUNCH_MARKER_PATH` request. It restarts the same owned
+executable at most once after a clean exit and a fresh strictly validated private
+marker, preserving the bridge, profiles, session token, stderr privacy and original
+startup deadline. It changes only the requested browser networking switch; it
+never adopts an unrelated successor or bypasses Node permissions or authentication.
+Closed `codex-owned-relaunch` stages measure whether this mechanism is requested.
+Native results are pending; the separate app-driven Node-permission relaunch
+remains outside this mechanism.

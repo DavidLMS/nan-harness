@@ -13,10 +13,20 @@ use tokio::sync::broadcast::error::RecvError;
 
 use super::profile::ManagedProfile;
 
+#[cfg(feature = "desktop-qualification")]
+#[path = "qualification_restart.rs"]
+mod qualification_restart;
+
 // wait must be cancel safe: select polls it alongside bridge activity.
 pub(super) trait SupervisedApp {
     async fn wait(&mut self) -> Result<i32, ChatGptDesktopError>;
     async fn stop(&mut self) -> Result<(), ChatGptDesktopError>;
+    fn restart_enabled(&self) -> bool {
+        false
+    }
+    fn restart(&mut self, _code: i32) -> Result<bool, ChatGptDesktopError> {
+        Ok(false)
+    }
 }
 
 pub(super) async fn supervise_desktop(
@@ -53,6 +63,32 @@ pub(super) async fn supervise_desktop(
         command.stdout(Stdio::null()).stderr(Stdio::null());
     }
     enable_linux_renderer_accessibility(&mut command);
+    #[cfg(feature = "desktop-qualification")]
+    if !debug {
+        let mut watch = StartupWatch::new(policy);
+        if let Some(mut app) =
+            qualification_restart::OwnedRestart::prepare(&mut command, capture_stderr)?
+        {
+            let mut diagnostics_receiver = bridge.take_diagnostics();
+            return supervise_startup(
+                &mut app,
+                async {
+                    match bridge.wait().await {
+                        Ok(()) => ChatGptDesktopError::BridgeExited,
+                        Err(error) => {
+                            ChatGptDesktopError::Bridge(CodexDesktopBridgeError::Bridge(error))
+                        }
+                    }
+                },
+                &mut activities,
+                &mut diagnostics_receiver,
+                &mut watch,
+                cancellation,
+                diagnostics,
+            )
+            .await;
+        }
+    }
     let mut child = command.spawn().map_err(ChatGptDesktopError::StartApp)?;
     let mut stderr_capture = child.stderr.take().map(start_stderr_capture);
     detect_singleton_race(&mut child, &mut stderr_capture, &installation.executable).await?;
@@ -103,7 +139,26 @@ pub(super) async fn supervise_startup<A: SupervisedApp>(
         tokio::select! {
             exit_code = app.wait() => {
                 drain_diagnostics(diagnostic_receiver, diagnostics);
-                return exit_code;
+                let code = exit_code?;
+                if !app.restart_enabled() {
+                    return Ok(code);
+                }
+                // Give terminal bridge/cancellation/deadline signals priority over a handoff.
+                tokio::select! {
+                    biased;
+                    signal = cancellation.cancelled() => return Ok(signal.exit_code()),
+                    error = &mut bridge_stopped => return Err(error),
+                    signal = watch.signal(), if !authenticated => {
+                        match signal {
+                            StartupSignal::TimedOut => return Err(ChatGptDesktopError::BridgeHandshakeTimeout),
+                            StartupSignal::Notice => print_startup_notice(),
+                        }
+                    }
+                    () = std::future::ready(()) => (),
+                }
+                if !app.restart(code)? {
+                    return Ok(code);
+                }
             }
             signal = cancellation.cancelled() => {
                 app.stop().await?;

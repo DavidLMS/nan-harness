@@ -585,6 +585,21 @@ class QualificationTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'hermes-desktop')
 
+    def test_owned_codex_relaunch_receipts_are_diagnostics_only_and_closed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / 'relaunch.json'
+            value = dict(schemaVersion=1, mechanism='codex-owned-relaunch', diagnosticsOnly=True, stage='restarted')
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(root, 'chatgpt-desktop'), [value])
+            with self.assertRaises(ValueError):
+                q.semantic_observations(root, 'hermes-desktop')
+            for changed in ({**value, 'stage': 'PRIVATE'}, {**value, 'marker': 'PRIVATE'},
+                            {**value, 'diagnosticsOnly': False}, {**value, 'stage': None}):
+                path.write_text(json.dumps(changed))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'chatgpt-desktop')
+
     def test_startup_facts_reject_raw_fields(self):
         import desktop_startup
         with tempfile.TemporaryDirectory() as tmp:
