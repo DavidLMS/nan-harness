@@ -3,7 +3,7 @@
 Investigated on 2026-10-02, on macOS arm64, from nan-harness branch
 `feat/zai-code`. This document records the initial research and the subsequent
 production integration described below. Historical probe notes retain their
-original evidence boundaries; complete harness parity is not yet claimed.
+original evidence boundaries; shared live qualification is recorded below.
 
 ## Conclusion
 
@@ -293,3 +293,11 @@ Real-account qualification uses the shared isolated tool probe: Write and Read
 must succeed, read and completion markers must be present, and NaN usage must be
 observed. Raw provider payloads and credentials remain private and are never
 included in evidence artifacts.
+
+The [shared live qualification run](https://github.com/DavidLMS/nan-harness/actions/runs/37067059161)
+passed on Linux ARM64, macOS ARM64 and Windows x64 on 2026-10-02, using NaN
+model `qwen3.6`, agent `0.16.9` at the upstream revision above, and nan-harness
+commit `a1d3f133b965671f36b30b914607a438e337b414`. Each cell passed source
+installation, the complete source probes, published conformance and the
+real-account tool/streaming/usage probe. The final cell completed at
+`2026-10-02T21:38:43Z`.

@@ -58,6 +58,8 @@
       },
       "lastCompatibleVersion": "0.16.9",
       "compatibleAt": "2026-10-02T10:31:09Z",
+      "lastLiveVerifiedVersion": "0.16.9",
+      "liveVerifiedAt": "2026-10-02T21:38:43Z",
       "minimumVersion": "0.16.9",
       "transport": "direct-chat",
       "status": "verified"
