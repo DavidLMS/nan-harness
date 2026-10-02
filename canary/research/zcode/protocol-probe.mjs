@@ -35,14 +35,24 @@ const server = http.createServer(async (req, res) => {
               index: 0,
               id: "probe-call",
               type: "function",
-              function: { name: "probe_tool", arguments: '{"value":"synthetic"}' },
+              function: { name: "probe_tool", arguments: '{"value":' },
             },
           ],
         },
-        finish_reason: "tool_calls",
+        finish_reason: null,
       }
     : { index: 0, delta: { content: "PROBE_OK" }, finish_reason: "stop" };
   res.writeHead(200, { "content-type": "text/event-stream" });
+  if (toolTurn) {
+    res.write(
+      `data: ${JSON.stringify({ id: "probe", object: "chat.completion.chunk", created: 1, model: body.model, choices: [choice] })}\n\n`,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    choice.delta = {
+      tool_calls: [{ index: 0, function: { arguments: '"synthetic"}' } }],
+    };
+    choice.finish_reason = "tool_calls";
+  }
   res.end(
     `data: ${JSON.stringify({ id: "probe", object: "chat.completion.chunk", created: 1, model: body.model, choices: [choice] })}\n\ndata: ${JSON.stringify({ id: "probe", object: "chat.completion.chunk", created: 1, model: body.model, choices: [], usage: { prompt_tokens: 12, completion_tokens: 4, total_tokens: 16 } })}\n\ndata: [DONE]\n\n`,
   );
@@ -73,6 +83,30 @@ try {
   assert.equal(requests[0].auth, "Bearer synthetic-only");
   assert.equal(requests[0].body.model, "synthetic-model");
   assert.equal(requests[0].body.stream_options.include_usage, true);
+  const png =
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aZ1sAAAAASUVORK5CYII=";
+  const image = streamText({
+    model: bound.resolved.model,
+    messages: [
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "synthetic image probe" },
+          { type: "image", image: Buffer.from(png, "base64"), mediaType: "image/png" },
+        ],
+      },
+    ],
+    maxRetries: 0,
+  });
+  assert.equal(await image.text, "PROBE_OK");
+  assert.ok(
+    requests
+      .at(-1)
+      .body.messages[0].content.some(
+        (part) =>
+          part.type === "image_url" && part.image_url.url === `data:image/png;base64,${png}`,
+      ),
+  );
   mode = "tool";
   let executed = false;
   const result = streamText({
@@ -115,7 +149,7 @@ try {
     }),
   );
   console.log(
-    "PASS: upstream model factory, direct authenticated Chat Completions, selected model, SSE termination, usage, tool execution/result continuation, HTTP 401, cancellation",
+    "PASS: upstream model factory, direct authenticated Chat Completions, selected model, SSE termination, usage, image serialization, fragmented tool execution/result continuation, HTTP 401, cancellation",
   );
 } finally {
   server.closeAllConnections();
