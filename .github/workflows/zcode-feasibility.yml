@@ -59,12 +59,12 @@ jobs:
           node canary/research/zcode/build-probes.mjs "$output"
           node "$output/config-probe.mjs"
           node "$output/protocol-probe.mjs"
-          python canary/research/zcode/native_probe.py --source "$ZCODE_SOURCE_ROOT" --node "$(command -v node)"
+          python canary/research/zcode/native_probe.py --source "$ZCODE_SOURCE_ROOT" --node "$(node -p 'process.execPath')"
       - name: Install pinned Windows terminal driver
         if: runner.os == 'Windows'
         run: |
           python -m pip install --only-binary=:all: pywinpty==3.0.5
       - name: Verify native session resumption and actual TUI
         run: |
-          python canary/research/zcode/runtime_probe.py --source "$ZCODE_SOURCE_ROOT" --node "$(command -v node)" --case sessions
-          python canary/research/zcode/runtime_probe.py --source "$ZCODE_SOURCE_ROOT" --node "$(command -v node)" --case tui
+          python canary/research/zcode/runtime_probe.py --source "$ZCODE_SOURCE_ROOT" --node "$(node -p 'process.execPath')" --case sessions
+          python canary/research/zcode/runtime_probe.py --source "$ZCODE_SOURCE_ROOT" --node "$(node -p 'process.execPath')" --case tui
