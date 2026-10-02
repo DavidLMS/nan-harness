@@ -7,6 +7,7 @@ from pathlib import Path
 import subprocess
 import sys
 import unittest
+import types
 from unittest.mock import patch
 
 module = runpy.run_path(str(Path(__file__).with_name('zed-input-x11.py')))
@@ -116,6 +117,47 @@ class Transport(unittest.TestCase):
                 self.assertNotEqual(self.call('retry-click', json.dumps(changed).encode()), 0)
             self.assertNotEqual(self.call('retry-click', b'x' * 4097), 0)
             run.assert_not_called()
+
+
+class AccessibilityIdentity(unittest.TestCase):
+    def test_changed_retry_identity_or_failed_queries_never_supply_coordinates(self):
+        class QueryFailure(Exception):
+            pass
+        request = dict(pid=20, bus=':1.2', path='/org/a11y/atspi/accessible/3')
+        for owner, role, name, failed, accepted in [
+                (20, 43, 'Retry', False, True),
+                (21, 43, 'Retry', False, False),
+                (20, 42, 'Retry', False, False),
+                (20, 43, 'PRIVATE_OTHER_CONTROL', False, False),
+                (20, 43, 'Retry', True, False)]:
+            closed = []
+            component = types.SimpleNamespace(
+                GetRole=lambda **kwargs: role,
+                Get=lambda *args, **kwargs: name,
+                GetExtents=lambda *args, **kwargs: (100, 200, 40, 20))
+            def query(*args):
+                if failed:
+                    raise QueryFailure('PRIVATE_QUERY_DETAIL')
+                return component
+            bus = types.SimpleNamespace(
+                get_object=lambda destination, path: types.SimpleNamespace(
+                    GetConnectionUnixProcessID=lambda *args, **kwargs: owner)
+                    if destination == 'org.freedesktop.DBus' else query(),
+                close=lambda: closed.append(True))
+            session = types.SimpleNamespace(get_object=lambda *args: types.SimpleNamespace(
+                GetAddress=lambda **kwargs: 'PRIVATE_BUS_ADDRESS'))
+            fake = types.SimpleNamespace(SessionBus=lambda: session,
+                bus=types.SimpleNamespace(BusConnection=lambda address: bus),
+                UInt32=int, DBusException=QueryFailure)
+            with patch.dict(sys.modules, dbus=fake):
+                if accepted:
+                    self.assertEqual(module['normalized_retry_point'](request, 40,
+                        (10, 30, 800, 600)), (130, 240))
+                else:
+                    with self.assertRaises(ValueError) as failure:
+                        module['normalized_retry_point'](request, 40, (10, 30, 800, 600))
+                    self.assertNotIn('PRIVATE', str(failure.exception))
+            self.assertEqual(closed, [True])
 
 
 if __name__ == '__main__':
