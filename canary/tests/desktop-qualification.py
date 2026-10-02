@@ -92,6 +92,20 @@ class RunnerTests(unittest.TestCase):
 
 
 class QualificationTests(unittest.TestCase):
+    def test_child_startup_receipt_rejects_private_output_and_wrong_app(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'renderer-startup.json'
+            value = dict(schemaVersion=1, mechanism='renderer-startup', diagnosticsOnly=True,
+                         app='claude-desktop', exitCode=0, stderrPresent=True,
+                         captureTruncated=False, startupCategory='unclassified')
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [value])
+            for changed in ({**value, 'stderr': 'PRIVATE'}, {**value, 'app': 'pen-desktop'},
+                            {**value, 'exitCode': True}, {**value, 'startupCategory': 'PRIVATE'}):
+                path.write_text(json.dumps(changed))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'claude-desktop')
+
     def test_stability_counts_are_closed_and_never_accept_window_metadata(self):
         with tempfile.TemporaryDirectory() as root:
             path = Path(root) / 'stability.json'

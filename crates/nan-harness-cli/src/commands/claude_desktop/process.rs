@@ -135,14 +135,16 @@ impl DesktopProcess for SystemDesktopProcess {
             if self.platform == DesktopPlatform::Macos && executable.is_dir() {
                 return run_launcher("/usr/bin/open", &[executable.as_os_str()]);
             }
-            return Command::new(executable)
+            let mut command = Command::new(executable);
+            command
                 .args(crate::commands::desktop::qualification_renderer_arguments())
                 .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn()
-                .map(|_| ())
-                .map_err(ClaudeDesktopError::Launch);
+                .stdout(Stdio::null());
+            return crate::commands::desktop::spawn_observed_desktop(
+                &mut command,
+                "claude-desktop",
+            )
+            .map_err(ClaudeDesktopError::Launch);
         }
         match self.platform {
             DesktopPlatform::Macos => {

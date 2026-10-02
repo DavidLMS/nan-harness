@@ -1,3 +1,24 @@
+#[cfg(feature = "desktop-qualification")]
+mod qualification;
+
+pub(crate) fn spawn_observed_desktop(
+    command: &mut std::process::Command,
+    app: &'static str,
+) -> std::io::Result<()> {
+    #[cfg(feature = "desktop-qualification")]
+    {
+        qualification::spawn(command, app)
+    }
+    #[cfg(not(feature = "desktop-qualification"))]
+    {
+        let _ = app;
+        command
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .map(|_| ())
+    }
+}
+
 use nan_harness_private_fs::{
     PrivatePathKind, open_private_new, open_private_read_write, restrict_path,
 };

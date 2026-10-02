@@ -207,12 +207,8 @@ impl SystemPenProcess {
         let owned_app = self.platform == PenPlatform::Macos
             && env::var(OWNED_APP_LAUNCH_ENV).ok().as_deref() == Some("1");
         let mut command = self.launch_command(owned_app)?;
-        command
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .map(|_| ())
+        command.stdin(Stdio::null()).stdout(Stdio::null());
+        crate::commands::desktop::spawn_observed_desktop(&mut command, "pen-desktop")
             .map_err(PenDesktopError::Launch)
     }
 

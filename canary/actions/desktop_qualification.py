@@ -127,13 +127,23 @@ def semantic_observations(directory, app):
         if type(value) is not dict:
             raise ValueError('invalid semantic observation')
         mechanism = value.get('mechanism')
-        if mechanism not in {'hermes-renderer-qualification', 'zed-native-copy', 'semantic-provider-oracle', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'hermes-front-source', 'renderer-inventory', 'native-window-stability'}:
+        if mechanism not in {'hermes-renderer-qualification', 'zed-native-copy', 'semantic-provider-oracle', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'hermes-front-source', 'renderer-inventory', 'native-window-stability', 'renderer-startup'}:
             continue
         expected = 'hermes-renderer-qualification' if app == 'hermes-desktop' else 'zed-native-copy'
-        if (mechanism != expected and mechanism not in {'semantic-provider-oracle', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'hermes-front-source', 'renderer-inventory', 'native-window-stability'}) or type(value.get('schemaVersion')) is not int or value['schemaVersion'] != 1:
+        if (mechanism != expected and mechanism not in {'semantic-provider-oracle', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'hermes-front-source', 'renderer-inventory', 'native-window-stability', 'renderer-startup'}) or type(value.get('schemaVersion')) is not int or value['schemaVersion'] != 1:
             raise ValueError('semantic observation identity differs')
         record = {'schemaVersion': 1, 'mechanism': mechanism}
-        if mechanism == 'native-window-stability':
+        if mechanism == 'renderer-startup':
+            if set(value) != set('schemaVersion mechanism diagnosticsOnly app exitCode stderrPresent captureTruncated startupCategory'.split()) or value['diagnosticsOnly'] is not True or value['app'] != app:
+                raise ValueError('invalid renderer startup identity')
+            code = value['exitCode']
+            if code is not None and (type(code) is not int or not -(2**31) <= code < 2**31):
+                raise ValueError('invalid renderer exit code')
+            for key in ('stderrPresent', 'captureTruncated'):
+                flag(record, value, key)
+            enum(record, value, 'startupCategory', {'unclassified', 'no-usable-sandbox', 'missing-shared-library', 'display-unavailable'})
+            record.update(app=app, diagnosticsOnly=True, exitCode=code)
+        elif mechanism == 'native-window-stability':
             if set(value) != {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'counts'} or value['diagnosticsOnly'] is not True:
                 raise ValueError('invalid window stability identity')
             counts = value['counts']
