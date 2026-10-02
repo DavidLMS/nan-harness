@@ -129,10 +129,10 @@ observations describe completed runs, rather than additional qualification:
 | Application | Linux x64 | macOS ARM64 | Windows x64 |
 | --- | --- | --- | --- |
 | Zed | Response and file-tool steps pass; pointer and accessibility Retry acknowledgements do not produce provider recovery. | Three complete probes pass the expanded retry policy. | Owned window is visible but acquisition fails stability. |
-| Hermes | Three complete probes pass with renderer process ownership. | Three complete probes pass with private native userData and bounded cold-start waits. | Owned renderer connects; private retry-policy replacement fails. A private Windows file-handle fix awaits native evidence. |
+| Hermes | Three complete probes pass with renderer process ownership. | Three complete probes pass with private native userData and bounded cold-start waits. | Private retry-policy replacement succeeds; initial provider responses pass in some probes. Attachment, Retry and cleanup still prevent acceptance. Corrected Win32 environment awaits native evidence. |
 | ChatGPT / Codex | Owned document loads; no composer is observed. | Renderer attaches, then endpoint ownership is lost. | Launcher ancestry is proved; application exits. |
-| Claude | Uninstrumented startup succeeds; instrumented child exits with code 1. | Instrumented child exits with code 1; uninstrumented startup has no eligible window. | Instrumented child exits with code 1; uninstrumented cleanup remains unqualified. |
-| Pen | Three owned startup documents report unavailable hardware acceleration; software rendering needs a native trial. | Two probes expose composer/Send; another exposes sign-in. Conversation adapter remains unimplemented. | Owned renderer loads sign-in and a dialog; conversation adapter remains unimplemented. |
+| Claude | Three uninstrumented windows acquired. Explicit native accessibility returns zero visible editors or login buttons. Official account-free gateway remains unqualified. | Instrumented child exits with code 1; uninstrumented startup has no eligible window. | Uninstrumented owned window is seen but stability and cleanup remain unqualified. |
+| Pen | Software GLES removes GPU startup failure; three fresh sessions show sign-in and no editor. No official account-free route found for the frozen release. | Two probes expose composer/Send; another exposes sign-in. Conversation adapter remains unimplemented. | Owned renderer loads sign-in and a dialog; conversation adapter remains unimplemented. |
 
 The completed evidence is available in runs
 [36975359718](https://github.com/DavidLMS/nan-harness/actions/runs/36975359718)
@@ -435,3 +435,21 @@ continuing to remove credentials and unrelated opt-ins. Native evidence for the
 corrected environment is pending. Two observations before expiry do not prove
 window instability: fitting consumes the first and the second establishes a
 post-fit baseline.
+
+Run [36987296715](https://github.com/DavidLMS/nan-harness/actions/runs/36987296715)
+confirms the explicit native accessibility switch makes Claude Linux control
+queries readable in three sessions; each returns zero visible editable, Retry
+and login controls. Run [36987564606](https://github.com/DavidLMS/nan-harness/actions/runs/36987564606)
+confirms private Codex Electron state cleans up on all three platforms. Its Linux
+landing document has no editor, New chat or known import/project-creation controls;
+macOS loses endpoint ownership after attachment and Windows attachment still fails.
+These remain unqualified startup observations.
+
+The user requires account-free qualification. Claude's
+[official single-machine setup](https://claude.com/docs/third-party/claude-desktop/installation)
+explicitly supports configuring third-party inference without an Anthropic account;
+a startup failure must not be classified as an account requirement. Pen's frozen
+Linux distribution compiles activation as mandatory, and its optional profile
+completion skip does not bypass sign-in. No supported account-free switch was
+found. The three Pen cells remain externally constrained under this requirement;
+the checker does not alter the vendor distribution or fabricate authenticated state.
