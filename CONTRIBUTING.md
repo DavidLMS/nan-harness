@@ -133,6 +133,20 @@ These exceptions cover direct variant-to-fixed-value mappings without guards,
 nested decisions, or side effects. Reassess them if behavior is added. They do
 not exempt coverage, mutation testing, privacy, or other quality requirements.
 
+ZCode adds one direct mapping case to each projection. At `513a3c5d`, the same
+script measured `telemetry_harness_for_command` at cyclomatic 25/cognitive 24
+and telemetry `HarnessKind::as_str` at cyclomatic 24/cognitive 23. The existing
+fixed-value mapping exception and review conditions still apply.
+
+`inspect_value_at` in
+`crates/nan-harness-runtime/src/search_policy/inspection.rs` measures cognitive
+23, cyclomatic 13 and Halstead difficulty 22.1 at the same revision. Its recursive
+configuration traversal now explicitly distinguishes ZCode's `mcp.servers`
+container from flat MCP maps. Keep this small schema distinction beside the
+existing detection and enabled-state rules; moving it into a forwarding helper
+would obscure those rules. Reassess when another container format or independent
+detection policy is added. This exception does not waive behavioral tests.
+
 Two flat doctor contract types each contain four boolean fields, above Clippy's
 `struct_excessive_bools` threshold of three:
 
