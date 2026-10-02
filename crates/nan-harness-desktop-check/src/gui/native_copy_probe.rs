@@ -135,6 +135,42 @@ fn valid_pointer_request(payload: &str) -> bool {
     })
 }
 
+fn pointer_transport_diagnostic(code: Option<i32>) {
+    if std::env::var("GITHUB_ACTIONS").as_deref() != Ok("true")
+        || std::env::var("RUNNER_ENVIRONMENT").as_deref() != Ok("github-hosted")
+    {
+        return;
+    }
+    let Some(directory) = std::env::var_os("NANH_DESKTOP_QUALIFICATION_FACTS") else {
+        return;
+    };
+    let directory = PathBuf::from(directory);
+    if !directory.is_absolute() || !directory.is_dir() || directory.is_symlink() {
+        return;
+    }
+    let stage = match code {
+        Some(0) => "dispatched",
+        Some(2) => "invalid-request",
+        Some(11) => "foreground-mismatch",
+        Some(12) => "process-mismatch",
+        Some(13) => "initial-query-failed",
+        Some(14) => "movement-failed",
+        Some(15) => "final-query-failed",
+        Some(16) => "activation-failed",
+        _ => "transport-failed",
+    };
+    let mut nonce = [0_u8; 8];
+    if getrandom::fill(&mut nonce).is_ok()
+        && let Ok(mut file) = open_private_new(
+            &directory.join(format!("zed-pointer-{}.json", u64::from_le_bytes(nonce))),
+        )
+    {
+        let value = serde_json::json!({"schemaVersion":1,"mechanism":"zed-pointer-transport",
+            "diagnosticsOnly":true,"stage":stage});
+        let _ = serde_json::to_writer(&mut file, &value);
+    }
+}
+
 fn neutral_input(executable: &Path, mode: &str, prompt: &str) -> Result<(), Reason> {
     if !executable.is_absolute()
         || !executable.is_file()
@@ -208,6 +244,9 @@ fn neutral_input(executable: &Path, mode: &str, prompt: &str) -> Result<(), Reas
             let _ = child.wait();
         }
         let written = writer.join().map_err(|_| Reason::ActionUnsupported)?;
+        if mode == "retry-click" {
+            pointer_transport_diagnostic(status.and_then(|status| status.code()));
+        }
         if !status.is_some_and(|status| status.success()) {
             return Err(Reason::ActionUnsupported);
         }

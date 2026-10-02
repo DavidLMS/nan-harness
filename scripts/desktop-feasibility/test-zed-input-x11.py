@@ -52,15 +52,30 @@ class Transport(unittest.TestCase):
                           'getactivewindow', 'getwindowpid', 'click'])
         self.assertEqual(calls[-1], ['/usr/bin/xdotool', 'click', '--clearmodifiers', '1'])
         with patch('subprocess.run', return_value=subprocess.CompletedProcess([], 0, stdout=b'99')) as run:
-            self.assertEqual(self.call('retry-click', request), 3)
+            self.assertEqual(self.call('retry-click', request), 11)
             self.assertEqual(run.call_count, 1)
         with patch('subprocess.run', side_effect=[
                 subprocess.CompletedProcess([], 0, stdout=b'40'),
                 subprocess.CompletedProcess([], 0, stdout=b'20'),
                 subprocess.CompletedProcess([], 0),
                 subprocess.CompletedProcess([], 0, stdout=b'99')]) as run:
-            self.assertEqual(self.call('retry-click', request), 3)
+            self.assertEqual(self.call('retry-click', request), 11)
             self.assertEqual(run.call_count, 4)
+
+    def test_pointer_failure_stage_never_replays_input(self):
+        request = json.dumps(dict(pid=20, window=40, x=100, y=200)).encode()
+        for failed, code in [('getactivewindow', 13), ('mousemove', 14), ('click', 16)]:
+            calls = []
+            def execute(args, **kwargs):
+                calls.append(args[1])
+                if args[1] == failed:
+                    raise subprocess.TimeoutExpired('fixed-helper', 2)
+                output = b'40' if args[1] == 'getactivewindow' else b'20'
+                return subprocess.CompletedProcess(args, 0, stdout=output)
+            with patch('subprocess.run', side_effect=execute):
+                self.assertEqual(self.call('retry-click', request), code)
+            self.assertLessEqual(calls.count('click'), 1)
+            self.assertEqual(calls[-1], failed)
 
     def test_invalid_pointer_data_never_reaches_native_input(self):
         request = dict(pid=20, window=40, x=100, y=200)

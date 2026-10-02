@@ -33,18 +33,27 @@ def retry_click(payload):
                 raise ValueError('invalid identity')
             return int(output)
         def owned_foreground():
-            return (run(['getactivewindow'], True) == request['window']
-                    and run(['getwindowpid', str(request['window'])], True) == request['pid'])
-        if not owned_foreground():
-            return 3
+            if run(['getactivewindow'], True) != request['window']:
+                return 11
+            if run(['getwindowpid', str(request['window'])], True) != request['pid']:
+                return 12
+            return 0
+        stage = 13
+        guard = owned_foreground()
+        if guard:
+            return guard
+        stage = 14
         run(['mousemove', '--sync', '--', str(request['x']), str(request['y'])])
-        if not owned_foreground():
-            return 3
+        stage = 15
+        guard = owned_foreground()
+        if guard:
+            return guard
+        stage = 16
         # One ordinary activation, never another press after an uncertain receipt.
         run(['click', '--clearmodifiers', '1'])
         return 0
     except (ValueError, TypeError, OSError, subprocess.SubprocessError):
-        return 3
+        return locals().get("stage", 2)
 
 
 def main():

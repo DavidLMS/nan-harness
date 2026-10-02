@@ -579,6 +579,22 @@ class QualificationTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'pen-desktop')
 
+    def test_pointer_diagnostic_is_closed_and_app_scoped(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            value = dict(schemaVersion=1, mechanism='zed-pointer-transport',
+                         diagnosticsOnly=True, stage='movement-failed')
+            path = root / 'pointer.json'
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(root, 'zed-desktop'), [value])
+            with self.assertRaises(ValueError):
+                q.semantic_observations(root, 'hermes-desktop')
+            for changed in ({**value, 'stage': 'PRIVATE'}, {**value, 'pid': 40},
+                            {**value, 'diagnosticsOnly': False}):
+                path.write_text(json.dumps(changed))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'zed-desktop')
+
     def test_policy_preparation_failures_keep_only_the_closed_stage(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

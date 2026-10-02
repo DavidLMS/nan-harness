@@ -299,6 +299,10 @@ fn renderer_arguments(
             format!("--remote-debugging-port={port}"),
             "--remote-debugging-address=127.0.0.1".into(),
         ];
+        if kind == nan_harness_core::DesktopHarnessKind::Pen && cfg!(target_os = "linux") {
+            // SwANGLE supplies a software GLES driver on GPU-less hosted runners.
+            arguments.extend(["--use-gl=angle".into(), "--use-angle=swiftshader".into()]);
+        }
         if kind == nan_harness_core::DesktopHarnessKind::ChatGpt {
             // The packaged app otherwise relaunches after discovering that its
             // API-key session has no in-app browser. Use its own startup switch
@@ -322,7 +326,15 @@ mod renderer_tests {
         assert_eq!(codex.len(), 3);
         assert_eq!(codex[2], "--codex-browser-background-networking-disabled");
         for kind in [DesktopHarnessKind::Claude, DesktopHarnessKind::Pen] {
-            assert_eq!(renderer_arguments(kind, true, root, Some("43210")).len(), 2);
+            let expected = if kind == DesktopHarnessKind::Pen && cfg!(target_os = "linux") {
+                4
+            } else {
+                2
+            };
+            assert_eq!(
+                renderer_arguments(kind, true, root, Some("43210")).len(),
+                expected
+            );
         }
         assert!(
             renderer_arguments(DesktopHarnessKind::ChatGpt, false, root, Some("43210")).is_empty()
@@ -340,7 +352,7 @@ mod renderer_tests {
             assert!(renderer_arguments(DesktopHarnessKind::Pen, true, root, Some(port)).is_empty());
         }
         assert_eq!(
-            renderer_arguments(DesktopHarnessKind::Pen, true, root, Some("43210")),
+            renderer_arguments(DesktopHarnessKind::Claude, true, root, Some("43210")),
             [
                 "--remote-debugging-port=43210",
                 "--remote-debugging-address=127.0.0.1"

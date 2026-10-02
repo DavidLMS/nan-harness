@@ -349,3 +349,11 @@ require the explicit workflow option and protected `canary-live` environment.
 Reports need a separate approval; Desktop checks never gate a nanh release.
 See the [hosted canary runbook](README.md) for state initialization, CLI release
 qualification, recommendation and the guarded Tart emergency path.
+
+Pen Linux qualification requests the fixed `--use-gl=angle` and
+`--use-angle=swiftshader` software GLES driver documented by
+[Chromium](https://github.com/chromium/chromium/blob/main/docs/gpu/swiftshader.md).
+This is confined to owned hosted qualification; it does not disable the sandbox.
+Its native outcome remains pending. Zed's X11 pointer helper now emits only a
+closed transport stage to distinguish foreground/process rejection, failed
+movement and failed activation. Neither diagnostic can qualify a probe.
