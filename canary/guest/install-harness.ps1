@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-  [Parameter(Mandatory=$true)][ValidateSet('claude-code','codex','mimo-code','opencode','hermes','pi','omp','prime-agent','deepseek-harness','openclaw','cline','qwen-code','kimi-code','aider','goose','fx')][string]$Harness,
+  [Parameter(Mandatory=$true)][ValidateSet('claude-code','codex','mimo-code','zcode','opencode','hermes','pi','omp','prime-agent','deepseek-harness','openclaw','cline','qwen-code','kimi-code','aider','goose','fx')][string]$Harness,
   [Parameter(Mandatory=$true)][string]$Version,
   [ValidatePattern('^[0-9]+\.[0-9]+$')][string]$PythonVersion = '3.12',
   [string]$Ref = ''
@@ -241,6 +241,10 @@ function Probe-OfficialWindowsMetadata([string]$Uri, [string]$Name) {
 }
 try {
   switch ($Harness) {
+    'zcode' {
+      if ($Ref -notmatch '^[0-9a-f]{40}$') { throw 'ZCode requires an immutable source ref' }
+      Invoke-Native 'python.exe' @((Join-Path $PSScriptRoot 'zcode-source.py'),'install','--version',$Version,'--ref',$Ref,'--directory',$cell) 'python' 'install'
+    }
     'claude-code' { Npm "@anthropic-ai/claude-code@$Version" }
     'codex' { Npm "@openai/codex@$Version" }
     'mimo-code' {

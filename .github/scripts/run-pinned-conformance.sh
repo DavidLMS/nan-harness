@@ -44,6 +44,12 @@ for harness in "$@"; do
         fi
       )
       ;;
+    zcode)
+      cargo run --locked --quiet -- doctor zcode
+      cargo test --locked -p nan-harness-cli --test conformance_direct zcode_ -- --ignored
+      source_directory="$HOME/.local/share/nan-harness-canary/zcode"
+      python3 "$repository_root/canary/guest/zcode-source.py" check --directory "$source_directory" --binary "$repository_root/target/debug/nan-harness"
+      ;;
     fx)
       cargo run --locked --quiet -- doctor fx
       cargo test --locked -p nan-harness-cli --test conformance_fx fx_ -- --ignored

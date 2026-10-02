@@ -1,4 +1,4 @@
-"""Isolated feasibility probe; not a compatibility-manifest or daily gate entry."""
+"""Synthetic native tool contracts reused by pinned and daily compatibility checks."""
 
 import argparse
 import json

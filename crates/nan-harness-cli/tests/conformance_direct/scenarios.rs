@@ -44,3 +44,6 @@ mod pi;
 mod prime_agent;
 #[path = "scenarios/qwen_code.rs"]
 mod qwen_code;
+
+#[path = "scenarios/zcode.rs"]
+mod zcode;

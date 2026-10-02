@@ -7,7 +7,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from selection import WINDOWS_UNAVAILABLE, WINDOWS_SKIP_REASON
 from cell import HERMES_INSTALL_STAGES
 
-HARNESSES = frozenset(("claude-code", "codex", "mimo-code", "opencode", "hermes", "pi", "omp", "prime-agent", "deepseek-harness", "openclaw", "cline", "qwen-code", "kimi-code", "aider", "goose", "fx"))
+HARNESSES = frozenset(("claude-code", "codex", "mimo-code", "zcode", "opencode", "hermes", "pi", "omp", "prime-agent", "deepseek-harness", "openclaw", "cline", "qwen-code", "kimi-code", "aider", "goose", "fx"))
 PHASES = ("metadata", "prerequisites", "install", "version-doctor", "deterministic-contract", "live-tool")
 SETUP = frozenset(("checkout", "node", "python", "rust", "source", "fixtures", "rust_fixture", "build", "workflow", "batch", "entrypoint"))
 OUTCOMES = frozenset(("passed", "failed", "blocked", "skipped"))

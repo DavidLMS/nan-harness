@@ -5,6 +5,7 @@ from contextlib import nullcontext
 import json
 import os
 import re
+import shutil
 from pathlib import Path
 import subprocess
 import sys
@@ -110,10 +111,15 @@ def main():
             environment = {name: value for name, value in os.environ.items()
                            if name in ("PATH", "SYSTEMROOT", "SystemRoot", "WINDIR", "COMSPEC", "PATHEXT", "SystemDrive")}
             helper = binary.parent / ("nan-harness.exe" if os.name == "nt" else "nan-harness")
-            assert helper.is_file(), "Build both nanh and nan-harness before running the integration probe"
+            if not helper.is_file():
+                # Published assets have target-qualified names. MCP still resolves
+                # the canonical helper command; stage the same binary privately.
+                helper = home / "bin" / ("nan-harness.exe" if os.name == "nt" else "nan-harness")
+                helper.parent.mkdir()
+                shutil.copy2(binary, helper)
             # Native MCP commands resolve nan-harness through PATH. Test this checkout,
             # even when another nan-harness version is installed on the host.
-            environment["PATH"] = str(binary.parent) + os.pathsep + environment.get("PATH", "")
+            environment["PATH"] = str(helper.parent) + os.pathsep + environment.get("PATH", "")
             environment.update(HOME=temporary, USERPROFILE=temporary, APPDATA=temporary,
                                LOCALAPPDATA=temporary, TMPDIR=temporary, TMP=temporary, TEMP=temporary,
                                NAN_HARNESS_CONFIG_DIR=str(state), NAN_HARNESS_CREDENTIAL_BACKEND="file",

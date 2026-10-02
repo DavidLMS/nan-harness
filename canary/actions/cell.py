@@ -995,6 +995,10 @@ def conformance(args, state):
     """
     report = args.directory / "conformance-private.json"
     environment = cell_environment(args.directory)
+    if args.harness == "zcode":
+        private_command([sys.executable, str(ROOT / "canary/guest/zcode-source.py"), "check",
+                         "--directory", str(args.directory), "--binary", str(args.binary)],
+                        args.directory, timeout=1200, environment=environment)
     for attempt in range(1, CONFORMANCE_ATTEMPTS + 1):
         try:
             private_command([str(args.canary), "conformance", "--nan-harness", str(args.binary),

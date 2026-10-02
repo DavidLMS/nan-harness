@@ -1,0 +1,65 @@
+"""Offline contracts for immutable ZCode builds and their complete probe path."""
+
+import importlib.util
+import json
+from pathlib import Path
+import tempfile
+import unittest
+from unittest.mock import patch
+
+ROOT = Path(__file__).resolve().parents[2]
+spec = importlib.util.spec_from_file_location("zcode_source", ROOT / "canary/guest/zcode-source.py")
+source = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(source)
+
+
+class SourceContracts(unittest.TestCase):
+    def test_binding_preserves_startup_and_refuses_source_drift(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            entries = root / "apps/zcode-cli/packages/cli/src"
+            entries.mkdir(parents=True)
+            main = entries / "main.ts"
+            headless = entries / "prompt-command.ts"
+            main.write_text('const exitCode = await run(context, {\n});\nvoid main();\n')
+            headless.write_text('      env: appEnv,\n')
+            source.bind(root)
+            self.assertIn('else {\n  void main();', main.read_text())
+            self.assertIn('NAN_HARNESS_ZCODE_PROJECT_CONFIG_FILE', main.read_text())
+            self.assertIn('projectConfigPath: deps.projectConfigPath', headless.read_text())
+            main.write_text('changed startup')
+            with self.assertRaises(ValueError):
+                source.bind(root)
+
+    def test_bad_identity_never_starts_an_installer(self):
+        for version, ref in (('latest', 'a' * 40), ('0.16.9', 'main'),
+                             ('../0.16.9', 'a' * 40)):
+            with patch.object(source, 'run') as run, tempfile.TemporaryDirectory() as tmp:
+                with self.assertRaises(ValueError):
+                    source.install(version, ref, Path(tmp))
+                run.assert_not_called()
+
+    def test_declared_version_and_checked_out_commit_must_match(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(source, 'run', return_value='b' * 40) as run:
+            with self.assertRaises(ValueError):
+                source.install('0.16.9', 'a' * 40, Path(tmp))
+            self.assertFalse(any('npm' in str(call) for call in run.call_args_list))
+
+    def test_check_runs_protocol_sessions_tui_managed_native_and_search_probes_without_live_key(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(source, 'run') as run, \
+                patch.dict(source.os.environ, {'NAN_API_KEY': 'synthetic-secret'}):
+            root = Path(tmp)
+            (root / 'zcode-source.json').write_text(json.dumps({'source': str(root / 'source'),
+                                                              'node': str(root / 'node')}))
+            source.check(root, root / 'nanh')
+            calls = run.call_args_list
+            self.assertEqual(len(calls), 7)
+            commands = [[str(arg) for arg in call.args[0]] for call in calls]
+            self.assertEqual([command[-1] for command in commands[4:6]], ['sessions', 'tui'])
+            self.assertIn('integration_probe.py', ' '.join(commands[-1]))
+            for call in calls:
+                self.assertNotIn('NAN_API_KEY', call.args[2])
+
+
+if __name__ == '__main__':
+    unittest.main()

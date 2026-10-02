@@ -45,6 +45,9 @@ HISTORICAL_WINDOWS_IDENTITIES = HISTORICAL_IDENTITIES | {
     f"windows/{harness}" for harness in HISTORICAL_HARNESSES
     if harness not in ("prime-agent", "fx")
 }
+HISTORICAL_MIMO_IDENTITIES = HISTORICAL_WINDOWS_IDENTITIES | {
+    f"{platform}/mimo-code" for platform in PLATFORMS
+}
 HISTORICAL_ASSETS = {name for platform in ("linux", "macos") for name in PLATFORM_ASSETS[platform].values()}
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
@@ -154,6 +157,8 @@ def _matrix_policy(handoff: dict[str, Any], recommendation: bool):
         return HISTORICAL_IDENTITIES, HISTORICAL_ASSETS
     if recommendation and handoff.get("reportCount") == len(HISTORICAL_WINDOWS_IDENTITIES):
         return HISTORICAL_WINDOWS_IDENTITIES, set(ASSET_NAMES)
+    if recommendation and handoff.get("reportCount") == len(HISTORICAL_MIMO_IDENTITIES):
+        return HISTORICAL_MIMO_IDENTITIES, set(ASSET_NAMES)
     return REQUIRED_IDENTITIES, set(ASSET_NAMES)
 
 

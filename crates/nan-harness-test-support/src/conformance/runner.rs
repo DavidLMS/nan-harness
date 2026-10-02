@@ -179,6 +179,13 @@ impl PublishedConformanceRunner {
         if registration.kind == HarnessKind::MimoCode {
             command = command.env("MIMOCODE_HOME", home.join("mimo"));
         }
+        if registration.kind == HarnessKind::ZCode {
+            command = command
+                .env("ZCODE_DATA_BASE_DIR", home.join("zcode"))
+                .env("ZCODE_ENDPOINT_ORIGIN", provider.base_url())
+                .env("ZCODE_MODEL_TELEMETRY_ENABLED", "0")
+                .env("ZCODE_TELEMETRY_REPORT_ENDPOINT", "");
+        }
         if registration.kind == HarnessKind::OpenCode {
             command = command
                 .env("XDG_CONFIG_HOME", home.join("config"))

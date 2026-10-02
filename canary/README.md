@@ -3,7 +3,7 @@
 For the Windows integration candidate, explicit platform skips and remaining
 qualification work, see [Windows integration](windows-integration.md).
 
-The nan-harness compatibility canary tests all 16 supported CLI harnesses on
+The nan-harness compatibility canary tests all 17 supported CLI harnesses on
 GitHub-hosted native runners without adding commands to the public `nanh`
 binary. Daily checks refresh compatibility evidence for published binaries;
 the separate release gate qualifies new releases.
@@ -11,9 +11,9 @@ the separate release gate qualifies new releases.
 GitHub Actions provides modular CLI checks and protected live provider probes.
 Each new draft release automatically dispatches verification of its exact
 signed Linux/macOS ARM64 and Windows x64 assets. Publication remains a separate,
-explicit operation after all 46 supported live cells pass; Windows Prime Agent
+explicit operation after all 49 supported live cells pass; Windows Prime Agent
 and FX are skipped because no official Windows distribution is available.
-Historical 30- and 43-cell evidence remains valid only for recommending an already
+Historical 30-, 43- and 46-cell evidence remains valid only for recommending an already
 published stable release with its complete, bound publication receipt. It cannot
 qualify a new publication. The Tart procedures below remain recovery references.
 
@@ -30,10 +30,24 @@ against local fixtures. Failure of this `native-configuration` check fails
 conformance in daily and release cells. Published assets acquire this check only
 when they include the updated canary binary; daily never substitutes a source build.
 
+ZCode freezes the official `zai-org/ZCode` main commit and reads the agent
+version from `apps/zcode-cli/package.json` at that commit. It never uses the
+desktop product version. Every daily run rechecks the source commit, even when
+the agent semver is unchanged. The same commit is used on all three platforms.
+Its clean installer builds in the cell with the declared Node and pnpm versions;
+no global tools or user configuration are changed. Deterministic coverage runs
+source/protocol contracts, native tools, sessions, the TUI, managed and native
+configuration lifecycles, and private search before the real-provider tool probe.
+Releases whose embedded registry lacks a harness report `unavailable-in-release`;
+those entries do not count as passing evidence and are never published to the feed.
+New release publication requires the complete 49-cell matrix. Existing 30-, 43-
+and 46-cell publication receipts remain usable only for recommendation of their
+already published release.
+
 | Trigger | Platforms | Coverage |
 | --- | --- | --- |
 | Daily hosted | Linux/macOS ARM64 and Windows x64 | Pending upstream versions: clean install, doctor, deterministic conformance and live `qwen3.6`; partial feed publication by harness |
-| Hosted release gate | Linux/macOS ARM64 and Windows x64 | Automatic draft verification of 46 supported live cells; publication remains explicit |
+| Hosted release gate | Linux/macOS ARM64 and Windows x64 | Automatic draft verification of 49 supported live cells; publication remains explicit |
 
 Compatibility evidence is release-scoped, with CLI schema v2 and unified CLI /
 Desktop schema v3 assets. Daily publication requires every supported native
@@ -370,7 +384,7 @@ mode=live  verification_only=true|false
 It requires a draft for publication; verification-only mode also accepts an
 already published stable release. It resolves the tag to the exact supplied
 commit, verifies the signed `SHA256SUMS` and six canonical assets, and runs
-46 unique CLI cells: 16 Linux ARM64, 16 macOS ARM64 and 14 Windows x64.
+49 unique CLI cells: 17 Linux ARM64, 17 macOS ARM64 and 15 Windows x64.
 Prime Agent and FX are explicitly unavailable on Windows and are not counted
 as passes. The workflow checks out only immutable `GITHUB_SHA` trusted-branch
 code and never executes tag-controlled workflow code. `NAN_API_KEY` is exposed
@@ -381,7 +395,7 @@ that environment.
 
 The default `verification_only=true` mode is safe for testing and produces
 verification evidence without publishing. Publication is allowed only for a
-live run with `verification_only=false`, after the full 46-cell pass and
+live run with `verification_only=false`, after the full 49-cell pass and
 provenance handoff succeed. The publisher makes the release public and
 non-latest, updates the compatibility and available-release feeds, and retains
 durable evidence/receipts; a deterministic run never satisfies the live release
@@ -552,7 +566,7 @@ is nothing to time out.
 | Manual cell | 2-5 minutes | 60 minutes | Reproduce one harness/platform without publication |
 | Daily | 20-30 minutes | 60 minutes | Detect Linux installation and deterministic regressions every non-Sunday day |
 | Weekly | 45-60 minutes (20-30 with a validated two-lane host) | 120 minutes | Verify every harness live on Linux and macOS |
-| Hosted release gate | Hosted Linux/macOS ARM64 and Windows x64 matrix | 180 minutes per cell | Automatically verify each draft with the exact 46-cell live matrix; publication remains explicit |
+| Hosted release gate | Hosted Linux/macOS ARM64 and Windows x64 matrix | 180 minutes per cell | Automatically verify each draft with the exact 49-cell live matrix; publication remains explicit |
 | Legacy local release gate | 45-60 minutes (20-30 with a validated two-lane host) | 120 minutes | Historical Tart release evidence and recovery only |
 
 The first uncached Tart image can add up to 30 minutes per platform. A suite

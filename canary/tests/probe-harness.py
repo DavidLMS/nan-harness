@@ -19,7 +19,7 @@ CELL_SPEC = importlib.util.spec_from_file_location("probe_cell_contract", ROOT /
 CELL = importlib.util.module_from_spec(CELL_SPEC)
 CELL_SPEC.loader.exec_module(CELL)
 HARNESSES = (
-    "claude-code", "codex", "mimo-code", "opencode", "hermes", "pi", "omp", "prime-agent",
+    "claude-code", "codex", "mimo-code", "zcode", "opencode", "hermes", "pi", "omp", "prime-agent",
     "deepseek-harness", "openclaw", "cline", "qwen-code", "kimi-code", "aider",
     "goose", "fx",
 )
@@ -57,13 +57,13 @@ if subcommand == "aider":
     Path("edit-target.txt").write_text("AIDER_CANARY_TOOL_OK\n", encoding="utf-8")
     if os.environ.get("NAN_CANARY_FAKE_MODE", "").startswith("aidercategory-stdout-nonempty"):
         print("synthetic private output")
-if subcommand in {"codex", "hermes", "prime", "dsh"}:
+if subcommand in {"codex", "hermes", "prime", "dsh", "zcode"} and os.environ.get("NAN_CANARY_FAKE_MODE") != "toolfailure":
     text = " ".join(args)
     match = re.search(r"(?:> '|> |create '|to ')(/[^ '\"]+)", text)
     if match:
         target = Path(match.group(1))
         value = {"codex": "NAN_CODEX_TOOL_OK", "hermes": "NAN_HERMES_TOOL_OK",
-                 "prime": "NAN_PRIME_TOOL_OK", "dsh": "NAN_DEEPSEEK_TOOL_OK"}[subcommand]
+                 "prime": "NAN_PRIME_TOOL_OK", "dsh": "NAN_DEEPSEEK_TOOL_OK", "zcode": "NAN_ZCODE_TOOL_OK"}[subcommand]
         target.write_text(value + "\n", encoding="utf-8")
 if subcommand == "openclaw":
     print('{')

@@ -27,6 +27,9 @@ jobs:
           - name: Node B
             node: true
             harnesses: claude-code cline qwen-code mimo-code opencode
+          - name: ZCode source
+            node: true
+            harnesses: zcode
           - name: Hermes
             node: false
             harnesses: hermes

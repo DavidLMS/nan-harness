@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-  [Parameter(Mandatory=$true)][ValidateSet('claude-code','codex','mimo-code','opencode','hermes','pi','omp','prime-agent','deepseek-harness','openclaw','cline','qwen-code','kimi-code','aider','goose','fx')][string]$Harness,
+  [Parameter(Mandatory=$true)][ValidateSet('claude-code','codex','mimo-code','zcode','opencode','hermes','pi','omp','prime-agent','deepseek-harness','openclaw','cline','qwen-code','kimi-code','aider','goose','fx')][string]$Harness,
   [Parameter(Mandatory=$true)][ValidateSet('version-doctor','deterministic-contract','live-tool')][string]$Stage,
   [string]$Model = 'qwen3.6', [Parameter(Mandatory=$true)][string]$NanBinary,
   [Parameter(Mandatory=$true)][string]$Canary, [Parameter(Mandatory=$true)][string]$Version
@@ -213,6 +213,7 @@ try {
   switch ($Harness) {
     'claude-code' { Run-Native @('claude','--model',$Model,'--','-p',$prompt,'--output-format','stream-json','--verbose','--no-session-persistence','--max-turns','4','--tools','Read','--allowedTools','Read'); if (-not (Has-Text '"name":"Read"')) { Fail 'tool evidence missing' } }
     'codex' { $target=Join-Path $workspace 'codex-tool.txt'; $quotedTarget = $target.Replace("'", "''"); $p="Use exec_command to run powershell -NoProfile -Command `"Set-Content -NoNewline -LiteralPath '$quotedTarget' -Value 'NAN_CODEX_TOOL_OK'`". After the command succeeds, reply exactly NAN_CANARY_OK."; Run-Native @('codex','--model',$Model,'--','exec','--skip-git-repo-check','--ephemeral','--json','--dangerously-bypass-approvals-and-sandbox',$p); Read-Exact $target 'NAN_CODEX_TOOL_OK' }
+    'zcode' { $target=Join-Path $workspace 'zcode-tool.txt'; $p="Use Write to create '$target' with exactly NAN_ZCODE_TOOL_OK. Then use Read to read '$readTarget'. After both tools succeed, reply with the file content and NAN_CANARY_OK."; $env:ZCODE_DATA_BASE_DIR=Join-Path $workspace 'zcode'; $env:ZCODE_MODEL_TELEMETRY_ENABLED='0'; $env:ZCODE_TELEMETRY_REPORT_ENDPOINT=''; Run-Native @('zcode','--model',$Model,'--','--locale','en-US','--no-color','--prompt',$p); Read-Exact $target 'NAN_ZCODE_TOOL_OK' }
     'mimo-code' { Run-Native @('mimo','--model',$Model,'--','run','--pure','--format','json','--dangerously-skip-permissions',$prompt); if (-not (Has-Regex '"tool"\s*:\s*"read"|"read"')) { Fail 'tool evidence missing' } }
     'opencode' { Run-Native @('opencode','--model',$Model,'--','run','--pure','--format','json','--auto',$prompt); if (-not (Has-Regex '"tool"\s*:\s*"read"|"read"')) { Fail 'tool evidence missing' } }
     'hermes' { $target=Join-Path $workspace 'hermes-tool.txt'; $p="You must call write_file exactly once to create '$target' with exactly NAN_HERMES_TOOL_OK. Do not reply before the tool succeeds. Then reply exactly NAN_CANARY_OK."; $env:BFL_API_KEY='';$env:ELEVENLABS_API_KEY='';$env:FAL_KEY='';$env:OPENAI_API_KEY='';$env:XAI_API_KEY=''; Run-Native @('hermes','--model',$Model,'--','chat','--query',$p,'--toolsets','file','--quiet','--yolo','--safe-mode','--source','tool','--max-turns','5'); Read-Exact $target 'NAN_HERMES_TOOL_OK' }

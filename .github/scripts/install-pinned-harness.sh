@@ -136,6 +136,12 @@ omp_binary_asset() {
 }
 
 case "$harness_id" in
+  zcode)
+    source_directory="$HOME/.local/share/nan-harness-canary/zcode"
+    mkdir -p "$source_directory"
+    python3 "$repository_root/canary/guest/zcode-source.py" install --version "$(package_version)" --directory "$source_directory"
+    append_path "$HOME/.local/bin"
+    ;;
   claude-code)
     npm install --global "@anthropic-ai/claude-code@$(package_version)"
     ;;

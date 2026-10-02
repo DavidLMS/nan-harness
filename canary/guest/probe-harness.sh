@@ -119,6 +119,15 @@ case "$harness" in
     probe_stage='tool-evidence'
     grep -Fx 'NAN_CODEX_TOOL_OK' "$target" >/dev/null
     ;;
+  zcode)
+    target="$workspace/zcode-tool.txt"
+    zcode_prompt="Use Write to create '$target' with exactly NAN_ZCODE_TOOL_OK. Then use Read to read '$workspace/read-target.txt'. After both tools succeed, reply with the file content and NAN_CANARY_OK."
+    export ZCODE_DATA_BASE_DIR="$workspace/zcode" ZCODE_MODEL_TELEMETRY_ENABLED=0 ZCODE_TELEMETRY_REPORT_ENDPOINT=''
+    "$nan_command" zcode --model "$model" -- \
+      --locale en-US --no-color --prompt "$zcode_prompt" >"$output" 2>"$stderr_output"
+    probe_stage='tool-evidence'
+    grep -Fx 'NAN_ZCODE_TOOL_OK' "$target" >/dev/null
+    ;;
   mimo-code)
     "$nan_command" mimo --model "$model" -- \
       run --pure --format json --dangerously-skip-permissions "$prompt" >"$output" 2>"$stderr_output"

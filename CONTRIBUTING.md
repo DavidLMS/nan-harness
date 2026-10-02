@@ -264,8 +264,8 @@ verifies the draft before publication.
       tag's commit, the six Linux/macOS ARM64 and Windows x64 release assets,
       and the trusted workflow
       source rather than executing tag-controlled code.
-- [ ] Keep the draft unpublished until the live hosted gate reports all 46
-      unique cells passed (16 Linux, 16 macOS, 14 Windows) and emits its complete provenance
+- [ ] Keep the draft unpublished until the live hosted gate reports all 49
+      unique cells passed (17 Linux, 17 macOS, 15 Windows) and emits its complete provenance
       handoff. A deterministic verification-only run is useful evidence but
       does not satisfy the live release criterion and cannot publish.
       Prime Agent and FX are skipped only on Windows until official native

@@ -274,11 +274,22 @@ x64. All provider payloads and credentials in these probes are synthetic.
 The [hosted production run](https://github.com/DavidLMS/nan-harness/actions/runs/37005961113)
 passed on all three platforms, including Windows process-tree cleanup.
 
-This first implementation does not yet claim live NaN account qualification or
-integration into the shared release publication matrix. A latest-source daily
-canary is proposed after the hosted production matrix passes: resolve the
-upstream main commit and agent package version together, build that exact commit
-with its declared Node/pnpm versions, and run the same protocol, session, TUI,
-managed/native and search probes. Report source contract drift independently of
-provider regressions; never substitute the desktop product version for the
-agent CLI version or silently change the installation pin.
+The shared compatibility matrix now includes ZCode on all three native platforms.
+The pinned conformance shard installs the verified revision and runs the published
+inventory/tool/sentinel contract plus these complete source probes. The daily
+canary resolves upstream main once, reads the agent version at that exact commit,
+and uses the same source identity across platforms. It builds with the declared
+Node/pnpm versions and repeats protocol, session, TUI, managed/native and search
+checks before the live provider probe. Source commits are rechecked even if the
+agent version has not changed. The installation pin remains unchanged.
+
+The shared release publication gate now requires 49 live cells. Already published
+receipts retain their historical matrix only on the recommendation path; no old
+receipt qualifies a new publication. Daily selection reports a harness absent
+from a published binary's embedded registry as unavailable, without passing it
+or substituting a source-built nan-harness binary.
+
+Real-account qualification uses the shared isolated tool probe: Write and Read
+must succeed, read and completion markers must be present, and NaN usage must be
+observed. Raw provider payloads and credentials remain private and are never
+included in evidence artifacts.

@@ -2,6 +2,7 @@
 """Prepare, run and publish daily checks of exact published nan-harness assets."""
 
 import argparse
+import base64
 import datetime
 import importlib.util
 import json
@@ -83,33 +84,50 @@ def release_identity(repository, tag):
 
 def release_assets(repository, tag, directory):
     commit = release_identity(repository, tag)
+    metadata = json.loads(gh("api", f"repos/{repository}/contents/crates/nan-harness-runtime/resources/compatibility.json?ref={commit}"))
+    embedded = json.loads(base64.b64decode(metadata["content"], validate=False))
+    harnesses = [entry["id"] for entry in embedded["harnesses"]]
+    if len(harnesses) != len(set(harnesses)) or any(not isinstance(h, str) for h in harnesses):
+        raise ValueError("release harness registry is invalid")
     for name in ("SHA256SUMS", *(n for pair in PLATFORM_ASSETS.values() for n in pair.values())):
         download(repository, tag, name, directory / name)
     gh("attestation", "verify", directory / "SHA256SUMS", "--repo", repository,
        "--signer-workflow", repository + "/.github/workflows/release.yml",
        "--source-ref", "refs/tags/" + tag, "--source-digest", commit, "--deny-self-hosted-runners")
     entries, _ = _asset_entries(directory)
-    return {"tag": tag, "version": tag[1:], "commit": commit,
+    return {"tag": tag, "version": tag[1:], "commit": commit, "harnesses": harnesses,
             "digests": {entry["name"]: entry["sha256"] for entry in entries}}
 
 
 def frozen_versions(model):
     result = {}
+    zcode = None
     for system, platform in PLATFORMS.items():
-        names = [h for h in CLI_HARNESSES if system in supported_platforms(h)]
+        names = [h for h in CLI_HARNESSES if system in supported_platforms(h)
+                 and (h != "zcode" or system == "linux")]
         resolved, _ = suite.resolve_manifest(names, system, platform["architecture"], model)
         result[system] = {item.harness: item.as_dict() for item in resolved}
+        if system == "linux":
+            zcode = result[system].get("zcode")
+        elif zcode:
+            result[system]["zcode"] = {**zcode, "system": system, "architecture": platform["architecture"]}
     return result
 
 
 def select_cells(plan, release, versions, feed, force):
     for harness in CLI_HARNESSES:
+        if harness not in release.get("harnesses", CLI_HARNESSES):
+            plan["results"].append({"tag": release["tag"], "harness": harness,
+                                    "status": "unavailable-in-release"})
+            continue
         platforms = supported_platforms(harness)
         frozen = [versions[system].get(harness) for system in platforms]
         status = None
         if any(item is None for item in frozen) or len({(v["version"], v.get("ref", "")) for v in frozen if v}) != 1:
             status = "unresolved"
-        elif not pending(feed, release["version"], harness, frozen[0]["version"], force):
+        # Source commits can change without changing the agent semver. The feed
+        # does not store commits, so ZCode must be checked on every daily run.
+        elif not pending(feed, release["version"], harness, frozen[0]["version"], force or harness == "zcode"):
             status = "current"
         if status:
             plan["results"].append({"tag": release["tag"], "harness": harness, "status": status})
@@ -235,7 +253,7 @@ def aggregate(args):
         for row in results:
             output.write(f"| {row['tag']} | {row['harness']} | {row['status']} |\n")
         output.write("\nWindows Prime Agent and FX are unavailable and never count as passes.\n")
-    return int(any(row["status"] not in ("current", "verified", "published") for row in results))
+    return int(any(row["status"] not in ("current", "verified", "published", "unavailable-in-release") for row in results))
 
 
 def main():

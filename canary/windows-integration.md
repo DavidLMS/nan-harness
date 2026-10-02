@@ -37,7 +37,7 @@ skip evidence without executing a compatibility cell.
 - An inventory-only failure is advisory only with positive process completion
   and no operational failure reasons; failed cleanup/provider work is not drift.
 - The Windows canary joins release assets and checksum generation. The trusted
-  release gate requires 46 unique passing live reports with matching binary
+  release gate requires 49 unique passing live reports with matching binary
   digests and architecture. A missing Windows report blocks publication.
 - Draft creation dispatches verification-only live checks automatically from
   the default branch. It never publishes automatically; the explicit publisher
@@ -52,7 +52,7 @@ skip evidence without executing a compatibility cell.
    statuses and run links, never prompts, responses or raw harness logs.
 3. Investigate any operational failures newly exposed by strict inventory
    classification, particularly DeepSeek Harness.
-4. Review the 46-cell trusted exact-release-asset gate and its automatic
+4. Review the 49-cell trusted exact-release-asset gate and its automatic
    verification-only dispatch before merge. Branch diagnostics do not replace
    exact-release-asset qualification of each future release.
 5. Complete repository gates and review before merging through a PR. Do not

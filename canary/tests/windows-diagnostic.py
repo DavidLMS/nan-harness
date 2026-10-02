@@ -316,14 +316,14 @@ class WindowsDiagnosticTests(unittest.TestCase):
                 '{"schemaVersion":2,"stage":"complete","status":"passed",'
                 '"diagnostics":[],"exitCode":0}')
 
-    def test_all_sixteen_have_every_phase_exclusive_totals(self):
+    def test_all_seventeen_have_every_phase_exclusive_totals(self):
         args = self.args()
         with tempfile.TemporaryDirectory() as tmp, patch.object(diagnostic, "resolver_module", return_value=Resolver()), \
              patch.object(diagnostic.shutil, "which", return_value="x"), patch.object(diagnostic, "run_bounded", return_value=(None, "timeout")):
             self.binaries(args, Path(tmp))
             report, failed = diagnostic.collect(args, list(diagnostic.HARNESSES), Path(tmp))
-        self.assertTrue(failed); self.assertEqual(report["totals"]["selected"], 16)
-        self.assertEqual(sum(report["totals"][key] for key in ("passed", "failed", "blocked", "skipped")), 16)
+        self.assertTrue(failed); self.assertEqual(report["totals"]["selected"], 17)
+        self.assertEqual(sum(report["totals"][key] for key in ("passed", "failed", "blocked", "skipped")), 17)
         self.assertEqual(report["totals"]["skipped"], 2)
         for item in report["harnesses"]:
             self.assertEqual(set(item["phases"]), set(diagnostic.PHASES))
@@ -524,7 +524,7 @@ class WindowsDiagnosticTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp, patch.object(diagnostic, "resolver_module", return_value=Resolver()), \
              patch.object(diagnostic.shutil, "which", return_value="x"):
             report, failed = diagnostic.collect(args, list(diagnostic.HARNESSES), Path(tmp))
-        self.assertTrue(failed); self.assertEqual(len(report["harnesses"]), 16)
+        self.assertTrue(failed); self.assertEqual(len(report["harnesses"]), 17)
         self.assertTrue(all(item["phases"]["version-doctor"]["status"] ==
                             ("SKIPPED" if item["harness"] in diagnostic.WINDOWS_UNAVAILABLE else "BLOCKED")
                             for item in report["harnesses"]))
