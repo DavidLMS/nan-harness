@@ -49,7 +49,7 @@ struct ChatFeatures {
     chooser_disabled: bool,
 }
 
-fn private_directory(path: &Path) -> bool {
+pub(super) fn private_directory(path: &Path) -> bool {
     let Ok(metadata) = std::fs::symlink_metadata(path) else {
         return false;
     };
@@ -179,7 +179,120 @@ if let actual = FileManager.default.urls(for: .applicationSupportDirectory, in: 
         .flatten()
 }
 
+pub(super) fn windows_roots(paths: &DesktopPaths) -> Option<[PathBuf; 2]> {
+    if !cfg!(windows)
+        || std::env::var("RUNNER_OS").as_deref() != Ok("Windows")
+        || std::env::var("NANH_CLAUDE_WINDOWS_PROFILE_POLICY").as_deref() != Ok("private-env")
+        || std::env::var("NANH_DESKTOP_QUALIFICATION_MODE").as_deref() != Ok("startup-baseline")
+        || std::env::var("GITHUB_ACTIONS").as_deref() != Ok("true")
+        || std::env::var("RUNNER_ENVIRONMENT").as_deref() != Ok("github-hosted")
+        || std::env::var_os("CLAUDE_USER_DATA_DIR").is_some()
+        || std::env::var_os("CLAUDE_CDP_AUTH").is_some()
+    {
+        return None;
+    }
+    let workspace = std::env::current_dir().ok()?;
+    let home = workspace.join("profile/home");
+    let local = home.join("AppData/Local");
+    let roaming = home.join("AppData/Roaming");
+    for (key, expected) in [
+        ("HOME", &home),
+        ("USERPROFILE", &home),
+        ("APPDATA", &roaming),
+        ("LOCALAPPDATA", &local),
+    ] {
+        if std::env::var_os(key).map(PathBuf::from).as_ref() != Some(expected) {
+            return None;
+        }
+    }
+    validated_windows_roots(paths, &workspace, &roaming, &local)
+}
+
+fn validated_windows_roots(
+    paths: &DesktopPaths,
+    workspace: &Path,
+    roaming: &Path,
+    local: &Path,
+) -> Option<[PathBuf; 2]> {
+    let home = workspace.join("profile/home");
+    if roaming != home.join("AppData/Roaming") || local != home.join("AppData/Local") {
+        return None;
+    }
+    let roots = [roaming.join("Claude"), local.join("Claude-3p")];
+    if !documents_match_roots(paths, &roots) {
+        return None;
+    }
+    let owned = workspace.join("profile").canonicalize().ok()?;
+    if roots.iter().any(|root| {
+        root.canonicalize()
+            .ok()
+            .is_none_or(|root| !root.starts_with(&owned))
+    }) {
+        return None;
+    }
+    Some(roots)
+}
+
+fn documents_match_roots(paths: &DesktopPaths, roots: &[PathBuf; 2]) -> bool {
+    paths.normal_config == roots[0].join("claude_desktop_config.json")
+        && paths.third_party_config == roots[1].join("claude_desktop_config.json")
+        && paths.meta == roots[1].join("configLibrary/_meta.json")
+        && paths.profile == roots[1].join(format!("configLibrary/{}.json", super::PROFILE_ID))
+}
+
+fn mac_observation_scope(paths: &DesktopPaths) -> Option<()> {
+    if !cfg!(target_os = "macos") || std::env::var("RUNNER_OS").as_deref() != Ok("macOS") {
+        return None;
+    }
+    let policy = std::env::var("NANH_CLAUDE_MAC_PROFILE_POLICY").ok()?;
+    if !matches!(
+        policy.as_str(),
+        "native-known-folders" | "electron-user-data-dir"
+    ) {
+        return None;
+    }
+    let workspace = std::env::current_dir().ok()?;
+    let profile = workspace.join("profile");
+    let home = PathBuf::from(std::env::var_os("HOME")?);
+    if !private_directory(&profile)
+        || (policy == "electron-user-data-dir" && home != profile.join("home"))
+    {
+        return None;
+    }
+    let support = home.join("Library/Application Support");
+    let roots = [support.join("Claude"), support.join("Claude-3p")];
+    if !documents_match_roots(paths, &roots) || roots.iter().any(|root| !private_directory(root)) {
+        return None;
+    }
+    Some(())
+}
+
+pub(super) fn observation_directory(paths: &DesktopPaths) -> Option<PathBuf> {
+    if std::env::var("NANH_DESKTOP_QUALIFICATION_MODE").as_deref() != Ok("startup-baseline")
+        || std::env::var("GITHUB_ACTIONS").as_deref() != Ok("true")
+        || std::env::var("RUNNER_ENVIRONMENT").as_deref() != Ok("github-hosted")
+    {
+        return None;
+    }
+    let supported = if cfg!(windows) {
+        windows_roots(paths).is_some()
+    } else {
+        mac_observation_scope(paths).is_some()
+    };
+    if !supported {
+        return None;
+    }
+    let directory = PathBuf::from(std::env::var_os("NANH_DESKTOP_QUALIFICATION_FACTS")?);
+    if !private_directory(&directory) {
+        return None;
+    }
+    Some(directory)
+}
+
 pub(super) async fn record(paths: &DesktopPaths, base_url: &str, token: &str) {
+    if cfg!(windows) && windows_roots(paths).is_none() {
+        return;
+    }
     let expected_os = if cfg!(target_os = "macos") {
         "macOS"
     } else if cfg!(windows) {
@@ -269,6 +382,26 @@ mod tests {
             "inferenceGatewayApiKey":"synthetic-private-token", "inferenceGatewayAuthScheme":"bearer",
             "modelDiscoveryEnabled":true, "chatTabEnabled":true, "disableDeploymentModeChooser":true})),
         ]
+    }
+
+    #[test]
+    fn windows_binding_rejects_foreign_roots_and_profile_documents() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = temp.path().canonicalize().unwrap();
+        let roaming = workspace.join("profile/home/AppData/Roaming");
+        let local = workspace.join("profile/home/AppData/Local");
+        for path in [roaming.join("Claude"), local.join("Claude-3p")] {
+            nan_harness_private_fs::create_private_dir_all(&path).unwrap();
+        }
+        let mut paths = DesktopPaths::new(
+            &roaming.join("Claude"),
+            &local.join("Claude-3p"),
+            &workspace.join("profile/nanh"),
+        );
+        assert!(validated_windows_roots(&paths, &workspace, &roaming, &local).is_some());
+        assert!(validated_windows_roots(&paths, &workspace, &local, &roaming).is_none());
+        paths.profile = workspace.join("foreign-profile.json");
+        assert!(validated_windows_roots(&paths, &workspace, &roaming, &local).is_none());
     }
 
     #[test]

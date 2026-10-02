@@ -1,0 +1,119 @@
+#!/usr/bin/env python3
+import importlib.util
+from pathlib import Path
+import unittest
+from unittest.mock import patch
+import tempfile
+import json
+import os
+
+spec = importlib.util.spec_from_file_location('sampler', Path(__file__).with_name('zed-atspi-observe.py'))
+m = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(m)
+
+
+class Backend:
+    def __init__(self, reads, geometry=(100, 200, 800, 600)):
+        self.reads, self.geometry = iter(reads), geometry
+    def guard(self):
+        return self.geometry
+    def read(self, held, deadline):
+        return next(self.reads)
+
+
+class Tests(unittest.TestCase):
+    def request(self):
+        return m.validate(dict(pid=71, window=91,
+            buttons=[dict(bus=':1.2', path='/org/a11y/private')], icons=[[110, 220, 14, 14]]))
+    def test_two_owned_proofs_missing_origin_and_raw_toggle(self):
+        value = (43, (1 << 4) | (1 << 8) | (1 << 30), (10, 20, 40, 40), (10, 20, 40, 40))
+        result = m.measure(self.request(), Backend([value, value]), 10, lambda: 0)
+        self.assertEqual(result['offsetMissing'], 1)
+        self.assertEqual(result['toggleOn'], 1)
+        self.assertEqual(result['containmentRejected'], 0)
+        self.assertNotIn('private', str(result))
+    def test_toggle_button_pressed_state_is_used_instead_of_checked(self):
+        value = (62, (1 << 20) | (1 << 8) | (1 << 30), (110, 220, 40, 40), (10, 20, 40, 40))
+        result = m.measure(self.request(), Backend([value, value]), 10, lambda: 0)
+        self.assertEqual(result['toggleOn'], 1)
+
+    def test_expected_origin_and_indeterminate(self):
+        value = (43, (1 << 32) | (1 << 8) | (1 << 25), (110, 220, 40, 40), (10, 20, 40, 40))
+        result = m.measure(self.request(), Backend([value, value]), 10, lambda: 0)
+        self.assertEqual(result['offsetExpected'], 1)
+        self.assertEqual(result['toggleUnknown'], 1)
+    def test_replaced_identity_and_unstable_state_not_certified(self):
+        result = m.measure(self.request(), Backend([None, None]), 10, lambda: 0)
+        self.assertEqual(result['identityRejected'], 1)
+        self.assertEqual(result['sampledButtons'], 0)
+        a = (43, 0, (1, 2, 3, 4), (1, 2, 3, 4))
+        b = (43, 1 << 4, (1, 2, 3, 4), (1, 2, 3, 4))
+        result = m.measure(self.request(), Backend([a, b]), 10, lambda: 0)
+        self.assertEqual(result['stabilityRejected'], 1)
+    def test_frame_geometry_never_becomes_client_origin(self):
+        backend = m.Backend.__new__(m.Backend)
+        backend.request = {'pid': 71, 'window': 91}
+        backend.frame_matches = lambda active, frame: True
+        calls = []
+        def query(args):
+            calls.append(args)
+            return b'91'
+        backend.query = query
+        with self.assertRaises(ValueError):
+            backend.guard()
+        self.assertEqual(calls, [['getactivewindow']])
+
+    def test_distinct_owned_client_requires_matching_pid(self):
+        backend = m.Backend.__new__(m.Backend)
+        backend.request = {'pid': 71, 'window': 91}
+        backend.frame_matches = lambda active, frame: active == 92 and frame == 91
+        values = iter([b'92', b'71', b'X=100\nY=200\nWIDTH=800\nHEIGHT=600\nSCREEN=0\nWINDOW=92'])
+        backend.query = lambda args: next(values)
+        self.assertEqual(backend.guard(), (100, 200, 800, 600))
+        values = iter([b'92', b'72'])
+        backend.query = lambda args: next(values)
+        with self.assertRaises(ValueError):
+            backend.guard()
+
+    def test_deadline_no_queries(self):
+        result = m.measure(self.request(), Backend([]), 0, lambda: 1)
+        self.assertEqual(result['status'], 'budget-exceeded')
+    def test_disabled_and_geometry_rejections_are_distinct(self):
+        value = (43, 0, (500, 500, 30, 30), (10, 20, 30, 30))
+        result = m.measure(self.request(), Backend([value, value]), 10, lambda: 0)
+        self.assertEqual(result['offsetInconsistent'], 1)
+        self.assertEqual(result['stateRejected'], 1)
+    def test_constructor_failure_and_query_failure_write_only_closed_receipt(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            environment = dict(NANH_ZED_PANEL_ZOOM='observe', GITHUB_ACTIONS='true',
+                RUNNER_ENVIRONMENT='github-hosted', RUNNER_OS='Linux',
+                NANH_DESKTOP_QUALIFICATION_FACTS=str(root))
+            with patch.dict(os.environ, environment), patch.object(m, 'Backend', side_effect=ImportError('PRIVATE')):
+                self.assertEqual(m.run(json.dumps(self.request())), 0)
+            result = json.loads(next(root.glob('*.json')).read_text())
+            self.assertEqual(result['status'], 'unavailable')
+            self.assertNotIn('PRIVATE', str(result))
+            self.assertEqual(next(root.glob('*.json')).stat().st_mode & 0o777, 0o600)
+            class FailedBackend:
+                closed = False
+                def __init__(self, request, deadline): pass
+                def guard(self): raise ValueError('PRIVATE')
+                def close(self): FailedBackend.closed = True
+            with patch.dict(os.environ, environment), patch.object(m, 'Backend', FailedBackend):
+                self.assertEqual(m.run(json.dumps(self.request())), 0)
+            self.assertTrue(FailedBackend.closed)
+
+    def test_duplicates_and_raw_payload_rejected(self):
+        request = self.request()
+        request['buttons'] *= 2
+        with self.assertRaises(ValueError):
+            m.validate(request)
+        request = self.request()
+        request['raw'] = 'PRIVATE'
+        with self.assertRaises(ValueError):
+            m.validate(request)
+
+
+if __name__ == '__main__':
+    unittest.main()

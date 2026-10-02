@@ -169,10 +169,10 @@ def semantic_observations(directory, app):
         if type(value) is not dict:
             raise ValueError('invalid semantic observation')
         mechanism = value.get('mechanism')
-        if mechanism not in {'hermes-windows-catalog-readiness', 'hermes-renderer-qualification', 'zed-native-copy', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'claude-owned-configuration', 'claude-storage-use', 'claude-native-root-preflight', 'zed-panel-zoom'}:
+        if mechanism not in {'hermes-windows-catalog-readiness', 'hermes-renderer-qualification', 'zed-native-copy', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'claude-owned-configuration', 'claude-model-discovery', 'claude-storage-use', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}:
             continue
         expected = 'hermes-renderer-qualification' if app == 'hermes-desktop' else 'zed-native-copy'
-        if (mechanism != expected and mechanism not in {'hermes-windows-catalog-readiness', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'claude-owned-configuration', 'claude-storage-use', 'claude-native-root-preflight', 'zed-panel-zoom'}) or type(value.get('schemaVersion')) is not int or value['schemaVersion'] != 1:
+        if (mechanism != expected and mechanism not in {'hermes-windows-catalog-readiness', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'claude-owned-configuration', 'claude-model-discovery', 'claude-storage-use', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}) or type(value.get('schemaVersion')) is not int or value['schemaVersion'] != 1:
             raise ValueError('semantic observation identity differs')
         record = {'schemaVersion': 1, 'mechanism': mechanism}
         if mechanism == 'hermes-windows-catalog-readiness':
@@ -269,6 +269,19 @@ def semantic_observations(directory, app):
                     or value['failure'] not in failures[value['stage']]):
                 raise ValueError('invalid Claude native root preflight')
             record.update(diagnosticsOnly=True, stage=value['stage'], failure=value['failure'])
+        elif mechanism == 'zed-atspi-geometry':
+            counts = set('sampledButtons identityRejected stateRejected stabilityRejected containmentRejected offsetExpected offsetMissing offsetInconsistent toggleOn toggleOff toggleUnknown'.split())
+            if (app != 'zed-desktop' or set(value) != counts | {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'status', 'phase'}
+                    or value['diagnosticsOnly'] is not True or value.get('phase') != 'pre-retry'
+                    or type(value['status']) is not str
+                    or value['status'] not in {'observed', 'partial', 'unavailable', 'budget-exceeded', 'guard-rejected'}
+                    or any(type(value[key]) is not int or not 0 <= value[key] <= 64 for key in counts)
+                    or value['sampledButtons'] + value['identityRejected'] + value['stabilityRejected'] > 64
+                    or max(value['stateRejected'], value['containmentRejected']) > value['sampledButtons']
+                    or value['sampledButtons'] != sum(value[key] for key in ('toggleOn', 'toggleOff', 'toggleUnknown'))
+                    or value['sampledButtons'] != sum(value[key] for key in ('offsetExpected', 'offsetMissing', 'offsetInconsistent'))):
+                raise ValueError('invalid Zed AT-SPI geometry observation')
+            record.update({key: value[key] for key in counts | {'diagnosticsOnly', 'status', 'phase'}})
         elif mechanism == 'zed-panel-zoom':
             counts = {'maximizeMatches', 'minimizeMatches', 'stableMaximizeMatches',
                       'stableMinimizeMatches', 'correlatedButtons'}
@@ -297,6 +310,16 @@ def semantic_observations(directory, app):
                     raise ValueError('invalid Claude configuration observation flag')
                 record[key] = value[key]
             record['diagnosticsOnly'] = True
+        elif mechanism == 'claude-model-discovery':
+            fields = {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'authenticatedModelsCount', 'complete', 'modelDiscoverySeen'}
+            count = value.get('authenticatedModelsCount')
+            seen = value.get('modelDiscoverySeen')
+            if (set(value) != fields or app != 'claude-desktop' or value['diagnosticsOnly'] is not True
+                    or type(count) is not int or not 0 <= count <= 32 or type(value['complete']) is not bool
+                    or (count == 0 and seen is not None) or (count > 0 and seen is not True)):
+                raise ValueError('invalid Claude model discovery observation')
+            record.update(diagnosticsOnly=True, authenticatedModelsCount=count,
+                          complete=value['complete'], modelDiscoverySeen=seen)
         elif mechanism == 'claude-storage-use':
             fields = set('schemaVersion mechanism diagnosticsOnly freshBefore observationValid before after'.split())
             storage = set('claudeLocalState claudePreferences thirdPartyLocalState thirdPartyPreferences'.split())

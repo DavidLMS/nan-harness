@@ -74,6 +74,8 @@ pub enum ClaudeAutoModeReviewStage {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BridgeActivity {
     AuthenticatedClient,
+    #[cfg(feature = "desktop-qualification")]
+    AuthenticatedModels,
     ClaudeAutoModeReview {
         review_id: u64,
         stage: ClaudeAutoModeReviewStage,

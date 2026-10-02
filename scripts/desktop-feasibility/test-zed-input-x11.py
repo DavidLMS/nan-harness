@@ -29,6 +29,15 @@ class Transport(unittest.TestCase):
         with patch.object(sys, 'argv', ['helper', mode]), patch.object(sys, 'stdin', stdin):
             return module['main']()
 
+    def test_readonly_sampler_mode_never_dispatches_native_input(self):
+        with patch('runpy.run_path', return_value={'run': lambda payload: 0}) as sampler, patch('subprocess.run') as run:
+            self.assertEqual(self.call('atspi-observe', b'{}'), 0)
+            sampler.assert_called_once()
+            run.assert_not_called()
+        with patch('runpy.run_path') as sampler:
+            self.assertEqual(self.call('atspi-observe', b'x' * 32769), 2)
+            sampler.assert_not_called()
+
     def test_foreign_keys_or_payload_cannot_send_input(self):
         with patch('subprocess.run') as run:
             self.assertEqual(self.call('arbitrary-command'), 2)

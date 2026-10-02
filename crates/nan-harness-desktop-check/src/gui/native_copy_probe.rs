@@ -181,7 +181,7 @@ fn pointer_transport_diagnostic(code: Option<i32>) {
 fn neutral_input(executable: &Path, mode: &str, prompt: &str) -> Result<(), Reason> {
     if !executable.is_absolute()
         || !executable.is_file()
-        || prompt.len() > 4096
+        || prompt.len() > if mode == "atspi-observe" { 32768 } else { 4096 }
         || !matches!(
             mode,
             "type"
@@ -196,12 +196,15 @@ fn neutral_input(executable: &Path, mode: &str, prompt: &str) -> Result<(), Reas
                 | "submit"
                 | "retry-click"
                 | "panel-zoom"
+                | "atspi-observe"
         )
         || (mode == "type" && prompt.is_empty())
         || (mode == "activate-accessibility" && !valid_activation_request(prompt))
         || (mode == "retry-click" && (!cfg!(target_os = "linux") || !valid_pointer_request(prompt)))
-        || (!matches!(mode, "type" | "activate-accessibility" | "retry-click")
-            && !prompt.is_empty())
+        || (!matches!(
+            mode,
+            "type" | "activate-accessibility" | "retry-click" | "atspi-observe"
+        ) && !prompt.is_empty())
     {
         return Err(Reason::IsolationUnavailable);
     }
@@ -229,6 +232,7 @@ fn neutral_input(executable: &Path, mode: &str, prompt: &str) -> Result<(), Reas
         "RUNNER_OS",
         "NANH_DESKTOP_QUALIFICATION_FACTS",
         "NANH_ZED_XRECORD",
+        "NANH_ZED_PANEL_ZOOM",
     ] {
         if let Some(value) = std::env::var_os(key) {
             command.env(key, value);
@@ -1097,7 +1101,10 @@ impl NativeClipboardSession<'_> {
             .ok_or(Reason::ActionUnsupported)?;
         let buttons = || -> Result<Vec<xa11y::ElementData>, Reason> {
             let app = self.gui.app.as_ref().ok_or(Reason::SelectorNotMatched)?;
-            let elements = app.locator("button").elements().map_err(map_error)?;
+            let mut elements = app.locator("button").elements().map_err(map_error)?;
+            // AccessKit exports source toggle buttons as AT-SPI ToggleButton;
+            // xa11y maps that role to Switch, so button-only inventory omits them.
+            elements.extend(app.locator("switch").elements().map_err(map_error)?);
             if elements.len() > 64 {
                 return Err(Reason::BudgetExceeded);
             }
@@ -1113,10 +1120,58 @@ impl NativeClipboardSession<'_> {
         let second = self.gui.visual.native_icon_frame()?;
         let after = buttons()?;
         let matches = super::native_icon_probe::observe_zoom(directory, &first, &second, capture)?;
+        #[cfg(target_os = "linux")]
+        self.observe_atspi_geometry(&matches, &before)?;
         let result = super::zed_zoom_probe::correlate(&matches, &before, &after);
         self.gui
             .native_copy_guard(&mut self.facts, "retry-revalidate")?;
         Ok(result)
+    }
+
+    #[cfg(target_os = "linux")]
+    fn observe_atspi_geometry(
+        &mut self,
+        matches: &super::native_icon_probe::ZoomMatches,
+        buttons: &[xa11y::ElementData],
+    ) -> Result<(), Reason> {
+        self.gui
+            .native_copy_guard(&mut self.facts, "retry-revalidate")?;
+        let capture = self.gui.visual.capture_bounds();
+        let (pid, window, _) = match self.gui.visual.native_pointer_target(capture) {
+            Ok(identity) => identity,
+            Err(reason) if icon_guard_failure(reason) => return Err(reason),
+            Err(_) => {
+                return self
+                    .gui
+                    .native_copy_guard(&mut self.facts, "retry-revalidate");
+            }
+        };
+        let held: Vec<_> = buttons
+            .iter()
+            .filter(|button| button.pid == Some(pid))
+            .filter_map(|button| {
+                Some(serde_json::json!({
+                    "bus": button.raw.get("bus_name")?.as_str()?,
+                    "path": button.stable_id.as_ref()?
+                }))
+            })
+            .collect();
+        let icons: Vec<_> = matches
+            .maximize
+            .iter()
+            .chain(&matches.minimize)
+            .map(|rect| [rect.x, rect.y, rect.width, rect.height])
+            .collect();
+        let request = serde_json::to_string(&serde_json::json!({
+            "pid":pid,"window":window,"buttons":held,"icons":icons
+        }))
+        .map_err(|_| Reason::IsolationUnavailable)?;
+        let executable =
+            std::env::var_os("FEASIBILITY_ZED_INPUT_DRIVER").ok_or(Reason::IsolationUnavailable)?;
+        // Measurement failure cannot change the existing activation or verdict.
+        let _ = neutral_input(Path::new(&executable), "atspi-observe", &request);
+        self.gui
+            .native_copy_guard(&mut self.facts, "retry-revalidate")
     }
 
     pub(crate) fn retry_once(&mut self) -> Result<(), Reason> {

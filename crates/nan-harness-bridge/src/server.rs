@@ -136,7 +136,10 @@ async fn models(
     let diagnostics = state.diagnostics.clone();
     let result: Result<Json<crate::models::AnthropicModelsResponse>, ApiError> = async {
         authorize(&headers, &state)?;
-        Ok(Json(state.models.api_response()))
+        let response = Json(state.models.api_response());
+        #[cfg(feature = "desktop-qualification")]
+        let _ = state.activities.send(BridgeActivity::AuthenticatedModels);
+        Ok(response)
     }
     .await;
     emit_diagnostic(&diagnostics, &result, BridgeEndpoint::Models);

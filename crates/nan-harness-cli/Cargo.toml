@@ -18,7 +18,7 @@ path = "src/bin/nanh.rs"
 
 [features]
 # Disposable hosted desktop qualification only; omitted from released builds.
-desktop-qualification = []
+desktop-qualification = ["nan-harness-runtime/desktop-qualification"]
 
 [dependencies]
 base64.workspace = true

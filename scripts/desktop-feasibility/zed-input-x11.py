@@ -315,9 +315,13 @@ def retry_click(payload):
 def main():
     if len(sys.argv) != 2:
         return 2
-    payload = sys.stdin.buffer.read(4097)
-    if len(payload) > 4096:
+    limit = 32768 if sys.argv[1] == 'atspi-observe' else 4096
+    payload = sys.stdin.buffer.read(limit + 1)
+    if len(payload) > limit:
         return 2
+    if sys.argv[1] == 'atspi-observe':
+        import runpy
+        return runpy.run_path(str(Path(__file__).with_name('zed-atspi-observe.py')))['run'](payload)
     if sys.argv[1] == 'retry-click':
         return retry_click(payload)
     if sys.argv[1] not in KEYS or payload:

@@ -54,8 +54,8 @@ fn contains(outer: Rect, inner: Rect) -> bool {
 }
 
 fn held_button(before: &ElementData, after: &ElementData) -> bool {
-    before.role == Role::Button
-        && after.role == Role::Button
+    matches!(before.role, Role::Button | Role::Switch)
+        && before.role == after.role
         && before.pid.is_some()
         && before.pid == after.pid
         && before.stable_id.as_ref().is_some_and(|id| !id.is_empty())
@@ -103,6 +103,9 @@ pub(super) fn correlate(
     result.unique_correlation =
         candidates.len() == 1 && matches.maximize.len() + matches.minimize.len() == 1;
     result.checked_state = match candidates.as_slice() {
+        // xa11y maps AT-SPI ToggleButton to Switch but reads CHECKED rather
+        // than AccessKit's PRESSED bit; only the raw sampler can measure it.
+        [button] if button.role == Role::Switch => "unavailable",
         [button] => match button.states.checked {
             Some(Toggled::Off) => "off",
             Some(Toggled::On) => "on",
@@ -160,6 +163,21 @@ mod tests {
             minimize_matches: 0,
         }
     }
+    #[test]
+    fn accesskit_toggle_button_mapped_to_switch_can_correlate_but_needs_raw_state() {
+        let mut button = button();
+        button.role = Role::Switch;
+        button.states.checked = Some(Toggled::Off);
+        let observation = correlate(
+            &icons(),
+            std::slice::from_ref(&button),
+            std::slice::from_ref(&button),
+        );
+        assert!(observation.unique_correlation);
+        assert_eq!(observation.checked_state, "unavailable");
+        assert!(!observation.activation_attempted);
+    }
+
     #[test]
     fn stable_owned_button_correlation_does_not_infer_toggle_or_authorize_input() {
         let button = button();

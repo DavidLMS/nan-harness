@@ -27,6 +27,7 @@ ZED_HELPERS = {'FEASIBILITY_ZED_INPUT_DRIVER', 'FEASIBILITY_ZED_INPUT_DRIVER_MOD
                'FEASIBILITY_ZED_RESPONSE_METHOD', 'NANH_ZED_ICON_TEMPLATES', 'FEASIBILITY_ZED_INPUT_SCRIPT'}
 WINDOWS_PROOF = {'FEASIBILITY_WINDOWS_PROOF_PYTHON', 'FEASIBILITY_WINDOWS_PROOF_SCRIPT'}
 HERMES_RUNTIME = {'HERMES_DESKTOP_HERMES_ROOT', 'HERMES_DESKTOP_HERMES'}
+CLAUDE_WINDOWS_BOOTSTRAP_SHA256 = '97910a0668710a80315da1ab12d215c4b8d58d9f159886493e37848feb92351e'
 CLAUDE_BOOTSTRAP_SHA256 = '83126565df48e98691a3845f27bb7ee78d0632aa14b5881adad8c7ac4f0a3adf'
 
 
@@ -74,6 +75,31 @@ def validate_codex_project_release(release, executable_hash):
             or release.get('digest') != 'sha256:4c70df5417fcee1f004a1356f6d48f6b084abdcf1da349e154a7f593f2360b19'
             or executable_hash != '27d4a13c2557cfb9b5d3360b0977828103b774b87295198abc7b901d4c223325'):
         raise ValueError('Codex project trial requires the inspected official release')
+
+
+def validate_claude_windows_bundle(executable):
+    if (not executable.is_absolute() or executable.name != 'Claude.exe' or executable.parent.name != 'app'
+            or executable.is_symlink() or not executable.is_file() or executable.resolve() != executable):
+        raise ValueError('Claude Windows native bundle is invalid')
+    asar = executable.parent / 'resources/app.asar'
+    if asar.is_symlink() or not asar.is_file() or asar.resolve() != asar:
+        raise ValueError('Claude Windows bootstrap is invalid')
+    with asar.open('rb') as archive:
+        header = archive.read(16)
+        if len(header) != 16:
+            raise ValueError('Claude Windows bootstrap is invalid')
+        _, header_size, _, json_size = struct.unpack('<4I', header)
+        if not 0 < json_size <= 1024 * 1024 or header_size < json_size:
+            raise ValueError('Claude Windows bootstrap is invalid')
+        metadata = json.loads(archive.read(json_size))
+        entry = metadata['files']['.vite']['files']['build']['files']['index.pre.js']
+        size, offset = entry['size'], int(entry['offset'])
+        if type(size) is not int or not 0 < size <= 2 * 1024 * 1024 or offset < 0:
+            raise ValueError('Claude Windows bootstrap is invalid')
+        archive.seek(8 + header_size + offset)
+        data = archive.read(size)
+        if len(data) != size or hashlib.sha256(data).hexdigest() != CLAUDE_WINDOWS_BOOTSTRAP_SHA256:
+            raise ValueError('Claude Windows bootstrap differs from the inspected release')
 
 
 def qualification_environment(app, facts, real_nanh, executable, inherited=None):
@@ -156,6 +182,13 @@ def qualification_environment(app, facts, real_nanh, executable, inherited=None)
                 raise ValueError('Claude native profile policy is unavailable')
             validate_claude_bundle(Path(executable))
             environment['NANH_CLAUDE_MAC_PROFILE_POLICY'] = profile_policy
+        windows_profile = source.get('NANH_CLAUDE_WINDOWS_PROFILE_POLICY')
+        if windows_profile is not None:
+            if (windows_profile != 'private-env' or app != 'claude-desktop'
+                    or source.get('RUNNER_OS') != 'Windows' or mode != 'startup-baseline'):
+                raise ValueError('Claude Windows profile observation is unavailable')
+            validate_claude_windows_bundle(Path(executable))
+            environment['NANH_CLAUDE_WINDOWS_PROFILE_POLICY'] = windows_profile
         policy = source.get('NANH_DESKTOP_QUALIFICATION_NAMESPACE_POLICY', 'default')
         if policy not in {'default', 'scoped-apparmor-userns'}:
             raise ValueError('namespace policy is invalid')
@@ -184,6 +217,12 @@ def run(args):
                 or release.get('version') != '2.19675.0'
                 or release.get('digest') != 'sha256:86f1460ca694313223a0b524da4f411bbccf6531c2271698d1ffc29a2131e392'):
             raise ValueError('Claude native profile trial requires the inspected official release')
+    if os.environ.get('NANH_CLAUDE_WINDOWS_PROFILE_POLICY') is not None:
+        release = manifest['apps'][0]
+        if (args.app != 'claude-desktop' or args.platform != 'windows'
+                or release.get('version') != '2.19675.0'
+                or release.get('digest') != 'sha256:8355c3d28aa08d2e8d841596b41abce0a4fc3805cc9d74f6836d42176ab6b0f9'):
+            raise ValueError('Claude Windows profile trial requires the inspected official release')
     prepared = bounded_json(args.prepared)
     launcher = args.real_nanh if args.app == 'zed-desktop' else (
         Path(os.environ['FEASIBILITY_HERMES_LAUNCHER']) if args.platform == 'windows'

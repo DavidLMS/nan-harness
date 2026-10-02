@@ -88,13 +88,19 @@ pub(super) async fn run_ready_session(
         let token = zeroize::Zeroizing::new(bridge.with_session_token(str::to_owned));
         qualification_config::record(paths, bridge.base_url(), &token).await;
     }
-    #[cfg(all(feature = "desktop-qualification", target_os = "macos"))]
+    #[cfg(feature = "desktop-qualification")]
     let storage = qualification_storage::Snapshot::capture(paths);
+    #[cfg(feature = "desktop-qualification")]
+    let models = qualification_models::Observation::start(paths, bridge);
     let activities = show_auto.then(|| bridge.subscribe_activities());
     if let Err(error) = process.launch() {
-        #[cfg(all(feature = "desktop-qualification", target_os = "macos"))]
+        #[cfg(feature = "desktop-qualification")]
         if let Some(storage) = &storage {
             storage.record();
+        }
+        #[cfg(feature = "desktop-qualification")]
+        if let Some(models) = models {
+            models.finish().await;
         }
         return complete_and_restore(paths, process, Err(error)).await;
     }
@@ -102,9 +108,13 @@ pub(super) async fn run_ready_session(
     let activity_logger =
         activities.map(|activities| tokio::spawn(log_bridge_activities(activities)));
     let completion = wait_for_exit_or_signal(process).await;
-    #[cfg(all(feature = "desktop-qualification", target_os = "macos"))]
+    #[cfg(feature = "desktop-qualification")]
     if let Some(storage) = &storage {
         storage.record();
+    }
+    #[cfg(feature = "desktop-qualification")]
+    if let Some(models) = models {
+        models.finish().await;
     }
     if let Some(activity_logger) = activity_logger {
         activity_logger.abort();
@@ -125,6 +135,8 @@ pub(super) fn launch_message(show_auto: bool) -> &'static str {
 async fn log_bridge_activities(mut activities: tokio::sync::broadcast::Receiver<BridgeActivity>) {
     loop {
         match activities.recv().await {
+            #[cfg(feature = "desktop-qualification")]
+            Ok(BridgeActivity::AuthenticatedModels) => {}
             Ok(activity) => eprintln!("{}", render_bridge_activity(&activity)),
             Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
                 eprintln!("{}", nan_harness_i18n::messages::orchestration_auto_permission_review_events_were_omitted(nan_harness_i18n::locale(), &(skipped)));
@@ -136,6 +148,8 @@ async fn log_bridge_activities(mut activities: tokio::sync::broadcast::Receiver<
 
 pub(super) fn render_bridge_activity(activity: &BridgeActivity) -> String {
     match activity {
+        #[cfg(feature = "desktop-qualification")]
+        BridgeActivity::AuthenticatedModels => String::new(),
         BridgeActivity::AuthenticatedClient => {
             nan_harness_i18n::messages::terminal_bridge_claude_desktop_authenticated_to_the_isolated_nan_bridge_text(nan_harness_i18n::locale()).to_owned()
         }

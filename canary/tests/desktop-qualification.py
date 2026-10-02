@@ -760,6 +760,23 @@ class QualificationTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'hermes-desktop')
 
+    def test_atspi_geometry_diagnostics_reject_private_or_inconsistent_counts(self):
+        names = 'sampledButtons identityRejected stateRejected stabilityRejected containmentRejected offsetExpected offsetMissing offsetInconsistent toggleOn toggleOff toggleUnknown'.split()
+        value = dict(schemaVersion=1, mechanism='zed-atspi-geometry', diagnosticsOnly=True,
+                     status='observed', phase='pre-retry', **dict.fromkeys(names, 0))
+        value.update(sampledButtons=1, offsetMissing=1, toggleOn=1)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / 'observation.json'
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(root, 'zed-desktop'), [value])
+            for changed in ({**value, 'bus': 'PRIVATE'}, {**value, 'status': 'PRIVATE'},
+                            {**value, 'sampledButtons': 65}, {**value, 'toggleOn': False},
+                            {**value, 'offsetMissing': 0}, {**value, 'diagnosticsOnly': False}):
+                path.write_text(json.dumps(changed))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'zed-desktop')
+
     def test_native_root_preflight_and_zoom_observations_are_closed(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -873,6 +890,27 @@ class QualificationTests(unittest.TestCase):
                 path.write_text(json.dumps(changed))
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'zed-desktop')
+
+    def test_claude_model_discovery_is_positive_only_and_payload_free(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / 'discovery.json'
+            value = dict(schemaVersion=1, mechanism='claude-model-discovery', diagnosticsOnly=True,
+                         authenticatedModelsCount=1, complete=True, modelDiscoverySeen=True)
+            for count, seen, complete in ((0, None, True), (1, True, True), (32, True, False)):
+                current = {**value, 'authenticatedModelsCount': count, 'modelDiscoverySeen': seen, 'complete': complete}
+                path.write_text(json.dumps(current))
+                self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [current])
+            for changed in ({**value, 'authenticatedModelsCount': 0}, {**value, 'authenticatedModelsCount': True},
+                            {**value, 'authenticatedModelsCount': 33}, {**value, 'modelDiscoverySeen': False},
+                            {**value, 'complete': 1}, {**value, 'modelIds': ['PRIVATE']},
+                            {**value, 'diagnosticsOnly': False}):
+                path.write_text(json.dumps(changed))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'claude-desktop')
+            path.write_text(json.dumps(value))
+            with self.assertRaises(ValueError):
+                q.semantic_observations(root, 'chatgpt-desktop')
 
     def test_claude_storage_use_is_closed_and_cannot_certify_consumption(self):
         with tempfile.TemporaryDirectory() as tmp:

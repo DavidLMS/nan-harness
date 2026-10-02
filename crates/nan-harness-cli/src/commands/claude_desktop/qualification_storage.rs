@@ -1,4 +1,4 @@
-//! Metadata-only observations in the disposable hosted macOS profile.
+//! Metadata-only observations in the disposable hosted desktop profile.
 use super::DesktopPaths;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
@@ -49,23 +49,19 @@ pub(super) struct Snapshot {
 }
 
 fn private_directory(path: &Path) -> bool {
-    use std::os::unix::fs::PermissionsExt as _;
-    std::fs::symlink_metadata(path).is_ok_and(|metadata| {
-        metadata.is_dir()
-            && metadata.permissions().mode().trailing_zeros() >= 6
-            && path.canonicalize().ok().as_deref() == Some(path)
-    })
+    super::qualification_config::private_directory(path)
 }
 
 // Walk only the fixed relative components; absent files are not read and
 // symlinked parents cannot turn a diagnostic into access to foreign state.
 fn present(root: &Path, components: &[&str]) -> Option<bool> {
-    let mut path = root.to_path_buf();
+    let mut path = root.canonicalize().ok()?;
     for (index, component) in components.iter().enumerate() {
         path.push(component);
         match std::fs::symlink_metadata(&path) {
             Ok(metadata) => {
-                if metadata.file_type().is_symlink()
+                if path.canonicalize().ok().as_deref() != Some(path.as_path())
+                    || metadata.file_type().is_symlink()
                     || (index + 1 == components.len() && !metadata.is_file())
                     || (index + 1 < components.len() && !metadata.is_dir())
                 {
@@ -95,6 +91,15 @@ fn observe(roots: &[PathBuf; 2]) -> Option<Presence> {
 }
 impl Snapshot {
     pub(super) fn capture(paths: &DesktopPaths) -> Option<Self> {
+        if cfg!(windows) {
+            let roots = super::qualification_config::windows_roots(paths)?;
+            let directory = super::qualification_config::observation_directory(paths)?;
+            return Some(Self {
+                before: observe(&roots)?,
+                roots,
+                directory,
+            });
+        }
         let policy = std::env::var("NANH_CLAUDE_MAC_PROFILE_POLICY");
         let native = policy.as_deref() == Ok("native-known-folders");
         if !matches!(
@@ -162,7 +167,7 @@ impl Snapshot {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use std::os::unix::fs::{PermissionsExt as _, symlink};

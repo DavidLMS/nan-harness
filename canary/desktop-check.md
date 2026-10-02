@@ -1060,3 +1060,26 @@ remains empty because the earlier capture was wired to the separate Hermes
 startup experiment. The actual semantic inventory path now passes its existing
 diagnostic vector to both startup guards, preserving their exact single-snapshot
 verdict and closed category.
+
+The clean Linux quality run on `d72649af`
+[37035049178](https://github.com/DavidLMS/nan-harness/actions/runs/37035049178)
+passes. Native trials on `72cf852e` compile on both platforms. macOS Claude
+[37037626734](https://github.com/DavidLMS/nan-harness/actions/runs/37037626734)
+now identifies the startup rejection as `same-process-window`: the process is
+active, visible and finished, but a different owned window precedes the acquired
+window. Cleanup passes; this is not evidence of an authentication requirement.
+Windows Codex
+[37037629093](https://github.com/DavidLMS/nan-harness/actions/runs/37037629093)
+acquires the first window with no editable or login controls; the next two probes
+reject a different foreground process during acquisition. All cleanup passes.
+The startup baseline does not exercise the instrumented foreign-overlay classifier.
+
+The next Zed measurement includes AT-SPI ToggleButton (role 62), which xa11y
+maps to Switch. The pinned AccessKit adapter exports its ON state as Pressed,
+not Checked. A read-only pre-retry sampler observes the held objects' state and
+screen/window geometry with bounded closed counters; it neither normalizes
+activation coordinates nor certifies zoom from the earlier icon-count change.
+The next Claude trials add private Windows configuration/storage receipts and a
+qualification-only bridge counter for successful authenticated model-catalog
+requests. A positive count establishes that discovery route; zero remains
+unknown and does not establish configuration consumption or mandatory login.
