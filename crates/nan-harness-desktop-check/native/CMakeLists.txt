@@ -10,7 +10,7 @@ target_link_libraries(nanh-desktop-native PRIVATE "${TESSERACT_LIBRARY}" "${LEPT
 if(APPLE)
   enable_language(OBJCXX)
   set_source_files_properties(windows.cpp PROPERTIES LANGUAGE OBJCXX)
-  target_link_libraries(nanh-desktop-native PRIVATE "-framework AppKit" "-framework CoreGraphics")
+  target_link_libraries(nanh-desktop-native PRIVATE "-framework AppKit" "-framework CoreGraphics" "-framework ApplicationServices")
 elseif(WIN32)
   target_link_libraries(nanh-desktop-native PRIVATE user32 dwmapi)
 else()

@@ -46,10 +46,29 @@ impl GuardFailure {
     }
 }
 
+#[derive(Clone, Copy, Debug, serde::Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum FocusStatus {
+    Proved,
+    Untrusted,
+    QueryError,
+    FocusMismatch,
+    NotStandard,
+    IdentityChanged,
+    NoMatch,
+    Ambiguous,
+}
+#[derive(Clone)]
+struct FocusProof {
+    status: FocusStatus,
+    window: u64,
+}
+
 #[derive(Clone)]
 pub(crate) struct Snapshot {
     foreground_pid: u32,
     foreground_window: u64,
+    focus: Option<FocusProof>,
     displays: Vec<Rect>,
     pub(crate) windows: Vec<Window>,
 }
@@ -128,6 +147,27 @@ impl Snapshot {
         }
     }
 
+    pub(crate) fn focus_observation(&self, held: &Window) -> Option<(FocusStatus, Option<bool>)> {
+        self.focus.as_ref().map(|proof| {
+            let matches = (proof.status == FocusStatus::Proved).then(|| {
+                proof.window == held.id
+                    && self.foreground_pid == held.pid
+                    && self
+                        .windows
+                        .iter()
+                        .filter(|window| {
+                            window.id == proof.window
+                                && window.pid == held.pid
+                                && window.bounds == held.bounds
+                                && window.layer == 0
+                        })
+                        .count()
+                        == 1
+            });
+            (proof.status, matches)
+        })
+    }
+
     pub(super) fn parse(text: &str) -> Result<Self, Reason> {
         let mut lines = text.lines();
         let fields = lines
@@ -141,12 +181,31 @@ impl Snapshot {
         let mut snapshot = Self {
             foreground_pid: parse(fields[1])?,
             foreground_window: parse(fields[2])?,
+            focus: None,
             displays: Vec::new(),
             windows: Vec::new(),
         };
         for line in lines {
             let fields = line.split_whitespace().collect::<Vec<_>>();
             match fields.as_slice() {
+                ["FOCUS", status, id] if snapshot.focus.is_none() => {
+                    let status = match *status {
+                        "proved" => FocusStatus::Proved,
+                        "untrusted" => FocusStatus::Untrusted,
+                        "query-error" => FocusStatus::QueryError,
+                        "focus-mismatch" => FocusStatus::FocusMismatch,
+                        "not-standard" => FocusStatus::NotStandard,
+                        "identity-changed" => FocusStatus::IdentityChanged,
+                        "no-match" => FocusStatus::NoMatch,
+                        "ambiguous" => FocusStatus::Ambiguous,
+                        _ => return Err(Reason::DesktopUnavailable),
+                    };
+                    let window = parse(id)?;
+                    if (status == FocusStatus::Proved) != (window != 0) {
+                        return Err(Reason::DesktopUnavailable);
+                    }
+                    snapshot.focus = Some(FocusProof { status, window });
+                }
                 ["DISPLAY", x, y, width, height] => {
                     snapshot.displays.push(rect(x, y, width, height)?);
                 }
@@ -742,6 +801,52 @@ mod tests {
             overlap_area(rect(-65536, -65536, 65536, 65536), rect(0, 0, 65536, 65536)),
             0
         );
+    }
+
+    #[test]
+    fn focus_proof_is_advisory_and_rejects_ambiguous_protocols() {
+        let base = "FG 7 0\nDISPLAY 0 0 2000 2000\nWIN 1 7 10 20 800 600 436c61756465 0\n";
+        let proved = Snapshot::parse(&format!("{base}FOCUS proved 1\n")).unwrap();
+        let held = proved.windows[0].clone();
+        assert_eq!(
+            proved.focus_observation(&held),
+            Some((FocusStatus::Proved, Some(true)))
+        );
+        assert_eq!(proved.guard_failure(&held), Ok(()));
+        let mut with_panel = proved.clone();
+        let mut panel = held.clone();
+        panel.id = 99;
+        panel.layer = 3;
+        panel.bounds = Rect {
+            x: 1800,
+            y: 1800,
+            width: 10,
+            height: 10,
+        };
+        with_panel.windows.insert(0, panel);
+        assert_eq!(
+            with_panel.focus_observation(&held),
+            Some((FocusStatus::Proved, Some(true)))
+        );
+        assert_eq!(
+            with_panel.guard_failure(&held),
+            Err(GuardFailure::SameProcessWindow)
+        );
+        for status in ["ambiguous", "identity-changed", "query-error", "untrusted"] {
+            let state = Snapshot::parse(&format!("{base}FOCUS {status} 0\n")).unwrap();
+            assert_eq!(state.focus_observation(&held).unwrap().1, None);
+            assert_eq!(state.guard_failure(&held), Ok(()));
+        }
+        for suffix in [
+            "FOCUS proved 0\n",
+            "FOCUS ambiguous 1\n",
+            "FOCUS invented 0\n",
+            "FOCUS proved 1\nFOCUS proved 1\n",
+        ] {
+            assert!(Snapshot::parse(&format!("{base}{suffix}")).is_err());
+        }
+        let different = Snapshot::parse(&format!("{base}FOCUS proved 2\n")).unwrap();
+        assert_eq!(different.focus_observation(&held).unwrap().1, Some(false));
     }
 
     #[test]

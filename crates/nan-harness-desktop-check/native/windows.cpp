@@ -1,5 +1,6 @@
 // Window ownership and stacking metadata only; never reads another window's text or pixels.
 #include <cstdint>
+#include <cmath>
 #include <array>
 #include <algorithm>
 #include <cctype>
@@ -19,6 +20,7 @@ int window_state(const std::string&) { return 5; }
 int activate_window(const std::string&) { return 5; }
 int observe_claude() { return 5; }
 int claude_known_folders() { return 5; }
+int windows_focus(const std::string&) { return 5; }
 #endif
 
 static std::string encode_name(const std::string& name) {
@@ -41,6 +43,7 @@ static void window_record(std::uint64_t id, std::uint32_t pid, double x, double 
 #if defined(__APPLE__)
 #import <AppKit/AppKit.h>
 #include <CoreGraphics/CoreGraphics.h>
+#include <ApplicationServices/ApplicationServices.h>
 #include <libproc.h>
 #include "inventory.hpp"
 
@@ -84,10 +87,125 @@ static void window_record_with_layer(std::uint64_t id, std::uint32_t pid, double
               << ' ' << layer << '\n';
 }
 
-int list_windows(bool include_foreground) {
+// Public accessibility focus reads only. No actions, attributes or activation are changed.
+struct AxFocus {
+    AXUIElementRef focused = nullptr, main = nullptr, input_window = nullptr;
+    CGRect bounds = CGRectZero;
+    const char* status = "query-error";
+    ~AxFocus() {
+        if (focused) CFRelease(focused);
+        if (main) CFRelease(main);
+        if (input_window) CFRelease(input_window);
+    }
+};
+static bool ax_attribute(AXUIElementRef element, CFStringRef name, CFTypeRef& value) {
+    return AXUIElementCopyAttributeValue(element, name, &value) == kAXErrorSuccess && value;
+}
+static void read_ax_focus(pid_t pid, AxFocus& result) {
+    if (!AXIsProcessTrusted()) { result.status = "untrusted"; return; }
+    AXUIElementRef app = AXUIElementCreateApplication(pid);
+    if (!app) return;
+    if (AXUIElementSetMessagingTimeout(app, 0.1f) != kAXErrorSuccess) { CFRelease(app); return; }
+    CFTypeRef focused = nullptr, main = nullptr, input = nullptr, input_window = nullptr;
+    bool read = ax_attribute(app, kAXFocusedWindowAttribute, focused)
+        && ax_attribute(app, kAXMainWindowAttribute, main)
+        && ax_attribute(app, kAXFocusedUIElementAttribute, input);
+    CFRelease(app);
+    if (read && CFGetTypeID(input) == AXUIElementGetTypeID()) {
+        read = AXUIElementSetMessagingTimeout(static_cast<AXUIElementRef>(input), 0.1f) == kAXErrorSuccess;
+        read = read && ax_attribute(static_cast<AXUIElementRef>(input), kAXWindowAttribute, input_window);
+    } else read = false;
+    if (input) CFRelease(input);
+    if (!read || !focused || !main || !input_window
+        || CFGetTypeID(focused) != AXUIElementGetTypeID()
+        || CFGetTypeID(main) != AXUIElementGetTypeID()
+        || CFGetTypeID(input_window) != AXUIElementGetTypeID()) {
+        if (focused) CFRelease(focused);
+        if (main) CFRelease(main);
+        if (input_window) CFRelease(input_window);
+        return;
+    }
+    result.focused = static_cast<AXUIElementRef>(focused);
+    result.main = static_cast<AXUIElementRef>(main);
+    result.input_window = static_cast<AXUIElementRef>(input_window);
+    if (!CFEqual(focused, main) || !CFEqual(focused, input_window)) {
+        result.status = "focus-mismatch"; return;
+    }
+    for (auto element : {result.focused, result.main, result.input_window}) {
+        pid_t owner = 0;
+        if (AXUIElementGetPid(element, &owner) != kAXErrorSuccess || owner != pid) return;
+    }
+    if (AXUIElementSetMessagingTimeout(result.focused, 0.1f) != kAXErrorSuccess) return;
+    CFTypeRef role = nullptr, subrole = nullptr, position = nullptr, size = nullptr;
+    read = ax_attribute(result.focused, kAXRoleAttribute, role)
+        && ax_attribute(result.focused, kAXSubroleAttribute, subrole)
+        && ax_attribute(result.focused, kAXPositionAttribute, position)
+        && ax_attribute(result.focused, kAXSizeAttribute, size);
+    if (read && (!CFEqual(role, kAXWindowRole) || !CFEqual(subrole, kAXStandardWindowSubrole))) {
+        result.status = "not-standard"; read = false;
+    }
+    CGPoint origin;
+    CGSize dimensions;
+    if (read && CFGetTypeID(position) == AXValueGetTypeID() && CFGetTypeID(size) == AXValueGetTypeID()
+        && AXValueGetValue(static_cast<AXValueRef>(position), kAXValueTypeCGPoint, &origin)
+        && AXValueGetValue(static_cast<AXValueRef>(size), kAXValueTypeCGSize, &dimensions)
+        && std::isfinite(origin.x) && std::isfinite(origin.y)
+        && std::isfinite(dimensions.width) && std::isfinite(dimensions.height)
+        && dimensions.width > 0 && dimensions.height > 0) {
+        result.bounds = CGRectMake(origin.x, origin.y, dimensions.width, dimensions.height);
+        result.status = "ready";
+    }
+    if (role) CFRelease(role);
+    if (subrole) CFRelease(subrole);
+    if (position) CFRelease(position);
+    if (size) CFRelease(size);
+}
+// Used by the read-only proof and synthetic fixtures; never queries the OS.
+std::uint64_t match_focus_window(CFArrayRef windows, pid_t owner, CGRect expected, unsigned& matches) {
+    matches = 0;
+    std::uint64_t id = 0;
+    for (CFIndex index = 0; index < CFArrayGetCount(windows); ++index) {
+        auto window = static_cast<CFDictionaryRef>(CFArrayGetValueAtIndex(windows, index));
+        CGRect bounds;
+        auto value = static_cast<CFDictionaryRef>(CFDictionaryGetValue(window, kCGWindowBounds));
+        if (number(window, kCGWindowOwnerPID) == owner && number(window, kCGWindowLayer) == 0
+            && number(window, kCGWindowNumber) > 0 && value
+            && CGRectMakeWithDictionaryRepresentation(value, &bounds) && CGRectEqualToRect(bounds, expected)) {
+            ++matches;
+            id = number(window, kCGWindowNumber);
+        }
+    }
+    return matches == 1 ? id : 0;
+}
+const char* classify_focus_agreement(bool stable_identity, unsigned matches) {
+    if (!stable_identity) return "identity-changed";
+    return matches == 1 ? "proved" : matches == 0 ? "no-match" : "ambiguous";
+}
+
+static void print_ax_focus(pid_t foreground, CFArrayRef windows, const AxFocus& before) {
+    AxFocus after;
+    if (std::string(before.status) == "ready") read_ax_focus(foreground, after);
+    const char* status = before.status;
+    std::uint64_t id = 0;
+    if (std::string(status) == "ready") {
+        bool stable = [[[NSWorkspace sharedWorkspace] frontmostApplication] processIdentifier] == foreground
+            && std::string(after.status) == "ready" && CFEqual(before.focused, after.focused)
+            && CFEqual(before.main, after.main) && CFEqual(before.input_window, after.input_window)
+            && CGRectEqualToRect(before.bounds, after.bounds);
+        unsigned matches = 0;
+        if (stable) id = match_focus_window(windows, foreground, before.bounds, matches);
+        status = classify_focus_agreement(stable, matches);
+    }
+    std::cout << "FOCUS " << status << ' ' << id << '\n';
+}
+
+static int list_mac_windows(bool include_foreground, bool focus_proof, pid_t expected_pid) {
     @autoreleasepool {
         auto foreground = include_foreground
             ? [[[NSWorkspace sharedWorkspace] frontmostApplication] processIdentifier] : 0;
+        AxFocus focus;
+        if (focus_proof && foreground == expected_pid) read_ax_focus(foreground, focus);
+        else if (focus_proof) focus.status = "focus-mismatch";
         std::cout << "FG " << foreground << " 0\n";
         CGDirectDisplayID displays[32];
         std::uint32_t count = 0;
@@ -123,10 +241,18 @@ int list_windows(bool include_foreground) {
                                      bounds.origin.y, bounds.size.width, bounds.size.height,
                                      name, number(window, kCGWindowLayer));
         }
+        if (focus_proof) print_ax_focus(foreground, windows, focus);
         CFRelease(windows);
         return std::cout ? 0 : 5;
     }
 }
+int list_windows(bool include_foreground) { return list_mac_windows(include_foreground, false, 0); }
+int windows_focus(const std::string& request) {
+    std::uint64_t pid = 0;
+    if (!parse_identity_token(request, pid) || pid == 0 || pid > std::numeric_limits<pid_t>::max()) return 5;
+    return list_mac_windows(true, true, static_cast<pid_t>(pid));
+}
+
 
 static void observation(const char* state) {
     std::cout << "OBS " << state << '\n';

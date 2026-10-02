@@ -42,7 +42,7 @@ def public_onboarding(setup, app):
     errors = {None, 'invalid-session', 'scope-not-matched', 'role-already-selected',
               'action-blocked', 'role-readback-failed', 'continue-not-matched',
               'ownership-lost', 'scope-remained', 'action-uncertain', 'observation-failed'}
-    if (app != 'chatgpt-desktop' or type(setup) is not dict or set(setup) not in (fields, fields | {'actionabilityFailure'}, fields | {'actionabilityFailure', 'foreignOverlay'}, fields | {'actionabilityFailure', 'foreignOverlay', 'foreignOverlayProof'})
+    if (app != 'chatgpt-desktop' or type(setup) is not dict or set(setup) not in (fields, fields | {'actionabilityFailure'}, fields | {'actionabilityFailure', 'foreignOverlay'}, fields | {'actionabilityFailure', 'foreignOverlay', 'foreignOverlayProof'}, fields | {'actionabilityFailure', 'foreignOverlay', 'foreignOverlayProof', 'foreignOverlaySurface', 'foreignOverlayFingerprint'})
             or type(setup['schemaVersion']) is not int or setup['schemaVersion'] != 1
             or setup['mechanism'] != 'codex-public-onboarding' or setup['diagnosticsOnly'] is not True
             or type(setup['stage']) is not str or setup['stage'] not in stages
@@ -71,6 +71,16 @@ def public_onboarding(setup, app):
                 or (setup['foreignOverlayProof'] == 'classified') != (setup['foreignOverlay'] in {
                     'chatgpt-onboarding-complete', 'other', 'ambiguous'})):
             raise ValueError('invalid public onboarding overlay proof')
+    if 'foreignOverlaySurface' in setup:
+        if (setup['foreignOverlayProof'] != 'classified'
+                or type(setup['foreignOverlaySurface']) is not str or setup['foreignOverlaySurface'] not in {
+                    'unknown', 'enclosing-role-dialog', 'enclosing-role-alertdialog', 'enclosing-role-aria-modal',
+                    'separate-dialog', 'separate-alertdialog', 'separate-menu'}
+                or type(setup['foreignOverlayFingerprint']) is not str or setup['foreignOverlayFingerprint'] not in {
+                    'not-applicable', 'heading-mismatch', 'form-mismatch', 'continue-mismatch', 'legal-links-mismatch', 'matched'}
+                or (setup['foreignOverlayFingerprint'] != 'not-applicable' and setup['foreignOverlaySurface'] != 'separate-dialog')
+                or (setup['foreignOverlayFingerprint'] == 'matched') != (setup['foreignOverlay'] == 'chatgpt-onboarding-complete')):
+            raise ValueError('invalid public onboarding overlay surface')
     return setup
 
 
@@ -110,7 +120,8 @@ def envelope(app, platform, architecture, source_sha):
                 realNanhSha256=None, frozenManifestSha256=None, preparedSha256=None,
                 reportSha256=None, applicationSha256=None, upstreamRevision=None,
                 upstreamArtifactSha256=None, appVersion=None, runtimeVersion=None,
-                appCleanup=None, globalCleanup=None, probes=[], semanticObservations=[], nativeDiagnostics=[])
+                appCleanup=None, globalCleanup=None, probes=[], semanticObservations=[], nativeDiagnostics=[],
+                nativeDiagnosticInvalidEvents=None)
 
 
 def bounded_json(path, limit=1024 * 1024):
@@ -177,10 +188,10 @@ def semantic_observations(directory, app):
         if type(value) is not dict:
             raise ValueError('invalid semantic observation')
         mechanism = value.get('mechanism')
-        if mechanism not in {'hermes-windows-catalog-readiness', 'hermes-renderer-qualification', 'zed-native-copy', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'claude-owned-configuration', 'claude-model-discovery', 'claude-window-stack', 'claude-storage-use', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}:
+        if mechanism not in {'hermes-windows-catalog-readiness', 'hermes-renderer-qualification', 'zed-native-copy', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'claude-owned-configuration', 'claude-model-discovery', 'claude-window-stack', 'claude-window-focus', 'claude-storage-use', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}:
             continue
         expected = 'hermes-renderer-qualification' if app == 'hermes-desktop' else 'zed-native-copy'
-        if (mechanism != expected and mechanism not in {'hermes-windows-catalog-readiness', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'claude-owned-configuration', 'claude-model-discovery', 'claude-window-stack', 'claude-storage-use', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}) or type(value.get('schemaVersion')) is not int or value['schemaVersion'] != 1:
+        if (mechanism != expected and mechanism not in {'hermes-windows-catalog-readiness', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'claude-owned-configuration', 'claude-model-discovery', 'claude-window-stack', 'claude-window-focus', 'claude-storage-use', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}) or type(value.get('schemaVersion')) is not int or value['schemaVersion'] != 1:
             raise ValueError('semantic observation identity differs')
         record = {'schemaVersion': 1, 'mechanism': mechanism}
         if mechanism == 'hermes-windows-catalog-readiness':
@@ -318,6 +329,16 @@ def semantic_observations(directory, app):
                     raise ValueError('invalid Claude configuration observation flag')
                 record[key] = value[key]
             record['diagnosticsOnly'] = True
+        elif mechanism == 'claude-window-focus':
+            fields = {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'status', 'nativeForegroundWindowMatchedHeld'}
+            statuses = {'proved', 'untrusted', 'query-error', 'focus-mismatch', 'not-standard',
+                        'identity-changed', 'no-match', 'ambiguous'}
+            if (app != 'claude-desktop' or set(value) != fields or value['diagnosticsOnly'] is not True
+                    or type(value['status']) is not str or value['status'] not in statuses
+                    or (type(value['nativeForegroundWindowMatchedHeld']) is not bool
+                        if value['status'] == 'proved' else value['nativeForegroundWindowMatchedHeld'] is not None)):
+                raise ValueError('invalid Claude focus observation')
+            record.update({key: value[key] for key in fields - {'schemaVersion', 'mechanism'}})
         elif mechanism == 'claude-window-stack':
             counts = set('samePidAheadCount samePidAheadEligibleCount samePidAheadIntersectsHeldCount samePidAheadNormalLayerCount samePidAheadOtherLayerCount'.split())
             flags = {'foregroundPidMatchesHeld', 'frontmostWindowSamePid'}
@@ -362,8 +383,10 @@ def semantic_observations(directory, app):
                           observationValid=value['observationValid'], before=dict(value['before']), after=dict(value['after']))
         elif mechanism == 'zed-pointer-observation':
             flags = set('maximizedHorizontal maximizedVertical enabled sensitive showing visible defunct retryContains'.split())
-            if (set(value) not in (flags | {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'pointerTarget', 'pointerChild'},
-                                       flags | {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'pointerTarget', 'pointerChild', 'inputDelivery'})
+            base = flags | {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'pointerTarget', 'pointerChild'}
+            coordinate_fields = {'clientOriginVerified', 'retryOffsetRelation'}
+            if (set(value) not in (base, base | {'inputDelivery'}, base | coordinate_fields,
+                                  base | coordinate_fields | {'inputDelivery'})
                     or app != 'zed-desktop' or value['diagnosticsOnly'] is not True):
                 raise ValueError('invalid Zed pointer observation identity')
             for key in flags:
@@ -375,6 +398,13 @@ def semantic_observations(directory, app):
             if type(value['pointerChild']) is not str or value['pointerChild'] not in {'unavailable', 'client', 'client-descendant', 'decoration-or-empty', 'other'}:
                 raise ValueError('invalid Zed pointer child')
             record.update(diagnosticsOnly=True, pointerTarget=value['pointerTarget'], pointerChild=value['pointerChild'])
+            if 'clientOriginVerified' in value:
+                if ((value['clientOriginVerified'] is not None and type(value['clientOriginVerified']) is not bool)
+                        or (value['retryOffsetRelation'] is not None and
+                            (type(value['retryOffsetRelation']) is not str or value['retryOffsetRelation'] not in {
+                                'expected-origin', 'missing-origin', 'inconsistent'}))):
+                    raise ValueError('invalid Zed Retry coordinate observation')
+                record.update({key: value[key] for key in coordinate_fields})
             if 'inputDelivery' in value:
                 delivery = value['inputDelivery']
                 fields = {'status', 'pressCount', 'releaseCount', 'orderedPair'}
@@ -683,6 +713,7 @@ def reduce_report(*, app, platform, architecture, source_sha, model, frozen, pre
         if any(event['record'].get('app') != app for event in bundle['events']):
             raise ValueError('native diagnostic application differs')
         result['nativeDiagnostics'] = bundle['events']
+        result['nativeDiagnosticInvalidEvents'] = bundle['invalidEvents']
     if result['backend'] == 'pending':
         raise ValueError('native backend is not qualified for this cell')
     manifest = read_frozen_manifest(frozen, [app], platform, architecture, model)
@@ -764,6 +795,9 @@ def aggregate(directory, source_sha):
         if set(item) != set(template) or any(item[key] != template[key] for key in
                 ('schemaVersion', 'suite', 'source', 'sourceSha', 'evidenceMode', 'backend')):
             raise ValueError('qualification provenance differs')
+        invalid = item['nativeDiagnosticInvalidEvents']
+        if invalid is not None and (type(invalid) is not int or not 0 <= invalid <= 4 * 1024 * 1024 + 1):
+            raise ValueError('invalid native diagnostic rejection count')
     return dict(schemaVersion=1, sourceSha=source_sha, qualification='deterministic-full'
                 if all(item['qualification'] == 'deterministic-full' and item['outcome'] == 'passed'
                        for item in records) else 'incomplete', cells=records)

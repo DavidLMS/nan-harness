@@ -353,6 +353,7 @@ class QualificationTests(unittest.TestCase):
         self.assertEqual(value['outcome'], 'blocked')
         self.assertEqual(value['qualification'], 'unqualified')
         self.assertIsNone(value['applicationSha256'])
+        self.assertIsNone(value['nativeDiagnosticInvalidEvents'])
         with self.assertRaises(ValueError):
             q.envelope('pen-desktop', 'windows', 'x86_64', 'private source payload')
 
@@ -364,6 +365,16 @@ class QualificationTests(unittest.TestCase):
                 (directory / 'qualification.json').write_text(json.dumps(q.envelope(
                     item['app'], item['platform'], item['architecture'], 'a' * 40)))
             self.assertEqual(q.aggregate(root, 'a' * 40)['qualification'], 'incomplete')
+            first = Path(root) / '0/qualification.json'
+            value = json.loads(first.read_text())
+            for invalid in (True, -1, 'PRIVATE', 4 * 1024 * 1024 + 2):
+                first.write_text(json.dumps({**value, 'nativeDiagnosticInvalidEvents': invalid}))
+                with self.assertRaises(ValueError):
+                    q.aggregate(root, 'a' * 40)
+            first.write_text(json.dumps({**value, 'nativeDiagnosticInvalidEvents': 1}))
+            cells = q.aggregate(root, 'a' * 40)['cells']
+            self.assertEqual(sum(item['nativeDiagnosticInvalidEvents'] == 1 for item in cells), 1)
+            first.write_text(json.dumps(value))
             with self.assertRaises(ValueError):
                 q.aggregate(root, 'b' * 40)
             (Path(root) / '0/qualification.json').unlink()
@@ -480,6 +491,28 @@ class QualificationTests(unittest.TestCase):
                     path.write_text(json.dumps({**native, field: invalid}))
                     with self.assertRaises(ValueError):
                         q.semantic_observations(root, 'zed-desktop')
+
+    def test_claude_focus_identity_is_diagnostic_and_unknown_is_not_false(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'focus.json'
+            value = dict(schemaVersion=1, mechanism='claude-window-focus', diagnosticsOnly=True,
+                         status='proved', nativeForegroundWindowMatchedHeld=True)
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(Path(root), 'claude-desktop'), [value])
+            for change in ({'status': 'ambiguous'}, {'nativeForegroundWindowMatchedHeld': None},
+                           {'windowId': 1}, {'diagnosticsOnly': False}, {'status': 'guessed'}):
+                path.write_text(json.dumps({**value, **change}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(Path(root), 'claude-desktop')
+            for status in ('no-match', 'ambiguous', 'untrusted', 'not-standard', 'query-error', 'focus-mismatch'):
+                closed = {**value, 'status': status, 'nativeForegroundWindowMatchedHeld': None}
+                path.write_text(json.dumps(closed))
+                self.assertEqual(q.semantic_observations(Path(root), 'claude-desktop'), [closed])
+            unknown = {**value, 'status': 'identity-changed', 'nativeForegroundWindowMatchedHeld': None}
+            path.write_text(json.dumps(unknown))
+            self.assertEqual(q.semantic_observations(Path(root), 'claude-desktop'), [unknown])
+            with self.assertRaises(ValueError):
+                q.semantic_observations(Path(root), 'zed-desktop')
 
     def test_claude_stack_counts_are_closed_and_overflow_is_unknown(self):
         with tempfile.TemporaryDirectory() as root:
@@ -907,6 +940,16 @@ class QualificationTests(unittest.TestCase):
             self.assertEqual(q.semantic_observations(root, 'zed-desktop'), [value])
             with self.assertRaises(ValueError):
                 q.semantic_observations(root, 'hermes-desktop')
+            measured = {**value, 'clientOriginVerified': True, 'retryOffsetRelation': 'missing-origin'}
+            path.write_text(json.dumps(measured))
+            self.assertEqual(q.semantic_observations(root, 'zed-desktop'), [measured])
+            for changed in ({**measured, 'clientOriginVerified': 1},
+                            {**measured, 'retryOffsetRelation': 'PRIVATE'},
+                            {**measured, 'retryOffsetRelation': False},
+                            {key: item for key, item in measured.items() if key != 'clientOriginVerified'}):
+                path.write_text(json.dumps(changed))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'zed-desktop')
             for changed in ({**value, 'x': 100}, {**value, 'pointerTarget': 'PRIVATE'}, {**value, 'pointerChild': 'PRIVATE'},
                             {**value, 'enabled': 1}, {**value, 'diagnosticsOnly': False},
                             {key: item for key, item in value.items() if key != 'visible'}):
@@ -1114,6 +1157,16 @@ class QualificationTests(unittest.TestCase):
         self.assertEqual(q.public_onboarding(fingerprint, 'chatgpt-desktop'), fingerprint)
         proved = {**fingerprint, 'foreignOverlayProof': 'classified'}
         self.assertEqual(q.public_onboarding(proved, 'chatgpt-desktop'), proved)
+        surface = {**proved, 'foreignOverlaySurface': 'separate-dialog', 'foreignOverlayFingerprint': 'matched'}
+        self.assertEqual(q.public_onboarding(surface, 'chatgpt-desktop'), surface)
+        for changed in ({**surface, 'foreignOverlaySurface': 'PRIVATE'},
+                        {**surface, 'foreignOverlayFingerprint': True},
+                        {**surface, 'foreignOverlaySurface': 'enclosing-role-dialog'},
+                        {**surface, 'foreignOverlayProof': 'query-failed'},
+                        {**surface, 'rawDialog': 'PRIVATE'},
+                        {key: value for key, value in surface.items() if key != 'foreignOverlaySurface'}):
+            with self.assertRaises(ValueError):
+                q.public_onboarding(changed, 'chatgpt-desktop')
         rejected = {**blocked, 'foreignOverlay': 'guard-rejected', 'foreignOverlayProof': 'query-failed'}
         self.assertEqual(q.public_onboarding(rejected, 'chatgpt-desktop'), rejected)
         for changed in ({**proved, 'foreignOverlayProof': 'PRIVATE'},

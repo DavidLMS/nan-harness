@@ -68,7 +68,46 @@ def pointer_observation():
     return dict(schemaVersion=1, mechanism='zed-pointer-observation', diagnosticsOnly=True,
                 maximizedHorizontal=None, maximizedVertical=None, enabled=None,
                 sensitive=None, showing=None, visible=None, defunct=None,
-                retryContains=None, pointerTarget='unavailable', pointerChild='unavailable')
+                retryContains=None, pointerTarget='unavailable', pointerChild='unavailable',
+                clientOriginVerified=None, retryOffsetRelation=None)
+
+
+def independent_client_origin(active):
+    """Translate the fresh owned client origin directly, without xdotool."""
+    xlib = ctypes.CDLL('libX11.so.6')
+    pointer = ctypes.POINTER(ctypes.c_ulong)
+    xlib.XOpenDisplay.argtypes = [ctypes.c_char_p]
+    xlib.XOpenDisplay.restype = ctypes.c_void_p
+    xlib.XCloseDisplay.argtypes = [ctypes.c_void_p]
+    xlib.XFree.argtypes = [ctypes.c_void_p]
+    xlib.XQueryTree.argtypes = [ctypes.c_void_p, ctypes.c_ulong, pointer, pointer,
+                               ctypes.POINTER(pointer), ctypes.POINTER(ctypes.c_uint)]
+    xlib.XQueryTree.restype = ctypes.c_int
+    xlib.XTranslateCoordinates.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_ulong,
+        ctypes.c_int, ctypes.c_int, ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int), pointer]
+    xlib.XTranslateCoordinates.restype = ctypes.c_int
+    display = xlib.XOpenDisplay(None)
+    if not display:
+        raise ValueError('origin unavailable')
+    children, count = pointer(), ctypes.c_uint()
+    root, parent, child = ctypes.c_ulong(), ctypes.c_ulong(), ctypes.c_ulong()
+    x, y = ctypes.c_int(), ctypes.c_int()
+    try:
+        if (not xlib.XQueryTree(display, active, ctypes.byref(root), ctypes.byref(parent),
+                ctypes.byref(children), ctypes.byref(count)) or not root.value
+                or not xlib.XTranslateCoordinates(display, active, root.value, 0, 0,
+                    ctypes.byref(x), ctypes.byref(y), ctypes.byref(child))):
+            raise ValueError('origin unavailable')
+        return x.value, y.value
+    finally:
+        if children:
+            xlib.XFree(children)
+        xlib.XCloseDisplay(display)
+
+
+def retry_offset_relation(screen, window, geometry):
+    expected = (geometry[0] + window[0], geometry[1] + window[1], *window[2:])
+    return 'expected-origin' if screen == expected else 'missing-origin' if screen == window else 'inconsistent'
 
 
 def pointer_child(frame, active):
@@ -179,6 +218,7 @@ def normalized_retry_point(request, active, geometry, facts=None):
             dbus_interface='org.a11y.atspi.Component', timeout=0.5))
         if facts is not None:
             accessibility_observation(component, dbus, window, facts)
+            facts['retryOffsetRelation'] = retry_offset_relation(screen, window, geometry)
         return coordinate_point(screen, window, geometry)
     except dbus.DBusException:
         raise ValueError('accessibility query unavailable') from None
@@ -252,6 +292,12 @@ def retry_click(payload):
         maximized_observation(active, facts, deadline)
         stage = 18
         geometry = run(['getwindowgeometry', '--shell', str(active)], 'geometry')
+        # A failed advisory measurement does not alter the established target.
+        try:
+            if active != request['window']:
+                facts['clientOriginVerified'] = independent_client_origin(active) == geometry[:2]
+        except (OSError, ValueError):
+            pass
         point = normalized_retry_point(request, active, geometry, facts)
         stage = 14
         # --sync waits for motion and can hang when the pointer is already here.

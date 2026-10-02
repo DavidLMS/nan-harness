@@ -19,6 +19,7 @@ class Transport(unittest.TestCase):
     def setUp(self):
         replacement = patch.dict(module['main'].__globals__,
             normalized_retry_point=lambda request, active, geometry, facts: (request['x'], request['y']),
+            independent_client_origin=lambda active: (10, 30),
             maximized_observation=lambda *args: None, publish_observation=lambda facts: None,
             pointer_child=lambda *args: 'unavailable')
         replacement.start()
@@ -28,6 +29,34 @@ class Transport(unittest.TestCase):
         stdin = io.TextIOWrapper(io.BytesIO(payload))
         with patch.object(sys, 'argv', ['helper', mode]), patch.object(sys, 'stdin', stdin):
             return module['main']()
+
+    def test_exact_retry_offset_relation_never_double_translates(self):
+        relation = module['retry_offset_relation']
+        screen = (20, 40, 30, 10)
+        geometry = (100, 200, 800, 600)
+        self.assertEqual(relation(screen, screen, geometry), 'missing-origin')
+        self.assertEqual(relation((120, 240, 30, 10), screen, geometry), 'expected-origin')
+        self.assertEqual(relation((121, 240, 30, 10), screen, geometry), 'inconsistent')
+        self.assertEqual(module['coordinate_point'](screen, screen, geometry), (135, 245))
+
+    def test_independent_translation_uses_client_zero_origin_and_releases_display(self):
+        closed = []
+        class Function:
+            def __init__(self, call): self.call = call
+            def __call__(self, *args): return self.call(*args)
+        def tree(*args):
+            args[2]._obj.value = 77
+            return 1
+        def translate(*args):
+            self.assertEqual(args[1:5], (90, 77, 0, 0))
+            args[5]._obj.value, args[6]._obj.value = 100, 200
+            return 1
+        library = types.SimpleNamespace(XOpenDisplay=Function(lambda _: 1),
+            XCloseDisplay=Function(lambda _: closed.append(True)), XFree=Function(lambda _: None),
+            XQueryTree=Function(tree), XTranslateCoordinates=Function(translate))
+        with patch('ctypes.CDLL', return_value=library):
+            self.assertEqual(module['independent_client_origin'](90), (100, 200))
+        self.assertEqual(closed, [True])
 
     def test_readonly_sampler_mode_never_dispatches_native_input(self):
         with patch('runpy.run_path', return_value={'run': lambda payload: 0}) as sampler, patch('subprocess.run') as run:

@@ -1159,3 +1159,29 @@ basename to `Claude.exe` case-sensitively. Windows name comparisons now respect
 case-insensitive filesystem semantics; canonical identity, symlink rejection,
 release and bootstrap pins remain unchanged. The synthetic lowercase archive
 fixture passes and noncanonical/symlink paths remain rejected.
+
+Windows Claude on `f6bbaa80`
+[37061001823](https://github.com/DavidLMS/nan-harness/actions/runs/37061001823)
+passes preflight and acquires a window. Its owned third-party configuration
+matches the gateway, authentication, model discovery and chat policy. The
+startup inventory contains no editable controls, and cleanup fails after the
+first probe; the remaining probes correctly do not run. No native diagnostic
+event survives in the reduced artifact. The next reduction preserves the
+existing closed invalid-event counter to distinguish rejected diagnostics from
+an absent event without publishing process logs.
+
+The next Codex Windows observation separates enclosing modal surfaces from
+separate dialogs and records which inspected final-onboarding fingerprint
+check failed. Two fresh observations must agree under the existing guard;
+unidentified surfaces still receive no input. Linux Zed now compares the
+exact held Retry control's coordinate spaces and independently verifies the
+client origin through X11. These observations do not alter input coordinates,
+Retry selection or acceptance. Five cells remain qualified; ten remain open.
+
+The macOS Claude focus trial reads public accessibility focus only for the
+already acquired owned process. Focused window, main window and the focused
+control's window must agree before and after the retained window inventory;
+finite exact bounds must identify one owned normal-layer window. The exported
+receipt contains only a status and a nullable match boolean. The existing
+same-process-window guard remains enforced, including when focus matches the
+held window. This trial does not activate or dismiss a window.

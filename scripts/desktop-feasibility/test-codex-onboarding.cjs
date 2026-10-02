@@ -105,6 +105,15 @@ async function trial(options={}) {
  const completeOverlay=await trial({modal:true});
  assert.equal(completeOverlay.facts.foreignOverlay,'chatgpt-onboarding-complete');
  assert.equal(completeOverlay.facts.foreignOverlayProof,'classified');
+ assert.equal(completeOverlay.facts.foreignOverlaySurface,'separate-dialog');
+ assert.equal(completeOverlay.facts.foreignOverlayFingerprint,'matched');
+ for(const [opts,fingerprint] of [[{overlayLookalike:true},'heading-mismatch'],[{overlayWrongLink:true},'legal-links-mismatch'],[{overlayWrongLayout:true},'form-mismatch']]) {
+  const r=await trial({modal:true,...opts});
+  assert.equal(r.facts.foreignOverlaySurface,'separate-dialog');assert.equal(r.facts.foreignOverlayFingerprint,fingerprint);
+  assert.equal(r.roleClicks,0);assert.equal(r.continueClicks,0);
+ }
+ const alert=await trial({alertDialog:true});assert.equal(alert.facts.foreignOverlaySurface,'enclosing-role-alertdialog');
+ assert.equal(alert.facts.foreignOverlayFingerprint,'not-applicable');assert.equal(alert.roleClicks,0);assert.equal(alert.continueClicks,0);
  assert.equal(completeOverlay.roleClicks,0);assert.equal(completeOverlay.continueClicks,0);
  for(const [opts,category] of [[{overlayLookalike:true},'other'],[{overlayWrongLink:true},'other'],[{overlayWrongLayout:true},'other'],
    [{overlayDialogReplacement:true},'guard-rejected'],[{overlayFrameChange:true},'guard-rejected'],
@@ -116,6 +125,7 @@ async function trial(options={}) {
    [{overlayReplacement:true},'document-replaced'],[{overlayOwnerLoss:true},'ownership-lost'],[{overlayQueryFail:true},'query-failed'],[{overlayBudgetExpired:true},'deadline-expired']]) {
   const r=await trial({modal:true,...opts});assert.equal(r.facts.foreignOverlay,'guard-rejected');
   assert.equal(r.facts.foreignOverlayProof,proof);assert.equal(r.roleClicks,0);assert.equal(r.continueClicks,0);
+  assert.equal(r.facts.foreignOverlaySurface,undefined);assert.equal(r.facts.foreignOverlayFingerprint,undefined);
   assert(!JSON.stringify(r.facts).includes('PRIVATE'));
  }
  assert(!JSON.stringify(completeOverlay.facts).includes("You're all set"));

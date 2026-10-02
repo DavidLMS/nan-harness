@@ -49,7 +49,8 @@ function foreignSurface(control) {
   return {document,scope,dialog:dialogs.length===1?dialogs[0]:null};
 }
 function classifyForeign(control,held) {
-  const result=(category,proof='classified')=>({category,proof});
+  let surface='unknown';
+  const result=(category,proof='classified',fingerprint='not-applicable')=>({category,proof,surface,fingerprint});
   const visible=e=>{if(!e)return false;const r=e.getBoundingClientRect(),s=getComputedStyle(e);
     return e.isConnected&&r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden';};
   if(control.ownerDocument!==document||!control.isConnected||held.document!==document) return result('guard-rejected','document-replaced');
@@ -61,17 +62,22 @@ function classifyForeign(control,held) {
   if(dialogs.length!==1)return dialogs.length>1?result('ambiguous'):result('guard-rejected','dialog-absent');
   const dialog=dialogs[0];
   if(dialog!==held.dialog)return result('guard-rejected','dialog-replaced');
-  if(dialog.getAttribute('role')!=='dialog'||dialog.contains(control)||dialog.querySelectorAll(group).length)return result('other');
+  const role=dialog.getAttribute('role'), enclosing=dialog.contains(control);
+  surface=enclosing ? (role==='dialog'?'enclosing-role-dialog':role==='alertdialog'?'enclosing-role-alertdialog':role===null&&dialog.getAttribute('aria-modal')==='true'?'enclosing-role-aria-modal':'unknown')
+    : role==='dialog'?'separate-dialog':role==='alertdialog'?'separate-alertdialog':role==='menu'?'separate-menu':'unknown';
+  if(role!=='dialog'||enclosing||dialog.querySelectorAll(group).length)return result('other');
   const headings=[...dialog.querySelectorAll('[class~="text-3xl"][class~="leading-9"][class~="font-normal"]')].filter(e=>visible(e)&&e.innerText.trim()==="You're all set");
   const forms=[...dialog.querySelectorAll('form')].filter(e=>visible(e)&&['m-auto','flex','w-full','shrink-0','flex-col','items-center','justify-between','py-4'].every(t=>e.classList.contains(t)));
-  if(headings.length!==1||forms.length!==1||!forms[0].contains(headings[0]))return result('other');
+  if(headings.length!==1)return result('other','classified','heading-mismatch');
+  if(forms.length!==1||!forms[0].contains(headings[0]))return result('other','classified','form-mismatch');
   const form=forms[0];
   const buttons=[...form.querySelectorAll('button')].filter(visible);
   const terms=[...form.querySelectorAll('a')].filter(e=>visible(e)&&e.classList.contains('underline')&&e.getAttribute('href')==='https://openai.com/terms');
   const privacy=[...form.querySelectorAll('a')].filter(e=>visible(e)&&e.classList.contains('underline')&&e.getAttribute('href')==='https://openai.com/privacy');
-  return buttons.length===1&&buttons[0].getAttribute('type')==='submit'&&buttons[0].innerText.trim()==='Continue'
-    &&!buttons[0].disabled&&buttons[0].getAttribute('aria-disabled')!=='true'&&terms.length===1&&privacy.length===1
-    ?result('chatgpt-onboarding-complete'):result('other');
+  if(buttons.length!==1||buttons[0].getAttribute('type')!=='submit'||buttons[0].innerText.trim()!=='Continue'
+      ||buttons[0].disabled||buttons[0].getAttribute('aria-disabled')==='true')return result('other','classified','continue-mismatch');
+  if(terms.length!==1||privacy.length!==1)return result('other','classified','legal-links-mismatch');
+  return result('chatgpt-onboarding-complete','classified','matched');
 }
 function candidate(a, b) {
   return a && b && !a.blocked && !b.blocked && JSON.stringify(a.rect) === JSON.stringify(b.rect)
@@ -174,9 +180,13 @@ exports.run = async function(page, ownerGuard, deadline) {
             const first=await handle.evaluate(classifyForeign,held);
             if(await guard(frame)) {
               const second=await handle.evaluate(classifyForeign,held);
-              if(first.category===second.category && first.proof===second.proof && await guard(frame)) {
+              if(JSON.stringify(first)===JSON.stringify(second) && await guard(frame)) {
                 facts.foreignOverlay=second.category;
                 facts.foreignOverlayProof=second.proof;
+                if(second.proof==='classified') {
+                  facts.foreignOverlaySurface=second.surface;
+                  facts.foreignOverlayFingerprint=second.fingerprint;
+                }
               } else if(second.category==='guard-rejected' && facts.foreignOverlayProof==='unmeasured') {
                 facts.foreignOverlayProof=second.proof;
               } else if(facts.foreignOverlayProof==='unmeasured') facts.foreignOverlayProof='unstable-classification';

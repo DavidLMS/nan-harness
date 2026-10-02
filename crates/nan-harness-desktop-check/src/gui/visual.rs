@@ -383,11 +383,11 @@ impl Visual {
     }
 
     pub(super) fn guard_composer(&self) -> Result<(), (Reason, ComposerErrorCategory)> {
+        let expected = self.window.borrow().clone();
         let snapshot = self
             .native
-            .windows_with_category()
+            .windows_with_focus(expected.pid)
             .map_err(|category| (category.reason(), native_error_category(category)))?;
-        let expected = self.window.borrow().clone();
         let verdict = snapshot.guard_failure(&expected);
         #[cfg(target_os = "macos")]
         if verdict == Err(GuardFailure::SameProcessWindow) {
@@ -1249,6 +1249,18 @@ fn record_claude_stack(snapshot: &Snapshot, held: &Window) {
         use std::os::unix::fs::PermissionsExt as _;
         if metadata.permissions().mode() & 0o077 != 0 {
             return;
+        }
+    }
+    if let Some((status, matched)) = snapshot.focus_observation(held) {
+        let focus_path = directory.join(format!("claude-window-focus-{}.json", std::process::id()));
+        if let Ok(file) = nan_harness_private_fs::open_private_new(&focus_path) {
+            let _ = serde_json::to_writer(
+                file,
+                &serde_json::json!({
+                    "schemaVersion": 1, "mechanism": "claude-window-focus", "diagnosticsOnly": true,
+                    "status": status, "nativeForegroundWindowMatchedHeld": matched,
+                }),
+            );
         }
     }
     let path = directory.join(format!("claude-window-stack-{}.json", std::process::id()));

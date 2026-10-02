@@ -213,6 +213,19 @@ impl Native {
         Snapshot::parse(&output).map_err(|_| FailureCategory::Pipe)
     }
 
+    pub(crate) fn windows_with_focus(&self, owned_pid: u32) -> Result<Snapshot, FailureCategory> {
+        if !claude_focus_policy() {
+            return self.windows_with_category();
+        }
+        if owned_pid == 0 {
+            return Err(FailureCategory::InvalidInput);
+        }
+        let argument = format!("--windows-focus {owned_pid}");
+        let output =
+            process::run_with_category(&self.executable, std::ffi::OsStr::new(&argument), None)?;
+        Snapshot::parse(&output).map_err(|_| FailureCategory::Pipe)
+    }
+
     pub(crate) fn windows_for_absence(&self) -> Result<Vec<Window>, Reason> {
         // Absence needs complete window enumeration, not a focused application.
         // Return only windows so this inventory cannot certify an input/capture guard.
@@ -315,6 +328,32 @@ impl Native {
         )?;
         Page::parse(&output, screenshot.width, screenshot.height)
     }
+}
+
+fn claude_focus_policy() -> bool {
+    let Some(directory) = std::env::var_os("NANH_DESKTOP_QUALIFICATION_FACTS").map(PathBuf::from)
+    else {
+        return false;
+    };
+    let Ok(metadata) = std::fs::symlink_metadata(&directory) else {
+        return false;
+    };
+    if !metadata.is_dir() || directory.canonicalize().ok().as_deref() != Some(directory.as_path()) {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        if metadata.permissions().mode() & 0o077 != 0 {
+            return false;
+        }
+    }
+    cfg!(target_os = "macos")
+        && std::env::var("GITHUB_ACTIONS").as_deref() == Ok("true")
+        && std::env::var("RUNNER_ENVIRONMENT").as_deref() == Ok("github-hosted")
+        && std::env::var("RUNNER_OS").as_deref() == Ok("macOS")
+        && std::env::var("NANH_DESKTOP_QUALIFICATION_MODE").as_deref() == Ok("startup-baseline")
+        && std::env::var("NANH_CLAUDE_MAC_PROFILE_POLICY").as_deref() == Ok("native-known-folders")
 }
 
 #[cfg(test)]
