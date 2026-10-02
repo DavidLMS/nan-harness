@@ -78,7 +78,9 @@ def validate_codex_project_release(release, executable_hash):
 
 
 def validate_claude_windows_bundle(executable):
-    if (not executable.is_absolute() or executable.name != 'Claude.exe' or executable.parent.name != 'app'
+    # The pinned MSIX stores app/claude.exe; Windows names are case-insensitive.
+    # Canonical identity and bootstrap bytes remain independent requirements.
+    if (not executable.is_absolute() or executable.name.casefold() != 'claude.exe' or executable.parent.name.casefold() != 'app'
             or executable.is_symlink() or not executable.is_file() or executable.resolve() != executable):
         raise ValueError('claude-windows-executable-invalid')
     asar = executable.parent / 'resources/app.asar'

@@ -1127,3 +1127,35 @@ bounded same-process window counts: eligibility, intersection and normal versus
 other layer, plus foreground ownership booleans. It issues no additional native
 query and never waives the guard. Focused Rust/Node tests, checker Clippy and all
 52 reducer contracts pass; native results remain pending.
+
+The clean Linux gate and all semantic experiment contracts on `e7520d98` pass
+in [37041726135](https://github.com/DavidLMS/nan-harness/actions/runs/37041726135).
+The corresponding local gate was interrupted by a machine restart and has no
+retained completion evidence. Claude macOS
+[37041715707](https://github.com/DavidLMS/nan-harness/actions/runs/37041715707)
+again records two authenticated catalog requests and passes cleanup. Its exact
+rejected snapshot has one same-process window ahead: below the eligibility
+threshold, not intersecting the held window, and on a nonzero layer. This does
+not prove which window holds keyboard focus or authorize ignoring it.
+Codex Windows
+[37041705326](https://github.com/DavidLMS/nan-harness/actions/runs/37041705326)
+now completes the overlay fingerprint in all three sessions and classifies the
+dialog as `other`. It is not the inspected final-onboarding dialog. No dialog
+action occurs; all cleanup passes.
+
+Linux Zed on `70f16bf7`
+[37041142386](https://github.com/DavidLMS/nan-harness/actions/runs/37041142386)
+passes the first four acceptance steps and cleanup in all three probes, but
+Retry still fails. Each fresh sampler observes 33 stable owned controls whose
+SCREEN and WINDOW extents agree despite a nonzero owned client origin. The
+existing Retry transport already translates this missing offset; the result
+does not justify applying it twice. Geometry, clipping and native hit testing
+remain under investigation.
+Windows Claude on the same commit
+[37041156791](https://github.com/DavidLMS/nan-harness/actions/runs/37041156791)
+identifies its preflight rejection as `claude-windows-executable-invalid`. The
+exact pinned MSIX contains `app/claude.exe`, while the validator compared the
+basename to `Claude.exe` case-sensitively. Windows name comparisons now respect
+case-insensitive filesystem semantics; canonical identity, symlink rejection,
+release and bootstrap pins remain unchanged. The synthetic lowercase archive
+fixture passes and noncanonical/symlink paths remain rejected.

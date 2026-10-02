@@ -56,6 +56,18 @@ class Policy(unittest.TestCase):
             asar.write_bytes(archive)
             with patch.object(runner, 'CLAUDE_WINDOWS_BOOTSTRAP_SHA256', hashlib.sha256(data).hexdigest()):
                 runner.validate_claude_windows_bundle(executable)
+                # Match the actual pinned public MSIX entry, including lowercase.
+                official_case = executable.with_name('claude.exe')
+                executable.rename(official_case)
+                runner.validate_claude_windows_bundle(official_case)
+                official_case.rename(executable)
+                alias = root / 'alias' / 'app' / 'claude.exe'
+                alias.parent.mkdir(parents=True)
+                alias.symlink_to(executable)
+                with self.assertRaisesRegex(ValueError, '^claude-windows-executable-invalid$'):
+                    runner.validate_claude_windows_bundle(alias)
+                with self.assertRaisesRegex(ValueError, '^claude-windows-executable-invalid$'):
+                    runner.validate_claude_windows_bundle(executable.parent / '..' / 'app' / executable.name)
                 asar.write_bytes(archive[:-1])
                 with self.assertRaisesRegex(ValueError, '^claude-windows-bootstrap-mismatch$'):
                     runner.validate_claude_windows_bundle(executable)
