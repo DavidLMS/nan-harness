@@ -581,23 +581,13 @@ impl Visual {
         self.guard()
     }
 
+    #[cfg(not(target_os = "linux"))]
     pub(super) fn click_native(&self, bounds: Rect) -> Result<(), Reason> {
         let point = native_hover_point(self.window.borrow().bounds, bounds)?;
         self.guard()?;
         let input = xa11y::input_sim().map_err(map_error)?;
         let mouse = input.mouse();
-        if cfg!(target_os = "linux") {
-            mouse.move_to(point).map_err(map_error)?;
-            std::thread::sleep(Duration::from_millis(50));
-            self.guard()?;
-            mouse.down(xa11y::MouseButton::Left).map_err(map_error)?;
-            // Give the app an event-loop turn between press and release. Always
-            // release this single press before evaluating another guard.
-            std::thread::sleep(Duration::from_millis(50));
-            mouse.up(xa11y::MouseButton::Left).map_err(map_error)?;
-        } else {
-            mouse.click(point).map_err(map_error)?;
-        }
+        mouse.click(point).map_err(map_error)?;
         self.guard()
     }
 

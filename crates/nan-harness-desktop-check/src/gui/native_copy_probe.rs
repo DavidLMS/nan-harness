@@ -1019,7 +1019,7 @@ impl NativeClipboardSession<'_> {
             let executable = std::env::var_os("FEASIBILITY_ZED_INPUT_DRIVER")
                 .ok_or(Reason::IsolationUnavailable)?;
             neutral_input(Path::new(&executable), "retry-click", &request)?;
-            return Ok("native-pointer-dispatched");
+            Ok("native-pointer-dispatched")
         }
         #[cfg(not(target_os = "linux"))]
         {
