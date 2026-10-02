@@ -54,12 +54,12 @@ def bind(source):
     }
     for name, changes in replacements.items():
         path = directory / name
-        content = path.read_text()
+        content = path.read_text(encoding="utf-8")
         for old, new in changes:
             if content.count(old) != 1:
                 raise ValueError("ZCode source configuration contract changed")
             content = content.replace(old, new)
-        path.write_text(content)
+        path.write_text(content, encoding="utf-8")
 
 
 def npm_command():

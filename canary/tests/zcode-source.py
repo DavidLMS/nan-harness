@@ -31,6 +31,24 @@ class SourceContracts(unittest.TestCase):
             with self.assertRaises(ValueError):
                 source.bind(root)
 
+    def test_utf8_source_binding_survives_windows_legacy_default_encoding(self):
+        read, write = Path.read_text, Path.write_text
+        def windows_read(path, encoding=None, **kwargs):
+            return read(path, encoding=encoding or "cp1252", **kwargs)
+        def windows_write(path, content, encoding=None, **kwargs):
+            return write(path, content, encoding=encoding or "cp1252", **kwargs)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            entries = root / "apps/zcode-cli/packages/cli/src"
+            entries.mkdir(parents=True)
+            original = "// synthetic UTF-8 ⚁\n"
+            (entries / "main.ts").write_text(original + "const exitCode = await run(context, {\n});\nvoid main();\n", encoding="utf-8")
+            (entries / "prompt-command.ts").write_text(original + "      env: appEnv,\n", encoding="utf-8")
+            with patch.object(Path, "read_text", windows_read), patch.object(Path, "write_text", windows_write):
+                source.bind(root)
+            for name in ("main.ts", "prompt-command.ts"):
+                self.assertTrue((entries / name).read_bytes().startswith(original.encode("utf-8")))
+
     def test_child_failures_keep_only_closed_stage_and_reason(self):
         import subprocess
         failure = subprocess.CalledProcessError(1, ["private-path"], output="private-output",
