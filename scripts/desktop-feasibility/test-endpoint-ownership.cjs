@@ -54,7 +54,7 @@ for (const result of ['true', 'false', 'true\n', 'private unexpected value']) {
         assert.equal(args[4], 'endpoint');
         assert.equal(args[5], '43210');
         assert.equal(args[6], '20');
-        assert.equal(options.timeout, 4000);
+        assert.equal(options.timeout, 8000);
         return result;
       } };
     } };

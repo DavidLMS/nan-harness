@@ -9,7 +9,7 @@ function windowsProof(mode, value, root) {
     const result = require('node:child_process').execFileSync('pwsh',
       ['-NoProfile', '-NonInteractive', '-File', `${__dirname}/endpoint-owner.ps1`,
         mode, String(value), String(root)],
-      { encoding: 'utf8', timeout: 4000, maxBuffer: 4096,
+      { encoding: 'utf8', timeout: 8000, maxBuffer: 4096,
         stdio: ['ignore', 'pipe', 'ignore'] });
     return result === 'true';
   } catch { return false; }

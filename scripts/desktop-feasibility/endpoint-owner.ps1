@@ -6,13 +6,19 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 function Test-Descendant([int]$Candidate, [int]$Root) {
+    # One metadata snapshot avoids repeated CIM startup on every ancestor. Each
+    # proof is fresh; never retain a PID map across renderer actions.
+    $records = @(Get-CimInstance Win32_Process -Property ProcessId, ParentProcessId, CreationDate, SessionId)
+    if ($records.Count -gt 4096) { return $false }
+    $processes = @{}
+    foreach ($record in $records) { $processes[[int]$record.ProcessId] = $record }
     $seen = [System.Collections.Generic.HashSet[int]]::new()
     for ($depth = 0; $depth -lt 32 -and $Candidate -gt 1; $depth++) {
         if (!$seen.Add($Candidate)) { return $false }
-        $current = Get-CimInstance Win32_Process -Filter "ProcessId = $Candidate"
+        $current = $processes[$Candidate]
         if (!$current -or !$current.CreationDate) { return $false }
         if ($Candidate -eq $Root) { return $true }
-        $parent = Get-CimInstance Win32_Process -Filter "ProcessId = $($current.ParentProcessId)"
+        $parent = $processes[[int]$current.ParentProcessId]
         # Microsoft documents PID reuse: a replacement parent can be younger.
         if (!$parent -or !$parent.CreationDate -or $parent.CreationDate -gt $current.CreationDate
             -or $parent.SessionId -ne $current.SessionId) { return $false }
