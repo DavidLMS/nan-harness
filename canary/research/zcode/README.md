@@ -1,8 +1,9 @@
 # ZCode feasibility investigation
 
 Investigated on 2026-10-02, on macOS arm64, from nan-harness branch
-`feat/zai-code`. These are research probes, not an implemented adapter or
-evidence of complete harness parity.
+`feat/zai-code`. This document records the initial research and the subsequent
+production integration described below. Historical probe notes retain their
+original evidence boundaries; complete harness parity is not yet claimed.
 
 ## Conclusion
 
@@ -13,7 +14,7 @@ is justified by the exercised behavior. The implementation is moderately
 involved: ZCode's provider configuration and resumed-session behavior differ
 from MiMo Code.
 
-The proposed canonical command is `nanh zcode`, with `zai` and `zai-code`
+The implemented canonical command is `nanh zcode`, with `zai` and `zai-code`
 aliases, and native setup through `nanh config zcode` using the same aliases.
 This refers to [zai-org/ZCode](https://github.com/zai-org/ZCode), not similarly
 named community CLIs or GLM integrations.
@@ -32,7 +33,8 @@ named community CLIs or GLM integrations.
 - The full distribution wrapper and unmodified Unix installer were exercised
   with a locally built package on macOS arm64. This is not an upstream
   released artifact. The rendered terminal UI was also exercised locally.
-  Web mode was not exercised. No minimum supported version has been established.
+  Web mode was not exercised. Backward compatibility before agent version
+  `0.16.9` has not been established.
 
 The [official source at the investigated commit](https://github.com/zai-org/ZCode/tree/29628c9acdb81b703bbd4080c207a0e7ce5e276e)
 is the reference. Older examples that put `provider`, `model.main` and
@@ -237,9 +239,9 @@ python3 canary/research/zcode/installer_probe.py \
 The installer probe serves that package on loopback, injects the temporary
 distribution URL, tests default/custom directories twice, verifies both
 version commands and runs real native tools through the installed wrapper.
-It does not install into the user's home. Automatic download and Windows CLI
-installation remain unverified external contracts; `nanh zcode` and
-`nanh config zcode` still require implementation and their own lifecycle gate.
+It does not install into the user's home. These initial installer results did
+not verify automatic download, Windows CLI installation or the nanh lifecycle;
+the subsequent production probe below covers those contracts.
 
 ## Production integration and remaining matrix dimensions
 
@@ -269,6 +271,8 @@ managed Write/Read/Edit/Agent behavior, private search MCP execution, native
 configure/status/refresh/key rotation/remove and standalone command execution.
 The `ZCode feasibility` workflow runs it on Linux ARM64, macOS ARM64 and Windows
 x64. All provider payloads and credentials in these probes are synthetic.
+The [hosted production run](https://github.com/DavidLMS/nan-harness/actions/runs/37005961113)
+passed on all three platforms, including Windows process-tree cleanup.
 
 This first implementation does not yet claim live NaN account qualification or
 integration into the shared release publication matrix. A latest-source daily
