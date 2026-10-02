@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 
 from desktop_diagnostics import CATEGORIES, REASONS
+from desktop_startup import startup
 from desktop_suite import read_frozen_manifest, validated_report
 
 APPS = ('zed-desktop', 'chatgpt-desktop', 'claude-desktop', 'hermes-desktop', 'pen-desktop')
@@ -14,6 +15,7 @@ TARGETS = (('linux', 'x86_64', 'ubuntu-24.04'), ('macos', 'aarch64', 'macos-15')
            ('windows', 'x86_64', 'windows-2025'))
 BACKENDS = {('zed-desktop', 'macos', 'aarch64'): 'native-thread-export',
             ('zed-desktop', 'linux', 'x86_64'): 'native-thread-export',
+            ('zed-desktop', 'windows', 'x86_64'): 'native-thread-export',
             ('hermes-desktop', 'linux', 'x86_64'): 'renderer-dom',
             ('hermes-desktop', 'macos', 'aarch64'): 'renderer-dom',
             ('hermes-desktop', 'windows', 'x86_64'): 'renderer-dom'}
@@ -87,15 +89,24 @@ def semantic_observations(directory, app):
     if directory.is_symlink() or not directory.is_dir():
         raise ValueError('semantic facts directory is invalid')
     all_paths = sorted(directory.glob('*.json'))
-    private = [path for path in all_paths if path.name.startswith(('connection-', 'startup-'))]
+    private = [path for path in all_paths if path.name.startswith(('connection-', 'startup-', 'closed-startup-'))]
     # Three fresh profiles produce connection/startup metadata. Bound those
     # separately so they cannot consume or bypass the closed-record budget.
     if len(private) > 12:
         raise ValueError('too many private semantic metadata files')
-    paths = [path for path in all_paths if not path.name.startswith(('connection-', 'startup-'))]
+    paths = [path for path in all_paths if not path.name.startswith(('connection-', 'startup-', 'closed-startup-'))]
     if len(paths) > 32:
         raise ValueError('too many semantic observations')
+    startup_paths = [path for path in private if path.name.startswith('closed-startup-')]
+    if len(startup_paths) > 3:
+        raise ValueError('too many startup observations')
     observations = []
+    for path in startup_paths:
+        value = bounded_json(path, 8192)
+        if isinstance(value, dict) and value.get('mechanism') == 'hermes-startup':
+            if app != 'hermes-desktop':
+                raise ValueError('startup application differs')
+            observations.append(startup(value))
     def flag(record, source, key, output=None):
         if key in source:
             if type(source[key]) is not bool:
@@ -241,7 +252,7 @@ def semantic_observations(directory, app):
             enum(record, value, 'retryActionReceipt', {'acknowledged', 'completion-unknown'})
             enum(record, value, 'retrySelector', {'retry-name-or-description', 'retry-tooltip', 'retry-label'})
             enum(record, value, 'retryInventoryStatus', {'complete', 'budget-exceeded', 'query-error'})
-            for key in ('retryControlCount', 'retryTitleCount', 'retryCandidateCount', 'retryTooltipCount', 'retryLabelCount',
+            for key in ('trustControlCount', 'panelControlCount', 'retryControlCount', 'retryTitleCount', 'retryCandidateCount', 'retryTooltipCount', 'retryLabelCount',
                         'retryInventoryTotal', 'retryInventoryButtons', 'retryInventoryStaticText',
                         'retryInventoryTitleMatches', 'retryInventoryGenerationMatches', 'retryInventoryRetryMatches'):
                 if key in value:

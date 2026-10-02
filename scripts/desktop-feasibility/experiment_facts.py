@@ -6,7 +6,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "canary/actions"))
 from desktop_diagnostics import CATEGORIES
 
 DOM_ERRORS = set('unclassified invalid-request launcher-unowned endpoint-unowned target-ambiguous target-invalid composer-ambiguous send-unavailable stale-response input-mismatch response-timeout submit-action-timeout submit-action-intercepted submit-action-detached submit-action-failed response-observation-failed attachment-or-action-failed'.split())
-STARTUP_CATEGORIES = set('sandbox-helper namespace-denied root-without-sandbox display-unavailable missing-library gpu-fatal native-module unclassified'.split())
+from desktop_startup import startup
 
 
 def shape(value, keys, mechanism):
@@ -73,27 +73,6 @@ def native_copy(value, reasons):
         raise ValueError('invalid assistant export proof')
     if value['response']['clipboardVerified'] and not (value['input']['submitted'] and value['response']['copyAction']):
         raise ValueError('response without native copy')
-    return value
-
-
-def startup(value):
-    shape(value, 'schemaVersion mechanism startupCategory namespacePolicy disableSetuidSandbox stderrPresent captureTruncated drainComplete launcherExitCode effectiveUserIsRoot apparmor_restrict_unprivileged_userns unprivileged_userns_clone sandboxHelperPresent sandboxHelperOwnerIsRoot sandboxHelperModeIs4755', 'hermes-startup')
-    flags(value, 'stderrPresent captureTruncated drainComplete disableSetuidSandbox')
-    if value['namespacePolicy'] not in {'default', 'scoped-apparmor-userns'} or value['disableSetuidSandbox'] and value['namespacePolicy'] != 'scoped-apparmor-userns':
-        raise ValueError('invalid namespace experiment policy')
-    if value['startupCategory'] not in STARTUP_CATEGORIES:
-        raise ValueError('invalid startup category')
-    if (value['captureTruncated'] or not value['drainComplete']) and value['startupCategory'] != 'unclassified':
-        raise ValueError('classification from incomplete stderr')
-    for key in ('effectiveUserIsRoot', 'sandboxHelperPresent', 'sandboxHelperOwnerIsRoot', 'sandboxHelperModeIs4755'):
-        if value[key] is not None and type(value[key]) is not bool:
-            raise ValueError('invalid startup fact')
-    for key in ('apparmor_restrict_unprivileged_userns', 'unprivileged_userns_clone'):
-        if value[key] is not None and (type(value[key]) is not int or value[key] not in (0, 1)):
-            raise ValueError('invalid namespace policy')
-    code = value['launcherExitCode']
-    if code is not None and (type(code) is not int or not -127 <= code <= 255):
-        raise ValueError('invalid launcher exit')
     return value
 
 

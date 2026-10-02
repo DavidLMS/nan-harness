@@ -32,7 +32,7 @@ capture = Capture(child.stderr)
 capture.start()
 code = None
 observer = None
-startup_output = Path(os.environ['FEASIBILITY_FACTS']) / f'startup-{child.pid}.json'
+startup_output = Path(os.environ['FEASIBILITY_FACTS']) / f'closed-startup-{child.pid}.json'
 def interrupted(number, _frame):
     capture.save(startup_output, code, join_timeout=0)
     raise SystemExit(128 + number)

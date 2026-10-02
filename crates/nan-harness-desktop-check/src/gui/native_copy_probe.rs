@@ -120,6 +120,7 @@ fn neutral_input(executable: &Path, mode: &str, prompt: &str) -> Result<(), Reas
             "type"
                 | "activate-accessibility"
                 | "new-thread"
+                | "trust"
                 | "select-all"
                 | "copy"
                 | "copy-thread"
@@ -134,7 +135,19 @@ fn neutral_input(executable: &Path, mode: &str, prompt: &str) -> Result<(), Reas
         return Err(Reason::IsolationUnavailable);
     }
     let mut command = Command::new(executable);
-    command.arg(mode).env_clear();
+    command.env_clear();
+    if let Some(script) = std::env::var_os("FEASIBILITY_ZED_INPUT_SCRIPT") {
+        let script = PathBuf::from(script);
+        if !script.is_absolute() || !script.is_file() {
+            return Err(Reason::IsolationUnavailable);
+        }
+        command.arg(script);
+    }
+    command.arg(mode);
+    #[cfg(windows)]
+    if let Some(root) = std::env::var_os("SystemRoot") {
+        command.env("SystemRoot", root);
+    }
     #[cfg(target_os = "linux")]
     for key in ["DISPLAY", "XAUTHORITY"] {
         if let Some(value) = std::env::var_os(key) {
@@ -361,7 +374,9 @@ fn native_copy_facts() -> Facts {
                 Ok("all" | "paste")
             ) {
                 if std::env::var("FEASIBILITY_ZED_INPUT_DRIVER_MODE").as_deref() == Ok("paste") {
-                    if cfg!(target_os = "linux") {
+                    if cfg!(windows) {
+                        "neutral-win32-paste"
+                    } else if cfg!(target_os = "linux") {
                         "neutral-x11-paste"
                     } else {
                         "neutral-quartz-paste"
@@ -1115,14 +1130,36 @@ impl Gui {
     fn prepare_native_copy(&self, facts: &mut Facts) -> Result<(), Reason> {
         let app = self.app.as_ref().ok_or(Reason::SelectorNotMatched)?;
         let trust = app.locator("button[name=\"Trust and Continue\"]");
-        let count = control_count(&trust)?;
+        let mut count = 0;
+        // The owned window can precede the asynchronous workspace trust modal.
+        for observation in 0..30 {
+            count = control_count(&trust)?;
+            if count != 0 || observation == 29 {
+                break;
+            }
+            self.native_copy_guard(facts, "trust-query")?;
+            std::thread::sleep(Duration::from_millis(100));
+        }
         facts.trust_control_count = Some(count);
         match count {
             0 => {}
             1 => {
                 self.native_copy_guard(facts, "trust-before")?;
-                trust.press().map_err(map_error)?;
-                trust.wait_hidden(WAIT).map_err(map_error)?;
+                if cfg!(target_os = "macos") {
+                    trust.press().map_err(map_error)?;
+                } else {
+                    // This private binding is scoped to the frozen SecurityModal;
+                    // it invokes its normal Confirm action once, with no retry.
+                    Self::neutral_key("trust")?;
+                }
+                let deadline = Instant::now() + WAIT;
+                while control_count(&trust)? != 0 {
+                    if Instant::now() >= deadline {
+                        return Err(Reason::Timeout);
+                    }
+                    self.native_copy_guard(facts, "trust-after")?;
+                    std::thread::sleep(Duration::from_millis(50));
+                }
                 self.native_copy_guard(facts, "trust-after")?;
             }
             _ => return Err(Reason::SelectorNotMatched),

@@ -3,7 +3,7 @@
 import subprocess
 import sys
 
-KEYS = {'new-thread': 'ctrl+alt+n', 'copy-thread': 'ctrl+alt+y',
+KEYS = {'trust': 'ctrl+alt+t', 'new-thread': 'ctrl+alt+n', 'copy-thread': 'ctrl+alt+y',
         'select-all': 'ctrl+a', 'copy': 'ctrl+c', 'paste': 'ctrl+v',
         'right': 'Right', 'submit': 'Return'}
 

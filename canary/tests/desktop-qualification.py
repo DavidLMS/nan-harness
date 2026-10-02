@@ -96,7 +96,7 @@ class QualificationTests(unittest.TestCase):
         cells = q.matrix()['include']
         self.assertEqual(len(cells), 15)
         self.assertEqual(len({(c['app'], c['platform'], c['architecture']) for c in cells}), 15)
-        self.assertEqual(sum(c['backend'] != 'pending' for c in cells), 5)
+        self.assertEqual(sum(c['backend'] != 'pending' for c in cells), 6)
         self.assertEqual({(c['platform'], c['architecture']) for c in cells},
                          {('linux', 'x86_64'), ('macos', 'aarch64'), ('windows', 'x86_64')})
         with self.assertRaises(ValueError):
@@ -448,6 +448,25 @@ class QualificationTests(unittest.TestCase):
             for key, invalid in [('retryFocusAfterAcquire', 1), ('retryDocumentFocused', None),
                                  ('retryActiveTag', 'private-tag'), ('retryActiveRegion', 'PRIVATE')]:
                 path.write_text(json.dumps({**value, key: invalid}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'hermes-desktop')
+
+    def test_startup_facts_reject_raw_fields(self):
+        import desktop_startup
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            value = dict(schemaVersion=1, mechanism='hermes-startup', startupCategory='unclassified',
+                         namespacePolicy='default', disableSetuidSandbox=False, stderrPresent=True,
+                         captureTruncated=False, drainComplete=True, launcherExitCode=1,
+                         effectiveUserIsRoot=False, apparmor_restrict_unprivileged_userns=None,
+                         unprivileged_userns_clone=None, sandboxHelperPresent=None,
+                         sandboxHelperOwnerIsRoot=None, sandboxHelperModeIs4755=None)
+            path = root / 'closed-startup-1.json'
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(root, 'hermes-desktop'), [value])
+            for changed in ({**value, 'stderr': 'PRIVATE'}, {**value, 'launcherExitCode': True},
+                            {**value, 'startupCategory': 'PRIVATE'}):
+                path.write_text(json.dumps(changed))
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'hermes-desktop')
 

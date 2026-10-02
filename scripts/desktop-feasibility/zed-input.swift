@@ -59,6 +59,7 @@ if mode == "activate-accessibility" {
     let key: CGKeyCode
     let modifiers: [(CGKeyCode, CGEventFlags)]
     switch mode {
+    case "trust": key = 17; modifiers = [(59, .maskControl), (58, .maskAlternate)]
     case "new-thread": key = 45; modifiers = [(59, .maskControl), (58, .maskAlternate)]
     case "select-all": key = 0; modifiers = [(55, .maskCommand)]
     case "copy-thread": key = 16; modifiers = [(59, .maskControl), (58, .maskAlternate)]

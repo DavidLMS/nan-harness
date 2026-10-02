@@ -3,10 +3,10 @@
 use crate::report::Reason;
 use zeroize::Zeroizing;
 
-#[cfg(any(target_os = "macos", target_os = "linux", test))]
+#[cfg(any(target_os = "macos", target_os = "linux", windows, test))]
 const OUTPUT_LIMIT: u64 = 64 * 1024;
 
-#[cfg(any(target_os = "macos", target_os = "linux", test))]
+#[cfg(any(target_os = "macos", target_os = "linux", windows, test))]
 fn decode(bytes: &[u8]) -> Result<Zeroizing<String>, Reason> {
     if bytes.len() as u64 > OUTPUT_LIMIT {
         return Err(Reason::ActionUnsupported);
@@ -16,7 +16,7 @@ fn decode(bytes: &[u8]) -> Result<Zeroizing<String>, Reason> {
         .map_err(|_| Reason::ActionUnsupported)
 }
 
-#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[cfg(any(target_os = "macos", target_os = "linux", windows))]
 mod transport {
     use super::{Reason, Zeroizing};
     use std::io::{Read as _, Write as _};
@@ -24,7 +24,9 @@ mod transport {
     use std::time::{Duration, Instant};
 
     pub(super) fn run(input: Option<&str>) -> Result<Zeroizing<String>, Reason> {
-        let executable = if cfg!(target_os = "linux") {
+        let executable = if cfg!(windows) {
+            "powershell.exe"
+        } else if cfg!(target_os = "linux") {
             "/usr/bin/xclip"
         } else if input.is_some() {
             "/usr/bin/pbcopy"
@@ -33,6 +35,19 @@ mod transport {
         };
         let mut command = Command::new(executable);
         command.env_clear();
+        #[cfg(windows)]
+        {
+            let script = if input.is_some() {
+                "$text=[Console]::In.ReadToEnd(); if ($text.Length -eq 0) { [System.Windows.Forms.Clipboard]::Clear() } else { [System.Windows.Forms.Clipboard]::SetText($text) }"
+            } else {
+                "[Console]::Out.Write([System.Windows.Forms.Clipboard]::GetText())"
+            };
+            command.args(["-NoProfile", "-NonInteractive", "-Sta", "-Command"])
+                .arg(format!("[Console]::InputEncoding=[System.Text.UTF8Encoding]::new($false); [Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false); Add-Type -AssemblyName System.Windows.Forms; {script}"));
+            if let Some(root) = std::env::var_os("SystemRoot") {
+                command.env("SystemRoot", root);
+            }
+        }
         #[cfg(target_os = "linux")]
         {
             command.args(["-selection", "clipboard", "-out"]);
@@ -174,7 +189,7 @@ pub(super) fn write(value: &str) -> Result<(), Reason> {
     if value.len() > 1024 {
         return Err(Reason::ActionUnsupported);
     }
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", windows))]
     {
         transport::run(Some(value)).map(|_| ())
     }
@@ -182,14 +197,14 @@ pub(super) fn write(value: &str) -> Result<(), Reason> {
     {
         x11::write(value)
     }
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
     {
         Err(Reason::ActionUnsupported)
     }
 }
 
 pub(super) fn read() -> Result<Zeroizing<String>, Reason> {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", windows))]
     {
         transport::run(None)
     }
@@ -201,7 +216,7 @@ pub(super) fn read() -> Result<Zeroizing<String>, Reason> {
         }
         Ok(value)
     }
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
     {
         Err(Reason::ActionUnsupported)
     }
