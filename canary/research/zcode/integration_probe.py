@@ -77,6 +77,11 @@ def main():
             origin = f"http://127.0.0.1:{server.server_port}"
             environment = {name: value for name, value in os.environ.items()
                            if name in ("PATH", "SYSTEMROOT", "SystemRoot", "WINDIR", "COMSPEC", "PATHEXT", "SystemDrive")}
+            helper = binary.parent / ("nan-harness.exe" if os.name == "nt" else "nan-harness")
+            assert helper.is_file(), "Build both nanh and nan-harness before running the integration probe"
+            # Native MCP commands resolve nan-harness through PATH. Test this checkout,
+            # even when another nan-harness version is installed on the host.
+            environment["PATH"] = str(binary.parent) + os.pathsep + environment.get("PATH", "")
             environment.update(HOME=temporary, USERPROFILE=temporary, APPDATA=temporary,
                                LOCALAPPDATA=temporary, TMPDIR=temporary, TMP=temporary, TEMP=temporary,
                                NAN_HARNESS_CONFIG_DIR=str(state), NAN_HARNESS_CREDENTIAL_BACKEND="file",
@@ -97,7 +102,7 @@ def main():
             else:
                 terminal = Terminal([*prefix, "--", *native], workspace, environment)
                 try:
-                    terminal.write(b"y\n")
+                    terminal.write(b"y\r")
                     deadline = time.monotonic() + 1200
                     output = bytearray()
                     while terminal.alive() and time.monotonic() < deadline:
@@ -163,8 +168,11 @@ def main():
                 return respond(body)
 
             scenario.respond = request_search
-            command([*prefix, "--", *native], workspace, environment, "NATIVE_PROBE_OK")
-            assert len(searches) == 1
+            result = command([*prefix, "--", *native], workspace, environment, "NATIVE_PROBE_OK")
+            if len(searches) != 1:
+                with tempfile.NamedTemporaryFile(prefix="nanh-zcode-synthetic-search-failure-", delete=False) as failure:
+                    failure.write((result.stdout + result.stderr).encode())
+            assert len(searches) == 1, f"Managed search requests: {len(searches)}; failures: {scenario.failures}"
             assert "SYNTHETIC_SEARCH_RESULT" in json.dumps(scenario.requests[-1]["messages"])
             assert user_config.read_bytes() == original
             scenario.respond = respond
