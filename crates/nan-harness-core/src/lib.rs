@@ -3,6 +3,7 @@
 pub mod adapter;
 pub mod desktop;
 pub mod desktop_check;
+pub mod desktop_metadata;
 pub mod error;
 pub mod harness;
 pub mod hosted_check;

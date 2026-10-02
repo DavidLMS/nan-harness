@@ -687,8 +687,12 @@ impl Gui {
             .map_err(|_| Reason::IsolationUnavailable)?;
         let outcome = self.run_dom_driver(&driver, &request_path, &output_path, true);
         std::fs::remove_file(&request_path).map_err(|_| Reason::IsolationUnavailable)?;
-        outcome?;
-        let mut facts = read_facts(&output_path, true)?;
+        // Failed actions still retain independent provider evidence. This is
+        // observation only and never grants a second submission.
+        let mut facts = match read_facts(&output_path, true) {
+            Ok(facts) => facts,
+            Err(reason) => return Err(outcome.err().unwrap_or(reason)),
+        };
         facts.response.provider_response_verified = provider.fixture_response_verified();
         facts.response.provider_generation_count =
             Some(provider.generation_count()).filter(|count| *count <= 4096);
@@ -698,6 +702,7 @@ impl Gui {
             .and_then(|mut file| file.write_all(&bytes))
             .and_then(|()| std::fs::rename(final_path, &output_path))
             .map_err(|_| Reason::IsolationUnavailable)?;
+        outcome?;
         if !facts.input.input_submitted
             || facts.error_category.is_some()
             || matches!(turn.action, DomAction::Retry)

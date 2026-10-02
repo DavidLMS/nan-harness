@@ -202,12 +202,13 @@ jobs:
             nanh="${FEASIBILITY_HERMES_LAUNCHER:-$GITHUB_WORKSPACE/scripts/desktop-feasibility/nanh-shim.py}"
           fi
           "$FEASIBILITY_CHECKER" prepare --app '${{ matrix.app }}' --model qwen3.6 --yes --non-interactive --ephemeral --nan-harness "$nanh" --frozen "$RUNNER_TEMP/semantic-feasibility/frozen.json" --artifacts "$RUNNER_TEMP/semantic-feasibility/artifacts" --output "$RUNNER_TEMP/semantic-feasibility/prepared.json"
-      - name: Prepare executable-scoped Hermes namespace sandbox
-        if: runner.os == 'Linux' && matrix.app == 'hermes-desktop'
+      - name: Prepare executable-scoped Electron namespace sandbox
+        if: runner.os == 'Linux' && matrix.app != 'zed-desktop'
         shell: bash
         run: |
-          python3 scripts/desktop-feasibility/hermes-namespace.py prepare --prepared "$RUNNER_TEMP/semantic-feasibility/prepared.json" --state "$RUNNER_TEMP/semantic-feasibility/namespace-policy.json"
+          python3 scripts/desktop-feasibility/hermes-namespace.py prepare --app '${{ matrix.app }}' --prepared "$RUNNER_TEMP/semantic-feasibility/prepared.json" --state "$RUNNER_TEMP/semantic-feasibility/namespace-policy.json"
           echo 'FEASIBILITY_HERMES_NAMESPACE_POLICY=scoped-apparmor-userns' >> "$GITHUB_ENV"
+          echo 'NANH_DESKTOP_QUALIFICATION_NAMESPACE_POLICY=scoped-apparmor-userns' >> "$GITHUB_ENV"
       - name: Run bounded native-copy or renderer DOM experiment
         if: inputs.experiment != 'deterministic-full'
         shell: bash
@@ -272,8 +273,8 @@ jobs:
           path: ${{ runner.temp }}/semantic-feasibility/installation-diagnostics.json
           if-no-files-found: ignore
           retention-days: 30
-      - name: Remove owned Hermes namespace policy
-        if: always() && runner.os == 'Linux' && matrix.app == 'hermes-desktop'
+      - name: Remove owned Electron namespace policy
+        if: always() && runner.os == 'Linux' && matrix.app != 'zed-desktop'
         shell: bash
         run: python3 scripts/desktop-feasibility/hermes-namespace.py cleanup --state "$RUNNER_TEMP/semantic-feasibility/namespace-policy.json"
       - name: Present completed closed observations

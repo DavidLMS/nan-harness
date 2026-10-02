@@ -237,6 +237,18 @@ def semantic_observations(directory, app):
                         'retryFocusAfterAcquire', 'retryFocusBeforeAction', 'retryButtonConnected',
                         'retryAncestorHidden', 'retryAncestorInert', 'retryFieldsetDisabled', 'retryDocumentFocused'):
                 flag(record, value, key)
+            for key in ('assistantTurnCount', 'requestFailedCount', 'apiErrorResponseCount', 'providerGenerationCount'):
+                if key in value:
+                    count = value[key]
+                    if count is not None and (type(count) is not int or not 0 <= count <= 4096):
+                        raise ValueError('invalid renderer diagnostic count')
+                    record[key] = count
+            enum(record, value, 'requestFailureCategory', {'aborted', 'connection', 'tls', 'other'})
+            if 'apiErrorStatus' in value:
+                status = value['apiErrorStatus']
+                if status is not None and (type(status) is not int or not 400 <= status <= 599):
+                    raise ValueError('invalid renderer HTTP status')
+                record['apiErrorStatus'] = status
             enum(record, value, 'retryReveal', {'none', 'command-dismissed', 'onboarding-skipped'})
             enum(record, value, 'retrySampleStatus', {'unmeasured', 'native-control-invalid', 'detached', 'hidden', 'disabled', 'inert', 'foreign-document', 'clipped', 'pointer-events-none', 'transformed', 'outside-viewport', 'no-owned-point', 'owned'})
             if 'retryHitOwnedPoints' in value:

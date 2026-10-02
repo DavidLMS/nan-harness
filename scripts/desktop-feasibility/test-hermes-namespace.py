@@ -11,6 +11,12 @@ module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 
 class NamespacePolicy(unittest.TestCase):
+    def test_non_electron_app_is_rejected_before_reading_or_mutating(self):
+        with patch.object(module, 'run') as run:
+            with self.assertRaises(ValueError):
+                module.prepare(Path('/missing'), Path('/missing'), Path('/tmp'), 'zed-desktop')
+            run.assert_not_called()
+
     def test_exact_executable_without_global_or_suid_changes(self):
         text = module.profile_text(Path('/tmp/owned/hermes'), 'nanh-hermes-feasibility-' + 'a' * 32)
         self.assertIn('"/tmp/owned/hermes" flags=(unconfined)', text)

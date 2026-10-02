@@ -221,7 +221,7 @@ pub(crate) fn qualification_renderer_arguments() -> Vec<String> {
     {
         let hosted = std::env::var("GITHUB_ACTIONS").as_deref() == Ok("true")
             && std::env::var("RUNNER_ENVIRONMENT").as_deref() == Ok("github-hosted");
-        renderer_arguments(
+        let mut arguments = renderer_arguments(
             hosted,
             std::env::var_os("NANH_DESKTOP_QUALIFICATION_FACTS")
                 .map(std::path::PathBuf::from)
@@ -229,7 +229,15 @@ pub(crate) fn qualification_renderer_arguments() -> Vec<String> {
             std::env::var("NANH_DESKTOP_QUALIFICATION_CDP_PORT")
                 .ok()
                 .as_deref(),
-        )
+        );
+        if !arguments.is_empty()
+            && cfg!(target_os = "linux")
+            && std::env::var("NANH_DESKTOP_QUALIFICATION_NAMESPACE_POLICY").as_deref()
+                == Ok("scoped-apparmor-userns")
+        {
+            arguments.push("--disable-setuid-sandbox".into());
+        }
+        arguments
     }
     #[cfg(not(feature = "desktop-qualification"))]
     Vec::new()

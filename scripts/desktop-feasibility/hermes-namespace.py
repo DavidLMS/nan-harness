@@ -43,13 +43,15 @@ def cleanup(state):
     state.unlink()
 
 
-def prepare(prepared, state, runner_root):
+def prepare(prepared, state, runner_root, app="hermes-desktop"):
+    if app not in {"hermes-desktop", "chatgpt-desktop", "claude-desktop", "pen-desktop"}:
+        raise ValueError("unsupported Electron application")
     if state.exists():
         raise ValueError('policy journal already exists')
     receipt = json.loads(prepared.read_text())
-    apps = [app for app in receipt['apps'] if app['app'] == 'hermes-desktop']
+    apps = [entry for entry in receipt['apps'] if entry['app'] == app]
     if len(apps) != 1:
-        raise ValueError('ambiguous Hermes receipt')
+        raise ValueError('ambiguous application receipt')
     executable = Path(apps[0]['executable']['path'])
     if executable.is_symlink() or not executable.is_file():
         raise ValueError('invalid installed executable')
@@ -85,6 +87,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('operation', choices=['prepare', 'cleanup'])
     parser.add_argument('--prepared', type=Path)
+    parser.add_argument('--app', choices=['hermes-desktop', 'chatgpt-desktop', 'claude-desktop', 'pen-desktop'], default='hermes-desktop')
     parser.add_argument('--state', type=Path, required=True)
     args = parser.parse_args()
     if sys.platform != 'linux' or os.environ.get('GITHUB_ACTIONS') != 'true' or os.environ.get('RUNNER_ENVIRONMENT') != 'github-hosted':
@@ -96,7 +99,7 @@ def main():
     else:
         if args.prepared is None:
             raise ValueError('prepared receipt required')
-        prepare(args.prepared, args.state, runner_root)
+        prepare(args.prepared, args.state, runner_root, args.app)
 
 
 if __name__ == '__main__':

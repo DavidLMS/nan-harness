@@ -176,7 +176,7 @@ async function driveDom() {
   if (!ownedEndpoint()) { facts.errorCategory = 'endpoint-unowned'; saveFacts(); return; }
   facts.endpointOwned = true;
   const browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`,
-    { timeout: Math.min(2000, request.timeoutMs), noDefaults: true });
+    { timeout: Math.max(1, Math.min(8000, deadline - Date.now())), noDefaults: true });
   facts.attached = true;
   const version = browser.version();
   if (/^(?:Chrome\/)?[0-9]+(?:\.[0-9]+){1,3}$/.test(version)) facts.observedRuntimeVersion = version.replace(/^Chrome\//, '');

@@ -81,7 +81,13 @@ pub(super) fn measure(
     }
     // Electron executables are never invoked for inventory: --version may open a GUI.
     let runtime_version = if kind == DesktopHarnessKind::ChatGpt {
-        let runtime = resources.join(if cfg!(windows) { "codex.exe" } else { "codex" });
+        let runtime =
+            nan_harness_core::desktop_metadata::codex_runtime_candidates(&resources, cfg!(windows))
+                .into_iter()
+                .find(|path| path.is_file())
+                .unwrap_or_else(|| {
+                    resources.join(if cfg!(windows) { "codex.exe" } else { "codex" })
+                });
         match fs::metadata(&runtime) {
             Ok(metadata) if metadata.is_file() => parse_version(&command_output_for(
                 Command::new(runtime).arg("--version"),
