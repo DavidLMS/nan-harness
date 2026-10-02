@@ -95,6 +95,19 @@ class RunnerTests(unittest.TestCase):
 
 
 class QualificationTests(unittest.TestCase):
+    def test_failure_policy_requires_a_disclosed_status_and_explicit_ui_action(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'policy.json'
+            value = dict(schemaVersion=1, mechanism='semantic-failure-policy',
+                         failureStatus=400, recoveryAction='explicit-ui-retry')
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(Path(root), 'zed-desktop'), [value])
+            for changed in ({**value, 'failureStatus': True}, {**value, 'failureStatus': 200},
+                            {**value, 'recoveryAction': 'automatic'}, {**value, 'text': 'PRIVATE'}):
+                path.write_text(json.dumps(changed))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(Path(root), 'zed-desktop')
+
     def test_windows_proof_diagnostics_remain_closed(self):
         with tempfile.TemporaryDirectory() as root:
             path = Path(root) / 'proof.json'

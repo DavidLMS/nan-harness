@@ -139,9 +139,7 @@ impl SemanticUi<'_> {
                 session.new_turn(prompt)?;
                 match purpose {
                     DomPurpose::Response => session.wait_response(marker, Duration::from_secs(30)),
-                    // Frozen Zed retries 503 four times with 5/10/20/40-second
-                    // delays and up to 10% jitter before exposing manual Retry.
-                    DomPurpose::Failure => session.wait_retry(Duration::from_secs(90)),
+                    DomPurpose::Failure => session.wait_retry(Duration::from_secs(30)),
                 }
             }
             Self::Renderer(session) => session.turn(
@@ -154,6 +152,30 @@ impl SemanticUi<'_> {
                 gate,
             ),
         }
+    }
+
+    fn inject_failure(&self, gate: &ProviderGate, directory: &Path) -> Result<(), Reason> {
+        // Zed exposes Retry for a rejected request without scheduling automatic
+        // retries. This isolates the explicit UI recovery contract from backoff.
+        let status = match self {
+            Self::Zed(_) => {
+                gate.fail_next_scenario(true);
+                400
+            }
+            Self::Renderer(_) => {
+                gate.fail_recoverable_scenario(true);
+                503
+            }
+        };
+        let policy = serde_json::json!({"schemaVersion":1, "mechanism":"semantic-failure-policy",
+            "failureStatus":status, "recoveryAction":"explicit-ui-retry"});
+        let mut nonce = [0_u8; 8];
+        getrandom::fill(&mut nonce).map_err(|_| Reason::IsolationUnavailable)?;
+        open_private_new(
+            &directory.join(format!("failure-policy-{}.json", u64::from_le_bytes(nonce))),
+        )
+        .and_then(|mut file| file.write_all(policy.to_string().as_bytes()))
+        .map_err(|_| Reason::IsolationUnavailable)
     }
 
     fn retry(&mut self, marker: &str, gate: &ProviderGate) -> Result<(), Reason> {
@@ -240,7 +262,7 @@ async fn complete_scenario(
 
     gate.arm_fixture_response("NAN_CHECK_EXPECTED_FAILURE")
         .map_err(|()| Reason::ProviderFailed)?;
-    gate.fail_recoverable_scenario(true);
+    ui.inject_failure(gate, directory)?;
     let failure = ui.turn(
         "Check the expected provider failure",
         "NAN_CHECK_EXPECTED_FAILURE",

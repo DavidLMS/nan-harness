@@ -1486,6 +1486,13 @@ fn isolated_command(spec: &ProbeSpec, program: &Path) -> Result<Command, Reason>
     // signalling an unrelated application in the runner's process group.
     #[cfg(unix)]
     command.process_group(0);
+    if spec.kind == DesktopHarnessKind::Hermes {
+        let user_data = hermes_user_data(&profile, &roaming);
+        create_private_dir_all(&user_data).map_err(|_| Reason::IsolationUnavailable)?;
+        // Electron's native userData lookup can ignore redirected HOME. Bind it
+        // to the directory where nANH applies the managed active-profile file.
+        command.env("HERMES_DESKTOP_USER_DATA_DIR", user_data);
+    }
     if spec.kind == DesktopHarnessKind::Zed {
         command
             .arg("--user-data-dir")
@@ -1500,6 +1507,16 @@ fn isolated_command(spec: &ProbeSpec, program: &Path) -> Result<Command, Reason>
         }
     }
     Ok(command)
+}
+
+fn hermes_user_data(profile: &Path, roaming: &Path) -> PathBuf {
+    if cfg!(target_os = "macos") {
+        profile.join("home/Library/Application Support/Hermes")
+    } else if cfg!(windows) {
+        roaming.join("Hermes")
+    } else {
+        profile.join("config/Hermes")
+    }
 }
 
 fn prepare_zed_profile(spec: &ProbeSpec) -> Result<(), Reason> {
@@ -2506,6 +2523,41 @@ mod tests {
                 .then_some(expected_observation_path.as_os_str());
             assert_eq!(observation, Some(expected_observation));
         }
+    }
+
+    #[test]
+    fn hermes_launch_redirects_native_data_to_the_managed_profile_directory() {
+        let directory = tempfile::tempdir().unwrap();
+        let spec = ProbeSpec {
+            kind: DesktopHarnessKind::Hermes,
+            nan_harness: directory.path().join("nanh"),
+            nan_harness_sha256: "a".repeat(64),
+            executable: directory.path().join("app"),
+            workspace: directory.path().join("workspace"),
+            model: "qwen3.6".into(),
+            live: false,
+            probe_index: None,
+            session: crate::cli::SessionMode::PrivateProfile,
+            verification: crate::cli::VerificationPolicy::default(),
+            launch_wrapper: None,
+        };
+        let command = isolated_command(&spec, &spec.nan_harness).unwrap();
+        let data = command
+            .as_std()
+            .get_envs()
+            .find(|(key, _)| *key == "HERMES_DESKTOP_USER_DATA_DIR")
+            .unwrap()
+            .1
+            .unwrap();
+        let expected = if cfg!(target_os = "macos") {
+            "profile/home/Library/Application Support/Hermes"
+        } else if cfg!(windows) {
+            "profile/home/AppData/Roaming/Hermes"
+        } else {
+            "profile/config/Hermes"
+        };
+        assert_eq!(Path::new(data), spec.workspace.join(expected));
+        assert!(Path::new(data).is_dir());
     }
 
     #[tokio::test]

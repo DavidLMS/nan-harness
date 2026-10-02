@@ -127,13 +127,17 @@ def semantic_observations(directory, app):
         if type(value) is not dict:
             raise ValueError('invalid semantic observation')
         mechanism = value.get('mechanism')
-        if mechanism not in {'hermes-renderer-qualification', 'zed-native-copy', 'semantic-provider-oracle', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'hermes-front-source', 'hermes-backend-failure', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline'}:
+        if mechanism not in {'hermes-renderer-qualification', 'zed-native-copy', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'hermes-front-source', 'hermes-backend-failure', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline'}:
             continue
         expected = 'hermes-renderer-qualification' if app == 'hermes-desktop' else 'zed-native-copy'
-        if (mechanism != expected and mechanism not in {'semantic-provider-oracle', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'hermes-front-source', 'hermes-backend-failure', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline'}) or type(value.get('schemaVersion')) is not int or value['schemaVersion'] != 1:
+        if (mechanism != expected and mechanism not in {'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'hermes-front-source', 'hermes-backend-failure', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline'}) or type(value.get('schemaVersion')) is not int or value['schemaVersion'] != 1:
             raise ValueError('semantic observation identity differs')
         record = {'schemaVersion': 1, 'mechanism': mechanism}
-        if mechanism == 'windows-endpoint-proof':
+        if mechanism == 'semantic-failure-policy':
+            if set(value) != set('schemaVersion mechanism failureStatus recoveryAction'.split()) or type(value['failureStatus']) is not int or value['failureStatus'] not in {400, 503} or value['recoveryAction'] != 'explicit-ui-retry':
+                raise ValueError('invalid semantic failure policy')
+            record.update(failureStatus=value['failureStatus'], recoveryAction=value['recoveryAction'])
+        elif mechanism == 'windows-endpoint-proof':
             if set(value) != set('schemaVersion mechanism diagnosticsOnly category'.split()) or value['diagnosticsOnly'] is not True:
                 raise ValueError('invalid Windows endpoint proof identity')
             allowed = {'owned', 'process-budget', 'ancestry-cycle', 'process-unavailable', 'parent-unavailable', 'parent-reused', 'session-mismatch', 'ancestry-limit', 'listener-unavailable', 'query-failed', 'transport-timeout', 'transport-failed', 'unclassified'}
