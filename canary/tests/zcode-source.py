@@ -47,7 +47,7 @@ class SourceContracts(unittest.TestCase):
             with patch.object(Path, "read_text", windows_read), patch.object(Path, "write_text", windows_write):
                 source.bind(root)
             for name in ("main.ts", "prompt-command.ts"):
-                self.assertTrue((entries / name).read_bytes().startswith(original.encode("utf-8")))
+                self.assertEqual((entries / name).read_bytes().decode("utf-8").splitlines()[0], original.strip())
 
     def test_child_failures_keep_only_closed_stage_and_reason(self):
         import subprocess
