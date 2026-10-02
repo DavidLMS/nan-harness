@@ -1308,7 +1308,9 @@ impl Gui {
     ) -> Result<(), Reason> {
         facts.stage = "response-readback";
         let export_deadline = Instant::now() + timeout;
-        for attempt in 0..5 {
+        // Recovery can finish at the provider before the renderer publishes its
+        // resumed thread. Repeat only read-only exports within the caller deadline.
+        for attempt in 0..128 {
             if Instant::now() >= export_deadline {
                 break;
             }

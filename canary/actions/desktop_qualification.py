@@ -269,7 +269,7 @@ def semantic_observations(directory, app):
             enum(record, value, 'retryActionReceipt', {'acknowledged', 'completion-unknown'})
             enum(record, value, 'retrySelector', {'retry-name-or-description', 'retry-tooltip', 'retry-label'})
             enum(record, value, 'retryInventoryStatus', {'complete', 'budget-exceeded', 'query-error'})
-            for key in ('trustControlCount', 'panelControlCount', 'retryControlCount', 'retryTitleCount', 'retryCandidateCount', 'retryTooltipCount', 'retryLabelCount',
+            for key in ('exportUserCount', 'exportAssistantTextCount', 'trustControlCount', 'panelControlCount', 'retryControlCount', 'retryTitleCount', 'retryCandidateCount', 'retryTooltipCount', 'retryLabelCount',
                         'retryInventoryTotal', 'retryInventoryButtons', 'retryInventoryStaticText',
                         'retryInventoryTitleMatches', 'retryInventoryGenerationMatches', 'retryInventoryRetryMatches'):
                 if key in value:
