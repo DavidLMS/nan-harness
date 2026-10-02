@@ -151,7 +151,7 @@ def semantic_observations(directory, app):
         elif mechanism == 'zed-pointer-transport':
             if set(value) != set('schemaVersion mechanism diagnosticsOnly stage'.split()) or app != 'zed-desktop' or value['diagnosticsOnly'] is not True:
                 raise ValueError('invalid Zed pointer transport identity')
-            allowed = {'dispatched', 'invalid-request', 'foreground-mismatch', 'process-mismatch', 'initial-query-failed', 'movement-failed', 'final-query-failed', 'activation-failed', 'transport-failed'}
+            allowed = {'dispatched', 'invalid-request', 'foreground-mismatch', 'process-mismatch', 'initial-query-failed', 'movement-failed', 'final-query-failed', 'activation-failed', 'coordinate-unavailable', 'transport-failed'}
             if type(value['stage']) is not str or value['stage'] not in allowed:
                 raise ValueError('invalid Zed pointer transport stage')
             record.update(diagnosticsOnly=True, stage=value['stage'])

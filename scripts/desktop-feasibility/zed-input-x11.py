@@ -2,6 +2,7 @@
 """Fixed native key transport; the checker proves foreground before and after."""
 import json
 import ctypes
+import re
 import subprocess
 import time
 import sys
@@ -60,15 +61,61 @@ def owned_frame(active, expected):
         xlib.XCloseDisplay(display)
 
 
+def normalized_retry_point(request, active, geometry):
+    import dbus
+    bus = None
+    try:
+        session = dbus.SessionBus()
+        address = session.get_object('org.a11y.Bus', '/org/a11y/bus').GetAddress(
+            dbus_interface='org.a11y.Bus', timeout=0.5)
+        bus = dbus.bus.BusConnection(str(address))
+        owner = bus.get_object('org.freedesktop.DBus', '/org/freedesktop/DBus').GetConnectionUnixProcessID(
+            request['bus'], dbus_interface='org.freedesktop.DBus', timeout=0.5)
+        if int(owner) != request['pid']:
+            raise ValueError('accessibility owner mismatch')
+        component = bus.get_object(request['bus'], request['path'])
+        role = component.GetRole(dbus_interface='org.a11y.atspi.Accessible', timeout=0.5)
+        name = component.Get('org.a11y.atspi.Accessible', 'Name',
+            dbus_interface='org.freedesktop.DBus.Properties', timeout=0.5)
+        if int(role) != 43 or str(name) != 'Retry':
+            raise ValueError('retry control changed')
+        screen = tuple(int(value) for value in component.GetExtents(dbus.UInt32(0),
+            dbus_interface='org.a11y.atspi.Component', timeout=0.5))
+        window = tuple(int(value) for value in component.GetExtents(dbus.UInt32(1),
+            dbus_interface='org.a11y.atspi.Component', timeout=0.5))
+        return coordinate_point(screen, window, geometry)
+    except dbus.DBusException:
+        raise ValueError('accessibility query unavailable') from None
+    finally:
+        if bus is not None:
+            bus.close()
+
+
+
+def coordinate_point(screen, window, geometry):
+    # A missing AccessKit screen origin is accepted only when both coordinate
+    # queries agree and the window-relative control is inside this owned client.
+    x, y, width, height = window
+    gx, gy, gw, gh = geometry
+    if width <= 0 or height <= 0 or x < 0 or y < 0 or x + width > gw or y + height > gh:
+        raise ValueError('control outside client')
+    expected = (gx + x, gy + y, width, height)
+    if screen != window and screen != expected:
+        raise ValueError('coordinate conversion unavailable')
+    return gx + x + width // 2, gy + y + height // 2
+
+
 def retry_click(payload):
     try:
         request = json.loads(payload)
-        if (type(request) is not dict or set(request) != {'pid', 'window', 'x', 'y'}
-                or any(type(value) is not int for value in request.values())
+        if (type(request) is not dict or set(request) != {'pid', 'window', 'x', 'y', 'bus', 'path'}
+                or any(type(request[key]) is not int for key in ('pid', 'window', 'x', 'y'))
+                or not isinstance(request['bus'], str) or not re.fullmatch(r':[0-9]+\.[0-9]+', request['bus'])
+                or not isinstance(request['path'], str) or not re.fullmatch(r'/org/a11y/atspi/accessible/[A-Za-z0-9_/]+', request['path'])
                 or not 1 < request['pid'] <= 2147483647 or not 0 < request['window'] <= 4294967295
                 or any(not -32768 <= request[key] <= 32767 for key in ('x', 'y'))):
             return 2
-        deadline = time.monotonic() + 2
+        deadline = time.monotonic() + 4
         def run(args, query=False):
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -79,45 +126,49 @@ def retry_click(payload):
             if not query:
                 return None
             output = result.stdout.strip()
-            if query == 'position':
+            if query in ('position', 'geometry'):
                 if len(output) > 256:
                     raise ValueError('invalid pointer observation')
                 parts = [line.split(b'=', 1) for line in output.splitlines()]
-                if len(parts) != 4 or any(len(part) != 2 for part in parts):
+                if any(len(part) != 2 for part in parts):
                     raise ValueError('invalid pointer observation')
                 values = dict(parts)
-                if set(values) != {b'X', b'Y', b'SCREEN', b'WINDOW'}:
+                expected = {b'X', b'Y', b'SCREEN', b'WINDOW'} if query == 'position' else {b'X', b'Y', b'SCREEN', b'WINDOW', b'WIDTH', b'HEIGHT'}
+                if len(parts) != len(expected) or set(values) != expected:
                     raise ValueError('invalid pointer observation')
-                return int(values[b'X']), int(values[b'Y'])
+                point = (int(values[b'X']), int(values[b'Y']))
+                return point if query == 'position' else (*point, int(values[b'WIDTH']), int(values[b'HEIGHT']))
             if len(output) > 32 or not output.isdigit():
                 raise ValueError('invalid identity')
             return int(output)
         def owned_foreground():
             active = run(['getactivewindow'], True)
             if not owned_frame(active, request['window']):
-                return 11
+                return 11, None
             if run(['getwindowpid', str(active)], True) != request['pid']:
-                return 12
-            return 0
+                return 12, None
+            return 0, active
         stage = 13
-        guard = owned_foreground()
-        if guard:
-            return guard
+        failure, active = owned_foreground()
+        if failure:
+            return failure
+        stage = 18
+        geometry = run(['getwindowgeometry', '--shell', str(active)], 'geometry')
+        point = normalized_retry_point(request, active, geometry)
         stage = 14
         # --sync waits for motion and can hang when the pointer is already here.
         # Dispatch once and prove the resulting position instead.
-        run(['mousemove', '--', str(request['x']), str(request['y'])])
-        if run(['getmouselocation', '--shell'], 'position') != (request['x'], request['y']):
+        run(['mousemove', '--', str(point[0]), str(point[1])])
+        if run(['getmouselocation', '--shell'], 'position') != point:
             return 14
         stage = 15
-        guard = owned_foreground()
-        if guard:
-            return guard
+        if owned_foreground() != (0, active):
+            return 11
         stage = 16
         # One ordinary activation, never another press after an uncertain receipt.
         run(['click', '--clearmodifiers', '1'])
         return 0
-    except (ValueError, TypeError, OSError, subprocess.SubprocessError):
+    except (ValueError, TypeError, OSError, subprocess.SubprocessError, ImportError):
         return locals().get("stage", 2)
 
 

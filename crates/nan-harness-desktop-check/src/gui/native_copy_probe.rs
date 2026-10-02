@@ -124,6 +124,8 @@ struct PointerRequest {
     window: u64,
     x: i16,
     y: i16,
+    bus: String,
+    path: String,
 }
 
 fn valid_pointer_request(payload: &str) -> bool {
@@ -132,6 +134,10 @@ fn valid_pointer_request(payload: &str) -> bool {
             && request.pid <= i32::MAX.cast_unsigned()
             && request.window > 0
             && u32::try_from(request.window).is_ok()
+            && request.bus.starts_with(':')
+            && request.bus.len() <= 128
+            && request.path.starts_with("/org/a11y/atspi/accessible/")
+            && request.path.len() <= 1024
     })
 }
 
@@ -157,6 +163,7 @@ fn pointer_transport_diagnostic(code: Option<i32>) {
         Some(14) => "movement-failed",
         Some(15) => "final-query-failed",
         Some(16) => "activation-failed",
+        Some(18) => "coordinate-unavailable",
         _ => "transport-failed",
     };
     let mut nonce = [0_u8; 8];
@@ -212,7 +219,7 @@ fn neutral_input(executable: &Path, mode: &str, prompt: &str) -> Result<(), Reas
         command.env("SystemRoot", root);
     }
     #[cfg(target_os = "linux")]
-    for key in ["DISPLAY", "XAUTHORITY"] {
+    for key in ["DISPLAY", "XAUTHORITY", "DBUS_SESSION_BUS_ADDRESS"] {
         if let Some(value) = std::env::var_os(key) {
             command.env(key, value);
         }
@@ -230,7 +237,8 @@ fn neutral_input(executable: &Path, mode: &str, prompt: &str) -> Result<(), Reas
             return Err(Reason::ActionUnsupported);
         };
         let writer = scope.spawn(move || stdin.write_all(prompt.as_bytes()));
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline =
+            Instant::now() + Duration::from_secs(if mode == "retry-click" { 5 } else { 3 });
         let status = loop {
             match child.try_wait() {
                 Ok(Some(status)) => break Some(status),
@@ -1053,6 +1061,13 @@ impl NativeClipboardSession<'_> {
                 window,
                 x: point.x.try_into().map_err(|_| Reason::ActionUnsupported)?,
                 y: point.y.try_into().map_err(|_| Reason::ActionUnsupported)?,
+                bus: button
+                    .raw
+                    .get("bus_name")
+                    .and_then(serde_json::Value::as_str)
+                    .ok_or(Reason::ActionUnsupported)?
+                    .to_owned(),
+                path: button.stable_id.clone().ok_or(Reason::ActionUnsupported)?,
             })
             .map_err(|_| Reason::IsolationUnavailable)?;
             let executable = std::env::var_os("FEASIBILITY_ZED_INPUT_DRIVER")
@@ -1532,7 +1547,7 @@ mod tests {
     #[test]
     fn neutral_transport_rejects_unbounded_or_relative_requests_before_spawn() {
         assert!(valid_pointer_request(
-            r#"{"pid":20,"window":40,"x":100,"y":200}"#
+            r#"{"pid":20,"window":40,"x":100,"y":200,"bus":":1.2","path":"/org/a11y/atspi/accessible/3"}"#
         ));
         for request in [
             r#"{"pid":1,"window":40,"x":100,"y":200}"#,

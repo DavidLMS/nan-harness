@@ -13,6 +13,12 @@ module = runpy.run_path(str(Path(__file__).with_name('zed-input-x11.py')))
 
 
 class Transport(unittest.TestCase):
+    def setUp(self):
+        replacement = patch.dict(module['main'].__globals__,
+            normalized_retry_point=lambda request, active, geometry: (request['x'], request['y']))
+        replacement.start()
+        self.addCleanup(replacement.stop)
+
     def call(self, mode, payload=b''):
         stdin = io.TextIOWrapper(io.BytesIO(payload))
         with patch.object(sys, 'argv', ['helper', mode]), patch.object(sys, 'stdin', stdin):
@@ -37,18 +43,18 @@ class Transport(unittest.TestCase):
             self.assertEqual(self.call('submit'), 3)
 
     def test_pointer_checks_foreground_before_one_activation(self):
-        request = json.dumps(dict(pid=20, window=40, x=100, y=200)).encode()
+        request = json.dumps(dict(pid=20, window=40, x=100, y=200, bus=':1.2', path='/org/a11y/atspi/accessible/3')).encode()
         calls = []
         def execute(args, **kwargs):
             calls.append(args)
-            self.assertLessEqual(kwargs['timeout'], 2)
+            self.assertLessEqual(kwargs['timeout'], 4)
             self.assertEqual(kwargs['stderr'], subprocess.DEVNULL)
-            output = b'X=100\nY=200\nSCREEN=0\nWINDOW=40' if args[1] == 'getmouselocation' else b'40\n' if args[1] == 'getactivewindow' else b'20\n'
+            output = b'X=0\nY=0\nSCREEN=0\nWINDOW=40\nWIDTH=1280\nHEIGHT=800' if args[1] == 'getwindowgeometry' else b'X=100\nY=200\nSCREEN=0\nWINDOW=40' if args[1] == 'getmouselocation' else b'40\n' if args[1] == 'getactivewindow' else b'20\n'
             return subprocess.CompletedProcess(args, 0, stdout=output)
         with patch('subprocess.run', side_effect=execute):
             self.assertEqual(self.call('retry-click', request), 0)
         self.assertEqual([args[1] for args in calls],
-                         ['getactivewindow', 'getwindowpid', 'mousemove', 'getmouselocation',
+                         ['getactivewindow', 'getwindowpid', 'getwindowgeometry', 'mousemove', 'getmouselocation',
                           'getactivewindow', 'getwindowpid', 'click'])
         self.assertEqual(calls[-1], ['/usr/bin/xdotool', 'click', '--clearmodifiers', '1'])
         with patch.dict(module['main'].__globals__, owned_frame=lambda a, b: a == b), patch('subprocess.run', return_value=subprocess.CompletedProcess([], 0, stdout=b'99')) as run:
@@ -57,11 +63,12 @@ class Transport(unittest.TestCase):
         with patch.dict(module['main'].__globals__, owned_frame=lambda a, b: a == b), patch('subprocess.run', side_effect=[
                 subprocess.CompletedProcess([], 0, stdout=b'40'),
                 subprocess.CompletedProcess([], 0, stdout=b'20'),
+                subprocess.CompletedProcess([], 0, stdout=b'X=0\nY=0\nSCREEN=0\nWINDOW=40\nWIDTH=1280\nHEIGHT=800'),
                 subprocess.CompletedProcess([], 0),
                 subprocess.CompletedProcess([], 0, stdout=b'X=100\nY=200\nSCREEN=0\nWINDOW=40'),
                 subprocess.CompletedProcess([], 0, stdout=b'99')]) as run:
             self.assertEqual(self.call('retry-click', request), 11)
-            self.assertEqual(run.call_count, 5)
+            self.assertEqual(run.call_count, 6)
 
     def test_active_client_must_have_the_exact_owned_frame_as_ancestor(self):
         matches = module['matches_owned_frame']
@@ -76,22 +83,33 @@ class Transport(unittest.TestCase):
         self.assertEqual(len(calls), 16)
 
     def test_pointer_failure_stage_never_replays_input(self):
-        request = json.dumps(dict(pid=20, window=40, x=100, y=200)).encode()
+        request = json.dumps(dict(pid=20, window=40, x=100, y=200, bus=':1.2', path='/org/a11y/atspi/accessible/3')).encode()
         for failed, code in [('getactivewindow', 13), ('mousemove', 14), ('click', 16)]:
             calls = []
             def execute(args, **kwargs):
                 calls.append(args[1])
                 if args[1] == failed:
                     raise subprocess.TimeoutExpired('fixed-helper', 2)
-                output = b'X=100\nY=200\nSCREEN=0\nWINDOW=40' if args[1] == 'getmouselocation' else b'40' if args[1] == 'getactivewindow' else b'20'
+                output = b'X=0\nY=0\nSCREEN=0\nWINDOW=40\nWIDTH=1280\nHEIGHT=800' if args[1] == 'getwindowgeometry' else b'X=100\nY=200\nSCREEN=0\nWINDOW=40' if args[1] == 'getmouselocation' else b'40' if args[1] == 'getactivewindow' else b'20'
                 return subprocess.CompletedProcess(args, 0, stdout=output)
             with patch('subprocess.run', side_effect=execute):
                 self.assertEqual(self.call('retry-click', request), code)
             self.assertLessEqual(calls.count('click'), 1)
             self.assertEqual(calls[-1], failed)
 
+    def test_coordinate_conversion_accepts_only_owned_client_geometry(self):
+        point = module['coordinate_point']
+        window = (100, 200, 40, 20)
+        geometry = (10, 30, 800, 600)
+        self.assertEqual(point(window, window, geometry), (130, 240))
+        self.assertEqual(point((110, 230, 40, 20), window, geometry), (130, 240))
+        for screen, local in [((111, 230, 40, 20), window), (window, (-1, 200, 40, 20)),
+                              (window, (790, 200, 40, 20))]:
+            with self.assertRaises(ValueError):
+                point(screen, local, geometry)
+
     def test_invalid_pointer_data_never_reaches_native_input(self):
-        request = dict(pid=20, window=40, x=100, y=200)
+        request = dict(pid=20, window=40, x=100, y=200, bus=':1.2', path='/org/a11y/atspi/accessible/3')
         with patch('subprocess.run') as run:
             for changed in ({**request, 'pid': True}, {**request, 'window': 0},
                             {**request, 'x': 32768}, {**request, 'command': 'PRIVATE'}):

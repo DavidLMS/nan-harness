@@ -403,3 +403,11 @@ Claude's existing `deploymentMode: 3p` gateway profile remains the account-free
 route under test. Startup baselines now retain only native accessibility presence
 and visible editable/Retry/login counts, never labels, field values or trees,
 to assess this route without forbidden CDP switches. These remain diagnostics.
+
+The frozen Zed 1.22.0 source exports window-local AccessKit bounds but has no
+callers for its X11 root-window origin update. The Linux Retry transport therefore
+compares fresh AT-SPI screen and window extents with the owned X11 client geometry.
+It accepts only the exact translated bounds or an exact missing-origin match,
+rechecks the accessible object's process, button role and Retry name, and dispatches
+one ordinary click. Arbitrary coordinate offsets remain rejected. Native recovery
+qualification for this correction is pending.

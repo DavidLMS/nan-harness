@@ -121,12 +121,13 @@ jobs:
         run: |
           apt_options=(-o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
           sudo apt-get "${apt_options[@]}" update
-          sudo apt-get "${apt_options[@]}" install --no-install-recommends -y cmake xvfb openbox x11-utils xclip xdotool zstd dbus-x11 at-spi2-core libx11-dev libxkbcommon-dev libxkbcommon-x11-dev libegl1 libvulkan1 mesa-vulkan-drivers libgtk-3-0 libnss3 libasound2t64 libgbm1 libsecret-1-0 libnotify4
+          sudo apt-get "${apt_options[@]}" install --no-install-recommends -y cmake xvfb openbox x11-utils xclip xdotool zstd dbus-x11 python3-dbus at-spi2-core libx11-dev libxkbcommon-dev libxkbcommon-x11-dev libegl1 libvulkan1 mesa-vulkan-drivers libgtk-3-0 libnss3 libasound2t64 libgbm1 libsecret-1-0 libnotify4
       - name: Prepare fixed X11 Zed input and export helpers
         if: runner.os == 'Linux' && matrix.app == 'zed-desktop'
         shell: bash
         run: |
-          echo "FEASIBILITY_ZED_INPUT_DRIVER=$GITHUB_WORKSPACE/scripts/desktop-feasibility/zed-input-x11.py" >> "$GITHUB_ENV"
+          echo 'FEASIBILITY_ZED_INPUT_DRIVER=/usr/bin/python3' >> "$GITHUB_ENV"
+          echo "FEASIBILITY_ZED_INPUT_SCRIPT=$GITHUB_WORKSPACE/scripts/desktop-feasibility/zed-input-x11.py" >> "$GITHUB_ENV"
           echo 'FEASIBILITY_ZED_INPUT_DRIVER_MODE=paste' >> "$GITHUB_ENV"
           echo "FEASIBILITY_ZED_ZSTD=$(command -v zstd)" >> "$GITHUB_ENV"
           echo "FEASIBILITY_ZED_EXPORT_PARSER=$GITHUB_WORKSPACE/scripts/desktop-feasibility/zed-export.py" >> "$GITHUB_ENV"
