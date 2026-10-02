@@ -131,10 +131,10 @@ def semantic_observations(directory, app):
         if type(value) is not dict:
             raise ValueError('invalid semantic observation')
         mechanism = value.get('mechanism')
-        if mechanism not in {'hermes-renderer-qualification', 'zed-native-copy', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch'}:
+        if mechanism not in {'hermes-renderer-qualification', 'zed-native-copy', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch'}:
             continue
         expected = 'hermes-renderer-qualification' if app == 'hermes-desktop' else 'zed-native-copy'
-        if (mechanism != expected and mechanism not in {'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch'}) or type(value.get('schemaVersion')) is not int or value['schemaVersion'] != 1:
+        if (mechanism != expected and mechanism not in {'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch'}) or type(value.get('schemaVersion')) is not int or value['schemaVersion'] != 1:
             raise ValueError('semantic observation identity differs')
         record = {'schemaVersion': 1, 'mechanism': mechanism}
         if mechanism == 'semantic-failure-policy':
@@ -145,7 +145,7 @@ def semantic_observations(directory, app):
             if (app != 'chatgpt-desktop' or set(value) != {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'stage'}
                     or value['diagnosticsOnly'] is not True
                     or type(value['stage']) is not str
-                    or value['stage'] not in {'armed', 'restarted', 'no-request', 'invalid-request', 'executable-changed'}):
+                    or value['stage'] not in {'armed', 'restarted', 'no-request', 'invalid-request', 'executable-changed', 'child-exited', 'startup-timeout', 'bridge-stopped', 'cancelled'}):
                 raise ValueError('invalid Codex relaunch observation')
             record.update(diagnosticsOnly=True, stage=value['stage'])
         elif mechanism == 'windows-endpoint-proof':
@@ -162,6 +162,17 @@ def semantic_observations(directory, app):
             if type(value['stage']) is not str or value['stage'] not in allowed:
                 raise ValueError('invalid Zed pointer transport stage')
             record.update(diagnosticsOnly=True, stage=value['stage'])
+        elif mechanism == 'zed-clipboard-transport':
+            fields = {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'operation', 'stage', 'elapsed'}
+            if set(value) != fields or app != 'zed-desktop' or value['diagnosticsOnly'] is not True:
+                raise ValueError('invalid Zed clipboard transport identity')
+            stages = {'executable', 'spawn', 'pipe', 'write', 'read', 'wait', 'wait-timeout', 'nonzero', 'decode', 'thread'}
+            for key, allowed in [('operation', {'read', 'write', 'clear'}), ('stage', stages),
+                                 ('elapsed', {'under-1s', '1-to-3s', 'at-least-3s'})]:
+                if type(value[key]) is not str or value[key] not in allowed:
+                    raise ValueError('invalid Zed clipboard transport category')
+                record[key] = value[key]
+            record['diagnosticsOnly'] = True
         elif mechanism == 'hermes-policy-preparation':
             if set(value) != set('schemaVersion mechanism diagnosticsOnly stage'.split()) or app != 'hermes-desktop' or value['diagnosticsOnly'] is not True:
                 raise ValueError('invalid Hermes policy preparation identity')
@@ -228,7 +239,8 @@ def semantic_observations(directory, app):
                     raise ValueError('invalid renderer landing counts')
                 record['landingCounts'] = counts
             if 'startupScreen' in value:
-                if type(value['startupScreen']) is not str or value['startupScreen'] not in {'unmeasured', 'gpu-unavailable', 'startup-failed', 'other'}:
+                if (type(value['startupScreen']) is not str or value['startupScreen'] not in {'unmeasured', 'gpu-unavailable', 'startup-failed', 'other', 'cli-connection-failed'}
+                        or (value['startupScreen'] == 'cli-connection-failed' and app != 'chatgpt-desktop')):
                     raise ValueError('invalid renderer startup screen')
                 record['startupScreen'] = value['startupScreen']
             for key in ('pageCount', 'textareaCount', 'editableCount', 'sendCount', 'retryCount', 'newThreadCount', 'loginCount', 'dialogCount'):

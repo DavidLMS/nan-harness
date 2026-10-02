@@ -62,7 +62,10 @@ async function run() {
       // Exact public distribution headings are classified in memory; never
       // retain headings, labels, HTML or other application text.
       const headings = [...document.querySelectorAll('h1')].filter(visible);
-      const startupScreen = appName !== 'pen-desktop' ? 'unmeasured'
+      const cliConnectionFailed = appName === 'chatgpt-desktop'
+        && (document.body?.innerText || '').includes('Something went wrong connecting to the Codex CLI. Try restarting');
+      const startupScreen = cliConnectionFailed ? 'cli-connection-failed'
+        : appName !== 'pen-desktop' ? 'unmeasured'
         : headings.length === 1 && headings[0].textContent === 'Hardware acceleration unavailable' ? 'gpu-unavailable'
         : headings.length === 1 && headings[0].textContent === 'Failed to start pen.dev' ? 'startup-failed' : 'other';
       return { textareaCount: count('textarea'), editableCount: count('[contenteditable="true"]'),

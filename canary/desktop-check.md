@@ -128,8 +128,8 @@ observations describe completed runs, rather than additional qualification:
 
 | Application | Linux x64 | macOS ARM64 | Windows x64 |
 | --- | --- | --- | --- |
-| Zed | Response and file-tool steps pass; pointer and accessibility Retry acknowledgements do not produce provider recovery. | Three complete probes pass the expanded retry policy. | Owned window is visible but acquisition fails stability. |
-| Hermes | Three complete probes pass with renderer process ownership. | Three complete probes pass with private native userData and bounded cold-start waits. | Private retry-policy replacement succeeds; initial provider responses pass in some probes. Attachment, Retry and cleanup still prevent acceptance. Corrected Win32 environment awaits native evidence. |
+| Zed | Response and file-tool steps pass; pointer and accessibility Retry acknowledgements do not produce provider recovery. | Three complete probes pass the expanded retry policy. | All three probes acquire stable owned windows; clipboard write and cleanup fail before submission. |
+| Hermes | Three complete probes pass with renderer process ownership. | Three complete probes pass with private native userData and bounded cold-start waits. | One complete probe passes all five stages and cleanup. Two others fail attachment or initial response; three-pass acceptance remains unmet. |
 | ChatGPT / Codex | Owned document loads; no composer is observed. | Renderer attaches, then endpoint ownership is lost. | Launcher ancestry is proved; application exits. |
 | Claude | Three uninstrumented windows acquired. Explicit native accessibility returns zero visible editors or login buttons. Official account-free gateway remains unqualified. | Instrumented child exits with code 1; uninstrumented startup has no eligible window. | Uninstrumented owned window is seen but stability and cleanup remain unqualified. |
 | Pen | Software GLES removes GPU startup failure; three fresh sessions show sign-in and no editor. No official account-free route found for the frozen release. | Two probes expose composer/Send; another exposes sign-in. Conversation adapter remains unimplemented. | Owned renderer loads sign-in and a dialog; conversation adapter remains unimplemented. |
@@ -461,5 +461,29 @@ marker, preserving the bridge, profiles, session token, stderr privacy and origi
 startup deadline. It changes only the requested browser networking switch; it
 never adopts an unrelated successor or bypasses Node permissions or authentication.
 Closed `codex-owned-relaunch` stages measure whether this mechanism is requested.
-Native results are pending; the separate app-driven Node-permission relaunch
-remains outside this mechanism.
+Run [36990309336](https://github.com/DavidLMS/nan-harness/actions/runs/36990309336)
+records only `armed` on all three platforms, with cleanup passing. This does not
+establish a relaunch: the CLI can also stop an unauthenticated startup at its
+noninteractive deadline. Closed terminal receipts now distinguish `child-exited`,
+`startup-timeout`, `bridge-stopped` and `cancelled`. Hosted Codex probes explicitly
+request the supported `--startup-timeout 120`, exceeding the observer's bounded
+cold-start budget without resetting the watch or changing normal CLI defaults.
+The separate app-driven Node-permission relaunch remains outside this mechanism.
+The renderer also classifies the frozen app's exact public CLI connection error
+as `cli-connection-failed`; unknown screen text remains unmeasured and is never
+retained. This diagnostic does not establish an account requirement or recovery.
+
+Run [36990110901](https://github.com/DavidLMS/nan-harness/actions/runs/36990110901)
+confirms the canonical Win32 proof paths restore stable Zed Windows window
+acquisition in three probes. Clipboard writes fail before submission; application
+and global cleanup pass, but clipboard cleanup fails. The next transport uses an
+absolute validated PowerShell executable and hides its console. Failure-only
+`zed-clipboard-transport` diagnostics retain operation, closed failure stage and
+elapsed bucket, never clipboard content or subprocess errors. The three-second
+deadline and failure verdict remain unchanged pending native evidence.
+
+Run [36990312437](https://github.com/DavidLMS/nan-harness/actions/runs/36990312437)
+confirms Hermes Windows cleanup passes and one probe completes all five steps.
+The other probes fail before attachment or after submitting the first prompt with
+zero provider generations. Owned renderer readiness alone does not prove backend
+readiness; input must not be replayed after submission.

@@ -17,10 +17,18 @@ use super::profile::ManagedProfile;
 #[path = "qualification_restart.rs"]
 mod qualification_restart;
 
+#[derive(Clone, Copy)]
+pub(super) enum StopCause {
+    StartupTimeout,
+    BridgeStopped,
+    Cancelled,
+}
+
 // wait must be cancel safe: select polls it alongside bridge activity.
 pub(super) trait SupervisedApp {
     async fn wait(&mut self) -> Result<i32, ChatGptDesktopError>;
     async fn stop(&mut self) -> Result<(), ChatGptDesktopError>;
+    fn stopping(&self, _cause: StopCause) {}
     fn restart_enabled(&self) -> bool {
         false
     }
@@ -146,11 +154,20 @@ pub(super) async fn supervise_startup<A: SupervisedApp>(
                 // Give terminal bridge/cancellation/deadline signals priority over a handoff.
                 tokio::select! {
                     biased;
-                    signal = cancellation.cancelled() => return Ok(signal.exit_code()),
-                    error = &mut bridge_stopped => return Err(error),
+                    signal = cancellation.cancelled() => {
+                        app.stopping(StopCause::Cancelled);
+                        return Ok(signal.exit_code());
+                    },
+                    error = &mut bridge_stopped => {
+                        app.stopping(StopCause::BridgeStopped);
+                        return Err(error);
+                    },
                     signal = watch.signal(), if !authenticated => {
                         match signal {
-                            StartupSignal::TimedOut => return Err(ChatGptDesktopError::BridgeHandshakeTimeout),
+                            StartupSignal::TimedOut => {
+                                app.stopping(StopCause::StartupTimeout);
+                                return Err(ChatGptDesktopError::BridgeHandshakeTimeout);
+                            },
                             StartupSignal::Notice => print_startup_notice(),
                         }
                     }
@@ -161,11 +178,13 @@ pub(super) async fn supervise_startup<A: SupervisedApp>(
                 }
             }
             signal = cancellation.cancelled() => {
+                app.stopping(StopCause::Cancelled);
                 app.stop().await?;
                 drain_diagnostics(diagnostic_receiver, diagnostics);
                 return Ok(signal.exit_code());
             }
             error = &mut bridge_stopped => {
+                app.stopping(StopCause::BridgeStopped);
                 app.stop().await?;
                 drain_diagnostics(diagnostic_receiver, diagnostics);
                 return Err(error);
@@ -188,6 +207,7 @@ pub(super) async fn supervise_startup<A: SupervisedApp>(
                 match startup {
                     StartupSignal::Notice => print_startup_notice(),
                     StartupSignal::TimedOut => {
+                        app.stopping(StopCause::StartupTimeout);
                         app.stop().await?;
                         drain_diagnostics(diagnostic_receiver, diagnostics);
                         return Err(ChatGptDesktopError::BridgeHandshakeTimeout);

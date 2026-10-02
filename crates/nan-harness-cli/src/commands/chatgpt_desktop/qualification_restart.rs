@@ -109,6 +109,10 @@ enum Stage {
     NoRequest,
     InvalidRequest,
     ExecutableChanged,
+    ChildExited,
+    StartupTimeout,
+    BridgeStopped,
+    Cancelled,
 }
 
 impl Stage {
@@ -119,6 +123,10 @@ impl Stage {
             Self::NoRequest => "no-request",
             Self::InvalidRequest => "invalid-request",
             Self::ExecutableChanged => "executable-changed",
+            Self::ChildExited => "child-exited",
+            Self::StartupTimeout => "startup-timeout",
+            Self::BridgeStopped => "bridge-stopped",
+            Self::Cancelled => "cancelled",
         }
     }
 }
@@ -206,6 +214,16 @@ fn parse(bytes: &[u8], disabled: bool) -> std::io::Result<bool> {
 }
 
 impl SupervisedApp for OwnedRestart<'_> {
+    fn stopping(&self, cause: super::StopCause) {
+        receipt(
+            &self.facts,
+            match cause {
+                super::StopCause::StartupTimeout => Stage::StartupTimeout,
+                super::StopCause::BridgeStopped => Stage::BridgeStopped,
+                super::StopCause::Cancelled => Stage::Cancelled,
+            },
+        );
+    }
     fn restart_enabled(&self) -> bool {
         true
     }
@@ -215,6 +233,7 @@ impl SupervisedApp for OwnedRestart<'_> {
             .wait()
             .await
             .map_err(ChatGptDesktopError::WaitForApp)?;
+        receipt(&self.facts, Stage::ChildExited);
         let early = self.started.elapsed() < std::time::Duration::from_millis(500);
         let stderr = if let Some(capture) = self.capture.as_mut() {
             super::finish_stderr_capture(capture).await
@@ -317,9 +336,17 @@ mod tests {
     struct Handoff {
         restarts: usize,
         stops: usize,
+        stop_cause: std::cell::Cell<Option<&'static str>>,
     }
 
     impl super::SupervisedApp for Handoff {
+        fn stopping(&self, cause: super::super::StopCause) {
+            self.stop_cause.set(Some(match cause {
+                super::super::StopCause::StartupTimeout => "timeout",
+                super::super::StopCause::BridgeStopped => "bridge",
+                super::super::StopCause::Cancelled => "cancelled",
+            }));
+        }
         async fn wait(&mut self) -> Result<i32, super::ChatGptDesktopError> {
             if self.restarts == 0 {
                 Ok(0)
@@ -347,6 +374,7 @@ mod tests {
         let mut app = Handoff {
             restarts: 0,
             stops: 0,
+            stop_cause: std::cell::Cell::new(None),
         };
         let (_activities, mut activity) = tokio::sync::broadcast::channel(1);
         let (_diagnostics, mut diagnostic) = tokio::sync::mpsc::unbounded_channel();
@@ -371,10 +399,12 @@ mod tests {
         ));
         assert_eq!(app.restarts, 1);
         assert_eq!(app.stops, 1);
+        assert_eq!(app.stop_cause.get(), Some("timeout"));
         assert_eq!(started.elapsed(), Duration::from_secs(2));
         let mut app = Handoff {
             restarts: 0,
             stops: 0,
+            stop_cause: std::cell::Cell::new(None),
         };
         let result = super::super::supervise_startup(
             &mut app,
@@ -391,6 +421,7 @@ mod tests {
             Err(super::ChatGptDesktopError::BridgeExited)
         ));
         assert_eq!(app.restarts, 0);
+        assert_eq!(app.stop_cause.get(), Some("bridge"));
     }
 
     #[test]

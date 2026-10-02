@@ -1629,6 +1629,13 @@ fn launch_command(spec: &ProbeSpec, gate: &ProviderGate) -> Result<Command, Reas
         "--model",
         &spec.model,
     ]);
+    if spec.kind == DesktopHarnessKind::ChatGpt
+        && spec.session == crate::cli::SessionMode::GithubHosted
+    {
+        // Cold-start observation can exceed the CLI's noninteractive default.
+        // Keep one explicit deadline through any supervised owned relaunch.
+        command.args(["--startup-timeout", "120"]);
+    }
     if spec.kind == DesktopHarnessKind::Hermes {
         command.arg("--desktop-executable");
     } else {
@@ -2596,6 +2603,53 @@ mod tests {
         };
         assert_eq!(Path::new(data), spec.workspace.join(expected));
         assert!(Path::new(data).is_dir());
+    }
+
+    #[tokio::test]
+    async fn only_hosted_codex_uses_an_explicit_cold_start_deadline() {
+        use crate::cli::SessionMode;
+        let directory = tempfile::tempdir().unwrap();
+        let gate = ProviderGate::start(
+            "http://127.0.0.1:1/v1",
+            Zeroizing::new("synthetic-provider-key".into()),
+            false,
+            "fixture-marker",
+        )
+        .await
+        .unwrap();
+        for (kind, session, expected) in [
+            (DesktopHarnessKind::ChatGpt, SessionMode::GithubHosted, true),
+            (
+                DesktopHarnessKind::ChatGpt,
+                SessionMode::PrivateProfile,
+                false,
+            ),
+            (DesktopHarnessKind::Hermes, SessionMode::GithubHosted, false),
+        ] {
+            let spec = ProbeSpec {
+                kind,
+                nan_harness: directory.path().join("nanh"),
+                nan_harness_sha256: "a".repeat(64),
+                executable: directory.path().join("app"),
+                workspace: directory.path().join(kind.to_string()),
+                model: "qwen3.6".into(),
+                live: false,
+                probe_index: None,
+                session,
+                verification: crate::cli::VerificationPolicy::default(),
+                launch_wrapper: None,
+            };
+            let command = launch_command(&spec, &gate).unwrap();
+            let args = command.as_std().get_args().collect::<Vec<_>>();
+            assert_eq!(
+                args.windows(2).any(|pair| pair
+                    == [
+                        std::ffi::OsStr::new("--startup-timeout"),
+                        std::ffi::OsStr::new("120")
+                    ]),
+                expected
+            );
+        }
     }
 
     #[tokio::test]

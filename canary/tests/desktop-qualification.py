@@ -655,6 +655,23 @@ class QualificationTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'zed-desktop')
 
+    def test_clipboard_failures_reject_private_fields_and_invalid_categories(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / 'clipboard.json'
+            value = dict(schemaVersion=1, mechanism='zed-clipboard-transport',
+                         diagnosticsOnly=True, operation='clear', stage='wait-timeout', elapsed='at-least-3s')
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(root, 'zed-desktop'), [value])
+            with self.assertRaises(ValueError):
+                q.semantic_observations(root, 'hermes-desktop')
+            for changed in ({**value, 'text': 'PRIVATE'}, {**value, 'operation': None},
+                            {**value, 'stage': 'PRIVATE'}, {**value, 'elapsed': True},
+                            {**value, 'diagnosticsOnly': False}):
+                path.write_text(json.dumps(changed))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'zed-desktop')
+
     def test_policy_preparation_failures_keep_only_the_closed_stage(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -697,10 +714,14 @@ class QualificationTests(unittest.TestCase):
             self.assertEqual(q.semantic_observations(root, 'pen-desktop'), [value])
             for changed in ({**value, 'html': 'PRIVATE'}, {**value, 'sendCount': True},
                             {**value, 'app': 'claude-desktop'}, {**value, 'startupScreen': 'PRIVATE'},
-                            {**value, 'startupScreen': None}, {**value, 'startupScreen': []}):
+                            {**value, 'startupScreen': None}, {**value, 'startupScreen': []},
+                            {**value, 'startupScreen': 'cli-connection-failed'}):
                 path.write_text(json.dumps(changed))
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'pen-desktop')
+            codex = {**value, 'app': 'chatgpt-desktop', 'startupScreen': 'cli-connection-failed'}
+            path.write_text(json.dumps(codex))
+            self.assertEqual(q.semantic_observations(root, 'chatgpt-desktop'), [codex])
 
 if __name__ == '__main__':
     unittest.main()
