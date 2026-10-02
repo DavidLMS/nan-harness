@@ -79,6 +79,32 @@ contains assertions and counts, not request bodies or credentials.
 
 ## Implementation implications
 
+### Official distribution recheck
+
+Rechecked on 2026-10-02 before starting command implementation:
+
+- Official `main` still points to the investigated source commit
+  `29628c9acdb81b703bbd4080c207a0e7ce5e276e`.
+- The [official GitHub release](https://github.com/zai-org/ZCode/releases/tag/v3.14.3)
+  exposes `ZCode-3.14.3-mac-arm64.dmg` and
+  `ZCode-3.14.3-win-x64.exe` as uploaded assets. Neither is a standalone CLI
+  distribution. GitHub-generated source archives remain available.
+- The [official installation guide](https://zcode.z.ai/en/docs/install)
+  describes installing the desktop application on Windows and launching it
+  from the Start menu or desktop. It does not document installing a terminal
+  `zcode` command.
+- The official README documents building the CLI from source. Its installer
+  download origin remains a publisher-supplied URL, not a published upstream
+  CLI channel. The supplied distribution installer is a Unix shell script;
+  no first-party PowerShell installer or Windows command shim was found.
+
+The confirmed official route for the tested standalone agent is therefore a
+source build. Windows runtime support has passed the hosted probes, but that
+does not establish official Windows CLI installation. Integrating a manually
+installed source build is a different scope from automatic installation of a
+released CLI package. Do not substitute desktop installers, npm namesakes or
+third-party repackaging for an official CLI release.
+
 1. **Provider configuration:** use
    `ZCODE_PERSONAL_PROVIDER_CONFIG_FILE` to point at a schema-version-1 file.
    Its important fields are `providerConfigRules.providerRules`,
