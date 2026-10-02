@@ -74,6 +74,11 @@
       "transport": "direct-chat",
       "testedAt": "2026-08-17"
     },
+    "zcode": {
+      "status": "unknown",
+      "testedAt": null,
+      "transport": "direct-chat"
+    },
     "qwen-code": {
       "status": "qualified",
       "transport": "direct-chat",
