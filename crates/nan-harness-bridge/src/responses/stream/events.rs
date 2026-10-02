@@ -31,7 +31,7 @@ pub(super) fn failed(state: &StreamState, error: &ApiError) -> Event {
             "response": {
                 "id": state.response_id(),
                 "error": {
-                    "code": "server_error",
+                    "code": error.response_code(),
                     "message": format!("{error} [{}]", error.code())
                 }
             }

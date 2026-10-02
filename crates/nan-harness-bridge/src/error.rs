@@ -122,6 +122,8 @@ pub(crate) enum ApiError {
     UpstreamTimeout(UpstreamTimeoutPhase),
     #[error("NaN returned HTTP {status}: {message}")]
     UpstreamStatus { status: StatusCode, message: String },
+    #[error("The provider is temporarily overloaded. Please try again.")]
+    ServerOverloaded(OverloadSource),
     #[error(
         "{model}'s guardrails rejected this request. This may be a false positive. Try another model."
     )]
@@ -138,6 +140,12 @@ pub(crate) enum ApiError {
     AccountingUnavailable(String),
     #[error("provider token budget is inconsistent: {0}")]
     BudgetMismatch(String),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum OverloadSource {
+    Http,
+    Stream,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -162,6 +170,9 @@ impl ApiError {
         model: Option<&str>,
     ) -> Self {
         let parsed: serde_json::Value = serde_json::from_str(body).unwrap_or_default();
+        if status == StatusCode::SERVICE_UNAVAILABLE && Self::is_overload(&parsed["error"]) {
+            return Self::ServerOverloaded(OverloadSource::Http);
+        }
         let message = parsed
             .pointer("/error/message")
             .or_else(|| parsed.get("message"))
@@ -190,6 +201,18 @@ impl ApiError {
         }
     }
 
+    pub(crate) fn is_overload(error: &serde_json::Value) -> bool {
+        error.get("code").and_then(serde_json::Value::as_str) == Some("server_is_overloaded")
+    }
+
+    pub(crate) const fn response_code(&self) -> &'static str {
+        if matches!(self, Self::ServerOverloaded(_)) {
+            "server_is_overloaded"
+        } else {
+            "server_error"
+        }
+    }
+
     pub(crate) const fn code(&self) -> &'static str {
         match self {
             Self::Unauthorized => "NH-BRIDGE-101",
@@ -197,9 +220,13 @@ impl ApiError {
             Self::SearchDisabled => "NH-BRIDGE-106",
             Self::SearchUnconfigured => "NH-BRIDGE-112",
             Self::UpstreamTransport(_) | Self::UpstreamTimeout(_) => "NH-BRIDGE-103",
-            Self::UpstreamStatus { .. } => "NH-BRIDGE-104",
+            Self::UpstreamStatus { .. } | Self::ServerOverloaded(OverloadSource::Http) => {
+                "NH-BRIDGE-104"
+            }
             Self::ProviderContentFiltered { .. } => "NH-PROVIDER-CONTENT-FILTERED",
-            Self::InvalidUpstream(_) => "NH-BRIDGE-105",
+            Self::InvalidUpstream(_) | Self::ServerOverloaded(OverloadSource::Stream) => {
+                "NH-BRIDGE-105"
+            }
             Self::CoordinatorUnavailable(_) => "NH-BRIDGE-107",
             Self::CoordinatorQueueTimeout => "NH-BRIDGE-108",
             Self::BudgetExhausted(_) => "NH-BRIDGE-109",
@@ -217,7 +244,8 @@ impl ApiError {
             | Self::BudgetExhausted(_) => StatusCode::BAD_REQUEST,
             Self::SearchDisabled => StatusCode::NOT_FOUND,
             Self::UpstreamTimeout(_) => StatusCode::GATEWAY_TIMEOUT,
-            Self::SearchUnconfigured
+            Self::ServerOverloaded(_)
+            | Self::SearchUnconfigured
             | Self::CoordinatorUnavailable(_)
             | Self::CoordinatorQueueTimeout
             | Self::AccountingUnavailable(_)
@@ -251,11 +279,15 @@ impl ApiError {
             | Self::UpstreamTransport(_)
             | Self::UpstreamTimeout(_)
             | Self::UpstreamStatus { .. }
+            | Self::ServerOverloaded(_)
             | Self::InvalidUpstream(_) => "api_error",
         }
     }
 
     pub(crate) fn event_data(&self) -> serde_json::Value {
+        if matches!(self, Self::ServerOverloaded(_)) {
+            return json!({"type":"error", "error":{"type":"api_error", "code":self.response_code(), "message":self.to_string()}});
+        }
         json!({
             "type": "error",
             "error": {
@@ -392,3 +424,7 @@ mod tests {
         assert_eq!(error.status(), axum::http::StatusCode::SERVICE_UNAVAILABLE);
     }
 }
+
+#[cfg(test)]
+#[path = "error/overload_tests.rs"]
+mod overload_tests;

@@ -26,6 +26,12 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   separate deterministic/live execution. Hosted installation includes official
   Windows packages, Claude Linux DEBs and Hermes source builds.
 
+### Fixed
+
+- Preserve explicitly typed provider overload failures in local HTTP and
+  Responses streaming errors, allowing Codex to expose its native recovery UI.
+  Other error classifications and retry policies remain unchanged.
+
 ## [0.1.12] - 2026-09-26
 
 ### Added
