@@ -630,6 +630,7 @@ pub(crate) struct RendererSession<'a> {
     process: &'a mut crate::process::ProbeProcess,
     directory: &'a Path,
     owner: u32,
+    readiness_deadline: Instant,
 }
 
 fn renderer_guard(
@@ -660,6 +661,13 @@ impl<'a> RendererSession<'a> {
             process,
             directory,
             owner,
+            readiness_deadline: Instant::now() + Duration::from_secs(125),
+        })
+    }
+
+    pub(crate) fn prepare_hermes_profile(&mut self, workspace: &Path) -> Result<(), Reason> {
+        crate::probe::hermes_readiness::prepare(workspace, self.readiness_deadline, || {
+            renderer_guard(self.process, self.owner)
         })
     }
 
@@ -679,9 +687,14 @@ impl<'a> RendererSession<'a> {
         open_private_new(&request_path)
             .and_then(|mut file| file.write_all(request.to_string().as_bytes()))
             .map_err(|_| Reason::IsolationUnavailable)?;
-        let outcome = run_driver(&driver, &request_path, &output_path, false, || {
-            renderer_guard(self.process, owner)
-        });
+        let outcome = run_driver(
+            &driver,
+            &request_path,
+            &output_path,
+            false,
+            Duration::from_secs(35),
+            || renderer_guard(self.process, owner),
+        );
         std::fs::remove_file(request_path).map_err(|_| Reason::IsolationUnavailable)?;
         outcome?;
         let mut bytes = Vec::new();
@@ -727,13 +740,17 @@ impl<'a> RendererSession<'a> {
         let stem = format!("qualification-{owner}-{}", u64::from_le_bytes(nonce));
         let request_path = directory.join(format!("{stem}.private"));
         let output_path = directory.join(format!("{stem}.json"));
+        let (request_ms, process_limit) = qualification_timing(
+            matches!(turn.action, DomAction::Ready) && crate::probe::hermes_readiness::enabled(),
+            self.readiness_deadline,
+        )?;
         let request = QualificationRequest {
             request: Request {
                 connection_path: directory.join(format!("connection-{owner}.json")),
                 owner_pid: owner,
                 prompt: turn.prompt,
                 expected_marker: turn.marker,
-                timeout_ms: 45_000,
+                timeout_ms: request_ms,
             },
             action: turn.action,
             purpose: turn.purpose,
@@ -742,9 +759,14 @@ impl<'a> RendererSession<'a> {
         open_private_new(&request_path)
             .and_then(|mut file| file.write_all(&bytes))
             .map_err(|_| Reason::IsolationUnavailable)?;
-        let outcome = run_driver(&driver, &request_path, &output_path, true, || {
-            renderer_guard(self.process, owner)
-        });
+        let outcome = run_driver(
+            &driver,
+            &request_path,
+            &output_path,
+            true,
+            process_limit,
+            || renderer_guard(self.process, owner),
+        );
         std::fs::remove_file(&request_path).map_err(|_| Reason::IsolationUnavailable)?;
         // Failed actions still retain independent provider evidence. This is
         // observation only and never grants a second submission.
@@ -914,10 +936,36 @@ impl Gui {
         output: &Path,
         qualification: bool,
     ) -> Result<(), Reason> {
-        run_driver(driver, request, output, qualification, || {
-            self.visual.guard()
-        })
+        run_driver(
+            driver,
+            request,
+            output,
+            qualification,
+            Duration::from_secs(if qualification { 65 } else { 35 }),
+            || self.visual.guard(),
+        )
     }
+}
+
+// Profile preparation and ready observation retain one original watch;
+// the outer worker also governs all subsequent turns and cleanup.
+fn qualification_timing(windows_ready: bool, deadline: Instant) -> Result<(u32, Duration), Reason> {
+    if !windows_ready {
+        return Ok((45_000, Duration::from_secs(65)));
+    }
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    let request = remaining
+        .checked_sub(Duration::from_secs(5))
+        .ok_or(Reason::Timeout)?;
+    if request.is_zero() {
+        return Err(Reason::Timeout);
+    }
+    let milliseconds =
+        u32::try_from(request.as_millis().min(120_000)).map_err(|_| Reason::Timeout)?;
+    if milliseconds == 0 {
+        return Err(Reason::Timeout);
+    }
+    Ok((milliseconds, remaining))
 }
 
 fn run_driver(
@@ -925,6 +973,7 @@ fn run_driver(
     request: &Path,
     output: &Path,
     qualification: bool,
+    limit: Duration,
     mut guard: impl FnMut() -> Result<(), Reason>,
 ) -> Result<(), Reason> {
     guard()?;
@@ -942,7 +991,7 @@ fn run_driver(
         .stderr(Stdio::null())
         .spawn()
         .map_err(|_| Reason::ActionUnsupported)?;
-    let deadline = Instant::now() + Duration::from_secs(if qualification { 65 } else { 35 });
+    let deadline = Instant::now() + limit;
     let outcome = loop {
         match child.try_wait() {
             Ok(Some(_)) => break Ok(()),
@@ -966,6 +1015,27 @@ fn run_driver(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cold_readiness_retains_its_watch_and_leaves_driver_cleanup_time() {
+        let deadline = Instant::now() + Duration::from_secs(20);
+        let (request_ms, limit) = qualification_timing(true, deadline).unwrap();
+        assert!(limit <= Duration::from_secs(20));
+        assert!(Duration::from_millis(u64::from(request_ms)) + Duration::from_secs(5) <= limit);
+        assert_eq!(
+            qualification_timing(true, Instant::now()),
+            Err(Reason::Timeout)
+        );
+        assert_eq!(
+            qualification_timing(true, Instant::now() + Duration::from_secs(4)),
+            Err(Reason::Timeout)
+        );
+        assert_eq!(
+            qualification_timing(false, Instant::now()),
+            Ok((45_000, Duration::from_secs(65)))
+        );
+    }
+
     use serde_json::json;
 
     struct ProcessObservation {

@@ -53,6 +53,14 @@ def qualification_environment(app, facts, real_nanh, executable, inherited=None)
         policy = source.get('FEASIBILITY_HERMES_NAMESPACE_POLICY', 'default')
         if policy not in {'default', 'scoped-apparmor-userns'}:
             raise ValueError('namespace policy is invalid')
+        readiness = source.get('FEASIBILITY_HERMES_READINESS_POLICY')
+        if readiness is not None:
+            if readiness != 'current-catalog' or source.get('RUNNER_OS') != 'Windows':
+                raise ValueError('Hermes readiness policy is unavailable')
+            # nANH writes active-profile.json with the owned nan profile and
+            # Electron pins that profile before spawning its local backend.
+            environment.update(FEASIBILITY_HERMES_READINESS_POLICY=readiness,
+                               FEASIBILITY_HERMES_CATALOG_PROFILE='nan')
         environment.update(FEASIBILITY_HERMES_NAMESPACE_POLICY=policy,
                            FEASIBILITY_HERMES_CDP='enabled', FEASIBILITY_HERMES_DOM_INPUT='1',
                            FEASIBILITY_HERMES_EXECUTABLE=str(executable),

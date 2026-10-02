@@ -68,7 +68,35 @@ def pointer_observation():
     return dict(schemaVersion=1, mechanism='zed-pointer-observation', diagnosticsOnly=True,
                 maximizedHorizontal=None, maximizedVertical=None, enabled=None,
                 sensitive=None, showing=None, visible=None, defunct=None,
-                retryContains=None, pointerTarget='unavailable')
+                retryContains=None, pointerTarget='unavailable', pointerChild='unavailable')
+
+
+def pointer_child(frame, active):
+    # xdotool's root query reports the Openbox frame. Query that frame directly
+    # to distinguish its client from decoration without publishing window IDs.
+    xlib = ctypes.CDLL('libX11.so.6')
+    xlib.XOpenDisplay.argtypes = [ctypes.c_char_p]
+    xlib.XOpenDisplay.restype = ctypes.c_void_p
+    xlib.XCloseDisplay.argtypes = [ctypes.c_void_p]
+    long_pointer, int_pointer = ctypes.POINTER(ctypes.c_ulong), ctypes.POINTER(ctypes.c_int)
+    xlib.XQueryPointer.argtypes = [ctypes.c_void_p, ctypes.c_ulong, long_pointer,
+        long_pointer, int_pointer, int_pointer, int_pointer, int_pointer,
+        ctypes.POINTER(ctypes.c_uint)]
+    xlib.XQueryPointer.restype = ctypes.c_int
+    display = xlib.XOpenDisplay(None)
+    if not display:
+        return 'unavailable'
+    try:
+        root, child = ctypes.c_ulong(), ctypes.c_ulong()
+        rx, ry, wx, wy, mask = ctypes.c_int(), ctypes.c_int(), ctypes.c_int(), ctypes.c_int(), ctypes.c_uint()
+        if not xlib.XQueryPointer(display, frame, ctypes.byref(root), ctypes.byref(child),
+            ctypes.byref(rx), ctypes.byref(ry), ctypes.byref(wx), ctypes.byref(wy), ctypes.byref(mask)):
+            return 'unavailable'
+        return ('client' if child.value == active or not child.value and frame == active
+                else 'decoration-or-empty' if not child.value
+                else 'client-descendant' if owned_frame(child.value, active) else 'other')
+    finally:
+        xlib.XCloseDisplay(display)
 
 
 def publish_observation(facts):
@@ -115,7 +143,8 @@ def accessibility_observation(component, dbus, window, facts):
             dbus_interface='org.a11y.atspi.Accessible', timeout=0.2))
         if len(states) == 2 and all(0 <= value <= 0xffffffff for value in states):
             bits = states[0] | states[1] << 32
-            for name, bit in [('defunct', 6), ('enabled', 7), ('sensitive', 24),
+            # AtspiStateType: editable is 7; enabled is 8.
+            for name, bit in [('defunct', 6), ('enabled', 8), ('sensitive', 24),
                               ('showing', 25), ('visible', 30)]:
                 facts[name] = bool(bits & 1 << bit)
         x, y, width, height = window
@@ -234,6 +263,7 @@ def retry_click(payload):
         facts['pointerTarget'] = ('client' if pointer_window == active else
             'owned-frame' if pointer_window == request['window'] else
             'client-descendant' if owned_frame(pointer_window, active) else 'foreign')
+        facts['pointerChild'] = pointer_child(request['window'], active)
         stage = 15
         if owned_foreground() != (0, active):
             return 11

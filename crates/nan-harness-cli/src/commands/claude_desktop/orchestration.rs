@@ -83,6 +83,11 @@ pub(super) async fn run_ready_session(
     if let Err(error) = apply {
         return restore_after(paths, Err(error));
     }
+    #[cfg(feature = "desktop-qualification")]
+    {
+        let token = zeroize::Zeroizing::new(bridge.with_session_token(str::to_owned));
+        qualification_config::record(paths, bridge.base_url(), &token).await;
+    }
     let activities = show_auto.then(|| bridge.subscribe_activities());
     if let Err(error) = process.launch() {
         return complete_and_restore(paths, process, Err(error)).await;

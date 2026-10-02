@@ -43,13 +43,21 @@ async function trial(options={}) {
   async elementHandle(){return new Handle(this.element());}
  }
  const page={locator:s=>new Locator(s.startsWith('fieldset > legend')?'legend':'radios'),url:()=> 'app://codex/index.html',context:()=>({browser:()=>({contexts:()=>[{pages:()=>options.foreignPage?[page,{}]:[page]}]})})};
- const sandbox={exports:{},process:{platform:'win32',env:{GITHUB_ACTIONS:'true',RUNNER_ENVIRONMENT:'github-hosted',RUNNER_OS:'Windows',NANH_CODEX_PUBLIC_ONBOARDING:options.noOptin?undefined:'engineering'}},Date:{now:()=>now},setTimeout:f=>{now+=100;f();}};
+ const sandbox={exports:{},process:{platform:options.platform??'win32',env:{GITHUB_ACTIONS:options.noHost?'false':'true',RUNNER_ENVIRONMENT:'github-hosted',RUNNER_OS:'Windows',NANH_CODEX_PUBLIC_ONBOARDING:options.noOptin?undefined:'engineering'}},Date:{now:()=>now},setTimeout:f=>{now+=100;f();}};
  vm.runInNewContext(source,sandbox);
  let guards=0;
- const facts=await sandbox.exports.run(page,()=>{guards++;return !(options.ownerLoss&&roleClicks>0)&&!(options.finalLoss&&guards>=2);},1200);
+ const guard=()=>{guards++;return !(options.ownerLoss&&roleClicks>0)&&!(options.finalLoss&&guards>=2);};
+ const budget=options.expired?0:options.invalidDeadline?NaN:options.excessBudget?25001:1200;
+ const facts=await sandbox.exports.run(page,options.noGuard?undefined:guard,budget);
  return {facts,roleClicks,continueClicks};
 }
 (async()=>{
+ for(const [opts,reason] of [[{expired:true},'deadline-expired'],[{invalidDeadline:true},'deadline-invalid'],
+  [{excessBudget:true},'deadline-invalid'],[{noGuard:true},'guard-missing'],[{platform:'linux'},'platform'],
+  [{noHost:true},'host-policy'],[{noOptin:true},'onboarding-policy']]) {
+  const r=await trial(opts);assert.equal(r.facts.errorCategory,'invalid-session');assert.equal(r.facts.sessionProofFailure,reason);
+  assert.equal(r.facts.roleProofFailure,'unmeasured');assert.equal(r.roleClicks,0);assert.equal(r.continueClicks,0);
+ }
  const loaded=await trial({loading:true});assert.equal(loaded.roleClicks,1);assert.equal(loaded.continueClicks,1);
  const scoped=await trial({extraFieldset:true});assert.equal(scoped.roleClicks,1);assert.equal(scoped.continueClicks,1);assert.equal(scoped.facts.roleScopeAbsent,true);
  const duplicateScope=await trial({duplicateRoleFieldset:true});assert.equal(duplicateScope.facts.roleProofFailure,'legend-count');assert.equal(duplicateScope.roleClicks,0);assert.equal(duplicateScope.continueClicks,0);

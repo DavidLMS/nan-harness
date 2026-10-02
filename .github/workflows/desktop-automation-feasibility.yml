@@ -261,6 +261,10 @@ jobs:
         if: runner.os == 'Windows' && matrix.app == 'chatgpt-desktop' && inputs.experiment == 'deterministic-full'
         shell: bash
         run: echo 'NANH_CODEX_PUBLIC_ONBOARDING=engineering' >> "$GITHUB_ENV"
+      - name: Enable Hermes Windows current-catalog readiness
+        if: runner.os == 'Windows' && matrix.app == 'hermes-desktop' && inputs.experiment == 'deterministic-full'
+        shell: bash
+        run: echo 'FEASIBILITY_HERMES_READINESS_POLICY=current-catalog' >> "$GITHUB_ENV"
       - name: Run full deterministic semantic qualification
         env:
           NANH_DESKTOP_QUALIFICATION_MODE: ${{ inputs.experiment == 'startup-baseline' && 'startup-baseline' || 'renderer' }}

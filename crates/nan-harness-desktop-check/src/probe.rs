@@ -119,6 +119,7 @@ mod windows_process_tests {
 }
 
 mod hermes_policy;
+pub(crate) mod hermes_readiness;
 mod semantic;
 
 /// Opt-in startup diagnostic binding. Only the `chatgpt-desktop` launch runs
@@ -1619,7 +1620,8 @@ fn launch_command(spec: &ProbeSpec, gate: &ProviderGate) -> Result<Command, Reas
         "--model",
         &spec.model,
     ]);
-    if spec.kind == DesktopHarnessKind::ChatGpt
+    if (spec.kind == DesktopHarnessKind::ChatGpt
+        || (spec.kind == DesktopHarnessKind::Hermes && hermes_readiness::enabled()))
         && spec.session == crate::cli::SessionMode::GithubHosted
     {
         // Cold-start observation can exceed the CLI's noninteractive default.

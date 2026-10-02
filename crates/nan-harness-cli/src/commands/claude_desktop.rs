@@ -38,6 +38,8 @@ mod error;
 mod orchestration;
 mod paths;
 mod process;
+#[cfg(feature = "desktop-qualification")]
+mod qualification_config;
 mod session;
 #[cfg(test)]
 mod tests;

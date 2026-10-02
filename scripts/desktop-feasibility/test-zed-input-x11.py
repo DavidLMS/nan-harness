@@ -2,10 +2,12 @@
 """The native key helper accepts fixed actions only and never echoes content."""
 import io
 import json
+import os
 import runpy
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 import unittest
 import types
 from unittest.mock import patch
@@ -17,7 +19,8 @@ class Transport(unittest.TestCase):
     def setUp(self):
         replacement = patch.dict(module['main'].__globals__,
             normalized_retry_point=lambda request, active, geometry, facts: (request['x'], request['y']),
-            maximized_observation=lambda *args: None, publish_observation=lambda facts: None)
+            maximized_observation=lambda *args: None, publish_observation=lambda facts: None,
+            pointer_child=lambda *args: 'unavailable')
         replacement.start()
         self.addCleanup(replacement.stop)
 
@@ -121,10 +124,47 @@ class Transport(unittest.TestCase):
 
 
 class AccessibilityIdentity(unittest.TestCase):
+    def test_pointer_child_distinguishes_client_from_frame_decoration(self):
+        class Function:
+            def __init__(self, callback):
+                self.callback = callback
+            def __call__(self, *args):
+                return self.callback(*args)
+        for child, expected in [(40, 'client'), (0, 'decoration-or-empty'), (41, 'client-descendant'), (99, 'other')]:
+            closed = []
+            def query(*args):
+                args[3]._obj.value = child
+                return 1
+            xlib = types.SimpleNamespace(XOpenDisplay=Function(lambda _: 1),
+                XCloseDisplay=Function(lambda _: closed.append(True)), XQueryPointer=Function(query))
+            with patch('ctypes.CDLL', return_value=xlib), patch.dict(module['pointer_child'].__globals__,
+                    owned_frame=lambda candidate, active: candidate == 41 and active == 40):
+                self.assertEqual(module['pointer_child'](50, 40), expected)
+            self.assertEqual(closed, [True])
+
+    def test_closed_receipt_requires_hosted_metadata_and_private_new_file(self):
+        publish = module['publish_observation']
+        with tempfile.TemporaryDirectory() as tmp:
+            facts = module['pointer_observation']()
+            environment = dict(GITHUB_ACTIONS='true', RUNNER_ENVIRONMENT='github-hosted',
+                               RUNNER_OS='Linux', NANH_DESKTOP_QUALIFICATION_FACTS=tmp)
+            with patch.dict(os.environ, environment, clear=True):
+                publish(facts)
+            receipts = list(Path(tmp).glob('*.json'))
+            self.assertEqual(len(receipts), 1)
+            self.assertEqual(json.loads(receipts[0].read_text()), facts)
+            self.assertEqual(receipts[0].stat().st_mode & 0o777, 0o600)
+            for changed in ({**environment, 'RUNNER_ENVIRONMENT': 'self-hosted'},
+                            {**environment, 'GITHUB_ACTIONS': 'false'},
+                            {**environment, 'RUNNER_OS': 'Windows'}):
+                with patch.dict(os.environ, changed, clear=True):
+                    publish(facts)
+            self.assertEqual(len(list(Path(tmp).glob('*.json'))), 1)
+
     def test_observation_reduces_native_state_and_never_exposes_coordinates(self):
         facts = module['pointer_observation']()
         calls = []
-        component = types.SimpleNamespace(GetState=lambda **kwargs: [(1 << 7) | (1 << 24) | (1 << 25) | (1 << 30), 0],
+        component = types.SimpleNamespace(GetState=lambda **kwargs: [(1 << 8) | (1 << 24) | (1 << 25) | (1 << 30), 0],
             Contains=lambda *args, **kwargs: calls.append(args) or True)
         module['accessibility_observation'](component,
             types.SimpleNamespace(Int32=int, UInt32=int, DBusException=RuntimeError),
@@ -133,6 +173,12 @@ class AccessibilityIdentity(unittest.TestCase):
         self.assertFalse(facts['defunct'])
         self.assertEqual(calls, [(120, 210, 1)])
         self.assertNotIn('120', json.dumps(facts))
+        component.GetState = lambda **kwargs: [1 << 7, 0]
+        editable = module['pointer_observation']()
+        module['accessibility_observation'](component,
+            types.SimpleNamespace(Int32=int, UInt32=int, DBusException=RuntimeError),
+            (100, 200, 40, 20), editable)
+        self.assertFalse(editable['enabled'])
         component.GetState = lambda **kwargs: (_ for _ in ()).throw(RuntimeError('PRIVATE'))
         unavailable = module['pointer_observation']()
         module['accessibility_observation'](component,

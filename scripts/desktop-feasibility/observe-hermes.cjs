@@ -152,6 +152,8 @@ async function driveDom() {
     ['response', 'failure'].includes(request.purpose) &&
     (request.action !== 'ready' || request.purpose === 'response') &&
     (request.purpose !== 'failure' || (request.action === 'submit' && request.expectedMarker === 'NAN_CHECK_EXPECTED_FAILURE')));
+  const readinessBudget = qualify && request.action === 'ready' && process.platform === 'win32'
+    && process.env.FEASIBILITY_HERMES_READINESS_POLICY === 'current-catalog' ? 120000 : (qualify ? 45000 : 30000);
   if (!exactKeys(request, requestKeys) || !qualificationRequest ||
       !exactKeys(connection, ['schemaVersion', 'port', 'launcherPid']) || connection.schemaVersion !== 1 ||
       typeof request.connectionPath !== 'string' || request.connectionPath.length > 4096 || !Number.isInteger(connection.port) || connection.port < 1 || connection.port > 65535 ||
@@ -160,7 +162,7 @@ async function driveDom() {
       !(qualify ? ['Check this connection', 'Read read-target.txt using your file tool.', 'Check the expected provider failure'].includes(request.prompt) : request.prompt === 'Check this connection') ||
       typeof request.expectedMarker !== 'string' || request.expectedMarker.length < (qualify && request.purpose === 'failure' ? 1 : 32) ||
       request.expectedMarker.length > 2048 || !Number.isInteger(request.timeoutMs) ||
-      request.timeoutMs < 1 || request.timeoutMs > (qualify ? 45000 : 30000)) {
+      request.timeoutMs < 1 || request.timeoutMs > readinessBudget) {
     facts.errorCategory = 'invalid-request'; saveFacts(); return;
   }
   let ancestor = connection.launcherPid;
@@ -219,7 +221,15 @@ async function driveDom() {
     facts.errorCategory = 'target-invalid'; saveFacts(); return;
   }
   facts.targetVerified = true;
-  if (qualify && request.action === 'ready') { facts.errorCategory = null; saveFacts(); return; }
+  if (qualify && request.action === 'ready') {
+    if (process.env.FEASIBILITY_HERMES_READINESS_POLICY === 'current-catalog') {
+      const readiness = await require('./hermes-windows-ready.cjs').run(page, session, ownedEndpoint,
+        deadline, process.env.FEASIBILITY_HERMES_CATALOG_PROFILE);
+      require('node:fs').writeFileSync(output + '.ready.json', JSON.stringify(readiness), { mode: 0o600, flag: 'wx' });
+      facts.errorCategory = readiness.stage === 'ready' ? null : 'attachment-or-action-failed';
+    } else facts.errorCategory = null;
+    saveFacts(); return;
+  }
   const errorCards = page.locator('[data-role="assistant"][data-slot="aui_assistant-message-root"] [role="alert"]:visible');
   const retryButton = errorCards.getByRole('button', { name: 'Retry', exact: true });
   async function errorProof() {

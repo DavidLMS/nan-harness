@@ -44,13 +44,19 @@ exports.run = async function(page, ownerGuard, deadline) {
     stage:'session', errorCategory:null, conversationalScope:false, engineeringControl:false,
     roleClickAttempted:false, roleClickCompleted:false, engineeringChecked:false,
     continueControl:false, continueClickAttempted:false, continueClickCompleted:false,
-    roleScopeAbsent:false, roleProofFailure:'unmeasured'};
+    roleScopeAbsent:false, roleProofFailure:'unmeasured', sessionProofFailure:'unmeasured'};
   const stop = category => { facts.errorCategory=category; return facts; };
-  if (typeof ownerGuard !== 'function' || !Number.isFinite(maxWaitMs) || maxWaitMs < 1 || maxWaitMs > 25000
-      || process.platform !== 'win32' || process.env.GITHUB_ACTIONS !== 'true'
-      || process.env.RUNNER_ENVIRONMENT !== 'github-hosted'
-      || process.env.RUNNER_OS !== 'Windows'
-      || process.env.NANH_CODEX_PUBLIC_ONBOARDING !== 'engineering') return stop('invalid-session');
+  const sessionFailure = typeof ownerGuard !== 'function' ? 'guard-missing'
+    : !Number.isFinite(deadline) || !Number.isFinite(maxWaitMs) || maxWaitMs > 25000 ? 'deadline-invalid'
+    : maxWaitMs < 1 ? 'deadline-expired'
+    : process.platform !== 'win32' ? 'platform'
+    : process.env.GITHUB_ACTIONS !== 'true' || process.env.RUNNER_ENVIRONMENT !== 'github-hosted'
+      || process.env.RUNNER_OS !== 'Windows' ? 'host-policy'
+    : process.env.NANH_CODEX_PUBLIC_ONBOARDING !== 'engineering' ? 'onboarding-policy' : null;
+  if (sessionFailure !== null) {
+    facts.sessionProofFailure=sessionFailure;
+    return stop('invalid-session');
+  }
   let scope, fieldset, radio, label, button;
   async function proof(needChecked=false) {
     const fail = reason => { facts.roleProofFailure=reason; return false; };

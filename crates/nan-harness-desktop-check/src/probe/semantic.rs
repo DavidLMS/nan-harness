@@ -33,6 +33,9 @@ impl SemanticBackend {
         if spec.live || spec.session != SessionMode::GithubHosted || !spec.session.available() {
             return Err(Reason::IsolationUnavailable);
         }
+        if spec.kind == DesktopHarnessKind::Hermes {
+            super::hermes_readiness::requested()?;
+        }
         let directory = std::env::var_os("NANH_DESKTOP_QUALIFICATION_FACTS")
             .map(PathBuf::from)
             .ok_or(Reason::IsolationUnavailable)?;
@@ -64,6 +67,12 @@ impl SemanticBackend {
             // A read-only inventory never qualifies the application.
             return Err(Reason::ActionUnsupported);
         }
+        session.prepare_hermes_profile(
+            scenario
+                .fixture
+                .parent()
+                .ok_or(Reason::IsolationUnavailable)?,
+        )?;
         // Endpoint readiness proves the launcher has applied the fresh profile
         // and spawned its GUI; no user input occurs before the retry policy.
         session.turn(

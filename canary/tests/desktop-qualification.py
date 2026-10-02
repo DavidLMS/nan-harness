@@ -656,18 +656,38 @@ class QualificationTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'pen-desktop')
 
+    def test_claude_configuration_presence_is_closed_diagnostic_evidence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            value = dict(schemaVersion=1, mechanism='claude-owned-configuration', diagnosticsOnly=True,
+                         configurationPresent=True, objectSchema=True, deploymentModeMatches=True,
+                         profileMatches=True, providerGateway=True, loopbackBaseUrlMatches=True,
+                         authMatches=True, modelDiscoveryEnabled=True, chatEnabled=True, chooserDisabled=True,
+                         nativePathAlignment=False, configurationConsumed=None, modelDiscoverySeen=None)
+            path = root / 'configuration.json'
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [value])
+            with self.assertRaises(ValueError):
+                q.semantic_observations(root, 'zed-desktop')
+            for changed in ({**value, 'token': 'PRIVATE'}, {**value, 'nativePathAlignment': 'PRIVATE'},
+                            {**value, 'authMatches': None}, {**value, 'configurationConsumed': 1},
+                            {**value, 'diagnosticsOnly': False}):
+                path.write_text(json.dumps(changed))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'claude-desktop')
+
     def test_pointer_observation_never_accepts_private_native_details(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             value = dict(schemaVersion=1, mechanism='zed-pointer-observation', diagnosticsOnly=True,
                          maximizedHorizontal=True, maximizedVertical=True, enabled=True, sensitive=True,
-                         showing=None, visible=None, defunct=False, retryContains=True, pointerTarget='client')
+                         showing=None, visible=None, defunct=False, retryContains=True, pointerTarget='client', pointerChild='client')
             path = root / 'pointer.json'
             path.write_text(json.dumps(value))
             self.assertEqual(q.semantic_observations(root, 'zed-desktop'), [value])
             with self.assertRaises(ValueError):
                 q.semantic_observations(root, 'hermes-desktop')
-            for changed in ({**value, 'x': 100}, {**value, 'pointerTarget': 'PRIVATE'},
+            for changed in ({**value, 'x': 100}, {**value, 'pointerTarget': 'PRIVATE'}, {**value, 'pointerChild': 'PRIVATE'},
                             {**value, 'enabled': 1}, {**value, 'diagnosticsOnly': False},
                             {key: item for key, item in value.items() if key != 'visible'}):
                 path.write_text(json.dumps(changed))
@@ -770,11 +790,11 @@ class QualificationTests(unittest.TestCase):
                      stage='stopped-after-role', errorCategory=None, conversationalScope=True,
                      engineeringControl=True, roleClickAttempted=True, roleClickCompleted=True,
                      engineeringChecked=True, continueControl=True, continueClickAttempted=True,
-                     continueClickCompleted=True, roleScopeAbsent=True, roleProofFailure='unmeasured')
+                     continueClickCompleted=True, roleScopeAbsent=True, roleProofFailure='unmeasured', sessionProofFailure='unmeasured')
         self.assertEqual(q.public_onboarding(setup, 'chatgpt-desktop'), setup)
         for changed in ({**setup, 'label': 'PRIVATE'}, {**setup, 'stage': 'PRIVATE'},
                         {**setup, 'errorCategory': []}, {**setup, 'engineeringChecked': 1},
-                        {**setup, 'roleProofFailure': 'PRIVATE'}, {**setup, 'roleProofFailure': []},
+                        {**setup, 'roleProofFailure': 'PRIVATE'}, {**setup, 'roleProofFailure': []}, {**setup, 'sessionProofFailure': 'PRIVATE'}, {**setup, 'sessionProofFailure': None},
                         {**setup, 'schemaVersion': True}, {**setup, 'diagnosticsOnly': False},
                         {key: value for key, value in setup.items() if key != 'roleScopeAbsent'}):
             with self.assertRaises(ValueError):
@@ -791,6 +811,42 @@ class QualificationTests(unittest.TestCase):
             (root / 'inventory.json').write_text(json.dumps(value))
             self.assertEqual(q.semantic_observations(root, 'chatgpt-desktop'), [value])
             self.assertEqual(q.envelope('chatgpt-desktop', 'windows', 'x86_64', 'a' * 40)['qualification'], 'unqualified')
+
+class HermesReadinessTests(unittest.TestCase):
+    def test_policy_is_windows_hosted_only_and_profile_is_not_inherited(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            helper = Path(tmp) / 'helper'
+            helper.write_text('synthetic')
+            source = dict(GITHUB_ACTIONS='true', RUNNER_ENVIRONMENT='github-hosted', RUNNER_OS='Windows',
+                          FEASIBILITY_WINDOWS_PROOF_PYTHON=str(helper), FEASIBILITY_WINDOWS_PROOF_SCRIPT=str(helper),
+                          FEASIBILITY_HERMES_READINESS_POLICY='current-catalog',
+                          FEASIBILITY_HERMES_CATALOG_PROFILE='foreign')
+            env = runner.qualification_environment('hermes-desktop', Path('/facts'), Path('/nanh'), '/app', source)
+            self.assertEqual(env['FEASIBILITY_HERMES_CATALOG_PROFILE'], 'nan')
+            self.assertEqual(env['FEASIBILITY_HERMES_READINESS_POLICY'], 'current-catalog')
+            for changed in ({'RUNNER_OS': 'Linux'}, {'RUNNER_OS': 'macOS'},
+                            {'RUNNER_ENVIRONMENT': 'self-hosted'}, {'FEASIBILITY_HERMES_READINESS_POLICY': 'unknown'}):
+                with self.assertRaises(ValueError):
+                    runner.qualification_environment('hermes-desktop', Path('/facts'), Path('/nanh'), '/app', {**source, **changed})
+
+    def test_readiness_receipt_is_closed_and_never_qualifies_a_cell(self):
+        value = dict(schemaVersion=1, mechanism='hermes-windows-catalog-readiness', diagnosticsOnly=True,
+                     stage='ready', errorCategory=None, menuOpened=True, refreshAttempted=True,
+                     catalogVerified=True, modelRowVerified=True, menuDismissed=True, composerReverified=True)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / 'ready.json'
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(root, 'hermes-desktop'), [value])
+            self.assertEqual(q.envelope('hermes-desktop', 'windows', 'x86_64', 'a' * 40)['qualification'], 'unqualified')
+            for changed in ({'diagnosticsOnly': False}, {'catalogVerified': 1}, {'composerReverified': False},
+                            {'stage': 'PRIVATE'}, {'errorCategory': 'PRIVATE'}, {'rawFrame': 'PRIVATE'}):
+                path.write_text(json.dumps({**value, **changed}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'hermes-desktop')
+            path.write_text(json.dumps(value))
+            with self.assertRaises(ValueError):
+                q.semantic_observations(root, 'zed-desktop')
 
 if __name__ == '__main__':
     unittest.main()

@@ -135,7 +135,7 @@ observations describe completed runs, rather than additional qualification:
 | --- | --- | --- | --- |
 | Zed | Response and file-tool steps pass; pointer and accessibility Retry acknowledgements do not produce provider recovery. | Three complete probes pass the expanded retry policy. | Three complete probes pass with direct native clipboard transport and all cleanup checks. |
 | Hermes | Three complete probes pass with renderer process ownership. | Three complete probes pass with private native userData and bounded cold-start waits. | One complete probe passes all five stages and cleanup. Two others fail attachment or initial response; three-pass acceptance remains unmet. |
-| ChatGPT / Codex | Owned document loads without a composer; latest longer startup fails cleanup. | Renderer observation remains intermittent; cleanup passes. | Three owned documents load with twelve visible inputs and no composer; cleanup passes. |
+| ChatGPT / Codex | Owned document loads without a composer; the latest completed startup diagnostic passes cleanup. | Renderer observation remains intermittent; cleanup passes. | Three owned documents load with twelve visible inputs and no composer; cleanup passes. |
 | Claude | Three uninstrumented windows acquired. Explicit native accessibility returns zero visible editors or login buttons. Official account-free gateway remains unqualified. | Instrumented child exits with code 1; uninstrumented startup has no eligible window. | Stable owned window acquired; no editable controls observed and cleanup fails. |
 | Pen | Software GLES removes GPU startup failure; three fresh sessions show sign-in and no editor. No official account-free route found for the frozen release. | Two probes expose composer/Send; another exposes sign-in. Conversation adapter remains unimplemented. | Owned renderer loads sign-in and a dialog; conversation adapter remains unimplemented. |
 
@@ -599,3 +599,42 @@ paths or application text are retained. These observations do not prove input
 delivery or recovery. The unchanged provider and native export oracles remain
 the acceptance boundary. The [AT-SPI component contract](https://gnome.pages.gitlab.gnome.org/at-spi2-core/libatspi/method.Component.get_accessible_at_point.html)
 distinguishes accessible containment from actual activation.
+
+On commit `cd1be14d`, Linux Zed in
+[run 37006717428](https://github.com/DavidLMS/nan-harness/actions/runs/37006717428)
+passes response and file-tool verification in all three probes, but Retry still
+produces no independent recovery. Maximization, sensitive/showing/visible
+state, non-defunct state and accessible containment are observed; the pointer
+is reported over the owned Openbox frame. The `enabled` observation from that
+commit is invalid: the decoder used AT-SPI state bit 7 (editable) instead of
+bit 8 (enabled). The correction has a distinct editable-only regression case.
+The next measurement queries the frame's child to distinguish the application
+client from decoration. No recovery verdict depends on these diagnostic flags.
+
+Codex Windows in
+[run 37006719662](https://github.com/DavidLMS/nan-harness/actions/runs/37006719662)
+passes application/global cleanup in all three probes on `cd1be14d`, but
+rejects the onboarding session before any role proof or click. An added closed
+`sessionProofFailure` distinguishes exhausted or invalid deadlines from missing
+guards and unsupported platform/host/policy. The existing total 25-second
+observer deadline includes listener checks, attachment and document readiness;
+no timeout has been extended based on the ambiguous result.
+
+Hermes Windows has an experimental `current-catalog` readiness policy. It
+verifies the fresh managed `nan` profile selection, then uses the source-defined
+model menu and at most one ordinary Refresh models action to observe a matching
+fresh `model.options` response on the same renderer socket. Cached rows alone
+do not establish readiness. This receipt does not independently establish the
+backend process identity and cannot qualify a cell: response, file-tool,
+failure/Retry and cleanup oracles still apply. Its longer cold-start budget is
+Windows-only and remains bounded by the unchanged total worker deadline. Linux
+and macOS retain their qualified readiness behavior.
+
+Claude's hosted-only configuration observation reads the four owned disposable
+configuration documents after gateway application. It checks their closed
+profile/provider/authentication/features contract and optionally compares the
+macOS Foundation Application Support directory with the managed HOME-derived
+path. It never reads the independently resolved native directory. Presence
+and path alignment are separate from consumption: `configurationConsumed` and
+`modelDiscoverySeen` remain unknown until independently observed. No vendor
+authentication state, signed debugging token or application bootstrap is changed.

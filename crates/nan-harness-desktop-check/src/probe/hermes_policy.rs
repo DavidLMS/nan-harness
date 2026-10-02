@@ -42,7 +42,7 @@ fn read(path: &Path) -> Result<Vec<u8>, Reason> {
     Ok(bytes)
 }
 
-fn verify_owner(workspace: &Path) -> Result<(), Reason> {
+pub(super) fn verify_owner(workspace: &Path) -> Result<(), Reason> {
     if !workspace.is_absolute()
         || !std::fs::symlink_metadata(workspace).is_ok_and(|metadata| metadata.is_dir())
     {
