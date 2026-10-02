@@ -158,20 +158,21 @@ def semantic_observations(directory, app):
         if type(value) is not dict:
             raise ValueError('invalid semantic observation')
         mechanism = value.get('mechanism')
-        if mechanism not in {'hermes-windows-catalog-readiness', 'hermes-renderer-qualification', 'zed-native-copy', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'claude-owned-configuration'}:
+        if mechanism not in {'hermes-windows-catalog-readiness', 'hermes-renderer-qualification', 'zed-native-copy', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'claude-owned-configuration'}:
             continue
         expected = 'hermes-renderer-qualification' if app == 'hermes-desktop' else 'zed-native-copy'
-        if (mechanism != expected and mechanism not in {'hermes-windows-catalog-readiness', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'claude-owned-configuration'}) or type(value.get('schemaVersion')) is not int or value['schemaVersion'] != 1:
+        if (mechanism != expected and mechanism not in {'hermes-windows-catalog-readiness', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'claude-owned-configuration'}) or type(value.get('schemaVersion')) is not int or value['schemaVersion'] != 1:
             raise ValueError('semantic observation identity differs')
         record = {'schemaVersion': 1, 'mechanism': mechanism}
         if mechanism == 'hermes-windows-catalog-readiness':
             booleans = {'menuOpened', 'refreshAttempted', 'catalogVerified', 'modelRowVerified',
                         'menuDismissed', 'composerReverified'}
             fields = booleans | {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'stage', 'errorCategory'}
+            diagnostics = {'composerObservation', 'guardFailure'}
             stages = {'policy', 'menu', 'refresh', 'catalog', 'dismiss', 'composer', 'ready'}
             errors = {None, 'policy-rejected', 'menu-unavailable', 'refresh-uncertain',
                       'catalog-unavailable', 'dismiss-uncertain', 'composer-changed', 'composer-unavailable'}
-            if (app != 'hermes-desktop' or set(value) != fields or value['diagnosticsOnly'] is not True
+            if (app != 'hermes-desktop' or set(value) not in (fields, fields | diagnostics) or value['diagnosticsOnly'] is not True
                     or type(value['stage']) is not str or value['stage'] not in stages
                     or (value['errorCategory'] is not None and type(value['errorCategory']) is not str)
                     or value['errorCategory'] not in errors
@@ -181,10 +182,39 @@ def semantic_observations(directory, app):
                     or (value['stage'] != 'ready' and value['errorCategory'] is None)):
                 raise ValueError('invalid Hermes catalog readiness diagnostic')
             record.update({key: value[key] for key in fields - {'schemaVersion', 'mechanism'}})
+            if diagnostics <= set(value):
+                failure = value['guardFailure']
+                failures = {None, 'unmeasured', 'deadline-expired', 'ownership-lost',
+                            'page-count', 'url-changed', 'query-failed'}
+                observation = value['composerObservation']
+                if ((failure is not None and type(failure) is not str) or failure not in failures):
+                    raise ValueError('invalid Hermes readiness guard observation')
+                if observation is not None:
+                    counts = {'roots', 'editors', 'expectedModelPills', 'modelPills', 'pickerButtons', 'switchButtons'}
+                    if (type(observation) is not dict or set(observation) != counts | {'readyState'}
+                            or any(type(observation[key]) is not int or not 0 <= observation[key] <= 64 for key in counts)
+                            or type(observation['readyState']) is not str
+                            or observation['readyState'] not in {'loading', 'interactive', 'complete'}):
+                        raise ValueError('invalid Hermes composer observation')
+                if value['stage'] == 'ready' and (failure is not None or observation is None):
+                    raise ValueError('unmeasured Hermes readiness success')
+                record.update(composerObservation=observation, guardFailure=failure)
         elif mechanism == 'semantic-failure-policy':
             if set(value) != set('schemaVersion mechanism failureStatus recoveryAction'.split()) or type(value['failureStatus']) is not int or value['failureStatus'] not in {400, 503} or value['recoveryAction'] != 'explicit-ui-retry':
                 raise ValueError('invalid semantic failure policy')
             record.update(failureStatus=value['failureStatus'], recoveryAction=value['recoveryAction'])
+        elif mechanism == 'codex-restore':
+            fields = {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'stage', 'cause'}
+            stages = {'lock', 'process', 'ownership', 'restore'}
+            causes = {'session-busy', 'app-running', 'process-inspection', 'unsafe-path',
+                      'profile-invalid', 'receipt-invalid', 'backup-missing', 'backup-mismatch',
+                      'config-invalid', 'orphaned-session', 'io', 'persistence', 'unclassified'}
+            if (app != 'chatgpt-desktop' or set(value) != fields
+                    or value['diagnosticsOnly'] is not True
+                    or type(value['stage']) is not str or value['stage'] not in stages
+                    or type(value['cause']) is not str or value['cause'] not in causes):
+                raise ValueError('invalid Codex restore observation')
+            record.update(diagnosticsOnly=True, stage=value['stage'], cause=value['cause'])
         elif mechanism == 'codex-owned-relaunch':
             if (app != 'chatgpt-desktop' or set(value) != {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'stage'}
                     or value['diagnosticsOnly'] is not True
@@ -212,7 +242,8 @@ def semantic_observations(directory, app):
             record['diagnosticsOnly'] = True
         elif mechanism == 'zed-pointer-observation':
             flags = set('maximizedHorizontal maximizedVertical enabled sensitive showing visible defunct retryContains'.split())
-            if (set(value) != flags | {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'pointerTarget', 'pointerChild'}
+            if (set(value) not in (flags | {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'pointerTarget', 'pointerChild'},
+                                       flags | {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'pointerTarget', 'pointerChild', 'inputDelivery'})
                     or app != 'zed-desktop' or value['diagnosticsOnly'] is not True):
                 raise ValueError('invalid Zed pointer observation identity')
             for key in flags:
@@ -224,6 +255,22 @@ def semantic_observations(directory, app):
             if type(value['pointerChild']) is not str or value['pointerChild'] not in {'unavailable', 'client', 'client-descendant', 'decoration-or-empty', 'other'}:
                 raise ValueError('invalid Zed pointer child')
             record.update(diagnosticsOnly=True, pointerTarget=value['pointerTarget'], pointerChild=value['pointerChild'])
+            if 'inputDelivery' in value:
+                delivery = value['inputDelivery']
+                fields = {'status', 'pressCount', 'releaseCount', 'orderedPair'}
+                statuses = {'complete', 'unavailable', 'timeout', 'query-failed', 'identity-failed'}
+                if (type(delivery) is not dict or set(delivery) != fields
+                        or type(delivery['status']) is not str or delivery['status'] not in statuses):
+                    raise ValueError('invalid Zed input delivery observation')
+                if delivery['status'] == 'complete':
+                    if (any(type(delivery[key]) is not int or not 0 <= delivery[key] <= 2
+                            for key in ('pressCount', 'releaseCount'))
+                            or type(delivery['orderedPair']) is not bool
+                            or delivery['orderedPair'] and (delivery['pressCount'], delivery['releaseCount']) != (1, 1)):
+                        raise ValueError('invalid Zed input delivery counts')
+                elif any(delivery[key] is not None for key in fields - {'status'}):
+                    raise ValueError('unmeasured Zed input delivery contains counts')
+                record['inputDelivery'] = dict(delivery)
         elif mechanism == 'zed-pointer-transport':
             if set(value) != set('schemaVersion mechanism diagnosticsOnly stage'.split()) or app != 'zed-desktop' or value['diagnosticsOnly'] is not True:
                 raise ValueError('invalid Zed pointer transport identity')

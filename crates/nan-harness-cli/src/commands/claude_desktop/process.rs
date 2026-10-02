@@ -131,6 +131,7 @@ impl DesktopProcess for SystemDesktopProcess {
         if std::env::var_os(crate::native_diagnostic::PROCESS_OBSERVATION_ENV_PATH).is_some() {
             self.observation_started.set(true);
         }
+        #[cfg(feature = "desktop-qualification")]
         let profile_arguments =
             crate::commands::desktop::claude_profile_arguments(self.executable.as_deref())
                 .map_err(ClaudeDesktopError::Launch)?;
@@ -143,9 +144,10 @@ impl DesktopProcess for SystemDesktopProcess {
                 .args(crate::commands::desktop::qualification_renderer_arguments(
                     DesktopHarnessKind::Claude,
                 ))
-                .args(profile_arguments)
                 .stdin(Stdio::null())
                 .stdout(Stdio::null());
+            #[cfg(feature = "desktop-qualification")]
+            command.args(profile_arguments);
             return crate::commands::desktop::spawn_observed_desktop(
                 &mut command,
                 "claude-desktop",

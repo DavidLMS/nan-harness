@@ -341,14 +341,7 @@ mod renderer_tests {
 }
 
 /// A qualification-only native Electron profile override; ordinary launches are unchanged.
+#[cfg(feature = "desktop-qualification")]
 pub(crate) fn claude_profile_arguments(executable: Option<&Path>) -> std::io::Result<Vec<String>> {
-    #[cfg(feature = "desktop-qualification")]
-    {
-        claude_profile::arguments(executable)
-    }
-    #[cfg(not(feature = "desktop-qualification"))]
-    {
-        let _ = executable;
-        Ok(Vec::new())
-    }
+    claude_profile::arguments(executable)
 }

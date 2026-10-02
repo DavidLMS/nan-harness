@@ -3,6 +3,24 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const source = fs.readFileSync(`${__dirname}/observe-renderer.cjs`, 'utf8');
+const timingStart = source.indexOf('function onboardingTrial(');
+const timingEnd = source.indexOf('async function run()', timingStart);
+const timing = vm.runInNewContext(`(() => { ${source.slice(timingStart, timingEnd)}
+  return {onboardingTrial, onboardingDeadline}; })()`);
+const hosted = {GITHUB_ACTIONS: 'true', RUNNER_ENVIRONMENT: 'github-hosted',
+  RUNNER_OS: 'Windows', NANH_CODEX_PUBLIC_ONBOARDING: 'engineering'};
+assert.equal(timing.onboardingTrial('chatgpt-desktop', 'win32', hosted), true);
+for (const [app, platform, env] of [
+  ['claude-desktop', 'win32', hosted], ['chatgpt-desktop', 'darwin', hosted],
+  ['chatgpt-desktop', 'win32', {...hosted, RUNNER_ENVIRONMENT: 'self-hosted'}],
+  ['chatgpt-desktop', 'win32', {...hosted, NANH_CODEX_PUBLIC_ONBOARDING: 'unknown'}],
+]) assert.equal(timing.onboardingTrial(app, platform, env), false);
+// An exhausted startup clock cannot consume the public action budget, while
+// the original total observation deadline still limits late attachment.
+assert.equal(timing.onboardingDeadline(true, 35000, 60000, 36000), 60000);
+assert.equal(timing.onboardingDeadline(true, 35000, 60000, 10000), 35000);
+assert.equal(timing.onboardingDeadline(true, 35000, 60000, 61000), 60000);
+assert.equal(timing.onboardingDeadline(false, 25000, 25000, 26000), 25000);
 const start = source.indexOf('const counts = await page.evaluate(') + 'const counts = await page.evaluate('.length;
 const end = source.indexOf('}, app);', start) + 1;
 function trial(headings, app = 'pen-desktop', bodyText = '', roleCount = 0) {

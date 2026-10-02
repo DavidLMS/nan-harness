@@ -60,6 +60,11 @@ def qualification_environment(app, facts, real_nanh, executable, inherited=None)
                        FEASIBILITY_FACTS=str(facts), FEASIBILITY_REAL_NANH=str(real_nanh))
     if app == 'zed-desktop':
         environment.update({key: value for key, value in source.items() if key in ZED_HELPERS})
+        delivery = source.get('NANH_ZED_XRECORD')
+        if delivery is not None:
+            if delivery != '1' or source.get('RUNNER_OS') != 'Linux':
+                raise ValueError('Zed delivery diagnostic is unavailable')
+            environment['NANH_ZED_XRECORD'] = delivery
         if (environment.get('FEASIBILITY_ZED_INPUT_DRIVER_MODE') != 'paste'
                 or environment.get('FEASIBILITY_ZED_RESPONSE_METHOD') != 'thread-export'
                 or not all(environment.get(key) for key in ZED_HELPERS - {'NANH_ZED_ICON_TEMPLATES', 'FEASIBILITY_ZED_INPUT_SCRIPT'})):

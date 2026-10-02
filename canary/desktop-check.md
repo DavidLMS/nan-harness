@@ -697,3 +697,36 @@ explicitly reports an exhausted onboarding session deadline before any click.
 The first observed document has no inputs; the second has no renderer page.
 The second probe also fails restoration with a nonzero exit, stopping the third
 probe. This is a separate cleanup blocker, not a successful onboarding result.
+
+The next Codex Windows diagnostic reserves separate bounded stages: at most
+35 seconds for renderer startup and at most 25 seconds for the public work-role
+interaction, within a 60-second observation clock and a 75-second supervised
+driver limit. Other apps, platforms and policies retain their existing limits.
+Every action still requires fresh ownership and exact scoped control proof.
+A failure-only restore receipt classifies the actual typed CLI error without
+reading stderr; it cannot override the failed cleanup verdict.
+
+Hermes Windows [37011833500](https://github.com/DavidLMS/nan-harness/actions/runs/37011833500)
+on `d7d619a3` reaches an owned renderer in all three probes, but the current-catalog
+trial fails before opening the model menu. Each receipt reports
+`composer-unavailable`, no provider requests and passing cleanup. The next
+receipt separates missing composer/editor, the source-defined fallback picker,
+model-label variants and ownership/deadline failure. It retains the same action
+guards and cold-start deadline.
+
+The Linux Zed feasibility cell now optionally records already-delivered XI2
+button headers for the exact owned X client through XRecord. Fresh XRes identity,
+foreground, geometry and pointer preflight remain required. Native calls run in
+a separately supervised worker within the original input helper deadline;
+missing libraries/extensions and uncertain identity yield advisory unknowns.
+It selects no input events, takes no grab and generates no additional click.
+Only bounded press/release counts and an ordered-pair boolean leave memory.
+Delivered events still do not prove GPUI consumption or qualify recovery.
+
+The private-root correction in `962198f2` allows macOS Claude's native process to
+start in all three probes in
+[37013251894](https://github.com/DavidLMS/nan-harness/actions/runs/37013251894).
+Each remains blocked because no eligible visible window appears during native
+acquisition; all cleanup passes. The owned configuration contract remains valid,
+but consumption and model discovery are still unmeasured. A running process
+does not establish that the account-free editor is available.

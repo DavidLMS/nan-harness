@@ -261,6 +261,10 @@ jobs:
         if: runner.os == 'Windows' && matrix.app == 'chatgpt-desktop' && inputs.experiment == 'deterministic-full'
         shell: bash
         run: echo 'NANH_CODEX_PUBLIC_ONBOARDING=engineering' >> "$GITHUB_ENV"
+      - name: Enable passive owned-client Zed event delivery observation
+        if: runner.os == 'Linux' && matrix.app == 'zed-desktop' && inputs.experiment == 'deterministic-full'
+        shell: bash
+        run: echo 'NANH_ZED_XRECORD=1' >> "$GITHUB_ENV"
       - name: Enable Hermes Windows current-catalog readiness
         if: runner.os == 'Windows' && matrix.app == 'hermes-desktop' && inputs.experiment == 'deterministic-full'
         shell: bash

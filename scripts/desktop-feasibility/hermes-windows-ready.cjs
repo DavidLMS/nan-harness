@@ -18,14 +18,28 @@ function sample(element) {
 exports.run = async function run(page, session, ownedEndpoint, deadline, expectedProfile) {
   const facts={schemaVersion:1,mechanism:'hermes-windows-catalog-readiness',diagnosticsOnly:true,
     stage:'policy',errorCategory:'policy-rejected',menuOpened:false,refreshAttempted:false,
-    catalogVerified:false,modelRowVerified:false,menuDismissed:false,composerReverified:false};
+    catalogVerified:false,modelRowVerified:false,menuDismissed:false,composerReverified:false,
+    composerObservation:null,guardFailure:'unmeasured'};
   if (process.platform!=='win32' || process.env.GITHUB_ACTIONS!=='true'
       || process.env.RUNNER_ENVIRONMENT!=='github-hosted' || process.env.RUNNER_OS!=='Windows'
       || process.env.FEASIBILITY_HERMES_READINESS_POLICY!=='current-catalog'
       || !Number.isFinite(deadline) || deadline<=Date.now() || deadline-Date.now()>120000) return facts;
   const initialUrl=page.url();
-  const guard=()=>Date.now()<deadline && ownedEndpoint() && page.url()===initialUrl
-    && page.context().browser().contexts().flatMap(context=>context.pages()).length===1;
+  const guard=()=>{
+    try {
+      const failure = Date.now()>=deadline ? 'deadline-expired'
+        : !ownedEndpoint() ? 'ownership-lost'
+        : page.url()!==initialUrl ? 'url-changed'
+        : page.context().browser().contexts().flatMap(context=>context.pages()).length!==1 ? 'page-count'
+        : Date.now()>=deadline ? 'deadline-expired'
+        : null;
+      facts.guardFailure=failure;
+      return failure===null;
+    } catch {
+      facts.guardFailure='query-failed';
+      return false;
+    }
+  };
   let evidence;
   try {
     evidence=monitor(session,guard,'qwen3.6',expectedProfile);
@@ -34,10 +48,27 @@ exports.run = async function run(page, session, ownedEndpoint, deadline, expecte
     const roots=page.locator('[data-slot="composer-root"]:visible');
     const editor=roots.locator('[role="textbox"]:visible');
     const pill=roots.getByRole('button',{name:/^Model · [^\n]+: qwen3\.6$/,exact:true});
+    const allPills=roots.getByRole('button',{name:/^Model · [^\n]+/,exact:true});
+    const picker=roots.getByRole('button',{name:'Open model picker',exact:true});
+    const switcher=roots.getByRole('button',{name:'Switch model',exact:true});
+    async function observeComposer() {
+      const values=await Promise.all([roots.count(),editor.count(),pill.count(),
+        allPills.count(),picker.count(),switcher.count()]);
+      const readyState=await page.evaluate(()=>document.readyState);
+      if (values.some(value=>!Number.isInteger(value) || value<0 || value>64)
+          || !['loading','interactive','complete'].includes(readyState)) {
+        facts.guardFailure='query-failed';
+        throw new Error('observation');
+      }
+      const [rootCount,editors,expectedModelPills,modelPills,pickerButtons,switchButtons]=values;
+      facts.composerObservation={roots:rootCount,editors,expectedModelPills,modelPills,
+        pickerButtons,switchButtons,readyState};
+      return values.slice(0,3);
+    }
     while (guard()) {
       if (await page.locator('[role="dialog"]:visible, [role="alertdialog"]:visible').count()!==0) throw new Error('modal');
-      const complete=await page.evaluate(()=>document.readyState==='complete');
-      const counts=await Promise.all([roots.count(),editor.count(),pill.count()]);
+      const counts=await observeComposer();
+      const complete=facts.composerObservation.readyState==='complete';
       if (counts.some(count=>count>1)) throw new Error('ambiguous composer');
       if (complete && counts.every(count=>count===1) && await pill.isEnabled()) break;
       await delay(Math.min(100,Math.max(0,deadline-Date.now())));
@@ -84,6 +115,9 @@ exports.run = async function run(page, session, ownedEndpoint, deadline, expecte
     facts.stage='composer'; facts.errorCategory='composer-changed';
     if (await roots.count()!==1 || await editor.count()!==1 || await pill.count()!==1
         || !await editor.evaluate((element,held)=>element===held,original) || !guard() || !evidence.verified()) throw new Error('composer');
+    const finalCounts=await observeComposer();
+    if (!guard() || finalCounts.some(count=>count!==1)
+        || facts.composerObservation.readyState!=='complete') throw new Error('composer');
     facts.composerReverified=true; facts.stage='ready'; facts.errorCategory=null;
   } catch { /* Closed stage/category only; never retain raw error or app text. */ }
   finally { evidence?.dispose(); }

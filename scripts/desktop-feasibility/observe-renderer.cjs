@@ -15,6 +15,14 @@ function save() {
   fs.writeFileSync(`${output}.tmp`, JSON.stringify(facts) + '\n', { mode: 0o600 });
   fs.renameSync(`${output}.tmp`, output);
 }
+function onboardingTrial(appName, platform, env) {
+  return appName === 'chatgpt-desktop' && platform === 'win32'
+    && env.GITHUB_ACTIONS === 'true' && env.RUNNER_ENVIRONMENT === 'github-hosted'
+    && env.RUNNER_OS === 'Windows' && env.NANH_CODEX_PUBLIC_ONBOARDING === 'engineering';
+}
+function onboardingDeadline(trial, startupDeadline, totalDeadline, now) {
+  return trial ? Math.min(totalDeadline, now + 25000) : startupDeadline;
+}
 async function run() {
   if (!['chatgpt-desktop', 'claude-desktop', 'pen-desktop'].includes(app)
       || !Number.isSafeInteger(request.ownerPid) || request.ownerPid <= 1
@@ -26,7 +34,10 @@ async function run() {
   facts.launcherOwned = rootProof.descendant(connection.launcherPid);
   if (!facts.launcherOwned) { facts.errorCategory = 'launcher-unowned'; save(); return; }
   const ownership = require('./endpoint-ownership.cjs').proof(String(connection.launcherPid), String(connection.port));
-  const deadline = Date.now() + 25000;
+  const trial = onboardingTrial(app, process.platform, process.env);
+  const started = Date.now();
+  const deadline = started + (trial ? 35000 : 25000);
+  const totalDeadline = started + (trial ? 60000 : 25000);
   while (Date.now() < deadline && !ownership.ownedEndpoint()) await new Promise(r => setTimeout(r, 250));
   facts.endpointOwned = ownership.ownedEndpoint();
   if (!facts.endpointOwned) { facts.errorCategory = 'endpoint-unowned'; save(); return; }
@@ -58,7 +69,8 @@ async function run() {
         && await page.evaluate(() => location.protocol === 'app:' && document.readyState === 'complete');
       if (!targetReady) { facts.errorCategory = 'invalid-request'; save(); return; }
       facts.publicOnboarding = await require('./codex-onboarding.cjs').run(page,
-        () => rootProof.descendant(connection.launcherPid) && ownership.ownedEndpoint(), deadline);
+        () => rootProof.descendant(connection.launcherPid) && ownership.ownedEndpoint(),
+        onboardingDeadline(trial, deadline, totalDeadline, Date.now()));
     }
     const counts = await page.evaluate(appName => {
       const visible = e => e.isConnected && e.getBoundingClientRect().width > 0

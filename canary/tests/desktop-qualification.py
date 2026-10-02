@@ -21,6 +21,21 @@ spec.loader.exec_module(runner)
 
 
 class RunnerTests(unittest.TestCase):
+    def test_zed_delivery_policy_is_explicit_and_linux_only(self):
+        source = {key: 'synthetic' for key in runner.ZED_HELPERS}
+        source.update(GITHUB_ACTIONS='true', RUNNER_ENVIRONMENT='github-hosted',
+                      RUNNER_OS='Linux', NANH_ZED_XRECORD='1',
+                      FEASIBILITY_ZED_INPUT_DRIVER_MODE='paste',
+                      FEASIBILITY_ZED_RESPONSE_METHOD='thread-export')
+        args = ('zed-desktop', Path('/synthetic/facts'), Path('/synthetic/nanh'), Path('/synthetic/app'))
+        env = runner.qualification_environment(*args, inherited=source)
+        self.assertEqual(env['NANH_ZED_XRECORD'], '1')
+        for changes in ({'RUNNER_OS': 'macOS'}, {'NANH_ZED_XRECORD': 'unknown'}):
+            with self.assertRaises(ValueError):
+                runner.qualification_environment(*args, inherited={**source, **changes})
+        del source['NANH_ZED_XRECORD']
+        self.assertNotIn('NANH_ZED_XRECORD', runner.qualification_environment(*args, inherited=source))
+
     def test_claude_mac_profile_trial_requires_direct_bundle_and_scoped_policy(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()
@@ -704,6 +719,37 @@ class QualificationTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'claude-desktop')
 
+    def test_hermes_composer_readiness_diagnostics_are_closed_and_advisory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            value = dict(schemaVersion=1, mechanism='hermes-windows-catalog-readiness', diagnosticsOnly=True,
+                         stage='composer', errorCategory='composer-unavailable', menuOpened=False,
+                         refreshAttempted=False, catalogVerified=False, modelRowVerified=False,
+                         menuDismissed=False, composerReverified=False)
+            path = root / 'readiness.json'
+            observation = dict(roots=1, editors=1, expectedModelPills=0, modelPills=0,
+                               pickerButtons=1, switchButtons=0, readyState='complete')
+            for snapshot in (None, observation):
+                item = {**value, 'composerObservation': snapshot, 'guardFailure': 'deadline-expired'}
+                path.write_text(json.dumps(item))
+                self.assertEqual(q.semantic_observations(root, 'hermes-desktop'), [item])
+            item = {**value, 'composerObservation': observation, 'guardFailure': 'ownership-lost'}
+            invalid = [{**item, 'guardFailure': 'PRIVATE'},
+                       {**item, 'composerObservation': {**observation, 'label': 'PRIVATE'}},
+                       {**item, 'composerObservation': {**observation, 'roots': True}},
+                       {**item, 'composerObservation': {**observation, 'roots': 65}},
+                       {**item, 'composerObservation': {**observation, 'readyState': 'PRIVATE'}},
+                       {key: val for key, val in item.items() if key != 'guardFailure'}]
+            for changed in invalid:
+                path.write_text(json.dumps(changed))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'hermes-desktop')
+            path.write_text(json.dumps(item))
+            with self.assertRaises(ValueError):
+                q.semantic_observations(root, 'zed-desktop')
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(root, 'hermes-desktop'), [value])
+
     def test_pointer_observation_never_accepts_private_native_details(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -719,6 +765,34 @@ class QualificationTests(unittest.TestCase):
                             {**value, 'enabled': 1}, {**value, 'diagnosticsOnly': False},
                             {key: item for key, item in value.items() if key != 'visible'}):
                 path.write_text(json.dumps(changed))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'zed-desktop')
+
+    def test_input_delivery_is_advisory_closed_and_distinguishes_unmeasured(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            value = dict(schemaVersion=1, mechanism='zed-pointer-observation', diagnosticsOnly=True,
+                         maximizedHorizontal=True, maximizedVertical=True, enabled=True, sensitive=True,
+                         showing=None, visible=None, defunct=False, retryContains=True,
+                         pointerTarget='client', pointerChild='client')
+            path = root / 'pointer.json'
+            valid = [dict(status='complete', pressCount=1, releaseCount=1, orderedPair=True),
+                     dict(status='complete', pressCount=0, releaseCount=0, orderedPair=False)]
+            valid.extend(dict(status=status, pressCount=None, releaseCount=None, orderedPair=None)
+                         for status in ('unavailable', 'timeout', 'query-failed', 'identity-failed'))
+            for delivery in valid:
+                path.write_text(json.dumps({**value, 'inputDelivery': delivery}))
+                observed = q.semantic_observations(root, 'zed-desktop')[0]
+                self.assertEqual(observed['inputDelivery'], delivery)
+                self.assertIs(observed['diagnosticsOnly'], True)
+            invalid = [dict(status='PRIVATE', pressCount=None, releaseCount=None, orderedPair=None),
+                       dict(status='complete', pressCount=0, releaseCount=1, orderedPair=True),
+                       dict(status='complete', pressCount=True, releaseCount=1, orderedPair=False),
+                       dict(status='complete', pressCount=3, releaseCount=1, orderedPair=False),
+                       dict(status='timeout', pressCount=0, releaseCount=None, orderedPair=None),
+                       {**valid[0], 'window': 10}, {'status': 'complete'}, None]
+            for delivery in invalid:
+                path.write_text(json.dumps({**value, 'inputDelivery': delivery}))
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'zed-desktop')
 
@@ -812,6 +886,25 @@ class QualificationTests(unittest.TestCase):
                 path.write_text(json.dumps({**codex, 'onboardingCounts': counts}))
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'chatgpt-desktop')
+
+    def test_codex_restore_facts_are_typed_private_diagnostics(self):
+        value = dict(schemaVersion=1, mechanism='codex-restore', diagnosticsOnly=True,
+                     stage='restore', cause='backup-mismatch')
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / 'restore.json'
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(root, 'chatgpt-desktop'), [value])
+            for changed in ({**value, 'stage': 'PRIVATE'}, {**value, 'cause': []},
+                            {**value, 'diagnosticsOnly': False}, {**value, 'schemaVersion': True},
+                            {**value, 'rawError': 'PRIVATE'},
+                            {key: item for key, item in value.items() if key != 'cause'}):
+                path.write_text(json.dumps(changed))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'chatgpt-desktop')
+            path.write_text(json.dumps(value))
+            with self.assertRaises(ValueError):
+                q.semantic_observations(root, 'hermes-desktop')
 
     def test_public_onboarding_receipts_reject_private_and_untyped_data(self):
         setup = dict(schemaVersion=1, mechanism='codex-public-onboarding', diagnosticsOnly=True,

@@ -692,7 +692,7 @@ impl<'a> RendererSession<'a> {
             &request_path,
             &output_path,
             false,
-            Duration::from_secs(35),
+            inventory_driver_limit(),
             || renderer_guard(self.process, owner),
         );
         std::fs::remove_file(request_path).map_err(|_| Reason::IsolationUnavailable)?;
@@ -821,6 +821,18 @@ impl<'a> RendererSession<'a> {
             _ => Err(Reason::ResponseMismatch),
         }
     }
+}
+
+fn inventory_driver_limit() -> Duration {
+    let public_setup_trial = cfg!(windows)
+        && std::env::var("GITHUB_ACTIONS").as_deref() == Ok("true")
+        && std::env::var("RUNNER_ENVIRONMENT").as_deref() == Ok("github-hosted")
+        && std::env::var("RUNNER_OS").as_deref() == Ok("Windows")
+        && std::env::var("NANH_DESKTOP_RENDERER_APP").as_deref() == Ok("chatgpt-desktop")
+        && std::env::var("NANH_CODEX_PUBLIC_ONBOARDING").as_deref() == Ok("engineering");
+    // Trial: 35s startup + at most 25s public setup, with room for the initial
+    // native ownership query and driver teardown. The worker remains capped.
+    Duration::from_secs(if public_setup_trial { 75 } else { 35 })
 }
 
 impl Gui {

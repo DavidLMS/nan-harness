@@ -267,13 +267,48 @@ def retry_click(payload):
         stage = 15
         if owned_foreground() != (0, active):
             return 11
+        observer = None
+        if (os.environ.get('NANH_ZED_XRECORD') == '1'
+                and sys.platform == 'linux'
+                and os.environ.get('GITHUB_ACTIONS') == 'true'
+                and os.environ.get('RUNNER_ENVIRONMENT') == 'github-hosted'
+                and os.environ.get('RUNNER_OS') == 'Linux'):
+            # Observation never selects events or authorizes activation.
+            import runpy
+
+            def record_scope():
+                try:
+                    return (owned_foreground() == (0, active)
+                            and run(['getwindowgeometry', '--shell', str(active)], 'geometry') == geometry
+                            and pointer_child(request['window'], active) == 'client')
+                except (OSError, ValueError, subprocess.SubprocessError):
+                    return False
+
+            remaining = deadline - time.monotonic()
+            facts['inputDelivery'] = dict(status='unavailable', pressCount=None,
+                                          releaseCount=None, orderedPair=None)
+            if remaining > 1:
+                module = runpy.run_path(str(Path(__file__).with_name('zed-xrecord-supervisor.py')))
+                observer = module['Observer'](request['pid'], active, record_scope,
+                                              budget=min(3, remaining - .5))
+            if (not record_scope()
+                    or normalized_retry_point(request, active, geometry) != point):
+                if observer is not None:
+                    facts['inputDelivery'] = observer.finish()
+                return 18
         stage = 16
         # One ordinary activation, never another press after an uncertain receipt.
         run(['click', '--clearmodifiers', '1'])
+        if observer is not None:
+            facts['inputDelivery'] = observer.finish()
         return 0
     except (ValueError, TypeError, OSError, subprocess.SubprocessError, ImportError):
         return locals().get("stage", 2)
     finally:
+        observer = locals().get('observer')
+        if observer is not None:
+            observer.close()
+            facts['inputDelivery'] = observer.result
         publish_observation(facts)
 
 
