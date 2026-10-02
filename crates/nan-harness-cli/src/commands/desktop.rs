@@ -256,6 +256,13 @@ pub(crate) fn qualification_renderer_arguments(
         );
         if std::env::var("NANH_DESKTOP_QUALIFICATION_MODE").as_deref() == Ok("startup-baseline") {
             arguments.clear();
+            if kind == nan_harness_core::DesktopHarnessKind::Claude
+                && cfg!(target_os = "linux")
+                && qualification_capture_enabled()
+            {
+                // Request Chromium's native accessibility tree without CDP.
+                arguments.push("--force-renderer-accessibility".into());
+            }
         }
         if qualification_capture_enabled()
             && cfg!(target_os = "linux")

@@ -411,3 +411,10 @@ It accepts only the exact translated bounds or an exact missing-origin match,
 rechecks the accessible object's process, button role and Retry name, and dispatches
 one ordinary click. Arbitrary coordinate offsets remain rejected. Native recovery
 qualification for this correction is pending.
+
+Claude startup-baseline run [36984546491](https://github.com/DavidLMS/nan-harness/actions/runs/36984546491)
+acquires the uninstrumented Linux window in three probes, but all native control
+queries fail. macOS still has no eligible visible window. Linux baseline launches
+now request Chromium's native renderer accessibility explicitly; CDP remains off.
+The vendor's frozen debugging-switch denylist does not forbid this accessibility
+switch. This is a diagnostic trial, not conversation qualification.
