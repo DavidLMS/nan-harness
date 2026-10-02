@@ -3,8 +3,15 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('nod
 const {EventEmitter}=require('node:events');
 async function trial(scenario) {
  let clock=0,opened=false,owner=true,refreshClicks=0,pillClicks=0,escapes=0;
- const session=new EventEmitter(); session.send=async method=>method==='Page.getFrameTree'
-   ? scenario==='stalled-frame'?new Promise(()=>{}):{frameTree:{frame:{id:scenario==='frame-replaced' && clock>=100?'other':'main',loaderId:scenario==='reload' && clock>=100?'new':'original',url:page.url()}}}:undefined;
+ const session=new EventEmitter(); session.send=async method=>{
+   if(method!=='Page.getFrameTree')return;
+   if(scenario==='stalled-frame')return new Promise(()=>{});
+   const url=new URL(page.url());
+   return {frameTree:{frame:{id:scenario==='frame-replaced' && clock>=100?'other':'main',
+     loaderId:scenario==='reload' && clock>=100?'new':'original',
+     url:scenario==='frame-url-mismatch'?'file:///foreign/index.html':url.href.slice(0,url.href.length-url.hash.length),
+     urlFragment:scenario==='frame-fragment-mismatch'?'#/foreign':scenario==='frame-fragment-invalid'?null:scenario==='frame-fragment-missing'?undefined:url.hash}}};
+ };
  const point={x:5,y:5,left:0,top:0,width:20,height:20};
  const editorHandle={},rootHandle={};
  const handle={evaluate:async()=>scenario==='covered'?null:point,click:async()=>{if(opened){refreshClicks++; if(scenario==='uncertain')throw new Error('PRIVATE');
@@ -27,7 +34,7 @@ async function trial(scenario) {
  const page={evaluate:async()=>['startup-owner-loss','startup-url-change','startup-page-count'].includes(scenario) || scenario==='loading' || scenario==='document-pending' && clock<200?'loading':'complete',url:()=>{
  const base='file:///synthetic/resources/app.asar/dist/index.html';
  if(scenario==='startup-url-change' && clock>=200)return 'file:///synthetic/other.html';
- if(scenario==='warm-root')return base+'#/';
+ if(scenario==='warm-root'||scenario==='frame-fragment-missing')return base+'#/';
  if(scenario==='root-transition' && clock>=100)return base+'#/';
  if(scenario==='second-transition' && clock>=100 && clock<200)return base+'#/';
  if(scenario==='query-transition' && clock>=100)return base+'?profile=nan#/';
@@ -86,7 +93,7 @@ async function trial(scenario) {
  for(const scenario of ['root-transition','warm-root']) {
  const result=await trial(scenario);assert.equal(result.facts.stage,'ready',scenario);assert.equal(result.pillClicks,1);assert.equal(result.refreshClicks,1);
  }
- for(const scenario of ['query-transition','path-transition','hash-transition','second-transition','post-freeze','reload','frame-replaced','page-replaced','composer-remount','root-remount','stability-owner-loss','stalled-frame']) {
+ for(const scenario of ['query-transition','path-transition','hash-transition','second-transition','post-freeze','reload','frame-replaced','page-replaced','composer-remount','root-remount','stability-owner-loss','stalled-frame','frame-url-mismatch','frame-fragment-mismatch','frame-fragment-invalid','frame-fragment-missing']) {
  const result=await trial(scenario);assert.notEqual(result.facts.stage,'ready',scenario);assert.equal(result.pillClicks,0,scenario);assert.equal(result.refreshClicks,0,scenario);
  }
  console.log('PASS Windows ordinary catalog UI behavioral guards');

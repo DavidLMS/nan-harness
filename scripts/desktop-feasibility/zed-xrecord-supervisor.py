@@ -8,11 +8,21 @@ import sys
 import time
 STATUSES = {'complete', 'unavailable', 'timeout', 'query-failed', 'identity-failed'}
 
-def unobserved(status):
-    return {'status': status, 'pressCount': None, 'releaseCount': None, 'orderedPair': None}
+STAGES = {'policy', 'budget-insufficient', 'request', 'library', 'display',
+          'record-version', 'xres-version', 'xinput-extension', 'client-query',
+          'client-identity', 'context', 'enable', 'identity-recheck', 'armed',
+          'observation', 'cleanup'}
+
+def unobserved(status, stage=None):
+    result = {'status': status, 'pressCount': None, 'releaseCount': None, 'orderedPair': None}
+    if stage is not None:
+        result['stage'] = stage
+    return result
 
 def validate(value):
-    if type(value) is not dict or set(value) != {'status', 'pressCount', 'releaseCount', 'orderedPair'} or value['status'] not in STATUSES:
+    if type(value) is not dict or set(value) not in ({'status', 'pressCount', 'releaseCount', 'orderedPair'}, {'status', 'pressCount', 'releaseCount', 'orderedPair', 'stage'}) or value['status'] not in STATUSES:
+        raise ValueError('closed record rejected')
+    if 'stage' in value and (type(value['stage']) is not str or value['stage'] not in STAGES):
         raise ValueError('closed record rejected')
     if value['status'] == 'complete':
         if any((type(value[k]) is not int or not 0 <= value[k] <= 2 for k in ['pressCount', 'releaseCount'])) or type(value['orderedPair']) is not bool:
@@ -39,11 +49,13 @@ class Observer:
         self.pending = bytearray()
         self.absolute_end = time.monotonic() + budget
         self.end = self.absolute_end - min(0.2, budget / 4)
-        self.result = unobserved('unavailable')
+        self.stage = 'request'
+        self.result = unobserved('unavailable', self.stage)
         if not 0 < budget <= 3:
+            self.result = unobserved('unavailable', 'budget-insufficient')
             return
         if not self._owned():
-            self.result = unobserved('identity-failed')
+            self.result = unobserved('identity-failed', self.stage)
             return
         if type(pid) is not int or not 1 < pid <= 2147483647 or type(window) is not int or (not 0 < window <= 4294967295):
             return
@@ -54,16 +66,17 @@ class Observer:
             self.child.stdin.write(json.dumps({'pid': pid, 'window': window}).encode() + b'\n')
             self.child.stdin.flush()
             ready = self._line()
-            if ready == {'stage': 'armed'} and self._owned():
-                self.result = None
-            elif set(ready) == {'status', 'pressCount', 'releaseCount', 'orderedPair'}:
+            if ready == {'stage': 'armed'}:
+                self.stage = 'armed'
+                self.result = None if self._owned() else unobserved('identity-failed', self.stage)
+            elif isinstance(ready, dict) and 'status' in ready:
                 self.result = validate(ready)
             else:
-                self.result = unobserved('identity-failed' if ready == {'stage': 'armed'} else 'query-failed')
+                self.result = unobserved('identity-failed' if ready == {'stage': 'armed'} else 'query-failed', self.stage)
         except TimeoutError:
-            self.result = unobserved('timeout')
+            self.result = unobserved('timeout', self.stage)
         except (OSError, ValueError, TypeError):
-            self.result = unobserved('query-failed')
+            self.result = unobserved('query-failed', self.stage)
         if self.result is not None:
             self.close()
 
@@ -93,18 +106,19 @@ class Observer:
     def finish(self):
         try:
             if self.result is None:
+                self.stage = 'observation'
                 if not self._owned():
-                    self.result = unobserved('identity-failed')
+                    self.result = unobserved('identity-failed', self.stage)
                 else:
                     self.child.stdin.write(b'finish\n')
                     self.child.stdin.flush()
                     self.result = validate(self._line())
                     if not self._owned():
-                        self.result = unobserved('identity-failed')
+                        self.result = unobserved('identity-failed', self.stage)
         except TimeoutError:
-            self.result = unobserved('timeout')
+            self.result = unobserved('timeout', self.stage)
         except (OSError, ValueError, TypeError):
-            self.result = unobserved('query-failed')
+            self.result = unobserved('query-failed', self.stage)
         finally:
             self.close()
         return self.result
@@ -132,11 +146,11 @@ class Observer:
                         break
                     trailing += chunk
             if trailing:
-                self.result = unobserved('query-failed')
+                self.result = unobserved('query-failed', 'cleanup')
         except subprocess.TimeoutExpired:
-            self.result = unobserved('timeout')
+            self.result = unobserved('timeout', 'cleanup')
         except OSError:
-            self.result = unobserved('query-failed')
+            self.result = unobserved('query-failed', 'cleanup')
         finally:
             for stream in (child.stdin, child.stdout):
                 try:
@@ -151,9 +165,10 @@ class Observer:
 
 def worker():
     if sys.platform != 'linux' or os.environ.get('GITHUB_ACTIONS') != 'true' or os.environ.get('RUNNER_ENVIRONMENT') != 'github-hosted' or (os.environ.get('RUNNER_OS') != 'Linux'):
-        print(json.dumps(unobserved('unavailable')), flush=True)
+        print(json.dumps(unobserved('unavailable', 'policy')), flush=True)
         return
     recorder = None
+    stage = 'request'
     try:
         request = json.loads(sys.stdin.buffer.readline(257), object_pairs_hook=unique)
         if type(request) is not dict or set(request) != {'pid', 'window'} or type(request['pid']) is not int or (not 1 < request['pid'] <= 2147483647) or (type(request['window']) is not int) or (not 0 < request['window'] <= 4294967295):
@@ -164,16 +179,18 @@ def worker():
         Unavailable = native['Unavailable']
         try:
             recorder = NativeRecorder(request['pid'], request['window'])
-        except Unavailable:
-            print(json.dumps(unobserved('unavailable')), flush=True)
+        except Unavailable as error:
+            print(json.dumps(validate(unobserved('unavailable', error.stage))), flush=True)
             return
+        stage = 'armed'
         print(json.dumps({'stage': 'armed'}), flush=True)
         if sys.stdin.buffer.readline(16) != b'finish\n':
             raise ValueError()
-        result = {'status': 'complete', **recorder.observe(0.5)}
+        stage = 'observation'
+        result = {'status': 'complete', 'stage': stage, **recorder.observe(0.5)}
         print(json.dumps(validate(result)), flush=True)
     except Exception:
-        print(json.dumps(unobserved('query-failed')), flush=True)
+        print(json.dumps(unobserved('query-failed', stage)), flush=True)
     finally:
         if recorder is not None:
             recorder.close()

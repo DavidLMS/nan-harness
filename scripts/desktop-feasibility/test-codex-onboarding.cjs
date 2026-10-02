@@ -9,14 +9,19 @@ async function trial(options={}) {
  const label={kind:'label',tagName:'LABEL',parentElement:fieldset,innerText:'Engineering'};
  const radio={kind:'radio',parentElement:label,labels:options.badAssociation?[]:[label],disabled:false};
  const button={kind:'continue',parentElement:root,tagName:'BUTTON',disabled:!!options.disabled};
- const foreign={kind:'foreign'};
+ const foreign={kind:'foreign'},dialog={kind:'dialog'},legend={innerText:'Select the kind of work you do'};
  const doc={querySelectorAll: selector=>selector.startsWith('input')?[radio]:options.modal?[foreign]:[],
   elementFromPoint:()=>options.intercepted===lastKind?foreign:elements[lastKind]};
  let lastKind='label';const elements={label,continue:button};
- for(const e of [root,fieldset,label,radio,button,foreign]) Object.assign(e,{ownerDocument:doc,isConnected:true,
+ for(const e of [root,fieldset,label,radio,button,foreign,dialog,legend]) Object.assign(e,{ownerDocument:doc,isConnected:true,
   clientLeft:0,clientTop:0,clientWidth:80,clientHeight:40,
   getBoundingClientRect:()=>({left:10,top:10,width:80,height:40}),
   getAttribute:()=>null,closest:()=>null,contains:x=>x===e||(e===label&&x===radio)});
+ dialog.getAttribute=key=>key==='role'?(options.alertDialog?'alertdialog':'dialog'):null;
+ dialog.contains=e=>[root,fieldset,label,radio,button,legend].includes(e);
+ dialog.querySelectorAll=selector=>selector.startsWith('input')?(options.ambiguousDialog?[radio,radio]:[radio]):[legend];
+ if(options.onboardingDialog||options.alertDialog||options.ambiguousDialog||options.duplicateDialog)
+  doc.querySelectorAll=selector=>selector.startsWith('input')?[radio]:options.duplicateDialog?[dialog,foreign]:[dialog];
  const globals={document:doc,innerWidth:800,innerHeight:600,getComputedStyle:()=>({display:'block',visibility:'visible',pointerEvents:'auto'})};
  function evaluate(fn,e,arg) {
   if(fn.name==='sample') {lastKind=e.kind;samples++;}
@@ -77,7 +82,9 @@ async function trial(options={}) {
  const legend=await trial({wrongLegend:true});assert.equal(legend.facts.roleProofFailure,'legend-count');
  for(const [opts,reason] of [[{badScope:true},'scope-count'],[{login:true},'login-present'],[{noGroup:true},'group-absent'],[{duplicateLabel:true},'label-count'],[{badAssociation:true},'label-association'],[{finalLoss:true},'ownership-lost']]) {const r=await trial(opts);assert.equal(r.facts.roleProofFailure,reason);assert.equal(r.roleClicks,0);assert.equal(r.continueClicks,0);}
  const good=await trial();assert.equal(good.roleClicks,1);assert.equal(good.continueClicks,1);assert.equal(good.facts.roleScopeAbsent,true);assert.equal(good.facts.stage,'stopped-after-role');assert.equal(good.facts.errorCategory,null);
- for(const opts of [{noOptin:true},{foreignPage:true},{wrongLegend:true},{duplicateRadio:true},{badScope:true},{duplicateRoleFieldset:true},{login:true},{radioDisabled:true},{modal:true},{intercepted:'label'},{remount:true}]) {
+ const ownDialog=await trial({onboardingDialog:true});assert.equal(ownDialog.roleClicks,1);assert.equal(ownDialog.continueClicks,1);assert.equal(ownDialog.facts.roleScopeAbsent,true);
+ assert.equal((await trial({modal:true})).facts.roleProofFailure,'control-not-actionable');
+ for(const opts of [{noOptin:true},{foreignPage:true},{wrongLegend:true},{duplicateRadio:true},{badScope:true},{duplicateRoleFieldset:true},{login:true},{radioDisabled:true},{modal:true},{alertDialog:true},{ambiguousDialog:true},{duplicateDialog:true},{intercepted:'label'},{remount:true}]) {
   const r=await trial(opts);assert.equal(r.roleClicks,0);assert.equal(r.continueClicks,0);
  }
  for(const opts of [{readbackFail:true},{multipleChecked:true},{ownerLoss:true},{disabled:true},{duplicateContinue:true},{intercepted:'continue'},{uncertain:'role'}]) {

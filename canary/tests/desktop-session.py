@@ -46,20 +46,30 @@ class DesktopSessionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             commands = {
-                "openbox": '#!/bin/sh\n[ -z "${NAN_API_KEY+x}" ] || exit 90\nexec sleep 30\n',
-                "xprop": '#!/bin/sh\necho "_NET_SUPPORTING_WM_CHECK(WINDOW): window id # 0x123"\n',
-                "checker": '#!/bin/sh\n[ "$NAN_API_KEY" = synthetic ] || exit 91\nexit 23\n',
+                "openbox": '#!/bin/sh\n[ -z "${NAN_API_KEY+x}" ] || exit 90\nprintf "%s" "$$" > "$SYNTHETIC_SESSION/started"\nexec sleep 30\n',
+                "xprop": '#!/bin/sh\n[ -f "$SYNTHETIC_SESSION/started" ] && echo "_NET_SUPPORTING_WM_CHECK(WINDOW): window id # 0x123"\n',
+                "checker": '#!/bin/sh\n[ "$NAN_API_KEY" = synthetic ] || exit 91\n[ -f "$SYNTHETIC_SESSION/started" ] || exit 92\nexit 23\n',
             }
             for name, content in commands.items():
                 path = root / name
                 path.write_text(content)
                 path.chmod(0o700)
-            environment = dict(os.environ, PATH=f"{root}:{os.environ['PATH']}", NAN_API_KEY="synthetic")
+            shell_environment = root / "shell-environment"
+            shell_environment.write_text(
+                'env() { [[ "$1" == -u && "$2" == NAN_API_KEY && "$3" == openbox ]] || return 93; command env "$1" "$2" /bin/sh "$SYNTHETIC_SESSION/openbox" "${@:4}"; }\n'
+                'xprop() { /bin/sh "$SYNTHETIC_SESSION/xprop" "$@"; }\n'
+            )
+            # Explicit interpreters avoid platform handling of temporary
+            # shebang executables. The real env command still removes the key.
+            environment = dict(os.environ, BASH_ENV=str(shell_environment),
+                               SYNTHETIC_SESSION=str(root), NAN_API_KEY="synthetic")
             result = subprocess.run(
-                ["bash", str(ROOT / "scripts/run-desktop-check-x11.sh"), str(root / "checker")],
+                ["bash", str(ROOT / "scripts/run-desktop-check-x11.sh"), "/bin/sh", str(root / "checker")],
                 env=environment, capture_output=True, timeout=5,
             )
             self.assertEqual(result.returncode, 23)
+            with self.assertRaises(ProcessLookupError):
+                os.kill(int((root / "started").read_text()), 0)
 
 
 if __name__ == "__main__":

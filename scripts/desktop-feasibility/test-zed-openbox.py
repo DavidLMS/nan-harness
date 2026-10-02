@@ -83,6 +83,7 @@ class PolicyTests(unittest.TestCase):
                                REAL_PYTHON=sys.executable, STOCK_XML=str(directory / 'stock.xml'),
                                WM_ARGS=str(directory / 'args'), FEASIBILITY_ZED_MAXIMIZED='1',
                                GITHUB_ACTIONS='true', RUNNER_ENVIRONMENT='github-hosted', RUNNER_OS='Linux')
+            self.explicit_fixture_interpreters(directory, environment)
             result = subprocess.run(['bash', str(ROOT / 'scripts/run-desktop-check-x11.sh'), '/usr/bin/true'],
                                     env=environment, capture_output=True, timeout=3)
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -103,10 +104,23 @@ class PolicyTests(unittest.TestCase):
             probe.chmod(0o700)
             environment = dict(os.environ, PATH=str(directory) + ':' + os.environ['PATH'],
                                WM_ARGS=str(directory / 'args'), FEASIBILITY_ZED_MAXIMIZED='0')
+            self.explicit_fixture_interpreters(directory, environment)
             result = subprocess.run(['bash', str(ROOT / 'scripts/run-desktop-check-x11.sh'), '/usr/bin/true'],
                                     env=environment, capture_output=True, timeout=3)
             self.assertEqual(result.returncode, 0)
             self.assertEqual((directory / 'args').read_text(), '--sm-disable\n')
+
+    @staticmethod
+    def explicit_fixture_interpreters(directory, environment):
+        # Exercise the real wrapper and env credential removal without asking
+        # the OS to execute temporary shebang fixtures directly.
+        startup = directory / 'shell-environment'
+        startup.write_text(
+            'env() { [[ "$1" == -u && "$2" == NAN_API_KEY && "$3" == openbox ]] || return 93; command env "$1" "$2" /bin/sh "$SYNTHETIC_OPENBOX/openbox" "${@:4}"; }\n'
+            'xprop() { /bin/sh "$SYNTHETIC_OPENBOX/xprop" "$@"; }\n'
+            'python3() { /bin/sh "$SYNTHETIC_OPENBOX/python3" "$@"; }\n'
+        )
+        environment.update(BASH_ENV=str(startup), SYNTHETIC_OPENBOX=str(directory))
 
 
 if __name__ == '__main__':

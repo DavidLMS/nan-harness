@@ -88,14 +88,24 @@ pub(super) async fn run_ready_session(
         let token = zeroize::Zeroizing::new(bridge.with_session_token(str::to_owned));
         qualification_config::record(paths, bridge.base_url(), &token).await;
     }
+    #[cfg(all(feature = "desktop-qualification", target_os = "macos"))]
+    let storage = qualification_storage::Snapshot::capture(paths);
     let activities = show_auto.then(|| bridge.subscribe_activities());
     if let Err(error) = process.launch() {
+        #[cfg(all(feature = "desktop-qualification", target_os = "macos"))]
+        if let Some(storage) = &storage {
+            storage.record();
+        }
         return complete_and_restore(paths, process, Err(error)).await;
     }
     eprintln!("{}", launch_message(show_auto));
     let activity_logger =
         activities.map(|activities| tokio::spawn(log_bridge_activities(activities)));
     let completion = wait_for_exit_or_signal(process).await;
+    #[cfg(all(feature = "desktop-qualification", target_os = "macos"))]
+    if let Some(storage) = &storage {
+        storage.record();
+    }
     if let Some(activity_logger) = activity_logger {
         activity_logger.abort();
     }

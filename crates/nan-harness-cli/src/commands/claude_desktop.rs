@@ -40,6 +40,8 @@ mod paths;
 mod process;
 #[cfg(feature = "desktop-qualification")]
 mod qualification_config;
+#[cfg(all(feature = "desktop-qualification", target_os = "macos"))]
+mod qualification_storage;
 mod session;
 #[cfg(test)]
 mod tests;

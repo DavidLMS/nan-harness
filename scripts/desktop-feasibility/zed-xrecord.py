@@ -9,7 +9,9 @@ import sys
 import time
 
 class Unavailable(Exception):
-    pass
+    def __init__(self, stage):
+        self.stage = stage
+        super().__init__(stage)
 
 class Counts:
 
@@ -79,46 +81,55 @@ class NativeRecorder:
         self.control = self.data = None
         self.context = 0
         self.pid, self.window = (pid, window)
+        self.stage = 'library'
         try:
             self.x = C.CDLL('libX11.so.6')
             self.record = C.CDLL('libXtst.so.6')
             self.res = C.CDLL('libXres.so.1')
             self._bind()
+            self.stage = 'display'
             self.control = self.x.XOpenDisplay(None)
             self.data = self.x.XOpenDisplay(None)
             if not self.control or not self.data:
-                raise Unavailable()
+                raise Unavailable(self.stage)
             a, b = (C.c_int(), C.c_int())
+            self.stage = 'record-version'
             if not self.record.XRecordQueryVersion(self.control, C.byref(a), C.byref(b)) or (a.value, b.value) < (1, 13):
-                raise Unavailable()
+                raise Unavailable(self.stage)
+            self.stage = 'xres-version'
             if not self.res.XResQueryVersion(self.control, C.byref(a), C.byref(b)) or (a.value, b.value) < (1, 2):
-                raise Unavailable()
+                raise Unavailable(self.stage)
             opcode, ev, err = (C.c_int(), C.c_int(), C.c_int())
+            self.stage = 'xinput-extension'
             if not self.x.XQueryExtension(self.control, b'XInputExtension', C.byref(opcode), C.byref(ev), C.byref(err)):
-                raise Unavailable()
+                raise Unavailable(self.stage)
             self.opcode = opcode.value
             if not 128 <= self.opcode <= 255:
-                raise Unavailable()
+                raise Unavailable(self.stage)
             base = self._identity()
             self.counts = Counts(window, self.opcode, base)
             ranges = Range()
             ranges.delivered = R8(35, 35)
             pointer = C.pointer(ranges)
             clients = (C.c_ulong * 1)(window)
+            self.stage = 'context'
             self.context = self.record.XRecordCreateContext(self.control, 0, clients, 1, C.byref(pointer), 1)
             if not self.context:
-                raise Unavailable()
+                raise Unavailable(self.stage)
             # The data connection cannot enable a context until the control
             # connection's creation request has reached the server.
             self.x.XSync(self.control, 0)
             self.callback = CALLBACK(self._event)
+            self.stage = 'enable'
             if not self.record.XRecordEnableContextAsync(self.data, self.context, self.callback, None):
-                raise Unavailable()
+                raise Unavailable(self.stage)
+            self.stage = 'identity-recheck'
             if self._identity() != base:
-                raise Unavailable()
+                raise Unavailable(self.stage)
         except (OSError, Unavailable):
+            failed_stage = self.stage
             self.close()
-            raise Unavailable() from None
+            raise Unavailable(failed_stage) from None
 
     def _bind(self):
 
@@ -147,14 +158,19 @@ class NativeRecorder:
         bind(self.record, 'XRecordFreeData', [C.POINTER(Intercept)], None)
 
     def _identity(self):
+        recheck = self.stage in {'identity-recheck', 'observation'}
+        if not recheck:
+            self.stage = 'client-query'
         spec = Spec(self.window, 2)
         n = C.c_long()
         values = C.POINTER(Identity)()
         if self.res.XResQueryClientIds(self.control, 1, C.byref(spec), C.byref(n), C.byref(values)) != 0:
-            raise Unavailable()
+            raise Unavailable(self.stage)
         try:
+            if not recheck:
+                self.stage = 'client-identity'
             if n.value != 1 or values[0].spec.mask != 2 or self.res.XResGetClientPid(values) != self.pid or (not values[0].spec.client):
-                raise Unavailable()
+                raise Unavailable(self.stage)
             return values[0].spec.client
         finally:
             self.res.XResClientIdsDestroy(n, values)
@@ -174,14 +190,15 @@ class NativeRecorder:
 
     def observe(self, seconds=0.5):
         if not 0 < seconds <= 1:
-            raise Unavailable()
+            raise Unavailable(self.stage)
+        self.stage = 'observation'
         end = time.monotonic() + seconds
         while time.monotonic() < end:
             ready, _, _ = select.select([self.x.XConnectionNumber(self.data)], [], [], max(0, end - time.monotonic()))
             if ready:
                 self.record.XRecordProcessReplies(self.data)
         if self._identity() != self.counts.base:
-            raise Unavailable()
+            raise Unavailable(self.stage)
         return self.counts.closed()
 
     def close(self):

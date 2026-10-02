@@ -47,6 +47,37 @@ class Transport(unittest.TestCase):
         with patch('subprocess.run', side_effect=subprocess.TimeoutExpired('fixed-helper', 2)):
             self.assertEqual(self.call('submit'), 3)
 
+    def test_recording_budget_exhaustion_is_closed_without_suppressing_one_click(self):
+        request = json.dumps(dict(pid=20, window=40, x=100, y=200,
+            bus=':1.2', path='/org/a11y/atspi/accessible/3')).encode()
+        clock, observations, clicks = [0], [], []
+        def execute(args, **kwargs):
+            if args[1] == 'getmouselocation':
+                clock[0] = 3.2
+            if args[1] == 'click':
+                clicks.append(args)
+            output = (b'X=0\nY=0\nSCREEN=0\nWINDOW=40\nWIDTH=1280\nHEIGHT=800'
+                if args[1] == 'getwindowgeometry' else
+                b'X=100\nY=200\nSCREEN=0\nWINDOW=40'
+                if args[1] == 'getmouselocation' else
+                b'40\n' if args[1] == 'getactivewindow' else b'20\n')
+            return subprocess.CompletedProcess(args, 0, stdout=output)
+        with patch.dict(os.environ, {'NANH_ZED_XRECORD':'1', 'GITHUB_ACTIONS':'true',
+                'RUNNER_ENVIRONMENT':'github-hosted', 'RUNNER_OS':'Linux'}), \
+             patch.object(sys, 'platform', 'linux'), \
+             patch('time.monotonic', side_effect=lambda: clock[0]), \
+             patch('subprocess.run', side_effect=execute), \
+             patch('runpy.run_path') as spawn, \
+             patch.dict(module['main'].__globals__,
+                normalized_retry_point=lambda request, active, geometry, facts=None: (100,200),
+                pointer_child=lambda *args:'client',
+                publish_observation=lambda facts:observations.append(facts)):
+            self.assertEqual(self.call('retry-click', request),0)
+            spawn.assert_not_called()
+        self.assertEqual(len(clicks),1)
+        self.assertEqual(observations[0]['inputDelivery'], dict(status='unavailable',
+            stage='budget-insufficient',pressCount=None,releaseCount=None,orderedPair=None))
+
     def test_pointer_checks_foreground_before_one_activation(self):
         request = json.dumps(dict(pid=20, window=40, x=100, y=200, bus=':1.2', path='/org/a11y/atspi/accessible/3')).encode()
         calls = []

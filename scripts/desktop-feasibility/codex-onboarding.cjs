@@ -11,7 +11,16 @@ function sample(control) {
   if (!control.isConnected || control.ownerDocument !== document || control.closest('[inert]')) return null;
   const visible = e => { const r = e.getBoundingClientRect(); const s = getComputedStyle(e);
     return r.width > 0 && r.height > 0 && s.display !== 'none' && s.visibility !== 'hidden'; };
-  if ([...document.querySelectorAll('[role="dialog"],[aria-modal="true"],[role="alertdialog"],[role="menu"]')].some(visible)) return null;
+  const overlays=[...document.querySelectorAll('[role="dialog"],[aria-modal="true"],[role="alertdialog"],[role="menu"]')].filter(visible);
+  if (overlays.length>1) return null;
+  if (overlays.length===1) {
+    const dialog=overlays[0];
+    // Native project entry can present the same verified public role form in
+    // a dialog. Only its own enclosing dialog can admit an ordinary click.
+    if (dialog.getAttribute('role')!=='dialog' || !dialog.contains(control)
+        || dialog.querySelectorAll('input[type="radio"][name="conversational-onboarding-inline-role"][value="engineering"]').length!==1
+        || [...dialog.querySelectorAll('fieldset > legend')].filter(e=>visible(e)&&e.innerText.trim()==='Select the kind of work you do').length!==1) return null;
+  }
   for (let e = control, depth = 0; e; e = e.parentElement) {
     if (++depth > 64 || getComputedStyle(e).pointerEvents === 'none') return null;
   }
@@ -102,17 +111,18 @@ exports.run = async function(page, ownerGuard, deadline) {
   }
   async function click(control, reprove, before, after) {
     if (!await reprove()) return false;
+    const blocked=()=>{facts.roleProofFailure='control-not-actionable';return false;};
     const handle = await control.elementHandle();
-    if (!handle) return false;
+    if (!handle) return blocked();
     try {
       const first = await handle.evaluate(sample);
       await wait(Math.min(100,Math.max(0,deadline-Date.now())));
       if (!await reprove() || !await control.evaluate((e, held)=>e===held,handle)) return false;
       const point = candidate(first,await handle.evaluate(sample));
-      if (!point) return false;
+      if (!point) return blocked();
       if (!await reprove() || !await control.evaluate((e, held)=>e===held,handle)) return false;
       const final=await handle.evaluate(sample);
-      if (!candidate(first,final) || !final.points.some(p=>p.x===point.x&&p.y===point.y)) return false;
+      if (!candidate(first,final) || !final.points.some(p=>p.x===point.x&&p.y===point.y)) return blocked();
       if (!ownedEndpoint()) return false;
       if (Date.now() >= deadline) { facts.roleProofFailure='deadline-expired'; return false; }
       facts[before]=true;

@@ -33,7 +33,7 @@ def public_onboarding(setup, app):
                 'roleClickCompleted', 'engineeringChecked', 'continueControl',
                 'continueClickAttempted', 'continueClickCompleted', 'roleScopeAbsent'}
     fields = booleans | {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'stage', 'errorCategory', 'roleProofFailure', 'sessionProofFailure'}
-    failures = {'unmeasured', 'deadline-or-ownership', 'deadline-expired', 'ownership-lost', 'page-count', 'page-changed', 'url-changed', 'query-failed', 'legend-count', 'group-absent', 'scope-count',
+    failures = {'unmeasured', 'deadline-or-ownership', 'deadline-expired', 'ownership-lost', 'page-count', 'page-changed', 'url-changed', 'query-failed', 'control-not-actionable', 'legend-count', 'group-absent', 'scope-count',
                 'fieldset-count', 'login-present', 'engineering-count', 'engineering-disabled',
                 'label-count', 'label-association', 'checked-mismatch', 'final-ownership'}
     sessions = {'unmeasured', 'guard-missing', 'deadline-invalid', 'deadline-expired', 'platform', 'host-policy', 'onboarding-policy'}
@@ -158,10 +158,10 @@ def semantic_observations(directory, app):
         if type(value) is not dict:
             raise ValueError('invalid semantic observation')
         mechanism = value.get('mechanism')
-        if mechanism not in {'hermes-windows-catalog-readiness', 'hermes-renderer-qualification', 'zed-native-copy', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'claude-owned-configuration'}:
+        if mechanism not in {'hermes-windows-catalog-readiness', 'hermes-renderer-qualification', 'zed-native-copy', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'claude-owned-configuration', 'claude-storage-use'}:
             continue
         expected = 'hermes-renderer-qualification' if app == 'hermes-desktop' else 'zed-native-copy'
-        if (mechanism != expected and mechanism not in {'hermes-windows-catalog-readiness', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'claude-owned-configuration'}) or type(value.get('schemaVersion')) is not int or value['schemaVersion'] != 1:
+        if (mechanism != expected and mechanism not in {'hermes-windows-catalog-readiness', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'claude-owned-configuration', 'claude-storage-use'}) or type(value.get('schemaVersion')) is not int or value['schemaVersion'] != 1:
             raise ValueError('semantic observation identity differs')
         record = {'schemaVersion': 1, 'mechanism': mechanism}
         if mechanism == 'hermes-windows-catalog-readiness':
@@ -240,6 +240,22 @@ def semantic_observations(directory, app):
                     raise ValueError('invalid Claude configuration observation flag')
                 record[key] = value[key]
             record['diagnosticsOnly'] = True
+        elif mechanism == 'claude-storage-use':
+            fields = set('schemaVersion mechanism diagnosticsOnly freshBefore observationValid before after'.split())
+            storage = set('claudeLocalState claudePreferences thirdPartyLocalState thirdPartyPreferences'.split())
+            if (set(value) != fields or app != 'claude-desktop' or value['diagnosticsOnly'] is not True
+                    or type(value['freshBefore']) is not bool or type(value['observationValid']) is not bool):
+                raise ValueError('invalid Claude storage observation identity')
+            for phase in ('before', 'after'):
+                flags = value[phase]
+                if type(flags) is not dict or set(flags) != storage or any(type(flag) is not bool for flag in flags.values()):
+                    raise ValueError('invalid Claude storage observation flags')
+            initial_present = any(value['before'].values())
+            if (value['freshBefore'] and initial_present
+                    or value['observationValid'] and value['freshBefore'] == initial_present):
+                raise ValueError('inconsistent Claude storage freshness')
+            record.update(diagnosticsOnly=True, freshBefore=value['freshBefore'],
+                          observationValid=value['observationValid'], before=dict(value['before']), after=dict(value['after']))
         elif mechanism == 'zed-pointer-observation':
             flags = set('maximizedHorizontal maximizedVertical enabled sensitive showing visible defunct retryContains'.split())
             if (set(value) not in (flags | {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'pointerTarget', 'pointerChild'},
@@ -259,9 +275,15 @@ def semantic_observations(directory, app):
                 delivery = value['inputDelivery']
                 fields = {'status', 'pressCount', 'releaseCount', 'orderedPair'}
                 statuses = {'complete', 'unavailable', 'timeout', 'query-failed', 'identity-failed'}
-                if (type(delivery) is not dict or set(delivery) != fields
+                stages = {'policy', 'budget-insufficient', 'request', 'library', 'display',
+                          'record-version', 'xres-version', 'xinput-extension', 'client-query',
+                          'client-identity', 'context', 'enable', 'identity-recheck',
+                          'armed', 'observation', 'cleanup'}
+                if (type(delivery) is not dict or set(delivery) not in (fields, fields | {'stage'})
                         or type(delivery['status']) is not str or delivery['status'] not in statuses):
                     raise ValueError('invalid Zed input delivery observation')
+                if 'stage' in delivery and (type(delivery['stage']) is not str or delivery['stage'] not in stages):
+                    raise ValueError('invalid Zed input delivery stage')
                 if delivery['status'] == 'complete':
                     if (any(type(delivery[key]) is not int or not 0 <= delivery[key] <= 2
                             for key in ('pressCount', 'releaseCount'))

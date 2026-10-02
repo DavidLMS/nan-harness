@@ -285,7 +285,7 @@ def retry_click(payload):
                     return False
 
             remaining = deadline - time.monotonic()
-            facts['inputDelivery'] = dict(status='unavailable', pressCount=None,
+            facts['inputDelivery'] = dict(status='unavailable', stage='budget-insufficient', pressCount=None,
                                           releaseCount=None, orderedPair=None)
             if remaining > 1:
                 module = runpy.run_path(str(Path(__file__).with_name('zed-xrecord-supervisor.py')))

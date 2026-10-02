@@ -768,6 +768,27 @@ class QualificationTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'zed-desktop')
 
+    def test_claude_storage_use_is_closed_and_cannot_certify_consumption(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            flags = dict(claudeLocalState=False, claudePreferences=False,
+                         thirdPartyLocalState=False, thirdPartyPreferences=False)
+            value = dict(schemaVersion=1, mechanism='claude-storage-use', diagnosticsOnly=True,
+                         freshBefore=True, observationValid=True, before=flags,
+                         after={**flags, 'thirdPartyPreferences': True})
+            path = root / 'storage.json'
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(root, 'claude-desktop')[0], value)
+            with self.assertRaises(ValueError):
+                q.semantic_observations(root, 'chatgpt-desktop')
+            for changed in ({**value, 'rawPath': 'PRIVATE'}, {**value, 'diagnosticsOnly': False},
+                            {**value, 'freshBefore': False}, {**value, 'configurationConsumed': True},
+                            {**value, 'after': {**flags, 'thirdPartyPreferences': 1}},
+                            {**value, 'before': {**flags, 'claudeLocalState': True}}):
+                path.write_text(json.dumps(changed))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'claude-desktop')
+
     def test_input_delivery_is_advisory_closed_and_distinguishes_unmeasured(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -780,6 +801,11 @@ class QualificationTests(unittest.TestCase):
                      dict(status='complete', pressCount=0, releaseCount=0, orderedPair=False)]
             valid.extend(dict(status=status, pressCount=None, releaseCount=None, orderedPair=None)
                          for status in ('unavailable', 'timeout', 'query-failed', 'identity-failed'))
+            valid.extend(dict(status='unavailable', pressCount=None, releaseCount=None, orderedPair=None, stage=stage)
+                         for stage in ('policy', 'budget-insufficient', 'request', 'library', 'display',
+                                       'record-version', 'xres-version', 'xinput-extension', 'client-query',
+                                       'client-identity', 'context', 'enable', 'identity-recheck',
+                                       'armed', 'observation', 'cleanup'))
             for delivery in valid:
                 path.write_text(json.dumps({**value, 'inputDelivery': delivery}))
                 observed = q.semantic_observations(root, 'zed-desktop')[0]
@@ -790,7 +816,8 @@ class QualificationTests(unittest.TestCase):
                        dict(status='complete', pressCount=True, releaseCount=1, orderedPair=False),
                        dict(status='complete', pressCount=3, releaseCount=1, orderedPair=False),
                        dict(status='timeout', pressCount=0, releaseCount=None, orderedPair=None),
-                       {**valid[0], 'window': 10}, {'status': 'complete'}, None]
+                       {**valid[0], 'window': 10}, {**valid[0], 'stage': 'PRIVATE'},
+                       {**valid[0], 'stage': None}, {'status': 'complete'}, None]
             for delivery in invalid:
                 path.write_text(json.dumps({**value, 'inputDelivery': delivery}))
                 with self.assertRaises(ValueError):

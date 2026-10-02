@@ -24,6 +24,26 @@ class Tests(unittest.TestCase):
         o = m.Observer(10, 20, lambda: True, self.fake('print(\'{"status":"unavailable","pressCount":null,"releaseCount":null,"orderedPair":null}\',flush=True)'))
         self.assertEqual(o.finish(), m.unobserved('unavailable'))
 
+    def test_stage_boundary_accepts_only_closed_enum_and_legacy_receipts(self):
+        for stage in m.STAGES:
+            payload = m.unobserved('unavailable', stage)
+            observer = m.Observer(10, 20, lambda: True,
+                self.fake('print(' + repr(json.dumps(payload)) + ',flush=True)'))
+            self.assertEqual(observer.finish(), payload)
+            self.assertIsNone(observer.child)
+        for stage in ['PRIVATE', None, 2, {}]:
+            with self.assertRaises(ValueError):
+                m.validate({**m.unobserved('unavailable'), 'stage': stage})
+        self.assertEqual(m.validate(m.unobserved('unavailable')), m.unobserved('unavailable'))
+
+    def test_invalid_budget_and_request_never_spawn(self):
+        with mock.patch.object(m.subprocess, 'Popen') as spawn:
+            self.assertEqual(m.Observer(10, 20, lambda: True, budget=0).finish(),
+                             m.unobserved('unavailable', 'budget-insufficient'))
+            self.assertEqual(m.Observer(0, 20, lambda: True).finish(),
+                             m.unobserved('unavailable', 'request'))
+            spawn.assert_not_called()
+
     def test_hung_native_arm_is_killed_without_input_or_clock_reset(self):
         start = time.monotonic()
         o = m.Observer(10, 20, lambda: True, self.fake('import time;time.sleep(30)'), budget=0.1)
@@ -34,26 +54,26 @@ class Tests(unittest.TestCase):
     def test_loss_after_arm_cannot_report_pair(self):
         guard = iter([True, False])
         o = m.Observer(10, 20, lambda: next(guard), self.fake('import sys;sys.stdin.readline();print(\'{"stage":"armed"}\',flush=True);sys.stdin.readline()'))
-        self.assertEqual(o.finish(), m.unobserved('identity-failed'))
+        self.assertEqual(o.finish(), m.unobserved('identity-failed', 'armed'))
 
     def test_raw_or_duplicate_payload_rejected_and_worker_reaped(self):
         for payload in ['{"private":"content"}', '{"stage":"armed","stage":"armed"}']:
             o = m.Observer(10, 20, lambda: True, self.fake('print(' + repr(payload) + ',flush=True)'))
-            self.assertEqual(o.finish(), m.unobserved('query-failed'))
+            self.assertEqual(o.finish(), m.unobserved('query-failed', 'request'))
 
     def test_inconsistent_approval_rejected(self):
         with self.assertRaises(ValueError):
             m.validate({'status': 'complete', 'pressCount': 0, 'releaseCount': 1, 'orderedPair': True})
     def test_eof_without_receipt_is_unobserved(self):
         observer = m.Observer(10, 20, lambda: True, self.fake('pass'))
-        self.assertEqual(observer.finish(), m.unobserved('query-failed'))
+        self.assertEqual(observer.finish(), m.unobserved('query-failed', 'request'))
         self.assertIsNone(observer.child)
 
     def test_trailing_bytes_are_not_a_second_output_channel(self):
         payload = json.dumps(m.unobserved('unavailable')) + "\nPRIVATE\n"
         observer = m.Observer(10, 20, lambda: True,
                               self.fake('import sys;sys.stdout.write(' + repr(payload) + ');sys.stdout.flush()'))
-        self.assertEqual(observer.finish(), m.unobserved('query-failed'))
+        self.assertEqual(observer.finish(), m.unobserved('query-failed', 'cleanup'))
         self.assertIsNone(observer.child)
 
     def test_worker_does_not_inherit_provider_or_python_environment(self):
@@ -83,7 +103,7 @@ else:
         observer.result = m.unobserved('unavailable')
         observer.close()
         self.assertIs(observer.child, child)
-        self.assertEqual(observer.result, m.unobserved('timeout'))
+        self.assertEqual(observer.result, m.unobserved('timeout', 'cleanup'))
         observer.close()
         self.assertIsNone(observer.child)
         self.assertEqual(child.wait.call_count, 2)
@@ -98,7 +118,7 @@ else:
             return True
         observer = m.Observer(10, 20, guard,
             self.fake("import sys;sys.stdin.readline();print('{\"stage\":\"armed\"}',flush=True);sys.stdin.readline()"))
-        self.assertEqual(observer.finish(), m.unobserved('identity-failed'))
+        self.assertEqual(observer.finish(), m.unobserved('identity-failed', 'armed'))
         self.assertIsNone(observer.child)
 
 if __name__ == '__main__':

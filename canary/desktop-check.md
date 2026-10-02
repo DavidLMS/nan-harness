@@ -774,3 +774,64 @@ On this Mac, direct execution of a temporary Python script repeatedly times out
 while explicitly invoking its interpreter completes promptly. The unrelated
 synthetic Openbox launch fixtures encounter the same temporary-script boundary
 on macOS; their authoritative Linux workflow check remains required.
+
+Linux Zed on `edb2d933` in
+[37018798133](https://github.com/DavidLMS/nan-harness/actions/runs/37018798133)
+again passes response and file-tool checks in all three probes, then fails Retry;
+all cleanup passes. The input observer is now enabled, but both emitted delivery
+receipts report `unavailable`, not measured zero events. The next receipt names
+only a closed preparation boundary, including insufficient remaining budget,
+without changing the input action or treating an unknown as success.
+
+The parser-corrected macOS Claude trial on the same commit in
+[37018822593](https://github.com/DavidLMS/nan-harness/actions/runs/37018822593)
+reports `finishedLaunching=true`, `hidden=false` and `active=false` in all three
+probes. The exact matching native process exists, but its window inventory is
+absent; all cleanup passes. Configuration consumption remains unmeasured. This
+does not demonstrate an editor or a requirement for an Anthropic account.
+
+The local gate on `edb2d933` stops at the synthetic X11 session fixture's direct
+temporary shell execution. That fixture now uses explicit interpreters while
+still exercising the real wrapper and real `env` credential removal. It verifies
+window-manager readiness, preservation of the checker's failure status and
+process cleanup. Both the session and Openbox fixtures pass with their original
+deadlines; ordinary desktop launch code is unchanged. The final tree still
+requires a complete repository gate.
+
+The clean Linux gate for `edb2d933` passes in
+[37018868617](https://github.com/DavidLMS/nan-harness/actions/runs/37018868617).
+Windows Hermes in
+[37018804947](https://github.com/DavidLMS/nan-harness/actions/runs/37018804947)
+finds one complete composer, editor and expected model pill in every probe, but
+fails a document query before clicking; all cleanup passes. The frame comparison
+incorrectly treated CDP's fragment-free `Frame.url` as the complete URL. The next
+trial reconstructs it using the protocol's separate `urlFragment`, still checking
+the original document, loader and exact allowed route. Synthetic tests cover this
+actual protocol shape and reject missing, foreign or invalid fragments.
+
+Windows Codex in
+[37018815332](https://github.com/DavidLMS/nan-harness/actions/runs/37018815332)
+launches with the exact native project policy in all three probes. Its public role
+form is present with one dialog and no editor; the old sampler rejects every
+visible dialog before any click. The next sampler can admit only one enclosing
+dialog containing that already-proved role form. Foreign dialogs, alerts, menus,
+ambiguous forms and covered controls remain blocked. The native result does not
+yet establish that the project or coding composer opened; all cleanup passes.
+
+Codex runtime `0.159.0-alpha.12.1` requires canonical
+`server_is_overloaded` classification for its coding capacity Retry. The inspected
+[HTTP classifier](https://github.com/openai/codex/blob/180d8caaac22c656bfc6329f2f573ee1430cbe20/codex-rs/codex-api/src/api_bridge.rs#L99)
+accepts HTTP 503 with that exact error code; its Responses stream also accepts
+the canonical code. The bridge previously replaced both with generic failures.
+The bridge now preserves only this explicitly typed overload, emits a fixed safe
+message, and retains other failures and retry policies. HTTP/SSE and negative
+contract tests pass. This enables a future recovery adapter; it does not qualify
+Codex's inventory trial or prove a manual click before the UI's automatic timer.
+
+The next Claude macOS diagnostic snapshots only regular-file presence for
+`Local State` and `Default/Preferences` in the two exact owned profile roots
+before and after launch. Fresh artifacts can establish private application
+storage use, but never gateway configuration consumption or editor acceptance.
+Unsafe metadata invalidates that advisory observation; file contents and paths
+are not emitted. The inspected bootstrap deliberately changes its user-data
+directory to the private `Claude-3p` sibling after parsing third-party mode.

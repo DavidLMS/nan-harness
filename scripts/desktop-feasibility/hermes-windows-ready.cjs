@@ -73,7 +73,10 @@ exports.run = async function run(page, session, ownedEndpoint, deadline, expecte
         timer=setTimeout(()=>reject(new Error('frame deadline')),Math.min(5000,Math.max(1,deadline-Date.now())));
       })]);
       const current=reply?.frameTree?.frame;
-      if (!current || current.url!==page.url() || !['id','loaderId'].every(key=>typeof current[key]==='string'
+      // CDP separates the document URL from its fragment, including the '#'.
+      const fragment=current?.urlFragment===undefined?'':current.urlFragment;
+      if (!current || current.url!==base || !['','#/'].includes(fragment)
+          || current.url+fragment!==page.url() || !['id','loaderId'].every(key=>typeof current[key]==='string'
           && current[key].length>0 && current[key].length<=256)) throw new Error('frame');
       if (documentIdentity && (current.id!==documentIdentity.id || current.loaderId!==documentIdentity.loaderId)) {
         facts.guardFailure='url-changed'; throw new Error('document changed');
