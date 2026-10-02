@@ -335,6 +335,37 @@ async function driveDom() {
     facts.errorCategory = 'submit-action-intercepted'; saveFacts(); return;
   }
   await send.scrollIntoViewIfNeeded({ timeout: Math.max(1, deadline - Date.now()) });
+  async function recordUnknownFront(handle) {
+    try {
+      const privateLevels = await handle.evaluate(button => {
+        const rect = button.getBoundingClientRect();
+        let front = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+        const levels = [];
+        let remaining = 48;
+        for (let level = 0; front && level < 4; level++, front = front.parentElement) {
+          const tokens = [];
+          for (const token of front.classList) {
+            if ((/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(token)
+                || /^z-(?:\(--[a-z0-9-]+\)|\[var\(--[a-z0-9-]+\)\]|\[[0-9]{1,5}\])$/.test(token)) && !tokens.includes(token)) {
+              if (tokens.length >= 24 || remaining === 0) break;
+              tokens.push(token); remaining--;
+            }
+          }
+          levels.push({ level, tokens });
+        }
+        return levels;
+      });
+      const { createHash } = require('node:crypto');
+      const levels = privateLevels.map(({ level, tokens }) => ({ level, tokenCount: tokens.length,
+        tokenHashes: tokens.map(token => createHash('sha256').update(token, 'utf8').digest('hex')) }));
+      privateLevels.length = 0;
+      const payload = JSON.stringify({ schemaVersion: 1, mechanism: 'hermes-front-source', diagnosticsOnly: true, levels }) + '\n';
+      if (Buffer.byteLength(payload, 'utf8') > 8192) return;
+      const diagnostic = `${output}.front.json`;
+      fs.writeFileSync(`${diagnostic}.tmp`, payload, { mode: 0o600 });
+      fs.renameSync(`${diagnostic}.tmp`, diagnostic);
+    } catch { /* Auxiliary observation never grants permission to submit. */ }
+  }
   let retryHandle;
   let retryPosition;
   let secondCandidate;
@@ -403,6 +434,8 @@ async function driveDom() {
     facts.retryAncestorClipped = second.closed.clipped;
     facts.retryRectInViewport = second.closed.rectInViewport;
     facts.retryPointerEventsNone = second.closed.pointerEventsNone;
+    if (!retryPosition && second.closed.status === 'no-owned-point' && second.closed.frontRegion === 'other'
+        && await reprove()) await recordUnknownFront(retryHandle);
     if (!retryPosition || !ownedEndpoint() || Date.now() >= deadline) {
       facts.sendBlocker = 'other'; facts.errorCategory = 'submit-action-intercepted'; saveFacts(); return;
     }

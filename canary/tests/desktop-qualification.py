@@ -387,6 +387,33 @@ class QualificationTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'hermes-desktop')
 
+    def test_source_fingerprints_publish_bounded_hashes_without_dom_attributes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / 'front.json'
+            value = dict(schemaVersion=1, mechanism='hermes-front-source', diagnosticsOnly=True,
+                         levels=[dict(level=0, tokenCount=1, tokenHashes=['a' * 64], className='PRIVATE')],
+                         rawText='PRIVATE', coordinates=[1, 2])
+            path.write_text(json.dumps(value))
+            public = q.semantic_observations(root, 'hermes-desktop')[0]
+            self.assertEqual(public['levels'][0]['tokenHashes'], ['a' * 64])
+            self.assertNotIn('PRIVATE', str(public))
+            self.assertNotIn('coordinates', public)
+            with self.assertRaises(ValueError):
+                q.semantic_observations(root, 'zed-desktop')
+            for invalid in [dict(level=1, tokenCount=1, tokenHashes=['a' * 64]),
+                            dict(level=0, tokenCount=True, tokenHashes=['a' * 64]),
+                            dict(level=0, tokenCount=1, tokenHashes=['PRIVATE']),
+                            dict(level=0, tokenCount=2, tokenHashes=['a' * 64, 'a' * 64]),
+                            dict(level=0, tokenCount=25, tokenHashes=['a' * 64] * 25)]:
+                path.write_text(json.dumps({**value, 'levels': [invalid]}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'hermes-desktop')
+            too_many = [dict(level=i, tokenCount=24, tokenHashes=[f'{j:064x}' for j in range(24)]) for i in range(3)]
+            path.write_text(json.dumps({**value, 'levels': too_many}))
+            with self.assertRaises(ValueError):
+                q.semantic_observations(root, 'hermes-desktop')
+
     def test_retry_focus_diagnostics_cannot_publish_active_editor_contents(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

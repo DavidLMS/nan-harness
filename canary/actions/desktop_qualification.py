@@ -105,10 +105,10 @@ def semantic_observations(directory, app):
         if type(value) is not dict:
             raise ValueError('invalid semantic observation')
         mechanism = value.get('mechanism')
-        if mechanism not in {'hermes-renderer-qualification', 'zed-native-copy', 'semantic-provider-oracle', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons'}:
+        if mechanism not in {'hermes-renderer-qualification', 'zed-native-copy', 'semantic-provider-oracle', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'hermes-front-source'}:
             continue
         expected = 'hermes-renderer-qualification' if app == 'hermes-desktop' else 'zed-native-copy'
-        if (mechanism != expected and mechanism not in {'semantic-provider-oracle', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons'}) or type(value.get('schemaVersion')) is not int or value['schemaVersion'] != 1:
+        if (mechanism != expected and mechanism not in {'semantic-provider-oracle', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'hermes-front-source'}) or type(value.get('schemaVersion')) is not int or value['schemaVersion'] != 1:
             raise ValueError('semantic observation identity differs')
         record = {'schemaVersion': 1, 'mechanism': mechanism}
         if mechanism == 'semantic-inventory':
@@ -160,6 +160,26 @@ def semantic_observations(directory, app):
                         metrics[key] = number
                     safe[icon] = metrics
                 record['calibration'] = safe
+        elif mechanism == 'hermes-front-source':
+            if app != 'hermes-desktop' or value.get('diagnosticsOnly') is not True:
+                raise ValueError('invalid Hermes source diagnostic identity')
+            levels = value.get('levels')
+            if type(levels) is not list or not 1 <= len(levels) <= 4:
+                raise ValueError('invalid source diagnostic levels')
+            safe, total = [], 0
+            for index, level in enumerate(levels):
+                if type(level) is not dict or type(level.get('level')) is not int or level['level'] != index:
+                    raise ValueError('invalid source diagnostic depth')
+                hashes, count = level.get('tokenHashes'), level.get('tokenCount')
+                if type(count) is not int or not 0 <= count <= 24 or type(hashes) is not list or len(hashes) != count:
+                    raise ValueError('invalid source diagnostic count')
+                if any(type(item) is not str or not HASH.fullmatch(item) for item in hashes) or len(set(hashes)) != len(hashes):
+                    raise ValueError('invalid source diagnostic hashes')
+                total += count
+                safe.append(dict(level=index, tokenCount=count, tokenHashes=hashes))
+            if total > 48:
+                raise ValueError('source diagnostic exceeds token budget')
+            record.update(diagnosticsOnly=True, levels=safe)
         elif mechanism == 'hermes-retry-policy':
             if app != 'hermes-desktop' or value.get('policy') != 'explicit-ui-retry' or type(value.get('autoRecoveryCycles')) is not int or value['autoRecoveryCycles'] != 0 or type(value.get('apiMaxRetries')) is not int or value['apiMaxRetries'] != 3:
                 raise ValueError('invalid Hermes qualification policy')

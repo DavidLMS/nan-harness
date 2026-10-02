@@ -161,7 +161,15 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
   commandBackdrop.parentElement = { children: [commandBackdrop, commandContent], parentElement: null,
     classList: { contains: () => false }, getAttribute: () => null };
   for (const element of [hitButton, overlay, foreignHit, ancestorFront, bodyHit, hitChild, dockStrip, sourceRegionHit, threadBackground]) {
-    element.classList ??= { contains: () => false }; element.getAttribute ??= () => null;
+    element.classList ??= Object.assign(['z-(--z-over-modal)', 'z-[var(--z-layer)]', 'z-[123]', 'z-[url(private)]', 'PRIVATE_SYNTHETIC_VALUE', ...Array.from({length:80}, (_,i)=>'static_token_'+i), '[bad:token]'], { contains: () => false }); element.getAttribute ??= () => null;
+  }
+  if (scenario === 'retry-all-covered') {
+    let parent = foreignHit;
+    for (let depth = 0; depth < 6; depth++) {
+      parent.parentElement = { tagName: 'DIV', parentElement: null, getAttribute: () => null,
+        classList: Object.assign(Array.from({ length: 40 }, (_, i) => 'ancestor_token_' + depth + '_' + i), { contains: () => false }) };
+      parent = parent.parentElement;
+    }
   }
   const page = {
     keyboard: { async press(key) { assert.equal(key, 'Escape'); escapes++;
@@ -219,18 +227,19 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
     },
     readdirSync(path) { return path === '/proc' ? ['30'] : ['5']; },
     readlinkSync() { return 'socket:[777]'; },
-    writeFileSync(path, value) { output.set(path, value); },
+    writeFileSync(path, value) { if (scenario === 'aux-write-failed' && path.includes('.front.json')) throw new Error('PRIVATE_SYNTHETIC_VALUE'); output.set(path, value); },
     renameSync(from, to) { output.set(to, output.get(from)); },
   };
   await new Promise((resolve, reject) => {
     vm.runInNewContext(source, {
       require(name) {
         if (name === 'node:fs') return mockFs;
+        if (name === 'node:crypto') return require('node:crypto');
         if (name.endsWith('/package.json')) return { version: '1.61.1' };
         return { chromium: { async connectOverCDP() { attaches++;
           if (!scenario) throw new Error('must not attach'); return browser; } } };
       },
-      URL, setTimeout: (callback, delayMs) => { if (delayMs === 0) settleTimerObserved = true; return setTimeout(callback, delayMs); }, requestAnimationFrame: callback => {
+      URL, Buffer, setTimeout: (callback, delayMs) => { if (delayMs === 0) settleTimerObserved = true; return setTimeout(callback, delayMs); }, requestAnimationFrame: callback => {
         if (scenario !== 'retry-no-frames') setTimeout(() => { frames++; callback(); }, 0);
       }, window: { innerWidth: 100, innerHeight: 100 }, innerWidth: 100, innerHeight: 100,
       getComputedStyle: element => ({ display: scenario === 'retry-ancestor-hidden' ? 'none' : 'block', visibility: 'visible', contentVisibility: 'visible', clipPath: scenario === 'retry-source-clipped' ? 'inset(25px 0px 0px)' : 'inset(0px 0px 0px 0px)', maskImage: 'none', pointerEvents: scenario === 'retry-pointer-none' && element === hitButton ? 'none' : 'auto',
@@ -247,7 +256,7 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
         return [];
       }, elementFromPoint: (x, y) =>
         commandVisible ? commandBackdrop : scenario === 'retry-center-covered' && x === 20 && y === 20 || scenario === 'retry-overlay' || (scenario === 'retry-centering' && centers === 0)
-          || (scenario === 'retry-intercepted' && clicks > 0) ? overlay : scenario === 'retry-fading-overlay' && sampleCount <= 2 ? foreignHit : ['retry-ancestor-cover', 'retry-composer-cover'].includes(scenario) ? ancestorFront : (scenario === 'retry-all-covered' || scenario === 'retry-covered-at-final' && sampleCount >= 3) ? foreignHit : (sourceRegionSelectors[scenario] || ['gateway-connecting', 'gateway-forged'].includes(scenario)) ? sourceRegionHit : scenario === 'retry-frame-settle' && frames < 2 ? threadBackground : scenario === 'retry-source-clipped' ? threadBackground : scenario === 'retry-offviewport' ? null : scenario === 'retry-private-hit' ? foreignHit : scenario === 'retry-body-hit' ? bodyHit : scenario === 'retry-dock-strip' ? dockStrip : scenario === 'retry-child-hit' ? hitChild : hitButton },
+          || (scenario === 'retry-intercepted' && clicks > 0) ? overlay : scenario === 'retry-fading-overlay' && sampleCount <= 2 ? foreignHit : ['retry-ancestor-cover', 'retry-composer-cover'].includes(scenario) ? ancestorFront : (['retry-all-covered', 'aux-write-failed'].includes(scenario) || scenario === 'retry-covered-at-final' && sampleCount >= 3) ? foreignHit : (sourceRegionSelectors[scenario] || ['gateway-connecting', 'gateway-forged'].includes(scenario)) ? sourceRegionHit : scenario === 'retry-frame-settle' && frames < 2 ? threadBackground : scenario === 'retry-source-clipped' ? threadBackground : scenario === 'retry-offviewport' ? null : scenario === 'retry-private-hit' ? foreignHit : scenario === 'retry-body-hit' ? bodyHit : scenario === 'retry-dock-strip' ? dockStrip : scenario === 'retry-child-hit' ? hitChild : hitButton },
       process: { argv: ['node', 'helper', qualify ? '--qualify' : '--drive', '/request', '/output'], exit: resolve },
     });
     setTimeout(() => reject(new Error('bounded helper fixture timed out')), 1000).unref();
@@ -256,7 +265,7 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
   const facts = JSON.parse(output.get('/output'));
   if (qualify) {
     assert(!output.get('/output').includes(request.expectedMarker));
-    return { facts, submits, fills, clicks, keys, centers, frames, focuses, escapes };
+    return { facts, submits, fills, clicks, keys, centers, frames, focuses, escapes, auxiliary: output.get('/output.front.json') };
   }
   assert.equal(facts.inputSubmitted, ['happy', 'delayed', 'missing-editor', 'transient-context', 'keyboard'].includes(scenario));
   assert.equal(facts.responseVerified, ['happy', 'delayed', 'missing-editor', 'transient-context', 'keyboard'].includes(scenario));
@@ -403,6 +412,31 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
     assert.equal(gateway.clicks, 0);
     assert.equal(gateway.escapes, 0);
   }
+  const fingerprint = await trial({ ...retryRequest, timeoutMs: 150 }, {}, 'retry-all-covered', true);
+  assert.equal(fingerprint.clicks, 0);
+  const auxiliary = JSON.parse(fingerprint.auxiliary);
+  assert.equal(auxiliary.mechanism, 'hermes-front-source');
+  assert.equal(auxiliary.schemaVersion, 1);
+  assert.equal(auxiliary.diagnosticsOnly, true);
+  const hashToken = token => require('node:crypto').createHash('sha256').update(token).digest('hex');
+  for (const token of ['z-(--z-over-modal)', 'z-[var(--z-layer)]', 'z-[123]'])
+    assert(auxiliary.levels[0].tokenHashes.includes(hashToken(token)));
+  assert(!auxiliary.levels[0].tokenHashes.includes(hashToken('z-[url(private)]')));
+  assert.equal(auxiliary.levels.length, 4);
+  assert.equal(auxiliary.levels.reduce((sum, level) => sum + level.tokenCount, 0), 48);
+  for (const level of auxiliary.levels) {
+    assert(level.tokenCount <= 24);
+    assert.equal(level.tokenHashes.length, level.tokenCount);
+    assert(level.tokenHashes.every(hash => /^[a-f0-9]{64}$/.test(hash)));
+  }
+  assert(!fingerprint.auxiliary.includes('PRIVATE_SYNTHETIC_VALUE'));
+  assert(!fingerprint.auxiliary.includes('static_token_'));
+  assert(Buffer.byteLength(fingerprint.auxiliary) <= 8192);
+  const failedAux = await trial({ ...retryRequest, timeoutMs: 150 }, {}, 'aux-write-failed', true);
+  assert.equal(failedAux.auxiliary, undefined);
+  assert.equal(failedAux.clicks, 0);
+  assert.equal(failedAux.keys, 0);
+  assert.equal(failedAux.facts.inputSubmitted, false);
   const uncertain = await trial(retryRequest, {}, 'retry-intercepted', true);
   assert.equal(uncertain.clicks, 1);
   assert.equal(uncertain.keys, 0);
