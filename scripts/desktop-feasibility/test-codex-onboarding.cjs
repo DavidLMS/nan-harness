@@ -3,7 +3,7 @@ const fs=require('node:fs');
 const vm=require('node:vm');
 const source=fs.readFileSync(`${__dirname}/codex-onboarding.cjs`,'utf8');
 async function trial(options={}) {
- let now=0,checked=false,absent=false,roleClicks=0,continueClicks=0,samples=0,overlayReads=0;
+ let now=0,checked=false,absent=false,roleClicks=0,continueClicks=0,samples=0,overlayReads=0,legendReads=0;
  const root={parentElement:null};
  const fieldset={parentElement:root};
  const label={kind:'label',tagName:'LABEL',parentElement:fieldset,innerText:'Engineering'};
@@ -59,7 +59,10 @@ async function trial(options={}) {
   filter(predicate){if(this.members&&predicate.has)this.members=this.members.filter(e=>predicate.has.kind==='legend'?e.legend:e.group);return this;}
   locator(s){return new Locator(s==='..'?'fieldset':s.startsWith('xpath=')?'scope':s==='fieldset:visible'?'roleFieldsets':s==='fieldset'?'fieldset':s==='label'?'label':s.includes(':checked')?'checked':s.includes('value=')?'radio':'radios');}
   getByRole(_r,o){return new Locator(o.name==='Continue'?'continue':'login');}
-  async count(){return this.kind==='label'?(options.duplicateLabel?2:1):this.kind==='scope'?(options.badScope?0:1):this.kind==='fieldset'?(options.extraFieldset?2:1):this.kind==='login'?(options.login?1:0):this.kind==='roleFieldsets'?this.members.length:this.kind==='legend'?(options.wrongLegend?0:options.duplicateRoleFieldset?2:1):this.kind==='radios'?(absent||options.noGroup?0:11):this.kind==='checked'?(checked?(options.multipleChecked?2:1):0):this.kind==='continue'?(options.duplicateContinue?2:1):this.kind==='radio'?(options.duplicateRadio?2:1):1;}
+  async count(){
+   if(this.kind==='legend'){legendReads++;if(options.overlayDeadlineDuringProof&&legendReads>=3)now=1201;if(options.overlayLegendLost&&legendReads>=3)return 0;}
+   if(this.kind==='scope'&&options.overlayScopeLost&&legendReads>=3)return 0;
+   return this.kind==='label'?(options.duplicateLabel?2:1):this.kind==='scope'?(options.badScope?0:1):this.kind==='fieldset'?(options.extraFieldset?2:1):this.kind==='login'?(options.login?1:0):this.kind==='roleFieldsets'?this.members.length:this.kind==='legend'?(options.wrongLegend?0:options.duplicateRoleFieldset?2:1):this.kind==='radios'?(absent||options.noGroup?0:11):this.kind==='checked'?(checked?(options.multipleChecked?2:1):0):this.kind==='continue'?(options.duplicateContinue?2:1):this.kind==='radio'?(options.duplicateRadio?2:1):1;}
   async isEnabled(){return this.kind==='radio'?!(options.radioDisabled||options.loading&&now<300):this.kind!=='continue'||!options.disabled;}
   async isChecked(){return checked;}
   element(){return this.kind==='label'?label:this.kind==='continue'?button:this.kind==='radio'?radio:this.kind==='fieldset'?fieldset:root;}
@@ -73,7 +76,7 @@ async function trial(options={}) {
  const sandbox={exports:{},process:{platform:options.platform??'win32',env:{GITHUB_ACTIONS:options.noHost?'false':'true',RUNNER_ENVIRONMENT:'github-hosted',RUNNER_OS:'Windows',NANH_CODEX_PUBLIC_ONBOARDING:options.noOptin?undefined:'engineering'}},Date:{now:()=>now},setTimeout:f=>{now+=100;f();}};
  vm.runInNewContext(source,sandbox);
  let guards=0;
- const guard=()=>{guards++;if(options.guardThrows)throw Error('PRIVATE');if(options.guardExhaustsBudget&&guards>=3||options.overlayBudgetExpired&&overlayReads>0)now=1201;return !(options.overlayOwnerLoss&&overlayReads>0)&&!options.initialOwnerLoss&&!(options.ownerLossBeforeRole&&guards>=3)&&!(options.ownerLoss&&roleClicks>0)&&!(options.finalLoss&&guards>=2);};
+ const guard=()=>{guards++;if(options.guardThrows)throw Error('PRIVATE');if(options.guardExhaustsBudget&&guards>=3||options.overlayBudgetExpired&&overlayReads>0)now=1201;return !(options.overlayOwnerDuringProof&&legendReads>=3)&&!(options.overlayOwnerLoss&&overlayReads>0)&&!options.initialOwnerLoss&&!(options.ownerLossBeforeRole&&guards>=3)&&!(options.ownerLoss&&roleClicks>0)&&!(options.finalLoss&&guards>=2);};
  const budget=options.expired?0:options.invalidDeadline?NaN:options.excessBudget?25001:1200;
  const facts=await sandbox.exports.run(page,options.noGuard?undefined:guard,budget);
  assert(!JSON.stringify(facts).includes('PRIVATE'));
@@ -141,6 +144,16 @@ async function trial(options={}) {
   assert.equal(r.facts.foreignOverlayProof,proof);assert.equal(r.roleClicks,0);assert.equal(r.continueClicks,0);
   assert.equal(r.facts.foreignOverlaySurface,undefined);assert.equal(r.facts.foreignOverlayFingerprint,undefined);
   assert(!JSON.stringify(r.facts).includes('PRIVATE'));
+ }
+ for(const [opts,roleFailure,overlayProof] of [
+  [{overlayLegendLost:true},'legend-count','role-proof-rejected'],
+  [{overlayScopeLost:true},'scope-count','role-proof-rejected'],
+  [{overlayDeadlineDuringProof:true},'deadline-expired','deadline-expired'],
+  [{overlayOwnerDuringProof:true},'ownership-lost','ownership-lost']]) {
+  const r=await trial({modal:true,...opts});
+  assert.equal(r.facts.roleProofFailure,roleFailure);assert.equal(r.facts.foreignOverlayProof,overlayProof);
+  assert.equal(r.roleClicks,0);assert.equal(r.continueClicks,0);
+  assert.equal(r.facts.foreignOverlayHeading,undefined);
  }
  assert(!JSON.stringify(completeOverlay.facts).includes("You're all set"));
  assert(!JSON.stringify(completeOverlay.facts).includes('openai.com'));

@@ -170,7 +170,11 @@ exports.run = async function(page, ownerGuard, deadline) {
           if(!ownedEndpoint()){facts.foreignOverlayProof='ownership-lost';return false;}
           if(Date.now()>=deadline){facts.foreignOverlayProof='deadline-expired';return false;}
           if(page.mainFrame()!==frame){facts.foreignOverlayProof='frame-replaced';return false;}
-          if(!await reprove()){facts.foreignOverlayProof='role-proof-rejected';return false;}
+          if(!await reprove()){
+            facts.foreignOverlayProof=facts.roleProofFailure==='deadline-expired'?'deadline-expired'
+              : ['ownership-lost','final-ownership','page-count','page-changed','url-changed','query-failed'].includes(facts.roleProofFailure)?'ownership-lost':'role-proof-rejected';
+            return false;
+          }
           if(!await control.evaluate((e,original)=>e===original,handle)){
             facts.foreignOverlayProof='control-replaced';return false;
           }
@@ -201,7 +205,7 @@ exports.run = async function(page, ownerGuard, deadline) {
         } catch { facts.foreignOverlayProof='query-failed'; }
         finally { if(held) await held.dispose(); }
       }
-      facts.roleProofFailure='control-not-actionable';
+      if(facts.roleProofFailure==='unmeasured')facts.roleProofFailure='control-not-actionable';
       return false;
     };
     const handle = await control.elementHandle();

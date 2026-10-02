@@ -46,6 +46,7 @@ impl GuardFailure {
     }
 }
 
+#[cfg(any(test, target_os = "macos"))]
 #[derive(Clone, Copy, Debug, serde::Serialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum FocusStatus {
@@ -58,6 +59,7 @@ pub(crate) enum FocusStatus {
     NoMatch,
     Ambiguous,
 }
+#[cfg(any(test, target_os = "macos"))]
 #[derive(Clone)]
 struct FocusProof {
     status: FocusStatus,
@@ -68,6 +70,7 @@ struct FocusProof {
 pub(crate) struct Snapshot {
     foreground_pid: u32,
     foreground_window: u64,
+    #[cfg(any(test, target_os = "macos"))]
     focus: Option<FocusProof>,
     displays: Vec<Rect>,
     pub(crate) windows: Vec<Window>,
@@ -147,6 +150,7 @@ impl Snapshot {
         }
     }
 
+    #[cfg(any(test, target_os = "macos"))]
     pub(crate) fn focus_observation(&self, held: &Window) -> Option<(FocusStatus, Option<bool>)> {
         self.focus.as_ref().map(|proof| {
             let matches = (proof.status == FocusStatus::Proved).then(|| {
@@ -181,6 +185,7 @@ impl Snapshot {
         let mut snapshot = Self {
             foreground_pid: parse(fields[1])?,
             foreground_window: parse(fields[2])?,
+            #[cfg(any(test, target_os = "macos"))]
             focus: None,
             displays: Vec::new(),
             windows: Vec::new(),
@@ -188,6 +193,7 @@ impl Snapshot {
         for line in lines {
             let fields = line.split_whitespace().collect::<Vec<_>>();
             match fields.as_slice() {
+                #[cfg(any(test, target_os = "macos"))]
                 ["FOCUS", status, id] if snapshot.focus.is_none() => {
                     let status = match *status {
                         "proved" => FocusStatus::Proved,

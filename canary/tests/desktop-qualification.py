@@ -1189,6 +1189,22 @@ class QualificationTests(unittest.TestCase):
                         {key: value for key, value in surface.items() if key != 'foreignOverlaySurface'}):
             with self.assertRaises(ValueError):
                 q.public_onboarding(changed, 'chatgpt-desktop')
+
+        for role_failure, proof in [('legend-count', 'role-proof-rejected'), ('scope-count', 'role-proof-rejected'),
+                                    ('deadline-expired', 'deadline-expired'), ('ownership-lost', 'ownership-lost'),
+                                    ('page-count', 'ownership-lost')]:
+            specific = {**blocked, 'roleProofFailure': role_failure,
+                        'foreignOverlay': 'guard-rejected', 'foreignOverlayProof': proof}
+            self.assertEqual(q.public_onboarding(specific, 'chatgpt-desktop'), specific)
+            for change in ({'foreignOverlay': 'other'}, {'actionabilityFailure': 'hidden'},
+                           {'foreignOverlayProof': 'classified'}, {'foreignOverlayProof': 'document-replaced'}):
+                with self.assertRaises(ValueError):
+                    q.public_onboarding({**specific, **change}, 'chatgpt-desktop')
+        for failure, proof in [('legend-count', 'deadline-expired'), ('deadline-expired', 'ownership-lost'),
+                               ('ownership-lost', 'role-proof-rejected')]:
+            with self.assertRaises(ValueError):
+                q.public_onboarding({**blocked, 'roleProofFailure': failure,
+                    'foreignOverlay': 'guard-rejected', 'foreignOverlayProof': proof}, 'chatgpt-desktop')
         rejected = {**blocked, 'foreignOverlay': 'guard-rejected', 'foreignOverlayProof': 'query-failed'}
         self.assertEqual(q.public_onboarding(rejected, 'chatgpt-desktop'), rejected)
         for changed in ({**proved, 'foreignOverlayProof': 'PRIVATE'},

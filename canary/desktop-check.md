@@ -1244,3 +1244,30 @@ cleanup returns; an executor cleanup exception can therefore discard already
 captured closed events. The next trial publishes those events on failure too,
 while preserving the executor failure and blocking further probes. No process
 output is added to the artifact.
+
+The local full gate on `a3ec421f` passes. The clean Linux gate
+[37065467921](https://github.com/DavidLMS/nan-harness/actions/runs/37065467921)
+identifies unused macOS focus members in the non-macOS library build. Focus
+types, storage, parser records and observation methods are now compiled only
+for macOS or synthetic tests; no lint exception is introduced.
+
+The same commit's Linux Zed trial
+[37065452851](https://github.com/DavidLMS/nan-harness/actions/runs/37065452851)
+verifies the exact installed Noble packages and parent-offset discrepancy in
+all three probes. Each uses the corrected origin and delivers one complete
+pointer pair, but Retry still fails. Response and tool steps and cleanup pass.
+Two separate diagnostics still compare incompatible origins: the AT-SPI
+sampler uses old xdotool geometry, and the icon correlation compares screenshot
+root coordinates against unshifted accessible bounds. Zero correlation cannot
+therefore certify a missing panel control or its zoom state.
+
+Claude macOS
+[37065460048](https://github.com/DavidLMS/nan-harness/actions/runs/37065460048)
+now records the initial focus query as `query-error` while preserving its
+same-process-window rejection; model discovery and cleanup pass. Windows
+Claude
+[37065464254](https://github.com/DavidLMS/nan-harness/actions/runs/37065464254)
+finally retains its closed cleanup diagnostic: `restore` fails with
+`nonzero-exit`, after an `action-unsupported` startup inventory. The next
+Windows investigation must classify that restore failure, rather than alter
+process ownership or treat cleanup as successful.

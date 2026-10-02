@@ -52,11 +52,21 @@ def public_onboarding(setup, app):
             or type(setup['sessionProofFailure']) is not str or setup['sessionProofFailure'] not in sessions
             or any(type(setup[key]) is not bool for key in booleans)):
         raise ValueError('invalid public onboarding diagnostic')
+    specific_overlay_failures = {
+        'deadline-expired': {'deadline-expired'},
+        'ownership-lost': {'ownership-lost', 'final-ownership', 'page-count', 'page-changed', 'url-changed', 'query-failed'},
+        'role-proof-rejected': {'legend-count', 'group-absent', 'scope-count', 'fieldset-count', 'login-present',
+                                'engineering-count', 'engineering-disabled', 'label-count', 'label-association', 'checked-mismatch'},
+    }
+    specific_overlay_rejection = (setup.get('actionabilityFailure') == 'foreign-overlay'
+        and setup.get('foreignOverlay') == 'guard-rejected'
+        and type(setup.get('foreignOverlayProof')) is str
+        and setup.get('roleProofFailure') in specific_overlay_failures.get(setup.get('foreignOverlayProof'), set()))
     if 'actionabilityFailure' in setup:
         if (type(setup['actionabilityFailure']) is not str or setup['actionabilityFailure'] not in {
                 'unsupported-control', 'detached-or-inert', 'ambiguous-overlays', 'foreign-overlay',
                 'pointer-disabled', 'hidden', 'disabled', 'unstable', 'no-owned-point'}
-                or setup['roleProofFailure'] != 'control-not-actionable'):
+                or (setup['roleProofFailure'] != 'control-not-actionable' and not specific_overlay_rejection)):
             raise ValueError('invalid public onboarding actionability')
     if 'foreignOverlay' in setup:
         if (setup.get('actionabilityFailure') != 'foreign-overlay'
