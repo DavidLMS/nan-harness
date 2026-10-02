@@ -673,6 +673,26 @@ class QualificationTests(unittest.TestCase):
             path = root / 'closed-startup-1.json'
             path.write_text(json.dumps(value))
             self.assertEqual(q.semantic_observations(root, 'hermes-desktop'), [value])
+
+    def test_hermes_action_diagnostics_reject_private_or_untyped_values(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / 'readiness.json'
+            value = dict(schemaVersion=1, mechanism='hermes-windows-catalog-readiness', diagnosticsOnly=True,
+                         stage='menu', errorCategory='menu-unavailable', menuOpened=False,
+                         refreshAttempted=False, catalogVerified=False, modelRowVerified=False,
+                         menuDismissed=False, composerReverified=False,
+                         composerObservation=None, guardFailure=None)
+            action = dict(action='menu', sampleStatus='no-owned-point', blocker='onboarding')
+            item = {**value, 'actionObservation': action}
+            path.write_text(json.dumps(item))
+            self.assertEqual(q.semantic_observations(root, 'hermes-desktop'), [item])
+            for changed in ({**action, 'label': 'PRIVATE'}, {**action, 'action': 'PRIVATE'},
+                            {**action, 'sampleStatus': True}, {**action, 'blocker': 'PRIVATE'},
+                            {key: val for key, val in action.items() if key != 'blocker'}, None):
+                path.write_text(json.dumps({**value, 'actionObservation': changed}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'hermes-desktop')
             for changed in ({**value, 'stderr': 'PRIVATE'}, {**value, 'launcherExitCode': True},
                             {**value, 'startupCategory': 'PRIVATE'}):
                 path.write_text(json.dumps(changed))

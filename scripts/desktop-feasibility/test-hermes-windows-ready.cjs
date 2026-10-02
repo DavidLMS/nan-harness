@@ -14,7 +14,7 @@ async function trial(scenario) {
  };
  const point={x:5,y:5,left:0,top:0,width:20,height:20};
  const editorHandle={},rootHandle={};
- const handle={evaluate:async()=>scenario==='covered'?null:point,click:async()=>{if(opened){refreshClicks++; if(scenario==='uncertain')throw new Error('PRIVATE');
+ const handle={evaluate:async(_callback,diagnostic)=>{const status=scenario==='covered'?'no-owned-point':scenario==='hidden-control'?'hidden':scenario==='outside-control'?'outside-viewport':'owned';const blocker=scenario==='covered'?'onboarding':status==='owned'?'none':'unmeasured';return diagnostic?{sampleStatus:status,blocker,point:status==='owned'?point:null}:status==='owned'?point:null;},click:async()=>{if(scenario==='menu-click-uncertain')throw new Error('PRIVATE');if(opened){refreshClicks++; if(scenario==='uncertain')throw new Error('PRIVATE');
  const send=(dir,obj)=>session.emit('Network.webSocketFrame'+dir,{requestId:'socket',response:{opcode:1,payloadData:JSON.stringify(obj)}});
  send('Sent',{jsonrpc:'2.0',id:1,method:'model.options',params:{profile:'default',explicit_only:true,refresh:true}});
  send('Received',{jsonrpc:'2.0',id:1,result:{providers:[{models:['qwen3.6']}]}});
@@ -57,10 +57,28 @@ async function trial(scenario) {
  assert(!JSON.stringify(facts).includes('PRIVATE'));
  return {facts,pillClicks,refreshClicks,escapes};
 }
+// Execute the serialized browser callback without Node helper bindings.
+function sampled(blocker) {
+ const element={isConnected:true,ownerDocument:null,closest:()=>null,matches:()=>false,
+ getAttribute:()=>null,checkVisibility:()=>true,clientWidth:20,clientHeight:20,clientLeft:0,clientTop:0,
+ getBoundingClientRect:()=>({left:0,top:0,right:20,bottom:20,width:20,height:20}),contains:()=>false};
+ const front={closest:selector=>blocker==='onboarding' && selector==='[data-glass-opaque][class~="z-(--z-onboarding)"]'
+    || blocker==='modal' && selector==='[role="dialog"], [role="alertdialog"], [data-slot="dialog-overlay"]'?{}:null};
+ const document={elementFromPoint:()=>blocker==='self'?element:front};element.ownerDocument=document;
+ const exports={};vm.runInNewContext(fs.readFileSync(__dirname+'/hermes-windows-ready.cjs','utf8'),
+   {exports,require:()=>({}),document,innerWidth:100,innerHeight:100,setTimeout});
+ return exports.sample(element,true);
+}
+for(const blocker of ['onboarding','modal','other']) {
+ const result=sampled(blocker);assert.equal(result.sampleStatus,'no-owned-point');assert.equal(result.blocker,blocker);
+ assert.equal(result.point,null);assert(!JSON.stringify(result).includes('z-onboarding'));
+}
+assert.equal(sampled('forged-onboarding').blocker,'other');
+assert.equal(sampled('self').sampleStatus,'owned');
 (async()=>{
  for(const scenario of ['composer-pending','document-pending']) assert.equal((await trial(scenario)).facts.stage,'ready');
  const good=await trial('good');assert.equal(good.facts.stage,'ready');assert.equal(good.pillClicks,1);assert.equal(good.refreshClicks,1);assert.equal(good.escapes,1);
- for(const s of ['covered','duplicate','disabled','modal']){const r=await trial(s);assert.equal(r.pillClicks,0);assert.equal(r.refreshClicks,0);assert.notEqual(r.facts.stage,'ready');}
+ for(const s of ['covered','hidden-control','outside-control','duplicate','disabled','modal']){const r=await trial(s);assert.equal(r.pillClicks,0);assert.equal(r.refreshClicks,0);assert.notEqual(r.facts.stage,'ready');}
  const lost=await trial('owner-loss');assert.equal(lost.refreshClicks,0);assert.equal(lost.escapes,0);
  const uncertain=await trial('uncertain');assert.equal(uncertain.refreshClicks,1);assert.equal(uncertain.escapes,0);assert.notEqual(uncertain.facts.stage,'ready');
  for(const s of ['wrong-row','menu-remains','composer-changed'])assert.notEqual((await trial(s)).facts.stage,'ready');
@@ -95,6 +113,14 @@ async function trial(scenario) {
  }
  for(const scenario of ['query-transition','path-transition','hash-transition','second-transition','post-freeze','reload','frame-replaced','page-replaced','composer-remount','root-remount','stability-owner-loss','stalled-frame','frame-url-mismatch','frame-fragment-mismatch','frame-fragment-invalid','frame-fragment-missing']) {
  const result=await trial(scenario);assert.notEqual(result.facts.stage,'ready',scenario);assert.equal(result.pillClicks,0,scenario);assert.equal(result.refreshClicks,0,scenario);
+ }
+ const covered=await trial('covered');
+ assert.equal(covered.facts.actionObservation.action,'menu');
+ assert.equal(covered.facts.actionObservation.sampleStatus,'no-owned-point');
+ assert.equal(covered.facts.actionObservation.blocker,'onboarding');
+ for(const [scenario,status] of [['hidden-control','hidden'],['outside-control','outside-viewport'],['menu-click-uncertain','click-failed']]) {
+ const result=await trial(scenario);assert.equal(result.facts.actionObservation.sampleStatus,status);
+ assert.equal(result.refreshClicks,0);assert.equal(result.facts.menuOpened,false);
  }
  console.log('PASS Windows ordinary catalog UI behavioral guards');
 })().catch(error=>{console.error(error);process.exitCode=1;});

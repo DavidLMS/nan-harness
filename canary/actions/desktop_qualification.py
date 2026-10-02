@@ -172,7 +172,8 @@ def semantic_observations(directory, app):
             stages = {'policy', 'menu', 'refresh', 'catalog', 'dismiss', 'composer', 'ready'}
             errors = {None, 'policy-rejected', 'menu-unavailable', 'refresh-uncertain',
                       'catalog-unavailable', 'dismiss-uncertain', 'composer-changed', 'composer-unavailable'}
-            if (app != 'hermes-desktop' or set(value) not in (fields, fields | diagnostics) or value['diagnosticsOnly'] is not True
+            action_fields = {'actionObservation'}
+            if (app != 'hermes-desktop' or set(value) not in (fields, fields | diagnostics, fields | diagnostics | action_fields) or value['diagnosticsOnly'] is not True
                     or type(value['stage']) is not str or value['stage'] not in stages
                     or (value['errorCategory'] is not None and type(value['errorCategory']) is not str)
                     or value['errorCategory'] not in errors
@@ -199,6 +200,17 @@ def semantic_observations(directory, app):
                 if value['stage'] == 'ready' and (failure is not None or observation is None):
                     raise ValueError('unmeasured Hermes readiness success')
                 record.update(composerObservation=observation, guardFailure=failure)
+            if 'actionObservation' in value:
+                action = value['actionObservation']
+                if (type(action) is not dict or set(action) != {'action', 'sampleStatus', 'blocker'}
+                        or type(action['action']) is not str or action['action'] not in {'menu', 'refresh'}
+                        or type(action['sampleStatus']) is not str or action['sampleStatus'] not in {
+                            'unmeasured', 'guard-rejected', 'hidden', 'outside-viewport',
+                            'no-owned-point', 'owned', 'unstable', 'control-replaced', 'click-failed'}
+                        or type(action['blocker']) is not str or action['blocker'] not in {
+                            'unmeasured', 'none', 'onboarding', 'modal', 'other'}):
+                    raise ValueError('invalid Hermes action observation')
+                record['actionObservation'] = action
         elif mechanism == 'semantic-failure-policy':
             if set(value) != set('schemaVersion mechanism failureStatus recoveryAction'.split()) or type(value['failureStatus']) is not int or value['failureStatus'] not in {400, 503} or value['recoveryAction'] != 'explicit-ui-retry':
                 raise ValueError('invalid semantic failure policy')

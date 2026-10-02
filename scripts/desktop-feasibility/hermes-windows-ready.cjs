@@ -2,18 +2,26 @@
 const { monitor } = require('./hermes-catalog-readiness.cjs');
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 // Standalone browser callback. Coordinates are returned privately to Node only.
-function sample(element) {
+function sample(element, diagnostic=false) {
+  const result=(sampleStatus,blocker='unmeasured',point=null)=>
+    diagnostic?{sampleStatus,blocker,point}:point;
   if (!element.isConnected || element.ownerDocument !== document || element.closest('[inert]')
-      || element.matches(':disabled') || element.getAttribute('aria-disabled') === 'true') return null;
+      || element.matches(':disabled') || element.getAttribute('aria-disabled') === 'true') return result('guard-rejected');
   const r = element.getBoundingClientRect();
   if (!element.checkVisibility({contentVisibilityAuto:true,opacityProperty:true,visibilityProperty:true})
-      || r.width <= 0 || r.height <= 0 || r.left < 0 || r.top < 0 || r.right > innerWidth || r.bottom > innerHeight) return null;
+      || r.width <= 0 || r.height <= 0) return result('hidden');
+  if (r.left < 0 || r.top < 0 || r.right > innerWidth || r.bottom > innerHeight) return result('outside-viewport');
+  let blocker='other';
   for (const y of [.25,.5,.75]) for (const x of [.25,.5,.75]) {
     const px = element.clientWidth*x, py=element.clientHeight*y;
     const front=document.elementFromPoint(r.left+element.clientLeft+px,r.top+element.clientTop+py);
-    if (front===element || element.contains(front)) return {x:px,y:py,left:r.left,top:r.top,width:r.width,height:r.height};
+    if (front===element || element.contains(front)) return result('owned','none',
+      {x:px,y:py,left:r.left,top:r.top,width:r.width,height:r.height});
+    // Fixed source selector only; neither CSS classes nor app text escape.
+    if (front?.closest?.('[data-glass-opaque][class~="z-(--z-onboarding)"]')) blocker='onboarding';
+    else if (blocker!=='onboarding' && front?.closest?.('[role="dialog"], [role="alertdialog"], [data-slot="dialog-overlay"]')) blocker='modal';
   }
-  return null;
+  return result('no-owned-point',blocker);
 }
 exports.run = async function run(page, session, ownedEndpoint, deadline, expectedProfile) {
   const facts={schemaVersion:1,mechanism:'hermes-windows-catalog-readiness',diagnosticsOnly:true,
@@ -131,31 +139,48 @@ exports.run = async function run(page, session, ownedEndpoint, deadline, expecte
     }
     if (!guard() || await roots.count()!==1 || await editor.count()!==1 || await pill.count()!==1) throw new Error('composer');
     if (startup || !original || !originalRoot) throw new Error('unstable composer');
-    async function click(locator) {
+    async function click(locator,action) {
+      const observation={action,sampleStatus:'guard-rejected',blocker:'unmeasured'};
+      facts.actionObservation=observation;
       await frame();
       if (!guard() || await roots.count()!==1 || await editor.count()!==1
           || !await editor.evaluate((element,held)=>element===held,original)
           || await page.locator('[role="dialog"]:visible, [role="alertdialog"]:visible').count()!==0
           || await locator.count()!==1 || !await locator.isEnabled()) throw new Error('control');
       const handle=await locator.elementHandle();
-      const first=await handle.evaluate(sample); await delay(Math.min(100,Math.max(0,deadline-Date.now())));
-      const second=await handle.evaluate(sample);
-      if (!guard() || !first || !second || JSON.stringify(first)!==JSON.stringify(second)
-          || await locator.count()!==1 || !await locator.evaluate((element,held)=>element===held,handle)) throw new Error('actionability');
-      const last=await handle.evaluate(sample);
+      const inspect=async()=>{
+        const value=await handle.evaluate(sample,true);
+        observation.sampleStatus=value.sampleStatus;observation.blocker=value.blocker;
+        return value.point;
+      };
+      const first=await inspect();
+      if (!first) throw new Error('actionability');
+      await delay(Math.min(100,Math.max(0,deadline-Date.now())));
+      const second=await inspect();
+      if (!second) throw new Error('actionability');
+      if (!guard()) {observation.sampleStatus='guard-rejected';throw new Error('guard');}
+      if (JSON.stringify(first)!==JSON.stringify(second)) {observation.sampleStatus='unstable';throw new Error('actionability');}
+      if (await locator.count()!==1 || !await locator.evaluate((element,held)=>element===held,handle)) {
+        observation.sampleStatus='control-replaced';throw new Error('actionability');
+      }
+      const last=await inspect();
       await frame();
-      if (!last || JSON.stringify(second)!==JSON.stringify(last) || !guard()) throw new Error('actionability');
-      await handle.click({position:{x:last.x,y:last.y},timeout:Math.min(5000,Math.max(1,deadline-Date.now()))});
+      if (!last) throw new Error('actionability');
+      if (JSON.stringify(second)!==JSON.stringify(last)) {observation.sampleStatus='unstable';throw new Error('actionability');}
+      if (!guard()) {observation.sampleStatus='guard-rejected';throw new Error('guard');}
+      try {
+        await handle.click({position:{x:last.x,y:last.y},timeout:Math.min(5000,Math.max(1,deadline-Date.now()))});
+      } catch {observation.sampleStatus='click-failed';throw new Error('action');}
     }
     facts.stage='menu'; facts.errorCategory='menu-unavailable';
-    await click(pill); facts.menuOpened=true;
+    await click(pill,'menu'); facts.menuOpened=true;
     const menu=page.getByRole('menu').filter({has:page.getByRole('menuitem',{name:'Refresh models',exact:true})});
     if (!guard() || await menu.count()!==1) throw new Error('menu');
     // An explicit ordinary refresh, armed only after this unique menu opened,
     // avoids treating startup traffic or a cached row as fresh readiness.
     facts.stage='refresh'; facts.errorCategory='refresh-uncertain';
     evidence.arm(); facts.refreshAttempted=true;
-    await click(menu.getByRole('menuitem',{name:'Refresh models',exact:true}));
+    await click(menu.getByRole('menuitem',{name:'Refresh models',exact:true}),'refresh');
     facts.stage='catalog'; facts.errorCategory='catalog-unavailable';
     while (guard() && !evidence.verified()) await delay(Math.min(100,Math.max(0,deadline-Date.now())));
     if (!evidence.verified()) throw new Error('catalog');
