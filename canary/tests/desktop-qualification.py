@@ -2813,13 +2813,18 @@ class CodexStaticDialogTitleTests(unittest.TestCase):
                      sourceVersion='26.930.41038', platform='linux',
                      artifactSha256='ee7854145554718d7239d01ea37d44f6ba1e0ba4a93f47ac097d6e0f964da47c',
                      wrapperSourceSha256='c3c9a86a6d9c3a2a8cecaf0a6a22527c69f89949cb0d8958896bc86131e9c6c9',
-                     catalogSha256='f8ee7fd71682aaff118c1efc2487b15307818fd5d378233270e82c9c4ed3cd90',
+                     catalogSha256='1922e550abd0c95c9190ae82478f07f1485cdc07e6c9132a16c11a3314229816',
                      status='matched', titleReferenceCount=1, matchCount=1,
                      sourceTitleIds=['chatgpt.global_search.modal.title'])
         with tempfile.TemporaryDirectory() as root:
             path = Path(root) / 'title.json'
             path.write_text(json.dumps(value))
             self.assertEqual(q.semantic_observations(root, 'chatgpt-desktop')[0]['sourceVersion'], '26.930.41038')
+            for identity in ('workspaceOnboarding.dialogTitle', 'work.onboarding.role.new.question'):
+                path.write_text(json.dumps({**value, 'sourceTitleIds': [identity]}))
+                self.assertEqual(q.semantic_observations(root, 'chatgpt-desktop')[0]['sourceTitleIds'], [identity])
+                path.write_text(json.dumps({**value, 'platform': 'windows', 'sourceTitleIds': [identity]}))
+                with self.assertRaises(ValueError): q.semantic_observations(root, 'chatgpt-desktop')
             for patch in ({'sourceVersion': '26.930.31730'}, {'platform': 'macos'},
                           {'artifactSha256': '0' * 64}, {'wrapperSourceSha256': '0' * 64},
                           {'catalogSha256': '0' * 64}, {'privateText': 'PRIVATE_SENTINEL'}):

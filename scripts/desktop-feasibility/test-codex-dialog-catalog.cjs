@@ -20,7 +20,7 @@ async function main() {
  const linux=require('./codex-dialog-title-catalog-linux.json');
  assert.equal(linux.sourceVersion,'26.930.41038');
  assert.equal(require('node:crypto').createHash('sha256').update(require('node:fs').readFileSync(require.resolve('./codex-dialog-title-catalog-linux.json'))).digest('hex'),helper.facts('linux').catalogSha256);
- assert.equal(new Set(linux.entries.map(e=>e.id)).size,63);
+ assert.equal(new Set(linux.entries.map(e=>e.id)).size,168);
  const lf=fixture('Global search');
  assert.equal(lf.classify({held:lf.held,entries:Object.values(Object.fromEntries(linux.entries.map(e=>[e.id,e])))}).status,'matched');
  assert.equal(helper.facts('linux').sourceVersion,'26.930.41038');
@@ -32,6 +32,11 @@ async function main() {
  assert.equal(new Set(mac.entries.map(e=>e.id)).size,24);
  assert.equal(require('node:crypto').createHash('sha256').update(require('node:fs').readFileSync(require.resolve('./codex-dialog-title-catalog-macos.json'))).digest('hex'),helper.facts('darwin').catalogSha256);
  assert.equal(helper.facts('win32').sourceVersion,'26.930.31730');
+ for(const [text,id]of [['Welcome to ChatGPT','workspaceOnboarding.dialogTitle'],['What kind of work do you do?','work.onboarding.role.new.question']]) {
+  const f=fixture(text);const entries=Object.values(Object.fromEntries(linux.entries.map(e=>[e.id,e])));
+  assert.equal(f.classify({held:f.held,entries}).sourceTitleIds[0],id);
+ }
+ const excessive=fixture();assert.equal(excessive.classify({held:excessive.held,entries:Array(257).fill({id:'known',text:'fixed'})}).rejectionStage,'scope');
  const f=fixture();
  let result=f.classify({held:f.held,entries:f.entries});
  assert.equal(result.status,'matched');assert.equal(result.sourceTitleEmpty,false);assert.equal(result.sourceTitleIds[0],'electron.onboarding.conversationalOnboarding.skipDialog.title');

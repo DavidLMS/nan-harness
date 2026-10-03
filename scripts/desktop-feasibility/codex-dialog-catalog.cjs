@@ -2,7 +2,7 @@
 const macCatalog=require('./codex-dialog-title-catalog-macos.json');
 const macCatalogSha256='cb0dad04840297918677c21b87182b4845117e90c93b414a428dabcd4d332a93';
 const linuxCatalog=require('./codex-dialog-title-catalog-linux.json');
-const linuxCatalogSha256='f8ee7fd71682aaff118c1efc2487b15307818fd5d378233270e82c9c4ed3cd90';
+const linuxCatalogSha256='1922e550abd0c95c9190ae82478f07f1485cdc07e6c9132a16c11a3314229816';
 const catalog=require('./codex-dialog-title-catalog.json');
 const windowsCatalog=require('./codex-dialog-title-catalog-windows.json');
 const windowsCatalogSha256='dff2a1184ab65c0ad8497ea90984ccb19be01c09f6a025a8e1e9d96b3bc4f467';
@@ -48,7 +48,7 @@ function classifyTitle({held,entries}) {
  if(dialogs.length!==1)return reject('dialog-count');
  if(dialogs[0]!==held.dialog||!held.dialog.isConnected||held.dialog.ownerDocument!==document
   ||held.dialog.getAttribute('role')!=='dialog')return reject('changed');
- if(entries.length>63)return reject('scope');
+ if(entries.length>256)return reject('scope');
  let current=held.dialog,depth=0;
  while(current) {
   if(++depth>64||current.inert||current.getAttribute('aria-hidden')==='true'

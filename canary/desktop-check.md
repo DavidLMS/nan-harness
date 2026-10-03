@@ -2579,3 +2579,23 @@ Windows startup trials now explicitly set the supported managed
 exact Windows `2.19675.0` bootstrap/schema supports that field in third-party
 deployment. This does not prove classic Chat is selected: retained runtime
 mode/editor observations remain required, and no input authority is added.
+
+
+The complete Linux `26.930.41038` archive contains additional DialogTitle
+callsites outside dialog/onboarding-named chunks. The Linux catalog now has
+168 fixed IDs, including 105 additional direct literal Intl children whose
+imports resolve to the pinned `eC`/H2 wrapper. Each added row records its
+callsite hash and wrapper proof; dynamic placeholders and arbitrary headings
+remain excluded. Mac/Windows catalogs are unchanged. This is broader source
+coverage, not an identification of the currently observed Linux dialog.
+
+The Mac native-turn cap is now 15 seconds, chosen before each operation; copy
+and passive retry queries still clip it to their caller deadline. Native
+transport, protocol and helper preserve the original absolute monotonic cutoff
+and teardown margin. A prior `deadline` receipt does not establish which inner
+stage exhausted the budget. Pure native contracts, all 389 checker unit tests
+(serial), 110 strict qualification tests, Windows policy tests and CLI/checker
+Clippy pass. An earlier complete gate failed in synthetic process-fixture
+timing/exit assertions while edits and focused builds were concurrent; the
+serial checker rerun passes every assertion. A clean complete gate on the
+committed tree remains required.
