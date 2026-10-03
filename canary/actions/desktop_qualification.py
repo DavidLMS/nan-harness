@@ -1074,10 +1074,24 @@ def semantic_observations(directory, app):
             record.update({key: value[key] for key in fields - {'schemaVersion', 'mechanism'}})
         elif mechanism == 'renderer-inventory':
             fields = set('schemaVersion mechanism diagnosticsOnly app endpointOwned launcherOwned attached pageCount textareaCount editableCount sendCount retryCount newThreadCount loginCount dialogCount errorCategory'.split())
-            if set(value) - {'documentState', 'startupScreen', 'landingCounts', 'onboardingCounts', 'publicOnboarding', 'mainAuxCorrelation', 'codexSession', 'initialMainBinding', 'initialMainConfirmation', 'sourceScreen', 'managedSignIn'} != fields or value['app'] != app or value['diagnosticsOnly'] is not True:
+            if set(value) - {'documentState', 'startupScreen', 'landingCounts', 'onboardingCounts', 'publicOnboarding', 'mainAuxCorrelation', 'codexSession', 'initialMainBinding', 'initialMainConfirmation', 'sourceScreen', 'managedSignIn', 'sourceDialog'} != fields or value['app'] != app or value['diagnosticsOnly'] is not True:
                 raise ValueError('invalid renderer inventory identity')
             for key in ('endpointOwned', 'launcherOwned', 'attached'):
                 flag(record, value, key)
+            if 'sourceDialog' in value:
+                dialog = value['sourceDialog']
+                keys = {'dialogs', 'workspaceFailureTitle', 'retryButton'}
+                if (app != 'chatgpt-desktop' or type(dialog) is not dict
+                        or set(dialog) != {'status', 'counts'} or type(dialog['counts']) is not dict
+                        or set(dialog['counts']) != keys
+                        or any(type(count) is not int or not 0 <= count <= 32 for count in dialog['counts'].values())):
+                    raise ValueError('invalid Codex public dialog counts')
+                counts = dialog['counts']
+                expected = ('ambiguous' if any(count > 1 for count in counts.values()) else
+                            'workspace-discovery-failed' if all(count == 1 for count in counts.values()) else 'unknown')
+                if type(dialog['status']) is not str or dialog['status'] != expected:
+                    raise ValueError('inconsistent Codex public dialog category')
+                record['sourceDialog'] = dialog
             if 'managedSignIn' in value:
                 requirements = value['managedSignIn']
                 status_keys = {'loading', 'unsupported', 'disabled', 'error'}

@@ -1904,6 +1904,26 @@ class QualificationTests(unittest.TestCase):
                     q.semantic_observations(root, 'chatgpt-desktop')
             self.assertEqual(q.envelope('chatgpt-desktop', 'windows', 'x86_64', 'a' * 40)['qualification'], 'unqualified')
 
+    def test_codex_public_dialog_is_passive_closed_and_consistent(self):
+        value = dict(schemaVersion=1, mechanism='renderer-inventory', diagnosticsOnly=True,
+                     app='chatgpt-desktop', endpointOwned=True, launcherOwned=True, attached=True,
+                     pageCount=1, textareaCount=0, editableCount=0, sendCount=0,
+                     retryCount=0, newThreadCount=0, loginCount=0, dialogCount=1, errorCategory=None)
+        observed = dict(status='workspace-discovery-failed', counts=dict(dialogs=1, workspaceFailureTitle=1, retryButton=1))
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'inventory.json'
+            path.write_text(json.dumps({**value, 'sourceDialog': observed}))
+            self.assertEqual(q.semantic_observations(tmp, 'chatgpt-desktop')[0]['sourceDialog'], observed)
+            for changed in ({**observed, 'status': 'PRIVATE'}, {**observed, 'status': 'unknown'},
+                            {**observed, 'title': 'PRIVATE'}, {**observed, 'counts': {'dialogs': True}},
+                            {**observed, 'counts': {**observed['counts'], 'retryButton': 33}}):
+                path.write_text(json.dumps({**value, 'sourceDialog': changed}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(tmp, 'chatgpt-desktop')
+            path.write_text(json.dumps({**value, 'app': 'claude-desktop', 'sourceDialog': observed}))
+            with self.assertRaises(ValueError):
+                q.semantic_observations(tmp, 'claude-desktop')
+
     def test_codex_managed_sign_in_observation_cannot_authorize_input(self):
         value = dict(schemaVersion=1, mechanism='renderer-inventory', diagnosticsOnly=True,
                      app='chatgpt-desktop', endpointOwned=True, launcherOwned=True, attached=True,

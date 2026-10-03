@@ -372,3 +372,27 @@ assert.equal(managed([], ['Enter API key','Enter API key']).status, 'ambiguous')
 assert.equal(managed(Array(40).fill('Loading sign-in requirements…')).counts.loading, 32);
 assert.equal(managed([], [], 'claude-desktop'), undefined);
 console.log('Renderer managed sign-in classifier: exact source notices and passive choices passed');
+
+// Public modal title wrappers need not be semantic headings. Only the exact
+// source title plus its ordinary retry control can identify this passive state.
+function publicDialogTrial(titles, buttons, dialogCount=1, app='chatgpt-desktop') {
+  const node=text=>({textContent:text,innerText:text,children:[],isConnected:true,
+    getBoundingClientRect:()=>({width:10,height:10}),getAttribute:()=>null});
+  const dialogs=Array.from({length:dialogCount},()=>({...node(''),querySelectorAll:selector=>
+    selector==='*'?titles.map(node):buttons.map(node)}));
+  const read=vm.runInNewContext(`(${source.slice(start,end)})`,{
+    document:{readyState:'complete',body:{innerText:''},querySelectorAll:selector=>
+      selector==='[role="dialog"],[role="alertdialog"]'?dialogs:[]},
+    location:{protocol:'app:',href:'app://PRIVATE'},getComputedStyle:()=>({visibility:'visible'})});
+  const result=read(app).sourceDialog;
+  assert(!JSON.stringify(result??null).includes('Could not load workspaces'));
+  assert(!JSON.stringify(result??null).includes('PRIVATE'));
+  return result;
+}
+assert.equal(publicDialogTrial(['Could not load workspaces'],['Try again']).status,'workspace-discovery-failed');
+assert.equal(publicDialogTrial(['Could not load workspaces'],[]).status,'unknown');
+assert.equal(publicDialogTrial(['PRIVATE'],['Try again']).status,'unknown');
+assert.equal(publicDialogTrial(['Could not load workspaces','Could not load workspaces'],['Try again']).status,'ambiguous');
+assert.equal(publicDialogTrial(['Could not load workspaces'],['Try again'],2).status,'ambiguous');
+assert.equal(publicDialogTrial(['Could not load workspaces'],['Try again'],1,'claude-desktop'),undefined);
+console.log('Renderer public modal classifier: exact source pair and privacy passed');

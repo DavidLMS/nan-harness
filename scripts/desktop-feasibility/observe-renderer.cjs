@@ -381,7 +381,7 @@ async function run() {
         : appName !== 'pen-desktop' ? 'unmeasured'
         : headings.length === 1 && headings[0].textContent === 'Hardware acceleration unavailable' ? 'gpu-unavailable'
         : headings.length === 1 && headings[0].textContent === 'Failed to start pen.dev' ? 'startup-failed' : 'other';
-      let sourceScreen, managedSignIn;
+      let sourceScreen, managedSignIn, sourceDialog;
       if (appName === 'chatgpt-desktop') {
         // Frozen public headings, including the source's non-heading all-set title.
         // These are observations only; no category authorizes an action or login.
@@ -417,10 +417,27 @@ async function run() {
           : statuses.length === 0 ? (choices > 0 ? 'sign-in-options' : 'unknown')
           : statuses.length === 1 && choices === 0 ? statuses[0] : 'ambiguous';
         managedSignIn = {status: requirementStatus, counts: requirements};
+        // Frozen workspace-discovery failure is a modal title wrapper, not
+        // necessarily an HTML heading. Its exact public title and button are
+        // observed only inside visible dialogs; neither permits interaction.
+        const dialogs = [...document.querySelectorAll('[role="dialog"],[role="alertdialog"]')].filter(visible);
+        const dialogCounts = {dialogs: Math.min(32, dialogs.length), workspaceFailureTitle: 0, retryButton: 0};
+        for (const dialog of dialogs.slice(0, 32)) {
+          dialogCounts.workspaceFailureTitle += [...dialog.querySelectorAll('*')].filter(e =>
+            visible(e) && e.children.length === 0 && (e.textContent || '').trim() === 'Could not load workspaces').length;
+          dialogCounts.retryButton += [...dialog.querySelectorAll('button,[role="button"]')].filter(e =>
+            visible(e) && (e.getAttribute('aria-label') || e.innerText || '').trim() === 'Try again').length;
+        }
+        const sourceDialogStatus = dialogs.length > 1 || dialogCounts.workspaceFailureTitle > 1 || dialogCounts.retryButton > 1
+          ? 'ambiguous' : dialogs.length === 1 && dialogCounts.workspaceFailureTitle === 1 && dialogCounts.retryButton === 1
+            ? 'workspace-discovery-failed' : 'unknown';
+        dialogCounts.workspaceFailureTitle = Math.min(32, dialogCounts.workspaceFailureTitle);
+        dialogCounts.retryButton = Math.min(32, dialogCounts.retryButton);
+        sourceDialog = {status: sourceDialogStatus, counts: dialogCounts};
       }
       return { textareaCount: count('textarea'), editableCount: count('[contenteditable="true"]'),
         startupScreen,
-        ...(sourceScreen ? {sourceScreen, managedSignIn} : {}),
+        ...(sourceScreen ? {sourceScreen, managedSignIn, sourceDialog} : {}),
         landingCounts: {
           importHeading: Math.min(4096, [...document.querySelectorAll('h1,h2,h3,[role="heading"]')]
             .filter(visible).filter(e => /^(Import other AI setup|Import work from other AI apps)$/.test(e.textContent || '')).length),

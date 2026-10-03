@@ -1977,3 +1977,108 @@ stopped at the synthetic Windows directory contracts before application
 installation. Normal and verbatim directory spellings were rejected, while the
 junction rejection test passed. This runner result does not measure Claude
 startup and must not be interpreted as an application failure.
+
+
+### Owned session corrections, 2026-10-03
+
+The complete local gate and hosted Linux quality-only run
+[37126269012](https://github.com/DavidLMS/nan-harness/actions/runs/37126269012)
+passed on `fcf16619`. Later implementation changes require the final gate on
+the next converged tree.
+
+The synthetic Windows qualification-directory contracts passed in
+[37126171093](https://github.com/DavidLMS/nan-harness/actions/runs/37126171093).
+Actual startup then rejected an off-display window. That failure also revealed
+that discarding the acquired GUI before final readiness removed the native
+transport needed for owned cleanup. The acquired transport now remains held
+through cleanup even when readiness refuses input; off-display rejection is
+unchanged.
+
+macOS Claude in
+[37125969670](https://github.com/DavidLMS/nan-harness/actions/runs/37125969670)
+reached the conversation controller in three sessions, but all three stopped
+at a nonempty initial accessibility value before any input. The owned-profile
+controller now borrows the actual native-root owner, verifies both newly
+created private directories retain their original identities, and permits an
+ordinary Select All and Paste only after proving the retained editor is the
+application's focused accessibility element. Legacy input still rejects a
+nonempty editor. Exact clipboard and native-value readback remains mandatory
+before the single ordinary Send action. Synthetic ownership-loss, selector,
+request-framing and privacy contracts pass; actual conversation acceptance
+remains pending hosted evidence.
+
+Codex Windows in
+[37125658347](https://github.com/DavidLMS/nan-harness/actions/runs/37125658347)
+rejected its renderer page set before role selection in all three sessions.
+The new diagnostic retains only a closed rejection category, bounded page
+counts and whether the original main page remained present. It records no
+route, title, identity or raw exception. It does not authorize a replacement
+main page or relax auxiliary renderer admission.
+
+Zed Linux in
+[37126267101](https://github.com/DavidLMS/nan-harness/actions/runs/37126267101)
+observed a best minimize-icon correlation of 980 milli in all three sessions,
+below the unchanged 985 threshold. Exact pinned GPUI source identifies resvg
+rasterization, doubled-resolution linear sampling and brightness-dependent
+Linux shader correction. Selected zoom also uses the theme's accent color.
+Source-generated reference correction is in progress; measurements remain
+unqualified. Five active cells remain qualified, seven remain open, and Pen
+remains deferred.
+
+
+Follow-up run
+[37127849670](https://github.com/DavidLMS/nan-harness/actions/runs/37127849670)
+on `e07b14b1` verifies the cleanup correction against five retained Windows
+Claude descendants: all five targeted processes exited, none was rejected,
+and independent application/global absence checks passed. Initial readiness
+still refuses the off-display window. The subsequent one-shot fit retains
+its use state across both acquisition phases and requires two equal geometry
+samples, the original HWND/PID/name, owned ancestry, foreground and a clear
+window stack; it never permits a second fit or input before strict reacquisition.
+
+Run [37127849665](https://github.com/DavidLMS/nan-harness/actions/runs/37127849665)
+with Claude `2.19675.0` verifies one input and one Send in a fresh macOS session.
+Response acquisition then stopped at a pre-action tree read. Another session
+reported an uncertain action, which is never replayed. All application and
+global cleanup checks passed. This is progress through input, not successful
+response/retry qualification.
+
+
+Run [37128104248](https://github.com/DavidLMS/nan-harness/actions/runs/37128104248)
+on `8ebb5977` verifies input, response and the read-tool scenario in all three
+Linux Zed sessions. Correct source rasterization raises the retained Minimize
+reference correlation to 999 milli, above the unchanged 985 requirement.
+Recovery remains blocked before its single Retry action: all nine queried AX
+hit points match the retained control, but the native cursor is an arrow.
+Pinned source defines this HTTP400 recovery control as an enabled filled text
+button with `PointingHand`, so dropping the hand check is not justified. The
+next helper verifies actual pointer position and owned client child before
+sampling, and requires two hand samples at the same held point within the
+original four-second deadline. It retains no pointer coordinates or pixels.
+
+Run [37127849568](https://github.com/DavidLMS/nan-harness/actions/runs/37127849568)
+confirms the Windows Codex page-set failure in all three sessions: one page
+becomes two during a proof while the original main remains present, before any
+role click. The guard permits one incomplete pre-input proof to be discarded
+for this exact transition only. A full fresh proof must retain the original
+main document and prove the source-known inert auxiliary twice. The first
+attempted role click permanently seals this permission, including uncertain
+failures. No page replacement, extra target or later-action retry is admitted.
+
+Codex macOS
+[37128182583](https://github.com/DavidLMS/nan-harness/actions/runs/37128182583)
+and Linux
+[37128182781](https://github.com/DavidLMS/nan-harness/actions/runs/37128182781)
+remain blocked at a dialog lacking the expected role scope. Closed startup and
+managed-sign-in classifications remain unknown. A new passive source-dialog
+classifier checks the exact published workspace-load failure title and its
+Try Again button, without granting action permission. macOS also reports a
+native ownership rejection; its original renderer identity remains unchanged
+where the query completes. Neither observation establishes a login requirement.
+
+macOS Claude's passive tree acquisition now distinguishes query failures from
+terminal identity, focus, type, duplicate and limit failures. Only a transient
+query failure before Copy or retry-readiness permits a fresh passive read under
+the original polling deadline. Input, Send, Retry and uncertain Copy actions
+are never repeated by this policy. Synthetic receipts, pure native selectors,
+framing and privacy checks pass; hosted qualification remains pending.
