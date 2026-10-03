@@ -83,8 +83,8 @@ function foreignSurface(control) {
   return {document,scope,dialog:dialogs.length===1?dialogs[0]:null};
 }
 function classifyForeign(control,held) {
-  let surface='unknown', heading='unknown';
-  const result=(category,proof='classified',fingerprint='not-applicable')=>({category,proof,surface,fingerprint,heading});
+  let surface='unknown', heading='unknown', importSetup=null;
+  const result=(category,proof='classified',fingerprint='not-applicable')=>({category,proof,surface,fingerprint,heading,importSetup});
   const visible=e=>{if(!e)return false;const r=e.getBoundingClientRect(),s=getComputedStyle(e);
     return e.isConnected&&r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden';};
   if(control.ownerDocument!==document||!control.isConnected||held.document!==document) return result('guard-rejected','document-replaced');
@@ -98,9 +98,21 @@ function classifyForeign(control,held) {
   if(dialog!==held.dialog)return result('guard-rejected','dialog-replaced');
   // Public heading text is classified independently of the stronger style fingerprint.
   const publicHeadings=[...dialog.querySelectorAll('[role="heading"],h1,h2,h3')].filter(visible);
-  const known=new Map([["You're all set",'all-set'],['Import from other AI apps','external-import'],['Skip setup?','skip-confirmation']]);
+  const known=new Map([["You're all set",'all-set'],['Import from other AI apps','external-import'],['Skip setup?','skip-confirmation'],['Continue with your existing setup','imported-setup']]);
   const matches=publicHeadings.map(e=>known.get(e.innerText.trim())).filter(Boolean);
   heading=matches.length>1?'ambiguous':matches[0]??'unknown';
+  const setupTitleCount=publicHeadings.filter(e=>e.innerText.trim()==='Continue with your existing setup').length;
+  if(setupTitleCount>0) {
+    const setupButtons=[...dialog.querySelectorAll('button')].filter(visible);
+    const counts={titleCount:setupTitleCount,
+      continueCount:setupButtons.filter(e=>e.innerText.trim()==='Continue').length,
+      notNowCount:setupButtons.filter(e=>e.innerText.trim()==='Not now').length,
+      skipCount:setupButtons.filter(e=>e.innerText.trim()==='Skip').length};
+    if(Object.values(counts).every(count=>count<=32))importSetup=counts;
+    const paired=counts.titleCount===1&&counts.continueCount===1
+      &&((counts.notNowCount===1&&counts.skipCount===0)||(counts.notNowCount===0&&counts.skipCount===1));
+    if(heading==='imported-setup'&&!paired)heading='unknown';
+  }
   const role=dialog.getAttribute('role'), enclosing=dialog.contains(control);
   surface=enclosing ? (role==='dialog'?'enclosing-role-dialog':role==='alertdialog'?'enclosing-role-alertdialog':role===null&&dialog.getAttribute('aria-modal')==='true'?'enclosing-role-aria-modal':'unknown')
     : role==='dialog'?'separate-dialog':role==='alertdialog'?'separate-alertdialog':role==='menu'?'separate-menu':'unknown';
@@ -264,6 +276,7 @@ async function run(page, ownerGuard, deadline, rejected, mainGuard) {
                   facts.foreignOverlaySurface=second.surface;
                   facts.foreignOverlayFingerprint=second.fingerprint;
                   facts.foreignOverlayHeading=second.heading;
+                  if(second.importSetup!==null)facts.foreignOverlayImportSetup=second.importSetup;
                 }
               } else if(second.category==='guard-rejected' && facts.foreignOverlayProof==='unmeasured') {
                 facts.foreignOverlayProof=second.proof;

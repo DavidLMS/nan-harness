@@ -2263,6 +2263,24 @@ class QualificationTests(unittest.TestCase):
                 q.public_onboarding({**surface, 'foreignOverlayHeading': invalid}, 'chatgpt-desktop')
         with self.assertRaises(ValueError):
             q.public_onboarding({**blocked, 'foreignOverlayHeading': 'unknown'}, 'chatgpt-desktop')
+        counts = dict(titleCount=1, continueCount=1, notNowCount=1, skipCount=0)
+        measured = {**surface, 'foreignOverlayHeading': 'imported-setup',
+                    'foreignOverlayImportSetup': counts}
+        self.assertEqual(q.public_onboarding(measured, 'chatgpt-desktop'), measured)
+        self.assertEqual(q.public_onboarding({**measured, 'foreignOverlayImportSetup': {
+            **counts, 'notNowCount': 0, 'skipCount': 1}}, 'chatgpt-desktop')['foreignOverlayHeading'], 'imported-setup')
+        for invalid in ({**counts, 'text': 'PRIVATE'}, {**counts, 'titleCount': True},
+                        {**counts, 'titleCount': 33}, {**counts, 'continueCount': 0},
+                        {**counts, 'skipCount': 1}, {}, None):
+            with self.assertRaises(ValueError):
+                q.public_onboarding({**measured, 'foreignOverlayImportSetup': invalid}, 'chatgpt-desktop')
+        with self.assertRaises(ValueError):
+            q.public_onboarding({**surface, 'foreignOverlayHeading': 'imported-setup'}, 'chatgpt-desktop')
+        with self.assertRaises(ValueError):
+            q.public_onboarding({**measured, 'foreignOverlayProof': 'ownership-lost'}, 'chatgpt-desktop')
+        with self.assertRaises(ValueError):
+            q.public_onboarding(measured, 'claude-desktop')
+
 
         for changed in ({**surface, 'foreignOverlaySurface': 'PRIVATE'},
                         {**surface, 'foreignOverlayFingerprint': True},

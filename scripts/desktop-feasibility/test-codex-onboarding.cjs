@@ -38,7 +38,8 @@ async function trial(options={}) {
  root.querySelectorAll=s=>absent?(s.startsWith('input')?[]:s==='button'?[startControl]:options.noTaskScope?[]:[acknowledgement]):s.startsWith('input')?[radio]:[legend];
  label.closest=s=>s.startsWith('div')?root:null;
  foreign.getAttribute=k=>k==='role'?'dialog':null;
- foreign.querySelectorAll=s=>s.startsWith('input')?[]:s==='form'?[form]:s.startsWith('[class')?(options.overlayWrongHeadingStyle?[]:[heading]):s==='[role="heading"],h1,h2,h3'?(options.overlayDuplicateHeading?[heading,heading]:[heading]):[];
+ const setupButtons=(options.importSetupButtons??[]).map(innerText=>({...button,innerText}));
+ foreign.querySelectorAll=s=>s.startsWith('input')?[]:s==='button'?setupButtons:s==='form'?[form]:s.startsWith('[class')?(options.overlayWrongHeadingStyle?[]:[heading]):s==='[role="heading"],h1,h2,h3'?(options.overlayDuplicateHeading?[heading,heading]:[heading]):[];
  if(options.overlayDialogReplacement)doc.querySelectorAll=s=>s.startsWith('input')?[radio]:overlayReads?[{...foreign}]:[foreign];
  if(options.overlayMultiple)doc.querySelectorAll=s=>s.startsWith('input')?[radio]:overlayReads?[foreign,dialog]:[foreign];
  const globals={document:doc,innerWidth:800,innerHeight:600,getComputedStyle:()=>({display:'block',visibility:'visible',pointerEvents:'auto'})};
@@ -199,6 +200,25 @@ async function trial(options={}) {
   assert.equal(r.facts.foreignOverlayFingerprint,'heading-mismatch');
   assert.equal(r.roleClicks,0);assert.equal(r.continueClicks,0);
  }
+ for(const [buttons,expected] of [[['Continue','Not now'],'imported-setup'],
+    [['Continue','Skip'],'imported-setup'],[['Continue'],'unknown'],
+    [['Continue','Not now','Skip'],'unknown'],[['Continue','Not now','Not now'],'unknown']]) {
+  const r=await trial({modal:true,overlayHeading:'Continue with your existing setup',
+    overlayWrongHeadingStyle:true,importSetupButtons:buttons});
+  assert.equal(r.facts.foreignOverlayHeading,expected);
+  assert.equal(r.facts.foreignOverlayImportSetup.titleCount,1);
+  assert.equal(r.facts.foreignOverlayImportSetup.continueCount,1);
+  assert.equal(r.facts.foreignOverlayFingerprint,'heading-mismatch');
+  assert.equal(r.roleClicks,0);assert.equal(r.continueClicks,0);
+ }
+ const importDuplicate=await trial({modal:true,overlayHeading:'Continue with your existing setup',
+   overlayDuplicateHeading:true,overlayWrongHeadingStyle:true,importSetupButtons:['Continue','Not now']});
+ assert.equal(importDuplicate.facts.foreignOverlayHeading,'ambiguous');
+ assert.equal(importDuplicate.facts.foreignOverlayImportSetup.titleCount,2);
+ const importChanges=await trial({modal:true,overlayHeading:'Continue with your existing setup',
+   overlayWrongHeadingStyle:true,overlayHeadingChanges:true,importSetupButtons:['Continue','Not now']});
+ assert.equal(importChanges.facts.foreignOverlayProof,'unstable-classification');
+ assert.equal(importChanges.facts.foreignOverlayImportSetup,undefined);
  const duplicateHeading=await trial({modal:true,overlayDuplicateHeading:true});
  assert.equal(duplicateHeading.facts.foreignOverlayHeading,'ambiguous');
  assert.equal(duplicateHeading.roleClicks,0);assert.equal(duplicateHeading.continueClicks,0);

@@ -69,7 +69,7 @@ def main_aux_correlation(value, app):
 
 
 def public_onboarding(setup, app):
-    shape = set(setup) - {'rejectedPageInventory', 'taskScopeProved', 'taskClickAttempted', 'taskClickCompleted', 'codingComposerReady', 'mainGuardFailure', 'pageSetFailure'} if type(setup) is dict else set()
+    shape = set(setup) - {'rejectedPageInventory', 'taskScopeProved', 'taskClickAttempted', 'taskClickCompleted', 'codingComposerReady', 'mainGuardFailure', 'pageSetFailure', 'foreignOverlayImportSetup'} if type(setup) is dict else set()
     booleans = {'conversationalScope', 'engineeringControl', 'roleClickAttempted',
                 'roleClickCompleted', 'engineeringChecked', 'continueControl',
                 'continueClickAttempted', 'continueClickCompleted', 'roleScopeAbsent'}
@@ -192,8 +192,24 @@ def public_onboarding(setup, app):
     if 'foreignOverlayHeading' in setup:
         if (setup.get('foreignOverlayProof') != 'classified'
                 or type(setup['foreignOverlayHeading']) is not str or setup['foreignOverlayHeading'] not in {
-                    'all-set', 'external-import', 'skip-confirmation', 'unknown', 'ambiguous'}):
+                    'all-set', 'external-import', 'skip-confirmation', 'imported-setup', 'unknown', 'ambiguous'}):
             raise ValueError('invalid public onboarding overlay heading')
+    if 'foreignOverlayImportSetup' in setup:
+        counts = setup['foreignOverlayImportSetup']
+        if (setup.get('foreignOverlayProof') != 'classified' or 'foreignOverlayHeading' not in setup
+                or type(counts) is not dict or set(counts) != {
+                    'titleCount', 'continueCount', 'notNowCount', 'skipCount'}
+                or any(type(count) is not int or not 0 <= count <= 32 for count in counts.values())
+                or counts['titleCount'] == 0):
+            raise ValueError('invalid imported setup dialog observation')
+        paired = (counts['titleCount'] == 1 and counts['continueCount'] == 1
+                  and (counts['notNowCount'], counts['skipCount']) in {(1, 0), (0, 1)})
+        heading = setup['foreignOverlayHeading']
+        if ((heading == 'imported-setup' and not paired)
+                or paired and heading not in {'imported-setup', 'ambiguous'}):
+            raise ValueError('inconsistent imported setup dialog observation')
+    elif setup.get('foreignOverlayHeading') == 'imported-setup':
+        raise ValueError('missing imported setup dialog observation')
     return setup
 
 
