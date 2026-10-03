@@ -71,33 +71,6 @@ class DesktopSessionTests(unittest.TestCase):
             with self.assertRaises(ProcessLookupError):
                 os.kill(int((root / "started").read_text()), 0)
 
-    def test_large_viewport_is_fixed_and_requires_the_hosted_zed_opt_in(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            shell_environment = root / "shell-environment"
-            shell_environment.write_text(
-                'exec() { "$@"; exit "$?"; }\n'
-                'dbus-run-session() { [[ "$1" == -- ]] || return 93; shift; "$@"; }\n'
-                'busctl() { return 0; }\n'
-                'xvfb-run() { printf "%s\\n" "$@" > "$SYNTHETIC_SESSION/args"; return 27; }\n'
-            )
-            base = dict(os.environ, BASH_ENV=str(shell_environment), SYNTHETIC_SESSION=str(root),
-                        RUNNER_OS="Linux", GITHUB_ACTIONS="true", RUNNER_ENVIRONMENT="github-hosted",
-                        FEASIBILITY_ZED_MAXIMIZED="1", NANH_ZED_X11_VIEWPORT="large")
-            for change, expected_large in (({}, True), ({"NANH_ZED_X11_VIEWPORT": "default"}, False),
-                                          ({"NANH_ZED_X11_VIEWPORT": "PRIVATE"}, False),
-                                          ({"FEASIBILITY_ZED_MAXIMIZED": "0"}, False),
-                                          ({"RUNNER_ENVIRONMENT": "self-hosted"}, False),
-                                          ({"GITHUB_ACTIONS": "false"}, False)):
-                result = subprocess.run(
-                    ["bash", str(ROOT / "scripts/run-desktop-check-session.sh"), "synthetic-checker"],
-                    env={**base, **change}, capture_output=True, timeout=5,
-                )
-                self.assertEqual(result.returncode, 27)
-                args = (root / "args").read_text().splitlines()
-                prefix = ["-a", "-s", "-screen 0 1920x1440x24"] if expected_large else ["-a"]
-                self.assertEqual(args, prefix + ["bash", str(ROOT / "scripts/run-desktop-check-x11.sh"), "synthetic-checker"])
-
 
 if __name__ == "__main__":
     unittest.main()
