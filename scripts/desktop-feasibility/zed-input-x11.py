@@ -704,6 +704,31 @@ def retry_click(payload):
             facts['inputDelivery'] = observer.finish()
         return 0
     except (ValueError, TypeError, OSError, subprocess.SubprocessError, ImportError):
+        # A blocked GPUI parent forces Arrow and ignores all input, even if its
+        # owned transient Dialog is unmapped. Observe only; never dismiss it.
+        if (facts.get('cursorSelection', {}).get('status') == 'no-hit'
+                and os.environ.get('NANH_ZED_XRECORD') == '1'
+                and sys.platform == 'linux'
+                and os.environ.get('GITHUB_ACTIONS') == 'true'
+                and os.environ.get('RUNNER_ENVIRONMENT') == 'github-hosted'
+                and os.environ.get('RUNNER_OS') == 'Linux'):
+            facts['transientDialogs'] = dict(state='unavailable',
+                ownedTransientDialogs=None, mappedOwnedTransientDialogs=None)
+            try:
+                scope = locals().get('cursor_scope')
+                client = locals().get('active')
+                cutoff = locals().get('deadline')
+                held_request = locals().get('request')
+                if (not callable(scope) or type(client) is not int or client <= 0
+                        or type(cutoff) not in (int, float) or type(held_request) is not dict
+                        or type(held_request.get('pid')) is not int):
+                    return locals().get('stage', 2)
+                import runpy
+                module = runpy.run_path(str(Path(__file__).with_name('zed-transient-dialogs.py')))
+                facts['transientDialogs'] = module['capture'](
+                    client, held_request['pid'], scope, cutoff)
+            except (ValueError, TypeError, OSError, ImportError):
+                pass
         return locals().get("stage", 2)
     finally:
         live_cursor = locals().get('live_cursor')

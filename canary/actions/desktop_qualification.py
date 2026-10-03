@@ -924,7 +924,22 @@ def semantic_observations(directory, app):
                     raise ValueError('invalid Zed published ancestor observation')
                 record.update(centerWithinPublishedAncestors=within, ancestorBoundsStatus=state,
                               checkedAncestorCount=count)
-            if (set(value) - modifier_fields - ancestor_fields - ancestor_stage_fields - {'cursorSelection'} not in (base, base | {'inputDelivery'}, base | coordinate_fields,
+            if 'transientDialogs' in value:
+                dialogs = value['transientDialogs']
+                if (type(dialogs) is not dict or set(dialogs) != {
+                        'state', 'ownedTransientDialogs', 'mappedOwnedTransientDialogs'}
+                        or type(dialogs['state']) is not str or dialogs['state'] not in {
+                            'complete', 'unavailable', 'query-failed', 'identity-rejected', 'deadline', 'limit'}):
+                    raise ValueError('invalid Zed transient dialog observation')
+                total, mapped = dialogs['ownedTransientDialogs'], dialogs['mappedOwnedTransientDialogs']
+                if dialogs['state'] == 'complete':
+                    if (type(total) is not int or type(mapped) is not int
+                            or not 0 <= mapped <= total <= 32):
+                        raise ValueError('invalid Zed transient dialog counts')
+                elif total is not None or mapped is not None:
+                    raise ValueError('incomplete Zed transient dialog counts')
+                record['transientDialogs'] = dict(dialogs)
+            if (set(value) - modifier_fields - ancestor_fields - ancestor_stage_fields - {'cursorSelection', 'transientDialogs'} not in (base, base | {'inputDelivery'}, base | coordinate_fields,
                                   base | coordinate_fields | {'inputDelivery'}, base | coordinate_fields | authority_fields,
                                   base | coordinate_fields | authority_fields | {'inputDelivery'})
                     or present_modifiers and present_modifiers != modifier_fields

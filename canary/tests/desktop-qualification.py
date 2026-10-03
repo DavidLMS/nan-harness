@@ -1286,6 +1286,30 @@ class QualificationTests(unittest.TestCase):
             path.write_text(json.dumps(value))
             self.assertEqual(q.semantic_observations(root, 'hermes-desktop'), [value])
 
+    def test_transient_dialog_counts_are_advisory_closed_and_partial_unknown(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / 'dialogs.json'
+            base = dict(schemaVersion=1, mechanism='zed-pointer-observation', diagnosticsOnly=True,
+                pointerTarget='unavailable', pointerChild='unavailable',
+                **dict.fromkeys('maximizedHorizontal maximizedVertical enabled sensitive showing visible defunct retryContains'.split(), None))
+            for state in ('complete','unavailable','query-failed','identity-rejected','deadline','limit'):
+                dialogs = dict(state=state, ownedTransientDialogs=2 if state=='complete' else None,
+                               mappedOwnedTransientDialogs=1 if state=='complete' else None)
+                value = {**base,'transientDialogs':dialogs}
+                path.write_text(json.dumps(value))
+                self.assertEqual(q.semantic_observations(root,'zed-desktop'),[value])
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root,'claude-desktop')
+            good = dict(state='complete',ownedTransientDialogs=0,mappedOwnedTransientDialogs=0)
+            for invalid in ({**good,'state':'PRIVATE'}, {**good,'text':'PRIVATE'},
+                            {**good,'ownedTransientDialogs':True}, {**good,'ownedTransientDialogs':33},
+                            {**good,'mappedOwnedTransientDialogs':1}, {**good,'state':'deadline'},
+                            {**good,'ownedTransientDialogs':None}, {}, None):
+                path.write_text(json.dumps({**base,'transientDialogs':invalid}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root,'zed-desktop')
+
     def test_pointer_observation_never_accepts_private_native_details(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
