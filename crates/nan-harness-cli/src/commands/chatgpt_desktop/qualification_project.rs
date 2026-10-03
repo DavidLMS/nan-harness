@@ -9,9 +9,9 @@ use std::io::{Error, ErrorKind, Read as _};
 use std::path::{Path, PathBuf};
 use tokio::process::Command;
 
-const ARTIFACT: &str = "4c70df5417fcee1f004a1356f6d48f6b084abdcf1da349e154a7f593f2360b19";
-const EXECUTABLE: &str = "27d4a13c2557cfb9b5d3360b0977828103b774b87295198abc7b901d4c223325";
-const VERSION: &str = "26.930.21537";
+const ARTIFACT: &str = "f7b0266d6c00d4743da01d62bc82488f7ec5560c642501758119cb9885f67c87";
+const EXECUTABLE: &str = "b35bf062c01d73da090c60e62186dc180c2a8545cb6fc9575b4403c8fa3db49e";
+const VERSION: &str = "26.930.31730";
 const POLICY_KEYS: [&str; 7] = [
     "GITHUB_ACTIONS",
     "RUNNER_ENVIRONMENT",

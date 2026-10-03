@@ -71,9 +71,9 @@ def validate_claude_bundle(executable):
 
 def validate_codex_project_release(release, executable_hash):
     # The ordinary native flag was inspected in these exact official bytes.
-    if (release.get('version') != '26.930.21537'
-            or release.get('digest') != 'sha256:4c70df5417fcee1f004a1356f6d48f6b084abdcf1da349e154a7f593f2360b19'
-            or executable_hash != '27d4a13c2557cfb9b5d3360b0977828103b774b87295198abc7b901d4c223325'):
+    if (release.get('version') != '26.930.31730'
+            or release.get('digest') != 'sha256:f7b0266d6c00d4743da01d62bc82488f7ec5560c642501758119cb9885f67c87'
+            or executable_hash != 'b35bf062c01d73da090c60e62186dc180c2a8545cb6fc9575b4403c8fa3db49e'):
         raise ValueError('Codex project trial requires the inspected official release')
 
 
@@ -275,7 +275,7 @@ def run(args):
         if args.app != 'chatgpt-desktop' or args.platform != 'windows':
             raise ValueError('Codex native project trial platform differs')
         validate_codex_project_release(manifest['apps'][0], digest(Path(executable)))
-        environment['NANH_CODEX_PROJECT_ARTIFACT_SHA256'] = '4c70df5417fcee1f004a1356f6d48f6b084abdcf1da349e154a7f593f2360b19'
+        environment['NANH_CODEX_PROJECT_ARTIFACT_SHA256'] = 'f7b0266d6c00d4743da01d62bc82488f7ec5560c642501758119cb9885f67c87'
     expected_os = {'macos': ('macOS', 'darwin'), 'linux': ('Linux', 'linux'), 'windows': ('Windows', 'win32')}[args.platform]
     if environment.get('RUNNER_OS') != expected_os[0] or sys.platform != expected_os[1]:
         raise ValueError('host platform differs')
