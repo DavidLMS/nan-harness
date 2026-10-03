@@ -34,8 +34,6 @@ to use either model for an individual image. See [image generation](#image-gener
 | `nanh goose` | [Goose](https://github.com/block/goose) | OpenAI Chat Completions | Optional |
 | `nanh claude` | [Claude Code](https://www.anthropic.com/claude-code) | Anthropic Messages bridge | Not available |
 | `nanh codex` | [Codex](https://openai.com/codex/) | OpenAI Responses bridge | Not available |
-| `nanh zcode` | [ZCode](https://github.com/zai-org/ZCode) | OpenAI Chat Completions | Optional |
-| `nanh mimo` | [MiMo Code](https://github.com/XiaomiMiMo/MiMo-Code) | OpenAI Chat Completions | Optional |
 | `nanh opencode` | [OpenCode](https://opencode.ai/) | OpenAI Chat Completions | Optional |
 | `nanh qwen` | [Qwen Code](https://qwenlm.github.io/qwen-code-docs/en/users/overview) | OpenAI Chat Completions | Optional |
 | `nanh pi` | [Pi](https://pi.dev/) | OpenAI Chat Completions | Optional |
@@ -43,6 +41,8 @@ to use either model for an individual image. See [image generation](#image-gener
 | `nanh openclaw` | [OpenClaw](https://openclaw.ai/) | OpenAI Chat Completions | Optional |
 | `nanh hermes` | [Hermes Agent](https://hermes-agent.nousresearch.com/) | OpenAI Chat Completions | Optional |
 | `nanh omp` | [Oh My Pi](https://omp.sh/) | OpenAI Chat Completions | Optional |
+| `nanh mimo` | [MiMo Code](https://github.com/XiaomiMiMo/MiMo-Code) | OpenAI Chat Completions | Optional |
+| `nanh zcode` | [ZCode](https://github.com/zai-org/ZCode) | OpenAI Chat Completions | Optional |
 | `nanh prime-agent` | [Prime Agent](https://github.com/PrimeIntellect-ai/prime-agent) | OpenAI Chat Completions | Optional |
 | `nanh dsh` | [DeepSeek Harness](https://deepseek.com/harness/en/) | OpenAI Chat Completions | Optional |
 | `nanh fx` | [fx](https://fx.sh/) | fx AI Gateway bridge | Not available |
