@@ -1862,7 +1862,6 @@ dependencies = [
  "time",
  "tokio",
  "url",
- "windows-sys 0.61.2",
  "xa11y",
  "zeroize",
 ]

@@ -94,6 +94,26 @@ pub(super) fn run_absence_until(
     .map_err(FailureCategory::reason)
 }
 
+#[cfg(any(windows, test))]
+pub(super) fn run_process_presence_until(
+    executable: &Path,
+    claude: bool,
+    deadline: Instant,
+) -> Result<Zeroizing<String>, FailureCategory> {
+    let argument = if claude {
+        "--claude-process-presence"
+    } else {
+        "--codex-process-presence"
+    };
+    run_once_until(
+        executable,
+        OsStr::new(argument),
+        None,
+        std::process::id().to_string().as_bytes(),
+        Some(deadline),
+    )
+}
+
 fn run_once(
     executable: &Path,
     argument: &OsStr,
@@ -239,6 +259,31 @@ pub(super) fn validate_image(image: &Screenshot) -> Result<(), Reason> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn presence_command_passes_checker_identity_and_keeps_original_deadline() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let root = tempfile::tempdir().unwrap();
+        let executable = root.path().join("helper");
+        std::fs::write(&executable, "#!/bin/sh\n[ \"$1\" = --version ] && exit 0\n[ \"$1\" = --claude-process-presence ] || exit 2\nread -r checker\n[ \"$checker\" = \"$PPID\" ] || exit 3\nprintf 'absent\\n'\n").unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+        nan_harness_test_support::executable_fixture::wait_until_ready(&executable).unwrap();
+        assert!(run_process_presence_until(&executable, true, Instant::now()).is_err());
+        assert_eq!(
+            &*run_process_presence_until(
+                &executable,
+                true,
+                Instant::now() + Duration::from_secs(1)
+            )
+            .unwrap(),
+            "absent\n"
+        );
+        assert!(
+            run_process_presence_until(&executable, false, Instant::now() + Duration::from_secs(1))
+                .is_err()
+        );
+    }
 
     #[cfg(unix)]
     #[test]

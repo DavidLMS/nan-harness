@@ -1494,3 +1494,27 @@ Linux Zed
 observes no held modifiers or mouse buttons in all three Retry dispatches. Server
 delivery, first reply/tool acceptance and cleanup pass; Retry recovery does not.
 This eliminates held-input-state as the cause in these probes. No cell is promoted.
+
+
+Windows trials on `0b9ccbe9` fail before application launch:
+[Claude 37079744074](https://github.com/DavidLMS/nan-harness/actions/runs/37079744074)
+and [Codex 37079749513](https://github.com/DavidLMS/nan-harness/actions/runs/37079749513).
+The checker denies unsafe Rust, so the direct Toolhelp calls cannot compile there.
+The corrected implementation places this read-only enumeration in the existing
+C++ native boundary, returns only closed presence/failure facts, and retains the
+original absolute deadline and checker-entry completeness requirement. No lint
+exception is introduced. Retained Claude helpers are reused for this query too.
+
+macOS Claude
+[37079746739](https://github.com/DavidLMS/nan-harness/actions/runs/37079746739)
+passes cleanup, records two authenticated model-catalog requests, and proves both
+initial and final focus. It still rejects final acquisition with `window-changed`.
+That receipt does not distinguish candidate ambiguity, identity or display
+failure. The next receipt adds a closed final candidate state without changing
+selection or guards. Startup inventory remains unqualified.
+
+Frozen Windows Claude 2.19675.0 bootstrap resolves third-party storage using
+`LOCALAPPDATA/Claude-3p`, already matching the private qualification profile.
+Real known-folder copying is not supported by this observation. Config-file
+presence and catalog requests remain distinct from consumed configuration or a
+usable composer. No account-free Pen composer route has been established.

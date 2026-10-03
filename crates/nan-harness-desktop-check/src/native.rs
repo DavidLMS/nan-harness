@@ -237,6 +237,15 @@ impl Native {
         Ok(Snapshot::parse(&output)?.windows)
     }
 
+    #[cfg(windows)]
+    pub(crate) fn process_presence_until(
+        &self,
+        claude: bool,
+        deadline: std::time::Instant,
+    ) -> Result<zeroize::Zeroizing<String>, FailureCategory> {
+        process::run_process_presence_until(&self.executable, claude, deadline)
+    }
+
     #[cfg(any(windows, test))]
     pub(crate) fn windows_for_absence_until(
         &self,

@@ -307,7 +307,7 @@ impl Gui {
                         Instant::now(),
                         bound,
                     ) {
-                        process_absence::observe_after_accessibility_rejection(bound);
+                        process_absence::observe_after_accessibility_rejection(bound, native);
                     }
                     // Independent evidence never overrides the original absence verdict.
                     result
@@ -376,7 +376,7 @@ impl Gui {
         require_budget(AbsenceStage::ProcessEnumeration)?;
         #[cfg(windows)]
         match deadline {
-            Some(bound) => process_absence::inspect_absent(kind, bound),
+            Some(bound) => process_absence::inspect_absent(kind, bound, retained_native),
             None => process_absence::ensure_absent(kind),
         }
         .map_err(|reason| AbsenceFailure {

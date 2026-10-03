@@ -1136,6 +1136,24 @@ class QualificationTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 q.semantic_observations(root, 'chatgpt-desktop')
 
+    def test_claude_final_candidate_state_is_closed_and_diagnostic_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / 'focus.json'
+            value = dict(schemaVersion=1, mechanism='claude-window-focus', diagnosticsOnly=True,
+                         status='proved', nativeForegroundWindowMatchedHeld=True,
+                         phase='final-stability', candidateState='off-display')
+            for state in ('absent', 'ambiguous', 'identity-changed', 'bounds-changed', 'focus-unproved',
+                          'same-process-window', 'off-display', 'occluded', 'proved'):
+                current = {**value, 'candidateState': state}
+                path.write_text(json.dumps(current))
+                self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [current])
+            for changed in ({**value, 'candidateState': 'PRIVATE'}, {**value, 'candidateState': True},
+                            {**value, 'phase': 'initial'}, {**value, 'windowId': 45}):
+                path.write_text(json.dumps(changed))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'claude-desktop')
+
     def test_claude_storage_use_is_closed_and_cannot_certify_consumption(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

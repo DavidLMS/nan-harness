@@ -7,11 +7,13 @@ use nan_harness_core::DesktopHarnessKind;
 pub(super) fn ensure_absent(kind: DesktopHarnessKind) -> Result<(), Reason> {
     if kind == DesktopHarnessKind::ChatGpt {
         use std::time::{Duration, Instant};
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let native = crate::native::Native::new()?;
         return wait_absent(
-            |deadline| inspect(deadline, b"ChatGPT.exe"),
+            |deadline| inspect(&native, deadline, b"ChatGPT.exe"),
             Instant::now,
             std::thread::sleep,
-            Instant::now() + Duration::from_secs(2),
+            deadline,
         );
     }
     Ok(())
@@ -21,13 +23,26 @@ pub(super) fn ensure_absent(kind: DesktopHarnessKind) -> Result<(), Reason> {
 pub(super) fn inspect_absent(
     kind: DesktopHarnessKind,
     deadline: std::time::Instant,
+    native: Option<&crate::native::Native>,
 ) -> Result<(), Reason> {
     let image: &[u8] = match kind {
         DesktopHarnessKind::ChatGpt => b"ChatGPT.exe",
         DesktopHarnessKind::Claude => b"Claude.exe",
         _ => return Ok(()),
     };
-    if inspect(deadline, image)? {
+    if std::time::Instant::now() >= deadline {
+        save_failure(image, InspectionStage::Deadline);
+        return Err(Reason::DesktopUnavailable);
+    }
+    let prepared;
+    let native = match native {
+        Some(native) => native,
+        None => {
+            prepared = crate::native::Native::new()?;
+            &prepared
+        }
+    };
+    if inspect(native, deadline, image)? {
         Err(Reason::AlreadyRunning)
     } else {
         Ok(())
@@ -64,7 +79,10 @@ fn post_stop_facts(state: PostStopState) -> serde_json::Value {
 }
 
 #[cfg(windows)]
-pub(super) fn observe_after_accessibility_rejection(deadline: std::time::Instant) {
+pub(super) fn observe_after_accessibility_rejection(
+    deadline: std::time::Instant,
+    native: Option<&crate::native::Native>,
+) {
     if std::env::var("GITHUB_ACTIONS").as_deref() != Ok("true")
         || std::env::var("RUNNER_ENVIRONMENT").as_deref() != Ok("github-hosted")
         || std::env::var("RUNNER_OS").as_deref() != Ok("Windows")
@@ -72,7 +90,18 @@ pub(super) fn observe_after_accessibility_rejection(deadline: std::time::Instant
     {
         return;
     }
-    let state = match inspect(deadline, b"Claude.exe") {
+    let prepared;
+    let native = match native {
+        Some(native) => Some(native),
+        None => {
+            prepared = crate::native::Native::new().ok();
+            prepared.as_ref()
+        }
+    };
+    let result = native
+        .ok_or(Reason::DesktopUnavailable)
+        .and_then(|native| inspect(native, deadline, b"Claude.exe"));
+    let state = match result {
         Ok(true) => PostStopState::Present,
         Ok(false) => PostStopState::Absent,
         Err(_) => PostStopState::QueryFailed,
@@ -99,47 +128,6 @@ fn wait_absent(
             return Ok(());
         }
         pause(std::time::Duration::from_millis(50).min(deadline.saturating_duration_since(now())));
-    }
-}
-
-#[cfg(any(windows, test))]
-#[derive(Default)]
-struct ProcessScan {
-    present: bool,
-    own_seen: bool,
-    count: usize,
-}
-
-#[cfg(any(windows, test))]
-impl ProcessScan {
-    fn observe(
-        &mut self,
-        pid: u32,
-        name: &[u16],
-        own: u32,
-        image: &[u8],
-    ) -> Result<(), InspectionStage> {
-        self.count += 1;
-        if self.count > 65536 {
-            return Err(InspectionStage::Oversize);
-        }
-        let end = name
-            .iter()
-            .position(|unit| *unit == 0)
-            .ok_or(InspectionStage::Schema)?;
-        let name = String::from_utf16(&name[..end]).map_err(|_| InspectionStage::Schema)?;
-        if name.is_empty() || name.contains(['/', '\\']) {
-            return Err(InspectionStage::Schema);
-        }
-        self.own_seen |= pid == own;
-        self.present |= name.as_bytes().eq_ignore_ascii_case(image);
-        Ok(())
-    }
-    fn finish(self, complete: bool) -> Result<bool, InspectionStage> {
-        if !complete || !self.own_seen {
-            return Err(InspectionStage::Schema);
-        }
-        Ok(self.present)
     }
 }
 
@@ -212,79 +200,37 @@ fn save_failure(image: &[u8], stage: InspectionStage) {
 }
 
 #[cfg(windows)]
-fn inspect(deadline: std::time::Instant, image: &[u8]) -> Result<bool, Reason> {
-    inspect_inner(deadline, image).map_err(|stage| {
+fn inspect(
+    native: &crate::native::Native,
+    deadline: std::time::Instant,
+    image: &[u8],
+) -> Result<bool, Reason> {
+    let result = native
+        .process_presence_until(image == b"Claude.exe", deadline)
+        .map_err(|error| {
+            if error == crate::native::FailureCategory::Timeout {
+                InspectionStage::Deadline
+            } else {
+                InspectionStage::Schema
+            }
+        })
+        .and_then(|output| parse_presence(&output));
+    result.map_err(|stage| {
         save_failure(image, stage);
         Reason::DesktopUnavailable
     })
 }
 
-#[cfg(windows)]
-fn inspect_inner(deadline: std::time::Instant, image: &[u8]) -> Result<bool, InspectionStage> {
-    use windows_sys::Win32::{
-        Foundation::{
-            CloseHandle, ERROR_NO_MORE_FILES, GetLastError, HANDLE, INVALID_HANDLE_VALUE,
-        },
-        System::Diagnostics::ToolHelp::{
-            CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW,
-            TH32CS_SNAPPROCESS,
-        },
-    };
-    struct Snapshot(HANDLE);
-    impl Drop for Snapshot {
-        fn drop(&mut self) {
-            unsafe {
-                CloseHandle(self.0);
-            }
-        }
-    }
-    let check = || {
-        if std::time::Instant::now() >= deadline {
-            Err(InspectionStage::Deadline)
-        } else {
-            Ok(())
-        }
-    };
-    check()?;
-    // The read-only snapshot is the only handle opened; enumerated PIDs are never opened.
-    let handle = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
-    if handle == INVALID_HANDLE_VALUE {
-        return Err(InspectionStage::Snapshot);
-    }
-    let snapshot = Snapshot(handle);
-    check()?;
-    let mut entry = PROCESSENTRY32W {
-        dwSize: u32::try_from(std::mem::size_of::<PROCESSENTRY32W>())
-            .map_err(|_| InspectionStage::Schema)?,
-        ..Default::default()
-    };
-    let mut valid = unsafe { Process32FirstW(snapshot.0, &mut entry) };
-    if valid == 0 {
-        return Err(InspectionStage::First);
-    }
-    let mut scan = ProcessScan::default();
-    loop {
-        check()?;
-        scan.observe(
-            entry.th32ProcessID,
-            &entry.szExeFile,
-            std::process::id(),
-            image,
-        )?;
-        check()?;
-        valid = unsafe { Process32NextW(snapshot.0, &mut entry) };
-        let end_error = if valid == 0 {
-            unsafe { GetLastError() }
-        } else {
-            0
-        };
-        check()?;
-        if valid == 0 {
-            if end_error != ERROR_NO_MORE_FILES {
-                return Err(InspectionStage::Next);
-            }
-            return scan.finish(true);
-        }
+#[cfg(any(windows, test))]
+fn parse_presence(output: &str) -> Result<bool, InspectionStage> {
+    match output {
+        "present\n" => Ok(true),
+        "absent\n" => Ok(false),
+        "error snapshot\n" => Err(InspectionStage::Snapshot),
+        "error first\n" => Err(InspectionStage::First),
+        "error next\n" => Err(InspectionStage::Next),
+        "error oversize\n" => Err(InspectionStage::Oversize),
+        _ => Err(InspectionStage::Schema),
     }
 }
 
@@ -372,33 +318,17 @@ mod tests {
     }
 
     #[test]
-    fn complete_utf16_scan_requires_self_and_exact_basename() {
-        let name = |s: &str| s.encode_utf16().chain([0]).collect::<Vec<_>>();
-        let mut scan = ProcessScan::default();
-        scan.observe(42, &name("checker.exe"), 42, b"Claude.exe")
-            .unwrap();
-        scan.observe(99, &name("cLaUdE.exe"), 42, b"Claude.exe")
-            .unwrap();
-        assert!(scan.finish(true).unwrap());
-        let mut scan = ProcessScan::default();
-        scan.observe(42, &name("checker.exe"), 42, b"Claude.exe")
-            .unwrap();
-        scan.observe(99, &name("ClaudeHelper.exe"), 42, b"Claude.exe")
-            .unwrap();
-        assert!(!scan.finish(true).unwrap());
-        assert!(ProcessScan::default().finish(true).is_err());
-        assert!(ProcessScan::default().finish(false).is_err());
-        for invalid in [
-            vec![0xd800, 0],
-            vec![65; 260],
-            name("C:/Claude.exe"),
-            name(""),
+    fn native_presence_protocol_rejects_partial_or_private_payloads() {
+        assert!(parse_presence("present\n").unwrap());
+        assert!(!parse_presence("absent\n").unwrap());
+        for rejected in [
+            "present",
+            "absent\nPRIVATE_SENTINEL",
+            "present\nabsent\n",
+            "error schema\n",
+            "error next\n",
         ] {
-            assert!(
-                ProcessScan::default()
-                    .observe(42, &invalid, 42, b"Claude.exe")
-                    .is_err()
-            );
+            assert!(parse_presence(rejected).is_err());
         }
     }
 

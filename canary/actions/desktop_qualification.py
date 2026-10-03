@@ -426,7 +426,7 @@ def semantic_observations(directory, app):
             fields = {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'status', 'nativeForegroundWindowMatchedHeld'}
             statuses = {'proved', 'untrusted', 'query-error', 'focus-mismatch', 'not-standard',
                         'identity-changed', 'no-match', 'ambiguous'}
-            if (app != 'claude-desktop' or set(value) - {'phase'} not in (fields, fields | {'query'}, fields | {'windowOnlyStatus', 'windowOnlyMatchedHeld'}, fields | {'query', 'windowOnlyStatus', 'windowOnlyMatchedHeld'}) or value['diagnosticsOnly'] is not True
+            if (app != 'claude-desktop' or set(value) - {'phase', 'candidateState'} not in (fields, fields | {'query'}, fields | {'windowOnlyStatus', 'windowOnlyMatchedHeld'}, fields | {'query', 'windowOnlyStatus', 'windowOnlyMatchedHeld'}) or value['diagnosticsOnly'] is not True
                     or type(value['status']) is not str or value['status'] not in statuses
                     or (type(value['nativeForegroundWindowMatchedHeld']) is not bool
                         if value['status'] == 'proved' else value['nativeForegroundWindowMatchedHeld'] is not None)):
@@ -442,6 +442,12 @@ def semantic_observations(directory, app):
                 if type(value['phase']) is not str or value['phase'] not in {'initial', 'final-stability'}:
                     raise ValueError('invalid Claude focus phase')
                 record['phase'] = value['phase']
+            if 'candidateState' in value:
+                if (value.get('phase') != 'final-stability' or type(value['candidateState']) is not str
+                        or value['candidateState'] not in {'absent', 'ambiguous', 'identity-changed', 'bounds-changed',
+                                                          'focus-unproved', 'same-process-window', 'off-display', 'occluded', 'proved'}):
+                    raise ValueError('invalid Claude acquisition candidate state')
+                record['candidateState'] = value['candidateState']
             query = value.get('query')
             if query is not None:
                 stages = set('app-create app-timeout focused-window main-window focused-element input-timeout input-window element-type pid window-timeout role subrole position size geometry'.split())

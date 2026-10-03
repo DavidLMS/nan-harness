@@ -12,6 +12,7 @@
 #include <sstream>
 
 #if !defined(_WIN32)
+int process_presence(bool) { return 5; }
 int fit_window(const std::string&) { return 5; }
 int window_state(const std::string&) { return 5; }
 #endif
@@ -551,6 +552,58 @@ int activate_window(const std::string& request) {
 #elif defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <tlhelp32.h>
+
+// Only the complete read-only snapshot may establish absence. The caller's
+// checker PID (not this helper's PID) must occur in the snapshot.
+int process_presence(bool claude) {
+    auto fail = [](const char* stage) {
+        std::cout << "error " << stage << '\n';
+        return std::cout ? 0 : 4;
+    };
+    char request[32] = {};
+    if (!std::cin.getline(request, sizeof(request))
+        || std::cin.peek() != std::char_traits<char>::eof()) return fail("schema");
+    std::uint32_t checker = 0;
+    const std::string text(request);
+    const auto parsed = std::from_chars(text.data(), text.data() + text.size(), checker);
+    if (parsed.ec != std::errc() || parsed.ptr != text.data() + text.size() || checker == 0)
+        return fail("schema");
+    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snapshot == INVALID_HANDLE_VALUE) return fail("snapshot");
+    struct HandleGuard {
+        HANDLE value;
+        ~HandleGuard() { CloseHandle(value); }
+    } guard{snapshot};
+    PROCESSENTRY32W entry{};
+    entry.dwSize = sizeof(entry);
+    if (!Process32FirstW(snapshot, &entry)) return fail("first");
+    bool present = false, own_seen = false;
+    std::size_t count = 0;
+    const wchar_t* expected = claude ? L"Claude.exe" : L"ChatGPT.exe";
+    do {
+        if (++count > 65536) return fail("oversize");
+        const auto end = std::find(std::begin(entry.szExeFile), std::end(entry.szExeFile), L'\0');
+        if (end == std::end(entry.szExeFile) || end == std::begin(entry.szExeFile)) return fail("schema");
+        const std::wstring name(std::begin(entry.szExeFile), end);
+        if (name.find_first_of(L"/\\") != std::wstring::npos) return fail("schema");
+        for (std::size_t i = 0; i < name.size(); ++i) {
+            const auto unit = static_cast<unsigned>(name[i]);
+            if (unit >= 0xD800 && unit <= 0xDBFF) {
+                if (++i >= name.size() || static_cast<unsigned>(name[i]) < 0xDC00
+                    || static_cast<unsigned>(name[i]) > 0xDFFF) return fail("schema");
+            } else if (unit >= 0xDC00 && unit <= 0xDFFF) return fail("schema");
+        }
+        own_seen = own_seen || entry.th32ProcessID == checker;
+        present = present || _wcsicmp(name.c_str(), expected) == 0;
+    } while (Process32NextW(snapshot, &entry));
+    if (GetLastError() != ERROR_NO_MORE_FILES) return fail("next");
+    if (!own_seen) return fail("schema");
+    std::cout << (present ? "present\n" : "absent\n");
+    return std::cout ? 0 : 4;
+}
+
+
 #include <dwmapi.h>
 
 static int fit_failure(const char* stage, const char* detail = nullptr) {

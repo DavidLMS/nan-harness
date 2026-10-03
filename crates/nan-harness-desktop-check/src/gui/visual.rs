@@ -435,11 +435,7 @@ impl Visual {
         loop {
             if Instant::now() >= deadline {
                 if let Some(snapshot) = &pending {
-                    record_claude_snapshot(
-                        snapshot,
-                        final_focus_expected(snapshot, &original),
-                        "final-stability",
-                    );
+                    record_claude_snapshot(snapshot, &original, "final-stability");
                 }
                 stability.save();
                 return Err(failure(Reason::DesktopUnavailable));
@@ -471,11 +467,7 @@ impl Visual {
             }
             pending = None;
             let candidate = final_initial_candidate(&snapshot, &original).map_err(|error| {
-                record_claude_snapshot(
-                    &snapshot,
-                    final_focus_expected(&snapshot, &original),
-                    "final-stability",
-                );
+                record_claude_snapshot(&snapshot, &original, "final-stability");
                 failure(error.reason())
             })?;
             ownership()?;
@@ -1511,6 +1503,23 @@ fn final_focus_expected<'a>(snapshot: &'a Snapshot, original: &'a Window) -> &'a
     }
 }
 
+#[cfg(any(test, target_os = "macos"))]
+fn final_candidate_state(snapshot: &Snapshot, original: &Window) -> &'static str {
+    match eligible_windows(DesktopHarnessKind::Claude, &snapshot.windows).count() {
+        0 => "absent",
+        1 => match final_initial_candidate(snapshot, original) {
+            Ok(_) => "proved",
+            Err(GuardFailure::IdentityMissing) => "identity-changed",
+            Err(GuardFailure::BoundsChanged) => "bounds-changed",
+            Err(GuardFailure::ForegroundChanged) => "focus-unproved",
+            Err(GuardFailure::SameProcessWindow) => "same-process-window",
+            Err(GuardFailure::OffDisplay) => "off-display",
+            Err(GuardFailure::Occluded) => "occluded",
+        },
+        _ => "ambiguous",
+    }
+}
+
 #[cfg(target_os = "macos")]
 fn record_claude_snapshot(snapshot: &Snapshot, held: &Window, phase: &str) {
     if !cfg!(target_os = "macos")
@@ -1541,6 +1550,12 @@ fn record_claude_snapshot(snapshot: &Snapshot, held: &Window, phase: &str) {
             return;
         }
     }
+    let original = held;
+    let held = if phase == "final-stability" {
+        final_focus_expected(snapshot, original)
+    } else {
+        held
+    };
     if let Some((status, matched, query)) = snapshot.focus_observation(held) {
         let window_only = snapshot.window_focus_observation(held);
         let suffix = if phase == "initial" { "" } else { "-final" };
@@ -1549,15 +1564,16 @@ fn record_claude_snapshot(snapshot: &Snapshot, held: &Window, phase: &str) {
             std::process::id()
         ));
         if let Ok(file) = nan_harness_private_fs::open_private_new(&focus_path) {
-            let _ = serde_json::to_writer(
-                file,
-                &serde_json::json!({
-                    "schemaVersion": 1, "mechanism": "claude-window-focus", "diagnosticsOnly": true,
-                    "status": status, "nativeForegroundWindowMatchedHeld": matched, "query": query, "phase": phase,
-                    "windowOnlyStatus": window_only.map(|value| value.0),
-                    "windowOnlyMatchedHeld": window_only.and_then(|value| value.1),
-                }),
-            );
+            let mut facts = serde_json::json!({
+                "schemaVersion": 1, "mechanism": "claude-window-focus", "diagnosticsOnly": true,
+                "status": status, "nativeForegroundWindowMatchedHeld": matched, "query": query, "phase": phase,
+                "windowOnlyStatus": window_only.map(|value| value.0),
+                "windowOnlyMatchedHeld": window_only.and_then(|value| value.1),
+            });
+            if phase == "final-stability" {
+                facts["candidateState"] = final_candidate_state(snapshot, original).into();
+            }
+            let _ = serde_json::to_writer(file, &facts);
         }
     }
     if phase != "initial" {
@@ -1598,15 +1614,19 @@ mod tests {
         )
         .unwrap();
         let original = state.windows[0].clone();
+        assert_eq!(final_candidate_state(&state, &original), "focus-unproved");
         state.windows[0].bounds.width += 20;
         assert_eq!(final_focus_expected(&state, &original).bounds.width, 820);
         state.windows.push(state.windows[0].clone());
+        assert_eq!(final_candidate_state(&state, &original), "ambiguous");
         assert_eq!(final_focus_expected(&state, &original), &original);
         state.windows.clear();
+        assert_eq!(final_candidate_state(&state, &original), "absent");
         assert_eq!(final_focus_expected(&state, &original), &original);
         let mut foreign = original.clone();
         foreign.pid = 8;
         state.windows.push(foreign);
+        assert_eq!(final_candidate_state(&state, &original), "identity-changed");
         assert_eq!(final_focus_expected(&state, &original), &original);
     }
 
