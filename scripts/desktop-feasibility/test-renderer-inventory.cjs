@@ -150,6 +150,23 @@ console.log('Renderer inventory: closed startup headings passed');
   assert.ok(confirmed);assert.equal(confirmed.scope.mainScope,true);
   assert.equal(confirmed.page,f.main);
   f=fixture();assert.equal(await helper.captureCorrelationMain(f.main,f.browser,()=>true,1000,f.identity),null);
+  // A sole blank target may commit the official main before identity binding.
+  // Ownership loss, a second target and deadline expiry still stop acquisition.
+  f=fixture();f.setPages([f.main]);let committed=false;
+  f.main.url=()=>committed?'app://-/index.html':'about:blank';
+  const committedMain=await helper.captureCorrelationMain(f.main,f.browser,()=>true,1000,f.identity,
+    async ms=>{clock+=ms;committed=true;});
+  assert.ok(committedMain);assert.equal(committedMain.url,'app://-/index.html');
+  f=fixture();f.setPages([f.main]);f.main.url=()=> 'about:blank';
+  assert.equal(await helper.captureCorrelationMain(f.main,f.browser,()=>true,1000,f.identity,
+    async ms=>{clock+=ms;}),null);
+  f=fixture();f.setPages([f.main]);f.main.url=()=> 'about:blank';
+  assert.equal(await helper.captureCorrelationMain(f.main,f.browser,()=>true,1000,f.identity,
+    async ms=>{clock+=ms;f.setPages([f.main,f.aux]);}),null);
+  f=fixture();f.setPages([f.main]);let identityAttempts=0;
+  assert.ok(await helper.captureCorrelationMain(f.main,f.browser,()=>true,1000,
+    async (...args)=>{if(++identityAttempts===1)throw Error('loader not committed');return f.identity(...args);},
+    async ms=>{clock+=ms;}));
   // Initial blank, query/fragment/aux routes, replacement or incomplete loader
   // never produce a capability that can be recovered from a later page list.
   for(const mutate of [r=>{r.url='about:blank';},r=>{r.url+='?initialRoute=%2Favatar-overlay';},

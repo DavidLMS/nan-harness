@@ -285,10 +285,10 @@ def semantic_observations(directory, app):
         if type(value) is not dict:
             raise ValueError('invalid semantic observation')
         mechanism = value.get('mechanism')
-        if mechanism not in {'codex-renderer-qualification', 'qualification-runner-failure', 'hermes-windows-catalog-readiness', 'hermes-renderer-qualification', 'zed-native-copy', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'zed-retry-visual', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'codex-project-preflight', 'windows-process-absence', 'windows-post-stop-process', 'windows-process-baseline', 'windows-process-settlement', 'claude-owned-configuration', 'claude-restore', 'claude-model-discovery', 'claude-window-stack', 'claude-window-focus', 'claude-chat-navigation', 'claude-window-fit', 'claude-storage-use', 'claude-native-storage', 'claude-private-storage-stage', 'claude-native-composer', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}:
+        if mechanism not in {'codex-renderer-qualification', 'qualification-runner-failure', 'hermes-windows-catalog-readiness', 'hermes-renderer-qualification', 'zed-native-copy', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'zed-retry-visual', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'codex-project-preflight', 'windows-process-absence', 'windows-post-stop-process', 'windows-process-baseline', 'windows-process-settlement', 'windows-owned-stop', 'claude-owned-configuration', 'claude-restore', 'claude-model-discovery', 'claude-window-stack', 'claude-window-focus', 'claude-chat-navigation', 'claude-window-fit', 'claude-storage-use', 'claude-native-storage', 'claude-private-storage-stage', 'claude-native-composer', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}:
             continue
         expected = 'hermes-renderer-qualification' if app == 'hermes-desktop' else 'zed-native-copy'
-        if (mechanism != expected and mechanism not in {'codex-renderer-qualification', 'qualification-runner-failure', 'hermes-windows-catalog-readiness', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'zed-retry-visual', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'codex-project-preflight', 'windows-process-absence', 'windows-post-stop-process', 'windows-process-baseline', 'windows-process-settlement', 'claude-owned-configuration', 'claude-restore', 'claude-model-discovery', 'claude-window-stack', 'claude-window-focus', 'claude-chat-navigation', 'claude-window-fit', 'claude-storage-use', 'claude-native-storage', 'claude-private-storage-stage', 'claude-native-composer', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}) or type(value.get('schemaVersion')) is not int or value['schemaVersion'] != 1:
+        if (mechanism != expected and mechanism not in {'codex-renderer-qualification', 'qualification-runner-failure', 'hermes-windows-catalog-readiness', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'zed-retry-visual', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'codex-project-preflight', 'windows-process-absence', 'windows-post-stop-process', 'windows-process-baseline', 'windows-process-settlement', 'windows-owned-stop', 'claude-owned-configuration', 'claude-restore', 'claude-model-discovery', 'claude-window-stack', 'claude-window-focus', 'claude-chat-navigation', 'claude-window-fit', 'claude-storage-use', 'claude-native-storage', 'claude-private-storage-stage', 'claude-native-composer', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}) or type(value.get('schemaVersion')) is not int or value['schemaVersion'] != 1:
             raise ValueError('semantic observation identity differs')
         record = {'schemaVersion': 1, 'mechanism': mechanism}
         if mechanism == 'codex-project-preflight':
@@ -396,7 +396,7 @@ def semantic_observations(directory, app):
         elif mechanism == 'zed-atspi-geometry':
             counts = set('sampledButtons identityRejected stateRejected stabilityRejected containmentRejected offsetExpected offsetMissing offsetInconsistent toggleOn toggleOff toggleUnknown'.split())
             if (app != 'zed-desktop' or set(value) != counts | {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'status', 'phase'}
-                    or value['diagnosticsOnly'] is not True or value.get('phase') != 'pre-retry'
+                    or value['diagnosticsOnly'] is not True or value.get('phase') not in {'pre-send', 'pre-retry'}
                     or type(value['status']) is not str
                     or value['status'] not in {'observed', 'partial', 'unavailable', 'budget-exceeded', 'guard-rejected'}
                     or any(type(value[key]) is not int or not 0 <= value[key] <= 64 for key in counts)
@@ -510,6 +510,16 @@ def semantic_observations(directory, app):
                 raise ValueError('inconsistent Claude Chat navigation observation')
             record.update(diagnosticsOnly=True, phase=phase, actionStatus=action,
                           **{key: value[key] for key in flags})
+        elif mechanism == 'windows-owned-stop':
+            flags = {'wrapperPresent', 'launcherHandleAvailable', 'jobClosed'}
+            fields = flags | {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'terminateResult'}
+            outcome = value.get('terminateResult')
+            if (set(value) != fields or app != 'claude-desktop' or value['diagnosticsOnly'] is not True
+                    or type(outcome) is not str or outcome not in {'issued', 'failed', 'not-attempted'}
+                    or any(type(value[key]) is not bool for key in flags)
+                    or not value['wrapperPresent'] and (value['launcherHandleAvailable'] or outcome != 'not-attempted')):
+                raise ValueError('invalid Windows owned stop observation')
+            record.update({key: value[key] for key in fields - {'schemaVersion', 'mechanism'}})
         elif mechanism == 'windows-process-settlement':
             fields = set('schemaVersion mechanism diagnosticsOnly firstState lastState queryCount'.split())
             states = {'present', 'absent', 'query-failed', 'not-queried'}
@@ -535,7 +545,7 @@ def semantic_observations(directory, app):
             fields = {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'status', 'nativeForegroundWindowMatchedHeld'}
             statuses = {'proved', 'untrusted', 'query-error', 'focus-mismatch', 'not-standard',
                         'identity-changed', 'no-match', 'ambiguous'}
-            if (app != 'claude-desktop' or set(value) - {'phase', 'candidateState', 'guardCategory'} not in (fields, fields | {'query'}, fields | {'windowOnlyStatus', 'windowOnlyMatchedHeld'}, fields | {'query', 'windowOnlyStatus', 'windowOnlyMatchedHeld'}) or value['diagnosticsOnly'] is not True
+            if (app != 'claude-desktop' or set(value) - {'phase', 'candidateState', 'guardCategory', 'windowOnlyQuery'} not in (fields, fields | {'query'}, fields | {'windowOnlyStatus', 'windowOnlyMatchedHeld'}, fields | {'query', 'windowOnlyStatus', 'windowOnlyMatchedHeld'}) or value['diagnosticsOnly'] is not True
                     or type(value['status']) is not str or value['status'] not in statuses
                     or (type(value['nativeForegroundWindowMatchedHeld']) is not bool
                         if value['status'] == 'proved' else value['nativeForegroundWindowMatchedHeld'] is not None)):
@@ -567,19 +577,22 @@ def semantic_observations(directory, app):
                                                           'focus-unproved', 'same-process-window', 'off-display', 'occluded', 'proved'}):
                     raise ValueError('invalid Claude acquisition candidate state')
                 record['candidateState'] = value['candidateState']
-            query = value.get('query')
-            if query is not None:
-                stages = set('app-create app-timeout focused-window main-window focused-element input-timeout input-window element-type pid window-timeout role subrole position size geometry'.split())
-                errors = set('failure illegal-argument invalid-element cannot-complete attribute-unsupported not-implemented api-disabled no-value other empty-value type-mismatch owner-mismatch geometry-invalid'.split())
-                if (type(query) is not dict or set(query) != {'phase', 'stage', 'error'}
-                        or any(type(query[key]) is not str for key in ('phase', 'stage', 'error'))
-                        or query['phase'] not in {'before', 'after'} or query['stage'] not in stages
-                        or query['error'] not in errors
-                        or value['status'] != {'before': 'query-error', 'after': 'identity-changed'}[query['phase']]):
-                    raise ValueError('invalid Claude focus query observation')
+            if 'windowOnlyQuery' in value and 'windowOnlyStatus' not in value:
+                raise ValueError('missing Claude window-only focus status')
+            for key, status_key in (('query', 'status'), ('windowOnlyQuery', 'windowOnlyStatus')):
+                query = value.get(key)
+                if query is not None:
+                    stages = set('app-create app-timeout focused-window main-window focused-element input-timeout input-window element-type pid window-timeout role subrole position size geometry'.split())
+                    errors = set('failure illegal-argument invalid-element cannot-complete attribute-unsupported not-implemented api-disabled no-value other empty-value type-mismatch owner-mismatch geometry-invalid'.split())
+                    if (type(query) is not dict or set(query) != {'phase', 'stage', 'error'}
+                            or any(type(query[field]) is not str for field in ('phase', 'stage', 'error'))
+                            or query['phase'] not in {'before', 'after'} or query['stage'] not in stages
+                            or query['error'] not in errors
+                            or value.get(status_key) != {'before': 'query-error', 'after': 'identity-changed'}[query['phase']]):
+                        raise ValueError('invalid Claude focus query observation')
+                if key in value:
+                    record[key] = query
             record.update({key: value[key] for key in fields - {'schemaVersion', 'mechanism'}})
-            if 'query' in value:
-                record['query'] = query
         elif mechanism == 'claude-window-stack':
             counts = set('samePidAheadCount samePidAheadEligibleCount samePidAheadIntersectsHeldCount samePidAheadNormalLayerCount samePidAheadOtherLayerCount'.split())
             flags = {'foregroundPidMatchesHeld', 'frontmostWindowSamePid'}

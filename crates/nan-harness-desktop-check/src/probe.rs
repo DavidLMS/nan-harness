@@ -762,6 +762,7 @@ async fn scenario_owned(
     } else {
         let acquired = Gui::wait(spec.kind, &mut process);
         capture_failed_acquisition(acquired.is_err(), &mut process, spec, launch_observation);
+        #[cfg(any(target_os = "macos", windows))]
         let acquired = acquired.and_then(|native_gui| {
             native_gui.finish_initial_ready(&mut process)?;
             Ok(native_gui)
@@ -1582,7 +1583,15 @@ fn isolated_command(spec: &ProbeSpec, program: &Path) -> Result<Command, Reason>
         .env_remove("CLAUDE_CDP_AUTH");
     if spec.kind == DesktopHarnessKind::ChatGpt {
         let user_data = profile.join("codex-desktop");
-        create_private_dir_all(&user_data).map_err(|_| Reason::IsolationUnavailable)?;
+        let state = profile.join("nanh");
+        let surface = state.join("chatgpt-desktop");
+        let managed = surface.join("profile");
+        // Prepare every owned ancestor before the CLI creates state files.
+        // Its ordinary create_dir_all can otherwise leave intermediate Unix
+        // directories with the runner's default permissions.
+        for directory in [&user_data, &state, &surface, &managed] {
+            create_private_dir_all(directory).map_err(|_| Reason::IsolationUnavailable)?;
+        }
         // Codex's supported Electron override also isolates UI onboarding and
         // singleton state; CODEX_HOME alone redirects only runtime settings.
         command.env("CODEX_ELECTRON_USER_DATA_PATH", user_data);
@@ -1643,7 +1652,7 @@ fn prepare_zed_profile(spec: &ProbeSpec) -> Result<(), Reason> {
         // NewThread's workspace handler focuses the panel without toggling it.
         open_private_new(&directory.join("keymap.json"))
             .and_then(|mut file| {
-                file.write_all(br#"[{"bindings":{"ctrl-alt-n":"agent::NewThread","ctrl-alt-y":"agent::CopyThreadToClipboard"}},{"context":"SecurityModal","bindings":{"ctrl-alt-t":"menu::Confirm"}}]"#)
+                file.write_all(br#"[{"bindings":{"ctrl-alt-n":"agent::NewThread","ctrl-alt-y":"agent::CopyThreadToClipboard","ctrl-alt-z":"workspace::ToggleZoom"}},{"context":"SecurityModal","bindings":{"ctrl-alt-t":"menu::Confirm"}}]"#)
             })
             .map_err(|_| Reason::IsolationUnavailable)?;
     }
@@ -2731,6 +2740,22 @@ mod tests {
             spec.workspace.join("profile/codex-desktop")
         );
         assert!(Path::new(data).is_dir());
+        for suffix in [
+            "nanh",
+            "nanh/chatgpt-desktop",
+            "nanh/chatgpt-desktop/profile",
+        ] {
+            let path = spec.workspace.join("profile").join(suffix);
+            assert!(path.is_dir());
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt as _;
+                assert_eq!(
+                    std::fs::metadata(path).unwrap().permissions().mode() & 0o077,
+                    0
+                );
+            }
+        }
     }
 
     #[test]

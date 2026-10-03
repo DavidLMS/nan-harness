@@ -572,21 +572,14 @@ impl Visual {
         }
     }
 
+    #[cfg(target_os = "macos")]
     pub(super) fn press_claude_chat(
         &self,
         deadline: Instant,
     ) -> Result<crate::native::ChatPressStage, Reason> {
-        #[cfg(target_os = "macos")]
-        {
-            self.native
-                .press_claude_chat(&self.window.borrow(), deadline)
-                .map_err(FailureCategory::reason)
-        }
-        #[cfg(not(target_os = "macos"))]
-        {
-            let _ = deadline;
-            Err(Reason::ActionUnsupported)
-        }
+        self.native
+            .press_claude_chat(&self.window.borrow(), deadline)
+            .map_err(FailureCategory::reason)
     }
 
     pub(super) fn pid(&self) -> u32 {
@@ -1842,6 +1835,7 @@ fn record_claude_snapshot(snapshot: &Snapshot, held: &Window, phase: &str) {
                 "schemaVersion": 1, "mechanism": "claude-window-focus", "diagnosticsOnly": true,
                 "status": status, "nativeForegroundWindowMatchedHeld": matched, "query": query, "phase": phase,
                 "windowOnlyStatus": window_only.map(|value| value.0),
+                "windowOnlyQuery": snapshot.window_focus_query(),
                 "windowOnlyMatchedHeld": window_only.and_then(|value| value.1),
             });
             if phase == "initial-decision" {
@@ -2118,7 +2112,7 @@ mod tests {
 
     #[test]
     fn initial_incomplete_focus_waits_without_proving_readiness() {
-        let state = Snapshot::parse("FG 7 0\nDISPLAY 0 0 2000 2000\nWIN 99 7 1800 1800 10 10 436c61756465 3\nWIN 1 7 10 20 800 600 436c61756465 0\nFOCUS query-error 0\nFOCUS_QUERY before focused-window cannot-complete\nFOCUS_WINDOW query-error 0\n").unwrap();
+        let state = Snapshot::parse("FG 7 0\nDISPLAY 0 0 2000 2000\nWIN 99 7 1800 1800 10 10 436c61756465 3\nWIN 1 7 10 20 800 600 436c61756465 0\nFOCUS query-error 0\nFOCUS_QUERY before focused-window cannot-complete\nFOCUS_WINDOW query-error 0\nFOCUS_WINDOW_QUERY before focused-window cannot-complete\n").unwrap();
         let held = state.windows[1].clone();
         let now = Instant::now();
         let deadline = now + Duration::from_secs(45);

@@ -675,6 +675,30 @@ class QualificationTests(unittest.TestCase):
             path.write_text(json.dumps(value))
             self.assertEqual(q.semantic_observations(Path(root), 'claude-desktop'), [value])
 
+    def test_independent_window_query_and_owned_stop_are_closed(self):
+        focus = dict(schemaVersion=1, mechanism='claude-window-focus', diagnosticsOnly=True,
+                     status='proved', nativeForegroundWindowMatchedHeld=True,
+                     windowOnlyStatus='query-error', windowOnlyMatchedHeld=None,
+                     windowOnlyQuery=dict(phase='before', stage='focused-window', error='cannot-complete'))
+        stop = dict(schemaVersion=1, mechanism='windows-owned-stop', diagnosticsOnly=True,
+                    wrapperPresent=True, launcherHandleAvailable=True, terminateResult='issued', jobClosed=True)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'facts.json'
+            for value in (focus, stop):
+                path.write_text(json.dumps(value))
+                self.assertEqual(q.semantic_observations(tmp, 'claude-desktop'), [value])
+                for changed in ({**value, 'privatePath': 'PRIVATE'}, {**value, 'diagnosticsOnly': False}):
+                    path.write_text(json.dumps(changed))
+                    with self.assertRaises(ValueError):
+                        q.semantic_observations(tmp, 'claude-desktop')
+            for changed in ({**focus, 'windowOnlyStatus': 'proved'},
+                            {**focus, 'windowOnlyQuery': {'phase': 'before', 'stage': 'PRIVATE', 'error': 'cannot-complete'}},
+                            {**stop, 'wrapperPresent': False}, {**stop, 'terminateResult': 'PRIVATE'},
+                            {**stop, 'jobClosed': 1}):
+                path.write_text(json.dumps(changed))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(tmp, 'claude-desktop')
+
     def test_claude_focus_phases_are_optional_closed_and_never_promote_failure(self):
         with tempfile.TemporaryDirectory() as root:
             path = Path(root) / 'focus.json'
@@ -1028,7 +1052,10 @@ class QualificationTests(unittest.TestCase):
             path = root / 'observation.json'
             path.write_text(json.dumps(value))
             self.assertEqual(q.semantic_observations(root, 'zed-desktop'), [value])
-            for changed in ({**value, 'bus': 'PRIVATE'}, {**value, 'status': 'PRIVATE'},
+            path.write_text(json.dumps({**value, 'phase': 'pre-send'}))
+            self.assertEqual(q.semantic_observations(root, 'zed-desktop')[0]['phase'], 'pre-send')
+            for changed in ({**value, 'phase': 'PRIVATE'}, {**value, 'phase': True},
+                            {**value, 'bus': 'PRIVATE'}, {**value, 'status': 'PRIVATE'},
                             {**value, 'sampledButtons': 65}, {**value, 'toggleOn': False},
                             {**value, 'offsetMissing': 0}, {**value, 'diagnosticsOnly': False}):
                 path.write_text(json.dumps(changed))

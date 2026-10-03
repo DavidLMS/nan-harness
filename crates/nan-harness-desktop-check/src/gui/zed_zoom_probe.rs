@@ -37,6 +37,17 @@ fn omit_atspi_roles<T>(_: &T) -> bool {
 }
 
 impl Observation {
+    pub(super) fn proves_zoomed(&self) -> bool {
+        self.status == "observed"
+            && self.unique_correlation
+            && self.correlated_buttons == 1
+            && self.stable_minimize_matches == 1
+            && self.stable_maximize_matches == 0
+            && self.matched_toggle_buttons == 1
+            && self.matched_push_buttons == 0
+            && self.checked_state == "on"
+    }
+
     pub(super) fn unavailable(status: &'static str) -> Self {
         Self {
             schema_version: 1,
@@ -282,6 +293,33 @@ pub(super) fn correlate_canonical(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn zoom_postcondition_requires_stable_minimize_and_selected_owned_toggle() {
+        let mut held = button();
+        held.role = Role::Switch;
+        let mut matches = icons();
+        matches.minimize = std::mem::take(&mut matches.maximize);
+        matches.minimize_matches = 1;
+        matches.maximize_matches = 0;
+        let canonical = |toggle: &str| CanonicalButton {
+            index: 0,
+            role: 62,
+            bounds: [10, 20, 30, 30],
+            toggle: toggle.into(),
+        };
+        let before = std::slice::from_ref(&held);
+        let observed = correlate_canonical(&matches, before, before, &[canonical("on")]);
+        assert!(observed.proves_zoomed());
+        assert!(
+            !correlate_canonical(&matches, before, before, &[canonical("off")]).proves_zoomed()
+        );
+        assert!(
+            !correlate_canonical(&matches, before, before, &[canonical("unknown")]).proves_zoomed()
+        );
+        matches.maximize = matches.minimize.clone();
+        assert!(!correlate_canonical(&matches, before, before, &[canonical("on")]).proves_zoomed());
+    }
+
     #[test]
     fn canonical_root_bounds_correlate_without_double_origin_or_identity_loss() {
         let mut held = button();

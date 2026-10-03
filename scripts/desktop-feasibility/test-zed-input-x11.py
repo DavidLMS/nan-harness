@@ -137,6 +137,14 @@ class Transport(unittest.TestCase):
             self.assertEqual(self.call('submit', b'private synthetic prompt'), 2)
             run.assert_not_called()
 
+    def test_panel_zoom_uses_the_private_public_action_binding(self):
+        self.assertEqual(module['KEYS']['panel-zoom'], 'ctrl+alt+z')
+        with patch('subprocess.run', return_value=subprocess.CompletedProcess([], 0)) as run:
+            self.assertEqual(self.call('panel-zoom'), 0)
+            self.assertEqual(run.call_count, 1)
+            self.assertEqual(run.call_args.args[0],
+                             ['/usr/bin/xdotool', 'key', '--clearmodifiers', 'ctrl+alt+z'])
+
     def test_fixed_actions_are_bounded_and_silent(self):
         with patch('subprocess.run', return_value=subprocess.CompletedProcess([], 0)) as run:
             for mode, key in module['KEYS'].items():

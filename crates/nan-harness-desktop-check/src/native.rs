@@ -3,6 +3,7 @@
 #[cfg(target_os = "macos")]
 mod identity;
 mod image;
+#[cfg(any(target_os = "macos", test))]
 mod mac_chat;
 #[cfg(any(target_os = "macos", test))]
 mod mac_fit;
@@ -13,6 +14,7 @@ mod window;
 #[cfg(target_os = "macos")]
 pub(crate) use crate::diagnostics::ClaudeIdentityObservation;
 pub(crate) use image::prepare_ocr_image;
+#[cfg(any(target_os = "macos", test))]
 pub(crate) use mac_chat::ChatPressStage;
 pub(crate) use ocr::Page;
 pub(crate) use process::FailureCategory;

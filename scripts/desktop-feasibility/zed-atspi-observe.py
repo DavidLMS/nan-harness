@@ -174,6 +174,7 @@ def canonical_rectangle(screen, window, geometry):
 
 def measure(request, backend, deadline, clock=time.monotonic, canonical=None):
     result = observation('observed')
+    result['phase'] = request.get('phase', 'pre-retry')
     geometry = backend.guard()
     for index, held in enumerate(request['buttons']):
         if clock() >= deadline:
@@ -220,12 +221,14 @@ def measure(request, backend, deadline, clock=time.monotonic, canonical=None):
 
 
 def validate(request):
-    if (set(request) not in ({'pid', 'window', 'buttons', 'icons'},
+    if (set(request) - {'phase'} not in ({'pid', 'window', 'buttons', 'icons'},
                             {'pid', 'window', 'buttons', 'icons', 'privateName'})
             or any(type(request[k]) is not int or request[k] <= 0 for k in ('pid', 'window'))
             or type(request['buttons']) is not list or len(request['buttons']) > 64
             or type(request['icons']) is not list or len(request['icons']) > 64):
         raise ValueError('invalid request')
+    if request.get('phase', 'pre-retry') not in ('pre-send', 'pre-retry'):
+        raise ValueError('invalid phase')
     if ('privateName' in request and (type(request['privateName']) is not str
             or not re.fullmatch(r'zed-canonical-[0-9a-f]{16}\.private', request['privateName']))):
         raise ValueError('invalid private handoff')
@@ -333,6 +336,7 @@ def run(payload):
     result, backend, canonical, request = observation(), None, [], None
     try:
         request = validate(json.loads(payload))
+        result["phase"] = request.get("phase", "pre-retry")
         deadline = time.monotonic() + 2
         backend = Backend(request, deadline)
         result = measure(request, backend, deadline, canonical=canonical)

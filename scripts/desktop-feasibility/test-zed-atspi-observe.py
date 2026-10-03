@@ -22,6 +22,17 @@ class Backend:
 
 
 class Tests(unittest.TestCase):
+    def test_phase_binding_preserves_legacy_and_rejects_unknown(self):
+        request = dict(pid=7, window=8, buttons=[], icons=[])
+        self.assertEqual(m.validate(request), request)
+        for phase in ('pre-send', 'pre-retry'):
+            current = dict(request, phase=phase)
+            self.assertEqual(m.validate(current), current)
+            measured = m.measure(current, Backend([]), 10, clock=lambda: 0)
+            self.assertEqual(measured['phase'], phase)
+        with self.assertRaises(ValueError):
+            m.validate(dict(request, phase='private-output'))
+
     def test_published_ancestor_intersection_is_closed_and_not_action_authority(self):
         held, parent, app = (':1.2', '/retry'), (':1.2', '/group'), (':1.2', '/app')
         def collect(extent):

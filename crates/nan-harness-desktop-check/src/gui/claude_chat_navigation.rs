@@ -1,13 +1,20 @@
 //! Explicit hosted public navigation; one accessibility action and no conversation input.
 
+#[cfg(target_os = "macos")]
 use super::{ComposerFailure, Gui, map_error, require_foreground_pid};
 use crate::native::ChatPressStage;
 use crate::report::Reason;
+#[cfg(target_os = "macos")]
 use nan_harness_private_fs::open_private_new;
 use serde::Serialize;
+#[cfg(target_os = "macos")]
 use std::io::Write as _;
+#[cfg(target_os = "macos")]
 use std::path::Path;
-use std::time::{Duration, Instant};
+#[cfg(target_os = "macos")]
+use std::time::Duration;
+use std::time::Instant;
+#[cfg(target_os = "macos")]
 use xa11y::{App, AppExt as _};
 
 #[derive(Default, Serialize)]
@@ -16,7 +23,9 @@ enum Phase {
     #[default]
     Preflight,
     Press,
+    #[cfg(target_os = "macos")]
     Postcondition,
+    #[cfg(target_os = "macos")]
     Completed,
 }
 #[derive(Default, Serialize)]
@@ -103,6 +112,7 @@ fn within(deadline: Instant) -> Result<(), Reason> {
         Err(Reason::Timeout)
     }
 }
+#[cfg(target_os = "macos")]
 impl Gui {
     fn navigation_guard(
         &self,
@@ -175,6 +185,7 @@ impl Gui {
         }
     }
 }
+#[cfg(target_os = "macos")]
 fn record(directory: &Path, owner: u32, facts: &Facts) {
     let Ok(metadata) = std::fs::symlink_metadata(directory) else {
         return;

@@ -1,6 +1,7 @@
 //! Native controls are resolved inside one app; native errors never enter public reports.
 
 mod accessibility_probe;
+#[cfg(any(target_os = "macos", test))]
 mod claude_chat_navigation;
 mod claude_native_probe;
 #[cfg(any(windows, test))]
@@ -459,6 +460,7 @@ impl Gui {
         })
     }
 
+    #[cfg(any(target_os = "macos", windows))]
     pub(crate) fn finish_initial_ready<P: Observation>(
         &self,
         process: &mut P,
@@ -475,8 +477,6 @@ impl Gui {
             self.visual
                 .finish_windows_initial_acquisition(process, deadline)?;
         }
-        #[cfg(not(any(target_os = "macos", windows)))]
-        let _ = process;
         Ok(())
     }
 

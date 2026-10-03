@@ -1772,3 +1772,30 @@ failure category in that same unqualified envelope, without exception text or
 raw application logs. [Quality 37087916144](https://github.com/DavidLMS/nan-harness/actions/runs/37087916144)
 and the local full gate with `RUST_TEST_THREADS=1` pass on `82e7758e`; parallel
 local tests expose intermittent two-second synthetic-script readiness timeouts.
+
+### Current startup and Linux panel follow-up
+
+The next candidate prepares every owned Codex state ancestor with the private
+filesystem contract before the ordinary launcher creates its managed profile.
+Run [37114901374](https://github.com/DavidLMS/nan-harness/actions/runs/37114901374)
+reported `root-component` rejection in all Linux and macOS sessions. Windows
+reached the renderer but could not bind its initial main document. Initial
+binding now waits within the existing deadline for the sole owned blank target
+to commit the exact official primary route; it still rejects a second target,
+unknown route, changed identity or lost ownership before granting input.
+
+Claude macOS records the independent window-only accessibility query error as
+well as the full focus query. Only explicitly incomplete queries may remain
+pending during the original initial acquisition budget. Runtime focus guards
+are unchanged. Claude Windows records closed facts about the existing owned
+wrapper termination and release; these facts do not establish that job members
+are absent and do not waive the independent process-absence requirement.
+
+The Linux Zed panel trial uses a fixed private binding for the public
+`workspace::ToggleZoom` action. It sends that action once and requires the
+source-backed selected Minimize control before submitting the first prompt.
+An acknowledged keyboard transport alone is insufficient. Existing exact
+prompt readback, ownership, accessibility hit testing and cursor checks remain
+mandatory for the later single Retry action. These changes are candidates for
+hosted verification, not additional qualified acceptance cells. Pen remains
+excluded from the active qualification matrix.

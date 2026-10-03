@@ -769,6 +769,11 @@ impl NativeClipboardSession<'_> {
                 .native_copy_guard(&mut self.facts, "layout-zoom-after")?;
             self.facts.input.clipboard_verified = false;
             self.gui.verify_native_copy_input(&mut self.facts, prompt)?;
+            let observation = self.panel_zoom_observation("pre-send")?;
+            self.record_panel_zoom(&observation)?;
+            if !observation.proves_zoomed() {
+                return Err(Reason::ActionUnsupported);
+            }
         }
         self.capture_icon_baseline()?;
         self.gui.send_native_copy_turn(&mut self.facts)
@@ -1073,7 +1078,7 @@ impl NativeClipboardSession<'_> {
         {
             return Err(Reason::IsolationUnavailable);
         }
-        let observation = self.panel_zoom_observation();
+        let observation = self.panel_zoom_observation("pre-retry");
         let (record, failure) = match observation {
             Ok(record) => (record, None),
             Err(reason) => (
@@ -1086,18 +1091,26 @@ impl NativeClipboardSession<'_> {
                 Some(reason),
             ),
         };
-        let bytes = serde_json::to_vec(&record).map_err(|_| Reason::IsolationUnavailable)?;
-        let name = format!("panel-zoom-{}-{}.json", std::process::id(), nonce()?);
-        open_private_new(&self.directory.join(name))
-            .and_then(|mut file| file.write_all(&bytes).and_then(|()| file.sync_all()))
-            .map_err(|_| Reason::IsolationUnavailable)?;
+        self.record_panel_zoom(&record)?;
         if let Some(reason) = failure.filter(|reason| icon_guard_failure(*reason)) {
             return Err(reason);
         }
         Ok(())
     }
 
-    fn panel_zoom_observation(&mut self) -> Result<super::zed_zoom_probe::Observation, Reason> {
+    fn record_panel_zoom(&self, record: &super::zed_zoom_probe::Observation) -> Result<(), Reason> {
+        let bytes = serde_json::to_vec(record).map_err(|_| Reason::IsolationUnavailable)?;
+        let name = format!("panel-zoom-{}-{}.json", std::process::id(), nonce()?);
+        open_private_new(&self.directory.join(name))
+            .and_then(|mut file| file.write_all(&bytes).and_then(|()| file.sync_all()))
+            .map_err(|_| Reason::IsolationUnavailable)?;
+        Ok(())
+    }
+
+    fn panel_zoom_observation(
+        &mut self,
+        phase: &str,
+    ) -> Result<super::zed_zoom_probe::Observation, Reason> {
         self.gui
             .native_copy_guard(&mut self.facts, "retry-revalidate")?;
         let directory = self
@@ -1126,10 +1139,12 @@ impl NativeClipboardSession<'_> {
         let after = buttons()?;
         let matches = super::native_icon_probe::observe_zoom(directory, &first, &second, capture)?;
         #[cfg(target_os = "linux")]
-        let canonical = self.observe_atspi_geometry(&matches, &before)?;
+        let canonical = self.observe_atspi_geometry(&matches, &before, phase)?;
         #[cfg(target_os = "linux")]
         let result =
             super::zed_zoom_probe::correlate_canonical(&matches, &before, &after, &canonical);
+        #[cfg(not(target_os = "linux"))]
+        let _ = phase;
         #[cfg(not(target_os = "linux"))]
         let result = super::zed_zoom_probe::correlate(&matches, &before, &after);
         self.gui
@@ -1142,6 +1157,7 @@ impl NativeClipboardSession<'_> {
         &mut self,
         matches: &super::native_icon_probe::ZoomMatches,
         buttons: &[xa11y::ElementData],
+        phase: &str,
     ) -> Result<Vec<super::zed_zoom_probe::CanonicalButton>, Reason> {
         self.gui
             .native_copy_guard(&mut self.facts, "retry-revalidate")?;
@@ -1189,7 +1205,7 @@ impl NativeClipboardSession<'_> {
         let private_name = format!("zed-canonical-{}.private", nonce()?);
         let private_path = self.directory.join(&private_name);
         let request = serde_json::to_string(&serde_json::json!({
-            "pid":pid,"window":window,"buttons":held,"icons":icons,"privateName":private_name
+            "pid":pid,"window":window,"buttons":held,"icons":icons,"privateName":private_name,"phase":phase
         }))
         .map_err(|_| Reason::IsolationUnavailable)?;
         let executable =

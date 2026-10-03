@@ -16,7 +16,6 @@ pub(crate) enum ChatPressStage {
     Completed,
 }
 impl ChatPressStage {
-    #[cfg(any(target_os = "macos", test))]
     pub(super) fn parse(output: &str) -> Option<Self> {
         match output {
             "chat request\n" => Some(Self::Request),

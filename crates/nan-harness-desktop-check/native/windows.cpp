@@ -239,8 +239,8 @@ static void print_ax_focus(pid_t foreground, CFArrayRef windows, const AxFocus& 
     }
     std::cout << (window_only ? "FOCUS_WINDOW " : "FOCUS ") << status << ' ' << id << '\n';
     const AxFocus& failed = before.query_stage ? before : after;
-    if (failed.query_stage && !window_only) {
-        std::cout << "FOCUS_QUERY " << (before.query_stage ? "before" : "after") << ' '
+    if (failed.query_stage) {
+        std::cout << (window_only ? "FOCUS_WINDOW_QUERY " : "FOCUS_QUERY ") << (before.query_stage ? "before" : "after") << ' '
                   << failed.query_stage << ' ' << failed.query_error << '\n';
     }
 }

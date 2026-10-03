@@ -12,7 +12,7 @@ import uuid
 
 KEYS = {'trust': 'ctrl+alt+t', 'new-thread': 'ctrl+alt+n', 'copy-thread': 'ctrl+alt+y',
         'select-all': 'ctrl+a', 'copy': 'ctrl+c', 'paste': 'ctrl+v',
-        'right': 'Right', 'submit': 'Return', 'panel-zoom': 'shift+Escape'}
+        'right': 'Right', 'submit': 'Return', 'panel-zoom': 'ctrl+alt+z'}
 
 
 def matches_owned_frame(active, expected, parent_query):

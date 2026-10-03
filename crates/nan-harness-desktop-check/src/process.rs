@@ -4,6 +4,9 @@ use tokio::process::{Child, Command};
 #[cfg(windows)]
 use process_wrap::tokio::{ChildWrapper, CommandWrap, JobObject, KillOnDrop};
 
+#[cfg(any(windows, test))]
+mod windows_observation;
+
 pub(crate) trait Observation {
     fn id(&self) -> Option<u32>;
     fn try_wait(&mut self) -> io::Result<Option<ExitStatus>>;
@@ -14,6 +17,8 @@ pub(crate) struct ProbeProcess {
     inner: Child,
     #[cfg(windows)]
     inner: Option<Box<dyn ChildWrapper>>,
+    #[cfg(windows)]
+    stop_observation: windows_observation::StopObservation,
 }
 
 impl ProbeProcess {
@@ -33,7 +38,10 @@ impl ProbeProcess {
                 .wrap(KillOnDrop)
                 .wrap(JobObject)
                 .spawn()?;
-            Ok(Self { inner: Some(inner) })
+            Ok(Self {
+                inner: Some(inner),
+                stop_observation: windows_observation::StopObservation::new(),
+            })
         }
     }
 
@@ -70,9 +78,18 @@ impl ProbeProcess {
         }
         #[cfg(windows)]
         {
-            self.inner
+            let present = self.inner.is_some();
+            let handle = self
+                .inner
+                .as_ref()
+                .is_some_and(|inner| inner.process_handle().is_some());
+            let result = self
+                .inner
                 .as_mut()
-                .map_or(Ok(()), |inner| inner.start_kill())
+                .map_or(Ok(()), |inner| inner.start_kill());
+            self.stop_observation
+                .attempted(present, handle, result.is_ok());
+            result
         }
     }
     pub(crate) async fn wait_launcher(&mut self) -> io::Result<ExitStatus> {
@@ -96,6 +113,8 @@ impl ProbeProcess {
         // Closing the JobObject handle has kill-on-close semantics and is the final
         // ownership boundary after the launcher has been reaped.
         self.inner.take();
+        self.stop_observation.closed();
+        self.stop_observation.record();
     }
     pub(crate) async fn kill(&mut self) -> io::Result<()> {
         self.start_kill()?;

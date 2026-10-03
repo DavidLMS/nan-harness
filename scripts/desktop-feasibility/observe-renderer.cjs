@@ -82,13 +82,28 @@ function officialInitialMain(identity) {
     &&typeof identity.loader==='string'&&identity.loader.length>0
     &&identity.url==='app://-/index.html'&&identity.frameUrl===identity.url&&identity.fragment==='';
 }
-async function captureCorrelationMain(page,browser,guard,deadline,identity=correlationIdentity) {
+async function captureCorrelationMain(page,browser,guard,deadline,identity=correlationIdentity,
+  pause=ms=>new Promise(resolve=>setTimeout(resolve,ms))) {
   try {
-    if(Date.now()>=deadline||!guard())return null;
-    const pages=browser.contexts().flatMap(c=>c.pages());
-    if(pages.length!==1||pages[0]!==page)return null;
-    const held=await identity(page,deadline,false);
-    if(!officialInitialMain(held)||Date.now()>=deadline||!guard())return null;
+    const commitDeadline=Math.min(deadline,Date.now()+10000);
+    let held=null;
+    // The owned sole target can exist before Electron commits its first loader.
+    // Wait only before binding; once bound, a reload never grants a new identity.
+    while(Date.now()<commitDeadline&&guard()) {
+      const pages=browser.contexts().flatMap(c=>c.pages());
+      if(pages.length!==1||pages[0]!==page)return null;
+      const url=page.url();
+      if(url!==''&&url!=='about:blank'&&url!=='app://-/index.html')return null;
+      if(url==='app://-/index.html') {
+        try { held=await identity(page,commitDeadline,false); } catch { held=null; }
+        if(held) {
+          if(!officialInitialMain(held))return null;
+          break;
+        }
+      }
+      await pause(Math.min(50,Math.max(0,commitDeadline-Date.now())));
+    }
+    if(!held||Date.now()>=commitDeadline||!guard())return null;
     const between=browser.contexts().flatMap(c=>c.pages());
     if(between.length!==1||between[0]!==page)return null;
     const fresh=await identity(page,deadline,false);

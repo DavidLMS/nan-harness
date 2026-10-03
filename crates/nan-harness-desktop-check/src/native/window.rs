@@ -152,6 +152,8 @@ pub(crate) struct Snapshot {
     #[cfg(any(test, target_os = "macos"))]
     focus_query: Option<FocusQuery>,
     #[cfg(any(test, target_os = "macos"))]
+    window_focus_query: Option<FocusQuery>,
+    #[cfg(any(test, target_os = "macos"))]
     window_focus: Option<FocusProof>,
     displays: Vec<Rect>,
     pub(crate) windows: Vec<Window>,
@@ -257,6 +259,11 @@ impl Snapshot {
     }
 
     #[cfg(any(test, target_os = "macos"))]
+    pub(crate) fn window_focus_query(&self) -> Option<FocusQuery> {
+        self.window_focus_query
+    }
+
+    #[cfg(any(test, target_os = "macos"))]
     pub(crate) fn window_focus_observation(
         &self,
         held: &Window,
@@ -281,6 +288,28 @@ impl Snapshot {
         })
     }
 
+    #[cfg(any(test, target_os = "macos"))]
+    fn validate_focus_queries(&self) -> Result<(), Reason> {
+        for (query, proof) in [
+            (self.focus_query, &self.focus),
+            (self.window_focus_query, &self.window_focus),
+        ] {
+            if let Some(query) = query {
+                let expected_status = match query.phase {
+                    FocusQueryPhase::Before => FocusStatus::QueryError,
+                    FocusQueryPhase::After => FocusStatus::IdentityChanged,
+                };
+                if proof
+                    .as_ref()
+                    .is_none_or(|proof| proof.status != expected_status)
+                {
+                    return Err(Reason::DesktopUnavailable);
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) fn parse(text: &str) -> Result<Self, Reason> {
         let mut lines = text.lines();
         let fields = lines
@@ -298,6 +327,8 @@ impl Snapshot {
             focus: None,
             #[cfg(any(test, target_os = "macos"))]
             focus_query: None,
+            #[cfg(any(test, target_os = "macos"))]
+            window_focus_query: None,
             #[cfg(any(test, target_os = "macos"))]
             window_focus: None,
             displays: Vec::new(),
@@ -322,13 +353,28 @@ impl Snapshot {
                     }
                 }
                 #[cfg(any(test, target_os = "macos"))]
-                ["FOCUS_QUERY", phase, stage, error] if snapshot.focus_query.is_none() => {
-                    snapshot.focus_query = Some(
+                [
+                    tag @ ("FOCUS_QUERY" | "FOCUS_WINDOW_QUERY"),
+                    phase,
+                    stage,
+                    error,
+                ] if if *tag == "FOCUS_QUERY" {
+                    snapshot.focus_query.is_none()
+                } else {
+                    snapshot.window_focus_query.is_none()
+                } =>
+                {
+                    let query = Some(
                         serde_json::from_value(serde_json::json!({
                             "phase": phase, "stage": stage, "error": error,
                         }))
                         .map_err(|_| Reason::DesktopUnavailable)?,
                     );
+                    if *tag == "FOCUS_QUERY" {
+                        snapshot.focus_query = query;
+                    } else {
+                        snapshot.window_focus_query = query;
+                    }
                 }
                 ["DISPLAY", x, y, width, height] => {
                     snapshot.displays.push(rect(x, y, width, height)?);
@@ -358,19 +404,7 @@ impl Snapshot {
             }
         }
         #[cfg(any(test, target_os = "macos"))]
-        if let Some(query) = snapshot.focus_query {
-            let expected_status = match query.phase {
-                FocusQueryPhase::Before => FocusStatus::QueryError,
-                FocusQueryPhase::After => FocusStatus::IdentityChanged,
-            };
-            if snapshot
-                .focus
-                .as_ref()
-                .is_none_or(|proof| proof.status != expected_status)
-            {
-                return Err(Reason::DesktopUnavailable);
-            }
-        }
+        snapshot.validate_focus_queries()?;
         if snapshot.displays.is_empty() {
             return Err(Reason::DesktopUnavailable);
         }
@@ -452,12 +486,14 @@ impl Snapshot {
     /// complete window stack remain safe. It is never a focus proof.
     #[cfg(any(test, target_os = "macos"))]
     pub(crate) fn claude_focus_pending(&self, expected: &Window) -> bool {
-        let pending_status = |proof: &Option<FocusProof>| {
+        let pending_status = |proof: &Option<FocusProof>, query: Option<FocusQuery>| {
             proof.as_ref().is_some_and(|proof| {
-                matches!(
-                    proof.status,
-                    FocusStatus::QueryError | FocusStatus::IdentityChanged
-                ) || (proof.status == FocusStatus::Proved && proof.window == expected.id)
+                (proof.status == FocusStatus::Proved && proof.window == expected.id)
+                    || (matches!(
+                        proof.status,
+                        FocusStatus::QueryError | FocusStatus::IdentityChanged
+                    ) && query
+                        .is_some_and(|query| query.error == FocusQueryError::CannotComplete))
             })
         };
         self.windows
@@ -465,11 +501,12 @@ impl Snapshot {
             .filter(|window| window.id == expected.id && window.pid == expected.pid)
             .count()
             == 1
-            && self
-                .focus_query
-                .is_some_and(|query| query.error == FocusQueryError::CannotComplete)
-            && pending_status(&self.focus)
-            && pending_status(&self.window_focus)
+            && [self.focus_query, self.window_focus_query]
+                .into_iter()
+                .flatten()
+                .any(|query| query.error == FocusQueryError::CannotComplete)
+            && pending_status(&self.focus, self.focus_query)
+            && pending_status(&self.window_focus, self.window_focus_query)
             && matches!(
                 self.guard_failure(expected),
                 Ok(()) | Err(GuardFailure::SameProcessWindow)
@@ -1033,7 +1070,7 @@ mod tests {
     fn pending_focus_requires_only_incomplete_queries_and_safe_native_identity() {
         let base = "FG 7 0\nDISPLAY 0 0 2000 2000\nWIN 99 7 1500 1500 10 10 50616e656c 3\nWIN 1 7 10 20 800 600 436c61756465 0\n";
         let receipt = format!(
-            "{base}FOCUS identity-changed 0\nFOCUS_QUERY after main-window cannot-complete\nFOCUS_WINDOW identity-changed 0\n"
+            "{base}FOCUS identity-changed 0\nFOCUS_QUERY after main-window cannot-complete\nFOCUS_WINDOW identity-changed 0\nFOCUS_WINDOW_QUERY after main-window cannot-complete\n"
         );
         let state = Snapshot::parse(&receipt).unwrap();
         let held = state.windows[1].clone();
@@ -1041,10 +1078,12 @@ mod tests {
         assert!(state.claude_focused_guard_failure(&held).is_err());
         for changed in [
             receipt.replace("cannot-complete", "no-value"),
-            receipt.replace(
-                "FOCUS_WINDOW identity-changed 0",
-                "FOCUS_WINDOW focus-mismatch 0",
-            ),
+            receipt
+                .replace(
+                    "FOCUS_WINDOW identity-changed 0",
+                    "FOCUS_WINDOW focus-mismatch 0",
+                )
+                .replace("FOCUS_WINDOW_QUERY after main-window cannot-complete\n", ""),
             receipt.replace("1500 1500 10 10", "10 20 10 10"),
             receipt.replace("50616e656c 3", "50616e656c 0"),
             receipt.replace("FG 7 0", "FG 8 0"),
@@ -1059,6 +1098,30 @@ mod tests {
             Snapshot::parse(&format!("{base}FOCUS proved 1\nFOCUS_WINDOW proved 1\n")).unwrap();
         assert!(!proved.claude_focus_pending(&held));
         assert!(proved.claude_focused_guard_failure(&held).is_ok());
+    }
+
+    #[test]
+    fn independent_window_query_is_pending_only_when_incomplete_and_protocol_consistent() {
+        let base = "FG 7 0\nDISPLAY 0 0 2000 2000\nWIN 99 7 1500 1500 10 10 50616e656c 3\nWIN 1 7 10 20 800 600 436c61756465 0\nFOCUS proved 1\nFOCUS_WINDOW query-error 0\n";
+        let receipt = format!("{base}FOCUS_WINDOW_QUERY before main-window cannot-complete\n");
+        let state = Snapshot::parse(&receipt).unwrap();
+        assert!(state.claude_focus_pending(&state.windows[1]));
+        assert!(
+            state
+                .claude_focused_guard_failure(&state.windows[1])
+                .is_err()
+        );
+        for invalid in [
+            receipt.replace("before", "after"),
+            receipt.replace("query-error", "proved"),
+            format!("{receipt}FOCUS_WINDOW_QUERY before main-window cannot-complete\n"),
+        ] {
+            assert!(Snapshot::parse(&invalid).is_err());
+        }
+        for error in ["no-value", "attribute-unsupported", "failure"] {
+            let other = Snapshot::parse(&receipt.replace("cannot-complete", error)).unwrap();
+            assert!(!other.claude_focus_pending(&other.windows[1]));
+        }
     }
 
     #[test]
