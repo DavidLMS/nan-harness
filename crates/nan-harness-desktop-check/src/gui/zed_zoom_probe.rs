@@ -521,6 +521,39 @@ mod tests {
         );
     }
 
+    #[test]
+    fn tooltip_inventory_caps_work_before_hover_and_rejects_stale_geometry() {
+        let inventory: Vec<_> = (0..4)
+            .map(|index| {
+                let mut element = button();
+                element.role = Role::Switch;
+                element.stable_id = Some(format!("owned-source-{index}"));
+                element
+            })
+            .collect();
+        let records: Vec<_> = (0..4)
+            .map(|index| CanonicalButton {
+                index,
+                role: 62,
+                bounds: [10, 20, 30, 30],
+                toggle: "on".into(),
+            })
+            .collect();
+        assert_eq!(
+            active_candidates(&inventory[..3], &inventory[..3], &records[..3])
+                .unwrap()
+                .len(),
+            3
+        );
+        assert!(matches!(
+            active_candidates(&inventory, &inventory, &records),
+            Err(crate::report::Reason::BudgetExceeded)
+        ));
+        let mut moved = inventory.clone();
+        moved[0].bounds.as_mut().unwrap().x += 1;
+        assert!(active_candidates(&inventory[..3], &moved[..3], &records[..3]).is_err());
+    }
+
     fn button() -> ElementData {
         let mut element = ElementData {
             role: Role::Button,

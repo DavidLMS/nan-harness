@@ -762,6 +762,8 @@ pub(crate) struct NativeClipboardSession<'a> {
     retry_element: Option<xa11y::Element>,
     icon_directory: Option<PathBuf>,
     icon_baseline: Option<super::native_icon_probe::PrivateIconFrame>,
+    #[cfg(target_os = "linux")]
+    zoom_candidates: Option<Vec<(xa11y::ElementData, xa11y::Rect)>>,
 }
 
 impl NativeClipboardSession<'_> {
@@ -775,6 +777,10 @@ impl NativeClipboardSession<'_> {
         self.facts.response = ResponseFacts::default();
         self.facts.settle_observations = 0;
         self.icon_baseline = None;
+        #[cfg(target_os = "linux")]
+        {
+            self.zoom_candidates = None;
+        }
         self.gui.compose_native_copy_turn(&mut self.facts, prompt)?;
         if self.layout.begin(
             layout_policy_enabled()?,
@@ -1176,8 +1182,22 @@ impl NativeClipboardSession<'_> {
         #[cfg(target_os = "linux")]
         let canonical = self.observe_atspi_geometry(&matches, &before, phase)?;
         #[cfg(target_os = "linux")]
-        let result =
-            super::zed_zoom_probe::correlate_canonical(&matches, &before, &after, &canonical);
+        let result = {
+            if phase == "pre-send" {
+                // The icon measurement already sampled the same owned source nodes twice.
+                // Each hover independently revalidates this retained identity and ON state.
+                self.zoom_candidates =
+                    super::zed_zoom_probe::active_candidates(&before, &after, &canonical)
+                        .ok()
+                        .map(|candidates| {
+                            candidates
+                                .into_iter()
+                                .map(|(index, bounds)| (before[index].clone(), bounds))
+                                .collect()
+                        });
+            }
+            super::zed_zoom_probe::correlate_canonical(&matches, &before, &after, &canonical)
+        };
         #[cfg(not(target_os = "linux"))]
         let _ = phase;
         #[cfg(not(target_os = "linux"))]
@@ -1194,41 +1214,22 @@ impl NativeClipboardSession<'_> {
         deadline: Instant,
     ) -> Result<bool, Reason> {
         observation.record_tooltip("unavailable", 0, 0);
-        let app = self.gui.app.as_ref().ok_or(Reason::SelectorNotMatched)?;
-        let before: Vec<_> = app
-            .locator("switch")
-            .elements()
-            .map_err(map_error)?
-            .iter()
-            .map(|element| element.data().clone())
-            .collect();
-        if before.len() > 64 {
-            return Err(Reason::BudgetExceeded);
-        }
-        let empty = super::native_icon_probe::ZoomMatches {
-            maximize: Vec::new(),
-            minimize: Vec::new(),
-            maximize_matches: 0,
-            minimize_matches: 0,
-        };
-        let canonical = self.observe_atspi_geometry(&empty, &before, "pre-send")?;
-        let app = self.gui.app.as_ref().ok_or(Reason::SelectorNotMatched)?;
-        let after: Vec<_> = app
-            .locator("switch")
-            .elements()
-            .map_err(map_error)?
-            .iter()
-            .map(|element| element.data().clone())
-            .collect();
-        let candidates = super::zed_zoom_probe::active_candidates(&before, &after, &canonical)?;
+        let candidates = self
+            .zoom_candidates
+            .take()
+            .ok_or(Reason::ActionUnsupported)?;
         let count = candidates.len();
         let mut matched = 0;
-        for (index, bounds) in candidates {
-            self.clear_zoom_tooltip(deadline)?;
-            self.hover_zoom_candidate(&before[index], bounds, deadline)?;
+        self.clear_zoom_tooltip(deadline)?;
+        for (button, bounds) in candidates {
+            // A prior neutral move remains in effect; a fresh absence query still
+            // precedes every hover, without another redundant pointer action.
+            if !self.wait_zoom_tooltip(false, deadline)? {
+                return Err(Reason::SelectorNotMatched);
+            }
+            self.hover_zoom_candidate(&button, bounds, deadline)?;
             if self.wait_zoom_tooltip(true, deadline)? {
-                // Recheck the retained source node and its ON state after the tooltip appears.
-                self.hover_zoom_candidate(&before[index], bounds, deadline)?;
+                self.hover_zoom_candidate(&button, bounds, deadline)?;
                 matched += 1;
             }
             self.clear_zoom_tooltip(deadline)?;
@@ -1538,6 +1539,8 @@ impl Gui {
                 .map(PathBuf::from)
                 .filter(|path| path.is_dir()),
             icon_baseline: None,
+            #[cfg(target_os = "linux")]
+            zoom_candidates: None,
         })
     }
 
