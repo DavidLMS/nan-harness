@@ -198,6 +198,20 @@ fn classify(content: &Value) -> Option<(Shape, Option<ErrorCategory>, Vec<&str>)
 }
 
 fn error_category(text: &str) -> ErrorCategory {
+    // Claude's transcript renderer recognizes this tool-error envelope. Only
+    // one complete envelope may expose the same fixed error prefixes below.
+    let text = if let Some(body) = text
+        .trim()
+        .strip_prefix("<tool_use_error>")
+        .and_then(|body| body.strip_suffix("</tool_use_error>"))
+    {
+        if body.contains("<tool_use_error>") || body.contains("</tool_use_error>") {
+            return ErrorCategory::Unknown;
+        }
+        body.trim()
+    } else {
+        text
+    };
     if text.starts_with("File does not exist.") {
         ErrorCategory::FileNotFound
     } else if text.starts_with("FileTooLargeError:") {
@@ -220,6 +234,37 @@ mod tests {
         let mut value = json!({"messages":[{"role":role,"tool_call_id":EXPECTED_CALL}]});
         value["messages"][0]["content"] = content;
         value
+    }
+
+    #[test]
+    fn complete_tool_error_envelope_exposes_only_fixed_categories() {
+        assert_eq!(
+            error_category(
+                "<tool_use_error>\nFile does not exist. private path\n</tool_use_error>"
+            ),
+            ErrorCategory::FileNotFound
+        );
+        for body in [
+            "<tool_use_error>File does not exist. private",
+            "<tool_use_error>File does not exist.</tool_use_error> extra",
+            "<tool_use_error>File does not exist.</tool_use_error><tool_use_error>private</tool_use_error>",
+            "<other>File does not exist.</other>",
+        ] {
+            assert_eq!(error_category(body), ErrorCategory::Unknown);
+        }
+        let value = ToolResultObservation::collect(
+            &[request(
+                "tool",
+                json!(
+                    "Tool error: <tool_use_error>File does not exist. private path</tool_use_error>"
+                ),
+            )],
+            SelectedTool::Read,
+        );
+        let encoded = serde_json::to_string(&value).unwrap();
+        assert!(encoded.contains("file-not-found"));
+        assert!(!encoded.contains("private path"));
+        assert!(!encoded.contains("tool_use_error"));
     }
 
     #[test]
