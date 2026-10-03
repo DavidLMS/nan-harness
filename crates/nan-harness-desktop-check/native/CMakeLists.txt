@@ -26,3 +26,10 @@ add_custom_target(nanh-process-correlation-contract ALL
   COMMAND $<TARGET_FILE:nanh-process-correlation-test>
   DEPENDS nanh-process-correlation-test
   COMMENT "Verify bounded process ancestry correlation")
+
+# Pure framing contract runs during the native preinstallation build on Windows.
+add_executable(nanh-uia-request-frame-test uia_request_frame_test.cpp)
+add_custom_target(nanh-uia-request-frame-contract ALL
+  COMMAND $<TARGET_FILE:nanh-uia-request-frame-test>
+  DEPENDS nanh-uia-request-frame-test
+  COMMENT "Verify bounded UIA request framing")

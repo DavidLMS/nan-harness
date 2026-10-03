@@ -437,10 +437,7 @@ impl Native {
         if i32::try_from(right).is_err() || i32::try_from(bottom).is_err() {
             return windows_uia::failure("protocol");
         }
-        let input = format!(
-            "{} {} {} {} {} {} {}\n",
-            window.id, window.pid, window.bounds.x, window.bounds.y, right, bottom, remaining
-        );
+        let input = windows_uia_request(window, right, bottom, remaining);
         let result = process::run_once_until(
             &self.executable,
             std::ffi::OsStr::new("--windows-claude-uia-inventory"),
@@ -704,8 +701,51 @@ fn chat_press_request(window: &Window, millis: u32) -> String {
     )
 }
 
+#[cfg(any(windows, test))]
+fn windows_uia_request(window: &Window, right: i64, bottom: i64, remaining: u128) -> String {
+    // The shared process writer owns the single line delimiter.
+    format!(
+        "{} {} {} {} {right} {bottom} {remaining}",
+        window.id, window.pid, window.bounds.x, window.bounds.y
+    )
+}
+
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    #[test]
+    fn uia_request_transport_has_exactly_one_bounded_line() {
+        use std::os::unix::fs::PermissionsExt;
+        let window = Window {
+            id: 1,
+            pid: 7,
+            name: "Claude".into(),
+            layer: 0,
+            bounds: xa11y::Rect {
+                x: 10,
+                y: 20,
+                width: 800,
+                height: 600,
+            },
+        };
+        let input = windows_uia_request(&window, 810, 620, 3000);
+        let directory = tempfile::tempdir().unwrap();
+        let helper = directory.path().join("uia-protocol");
+        std::fs::write(&helper, "#!/bin/sh\nIFS= read -r line || exit 2\n[ \"$line\" = \"1 7 10 20 810 620 3000\" ] || exit 3\nIFS= read -r extra && exit 4\nprintf 'uia query - - - - - - -\\n'\n").unwrap();
+        std::fs::set_permissions(&helper, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let run = |payload: &str| {
+            process::run_once_until(
+                &helper,
+                std::ffi::OsStr::new("--windows-claude-uia-inventory"),
+                None,
+                payload.as_bytes(),
+                Some(std::time::Instant::now() + std::time::Duration::from_secs(1)),
+            )
+        };
+        assert_eq!(run(&input).unwrap().as_str(), "uia query - - - - - - -\n");
+        assert!(run(&format!("{input}\n")).is_err());
+    }
+
     #[cfg(unix)]
     #[test]
     fn chat_press_transport_frames_exactly_one_complete_request() {

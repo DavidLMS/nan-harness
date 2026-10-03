@@ -1,3 +1,5 @@
+#include "uia_request_frame.hpp"
+
 // Passive source-labelled UIA counts from one freshly guarded owned window.
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -102,9 +104,9 @@ struct Collection {
 };
 }
 int windows_claude_uia_inventory() {
-    char wire[257] = {};
-    if(!std::cin.getline(wire, sizeof(wire)) || std::cin.peek()!=std::char_traits<char>::eof()) return 2;
-    Request r;std::uint64_t id=0;std::string extra;std::istringstream parser(wire);
+    const auto wire = uia_request_frame(std::cin);
+    if (!wire) return 2;
+    Request r;std::uint64_t id=0;std::string extra;std::istringstream parser(*wire);
     if(!(parser>>id>>r.pid>>r.bounds.left>>r.bounds.top>>r.bounds.right>>r.bounds.bottom>>r.budget)
         || parser>>extra || !id || id>UINTPTR_MAX || !r.pid || !r.budget || r.budget>3000) return 2;
     r.window=reinterpret_cast<HWND>(static_cast<std::uintptr_t>(id));
