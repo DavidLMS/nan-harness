@@ -803,7 +803,11 @@ impl NativeClipboardSession<'_> {
             let proof = if observation.proves_zoomed() {
                 Ok(true)
             } else {
+                // Pinned GPUI renders tooltip titles as inaccessible SharedString.
+                // Keep the hover measurement advisory; only the retained ON
+                // control plus unique exact source icon can establish zoom.
                 self.panel_zoom_tooltip(&mut observation, zoom_deadline)
+                    .map(|_| observation.proves_zoomed())
             };
             #[cfg(not(target_os = "linux"))]
             let proof: Result<bool, Reason> = Ok(observation.proves_zoomed());

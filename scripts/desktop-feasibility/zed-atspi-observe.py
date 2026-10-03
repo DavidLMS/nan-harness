@@ -165,11 +165,11 @@ def contains(outer, inner):
 
 def canonical_rectangle(screen, window, geometry):
     expected = rectangle([geometry[0] + window[0], geometry[1] + window[1], *window[2:]])
-    if screen == window:
-        return expected
-    if screen == expected:
-        return screen
-    return None
+    if screen != window and screen != expected:
+        return None
+    # The origin comes from the independently owned X11 client, not AT-SPI.
+    # A published off-client element cannot authorize rendered correlation.
+    return expected if contains(geometry, expected) else None
 
 
 def measure(request, backend, deadline, clock=time.monotonic, canonical=None):

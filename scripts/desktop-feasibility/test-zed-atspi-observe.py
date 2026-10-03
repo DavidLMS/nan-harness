@@ -175,6 +175,30 @@ class Tests(unittest.TestCase):
         self.assertNotIn('bounds', result)
         self.assertEqual(result['containmentRejected'], 0)
 
+    def test_off_client_and_inconsistent_extents_never_enter_private_handoff(self):
+        for screen, window in (((790, 20, 40, 40), (790, 20, 40, 40)),
+                               ((111, 220, 40, 40), (10, 20, 40, 40))):
+            value = (62, (1 << 20) | (1 << 8) | (1 << 30), screen, window)
+            private = []
+            result = m.measure(self.request(), Backend([value, value]),
+                               10, lambda: 0, private)
+            self.assertEqual(private, [])
+            self.assertEqual(result['containmentRejected'], 1)
+
+    def test_foreign_identity_or_moving_client_does_not_export_normalized_bounds(self):
+        value = (62, (1 << 20) | (1 << 8) | (1 << 30),
+                 (10, 20, 40, 40), (10, 20, 40, 40))
+        for reads, geometries in (([None, None], [(100, 200, 800, 600)] * 2),
+                                  ([value, value], [(100, 200, 800, 600),
+                                                   (101, 200, 800, 600)])):
+            backend = Backend(reads)
+            geometry = iter(geometries)
+            backend.guard = lambda: next(geometry)
+            private = []
+            result = m.measure(self.request(), backend, 10, lambda: 0, private)
+            self.assertEqual(private, [])
+            self.assertIn(result['status'], ('observed', 'guard-rejected'))
+
     def test_deadline_no_queries(self):
         result = m.measure(self.request(), Backend([]), 0, lambda: 1)
         self.assertEqual(result['status'], 'budget-exceeded')

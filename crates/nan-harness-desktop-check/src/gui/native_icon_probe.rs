@@ -79,7 +79,7 @@ pub(super) struct IconCalibration {
     close: MatchMetrics,
 }
 
-#[derive(Debug, Default, Serialize)]
+#[derive(Clone, Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct MatchMetrics {
     contrast_positions: usize,
@@ -464,12 +464,22 @@ pub(super) fn observe(
     })
 }
 
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct ZoomCalibration {
+    template_side: u32,
+    scale_milli: u32,
+    maximize: MatchMetrics,
+    minimize: MatchMetrics,
+}
+
 /// Exact-source zoom candidates remain diagnostic-only; no input uses these bounds.
 pub(super) struct ZoomMatches {
     pub(super) maximize: Vec<xa11y::Rect>,
     pub(super) minimize: Vec<xa11y::Rect>,
     pub(super) maximize_matches: usize,
     pub(super) minimize_matches: usize,
+    pub(super) calibration: Option<ZoomCalibration>,
 }
 
 pub(super) fn observe_zoom(
@@ -508,9 +518,10 @@ pub(super) fn observe_zoom(
     let deadline = Instant::now() + Duration::from_secs(8);
     let one = LumaFrame::new(&first.0);
     let two = LumaFrame::new(&second.0);
-    let measure = |name| -> Result<(usize, Vec<xa11y::Rect>), Reason> {
+    let measure = |name| -> Result<(usize, Vec<xa11y::Rect>, MatchMetrics), Reason> {
         let mask = load(name)?;
-        let before = find(&one, &mask, side, deadline)?.positions;
+        let measured = find(&one, &mask, side, deadline)?;
+        let before = measured.positions;
         let after = find(&two, &mask, side, deadline)?.positions;
         let scale = if side == 14 { 1 } else { 2 };
         let stable = before
@@ -537,15 +548,21 @@ pub(super) fn observe_zoom(
                 })
             })
             .collect::<Result<Vec<_>, Reason>>()?;
-        Ok((before.len(), stable))
+        Ok((before.len(), stable, measured.metrics))
     };
-    let (maximize_matches, maximize) = measure("maximize")?;
-    let (minimize_matches, minimize) = measure("minimize")?;
+    let (maximize_matches, maximize, maximize_metrics) = measure("maximize")?;
+    let (minimize_matches, minimize, minimize_metrics) = measure("minimize")?;
     Ok(ZoomMatches {
         maximize,
         minimize,
         maximize_matches,
         minimize_matches,
+        calibration: Some(ZoomCalibration {
+            template_side: side,
+            scale_milli: if side == 14 { 1000 } else { 2000 },
+            maximize: maximize_metrics,
+            minimize: minimize_metrics,
+        }),
     })
 }
 
@@ -615,6 +632,14 @@ mod tests {
             height: 80,
         };
         let result = observe_zoom(directory.path(), &one, &two, capture).unwrap();
+        let calibration = serde_json::to_value(result.calibration.as_ref().unwrap()).unwrap();
+        assert_eq!(calibration["templateSide"], 14);
+        assert_eq!(calibration["scaleMilli"], 1000);
+        for name in ["maximize", "minimize"] {
+            assert!(calibration[name]["foregroundPositions"].as_u64().unwrap() > 0);
+            assert!(calibration[name]["maxCorrelationMilli"].as_u64().unwrap() >= 985);
+        }
+        assert!(!calibration.to_string().contains("pixels"));
         assert_eq!(result.maximize_matches, 1);
         assert_eq!(result.minimize_matches, 1);
         assert_eq!(

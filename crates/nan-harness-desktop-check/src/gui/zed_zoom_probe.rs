@@ -43,6 +43,8 @@ pub(super) struct Observation {
     tooltip_end_remaining_ms: Option<u16>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tooltip_phase: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    icon_calibration: Option<super::native_icon_probe::ZoomCalibration>,
 }
 
 // Raw AT-SPI roles must not be inferred from another platform's semantic role mapping.
@@ -117,6 +119,7 @@ impl Observation {
             tooltip_start_remaining_ms: None,
             tooltip_end_remaining_ms: None,
             tooltip_phase: None,
+            icon_calibration: None,
         }
     }
 }
@@ -181,6 +184,7 @@ pub(super) fn correlate(
         return Observation::unavailable("budget-exceeded");
     }
     let mut result = Observation::unavailable("observed");
+    result.icon_calibration.clone_from(&matches.calibration);
     result.maximize_matches = matches.maximize_matches;
     result.minimize_matches = matches.minimize_matches;
     result.stable_maximize_matches = matches.maximize.len();
@@ -349,6 +353,7 @@ pub(super) fn correlate_canonical(
         }
     }
     let mut result = Observation::unavailable("observed");
+    result.icon_calibration.clone_from(&matches.calibration);
     result.maximize_matches = matches.maximize_matches;
     result.minimize_matches = matches.minimize_matches;
     result.stable_maximize_matches = matches.maximize.len();
@@ -648,6 +653,7 @@ mod tests {
                 height: 14,
             }],
             minimize: vec![],
+            calibration: None,
             maximize_matches: 1,
             minimize_matches: 0,
         }

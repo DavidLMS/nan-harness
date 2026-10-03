@@ -426,6 +426,24 @@ def semantic_observations(directory, app):
                       'stableMinimizeMatches', 'correlatedButtons'}
             fields = counts | {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'status',
                                'checkedState', 'uniqueCorrelation', 'activationAttempted'}
+            if 'iconCalibration' in value:
+                calibration = value['iconCalibration']
+                metrics = {'contrastPositions': 4194304, 'foregroundPositions': 4194304,
+                           'maxCorrelationMilli': 1000, 'maxContrastMilli': 255000, 'maxSpreadMilli': 255000}
+                if (type(calibration) is not dict
+                        or set(calibration) != {'templateSide', 'scaleMilli', 'maximize', 'minimize'}
+                        or type(calibration['templateSide']) is not int or calibration['templateSide'] not in {14, 28}
+                        or type(calibration['scaleMilli']) is not int
+                        or calibration['scaleMilli'] != calibration['templateSide'] // 14 * 1000):
+                    raise ValueError('invalid Zed zoom icon calibration')
+                for name in ('maximize', 'minimize'):
+                    measured = calibration[name]
+                    if (type(measured) is not dict or set(measured) != set(metrics)
+                            or any(type(measured[key]) is not int or not 0 <= measured[key] <= bound
+                                   for key, bound in metrics.items())
+                            or measured['foregroundPositions'] > measured['contrastPositions']):
+                        raise ValueError('invalid Zed zoom icon metrics')
+                fields.add('iconCalibration')
             tooltip_fields = {'tooltipStatus', 'tooltipCandidates', 'tooltipMatches'}
             if tooltip_fields & set(value):
                 if (tooltip_fields - set(value)

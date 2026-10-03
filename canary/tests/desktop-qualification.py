@@ -1720,6 +1720,21 @@ class QualificationTests(unittest.TestCase):
                        'tooltipPhase': 'hover'}
             path.write_text(json.dumps(bounded))
             self.assertEqual(q.semantic_observations(root, 'zed-desktop'), [bounded])
+            metrics = dict(contrastPositions=20, foregroundPositions=10, maxCorrelationMilli=999,
+                           maxContrastMilli=255000, maxSpreadMilli=255000)
+            calibration = dict(templateSide=14, scaleMilli=1000, maximize=metrics, minimize=metrics)
+            measured = {**value, 'iconCalibration': calibration}
+            path.write_text(json.dumps(measured))
+            self.assertEqual(q.semantic_observations(root, 'zed-desktop'), [measured])
+            for invalid in (None, {**calibration, 'templateSide': True},
+                            {**calibration, 'scaleMilli': 2000}, {**calibration, 'pixels': 'PRIVATE'},
+                            {**calibration, 'minimize': {**metrics, 'maxCorrelationMilli': 1001}},
+                            {**calibration, 'maximize': {**metrics, 'foregroundPositions': 21}},
+                            {**calibration, 'maximize': {**metrics, 'maxContrastMilli': True}},
+                            {**calibration, 'maximize': {**metrics, 'label': 'PRIVATE'}}):
+                path.write_text(json.dumps({**value, 'iconCalibration': invalid}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'zed-desktop')
             for changed in ({**progress, 'tooltipEndRemainingMs': 2201},
                             {**progress, 'tooltipStartRemainingMs': True},
                             {**progress, 'tooltipPhase': 'PRIVATE'},
