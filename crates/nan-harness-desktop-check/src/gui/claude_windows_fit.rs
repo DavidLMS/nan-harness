@@ -23,7 +23,6 @@ pub(super) enum FitRejection {
     DisplayRelationUnavailable,
     SnapshotIdentityMissing,
     SameProcessAhead,
-    OverlapAhead,
 }
 
 pub(super) fn assess(
@@ -58,12 +57,8 @@ pub(super) fn assess(
     {
         return Err(FitRejection::SameProcessAhead);
     }
-    if snapshot.windows[..index]
-        .iter()
-        .any(|window| overlaps(window, current))
-    {
-        return Err(FitRejection::OverlapAhead);
-    }
+    // A foreign overlap blocks input, not passive attachment or an owned no-activate fit.
+    // The strict readiness guard must prove occlusion absent after the sole fit.
     Ok((*current).clone())
 }
 
@@ -76,6 +71,7 @@ pub(super) fn candidate(
     assess(snapshot, original, eligible, already_fitted).ok()
 }
 
+#[cfg(windows)]
 fn overlaps(first: &Window, second: &Window) -> bool {
     let a = first.bounds;
     let b = second.bounds;
@@ -89,7 +85,7 @@ fn overlaps(first: &Window, second: &Window) -> bool {
 mod tests {
     use super::*;
     #[test]
-    fn fit_requires_unique_original_off_display_unoccluded_foreground() {
+    fn fit_requires_unique_original_off_display_owned_foreground() {
         let parse = |text| Snapshot::parse(text).unwrap();
         let valid =
             parse("FG 10 42\nDISPLAY 0 0 1920 1080\nWIN 42 10 1800 100 800 600 636c61756465\n");
@@ -117,10 +113,30 @@ mod tests {
             ..original.clone()
         };
         assert!(candidate(&valid, &replacement, &[&original], false).is_none());
+        let overlap = parse(
+            "FG 10 42\nDISPLAY 0 0 1920 1080\nWIN 43 11 1800 100 800 600 6f74686572\nWIN 42 10 1800 100 800 600 636c61756465\n",
+        );
+        let current = overlap.windows.last().unwrap();
+        assert!(candidate(&overlap, current, &[current], false).is_some());
+        assert_eq!(
+            pending_candidate(&overlap, current, &[current]),
+            Ok(current.clone())
+        );
+        assert_eq!(
+            super::super::claude_windows_ready::candidate(&overlap, current, &[current]),
+            Err(GuardFailure::OffDisplay)
+        );
+        let on_display_overlap = parse(
+            "FG 10 42\nDISPLAY 0 0 1920 1080\nWIN 43 11 100 100 800 600 6f74686572\nWIN 42 10 100 100 800 600 636c61756465\n",
+        );
+        let current = on_display_overlap.windows.last().unwrap();
+        assert_eq!(
+            super::super::claude_windows_ready::candidate(&on_display_overlap, current, &[current]),
+            Err(GuardFailure::Occluded)
+        );
         for text in [
             "FG 11 43\nDISPLAY 0 0 1920 1080\nWIN 42 10 1800 100 800 600 636c61756465\n",
             "FG 10 42\nDISPLAY 0 0 1920 1080\nWIN 42 10 100 100 800 600 636c61756465\n",
-            "FG 10 42\nDISPLAY 0 0 1920 1080\nWIN 43 11 1800 100 800 600 6f74686572\nWIN 42 10 1800 100 800 600 636c61756465\n",
             "FG 10 42\nDISPLAY 0 0 1920 1080\nWIN 43 10 100 100 800 600 636c61756465\nWIN 42 10 1800 100 800 600 636c61756465\n",
         ] {
             let snapshot = parse(text);
