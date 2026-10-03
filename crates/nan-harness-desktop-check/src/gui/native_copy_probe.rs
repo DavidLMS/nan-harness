@@ -201,7 +201,7 @@ fn atspi_icon_rectangle(rect: xa11y::Rect) -> Option<[i32; 4]> {
     (width > 0 && height > 0).then_some([rect.x, rect.y, width, height])
 }
 
-fn neutral_input(executable: &Path, mode: &str, prompt: &str) -> Result<(), Reason> {
+fn validate_neutral_input(executable: &Path, mode: &str, prompt: &str) -> Result<(), Reason> {
     if !executable.is_absolute()
         || !executable.is_file()
         || prompt.len() > if mode == "atspi-observe" { 32768 } else { 4096 }
@@ -218,6 +218,7 @@ fn neutral_input(executable: &Path, mode: &str, prompt: &str) -> Result<(), Reas
                 | "right"
                 | "submit"
                 | "retry-click"
+                | "retry-atspi"
                 | "panel-zoom"
                 | "atspi-observe"
                 | "zoom-hover"
@@ -225,14 +226,25 @@ fn neutral_input(executable: &Path, mode: &str, prompt: &str) -> Result<(), Reas
         || (mode == "type" && prompt.is_empty())
         || (mode == "activate-accessibility" && !valid_activation_request(prompt))
         || (mode == "retry-click" && (!cfg!(target_os = "linux") || !valid_pointer_request(prompt)))
+        || (mode == "retry-atspi" && (!cfg!(target_os = "linux") || !valid_zoom_request(prompt)))
         || (mode == "zoom-hover" && (!cfg!(target_os = "linux") || !valid_zoom_request(prompt)))
         || (!matches!(
             mode,
-            "type" | "activate-accessibility" | "retry-click" | "atspi-observe" | "zoom-hover"
+            "type"
+                | "activate-accessibility"
+                | "retry-click"
+                | "retry-atspi"
+                | "atspi-observe"
+                | "zoom-hover"
         ) && !prompt.is_empty())
     {
         return Err(Reason::IsolationUnavailable);
     }
+    Ok(())
+}
+
+fn neutral_input(executable: &Path, mode: &str, prompt: &str) -> Result<(), Reason> {
+    validate_neutral_input(executable, mode, prompt)?;
     let mut command = Command::new(executable);
     command.env_clear();
     if let Some(script) = std::env::var_os("FEASIBILITY_ZED_INPUT_SCRIPT") {
@@ -258,6 +270,7 @@ fn neutral_input(executable: &Path, mode: &str, prompt: &str) -> Result<(), Reas
         "NANH_DESKTOP_QUALIFICATION_FACTS",
         "NANH_ZED_XRECORD",
         "NANH_ZED_CURSOR_HIT",
+        "NANH_ZED_RETRY_METHOD",
         "NANH_ZED_PANEL_ZOOM",
     ] {
         if let Some(value) = std::env::var_os(key) {
@@ -274,8 +287,12 @@ fn neutral_input(executable: &Path, mode: &str, prompt: &str) -> Result<(), Reas
         // The outer error path stops the child if its input pipe is missing.
         let mut stdin = child.stdin.take().ok_or(Reason::ActionUnsupported)?;
         let writer = scope.spawn(move || stdin.write_all(prompt.as_bytes()));
-        let deadline =
-            Instant::now() + Duration::from_secs(if mode == "retry-click" { 5 } else { 3 });
+        let deadline = Instant::now()
+            + Duration::from_secs(if matches!(mode, "retry-click" | "retry-atspi") {
+                5
+            } else {
+                3
+            });
         let status = loop {
             match child.try_wait() {
                 Ok(Some(status)) => break Some(status),
@@ -1531,6 +1548,26 @@ impl NativeClipboardSession<'_> {
         {
             let bounds = button.bounds.ok_or(Reason::ActionUnsupported)?;
             let (pid, window, point) = self.gui.visual.native_pointer_target(bounds)?;
+            if std::env::var("NANH_ZED_RETRY_METHOD").as_deref() == Ok("atspi-click") {
+                if std::env::var("GITHUB_ACTIONS").as_deref() != Ok("true")
+                    || std::env::var("RUNNER_ENVIRONMENT").as_deref() != Ok("github-hosted")
+                    || std::env::var("RUNNER_OS").as_deref() != Ok("Linux")
+                {
+                    return Err(Reason::ActionUnsupported);
+                }
+                let request = serde_json::to_string(&serde_json::json!({
+                    "pid": pid, "window": window, "x": point.x, "y": point.y,
+                    "bus": button.raw.get("bus_name").and_then(serde_json::Value::as_str)
+                        .ok_or(Reason::ActionUnsupported)?,
+                    "path": button.stable_id.as_ref().ok_or(Reason::ActionUnsupported)?,
+                    "bounds": [bounds.x, bounds.y, bounds.width, bounds.height]
+                }))
+                .map_err(|_| Reason::ActionUnsupported)?;
+                let executable = std::env::var_os("FEASIBILITY_ZED_INPUT_DRIVER")
+                    .ok_or(Reason::IsolationUnavailable)?;
+                neutral_input(Path::new(&executable), "retry-atspi", &request)?;
+                return Ok("native-atspi-forwarded");
+            }
             let request = serde_json::to_string(&PointerRequest {
                 pid,
                 window,

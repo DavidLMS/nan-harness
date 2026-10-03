@@ -41,6 +41,21 @@ class Policy(unittest.TestCase):
         with self.assertRaises(ValueError):
             runner.qualification_environment('hermes-desktop', *args, source)
 
+    def test_native_retry_trial_is_explicit_and_hosted_linux_only(self):
+        source = {key: 'synthetic' for key in runner.ZED_HELPERS}
+        source.update(GITHUB_ACTIONS='true', RUNNER_ENVIRONMENT='github-hosted', RUNNER_OS='Linux',
+                      FEASIBILITY_ZED_INPUT_DRIVER_MODE='paste', FEASIBILITY_ZED_RESPONSE_METHOD='thread-export')
+        args = (Path('/facts'), Path('/nanh'), '/zed')
+        self.assertNotIn('NANH_ZED_RETRY_METHOD', runner.qualification_environment('zed-desktop', *args, source))
+        source['NANH_ZED_RETRY_METHOD'] = 'atspi-click'
+        self.assertEqual(runner.qualification_environment('zed-desktop', *args, source)['NANH_ZED_RETRY_METHOD'], 'atspi-click')
+        for changes in ({'RUNNER_OS': 'macOS'}, {'RUNNER_OS': 'Windows'},
+                        {'NANH_ZED_RETRY_METHOD': 'force'}, {'RUNNER_ENVIRONMENT': 'self-hosted'}):
+            with self.assertRaises(ValueError):
+                runner.qualification_environment('zed-desktop', *args, {**source, **changes})
+        with self.assertRaises(ValueError):
+            runner.qualification_environment('hermes-desktop', *args, source)
+
 
 if __name__ == '__main__':
     unittest.main()

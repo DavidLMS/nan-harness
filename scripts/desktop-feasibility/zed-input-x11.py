@@ -804,6 +804,9 @@ def main():
         return runpy.run_path(str(Path(__file__).with_name('zed-atspi-observe.py')))['run'](payload)
     if sys.argv[1] == 'zoom-hover':
         return zoom_hover(payload)
+    if sys.argv[1] == 'retry-atspi':
+        import runpy
+        return runpy.run_path(str(Path(__file__).with_name('zed-atspi-retry.py')))['run'](payload)
     if sys.argv[1] == 'retry-click':
         return retry_click(payload)
     if sys.argv[1] not in KEYS or payload:

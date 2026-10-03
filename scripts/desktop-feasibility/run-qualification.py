@@ -131,6 +131,9 @@ def qualification_environment(app, facts, real_nanh, executable, inherited=None)
     layout = source.get('NANH_ZED_LAYOUT_POLICY')
     if layout is not None and (app != 'zed-desktop' or source.get('RUNNER_OS') != 'Linux' or layout != 'zoom-before-send'):
         raise ValueError('Zed layout trial is unavailable')
+    retry_method = source.get('NANH_ZED_RETRY_METHOD')
+    if retry_method is not None and (app != 'zed-desktop' or source.get('RUNNER_OS') != 'Linux' or retry_method != 'atspi-click'):
+        raise ValueError('Zed native Retry trial is unavailable')
     zoom = source.get('NANH_ZED_PANEL_ZOOM')
     if zoom is not None and (app != 'zed-desktop' or source.get('RUNNER_OS') != 'Linux' or zoom != 'observe'):
         raise ValueError('Zed panel zoom diagnostic is unavailable')
@@ -154,6 +157,8 @@ def qualification_environment(app, facts, real_nanh, executable, inherited=None)
             environment['NANH_ZED_LAYOUT_POLICY'] = layout
         if zoom is not None:
             environment['NANH_ZED_PANEL_ZOOM'] = zoom
+        if retry_method is not None:
+            environment['NANH_ZED_RETRY_METHOD'] = retry_method
         cursor = source.get('NANH_ZED_CURSOR_HIT')
         if cursor is not None:
             if cursor != '1' or source.get('RUNNER_OS') != 'Linux':
