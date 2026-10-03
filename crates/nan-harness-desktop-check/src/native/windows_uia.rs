@@ -8,7 +8,7 @@ const COUNT_KEYS: [&str; 7] = [
     "assistantHeadingCount",
     "copyControlCount",
 ];
-const FAILURES: [&str; 26] = [
+const FAILURES: [&str; 29] = [
     "query",
     "deadline",
     "identity",
@@ -28,6 +28,9 @@ const FAILURES: [&str; 26] = [
     "descendant-process-mismatch",
     "descendant-process-zero",
     "descendant-process-invalid",
+    "owned-descendant-process",
+    "foreign-descendant-process",
+    "descendant-correlation-unavailable",
     "heading-property",
     "com",
     "root-replaced",
@@ -97,6 +100,9 @@ mod tests {
             "descendant-process-mismatch",
             "descendant-process-zero",
             "descendant-process-invalid",
+            "owned-descendant-process",
+            "foreign-descendant-process",
+            "descendant-correlation-unavailable",
         ] {
             let wire = format!("uia {status} - - - - - - -\n");
             let value = parse(&wire).unwrap();

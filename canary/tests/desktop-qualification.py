@@ -534,7 +534,8 @@ class QualificationTests(unittest.TestCase):
                          sendControlCount=None, startTaskControlCount=None,
                          assistantHeadingCount=None, copyControlCount=None)
             for stage in ('root-process-query', 'root-process-mismatch', 'root-process-zero', 'root-process-invalid',
-                          'descendant-process-query', 'descendant-process-mismatch', 'descendant-process-zero', 'descendant-process-invalid'):
+                          'descendant-process-query', 'descendant-process-mismatch', 'descendant-process-zero', 'descendant-process-invalid',
+                          'owned-descendant-process', 'foreign-descendant-process', 'descendant-correlation-unavailable'):
                 path.write_text(json.dumps({**value, 'status': stage}))
                 self.assertEqual(q.semantic_observations(root, 'claude-desktop')[0]['status'], stage)
                 for change in ({'processId': 'PRIVATE'}, {'nodeCount': 1},

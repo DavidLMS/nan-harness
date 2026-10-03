@@ -1,5 +1,6 @@
 #include "uia_request_frame.hpp"
 #include "uia_process_identity.hpp"
+#include "uia_process_ancestry.hpp"
 
 // Passive source-labelled UIA counts from one freshly guarded owned window.
 #ifdef _WIN32
@@ -7,6 +8,7 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#include <tlhelp32.h>
 #include <UIAutomation.h>
 #include <dwmapi.h>
 #include <wrl/client.h>
@@ -20,6 +22,21 @@ using Microsoft::WRL::ComPtr;
 namespace {
 struct Request { HWND window{}; DWORD pid{}; RECT bounds{}; unsigned budget{}; };
 using Clock = std::chrono::steady_clock;
+struct ProcessHandle {
+    HANDLE value = nullptr;
+    explicit ProcessHandle(HANDLE handle = nullptr) : value(handle) {}
+    ProcessHandle(const ProcessHandle&) = delete;
+    ProcessHandle& operator=(const ProcessHandle&) = delete;
+    ~ProcessHandle() { if (value && value != INVALID_HANDLE_VALUE) CloseHandle(value); }
+};
+bool live_creation(HANDLE process, std::uint64_t& time) {
+    if (!process || process == INVALID_HANDLE_VALUE || WaitForSingleObject(process, 0) != WAIT_TIMEOUT)
+        return false;
+    FILETIME created{}, exited{}, kernel{}, user{};
+    if (!GetProcessTimes(process, &created, &exited, &kernel, &user)) return false;
+    time = (static_cast<std::uint64_t>(created.dwHighDateTime) << 32) | created.dwLowDateTime;
+    return time != 0 && WaitForSingleObject(process, 0) == WAIT_TIMEOUT;
+}
 struct Collection {
     Request request;
     Clock::time_point deadline;
@@ -28,6 +45,8 @@ struct Collection {
     std::vector<ComPtr<IUIAutomationElement>> held;
     unsigned classic{}, modern{}, sends{}, starts{}, headings{}, copies{}, nodes{};
     const char* stage = "query";
+    ProcessHandle root_process;
+    std::uint64_t root_creation{};
     bool within() const { return Clock::now() < deadline; }
     static bool contains(const RECT& a, const RECT& b) {
         return b.right>b.left && b.bottom>b.top && a.left<=b.left && a.top<=b.top && a.right>=b.right && a.bottom>=b.bottom;
@@ -55,6 +74,46 @@ struct Collection {
         }
         return within();
     }
+    bool process_snapshot(std::vector<CorrelationEntry>& rows) const {
+        if (!within()) return false;
+        ProcessHandle snapshot(CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0));
+        if (snapshot.value == INVALID_HANDLE_VALUE) return false;
+        PROCESSENTRY32W row{}; row.dwSize = sizeof(row);
+        if (!Process32FirstW(snapshot.value, &row)) return false;
+        bool root_present = false;
+        do {
+            if (!within() || rows.size() >= 4096) return false;
+            root_present = root_present || row.th32ProcessID == request.pid;
+            rows.push_back({row.th32ProcessID, row.th32ParentProcessID, false});
+        } while (Process32NextW(snapshot.value, &row));
+        return GetLastError() == ERROR_NO_MORE_FILES && root_present && within();
+    }
+    const char* mismatched_descendant(DWORD child) {
+        constexpr auto unavailable = "descendant-correlation-unavailable";
+        std::uint64_t before = 0;
+        if (!within() || !live_creation(root_process.value, before) || before != root_creation)
+            return unavailable;
+        std::vector<CorrelationEntry> rows, confirm;
+        if (!process_snapshot(rows) || !process_snapshot(confirm)) return unavailable;
+        const auto query = [&](std::uint32_t pid, std::uint64_t& time) {
+            if (!within()) return false;
+            ProcessHandle process(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE, pid));
+            return live_creation(process.value, time) && within();
+        };
+        std::uint64_t child_creation = 0;
+        if (!query(child, child_creation)) return unavailable;
+        const auto relation = classify_uia_ancestry(rows, confirm, child, request.pid,
+            root_creation, child_creation, query);
+        std::uint64_t after = 0;
+        if (!within() || !live_creation(root_process.value, after) || after != root_creation
+            || !guard()) return unavailable;
+        switch (relation) {
+            case UiaAncestry::Owned: return "owned-descendant-process";
+            case UiaAncestry::Foreign: return "foreign-descendant-process";
+            case UiaAncestry::Unavailable: return unavailable;
+        }
+        return unavailable;
+    }
     bool append(IUIAutomationElement* element,unsigned depth) {
         if(!within()) {stage="deadline";return false;}
         if(depth>32 || ++nodes>1024) {stage="limit";return false;}
@@ -68,7 +127,9 @@ struct Collection {
             stage=depth==0?"root-process-query":"descendant-process-query";return false;
         }
         if(const char* rejected=uia_process_identity_failure(pid,request.pid,depth==0)) {
-            stage=rejected;return false;
+            stage=depth>0 && pid>0 && static_cast<DWORD>(pid)!=request.pid
+                ? mismatched_descendant(static_cast<DWORD>(pid)) : rejected;
+            return false;
         }
         if(FAILED(element->get_CurrentControlType(&type)) || FAILED(element->get_CurrentName(&name))) return false;
         std::wstring text;
@@ -117,6 +178,8 @@ int windows_claude_uia_inventory() {
         || parser>>extra || !id || id>UINTPTR_MAX || !r.pid || !r.budget || r.budget>3000) return 2;
     r.window=reinterpret_cast<HWND>(static_cast<std::uintptr_t>(id));
     Collection collection;collection.request=r;collection.deadline=Clock::now()+std::chrono::milliseconds(r.budget);
+    collection.root_process.value = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE, r.pid);
+    live_creation(collection.root_process.value, collection.root_creation);
     const auto emit=[&](bool complete) {
         std::cout<<"uia "<<(complete?"observed":collection.stage)<<' ';
         if(complete) std::cout<<collection.nodes<<' '<<collection.classic<<' '<<collection.modern<<' '<<collection.sends<<' '<<collection.starts<<' '<<collection.headings<<' '<<collection.copies;

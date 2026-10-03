@@ -645,7 +645,7 @@ def semantic_observations(directory, app):
                       'startTaskControlCount', 'assistantHeadingCount', 'copyControlCount'}
             fields = counts | {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'phase', 'status',
                                'nativeGuardVerified', 'treeComplete'}
-            statuses = set('observed query deadline identity foreground bounds visibility display limit occlusion duplicate element-identity root-process-query root-process-mismatch root-process-zero root-process-invalid descendant-process-query descendant-process-mismatch descendant-process-zero descendant-process-invalid heading-property com root-replaced transport protocol policy directory'.split())
+            statuses = set('observed query deadline identity foreground bounds visibility display limit occlusion duplicate element-identity root-process-query root-process-mismatch root-process-zero root-process-invalid descendant-process-query descendant-process-mismatch descendant-process-zero descendant-process-invalid owned-descendant-process foreign-descendant-process descendant-correlation-unavailable heading-property com root-replaced transport protocol policy directory'.split())
             observed = value.get('status') == 'observed'
             if (app != 'claude-desktop' or set(value) != fields or value['diagnosticsOnly'] is not True
                     or value['phase'] != 'post-ready' or type(value['status']) is not str or value['status'] not in statuses

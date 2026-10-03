@@ -40,3 +40,9 @@ add_custom_target(nanh-uia-process-identity-contract ALL
   COMMAND $<TARGET_FILE:nanh-uia-process-identity-test>
   DEPENDS nanh-uia-process-identity-test
   COMMENT "Verify closed UIA process identity rejection")
+
+add_executable(nanh-uia-process-ancestry-test uia_process_ancestry_test.cpp)
+add_custom_target(nanh-uia-process-ancestry-contract ALL
+  COMMAND $<TARGET_FILE:nanh-uia-process-ancestry-test>
+  DEPENDS nanh-uia-process-ancestry-test
+  COMMENT "Verify passive UIA descendant ancestry classification")
