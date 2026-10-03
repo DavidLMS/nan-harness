@@ -587,6 +587,58 @@
       "platform": "linux",
       "sha": "8dc480a42b13428f4e4b82494a9f6922cdd3e7531a9c0771245a31dae6814b15",
       "text": "Continue your website in Work"
+    },
+    {
+      "binding": "Static Intl child s assigned from o then rendered as DialogTitle child s",
+      "file": "dialog-926def1b0d3c.js",
+      "id": "settings.browserUse.profileImport.extensionsConfirmationTitle",
+      "platform": "mac",
+      "sha": "1467408248a14b931ed9a34b328ecf058cae7e770c699bf2d03b0d9b5175d65b",
+      "text": "Import unverified extensions?"
+    },
+    {
+      "binding": "Query c export w.title imported Oe.title rendered under DialogTitle asChild h2",
+      "descriptorFile": "query-c6010b4d3757.js",
+      "descriptorSha256": "92060d6219c7c0f0043e1023886c0936c14a5eefdbfe4f65ac3063bb5c9b59d5",
+      "file": "dialog-926def1b0d3c.js",
+      "id": "settings.browserUse.profileImport.title",
+      "platform": "mac",
+      "sha": "1467408248a14b931ed9a34b328ecf058cae7e770c699bf2d03b0d9b5175d65b",
+      "text": "Import from your browser"
+    },
+    {
+      "binding": "DialogTitle sr-only child Intl spreads local title descriptor",
+      "file": "dialog-ad781855ca30.js",
+      "id": "chatgpt.global_search.modal.title",
+      "platform": "mac",
+      "sha": "11a6ccca6be088f2642e4d9b74f7f3deb0731ca8e4f297f02ec413761f2220bd",
+      "text": "Global search"
+    },
+    {
+      "binding": "DialogTitle sr-only child Intl spreads local title descriptor",
+      "file": "dialog-d0a7de3a6759.js",
+      "id": "chatgpt.global_search.modal.title",
+      "platform": "linux",
+      "sha": "17444588902dd21f8bb2259fcba70c3ed80a7514b5eeeae90df30e5aab971d7e",
+      "text": "Global search"
+    },
+    {
+      "binding": "Static Intl child s assigned from o then rendered as DialogTitle child s",
+      "file": "dialog-516256e76526.js",
+      "id": "settings.browserUse.profileImport.extensionsConfirmationTitle",
+      "platform": "linux",
+      "sha": "816603143866a373d42035ed3292bad1621ffb96467361d7dc91ff1bddceca10",
+      "text": "Import unverified extensions?"
+    },
+    {
+      "binding": "Query c export w.title imported Oe.title rendered under DialogTitle asChild h2",
+      "descriptorFile": "query-3cb3d8d48bf4.js",
+      "descriptorSha256": "c61771f2d0e6c135f9a546c701393347ec6296cad81e9163e26bd687c1ed0f02",
+      "file": "dialog-516256e76526.js",
+      "id": "settings.browserUse.profileImport.title",
+      "platform": "linux",
+      "sha": "816603143866a373d42035ed3292bad1621ffb96467361d7dc91ff1bddceca10",
+      "text": "Import from your browser"
     }
   ],
   "sourceVersion": "26.930.31730"

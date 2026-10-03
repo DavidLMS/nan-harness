@@ -19,9 +19,10 @@ function fixture(text='Skip setup?') {
 async function main() {
  const f=fixture();
  let result=f.classify({held:f.held,entries:f.entries});
- assert.equal(result.status,'matched');assert.equal(result.sourceTitleIds[0],'electron.onboarding.conversationalOnboarding.skipDialog.title');
+ assert.equal(result.status,'matched');assert.equal(result.sourceTitleEmpty,false);assert.equal(result.sourceTitleIds[0],'electron.onboarding.conversationalOnboarding.skipDialog.title');
  assert.ok(!JSON.stringify(result).includes('PRIVATE')); // actual DOM ID never exported
- const original=f.title.textContent;f.title.textContent='PRIVATE user-generated conversation';
+ const original=f.title.textContent;f.title.textContent='';
+ const empty=f.classify({held:f.held,entries:f.entries});assert.equal(empty.status,'unknown');assert.equal(empty.sourceTitleEmpty,true);f.title.textContent=original;f.title.textContent='PRIVATE user-generated conversation';
  assert.equal(f.classify({held:f.held,entries:f.entries}).status,'unknown');f.title.textContent=original;
  assert.equal(f.classify({held:f.held,entries:[...f.entries,{id:'other-known-source',text:original}]}).status,'ambiguous');
  f.setIds([f.title,{...f.title}]);assert.equal(f.classify({held:f.held,entries:f.entries}),null);f.setIds([f.title]);
@@ -52,9 +53,10 @@ async function main() {
  owns=true;reads=0;assert.equal((await helper.observe(held,'darwin',{...opts,deadline:Date.now()-1})).status,'guard-rejected');assert.equal(reads,0);
  page.evaluate=async(fn,arg)=>{reads++;if(reads===2)d.title.textContent='changed';return vm.runInNewContext('('+fn.toString()+')',d.context)({...arg,held:arg.held.value});};
  const changed=await helper.observe(held,'darwin',opts);assert.equal(changed.status,'guard-rejected');assert.equal(changed.matchCount,null);
- assert.equal(new Set(catalog.entries.map(e=>e.id)).size,60);
+ assert.equal(new Set(catalog.entries.map(e=>e.id)).size,63);
+ for(const [text,id]of [['Global search','chatgpt.global_search.modal.title'],['Import from your browser','settings.browserUse.profileImport.title'],['Import unverified extensions?','settings.browserUse.profileImport.extensionsConfirmationTitle']]) {const added=fixture(text);assert.equal(added.classify({held:added.held,entries:added.entries}).sourceTitleIds[0],id);}
  const windowsCatalog=require('./codex-dialog-title-catalog-windows.json');
- assert.equal(new Set(windowsCatalog.entries.map(e=>e.id)).size,60);
+ assert.equal(new Set(windowsCatalog.entries.map(e=>e.id)).size,63);
  assert.ok(windowsCatalog.entries.every(e=>catalog.entries.some(original=>original.id===e.id&&original.text===e.text)));
  d.title.textContent='Skip setup?';reads=0;
  page.evaluate=async(fn,arg)=>{reads++;return vm.runInNewContext('('+fn.toString()+')',d.context)({...arg,held:arg.held.value});};

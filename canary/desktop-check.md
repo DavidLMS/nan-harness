@@ -2488,3 +2488,22 @@ Follow-ups dispatched at `45838176`:
 and [Claude macOS 37156658157](https://github.com/DavidLMS/nan-harness/actions/runs/37156658157).
 Their results remain pending. GitHub API requests temporarily returned HTTP
 503; named closed qualification artifacts were retrieved after recovery.
+
+
+The source catalog now includes three additional hoisted static DialogTitle
+descriptors, verified separately in all three pinned official artifacts:
+Global search, Import unverified extensions?, and Import from your browser.
+Each has an explicit descriptor/import data-flow proof into DialogTitle; this
+does not admit arbitrary messages whose IDs end in title. The catalog has
+63 IDs. An optional `sourceTitleEmpty` flag distinguishes an empty referenced
+label from an unmatched nonempty label, without exporting runtime text.
+
+[Claude macOS 37156658157](https://github.com/DavidLMS/nan-harness/actions/runs/37156658157)
+reaches two verified/submitted/copied turns in one session and reports a
+completed Read result with a tool-error marker and unknown closed category.
+Tool verification still fails; no concrete file/path/namespace cause is proved.
+[Codex Linux 37156518819](https://github.com/DavidLMS/nan-harness/actions/runs/37156518819)
+refuses the frozen project-release policy before qualification. Its
+`codex-project-release-mismatch` receipt establishes a policy mismatch, not a
+particular new application version or native compatibility failure. Updated
+source provenance is required before changing any artifact pin.

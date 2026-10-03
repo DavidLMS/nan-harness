@@ -2747,7 +2747,7 @@ class CodexStaticDialogTitleTests(unittest.TestCase):
                      sourceVersion='26.930.31730', platform='macos',
                      artifactSha256='bfda661a7c9ca44dac3168134058dd6007947cde318ade37d570c484329f6d41',
                      wrapperSourceSha256='df6152796a7762d3956cbf2030bd8b17de90a4554513d786f11cd41f88b892d4',
-                     catalogSha256='6875f72d89a61cab995daccf0bf8075e78324c8e9981e653dcb46fd377e73ee8',
+                     catalogSha256='9fa1cdc597524b54f3e7c8ed7477fc565849b3c5989f66be91ff868098188ba3',
                      status='matched', titleReferenceCount=1, matchCount=1,
                      sourceTitleIds=['electron.onboarding.conversationalOnboarding.skipDialog.title'])
         with tempfile.TemporaryDirectory() as root:
@@ -2757,11 +2757,22 @@ class CodexStaticDialogTitleTests(unittest.TestCase):
             windows = {**value, 'platform': 'windows',
                        'artifactSha256': 'f7b0266d6c00d4743da01d62bc82488f7ec5560c642501758119cb9885f67c87',
                        'wrapperSourceSha256': '5e3a36d643393af861d2009584f64289f2247928e793f1985fe12cfec803a40b',
-                       'catalogSha256': '27524df1c017bf62e2db2b5578ae60d4e102dcb2df0a0d7fe1faea0f410dc377'}
+                       'catalogSha256': 'dff2a1184ab65c0ad8497ea90984ccb19be01c09f6a025a8e1e9d96b3bc4f467'}
             path.write_text(json.dumps(windows))
             self.assertEqual(q.semantic_observations(root, 'chatgpt-desktop')[0]['platform'], 'windows')
             for key in ('artifactSha256', 'wrapperSourceSha256', 'catalogSha256'):
                 path.write_text(json.dumps({**windows, key: value[key]}))
+                with self.assertRaises(ValueError): q.semantic_observations(root, 'chatgpt-desktop')
+            for platform_value in (value, windows):
+                for identity in ('chatgpt.global_search.modal.title', 'settings.browserUse.profileImport.title', 'settings.browserUse.profileImport.extensionsConfirmationTitle'):
+                    path.write_text(json.dumps({**platform_value, 'sourceTitleIds': [identity], 'sourceTitleEmpty': False}))
+                    self.assertEqual(q.semantic_observations(root, 'chatgpt-desktop')[0]['sourceTitleIds'], [identity])
+            empty = {**value, 'status': 'unknown', 'matchCount': 0, 'sourceTitleIds': [], 'sourceTitleEmpty': True}
+            path.write_text(json.dumps(empty))
+            self.assertTrue(q.semantic_observations(root, 'chatgpt-desktop')[0]['sourceTitleEmpty'])
+            for changed in ({**value, 'sourceTitleEmpty': True}, {**empty, 'sourceTitleEmpty': 'PRIVATE'},
+                            {**empty, 'sourceTitleEmpty': None}, {**empty, 'sourceTitleEmpty': 1}):
+                path.write_text(json.dumps(changed))
                 with self.assertRaises(ValueError): q.semantic_observations(root, 'chatgpt-desktop')
             for status, count, identities in [('unknown', 0, []), ('guard-rejected', None, []),
                                               ('ambiguous', 2, sorted(['keyboardShortcutsDialog.title', 'plugins.create.title']))]:

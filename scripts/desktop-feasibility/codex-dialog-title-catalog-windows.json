@@ -433,6 +433,32 @@
       "platform": "windows",
       "sha": "376f15ddb345010851ce7311c0c395f4f0dd7478528a830a798fa2d408847383",
       "text": "You're all set"
+    },
+    {
+      "binding": "DialogTitle sr-only child Intl spreads local title descriptor",
+      "file": "dialog-199d05004a7f.js",
+      "id": "chatgpt.global_search.modal.title",
+      "platform": "windows",
+      "sha": "ef1d395f2f0917c67504500fcdd11236e100c09dad5e0d9fa419c0e1de75b37b",
+      "text": "Global search"
+    },
+    {
+      "binding": "Static Intl child s assigned from o then rendered as DialogTitle child s",
+      "file": "dialog-25ac40c04af0.js",
+      "id": "settings.browserUse.profileImport.extensionsConfirmationTitle",
+      "platform": "windows",
+      "sha": "f3b80dd6159fd94a42a2dd0348f9b19be51ce48d12c570e4ba3952c5b4f4e3d0",
+      "text": "Import unverified extensions?"
+    },
+    {
+      "binding": "Query c export w.title imported Oe.title rendered under DialogTitle asChild h2",
+      "descriptorFile": "query-e84d9ec10898.js",
+      "descriptorSha256": "1d71e3905a2acd02a5d1a75e91ba9b9f832c743ddfd722b87c6f30cac9ba52dc",
+      "file": "dialog-25ac40c04af0.js",
+      "id": "settings.browserUse.profileImport.title",
+      "platform": "windows",
+      "sha": "f3b80dd6159fd94a42a2dd0348f9b19be51ce48d12c570e4ba3952c5b4f4e3d0",
+      "text": "Import from your browser"
     }
   ],
   "sourceVersion": "26.930.31730"
