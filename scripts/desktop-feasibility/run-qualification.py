@@ -128,6 +128,8 @@ def qualification_environment(app, facts, real_nanh, executable, inherited=None)
         raise ValueError('Claude native Chat controller is unavailable')
     if source.get('NANH_CLAUDE_MAC_CHAT_NAVIGATION') is not None and app != 'claude-desktop':
         raise ValueError('Claude native Chat navigation is unavailable')
+    if source.get('NANH_CLAUDE_WINDOWS_CHAT_ONLY') is not None and app != 'claude-desktop':
+        raise ValueError('Claude Windows Chat-only trial is unavailable')
     layout = source.get('NANH_ZED_LAYOUT_POLICY')
     if layout is not None and (app != 'zed-desktop' or source.get('RUNNER_OS') != 'Linux' or layout != 'zoom-before-send'):
         raise ValueError('Zed layout trial is unavailable')
@@ -252,6 +254,12 @@ def qualification_environment(app, facts, real_nanh, executable, inherited=None)
                 raise ValueError('claude-windows-policy-invalid')
             validate_claude_windows_bundle(Path(executable))
             environment['NANH_CLAUDE_WINDOWS_PROFILE_POLICY'] = windows_profile
+        windows_chat = source.get('NANH_CLAUDE_WINDOWS_CHAT_ONLY')
+        if windows_chat is not None:
+            if (windows_chat != '1' or app != 'claude-desktop' or source.get('RUNNER_OS') != 'Windows'
+                    or mode != 'startup-baseline' or windows_profile != 'private-env'):
+                raise ValueError('Claude Windows Chat-only trial is unavailable')
+            environment['NANH_CLAUDE_WINDOWS_CHAT_ONLY'] = windows_chat
         if app == 'chatgpt-desktop':
             environment['FEASIBILITY_CODEX_DOM_DRIVER'] = str(Path(__file__).with_name('codex-dom.cjs').resolve())
         policy = source.get('NANH_DESKTOP_QUALIFICATION_NAMESPACE_POLICY', 'default')

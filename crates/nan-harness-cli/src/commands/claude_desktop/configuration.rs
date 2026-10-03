@@ -16,6 +16,24 @@ pub(super) fn apply_gateway(
         }
         _ => return Err(ClaudeDesktopError::InvalidStatePath),
     };
+    #[cfg(feature = "desktop-qualification")]
+    let windows_chat_only = windows_chat_trial(
+        std::env::var("NANH_CLAUDE_WINDOWS_CHAT_ONLY")
+            .map(Some)
+            .or_else(|error| match error {
+                std::env::VarError::NotPresent => Ok(None),
+                std::env::VarError::NotUnicode(_) => Err(ClaudeDesktopError::InvalidStatePath),
+            })?
+            .as_deref(),
+        cfg!(windows),
+        std::env::var("RUNNER_OS").ok().as_deref(),
+        std::env::var("NANH_CLAUDE_WINDOWS_PROFILE_POLICY")
+            .ok()
+            .as_deref(),
+        qualification_config::observation_directory(paths).is_some(),
+    )?;
+    #[cfg(feature = "desktop-qualification")]
+    let chat_only = chat_only || windows_chat_only;
     let mut documents = paths
         .documents()
         .into_iter()
@@ -93,9 +111,49 @@ fn configure_chat_trial(profile: &mut Map<String, Value>, requested: bool) {
     }
 }
 
+#[cfg(feature = "desktop-qualification")]
+fn windows_chat_trial(
+    value: Option<&str>,
+    windows_host: bool,
+    runner_os: Option<&str>,
+    profile_policy: Option<&str>,
+    owned_observation: bool,
+) -> Result<bool, ClaudeDesktopError> {
+    match value {
+        None => Ok(false),
+        Some("1")
+            if windows_host
+                && runner_os == Some("Windows")
+                && profile_policy == Some("private-env")
+                && owned_observation =>
+        {
+            Ok(true)
+        }
+        _ => Err(ClaudeDesktopError::InvalidStatePath),
+    }
+}
+
 #[cfg(all(test, feature = "desktop-qualification"))]
 mod qualification_tests {
     use super::*;
+
+    #[test]
+    fn windows_chat_only_requires_owned_hosted_private_profile_and_explicit_flag() {
+        assert!(!windows_chat_trial(None, false, None, None, false).unwrap());
+        assert!(
+            windows_chat_trial(Some("1"), true, Some("Windows"), Some("private-env"), true)
+                .unwrap()
+        );
+        for (value, host, os, profile, owned) in [
+            (Some("0"), true, Some("Windows"), Some("private-env"), true),
+            (Some("1"), false, Some("Windows"), Some("private-env"), true),
+            (Some("1"), true, Some("macOS"), Some("private-env"), true),
+            (Some("1"), true, Some("Windows"), None, true),
+            (Some("1"), true, Some("Windows"), Some("private-env"), false),
+        ] {
+            assert!(windows_chat_trial(value, host, os, profile, owned).is_err());
+        }
+    }
 
     #[test]
     fn chat_trial_preserves_default_and_uses_supported_managed_field() {

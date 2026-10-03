@@ -325,7 +325,9 @@ jobs:
       - name: Enable Claude Windows private-profile observations
         if: runner.os == 'Windows' && matrix.app == 'claude-desktop' && inputs.experiment == 'startup-baseline'
         shell: bash
-        run: echo 'NANH_CLAUDE_WINDOWS_PROFILE_POLICY=private-env' >> "$GITHUB_ENV"
+        run: |
+          echo 'NANH_CLAUDE_WINDOWS_PROFILE_POLICY=private-env' >> "$GITHUB_ENV"
+          echo 'NANH_CLAUDE_WINDOWS_CHAT_ONLY=1' >> "$GITHUB_ENV"
       - name: Run full deterministic semantic qualification
         env:
           NANH_DESKTOP_QUALIFICATION_MODE: ${{ inputs.experiment == 'startup-baseline' && 'startup-baseline' || 'renderer' }}

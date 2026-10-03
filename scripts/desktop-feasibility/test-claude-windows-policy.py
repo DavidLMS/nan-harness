@@ -40,6 +40,28 @@ class Policy(unittest.TestCase):
             with self.assertRaises(ValueError):
                 environment()
 
+    def test_chat_only_is_explicit_and_does_not_admit_other_hosts_or_modes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            helper = root / 'helper'
+            helper.write_text('synthetic')
+            source = dict(GITHUB_ACTIONS='true', RUNNER_ENVIRONMENT='github-hosted', RUNNER_OS='Windows',
+                          NANH_DESKTOP_QUALIFICATION_MODE='startup-baseline',
+                          NANH_CLAUDE_WINDOWS_PROFILE_POLICY='private-env', NANH_CLAUDE_WINDOWS_CHAT_ONLY='1',
+                          FEASIBILITY_WINDOWS_PROOF_PYTHON=str(helper), FEASIBILITY_WINDOWS_PROOF_SCRIPT=str(helper))
+            with patch.object(runner, 'validate_claude_windows_bundle'):
+                def invoke(values=source, app='claude-desktop'):
+                    return runner.qualification_environment(app, root, helper, root / 'app/Claude.exe', values)
+                self.assertEqual(invoke()['NANH_CLAUDE_WINDOWS_CHAT_ONLY'], '1')
+                plain = {key: value for key, value in source.items() if key != 'NANH_CLAUDE_WINDOWS_CHAT_ONLY'}
+                self.assertNotIn('NANH_CLAUDE_WINDOWS_CHAT_ONLY', invoke(plain))
+                for change in ({'RUNNER_OS': 'macOS'}, {'GITHUB_ACTIONS': 'false'},
+                               {'RUNNER_ENVIRONMENT': 'self-hosted'}, {'NANH_CLAUDE_WINDOWS_CHAT_ONLY': '0'},
+                               {'NANH_DESKTOP_QUALIFICATION_MODE': 'renderer'},
+                               {'NANH_CLAUDE_WINDOWS_PROFILE_POLICY': None}):
+                    with self.assertRaises(ValueError): invoke({**source, **change})
+                with self.assertRaises(ValueError): invoke(source, 'chatgpt-desktop')
+
     def test_bounded_asar_reader_binds_the_bootstrap_and_rejects_truncation(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()
