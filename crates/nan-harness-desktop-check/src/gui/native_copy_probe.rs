@@ -1282,72 +1282,10 @@ impl NativeClipboardSession<'_> {
         self.gui.native_copy_guard(&mut self.facts, "retry-after")
     }
 
-    #[cfg(target_os = "linux")]
-    fn observe_retry_visual(&self, button: &xa11y::Element) -> Result<(), Reason> {
-        if self.icon_directory.is_none()
-            || std::env::var("NANH_ZED_PANEL_ZOOM").as_deref() != Ok("observe")
-        {
-            return Ok(());
-        }
-        let measure = || {
-            self.gui.visual.guard()?;
-            let baseline = self
-                .icon_baseline
-                .as_ref()
-                .ok_or(Reason::ActionUnsupported)?;
-            let directory = self
-                .icon_directory
-                .as_ref()
-                .ok_or(Reason::ActionUnsupported)?;
-            let bounds = button.data().bounds.ok_or(Reason::ActionUnsupported)?;
-            self.gui.visual.validate_native_bounds(bounds)?;
-            let masks = super::native_icon_probe::Templates::load(directory, baseline.scale())?;
-            let capture = self.gui.visual.capture_bounds();
-            let first = self.gui.visual.native_icon_frame()?;
-            self.gui.visual.guard()?;
-            std::thread::sleep(Duration::from_millis(200));
-            self.gui.visual.guard()?;
-            let second = self.gui.visual.native_icon_frame()?;
-            self.gui.visual.guard()?;
-            let app = self.gui.app.as_ref().ok_or(Reason::SelectorNotMatched)?;
-            let controls = app.locator("button").elements().map_err(map_error)?;
-            if controls.len() > 64
-                || controls
-                    .iter()
-                    .filter(|candidate| same_retry_element(button, candidate))
-                    .count()
-                    != 1
-            {
-                return Err(Reason::SelectorNotMatched);
-            }
-            super::native_icon_probe::observe_retry_visual(
-                &masks, baseline, &first, &second, capture, bounds,
-            )
-        };
-        let (observation, failure) = match measure() {
-            Ok(observation) => (observation, None),
-            Err(reason) => (
-                super::native_icon_probe::RetryVisualObservation::unavailable(reason),
-                Some(reason),
-            ),
-        };
-        let name = format!("retry-visual-{}-{}.json", std::process::id(), nonce()?);
-        let bytes = serde_json::to_vec(&observation).map_err(|_| Reason::IsolationUnavailable)?;
-        open_private_new(&self.directory.join(name))
-            .and_then(|mut file| file.write_all(&bytes).and_then(|()| file.sync_all()))
-            .map_err(|_| Reason::IsolationUnavailable)?;
-        if let Some(reason) = failure.filter(|reason| icon_guard_failure(*reason)) {
-            return Err(reason);
-        }
-        self.gui.visual.guard()
-    }
-
     fn press_retry(&self, button: &xa11y::Element) -> Result<&'static str, Reason> {
         if cfg!(target_os = "macos") {
             return retry_press_receipt(button.press());
         }
-        #[cfg(target_os = "linux")]
-        self.observe_retry_visual(button)?;
         #[cfg(target_os = "linux")]
         {
             let bounds = button.bounds.ok_or(Reason::ActionUnsupported)?;
