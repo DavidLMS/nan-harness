@@ -1105,6 +1105,10 @@ mod tests {
         let base = "FG 7 0\nDISPLAY 0 0 2000 2000\nWIN 99 7 1500 1500 10 10 50616e656c 3\nWIN 1 7 10 20 800 600 436c61756465 0\nFOCUS proved 1\nFOCUS_WINDOW query-error 0\n";
         let receipt = format!("{base}FOCUS_WINDOW_QUERY before main-window cannot-complete\n");
         let state = Snapshot::parse(&receipt).unwrap();
+        assert_eq!(
+            state.window_focus_query().unwrap().error,
+            FocusQueryError::CannotComplete
+        );
         assert!(state.claude_focus_pending(&state.windows[1]));
         assert!(
             state

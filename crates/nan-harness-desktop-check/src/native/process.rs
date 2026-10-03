@@ -175,7 +175,7 @@ pub(super) fn run_chat_until(
     )
 }
 
-fn run_once_until(
+pub(super) fn run_once_until(
     executable: &Path,
     argument: &OsStr,
     screenshot: Option<&Screenshot>,

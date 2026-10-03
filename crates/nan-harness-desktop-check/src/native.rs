@@ -307,11 +307,7 @@ impl Native {
         if millis == 0 {
             return Err(FailureCategory::Timeout);
         }
-        let bounds = window.bounds;
-        let input = format!(
-            "{} {} {} {} {} {} {}\n",
-            window.id, window.pid, bounds.x, bounds.y, bounds.width, bounds.height, millis
-        );
+        let input = chat_press_request(window, millis);
         let output = process::run_chat_until(&self.executable, input.as_bytes(), deadline)?;
         ChatPressStage::parse(&output).ok_or(FailureCategory::Output)
     }
@@ -524,8 +520,52 @@ pub(crate) fn claude_focus_policy() -> bool {
         && std::env::var("NANH_CLAUDE_MAC_PROFILE_POLICY").as_deref() == Ok("native-known-folders")
 }
 
+#[cfg(any(target_os = "macos", test))]
+fn chat_press_request(window: &Window, millis: u32) -> String {
+    let bounds = window.bounds;
+    // The native transport adds the single line terminator.
+    format!(
+        "{} {} {} {} {} {} {}",
+        window.id, window.pid, bounds.x, bounds.y, bounds.width, bounds.height, millis
+    )
+}
+
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    #[test]
+    fn chat_press_transport_frames_exactly_one_complete_request() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let window = Window {
+            id: 1,
+            pid: 7,
+            name: "Claude".into(),
+            bounds: xa11y::Rect {
+                x: 10,
+                y: 20,
+                width: 800,
+                height: 600,
+            },
+            layer: 0,
+        };
+        let input = chat_press_request(&window, 5000);
+        let root = tempfile::tempdir().unwrap();
+        let helper = root.path().join("helper");
+        std::fs::write(&helper, "#!/bin/sh\n[ \"$1\" = --version ] && exit 0\nIFS= read -r line || exit 2\n[ \"$line\" = \"1 7 10 20 800 600 5000\" ] || exit 3\nIFS= read -r extra && exit 4\nprintf 'chat completed\\n'\n").unwrap();
+        std::fs::set_permissions(&helper, std::fs::Permissions::from_mode(0o700)).unwrap();
+        nan_harness_test_support::executable_fixture::wait_until_ready(&helper).unwrap();
+        let run = |input: &str| {
+            process::run_once_until(
+                &helper,
+                std::ffi::OsStr::new("--claude-chat-press"),
+                None,
+                input.as_bytes(),
+                Some(std::time::Instant::now() + std::time::Duration::from_secs(1)),
+            )
+        };
+        assert_eq!(&*run(&input).unwrap(), "chat completed\n");
+        assert!(run(&(input + "\n")).is_err());
+    }
     #[test]
     fn native_storage_protocol_distinguishes_freshness_and_rejects_partial_output() {
         let fresh = ClaudeStoragePresence::parse("storage 0 0 0 0\n").unwrap();
