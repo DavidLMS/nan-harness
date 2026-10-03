@@ -23,15 +23,15 @@ struct Fixture {
 
 #[cfg(unix)]
 impl Fixture {
-    fn with_exit_code(code: i32) -> Self {
+    fn metadata_file() -> Self {
         let directory = tempfile::tempdir().expect("fixture directory");
         let executable = directory.path().join("fixture");
-        fs::write(&executable, format!("#!/bin/sh\nexit {code}\n")).expect("fixture script");
+        fs::write(&executable, "#!/bin/sh\nexit 0\n").expect("fixture script");
         #[cfg(unix)]
         fs::set_permissions(&executable, fs::Permissions::from_mode(0o700))
             .expect("fixture permissions");
-        nan_harness_test_support::executable_fixture::wait_until_ready(&executable)
-            .expect("pure exit-code fixture should be ready");
+        // These fixtures test metadata or a missing sibling path. Exit-status
+        // contracts use /bin/sh directly; publishing this file needs no launch.
         Self {
             directory,
             executable,
@@ -66,7 +66,7 @@ fn process_matches_maps_exit_statuses_and_missing_commands() {
         Err(ClaudeDesktopError::ProcessCheckFailed(Some(2)))
     ));
 
-    let missing = Fixture::with_exit_code(0);
+    let missing = Fixture::metadata_file();
     assert!(matches!(
         process_matches(missing.missing_path().to_str().unwrap(), &[]),
         Err(ClaudeDesktopError::ProcessCheck(_))
@@ -84,7 +84,7 @@ fn run_launcher_maps_success_nonzero_and_missing_commands() {
         "unexpected synthetic launcher result: {result:?}"
     );
 
-    let missing = Fixture::with_exit_code(0);
+    let missing = Fixture::metadata_file();
     let missing_path = missing.missing_path();
     assert!(matches!(
         run_launcher(missing_path.to_str().unwrap(), &[]),
@@ -105,7 +105,7 @@ fn terminate_matches_accepts_documented_statuses_only() {
         Err(ClaudeDesktopError::TerminateFailed(Some(2)))
     ));
 
-    let missing = Fixture::with_exit_code(0);
+    let missing = Fixture::metadata_file();
     let missing_path = missing.missing_path();
     assert!(matches!(
         terminate_matches(missing_path.to_str().unwrap(), &[]),
@@ -132,7 +132,7 @@ fn tasklist_parser_handles_csv_names_and_localized_empty_output() {
 #[cfg(unix)]
 #[test]
 fn explicit_executables_require_a_file_and_executable_permissions() {
-    let executable = Fixture::with_exit_code(0);
+    let executable = Fixture::metadata_file();
     assert!(is_executable_file(executable.path()));
     assert_eq!(
         find_executable(executable.path().to_str().unwrap()),
@@ -143,7 +143,7 @@ fn explicit_executables_require_a_file_and_executable_permissions() {
     assert!(!is_executable_file(directory.path()));
     assert!(find_executable(directory.path().to_str().unwrap()).is_none());
 
-    let non_executable = Fixture::with_exit_code(0);
+    let non_executable = Fixture::metadata_file();
     fs::set_permissions(non_executable.path(), fs::Permissions::from_mode(0o600))
         .expect("non-executable permissions");
     assert!(!is_executable_file(non_executable.path()));
@@ -160,7 +160,7 @@ fn explicit_executables_require_a_file_and_executable_permissions() {
 #[cfg(unix)]
 #[test]
 fn explicit_executable_availability_accepts_a_matching_file() {
-    let executable = Fixture::with_exit_code(0);
+    let executable = Fixture::metadata_file();
     assert!(matches!(
         SystemDesktopProcess::new(
             DesktopPlatform::Linux,
