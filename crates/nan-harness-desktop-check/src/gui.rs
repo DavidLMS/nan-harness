@@ -14,6 +14,7 @@ mod dom_probe;
 mod native_copy_probe;
 mod native_icon_probe;
 mod process_absence;
+mod qualification_directory;
 mod stability;
 mod visual;
 mod zed_zoom_probe;

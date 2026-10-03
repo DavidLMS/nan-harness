@@ -9,13 +9,7 @@ pub(super) fn policy() -> bool {
     else {
         return false;
     };
-    let Ok(metadata) = std::fs::symlink_metadata(&directory) else {
-        return false;
-    };
-    metadata.is_dir()
-        && !metadata.is_symlink()
-        && directory.is_absolute()
-        && directory.canonicalize().ok().as_deref() == Some(directory.as_path())
+    super::qualification_directory::canonical_directory(&directory).is_some()
         && std::env::var("GITHUB_ACTIONS").as_deref() == Ok("true")
         && std::env::var("RUNNER_ENVIRONMENT").as_deref() == Ok("github-hosted")
         && std::env::var("RUNNER_OS").as_deref() == Ok("Windows")

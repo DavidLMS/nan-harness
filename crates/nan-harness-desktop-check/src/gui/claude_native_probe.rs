@@ -158,19 +158,9 @@ impl Gui {
 }
 
 pub(super) fn record(directory: &Path, owner: u32, source_count: &serde_json::Value) {
-    let Ok(metadata) = std::fs::symlink_metadata(directory) else {
+    let Some(directory) = super::qualification_directory::canonical_directory(directory) else {
         return;
     };
-    if !metadata.is_dir() || directory.canonicalize().ok().as_deref() != Some(directory) {
-        return;
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt as _;
-        if metadata.permissions().mode() & 0o077 != 0 {
-            return;
-        }
-    }
     // Frozen official Mac ZIP and Windows MSIX 2.19675.0 contain byte-identical
     // renderer chunks; the enclosing trial binds platform artifact/app digests.
     let mut value = serde_json::json!({"schemaVersion":1,"mechanism":"claude-native-composer",
