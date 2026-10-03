@@ -17,6 +17,7 @@
 int process_presence(bool) { return 5; }
 int windows_claude_storage() { return 5; }
 #if !defined(__APPLE__)
+int claude_chat_press() { return 5; }
 int fit_window(const std::string&) { return 5; }
 #endif
 int window_state(const std::string&) { return 5; }
@@ -552,6 +553,166 @@ static bool fit_mac_proof(std::uint64_t id, pid_t pid, AxFocus& focus, bool requ
     }
     return safe && found && (require_off_display ? !contained : contained);
 }
+static int chat_result(const char* stage) {
+    std::cout << "chat " << stage << '\n';
+    return std::cout ? 0 : 5;
+}
+using ChatDeadline = std::chrono::steady_clock::time_point;
+static bool chat_timely(ChatDeadline deadline) { return std::chrono::steady_clock::now() < deadline; }
+static bool chat_geometry(AXUIElementRef element, CGRect& bounds) {
+    CFTypeRef position = nullptr, size = nullptr;
+    AXError first = AXUIElementCopyAttributeValue(element, kAXPositionAttribute, &position);
+    AXError second = AXUIElementCopyAttributeValue(element, kAXSizeAttribute, &size);
+    CGPoint origin{}; CGSize dimensions{};
+    bool valid = first == kAXErrorSuccess && second == kAXErrorSuccess && position && size
+        && CFGetTypeID(position) == AXValueGetTypeID() && CFGetTypeID(size) == AXValueGetTypeID()
+        && AXValueGetValue(static_cast<AXValueRef>(position), kAXValueTypeCGPoint, &origin)
+        && AXValueGetValue(static_cast<AXValueRef>(size), kAXValueTypeCGSize, &dimensions)
+        && std::isfinite(origin.x) && std::isfinite(origin.y)
+        && std::isfinite(dimensions.width) && std::isfinite(dimensions.height)
+        && dimensions.width > 0 && dimensions.height > 0;
+    if (valid) bounds = CGRectMake(origin.x, origin.y, dimensions.width, dimensions.height);
+    if (position) CFRelease(position);
+    if (size) CFRelease(size);
+    return valid;
+}
+// Synthetic-testable identity/cardinality/geometry boundary; never queries the OS.
+bool chat_control_agreement(unsigned groups, unsigned buttons, bool same_control,
+                            CGRect held, CGRect fresh, CGRect window) {
+    return groups == 1 && buttons == 1 && same_control
+        && held.size.width > 0 && held.size.height > 0
+        && CGRectEqualToRect(held, fresh) && CGRectContainsRect(window, held);
+}
+struct ChatControls {
+    AXUIElementRef button = nullptr;
+    CGRect bounds{};
+    unsigned groups = 0, buttons = 0, nodes = 0;
+    ~ChatControls() { if (button) CFRelease(button); }
+};
+static bool collect_chat(AXUIElementRef element, pid_t pid, CGRect window, ChatDeadline deadline,
+                         ChatControls& found, unsigned depth = 0, bool in_mode = false) {
+    if (!chat_timely(deadline) || depth > 32 || ++found.nodes > 1024) return false;
+    pid_t owner = 0;
+    if (AXUIElementGetPid(element, &owner) != kAXErrorSuccess || owner != pid
+        || AXUIElementSetMessagingTimeout(element, 0.1) != kAXErrorSuccess) return false;
+    const void* keys[] = {kAXRoleAttribute, kAXTitleAttribute, kAXDescriptionAttribute,
+                         kAXEnabledAttribute, kAXChildrenAttribute};
+    auto attributes = CFArrayCreate(nullptr, keys, 5, &kCFTypeArrayCallBacks);
+    CFArrayRef values = nullptr;
+    AXError error = AXUIElementCopyMultipleAttributeValues(element, attributes, 0, &values);
+    CFRelease(attributes);
+    if (error != kAXErrorSuccess || !values || CFArrayGetCount(values) != 5) {
+        if (values) CFRelease(values);
+        return false;
+    }
+    auto value = [&](CFIndex index) { return CFArrayGetValueAtIndex(values, index); };
+    auto equals = [&](CFIndex index, CFStringRef expected) {
+        return CFGetTypeID(value(index)) == CFStringGetTypeID() && CFEqual(value(index), expected);
+    };
+    bool mode = equals(0, kAXGroupRole) && (equals(1, CFSTR("Mode")) || equals(2, CFSTR("Mode")));
+    if (mode) ++found.groups;
+    bool valid = true;
+    if ((in_mode || mode) && equals(0, kAXButtonRole)
+        && (equals(1, CFSTR("Chat")) || equals(2, CFSTR("Chat")))) {
+        CGRect bounds;
+        valid = CFEqual(value(3), kCFBooleanTrue) && chat_geometry(element, bounds)
+            && CGRectContainsRect(window, bounds);
+        if (valid) {
+            ++found.buttons;
+            if (!found.button) { found.button = element; CFRetain(element); found.bounds = bounds; }
+        }
+    }
+    auto children = value(4);
+    if (valid && CFGetTypeID(children) == CFArrayGetTypeID()) {
+        auto array = static_cast<CFArrayRef>(children);
+        valid = CFArrayGetCount(array) <= 1024;
+        for (CFIndex index = 0; valid && index < CFArrayGetCount(array); ++index) {
+            auto child = CFArrayGetValueAtIndex(array, index);
+            valid = CFGetTypeID(child) == AXUIElementGetTypeID()
+                && collect_chat(static_cast<AXUIElementRef>(child), pid, window, deadline, found, depth + 1, in_mode || mode);
+        }
+    } else if (valid) {
+        AXError missing = kAXErrorFailure;
+        // Apple's batch contract also represents unsupported leaf attributes by CFNull.
+        valid = CFGetTypeID(children) == CFNullGetTypeID()
+            || (CFGetTypeID(children) == AXValueGetTypeID()
+                && AXValueGetType(static_cast<AXValueRef>(children)) == kAXValueAXErrorType
+                && AXValueGetValue(static_cast<AXValueRef>(children), static_cast<AXValueType>(kAXValueAXErrorType), &missing)
+                && (missing == kAXErrorAttributeUnsupported || missing == kAXErrorNoValue));
+    }
+    CFRelease(values);
+    return valid && chat_timely(deadline);
+}
+static bool chat_hit_target(AXUIElementRef button, pid_t pid, CGRect bounds, ChatDeadline deadline) {
+    auto application = AXUIElementCreateApplication(pid);
+    AXUIElementRef hit = nullptr;
+    bool valid = application && AXUIElementSetMessagingTimeout(application, 0.1) == kAXErrorSuccess
+        && AXUIElementCopyElementAtPosition(application, CGRectGetMidX(bounds), CGRectGetMidY(bounds), &hit) == kAXErrorSuccess;
+    if (application) CFRelease(application);
+    bool matched = false;
+    for (unsigned depth = 0; valid && hit && depth <= 32 && chat_timely(deadline); ++depth) {
+        pid_t owner = 0;
+        if (AXUIElementGetPid(hit, &owner) != kAXErrorSuccess || owner != pid) break;
+        if (CFEqual(hit, button)) { matched = true; break; }
+        CFTypeRef parent = nullptr;
+        if (AXUIElementSetMessagingTimeout(hit, 0.1) != kAXErrorSuccess
+            || AXUIElementCopyAttributeValue(hit, kAXParentAttribute, &parent) != kAXErrorSuccess
+            || !parent || CFGetTypeID(parent) != AXUIElementGetTypeID()) {
+            if (parent) CFRelease(parent);
+            break;
+        }
+        CFRelease(hit); hit = static_cast<AXUIElementRef>(parent);
+    }
+    if (hit) CFRelease(hit);
+    return matched && chat_timely(deadline);
+}
+int claude_chat_press() {
+    @autoreleasepool {
+        std::string request;
+        if (!std::getline(std::cin, request) || request.size() > 256 || std::cin.peek() != EOF) return chat_result("request");
+        std::istringstream input(request);
+        std::string id_text, pid_text, extra;
+        std::uint64_t id = 0, pid = 0;
+        double x = 0, y = 0, width = 0, height = 0;
+        unsigned budget = 0;
+        if (!(input >> id_text >> pid_text >> x >> y >> width >> height >> budget) || (input >> extra)
+            || !parse_identity_token(id_text, id) || !parse_identity_token(pid_text, pid)
+            || id == 0 || id > UINT32_MAX || pid == 0 || pid > static_cast<std::uint64_t>(std::numeric_limits<pid_t>::max())
+            || !std::isfinite(x) || !std::isfinite(y) || !std::isfinite(width) || !std::isfinite(height)
+            || width <= 0 || height <= 0 || budget == 0 || budget > 5000) return chat_result("request");
+        auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(budget);
+        CGRect expected = CGRectMake(x, y, width, height);
+        AxFocus before;
+        if (!fit_mac_proof(id, static_cast<pid_t>(pid), before, false)) return chat_result("initial-proof");
+        if (!CGRectEqualToRect(before.bounds, expected)) return chat_result("window-bounds");
+        ChatControls held;
+        if (!collect_chat(before.focused, pid, expected, deadline, held)) return chat_result(chat_timely(deadline) ? "tree" : "deadline");
+        if (held.groups != 1) return chat_result("mode");
+        if (held.buttons != 1) return chat_result("chat");
+        AxFocus fresh;
+        if (!chat_timely(deadline)) return chat_result("deadline");
+        if (!fit_mac_proof(id, static_cast<pid_t>(pid), fresh, false)
+            || !CFEqual(before.focused, fresh.focused) || !CGRectEqualToRect(fresh.bounds, expected)) return chat_result("control-recheck");
+        ChatControls current;
+        if (!collect_chat(fresh.focused, pid, expected, deadline, current)) return chat_result(chat_timely(deadline) ? "tree" : "deadline");
+        if (!chat_control_agreement(current.groups, current.buttons, current.button && CFEqual(held.button, current.button),
+                                    held.bounds, current.bounds, expected)) return chat_result("control-recheck");
+        if (!chat_hit_target(held.button, pid, held.bounds, deadline)) return chat_result(chat_timely(deadline) ? "hit-test" : "deadline");
+        AxFocus final_focus;
+        if (!fit_mac_proof(id, static_cast<pid_t>(pid), final_focus, false)
+            || !CFEqual(before.focused, final_focus.focused) || !CGRectEqualToRect(final_focus.bounds, expected)) return chat_result("control-recheck");
+        CGRect final_bounds;
+        if (!chat_geometry(held.button, final_bounds) || !CGRectEqualToRect(held.bounds, final_bounds)) return chat_result("control-recheck");
+        CFTypeRef enabled = nullptr;
+        bool still_enabled = AXUIElementCopyAttributeValue(held.button, kAXEnabledAttribute, &enabled) == kAXErrorSuccess
+            && enabled && CFEqual(enabled, kCFBooleanTrue);
+        if (enabled) CFRelease(enabled);
+        if (!still_enabled) return chat_result("control-recheck");
+        if (!chat_timely(deadline)) return chat_result("deadline");
+        return chat_result(AXUIElementPerformAction(held.button, kAXPressAction) == kAXErrorSuccess ? "completed" : "press-uncertain");
+    }
+}
+
 // Closed stage output is rejected by the caller; only empty timely output proves fit.
 static int mac_fit_rejected(const char* stage) {
     std::cout << "fit-rejected " << stage << '\n';

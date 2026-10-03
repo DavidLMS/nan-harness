@@ -89,6 +89,20 @@ pub(super) fn run_fit_until(
 }
 
 #[cfg(any(windows, test))]
+pub(super) fn run_windows_until(
+    executable: &Path,
+    deadline: Instant,
+) -> Result<Zeroizing<String>, FailureCategory> {
+    run_once_until(
+        executable,
+        OsStr::new("--windows"),
+        None,
+        &[],
+        Some(deadline),
+    )
+}
+
+#[cfg(any(windows, test))]
 pub(super) fn run_absence_until(
     executable: &Path,
     deadline: Instant,
@@ -144,6 +158,21 @@ fn run_once(
     input: &[u8],
 ) -> Result<Zeroizing<String>, FailureCategory> {
     run_once_until(executable, argument, screenshot, input, None)
+}
+
+#[cfg(target_os = "macos")]
+pub(super) fn run_chat_until(
+    executable: &Path,
+    input: &[u8],
+    deadline: Instant,
+) -> Result<Zeroizing<String>, FailureCategory> {
+    run_once_until(
+        executable,
+        OsStr::new("--claude-chat-press"),
+        None,
+        input,
+        Some(deadline),
+    )
 }
 
 fn run_once_until(

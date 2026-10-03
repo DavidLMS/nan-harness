@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The native project trial admits only the exact inspected hosted Windows release."""
+"""The native project trial admits only exact inspected hosted platform releases."""
 import importlib.util
 from pathlib import Path
 import tempfile
@@ -12,14 +12,27 @@ spec.loader.exec_module(module)
 
 class ProjectPolicy(unittest.TestCase):
     def test_exact_frozen_release_and_application_are_both_required(self):
-        release = dict(version='26.930.31730', digest='sha256:f7b0266d6c00d4743da01d62bc82488f7ec5560c642501758119cb9885f67c87')
-        executable = 'b35bf062c01d73da090c60e62186dc180c2a8545cb6fc9575b4403c8fa3db49e'
-        module.validate_codex_project_release(release, executable)
-        for changed, binary in (({**release, 'version': '26.930.2377.0'}, executable),
-                                ({**release, 'digest': 'sha256:' + '0' * 64}, executable),
-                                (release, '0' * 64), ({}, executable)):
-            with self.assertRaises(ValueError):
-                module.validate_codex_project_release(changed, binary)
+        targets = {
+            'macos': ('bfda661a7c9ca44dac3168134058dd6007947cde318ade37d570c484329f6d41',
+                      'b078df75c1cf593b99351622f5bc8184a44f993bb0bd0a4cbefac31f4a746bbd'),
+            'windows': ('f7b0266d6c00d4743da01d62bc82488f7ec5560c642501758119cb9885f67c87',
+                        'b35bf062c01d73da090c60e62186dc180c2a8545cb6fc9575b4403c8fa3db49e'),
+            'linux': ('e0174d8d0a5f4141145458c814f3c2d863dd67e942b868785a1f5dac9cba3e16',
+                      '207c4fbff7e2fcc1b0789448351ac6eed206206d94c5a0835e5f07c7cd73d6e3'),
+        }
+        for platform, (artifact, executable) in targets.items():
+            release = dict(version='26.930.31730', digest='sha256:' + artifact)
+            module.validate_codex_project_release(release, executable, platform)
+            foreign = targets['linux' if platform == 'windows' else 'windows']
+            for changed, binary in (({**release, 'version': '26.930.2377.0'}, executable),
+                                    ({**release, 'digest': 'sha256:' + '0' * 64}, executable),
+                                    ({**release, 'digest': 'sha256:' + foreign[0]}, executable),
+                                    (release, foreign[1]), (release, '0' * 64), ({}, executable)):
+                with self.assertRaises(ValueError):
+                    module.validate_codex_project_release(changed, binary, platform)
+            for unsupported in ('freebsd', 'unknown', ''):
+                with self.assertRaises(ValueError):
+                    module.validate_codex_project_release(release, executable, unsupported)
 
     def test_policy_is_opt_in_and_rejects_other_apps_platforms_or_modes(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -32,10 +45,16 @@ class ProjectPolicy(unittest.TestCase):
             result = module.qualification_environment('chatgpt-desktop', root, helper, helper, source)
             self.assertEqual(result['NANH_CODEX_PROJECT_POLICY'], 'open-project')
             self.assertNotIn('NANH_CODEX_PROJECT_ARTIFACT_SHA256', result)
+            linux = {**source, 'RUNNER_OS': 'Linux'}
+            linux_result = module.qualification_environment('chatgpt-desktop', root, helper, helper, linux)
+            self.assertEqual(linux_result['NANH_CODEX_PROJECT_POLICY'], 'open-project')
+            self.assertNotIn('NANH_CODEX_PROJECT_ARTIFACT_SHA256', linux_result)
             plain = {key: value for key, value in source.items() if key != 'NANH_CODEX_PROJECT_POLICY'}
             self.assertNotIn('NANH_CODEX_PROJECT_POLICY', module.qualification_environment('chatgpt-desktop', root, helper, helper, plain))
             for app, changed in [('hermes-desktop', source),
-                                 ('chatgpt-desktop', {**source, 'RUNNER_OS': 'Linux'}),
+                                 ('chatgpt-desktop', {**source, 'RUNNER_OS': 'FreeBSD'}),
+                                 ('chatgpt-desktop', {**linux, 'GITHUB_ACTIONS': 'false'}),
+                                 ('chatgpt-desktop', {**linux, 'RUNNER_ENVIRONMENT': 'self-hosted'}),
                                  ('chatgpt-desktop', {**source, 'NANH_CODEX_PROJECT_POLICY': 'unknown'}),
                                  ('chatgpt-desktop', {**source, 'NANH_DESKTOP_QUALIFICATION_MODE': 'startup-baseline'}),
                                  ('chatgpt-desktop', {key: value for key, value in source.items() if key != 'NANH_CODEX_PUBLIC_ONBOARDING'})]:

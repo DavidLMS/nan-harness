@@ -3,6 +3,8 @@
 mod accessibility_probe;
 mod claude_chat_navigation;
 mod claude_native_probe;
+#[cfg(any(windows, test))]
+mod claude_windows_ready;
 mod clipboard;
 mod codex_dom_probe;
 mod dom_probe;
@@ -221,12 +223,23 @@ pub(crate) enum ComposerGuardContext {
     BeforeResponse,
 }
 
+fn initial_claude_policy() -> bool {
+    #[cfg(windows)]
+    {
+        claude_windows_ready::policy()
+    }
+    #[cfg(not(windows))]
+    {
+        crate::native::claude_focus_policy()
+    }
+}
+
 pub(crate) struct Gui {
     app: Option<App>,
     app_error: Option<Reason>,
     kind: DesktopHarnessKind,
     visual: visual::Visual,
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", windows))]
     initial_deadline: Cell<Option<Instant>>,
 }
 
@@ -427,7 +440,7 @@ impl Gui {
         kind: DesktopHarnessKind,
         process: &mut P,
     ) -> Result<Self, visual::AcquisitionFailure> {
-        let deadline = (kind == DesktopHarnessKind::Claude && crate::native::claude_focus_policy())
+        let deadline = (kind == DesktopHarnessKind::Claude && initial_claude_policy())
             .then(|| Instant::now() + Duration::from_secs(45));
         let visual = visual::Visual::wait(kind, process, deadline)?;
         // The window can become stable before the accessibility bridge
@@ -441,7 +454,7 @@ impl Gui {
             app_error,
             kind,
             visual,
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", windows))]
             initial_deadline: Cell::new(deadline),
         })
     }
@@ -456,7 +469,12 @@ impl Gui {
             // conversation guard. The original launch budget is never renewed.
             self.visual.finish_initial_acquisition(process, deadline)?;
         }
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(windows)]
+        if let Some(deadline) = self.initial_deadline.take() {
+            self.visual
+                .finish_windows_initial_acquisition(process, deadline)?;
+        }
+        #[cfg(not(any(target_os = "macos", windows)))]
         let _ = process;
         Ok(())
     }

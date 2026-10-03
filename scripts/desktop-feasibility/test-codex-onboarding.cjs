@@ -78,7 +78,7 @@ async function trial(options={}) {
  const page={evaluate:async fn=>fn.name==='codingScope'?taskClicks===1&&!options.noCodingScope:'visible',mainFrame:()=>options.overlayFrameChange&&overlayReads?{}:mainFrame,locator:s=>new Locator(s.startsWith('fieldset > legend')?'legend':'radios'),
   url:()=>options.urlChange&&roleClicks>0?'app://codex/index.html?PRIVATE_ROUTE':'app://codex/index.html',
   context:()=>({browser:()=>({contexts:()=>[{pages:()=>options.foreignPage?[page,extraPage]:options.replacedPage?[{}]:[page]}]})})};
- const sandbox={exports:{},URL,process:{platform:options.platform??'win32',env:{GITHUB_ACTIONS:options.noHost?'false':'true',RUNNER_ENVIRONMENT:'github-hosted',RUNNER_OS:'Windows',NANH_CODEX_PUBLIC_ONBOARDING:options.noOptin?undefined:'engineering'}},Date:{now:()=>now},clearTimeout:()=>{},setTimeout:(f,ms)=>{if(ms<=100){now+=100;f();}}};
+ const sandbox={exports:{},URL,process:{platform:options.platform??'win32',env:{GITHUB_ACTIONS:options.noHost?'false':'true',RUNNER_ENVIRONMENT:'github-hosted',RUNNER_OS:options.runnerOs??'Windows',NANH_CODEX_PUBLIC_ONBOARDING:options.noOptin?undefined:'engineering'}},Date:{now:()=>now},clearTimeout:()=>{},setTimeout:(f,ms)=>{if(ms<=100){now+=100;f();}}};
  vm.runInNewContext(source,sandbox);
  let guards=0;
  const guard=()=>{guards++;if(options.guardThrows)throw Error('PRIVATE');if(options.guardExhaustsBudget&&guards>=3||options.overlayBudgetExpired&&overlayReads>0)now=1201;return !inventoryOwnerLost&&!(options.overlayOwnerDuringProof&&legendReads>=3)&&!(options.overlayOwnerLoss&&overlayReads>0)&&!options.initialOwnerLoss&&!(options.ownerLossBeforeRole&&guards>=3)&&!(options.ownerLoss&&roleClicks>0)&&!(options.finalLoss&&guards>=2);};
@@ -89,7 +89,7 @@ async function trial(options={}) {
 }
 (async()=>{
  for(const [opts,reason] of [[{expired:true},'deadline-expired'],[{invalidDeadline:true},'deadline-invalid'],
-  [{excessBudget:true},'deadline-invalid'],[{noGuard:true},'guard-missing'],[{platform:'linux'},'platform'],
+  [{excessBudget:true},'deadline-invalid'],[{noGuard:true},'guard-missing'],[{platform:'freebsd'},'platform'],[{platform:'linux'},'host-policy'],
   [{noHost:true},'host-policy'],[{noOptin:true},'onboarding-policy']]) {
   const r=await trial(opts);assert.equal(r.facts.errorCategory,'invalid-session');assert.equal(r.facts.sessionProofFailure,reason);
   assert.equal(r.facts.roleProofFailure,'unmeasured');assert.equal(r.roleClicks,0);assert.equal(r.continueClicks,0);
@@ -98,6 +98,8 @@ async function trial(options={}) {
   const r=await trial(opts);assert.equal(r.facts.roleProofFailure,reason);assert.equal(r.roleClicks,0);assert.equal(r.continueClicks,0);
   if(opts.guardExhaustsBudget||opts.ownerLossBeforeRole)assert.equal(r.facts.conversationalScope,true);
  }
+ const mac=await trial({platform:'darwin',runnerOs:'macOS'});assert.equal(mac.facts.codingComposerReady,true);
+ const linux=await trial({platform:'linux',runnerOs:'Linux'});assert.equal(linux.facts.codingComposerReady,true);
  const loaded=await trial({loading:true});assert.equal(loaded.roleClicks,1);assert.equal(loaded.continueClicks,1);
  for(const [url,kind] of [['about:blank','blank'],['app://codex/PRIVATE','app'],['devtools://PRIVATE','devtools'],['https://PRIVATE','other']]){
   const r=await trial({foreignPage:true,foreignUrl:url});

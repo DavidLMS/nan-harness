@@ -253,6 +253,13 @@ def accessibility_observation(component, dbus, window, facts):
         pass
 
 
+class RetryHitFailure(ValueError):
+    """Closed failure category; native payloads never enter the receipt."""
+    def __init__(self, category):
+        super().__init__('retry proof rejected')
+        self.category = category
+
+
 def normalized_retry_point(request, active, geometry, facts=None, return_bounds=False, hit_point=None):
     import dbus
     bus = None
@@ -288,7 +295,7 @@ def normalized_retry_point(request, active, geometry, facts=None, return_bounds=
                         dbus.Int32(hit_point[1] - geometry[1]), dbus.UInt32(1),
                         dbus_interface='org.a11y.atspi.Component', timeout=0.2)
                     if tuple(str(value) for value in hit) != (request['bus'], request['path']):
-                        raise ValueError('retry hit ambiguous')
+                        raise RetryHitFailure('accessible-hit-mismatch')
                     break
                 parent = ancestor.Get('org.a11y.atspi.Accessible', 'Parent',
                     dbus_interface='org.freedesktop.DBus.Properties', timeout=0.2)
@@ -302,6 +309,8 @@ def normalized_retry_point(request, active, geometry, facts=None, return_bounds=
                 raise ValueError('retry root unavailable')
         return (geometry[0] + window[0], geometry[1] + window[1], window[2], window[3]) if return_bounds else point
     except dbus.DBusException:
+        if hit_point is not None:
+            raise RetryHitFailure('accessible-query-unavailable') from None
         raise ValueError('accessibility query unavailable') from None
     finally:
         if bus is not None:
@@ -332,35 +341,82 @@ def interior_points(bounds):
     return list(dict.fromkeys(points))
 
 
+def guarded_retry_proof(point, scope, hit, observation, deadline):
+    try:
+        if time.monotonic() >= deadline:
+            raise RetryHitFailure('deadline')
+        if not scope():
+            raise RetryHitFailure('identity-rejected')
+        observation['guardBeforeVerified'] += 1
+        observation['accessibleChecks'] += 1
+        if not hit(point):
+            raise RetryHitFailure('identity-rejected')
+        observation['accessibleExactMatches'] += 1
+        if time.monotonic() >= deadline:
+            raise RetryHitFailure('deadline')
+        if not scope():
+            raise RetryHitFailure('identity-rejected')
+        observation['guardAfterVerified'] += 1
+    except (ValueError, OSError, subprocess.SubprocessError) as error:
+        reason = error.category if isinstance(error, RetryHitFailure) else 'identity-rejected'
+        observation.update(status=('deadline' if reason == 'deadline' else 'identity-rejected'),
+                           failureReason=reason, exactPointerMatched=False, accessibleHitVerified=False)
+        raise
+
+
+def sampled_cursor_match(matches, observation):
+    if observation is not None:
+        observation['cursorChecks'] += 1
+    matched = matches()
+    if matched and observation is not None:
+        observation['cursorExactMatches'] += 1
+    return matched
+
+
 def select_live_retry_point(bounds, move, prove, matches, deadline, pause=time.sleep, observation=None):
     # Hover only until one stable public hand cursor and held accessible hit
     # agree. Never replay an activation or select a point after the click.
+    if observation is not None:
+        for field in ('guardBeforeVerified', 'guardAfterVerified', 'accessibleChecks',
+                      'accessibleExactMatches', 'cursorChecks', 'cursorExactMatches'):
+            observation.setdefault(field, 0)
+        observation.setdefault('failureReason', None)
+    unstable_cursor = False
+
+    def proof(point):
+        try:
+            prove(point)
+        except (ValueError, OSError, subprocess.SubprocessError) as error:
+            if observation is not None:
+                reason = error.category if isinstance(error, RetryHitFailure) else 'identity-rejected'
+                observation.update(status=('deadline' if reason == 'deadline' else 'identity-rejected'),
+                                   failureReason=reason)
+            raise
+
     for point in interior_points(bounds):
         if time.monotonic() >= deadline:
             if observation is not None:
-                observation['status'] = 'deadline'
+                observation.update(status='deadline', failureReason='deadline')
             raise ValueError('retry hit deadline')
-        try:
-            prove(point)
-        except (ValueError, OSError, subprocess.SubprocessError):
-            if observation is not None:
-                observation['status'] = 'identity-rejected'
-            raise
+        proof(point)
         move(point)
         if observation is not None:
             observation['sampledPoints'] += 1
         pause(min(0.02, max(0, deadline - time.monotonic())))
-        if not matches():
+        if not sampled_cursor_match(matches, observation):
             continue
-        prove(point)
+        proof(point)
         pause(min(0.02, max(0, deadline - time.monotonic())))
-        if matches():
-            prove(point)
+        if sampled_cursor_match(matches, observation):
+            proof(point)
             if observation is not None:
-                observation.update(status='matched', exactPointerMatched=True, accessibleHitVerified=True)
+                observation.update(status='matched', exactPointerMatched=True,
+                                   accessibleHitVerified=True, failureReason=None)
             return point
+        unstable_cursor = True
     if observation is not None:
-        observation['status'] = 'no-hit'
+        observation.update(status='no-hit', failureReason=('cursor-unstable' if unstable_cursor
+                                                         else 'cursor-unmatched'))
     raise ValueError('retry live hit unavailable')
 
 
@@ -430,7 +486,9 @@ def retry_click(payload):
         live_cursor = None
         if os.environ.get('NANH_ZED_CURSOR_HIT') == '1':
             facts['cursorSelection'] = dict(status='unavailable', sampledPoints=0,
-                exactPointerMatched=False, accessibleHitVerified=False)
+                exactPointerMatched=False, accessibleHitVerified=False,
+                guardBeforeVerified=0, guardAfterVerified=0, accessibleChecks=0,
+                accessibleExactMatches=0, cursorChecks=0, cursorExactMatches=0, failureReason=None)
             if (sys.platform != 'linux' or os.environ.get('GITHUB_ACTIONS') != 'true'
                     or os.environ.get('RUNNER_ENVIRONMENT') != 'github-hosted'
                     or os.environ.get('RUNNER_OS') != 'Linux'):
@@ -442,10 +500,10 @@ def retry_click(payload):
                 return (owned_foreground() == (0, active)
                         and independent_client_snapshot(active) == second_geometry)
             def prove_hit(candidate):
-                if (not cursor_scope() or time.monotonic() >= deadline
-                        or normalized_retry_point(request, active, geometry,
-                            return_bounds=True, hit_point=candidate) != held_bounds):
-                    raise ValueError('retry live identity changed')
+                return guarded_retry_proof(candidate, cursor_scope,
+                    lambda point: normalized_retry_point(request, active, geometry,
+                        return_bounds=True, hit_point=point) == held_bounds,
+                    facts['cursorSelection'], deadline)
             live_cursor = module['PointerShape'](request['pid'], cursor_scope, deadline)
             point = select_live_retry_point(held_bounds,
                 lambda candidate: run(['mousemove', '--', str(candidate[0]), str(candidate[1])]),
@@ -519,8 +577,13 @@ def retry_click(payload):
         stage = 16
         if live_cursor is not None:
             prove_hit(point)
-            if (run(['getmouselocation', '--shell'], 'position') != (px, py, pointer_window)
-                    or not live_cursor.matches()):
+            if run(['getmouselocation', '--shell'], 'position') != (px, py, pointer_window):
+                facts['cursorSelection'].update(status='identity-rejected', failureReason='identity-rejected',
+                                               exactPointerMatched=False, accessibleHitVerified=False)
+                return 18
+            if not sampled_cursor_match(live_cursor.matches, facts['cursorSelection']):
+                facts['cursorSelection'].update(status='no-hit', failureReason='cursor-unstable',
+                                               exactPointerMatched=False, accessibleHitVerified=False)
                 return 18
         # One ordinary activation, never another press after an uncertain receipt.
         run(['click', '--clearmodifiers', '1'])

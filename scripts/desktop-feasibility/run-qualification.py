@@ -69,11 +69,22 @@ def validate_claude_bundle(executable):
             raise ValueError('Claude bootstrap differs from the inspected release')
 
 
-def validate_codex_project_release(release, executable_hash):
-    # The ordinary native flag was inspected in these exact official bytes.
-    if (release.get('version') != '26.930.31730'
-            or release.get('digest') != 'sha256:f7b0266d6c00d4743da01d62bc82488f7ec5560c642501758119cb9885f67c87'
-            or executable_hash != 'b35bf062c01d73da090c60e62186dc180c2a8545cb6fc9575b4403c8fa3db49e'):
+CODEX_PROJECT_RELEASES = {
+    'macos': ('bfda661a7c9ca44dac3168134058dd6007947cde318ade37d570c484329f6d41',
+              'b078df75c1cf593b99351622f5bc8184a44f993bb0bd0a4cbefac31f4a746bbd'),
+    'windows': ('f7b0266d6c00d4743da01d62bc82488f7ec5560c642501758119cb9885f67c87',
+                'b35bf062c01d73da090c60e62186dc180c2a8545cb6fc9575b4403c8fa3db49e'),
+    'linux': ('e0174d8d0a5f4141145458c814f3c2d863dd67e942b868785a1f5dac9cba3e16',
+              '207c4fbff7e2fcc1b0789448351ac6eed206206d94c5a0835e5f07c7cd73d6e3'),
+}
+
+
+def validate_codex_project_release(release, executable_hash, platform='windows'):
+    # Native flags and renderer controls were inspected in each platform's bytes.
+    pinned = CODEX_PROJECT_RELEASES.get(platform)
+    if (pinned is None or release.get('version') != '26.930.31730'
+            or release.get('digest') != 'sha256:' + pinned[0]
+            or executable_hash != pinned[1]):
         raise ValueError('Codex project trial requires the inspected official release')
 
 
@@ -179,13 +190,13 @@ def qualification_environment(app, facts, real_nanh, executable, inherited=None)
         onboarding = source.get('NANH_CODEX_PUBLIC_ONBOARDING')
         if onboarding is not None:
             if (onboarding != 'engineering' or app != 'chatgpt-desktop'
-                    or source.get('RUNNER_OS') != 'Windows' or mode != 'renderer'):
+                    or source.get('RUNNER_OS') not in {'Windows', 'Linux', 'macOS'} or mode != 'renderer'):
                 raise ValueError('public onboarding diagnostic is unavailable')
             environment['NANH_CODEX_PUBLIC_ONBOARDING'] = onboarding
         project_policy = source.get('NANH_CODEX_PROJECT_POLICY')
         if project_policy is not None:
             if (project_policy != 'open-project' or app != 'chatgpt-desktop'
-                    or source.get('RUNNER_OS') != 'Windows' or mode != 'renderer'
+                    or source.get('RUNNER_OS') not in {'Windows', 'Linux', 'macOS'} or mode != 'renderer'
                     or onboarding != 'engineering'):
                 raise ValueError('Codex native project policy is unavailable')
             environment['NANH_CODEX_PROJECT_POLICY'] = project_policy
@@ -272,10 +283,10 @@ def run(args):
         raise ValueError('report destination already exists')
     environment = qualification_environment(args.app, facts, args.real_nanh, executable)
     if environment.get('NANH_CODEX_PROJECT_POLICY') is not None:
-        if args.app != 'chatgpt-desktop' or args.platform != 'windows':
+        if args.app != 'chatgpt-desktop' or args.platform not in CODEX_PROJECT_RELEASES:
             raise ValueError('Codex native project trial platform differs')
-        validate_codex_project_release(manifest['apps'][0], digest(Path(executable)))
-        environment['NANH_CODEX_PROJECT_ARTIFACT_SHA256'] = 'f7b0266d6c00d4743da01d62bc82488f7ec5560c642501758119cb9885f67c87'
+        validate_codex_project_release(manifest['apps'][0], digest(Path(executable)), args.platform)
+        environment['NANH_CODEX_PROJECT_ARTIFACT_SHA256'] = CODEX_PROJECT_RELEASES[args.platform][0]
     expected_os = {'macos': ('macOS', 'darwin'), 'linux': ('Linux', 'linux'), 'windows': ('Windows', 'win32')}[args.platform]
     if environment.get('RUNNER_OS') != expected_os[0] or sys.platform != expected_os[1]:
         raise ValueError('host platform differs')

@@ -506,6 +506,89 @@ impl Visual {
         }
     }
 
+    #[cfg(windows)]
+    pub(super) fn finish_windows_initial_acquisition<P: Observation>(
+        &self,
+        process: &mut P,
+        deadline: Instant,
+    ) -> Result<(), AcquisitionFailure> {
+        let original = self.window.borrow().clone();
+        let owner = process.id().ok_or_else(|| {
+            acquisition_failure(
+                Reason::ApplicationExited,
+                crate::diagnostics::GuiAcquisitionStage::ProcessLive,
+            )
+        })?;
+        let failure = |reason| {
+            acquisition_failure(
+                reason,
+                crate::diagnostics::GuiAcquisitionStage::WindowStability,
+            )
+        };
+        let mut settle = super::stability::InitialSettle::default();
+        let mut stability = super::stability::Stability::default();
+        let mut previous = None;
+        loop {
+            if Instant::now() >= deadline {
+                stability.save();
+                return Err(failure(Reason::DesktopUnavailable));
+            }
+            require_running(process).map_err(failure)?;
+            require_owned_candidate(&original, owner)?;
+            let snapshot = self
+                .native
+                .windows_until(deadline)
+                .map_err(|error| failure(error.reason()))?;
+            let candidates =
+                eligible_windows(DesktopHarnessKind::Claude, &snapshot.windows).collect::<Vec<_>>();
+            let candidate =
+                super::claude_windows_ready::candidate(&snapshot, &original, &candidates).map_err(
+                    |error| {
+                        (
+                            error.reason(),
+                            crate::diagnostics::GuiAcquisitionStage::WindowStability,
+                            guard_error_category(error),
+                            None,
+                            None,
+                        )
+                    },
+                )?;
+            require_running(process).map_err(failure)?;
+            require_owned_candidate(&candidate, owner)?;
+            let now = Instant::now();
+            if now >= deadline {
+                stability.save();
+                return Err(failure(Reason::DesktopUnavailable));
+            }
+            stability.observe(Some(&candidate), previous.as_ref());
+            if settle.ready(true, now, previous.as_ref() == Some(&candidate), deadline) {
+                // The only geometry update occurs before GuiReady and any input.
+                *self.window.borrow_mut() = candidate;
+                stability.save();
+                return Ok(());
+            }
+            previous = Some(candidate);
+            std::thread::sleep(Duration::from_millis(200));
+        }
+    }
+
+    pub(super) fn press_claude_chat(
+        &self,
+        deadline: Instant,
+    ) -> Result<crate::native::ChatPressStage, Reason> {
+        #[cfg(target_os = "macos")]
+        {
+            self.native
+                .press_claude_chat(&self.window.borrow(), deadline)
+                .map_err(FailureCategory::reason)
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = deadline;
+            Err(Reason::ActionUnsupported)
+        }
+    }
+
     pub(super) fn pid(&self) -> u32 {
         self.window.borrow().pid
     }

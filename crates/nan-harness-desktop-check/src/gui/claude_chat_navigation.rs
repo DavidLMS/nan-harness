@@ -1,13 +1,14 @@
 //! Explicit hosted public navigation; one accessibility action and no conversation input.
 
 use super::{ComposerFailure, Gui, map_error, require_foreground_pid};
+use crate::native::ChatPressStage;
 use crate::report::Reason;
 use nan_harness_private_fs::open_private_new;
 use serde::Serialize;
 use std::io::Write as _;
 use std::path::Path;
 use std::time::{Duration, Instant};
-use xa11y::{App, AppExt as _, Element, ElementData};
+use xa11y::{App, AppExt as _};
 
 #[derive(Default, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -34,6 +35,8 @@ struct Facts {
     preconditions_verified: bool,
     chat_postcondition_verified: bool,
     native_guard_verified: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    native_press_stage: Option<ChatPressStage>,
 }
 impl Facts {
     fn value(&self) -> Option<serde_json::Value> {
@@ -59,19 +62,6 @@ fn postcondition(counts: &serde_json::Value) -> bool {
         && counts["sendMessageVisible"].as_u64() == Some(1)
         && counts["startTaskVisible"].as_u64() == Some(0)
 }
-fn held_identity(before: &ElementData, after: &ElementData, pid: u32) -> bool {
-    let bounded = before
-        .bounds
-        .is_some_and(|bounds| bounds.width > 0 && bounds.height > 0);
-    before.pid == Some(pid)
-        && after.pid == Some(pid)
-        && bounded
-        && before.stable_id.as_ref().is_some_and(|id| !id.is_empty())
-        && before.stable_id == after.stable_id
-        && before.bounds == after.bounds
-    // xa11y Mac allocates a new cache handle per query; AXIdentifier is the
-    // platform identity, while that handle only addresses a provider cache.
-}
 fn press_once(facts: &mut Facts, action: impl FnOnce() -> bool) -> Result<(), Reason> {
     if !matches!(facts.action_status, ActionStatus::NotAttempted) {
         return Err(Reason::ActionUnsupported);
@@ -82,6 +72,29 @@ fn press_once(facts: &mut Facts, action: impl FnOnce() -> bool) -> Result<(), Re
         facts.action_status = ActionStatus::Completed;
     }
     Ok(())
+}
+fn native_receipt(
+    facts: &mut Facts,
+    result: Result<ChatPressStage, Reason>,
+) -> Result<bool, Reason> {
+    match result {
+        Ok(stage) => {
+            facts.native_press_stage = Some(stage);
+            if !stage.attempted() {
+                return Ok(false);
+            }
+            facts.preconditions_verified = true;
+            facts.native_guard_verified = true;
+            press_once(facts, || stage == ChatPressStage::Completed)?;
+            Ok(true)
+        }
+        Err(reason) => {
+            // A transport failure may follow AXPress; never replay it.
+            facts.preconditions_verified = true;
+            press_once(facts, || false)?;
+            Err(reason)
+        }
+    }
 }
 fn within(deadline: Instant) -> Result<(), Reason> {
     if Instant::now() < deadline {
@@ -104,17 +117,6 @@ impl Gui {
             .map(|app| if app.is_foreground() { app.pid } else { None });
         require_foreground_pid(foreground, self.visual.pid())?;
         within(deadline)
-    }
-    fn chat_control(&self) -> Option<Element> {
-        let app = self.app.as_ref()?;
-        let mut found = app
-            .locator(&super::claude_native_probe::mode_button("Chat", true))
-            .elements()
-            .ok()?;
-        if found.len() != 1 {
-            return None;
-        }
-        found.pop()
     }
     pub(super) fn claude_chat_navigation(
         &self,
@@ -149,36 +151,10 @@ impl Gui {
         if !preflight(&counts) {
             return Ok(());
         }
-        let (Some(held), Some(pid)) = (
-            self.chat_control(),
-            self.app.as_ref().and_then(|app| app.pid),
-        ) else {
-            return Ok(());
-        };
-        within(deadline)?;
-        let Some(fresh) = self.chat_control() else {
-            return Ok(());
-        };
-        if !held_identity(held.data(), fresh.data(), pid) {
-            return Ok(());
-        }
-        let Some(counts) = self.claude_composer_inventory() else {
-            return Ok(());
-        };
-        if !preflight(&counts) {
-            return Ok(());
-        }
         self.navigation_guard(deadline, observations)?;
-        let Some(final_control) = self.chat_control() else {
-            return Ok(());
-        };
-        within(deadline)?;
-        if !held_identity(held.data(), final_control.data(), pid) {
+        if !native_receipt(facts, self.visual.press_claude_chat(deadline))? {
             return Ok(());
         }
-        facts.preconditions_verified = true;
-        facts.native_guard_verified = true;
-        press_once(facts, || held.press().is_ok())?;
         // A failed/uncertain receipt never permits a second action.
         facts.phase = Phase::Postcondition;
         loop {
@@ -227,7 +203,8 @@ fn record(directory: &Path, owner: u32, facts: &Facts) {
 }
 #[cfg(test)]
 mod tests {
-    use super::{Facts, held_identity, postcondition, preflight, press_once, within};
+    use super::{Facts, native_receipt, postcondition, preflight, press_once, within};
+    use crate::{native::ChatPressStage, report::Reason};
     #[test]
     fn source_counts_require_unique_scoped_controls_and_chat_transition() {
         let mut counts = serde_json::json!({"modeGroupVisible":1,"modeChatVisible":1,"modeChatEnabled":1,"classicEditable":1,"startTaskVisible":1,"sendMessageVisible":0});
@@ -283,28 +260,32 @@ mod tests {
         assert_eq!(value["chatPostconditionVerified"], false);
     }
     #[test]
-    fn fresh_provider_cache_handles_are_not_platform_identity() {
-        let mut before: xa11y::ElementData = serde_json::from_value(serde_json::json!({
-            "role":"Button","name":null,"value":null,"description":null,
-            "bounds":{"x":10,"y":20,"width":30,"height":40},"actions":[],
-            "states":xa11y::StateSet::default(),"numeric_value":null,"min_value":null,"max_value":null,
-            "stable_id":"private-control-id","pid":123,"raw":{}
-        }))
-        .unwrap();
-        before.handle = 1;
-        let mut after = before.clone();
-        after.handle = 2;
-        assert!(held_identity(&before, &after, 123));
-        after.pid = Some(124);
-        assert!(!held_identity(&before, &after, 123));
-        after = before.clone();
-        after.stable_id = Some("replaced-control".into());
-        assert!(!held_identity(&before, &after, 123));
-        after = before.clone();
-        after.bounds.as_mut().unwrap().x += 1;
-        assert!(!held_identity(&before, &after, 123));
-        before.stable_id = None;
-        after = before.clone();
-        assert!(!held_identity(&before, &after, 123));
+    fn native_rejection_never_claims_a_press_and_transport_uncertainty_never_claims_navigation() {
+        let mut rejected = Facts::default();
+        assert_eq!(
+            native_receipt(&mut rejected, Ok(ChatPressStage::ControlRecheck)),
+            Ok(false)
+        );
+        assert_eq!(rejected.value().unwrap()["pressAttempted"], false);
+        let mut completed = Facts::default();
+        assert_eq!(
+            native_receipt(&mut completed, Ok(ChatPressStage::Completed)),
+            Ok(true)
+        );
+        assert_eq!(
+            completed.value().unwrap()["chatPostconditionVerified"],
+            false
+        );
+        let mut uncertain = Facts::default();
+        assert_eq!(
+            native_receipt(&mut uncertain, Err(Reason::Timeout)),
+            Err(Reason::Timeout)
+        );
+        assert_eq!(uncertain.value().unwrap()["actionStatus"], "uncertain");
+        assert!(native_receipt(&mut uncertain, Ok(ChatPressStage::Completed)).is_err());
+        assert_eq!(
+            uncertain.value().unwrap()["chatPostconditionVerified"],
+            false
+        );
     }
 }

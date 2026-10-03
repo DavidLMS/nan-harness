@@ -283,11 +283,11 @@ jobs:
           if-no-files-found: ignore
           retention-days: 30
       - name: Enable public Codex work-preferences diagnostic
-        if: runner.os == 'Windows' && matrix.app == 'chatgpt-desktop' && inputs.experiment == 'deterministic-full'
+        if: matrix.app == 'chatgpt-desktop' && inputs.experiment == 'deterministic-full'
         shell: bash
         run: echo 'NANH_CODEX_PUBLIC_ONBOARDING=engineering' >> "$GITHUB_ENV"
       - name: Enable inspected native Codex project entry
-        if: runner.os == 'Windows' && matrix.app == 'chatgpt-desktop' && inputs.experiment == 'deterministic-full'
+        if: matrix.app == 'chatgpt-desktop' && inputs.experiment == 'deterministic-full'
         shell: bash
         run: echo 'NANH_CODEX_PROJECT_POLICY=open-project' >> "$GITHUB_ENV"
       - name: Enable passive owned-client Zed event delivery observation

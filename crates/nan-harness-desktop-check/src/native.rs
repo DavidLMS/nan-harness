@@ -3,6 +3,7 @@
 #[cfg(target_os = "macos")]
 mod identity;
 mod image;
+mod mac_chat;
 #[cfg(any(target_os = "macos", test))]
 mod mac_fit;
 mod ocr;
@@ -12,6 +13,7 @@ mod window;
 #[cfg(target_os = "macos")]
 pub(crate) use crate::diagnostics::ClaudeIdentityObservation;
 pub(crate) use image::prepare_ocr_image;
+pub(crate) use mac_chat::ChatPressStage;
 pub(crate) use ocr::Page;
 pub(crate) use process::FailureCategory;
 pub(crate) use window::{DisplayRelation, ForegroundRelation, GuardFailure, Snapshot, Window};
@@ -271,6 +273,45 @@ impl Native {
         let output =
             process::run_with_category(&self.executable, std::ffi::OsStr::new("--windows"), None)?;
         Snapshot::parse(&output).map_err(|_| FailureCategory::Pipe)
+    }
+
+    #[cfg(any(windows, test))]
+    pub(crate) fn windows_until(
+        &self,
+        deadline: std::time::Instant,
+    ) -> Result<Snapshot, FailureCategory> {
+        let output = process::run_windows_until(&self.executable, deadline)?;
+        if std::time::Instant::now() >= deadline {
+            return Err(FailureCategory::Timeout);
+        }
+        Snapshot::parse(&output).map_err(|_| FailureCategory::Pipe)
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(crate) fn press_claude_chat(
+        &self,
+        window: &Window,
+        deadline: std::time::Instant,
+    ) -> Result<ChatPressStage, FailureCategory> {
+        if !claude_focus_policy()
+            || std::env::var("NANH_CLAUDE_MAC_CHAT_NAVIGATION").as_deref() != Ok("1")
+        {
+            return Err(FailureCategory::InvalidInput);
+        }
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        let millis = u32::try_from(remaining.as_millis())
+            .unwrap_or(5000)
+            .min(5000);
+        if millis == 0 {
+            return Err(FailureCategory::Timeout);
+        }
+        let bounds = window.bounds;
+        let input = format!(
+            "{} {} {} {} {} {} {}\n",
+            window.id, window.pid, bounds.x, bounds.y, bounds.width, bounds.height, millis
+        );
+        let output = process::run_chat_until(&self.executable, input.as_bytes(), deadline)?;
+        ChatPressStage::parse(&output).ok_or(FailureCategory::Output)
     }
 
     pub(crate) fn windows_with_focus(&self, owned_pid: u32) -> Result<Snapshot, FailureCategory> {
@@ -539,6 +580,32 @@ mod tests {
         );
         std::fs::remove_file(&native.executable).unwrap();
         assert!(native.claude_storage_until(deadline).is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bounded_ready_inventory_retains_foreground_and_never_spawns_after_deadline() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let directory = tempfile::tempdir().unwrap();
+        let executable = directory.path().join("synthetic-ready-helper");
+        std::fs::write(&executable, "#!/bin/sh\n[ \"$1\" = --version ] && exit 0\n[ \"$1\" = --windows ] || exit 1\nprintf 'FG 10 42\\nDISPLAY 0 0 1920 1080\\nWIN 42 10 100 100 800 600 636c61756465\\n'\n").unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+        nan_harness_test_support::executable_fixture::wait_until_ready(&executable).unwrap();
+        let native = Native {
+            directory,
+            executable,
+        };
+        let snapshot = native
+            .windows_until(std::time::Instant::now() + std::time::Duration::from_secs(1))
+            .unwrap();
+        assert_eq!(snapshot.windows.len(), 1);
+        assert!(snapshot.guard_failure(&snapshot.windows[0]).is_ok());
+        // Missing executable would be Spawn; the original expired budget wins.
+        std::fs::remove_file(&native.executable).unwrap();
+        assert!(matches!(
+            native.windows_until(std::time::Instant::now()),
+            Err(FailureCategory::Timeout)
+        ));
     }
 
     #[cfg(unix)]

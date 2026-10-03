@@ -170,7 +170,7 @@ class RunnerTests(unittest.TestCase):
             for key in runner.WINDOWS_PROOF:
                 self.assertNotIn(key, env)
 
-    def test_public_onboarding_opt_in_is_hosted_windows_codex_renderer_only(self):
+    def test_public_onboarding_opt_in_requires_inspected_codex_host_and_renderer(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             helper = root / 'helper'
@@ -180,8 +180,10 @@ class RunnerTests(unittest.TestCase):
                           NANH_CODEX_PUBLIC_ONBOARDING='engineering')
             env = runner.qualification_environment('chatgpt-desktop', root, helper, str(helper), source)
             self.assertEqual(env['NANH_CODEX_PUBLIC_ONBOARDING'], 'engineering')
+            linux = runner.qualification_environment('chatgpt-desktop', root, helper, str(helper), {**source, 'RUNNER_OS': 'Linux'})
+            self.assertEqual(linux['NANH_CODEX_PUBLIC_ONBOARDING'], 'engineering')
             for changed, app in (({'NANH_CODEX_PUBLIC_ONBOARDING': 'PRIVATE'}, 'chatgpt-desktop'),
-                                 ({'RUNNER_OS': 'Linux'}, 'chatgpt-desktop'),
+                                 ({'RUNNER_OS': 'FreeBSD'}, 'chatgpt-desktop'),
                                  ({'NANH_DESKTOP_QUALIFICATION_MODE': 'startup-baseline'}, 'chatgpt-desktop'),
                                  ({}, 'claude-desktop'), ({}, 'pen-desktop')):
                 with self.assertRaises(ValueError):
@@ -415,7 +417,7 @@ class QualificationTests(unittest.TestCase):
         cells = q.matrix()['include']
         self.assertEqual(len(cells), 15)
         self.assertEqual(len({(c['app'], c['platform'], c['architecture']) for c in cells}), 15)
-        self.assertEqual(sum(c['backend'] != 'renderer-inventory' for c in cells), 7)
+        self.assertEqual(sum(c['backend'] != 'renderer-inventory' for c in cells), 9)
         self.assertEqual({(c['platform'], c['architecture']) for c in cells},
                          {('linux', 'x86_64'), ('macos', 'aarch64'), ('windows', 'x86_64')})
         with self.assertRaises(ValueError):
@@ -1336,14 +1338,18 @@ class QualificationTests(unittest.TestCase):
             path = root / 'chat-navigation.json'
             complete = {**base, 'phase': 'completed', 'actionStatus': 'completed',
                         'preconditionsVerified': True, 'pressAttempted': True, 'chatPostconditionVerified': True}
-            for value in (base, complete, {**complete, 'actionStatus': 'uncertain'},
+            for value in (base, complete, {**base, 'nativePressStage': 'chat'},
+                          {**complete, 'nativePressStage': 'completed'},
+                          {**complete, 'actionStatus': 'uncertain'},
                           {**complete, 'phase': 'postcondition', 'chatPostconditionVerified': False}):
                 path.write_text(json.dumps(value))
                 self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [value])
             for changed in ({**complete, 'preconditionsVerified': False}, {**complete, 'nativeGuardVerified': False},
                             {**base, 'pressAttempted': True}, {**complete, 'actionStatus': 'not-attempted'},
                             {**base, 'chatPostconditionVerified': True}, {**complete, 'windowId': 5},
-                            {**complete, 'diagnosticsOnly': False}, {**complete, 'actionStatus': 'PRIVATE'}):
+                            {**complete, 'diagnosticsOnly': False}, {**complete, 'actionStatus': 'PRIVATE'},
+                            {**base, 'nativePressStage': 'completed'}, {**complete, 'nativePressStage': 'tree'},
+                            {**base, 'nativePressStage': 'PRIVATE'}):
                 path.write_text(json.dumps(changed))
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'claude-desktop')
@@ -1775,6 +1781,27 @@ class HermesReadinessTests(unittest.TestCase):
             path.write_text(json.dumps(value))
             with self.assertRaises(ValueError):
                 q.semantic_observations(root, 'zed-desktop')
+
+    def test_zed_cursor_counters_are_bounded_and_private(self):
+        value = dict(schemaVersion=1, mechanism='zed-pointer-observation', diagnosticsOnly=True,
+                     maximizedHorizontal=True, maximizedVertical=True, enabled=True, sensitive=True,
+                     showing=True, visible=True, defunct=False, retryContains=True,
+                     pointerTarget='client', pointerChild='client')
+        selection = dict(status='no-hit', sampledPoints=9, exactPointerMatched=False,
+                         accessibleHitVerified=False, guardBeforeVerified=9, guardAfterVerified=9,
+                         accessibleChecks=9, accessibleExactMatches=9, cursorChecks=9,
+                         cursorExactMatches=0, failureReason='cursor-unmatched')
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'pointer.json'
+            path.write_text(json.dumps({**value, 'cursorSelection': selection}))
+            self.assertEqual(q.semantic_observations(tmp, 'zed-desktop')[0]['cursorSelection'], selection)
+            for changes in ({'failureReason': 'PRIVATE'}, {'cursorChecks': 20},
+                            {'accessibleChecks': True}, {'accessibleExactMatches': 10},
+                            {'cursorExactMatches': 10}, {'rawPixels': 'PRIVATE'},
+                            {'guardBeforeVerified': 8}):
+                path.write_text(json.dumps({**value, 'cursorSelection': {**selection, **changes}}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(tmp, 'zed-desktop')
 
     def test_zed_pointer_modifier_receipts_are_atomic_and_closed(self):
         with tempfile.TemporaryDirectory() as tmp:

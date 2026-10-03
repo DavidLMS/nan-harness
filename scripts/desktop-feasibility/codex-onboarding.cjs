@@ -166,9 +166,9 @@ async function run(page, ownerGuard, deadline, rejected, mainGuard) {
   const sessionFailure = typeof ownerGuard !== 'function' ? 'guard-missing'
     : !Number.isFinite(deadline) || !Number.isFinite(maxWaitMs) || maxWaitMs > 25000 ? 'deadline-invalid'
     : maxWaitMs < 1 ? 'deadline-expired'
-    : process.platform !== 'win32' ? 'platform'
+    : !['win32','linux','darwin'].includes(process.platform) ? 'platform'
     : process.env.GITHUB_ACTIONS !== 'true' || process.env.RUNNER_ENVIRONMENT !== 'github-hosted'
-      || process.env.RUNNER_OS !== 'Windows' ? 'host-policy'
+      || process.env.RUNNER_OS !== ({win32:'Windows',linux:'Linux',darwin:'macOS'}[process.platform]) ? 'host-policy'
     : process.env.NANH_CODEX_PUBLIC_ONBOARDING !== 'engineering' ? 'onboarding-policy' : null;
   if (sessionFailure !== null) {
     facts.sessionProofFailure=sessionFailure;
@@ -343,7 +343,7 @@ async function run(page, ownerGuard, deadline, rejected, mainGuard) {
     return stop('scope-remained');
   } catch { return stop(facts.roleClickAttempted || facts.continueClickAttempted ? 'action-uncertain':'observation-failed'); }
 };
-// These routes are bound to the frozen Windows MSIX's app-protocol and main chunks.
+// These routes are bound to the inspected Windows, Linux and macOS distributions' app-protocol and main chunks.
 function sourceRoute(raw) {
   try {
     const url=new URL(raw);

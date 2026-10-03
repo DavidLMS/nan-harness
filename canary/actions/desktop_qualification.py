@@ -23,6 +23,8 @@ BACKENDS.update({(app, platform, architecture): 'renderer-inventory'
                  for app in ('chatgpt-desktop', 'claude-desktop', 'pen-desktop')
                  for platform, architecture, _ in TARGETS})
 BACKENDS[('chatgpt-desktop', 'windows', 'x86_64')] = 'renderer-dom'
+BACKENDS[('chatgpt-desktop', 'linux', 'x86_64')] = 'renderer-dom'
+BACKENDS[('chatgpt-desktop', 'macos', 'aarch64')] = 'renderer-dom'
 RUNNER_FAILURES = set('windows-ownership-helper-missing windows-ownership-helper-invalid prepared-identity-mismatch prepared-app-unavailable prepared-executable-missing prepared-executable-changed host-platform-mismatch backend-unavailable frozen-app-unavailable report-absent claude-windows-executable-invalid claude-windows-bootstrap-invalid claude-windows-bootstrap-mismatch claude-windows-release-mismatch claude-windows-policy-invalid codex-project-release-mismatch invalid-preflight execution-failed'.split())
 STEPS = {'launched', 'input-submitted', 'response-verified', 'tool-verified', 'error-recovered'}
 COMMIT = re.compile(r'[0-9a-f]{40}\Z')
@@ -478,11 +480,18 @@ def semantic_observations(directory, app):
             flags = set('preconditionsVerified pressAttempted chatPostconditionVerified nativeGuardVerified'.split())
             fields = flags | set('schemaVersion mechanism diagnosticsOnly phase actionStatus'.split())
             phase, action = value.get('phase'), value.get('actionStatus')
-            if (set(value) != fields or app != 'claude-desktop' or value['diagnosticsOnly'] is not True
+            if (set(value) - {'nativePressStage'} != fields or app != 'claude-desktop' or value['diagnosticsOnly'] is not True
                     or type(phase) is not str or phase not in {'preflight', 'press', 'postcondition', 'completed'}
                     or type(action) is not str or action not in {'not-attempted', 'completed', 'uncertain'}
                     or any(type(value[key]) is not bool for key in flags)):
                 raise ValueError('invalid Claude Chat navigation identity')
+            if 'nativePressStage' in value:
+                stage = value['nativePressStage']
+                stages = {'request', 'initial-proof', 'window-bounds', 'tree', 'mode', 'chat', 'control-recheck', 'hit-test', 'deadline', 'press-uncertain', 'completed'}
+                if (type(stage) is not str or stage not in stages
+                        or (stage in {'completed', 'press-uncertain'}) != value['pressAttempted']):
+                    raise ValueError('invalid Claude native Chat press stage')
+                record['nativePressStage'] = stage
             attempted, ready, post, guarded = (value[key] for key in
                 ('pressAttempted', 'preconditionsVerified', 'chatPostconditionVerified', 'nativeGuardVerified'))
             if (attempted != (action != 'not-attempted') or attempted and not ready
@@ -701,7 +710,10 @@ def semantic_observations(directory, app):
             if 'cursorSelection' in value:
                 selection = value['cursorSelection']
                 fields = {'status', 'sampledPoints', 'exactPointerMatched', 'accessibleHitVerified'}
-                if (type(selection) is not dict or set(selection) != fields
+                counts = {'guardBeforeVerified': 20, 'guardAfterVerified': 20, 'accessibleChecks': 20,
+                          'accessibleExactMatches': 20, 'cursorChecks': 19, 'cursorExactMatches': 19}
+                extended = fields | set(counts) | {'failureReason'}
+                if (type(selection) is not dict or set(selection) not in (fields, extended)
                         or type(selection['status']) is not str or selection['status'] not in {'matched', 'unavailable', 'no-hit', 'deadline', 'identity-rejected'}
                         or type(selection['sampledPoints']) is not int or not 0 <= selection['sampledPoints'] <= 9
                         or any(type(selection[key]) is not bool for key in ('exactPointerMatched', 'accessibleHitVerified'))
@@ -709,6 +721,18 @@ def semantic_observations(directory, app):
                         or selection['status'] == 'matched' and selection['sampledPoints'] == 0
                         or selection['status'] != 'matched' and (selection['exactPointerMatched'] or selection['accessibleHitVerified'])):
                     raise ValueError('invalid Zed cursor selection')
+                if set(selection) == extended:
+                    reason = selection['failureReason']
+                    if (any(type(selection[key]) is not int or not 0 <= selection[key] <= limit
+                            for key, limit in counts.items())
+                            or reason is not None and (type(reason) is not str or reason not in {
+                                'cursor-unmatched', 'cursor-unstable', 'accessible-hit-mismatch',
+                                'accessible-query-unavailable', 'identity-rejected', 'deadline'})
+                            or selection['accessibleExactMatches'] > selection['accessibleChecks']
+                            or selection['guardAfterVerified'] > selection['guardBeforeVerified']
+                            or selection['cursorExactMatches'] > selection['cursorChecks']
+                            or selection['status'] == 'matched' and reason is not None):
+                        raise ValueError('invalid Zed cursor proof counters')
                 record['cursorSelection'] = dict(selection)
             if present_modifiers:
                 state = value['modifierState']

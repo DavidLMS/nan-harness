@@ -100,10 +100,83 @@ class CursorTests(unittest.TestCase):
     def test_closed_selection_receipt_never_contains_pixels_or_coordinates(self):
         observation = dict(status='unavailable', sampledPoints=0,
             exactPointerMatched=False, accessibleHitVerified=False)
+        deadline = time.monotonic() + 1
         INPUT['select_live_retry_point']((123, 456, 40, 20), lambda _: None,
-            lambda _: None, lambda: True, time.monotonic() + 1, lambda _: None, observation)
+            lambda point: INPUT['guarded_retry_proof'](point, lambda: True, lambda _: True,
+                                                     observation, deadline),
+            lambda: True, deadline, lambda _: None, observation)
         self.assertEqual(observation, dict(status='matched', sampledPoints=1,
-            exactPointerMatched=True, accessibleHitVerified=True))
+            exactPointerMatched=True, accessibleHitVerified=True, guardBeforeVerified=3,
+            guardAfterVerified=3, accessibleChecks=3, accessibleExactMatches=3,
+            cursorChecks=2, cursorExactMatches=2, failureReason=None))
+
+    def test_cursor_mismatch_and_instability_are_distinct_without_activation(self):
+        for samples, reason, checks, matches in [([False] * 9, 'cursor-unmatched', 9, 0),
+                                                ([True, False] * 9, 'cursor-unstable', 18, 9)]:
+            observed = dict(status='unavailable', sampledPoints=0,
+                            exactPointerMatched=False, accessibleHitVerified=False)
+            cursor = iter(samples)
+            with self.assertRaises(ValueError):
+                INPUT['select_live_retry_point']((0, 0, 40, 20), lambda _: None,
+                    lambda _: None, lambda: next(cursor), time.monotonic() + 1,
+                    lambda _: None, observed)
+            self.assertEqual(observed['sampledPoints'], 9)
+            self.assertEqual(observed['failureReason'], reason)
+            self.assertEqual(observed['cursorChecks'], checks)
+            self.assertEqual(observed['cursorExactMatches'], matches)
+            self.assertFalse(observed['exactPointerMatched'])
+
+    def test_existing_accessible_proof_and_each_guard_have_closed_counts(self):
+        def observation():
+            return dict(guardBeforeVerified=0, guardAfterVerified=0,
+                        accessibleChecks=0, accessibleExactMatches=0)
+        observed = observation()
+        INPUT['guarded_retry_proof']((123, 456), lambda: True, lambda _: True,
+                                    observed, time.monotonic() + 1)
+        self.assertEqual(list(observed.values()), [1, 1, 1, 1])
+        for category in ('accessible-hit-mismatch', 'accessible-query-unavailable'):
+            observed = observation()
+            def reject(_):
+                raise INPUT['RetryHitFailure'](category)
+            with self.assertRaises(ValueError):
+                INPUT['guarded_retry_proof']((123, 456), lambda: True, reject,
+                                            observed, time.monotonic() + 1)
+            self.assertEqual(observed['failureReason'], category)
+            self.assertEqual(observed['accessibleChecks'], 1)
+            self.assertEqual(observed['accessibleExactMatches'], 0)
+            self.assertEqual(observed['guardAfterVerified'], 0)
+            self.assertNotIn('123', str(observed))
+        observed = observation()
+        guards = iter([True, False])
+        with self.assertRaises(ValueError):
+            INPUT['guarded_retry_proof']((123, 456), lambda: next(guards), lambda _: True,
+                                        observed, time.monotonic() + 1)
+        self.assertEqual(observed['failureReason'], 'identity-rejected')
+        self.assertEqual(observed['accessibleExactMatches'], 1)
+        self.assertEqual(observed['guardAfterVerified'], 0)
+
+    def test_expired_guard_records_deadline_without_querying_or_moving(self):
+        observed = dict(guardBeforeVerified=0, guardAfterVerified=0,
+                        accessibleChecks=0, accessibleExactMatches=0)
+        with self.assertRaises(ValueError):
+            INPUT['guarded_retry_proof']((123, 456), lambda: self.fail('guard after deadline'),
+                                        lambda _: self.fail('query after deadline'), observed,
+                                        time.monotonic() - 1)
+        self.assertEqual(observed['status'], 'deadline')
+        self.assertEqual(observed['failureReason'], 'deadline')
+        self.assertEqual(observed['accessibleChecks'], 0)
+
+    def test_pre_click_rejection_invalidates_selected_point_without_replay(self):
+        observed = dict(status='matched', exactPointerMatched=True, accessibleHitVerified=True,
+                        guardBeforeVerified=3, guardAfterVerified=3,
+                        accessibleChecks=3, accessibleExactMatches=3)
+        with self.assertRaises(ValueError):
+            INPUT['guarded_retry_proof']((123, 456), lambda: False, lambda _: self.fail('lost owner'),
+                                        observed, time.monotonic() + 1)
+        self.assertEqual(observed['status'], 'identity-rejected')
+        self.assertFalse(observed['exactPointerMatched'])
+        self.assertFalse(observed['accessibleHitVerified'])
+        self.assertEqual(observed['accessibleChecks'], 3)
 
     def test_live_image_exact_comparison_and_ownership_loss(self):
         shape = CURSOR['PointerShape'].__new__(CURSOR['PointerShape'])

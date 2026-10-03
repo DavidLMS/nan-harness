@@ -16,9 +16,9 @@ function save() {
   fs.renameSync(`${output}.tmp`, output);
 }
 function onboardingTrial(appName, platform, env) {
-  return appName === 'chatgpt-desktop' && platform === 'win32'
+  return appName === 'chatgpt-desktop' && ['win32','linux','darwin'].includes(platform)
     && env.GITHUB_ACTIONS === 'true' && env.RUNNER_ENVIRONMENT === 'github-hosted'
-    && env.RUNNER_OS === 'Windows' && env.NANH_CODEX_PUBLIC_ONBOARDING === 'engineering';
+    && env.RUNNER_OS === ({win32:'Windows',linux:'Linux',darwin:'macOS'}[platform]) && env.NANH_CODEX_PUBLIC_ONBOARDING === 'engineering';
 }
 function onboardingDeadline(trial, startupDeadline, totalDeadline, now) {
   return trial ? Math.min(totalDeadline, now + 25000) : startupDeadline;
@@ -52,7 +52,7 @@ function correlationScope() {
       editable:cap(all('textarea,[contenteditable="true"],input:not([type="radio"]):not([type="checkbox"]):not([type="hidden"])'))},
     mainScope,focused:document.hasFocus()};
 }
-async function correlationIdentity(page, deadline) {
+async function correlationIdentity(page, deadline, includeScope=true) {
   let session;
   const bounded=async promise=>{
     const remaining=deadline-Date.now();if(remaining<=0)throw new Error('deadline');
@@ -64,9 +64,10 @@ async function correlationIdentity(page, deadline) {
     const target=await bounded(session.send('Target.getTargetInfo'));
     const tree=await bounded(session.send('Page.getFrameTree'));
     const frame=tree.frameTree?.frame;
-    if(typeof target.targetInfo?.targetId!=='string'||!frame||typeof frame.id!=='string'
+    if(typeof target.targetInfo?.targetId!=='string'||!target.targetInfo.targetId
+      ||!frame||typeof frame.id!=='string'||!frame.id||typeof frame.url!=='string'
       ||typeof frame.loaderId!=='string'||!frame.loaderId)throw new Error('identity');
-    const scope=await bounded(page.evaluate(correlationScope));
+    const scope=includeScope?await bounded(page.evaluate(correlationScope)):null;
     return {page,url:page.url(),target:target.targetInfo.targetId,frame:frame.id,
       loader:frame.loaderId,frameUrl:frame.url,fragment:frame.urlFragment??'',scope};
   } finally {if(session)await session.detach().catch(()=>{});}
@@ -75,15 +76,36 @@ function sameCorrelationIdentity(a,b) {
   return a.page===b.page&&a.url===b.url&&a.target===b.target&&a.frame===b.frame
     &&a.loader===b.loader&&a.frameUrl===b.frameUrl&&a.fragment===b.fragment;
 }
-async function bindCorrelationMain(page, browser, guard, deadline) {
+function officialInitialMain(identity) {
+  return typeof identity.target==='string'&&identity.target.length>0
+    &&typeof identity.frame==='string'&&identity.frame.length>0
+    &&typeof identity.loader==='string'&&identity.loader.length>0
+    &&identity.url==='app://-/index.html'&&identity.frameUrl===identity.url&&identity.fragment==='';
+}
+async function captureCorrelationMain(page,browser,guard,deadline,identity=correlationIdentity) {
   try {
     if(Date.now()>=deadline||!guard())return null;
     const pages=browser.contexts().flatMap(c=>c.pages());
     if(pages.length!==1||pages[0]!==page)return null;
-    const held=await correlationIdentity(page,deadline);
+    const held=await identity(page,deadline,false);
+    if(!officialInitialMain(held)||Date.now()>=deadline||!guard())return null;
+    const between=browser.contexts().flatMap(c=>c.pages());
+    if(between.length!==1||between[0]!==page)return null;
+    const fresh=await identity(page,deadline,false);
     const after=browser.contexts().flatMap(c=>c.pages());
     return Date.now()<deadline&&guard()&&after.length===1&&after[0]===page
-      &&held.scope.mainScope&&held.scope.focused?held:null;
+      &&sameCorrelationIdentity(held,fresh)&&officialInitialMain(fresh)?held:null;
+  } catch{return null;}
+}
+async function bindCorrelationMain(held,browser,guard,deadline,route,
+  identity=correlationIdentity,pause=ms=>new Promise(resolve=>setTimeout(resolve,ms))) {
+  try {
+    if(!held||Date.now()>=deadline||!guard())return null;
+    const fresh=await identity(held.page,deadline);
+    if(Date.now()>=deadline||!guard()||!sameCorrelationIdentity(held,fresh)
+      ||!fresh.scope.mainScope||!fresh.scope.focused)return null;
+    const proof=heldMainGuard(held,browser,guard,deadline,route,identity,pause,true);
+    return await proof()?fresh:null;
   } catch{return null;}
 }
 async function observeMainAux(held,browser,guard,deadline,auxRoute,
@@ -123,10 +145,11 @@ async function observeMainAux(held,browser,guard,deadline,auxRoute,
     return stop('observed');
   } catch{return stop(Date.now()>=deadline?'deadline':'query-failed');}
 }
-// A primary renderer is bound while it is the sole, focused role document.
+// Identity is captured while the official primary route is the sole page.
+// Source confirmation and focused/inert proofs happen before any input.
 // Later source-known inert avatar pages never become selectable input targets.
 function heldMainGuard(held, browser, owner, deadline, route,
-  identity=correlationIdentity, pause=ms=>new Promise(resolve=>setTimeout(resolve,ms))) {
+  identity=correlationIdentity, pause=ms=>new Promise(resolve=>setTimeout(resolve,ms)),requireMainScope=false) {
   let auxiliary=null, auxiliaryIdentity=null;
   const pages=()=>browser.contexts().flatMap(context=>context.pages());
   const valid=()=>Date.now()<deadline&&owner()===true;
@@ -145,7 +168,8 @@ function heldMainGuard(held, browser, owner, deadline, route,
         const before=pages();
         if(before.length!==initial.length||!before.every(page=>initial.includes(page)))return false;
         const main=await identity(held.page,deadline);
-        if(!valid()||!sameCorrelationIdentity(held,main)||!main.scope.focused)return false;
+        if(!valid()||!sameCorrelationIdentity(held,main)||!main.scope.focused
+          ||requireMainScope&&!main.scope.mainScope)return false;
         if(extra) {
           const aux=await identity(extra,deadline);
           const expected=auxiliaryIdentity??candidateAux;
@@ -209,6 +233,8 @@ async function run() {
       facts.errorCategory = 'target-ambiguous'; save(); return;
     }
     const page = pages[0];
+    const ownerGuard=()=>rootProof.descendant(connection.launcherPid)&&ownership.ownedEndpoint();
+    const initialMain=trial?await captureCorrelationMain(page,browser,ownerGuard,deadline):null;
     let pageErrorCount = 0;
     page.on('pageerror', () => { pageErrorCount = Math.min(4096, pageErrorCount + 1); });
     const documentDeadline = Math.min(deadline, Date.now() + 10000);
@@ -223,9 +249,9 @@ async function run() {
       const targetReady = app === 'chatgpt-desktop'
         && await page.evaluate(() => location.protocol === 'app:' && document.readyState === 'complete');
       if (!targetReady) { facts.errorCategory = 'invalid-request'; save(); return; }
-      const ownerGuard=()=>rootProof.descendant(connection.launcherPid)&&ownership.ownedEndpoint();
       const correlationDeadline=onboardingDeadline(trial,deadline,totalDeadline,Date.now());
-      const heldMain=trial?await bindCorrelationMain(page,browser,ownerGuard,correlationDeadline):null;
+      const heldMain=trial?await bindCorrelationMain(initialMain,browser,ownerGuard,correlationDeadline,
+        require('./codex-onboarding.cjs').sourceRoute):null;
       const mainGuard=trial&&heldMain?heldMainGuard(heldMain,browser,ownerGuard,correlationDeadline,
         require('./codex-onboarding.cjs').sourceRoute):undefined;
       facts.publicOnboarding = await require('./codex-onboarding.cjs').run(page,

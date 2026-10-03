@@ -18,6 +18,7 @@ int window_state(const std::string& request);
 int activate_window(const std::string& request);
 int observe_claude();
 int claude_known_folders();
+int claude_chat_press();
 int windows_claude_storage();
 int process_presence(bool claude);
 int clipboard_operation(const std::string& operation);
@@ -42,6 +43,7 @@ int main(int argc, char** argv) {
     if (argc == 2 && std::string(argv[1]) == "--codex-process-presence") return process_presence(false);
     if (argc == 2 && std::string(argv[1]) == "--windows") return list_windows(true);
     if (argc == 2 && std::string(argv[1]) == "--windows-absence") return list_windows(false);
+    if (argc == 2 && std::string(argv[1]) == "--claude-chat-press") return claude_chat_press();
     if (argc == 2 && std::string(argv[1]) == "--claude-known-folders") return claude_known_folders();
     if (argc == 2 && std::string(argv[1]) == "--windows-claude-storage") return windows_claude_storage();
     if (argc == 2 && std::string(argv[1]) == "--claude-observation") return observe_claude();

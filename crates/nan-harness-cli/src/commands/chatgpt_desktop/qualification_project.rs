@@ -9,9 +9,13 @@ use std::io::{Error, ErrorKind, Read as _};
 use std::path::{Path, PathBuf};
 use tokio::process::Command;
 
-const ARTIFACT: &str = "f7b0266d6c00d4743da01d62bc82488f7ec5560c642501758119cb9885f67c87";
-const EXECUTABLE: &str = "b35bf062c01d73da090c60e62186dc180c2a8545cb6fc9575b4403c8fa3db49e";
+const WINDOWS_ARTIFACT: &str = "f7b0266d6c00d4743da01d62bc82488f7ec5560c642501758119cb9885f67c87";
+const WINDOWS_EXECUTABLE: &str = "b35bf062c01d73da090c60e62186dc180c2a8545cb6fc9575b4403c8fa3db49e";
+const LINUX_ARTIFACT: &str = "e0174d8d0a5f4141145458c814f3c2d863dd67e942b868785a1f5dac9cba3e16";
+const LINUX_EXECUTABLE: &str = "207c4fbff7e2fcc1b0789448351ac6eed206206d94c5a0835e5f07c7cd73d6e3";
 const VERSION: &str = "26.930.31730";
+const MACOS_ARTIFACT: &str = "bfda661a7c9ca44dac3168134058dd6007947cde318ade37d570c484329f6d41";
+const MACOS_EXECUTABLE: &str = "b078df75c1cf593b99351622f5bc8184a44f993bb0bd0a4cbefac31f4a746bbd";
 const POLICY_KEYS: [&str; 7] = [
     "GITHUB_ACTIONS",
     "RUNNER_ENVIRONMENT",
@@ -22,15 +26,31 @@ const POLICY_KEYS: [&str; 7] = [
     "NANH_DESKTOP_RENDERER_APP",
 ];
 
+fn inspected_target(platform: &str) -> Option<(&'static str, &'static str, &'static str)> {
+    match platform {
+        "windows" => Some(("Windows", WINDOWS_ARTIFACT, WINDOWS_EXECUTABLE)),
+        "linux" => Some(("Linux", LINUX_ARTIFACT, LINUX_EXECUTABLE)),
+        "macos" => Some(("macOS", MACOS_ARTIFACT, MACOS_EXECUTABLE)),
+        _ => None,
+    }
+}
+
+fn inspected_release(platform: &str, version: &str, artifact: &str) -> Option<&'static str> {
+    let (_, expected_artifact, executable) = inspected_target(platform)?;
+    (version == VERSION && artifact == expected_artifact).then_some(executable)
+}
+
 fn admitted(platform: &str, debug: bool, environment: &BTreeMap<&str, String>) -> bool {
+    let Some((runner_os, _, _)) = inspected_target(platform) else {
+        return false;
+    };
     !debug
-        && platform == "windows"
         && POLICY_KEYS
             .iter()
             .zip([
                 "true",
                 "github-hosted",
-                "Windows",
+                runner_os,
                 "renderer",
                 "engineering",
                 "open-project",
@@ -138,12 +158,15 @@ pub(super) fn apply(
         .iter()
         .map(|&key| (key, std::env::var(key).unwrap_or_default()))
         .collect();
-    if !admitted(std::env::consts::OS, debug, &environment)
-        || installation.app_version.to_string() != VERSION
-        || std::env::var("NANH_CODEX_PROJECT_ARTIFACT_SHA256").as_deref() != Ok(ARTIFACT)
-    {
+    if !admitted(std::env::consts::OS, debug, &environment) {
         return Err(ChatGptDesktopError::InvalidInstallation);
     }
+    let executable = inspected_release(
+        std::env::consts::OS,
+        &installation.app_version.to_string(),
+        &std::env::var("NANH_CODEX_PROJECT_ARTIFACT_SHA256").unwrap_or_default(),
+    )
+    .ok_or(ChatGptDesktopError::InvalidInstallation)?;
     let facts = std::env::var_os("NANH_DESKTOP_QUALIFICATION_FACTS")
         .map(PathBuf::from)
         .ok_or(ChatGptDesktopError::InvalidInstallation)?;
@@ -155,7 +178,7 @@ pub(super) fn apply(
         .map_err(|_| ChatGptDesktopError::InvalidInstallation)?;
     if executable_digest(&installation.executable)
         .map_err(|_| ChatGptDesktopError::InvalidInstallation)?
-        != EXECUTABLE
+        != executable
     {
         return Err(ChatGptDesktopError::InvalidInstallation);
     }
@@ -182,34 +205,67 @@ mod tests {
 
     #[test]
     fn hosted_policy_requires_all_public_trial_conditions() {
-        let mut environment: BTreeMap<_, _> = POLICY_KEYS
-            .iter()
-            .copied()
-            .zip(
-                [
-                    "true",
-                    "github-hosted",
-                    "Windows",
-                    "renderer",
-                    "engineering",
-                    "open-project",
-                    "chatgpt-desktop",
-                ]
-                .map(str::to_owned),
-            )
-            .collect();
-        assert!(admitted("windows", false, &environment));
-        assert!(!admitted("linux", false, &environment));
-        assert!(!admitted("windows", true, &environment));
-        for key in POLICY_KEYS {
-            let original = environment.remove(key).unwrap();
-            assert!(!admitted("windows", false, &environment));
-            environment.insert(key, "unknown".into());
-            assert!(!admitted("windows", false, &environment));
-            environment.insert(key, original);
+        for (platform, runner_os) in [("windows", "Windows"), ("linux", "Linux"), ("macos", "macOS")] {
+            let mut environment: BTreeMap<_, _> = POLICY_KEYS
+                .iter()
+                .copied()
+                .zip(
+                    [
+                        "true",
+                        "github-hosted",
+                        runner_os,
+                        "renderer",
+                        "engineering",
+                        "open-project",
+                        "chatgpt-desktop",
+                    ]
+                    .map(str::to_owned),
+                )
+                .collect();
+            assert!(admitted(platform, false, &environment));
+            assert!(!admitted(platform, true, &environment));
+            assert!(!admitted("freebsd", false, &environment));
+            let foreign = if platform == "linux" {
+                "windows"
+            } else {
+                "linux"
+            };
+            assert!(!admitted(foreign, false, &environment));
+            for key in POLICY_KEYS {
+                let original = environment.remove(key).unwrap();
+                assert!(!admitted(platform, false, &environment));
+                environment.insert(key, "unknown".into());
+                assert!(!admitted(platform, false, &environment));
+                environment.insert(key, original);
+            }
         }
     }
 
+    #[test]
+    fn inspected_release_binds_each_platform_to_its_exact_binary() {
+        for (platform, artifact, executable, foreign_artifact) in [
+            (
+                "windows",
+                WINDOWS_ARTIFACT,
+                WINDOWS_EXECUTABLE,
+                LINUX_ARTIFACT,
+            ),
+            ("linux", LINUX_ARTIFACT, LINUX_EXECUTABLE, WINDOWS_ARTIFACT),
+            ("macos", MACOS_ARTIFACT, MACOS_EXECUTABLE, WINDOWS_ARTIFACT),
+        ] {
+            assert_eq!(
+                inspected_release(platform, VERSION, artifact),
+                Some(executable)
+            );
+            for version in ["", "26.930.21537", "26.930.31731"] {
+                assert_eq!(inspected_release(platform, version, artifact), None);
+            }
+            for artifact in ["", "unknown", foreign_artifact] {
+                assert_eq!(inspected_release(platform, VERSION, artifact), None);
+            }
+            assert_eq!(inspected_release("freebsd", VERSION, artifact), None);
+        }
+    }
     #[test]
     fn workspace_admission_requires_exact_private_profile_and_fixture() {
         let directory = private_tempdir();

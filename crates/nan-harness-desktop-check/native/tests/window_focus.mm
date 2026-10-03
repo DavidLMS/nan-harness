@@ -19,7 +19,17 @@ static CFDictionaryRef record(std::int64_t pid, std::int64_t id, std::int64_t la
     return result;
 }
 const char* classify_ax_error(AXError);
+bool chat_control_agreement(unsigned, unsigned, bool, CGRect, CGRect, CGRect);
 int main() {
+    auto chat = CGRectMake(20, 30, 60, 30);
+    auto main_window = CGRectMake(10, 20, 800, 600);
+    assert(chat_control_agreement(1, 1, true, chat, chat, main_window));
+    assert(!chat_control_agreement(2, 1, true, chat, chat, main_window));
+    assert(!chat_control_agreement(1, 2, true, chat, chat, main_window));
+    assert(!chat_control_agreement(1, 1, false, chat, chat, main_window));
+    assert(!chat_control_agreement(1, 1, true, chat, CGRectMake(21, 30, 60, 30), main_window));
+    assert(!chat_control_agreement(1, 1, true, chat, chat, CGRectMake(50, 50, 100, 100)));
+    assert(!chat_control_agreement(1, 1, true, CGRectZero, CGRectZero, main_window));
     assert(std::string(classify_ax_error(kAXErrorAttributeUnsupported)) == "attribute-unsupported");
     assert(std::string(classify_ax_error(kAXErrorCannotComplete)) == "cannot-complete");
     assert(std::string(classify_ax_error(kAXErrorAPIDisabled)) == "api-disabled");

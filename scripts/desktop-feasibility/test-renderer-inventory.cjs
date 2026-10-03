@@ -11,7 +11,7 @@ const hosted = {GITHUB_ACTIONS: 'true', RUNNER_ENVIRONMENT: 'github-hosted',
   RUNNER_OS: 'Windows', NANH_CODEX_PUBLIC_ONBOARDING: 'engineering'};
 assert.equal(timing.onboardingTrial('chatgpt-desktop', 'win32', hosted), true);
 for (const [app, platform, env] of [
-  ['claude-desktop', 'win32', hosted], ['chatgpt-desktop', 'darwin', hosted],
+  ['claude-desktop', 'win32', hosted], ['chatgpt-desktop', 'freebsd', hosted],
   ['chatgpt-desktop', 'win32', {...hosted, RUNNER_ENVIRONMENT: 'self-hosted'}],
   ['chatgpt-desktop', 'win32', {...hosted, NANH_CODEX_PUBLIC_ONBOARDING: 'unknown'}],
 ]) assert.equal(timing.onboardingTrial(app, platform, env), false);
@@ -60,7 +60,7 @@ console.log('Renderer inventory: closed startup headings passed');
 (async () => {
   let clock=0;
   const helper=vm.runInNewContext(`(() => { ${source.slice(timingStart,timingEnd)}
-    return {observeMainAux,correlationScope,correlationIdentity,bindCorrelationMain,heldMainGuard}; })()`,
+    return {observeMainAux,correlationScope,correlationIdentity,captureCorrelationMain,bindCorrelationMain,heldMainGuard}; })()`,
     {Date:{now:()=>clock},setTimeout,clearTimeout,URL});
   const empty={roleLegend:0,roleRadios:0,engineering:0,dialog:0,quickChatComposer:0,editable:0};
   function fixture() {
@@ -133,5 +133,56 @@ console.log('Renderer inventory: closed startup headings passed');
     detach:async()=>{detached++;}})}),evaluate:async()=>({counts:empty,focused:false,mainScope:false})};
   clock=0;const identity=await helper.correlationIdentity(page,1000);
   assert.equal(identity.loader,'private-loader');assert.equal(detached,1);
-  console.log('Renderer correlation: 17 passive identity/privacy cases passed');
+  // Capture full immutable identity while loading/sole, without evaluating
+  // source DOM. Confirm only after readiness and the source-known aux appears.
+  f=fixture();f.setPages([f.main]);let ready=false,scopeQueries=0;
+  const earlyIdentity=async (selected,deadline,includeScope=true)=>{
+    const value=await f.identity(selected,deadline);
+    if(includeScope) {scopeQueries++;value.scope.mainScope=ready&&selected===f.main;}
+    else value.scope=null;
+    return value;
+  };
+  const early=await helper.captureCorrelationMain(f.main,f.browser,()=>true,1000,earlyIdentity);
+  assert.ok(early);assert.equal(early.scope,null);assert.equal(scopeQueries,0);
+  ready=true;f.setPages([f.main,f.aux]);
+  const confirmed=await helper.bindCorrelationMain(early,f.browser,()=>true,1000,
+    ()=> 'avatarOverlay',earlyIdentity,async ms=>{clock+=ms;});
+  assert.ok(confirmed);assert.equal(confirmed.scope.mainScope,true);
+  assert.equal(confirmed.page,f.main);
+  f=fixture();assert.equal(await helper.captureCorrelationMain(f.main,f.browser,()=>true,1000,f.identity),null);
+  // Initial blank, query/fragment/aux routes, replacement or incomplete loader
+  // never produce a capability that can be recovered from a later page list.
+  for(const mutate of [r=>{r.url='about:blank';},r=>{r.url+='?initialRoute=%2Favatar-overlay';},
+    r=>{r.url+='#changed';},r=>{r.frameUrl='app://-/other.html';},r=>{r.fragment='#changed';},
+    r=>{r.loader='';},r=>{r.frame='';},r=>{r.target='';}]) {
+    f=fixture();f.setPages([f.main]);f.setAlter(mutate);
+    assert.equal(await helper.captureCorrelationMain(f.main,f.browser,()=>true,1000,f.identity),null);
+  }
+  for(const mutate of [r=>{r.loader='changed';},r=>{r.frame='changed';},r=>{r.target='changed';},
+    r=>{r.page={};},r=>{r.url='app://-/other.html';}]) {
+    f=fixture();f.setPages([f.main]);f.setAlter((r,n)=>{if(n===2)mutate(r);});
+    assert.equal(await helper.captureCorrelationMain(f.main,f.browser,()=>true,1000,f.identity),null);
+  }
+  f=fixture();f.setPages([f.main]);f.setAlter((r,n)=>{if(n===1)f.setPages([{},f.aux]);});
+  assert.equal(await helper.captureCorrelationMain(f.main,f.browser,()=>true,1000,f.identity),null);
+  f=fixture();f.setPages([f.main]);let owned=true;f.setAlter(()=>{owned=false;});
+  assert.equal(await helper.captureCorrelationMain(f.main,f.browser,()=>owned,1000,f.identity),null);
+  for(const mutate of [r=>{r.loader='new-document';},r=>{r.scope.mainScope=false;},r=>{r.scope.focused=false;}]) {
+    f=fixture();f.setAlter((r,n)=>{if(n===1)mutate(r);});
+    assert.equal(await helper.bindCorrelationMain(f.held,f.browser,()=>true,1000,
+      ()=> 'avatarOverlay',f.identity,async()=>{}),null);
+  }
+  f=fixture();f.setAlter((r,n)=>{if(n===2)r.scope.mainScope=false;});
+  assert.equal(await helper.bindCorrelationMain(f.held,f.browser,()=>true,1000,
+    ()=> 'avatarOverlay',f.identity,async()=>{}),null);
+  // The real identity callback does not read DOM before load; missing loader
+  // and loading-to-reloaded frame are rejected instead of rebound.
+  const loadingPage={...page,evaluate:async()=>{throw Error('DOM must not be queried');}};
+  const loadingIdentity=await helper.correlationIdentity(loadingPage,1000,false);
+  assert.equal(loadingIdentity.scope,null);
+  const missingLoader={...page,context:()=>({newCDPSession:async()=>({send:async method=>
+    method==='Target.getTargetInfo'?{targetInfo:{targetId:'private-target'}}:
+      {frameTree:{frame:{id:'private-frame',loaderId:'',url:'app://-/index.html'}}},detach:async()=>{}})})};
+  await assert.rejects(helper.correlationIdentity(missingLoader,1000,false));
+  console.log('Renderer correlation: passive identity, early binding and privacy cases passed');
 })().catch(error=>{console.error(error);process.exitCode=1;});

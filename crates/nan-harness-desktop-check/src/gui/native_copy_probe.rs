@@ -253,11 +253,8 @@ fn neutral_input(executable: &Path, mode: &str, prompt: &str) -> Result<(), Reas
         .spawn()
         .map_err(|_| Reason::ActionUnsupported)?;
     let outcome = std::thread::scope(|scope| {
-        let Some(mut stdin) = child.stdin.take() else {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(Reason::ActionUnsupported);
-        };
+        // The outer error path stops the child if its input pipe is missing.
+        let mut stdin = child.stdin.take().ok_or(Reason::ActionUnsupported)?;
         let writer = scope.spawn(move || stdin.write_all(prompt.as_bytes()));
         let deadline =
             Instant::now() + Duration::from_secs(if mode == "retry-click" { 5 } else { 3 });
