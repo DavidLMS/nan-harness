@@ -483,6 +483,38 @@ def select_live_retry_point(bounds, move, prove, matches, deadline, pause=time.s
     raise ValueError('retry live hit unavailable')
 
 
+def select_with_ancestor_diagnostic(select, observe, compare, scope, facts, deadline):
+    """Observe published ancestry even when rendered hit proof rejects every hover.
+
+    These rectangles are advisory AX layout, not GPUI paint masks. A rejected
+    cursor scan keeps its original exception and cannot authorize activation.
+    """
+    def sample():
+        if time.monotonic() >= deadline:
+            return None
+        try:
+            if not scope():
+                return None
+            result = observe()
+            return result if scope() and time.monotonic() < deadline else None
+        except (ValueError, OSError, subprocess.SubprocessError):
+            return None
+
+    first = sample()
+    try:
+        point = select()
+    except (ValueError, OSError, subprocess.SubprocessError):
+        if facts.get('cursorSelection', {}).get('status') == 'no-hit':
+            second = sample()
+            if first is not None and second is not None:
+                facts.update(compare(first, second))
+        raise
+    second = sample()
+    if first is not None and second is not None:
+        facts.update(compare(first, second))
+    return point
+
+
 def retry_click(payload):
     facts = pointer_observation()
     try:
@@ -576,12 +608,21 @@ def retry_click(payload):
                 if not cursor_scope():
                     raise RetryHitFailure('identity-rejected')
             live_cursor = module['PointerShape'](request['pid'], cursor_scope, deadline)
-            point = select_live_retry_point(held_bounds,
-                lambda candidate: run(['mousemove', '--', str(candidate[0]), str(candidate[1])]),
-                prove_hit, live_cursor.matches, deadline, observation=facts['cursorSelection'],
-                pointer_proof=prove_pointer)
+            def select():
+                return select_live_retry_point(held_bounds,
+                    lambda candidate: run(['mousemove', '--', str(candidate[0]), str(candidate[1])]),
+                    prove_hit, live_cursor.matches, deadline, observation=facts['cursorSelection'],
+                    pointer_proof=prove_pointer)
+            if os.environ.get('NANH_ZED_XRECORD') == '1':
+                ancestor_module = runpy.run_path(str(Path(__file__).with_name('zed-atspi-observe.py')))
+                facts.update(ancestor_module['ancestor_result']())
+                point = select_with_ancestor_diagnostic(select,
+                    lambda: ancestor_module['retry_ancestors'](request, None, deadline),
+                    ancestor_module['compare_ancestors'], cursor_scope, facts, deadline)
+            else:
+                point = select()
         ancestor_module, ancestor_before = None, None
-        if (os.environ.get('NANH_ZED_XRECORD') == '1'
+        if (live_cursor is None and os.environ.get('NANH_ZED_XRECORD') == '1'
                 and sys.platform == 'linux'
                 and os.environ.get('GITHUB_ACTIONS') == 'true'
                 and os.environ.get('RUNNER_ENVIRONMENT') == 'github-hosted'

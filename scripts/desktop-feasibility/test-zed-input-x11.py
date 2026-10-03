@@ -438,5 +438,65 @@ class AccessibilityIdentity(unittest.TestCase):
             self.assertEqual(closed, [True])
 
 
+class AncestorScanDiagnostic(unittest.TestCase):
+    def test_no_hit_retains_error_and_records_stable_published_ancestry(self):
+        facts = {'cursorSelection': {'status': 'no-hit'}}
+        error = ValueError('fixed rejection')
+        observations = []
+        def observe():
+            observations.append(True)
+            return ('closed', 'private in-memory signature')
+        def reject():
+            raise error
+        with self.assertRaises(ValueError) as caught:
+            module['select_with_ancestor_diagnostic'](reject, observe,
+                lambda a, b: {'ancestorBoundsStatus': 'complete',
+                    'centerWithinPublishedAncestors': False}, lambda: True,
+                facts, module['time'].monotonic() + 1)
+        self.assertIs(caught.exception, error)
+        self.assertEqual(len(observations), 2)
+        self.assertFalse(facts['centerWithinPublishedAncestors'])
+        self.assertNotIn('private', json.dumps(facts))
+
+    def test_identity_failure_skips_post_scan_and_never_becomes_a_hit(self):
+        facts = {'cursorSelection': {'status': 'identity-rejected'}}
+        reads = []
+        def reject():
+            raise module['RetryHitFailure']('pointer-child')
+        with self.assertRaises(ValueError):
+            module['select_with_ancestor_diagnostic'](reject,
+                lambda: reads.append(True), lambda a,b: {}, lambda: True,
+                facts, module['time'].monotonic() + 1)
+        self.assertEqual(reads, [True])
+        self.assertNotIn('ancestorBoundsStatus', facts)
+
+    def test_expired_or_lost_scope_does_not_query_and_diagnostic_error_keeps_rejection(self):
+        for scope, deadline in [(lambda: False, module['time'].monotonic()+1),
+                                (lambda: True, 0)]:
+            reads = []
+            with self.assertRaisesRegex(ValueError, 'original'):
+                module['select_with_ancestor_diagnostic'](
+                    lambda: (_ for _ in ()).throw(ValueError('original')),
+                    lambda: reads.append(True), lambda a,b: {}, scope,
+                    {'cursorSelection': {'status':'no-hit'}}, deadline)
+            self.assertEqual(reads, [])
+        with self.assertRaisesRegex(ValueError, 'original'):
+            module['select_with_ancestor_diagnostic'](
+                lambda: (_ for _ in ()).throw(ValueError('original')),
+                lambda: (_ for _ in ()).throw(OSError('PRIVATE')),
+                lambda a,b: {}, lambda: True,
+                {'cursorSelection': {'status':'no-hit'}}, module['time'].monotonic()+1)
+
+    def test_success_keeps_selected_point_and_compares_both_samples(self):
+        facts, reads = {}, []
+        point = module['select_with_ancestor_diagnostic'](lambda: (10,20),
+            lambda: reads.append(True) or len(reads),
+            lambda a,b: {'ancestorBoundsStatus': 'unavailable' if a != b else 'complete'},
+            lambda: True, facts, module['time'].monotonic()+1)
+        self.assertEqual(point, (10,20))
+        self.assertEqual(reads, [True,True])
+        self.assertEqual(facts['ancestorBoundsStatus'], 'unavailable')
+
+
 if __name__ == '__main__':
     unittest.main()
