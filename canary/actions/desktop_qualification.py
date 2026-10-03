@@ -69,7 +69,7 @@ def main_aux_correlation(value, app):
 
 
 def public_onboarding(setup, app):
-    shape = set(setup) - {'rejectedPageInventory', 'taskScopeProved', 'taskClickAttempted', 'taskClickCompleted', 'codingComposerReady', 'mainGuardFailure'} if type(setup) is dict else set()
+    shape = set(setup) - {'rejectedPageInventory', 'taskScopeProved', 'taskClickAttempted', 'taskClickCompleted', 'codingComposerReady', 'mainGuardFailure', 'pageSetFailure'} if type(setup) is dict else set()
     booleans = {'conversationalScope', 'engineeringControl', 'roleClickAttempted',
                 'roleClickCompleted', 'engineeringChecked', 'continueControl',
                 'continueClickAttempted', 'continueClickCompleted', 'roleScopeAbsent'}
@@ -100,6 +100,16 @@ def public_onboarding(setup, app):
                 'auxiliary-route', 'auxiliary-identity', 'auxiliary-focus', 'auxiliary-controls',
                 'query-failed', 'unmeasured'}):
             raise ValueError('invalid public onboarding main guard diagnostic')
+    if 'pageSetFailure' in setup:
+        details = setup['pageSetFailure']
+        if (setup.get('mainGuardFailure') != 'page-set' or type(details) is not dict
+                or set(details) != {'reason', 'initialCount', 'currentCount', 'heldPresent'}
+                or type(details['reason']) is not str or details['reason'] not in {
+                    'initial-count', 'held-main-missing', 'before-sample-changed', 'after-sample-changed'}
+                or type(details['heldPresent']) is not bool
+                or any(value is not None and (type(value) is not int or not 0 <= value <= 32)
+                       for value in (details['initialCount'], details['currentCount']))):
+            raise ValueError('invalid public onboarding page set diagnostic')
     if 'rejectedPageInventory' in setup:
         inventory = setup['rejectedPageInventory']
         counts = {'total', 'held', 'app', 'blank', 'devtools', 'other'}

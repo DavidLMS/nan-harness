@@ -89,6 +89,7 @@ async function trial(options={}) {
   return !options.auxGuardFailure&&!options.auxDeadlineFailedProof
     &&!(options.auxOwnershipLostDuringProof&&legendReads>0)&&(!options.auxOwnershipLostAfterClick||roleClicks===0);
  }:undefined;
+ if(mainGuard)mainGuard.failureDetails=()=>options.pageSetDetails;
  if(mainGuard)mainGuard.failure=()=>options.auxDeadlineFailedProof?'deadline':options.auxGuardFailure??'native-ownership';
  const facts=await sandbox.exports.run(page,options.noGuard?undefined:guard,budget,mainGuard);
  assert(!JSON.stringify(facts).includes('PRIVATE'));
@@ -98,6 +99,21 @@ async function trial(options={}) {
  for(const reason of ['main-focus','auxiliary-controls','query-failed']) {
   const blocked=await trial({admitAux:true,auxGuardFailure:reason});
   assert.equal(blocked.facts.mainGuardFailure,reason);assert.equal(blocked.roleClicks,0);assert.equal(blocked.continueClicks,0);
+ }
+ const details={reason:'after-sample-changed',initialCount:1,currentCount:2,heldPresent:true};
+ const pageSet=await trial({admitAux:true,auxGuardFailure:'page-set',pageSetDetails:details});
+ assert.deepEqual(JSON.parse(JSON.stringify(pageSet.facts.pageSetFailure)),details);
+ assert.equal(pageSet.roleClicks,0);assert.equal(pageSet.continueClicks,0);
+ const latePageSet=await trial({admitAux:true,auxGuardFailure:'page-set',
+   pageSetDetails:details,auxDeadlineAfterProof:true});
+ assert.equal(latePageSet.facts.roleProofFailure,'deadline-expired');
+ assert.equal(latePageSet.facts.mainGuardFailure,'page-set');
+ assert.deepEqual(JSON.parse(JSON.stringify(latePageSet.facts.pageSetFailure)),details);
+
+ for(const invalid of [{...details,reason:'PRIVATE'}, {...details,currentCount:33},
+   {...details,path:'PRIVATE'}, {...details,heldPresent:1}]) {
+  const blocked=await trial({admitAux:true,auxGuardFailure:'page-set',pageSetDetails:invalid});
+  assert.equal(blocked.facts.pageSetFailure,undefined);assert.equal(blocked.roleClicks,0);
  }
  const failedLate=await trial({admitAux:true,auxDeadlineFailedProof:true});
  assert.equal(failedLate.facts.roleProofFailure,'deadline-expired');

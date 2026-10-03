@@ -2069,6 +2069,18 @@ class QualificationTests(unittest.TestCase):
         for invalid in ('PRIVATE', None, True, {'path': 'PRIVATE'}):
             with self.assertRaises(ValueError):
                 q.public_onboarding({**setup, 'mainGuardFailure': invalid}, 'chatgpt-desktop')
+        details = dict(reason='after-sample-changed', initialCount=1, currentCount=2, heldPresent=True)
+        page_failure = {**setup, 'mainGuardFailure': 'page-set', 'pageSetFailure': details}
+        self.assertEqual(q.public_onboarding(page_failure, 'chatgpt-desktop'), page_failure)
+        for invalid in ({**details, 'reason': 'PRIVATE'}, {**details, 'initialCount': True},
+                        {**details, 'currentCount': 33}, {**details, 'heldPresent': 1},
+                        {**details, 'path': 'PRIVATE'}, {**details, 'reason': []}):
+            with self.assertRaises(ValueError):
+                q.public_onboarding({**page_failure, 'pageSetFailure': invalid}, 'chatgpt-desktop')
+        with self.assertRaises(ValueError):
+            q.public_onboarding({**page_failure, 'mainGuardFailure': 'deadline'}, 'chatgpt-desktop')
+        overflow = {**details, 'initialCount': None, 'currentCount': None}
+        self.assertEqual(q.public_onboarding({**page_failure, 'pageSetFailure': overflow}, 'chatgpt-desktop')['pageSetFailure'], overflow)
         inventory = dict(status='complete', total=2, held=1, app=1, blank=1, devtools=0, other=0)
         self.assertEqual(q.public_onboarding({**setup, 'rejectedPageInventory': inventory}, 'chatgpt-desktop')['rejectedPageInventory'], inventory)
         for invalid in ({**inventory, 'total': 1}, {**inventory, 'held': 2},

@@ -210,8 +210,14 @@ async function observeMainAux(held,browser,guard,deadline,auxRoute,
 // Later source-known inert avatar pages never become selectable input targets.
 function heldMainGuard(held, browser, owner, deadline, route,
   identity=correlationIdentity, pause=ms=>new Promise(resolve=>setTimeout(resolve,ms)),requireMainScope=false) {
-  let auxiliary=null, auxiliaryIdentity=null, failure='unmeasured';
+  let auxiliary=null, auxiliaryIdentity=null, failure='unmeasured', failureDetails=null;
   const reject=reason=>{failure=reason;return false;};
+  const rejectPageSet=(reason,initial,current)=>{
+    const count=pages=>pages.length<=32?pages.length:null;
+    failureDetails={reason,initialCount:count(initial),currentCount:count(current),
+      heldPresent:current.includes(held.page)};
+    return reject('page-set');
+  };
   const pages=()=>browser.contexts().flatMap(context=>context.pages());
   const valid=()=>{
     if(Date.now()>=deadline)return reject('deadline');
@@ -219,12 +225,13 @@ function heldMainGuard(held, browser, owner, deadline, route,
     return Date.now()<deadline||reject('deadline');
   };
   const prove=async function prove() {
-    failure='unmeasured';
+    failure='unmeasured';failureDetails=null;
     try {
       if(!held)return reject('main-identity');
       if(!valid())return false;
       const initial=pages();
-      if(initial.length<1||initial.length>2||!initial.includes(held.page))return reject('page-set');
+      if(!initial.includes(held.page))return rejectPageSet('held-main-missing',initial,initial);
+      if(initial.length<1||initial.length>2)return rejectPageSet('initial-count',initial,initial);
       const extra=initial.find(page=>page!==held.page);
       if(auxiliary&&extra!==auxiliary)return reject('auxiliary-identity');
       if(extra&&route(extra.url())!=='avatarOverlay')return reject('auxiliary-route');
@@ -233,7 +240,7 @@ function heldMainGuard(held, browser, owner, deadline, route,
       for(let sample=0;sample<samples;sample++) {
         if(!valid())return false;
         const before=pages();
-        if(before.length!==initial.length||!before.every(page=>initial.includes(page)))return reject('page-set');
+        if(before.length!==initial.length||!before.every(page=>initial.includes(page)))return rejectPageSet('before-sample-changed',initial,before);
         const main=await identity(held.page,deadline);
         if(!valid())return false;
         if(!sameCorrelationIdentity(held,main))return reject('main-identity');
@@ -252,7 +259,7 @@ function heldMainGuard(held, browser, owner, deadline, route,
         }
         const after=pages();
         if(!valid())return false;
-        if(after.length!==initial.length||!after.every(page=>initial.includes(page)))return reject('page-set');
+        if(after.length!==initial.length||!after.every(page=>initial.includes(page)))return rejectPageSet('after-sample-changed',initial,after);
         if(sample+1<samples)await pause(Math.min(100,Math.max(0,deadline-Date.now())));
       }
       if(extra&&!auxiliary){auxiliary=extra;auxiliaryIdentity=candidateAux;}
@@ -260,6 +267,7 @@ function heldMainGuard(held, browser, owner, deadline, route,
     } catch {return reject(Date.now()>=deadline?'deadline':'query-failed');}
   };
   prove.failure=()=>failure;
+  prove.failureDetails=()=>failure==='page-set'?failureDetails:null;
   const privateIdentity=value=>value&&Object.fromEntries(['url','target','frame','loader','frameUrl','fragment'].map(key=>[key,value[key]]));
   prove.binding=()=>({schemaVersion:1,main:privateIdentity(held),auxiliary:privateIdentity(auxiliaryIdentity)});
   return prove;

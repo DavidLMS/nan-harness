@@ -141,6 +141,33 @@ assert.equal(roleSourceScope({foreignFieldset:true}).mainScope,false);
   assert.equal((await f.run()).status,'deadline');
   f=fixture();result=await helper.observeMainAux(f.held,f.browser,()=>true,1000,
     ()=> 'unknown',f.identity,async()=>{});assert.equal(result.status,'source-scope');
+  for(const [mutate,reason,count,held] of [
+    [f=>f.setPages([f.main,f.aux,{}]),'initial-count',3,true],
+    [f=>f.setPages([f.aux]),'held-main-missing',1,false],
+    [f=>f.setAlter(()=>f.setPages([f.main])),'after-sample-changed',1,true],
+  ]) {
+    f=fixture();mutate(f);
+    const guard=helper.heldMainGuard(f.held,f.browser,()=>true,1000,
+      ()=> 'avatarOverlay',f.identity,async()=>{});
+    assert.equal(await guard(),false);
+    assert.equal(guard.failure(),'page-set');
+    assert.equal(guard.failureDetails().reason,reason);
+    assert.equal(guard.failureDetails().currentCount,count);
+    assert.equal(guard.failureDetails().heldPresent,held);
+    assert.equal(Object.keys(guard.failureDetails()).length,4);
+  }
+  f=fixture();
+  const between=helper.heldMainGuard(f.held,f.browser,()=>true,1000,
+    ()=> 'avatarOverlay',f.identity,async()=>f.setPages([f.main]));
+  assert.equal(await between(),false);
+  assert.equal(between.failureDetails().reason,'before-sample-changed');
+  assert.equal(between.failureDetails().initialCount,2);
+  assert.equal(between.failureDetails().currentCount,1);
+  f=fixture();f.setPages([f.main,...Array.from({length:32},()=>({}))]);
+  let overflow=helper.heldMainGuard(f.held,f.browser,()=>true,1000,()=> 'avatarOverlay',f.identity);
+  assert.equal(await overflow(),false);
+  assert.equal(overflow.failureDetails().initialCount,null);
+  assert.equal(overflow.failureDetails().currentCount,null);
   // The auxiliary capability retains immutable identities across real actions;
   // the main role may transition while the auxiliary must remain inert.
   f=fixture();let owner=true;

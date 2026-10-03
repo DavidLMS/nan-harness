@@ -141,6 +141,14 @@ async function run(page, ownerGuard, deadline, rejected, mainGuard) {
         const reason=mainGuard.failure();
         if(['deadline','native-ownership','page-set','main-identity','main-focus','main-scope',
           'auxiliary-route','auxiliary-identity','auxiliary-focus','auxiliary-controls','query-failed','unmeasured'].includes(reason)) facts.mainGuardFailure=reason;
+        if(reason==='page-set'&&typeof mainGuard.failureDetails==='function') {
+          const details=mainGuard.failureDetails();
+          const count=value=>value===null||Number.isInteger(value)&&value>=0&&value<=32;
+          if(details&&Object.keys(details).sort().join(',')==='currentCount,heldPresent,initialCount,reason'
+            &&['initial-count','held-main-missing','before-sample-changed','after-sample-changed'].includes(details.reason)
+            &&count(details.initialCount)&&count(details.currentCount)&&typeof details.heldPresent==='boolean')
+            facts.pageSetFailure={...details};
+        }
       }
       if (Date.now() >= deadline) return fail('deadline-expired');
       if (pages.length !== 1 && !mainProved) {
