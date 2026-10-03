@@ -143,8 +143,8 @@ observations describe completed runs, rather than additional qualification:
 | --- | --- | --- | --- |
 | Zed | Response and file-tool steps pass; pointer and accessibility Retry acknowledgements do not produce provider recovery. | Three complete probes pass the expanded retry policy. | Three complete probes pass with direct native clipboard transport and all cleanup checks. |
 | Hermes | Three complete probes pass with renderer process ownership. | Three complete probes pass with private native userData and bounded cold-start waits. | Three complete probes pass after ordinary onboarding dismissal and fresh catalog readiness, including explicit UI Retry and cleanup. |
-| ChatGPT / Codex | Official Linux beta package; native conversation qualification remains open. | Renderer observation remains intermittent; cleanup passes. | All three probes acquire a renderer, but a foreign overlay blocks the public role form before action. Process absence and all cleanup pass. |
-| Claude | Official Linux beta package; native conversation qualification remains open. | Two of three windows acquired in completed trials, with one exact classic composer and Start task; no Send message. Latest trial acquires a focused window, then rejects changed bounds before composer inventory. Cleanup passes. Guarded Chat navigation and conversation verification remain open. | Owned window acquired, no editable observed, cleanup unproved. Native known-folder metadata is fresh and unchanged; private third-party Local State is now observed. Process absence after shutdown still fails. |
+| ChatGPT / Codex | Official Linux beta package; native conversation qualification remains open. | All three latest endpoints are owned; an unknown separate dialog blocks role selection. Cleanup passes. | All three probes acquire a renderer, but a foreign overlay blocks the public role form before action. Process absence and all cleanup pass. |
+| Claude | Official Linux beta package; native conversation qualification remains open. | Native Chat trials verify input and Send in some sessions; response scope and action stability still block qualification. Cleanup passes. | One classic editor is acquired after an owned window fit. Passive UIA readback remains unproved; cleanup now passes for both acquired and failed-acquisition sessions. |
 | Pen | Software GLES removes GPU startup failure; three fresh sessions show sign-in and no editor. No official account-free route found for the frozen release. | Two probes expose composer/Send; another exposes sign-in. Conversation adapter remains unimplemented. | Owned renderer loads sign-in and a dialog; conversation adapter remains unimplemented. |
 
 The completed evidence is available in runs
@@ -2214,3 +2214,70 @@ The bounded passive X11 inventory reports zero mapped or unmapped owned transien
 Dialog windows in each session. The blocked-parent Dialog hypothesis is therefore
 not supported by this trial; Retry still rejects before any click. Native
 cleanup passes and the strict privacy reducer reports zero invalid events.
+
+The [aa6c3ceb Windows trial](https://github.com/DavidLMS/nan-harness/actions/runs/37140104786)
+confirms cleanup after both acquired and failed-window sessions: each retains
+and closes five verified descendants, with global cleanup passed and zero invalid
+native diagnostic events. One session reaches owned-window fit and one source
+editor; a later foreground change still blocks acquisition. No conversation is
+qualified by these startup results.
+
+Revision `ac4acf9e` adds a passive Windows UIA collector after strict initial
+readiness. It receives the retained acquisition deadline, capped at three seconds,
+and rechecks exact native HWND/PID/rectangle, foreground, display and clear stack
+before and after a complete bounded tree. Closed counts and failure stages can
+expose native control projection; they cannot authorize Send, Copy or acceptance.
+The normal hosted build compiles its Windows SDK body before vendor installation,
+and a separate pre-install test checks the strict receipt parser. The complete
+privacy reducer passes 97 deterministic contracts locally; native projection
+remains to be observed on the disposable runner.
+
+The `02547346` follow-up compiled the actual Windows UIA implementation and
+passed the pre-installation Rust receipt tests in
+[run 37140686691](https://github.com/DavidLMS/nan-harness/actions/runs/37140686691).
+The acquired window produced a transport failure rather than UIA counts; both
+acquired and failed-acquisition sessions again cleaned up five verified owned
+descendants, with zero rejected diagnostic events. macOS
+[Claude run 37140688993](https://github.com/DavidLMS/nan-harness/actions/runs/37140688993)
+failed before the response-heading boundary could be measured: one input
+transport timed out, another sent a verified input but stopped before the next
+guard, and the third lost focus. The diagnostic provider snapshot recorded a
+generation without completed fixture response; it does not establish the final
+provider or renderer state. Cleanup passed. In
+[Codex run 37140690985](https://github.com/DavidLMS/nan-harness/actions/runs/37140690985),
+all three endpoints were owned, but the separate dialog remained unknown and
+no role or Continue action was dispatched. All three results remain unqualified.
+
+The `00ab3098` Linux feasibility trial replaces the pointer Retry attempt with
+one AT-SPI `DoAction(0)` on the retained unique button. It requires two matching
+ownership, state, bounds and single-click-action proofs, consumes the attempt
+before dispatch, and rejects uncertain completion without fallback or replay.
+A true forwarding receipt and unchanged post-action ownership permit subsequent
+observation only; qualification still requires a new provider recovery and an
+exact export of the same failed turn. The production qualification workflow
+continues to use its existing route pending full native evidence.
+
+The Windows UIA transport failure exposed a concrete request framing bug:
+the UIA encoder appended a newline and the shared process writer appended
+another. The native receiver rejected the extra byte before any UIA query.
+Commit `cb776b6d` makes the shared writer own the delimiter. A synthetic test
+uses the actual Rust process transport to distinguish one frame from the old
+double frame; the shared C++ framing fixture rejects trailing bytes, missing
+delimiters and oversized input during the pre-installation native build.
+
+A public-source audit also identifies the separate Computer History consent
+screen in Codex `26.930.31730` (`onboarding-page-5330b67eb049.js`, SHA-256
+`05667867f6c8b4525a8009610dc942881bdcbff3a737a3dd3411e28956a88137`).
+The follow-up observer measures exact public title, source form and control
+counts within the retained dialog, using the existing two identical reads and
+ownership guards. The classifier remains passive, never accepts permission,
+and does not establish that this was the dialog in the preceding run.
+Project-import title/control counts are likewise source-bound and diagnostic.
+
+Claude macOS Chat pre- and post-action guards now share the original action
+deadline with the native transport. Previously those focus queries could use
+an independent fifteen-second cap. The original window verdict remains
+unchanged, and expiration cannot reset the budget or spawn a second guard
+helper. A synthetic native-process regression covers that exhausted-deadline
+case. This corrects the timing boundary; it does not establish the cause of
+the preceding `before-guard` failure.
