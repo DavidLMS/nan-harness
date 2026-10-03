@@ -306,7 +306,6 @@ jobs:
           echo 'NANH_ZED_CURSOR_HIT=1' >> "$GITHUB_ENV"
           echo 'NANH_ZED_XRECORD=1' >> "$GITHUB_ENV"
           echo 'NANH_ZED_PANEL_LAYOUT=fixed-wide' >> "$GITHUB_ENV"
-          echo 'NANH_ZED_RETRY_METHOD=atspi-click' >> "$GITHUB_ENV"
       - name: Enable Hermes Windows current-catalog readiness
         if: runner.os == 'Windows' && matrix.app == 'hermes-desktop' && inputs.experiment == 'deterministic-full'
         shell: bash
