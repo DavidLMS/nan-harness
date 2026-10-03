@@ -1,4 +1,5 @@
 #include "uia_request_frame.hpp"
+#include "uia_process_identity.hpp"
 
 // Passive source-labelled UIA counts from one freshly guarded owned window.
 #ifdef _WIN32
@@ -66,8 +67,8 @@ struct Collection {
         if(FAILED(element->get_CurrentProcessId(&pid))) {
             stage=depth==0?"root-process-query":"descendant-process-query";return false;
         }
-        if(pid!=static_cast<int>(request.pid)) {
-            stage=depth==0?"root-process-mismatch":"descendant-process-mismatch";return false;
+        if(const char* rejected=uia_process_identity_failure(pid,request.pid,depth==0)) {
+            stage=rejected;return false;
         }
         if(FAILED(element->get_CurrentControlType(&type)) || FAILED(element->get_CurrentName(&name))) return false;
         std::wstring text;

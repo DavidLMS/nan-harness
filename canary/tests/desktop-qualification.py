@@ -533,8 +533,8 @@ class QualificationTests(unittest.TestCase):
                          nodeCount=None, classicEditorCount=None, modernEditorCount=None,
                          sendControlCount=None, startTaskControlCount=None,
                          assistantHeadingCount=None, copyControlCount=None)
-            for stage in ('root-process-query', 'root-process-mismatch',
-                          'descendant-process-query', 'descendant-process-mismatch'):
+            for stage in ('root-process-query', 'root-process-mismatch', 'root-process-zero', 'root-process-invalid',
+                          'descendant-process-query', 'descendant-process-mismatch', 'descendant-process-zero', 'descendant-process-invalid'):
                 path.write_text(json.dumps({**value, 'status': stage}))
                 self.assertEqual(q.semantic_observations(root, 'claude-desktop')[0]['status'], stage)
                 for change in ({'processId': 'PRIVATE'}, {'nodeCount': 1},

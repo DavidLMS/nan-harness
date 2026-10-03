@@ -33,3 +33,10 @@ add_custom_target(nanh-uia-request-frame-contract ALL
   COMMAND $<TARGET_FILE:nanh-uia-request-frame-test>
   DEPENDS nanh-uia-request-frame-test
   COMMENT "Verify bounded UIA request framing")
+
+# Synthetic identities only; never creates or inspects a native window.
+add_executable(nanh-uia-process-identity-test uia_process_identity_test.cpp)
+add_custom_target(nanh-uia-process-identity-contract ALL
+  COMMAND $<TARGET_FILE:nanh-uia-process-identity-test>
+  DEPENDS nanh-uia-process-identity-test
+  COMMENT "Verify closed UIA process identity rejection")

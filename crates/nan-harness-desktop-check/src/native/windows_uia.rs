@@ -8,7 +8,7 @@ const COUNT_KEYS: [&str; 7] = [
     "assistantHeadingCount",
     "copyControlCount",
 ];
-const FAILURES: [&str; 22] = [
+const FAILURES: [&str; 26] = [
     "query",
     "deadline",
     "identity",
@@ -22,8 +22,12 @@ const FAILURES: [&str; 22] = [
     "element-identity",
     "root-process-query",
     "root-process-mismatch",
+    "root-process-zero",
+    "root-process-invalid",
     "descendant-process-query",
     "descendant-process-mismatch",
+    "descendant-process-zero",
+    "descendant-process-invalid",
     "heading-property",
     "com",
     "root-replaced",
@@ -87,8 +91,12 @@ mod tests {
         for status in [
             "root-process-query",
             "root-process-mismatch",
+            "root-process-zero",
+            "root-process-invalid",
             "descendant-process-query",
             "descendant-process-mismatch",
+            "descendant-process-zero",
+            "descendant-process-invalid",
         ] {
             let wire = format!("uia {status} - - - - - - -\n");
             let value = parse(&wire).unwrap();

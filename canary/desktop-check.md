@@ -2281,3 +2281,58 @@ unchanged, and expiration cannot reset the budget or spawn a second guard
 helper. A synthetic native-process regression covers that exhausted-deadline
 case. This corrects the timing boundary; it does not establish the cause of
 the preceding `before-guard` failure.
+
+Commit `8ad3a361` passed the complete local `cargo check-all` gate. Its native
+[Codex run 37141943730](https://github.com/DavidLMS/nan-harness/actions/runs/37141943730)
+remains unqualified: two sessions classified the same unknown separate dialog
+with all eight Computer History/project-import source counts zero; the third
+failed the role-legend proof. No role, Continue or permission action occurred.
+[Claude macOS run 37141943800](https://github.com/DavidLMS/nan-harness/actions/runs/37141943800)
+failed acquisition in one session and lost focus in another before verified
+input. The native Chat receipt stopped at its post-action guard; no response or
+retry was certified. Both runs passed cleanup with zero invalid diagnostic events.
+
+The one-frame UIA fix passed its actual Windows native build in
+[run 37141736476](https://github.com/DavidLMS/nan-harness/actions/runs/37141736476).
+The observer now reaches UIA and rejects an element process-identity check,
+rather than request framing. The current receipt does not distinguish root
+from descendant or a query failure from a mismatched PID. Ownership remains
+strict; Chromium's native accessibility implementation runs browser-side, so
+accepting arbitrary renderer processes would lack evidence. Cleanup passes.
+
+The AT-SPI Retry experiment in
+[run 37141494677](https://github.com/DavidLMS/nan-harness/actions/runs/37141494677)
+passes input, response and file-tool verification in all three Zed sessions.
+Each receives a true native forwarding receipt with unchanged post-action
+ownership. None produces independent provider recovery or assistant export;
+the exported failed turn still contains one User and no assistant or Resume.
+The cell therefore remains unqualified. Pinned source has no same-turn keyboard
+Retry command, and historical-message Regenerate rewinds/resubmits. The public
+ScrollOutputToBottom command affects the conversation list, but its editor
+focus is not exported by the pinned accessibility tree; an unknown keyboard
+context cannot authorize that proposed experiment.
+
+Commit `1d709748` passed the complete local gate. Its
+[Claude macOS run 37151572757](https://github.com/DavidLMS/nan-harness/actions/runs/37151572757)
+verified input and native assistant-copy response in two sessions. File-tool
+verification still failed: the provider observed a completed tool turn and the
+fixture response, but not the file's independent marker. This is not evidence
+that the selected Read tool successfully accessed the checker fixture.
+[Codex macOS run 37151579859](https://github.com/DavidLMS/nan-harness/actions/runs/37151579859)
+again rejected the unknown separate dialog; passive actionability measurements
+were unavailable. Its
+[Linux run 37151586884](https://github.com/DavidLMS/nan-harness/actions/runs/37151586884)
+attached to the owned renderer in three sessions but found no role form or
+editor and one unknown dialog. All three runs remain unqualified and passed
+cleanup with zero invalid diagnostic events.
+
+[Claude Windows run 37151374891](https://github.com/DavidLMS/nan-harness/actions/runs/37151374891)
+proved the root process identity and failed at a descendant process mismatch.
+The passive observer now distinguishes zero/default and invalid negative
+process properties from a different positive identity, without admitting any
+of them or publishing process IDs. Microsoft's
+[ProcessId property documentation](https://learn.microsoft.com/en-us/dotnet/api/system.windows.automation.automationelement.processidproperty?view=windowsdesktop-10.0)
+defines zero as the default when the property is not reported. Synthetic native
+and strict wire-decoder tests preserve rejection and null counts for each case.
+Actual runner evidence is required before attributing the mismatch to that
+specific default.
