@@ -336,21 +336,33 @@ static const char* input(const Request& request, const Tree& tree) {
     const char* initial_failure = initial_input_failure(initial_value, ax_query_failed, request.mode == "input-replace-owned");
     if (initial_value) CFRelease(initial_value);
     if (initial_failure) return initial_failure;
-    if (!owned(request) || AXUIElementSetAttributeValue(control.element, kAXFocusedAttribute, kCFBooleanTrue) != kAXErrorSuccess) return "focus";
+    if (!owned(request)) return "input-focus-guard";
+    if (AXUIElementSetAttributeValue(control.element, kAXFocusedAttribute, kCFBooleanTrue) != kAXErrorSuccess)
+        return "input-focus-setting";
     if (request.mode == "input-replace-owned") {
-        if (!focused_composer(request, control) || !key(0, true)) return "focus";
+        if (!focused_composer(request, control)) return "input-focused-identity";
+        if (!key(0, true)) return "input-replace-select-key";
     }
-    if (!owned(request) || !clipboard_write(request.prompt) || !owned(request)) return "focus";
-    if (request.mode == "input-replace-owned" && !focused_composer(request, control)) return "focus";
-    if (!key(9, true)) return "focus";
+    if (!owned(request)) return "input-prompt-before-guard";
+    if (!clipboard_write(request.prompt)) return "input-prompt-clipboard";
+    if (!owned(request)) return "input-prompt-after-guard";
+    if (request.mode == "input-replace-owned" && !focused_composer(request, control))
+        return "input-focused-identity";
+    if (!key(9, true)) return "input-paste-key";
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    if (!owned(request) || !clipboard_write(request.sentinel) || !owned(request) || !key(0, true) || !owned(request) || !key(8, true)) return "focus";
+    if (!owned(request)) return "input-readback-before-guard";
+    if (!clipboard_write(request.sentinel)) return "input-sentinel-clipboard";
+    if (!owned(request)) return "input-sentinel-after-guard";
+    if (!key(0, true)) return "input-readback-select-key";
+    if (!owned(request)) return "input-readback-select-guard";
+    if (!key(8, true)) return "input-readback-copy-key";
     while (within(request) && !clipboard_matches(request.prompt)) std::this_thread::sleep_for(std::chrono::milliseconds(20));
     bool copied = clipboard_matches(request.prompt);
     const char* readback_failure = input_readback_failure(copied,
         copied && string_attribute(control.element, kAXValueAttribute) == request.prompt);
     if (readback_failure) return readback_failure;
-    if (!owned(request) || !key(124, false)) return "focus";
+    if (!owned(request)) return "input-collapse-guard";
+    if (!key(124, false)) return "input-collapse-key";
     Tree fresh;
     if (!fresh.collect(request) || !chat(fresh) || !retained(fresh, control)) return "control";
     int enabled_send = enabled_submission(fresh, tree.nodes[send], request);

@@ -125,11 +125,16 @@ function classifyForeign(control,held) {
         ||control.clientWidth<=0||control.clientHeight<=0||innerWidth<=0||innerHeight<=0
         ||values.some(v=>Math.abs(v)>16384)||control.clientLeft<0||control.clientTop<0)return unavailable('geometry-invalid');
     const left=r.left+control.clientLeft,top=r.top+control.clientTop;
-    if(left<0||top<0||left+control.clientWidth>innerWidth||top+control.clientHeight>innerHeight
-        ||control.clientLeft+control.clientWidth>r.width||control.clientTop+control.clientHeight>r.height)return unavailable('geometry-outside');
+    // Client dimensions are integers; DOMRect dimensions can be fractional.
+    // Passive samples stay inside both measured boxes rather than treating a
+    // rounded client edge as proof that the target lies outside its rectangle.
+    const width=Math.min(control.clientWidth,r.width-control.clientLeft);
+    const height=Math.min(control.clientHeight,r.height-control.clientTop);
+    if(width<=0||height<=0)return unavailable('geometry-invalid');
+    if(left<0||top<0||left+width>innerWidth||top+height>innerHeight)return unavailable('geometry-outside');
     measured.targetOwnedPointCount=0;measured.dialogOwnedPointCount=0;measured.otherPointCount=0;
     for(const x of [1/6,1/2,5/6])for(const y of [1/6,1/2,5/6]) {
-      const front=document.elementFromPoint(left+x*control.clientWidth,top+y*control.clientHeight);
+      const front=document.elementFromPoint(left+x*width,top+y*height);
       if(front&&(front===control||control.contains(front)))measured.targetOwnedPointCount++;
       else if(front&&(front===dialog||dialog.contains(front)))measured.dialogOwnedPointCount++;
       else measured.otherPointCount++;

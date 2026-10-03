@@ -45,6 +45,7 @@ async function trial(options={}) {
  foreign.parentElement=options.overlayAncestor?{ownerDocument:doc,isConnected:true,parentElement:null,
    inert:!!options.overlayAncestorInert,hasAttribute:()=>false,getAttribute:k=>k==='data-state'&&options.overlayClosed?'closed':null}:null;
  foreign.hasAttribute=k=>k==='inert'&&!!options.overlayInert;
+ if(options.overlayFractional)label.getBoundingClientRect=()=>({left:10,top:10,width:79.6,height:39.6});
  if(options.overlayOutside)label.getBoundingClientRect=()=>({left:-20,top:10,width:80,height:40});
  if(options.overlayLongAncestors) {let current=foreign;for(let i=0;i<65;i++){current.parentElement={ownerDocument:doc,isConnected:true,parentElement:null,inert:false,hasAttribute:()=>false,getAttribute:()=>null};current=current.parentElement;}}
  let diagnosticPoints=0;if(options.overlayMixedPoints)doc.elementFromPoint=()=>[label,foreign,dialog][diagnosticPoints++%3];
@@ -313,7 +314,7 @@ async function trial(options={}) {
  assert.equal(JSON.stringify(good.facts).includes('private'),false);
  for(const opts of [{overlayZero:true},{overlayPointerNone:true},{overlayInert:true},
    {overlayAncestor:true,overlayAncestorZero:true,overlayAncestorPointerNone:true,overlayAncestorInert:true,overlayClosed:true},
-   {overlayPointFront:'dialog'},{overlayPointFront:'other'},{overlayMixedPoints:true},{overlayLongAncestors:true},{overlayOutside:true},{overlayBadOpacity:true}]) {
+   {overlayFractional:true},{overlayPointFront:'dialog'},{overlayPointFront:'other'},{overlayMixedPoints:true},{overlayLongAncestors:true},{overlayOutside:true},{overlayBadOpacity:true}]) {
    const r=await trial({modal:true,overlayHeading:'Unknown',...opts});
    assert.equal(r.roleClicks,0);assert.equal(r.continueClicks,0);
    assert.equal(r.facts.actionabilityFailure,'foreign-overlay');

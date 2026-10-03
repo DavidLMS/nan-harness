@@ -44,6 +44,22 @@ pub(crate) enum ChatTurnStage {
     Mode,
     Composer,
     Focus,
+    InputFocusGuard,
+    InputFocusSetting,
+    InputFocusedIdentity,
+    InputReplaceSelectKey,
+    InputPromptBeforeGuard,
+    InputPromptClipboard,
+    InputPromptAfterGuard,
+    InputPasteKey,
+    InputReadbackBeforeGuard,
+    InputSentinelClipboard,
+    InputSentinelAfterGuard,
+    InputReadbackSelectKey,
+    InputReadbackSelectGuard,
+    InputReadbackCopyKey,
+    InputCollapseGuard,
+    InputCollapseKey,
     InputMismatch,
     InputInitialUnavailable,
     InputInitialNonempty,
@@ -103,6 +119,23 @@ impl ChatTurnStage {
             "turn mode\n" => Some(Self::Mode),
             "turn composer\n" => Some(Self::Composer),
             "turn focus\n" => Some(Self::Focus),
+            "turn input-focus-guard\n" => Some(Self::InputFocusGuard),
+            "turn input-focus-setting\n" => Some(Self::InputFocusSetting),
+            "turn input-focused-identity\n" => Some(Self::InputFocusedIdentity),
+            "turn input-replace-select-key\n" => Some(Self::InputReplaceSelectKey),
+            "turn input-prompt-before-guard\n" => Some(Self::InputPromptBeforeGuard),
+            "turn input-prompt-clipboard\n" => Some(Self::InputPromptClipboard),
+            "turn input-prompt-after-guard\n" => Some(Self::InputPromptAfterGuard),
+            "turn input-paste-key\n" => Some(Self::InputPasteKey),
+            "turn input-readback-before-guard\n" => Some(Self::InputReadbackBeforeGuard),
+            "turn input-sentinel-clipboard\n" => Some(Self::InputSentinelClipboard),
+            "turn input-sentinel-after-guard\n" => Some(Self::InputSentinelAfterGuard),
+            "turn input-readback-select-key\n" => Some(Self::InputReadbackSelectKey),
+            "turn input-readback-select-guard\n" => Some(Self::InputReadbackSelectGuard),
+            "turn input-readback-copy-key\n" => Some(Self::InputReadbackCopyKey),
+            "turn input-collapse-guard\n" => Some(Self::InputCollapseGuard),
+            "turn input-collapse-key\n" => Some(Self::InputCollapseKey),
+
             "turn input-mismatch\n" => Some(Self::InputMismatch),
             "turn input-initial-unavailable\n" => Some(Self::InputInitialUnavailable),
             "turn input-initial-nonempty\n" => Some(Self::InputInitialNonempty),
@@ -188,6 +221,72 @@ pub(super) fn request(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn input_boundary_failures_are_closed_terminal_receipts() {
+        for (label, expected) in [
+            ("input-focus-guard", ChatTurnStage::InputFocusGuard),
+            ("input-focus-setting", ChatTurnStage::InputFocusSetting),
+            (
+                "input-focused-identity",
+                ChatTurnStage::InputFocusedIdentity,
+            ),
+            (
+                "input-replace-select-key",
+                ChatTurnStage::InputReplaceSelectKey,
+            ),
+            (
+                "input-prompt-before-guard",
+                ChatTurnStage::InputPromptBeforeGuard,
+            ),
+            (
+                "input-prompt-clipboard",
+                ChatTurnStage::InputPromptClipboard,
+            ),
+            (
+                "input-prompt-after-guard",
+                ChatTurnStage::InputPromptAfterGuard,
+            ),
+            ("input-paste-key", ChatTurnStage::InputPasteKey),
+            (
+                "input-readback-before-guard",
+                ChatTurnStage::InputReadbackBeforeGuard,
+            ),
+            (
+                "input-sentinel-clipboard",
+                ChatTurnStage::InputSentinelClipboard,
+            ),
+            (
+                "input-sentinel-after-guard",
+                ChatTurnStage::InputSentinelAfterGuard,
+            ),
+            (
+                "input-readback-select-key",
+                ChatTurnStage::InputReadbackSelectKey,
+            ),
+            (
+                "input-readback-select-guard",
+                ChatTurnStage::InputReadbackSelectGuard,
+            ),
+            (
+                "input-readback-copy-key",
+                ChatTurnStage::InputReadbackCopyKey,
+            ),
+            ("input-collapse-guard", ChatTurnStage::InputCollapseGuard),
+            ("input-collapse-key", ChatTurnStage::InputCollapseKey),
+        ] {
+            let receipt = format!("turn {label}\n");
+            assert_eq!(ChatTurnStage::parse(&receipt), Some(expected));
+            assert!(!expected.passive_pending());
+            assert_eq!(ChatTurnStage::parse(&format!("{receipt}PRIVATE")), None);
+            assert_eq!(serde_json::to_value(expected).unwrap(), label);
+        }
+        assert_eq!(
+            ChatTurnStage::parse("turn focus\n"),
+            Some(ChatTurnStage::Focus)
+        );
+        assert_eq!(ChatTurnStage::parse("turn input-private-detail\n"), None);
+    }
 
     #[test]
     fn short_action_budgets_expire_before_a_helper_request() {
