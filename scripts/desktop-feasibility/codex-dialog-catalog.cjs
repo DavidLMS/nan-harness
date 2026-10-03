@@ -2,7 +2,7 @@
 const macCatalog=require('./codex-dialog-title-catalog-macos.json');
 const macCatalogSha256='858a67a053e8082f48c699afd2a9000f17d40ae3007c6a75895b1c894378d688';
 const linuxCatalog=require('./codex-dialog-title-catalog-linux.json');
-const linuxCatalogSha256='8a8578475a1914678e7a76d3de03a5bba4bb44b4f44de35ad4f158418b009b2f';
+const linuxCatalogSha256='d7957a729c576bb921b963ef550e756d975148b96971a0564c79e3daf41c6c37';
 const catalog=require('./codex-dialog-title-catalog.json');
 const windowsCatalog=require('./codex-dialog-title-catalog-windows.json');
 const windowsCatalogSha256='33c7d300500d793461b578c82b09b2cc748fe5f4ef99dd44e1e1151e857d63df';
@@ -25,7 +25,7 @@ function facts(platform) {
  return {schemaVersion:1,mechanism:'codex-static-dialog-title',diagnosticsOnly:true,
   sourceVersion:platform==='linux'?linuxCatalog.sourceVersion:platform==='darwin'?macCatalog.sourceVersion:catalog.sourceVersion,platform:platform==='win32'?'windows':platform==='darwin'?'macos':'linux',
   artifactSha256:pin.artifact,wrapperSourceSha256:pin.wrapper,catalogSha256:platform==='win32'?windowsCatalogSha256:platform==='linux'?linuxCatalogSha256:platform==='darwin'?macCatalogSha256:catalogSha256,
-  status:'guard-rejected',rejectionStage:'unmeasured',titleReferenceCount:null,matchCount:null,sourceTitleEmpty:null,sourceTitleIds:[]};
+  status:'guard-rejected',rejectionStage:'unmeasured',guardFailure:null,titleReferenceCount:null,matchCount:null,sourceTitleEmpty:null,sourceTitleIds:[]};
 }
 // Standalone callbacks: no closure references, app text or DOM IDs leave the page.
 function holdDialog() {
@@ -40,15 +40,16 @@ function holdDialog() {
  return {document,dialog,title:titles.length===1?titles[0]:null,reference};
 }
 function classifyTitle({held,entries}) {
- const reject=rejectionStage=>({rejectionStage});
- if(!held||held.document!==document||!document.hasFocus())return reject('scope');
+ const reject=(rejectionStage,guardFailure=null)=>({rejectionStage,guardFailure});
+ if(!held||held.document!==document)return reject('scope','retained-document');
+ if(!document.hasFocus())return reject('scope','document-focus');
  const visible=e=>e.isConnected&&e.getBoundingClientRect().width>0&&e.getBoundingClientRect().height>0
   &&getComputedStyle(e).display!=='none'&&getComputedStyle(e).visibility!=='hidden';
  const dialogs=[...document.querySelectorAll('[role="dialog"],[aria-modal="true"],[role="alertdialog"]')].filter(visible);
  if(dialogs.length!==1)return reject('dialog-count');
  if(dialogs[0]!==held.dialog||!held.dialog.isConnected||held.dialog.ownerDocument!==document
   ||held.dialog.getAttribute('role')!=='dialog')return reject('changed');
- if(entries.length>256)return reject('scope');
+ if(entries.length>256)return reject('scope','catalog-limit');
  let current=held.dialog,depth=0;
  while(current) {
   if(++depth>64||current.inert||current.getAttribute('aria-hidden')==='true'
@@ -73,16 +74,17 @@ function classifyTitle({held,entries}) {
  if(typeof text!=='string'||text.length>512)return reject('title-text');
  const matches=[...new Set(entries.filter(e=>e.text===text.trim()).map(e=>e.id))].sort();
  return {status:matches.length===1?'matched':matches.length?'ambiguous':'unknown',
-  titleReferenceCount:1,matchCount:matches.length,sourceTitleEmpty:text.trim().length===0,sourceTitleIds:matches,rejectionStage:null};
+  titleReferenceCount:1,matchCount:matches.length,sourceTitleEmpty:text.trim().length===0,sourceTitleIds:matches,rejectionStage:null,guardFailure:null};
 }
 async function observe(held,platform,{guard,identity,same,deadline}) {
  const result=facts(platform);let handle;
  const prove=async()=>{
   if(Date.now()>=deadline){result.rejectionStage='deadline';return false;}
-  if(!held||held.url!=='app://-/index.html'||!await guard()){result.rejectionStage='scope';return false;}
+  if(!held||held.url!=='app://-/index.html'){result.rejectionStage='scope';result.guardFailure='held-document';return false;}
+  if(!await guard()){result.rejectionStage='scope';result.guardFailure=guard.lastFailure??null;return false;}
   if(!same(held,await identity(held.page))){result.rejectionStage='changed';return false;}
   if(Date.now()>=deadline){result.rejectionStage='deadline';return false;}
-  if(!await guard()){result.rejectionStage='scope';return false;}
+  if(!await guard()){result.rejectionStage='scope';result.guardFailure=guard.lastFailure??null;return false;}
   return true;
  };
  try {

@@ -378,6 +378,26 @@ pub(crate) enum SealFailure {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum SealIoKind {
+    NotFound,
+    PermissionDenied,
+    AlreadyExists,
+    Interrupted,
+    Other,
+}
+
+fn seal_io_kind(kind: std::io::ErrorKind) -> SealIoKind {
+    match kind {
+        std::io::ErrorKind::NotFound => SealIoKind::NotFound,
+        std::io::ErrorKind::PermissionDenied => SealIoKind::PermissionDenied,
+        std::io::ErrorKind::AlreadyExists => SealIoKind::AlreadyExists,
+        std::io::ErrorKind::Interrupted => SealIoKind::Interrupted,
+        _ => SealIoKind::Other,
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct ParentSealDiagnostic {
     schema_version: u8,
@@ -386,6 +406,10 @@ pub(crate) struct ParentSealDiagnostic {
     mode: ProbeMode,
     stage: ParentSealStage,
     failure: SealFailure,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    io_kind: Option<SealIoKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    seal_operation: Option<crate::journal::SealOperation>,
     original_reason: Option<Reason>,
     reason: Reason,
 }
@@ -409,9 +433,23 @@ impl ParentSealDiagnostic {
             mode: context.mode,
             stage: ParentSealStage::ParentJournalSeal,
             failure,
+            io_kind: None,
+            seal_operation: None,
             original_reason: original,
             reason: Reason::CleanupFailed,
         }
+    }
+
+    pub(crate) fn with_operation(
+        mut self,
+        error: &crate::journal::JournalError,
+        operation: Option<crate::journal::SealOperation>,
+    ) -> Self {
+        if let crate::journal::JournalError::Io(error) = error {
+            self.io_kind = Some(seal_io_kind(error.kind()));
+        }
+        self.seal_operation = operation;
+        self
     }
 
     pub(crate) fn emit(self) {
@@ -425,6 +463,22 @@ impl ParentSealDiagnostic {
 mod tests {
     use super::*;
     use crate::report::Reason;
+
+    #[test]
+    fn parent_seal_io_classifier_never_serializes_private_error_payload() {
+        for (kind, expected) in [
+            (std::io::ErrorKind::NotFound, "not-found"),
+            (std::io::ErrorKind::PermissionDenied, "permission-denied"),
+            (std::io::ErrorKind::AlreadyExists, "already-exists"),
+            (std::io::ErrorKind::Interrupted, "interrupted"),
+            (std::io::ErrorKind::TimedOut, "other"),
+        ] {
+            let error = std::io::Error::new(kind, "PRIVATE sentinel path");
+            let value = serde_json::to_value(seal_io_kind(error.kind())).unwrap();
+            assert_eq!(value, expected);
+            assert!(!value.to_string().contains("PRIVATE"));
+        }
+    }
 
     #[test]
     fn parent_seal_record_preserves_timeout_without_private_error_payload() {

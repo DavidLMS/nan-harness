@@ -591,9 +591,9 @@ fn seal_probe(
     if !matches!(
         outcome.reason,
         Some(Reason::CleanupFailed | Reason::Cancelled)
-    ) && let Err(error) = journal.seal(name)
+    ) && let Err((error, operation)) = journal.seal_observed(name)
     {
-        report_seal_failure(&error, outcome.reason, context);
+        report_seal_failure(&error, operation, outcome.reason, context);
         outcome.status = Status::Failed;
         outcome.reason = Some(Reason::CleanupFailed);
     }
@@ -602,6 +602,7 @@ fn seal_probe(
 
 fn report_seal_failure(
     error: &crate::journal::JournalError,
+    operation: Option<crate::journal::SealOperation>,
     original: Option<Reason>,
     context: crate::diagnostics::ParentProbeContext,
 ) {
@@ -613,7 +614,9 @@ fn report_seal_failure(
         JournalError::Invalid => SealFailure::Invalid,
         JournalError::Conflict => SealFailure::Conflict,
     };
-    ParentSealDiagnostic::new(context, failure, original).emit();
+    ParentSealDiagnostic::new(context, failure, original)
+        .with_operation(error, operation)
+        .emit();
 }
 
 async fn execute_probe(spec: &ProbeSpec, root: &Path) -> ProbeResult {

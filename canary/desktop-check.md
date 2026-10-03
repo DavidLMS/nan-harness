@@ -2637,3 +2637,44 @@ The next Linux Claude startup trial explicitly disables Cowork through the
 exact official `2.9939.4` managed configuration. It requires the admitted release
 and artifact, GitHub-hosted Linux startup mode, and canonical private checker
 profile roots; defaults remain unchanged. This trial adds no GUI actions.
+
+The clean complete local gate on `fd94e1a5` passes, including 393 checker tests.
+[Claude macOS 37161281615](https://github.com/DavidLMS/nan-harness/actions/runs/37161281615)
+proves one exact owned MCP offer in the provider inventory. Built-in Read still
+returns a completed error (`plain-other` envelope); one other native session
+expires in the input phase. The next trial preferentially selects only the
+unique source-known fixture offer with its exact owned-path schema, under the
+existing hosted fixture policy. Duplicate offers in a toolset, schema drift and
+latest-toolset absence reject selection. Other harnesses retain their existing
+selector. The same independent tool-result marker remains mandatory.
+
+Native macOS input now waits passively for the retained composer's exact pasted
+value before issuing readback keys. It keeps the original deadline, focus,
+identity and window guards and never repeats paste or an uncertain action.
+Closed paste/readback deadline phases distinguish the two boundaries.
+
+[Claude Linux 37161283473](https://github.com/DavidLMS/nan-harness/actions/runs/37161283473)
+exits in the child CLI before a window appears. Source review confirms the
+Chat-only guard requires private `profile/nanh` before the CLI applies its
+configuration, but the checker did not prepare that root. The admitted trial
+now precreates it privately; existing insecure or redirected state is rejected.
+[Claude Windows 37161282371](https://github.com/DavidLMS/nan-harness/actions/runs/37161282371)
+proves current Chat, writable ValuePattern, keyboard focus, non-password editor
+and Start task InvokePattern. Initial value is nonempty, so a future controller
+must use the explicitly owned replacement contract. A second startup rejects
+foreground change. Cleanup passes for both Claude runs; no cell qualifies.
+
+[Codex 37161284248](https://github.com/DavidLMS/nan-harness/actions/runs/37161284248)
+still rejects macOS passive scope and measures unknown nonempty Linux/Windows
+titles. Linux's second probe also fails parent journal sealing with an I/O
+error. Optional closed scope, I/O-kind and seal-operation facts now distinguish
+these boundaries without changing acceptance or cleanup. The Linux catalog
+also includes one fixed title from the separately verified public Radix Title
+wrapper (187 total); no observed dialog identity is inferred.
+
+The next Zed Linux recovery trial uses official private startup settings:
+right dock, fixed 960px width, flexible sizing off and content-width cap off.
+The exact pinned source places the Retry callout outside the conversation
+scroller and clips its horizontal content. A wider panel is a layout trial,
+not proof of the preceding click failure. It adds no zoom activation or Retry
+replay and preserves the existing response/tool/Resume oracle.

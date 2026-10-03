@@ -57,6 +57,13 @@ pub enum JournalError {
     Conflict,
 }
 
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum SealOperation {
+    Fingerprint,
+    Persist,
+}
+
 impl Journal {
     /// Allocate a new run; existing runs and resources are never reused.
     ///
@@ -173,15 +180,24 @@ impl Journal {
     /// # Errors
     /// Fails if the owned directory cannot be completely fingerprinted.
     pub fn seal(&mut self, name: &str) -> Result<(), JournalError> {
+        self.seal_observed(name).map_err(|(error, _)| error)
+    }
+
+    pub(crate) fn seal_observed(
+        &mut self,
+        name: &str,
+    ) -> Result<(), (JournalError, Option<SealOperation>)> {
         let index = self
             .state
             .resources
             .iter()
             .position(|entry| entry.name == name)
-            .ok_or(JournalError::Invalid)?;
-        let fingerprint = tree_fingerprint(&self.root.join(name))?;
+            .ok_or((JournalError::Invalid, None))?;
+        let fingerprint = tree_fingerprint(&self.root.join(name))
+            .map_err(|error| (error, Some(SealOperation::Fingerprint)))?;
         self.state.resources[index].fingerprint = Some(fingerprint);
         self.save()
+            .map_err(|error| (error, Some(SealOperation::Persist)))
     }
 
     /// Remove only owned, unchanged resources; keep the journal for repeatable recovery.

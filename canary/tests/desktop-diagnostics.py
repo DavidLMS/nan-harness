@@ -51,6 +51,16 @@ class DiagnosticTests(unittest.TestCase):
             D.validate_parent({**record, "failure": failure})
         D.validate_parent({**record, "mode": "live", "probeIndex": None, "originalReason": None})
 
+    def test_parent_seal_io_kind_and_operation_are_closed_optional_diagnostics(self):
+        legacy = dict(schemaVersion=1, app="chatgpt-desktop", probeIndex=1, mode="deterministic",
+                      stage="parent-journal-seal", failure="io", originalReason="timeout", reason="cleanup-failed")
+        for kind in ('not-found', 'permission-denied', 'already-exists', 'interrupted', 'other'):
+            for operation in ('fingerprint', 'persist'):
+                D.validate_parent({**legacy, 'ioKind': kind, 'sealOperation': operation})
+        for patch in ({'ioKind': 'PRIVATE'}, {'ioKind': None}, {'ioKind': 'other', 'failure': 'invalid'},
+                      {'sealOperation': 'PRIVATE'}, {'sealOperation': None}, {'error': 'PRIVATE'}):
+            with self.assertRaises(ValueError): D.validate_parent({**legacy, **patch})
+
     def test_unknown_launcher_exit_preserves_closed_cleanup_without_masking_capture(self):
         record = {**native(), 'app': 'claude-desktop', 'launchExit': 'unknown'}
         capture = D.Capture('windows')

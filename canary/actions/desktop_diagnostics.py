@@ -404,7 +404,7 @@ def validate_stop(value):
 
 
 def validate_parent(record):
-    fields(record, {"schemaVersion", "app", "probeIndex", "mode", "stage", "failure", "originalReason", "reason"})
+    fields(record, {"schemaVersion", "app", "probeIndex", "mode", "stage", "failure", "originalReason", "reason"}, {"ioKind", "sealOperation"})
     integer(record["schemaVersion"], 1, 1)
     enum(record["app"], APPS)
     enum(record["mode"], {"deterministic", "live"})
@@ -414,6 +414,11 @@ def validate_parent(record):
         integer(record["probeIndex"], 0, 2)
     enum(record["stage"], {"parent-journal-seal"})
     enum(record["failure"], {"io", "locked", "invalid", "conflict"})
+    if "ioKind" in record:
+        require(record["failure"] == "io")
+        enum(record["ioKind"], {"not-found", "permission-denied", "already-exists", "interrupted", "other"})
+    if "sealOperation" in record:
+        enum(record["sealOperation"], {"fingerprint", "persist"})
     if record["originalReason"] is not None:
         enum(record["originalReason"], REASONS - {"cleanup-failed", "cancelled"})
     enum(record["reason"], {"cleanup-failed"})

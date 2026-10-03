@@ -6,6 +6,28 @@ static Node fixture(int parent, const char* role, const char* label, const char*
     return {nullptr, parent, role, label, current, CGRectZero, true};
 }
 int main() {
+    assert(pasted_value_state("","prompt",true,true)==PastedValue::Pending);
+    assert(pasted_value_state("pro","prompt",true,true)==PastedValue::Pending);
+    assert(pasted_value_state("prompt","prompt",true,true)==PastedValue::Ready);
+    assert(pasted_value_state("foreign","prompt",true,true)==PastedValue::Rejected);
+    assert(pasted_value_state("prompt","prompt",false,true)==PastedValue::Rejected);
+    assert(pasted_value_state("prompt","prompt",true,false)==PastedValue::Rejected);
+    assert(pasted_value_state(std::string(1025,'x'),"prompt",true,true)==PastedValue::Rejected);
+    unsigned value_queries=0, readback_keys=0, value_pauses=0;
+    if (settle_pasted_value([&] { assert(readback_keys==0); return ++value_queries==1
+            ? PastedValue::Pending : PastedValue::Ready; }, [] { return true; },
+            [&] { ++value_pauses; })) ++readback_keys;
+    assert(value_queries==2 && value_pauses==1 && readback_keys==1);
+    value_queries=readback_keys=value_pauses=0;
+    unsigned value_deadline_checks=0;
+    if (settle_pasted_value([&] { ++value_queries; return PastedValue::Ready; },
+            [&] { return ++value_deadline_checks==1; }, [&] { ++value_pauses; })) ++readback_keys;
+    assert(value_queries==1 && readback_keys==0 && value_pauses==0);
+    value_queries=readback_keys=value_pauses=0;
+    if (settle_pasted_value([&] { ++value_queries; return PastedValue::Rejected; },
+            [] { return true; }, [&] { ++value_pauses; })) ++readback_keys;
+    assert(value_queries==1 && readback_keys==0 && value_pauses==0);
+
     Request diagnostic;
     for (const char* phase : {"deadline-window", "deadline-tree", "deadline-focus", "deadline-input",
             "deadline-press", "deadline-copy", "deadline-retry-ready", "deadline-retry"}) {

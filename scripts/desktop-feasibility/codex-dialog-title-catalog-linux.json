@@ -1812,6 +1812,17 @@
       "sha": "387b42d3a47307b1d310ca01f8e7c5d86983e60920559ffcca66390cc28fc967",
       "text": "Are you sure?",
       "wrapperSha256": "c3c9a86a6d9c3a2a8cecaf0a6a22527c69f89949cb0d8958896bc86131e9c6c9"
+    },
+    {
+      "binding": "app-initial pz as U, U.Title\u2192nBo\u2192app-shared Bon as er\u2192rv\u2192H2",
+      "descriptorFile": "app-initial-39a13ffe060c.js",
+      "descriptorSha256": "28c6096af241a37a9a33a2e5601f0aa05426910d5c84d08824d852342a2b4d5d",
+      "file": "offer-page-5f3de3a5e359.js",
+      "id": "chatgpt.promotion.credit_grant_redemption.modal.title.v2",
+      "platform": "linux",
+      "sha": "1f288e1a1a0e282a726c34cabdf258c4e5209367d648d8b3722e8806443906d9",
+      "text": "Redeem credits",
+      "wrapperSha256": "c3c9a86a6d9c3a2a8cecaf0a6a22527c69f89949cb0d8958896bc86131e9c6c9"
     }
   ],
   "sourceVersion": "26.930.41038"

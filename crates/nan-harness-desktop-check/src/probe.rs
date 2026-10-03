@@ -1498,6 +1498,91 @@ fn select_read_tool(requests: &[Value], fixture: &Path) -> Option<(String, Value
 }
 
 /// Verify the diagnostic binding before any process runs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum OwnedReadFixtureSelection {
+    Selected,
+    Missing,
+    Ambiguous,
+    SchemaMismatch,
+    Limit,
+}
+
+fn select_semantic_read_tool(
+    requests: &[Value],
+    fixture: &Path,
+    owned_fixture_scope: bool,
+) -> (Option<(String, Value)>, Option<OwnedReadFixtureSelection>) {
+    if !owned_fixture_scope {
+        return (select_read_tool(requests, fixture), None);
+    }
+    match select_owned_read_fixture(requests, fixture) {
+        Ok(selected) => (Some(selected), Some(OwnedReadFixtureSelection::Selected)),
+        Err(status) => (None, Some(status)),
+    }
+}
+
+fn select_owned_read_fixture(
+    requests: &[Value],
+    fixture: &Path,
+) -> Result<(String, Value), OwnedReadFixtureSelection> {
+    const NAME: &str = "mcp__nanh-read-fixture__read_file";
+    if requests.len() > 4096 {
+        return Err(OwnedReadFixtureSelection::Limit);
+    }
+    let path = fixture
+        .to_str()
+        .ok_or(OwnedReadFixtureSelection::SchemaMismatch)?;
+    let mut inspected = 0_usize;
+    let mut latest_offer = false;
+    for request in requests {
+        let Some(tools) = request.get("tools").and_then(Value::as_array) else {
+            continue;
+        };
+        inspected = inspected
+            .checked_add(tools.len())
+            .ok_or(OwnedReadFixtureSelection::Limit)?;
+        if inspected > 4096 {
+            return Err(OwnedReadFixtureSelection::Limit);
+        }
+        let mut offered = false;
+        for tool in tools {
+            if tool.pointer("/function/name").and_then(Value::as_str) != Some(NAME) {
+                continue;
+            }
+            if offered {
+                return Err(OwnedReadFixtureSelection::Ambiguous);
+            }
+            offered = true;
+            let schema = tool
+                .pointer("/function/parameters")
+                .and_then(Value::as_object)
+                .ok_or(OwnedReadFixtureSelection::SchemaMismatch)?;
+            let properties = schema
+                .get("properties")
+                .and_then(Value::as_object)
+                .ok_or(OwnedReadFixtureSelection::SchemaMismatch)?;
+            if schema.get("type") != Some(&json!("object"))
+                || properties.len() != 1
+                || properties.get("path") != Some(&json!({"type":"string","const":path}))
+                || schema.get("required") != Some(&json!(["path"]))
+                || schema
+                    .get("additionalProperties")
+                    .is_some_and(|value| value != &Value::Bool(false))
+            {
+                return Err(OwnedReadFixtureSelection::SchemaMismatch);
+            }
+        }
+        // Each request is a fresh toolset. Repeated valid offers confirm the
+        // same contract; the latest observed toolset must still offer it.
+        latest_offer = offered;
+    }
+    if !latest_offer {
+        return Err(OwnedReadFixtureSelection::Missing);
+    }
+    Ok((NAME.to_owned(), json!({"path":path})))
+}
+
 fn prepare_launch_wrapper(kind: DesktopHarnessKind, wrapper: &LaunchWrapper) -> Result<(), Reason> {
     if kind != DesktopHarnessKind::ChatGpt || binary_digest(&wrapper.path)? != wrapper.sha256 {
         return Err(Reason::InstallationUnreadable);
@@ -1516,6 +1601,69 @@ fn prepare_claude_trial_roots(profile: &Path) -> Result<(), Reason> {
         create_private_dir_all(&support.join(name)).map_err(|_| Reason::IsolationUnavailable)?;
     }
     Ok(())
+}
+
+fn prepare_claude_linux_trial_state(spec: &ProbeSpec, profile: &Path) -> Result<(), Reason> {
+    if std::env::var_os("NANH_CLAUDE_LINUX_CHAT_ONLY").is_some() {
+        if !cfg!(target_os = "linux")
+            || spec.kind != DesktopHarnessKind::Claude
+            || spec.session != crate::cli::SessionMode::GithubHosted
+            || std::env::var("NANH_CLAUDE_LINUX_CHAT_ONLY").as_deref() != Ok("1")
+            || std::env::var("NANH_CLAUDE_LINUX_SOURCE_POLICY").as_deref()
+                != Ok("official-2.9939.4")
+            || std::env::var("RUNNER_OS").as_deref() != Ok("Linux")
+            || std::env::var("GITHUB_ACTIONS").as_deref() != Ok("true")
+            || std::env::var("RUNNER_ENVIRONMENT").as_deref() != Ok("github-hosted")
+            || std::env::var("NANH_DESKTOP_QUALIFICATION_MODE").as_deref() != Ok("startup-baseline")
+        {
+            return Err(Reason::IsolationUnavailable);
+        }
+        prepare_claude_linux_state(&profile.join("nanh"))?;
+    }
+    Ok(())
+}
+
+fn prepare_claude_linux_state(directory: &Path) -> Result<(), Reason> {
+    // PersistenceManager runs before the CLI profile guard. Prepare its exact
+    // owned root privately before its ordinary create_dir_all can create 0755.
+    create_private_dir_all(directory).map_err(|_| Reason::IsolationUnavailable)?;
+    let metadata =
+        std::fs::symlink_metadata(directory).map_err(|_| Reason::IsolationUnavailable)?;
+    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+        return Err(Reason::IsolationUnavailable);
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        if metadata.permissions().mode() & 0o077 != 0 {
+            return Err(Reason::IsolationUnavailable);
+        }
+    }
+    Ok(())
+}
+
+#[cfg(all(test, unix))]
+#[test]
+fn fresh_private_state_survives_ordinary_persistence_creation() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let temporary = tempfile::tempdir().unwrap();
+    let root = temporary.path();
+    let directory = root.join("nanh");
+    prepare_claude_linux_state(&directory).unwrap();
+    std::fs::create_dir_all(&directory).unwrap();
+    assert_eq!(
+        std::fs::metadata(&directory).unwrap().permissions().mode() & 0o777,
+        0o700
+    );
+    let sentinel = directory.join("state");
+    std::fs::write(&sentinel, b"private").unwrap();
+    std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(prepare_claude_linux_state(&directory).is_err());
+    assert_eq!(std::fs::read(&sentinel).unwrap(), b"private");
+    assert_eq!(
+        std::fs::metadata(&directory).unwrap().permissions().mode() & 0o777,
+        0o755
+    );
 }
 
 fn isolated_command(spec: &ProbeSpec, program: &Path) -> Result<Command, Reason> {
@@ -1537,6 +1685,7 @@ fn isolated_command(spec: &ProbeSpec, program: &Path) -> Result<Command, Reason>
     ] {
         create_private_dir_all(directory).map_err(|_| Reason::IsolationUnavailable)?;
     }
+    prepare_claude_linux_trial_state(spec, &profile)?;
     let native_policy = claude_native_roots::enabled(spec)?;
     if std::env::var_os("NANH_CLAUDE_MAC_PROFILE_POLICY").is_some() && !native_policy {
         if !cfg!(target_os = "macos")
@@ -1651,6 +1800,167 @@ fn hermes_user_data(profile: &Path, roaming: &Path) -> PathBuf {
     }
 }
 
+/// Only the disposable hosted Linux semantic profile admits this layout experiment.
+fn zed_panel_layout_settings(settings: &[u8], spec: &ProbeSpec) -> Result<Vec<u8>, Reason> {
+    let requested =
+        std::env::var("NANH_ZED_PANEL_LAYOUT")
+            .map(Some)
+            .or_else(|error| match error {
+                std::env::VarError::NotPresent => Ok(None),
+                std::env::VarError::NotUnicode(_) => Err(Reason::IsolationUnavailable),
+            })?;
+    let allowed = cfg!(target_os = "linux")
+        && spec.kind == DesktopHarnessKind::Zed
+        && spec.verification == crate::cli::VerificationPolicy::SemanticOnly
+        && spec.session == crate::cli::SessionMode::GithubHosted
+        && spec.session.available()
+        && std::env::var("RUNNER_OS").as_deref() == Ok("Linux")
+        && std::env::var("NANH_ZED_PANEL_SOURCE_POLICY").as_deref() == Ok("official-1.22.0")
+        && std::env::var_os("NANH_ZED_LAYOUT_POLICY").is_none()
+        && std::env::var_os("NANH_ZED_PANEL_ZOOM").is_none();
+    zed_panel_layout_bytes(settings, requested.as_deref(), allowed)
+}
+
+fn zed_panel_layout_bytes(
+    settings: &[u8],
+    requested: Option<&str>,
+    allowed: bool,
+) -> Result<Vec<u8>, Reason> {
+    let Some(requested) = requested else {
+        return Ok(settings.to_vec());
+    };
+    if requested != "fixed-wide" || !allowed {
+        return Err(Reason::IsolationUnavailable);
+    }
+    let mut document: Value =
+        serde_json::from_slice(settings).map_err(|_| Reason::IsolationUnavailable)?;
+    let object = document
+        .as_object_mut()
+        .ok_or(Reason::IsolationUnavailable)?;
+    object.insert(
+        "agent".to_owned(),
+        serde_json::json!({
+            "dock": "right", "flexible": false, "default_width": 960,
+            "limit_content_width": false
+        }),
+    );
+    serde_json::to_vec(&document).map_err(|_| Reason::IsolationUnavailable)
+}
+
+#[cfg(test)]
+mod zed_panel_layout_tests {
+    use super::*;
+    #[test]
+    fn owned_fixture_selection_tracks_latest_toolset_and_rejects_conflicts() {
+        let fixture = Path::new("/private/owned/read-target.txt");
+        let offered = json!({"function":{"name":"mcp__nanh-read-fixture__read_file","parameters":{
+            "type":"object","properties":{"path":{"type":"string","const":fixture}},
+            "required":["path"],"additionalProperties":false}}});
+        let request = json!({"tools":[offered.clone()]});
+        for requests in [
+            vec![request.clone()],
+            vec![request.clone(), request.clone()],
+            vec![json!({"tools":[]}), request.clone()],
+        ] {
+            let (selected, status) = select_semantic_read_tool(&requests, fixture, true);
+            assert_eq!(status, Some(OwnedReadFixtureSelection::Selected));
+            assert_eq!(
+                selected.unwrap(),
+                (
+                    "mcp__nanh-read-fixture__read_file".into(),
+                    json!({"path":fixture})
+                )
+            );
+        }
+        assert_eq!(
+            select_owned_read_fixture(&[request.clone(), json!({"tools":[]})], fixture),
+            Err(OwnedReadFixtureSelection::Missing)
+        );
+        assert_eq!(
+            select_owned_read_fixture(
+                &[json!({"tools":[offered.clone(),offered.clone()]})],
+                fixture
+            ),
+            Err(OwnedReadFixtureSelection::Ambiguous)
+        );
+        for (pointer, invalid) in [
+            (
+                "/function/parameters/properties/path/const",
+                json!("/private/other"),
+            ),
+            ("/function/parameters/properties/path/type", json!("number")),
+            ("/function/parameters/required", json!(["path", "path"])),
+            ("/function/parameters/additionalProperties", json!(true)),
+            (
+                "/function/parameters/properties",
+                json!({"path":{"type":"string","const":fixture},"extra":{}}),
+            ),
+            ("/function/parameters", json!(null)),
+        ] {
+            let mut wrong = offered.clone();
+            *wrong.pointer_mut(pointer).unwrap() = invalid;
+            let wrong_request = json!({"tools":[wrong]});
+            for requests in [
+                vec![request.clone(), wrong_request.clone()],
+                vec![wrong_request, request.clone()],
+            ] {
+                assert_eq!(
+                    select_owned_read_fixture(&requests, fixture),
+                    Err(OwnedReadFixtureSelection::SchemaMismatch)
+                );
+            }
+        }
+        for alias in [
+            "Read",
+            "nanh-read-fixture__read_file",
+            "mcp__other__read_file",
+        ] {
+            let mut wrong = offered.clone();
+            *wrong.pointer_mut("/function/name").unwrap() = json!(alias);
+            assert_eq!(
+                select_owned_read_fixture(&[json!({"tools":[wrong]})], fixture),
+                Err(OwnedReadFixtureSelection::Missing)
+            );
+        }
+        assert_eq!(
+            select_owned_read_fixture(&vec![request.clone(); 4097], fixture),
+            Err(OwnedReadFixtureSelection::Limit)
+        );
+        assert_eq!(
+            select_owned_read_fixture(&[json!({"tools":vec![offered;4097]})], fixture),
+            Err(OwnedReadFixtureSelection::Limit)
+        );
+        let (selected, status) = select_semantic_read_tool(
+            &[json!({"tools":[{"function":{"name":"Read"}}]})],
+            fixture,
+            false,
+        );
+        assert_eq!(selected.unwrap().0, "Read");
+        assert_eq!(status, None);
+    }
+
+    #[test]
+    fn fixed_panel_requires_admission_and_preserves_other_settings() {
+        let original = br#"{"auto_update":false,"telemetry":{"metrics":false},"theme":"One Dark"}"#;
+        assert_eq!(
+            zed_panel_layout_bytes(original, None, false).unwrap(),
+            original
+        );
+        assert!(zed_panel_layout_bytes(original, Some("fixed-wide"), false).is_err());
+        assert!(zed_panel_layout_bytes(original, Some("zoom"), true).is_err());
+        assert!(zed_panel_layout_bytes(b"[]", Some("fixed-wide"), true).is_err());
+        let configured: Value = serde_json::from_slice(
+            &zed_panel_layout_bytes(original, Some("fixed-wide"), true).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(configured["theme"], "One Dark");
+        assert_eq!(configured["telemetry"]["metrics"], false);
+        assert_eq!(configured["agent"]["default_width"], 960);
+        assert_eq!(configured["agent"]["flexible"], false);
+        assert_eq!(configured["agent"]["limit_content_width"], false);
+    }
+}
+
 fn prepare_zed_profile(spec: &ProbeSpec) -> Result<(), Reason> {
     if spec.kind != DesktopHarnessKind::Zed {
         return Ok(());
@@ -1664,8 +1974,9 @@ fn prepare_zed_profile(spec: &ProbeSpec) -> Result<(), Reason> {
     } else {
         br#"{"auto_update":false,"telemetry":{"metrics":false,"diagnostics":false},"agent_ui_font_size":18,"agent_buffer_font_size":16}"#
     };
+    let settings = zed_panel_layout_settings(settings, spec)?;
     open_private_new(&directory.join("settings.json"))
-        .and_then(|mut file| file.write_all(settings))
+        .and_then(|mut file| file.write_all(&settings))
         .map_err(|_| Reason::IsolationUnavailable)?;
     if std::env::var_os("FEASIBILITY_ZED_NATIVE_COPY_FACTS").is_some()
         || spec.verification == crate::cli::VerificationPolicy::SemanticOnly

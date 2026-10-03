@@ -367,12 +367,51 @@ static bool settle_composer_focus(Query query, Within within_deadline, Pause pau
     return false;
 }
 static bool wait_focused_composer(const Request& request, const Node& control) {
+    const char* prior_phase = request.deadline_phase;
     request.deadline_phase = "deadline-focus";
     const bool focused = settle_composer_focus([&] { return focused_composer(request, control); },
         [&] { return within(request); },
         [] { std::this_thread::sleep_for(std::chrono::milliseconds(20)); });
-    if (focused) request.deadline_phase = "deadline-input";
+    if (focused) request.deadline_phase = prior_phase;
     return focused;
+}
+enum class PastedValue { Ready, Pending, Rejected };
+static PastedValue pasted_value_state(const std::string& value, const std::string& prompt,
+                                     bool valid_value, bool exact_focus) {
+    if (!valid_value || !exact_focus || value.size()>1024) return PastedValue::Rejected;
+    if (value==prompt) return PastedValue::Ready;
+    return prompt.compare(0,value.size(),value)==0 ? PastedValue::Pending : PastedValue::Rejected;
+}
+static PastedValue pasted_composer_value(const Request& request, const Node& control) {
+    if (focused_composer(request,control)!=ComposerFocus::Focused) return PastedValue::Rejected;
+    auto value=attribute(control.element,kAXValueAttribute);
+    char buffer[4097]{};
+    const bool valid=value && CFGetTypeID(value)==CFStringGetTypeID()
+        && CFStringGetLength(static_cast<CFStringRef>(value))<=1024
+        && CFStringGetCString(static_cast<CFStringRef>(value),buffer,sizeof(buffer),kCFStringEncodingUTF8);
+    if (value) CFRelease(value);
+    std::string observed=valid ? buffer : "";
+    std::fill(std::begin(buffer),std::end(buffer),'\0');
+    const bool focused=focused_composer(request,control)==ComposerFocus::Focused;
+    const auto state=pasted_value_state(observed,request.prompt,valid && !ax_query_failed,focused);
+    std::fill(observed.begin(),observed.end(),'\0');
+    return state;
+}
+template<class Query, class Within, class Pause>
+static bool settle_pasted_value(Query query, Within within_deadline, Pause pause) {
+    while (within_deadline()) {
+        const auto state=query();
+        if (!within_deadline() || state==PastedValue::Rejected) return false;
+        if (state==PastedValue::Ready) return true;
+        pause();
+    }
+    return false;
+}
+static bool wait_pasted_value(const Request& request, const Node& control) {
+    request.deadline_phase="deadline-input-paste";
+    return settle_pasted_value([&] { return pasted_composer_value(request,control); },
+        [&] { return within(request); },
+        [] { std::this_thread::sleep_for(std::chrono::milliseconds(20)); });
 }
 static const char* input(const Request& request, const Tree& tree) {
     if (!chat(tree)) return "mode";
@@ -398,7 +437,8 @@ static const char* input(const Request& request, const Tree& tree) {
     if (!owned(request)) return "input-prompt-after-guard";
     if (!wait_focused_composer(request, control)) return "input-focused-identity";
     if (!key(9, true)) return "input-paste-key";
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    if (!wait_pasted_value(request,control)) return "input-value-mismatch";
+    request.deadline_phase="deadline-input-readback";
     if (!owned(request)) return "input-readback-before-guard";
     if (!clipboard_write(request.sentinel)) return "input-sentinel-clipboard";
     if (!owned(request)) return "input-sentinel-after-guard";

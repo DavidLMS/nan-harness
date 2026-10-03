@@ -118,6 +118,13 @@ def validate_claude_windows_bundle(executable):
         raise ValueError('claude-windows-bootstrap-invalid') from None
 
 
+def validate_zed_panel_release(release, executable_hash):
+    if (release.get('version') != '1.22.0'
+            or release.get('digest') != 'sha256:5ce3991b34a8fad0a23625f5821cda601c7150a6cc69683c097b8d1b083abc50'
+            or executable_hash != '443670f58a31e7410d0cec0577dd4ebbea6af27e53252c4e6f43d1715d798ba4'):
+        raise ValueError('Zed panel layout source differs')
+
+
 def qualification_environment(app, facts, real_nanh, executable, inherited=None):
     source = os.environ if inherited is None else inherited
     if source.get('GITHUB_ACTIONS') != 'true' or source.get('RUNNER_ENVIRONMENT') != 'github-hosted':
@@ -143,6 +150,11 @@ def qualification_environment(app, facts, real_nanh, executable, inherited=None)
         raise ValueError('Codex native project policy is unavailable')
     if source.get('NANH_CLAUDE_LINUX_CHAT_ONLY') is not None and (app != 'claude-desktop' or source.get('RUNNER_OS') != 'Linux' or source.get('NANH_DESKTOP_QUALIFICATION_MODE') != 'startup-baseline' or source.get('NANH_CLAUDE_LINUX_CHAT_ONLY') != '1'):
         raise ValueError('Claude Linux Chat-only trial is unavailable')
+    panel_layout = source.get('NANH_ZED_PANEL_LAYOUT')
+    if panel_layout is not None and (panel_layout != 'fixed-wide' or app != 'zed-desktop'
+            or source.get('RUNNER_OS') != 'Linux'
+            or source.get('NANH_ZED_LAYOUT_POLICY') is not None or source.get('NANH_ZED_PANEL_ZOOM') is not None):
+        raise ValueError('Zed panel layout trial is unavailable')
     environment = {key: value for key, value in source.items() if key in SESSION_ENV}
     if source.get('RUNNER_OS') == 'Windows':
         for key in WINDOWS_PROOF:
@@ -324,6 +336,13 @@ def run(args):
         raise ValueError('report destination already exists')
     environment = qualification_environment(args.app, facts, args.real_nanh, executable)
     release = manifest['apps'][0]
+    if os.environ.get('NANH_ZED_PANEL_LAYOUT') is not None:
+        if args.app != 'zed-desktop' or args.platform != 'linux':
+            raise ValueError('Zed panel layout platform differs')
+        validate_zed_panel_release(release, digest(Path(executable)))
+        environment['NANH_ZED_PANEL_LAYOUT'] = 'fixed-wide'
+        environment['NANH_ZED_PANEL_SOURCE_POLICY'] = 'official-1.22.0'
+
     if (args.app == 'claude-desktop' and args.platform == 'linux'
             and release.get('version') == '2.9939.4'
             and release.get('digest') == 'sha256:3cfddb23bf2911e05e27b4ed3856b8e795df94643b2c35b59deb317cf995bca0'

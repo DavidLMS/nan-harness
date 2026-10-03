@@ -15,6 +15,7 @@ pub(crate) enum SelectedTool {
     ReadFile,
     ReadFiles,
     ExecCommand,
+    FixtureRead,
 }
 
 impl SelectedTool {
@@ -24,6 +25,7 @@ impl SelectedTool {
             "read_file" => Some(Self::ReadFile),
             "read_files" => Some(Self::ReadFiles),
             "exec_command" => Some(Self::ExecCommand),
+            "mcp__nanh-read-fixture__read_file" => Some(Self::FixtureRead),
             _ => None,
         }
     }
@@ -310,6 +312,21 @@ mod tests {
         let mut value = json!({"messages":[{"role":role,"tool_call_id":EXPECTED_CALL}]});
         value["messages"][0]["content"] = content;
         value
+    }
+
+    #[test]
+    fn owned_fixture_tool_name_is_exact_and_not_a_general_mcp_alias() {
+        assert!(matches!(
+            SelectedTool::from_name("mcp__nanh-read-fixture__read_file"),
+            Some(SelectedTool::FixtureRead)
+        ));
+        for name in [
+            "nanh-read-fixture__read_file",
+            "mcp__other__read_file",
+            "MCP__nanh-read-fixture__read_file",
+        ] {
+            assert!(SelectedTool::from_name(name).is_none());
+        }
     }
 
     #[test]

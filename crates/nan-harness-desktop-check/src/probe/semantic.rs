@@ -1,6 +1,6 @@
 //! Complete hosted deterministic scenarios using owned semantic UI adapters.
 
-use super::{ProbeSpec, select_read_tool, semantic_marker};
+use super::{OwnedReadFixtureSelection, ProbeSpec, select_semantic_read_tool, semantic_marker};
 use crate::cli::{SessionMode, VerificationPolicy};
 #[cfg(target_os = "macos")]
 use crate::gui::ClaudeNativeChatSession;
@@ -331,7 +331,6 @@ async fn complete_scenario(
         .extend([CheckStep::InputSubmitted, CheckStep::ResponseVerified]);
 
     let requests = inventory.chat_requests();
-    let selected = select_read_tool(&requests, fixture);
     let owned_fixture_scope = {
         #[cfg(target_os = "macos")]
         {
@@ -342,11 +341,14 @@ async fn complete_scenario(
             false
         }
     };
+    let (selected, fixture_selection) =
+        select_semantic_read_tool(&requests, fixture, owned_fixture_scope);
     record_inventory(
         directory,
         &requests,
         selected.is_some(),
         owned_fixture_scope,
+        fixture_selection,
     )?;
     let (name, arguments) = selected.ok_or(Reason::ToolMismatch)?;
     let selected_tool = SelectedTool::from_name(&name).ok_or(Reason::ToolMismatch)?;
@@ -474,6 +476,8 @@ struct InventoryFacts {
     read_tool_selected: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     owned_read_fixture_tool_count: Option<OwnedReadFixtureCount>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    owned_read_fixture_selection: Option<OwnedReadFixtureSelection>,
 }
 
 fn record_inventory(
@@ -481,6 +485,7 @@ fn record_inventory(
     requests: &[serde_json::Value],
     selected: bool,
     owned_fixture_scope: bool,
+    fixture_selection: Option<OwnedReadFixtureSelection>,
 ) -> Result<(), Reason> {
     let tools: Vec<_> = requests
         .iter()
@@ -493,6 +498,7 @@ fn record_inventory(
         request_count: requests.len(),
         tool_count: tools.len(),
         read_tool_selected: selected,
+        owned_read_fixture_selection: fixture_selection,
         owned_read_fixture_tool_count: owned_fixture_scope.then(|| {
             owned_read_fixture_count(requests).map_or(
                 OwnedReadFixtureCount::Unavailable,

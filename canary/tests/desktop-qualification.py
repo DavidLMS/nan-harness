@@ -1028,6 +1028,25 @@ class QualificationTests(unittest.TestCase):
             path.write_text(json.dumps(value))
             self.assertNotIn('ownedReadFixtureToolCount', q.semantic_observations(root, 'claude-desktop')[0])
 
+    def test_owned_fixture_selection_is_closed_scoped_and_consistent(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'inventory.json'
+            value = dict(schemaVersion=1, mechanism='semantic-inventory', requestCount=2,
+                         toolCount=2, knownReadToolCount=0, ownedReadFixtureToolCount=2)
+            for status in ('selected', 'missing', 'ambiguous', 'schema-mismatch', 'limit'):
+                receipt = {**value, 'readToolSelected': status == 'selected', 'ownedReadFixtureSelection': status}
+                path.write_text(json.dumps(receipt))
+                self.assertEqual(q.semantic_observations(root, 'claude-desktop')[0]['ownedReadFixtureSelection'], status)
+                with self.assertRaises(ValueError): q.semantic_observations(root, 'hermes-desktop')
+                path.write_text(json.dumps({**receipt, 'readToolSelected': status != 'selected'}))
+                with self.assertRaises(ValueError): q.semantic_observations(root, 'claude-desktop')
+            for status in (None, True, 'PRIVATE', {'path':'PRIVATE'}):
+                path.write_text(json.dumps({**value, 'readToolSelected': False, 'ownedReadFixtureSelection': status}))
+                with self.assertRaises(ValueError): q.semantic_observations(root, 'claude-desktop')
+            value.pop('ownedReadFixtureToolCount')
+            path.write_text(json.dumps({**value, 'readToolSelected': False, 'ownedReadFixtureSelection':'missing'}))
+            with self.assertRaises(ValueError): q.semantic_observations(root, 'claude-desktop')
+
     def test_semantic_observation_bounds_and_symlink_rejection(self):
         with tempfile.TemporaryDirectory() as root:
             path = Path(root) / 'observation.json'
@@ -2112,7 +2131,7 @@ class QualificationTests(unittest.TestCase):
                 path.write_text(json.dumps(item))
                 self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [item])
                 self.assertEqual(q.envelope('claude-desktop', 'macos', 'aarch64', 'a' * 40)['qualification'], 'unqualified')
-            for deadline in ('deadline-window', 'deadline-tree', 'deadline-focus', 'deadline-input',
+            for deadline in ('deadline-window', 'deadline-tree', 'deadline-focus', 'deadline-input', 'deadline-input-paste', 'deadline-input-readback',
                              'deadline-press', 'deadline-copy', 'deadline-retry-ready', 'deadline-retry'):
                 item={**value, 'stage':deadline, 'submittedTurns':0, 'inputVerifiedTurns':0,
                       'copiedResponses':0, 'retryAttempted':False}
@@ -2874,7 +2893,7 @@ class CodexStaticDialogTitleTests(unittest.TestCase):
                      sourceVersion='26.930.41038', platform='linux',
                      artifactSha256='ee7854145554718d7239d01ea37d44f6ba1e0ba4a93f47ac097d6e0f964da47c',
                      wrapperSourceSha256='c3c9a86a6d9c3a2a8cecaf0a6a22527c69f89949cb0d8958896bc86131e9c6c9',
-                     catalogSha256='8a8578475a1914678e7a76d3de03a5bba4bb44b4f44de35ad4f158418b009b2f',
+                     catalogSha256='d7957a729c576bb921b963ef550e756d975148b96971a0564c79e3daf41c6c37',
                      status='matched', titleReferenceCount=1, matchCount=1,
                      sourceTitleIds=['chatgpt.global_search.modal.title'])
         with tempfile.TemporaryDirectory() as root:
@@ -2934,6 +2953,14 @@ class CodexStaticDialogTitleTests(unittest.TestCase):
             for identity in ('workspaceOnboarding.dialogTitle', 'work.onboarding.role.new.question'):
                 path.write_text(json.dumps({**value, 'sourceTitleIds': [identity]}))
                 self.assertEqual(q.semantic_observations(root, 'chatgpt-desktop')[0]['sourceTitleIds'], [identity])
+            for failure in ('held-document', 'page-set', 'native-ownership', 'retained-document', 'document-focus', 'catalog-limit'):
+                rejected = {**value, 'status': 'guard-rejected', 'rejectionStage': 'scope', 'guardFailure': failure,
+                            'titleReferenceCount': None, 'matchCount': None, 'sourceTitleIds': []}
+                path.write_text(json.dumps(rejected))
+                self.assertEqual(q.semantic_observations(root, 'chatgpt-desktop')[0]['guardFailure'], failure)
+                for patch in ({'guardFailure': 'PRIVATE'}, {'rejectionStage': 'query'}, {'guardFailure': []}):
+                    path.write_text(json.dumps({**rejected, **patch}))
+                    with self.assertRaises(ValueError): q.semantic_observations(root, 'chatgpt-desktop')
             for change in ({'sourceVersion': '26.930.31730'}, {'text': 'PRIVATE'}, {'platform': []}, {'status': []}, {'sourceTitleIds': ['PRIVATE']},
                            {'sourceTitleIds': value['sourceTitleIds'] * 2}, {'titleReferenceCount': True},
                            {'sourceTitleIds': ['unadmitted.static.title']},

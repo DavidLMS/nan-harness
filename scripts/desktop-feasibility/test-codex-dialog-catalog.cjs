@@ -16,11 +16,20 @@ function fixture(text='Skip setup?') {
  return {doc,title,dialog,context,classify,setDialogs:v=>dialogs=v,setIds:v=>ids=v,
   held:{document:doc,dialog,title,reference:title.id},entries:catalog.entries.filter(e=>e.platform==='mac')};
 }
+const rendererSource=require('node:fs').readFileSync(`${__dirname}/observe-renderer.cjs`,'utf8');
+const boundary=rendererSource.slice(rendererSource.indexOf('function passiveCatalogGuard('),rendererSource.indexOf('function recordStaticDialog'));
+const makeGuard=vm.runInNewContext(`(()=>{${boundary};return passiveCatalogGuard})()`);
+const heldPage={};let browserPages=[heldPage],owned=true;
+const sourceGuard=makeGuard({contexts:()=>[{pages:()=>browserPages}]},heldPage,()=>owned);
+assert.equal(sourceGuard(),true);browserPages=[heldPage,{}];assert.equal(sourceGuard(),false);assert.equal(sourceGuard.lastFailure,'page-set');
+browserPages=[{}];assert.equal(sourceGuard(),false);assert.equal(sourceGuard.lastFailure,'page-set');
+browserPages=[heldPage];owned=false;assert.equal(sourceGuard(),false);assert.equal(sourceGuard.lastFailure,'native-ownership');
+owned=true;assert.equal(sourceGuard(),true);assert.equal(sourceGuard.lastFailure,null);
 async function main() {
  const linux=require('./codex-dialog-title-catalog-linux.json');
  assert.equal(linux.sourceVersion,'26.930.41038');
  assert.equal(require('node:crypto').createHash('sha256').update(require('node:fs').readFileSync(require.resolve('./codex-dialog-title-catalog-linux.json'))).digest('hex'),helper.facts('linux').catalogSha256);
- assert.equal(new Set(linux.entries.map(e=>e.id)).size,186);
+ assert.equal(new Set(linux.entries.map(e=>e.id)).size,187);
  const lf=fixture('Global search');
  assert.equal(lf.classify({held:lf.held,entries:Object.values(Object.fromEntries(linux.entries.map(e=>[e.id,e])))}).status,'matched');
  assert.equal(helper.facts('linux').sourceVersion,'26.930.41038');
@@ -46,6 +55,10 @@ async function main() {
  }
  for(const [text,id]of [["Email", "restricted.aeon.email.dialog.loadingTitle"], ["Analysis", "chatgpt.pythonExecution.analysisTitle"]]) {
   const f=fixture(text);const entries=Object.values(Object.fromEntries(require('./codex-dialog-title-catalog-windows.json').entries.map(e=>[e.id,e])));
+  assert.equal(f.classify({held:f.held,entries}).sourceTitleIds[0],id);
+ }
+ for(const [text,id]of [["Redeem credits", "chatgpt.promotion.credit_grant_redemption.modal.title.v2"]]) {
+  const f=fixture(text);const entries=Object.values(Object.fromEntries(linux.entries.map(e=>[e.id,e])));
   assert.equal(f.classify({held:f.held,entries}).sourceTitleIds[0],id);
  }
  const excessive=fixture();assert.equal(excessive.classify({held:excessive.held,entries:Array(257).fill({id:'known',text:'fixed'})}).rejectionStage,'scope');

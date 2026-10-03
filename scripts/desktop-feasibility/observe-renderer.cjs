@@ -294,10 +294,15 @@ function publishCodexBinding(output,owner,connection,guard) {
   fs.writeFileSync(bindingPath,JSON.stringify(checkpoint)+'\n',{mode:0o600,flag:'wx'});
 }
 function passiveCatalogGuard(browser,page,ownerGuard) {
-  return ()=>{
+  const guard=()=>{
+    guard.lastFailure=null;
     const pages=browser.contexts().flatMap(context=>context.pages());
-    return pages.length===1&&pages[0]===page&&ownerGuard();
+    if(pages.length!==1||pages[0]!==page){guard.lastFailure='page-set';return false;}
+    if(!ownerGuard()){guard.lastFailure='native-ownership';return false;}
+    return true;
   };
+  guard.lastFailure=null;
+  return guard;
 }
 function recordStaticDialog(value) {
   const destination=`${output}.dialog-title.json`;
