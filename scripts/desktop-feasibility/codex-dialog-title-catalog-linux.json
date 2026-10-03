@@ -1,0 +1,465 @@
+{
+  "entries": [
+    {
+      "file": "downgrade-dialog-8dc0dc615142.js",
+      "id": "settings.consumerBilling.downgradeTitle",
+      "platform": "linux",
+      "sha": "f57d9cf7e3f173488d5ef66ab485465bb0a194afabe1cd3ffa3e42bb47482a76",
+      "text": "Confirm plan changes"
+    },
+    {
+      "file": "dialog-f1a2cc8799c6.js",
+      "id": "workspaceAgents.schedules.editor.title",
+      "platform": "linux",
+      "sha": "2f33790d90946285bee477841ceee2d38cbf56ea401bdb9cd1613f6b9754a5f1",
+      "text": "Scheduled automation"
+    },
+    {
+      "file": "settings-unsaved-changes-dialog-33f0f94644f4.js",
+      "id": "settings.unsavedChanges.discardTitle",
+      "platform": "linux",
+      "sha": "44bc88170482b3ee71aba2f19fdc6840f11b37d1f700b9ececbff047370569bc",
+      "text": "Discard changes?"
+    },
+    {
+      "file": "order-yubikey-dialog-468f3b2d2fe7.js",
+      "id": "settings.chatGpt.security.orderYubikey.title",
+      "platform": "linux",
+      "sha": "627121a4538a14ec2e40841b8d1c236c8010847515db6827afac990bae0d25cb",
+      "text": "Order a YubiKey"
+    },
+    {
+      "file": "shared-task-dialog-b4988cefd629.js",
+      "id": "automations.sharing.preview.dialog.title",
+      "platform": "linux",
+      "sha": "72147b7771fa78627111d598f547a0f4e1c414651072f319f5e6d52bcc4b7733",
+      "text": "Shared with you"
+    },
+    {
+      "file": "shared-task-dialog-b4988cefd629.js",
+      "id": "automations.sharing.preview.dialog.title",
+      "platform": "linux",
+      "sha": "72147b7771fa78627111d598f547a0f4e1c414651072f319f5e6d52bcc4b7733",
+      "text": "Shared with you"
+    },
+    {
+      "file": "publish-dialog-ed314c349c5c.js",
+      "id": "sitesPreview.share.title",
+      "platform": "linux",
+      "sha": "5be4f53974a4de2e3108191f574ff1d9d9bcc43e47cfd76f85e8894bbbad802d",
+      "text": "Ready to share your site?"
+    },
+    {
+      "file": "dialog-ceafc7bd589f.js",
+      "id": "composer.hooks.review.title",
+      "platform": "linux",
+      "sha": "bcabaec0a0748d98b9538acd9b984a8a1794d6913df5c971a288d6039391b605",
+      "text": "Review hooks"
+    },
+    {
+      "file": "new-space-dialog-ecaae7564d44.js",
+      "id": "codex.space.creation.discardTitle",
+      "platform": "linux",
+      "sha": "122877bd4cfe5d294fca803f06e270c7282647260aaeebf73b175c88ec71cb43",
+      "text": "Discard changes?"
+    },
+    {
+      "file": "habitat-automation-migration-dialog-29ea065a15d8.js",
+      "id": "inbox.automations.habitatMigration.title",
+      "platform": "linux",
+      "sha": "33756bf668118cddb93616cd1a48747f6c1b9cbc5c74bcedb0d166024227956b",
+      "text": "Sync your local automations"
+    },
+    {
+      "file": "education-dialog-5ce4590100af.js",
+      "id": "composer.worktreePrompt.education.title",
+      "platform": "linux",
+      "sha": "484087841e2c068a2798d8772749a3d632a9009d033439964a084a45e8bddbf7",
+      "text": "Worktrees that just work"
+    },
+    {
+      "binding": "Static Intl child s assigned from o then rendered as DialogTitle child s",
+      "file": "dialog-191506b85b56.js",
+      "id": "settings.browserUse.profileImport.extensionsConfirmationTitle",
+      "platform": "linux",
+      "sha": "3aac6a6a0577027b3d143fbb930e74542709056a699179f7724075eb8de43978",
+      "text": "Import unverified extensions?"
+    },
+    {
+      "binding": "Query c export w.title imported Oe.title rendered under DialogTitle asChild h2",
+      "descriptorFile": "query-6385edbcc7db.js",
+      "descriptorSha256": "6cd8b0d13001d53e006833f5f49e94a973696a1502c4b0526aa869fc16dd48e0",
+      "file": "dialog-191506b85b56.js",
+      "id": "settings.browserUse.profileImport.title",
+      "platform": "linux",
+      "sha": "3aac6a6a0577027b3d143fbb930e74542709056a699179f7724075eb8de43978",
+      "text": "Import from your browser"
+    },
+    {
+      "file": "setup-dialog-ffe5f4ede810.js",
+      "id": "restricted.aeon.slack.setup.title",
+      "platform": "linux",
+      "sha": "3082cacc117cf823bc12348379c41ffe43d5a56bb83e26bf285c117685274f81",
+      "text": "Add to Slack"
+    },
+    {
+      "file": "chatgpt-onboarding-dialog-19564c74285c.js",
+      "id": "chatgpt.new-onboarding.all-done-2",
+      "platform": "linux",
+      "sha": "ae2431174e5e11c71d6d22cb0b5f2b0f6652d7abb0e4020072b855b767165af7",
+      "text": "You're all set"
+    },
+    {
+      "file": "subscription-update-dialog-10a1214d8e3d.js",
+      "id": "settings.usage.pricingPlanPage.subscriptionUpdate.title",
+      "platform": "linux",
+      "sha": "a2a21dd7d11c25ea6a85db3bd4900c4cb705b2d5b6608ae454de8ed73317b72a",
+      "text": "Confirm plan changes"
+    },
+    {
+      "file": "pending-edits-dialog-23dbea2d4957.js",
+      "id": "codex.writingBlock.confirmCloseTitle",
+      "platform": "linux",
+      "sha": "3e3723fc084af6c51d3cadac5f9b6c3b62736c9acb16d1640a1d3e360b0897a4",
+      "text": "Close editor?"
+    },
+    {
+      "file": "sites-handoff-dialog-1653d76d4b5a.js",
+      "id": "sitesPreview.handoff.title",
+      "platform": "linux",
+      "sha": "58a9a23077d50eb98eb7d2d8caf0435b974c5a49c6635d37b3fbf79c55f30d6e",
+      "text": "Continue your website in Work"
+    },
+    {
+      "file": "add-sources-dialog-8cbf1fb84288.js",
+      "id": "chatgptConversations.projectHome.textSource.title",
+      "platform": "linux",
+      "sha": "5399744bcd3ad6b9b73fe2093f1a7c58df7284f60c51a0729d4b453e8dcf72b8",
+      "text": "Add text source"
+    },
+    {
+      "file": "add-sources-dialog-8cbf1fb84288.js",
+      "id": "chatgptProjectHome.website.title",
+      "platform": "linux",
+      "sha": "5399744bcd3ad6b9b73fe2093f1a7c58df7284f60c51a0729d4b453e8dcf72b8",
+      "text": "Add URL"
+    },
+    {
+      "file": "personal-workspace-access-blocked-dialog-0a357c2b64c3.js",
+      "id": "personalWorkspaceAccessBlocked.title",
+      "platform": "linux",
+      "sha": "abf8e9c7ed9de94045007c39f054387e7f54f5af8f248fa7688873b0d9bbb77c",
+      "text": "Personal workspace access blocked"
+    },
+    {
+      "binding": "DialogTitle sr-only child Intl spreads local title descriptor",
+      "file": "dialog-965a5d17683c.js",
+      "id": "chatgpt.global_search.modal.title",
+      "platform": "linux",
+      "sha": "d6440dfeb8eca8f217e70c73b42120b72e287ba498c50cb67a9d74ddda8b3a40",
+      "text": "Global search"
+    },
+    {
+      "file": "dialog-6279b3063c8e.js",
+      "id": "appgenSettings.transfer.dialogTitle",
+      "platform": "linux",
+      "sha": "027948c86e95c542cc6ff99782e4b0c2467e5d62df6afa0f5354f54a7151c919",
+      "text": "Transfer ownership"
+    },
+    {
+      "file": "dialog-4bbaf3a31187.js",
+      "id": "profile.sharing.title",
+      "platform": "linux",
+      "sha": "1a241aeaecf0692fc799d2fcdfd8717323825e3bb20e23d8d97466810f2c928e",
+      "text": "Share your profile"
+    },
+    {
+      "file": "app-connect-mfa-dialog-908acfaec70e.js",
+      "id": "apps.connectMfa.title",
+      "platform": "linux",
+      "sha": "a36f8a197b665ef93ca2aab614619251a21466acbdf139812b3b1ee46e69a2a5",
+      "text": "Enable a second factor to continue"
+    },
+    {
+      "file": "realtime-voice-picker-dialog-b41ee044a904.js",
+      "id": "settings.general.realtimeVoice.dialog.title",
+      "platform": "linux",
+      "sha": "bc617284011543132c95a1b6723d5a3003060639e29e05af4e90a75a02defaed",
+      "text": "Choose a voice"
+    },
+    {
+      "file": "team-setup-dialog-a6ddfdffcfbc.js",
+      "id": "teams.spaces.setup.loading",
+      "platform": "linux",
+      "sha": "7b4ca2ff67187f795f3fce699f3cfcf566007f59892c617a99764a0c1f45af61",
+      "text": "Loading Spaces\u2026"
+    },
+    {
+      "file": "my-gpt-delete-dialog-27e065fff005.js",
+      "id": "chatgptConversations.gpts.mine.deleteTitle",
+      "platform": "linux",
+      "sha": "9b9d27ed2024308ee4660b2d9aa48114e1945f6e26afcf432488d7a243016f90",
+      "text": "Delete GPT"
+    },
+    {
+      "file": "voice-personalization-dialog-4f4b5ee9846a.js",
+      "id": "chatgpt.pepper.personalization.voice.title",
+      "platform": "linux",
+      "sha": "fc3ced75acad414013bc470186f5316593e59e098a13e9fd0384bd8140a6b7c2",
+      "text": "Choose a voice"
+    },
+    {
+      "file": "versions-dialog-ccda9697db81.js",
+      "id": "chatgpt.versions.title",
+      "platform": "linux",
+      "sha": "dc03456b05bf5c5b3d76e51b15a3d625bc8d96e8559662f15c3089569bcd0d67",
+      "text": "Versions"
+    },
+    {
+      "file": "chatgpt-image-upload-reminder-dialog-1429c79cdfa8.js",
+      "id": "chatgptConversations.imageUploadReminder.title",
+      "platform": "linux",
+      "sha": "f699321828e566c4a549348ac80058c18569f445dbbf53a3d88d96aa00cef9f4",
+      "text": "Check before sharing"
+    },
+    {
+      "file": "renewal-dialog-f11b1f92dc3d.js",
+      "id": "settings.consumerBilling.renewalTitle",
+      "platform": "linux",
+      "sha": "d3f208c28a2c34f7188f660ebd682e6d080ecf0eb7499887f5b2b6c071db7c4b",
+      "text": "Confirm plan changes"
+    },
+    {
+      "file": "artifact-feedback-dialog-97da0fae5052.js",
+      "id": "artifactFeedback.title",
+      "platform": "linux",
+      "sha": "f9cbc54afb720afcc523a0853183fa30221de055375d42ae38a5666eec6e0c0f",
+      "text": "Help our team improve ChatGPT"
+    },
+    {
+      "file": "import-dialog-3e94fde8dab3.js",
+      "id": "personalVault.importTitle",
+      "platform": "linux",
+      "sha": "e97d9c6bd9291627f54ce4d1e3d73be0db3bb1f3791a7028c086ddeb4c912733",
+      "text": "Import local variables"
+    },
+    {
+      "file": "library-move-dialog-a46a528045b1.js",
+      "id": "libraryNext.move.title",
+      "platform": "linux",
+      "sha": "003efac0bcea180a8f702e179005014e13e5f52dc0bff45d60b02a6eccb841f8",
+      "text": "Move to\u2026"
+    },
+    {
+      "file": "dialog-e3b97ab53c03.js",
+      "id": "settings.chatGpt.sharedLinks.title",
+      "platform": "linux",
+      "sha": "f6004ac47efc1e8c0c1db2e86c78f61fb040773b390b3f14dffbf14e43083bd9",
+      "text": "Shared links"
+    },
+    {
+      "file": "dialog-e3b97ab53c03.js",
+      "id": "settings.chatGpt.sharedLinks.deleteAllConfirmTitle",
+      "platform": "linux",
+      "sha": "f6004ac47efc1e8c0c1db2e86c78f61fb040773b390b3f14dffbf14e43083bd9",
+      "text": "Delete all shared links?"
+    },
+    {
+      "file": "reboot-dialog-18744e988809.js",
+      "id": "orbit.primary.reboot.title",
+      "platform": "linux",
+      "sha": "7d62e70ab7973a9825af1fd6e799d7876181aa161ec3772474890f5bc99427dd",
+      "text": "Reboot your dot?"
+    },
+    {
+      "file": "permission-denied-dialog-49f0f236600d.js",
+      "id": "chatgptConversations.preciseLocation.permissionDenied.title",
+      "platform": "linux",
+      "sha": "2780b94aec4c464b037943689c7bfbaae1640b7e384891a3d276e8cd3e69308b",
+      "text": "Turn on location access"
+    },
+    {
+      "file": "appgen-change-slug-dialog-83c48037eacc.js",
+      "id": "appgenSettings.general.url.changeDialog.title",
+      "platform": "linux",
+      "sha": "1e411b427e860e2905ae08b89398d010703b3de25335d42045bcbeb684767d1a",
+      "text": "Change URL"
+    },
+    {
+      "file": "dialog-39192ee7c66d.js",
+      "id": "chatgptConversations.projectSettings.title",
+      "platform": "linux",
+      "sha": "7d075b2b6cb55059f2eb8b419b23a364549181984c1d816fdf6093f98466cf9b",
+      "text": "Project settings"
+    },
+    {
+      "file": "feedback-form-dialog-2dc68905118d.js",
+      "id": "feedbackFormDialog.title",
+      "platform": "linux",
+      "sha": "5ea72f67a7613b5f2d63317fe5913301c1676adc4be9fdd3efe25950f55a6d94",
+      "text": "Share feedback"
+    },
+    {
+      "file": "cloud-environment-packages-dialog-b950ea67fc17.js",
+      "id": "settings.cloudEnvironments.packages.title",
+      "platform": "linux",
+      "sha": "42065c78e5c85cde2ac11b64236d4e24bce623a3ecae8635bdf0cf6d14a73fdf",
+      "text": "Preinstalled packages"
+    },
+    {
+      "file": "products-dialog-cef26f525409.js",
+      "id": "businessProfiles.feedProducts.title",
+      "platform": "linux",
+      "sha": "a966bea0787b8d1579d0b0557bf531fbd047b98811396439b64000b19736b329",
+      "text": "Products"
+    },
+    {
+      "file": "run-history-dialog-9c36d2eda267.js",
+      "id": "chatgpt.tasks.run_history.title",
+      "platform": "linux",
+      "sha": "cd91437c72c7507639d727e63066d5ca41e6edad8805704428abb6a246ab9cc0",
+      "text": "Run history"
+    },
+    {
+      "file": "upgrade-dialog-c34b2d5e3c25.js",
+      "id": "pricing.comparison.title",
+      "platform": "linux",
+      "sha": "385bf1e45fdee8c0520354d5e7b332a3ed28f2d2ab2792f4ea1df909073f5a6c",
+      "text": "Upgrade your plan"
+    },
+    {
+      "file": "create-dialog-a46d14ff5c83.js",
+      "id": "restricted.environmentSetup.create.title",
+      "platform": "linux",
+      "sha": "81647aceb71ffd94ae949d583227c12e6d2fc504fca416eeed46d3439a31f5ad",
+      "text": "Create a cloud environment"
+    },
+    {
+      "file": "create-project-dialog-d34a55b9bef2.js",
+      "id": "projectSetup.remoteSource.choose",
+      "platform": "linux",
+      "sha": "5ce3853f8978f8362da3c0f07722bad4c583ed23894a502c7b1d1d7492b51eb8",
+      "text": "Choose a source folder"
+    },
+    {
+      "file": "create-project-dialog-d34a55b9bef2.js",
+      "id": "projectSetupDialog.createMissingRemoteFolderTitle",
+      "platform": "linux",
+      "sha": "5ce3853f8978f8362da3c0f07722bad4c583ed23894a502c7b1d1d7492b51eb8",
+      "text": "Create missing folder?"
+    },
+    {
+      "file": "dialog-f5e3fbf2eaba.js",
+      "id": "libraryNext.flashcards.dialogTitle",
+      "platform": "linux",
+      "sha": "03dd51b6fbdf27d2d38e896165fa6afed971ab847093b4feec8b21438e55f2f4",
+      "text": "Flashcards"
+    },
+    {
+      "file": "dialog-c4e5390ad6fd.js",
+      "id": "workspaceAgents.sharing.removeTitle",
+      "platform": "linux",
+      "sha": "f87315d604dafde21b8749ed99dbe49d19674a44b4fb02af3af6472e0e94ee73",
+      "text": "Remove access?"
+    },
+    {
+      "file": "trusted-contact-no-thanks-dialog-ab75e183d72f.js",
+      "id": "message.trustedContactNoThanksModal.title",
+      "platform": "linux",
+      "sha": "2f7b1003695cb3b6a8489c49c2f8cc37e907cab87f7381356cdf2a5808498084",
+      "text": "Thanks for letting us know"
+    },
+    {
+      "file": "attach-site-dialog-ff68389e3681.js",
+      "id": "codex.space.sitePage.attach.title",
+      "platform": "linux",
+      "sha": "a7c15ada81726d6fcf2ed177bce0759a9a8ef06aba3ea5f2550762060b4d4d3d",
+      "text": "Add existing Site"
+    },
+    {
+      "file": "gpt-about-dialog-262024bd2ce3.js",
+      "id": "chatgptConversations.gpts.about.loadError",
+      "platform": "linux",
+      "sha": "f8ae22e0238a40b8a00b6ffe295299eb7270bce15b581ceb6b4b9568c0303aea",
+      "text": "Couldn't load this GPT"
+    },
+    {
+      "file": "gpt-about-dialog-262024bd2ce3.js",
+      "id": "chatgptConversations.gpts.about.loading",
+      "platform": "linux",
+      "sha": "f8ae22e0238a40b8a00b6ffe295299eb7270bce15b581ceb6b4b9568c0303aea",
+      "text": "Loading GPT details"
+    },
+    {
+      "file": "gitlab-merge-request-form-dialog-72fa03d4df2d.js",
+      "id": "localConversationPage.createPrModal.gitLabTitle",
+      "platform": "linux",
+      "sha": "804fb4b3b985395d40114cc511c8a8cd8cd3518dfa6f304ae5e3090f0f8695fc",
+      "text": "Create merge request"
+    },
+    {
+      "file": "create-dialog-fe337312fd16.js",
+      "id": "plugins.create.title",
+      "platform": "linux",
+      "sha": "1c5706e07c1c6e215923bfab63cb91377d3c4ac31b2e4d84f71788cc2c150fa3",
+      "text": "New Plugin"
+    },
+    {
+      "file": "codex-mobile-setup-dialog-245e57108b94.js",
+      "id": "codexMobile.setupPage.waiting.pairing.fullscreenQrCodeTitle",
+      "platform": "linux",
+      "sha": "338f05f7785963fc5242f8348ff14d019a536437799bba1504ddc6c57b200020",
+      "text": "Pairing QR code"
+    },
+    {
+      "file": "onboarding-page-45abaea73d19.js",
+      "id": "electron.onboarding.conversationalOnboarding.skipDialog.title",
+      "platform": "linux",
+      "sha": "78774eb9fd3797437c84801e3933479741f0a8932c81aa150b692a5e803870af",
+      "text": "Skip setup?"
+    },
+    {
+      "file": "dictionary-dialog-8aafdae2bedd.js",
+      "id": "speechSettings.content.customDictionary.page.title",
+      "platform": "linux",
+      "sha": "9861cb08a360aee00b05bfa513bdfeffbf457794e10bf7bd2489b4a4f56f7c47",
+      "text": "Voice dictionary"
+    },
+    {
+      "file": "delete-thread-dialog-f8dda5df15da.js",
+      "id": "sidebarElectron.deleteThreadDialog.title",
+      "platform": "linux",
+      "sha": "59723a6f950fa453c3d5c216cf685108b356dae320aa09eb93e89be386aa9532",
+      "text": "Delete task?"
+    },
+    {
+      "file": "chatgpt-keyboard-shortcuts-dialog-dc6acc78cc2d.js",
+      "id": "keyboardShortcutsDialog.title",
+      "platform": "linux",
+      "sha": "b520a3342d5b4a264d9f32aa29d5ddb5bab5c3bb24500d305c07fb2ba8742d8d",
+      "text": "Keyboard shortcuts"
+    },
+    {
+      "file": "keyboard-shortcuts-dialog-8b872a78eb89.js",
+      "id": "keyboardShortcutsDialog.title",
+      "platform": "linux",
+      "sha": "14b88522cb2e2be406d6c01e66998fe29762585398e35cca7f9177e87f7cef52",
+      "text": "Keyboard shortcuts"
+    },
+    {
+      "file": "chatgpt-saved-memory-source-delete-dialog-f06c6cc49041.js",
+      "id": "chatgptConversations.summaryPanel.sources.memory.delete.title",
+      "platform": "linux",
+      "sha": "ae1a3c3f4bf1a39ea0865d2e5a7b96423abdc08d5a84f35a6ae9fb17a045ba4f",
+      "text": "Delete this memory?"
+    },
+    {
+      "file": "dialog-a58f7b097f68.js",
+      "id": "chatGpt.quietHours.active.title",
+      "platform": "linux",
+      "sha": "7313459ea5175f3ae68e5de7b7505a78cf597fb2669e075412fb12fce7ca5ff7",
+      "text": "Time for a break"
+    }
+  ],
+  "sourceVersion": "26.930.41038"
+}

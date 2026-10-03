@@ -13,18 +13,19 @@ spec.loader.exec_module(module)
 class ProjectPolicy(unittest.TestCase):
     def test_exact_frozen_release_and_application_are_both_required(self):
         targets = {
-            'macos': ('bfda661a7c9ca44dac3168134058dd6007947cde318ade37d570c484329f6d41',
-                      'b078df75c1cf593b99351622f5bc8184a44f993bb0bd0a4cbefac31f4a746bbd'),
+            'macos': ('f6cf4d2e9b69aeefa33adda4bcd1a2d306357f5253a1ac6049700870c28dd0c7',
+                      '418a460276b195f5642e43b320ec2821d6c34c646cb316ed2c0285546298243f'),
             'windows': ('f7b0266d6c00d4743da01d62bc82488f7ec5560c642501758119cb9885f67c87',
                         'b35bf062c01d73da090c60e62186dc180c2a8545cb6fc9575b4403c8fa3db49e'),
-            'linux': ('e0174d8d0a5f4141145458c814f3c2d863dd67e942b868785a1f5dac9cba3e16',
+            'linux': ('ee7854145554718d7239d01ea37d44f6ba1e0ba4a93f47ac097d6e0f964da47c',
                       '207c4fbff7e2fcc1b0789448351ac6eed206206d94c5a0835e5f07c7cd73d6e3'),
         }
         for platform, (artifact, executable) in targets.items():
-            release = dict(version='26.930.31730', digest='sha256:' + artifact)
+            release = dict(version='26.930.41038' if platform != 'windows' else '26.930.31730', digest='sha256:' + artifact)
             module.validate_codex_project_release(release, executable, platform)
             foreign = targets['linux' if platform == 'windows' else 'windows']
             for changed, binary in (({**release, 'version': '26.930.2377.0'}, executable),
+                                    ({**release, 'version': '26.930.31730' if platform != 'windows' else '26.930.41038'}, executable),
                                     ({**release, 'digest': 'sha256:' + '0' * 64}, executable),
                                     ({**release, 'digest': 'sha256:' + foreign[0]}, executable),
                                     (release, foreign[1]), (release, '0' * 64), ({}, executable)):

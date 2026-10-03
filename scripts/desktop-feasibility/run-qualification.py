@@ -70,11 +70,11 @@ def validate_claude_bundle(executable):
 
 
 CODEX_PROJECT_RELEASES = {
-    'macos': ('bfda661a7c9ca44dac3168134058dd6007947cde318ade37d570c484329f6d41',
-              'b078df75c1cf593b99351622f5bc8184a44f993bb0bd0a4cbefac31f4a746bbd'),
+    'macos': ('f6cf4d2e9b69aeefa33adda4bcd1a2d306357f5253a1ac6049700870c28dd0c7',
+              '418a460276b195f5642e43b320ec2821d6c34c646cb316ed2c0285546298243f'),
     'windows': ('f7b0266d6c00d4743da01d62bc82488f7ec5560c642501758119cb9885f67c87',
                 'b35bf062c01d73da090c60e62186dc180c2a8545cb6fc9575b4403c8fa3db49e'),
-    'linux': ('e0174d8d0a5f4141145458c814f3c2d863dd67e942b868785a1f5dac9cba3e16',
+    'linux': ('ee7854145554718d7239d01ea37d44f6ba1e0ba4a93f47ac097d6e0f964da47c',
               '207c4fbff7e2fcc1b0789448351ac6eed206206d94c5a0835e5f07c7cd73d6e3'),
 }
 
@@ -82,7 +82,7 @@ CODEX_PROJECT_RELEASES = {
 def validate_codex_project_release(release, executable_hash, platform='windows'):
     # Native flags and renderer controls were inspected in each platform's bytes.
     pinned = CODEX_PROJECT_RELEASES.get(platform)
-    if (pinned is None or release.get('version') != '26.930.31730'
+    if (pinned is None or release.get('version') != ('26.930.41038' if platform != 'windows' else '26.930.31730')
             or release.get('digest') != 'sha256:' + pinned[0]
             or executable_hash != pinned[1]):
         raise ValueError('Codex project trial requires the inspected official release')

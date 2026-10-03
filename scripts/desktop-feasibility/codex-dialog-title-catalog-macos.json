@@ -1,0 +1,185 @@
+{
+  "entries": [
+    {
+      "file": "dialog-660fee8a2eaa.js",
+      "id": "chatGpt.quietHours.active.title",
+      "platform": "mac",
+      "sha": "457186a76da501f15370a773d8eace5ca9bc23367b8f4e2847c7ef4f8d466bc0",
+      "text": "Time for a break"
+    },
+    {
+      "file": "voice-personalization-dialog-93bb7a172ce1.js",
+      "id": "chatgpt.pepper.personalization.voice.title",
+      "platform": "mac",
+      "sha": "e2883f18d7061f3228b4374d54b6dd99bd411e69617a693f6031b4725ad97a3f",
+      "text": "Choose a voice"
+    },
+    {
+      "file": "import-dialog-3685c7ec5558.js",
+      "id": "personalVault.importTitle",
+      "platform": "mac",
+      "sha": "2956ddcd78f12cdf4b6ff609833fc1a609cf10257cd90df4f88bafec1f09e4d4",
+      "text": "Import local variables"
+    },
+    {
+      "file": "create-project-dialog-702a481cded4.js",
+      "id": "projectSetup.remoteSource.choose",
+      "platform": "mac",
+      "sha": "d4f682fea70e2004a993a141889e1a964c2593b7ba58d0cddb5ec8f7769cb44f",
+      "text": "Choose a source folder"
+    },
+    {
+      "file": "create-project-dialog-702a481cded4.js",
+      "id": "projectSetupDialog.createMissingRemoteFolderTitle",
+      "platform": "mac",
+      "sha": "d4f682fea70e2004a993a141889e1a964c2593b7ba58d0cddb5ec8f7769cb44f",
+      "text": "Create missing folder?"
+    },
+    {
+      "file": "onboarding-page-2d604f911cec.js",
+      "id": "electron.onboarding.conversationalOnboarding.skipDialog.title",
+      "platform": "mac",
+      "sha": "d2f790467d50e8b4307766ee2d059004348333b1201c4a9f65336eddf1c56cbd",
+      "text": "Skip setup?"
+    },
+    {
+      "file": "chatgpt-onboarding-dialog-9592d8536260.js",
+      "id": "chatgpt.new-onboarding.all-done-2",
+      "platform": "mac",
+      "sha": "6513b1dd0b1e88794185d0588890710aa922775f2e192908e7c2cecaae9f7728",
+      "text": "You're all set"
+    },
+    {
+      "file": "education-dialog-f33ed9926315.js",
+      "id": "composer.worktreePrompt.education.title",
+      "platform": "mac",
+      "sha": "fd7cbc9925a102dd7ebae7042b8dd9b0c996fbd9dcc24295f84729eba6cc3653",
+      "text": "Worktrees that just work"
+    },
+    {
+      "file": "keyboard-shortcuts-dialog-7ffb772d1b92.js",
+      "id": "keyboardShortcutsDialog.title",
+      "platform": "mac",
+      "sha": "3e21a1d14ed2bbfb07be4fdaef4f2718fa9b0b3ae2af1a94182b5e79905cea78",
+      "text": "Keyboard shortcuts"
+    },
+    {
+      "file": "chatgpt-keyboard-shortcuts-dialog-7d5369480c47.js",
+      "id": "keyboardShortcutsDialog.title",
+      "platform": "mac",
+      "sha": "7b567a8e34372cb33a5dc0c37b3f840ac18e7caa5dcaaf1879e1d757b7d0e16d",
+      "text": "Keyboard shortcuts"
+    },
+    {
+      "file": "sites-handoff-dialog-914b908e79e3.js",
+      "id": "sitesPreview.handoff.title",
+      "platform": "mac",
+      "sha": "6b504c6c17006c274e1dafd9b5fa6305f48277ccf245b55a68a6d55cb062de3b",
+      "text": "Continue your website in Work"
+    },
+    {
+      "file": "app-connect-mfa-dialog-8acd695130cd.js",
+      "id": "apps.connectMfa.title",
+      "platform": "mac",
+      "sha": "2c24377432d26c436a43c9349049bb236359b1682daead02e4d43f1b4458678c",
+      "text": "Enable a second factor to continue"
+    },
+    {
+      "file": "codex-mobile-setup-dialog-976e025ea409.js",
+      "id": "codexMobile.setupPage.waiting.pairing.fullscreenQrCodeTitle",
+      "platform": "mac",
+      "sha": "5f8f0a2a359d1b708c0a5b2496879f52a227e7c454d07135c6c46aec735d1c86",
+      "text": "Pairing QR code"
+    },
+    {
+      "file": "dialog-fa8de005bba2.js",
+      "id": "workspaceAgents.sharing.removeTitle",
+      "platform": "mac",
+      "sha": "211867061e0c4938967d48a62a5f258dfe4da3d256d38167d2c7c2f68e97554f",
+      "text": "Remove access?"
+    },
+    {
+      "binding": "DialogTitle sr-only child Intl spreads local title descriptor",
+      "file": "dialog-21f9ee819a35.js",
+      "id": "chatgpt.global_search.modal.title",
+      "platform": "mac",
+      "sha": "91bde442b8c019bda2d56024ec515a1baf96a7454fa3087784119fe60b3edfed",
+      "text": "Global search"
+    },
+    {
+      "file": "create-dialog-90e5640c2d1b.js",
+      "id": "plugins.create.title",
+      "platform": "mac",
+      "sha": "a14b87632a4e71478a03363ef1a262039bc354a371e799a1bad169b5529c344e",
+      "text": "New Plugin"
+    },
+    {
+      "file": "create-dialog-64106836d465.js",
+      "id": "restricted.environmentSetup.create.title",
+      "platform": "mac",
+      "sha": "133f7caf42cc198a1c41c7e5d0fca35e240078b706f55f841d78b49542440b91",
+      "text": "Create a cloud environment"
+    },
+    {
+      "file": "setup-dialog-5d4008f55808.js",
+      "id": "restricted.aeon.slack.setup.title",
+      "platform": "mac",
+      "sha": "c32a51ee709216de51b75cd6a3db67d2fd1f30550d1cfc333df9f5cf09c010e3",
+      "text": "Add to Slack"
+    },
+    {
+      "file": "gpt-about-dialog-74f121839291.js",
+      "id": "chatgptConversations.gpts.about.loadError",
+      "platform": "mac",
+      "sha": "3bce19dc547adf9a527f16b536b3e4d7dc32dcfdae4d14720bb65423d6ba054f",
+      "text": "Couldn't load this GPT"
+    },
+    {
+      "file": "gpt-about-dialog-74f121839291.js",
+      "id": "chatgptConversations.gpts.about.loading",
+      "platform": "mac",
+      "sha": "3bce19dc547adf9a527f16b536b3e4d7dc32dcfdae4d14720bb65423d6ba054f",
+      "text": "Loading GPT details"
+    },
+    {
+      "binding": "Static Intl child s assigned from o then rendered as DialogTitle child s",
+      "file": "dialog-916dc44f889f.js",
+      "id": "settings.browserUse.profileImport.extensionsConfirmationTitle",
+      "platform": "mac",
+      "sha": "807ed9671ff174875aee2141e8493fbf9bcd4fff178f6787c2e2f029bf29be4a",
+      "text": "Import unverified extensions?"
+    },
+    {
+      "binding": "Query c export w.title imported Oe.title rendered under DialogTitle asChild h2",
+      "descriptorFile": "query-ce9d52ef280d.js",
+      "descriptorSha256": "aae8b90d1a8546ba28da79f4f66974355406d160cbeb04d355a8205f132c265e",
+      "file": "dialog-916dc44f889f.js",
+      "id": "settings.browserUse.profileImport.title",
+      "platform": "mac",
+      "sha": "807ed9671ff174875aee2141e8493fbf9bcd4fff178f6787c2e2f029bf29be4a",
+      "text": "Import from your browser"
+    },
+    {
+      "file": "dictionary-dialog-5de05167228d.js",
+      "id": "speechSettings.content.customDictionary.page.title",
+      "platform": "mac",
+      "sha": "f45f96dc0f094b0f8e2ed6e15355ad56f91cc2cc3579f10e4fb220b8e67f1452",
+      "text": "Voice dictionary"
+    },
+    {
+      "file": "order-yubikey-dialog-d507ec290595.js",
+      "id": "settings.chatGpt.security.orderYubikey.title",
+      "platform": "mac",
+      "sha": "dba6d26fd76f80b86519ce8e9ffea430be12e3e8838f91cdd26efbf96635dc1a",
+      "text": "Order a YubiKey"
+    },
+    {
+      "file": "personal-workspace-access-blocked-dialog-78079b1f9ab1.js",
+      "id": "personalWorkspaceAccessBlocked.title",
+      "platform": "mac",
+      "sha": "7b4869dbb1ed01d22f28ce6c7887bd46a0cfd822648a1a52dfc3fd785d3a678b",
+      "text": "Personal workspace access blocked"
+    }
+  ],
+  "sourceVersion": "26.930.41038"
+}

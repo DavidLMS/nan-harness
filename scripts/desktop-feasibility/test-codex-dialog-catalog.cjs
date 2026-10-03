@@ -17,6 +17,21 @@ function fixture(text='Skip setup?') {
   held:{document:doc,dialog,title,reference:title.id},entries:catalog.entries.filter(e=>e.platform==='mac')};
 }
 async function main() {
+ const linux=require('./codex-dialog-title-catalog-linux.json');
+ assert.equal(linux.sourceVersion,'26.930.41038');
+ assert.equal(require('node:crypto').createHash('sha256').update(require('node:fs').readFileSync(require.resolve('./codex-dialog-title-catalog-linux.json'))).digest('hex'),helper.facts('linux').catalogSha256);
+ assert.equal(new Set(linux.entries.map(e=>e.id)).size,63);
+ const lf=fixture('Global search');
+ assert.equal(lf.classify({held:lf.held,entries:Object.values(Object.fromEntries(linux.entries.map(e=>[e.id,e])))}).status,'matched');
+ assert.equal(helper.facts('linux').sourceVersion,'26.930.41038');
+ assert.equal(helper.facts('darwin').sourceVersion,'26.930.41038');
+ const linuxEnv={GITHUB_ACTIONS:'true',RUNNER_ENVIRONMENT:'github-hosted',RUNNER_OS:'Linux',NANH_CODEX_PUBLIC_ONBOARDING:'engineering',NANH_CODEX_PROJECT_POLICY:'open-project',NANH_CODEX_PROJECT_ARTIFACT_SHA256:helper.pins.linux.artifact};
+ assert.equal(helper.policy('chatgpt-desktop','linux',linuxEnv),true);
+ assert.equal(helper.policy('chatgpt-desktop','linux',{...linuxEnv,NANH_CODEX_PROJECT_ARTIFACT_SHA256:'e0174d8d0a5f4141145458c814f3c2d863dd67e942b868785a1f5dac9cba3e16'}),false);
+ const mac=require('./codex-dialog-title-catalog-macos.json');
+ assert.equal(new Set(mac.entries.map(e=>e.id)).size,24);
+ assert.equal(require('node:crypto').createHash('sha256').update(require('node:fs').readFileSync(require.resolve('./codex-dialog-title-catalog-macos.json'))).digest('hex'),helper.facts('darwin').catalogSha256);
+ assert.equal(helper.facts('win32').sourceVersion,'26.930.31730');
  const f=fixture();
  let result=f.classify({held:f.held,entries:f.entries});
  assert.equal(result.status,'matched');assert.equal(result.sourceTitleEmpty,false);assert.equal(result.sourceTitleIds[0],'electron.onboarding.conversationalOnboarding.skipDialog.title');
@@ -25,16 +40,16 @@ async function main() {
  const empty=f.classify({held:f.held,entries:f.entries});assert.equal(empty.status,'unknown');assert.equal(empty.sourceTitleEmpty,true);f.title.textContent=original;f.title.textContent='PRIVATE user-generated conversation';
  assert.equal(f.classify({held:f.held,entries:f.entries}).status,'unknown');f.title.textContent=original;
  assert.equal(f.classify({held:f.held,entries:[...f.entries,{id:'other-known-source',text:original}]}).status,'ambiguous');
- f.setIds([f.title,{...f.title}]);assert.equal(f.classify({held:f.held,entries:f.entries}),null);f.setIds([f.title]);
- f.setDialogs([f.dialog,{...f.dialog}]);assert.equal(f.classify({held:f.held,entries:f.entries}),null);f.setDialogs([f.dialog]);
+ f.setIds([f.title,{...f.title}]);assert.equal(f.classify({held:f.held,entries:f.entries}).rejectionStage,'title-count');f.setIds([f.title]);
+ f.setDialogs([f.dialog,{...f.dialog}]);assert.equal(f.classify({held:f.held,entries:f.entries}).rejectionStage,'dialog-count');f.setDialogs([f.dialog]);
  f.dialog.getAttribute=k=>k==='role'?'dialog':k==='aria-labelledby'?':one: :two:':null;
- assert.equal(f.classify({held:f.held,entries:f.entries}),null);
- const g=fixture();g.title.tagName='DIV';assert.equal(g.classify({held:g.held,entries:g.entries}),null);
+ assert.equal(f.classify({held:f.held,entries:f.entries}).rejectionStage,'reference');
+ const g=fixture();g.title.tagName='DIV';assert.equal(g.classify({held:g.held,entries:g.entries}).rejectionStage,'title-tag');
  for(const bad of ['0','unknown','2','']) {
-  const x=fixture();x.dialog.style.opacity=bad;assert.equal(x.classify({held:x.held,entries:x.entries}),null);
+  const x=fixture();x.dialog.style.opacity=bad;assert.equal(x.classify({held:x.held,entries:x.entries}).rejectionStage,'actionability');
  }
- const invisible=fixture();invisible.dialog.inert=true;assert.equal(invisible.classify({held:invisible.held,entries:invisible.entries}),null);
- const pointer=fixture();pointer.dialog.style.pointerEvents='none';assert.equal(pointer.classify({held:pointer.held,entries:pointer.entries}),null);
+ const invisible=fixture();invisible.dialog.inert=true;assert.equal(invisible.classify({held:invisible.held,entries:invisible.entries}).rejectionStage,'actionability');
+ const pointer=fixture();pointer.dialog.style.pointerEvents='none';assert.equal(pointer.classify({held:pointer.held,entries:pointer.entries}).rejectionStage,'actionability');
  for(const platform of ['linux','darwin','win32']) {
   const pin=helper.pins[platform],env={GITHUB_ACTIONS:'true',RUNNER_ENVIRONMENT:'github-hosted',RUNNER_OS:pin.runner,NANH_CODEX_PUBLIC_ONBOARDING:'engineering',NANH_CODEX_PROJECT_POLICY:'open-project',NANH_CODEX_PROJECT_ARTIFACT_SHA256:pin.artifact};
   assert.equal(helper.policy('chatgpt-desktop',platform,env),true);
@@ -53,6 +68,17 @@ async function main() {
  owns=true;reads=0;assert.equal((await helper.observe(held,'darwin',{...opts,deadline:Date.now()-1})).status,'guard-rejected');assert.equal(reads,0);
  page.evaluate=async(fn,arg)=>{reads++;if(reads===2)d.title.textContent='changed';return vm.runInNewContext('('+fn.toString()+')',d.context)({...arg,held:arg.held.value});};
  const changed=await helper.observe(held,'darwin',opts);assert.equal(changed.status,'guard-rejected');assert.equal(changed.matchCount,null);
+ // Rejected title projection is still measured twice under the held identity.
+ d.title.textContent='Skip setup?';d.title.tagName='DIV';reads=0;
+ page.evaluate=async(fn,arg)=>{reads++;return vm.runInNewContext('('+fn.toString()+')',d.context)({...arg,held:arg.held.value});};
+ const tagRejected=await helper.observe(held,'win32',opts);
+ assert.equal(reads,2);assert.equal(tagRejected.rejectionStage,'title-tag');
+ assert.equal(tagRejected.titleReferenceCount,null);assert.deepEqual(tagRejected.sourceTitleIds,[]);
+ d.title.tagName='H2';reads=0;
+ page.evaluate=async()=>{throw new Error('PRIVATE exception');};
+ assert.equal((await helper.observe(held,'win32',opts)).rejectionStage,'query');
+ assert.equal((await helper.observe(held,'win32',{...opts,deadline:Date.now()-1})).rejectionStage,'deadline');
+ assert.ok(!JSON.stringify(tagRejected).includes('PRIVATE'));
  assert.equal(new Set(catalog.entries.map(e=>e.id)).size,63);
  for(const [text,id]of [['Global search','chatgpt.global_search.modal.title'],['Import from your browser','settings.browserUse.profileImport.title'],['Import unverified extensions?','settings.browserUse.profileImport.extensionsConfirmationTitle']]) {const added=fixture(text);assert.equal(added.classify({held:added.held,entries:added.entries}).sourceTitleIds[0],id);}
  const windowsCatalog=require('./codex-dialog-title-catalog-windows.json');

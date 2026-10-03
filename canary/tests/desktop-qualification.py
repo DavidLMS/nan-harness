@@ -2765,19 +2765,63 @@ class CodexLinuxInitialDialogTests(unittest.TestCase):
 
 
 class CodexStaticDialogTitleTests(unittest.TestCase):
+    def test_catalog_rejection_is_closed_and_does_not_publish_title_identity(self):
+        value = dict(schemaVersion=1, mechanism='codex-static-dialog-title', diagnosticsOnly=True,
+                     sourceVersion='26.930.31730', platform='windows',
+                     artifactSha256='f7b0266d6c00d4743da01d62bc82488f7ec5560c642501758119cb9885f67c87',
+                     wrapperSourceSha256='5e3a36d643393af861d2009584f64289f2247928e793f1985fe12cfec803a40b',
+                     catalogSha256='dff2a1184ab65c0ad8497ea90984ccb19be01c09f6a025a8e1e9d96b3bc4f467',
+                     status='guard-rejected', titleReferenceCount=None, matchCount=None,
+                     sourceTitleIds=[], sourceTitleEmpty=None, rejectionStage='title-tag')
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'title.json'
+            for stage in ('scope', 'deadline', 'dialog-count', 'reference', 'title-count', 'title-tag',
+                          'title-text', 'actionability', 'query', 'changed', 'unmeasured'):
+                path.write_text(json.dumps({**value, 'rejectionStage': stage}))
+                self.assertEqual(q.semantic_observations(root, 'chatgpt-desktop')[0]['rejectionStage'], stage)
+            for change in ({'rejectionStage': 'PRIVATE'}, {'rejectionStage': None},
+                           {'sourceTitleIds': ['keyboardShortcutsDialog.title']}, {'privateTag': 'DIV'}):
+                path.write_text(json.dumps({**value, **change}))
+                with self.assertRaises(ValueError): q.semantic_observations(root, 'chatgpt-desktop')
+            observed = {**value, 'status': 'unknown', 'titleReferenceCount': 1, 'matchCount': 0,
+                        'sourceTitleEmpty': False, 'rejectionStage': None}
+            path.write_text(json.dumps(observed))
+            self.assertIsNone(q.semantic_observations(root, 'chatgpt-desktop')[0]['rejectionStage'])
+            path.write_text(json.dumps({**observed, 'rejectionStage': 'title-tag'}))
+            with self.assertRaises(ValueError): q.semantic_observations(root, 'chatgpt-desktop')
+
+    def test_linux_catalog_binds_new_version_and_exact_public_bytes(self):
+        value = dict(schemaVersion=1, mechanism='codex-static-dialog-title', diagnosticsOnly=True,
+                     sourceVersion='26.930.41038', platform='linux',
+                     artifactSha256='ee7854145554718d7239d01ea37d44f6ba1e0ba4a93f47ac097d6e0f964da47c',
+                     wrapperSourceSha256='c3c9a86a6d9c3a2a8cecaf0a6a22527c69f89949cb0d8958896bc86131e9c6c9',
+                     catalogSha256='f8ee7fd71682aaff118c1efc2487b15307818fd5d378233270e82c9c4ed3cd90',
+                     status='matched', titleReferenceCount=1, matchCount=1,
+                     sourceTitleIds=['chatgpt.global_search.modal.title'])
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'title.json'
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(root, 'chatgpt-desktop')[0]['sourceVersion'], '26.930.41038')
+            for patch in ({'sourceVersion': '26.930.31730'}, {'platform': 'macos'},
+                          {'artifactSha256': '0' * 64}, {'wrapperSourceSha256': '0' * 64},
+                          {'catalogSha256': '0' * 64}, {'privateText': 'PRIVATE_SENTINEL'}):
+                path.write_text(json.dumps({**value, **patch}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'chatgpt-desktop')
+
     def test_exact_catalog_pins_and_source_ids_are_passive_closed(self):
         value = dict(schemaVersion=1, mechanism='codex-static-dialog-title', diagnosticsOnly=True,
-                     sourceVersion='26.930.31730', platform='macos',
-                     artifactSha256='bfda661a7c9ca44dac3168134058dd6007947cde318ade37d570c484329f6d41',
-                     wrapperSourceSha256='df6152796a7762d3956cbf2030bd8b17de90a4554513d786f11cd41f88b892d4',
-                     catalogSha256='9fa1cdc597524b54f3e7c8ed7477fc565849b3c5989f66be91ff868098188ba3',
+                     sourceVersion='26.930.41038', platform='macos',
+                     artifactSha256='f6cf4d2e9b69aeefa33adda4bcd1a2d306357f5253a1ac6049700870c28dd0c7',
+                     wrapperSourceSha256='0703d0aa97450d6d21346e1c79c887a5bf9062cd0069e8251ec03748a33b6dd0',
+                     catalogSha256='cb0dad04840297918677c21b87182b4845117e90c93b414a428dabcd4d332a93',
                      status='matched', titleReferenceCount=1, matchCount=1,
                      sourceTitleIds=['electron.onboarding.conversationalOnboarding.skipDialog.title'])
         with tempfile.TemporaryDirectory() as root:
             path = Path(root) / 'title.json'
             path.write_text(json.dumps(value))
             self.assertEqual(q.semantic_observations(root, 'chatgpt-desktop')[0]['sourceTitleIds'], value['sourceTitleIds'])
-            windows = {**value, 'platform': 'windows',
+            windows = {**value, 'platform': 'windows', 'sourceVersion': '26.930.31730',
                        'artifactSha256': 'f7b0266d6c00d4743da01d62bc82488f7ec5560c642501758119cb9885f67c87',
                        'wrapperSourceSha256': '5e3a36d643393af861d2009584f64289f2247928e793f1985fe12cfec803a40b',
                        'catalogSha256': 'dff2a1184ab65c0ad8497ea90984ccb19be01c09f6a025a8e1e9d96b3bc4f467'}
@@ -2803,7 +2847,7 @@ class CodexStaticDialogTitleTests(unittest.TestCase):
                         'titleReferenceCount': None if count is None else 1}
                 path.write_text(json.dumps(item))
                 self.assertEqual(q.semantic_observations(root, 'chatgpt-desktop')[0]['status'], status)
-            for change in ({'text': 'PRIVATE'}, {'platform': []}, {'status': []}, {'sourceTitleIds': ['PRIVATE']},
+            for change in ({'sourceVersion': '26.930.31730'}, {'text': 'PRIVATE'}, {'platform': []}, {'status': []}, {'sourceTitleIds': ['PRIVATE']},
                            {'sourceTitleIds': value['sourceTitleIds'] * 2}, {'titleReferenceCount': True},
                            {'sourceTitleIds': ['codex.mcpTool.confirmFollowUp.widgetStateTitle']},
                            {'matchCount': True}, {'matchCount': 2}, {'artifactSha256': '0' * 64},
