@@ -81,6 +81,20 @@ struct CandidateInventory {
 }
 
 impl CandidateInventory {
+    fn timeout_failure(&self, kind: DesktopHarnessKind) -> AcquisitionFailure {
+        let stage = self.stage();
+        (
+            Reason::DesktopUnavailable,
+            stage,
+            ComposerErrorCategory::Other,
+            None,
+            (cfg!(target_os = "linux")
+                && matches!(kind, DesktopHarnessKind::Claude | DesktopHarnessKind::Pen))
+            .then(|| facts_for_stage(stage, self.facts()))
+            .flatten(),
+        )
+    }
+
     fn observe(&mut self, kind: DesktopHarnessKind, windows: &[Window], owner: u32) {
         let (named, eligible) = candidate_counts(kind, windows);
         self.total += windows.len();
@@ -249,6 +263,8 @@ pub(super) struct Visual {
     native: Native,
     window: RefCell<Window>,
     scale: Cell<Option<f32>>,
+    #[cfg(windows)]
+    windows_fitted: Cell<bool>,
     #[cfg(target_os = "macos")]
     mac_fit_identity: Cell<Option<(u64, u32)>>,
 }
@@ -328,7 +344,10 @@ impl Visual {
         let mut inventory = CandidateInventory::default();
         let mut stability = super::stability::Stability::default();
         #[cfg(windows)]
-        let mut fitted = false;
+        let mut windows_fit = WindowsInitialFit {
+            fitted: false,
+            claude: kind == DesktopHarnessKind::Claude && super::claude_windows_ready::policy(),
+        };
         #[cfg(target_os = "macos")]
         let mut mac_fitted = None;
         loop {
@@ -354,14 +373,19 @@ impl Visual {
             if let Some(window) = windows.first() {
                 require_owned_candidate(window, owner)?;
                 #[cfg(windows)]
-                if !fitted {
-                    fit_owned_window(&native, window)?;
-                    fitted = true;
+                if initial_windows_fit(
+                    &native,
+                    &snapshot,
+                    window,
+                    previous.as_ref() == Some(*window),
+                    &mut windows_fit,
+                    process,
+                    deadline,
+                )? {
+                    previous = None;
+                    settle.reset();
+                    stability = super::stability::Stability::default();
                     continue;
-                }
-                #[cfg(windows)]
-                if fitted && !snapshot.contains_display(window) {
-                    return Err(postcondition_geometry_failure());
                 }
                 let unchanged = previous.as_ref() == Some(*window);
                 let ready = settle.ready(extended_settle, Instant::now(), unchanged, deadline);
@@ -382,6 +406,8 @@ impl Visual {
                         window: RefCell::new((*window).clone()),
                         native,
                         scale: Cell::new(None),
+                        #[cfg(windows)]
+                        windows_fitted: Cell::new(windows_fit.fitted),
                         #[cfg(target_os = "macos")]
                         mac_fit_identity: Cell::new(mac_fitted),
                     });
@@ -393,17 +419,7 @@ impl Visual {
             }
             if Instant::now() >= deadline {
                 stability.save_failure(&native, &snapshot, previous.as_ref());
-                let stage = inventory.stage();
-                return Err((
-                    Reason::DesktopUnavailable,
-                    stage,
-                    ComposerErrorCategory::Other,
-                    None,
-                    (cfg!(target_os = "linux")
-                        && matches!(kind, DesktopHarnessKind::Claude | DesktopHarnessKind::Pen))
-                    .then(|| facts_for_stage(stage, inventory.facts()))
-                    .flatten(),
-                ));
+                return Err(inventory.timeout_failure(kind));
             }
             std::thread::sleep(Duration::from_millis(200));
         }
@@ -541,6 +557,29 @@ impl Visual {
                 .map_err(|error| failure(error.reason()))?;
             let candidates =
                 eligible_windows(DesktopHarnessKind::Claude, &snapshot.windows).collect::<Vec<_>>();
+            if let Some(fit) = super::claude_windows_fit::candidate(
+                &snapshot,
+                &original,
+                &candidates,
+                self.windows_fitted.get(),
+            ) {
+                if previous.as_ref() != Some(&fit) {
+                    stability.observe(Some(&fit), previous.as_ref());
+                    previous = Some(fit);
+                    settle.reset();
+                    std::thread::sleep(Duration::from_millis(200));
+                    continue;
+                }
+                require_running(process).map_err(failure)?;
+                require_owned_candidate(&fit, owner)?;
+                fit_owned_window_until(&self.native, &fit, deadline)?;
+                self.windows_fitted.set(true);
+                require_owned_candidate(&fit, owner)?;
+                settle.reset();
+                stability = super::stability::Stability::default();
+                previous = None;
+                continue;
+            }
             let candidate =
                 super::claude_windows_ready::candidate(&snapshot, &original, &candidates).map_err(
                     |error| {
@@ -1057,6 +1096,71 @@ impl Visual {
         let category = visual_failure.unwrap_or(ComposerErrorCategory::MissingComposerAnchor);
         Err((Reason::SelectorNotMatched, category))
     }
+}
+
+#[cfg(windows)]
+struct WindowsInitialFit {
+    fitted: bool,
+    claude: bool,
+}
+
+#[cfg(windows)]
+fn initial_windows_fit<P: Observation>(
+    native: &Native,
+    snapshot: &Snapshot,
+    window: &Window,
+    unchanged: bool,
+    state: &mut WindowsInitialFit,
+    process: &mut P,
+    deadline: Instant,
+) -> Result<bool, AcquisitionFailure> {
+    if !state.fitted && !state.claude {
+        fit_owned_window(native, window)?;
+        state.fitted = true;
+        return Ok(true);
+    }
+    if state.claude
+        && unchanged
+        && super::claude_windows_fit::candidate(snapshot, window, &[window], state.fitted).is_some()
+    {
+        require_running(process).map_err(|reason| {
+            acquisition_failure(reason, crate::diagnostics::GuiAcquisitionStage::ProcessLive)
+        })?;
+        let owner = process.id().ok_or_else(|| {
+            acquisition_failure(
+                Reason::ApplicationExited,
+                crate::diagnostics::GuiAcquisitionStage::ProcessLive,
+            )
+        })?;
+        require_owned_candidate(window, owner)?;
+        fit_owned_window_until(native, window, deadline)?;
+        state.fitted = true;
+        require_owned_candidate(window, owner)?;
+        return Ok(true);
+    }
+    if state.fitted && !snapshot.contains_display(window) {
+        return Err(postcondition_geometry_failure());
+    }
+    Ok(false)
+}
+
+#[cfg(windows)]
+fn fit_owned_window_until(
+    native: &Native,
+    window: &Window,
+    deadline: Instant,
+) -> Result<(), AcquisitionFailure> {
+    native
+        .fit_windows_owned_until(window, deadline)
+        .map_err(|error| {
+            (
+                Reason::ActionUnsupported,
+                crate::diagnostics::GuiAcquisitionStage::WindowStability,
+                fit_error_category(error),
+                None,
+                None,
+            )
+        })
 }
 
 #[cfg(windows)]

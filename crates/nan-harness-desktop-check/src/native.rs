@@ -554,6 +554,36 @@ impl Native {
         ))
     }
 
+    #[cfg(windows)]
+    pub(crate) fn fit_windows_owned_until(
+        &self,
+        window: &Window,
+        deadline: std::time::Instant,
+    ) -> Result<(), FitWindowError> {
+        let argument = format!("--fit-window {} {}", window.id, window.pid);
+        let output = process::run_windows_fit_until(
+            &self.executable,
+            std::ffi::OsStr::new(&argument),
+            deadline,
+        )
+        .map_err(FitWindowError::Transport)?;
+        if std::time::Instant::now() >= deadline {
+            return Err(FitWindowError::Transport(FailureCategory::Timeout));
+        }
+        let result = if output.trim().is_empty() {
+            Ok(())
+        } else {
+            Err(FitWindowError::Diagnostic(
+                FitFailure::parse(&output)
+                    .map_err(|_| FitWindowError::Transport(FailureCategory::Output))?,
+            ))
+        };
+        if std::time::Instant::now() >= deadline {
+            return Err(FitWindowError::Transport(FailureCategory::Timeout));
+        }
+        result
+    }
+
     #[cfg(target_os = "macos")]
     pub(crate) fn fit_mac_owned_until(
         &self,

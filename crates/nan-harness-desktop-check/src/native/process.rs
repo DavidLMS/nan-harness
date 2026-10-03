@@ -82,6 +82,15 @@ pub(super) fn run_with_category_input(
     run_once(executable, argument, None, input)
 }
 
+#[cfg(windows)]
+pub(super) fn run_windows_fit_until(
+    executable: &Path,
+    argument: &OsStr,
+    deadline: Instant,
+) -> Result<Zeroizing<String>, FailureCategory> {
+    run_once_until(executable, argument, None, &[], Some(deadline))
+}
+
 #[cfg(target_os = "macos")]
 pub(super) fn run_fit_until(
     executable: &Path,

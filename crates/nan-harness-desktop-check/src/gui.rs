@@ -7,6 +7,8 @@ mod claude_chat_navigation;
 mod claude_native_chat;
 mod claude_native_probe;
 #[cfg(any(windows, test))]
+mod claude_windows_fit;
+#[cfg(any(windows, test))]
 mod claude_windows_ready;
 mod clipboard;
 mod codex_dom_probe;
