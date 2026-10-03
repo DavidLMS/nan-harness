@@ -8,7 +8,7 @@ const COUNT_KEYS: [&str; 7] = [
     "assistantHeadingCount",
     "copyControlCount",
 ];
-const FAILURES: [&str; 18] = [
+const FAILURES: [&str; 22] = [
     "query",
     "deadline",
     "identity",
@@ -20,6 +20,10 @@ const FAILURES: [&str; 18] = [
     "occlusion",
     "duplicate",
     "element-identity",
+    "root-process-query",
+    "root-process-mismatch",
+    "descendant-process-query",
+    "descendant-process-mismatch",
     "heading-property",
     "com",
     "root-replaced",
@@ -80,6 +84,19 @@ mod tests {
         let value = parse("uia element-identity - - - - - - -\n").unwrap();
         assert_eq!(value["nativeGuardVerified"], false);
         assert!(value["nodeCount"].is_null());
+        for status in [
+            "root-process-query",
+            "root-process-mismatch",
+            "descendant-process-query",
+            "descendant-process-mismatch",
+        ] {
+            let wire = format!("uia {status} - - - - - - -\n");
+            let value = parse(&wire).unwrap();
+            assert_eq!(value["status"], status);
+            assert_eq!(value["treeComplete"], false);
+            assert!(value["nodeCount"].is_null());
+            assert!(parse(&wire.replace("- -", "1 -")).is_none());
+        }
         for invalid in [
             "uia observed 0 0 0 0 0 0 0\n",
             "uia observed 1 2 0 0 0 0 0\n",

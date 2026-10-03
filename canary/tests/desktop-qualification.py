@@ -525,6 +525,24 @@ class QualificationTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 q.semantic_observations(root, 'zed-desktop')
 
+    def test_windows_uia_process_failure_stages_remain_private_and_blocked(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'uia.json'
+            value = dict(schemaVersion=1, mechanism='claude-windows-uia', diagnosticsOnly=True,
+                         phase='post-ready', nativeGuardVerified=False, treeComplete=False,
+                         nodeCount=None, classicEditorCount=None, modernEditorCount=None,
+                         sendControlCount=None, startTaskControlCount=None,
+                         assistantHeadingCount=None, copyControlCount=None)
+            for stage in ('root-process-query', 'root-process-mismatch',
+                          'descendant-process-query', 'descendant-process-mismatch'):
+                path.write_text(json.dumps({**value, 'status': stage}))
+                self.assertEqual(q.semantic_observations(root, 'claude-desktop')[0]['status'], stage)
+                for change in ({'processId': 'PRIVATE'}, {'nodeCount': 1},
+                               {'nativeGuardVerified': True}, {'status': stage + '-PRIVATE'}):
+                    path.write_text(json.dumps({**value, 'status': stage, **change}))
+                    with self.assertRaises(ValueError):
+                        q.semantic_observations(root, 'claude-desktop')
+
     def test_semantic_observations_publish_only_closed_progress(self):
         with tempfile.TemporaryDirectory() as root:
             path = Path(root) / 'observation.json'

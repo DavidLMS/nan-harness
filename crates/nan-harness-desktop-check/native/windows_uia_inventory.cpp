@@ -63,7 +63,12 @@ struct Collection {
             if(same) {stage="duplicate";return false;}
         }
         int pid=0,type=0; BSTR name=nullptr;
-        if(FAILED(element->get_CurrentProcessId(&pid)) || pid!=static_cast<int>(request.pid)) {stage="element-identity";return false;}
+        if(FAILED(element->get_CurrentProcessId(&pid))) {
+            stage=depth==0?"root-process-query":"descendant-process-query";return false;
+        }
+        if(pid!=static_cast<int>(request.pid)) {
+            stage=depth==0?"root-process-mismatch":"descendant-process-mismatch";return false;
+        }
         if(FAILED(element->get_CurrentControlType(&type)) || FAILED(element->get_CurrentName(&name))) return false;
         std::wstring text;
         if(name) {
