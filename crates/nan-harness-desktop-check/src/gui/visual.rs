@@ -2147,7 +2147,8 @@ mod tests {
         let pending = Snapshot::parse("FG 7 0\nDISPLAY 0 0 2000 2000\nWIN 99 7 1800 1800 10 10 436c61756465 3\nWIN 1 7 10 20 800 600 436c61756465 0\nFOCUS query-error 0\nFOCUS_QUERY before main-window cannot-complete\nFOCUS_WINDOW proved 1\n").unwrap();
         let held = pending.windows[1].clone();
         let mut fresh = pending.clone();
-        fresh.windows[1].bounds.width += 20;
+        // A prior incomplete AX proof must not hide a fresh unsafe resize.
+        fresh.windows[1].bounds.width = 2001;
         let now = Instant::now();
         assert_eq!(
             initial_owned_focus(
