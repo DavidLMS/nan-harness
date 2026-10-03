@@ -1136,6 +1136,27 @@ class QualificationTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 q.semantic_observations(root, 'chatgpt-desktop')
 
+    def test_zed_retry_visual_is_advisory_closed_and_consistent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / 'retry-visual.json'
+            value = dict(schemaVersion=1, mechanism='zed-retry-visual', diagnosticsOnly=True,
+                         status='complete', reason=None, templateSide=14, copyMatches=1, closeMatches=1,
+                         baselinePairs=0, firstPairs=1, secondPairs=1, newStablePairs=1,
+                         retryCorrelations=1, relation='left-same-row')
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(root, 'zed-desktop'), [value])
+            for changed in ({**value, 'x': 20}, {**value, 'templateSide': True},
+                            {**value, 'newStablePairs': 2}, {**value, 'retryCorrelations': 0},
+                            {**value, 'relation': 'PRIVATE'}, {**value, 'copyMatches': 33},
+                            {**value, 'diagnosticsOnly': False}, {**value, 'status': 'unsupported'}):
+                path.write_text(json.dumps(changed))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'zed-desktop')
+            path.write_text(json.dumps(value))
+            with self.assertRaises(ValueError):
+                q.semantic_observations(root, 'claude-desktop')
+
     def test_claude_final_candidate_state_is_closed_and_diagnostic_only(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

@@ -464,6 +464,165 @@ pub(super) fn observe(
     })
 }
 
+/// Source-order correlation is advisory; rendered candidates never certify a click.
+#[cfg(any(target_os = "linux", test))]
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct RetryVisualObservation {
+    schema_version: u8,
+    mechanism: &'static str,
+    diagnostics_only: bool,
+    pub(super) status: &'static str,
+    pub(super) reason: Option<Reason>,
+    template_side: u32,
+    copy_matches: usize,
+    close_matches: usize,
+    baseline_pairs: usize,
+    first_pairs: usize,
+    second_pairs: usize,
+    new_stable_pairs: usize,
+    retry_correlations: usize,
+    relation: &'static str,
+}
+
+#[cfg(any(target_os = "linux", test))]
+impl RetryVisualObservation {
+    pub(super) fn unavailable(reason: Reason) -> Self {
+        Self {
+            schema_version: 1,
+            mechanism: "zed-retry-visual",
+            diagnostics_only: true,
+            status: "unsupported",
+            reason: Some(reason),
+            template_side: 0,
+            copy_matches: 0,
+            close_matches: 0,
+            baseline_pairs: 0,
+            first_pairs: 0,
+            second_pairs: 0,
+            new_stable_pairs: 0,
+            retry_correlations: 0,
+            relation: "unavailable",
+        }
+    }
+}
+
+#[cfg(any(target_os = "linux", test))]
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct CopyClosePair {
+    copy: Position,
+    close: Position,
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn copy_close_pairs(
+    copy: &[Position],
+    close: &[Position],
+    side: u32,
+) -> Result<Vec<CopyClosePair>, Reason> {
+    let mut pairs = Vec::new();
+    for &copy in copy {
+        for &close in close {
+            if copy.y.abs_diff(close.y) <= side / 7
+                && close.x > copy.x
+                && (side..=side * 3).contains(&(close.x - copy.x))
+            {
+                if pairs.len() >= MAX_MATCHES {
+                    return Err(Reason::BudgetExceeded);
+                }
+                pairs.push(CopyClosePair { copy, close });
+            }
+        }
+    }
+    Ok(pairs)
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn retry_precedes_pair(
+    pair: CopyClosePair,
+    side: u32,
+    scale: u32,
+    capture: xa11y::Rect,
+    retry: xa11y::Rect,
+) -> bool {
+    let copy_x = i64::from(capture.x) + i64::from(pair.copy.x / scale);
+    let icon_center_y = i64::from(capture.y) + i64::from((pair.copy.y + side / 2) / scale);
+    let retry_right = i64::from(retry.x) + i64::from(retry.width);
+    retry.width > 0
+        && retry.height > 0
+        && copy_x >= retry_right
+        && copy_x - retry_right <= i64::from(side * 3 / scale)
+        && icon_center_y >= i64::from(retry.y)
+        && icon_center_y < i64::from(retry.y) + i64::from(retry.height)
+}
+
+#[cfg(any(target_os = "linux", test))]
+pub(super) fn observe_retry_visual(
+    masks: &Templates,
+    baseline: &PrivateIconFrame,
+    first: &PrivateIconFrame,
+    second: &PrivateIconFrame,
+    capture: xa11y::Rect,
+    retry: xa11y::Rect,
+) -> Result<RetryVisualObservation, Reason> {
+    for frame in [&baseline.0, &first.0, &second.0] {
+        validate(frame)?;
+        if supported_side(frame.scale)? != masks.side
+            || frame.width != first.0.width
+            || frame.height != first.0.height
+        {
+            return Err(Reason::WindowChanged);
+        }
+    }
+    let deadline = Instant::now() + Duration::from_secs(8);
+    let candidates =
+        |frame: &PrivateIconFrame| -> Result<(usize, usize, Vec<CopyClosePair>), Reason> {
+            let luma = LumaFrame::new(&frame.0);
+            let copy = find(&luma, &masks.copy, masks.side, deadline)?.positions;
+            let close = find(&luma, &masks.close, masks.side, deadline)?.positions;
+            Ok((
+                copy.len(),
+                close.len(),
+                copy_close_pairs(&copy, &close, masks.side)?,
+            ))
+        };
+    let before = candidates(baseline)?;
+    let one = candidates(first)?;
+    let two = candidates(second)?;
+    let stable: Vec<_> = one
+        .2
+        .iter()
+        .copied()
+        .filter(|pair| two.2.contains(pair) && !before.2.contains(pair))
+        .collect();
+    let scale = if masks.side == 14 { 1 } else { 2 };
+    let correlations = stable
+        .iter()
+        .filter(|pair| retry_precedes_pair(**pair, masks.side, scale, capture, retry))
+        .count();
+    Ok(RetryVisualObservation {
+        schema_version: 1,
+        mechanism: "zed-retry-visual",
+        diagnostics_only: true,
+        status: "complete",
+        reason: None,
+        template_side: masks.side,
+        copy_matches: one.0,
+        close_matches: one.1,
+        baseline_pairs: before.2.len(),
+        first_pairs: one.2.len(),
+        second_pairs: two.2.len(),
+        new_stable_pairs: stable.len(),
+        retry_correlations: correlations,
+        relation: match (stable.len(), correlations) {
+            (0, _) => "no-pair",
+            (1, 1) => "left-same-row",
+            (1, 0) => "mismatch",
+            _ => "ambiguous",
+        },
+    })
+}
+
 /// Exact-source zoom candidates remain diagnostic-only; no input uses these bounds.
 pub(super) struct ZoomMatches {
     pub(super) maximize: Vec<xa11y::Rect>,
@@ -598,6 +757,49 @@ mod tests {
             }
         }
         PrivateIconFrame::new(screenshot)
+    }
+
+    #[test]
+    fn retry_row_correlation_requires_new_stable_unique_pair_and_owned_geometry() {
+        let masks = synthetic_masks();
+        let baseline = frame(&masks, &[]);
+        let one = frame(&masks, &[10]);
+        let two = frame(&masks, &[10]);
+        let capture = xa11y::Rect {
+            x: 100,
+            y: 200,
+            width: 120,
+            height: 80,
+        };
+        let retry = xa11y::Rect {
+            x: 110,
+            y: 210,
+            width: 20,
+            height: 20,
+        };
+        let observe = |baseline, two, retry| {
+            observe_retry_visual(&masks, baseline, &one, two, capture, retry).unwrap()
+        };
+        assert_eq!(observe(&baseline, &two, retry).relation, "left-same-row");
+        assert_eq!(observe(&one, &two, retry).relation, "no-pair");
+        let moved = frame(&masks, &[40]);
+        assert_eq!(observe(&baseline, &moved, retry).relation, "no-pair");
+        assert_eq!(
+            observe(&baseline, &two, xa11y::Rect { y: 250, ..retry }).relation,
+            "mismatch"
+        );
+        let ambiguous = frame(&masks, &[10, 40]);
+        assert_eq!(
+            observe_retry_visual(&masks, &baseline, &ambiguous, &ambiguous, capture, retry)
+                .unwrap()
+                .relation,
+            "ambiguous"
+        );
+        let unavailable = RetryVisualObservation::unavailable(Reason::ActionUnsupported);
+        let encoded = serde_json::to_value(unavailable).unwrap();
+        assert_eq!(encoded["templateSide"], 0);
+        assert_eq!(encoded["relation"], "unavailable");
+        assert!(!encoded.as_object().unwrap().contains_key("bounds"));
     }
 
     #[test]

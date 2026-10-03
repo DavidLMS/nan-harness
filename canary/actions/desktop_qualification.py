@@ -231,10 +231,10 @@ def semantic_observations(directory, app):
         if type(value) is not dict:
             raise ValueError('invalid semantic observation')
         mechanism = value.get('mechanism')
-        if mechanism not in {'hermes-windows-catalog-readiness', 'hermes-renderer-qualification', 'zed-native-copy', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'windows-process-absence', 'windows-post-stop-process', 'claude-owned-configuration', 'claude-restore', 'claude-model-discovery', 'claude-window-stack', 'claude-window-focus', 'claude-storage-use', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}:
+        if mechanism not in {'hermes-windows-catalog-readiness', 'hermes-renderer-qualification', 'zed-native-copy', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'zed-retry-visual', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'windows-process-absence', 'windows-post-stop-process', 'claude-owned-configuration', 'claude-restore', 'claude-model-discovery', 'claude-window-stack', 'claude-window-focus', 'claude-storage-use', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}:
             continue
         expected = 'hermes-renderer-qualification' if app == 'hermes-desktop' else 'zed-native-copy'
-        if (mechanism != expected and mechanism not in {'hermes-windows-catalog-readiness', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'windows-process-absence', 'windows-post-stop-process', 'claude-owned-configuration', 'claude-restore', 'claude-model-discovery', 'claude-window-stack', 'claude-window-focus', 'claude-storage-use', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}) or type(value.get('schemaVersion')) is not int or value['schemaVersion'] != 1:
+        if (mechanism != expected and mechanism not in {'hermes-windows-catalog-readiness', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'zed-retry-visual', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'windows-process-absence', 'windows-post-stop-process', 'claude-owned-configuration', 'claude-restore', 'claude-model-discovery', 'claude-window-stack', 'claude-window-focus', 'claude-storage-use', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}) or type(value.get('schemaVersion')) is not int or value['schemaVersion'] != 1:
             raise ValueError('semantic observation identity differs')
         record = {'schemaVersion': 1, 'mechanism': mechanism}
         if mechanism == 'hermes-windows-catalog-readiness':
@@ -702,6 +702,29 @@ def semantic_observations(directory, app):
             if type(value.get('readToolSelected')) is not bool:
                 raise ValueError('invalid semantic inventory flag')
             record['readToolSelected'] = value['readToolSelected']
+        elif mechanism == 'zed-retry-visual':
+            counts = set('copyMatches closeMatches baselinePairs firstPairs secondPairs newStablePairs retryCorrelations'.split())
+            fields = counts | set('schemaVersion mechanism diagnosticsOnly status reason templateSide relation'.split())
+            if (app != 'zed-desktop' or set(value) != fields or value['diagnosticsOnly'] is not True
+                    or any(type(value[k]) is not int or not 0 <= value[k] <= 32 for k in counts)):
+                raise ValueError('invalid Zed Retry visual observation')
+            enum(record, value, 'status', {'complete', 'unsupported', 'query-error'})
+            enum(record, value, 'reason', REASONS)
+            relation = value['relation']
+            if type(relation) is not str or relation not in {'unavailable', 'no-pair', 'ambiguous', 'left-same-row', 'mismatch'}:
+                raise ValueError('invalid Zed Retry visual relation')
+            stable, correlated = value['newStablePairs'], value['retryCorrelations']
+            if (stable > min(value['firstPairs'], value['secondPairs']) or correlated > stable
+                    or type(value['templateSide']) is not int):
+                raise ValueError('inconsistent Zed Retry visual counts')
+            if value['status'] == 'complete':
+                expected_relation = 'no-pair' if stable == 0 else ('left-same-row' if correlated == 1 else 'mismatch') if stable == 1 else 'ambiguous'
+                if value['reason'] is not None or value['templateSide'] not in {14, 28} or relation != expected_relation:
+                    raise ValueError('inconsistent complete Zed Retry visual observation')
+            elif (value['reason'] is None or value['templateSide'] != 0 or relation != 'unavailable'
+                  or any(value[k] != 0 for k in counts)):
+                raise ValueError('inconsistent unavailable Zed Retry visual observation')
+            record.update({k: value[k] for k in fields - {'schemaVersion', 'mechanism'}})
         elif mechanism == 'zed-native-icons':
             if app != 'zed-desktop' or value.get('diagnosticsOnly') is not True:
                 raise ValueError('invalid native icon diagnostic identity')

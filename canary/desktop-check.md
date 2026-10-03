@@ -1533,3 +1533,19 @@ now identifies the final acquisition failure as `off-display`; both independent
 focus proofs pass and cleanup passes. The next distinct trial fits only the
 already-owned, exactly focused initial window to the public visible work area,
 then requires the original strict guards and stability before any input.
+
+
+Windows Claude
+[37080445695](https://github.com/DavidLMS/nan-harness/actions/runs/37080445695)
+compiles the corrected native boundary and acquires its window. Cleanup still
+fails: the independent complete process snapshot reports Claude present after
+owned stop while AX absence is also rejected. This is positive presence evidence,
+not another process-inspection timeout; it does not establish whether the process
+belongs to the stopped job. Exact ownership and prelaunch presence are the next
+closed diagnostics. No global process kill is authorized by a matching name.
+
+The next Linux Zed trial compares guarded frames against the existing pre-submit
+baseline and correlates new stable exact-source Copy/Close icon candidates with
+the unchanged native Retry rectangle. It emits only closed counts and relations.
+Masks remain uncalibrated against GPUI, so even a unique matching cluster is
+advisory; this neither certifies the hitbox/callback nor changes the Retry click.
