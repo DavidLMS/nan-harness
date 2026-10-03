@@ -8,7 +8,7 @@ use crate::gui::{
     CodexDomSession, ComposerFailure, DomAction, DomPurpose, DomTurn, Gui, NativeClipboardSession,
     RendererSession,
 };
-use crate::provider::ProviderGate;
+use crate::provider::{ProviderGate, SelectedTool, ToolResultObservation};
 use crate::report::{CheckStep, InputMode, ProbeResult, Reason, ResponseVerification};
 use nan_harness_core::DesktopHarnessKind;
 use nan_harness_private_fs::{create_private_dir_all, open_private_new};
@@ -334,6 +334,7 @@ async fn complete_scenario(
     let selected = select_read_tool(&requests, fixture);
     record_inventory(directory, &requests, selected.is_some())?;
     let (name, arguments) = selected.ok_or(Reason::ToolMismatch)?;
+    let selected_tool = SelectedTool::from_name(&name).ok_or(Reason::ToolMismatch)?;
     let tool_marker = semantic_marker("NAN CHECK TOOL")?;
     let tool = ScriptedProvider::start(ProviderScenario::tool(name, arguments, &tool_marker))
         .await
@@ -348,7 +349,7 @@ async fn complete_scenario(
         DomPurpose::Response,
         gate,
     )?;
-    record_provider_oracle(directory, "tool", &tool, gate)?;
+    record_provider_oracle(directory, "tool", &tool, gate, Some(selected_tool))?;
     if !tool.completed()
         || !tool.recording_bounded()
         || !gate.tool_verified()
@@ -367,7 +368,7 @@ async fn complete_scenario(
         DomPurpose::Failure,
         gate,
     );
-    record_provider_oracle(directory, "failure", &tool, gate)?;
+    record_provider_oracle(directory, "failure", &tool, gate, None)?;
     failure?;
     if !gate.failure_observed() {
         return Err(Reason::ProviderFailed);
@@ -406,6 +407,8 @@ struct ProviderOracleFacts {
     tool: ToolOracleFacts,
     fixture_response_verified: bool,
     failure_observed: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tool_result: Option<ToolResultObservation>,
 }
 
 fn record_provider_oracle(
@@ -413,6 +416,7 @@ fn record_provider_oracle(
     stage: &'static str,
     tool: &ScriptedProvider,
     gate: &ProviderGate,
+    selected_tool: Option<SelectedTool>,
 ) -> Result<(), Reason> {
     let facts = ProviderOracleFacts {
         schema_version: 1,
@@ -425,6 +429,8 @@ fn record_provider_oracle(
         },
         fixture_response_verified: gate.fixture_response_verified(),
         failure_observed: gate.failure_observed(),
+        tool_result: selected_tool
+            .map(|selected| ToolResultObservation::collect(&tool.chat_requests(), selected)),
     };
     let mut nonce = [0_u8; 8];
     getrandom::fill(&mut nonce).map_err(|_| Reason::IsolationUnavailable)?;

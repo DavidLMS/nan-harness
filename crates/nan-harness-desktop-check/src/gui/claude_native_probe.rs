@@ -15,6 +15,73 @@ pub(super) fn mode_button(label: &str, enabled: bool) -> String {
     }).collect::<Vec<_>>().join(", ")
 }
 
+// Both pinned Linux mode variants are passive diagnostics, never navigation authority.
+fn linux_mode_selector(role: &str, mode: &str, enabled: bool) -> String {
+    let state = if enabled { "[enabled=\"true\"]" } else { "" };
+    let labels = [
+        mode.to_owned(),
+        format!("{mode}, awaiting your input"),
+        format!("{mode}, unread activity"),
+        format!("{mode}, working"),
+    ];
+    ["name", "description"].into_iter().flat_map(|group_name| {
+        labels.iter().flat_map(move |label| ["name", "description"].map(move |name| {
+            format!("group[visible=\"true\"][{group_name}=\"Mode\"] {role}[visible=\"true\"]{state}[{name}=\"{label}\"]")
+        }))
+    }).collect::<Vec<_>>().join(", ")
+}
+fn linux_mode_counts(mut query: impl FnMut(&str) -> Option<usize>) -> serde_json::Value {
+    let group =
+        "group[visible=\"true\"][name=\"Mode\"], group[visible=\"true\"][description=\"Mode\"]";
+    let mut count = |selector: &str| query(selector).filter(|count| *count <= 4096);
+    let mut values = serde_json::json!({"modeGroupVisible": count(group)});
+    for (key, role, mode, enabled) in [
+        ("chatButtonVisible", "button", "Chat", false),
+        ("chatButtonEnabled", "button", "Chat", true),
+        ("chatRadioVisible", "radio_button", "Chat", false),
+        ("chatRadioEnabled", "radio_button", "Chat", true),
+        ("coworkButtonVisible", "button", "Cowork", false),
+        ("coworkButtonEnabled", "button", "Cowork", true),
+        ("coworkRadioVisible", "radio_button", "Cowork", false),
+        ("coworkRadioEnabled", "radio_button", "Cowork", true),
+    ] {
+        values[key] = if values["modeGroupVisible"] == 1 {
+            count(&linux_mode_selector(role, mode, enabled)).into()
+        } else {
+            serde_json::Value::Null
+        };
+    }
+    // Each source query must remain under a unique Mode group; never aggregate
+    // controls across newly duplicated groups into an observed receipt.
+    if values["modeGroupVisible"] == 1 {
+        values["modeGroupVisible"] = count(group).into();
+    }
+    let status = if values["modeGroupVisible"].is_null() {
+        "query-failed"
+    } else if values["modeGroupVisible"] == 0 {
+        "group-unavailable"
+    } else if values["modeGroupVisible"] != 1 {
+        "group-ambiguous"
+    } else if values
+        .as_object()
+        .unwrap()
+        .values()
+        .any(serde_json::Value::is_null)
+    {
+        "query-failed"
+    } else {
+        "observed"
+    };
+    if status != "observed" {
+        for (key, value) in values.as_object_mut().unwrap() {
+            if key != "modeGroupVisible" {
+                *value = serde_json::Value::Null;
+            }
+        }
+    }
+    serde_json::json!({"status":status,"sourceCount":values})
+}
+
 fn counts(mut query: impl FnMut(&str) -> Option<usize>) -> serde_json::Value {
     let mut count = |selector: &str| query(selector).filter(|value| *value <= 4096);
     let labelled = |role: &str, label: &str, editable: bool| {
@@ -150,14 +217,19 @@ impl Gui {
         {
             return None;
         }
-        Some(counts(|selector| {
+        let query = |selector: &str| {
             self.app
                 .as_ref()?
                 .locator(selector)
                 .elements()
                 .ok()
                 .map(|elements| elements.len())
-        }))
+        };
+        let mut inventory = counts(query);
+        if linux {
+            inventory["linuxModeRoles"] = linux_mode_counts(query);
+        }
+        Some(inventory)
     }
 }
 
@@ -165,6 +237,25 @@ pub(super) fn record(directory: &Path, owner: u32, source_count: &serde_json::Va
     let Some(directory) = super::qualification_directory::canonical_directory(directory) else {
         return;
     };
+    let mut source_count = source_count.clone();
+    let linux_roles = source_count
+        .as_object_mut()
+        .and_then(|value| value.remove("linuxModeRoles"));
+    if cfg!(target_os = "linux")
+        && let Some(roles) = linux_roles
+    {
+        let value = serde_json::json!({"schemaVersion":1,"mechanism":"claude-linux-mode-roles",
+                "diagnosticsOnly":true,"sourceVersion":"2.9939.4",
+                "modeSourceSha256":"62ffbc1b8a3e4440ae77a33be142afd1914796f945bcd75d58cfe73679925f61",
+                "segmentedSourceSha256":"1fe986422649ab736613079340a52157efd7791b96e0b9c00c46681731b7a4ea",
+                "radioSourceSha256":"9c6ff87b4eaf0e9ad25e6329536f4337586b015e0f868389e72480c1769920a9",
+                "status":roles["status"],"sourceCount":roles["sourceCount"]});
+        if let Ok(mut file) =
+            open_private_new(&directory.join(format!("claude-linux-mode-roles-{owner}.json")))
+        {
+            let _ = file.write_all(value.to_string().as_bytes());
+        }
+    }
     // Frozen official Mac ZIP and Windows MSIX 2.19675.0 contain byte-identical
     // renderer chunks; the enclosing trial binds platform artifact/app digests.
     let mut value = serde_json::json!({"schemaVersion":1,"mechanism":"claude-native-composer",
@@ -297,5 +388,64 @@ mod tests {
         assert_eq!(result["modeChatEnabled"], 0);
         assert_eq!(result["modeGroupVisible"], 2);
         assert!(result["classicEditable"].is_null());
+    }
+    #[test]
+    fn linux_mode_distinguishes_radios_and_exact_attention_labels() {
+        let counts = super::linux_mode_counts(|selector| {
+            if !selector.contains(" button[") && !selector.contains(" radio_button[") {
+                return Some(1);
+            }
+            if selector.contains(" radio_button[") && selector.contains("Chat, working") {
+                Some(1)
+            } else {
+                Some(0)
+            }
+        });
+        assert_eq!(counts["status"], "observed");
+        assert_eq!(counts["sourceCount"]["chatRadioVisible"], 1);
+        assert_eq!(counts["sourceCount"]["chatButtonVisible"], 0);
+        assert!(!counts.to_string().contains("Chat"));
+        for label in [
+            "Chat",
+            "Chat, awaiting your input",
+            "Chat, unread activity",
+            "Chat, working",
+        ] {
+            assert!(
+                super::linux_mode_selector("radio_button", "Chat", true)
+                    .contains(&format!("=\"{label}\"]"))
+            );
+        }
+    }
+    #[test]
+    fn linux_mode_rejects_ambiguous_or_failed_group_queries() {
+        for group in [None, Some(0), Some(2), Some(4097)] {
+            let result = super::linux_mode_counts(|selector| {
+                assert!(!selector.contains(" button[") && !selector.contains(" radio_button["));
+                group
+            });
+            assert_ne!(result["status"], "observed");
+            for (key, count) in result["sourceCount"].as_object().unwrap() {
+                if key != "modeGroupVisible" {
+                    assert!(count.is_null());
+                }
+            }
+        }
+        let mut calls = 0;
+        let changed = super::linux_mode_counts(|_| {
+            calls += 1;
+            if calls == 10 { Some(2) } else { Some(1) }
+        });
+        assert_eq!(changed["status"], "group-ambiguous");
+        assert!(changed["sourceCount"]["chatRadioVisible"].is_null());
+        let failed = super::linux_mode_counts(|s| {
+            if s.contains(" radio_button[") {
+                None
+            } else {
+                Some(1)
+            }
+        });
+        assert_eq!(failed["status"], "query-failed");
+        assert!(failed["sourceCount"]["chatButtonVisible"].is_null());
     }
 }

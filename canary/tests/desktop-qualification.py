@@ -609,6 +609,37 @@ class QualificationTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'zed-desktop')
 
+    def test_tool_result_diagnostics_are_closed_and_do_not_certify_file_read(self):
+        oracle = dict(schemaVersion=1, mechanism='semantic-provider-oracle', stage='tool',
+                      toolCompleted=True, toolRecordingBounded=True, toolVerified=False,
+                      fixtureResponseVerified=True, failureObserved=False)
+        result = dict(selectedTool='read', resultPresent=True, resultCount=1,
+                      status='complete', shape='string', toolErrorDetected=True,
+                      errorCategory='file-not-found')
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'provider.json'
+            path.write_text(json.dumps({**oracle, 'toolResult': result}))
+            public = q.semantic_observations(root, 'claude-desktop')[0]
+            self.assertEqual(public['toolResult'], result)
+            self.assertFalse(public['toolVerified'])
+            for change in ({'selectedTool': 'PRIVATE'}, {'resultCount': True},
+                           {'resultCount': 33}, {'resultPresent': False},
+                           {'shape': 'absent'}, {'toolErrorDetected': False},
+                           {'path': 'PRIVATE'}, {'errorCategory': 'PRIVATE'}):
+                path.write_text(json.dumps({**oracle, 'toolResult': {**result, **change}}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'claude-desktop')
+            path.write_text(json.dumps({**oracle, 'stage': 'failure', 'toolResult': result}))
+            with self.assertRaises(ValueError):
+                q.semantic_observations(root, 'claude-desktop')
+            absent = dict(selectedTool='exec-command', resultPresent=False, resultCount=0,
+                          status='limit', shape='absent', toolErrorDetected=False,
+                          errorCategory='none')
+            path.write_text(json.dumps({**oracle, 'toolResult': absent}))
+            self.assertEqual(q.semantic_observations(root, 'claude-desktop')[0]['toolResult'], absent)
+            path.write_text(json.dumps(oracle))
+            self.assertNotIn('toolResult', q.semantic_observations(root, 'claude-desktop')[0])
+
     def test_provider_oracle_and_retry_tooltip_diagnostics_are_closed(self):
         with tempfile.TemporaryDirectory() as root:
             path = Path(root) / 'provider.json'
@@ -2555,6 +2586,40 @@ class HermesReadinessTests(unittest.TestCase):
                 path.write_text(json.dumps({**value, **changed}))
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'zed-desktop')
+
+class ClaudeLinuxModeRolesTests(unittest.TestCase):
+    def test_passive_roles_require_exact_source_and_unique_group(self):
+        value = dict(schemaVersion=1, mechanism='claude-linux-mode-roles', diagnosticsOnly=True,
+                     sourceVersion='2.9939.4', status='observed',
+                     modeSourceSha256='62ffbc1b8a3e4440ae77a33be142afd1914796f945bcd75d58cfe73679925f61',
+                     segmentedSourceSha256='1fe986422649ab736613079340a52157efd7791b96e0b9c00c46681731b7a4ea',
+                     radioSourceSha256='9c6ff87b4eaf0e9ad25e6329536f4337586b015e0f868389e72480c1769920a9',
+                     sourceCount=dict(modeGroupVisible=1, chatButtonVisible=0, chatButtonEnabled=0,
+                                      chatRadioVisible=1, chatRadioEnabled=1, coworkButtonVisible=0,
+                                      coworkButtonEnabled=0, coworkRadioVisible=0, coworkRadioEnabled=0))
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'roles.json'
+            path.write_text(json.dumps(value))
+            result = q.semantic_observations(root, 'claude-desktop')[0]
+            self.assertEqual(result['sourceCount']['chatRadioVisible'], 1)
+            self.assertNotIn('Chat', json.dumps(result))
+            for change in ({'label': 'PRIVATE'}, {'sourceVersion': '2.19675.0'},
+                           {'status': []}, {'segmentedSourceSha256': '0' * 64},
+                           {'sourceCount': {**value['sourceCount'], 'modeGroupVisible': 2}},
+                           {'sourceCount': {**value['sourceCount'], 'chatRadioVisible': True}},
+                           {'sourceCount': {**value['sourceCount'], 'chatRadioVisible': 4097}}):
+                path.write_text(json.dumps({**value, **change}))
+                with self.assertRaises(ValueError): q.semantic_observations(root, 'claude-desktop')
+            nulls = dict.fromkeys(value['sourceCount'])
+            for status, group in [('group-unavailable', 0), ('group-ambiguous', 2),
+                                  ('query-failed', None), ('query-failed', 1)]:
+                measured = {**value, 'status': status, 'sourceCount': {**nulls, 'modeGroupVisible': group}}
+                path.write_text(json.dumps(measured))
+                self.assertEqual(q.semantic_observations(root, 'claude-desktop')[0]['status'], status)
+                path.write_text(json.dumps({**measured, 'sourceCount': {**measured['sourceCount'], 'chatRadioVisible': 0}}))
+                with self.assertRaises(ValueError): q.semantic_observations(root, 'claude-desktop')
+            path.write_text(json.dumps(value))
+            with self.assertRaises(ValueError): q.semantic_observations(root, 'chatgpt-desktop')
 
 if __name__ == '__main__':
     unittest.main()

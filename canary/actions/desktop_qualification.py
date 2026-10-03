@@ -360,10 +360,10 @@ def semantic_observations(directory, app):
         if type(value) is not dict:
             raise ValueError('invalid semantic observation')
         mechanism = value.get('mechanism')
-        if mechanism not in {'codex-renderer-qualification', 'qualification-runner-failure', 'hermes-windows-catalog-readiness', 'hermes-renderer-qualification', 'zed-native-copy', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'zed-retry-visual', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-atspi-retry', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'codex-project-preflight', 'windows-process-absence', 'windows-post-stop-process', 'windows-process-baseline', 'windows-process-settlement', 'windows-owned-stop', 'windows-process-correlation', 'windows-owned-descendant-cleanup', 'windows-owned-cleanup-preflight', 'claude-owned-configuration', 'claude-restore', 'claude-model-discovery', 'claude-window-stack', 'claude-window-focus', 'claude-chat-navigation', 'claude-native-chat', 'claude-window-fit', 'claude-windows-fit', 'claude-windows-uia', 'claude-windows-fit-rejection', 'claude-storage-use', 'claude-native-storage', 'claude-private-storage-stage', 'claude-native-composer', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}:
+        if mechanism not in {'codex-renderer-qualification', 'qualification-runner-failure', 'hermes-windows-catalog-readiness', 'hermes-renderer-qualification', 'zed-native-copy', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'zed-retry-visual', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-atspi-retry', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'codex-project-preflight', 'windows-process-absence', 'windows-post-stop-process', 'windows-process-baseline', 'windows-process-settlement', 'windows-owned-stop', 'windows-process-correlation', 'windows-owned-descendant-cleanup', 'windows-owned-cleanup-preflight', 'claude-owned-configuration', 'claude-restore', 'claude-model-discovery', 'claude-window-stack', 'claude-window-focus', 'claude-chat-navigation', 'claude-native-chat', 'claude-window-fit', 'claude-windows-fit', 'claude-windows-uia', 'claude-windows-fit-rejection', 'claude-storage-use', 'claude-native-storage', 'claude-private-storage-stage', 'claude-native-composer', 'claude-linux-mode-roles', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}:
             continue
         expected = 'hermes-renderer-qualification' if app == 'hermes-desktop' else 'zed-native-copy'
-        if (mechanism != expected and mechanism not in {'codex-renderer-qualification', 'qualification-runner-failure', 'hermes-windows-catalog-readiness', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'zed-retry-visual', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-atspi-retry', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'codex-project-preflight', 'windows-process-absence', 'windows-post-stop-process', 'windows-process-baseline', 'windows-process-settlement', 'windows-owned-stop', 'windows-process-correlation', 'windows-owned-descendant-cleanup', 'windows-owned-cleanup-preflight', 'claude-owned-configuration', 'claude-restore', 'claude-model-discovery', 'claude-window-stack', 'claude-window-focus', 'claude-chat-navigation', 'claude-native-chat', 'claude-window-fit', 'claude-windows-fit', 'claude-windows-uia', 'claude-windows-fit-rejection', 'claude-storage-use', 'claude-native-storage', 'claude-private-storage-stage', 'claude-native-composer', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}) or type(value.get('schemaVersion')) is not int or value['schemaVersion'] != 1:
+        if (mechanism != expected and mechanism not in {'codex-renderer-qualification', 'qualification-runner-failure', 'hermes-windows-catalog-readiness', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'zed-retry-visual', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-atspi-retry', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'codex-project-preflight', 'windows-process-absence', 'windows-post-stop-process', 'windows-process-baseline', 'windows-process-settlement', 'windows-owned-stop', 'windows-process-correlation', 'windows-owned-descendant-cleanup', 'windows-owned-cleanup-preflight', 'claude-owned-configuration', 'claude-restore', 'claude-model-discovery', 'claude-window-stack', 'claude-window-focus', 'claude-chat-navigation', 'claude-native-chat', 'claude-window-fit', 'claude-windows-fit', 'claude-windows-uia', 'claude-windows-fit-rejection', 'claude-storage-use', 'claude-native-storage', 'claude-private-storage-stage', 'claude-native-composer', 'claude-linux-mode-roles', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}) or type(value.get('schemaVersion')) is not int or value['schemaVersion'] != 1:
             raise ValueError('semantic observation identity differs')
         record = {'schemaVersion': 1, 'mechanism': mechanism}
         if mechanism == 'codex-project-preflight':
@@ -918,6 +918,30 @@ def semantic_observations(directory, app):
                     or type(value['stage']) is not str or value['stage'] not in stages):
                 raise ValueError('invalid Windows owned cleanup preflight')
             record.update(diagnosticsOnly=True, stage=value['stage'])
+        elif mechanism == 'claude-linux-mode-roles':
+            hashes = dict(modeSourceSha256='62ffbc1b8a3e4440ae77a33be142afd1914796f945bcd75d58cfe73679925f61',
+                          segmentedSourceSha256='1fe986422649ab736613079340a52157efd7791b96e0b9c00c46681731b7a4ea',
+                          radioSourceSha256='9c6ff87b4eaf0e9ad25e6329536f4337586b015e0f868389e72480c1769920a9')
+            fields = set(hashes) | set('schemaVersion mechanism diagnosticsOnly sourceVersion status sourceCount'.split())
+            keys = set('modeGroupVisible chatButtonVisible chatButtonEnabled chatRadioVisible chatRadioEnabled coworkButtonVisible coworkButtonEnabled coworkRadioVisible coworkRadioEnabled'.split())
+            counts = value.get('sourceCount')
+            if (app != 'claude-desktop' or set(value) != fields or value['diagnosticsOnly'] is not True
+                    or value['sourceVersion'] != '2.9939.4' or any(value[key] != digest for key, digest in hashes.items())
+                    or type(value['status']) is not str or value['status'] not in {'observed', 'group-unavailable', 'group-ambiguous', 'query-failed'}
+                    or type(counts) is not dict or set(counts) != keys
+                    or any(count is not None and (type(count) is not int or not 0 <= count <= 4096) for count in counts.values())):
+                raise ValueError('invalid passive Linux Claude mode roles')
+            group = counts['modeGroupVisible']
+            controls = [counts[key] for key in keys - {'modeGroupVisible'}]
+            status = value['status']
+            if ((status == 'observed' and (group != 1 or any(count is None for count in controls)))
+                    or (status != 'observed' and any(count is not None for count in controls))
+                    or (status == 'group-unavailable' and group != 0)
+                    or (status == 'group-ambiguous' and (group is None or group < 2))
+                    or (status == 'query-failed' and group not in {None, 1})):
+                raise ValueError('inconsistent passive Linux Claude mode roles')
+            record.update(diagnosticsOnly=True, sourceVersion=value['sourceVersion'], status=status,
+                          sourceCount=dict(counts), **hashes)
         elif mechanism == 'claude-native-composer':
             hashes = {
                 'classicSourceSha256': '6e6be632eb7adc0e66c1bb795448269d6c1f3ffe8821bea59d9e9374671cf0ea',
@@ -1515,6 +1539,33 @@ def semantic_observations(directory, app):
             for key in ('toolCompleted', 'toolRecordingBounded', 'toolVerified',
                         'fixtureResponseVerified', 'failureObserved'):
                 flag(record, value, key)
+            if 'toolResult' in value:
+                result = value['toolResult']
+                keys = {'selectedTool', 'resultPresent', 'resultCount', 'status',
+                        'shape', 'toolErrorDetected', 'errorCategory'}
+                if value['stage'] != 'tool' or type(result) is not dict or set(result) != keys:
+                    raise ValueError('invalid tool result observation')
+                closed = {}
+                enum(closed, result, 'selectedTool', {'read', 'read-file', 'read-files', 'exec-command'})
+                enum(closed, result, 'status', {'complete', 'limit'})
+                enum(closed, result, 'shape', {'absent', 'string', 'text-array', 'mixed', 'unsupported'})
+                enum(closed, result, 'errorCategory', {'none', 'file-not-found', 'file-too-large',
+                                                     'read-budget', 'directory', 'unknown'})
+                flag(closed, result, 'resultPresent')
+                flag(closed, result, 'toolErrorDetected')
+                count = result['resultCount']
+                if type(count) is not int or not 0 <= count <= 32:
+                    raise ValueError('invalid tool result count')
+                if result['resultPresent'] != (count > 0):
+                    raise ValueError('inconsistent tool result presence')
+                if (result['shape'] == 'absent') != (count == 0):
+                    raise ValueError('inconsistent tool result shape')
+                if result['toolErrorDetected'] != (result['errorCategory'] != 'none'):
+                    raise ValueError('inconsistent tool error observation')
+                if result['toolErrorDetected'] and not result['resultPresent']:
+                    raise ValueError('tool error without result')
+                closed['resultCount'] = count
+                record['toolResult'] = closed
         elif mechanism == 'hermes-renderer-qualification':
             for key in ('endpointOwned', 'attached', 'targetVerified', 'uniqueComposer', 'inputReadback',
                         'inputSubmitted', 'responseVerified', 'providerResponseVerified', 'errorObserved',

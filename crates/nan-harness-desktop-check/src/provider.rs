@@ -1,5 +1,8 @@
 //! Local boundary that keeps the real key out of application environments and bounds calls.
 
+mod tool_result;
+pub(crate) use tool_result::{SelectedTool, ToolResultObservation};
+
 use axum::{
     Json, Router,
     body::Body,
