@@ -81,7 +81,8 @@ function ownedEndpoint() {
     // lsof selects listeners by port; reject wildcard/non-loopback bindings.
     try {
       const listing = require('node:child_process').execFileSync('/usr/sbin/lsof',
-        ['-nP', '-a', `-iTCP:${port}`, '-sTCP:LISTEN', '-Fpn'],
+        // Recent lsof versions no longer emit the file descriptor implicitly.
+        ['-nP', '-a', `-iTCP:${port}`, '-sTCP:LISTEN', '-Fpfn'],
         { encoding: 'utf8', timeout: 2000, maxBuffer: 65536,
           stdio: ['ignore', 'pipe', 'ignore'] });
       stage='listener-shape';

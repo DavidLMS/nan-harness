@@ -1,4 +1,4 @@
-// Native ownership proof: no application or network listener is launched here.
+// Synthetic ownership proofs; macOS also checks one disposable child listener.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
@@ -14,7 +14,7 @@ function trial(listing, parents, failure = false, details = false) {
       assert.equal(options.stdio[2], 'ignore');
       if(failure&&!(failure==='parent'&&command==='/usr/sbin/lsof'))throw new Error('private operational error');
       if (command === '/usr/sbin/lsof') {
-        assert.deepEqual(Array.from(args), ['-nP', '-a', '-iTCP:43210', '-sTCP:LISTEN', '-Fpn']);
+        assert.deepEqual(Array.from(args), ['-nP', '-a', '-iTCP:43210', '-sTCP:LISTEN', '-Fpfn']);
         return listing;
       }
       assert.equal(command, '/bin/ps');
@@ -159,3 +159,33 @@ for(const [component,reason,throwing] of [
   assert(!JSON.stringify(facts).includes('PRIVATE'));
 }
 console.log('Unix ownership failure diagnostic: same queries and throw semantics passed');
+
+if (process.platform === 'darwin') {
+  (async () => {
+    const {spawn} = require('node:child_process');
+    const child = spawn(process.execPath, ['-e',
+      "const server=require('node:net').createServer();server.listen(0,'127.0.0.1',()=>process.send(server.address().port));process.on('disconnect',()=>server.close());"],
+      {stdio: ['ignore', 'ignore', 'ignore', 'ipc']});
+    try {
+      const port = await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => reject(Error('Synthetic listener startup timed out')), 5000);
+        child.once('message', value => {clearTimeout(timeout); resolve(value);});
+        child.once('error', () => {clearTimeout(timeout); reject(Error('Synthetic listener failed'));});
+        child.once('exit', () => {clearTimeout(timeout); reject(Error('Synthetic listener exited'));});
+      });
+      assert(Number.isInteger(port) && port > 1 && port <= 65535);
+      const owned = require('./endpoint-ownership.cjs').proof(String(process.pid), port);
+      assert.equal(owned.descendant(child.pid), true);
+      assert.equal(owned.ownedEndpoint(), true, 'Explicit lsof fields must prove the owned listener');
+      const foreign = require('./endpoint-ownership.cjs').proof('1', port);
+      assert.equal(foreign.ownedEndpoint(), false);
+      assert.equal(foreign.failure(), 'listener-unowned');
+      console.log('Native macOS synthetic listener: owned and foreign ancestry passed');
+    } finally {
+      child.kill('SIGKILL');
+    }
+  })().catch(() => {
+    console.error('Native macOS synthetic listener contract failed');
+    process.exitCode = 1;
+  });
+}
