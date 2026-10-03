@@ -44,7 +44,56 @@ fn counts(mut query: impl FnMut(&str) -> Option<usize>) -> serde_json::Value {
     })
 }
 
+#[cfg(any(target_os = "macos", test))]
+fn source_composer_ready(classic: Option<usize>, modern: Option<usize>) -> bool {
+    matches!((classic, modern), (Some(1), Some(0)) | (Some(0), Some(1)))
+}
+
 impl Gui {
+    #[cfg(target_os = "macos")]
+    pub(super) fn wait_initial_claude_composer(
+        &self,
+        deadline: std::time::Instant,
+    ) -> Result<(), super::visual::AcquisitionFailure> {
+        let unavailable = || {
+            (
+                crate::report::Reason::DesktopUnavailable,
+                crate::diagnostics::GuiAcquisitionStage::WindowStability,
+                super::error_category(crate::report::Reason::DesktopUnavailable),
+                None,
+                None,
+            )
+        };
+        let app = self.app.as_ref().ok_or_else(unavailable)?;
+        loop {
+            if std::time::Instant::now() >= deadline {
+                return Err(unavailable());
+            }
+            // These public source labels distinguish an actual conversation
+            // editor from a stable startup shell. No control is activated.
+            let count = |label: &str| {
+                app.locator(&format!(
+                    "text_area[visible=\"true\"][editable=\"true\"][name=\"{label}\"], text_area[visible=\"true\"][editable=\"true\"][description=\"{label}\"], text_field[visible=\"true\"][editable=\"true\"][name=\"{label}\"], text_field[visible=\"true\"][editable=\"true\"][description=\"{label}\"]"
+                )).elements().ok().map(|elements| elements.len())
+            };
+            let classic = count("Write your prompt to Claude");
+            if std::time::Instant::now() >= deadline {
+                return Err(unavailable());
+            }
+            let modern = count("Message");
+            if std::time::Instant::now() >= deadline {
+                return Err(unavailable());
+            }
+            if source_composer_ready(classic, modern) {
+                return Ok(());
+            }
+            std::thread::sleep(
+                std::time::Duration::from_millis(200)
+                    .min(deadline.saturating_duration_since(std::time::Instant::now())),
+            );
+        }
+    }
+
     pub(super) fn claude_composer_inventory(&self) -> Option<serde_json::Value> {
         if !cfg!(target_os = "macos")
             || self.kind != DesktopHarnessKind::Claude
@@ -99,7 +148,22 @@ pub(super) fn record(directory: &Path, owner: u32, source_count: &serde_json::Va
 
 #[cfg(test)]
 mod tests {
-    use super::{counts, mode_button};
+    use super::{counts, mode_button, source_composer_ready};
+    #[test]
+    fn initial_readiness_requires_one_source_editor_and_measured_absence_of_other() {
+        assert!(source_composer_ready(Some(1), Some(0)));
+        assert!(source_composer_ready(Some(0), Some(1)));
+        for counts in [
+            (None, Some(1)),
+            (Some(1), None),
+            (Some(0), Some(0)),
+            (Some(1), Some(1)),
+            (Some(2), Some(0)),
+        ] {
+            assert!(!source_composer_ready(counts.0, counts.1));
+        }
+    }
+
     #[test]
     fn unavailable_and_oversized_queries_are_not_empty_or_unique() {
         let unavailable = counts(|_| None);

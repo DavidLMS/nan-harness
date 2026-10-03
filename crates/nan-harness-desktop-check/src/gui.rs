@@ -467,6 +467,7 @@ impl Gui {
         if let Some(deadline) = self.initial_deadline.take() {
             // Bind after launch diagnostics, immediately before the first
             // conversation guard. The original launch budget is never renewed.
+            self.wait_initial_claude_composer(deadline)?;
             self.visual.finish_initial_acquisition(process, deadline)?;
         }
         #[cfg(windows)]
