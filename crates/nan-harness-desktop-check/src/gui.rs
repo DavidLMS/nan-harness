@@ -314,8 +314,8 @@ impl Gui {
     }
 
     #[cfg(windows)]
-    fn process_diagnostic_enabled(&self) -> bool {
-        !(self.kind != DesktopHarnessKind::Claude
+    pub(crate) fn process_diagnostic_enabled(kind: DesktopHarnessKind) -> bool {
+        !(kind != DesktopHarnessKind::Claude
             || std::env::var("GITHUB_ACTIONS").as_deref() != Ok("true")
             || std::env::var("RUNNER_ENVIRONMENT").as_deref() != Ok("github-hosted")
             || std::env::var("RUNNER_OS").as_deref() != Ok("Windows")
@@ -332,11 +332,27 @@ impl Gui {
         digest: &str,
         deadline: Instant,
     ) -> Option<crate::native::OwnedCleanupHolder> {
-        if !self.process_diagnostic_enabled() {
+        if !Self::process_diagnostic_enabled(self.kind) {
             return None;
         }
-        self.visual
-            .absence_native()
+        Self::capture_owned_cleanup_native(
+            self.visual.absence_native(),
+            launcher,
+            expected,
+            digest,
+            deadline,
+        )
+    }
+
+    #[cfg(windows)]
+    pub(crate) fn capture_owned_cleanup_native(
+        native: &crate::native::Native,
+        launcher: u32,
+        expected: &std::path::Path,
+        digest: &str,
+        deadline: Instant,
+    ) -> Option<crate::native::OwnedCleanupHolder> {
+        native
             .start_owned_cleanup_holder(launcher, expected, digest, deadline)
             .map_err(|error| {
                 let stage = match error {
@@ -359,7 +375,7 @@ impl Gui {
         launcher: u32,
         deadline: Instant,
     ) -> Option<crate::process::windows_correlation::Snapshot> {
-        if !self.process_diagnostic_enabled() {
+        if !Self::process_diagnostic_enabled(self.kind) {
             return None;
         }
         let request = zeroize::Zeroizing::new(format!("{} {launcher}\n", std::process::id()));

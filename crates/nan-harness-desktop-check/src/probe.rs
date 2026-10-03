@@ -1913,6 +1913,24 @@ fn capture_stop_correlation(process: &mut ProbeProcess, gui: Option<&Gui>) -> Du
                 gui.capture_owned_cleanup(launcher, expected, digest, query_deadline)
             });
         process.correlation_snapshot = gui.capture_process_correlation(launcher, query_deadline);
+    } else if Gui::process_diagnostic_enabled(DesktopHarnessKind::Claude)
+        && let Some(launcher) = process.id()
+        && let Some((expected, digest)) = process
+            .cleanup_executable
+            .as_ref()
+            .zip(process.cleanup_executable_sha256.as_deref())
+        && let Ok(native) = crate::native::Native::new()
+    {
+        // Failed window acquisition must not discard authority to retain owned
+        // descendant handles before stopping the original launcher. The same
+        // executable identity and native ancestry checks still apply.
+        process.cleanup_holder = Gui::capture_owned_cleanup_native(
+            &native,
+            launcher,
+            expected,
+            digest,
+            deadline.min(Instant::now() + Duration::from_secs(1)),
+        );
     }
     // The advisory query consumes the existing initial stop budget.
     deadline.saturating_duration_since(Instant::now())
