@@ -435,12 +435,15 @@ mod tests {
             Err(FailureCategory::NonzeroExit)
         );
         assert_eq!(std::fs::read_to_string(&count).unwrap(), "attempt\n");
+        let deadline = Instant::now() + Duration::from_millis(100);
         assert_eq!(
-            run_focus_until(
-                &executable,
-                OsStr::new("--windows-focus 8"),
-                Instant::now() + Duration::from_millis(100)
-            ),
+            run_focus_until(&executable, OsStr::new("--windows-focus 8"), deadline),
+            Err(FailureCategory::Timeout)
+        );
+        // A later guard uses the same exhausted action budget; no reset or
+        // second child invocation is permitted after the first query times out.
+        assert_eq!(
+            run_focus_until(&executable, OsStr::new("--windows-focus 7"), deadline),
             Err(FailureCategory::Timeout)
         );
         assert_eq!(

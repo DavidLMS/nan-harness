@@ -136,9 +136,11 @@ impl ClaudeNativeChatSession<'_> {
         )?;
         self.facts.stage = stage;
         self.facts.action_phase = Some(ChatActionPhase::PostGuard);
-        self.gui.visual.guard_observed(|category| {
-            self.facts.transport_failure = Some(failure_label(category));
-        })?;
+        self.gui
+            .visual
+            .claude_chat_guard_until(deadline, |category| {
+                self.facts.transport_failure = Some(failure_label(category));
+            })?;
         if Instant::now() >= deadline {
             return Err(Reason::Timeout);
         }

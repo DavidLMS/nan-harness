@@ -702,7 +702,9 @@ impl Visual {
     ) -> Result<crate::native::ChatTurnStage, Reason> {
         use crate::native::ChatActionPhase as Phase;
         observe(Phase::BeforeGuard, None);
-        self.guard_observed(|category| observe(Phase::BeforeGuard, Some(category)))?;
+        self.claude_chat_guard_until(deadline, |category| {
+            observe(Phase::BeforeGuard, Some(category));
+        })?;
         observe(Phase::AfterGuard, None);
         observe(Phase::Transport, None);
         self.native
@@ -738,13 +740,43 @@ impl Visual {
         } else {
             self.native.windows()?
         };
-        let verdict = scoped_composer_guard(&snapshot, &expected);
+        Self::guard_snapshot(&snapshot, &expected)
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(super) fn claude_chat_guard_until(
+        &self,
+        deadline: Instant,
+        mut observe: impl FnMut(FailureCategory),
+    ) -> Result<(), Reason> {
+        let expected = self.window.borrow().clone();
+        if !crate::native::claude_focus_policy()
+            || !matches_app(DesktopHarnessKind::Claude, &expected.name)
+        {
+            return Err(Reason::IsolationUnavailable);
+        }
+        let snapshot = self
+            .native
+            .windows_with_focus_until(expected.pid, deadline)
+            .map_err(|category| {
+                observe(category);
+                category.reason()
+            })?;
+        if Instant::now() >= deadline {
+            observe(FailureCategory::Timeout);
+            return Err(FailureCategory::Timeout.reason());
+        }
+        Self::guard_snapshot(&snapshot, &expected)
+    }
+
+    fn guard_snapshot(snapshot: &Snapshot, expected: &Window) -> Result<(), Reason> {
+        let verdict = scoped_composer_guard(snapshot, expected);
         let reason = verdict.map_err(GuardFailure::reason);
         if reason == Err(Reason::WindowOccluded) {
             // Transient wave10 diagnostic: record closed occluder classification
             // at the exact rejected snapshot. Never changes the guard verdict
             // and never emits process names, titles, or raw inventory.
-            if let Some(diagnostic) = snapshot.occluders(&expected) {
+            if let Some(diagnostic) = snapshot.occluders(expected) {
                 crate::occlusion::emit(&diagnostic);
             }
         }
