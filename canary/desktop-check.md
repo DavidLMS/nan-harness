@@ -2082,3 +2082,49 @@ query failure before Copy or retry-readiness permits a fresh passive read under
 the original polling deadline. Input, Send, Retry and uncertain Copy actions
 are never repeated by this policy. Synthetic receipts, pure native selectors,
 framing and privacy checks pass; hosted qualification remains pending.
+
+### Source-bound acquisition follow-up
+
+Revision `5fb92e1b` passed the complete local gate and the hosted Linux gate in
+[37129498896](https://github.com/DavidLMS/nan-harness/actions/runs/37129498896).
+Native measurements remain separate from those deterministic quality checks:
+
+- Zed Linux in [37129240885](https://github.com/DavidLMS/nan-harness/actions/runs/37129240885)
+  again verifies input, response and the read-tool scenario in all three
+  sessions. Actual pointer position and owned client-child checks now match,
+  but Retry still has an arrow cursor; no Retry click is attempted. Published
+  AX ancestor bounds are now sampled on a completed rejected cursor scan too.
+  These bounds are advisory layout, not a measurement of GPUI's paint mask.
+- Claude macOS in [37129240909](https://github.com/DavidLMS/nan-harness/actions/runs/37129240909)
+  verifies one input and one Send, then stops before a response-action receipt.
+  Another session loses focus. Revision `b9ea38fc` removes an adjacent duplicate
+  guard while retaining the immediate pre-action and post-action checks, and
+  records closed action phases and native transport failure categories.
+- Claude Windows in [37128325832](https://github.com/DavidLMS/nan-harness/actions/runs/37128325832)
+  still fails display containment, with five retained descendants cleaned up.
+  Revision `b9ea38fc` moves the sole fit to source-editor-ready finalization.
+  Passive attachment cannot authorize input; the original window still needs
+  strict display, focus and stack reacquisition afterward. An uncertain fit
+  consumes the attempt. The Windows runner tests this policy before installing
+  the application.
+- Codex Windows in [37128779405](https://github.com/DavidLMS/nan-harness/actions/runs/37128779405)
+  passes the initial one-to-two page settlement, then rejects an unknown
+  separate dialog before its first role click. Codex macOS in
+  [37129512258](https://github.com/DavidLMS/nan-harness/actions/runs/37129512258)
+  and Linux in [37129512273](https://github.com/DavidLMS/nan-harness/actions/runs/37129512273)
+  also see one unknown dialog. Both exact workspace-failure title and Retry
+  counts are zero; the published workspace-failure hypothesis is ruled out.
+  These observations do not establish that an account is required.
+
+The macOS listener proof now explicitly requests `lsof`'s `f` descriptor field
+alongside PID and endpoint. The parser already requires that field;
+[lsof's field-output contract](https://lsof.readthedocs.io/en/stable/manpage/)
+does not guarantee it implicitly. A disposable synthetic child listener tests
+actual owned ancestry and rejection of foreign ancestry without launching an
+application or retaining process identities. Strict single-loopback-listener
+and ownership requirements are unchanged. Hosted verification of this change
+is required before attributing any Codex progress to it.
+
+There are still five qualified active cells and seven open active cells. Pen
+remains deferred. Acquisition and diagnostic improvements are not additional
+acceptance results.
