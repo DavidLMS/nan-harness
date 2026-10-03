@@ -1,6 +1,6 @@
 //! Complete hosted deterministic scenarios using owned semantic UI adapters.
 
-use super::{ProbeSpec, select_read_tool, visual_marker};
+use super::{ProbeSpec, select_read_tool, semantic_marker};
 use crate::cli::{SessionMode, VerificationPolicy};
 #[cfg(target_os = "macos")]
 use crate::gui::ClaudeNativeChatSession;
@@ -334,7 +334,7 @@ async fn complete_scenario(
     let selected = select_read_tool(&requests, fixture);
     record_inventory(directory, &requests, selected.is_some())?;
     let (name, arguments) = selected.ok_or(Reason::ToolMismatch)?;
-    let tool_marker = visual_marker("NAN CHECK TOOL")?;
+    let tool_marker = semantic_marker("NAN CHECK TOOL")?;
     let tool = ScriptedProvider::start(ProviderScenario::tool(name, arguments, &tool_marker))
         .await
         .map_err(|_| Reason::ProviderFailed)?;
@@ -372,7 +372,7 @@ async fn complete_scenario(
     if !gate.failure_observed() {
         return Err(Reason::ProviderFailed);
     }
-    let recovered_marker = visual_marker("NAN CHECK RECOVERED")?;
+    let recovered_marker = semantic_marker("NAN CHECK RECOVERED")?;
     let recovered = ScriptedProvider::start(ProviderScenario::inventory(&recovered_marker))
         .await
         .map_err(|_| Reason::ProviderFailed)?;

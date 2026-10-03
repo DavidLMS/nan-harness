@@ -732,7 +732,11 @@ async fn scenario_owned(
     }
     let marker = visual_marker("NAN CHECK READ")?;
     let fixture = prepare_read_fixture(spec, &marker)?;
-    let final_marker = visual_marker("NAN CHECK RESPONSE")?;
+    let final_marker = if semantic.is_some() {
+        semantic_marker("NAN CHECK RESPONSE")?
+    } else {
+        visual_marker("NAN CHECK RESPONSE")?
+    };
     let inventory = ScriptedProvider::start(ProviderScenario::inventory(&final_marker))
         .await
         .map_err(|_| Reason::ProviderFailed)?;
@@ -2040,6 +2044,18 @@ fn group_absent(group: ProcessGroupId) -> bool {
         .is_err_and(|error| error == nix::errno::Errno::ESRCH)
 }
 
+fn semantic_marker(label: &str) -> Result<String, Reason> {
+    let mut bytes = [0u8; 16];
+    getrandom::fill(&mut bytes).map_err(|_| Reason::ProviderFailed)?;
+    Ok(encode_semantic_marker(label, &bytes))
+}
+
+fn encode_semantic_marker(label: &str, bytes: &[u8; 16]) -> String {
+    // Claude truncates its accessible response summary to 160 characters.
+    // A compact marker preserves all 128 random bits inside that source limit.
+    format!("{label} {:032x}", u128::from_be_bytes(*bytes))
+}
+
 fn visual_marker(label: &str) -> Result<String, Reason> {
     let mut bytes = [0u8; 16];
     getrandom::fill(&mut bytes).map_err(|_| Reason::ProviderFailed)?;
@@ -2699,6 +2715,38 @@ mod tests {
                 serde_json::from_slice(&serde_json::to_vec(&outcome).unwrap()).unwrap();
             assert_eq!(decoded.cleanup, outcome.cleanup);
             assert_eq!(decoded.cleanup.unwrap().absence, Some(absence));
+        }
+    }
+
+    #[test]
+    fn semantic_markers_preserve_all_random_bits_within_heading_summary_limit() {
+        let bytes = [0x0f; 16];
+        for label in [
+            "NAN CHECK RESPONSE",
+            "NAN CHECK TOOL",
+            "NAN CHECK RECOVERED",
+        ] {
+            let marker = encode_semantic_marker(label, &bytes);
+            assert!(marker.len() < 160);
+            let encoded = marker.strip_prefix(&format!("{label} ")).unwrap();
+            assert_eq!(encoded, "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f");
+            assert_eq!(
+                u128::from_str_radix(encoded, 16).unwrap().to_be_bytes(),
+                bytes
+            );
+        }
+        for offset in 0..16 {
+            for value in 1..=u8::MAX {
+                let mut changed = [0; 16];
+                changed[offset] = value;
+                let marker = encode_semantic_marker("NAN CHECK RESPONSE", &changed);
+                let encoded = marker.split_whitespace().last().unwrap();
+                assert_eq!(encoded.len(), 32);
+                assert_eq!(
+                    u128::from_str_radix(encoded, 16).unwrap().to_be_bytes(),
+                    changed
+                );
+            }
         }
     }
 
