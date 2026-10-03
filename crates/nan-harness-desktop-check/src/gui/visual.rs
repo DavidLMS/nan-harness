@@ -698,19 +698,23 @@ impl Visual {
         mode: &str,
         values: [&str; 3],
         deadline: Instant,
-        mut observe: impl FnMut(crate::native::ChatActionPhase, Option<FailureCategory>),
+        mut observe: impl FnMut(
+            crate::native::ChatActionPhase,
+            Option<FailureCategory>,
+            Option<GuardFailure>,
+        ),
     ) -> Result<crate::native::ChatTurnStage, Reason> {
         use crate::native::ChatActionPhase as Phase;
-        observe(Phase::BeforeGuard, None);
-        self.claude_chat_guard_until(deadline, |category| {
-            observe(Phase::BeforeGuard, Some(category));
+        observe(Phase::BeforeGuard, None, None);
+        self.claude_chat_guard_until(deadline, |transport, rejection| {
+            observe(Phase::BeforeGuard, transport, rejection);
         })?;
-        observe(Phase::AfterGuard, None);
-        observe(Phase::Transport, None);
+        observe(Phase::AfterGuard, None, None);
+        observe(Phase::Transport, None, None);
         self.native
             .claude_chat_turn(&self.window.borrow(), mode, values, deadline)
             .map_err(|category| {
-                observe(Phase::Transport, Some(category));
+                observe(Phase::Transport, Some(category), None);
                 category.reason()
             })
     }
@@ -747,7 +751,7 @@ impl Visual {
     pub(super) fn claude_chat_guard_until(
         &self,
         deadline: Instant,
-        mut observe: impl FnMut(FailureCategory),
+        mut observe: impl FnMut(Option<FailureCategory>, Option<GuardFailure>),
     ) -> Result<(), Reason> {
         let expected = self.window.borrow().clone();
         if !crate::native::claude_focus_policy()
@@ -759,18 +763,31 @@ impl Visual {
             .native
             .windows_with_focus_until(expected.pid, deadline)
             .map_err(|category| {
-                observe(category);
+                observe(Some(category), None);
                 category.reason()
             })?;
         if Instant::now() >= deadline {
-            observe(FailureCategory::Timeout);
+            observe(Some(FailureCategory::Timeout), None);
             return Err(FailureCategory::Timeout.reason());
         }
-        Self::guard_snapshot(&snapshot, &expected)
+        Self::guard_snapshot_observed(&snapshot, &expected, |failure| {
+            observe(None, Some(failure));
+        })
     }
 
     fn guard_snapshot(snapshot: &Snapshot, expected: &Window) -> Result<(), Reason> {
+        Self::guard_snapshot_observed(snapshot, expected, |_| {})
+    }
+
+    fn guard_snapshot_observed(
+        snapshot: &Snapshot,
+        expected: &Window,
+        mut observe: impl FnMut(GuardFailure),
+    ) -> Result<(), Reason> {
         let verdict = scoped_composer_guard(snapshot, expected);
+        if let Err(failure) = verdict {
+            observe(failure);
+        }
         let reason = verdict.map_err(GuardFailure::reason);
         if reason == Err(Reason::WindowOccluded) {
             // Transient wave10 diagnostic: record closed occluder classification
@@ -2208,6 +2225,29 @@ fn record_claude_snapshot(snapshot: &Snapshot, held: &Window, phase: &str) {
 mod tests {
     use super::*;
     use crate::native::FitFailure;
+
+    #[test]
+    fn rejected_guard_observes_same_snapshot_without_another_query() {
+        let original =
+            Snapshot::parse("FG 7 1\nDISPLAY 0 0 2000 2000\nWIN 1 7 10 20 800 600 5a6564 0\n")
+                .unwrap();
+        let held = original.windows[0].clone();
+        let changed =
+            Snapshot::parse("FG 7 1\nDISPLAY 0 0 2000 2000\nWIN 1 7 10 20 900 600 5a6564 0\n")
+                .unwrap();
+        let mut rejected = Vec::new();
+        assert_eq!(
+            Visual::guard_snapshot_observed(&changed, &held, |failure| rejected.push(failure)),
+            Err(Reason::WindowChanged)
+        );
+        assert_eq!(rejected, [GuardFailure::BoundsChanged]);
+        rejected.clear();
+        assert!(
+            Visual::guard_snapshot_observed(&original, &held, |failure| rejected.push(failure))
+                .is_ok()
+        );
+        assert!(rejected.is_empty());
+    }
 
     #[test]
     fn mac_fit_requires_original_off_display_focus_and_unoccluded_unique_window() {

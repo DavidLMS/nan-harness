@@ -83,8 +83,8 @@ function foreignSurface(control) {
   return {document,scope,dialog:dialogs.length===1?dialogs[0]:null};
 }
 function classifyForeign(control,held) {
-  let surface='unknown', heading='unknown', importSetup=null, sourceCounts=null;
-  const result=(category,proof='classified',fingerprint='not-applicable')=>({category,proof,surface,fingerprint,heading,importSetup,sourceCounts});
+  let surface='unknown', heading='unknown', importSetup=null, sourceCounts=null, actionability=null;
+  const result=(category,proof='classified',fingerprint='not-applicable')=>({category,proof,surface,fingerprint,heading,importSetup,sourceCounts,actionability});
   const visible=e=>{if(!e)return false;const r=e.getBoundingClientRect(),s=getComputedStyle(e);
     return e.isConnected&&r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden';};
   if(control.ownerDocument!==document||!control.isConnected||held.document!==document) return result('guard-rejected','document-replaced');
@@ -96,6 +96,44 @@ function classifyForeign(control,held) {
   if(dialogs.length!==1)return dialogs.length>1?result('ambiguous'):result('guard-rejected','dialog-absent');
   const dialog=dialogs[0];
   if(dialog!==held.dialog)return result('guard-rejected','dialog-replaced');
+  // Diagnostic only: measure the same held overlay and control, never admit input.
+  actionability=(()=>{
+    const blank={status:'unavailable',dialogOpacityZero:null,ancestorOpacityZero:null,
+      dialogPointerEventsNone:null,ancestorPointerEventsNone:null,inert:null,stateClosed:null,
+      targetOwnedPointCount:null,dialogOwnedPointCount:null,otherPointCount:null};
+    const measured={...blank,status:'observed',dialogOpacityZero:false,ancestorOpacityZero:false,
+      dialogPointerEventsNone:false,ancestorPointerEventsNone:false,inert:false,stateClosed:false};
+    let e=dialog,depth=0;
+    while(e) {
+      if(++depth>64||e.ownerDocument!==document||!e.isConnected)return blank;
+      const style=getComputedStyle(e),raw=style.opacity;
+      if(typeof raw!=='string'||! /^(?:0(?:\.\d+)?|1(?:\.0+)?)$/.test(raw))return blank;
+      const opacity=Number(raw);
+      if(!Number.isFinite(opacity)||opacity<0||opacity>1)return blank;
+      if(e===dialog) {measured.dialogOpacityZero=opacity===0;measured.dialogPointerEventsNone=style.pointerEvents==='none';}
+      else {measured.ancestorOpacityZero ||= opacity===0;measured.ancestorPointerEventsNone ||= style.pointerEvents==='none';}
+      if(typeof style.pointerEvents!=='string'||!style.pointerEvents)return blank;
+      measured.inert ||= e.inert===true||e.hasAttribute('inert');
+      measured.stateClosed ||= e.getAttribute('data-state')==='closed';
+      e=e.parentElement;
+    }
+    const r=control.getBoundingClientRect(),values=[r.left,r.top,r.width,r.height,
+      control.clientLeft,control.clientTop,control.clientWidth,control.clientHeight,innerWidth,innerHeight];
+    if(values.some(v=>!Number.isFinite(v))||r.width<=0||r.height<=0
+        ||control.clientWidth<=0||control.clientHeight<=0||innerWidth<=0||innerHeight<=0
+        ||values.some(v=>Math.abs(v)>16384)||control.clientLeft<0||control.clientTop<0)return blank;
+    const left=r.left+control.clientLeft,top=r.top+control.clientTop;
+    if(left<0||top<0||left+control.clientWidth>innerWidth||top+control.clientHeight>innerHeight
+        ||control.clientLeft+control.clientWidth>r.width||control.clientTop+control.clientHeight>r.height)return blank;
+    measured.targetOwnedPointCount=0;measured.dialogOwnedPointCount=0;measured.otherPointCount=0;
+    for(const x of [1/6,1/2,5/6])for(const y of [1/6,1/2,5/6]) {
+      const front=document.elementFromPoint(left+x*control.clientWidth,top+y*control.clientHeight);
+      if(front&&(front===control||control.contains(front)))measured.targetOwnedPointCount++;
+      else if(front&&(front===dialog||dialog.contains(front)))measured.dialogOwnedPointCount++;
+      else measured.otherPointCount++;
+    }
+    return measured;
+  })();
   // Public heading text is classified independently of the stronger style fingerprint.
   const publicHeadings=[...dialog.querySelectorAll('[role="heading"],h1,h2,h3')].filter(visible);
   const known=new Map([["You're all set",'all-set'],['Import from other AI apps','external-import'],['Skip setup?','skip-confirmation'],['Continue with your existing setup','imported-setup'],['Connect Computer History','computer-history-consent'],['Select settings to import','project-import']]);
@@ -297,6 +335,7 @@ async function run(page, ownerGuard, deadline, rejected, mainGuard) {
                   facts.foreignOverlayHeading=second.heading;
                   if(second.importSetup!==null)facts.foreignOverlayImportSetup=second.importSetup;
                   if(second.sourceCounts!==null)facts.foreignOverlaySourceCounts=second.sourceCounts;
+                  if(second.actionability!==null)facts.foreignOverlayActionability=second.actionability;
                 }
               } else if(second.category==='guard-rejected' && facts.foreignOverlayProof==='unmeasured') {
                 facts.foreignOverlayProof=second.proof;

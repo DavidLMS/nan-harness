@@ -69,7 +69,7 @@ def main_aux_correlation(value, app):
 
 
 def public_onboarding(setup, app):
-    shape = set(setup) - {'rejectedPageInventory', 'taskScopeProved', 'taskClickAttempted', 'taskClickCompleted', 'codingComposerReady', 'mainGuardFailure', 'pageSetFailure', 'foreignOverlayImportSetup', 'foreignOverlaySourceCounts'} if type(setup) is dict else set()
+    shape = set(setup) - {'rejectedPageInventory', 'taskScopeProved', 'taskClickAttempted', 'taskClickCompleted', 'codingComposerReady', 'mainGuardFailure', 'pageSetFailure', 'foreignOverlayImportSetup', 'foreignOverlaySourceCounts', 'foreignOverlayActionability'} if type(setup) is dict else set()
     booleans = {'conversationalScope', 'engineeringControl', 'roleClickAttempted',
                 'roleClickCompleted', 'engineeringChecked', 'continueControl',
                 'continueClickAttempted', 'continueClickCompleted', 'roleScopeAbsent'}
@@ -210,6 +210,22 @@ def public_onboarding(setup, app):
             raise ValueError('inconsistent imported setup dialog observation')
     elif setup.get('foreignOverlayHeading') == 'imported-setup':
         raise ValueError('missing imported setup dialog observation')
+    if 'foreignOverlayActionability' in setup:
+        observation = setup['foreignOverlayActionability']
+        bools = {'dialogOpacityZero', 'ancestorOpacityZero', 'dialogPointerEventsNone',
+                 'ancestorPointerEventsNone', 'inert', 'stateClosed'}
+        counts = {'targetOwnedPointCount', 'dialogOwnedPointCount', 'otherPointCount'}
+        if (setup.get('foreignOverlayProof') != 'classified'
+                or type(observation) is not dict or set(observation) != bools | counts | {'status'}
+                or type(observation['status']) is not str or observation['status'] not in {'observed', 'unavailable'}):
+            raise ValueError('invalid passive overlay actionability observation')
+        if observation['status'] == 'unavailable':
+            if any(observation[key] is not None for key in bools | counts):
+                raise ValueError('invalid unavailable overlay actionability observation')
+        elif (any(type(observation[key]) is not bool for key in bools)
+              or any(type(observation[key]) is not int or not 0 <= observation[key] <= 9 for key in counts)
+              or sum(observation[key] for key in counts) != 9):
+            raise ValueError('invalid overlay hit-point partition')
     if 'foreignOverlaySourceCounts' in setup:
         counts = setup['foreignOverlaySourceCounts']
         keys = {'computerHistoryTitleCount', 'computerHistoryFormCount', 'computerHistoryNotNowCount',
@@ -661,7 +677,7 @@ def semantic_observations(directory, app):
             fields = counts | flags | {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'stage'}
             stages = set('request window tree tree-query tree-duplicate tree-type tree-limit tree-pid tree-focus tree-window mode composer focus input-mismatch input-initial-unavailable input-initial-nonempty input-clipboard-mismatch input-value-mismatch control scope scope-anchor-absent scope-heading-absent scope-assistant-heading-absent scope-marker-heading-absent scope-anchor-ambiguous scope-control-absent scope-control-ambiguous scope-heading-ambiguous scope-prompt-mismatch deadline action-uncertain response-mismatch sent copied retry-ready retried completed'.split())
             phase_fields = {'actionPhase', 'transportFailure'}
-            if (app != 'claude-desktop' or set(value) - {'providerObservation'} not in (fields, fields | phase_fields) or value['diagnosticsOnly'] is not True
+            if (app != 'claude-desktop' or set(value) - {'providerObservation', 'guardRejection'} not in (fields, fields | phase_fields) or value['diagnosticsOnly'] is not True
                     or type(value['stage']) is not str or value['stage'] not in stages
                     or any(type(value[key]) is not bool for key in flags)
                     or any(type(value[key]) is not int or not 0 <= value[key] <= 3 for key in counts)
@@ -678,6 +694,16 @@ def semantic_observations(directory, app):
                         or failure is not None and phase not in {'before-guard', 'transport', 'post-guard'}):
                     raise ValueError('invalid Claude action transport diagnostic')
                 record.update(actionPhase=phase, transportFailure=failure)
+            if 'guardRejection' in value:
+                rejection = value['guardRejection']
+                if (type(rejection) is not str or rejection not in {
+                        'identity-missing', 'bounds-changed', 'foreground-changed',
+                        'same-process-window', 'off-display', 'occluded'}
+                        or not phase_fields <= set(value)
+                        or value['actionPhase'] not in {'before-guard', 'post-guard'}
+                        or value['transportFailure'] is not None or value['stage'] == 'completed'):
+                    raise ValueError('invalid Claude native guard rejection')
+                record['guardRejection'] = rejection
             if 'providerObservation' in value:
                 observation = value['providerObservation']
                 if observation is not None and (type(observation) is not dict or set(observation) != {

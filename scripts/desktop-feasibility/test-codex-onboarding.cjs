@@ -17,7 +17,7 @@ async function trial(options={}) {
  for(const e of [root,fieldset,label,radio,button,foreign,dialog,legend]) Object.assign(e,{ownerDocument:doc,isConnected:true,
   clientLeft:0,clientTop:0,clientWidth:80,clientHeight:40,
   getBoundingClientRect:()=>({left:10,top:10,width:80,height:40}),
-  getAttribute:()=>null,closest:()=>null,contains:x=>x===e||(e===label&&x===radio)});
+  hasAttribute:()=>false,getAttribute:()=>null,closest:()=>null,contains:x=>x===e||(e===label&&x===radio)});
  dialog.getAttribute=key=>key==='role'?(options.alertDialog?'alertdialog':'dialog'):null;
  dialog.contains=e=>[root,fieldset,label,radio,button,legend,startControl].includes(e);
  dialog.querySelectorAll=selector=>selector.startsWith('input')?(options.ambiguousDialog?[radio,radio]:[radio]):[legend];
@@ -42,7 +42,17 @@ async function trial(options={}) {
  foreign.querySelectorAll=s=>s.startsWith('input')?[]:s==='button'?setupButtons:s==='form'?[form]:s.startsWith('[class')?(options.overlayWrongHeadingStyle?[]:[heading]):s==='[role="heading"],h1,h2,h3'?(options.overlayDuplicateHeading?[heading,heading]:[heading]):[];
  if(options.overlayDialogReplacement)doc.querySelectorAll=s=>s.startsWith('input')?[radio]:overlayReads?[{...foreign}]:[foreign];
  if(options.overlayMultiple)doc.querySelectorAll=s=>s.startsWith('input')?[radio]:overlayReads?[foreign,dialog]:[foreign];
- const globals={document:doc,innerWidth:800,innerHeight:600,getComputedStyle:()=>({display:'block',visibility:'visible',pointerEvents:'auto'})};
+ foreign.parentElement=options.overlayAncestor?{ownerDocument:doc,isConnected:true,parentElement:null,
+   inert:!!options.overlayAncestorInert,hasAttribute:()=>false,getAttribute:k=>k==='data-state'&&options.overlayClosed?'closed':null}:null;
+ foreign.hasAttribute=k=>k==='inert'&&!!options.overlayInert;
+ if(options.overlayOutside)label.getBoundingClientRect=()=>({left:-20,top:10,width:80,height:40});
+ if(options.overlayLongAncestors) {let current=foreign;for(let i=0;i<65;i++){current.parentElement={ownerDocument:doc,isConnected:true,parentElement:null,inert:false,hasAttribute:()=>false,getAttribute:()=>null};current=current.parentElement;}}
+ let diagnosticPoints=0;if(options.overlayMixedPoints)doc.elementFromPoint=()=>[label,foreign,dialog][diagnosticPoints++%3];
+ if(options.overlayPointFront)doc.elementFromPoint=()=>options.overlayPointFront==='dialog'?foreign:options.overlayPointFront==='other'?dialog:label;
+ const globals={document:doc,innerWidth:800,innerHeight:600,getComputedStyle:e=>({display:'block',visibility:'visible',
+   opacity:options.overlayBadOpacity?'PRIVATE':e===foreign?(options.overlayZero?'0':'1'):
+     e===foreign.parentElement&&options.overlayAncestorZero?'0':'1',
+   pointerEvents:e===foreign&&options.overlayPointerNone?'none':e===foreign.parentElement&&options.overlayAncestorPointerNone?'none':'auto'})};
  function evaluate(fn,e,arg) {
   if(fn.name==='sample') {lastKind=e.kind;samples++;}
   if(fn.name==='classifyForeign'){overlayReads++;if(options.overlayHeadingChanges&&overlayReads>1)heading.innerText='Skip setup?';if(options.overlayQueryFail)throw Error('PRIVATE query failed');}
@@ -301,5 +311,27 @@ async function trial(options={}) {
  for(const opts of [{remain:true},{uncertain:'continue'}]) {const r=await trial(opts);assert.equal(r.roleClicks,1);assert.equal(r.continueClicks,1);assert.equal(r.facts.roleScopeAbsent,false);}
  assert.equal(JSON.stringify(good.facts).includes('Engineering'),false);
  assert.equal(JSON.stringify(good.facts).includes('private'),false);
+ for(const opts of [{overlayZero:true},{overlayPointerNone:true},{overlayInert:true},
+   {overlayAncestor:true,overlayAncestorZero:true,overlayAncestorPointerNone:true,overlayAncestorInert:true,overlayClosed:true},
+   {overlayPointFront:'dialog'},{overlayPointFront:'other'},{overlayMixedPoints:true},{overlayLongAncestors:true},{overlayOutside:true},{overlayBadOpacity:true}]) {
+   const r=await trial({modal:true,overlayHeading:'Unknown',...opts});
+   assert.equal(r.roleClicks,0);assert.equal(r.continueClicks,0);
+   assert.equal(r.facts.actionabilityFailure,'foreign-overlay');
+   const m=r.facts.foreignOverlayActionability;assert.ok(m);
+   if(opts.overlayOutside||opts.overlayBadOpacity||opts.overlayLongAncestors) {
+     assert.equal(m.status,'unavailable');assert.equal(m.targetOwnedPointCount,null);
+     assert.equal(m.dialogOwnedPointCount,null);assert.equal(m.otherPointCount,null);
+   } else {
+     assert.equal(m.status,'observed');
+     assert.equal(m.targetOwnedPointCount+m.dialogOwnedPointCount+m.otherPointCount,9);
+     if(opts.overlayZero)assert.equal(m.dialogOpacityZero,true);
+     if(opts.overlayPointerNone)assert.equal(m.dialogPointerEventsNone,true);
+     if(opts.overlayInert)assert.equal(m.inert,true);
+     if(opts.overlayAncestor) {assert.equal(m.ancestorOpacityZero,true);assert.equal(m.ancestorPointerEventsNone,true);assert.equal(m.inert,true);assert.equal(m.stateClosed,true);}
+     if(opts.overlayMixedPoints)assert.deepEqual([m.targetOwnedPointCount,m.dialogOwnedPointCount,m.otherPointCount],[3,3,3]);
+     if(opts.overlayPointFront==='dialog')assert.equal(m.dialogOwnedPointCount,9);
+     if(opts.overlayPointFront==='other')assert.equal(m.otherPointCount,9);
+   }
+ }
  console.log('PASS: public onboarding behavioral guards (closed proof branches + guarded loading)');
 })().catch(e=>{console.error(e);process.exitCode=1;});

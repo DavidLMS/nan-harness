@@ -1880,6 +1880,33 @@ class QualificationTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 q.semantic_observations(tmp, 'chatgpt-desktop')
 
+    def test_claude_native_chat_guard_rejection_is_separate_and_closed(self):
+        value = dict(schemaVersion=1, mechanism='claude-native-chat', diagnosticsOnly=True,
+                     stage='action-uncertain', submittedTurns=1, inputVerifiedTurns=1,
+                     copiedResponses=0, retryAttempted=False, clipboardCleared=True,
+                     actionPhase='post-guard', transportFailure=None)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / 'chat.json'
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [value])
+            for phase in ('before-guard', 'post-guard'):
+                for rejection in ('identity-missing', 'bounds-changed', 'foreground-changed',
+                                  'same-process-window', 'off-display', 'occluded'):
+                    item = {**value, 'actionPhase': phase, 'guardRejection': rejection}
+                    path.write_text(json.dumps(item))
+                    self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [item])
+            for change in ({'guardRejection': 'PRIVATE'}, {'guardRejection': None},
+                           {'actionPhase': 'transport'}, {'transportFailure': 'timeout'},
+                           {'stage': 'completed'}, {'rawBounds': [1, 2, 3, 4]}):
+                item = {**value, 'guardRejection': 'bounds-changed', **change}
+                path.write_text(json.dumps(item))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'claude-desktop')
+            path.write_text(json.dumps({**value, 'guardRejection': 'occluded'}))
+            with self.assertRaises(ValueError):
+                q.semantic_observations(root, 'zed-desktop')
+
     def test_claude_native_chat_receipt_is_closed_and_not_qualification(self):
         value = dict(schemaVersion=1, mechanism='claude-native-chat', diagnosticsOnly=True,
                      stage='completed', submittedTurns=3, inputVerifiedTurns=3, copiedResponses=3,
@@ -2299,6 +2326,22 @@ class QualificationTests(unittest.TestCase):
                 q.public_onboarding({**surface, 'foreignOverlayHeading': invalid}, 'chatgpt-desktop')
         with self.assertRaises(ValueError):
             q.public_onboarding({**blocked, 'foreignOverlayHeading': 'unknown'}, 'chatgpt-desktop')
+        actionability = dict(status='observed', dialogOpacityZero=True, ancestorOpacityZero=False,
+                             dialogPointerEventsNone=True, ancestorPointerEventsNone=False,
+                             inert=True, stateClosed=True, targetOwnedPointCount=3,
+                             dialogOwnedPointCount=3, otherPointCount=3)
+        self.assertEqual(q.public_onboarding({**surface, 'foreignOverlayActionability': actionability},
+                                            'chatgpt-desktop')['foreignOverlayActionability'], actionability)
+        unavailable = {key: None for key in actionability}
+        unavailable['status'] = 'unavailable'
+        self.assertEqual(q.public_onboarding({**surface, 'foreignOverlayActionability': unavailable},
+                                            'chatgpt-desktop')['foreignOverlayActionability'], unavailable)
+        for invalid in ({**actionability, 'rawStyle': 'PRIVATE'}, {**actionability, 'status': []},
+                        {**actionability, 'inert': 1}, {**actionability, 'otherPointCount': 2},
+                        {**actionability, 'dialogOwnedPointCount': True},
+                        {**unavailable, 'targetOwnedPointCount': 0}):
+            with self.assertRaises(ValueError):
+                q.public_onboarding({**surface, 'foreignOverlayActionability': invalid}, 'chatgpt-desktop')
         source_counts = dict(computerHistoryTitleCount=1, computerHistoryFormCount=1,
                              computerHistoryNotNowCount=1, computerHistoryCustomizeCount=1, computerHistoryAllowCount=1,
                              projectImportTitleCount=0, projectImportContinueCount=0, projectImportNotNowCount=1)

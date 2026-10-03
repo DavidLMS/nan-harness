@@ -1,7 +1,7 @@
 //! Source-bound native Chat conversation input and assistant-only clipboard readback.
 use super::{Gui, clipboard};
-use crate::native::ChatTurnStage;
 use crate::native::{ChatActionPhase, failure_label};
+use crate::native::{ChatTurnStage, GuardFailure};
 use crate::provider::ProviderGate;
 use crate::report::Reason;
 use nan_harness_private_fs::open_private_new;
@@ -10,6 +10,29 @@ use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use zeroize::Zeroizing;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum GuardRejection {
+    IdentityMissing,
+    BoundsChanged,
+    ForegroundChanged,
+    SameProcessWindow,
+    OffDisplay,
+    Occluded,
+}
+impl From<GuardFailure> for GuardRejection {
+    fn from(failure: GuardFailure) -> Self {
+        match failure {
+            GuardFailure::IdentityMissing => Self::IdentityMissing,
+            GuardFailure::BoundsChanged => Self::BoundsChanged,
+            GuardFailure::ForegroundChanged => Self::ForegroundChanged,
+            GuardFailure::SameProcessWindow => Self::SameProcessWindow,
+            GuardFailure::OffDisplay => Self::OffDisplay,
+            GuardFailure::Occluded => Self::Occluded,
+        }
+    }
+}
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -28,6 +51,8 @@ struct Facts {
     stage: ChatTurnStage,
     action_phase: Option<ChatActionPhase>,
     transport_failure: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    guard_rejection: Option<GuardRejection>,
     provider_observation: Option<ProviderObservation>,
     submitted_turns: u8,
     input_verified_turns: u8,
@@ -44,6 +69,7 @@ impl Default for Facts {
             stage: ChatTurnStage::Request,
             action_phase: None,
             transport_failure: None,
+            guard_rejection: None,
             provider_observation: None,
             submitted_turns: 0,
             input_verified_turns: 0,
@@ -123,23 +149,26 @@ impl ClaudeNativeChatSession<'_> {
         }
         self.facts.action_phase = Some(ChatActionPhase::BeforeGuard);
         self.facts.transport_failure = None;
+        self.facts.guard_rejection = None;
         let sentinel = Zeroizing::new(nonce()?);
         let facts = &mut self.facts;
         let stage = self.gui.visual.claude_chat_turn(
             mode,
             [&self.prompt, marker, &sentinel],
             deadline,
-            |phase, failure| {
+            |phase, failure, rejection| {
                 facts.action_phase = Some(phase);
                 facts.transport_failure = failure.map(failure_label);
+                facts.guard_rejection = rejection.map(GuardRejection::from);
             },
         )?;
         self.facts.stage = stage;
         self.facts.action_phase = Some(ChatActionPhase::PostGuard);
         self.gui
             .visual
-            .claude_chat_guard_until(deadline, |category| {
-                self.facts.transport_failure = Some(failure_label(category));
+            .claude_chat_guard_until(deadline, |failure, rejection| {
+                self.facts.transport_failure = failure.map(failure_label);
+                self.facts.guard_rejection = rejection.map(GuardRejection::from);
             })?;
         if Instant::now() >= deadline {
             return Err(Reason::Timeout);
@@ -299,6 +328,31 @@ impl ClaudeNativeChatSession<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn guard_rejections_keep_transport_failure_distinct() {
+        let mut facts = Facts::default();
+        assert!(
+            serde_json::to_value(&facts)
+                .unwrap()
+                .get("guardRejection")
+                .is_none()
+        );
+        for (failure, label) in [
+            (GuardFailure::IdentityMissing, "identity-missing"),
+            (GuardFailure::BoundsChanged, "bounds-changed"),
+            (GuardFailure::ForegroundChanged, "foreground-changed"),
+            (GuardFailure::SameProcessWindow, "same-process-window"),
+            (GuardFailure::OffDisplay, "off-display"),
+            (GuardFailure::Occluded, "occluded"),
+        ] {
+            facts.action_phase = Some(ChatActionPhase::PostGuard);
+            facts.guard_rejection = Some(failure.into());
+            let value = serde_json::to_value(&facts).unwrap();
+            assert_eq!(value["guardRejection"], label);
+            assert!(value["transportFailure"].is_null());
+        }
+    }
+
     #[test]
     fn clipboard_cleanup_is_observed_even_on_driver_failure() {
         assert!(verified_clipboard_clear(|| Ok(()), || Ok(Zeroizing::new(String::new()))).is_ok());
