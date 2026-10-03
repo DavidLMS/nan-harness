@@ -883,7 +883,6 @@ int process_correlation(bool before) {
     }
     std::istringstream input(request); DWORD checker = 0, launcher = 0;
     if (!(input >> checker >> launcher) || checker == 0 || launcher == 0) return 2;
-    stage = "snapshot";
     std::vector<CorrelationEntry> rows;
     if (!correlation_snapshot(checker, rows)) { std::cout << "unavailable\n"; return 0; }
     if (before) {
@@ -893,8 +892,7 @@ int process_correlation(bool before) {
         std::vector<CorrelationEntry> confirm;
         if (!correlation_snapshot(checker, confirm)) { std::cout << "unavailable\n"; return 0; }
         std::vector<CorrelationIdentity> verified{{launcher, launcher_time, false}};
-        stage = "ancestry";
-    for (const auto& row : rows) {
+        for (const auto& row : rows) {
             if (!row.matching || row.pid == launcher) continue;
             std::uint64_t created = 0;
             if (correlation_time(row.pid, created)
