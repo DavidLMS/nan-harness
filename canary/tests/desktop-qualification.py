@@ -338,6 +338,58 @@ class QualificationTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'zed-desktop')
 
+    def test_deferred_pen_scope_is_explicit_and_cannot_hide_missing_active_cells(self):
+        cells = q.matrix(['pen-desktop'])['include']
+        self.assertEqual(len(cells), 12)
+        self.assertEqual({c['app'] for c in cells}, set(q.APPS) - {'pen-desktop'})
+        for invalid in (['unknown'], ['pen-desktop', 'pen-desktop'], list(q.APPS)):
+            with self.assertRaises(ValueError):
+                q.matrix(invalid)
+        with tempfile.TemporaryDirectory() as root:
+            for index, item in enumerate(cells):
+                directory = Path(root) / str(index)
+                directory.mkdir()
+                (directory / 'qualification.json').write_text(json.dumps(q.envelope(
+                    item['app'], item['platform'], item['architecture'], 'a' * 40)))
+            result = q.aggregate(root, 'a' * 40, ['pen-desktop'])
+            self.assertEqual(result['excludedApps'], ['pen-desktop'])
+            self.assertEqual(result['qualification'], 'incomplete')
+            with self.assertRaises(ValueError):
+                q.aggregate(root, 'a' * 40)
+            (Path(root) / '0/qualification.json').unlink()
+            with self.assertRaises(ValueError):
+                q.aggregate(root, 'a' * 40, ['pen-desktop'])
+
+    def test_runner_failure_keeps_pending_verdict_and_never_exports_exception_text(self):
+        with tempfile.TemporaryDirectory() as root:
+            directory = Path(root).resolve()
+            args = argparse.Namespace(directory=directory, app='chatgpt-desktop',
+                                      platform='windows', source_sha='a' * 40)
+            value = q.envelope(args.app, args.platform, 'x86_64', args.source_sha)
+            output = directory / 'qualification.json'
+            output.write_text(json.dumps(value))
+            env = {'GITHUB_ACTIONS': 'true', 'RUNNER_ENVIRONMENT': 'github-hosted'}
+            with patch.dict(runner.os.environ, env, clear=True):
+                runner.publish_runner_failure(args, 'PRIVATE_EXCEPTION')
+                self.assertEqual(json.loads(output.read_text()), value)
+                runner.publish_runner_failure(args, 'codex-project-release-mismatch')
+            observed = json.loads(output.read_text())
+            self.assertEqual(observed['qualification'], 'unqualified')
+            self.assertEqual(observed['reason'], 'not-run')
+            self.assertEqual(observed['semanticObservations'][0]['errorCategory'], 'codex-project-release-mismatch')
+            self.assertNotIn('PRIVATE_EXCEPTION', output.read_text())
+            with patch.dict(runner.os.environ, env, clear=True):
+                runner.publish_runner_failure(args, 'execution-failed')
+            self.assertEqual(json.loads(output.read_text()), observed)
+            facts = directory / 'facts'
+            facts.mkdir()
+            fact = facts / 'runner.json'
+            fact.write_text(json.dumps(observed['semanticObservations'][0]))
+            self.assertEqual(q.semantic_observations(facts, args.app), observed['semanticObservations'])
+            fact.write_text(json.dumps({**observed['semanticObservations'][0], 'errorCategory': 'PRIVATE_EXCEPTION'}))
+            with self.assertRaises(ValueError):
+                q.semantic_observations(facts, args.app)
+
     def test_exact_initial_matrix_separates_scenario_backends_and_inventories(self):
         cells = q.matrix()['include']
         self.assertEqual(len(cells), 15)

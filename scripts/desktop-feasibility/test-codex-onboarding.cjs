@@ -33,7 +33,9 @@ async function trial(options={}) {
  form.contains=e=>e===heading;
  form.querySelectorAll=s=>s==='button'?[finish]:s==='a'?[terms,privacy]:[];
  root.contains=e=>[label,radio,button].includes(e);
- root.querySelectorAll=s=>s.startsWith('input')?[radio]:[legend];
+ const acknowledgement={textContent:'Engineering—got it. I can map an unfamiliar codebase, plan and build features, trace bugs across logs and tests, and run checks to verify behavior.',children:[],isConnected:true,getBoundingClientRect:()=>({width:80,height:40})};
+ const startControl={...acknowledgement,textContent:'Get Started'};
+ root.querySelectorAll=s=>absent?(s.startsWith('input')?[]:s==='button'?[startControl]:options.noTaskScope?[]:[acknowledgement]):s.startsWith('input')?[radio]:[legend];
  label.closest=s=>s.startsWith('div')?root:null;
  foreign.getAttribute=k=>k==='role'?'dialog':null;
  foreign.querySelectorAll=s=>s.startsWith('input')?[]:s==='form'?[form]:s.startsWith('[class')?(options.overlayWrongHeadingStyle?[]:[heading]):s==='[role="heading"],h1,h2,h3'?(options.overlayDuplicateHeading?[heading,heading]:[heading]):[];
@@ -80,7 +82,7 @@ async function trial(options={}) {
  let guards=0;
  const guard=()=>{guards++;if(options.guardThrows)throw Error('PRIVATE');if(options.guardExhaustsBudget&&guards>=3||options.overlayBudgetExpired&&overlayReads>0)now=1201;return !inventoryOwnerLost&&!(options.overlayOwnerDuringProof&&legendReads>=3)&&!(options.overlayOwnerLoss&&overlayReads>0)&&!options.initialOwnerLoss&&!(options.ownerLossBeforeRole&&guards>=3)&&!(options.ownerLoss&&roleClicks>0)&&!(options.finalLoss&&guards>=2);};
  const budget=options.expired?0:options.invalidDeadline?NaN:options.excessBudget?25001:1200;
- const facts=await sandbox.exports.run(page,options.noGuard?undefined:guard,budget);
+ const facts=await sandbox.exports.run(page,options.noGuard?undefined:guard,budget,options.admitAux?async()=>!options.auxOwnershipLostAfterClick||roleClicks===0:undefined);
  assert(!JSON.stringify(facts).includes('PRIVATE'));
  return {facts,roleClicks,continueClicks};
 }
@@ -181,6 +183,12 @@ async function trial(options={}) {
  }
  assert(!JSON.stringify(completeOverlay.facts).includes("You're all set"));
  assert(!JSON.stringify(completeOverlay.facts).includes('openai.com'));
+ const knownAux=await trial({foreignPage:true,admitAux:true});
+ assert.equal(knownAux.roleClicks,1);assert.equal(knownAux.continueClicks,1);assert.equal(knownAux.facts.taskScopeProved,true);
+ const lostAux=await trial({foreignPage:true,admitAux:true,auxOwnershipLostAfterClick:true});
+ assert.equal(lostAux.roleClicks,1);assert.equal(lostAux.continueClicks,0);assert.equal(lostAux.facts.roleProofFailure,'page-count');
+ const missingTask=await trial({noTaskScope:true});
+ assert.equal(missingTask.continueClicks,1);assert.equal(missingTask.facts.roleScopeAbsent,true);assert.equal(missingTask.facts.taskScopeProved,false);assert.equal(missingTask.facts.errorCategory,'scope-remained');
  const ownDialog=await trial({onboardingDialog:true});assert.equal(ownDialog.roleClicks,1);assert.equal(ownDialog.continueClicks,1);assert.equal(ownDialog.facts.roleScopeAbsent,true);
  assert.equal((await trial({modal:true})).facts.roleProofFailure,'control-not-actionable');
  assert.equal((await trial({modal:true})).facts.actionabilityFailure,'foreign-overlay');

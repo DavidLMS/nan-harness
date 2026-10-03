@@ -17,7 +17,7 @@ jobs:
         with:
           persist-credentials: false
       - id: selection
-        run: echo "matrix=$(python3 canary/actions/desktop_qualification.py matrix)" >> "$GITHUB_OUTPUT"
+        run: echo "matrix=$(python3 canary/actions/desktop_qualification.py matrix --exclude-app pen-desktop)" >> "$GITHUB_OUTPUT"
   qualify:
     needs: select
     strategy:
@@ -237,8 +237,8 @@ jobs:
         with:
           pattern: qualification-*
           path: qualification-results
-      - name: Require complete 15-cell acceptance
-        run: python3 canary/actions/desktop_qualification.py aggregate --directory qualification-results --source-sha "$GITHUB_SHA" --output qualification-matrix.json
+      - name: Require complete 12-cell acceptance with Pen deferred
+        run: python3 canary/actions/desktop_qualification.py aggregate --exclude-app pen-desktop --directory qualification-results --source-sha "$GITHUB_SHA" --output qualification-matrix.json
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:

@@ -29,11 +29,13 @@ All verify response, real file-tool use, controlled provider failure, UI Retry
 recovery and application, global and clipboard cleanup without OCR. Hermes
 observes Chromium 144.0.7559.236; Electron's separate version and Zed's runtime
 version remain unobserved. Exact commits and artifact hashes are recorded in
-each closed result. Five of the thirteen cells with official native distribution
-are qualified; eight remain open. Linux Claude and Linux Codex have no official
-native desktop distribution and are unsupported, making ten unqualified cells
-in the complete fifteen-cell inventory. The three Pen cells are blocked by vendor activation: no
-official account-free route is established, and no test account is authorized.
+each closed result. Five of the fifteen cells with official native distribution are qualified.
+Codex and Claude also distribute official Linux beta packages; their Linux cells
+remain unqualified, rather than unsupported. Pen is deferred from the active
+workflow at the user's direction. The active scope contains twelve cells for
+Zed, Hermes, Codex and Claude, with five qualified and seven open. The full
+fifteen-cell inventory remains available, and scoped aggregation explicitly
+records Pen as excluded rather than accepted. No test account is authorized.
 Personal-machine isolation and live-provider behavior still require separate
 evidence.
 
@@ -133,16 +135,16 @@ the full acceptance gate. Implemented adapters are accepted only when their
 full native result meets the gate; implementation and feasibility alone do not
 qualify a cell.
 
-Five of thirteen native-supported cells are qualified, leaving eight open;
-the two additional Linux cells are unsupported. The following
+Five of twelve active cells are qualified, leaving seven open; the three Pen
+cells are deferred. All fifteen inventory cells have official distributions. The following
 observations describe completed runs, rather than additional qualification:
 
 | Application | Linux x64 | macOS ARM64 | Windows x64 |
 | --- | --- | --- | --- |
 | Zed | Response and file-tool steps pass; pointer and accessibility Retry acknowledgements do not produce provider recovery. | Three complete probes pass the expanded retry policy. | Three complete probes pass with direct native clipboard transport and all cleanup checks. |
 | Hermes | Three complete probes pass with renderer process ownership. | Three complete probes pass with private native userData and bounded cold-start waits. | Three complete probes pass after ordinary onboarding dismissal and fresh catalog readiness, including explicit UI Retry and cleanup. |
-| ChatGPT / Codex | No official native desktop distribution; unpacked feasibility observations do not qualify Linux. | Renderer observation remains intermittent; cleanup passes. | All three probes acquire a renderer, but a foreign overlay blocks the public role form before action. Process absence and all cleanup pass. |
-| Claude | No official native desktop distribution. | Two of three windows acquired in completed trials, with one exact classic composer and Start task; no Send message. Latest trial rejects incomplete initial focus. Cleanup passes. Guarded Chat navigation and conversation verification remain open. | Owned window acquired, no editable observed, cleanup unproved. Native known-folder metadata is fresh and unchanged; private-profile observation remains unavailable. A later session preflight fails before app execution. |
+| ChatGPT / Codex | Official Linux beta package; native conversation qualification remains open. | Renderer observation remains intermittent; cleanup passes. | All three probes acquire a renderer, but a foreign overlay blocks the public role form before action. Process absence and all cleanup pass. |
+| Claude | Official Linux beta package; native conversation qualification remains open. | Two of three windows acquired in completed trials, with one exact classic composer and Start task; no Send message. Latest trial acquires a focused window, then rejects changed bounds before composer inventory. Cleanup passes. Guarded Chat navigation and conversation verification remain open. | Owned window acquired, no editable observed, cleanup unproved. Native known-folder metadata is fresh and unchanged; private third-party Local State is now observed. Process absence after shutdown still fails. |
 | Pen | Software GLES removes GPU startup failure; three fresh sessions show sign-in and no editor. No official account-free route found for the frozen release. | Two probes expose composer/Send; another exposes sign-in. Conversation adapter remains unimplemented. | Owned renderer loads sign-in and a dialog; conversation adapter remains unimplemented. |
 
 The completed evidence is available in runs
@@ -1738,3 +1740,35 @@ The next Windows Codex observation correlates the already held sole main target
 with a later source-scoped auxiliary target, using bounded passive samples. It
 keeps the multiple-page rejection and performs no auxiliary dismissal or input.
 Neither diagnostic invents full acceptance for inventory-only backends.
+
+
+### Active scope correction and startup handoff
+
+The official Linux Codex package is documented at
+[OpenAI Linux desktop](https://learn.chatgpt.com/docs/linux/linux-app), and
+[Claude installation](https://support.claude.com/en/articles/10065433-install-claude-desktop)
+documents Ubuntu/Debian x64 and ARM64 beta packages. The catalog already resolves
+these official APT sources. Earlier statements that the two Linux cells lacked
+official distributions were incorrect; distribution availability is separate
+from native qualification. Pen is explicitly excluded from the active matrix
+and aggregate, preserving a full inventory for later work.
+
+On `82e7758e`,
+[Claude Windows 37087363582](https://github.com/DavidLMS/nan-harness/actions/runs/37087363582)
+confirms private-root preparation and the third-party Local State file appearing
+inside the owned profile. Cleanup remains failed, with first/last presence across
+37 existing process queries.
+[Claude macOS 37087361588](https://github.com/DavidLMS/nan-harness/actions/runs/37087361588)
+proves initial focus but rejects bounds changing after final acquisition and
+launch-diagnostic capture, before the first conversation guard. The next trial
+moves the existing final initial binding after those diagnostics, immediately
+before conversation readiness. It preserves the original 45-second deadline,
+original window identity, ownership, both focus proofs and stability rules; no
+post-input rebinding is added.
+
+[Codex Windows 37087365578](https://github.com/DavidLMS/nan-harness/actions/runs/37087365578)
+produces only a not-run envelope in both attempts. The runner now retains a closed
+failure category in that same unqualified envelope, without exception text or
+raw application logs. [Quality 37087916144](https://github.com/DavidLMS/nan-harness/actions/runs/37087916144)
+and the local full gate with `RUST_TEST_THREADS=1` pass on `82e7758e`; parallel
+local tests expose intermittent two-second synthetic-script readiness timeouts.

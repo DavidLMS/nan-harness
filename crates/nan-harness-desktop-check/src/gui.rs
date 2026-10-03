@@ -224,6 +224,8 @@ pub(crate) struct Gui {
     app_error: Option<Reason>,
     kind: DesktopHarnessKind,
     visual: visual::Visual,
+    #[cfg(target_os = "macos")]
+    initial_deadline: Cell<Option<Instant>>,
 }
 
 fn guard_then<T, Guard, Continuation>(
@@ -432,16 +434,29 @@ impl Gui {
             Ok(app) => (Some(app), None),
             Err(error) => (None, Some(map_error(error))),
         };
-        #[cfg(target_os = "macos")]
-        if let Some(deadline) = deadline {
-            visual.finish_initial_acquisition(process, deadline)?;
-        }
         Ok(Self {
             app,
             app_error,
             kind,
             visual,
+            #[cfg(target_os = "macos")]
+            initial_deadline: Cell::new(deadline),
         })
+    }
+
+    pub(crate) fn finish_initial_ready<P: Observation>(
+        &self,
+        process: &mut P,
+    ) -> Result<(), visual::AcquisitionFailure> {
+        #[cfg(target_os = "macos")]
+        if let Some(deadline) = self.initial_deadline.take() {
+            // Bind after launch diagnostics, immediately before the first
+            // conversation guard. The original launch budget is never renewed.
+            self.visual.finish_initial_acquisition(process, deadline)?;
+        }
+        #[cfg(not(target_os = "macos"))]
+        let _ = process;
+        Ok(())
     }
 
     pub(crate) fn observe_hosted_startup(

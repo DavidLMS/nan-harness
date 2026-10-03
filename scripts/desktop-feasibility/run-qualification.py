@@ -309,6 +309,33 @@ def execute_with_diagnostics(command, directory, facts, platform, source_sha, en
                 raise
 
 
+def publish_runner_failure(args, category):
+    """Replace only the same-commit pending envelope with a closed failure fact."""
+    if (os.environ.get('GITHUB_ACTIONS') != 'true'
+            or os.environ.get('RUNNER_ENVIRONMENT') != 'github-hosted'):
+        return
+    try:
+        directory = args.directory
+        if not directory.is_absolute() or any(p.is_symlink() or not p.is_dir()
+                or getattr(p, 'is_junction', lambda: False)() for p in (directory, *directory.parents)):
+            return
+        architecture = 'aarch64' if args.platform == 'macos' else 'x86_64'
+        pending = envelope(args.app, args.platform, architecture, args.source_sha)
+        output = directory / 'qualification.json'
+        if bounded_json(output, 65536) != pending:
+            return
+        fact = dict(schemaVersion=1, mechanism='qualification-runner-failure',
+                    diagnosticsOnly=True, errorCategory=category)
+        from desktop_qualification import RUNNER_FAILURES
+        if category not in RUNNER_FAILURES:
+            return
+        pending['semanticObservations'] = [fact]
+        write_json(output, pending)
+    except (OSError, ValueError, TypeError, RuntimeError):
+        # A diagnostic never replaces the original execution failure.
+        return
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--app', choices=APPS, required=True)
@@ -334,14 +361,17 @@ def main():
             'qualification backend is unavailable': 'backend-unavailable',
             'official frozen application is unavailable': 'frozen-app-unavailable',
             'qualification report is absent': 'report-absent',
+            'Codex project trial requires the inspected official release': 'codex-project-release-mismatch',
             **{category: category for category in (
                 'claude-windows-executable-invalid', 'claude-windows-bootstrap-invalid',
                 'claude-windows-bootstrap-mismatch', 'claude-windows-release-mismatch',
                 'claude-windows-policy-invalid')},
         }
         category = categories.get(str(error), 'invalid-preflight')
+        publish_runner_failure(args, category)
         raise SystemExit('desktop qualification failed: ' + category) from None
     except (OSError, RuntimeError, subprocess.SubprocessError):
+        publish_runner_failure(args, 'execution-failed')
         raise SystemExit('desktop qualification failed; private evidence retained') from None
 
 

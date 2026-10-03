@@ -123,6 +123,47 @@ async function observeMainAux(held,browser,guard,deadline,auxRoute,
     return stop('observed');
   } catch{return stop(Date.now()>=deadline?'deadline':'query-failed');}
 }
+// A primary renderer is bound while it is the sole, focused role document.
+// Later source-known inert avatar pages never become selectable input targets.
+function heldMainGuard(held, browser, owner, deadline, route,
+  identity=correlationIdentity, pause=ms=>new Promise(resolve=>setTimeout(resolve,ms))) {
+  let auxiliary=null, auxiliaryIdentity=null;
+  const pages=()=>browser.contexts().flatMap(context=>context.pages());
+  const valid=()=>Date.now()<deadline&&owner()===true;
+  return async function prove() {
+    if(!held||!valid())return false;
+    try {
+      const initial=pages();
+      if(initial.length<1||initial.length>2||!initial.includes(held.page))return false;
+      const extra=initial.find(page=>page!==held.page);
+      if(auxiliary&&extra!==auxiliary)return false;
+      if(extra&&route(extra.url())!=='avatarOverlay')return false;
+      const samples=extra&&!auxiliary?2:1;
+      let candidateAux=null;
+      for(let sample=0;sample<samples;sample++) {
+        if(!valid())return false;
+        const before=pages();
+        if(before.length!==initial.length||!before.every(page=>initial.includes(page)))return false;
+        const main=await identity(held.page,deadline);
+        if(!valid()||!sameCorrelationIdentity(held,main)||!main.scope.focused)return false;
+        if(extra) {
+          const aux=await identity(extra,deadline);
+          const expected=auxiliaryIdentity??candidateAux;
+          if(!valid()||expected&&!sameCorrelationIdentity(expected,aux))return false;
+          const counts=aux.scope.counts;
+          if(aux.scope.focused||['roleLegend','roleRadios','engineering','dialog','quickChatComposer','editable']
+              .some(key=>counts[key]!==0))return false;
+          candidateAux=aux;
+        }
+        const after=pages();
+        if(!valid()||after.length!==initial.length||!after.every(page=>initial.includes(page)))return false;
+        if(sample+1<samples)await pause(Math.min(100,Math.max(0,deadline-Date.now())));
+      }
+      if(extra&&!auxiliary){auxiliary=extra;auxiliaryIdentity=candidateAux;}
+      return true;
+    } catch {return false;}
+  };
+}
 async function run() {
   if (!['chatgpt-desktop', 'claude-desktop', 'pen-desktop'].includes(app)
       || !Number.isSafeInteger(request.ownerPid) || request.ownerPid <= 1
@@ -176,7 +217,8 @@ async function run() {
       const heldMain=trial?await bindCorrelationMain(page,browser,ownerGuard,correlationDeadline):null;
       facts.publicOnboarding = await require('./codex-onboarding.cjs').run(page,
         () => rootProof.descendant(connection.launcherPid) && ownership.ownedEndpoint(),
-        correlationDeadline);
+        correlationDeadline, trial&&heldMain?heldMainGuard(heldMain,browser,ownerGuard,correlationDeadline,
+          require('./codex-onboarding.cjs').sourceRoute):undefined);
       if(trial&&browser.contexts().flatMap(c=>c.pages()).length!==1) {
         facts.mainAuxCorrelation=await observeMainAux(heldMain,browser,ownerGuard,correlationDeadline,
           require('./codex-onboarding.cjs').sourceRoute);

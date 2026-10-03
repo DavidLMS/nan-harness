@@ -39,6 +39,21 @@ function sample(control) {
   return {rect: [r.left,r.top,r.width,r.height], points};
 }
 
+// The frozen role Continue callback transitions into task setup. Disappearance
+// alone is not proof: retain its source scope and exact Engineering acknowledgement.
+function taskContinuation(scope) {
+  const acknowledgement='Engineering—got it. I can map an unfamiliar codebase, plan and build features, trace bugs across logs and tests, and run checks to verify behavior.';
+  const visible=e=>{const r=e.getBoundingClientRect(),style=getComputedStyle(e);
+    return e.isConnected&&r.width>0&&r.height>0&&style.display!=='none'&&style.visibility!=='hidden';};
+  if(scope.ownerDocument!==document||!visible(scope)||scope.closest('[inert]'))return false;
+  if(scope.querySelectorAll('input[name="conversational-onboarding-inline-role"]').length!==0)return false;
+  const acknowledgementNodes=[...scope.querySelectorAll('*')].filter(e=>visible(e)
+    &&e.textContent.trim()===acknowledgement
+    &&![...e.children].some(child=>child.textContent.trim()===acknowledgement));
+  const start=[...scope.querySelectorAll('button')].filter(e=>visible(e)&&e.textContent.trim()==='Get Started');
+  return acknowledgementNodes.length===1&&start.length===1;
+}
+
 // Exact immutable final-onboarding surface. No arbitrary app payload is returned.
 function foreignSurface(control) {
   const visible=e=>{const r=e.getBoundingClientRect(),s=getComputedStyle(e);
@@ -88,10 +103,10 @@ function candidate(a, b) {
   return a && b && !a.blocked && !b.blocked && JSON.stringify(a.rect) === JSON.stringify(b.rect)
     && a.points.find(p => b.points.some(q => p.x === q.x && p.y === q.y));
 }
-async function run(page, ownerGuard, deadline, rejected) {
+async function run(page, ownerGuard, deadline, rejected, mainGuard) {
   const maxWaitMs = deadline - Date.now();
   const originalUrl = page.url();
-  const ownedEndpoint = () => {
+  const ownedEndpoint = async () => {
     const fail = reason => { facts.roleProofFailure=reason; return false; };
     try {
       if (typeof ownerGuard !== 'function' || ownerGuard() !== true) return fail('ownership-lost');
@@ -100,7 +115,7 @@ async function run(page, ownerGuard, deadline, rejected) {
       const browser = page.context().browser();
       const pages = browser?.contexts().flatMap(context => context.pages());
       if (!pages) return fail('query-failed');
-      if (pages.length !== 1) {
+      if (pages.length !== 1 && !(typeof mainGuard === 'function' && await mainGuard())) {
         // Retain only a bounded protocol inventory of the rejected snapshot.
         // This never authorizes choosing among renderer targets.
         if (pages.length > 32) facts.rejectedPageInventory={status:'overflow'};
@@ -117,7 +132,8 @@ async function run(page, ownerGuard, deadline, rejected) {
         }
         return fail('page-count');
       }
-      if (pages[0] !== page) return fail('page-changed');
+      if (!pages.includes(page) || pages.length === 1 && pages[0] !== page) return fail('page-changed');
+      if (typeof mainGuard === 'function' && !await mainGuard()) return fail('ownership-lost');
       if (page.url() !== originalUrl) return fail('url-changed');
       return true;
     } catch { return fail('query-failed'); }
@@ -126,7 +142,7 @@ async function run(page, ownerGuard, deadline, rejected) {
     stage:'session', errorCategory:null, conversationalScope:false, engineeringControl:false,
     roleClickAttempted:false, roleClickCompleted:false, engineeringChecked:false,
     continueControl:false, continueClickAttempted:false, continueClickCompleted:false,
-    roleScopeAbsent:false, roleProofFailure:'unmeasured', sessionProofFailure:'unmeasured'};
+    roleScopeAbsent:false, taskScopeProved:false, roleProofFailure:'unmeasured', sessionProofFailure:'unmeasured'};
   const stop = category => { facts.errorCategory=category; return facts; };
   const sessionFailure = typeof ownerGuard !== 'function' ? 'guard-missing'
     : !Number.isFinite(deadline) || !Number.isFinite(maxWaitMs) || maxWaitMs > 25000 ? 'deadline-invalid'
@@ -144,7 +160,7 @@ async function run(page, ownerGuard, deadline, rejected) {
     const fail = reason => { facts.roleProofFailure=reason; return false; };
     facts.roleProofFailure='unmeasured';
     if (Date.now() >= deadline) return fail('deadline-expired');
-    if (!ownedEndpoint()) return false;
+    if (!await ownedEndpoint()) return false;
     if (Date.now() >= deadline) return fail('deadline-expired');
     const legends = page.locator('fieldset > legend:visible').filter({hasText:/^Select the kind of work you do$/});
     if (await legends.count() !== 1) return fail('legend-count');
@@ -169,7 +185,7 @@ async function run(page, ownerGuard, deadline, rejected) {
     },GROUP)) return fail('label-association');
     if (!needChecked && !await radio.isEnabled()) return fail('engineering-disabled');
     if (needChecked && (!await radio.isChecked() || await fieldset.locator(GROUP+':checked').count() !== 1)) return fail('checked-mismatch');
-    if (!ownedEndpoint()) return false;
+    if (!await ownedEndpoint()) return false;
     if (Date.now() >= deadline) return fail('deadline-expired');
     return true;
   }
@@ -183,7 +199,7 @@ async function run(page, ownerGuard, deadline, rejected) {
         let held;
         const guard=async frame=>{
           if(Date.now()>=deadline){facts.foreignOverlayProof='deadline-expired';return false;}
-          if(!ownedEndpoint()){facts.foreignOverlayProof='ownership-lost';return false;}
+          if(!await ownedEndpoint()){facts.foreignOverlayProof='ownership-lost';return false;}
           if(Date.now()>=deadline){facts.foreignOverlayProof='deadline-expired';return false;}
           if(page.mainFrame()!==frame){facts.foreignOverlayProof='frame-replaced';return false;}
           if(!await reprove()){
@@ -194,7 +210,7 @@ async function run(page, ownerGuard, deadline, rejected) {
           if(!await control.evaluate((e,original)=>e===original,handle)){
             facts.foreignOverlayProof='control-replaced';return false;
           }
-          if(!ownedEndpoint()){facts.foreignOverlayProof='ownership-lost';return false;}
+          if(!await ownedEndpoint()){facts.foreignOverlayProof='ownership-lost';return false;}
           if(Date.now()>=deadline){facts.foreignOverlayProof='deadline-expired';return false;}
           return true;
         };
@@ -239,11 +255,13 @@ async function run(page, ownerGuard, deadline, rejected) {
       const final=await handle.evaluate(sample);
       if (final?.blocked) return await blocked(final.blocked);
       if (!candidate(first,final) || !final.points.some(p=>p.x===point.x&&p.y===point.y)) return await blocked('unstable');
-      if (!ownedEndpoint()) return false;
+      if (!await ownedEndpoint()) return false;
       if (Date.now() >= deadline) { facts.roleProofFailure='deadline-expired'; return false; }
       facts[before]=true;
       await handle.click({position:point,timeout:Math.max(1,Math.min(2000,deadline-Date.now()))});
       facts[after]=true;
+      if (!await ownedEndpoint()) return false;
+      if (Date.now() >= deadline) { facts.roleProofFailure='deadline-expired'; return false; }
       return true;
     } finally { await handle.dispose(); }
   }
@@ -262,7 +280,7 @@ async function run(page, ownerGuard, deadline, rejected) {
     if (!await click(label,()=>proof(), 'roleClickAttempted','roleClickCompleted')) return stop('action-blocked');
     facts.stage='role-readback';
     while (Date.now()<deadline && !await proof(true)) {
-      if (!ownedEndpoint()) return stop('ownership-lost');
+      if (!await ownedEndpoint()) return stop('ownership-lost');
       await wait(100);
     }
     if (!await proof(true)) return stop('role-readback-failed');
@@ -280,8 +298,13 @@ async function run(page, ownerGuard, deadline, rejected) {
     if (!await click(button,continueProof,'continueClickAttempted','continueClickCompleted')) return stop('action-blocked');
     facts.stage='scope-transition';
     while (Date.now()<deadline) {
-      if (!ownedEndpoint()) return stop('ownership-lost');
-      if (await page.locator(GROUP).count()===0) { facts.roleScopeAbsent=true;facts.stage='stopped-after-role';return facts; }
+      if (!await ownedEndpoint()) return stop('ownership-lost');
+      if (await page.locator(GROUP).count()===0) {
+        facts.roleScopeAbsent=true;
+        if(await scope.count()===1&&await scope.evaluate(taskContinuation)&&await ownedEndpoint()&&Date.now()<deadline) {
+          facts.taskScopeProved=true;facts.stage='stopped-after-role';return facts;
+        }
+      }
       await wait(100);
     }
     return stop('scope-remained');
@@ -300,9 +323,9 @@ function sourceRoute(raw) {
       ['/global-dictation','globalDictation'],['/debug','debug']]).get(route)??'unknown';
   } catch { return 'unknown'; }
 }
-exports.run=async function(page, ownerGuard, deadline) {
+exports.run=async function(page, ownerGuard, deadline, mainGuard) {
   let rejectedPages, rejectedUrls;
-  const facts=await run(page,ownerGuard,deadline,pages=>{rejectedPages=pages;rejectedUrls=pages.map(p=>p.url());});
+  const facts=await run(page,ownerGuard,deadline,pages=>{rejectedPages=pages;rejectedUrls=pages.map(p=>p.url());},mainGuard);
   if(!rejectedPages)return facts;
   const unavailable=()=>{facts.rejectedPageInventory.source={status:'unavailable'};return facts;};
   const stable=()=>{
@@ -334,3 +357,5 @@ exports.sourceRoute=sourceRoute;
 exports.sample = sample;
 exports.candidate = candidate;
 exports.scopeFingerprint = SCOPE;
+
+exports.taskContinuation=taskContinuation;

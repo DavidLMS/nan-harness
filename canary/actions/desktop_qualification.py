@@ -22,6 +22,7 @@ BACKENDS = {('zed-desktop', 'macos', 'aarch64'): 'native-thread-export',
 BACKENDS.update({(app, platform, architecture): 'renderer-inventory'
                  for app in ('chatgpt-desktop', 'claude-desktop', 'pen-desktop')
                  for platform, architecture, _ in TARGETS})
+RUNNER_FAILURES = set('windows-ownership-helper-missing windows-ownership-helper-invalid prepared-identity-mismatch prepared-app-unavailable prepared-executable-missing prepared-executable-changed host-platform-mismatch backend-unavailable frozen-app-unavailable report-absent claude-windows-executable-invalid claude-windows-bootstrap-invalid claude-windows-bootstrap-mismatch claude-windows-release-mismatch claude-windows-policy-invalid codex-project-release-mismatch invalid-preflight execution-failed'.split())
 STEPS = {'launched', 'input-submitted', 'response-verified', 'tool-verified', 'error-recovered'}
 COMMIT = re.compile(r'[0-9a-f]{40}\Z')
 HASH = re.compile(r'[0-9a-f]{64}\Z')
@@ -64,7 +65,7 @@ def main_aux_correlation(value, app):
 
 
 def public_onboarding(setup, app):
-    shape = set(setup) - {'rejectedPageInventory'} if type(setup) is dict else set()
+    shape = set(setup) - {'rejectedPageInventory', 'taskScopeProved'} if type(setup) is dict else set()
     booleans = {'conversationalScope', 'engineeringControl', 'roleClickAttempted',
                 'roleClickCompleted', 'engineeringChecked', 'continueControl',
                 'continueClickAttempted', 'continueClickCompleted', 'roleScopeAbsent'}
@@ -115,6 +116,11 @@ def public_onboarding(setup, app):
                                or sum(source[key].values()) != inventory['total']
                                for key, fields in (('routes', routes), ('visibility', visibility)))))):
                 raise ValueError('invalid rejected renderer source inventory')
+    if 'taskScopeProved' in setup:
+        if type(setup['taskScopeProved']) is not bool:
+            raise ValueError('invalid Codex task scope proof')
+        if setup['taskScopeProved'] and not setup['roleScopeAbsent']:
+            raise ValueError('inconsistent Codex task scope proof')
     specific_overlay_failures = {
         'deadline-expired': {'deadline-expired'},
         'ownership-lost': {'ownership-lost', 'final-ownership', 'page-count', 'page-changed', 'url-changed', 'query-failed'},
@@ -162,10 +168,12 @@ def public_onboarding(setup, app):
     return setup
 
 
-def matrix():
+def matrix(excluded=()):
+    if len(set(excluded)) != len(excluded) or not set(excluded) < set(APPS):
+        raise ValueError('invalid qualification exclusions')
     return {'include': [dict(app=app, platform=platform, architecture=architecture,
                              runner=runner, backend=BACKENDS.get((app, platform, architecture), 'pending'))
-                        for platform, architecture, runner in TARGETS for app in APPS]}
+                        for platform, architecture, runner in TARGETS for app in APPS if app not in excluded]}
 
 
 def cell(app, platform, architecture):
@@ -266,10 +274,10 @@ def semantic_observations(directory, app):
         if type(value) is not dict:
             raise ValueError('invalid semantic observation')
         mechanism = value.get('mechanism')
-        if mechanism not in {'hermes-windows-catalog-readiness', 'hermes-renderer-qualification', 'zed-native-copy', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'zed-retry-visual', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'windows-process-absence', 'windows-post-stop-process', 'windows-process-baseline', 'windows-process-settlement', 'claude-owned-configuration', 'claude-restore', 'claude-model-discovery', 'claude-window-stack', 'claude-window-focus', 'claude-chat-navigation', 'claude-window-fit', 'claude-storage-use', 'claude-native-storage', 'claude-private-storage-stage', 'claude-native-composer', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}:
+        if mechanism not in {'qualification-runner-failure', 'hermes-windows-catalog-readiness', 'hermes-renderer-qualification', 'zed-native-copy', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'zed-retry-visual', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'windows-process-absence', 'windows-post-stop-process', 'windows-process-baseline', 'windows-process-settlement', 'claude-owned-configuration', 'claude-restore', 'claude-model-discovery', 'claude-window-stack', 'claude-window-focus', 'claude-chat-navigation', 'claude-window-fit', 'claude-storage-use', 'claude-native-storage', 'claude-private-storage-stage', 'claude-native-composer', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}:
             continue
         expected = 'hermes-renderer-qualification' if app == 'hermes-desktop' else 'zed-native-copy'
-        if (mechanism != expected and mechanism not in {'hermes-windows-catalog-readiness', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'zed-retry-visual', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'windows-process-absence', 'windows-post-stop-process', 'windows-process-baseline', 'windows-process-settlement', 'claude-owned-configuration', 'claude-restore', 'claude-model-discovery', 'claude-window-stack', 'claude-window-focus', 'claude-chat-navigation', 'claude-window-fit', 'claude-storage-use', 'claude-native-storage', 'claude-private-storage-stage', 'claude-native-composer', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}) or type(value.get('schemaVersion')) is not int or value['schemaVersion'] != 1:
+        if (mechanism != expected and mechanism not in {'qualification-runner-failure', 'hermes-windows-catalog-readiness', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'zed-retry-visual', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'windows-process-absence', 'windows-post-stop-process', 'windows-process-baseline', 'windows-process-settlement', 'claude-owned-configuration', 'claude-restore', 'claude-model-discovery', 'claude-window-stack', 'claude-window-focus', 'claude-chat-navigation', 'claude-window-fit', 'claude-storage-use', 'claude-native-storage', 'claude-private-storage-stage', 'claude-native-composer', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}) or type(value.get('schemaVersion')) is not int or value['schemaVersion'] != 1:
             raise ValueError('semantic observation identity differs')
         record = {'schemaVersion': 1, 'mechanism': mechanism}
         if mechanism == 'hermes-windows-catalog-readiness':
@@ -808,6 +816,12 @@ def semantic_observations(directory, app):
             if counts['candidatesPresent'] + counts['candidatesAbsent'] != counts['observations']:
                 raise ValueError('inconsistent window stability counts')
             record.update(diagnosticsOnly=True, counts=counts)
+        elif mechanism == 'qualification-runner-failure':
+            fields = {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'errorCategory'}
+            if (set(value) != fields or value['diagnosticsOnly'] is not True
+                    or type(value['errorCategory']) is not str or value['errorCategory'] not in RUNNER_FAILURES):
+                raise ValueError('invalid qualification runner failure')
+            record.update(diagnosticsOnly=True, errorCategory=value['errorCategory'])
         elif mechanism == 'renderer-inventory':
             fields = set('schemaVersion mechanism diagnosticsOnly app endpointOwned launcherOwned attached pageCount textareaCount editableCount sendCount retryCount newThreadCount loginCount dialogCount errorCategory'.split())
             if set(value) - {'documentState', 'startupScreen', 'landingCounts', 'onboardingCounts', 'publicOnboarding', 'mainAuxCorrelation'} != fields or value['app'] != app or value['diagnosticsOnly'] is not True:
@@ -1118,11 +1132,11 @@ def reduce_report(*, app, platform, architecture, source_sha, model, frozen, pre
     return result
 
 
-def aggregate(directory, source_sha):
+def aggregate(directory, source_sha, excluded=()):
     records = [bounded_json(path) for path in Path(directory).glob('**/qualification.json')]
-    expected = {(item['app'], item['platform'], item['architecture']) for item in matrix()['include']}
+    expected = {(item['app'], item['platform'], item['architecture']) for item in matrix(excluded)['include']}
     observed = [(item.get('app'), item.get('platform'), item.get('architecture')) for item in records]
-    if len(observed) != 15 or len(set(observed)) != 15 or set(observed) != expected:
+    if len(observed) != len(expected) or len(set(observed)) != len(expected) or set(observed) != expected:
         raise ValueError('qualification matrix is incomplete or duplicated')
     for item in records:
         template = envelope(item['app'], item['platform'], item['architecture'], source_sha)
@@ -1141,21 +1155,25 @@ def aggregate(directory, source_sha):
         invalid = item['nativeDiagnosticInvalidEvents']
         if invalid is not None and (type(invalid) is not int or not 0 <= invalid <= 4 * 1024 * 1024 + 1):
             raise ValueError('invalid native diagnostic rejection count')
-    return dict(schemaVersion=1, sourceSha=source_sha, qualification='deterministic-full'
+    result = dict(schemaVersion=1, sourceSha=source_sha, qualification='deterministic-full'
                 if all(item['qualification'] == 'deterministic-full' and item['outcome'] == 'passed'
                        for item in records) else 'incomplete', cells=records)
+    if excluded:
+        result['excludedApps'] = sorted(excluded)
+    return result
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('command', choices=('matrix', 'pending', 'reduce', 'aggregate'))
+    parser.add_argument('--exclude-app', action='append', choices=APPS, default=[])
     for name in ('app', 'platform', 'architecture', 'source-sha', 'output', 'model', 'frozen', 'prepared',
                  'checker', 'launcher', 'real-nanh', 'report', 'directory', 'facts'):
         parser.add_argument('--' + name)
     args = parser.parse_args()
     try:
         if args.command == 'matrix':
-            print(json.dumps(matrix(), separators=(',', ':')))
+            print(json.dumps(matrix(args.exclude_app), separators=(',', ':')))
             return
         required = (['directory', 'source_sha', 'output'] if args.command == 'aggregate' else
                     ['app', 'platform', 'architecture', 'source_sha', 'output'])
@@ -1163,7 +1181,7 @@ def main():
             required += ['model', 'frozen', 'prepared', 'checker', 'launcher', 'real_nanh', 'report']
         if any(getattr(args, key) is None for key in required):
             raise ValueError('required cell evidence is missing')
-        result = (aggregate(args.directory, args.source_sha) if args.command == 'aggregate' else
+        result = (aggregate(args.directory, args.source_sha, args.exclude_app) if args.command == 'aggregate' else
                   envelope(args.app, args.platform, args.architecture, args.source_sha)
                   if args.command == 'pending' else reduce_report(**{key: getattr(args, key) for key in required if key != 'output'}, facts=args.facts))
         destination = Path(args.output)

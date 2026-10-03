@@ -762,6 +762,10 @@ async fn scenario_owned(
     } else {
         let acquired = Gui::wait(spec.kind, &mut process);
         capture_failed_acquisition(acquired.is_err(), &mut process, spec, launch_observation);
+        let acquired = acquired.and_then(|native_gui| {
+            native_gui.finish_initial_ready(&mut process)?;
+            Ok(native_gui)
+        });
         match acquired {
             Ok(native_gui) => {
                 result.steps.push(CheckStep::Launched);

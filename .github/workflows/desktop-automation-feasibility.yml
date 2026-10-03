@@ -54,7 +54,7 @@ jobs:
           from desktop_qualification import matrix
           selected = os.environ['SELECTED_APP']
           platform = os.environ['SELECTED_PLATFORM']
-          cells = [c for c in matrix()['include'] if c['backend'] != 'pending'
+          cells = [c for c in matrix(['pen-desktop'] if os.environ['SELECTED_APP'] == 'all' else [])['include'] if c['backend'] != 'pending'
                    and (selected == 'all' or c['app'] == selected)
                    and (os.environ['SELECTED_EXPERIMENT'] != 'startup-baseline' or c['backend'] == 'renderer-inventory')
                    and (platform == 'pilots' and (c['app'], c['platform']) in

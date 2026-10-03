@@ -60,7 +60,7 @@ console.log('Renderer inventory: closed startup headings passed');
 (async () => {
   let clock=0;
   const helper=vm.runInNewContext(`(() => { ${source.slice(timingStart,timingEnd)}
-    return {observeMainAux,correlationScope,correlationIdentity,bindCorrelationMain}; })()`,
+    return {observeMainAux,correlationScope,correlationIdentity,bindCorrelationMain,heldMainGuard}; })()`,
     {Date:{now:()=>clock},setTimeout,clearTimeout,URL});
   const empty={roleLegend:0,roleRadios:0,engineering:0,dialog:0,quickChatComposer:0,editable:0};
   function fixture() {
@@ -103,6 +103,24 @@ console.log('Renderer inventory: closed startup headings passed');
   assert.equal((await f.run()).status,'deadline');
   f=fixture();result=await helper.observeMainAux(f.held,f.browser,()=>true,1000,
     ()=> 'unknown',f.identity,async()=>{});assert.equal(result.status,'source-scope');
+  // The auxiliary capability retains immutable identities across real actions;
+  // the main role may transition while the auxiliary must remain inert.
+  f=fixture();let owner=true;
+  let inputGuard=helper.heldMainGuard(f.held,f.browser,()=>owner,1000,()=> 'avatarOverlay',f.identity,async ms=>{clock+=ms;});
+  assert.equal(await inputGuard(),true);
+  f.setAlter(r=>{if(r.page===f.main){r.scope.mainScope=false;r.scope.counts.roleRadios=0;}});
+  assert.equal(await inputGuard(),true);
+  f.setAlter(r=>{if(r.page===f.aux)r.scope.counts.editable=1;});
+  assert.equal(await inputGuard(),false);
+  for(const change of [r=>{r.loader='changed';},r=>{r.scope.focused=true;},r=>{r.scope.counts.dialog=1;}]) {
+    f=fixture();inputGuard=helper.heldMainGuard(f.held,f.browser,()=>true,1000,()=> 'avatarOverlay',f.identity,async()=>{});
+    assert.equal(await inputGuard(),true);
+    f.setAlter(r=>{if(r.page===f.aux)change(r);});assert.equal(await inputGuard(),false);
+  }
+  f=fixture();inputGuard=helper.heldMainGuard(f.held,f.browser,()=>true,1000,()=> 'unknown',f.identity,async()=>{});
+  assert.equal(await inputGuard(),false);
+  f=fixture();inputGuard=helper.heldMainGuard(null,f.browser,()=>true,1000,()=> 'avatarOverlay',f.identity,async()=>{});
+  assert.equal(await inputGuard(),false);
   // The callback runs serialized in a standalone browser realm, without Node helpers.
   const scope=vm.runInNewContext(`(${helper.correlationScope.toString()})()`, {
     document:{querySelectorAll:()=>[],hasFocus:()=>false},getComputedStyle:()=>({})});
