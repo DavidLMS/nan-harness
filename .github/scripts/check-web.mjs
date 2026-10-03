@@ -165,8 +165,8 @@ for (const relativePath of [
   }
 }
 assert.match(markdownFiles.get('index.md'), /nanh codex --model qwen3\.6/);
-assert.match(markdownFiles.get('docs.md'), /nanh hermes[\s\S]*nanh omp[\s\S]*nanh prime-agent/s);
-assert.match(markdownFiles.get('es/docs.md'), /nanh hermes[\s\S]*nanh omp[\s\S]*nanh prime-agent/s);
+assert.match(markdownFiles.get('docs.md'), /nanh hermes[\s\S]*nanh omp[\s\S]*nanh mimo[\s\S]*nanh zcode[\s\S]*nanh prime-agent/s);
+assert.match(markdownFiles.get('es/docs.md'), /nanh hermes[\s\S]*nanh omp[\s\S]*nanh mimo[\s\S]*nanh zcode[\s\S]*nanh prime-agent/s);
 assert.match(markdownFiles.get('docs.md'), /--image-model qwen-image-2\.1/);
 assert.match(markdownFiles.get('docs.md'), /qwen-image-2\.1[\s\S]*generation only/);
 assert.match(markdownFiles.get('es/docs.md'), /--image-model qwen-image-2\.1/);
@@ -223,6 +223,8 @@ const harnessIds = [
   'hermes',
   'omp',
   'pi',
+  'mimo',
+  'zcode',
   'prime',
   'deepseek',
   'openclaw',
@@ -237,6 +239,7 @@ const logoHarnessIds = harnessIds.filter((harnessId) => harnessId !== 'fx');
 const logoFiles = Object.fromEntries(logoHarnessIds.map((harnessId) => [harnessId, `${harnessId}.svg`]));
 logoFiles.codex = 'codex.png';
 logoFiles.hermes = 'hermes.png';
+logoFiles.mimo = 'mimo.png';
 
 function assertUniqueIds(html, page) {
   const ids = [...html.matchAll(/\sid="([^"]+)"/g)].map((match) => match[1]);
@@ -324,7 +327,7 @@ assert.match(docs, /class="docs-sidebar" aria-label=/);
 assert.match(docs, /class="docs-breadcrumb" aria-label=/);
 assert.match(docs, /<code>nanh &lt;harness&gt;<\/code>/);
 assert.match(docs, /<code>nanh config &lt;harness&gt;<\/code>/);
-assert.match(docs, /nanh hermes.*nanh omp.*nanh prime-agent/s);
+assert.match(docs, /nanh hermes.*nanh omp.*nanh mimo.*nanh zcode.*nanh prime-agent/s);
 
 const docsSectionIds = ['install', 'first-run', 'harnesses', 'media', 'platforms', 'desktop', 'search', 'limits', 'options', 'cli', 'help'];
 for (const html of [docs, docsEs]) {
