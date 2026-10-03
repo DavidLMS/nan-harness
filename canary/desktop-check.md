@@ -1701,3 +1701,40 @@ postcondition. No conversation input, response assertion or qualification is
 added. xa11y cache handles are freshly allocated per query and cannot establish
 AX identity; the guard uses stable identifier, PID, bounds and the exact source
 scope instead.
+
+
+### Wave 8 restart continuation
+
+Revision `9f2d494e` retains five qualified cells out of thirteen supported cells.
+Hosted Linux quality [37085892041](https://github.com/DavidLMS/nan-harness/actions/runs/37085892041)
+passed. The local final gate found a native fit diagnostic regression: rejected
+requests must retain a nonzero helper exit code. The correction preserves that
+contract while the bounded fit transport accepts only the closed rejection
+protocol for its diagnostic. A separate synthetic fixture timed out in the full
+run and passed in the focused run; the final gate must be repeated after fixes.
+
+Claude macOS [37085888754](https://github.com/DavidLMS/nan-harness/actions/runs/37085888754)
+stopped before composer/navigation with a same-process-window rejection; cleanup
+passed. The first AX receipt does not describe the later fresh decision. The next
+trial records that terminal decision from the same snapshot without another query
+or a guard exception.
+
+Claude Windows [37085889780](https://github.com/DavidLMS/nan-harness/actions/runs/37085889780)
+failed private storage preparation and cleanup. Forty existing post-stop process
+queries reported presence at both ends. This does not establish membership in the
+owned job. The private-root creation failed before launch. The next correction
+creates only the final owned directory under existing canonical AppData parents,
+avoiding recursive traversal of the Windows verbatim drive prefix. The frozen
+MSIX explicitly excludes LocalAppData\Claude-3p from write virtualization;
+blanket package redirection is therefore insufficient to explain missing native
+third-party storage.
+
+Zed Linux [37085890943](https://github.com/DavidLMS/nan-harness/actions/runs/37085890943)
+again passed reply/tool and cleanup in all three trials but failed Retry recovery.
+Each ancestor diagnostic stopped at ancestor-bounds, with no measured ancestor
+bounds. No coordinate correction or clipping conclusion follows from that result.
+
+The next Windows Codex observation correlates the already held sole main target
+with a later source-scoped auxiliary target, using bounded passive samples. It
+keeps the multiple-page rejection and performs no auxiliary dismissal or input.
+Neither diagnostic invents full acceptance for inventory-only backends.

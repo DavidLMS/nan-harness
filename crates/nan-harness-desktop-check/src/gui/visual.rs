@@ -1391,12 +1391,14 @@ fn initial_readiness(
                 )
             })
         };
+        let mut decision_snapshot = None;
         match initial_owned_focus(
             window,
             deadline,
             || {
                 let fresh = native.windows_with_focus(window.pid).ok()?;
                 record_claude_stack(&fresh, window);
+                decision_snapshot = Some(fresh.clone());
                 Some(fresh)
             },
             ownership,
@@ -1404,7 +1406,11 @@ fn initial_readiness(
         )? {
             InitialFocus::Ready => return Ok(true),
             InitialFocus::Pending => return Ok(false),
-            InitialFocus::Rejected => {}
+            InitialFocus::Rejected => {
+                if let Some(fresh) = decision_snapshot.as_ref() {
+                    record_claude_snapshot(fresh, window, "initial-decision");
+                }
+            }
         }
     }
     if let Err(failure) = snapshot.non_foreground_failure(window) {
@@ -1686,6 +1692,21 @@ fn final_candidate_state(snapshot: &Snapshot, original: &Window) -> &'static str
     }
 }
 
+#[cfg(any(test, target_os = "macos"))]
+fn initial_decision_guard(snapshot: &Snapshot, original: &Window) -> Option<&'static str> {
+    snapshot
+        .claude_focused_guard_failure(original)
+        .err()
+        .map(|failure| match failure {
+            GuardFailure::IdentityMissing => "identity-missing",
+            GuardFailure::BoundsChanged => "bounds-changed",
+            GuardFailure::ForegroundChanged => "foreground-changed",
+            GuardFailure::SameProcessWindow => "same-process-window",
+            GuardFailure::OffDisplay => "off-display",
+            GuardFailure::Occluded => "occluded",
+        })
+}
+
 #[cfg(target_os = "macos")]
 fn record_claude_snapshot(snapshot: &Snapshot, held: &Window, phase: &str) {
     if !cfg!(target_os = "macos")
@@ -1724,7 +1745,11 @@ fn record_claude_snapshot(snapshot: &Snapshot, held: &Window, phase: &str) {
     };
     if let Some((status, matched, query)) = snapshot.focus_observation(held) {
         let window_only = snapshot.window_focus_observation(held);
-        let suffix = if phase == "initial" { "" } else { "-final" };
+        let suffix = match phase {
+            "initial" => "",
+            "initial-decision" => "-initial-decision",
+            _ => "-final",
+        };
         let focus_path = directory.join(format!(
             "claude-window-focus-{}{suffix}.json",
             std::process::id()
@@ -1736,6 +1761,9 @@ fn record_claude_snapshot(snapshot: &Snapshot, held: &Window, phase: &str) {
                 "windowOnlyStatus": window_only.map(|value| value.0),
                 "windowOnlyMatchedHeld": window_only.and_then(|value| value.1),
             });
+            if phase == "initial-decision" {
+                facts["guardCategory"] = initial_decision_guard(snapshot, original).into();
+            }
             if phase == "final-stability" {
                 facts["candidateState"] = final_candidate_state(snapshot, original).into();
             }
@@ -1966,6 +1994,42 @@ mod tests {
                 || start
             ),
             Ok(InitialFocus::Ready)
+        );
+    }
+
+    #[test]
+    fn terminal_initial_decision_uses_fresh_geometry_not_prior_pending_proof() {
+        let pending = Snapshot::parse("FG 7 0\nDISPLAY 0 0 2000 2000\nWIN 99 7 1800 1800 10 10 436c61756465 3\nWIN 1 7 10 20 800 600 436c61756465 0\nFOCUS query-error 0\nFOCUS_QUERY before main-window cannot-complete\nFOCUS_WINDOW proved 1\n").unwrap();
+        let held = pending.windows[1].clone();
+        let mut fresh = pending.clone();
+        fresh.windows[1].bounds.width += 20;
+        let now = Instant::now();
+        assert_eq!(
+            initial_owned_focus(
+                &held,
+                now + Duration::from_secs(45),
+                || Some(fresh.clone()),
+                || Ok(()),
+                || now
+            ),
+            Ok(InitialFocus::Rejected)
+        );
+        assert_eq!(
+            initial_decision_guard(&fresh, &held),
+            Some("bounds-changed")
+        );
+        assert_ne!(
+            initial_decision_guard(&pending, &held),
+            Some("bounds-changed")
+        );
+        assert_eq!(
+            serde_json::to_value(fresh.focus_observation(&held).unwrap().0).unwrap(),
+            "query-error"
+        );
+        fresh.windows.clear();
+        assert_eq!(
+            initial_decision_guard(&fresh, &held),
+            Some("identity-missing")
         );
     }
 

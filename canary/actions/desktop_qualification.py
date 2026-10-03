@@ -28,6 +28,41 @@ HASH = re.compile(r'[0-9a-f]{64}\Z')
 VERSION = re.compile(r'[0-9]+(?:\.[0-9]+){2}(?:[-+][A-Za-z0-9.-]+)?\Z')
 
 
+def main_aux_correlation(value, app):
+    flags = set('heldMainUnchanged auxRouteMatched mainScopeUnique auxMainControlsAbsent auxComposerAbsent guarded'.split())
+    focus = {'mainDocumentFocused', 'auxDocumentFocused'}
+    fields = flags | focus | set('schemaVersion mechanism diagnosticsOnly status totalPages stableSamples main aux'.split())
+    statuses = {'observed', 'initial-main-unavailable', 'page-count', 'source-scope',
+                'identity-changed', 'ownership-lost', 'query-failed', 'deadline'}
+    if (app != 'chatgpt-desktop' or type(value) is not dict or set(value) != fields
+            or type(value['schemaVersion']) is not int or value['schemaVersion'] != 1
+            or value['mechanism'] != 'codex-main-aux-correlation' or value['diagnosticsOnly'] is not True
+            or type(value['status']) is not str or value['status'] not in statuses
+            or any(type(value[key]) is not bool for key in flags)
+            or any(value[key] is not None and type(value[key]) is not bool for key in focus)
+            or value['totalPages'] is not None and (type(value['totalPages']) is not int or not 0 <= value['totalPages'] <= 32)
+            or type(value['stableSamples']) is not int or not 0 <= value['stableSamples'] <= 2):
+        raise ValueError('invalid Codex main auxiliary correlation')
+    keys = set('roleLegend roleRadios engineering dialog quickChatComposer editable'.split())
+    for key in ('main', 'aux'):
+        counts = value[key]
+        if counts is not None and (type(counts) is not dict or set(counts) != keys
+                or any(type(count) is not int or not 0 <= count <= 4096 for count in counts.values())):
+            raise ValueError('invalid Codex main auxiliary counts')
+    main, aux = value['main'], value['aux']
+    if (value['mainScopeUnique'] and (main is None or any(main[key] != count for key, count in
+            {'roleLegend': 1, 'roleRadios': 11, 'engineering': 1, 'dialog': 1}.items()))
+            or value['auxMainControlsAbsent'] and (aux is None or any(aux[key] != 0 for key in
+                ('roleLegend', 'roleRadios', 'engineering', 'dialog')))
+            or value['auxComposerAbsent'] and (aux is None or aux['quickChatComposer'] != 0 or aux['editable'] != 0)):
+        raise ValueError('inconsistent Codex main auxiliary counts')
+    if value['status'] == 'observed' and not (value['totalPages'] == 2 and value['stableSamples'] == 2
+            and all(value[key] for key in flags) and value['mainDocumentFocused'] is True
+            and value['auxDocumentFocused'] is False and value['main'] is not None and value['aux'] is not None):
+        raise ValueError('unproved Codex main auxiliary correlation')
+    return value
+
+
 def public_onboarding(setup, app):
     shape = set(setup) - {'rejectedPageInventory'} if type(setup) is dict else set()
     booleans = {'conversationalScope', 'engineeringControl', 'roleClickAttempted',
@@ -466,7 +501,7 @@ def semantic_observations(directory, app):
             fields = {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'status', 'nativeForegroundWindowMatchedHeld'}
             statuses = {'proved', 'untrusted', 'query-error', 'focus-mismatch', 'not-standard',
                         'identity-changed', 'no-match', 'ambiguous'}
-            if (app != 'claude-desktop' or set(value) - {'phase', 'candidateState'} not in (fields, fields | {'query'}, fields | {'windowOnlyStatus', 'windowOnlyMatchedHeld'}, fields | {'query', 'windowOnlyStatus', 'windowOnlyMatchedHeld'}) or value['diagnosticsOnly'] is not True
+            if (app != 'claude-desktop' or set(value) - {'phase', 'candidateState', 'guardCategory'} not in (fields, fields | {'query'}, fields | {'windowOnlyStatus', 'windowOnlyMatchedHeld'}, fields | {'query', 'windowOnlyStatus', 'windowOnlyMatchedHeld'}) or value['diagnosticsOnly'] is not True
                     or type(value['status']) is not str or value['status'] not in statuses
                     or (type(value['nativeForegroundWindowMatchedHeld']) is not bool
                         if value['status'] == 'proved' else value['nativeForegroundWindowMatchedHeld'] is not None)):
@@ -479,9 +514,19 @@ def semantic_observations(directory, app):
                     raise ValueError('invalid Claude window-only focus observation')
                 record.update(windowOnlyStatus=window_status, windowOnlyMatchedHeld=window_matched)
             if 'phase' in value:
-                if type(value['phase']) is not str or value['phase'] not in {'initial', 'final-stability'}:
+                if type(value['phase']) is not str or value['phase'] not in {'initial', 'final-stability', 'initial-decision'}:
                     raise ValueError('invalid Claude focus phase')
                 record['phase'] = value['phase']
+            if 'guardCategory' in value:
+                category = value['guardCategory']
+                if (value.get('phase') != 'initial-decision'
+                        or category is not None and (type(category) is not str or category not in {
+                            'identity-missing', 'bounds-changed', 'foreground-changed',
+                            'same-process-window', 'off-display', 'occluded'})):
+                    raise ValueError('invalid Claude initial decision category')
+                record['guardCategory'] = category
+            elif value.get('phase') == 'initial-decision':
+                raise ValueError('missing Claude initial decision category')
             if 'candidateState' in value:
                 if (value.get('phase') != 'final-stability' or type(value['candidateState']) is not str
                         or value['candidateState'] not in {'absent', 'ambiguous', 'identity-changed', 'bounds-changed',
@@ -765,7 +810,7 @@ def semantic_observations(directory, app):
             record.update(diagnosticsOnly=True, counts=counts)
         elif mechanism == 'renderer-inventory':
             fields = set('schemaVersion mechanism diagnosticsOnly app endpointOwned launcherOwned attached pageCount textareaCount editableCount sendCount retryCount newThreadCount loginCount dialogCount errorCategory'.split())
-            if set(value) - {'documentState', 'startupScreen', 'landingCounts', 'onboardingCounts', 'publicOnboarding'} != fields or value['app'] != app or value['diagnosticsOnly'] is not True:
+            if set(value) - {'documentState', 'startupScreen', 'landingCounts', 'onboardingCounts', 'publicOnboarding', 'mainAuxCorrelation'} != fields or value['app'] != app or value['diagnosticsOnly'] is not True:
                 raise ValueError('invalid renderer inventory identity')
             for key in ('endpointOwned', 'launcherOwned', 'attached'):
                 flag(record, value, key)
@@ -783,6 +828,8 @@ def semantic_observations(directory, app):
                         or any(type(item) is not int or not 0 <= item <= 4096 for item in counts.values())):
                     raise ValueError('invalid renderer onboarding counts')
                 record['onboardingCounts'] = counts
+            if 'mainAuxCorrelation' in value:
+                record['mainAuxCorrelation'] = main_aux_correlation(value['mainAuxCorrelation'], app)
             if 'publicOnboarding' in value:
                 record['publicOnboarding'] = public_onboarding(value['publicOnboarding'], app)
             if 'startupScreen' in value:

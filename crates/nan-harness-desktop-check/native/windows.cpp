@@ -555,7 +555,7 @@ static bool fit_mac_proof(std::uint64_t id, pid_t pid, AxFocus& focus, bool requ
 // Closed stage output is rejected by the caller; only empty timely output proves fit.
 static int mac_fit_rejected(const char* stage) {
     std::cout << "fit-rejected " << stage << '\n';
-    return std::cout ? 0 : 4;
+    return std::cout ? 5 : 4;
 }
 int fit_window(const std::string& request) {
     @autoreleasepool {

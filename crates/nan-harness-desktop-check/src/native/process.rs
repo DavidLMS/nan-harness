@@ -224,6 +224,19 @@ fn run_once_until(
             return Err(FailureCategory::Timeout);
         }
         if !status.is_some_and(|status| status.success()) {
+            #[cfg(target_os = "macos")]
+            if written.is_ok()
+                && output.as_ref().is_ok_and(|text| {
+                    closed_mac_fit_rejection(
+                        argument,
+                        absolute_deadline.is_some(),
+                        status.and_then(|s| s.code()),
+                        text,
+                    )
+                })
+            {
+                return output;
+            }
             let inventory =
                 argument == OsStr::new("--windows") || argument == OsStr::new("--windows-absence");
             return Err(exit_category(
@@ -234,6 +247,21 @@ fn run_once_until(
         written.map_err(|_| FailureCategory::Pipe)?;
         output
     })
+}
+
+#[cfg(target_os = "macos")]
+fn closed_mac_fit_rejection(
+    argument: &OsStr,
+    bounded: bool,
+    code: Option<i32>,
+    output: &str,
+) -> bool {
+    bounded
+        && code == Some(5)
+        && argument
+            .to_str()
+            .is_some_and(|value| value.starts_with("--fit-window "))
+        && super::mac_fit::parse(output).is_some_and(|stage| stage != "completed")
 }
 
 fn exit_category(code: Option<i32>, inventory: bool) -> FailureCategory {
@@ -306,6 +334,47 @@ mod tests {
             .is_err()
         );
         assert_eq!(std::fs::read_to_string(count).unwrap(), "attempt\n");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn bounded_fit_retains_closed_rejection_without_turning_nonzero_into_success() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let root = tempfile::tempdir().unwrap();
+        let executable = root.path().join("rejected-fit");
+        std::fs::write(
+            &executable,
+            "#!/bin/sh\n[ \"$1\" = --version ] && exit 0\nprintf 'fit-rejected size\\n'\nexit 5\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+        nan_harness_test_support::executable_fixture::wait_until_ready(&executable).unwrap();
+        assert!(run(&executable, OsStr::new("--fit-window 1 7"), None).is_err());
+        let output = run_fit_until(
+            &executable,
+            OsStr::new("--fit-window 1 7"),
+            Instant::now() + Duration::from_secs(1),
+        )
+        .unwrap();
+        assert_eq!(super::super::mac_fit::parse(&output), Some("size"));
+        assert!(!closed_mac_fit_rejection(
+            OsStr::new("--windows"),
+            true,
+            Some(5),
+            &output
+        ));
+        assert!(!closed_mac_fit_rejection(
+            OsStr::new("--fit-window 1 7"),
+            true,
+            Some(5),
+            ""
+        ));
+        assert!(!closed_mac_fit_rejection(
+            OsStr::new("--fit-window 1 7"),
+            true,
+            Some(5),
+            "fit-rejected PRIVATE\n"
+        ));
     }
 
     #[cfg(unix)]

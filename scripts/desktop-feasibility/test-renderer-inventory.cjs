@@ -55,3 +55,65 @@ assert.equal(trial([], 'chatgpt-desktop', 'PRIVATE_UNKNOWN_ERROR'), 'unmeasured'
 assert.equal(trial([], 'claude-desktop', connectionError), 'unmeasured');
 assert.equal(trial([], 'chatgpt-desktop', '', 11), 'unmeasured');
 console.log('Renderer inventory: closed startup headings passed');
+
+// Passive main/aux binding never sends input or changes the singleton guard.
+(async () => {
+  let clock=0;
+  const helper=vm.runInNewContext(`(() => { ${source.slice(timingStart,timingEnd)}
+    return {observeMainAux,correlationScope,correlationIdentity,bindCorrelationMain}; })()`,
+    {Date:{now:()=>clock},setTimeout,clearTimeout,URL});
+  const empty={roleLegend:0,roleRadios:0,engineering:0,dialog:0,quickChatComposer:0,editable:0};
+  function fixture() {
+    clock=0;
+    const main={url:()=> 'app://-/index.html'},aux={url:()=> 'app://-/index.html?initialRoute=%2Favatar-overlay'};
+    let current=[main,aux],owned=true,queries=0;
+    const state=page=>({page,url:page.url(),target:page===main?'private-main':'private-aux',
+      frame:page===main?'frame-main':'frame-aux',loader:'private-loader',frameUrl:page.url(),fragment:'',
+      scope:{mainScope:page===main,focused:page===main,
+        counts:page===main?{...empty,roleLegend:1,roleRadios:11,engineering:1,dialog:1}: {...empty}}});
+    const held=state(main),browser={contexts:()=>[{pages:()=>current}]};
+    let alter=()=>{};
+    const identity=async page=>{queries++;const result=state(page);alter(result,queries);return result;};
+    return {main,aux,held,browser,identity,setAlter:fn=>{alter=fn;},setPages:p=>{current=p;},
+      loseOwner:()=>{owned=false;},run:(heldOverride=held)=>helper.observeMainAux(heldOverride,browser,
+        ()=>owned,1000,()=> 'avatarOverlay',identity,async ms=>{clock+=ms;})};
+  }
+  let f=fixture(),result=await f.run();
+  assert.equal(result.status,'observed');assert.equal(result.stableSamples,2);
+  assert.equal(result.main.roleRadios,11);assert.equal(result.auxComposerAbsent,true);
+  assert.equal(JSON.stringify(result).includes('private-'),false);
+  f=fixture();result=await f.run(null);assert.equal(result.status,'initial-main-unavailable');
+  f=fixture();f.setPages([f.main,f.aux,{}]);assert.equal((await f.run()).status,'page-count');
+  for(const change of [r=>{r.loader='reloaded';},r=>{r.target='replaced';},r=>{r.url+='?changed';}]) {
+    f=fixture();f.setAlter((r,n)=>{if(n===2)change(r);});
+    assert.equal((await f.run()).status,'identity-changed');
+  }
+  f=fixture();f.setAlter((r,n)=>{if(n===2)f.setPages([{},f.aux]);});
+  assert.equal((await f.run()).status,'identity-changed');
+  f=fixture();f.setAlter((r,n)=>{if(n===2)f.loseOwner();});
+  assert.equal((await f.run()).status,'ownership-lost');
+  for(const change of [r=>{r.scope.counts.quickChatComposer=1;},r=>{r.scope.counts.editable=1;},
+    r=>{r.scope.focused=true;},r=>{r.scope.counts.roleLegend=1;}]) {
+    f=fixture();f.setAlter((r,n)=>{if(n===3)change(r);});
+    assert.equal((await f.run()).status,'source-scope');
+  }
+  f=fixture();f.setAlter((r,n)=>{if(n===2)r.scope.mainScope=false;});
+  assert.equal((await f.run()).status,'source-scope');
+  f=fixture();f.setAlter((r,n)=>{if(n===2)clock=1001;});
+  assert.equal((await f.run()).status,'deadline');
+  f=fixture();result=await helper.observeMainAux(f.held,f.browser,()=>true,1000,
+    ()=> 'unknown',f.identity,async()=>{});assert.equal(result.status,'source-scope');
+  // The callback runs serialized in a standalone browser realm, without Node helpers.
+  const scope=vm.runInNewContext(`(${helper.correlationScope.toString()})()`, {
+    document:{querySelectorAll:()=>[],hasFocus:()=>false},getComputedStyle:()=>({})});
+  assert.equal(scope.mainScope,false);assert.equal(scope.counts.quickChatComposer,0);
+  // Read-only public CDP identity queries are closed/detached; no action APIs exist.
+  let detached=0;
+  const page={url:()=> 'app://-/index.html',context:()=>({newCDPSession:async()=>({
+    send:async method=>method==='Target.getTargetInfo'?{targetInfo:{targetId:'private-target'}}:
+      {frameTree:{frame:{id:'private-frame',loaderId:'private-loader',url:'app://-/index.html'}}},
+    detach:async()=>{detached++;}})}),evaluate:async()=>({counts:empty,focused:false,mainScope:false})};
+  clock=0;const identity=await helper.correlationIdentity(page,1000);
+  assert.equal(identity.loader,'private-loader');assert.equal(detached,1);
+  console.log('Renderer correlation: 17 passive identity/privacy cases passed');
+})().catch(error=>{console.error(error);process.exitCode=1;});

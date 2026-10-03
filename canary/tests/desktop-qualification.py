@@ -492,6 +492,40 @@ class QualificationTests(unittest.TestCase):
                     with self.assertRaises(ValueError):
                         q.semantic_observations(root, 'zed-desktop')
 
+    def test_initial_decision_requires_closed_category_from_same_snapshot(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'focus.json'
+            value = dict(schemaVersion=1, mechanism='claude-window-focus', diagnosticsOnly=True,
+                         status='query-error', nativeForegroundWindowMatchedHeld=None,
+                         phase='initial-decision', guardCategory='bounds-changed')
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(Path(root), 'claude-desktop'), [value])
+            for change in ({'guardCategory': 'PRIVATE'}, {'guardCategory': True}, {'phase': 'initial'}):
+                path.write_text(json.dumps({**value, **change}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(Path(root), 'claude-desktop')
+            del value['guardCategory']
+            path.write_text(json.dumps(value))
+            with self.assertRaises(ValueError):
+                q.semantic_observations(Path(root), 'claude-desktop')
+
+    def test_main_aux_correlation_is_diagnostic_closed_and_requires_full_proof(self):
+        counts = dict(roleLegend=0, roleRadios=0, engineering=0, dialog=0, quickChatComposer=0, editable=0)
+        value = dict(schemaVersion=1, mechanism='codex-main-aux-correlation', diagnosticsOnly=True,
+                     status='observed', totalPages=2, stableSamples=2,
+                     heldMainUnchanged=True, auxRouteMatched=True, mainScopeUnique=True,
+                     auxMainControlsAbsent=True, auxComposerAbsent=True, guarded=True,
+                     mainDocumentFocused=True, auxDocumentFocused=False,
+                     main={**counts, 'roleLegend': 1, 'roleRadios': 11, 'engineering': 1, 'dialog': 1}, aux=counts)
+        self.assertEqual(q.main_aux_correlation(value, 'chatgpt-desktop'), value)
+        for change in ({'status': 'PRIVATE'}, {'stableSamples': True}, {'stableSamples': 1},
+                       {'guarded': False}, {'auxDocumentFocused': True}, {'main': None},
+                       {'targetId': 'PRIVATE'}, {'aux': {**counts, 'editable': 4097}}):
+            with self.assertRaises(ValueError):
+                q.main_aux_correlation({**value, **change}, 'chatgpt-desktop')
+        with self.assertRaises(ValueError):
+            q.main_aux_correlation(value, 'pen-desktop')
+
     def test_claude_focus_identity_is_diagnostic_and_unknown_is_not_false(self):
         with tempfile.TemporaryDirectory() as root:
             path = Path(root) / 'focus.json'

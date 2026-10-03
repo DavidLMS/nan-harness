@@ -77,6 +77,31 @@ fn scope(spec: &ProbeSpec) -> Option<([PathBuf; 2], PathBuf)> {
 fn regular_directory(path: &Path) -> bool {
     std::fs::symlink_metadata(path).is_ok_and(|m| m.is_dir() && !m.file_type().is_symlink())
 }
+
+fn create_owned_root(root: &Path) -> std::io::Result<()> {
+    let parent = root.parent().ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, "missing owned parent")
+    })?;
+    if !regular_directory(parent) || parent.canonicalize()?.as_path() != parent {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "owned parent changed",
+        ));
+    }
+    match std::fs::symlink_metadata(root) {
+        Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            // The isolated launcher already creates the owned AppData parents.
+            // Do not traverse a canonical Windows verbatim drive prefix alone.
+            nan_harness_private_fs::create_private_dir(root)
+        }
+        Err(error) => Err(error),
+        Ok(_) => Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "owned root changed",
+        )),
+    }
+}
 fn present(root: &Path, parts: &[&str]) -> Option<bool> {
     if !regular_directory(root) || root.canonicalize().ok().as_deref() != Some(root) {
         return None;
@@ -219,7 +244,7 @@ fn capture_inner(spec: &ProbeSpec, command: &tokio::process::Command) -> Result<
                 return Err(StorageStage::RootRejected);
             }
         }
-        if nan_harness_private_fs::create_private_dir_all(root).is_err() {
+        if create_owned_root(root).is_err() {
             return Err(StorageStage::RootCreateFailed);
         }
     }
@@ -276,6 +301,34 @@ pub(super) fn record(spec: &ProbeSpec) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn root_creation_requires_existing_canonical_parent_and_regular_leaf() {
+        let temp = tempfile::tempdir().unwrap();
+        let parent = temp.path().canonicalize().unwrap();
+        let root = parent.join("Claude-3p");
+        create_owned_root(&root).unwrap();
+        create_owned_root(&root).unwrap();
+        assert!(regular_directory(&root));
+        assert!(create_owned_root(&parent.join("missing").join("Claude-3p")).is_err());
+        assert!(!parent.join("missing").exists());
+        let file = parent.join("file");
+        std::fs::write(&file, b"synthetic").unwrap();
+        assert!(create_owned_root(&file).is_err());
+        assert!(create_owned_root(&file.join("Claude-3p")).is_err());
+    }
+    #[cfg(unix)]
+    #[test]
+    fn root_creation_rejects_linked_root_and_parent() {
+        let temp = tempfile::tempdir().unwrap();
+        let parent = temp.path().canonicalize().unwrap();
+        let foreign = parent.join("foreign");
+        std::fs::create_dir(&foreign).unwrap();
+        let linked = parent.join("linked");
+        std::os::unix::fs::symlink(&foreign, &linked).unwrap();
+        assert!(create_owned_root(&linked).is_err());
+        assert!(create_owned_root(&linked.join("Claude-3p")).is_err());
+        assert!(!foreign.join("Claude-3p").exists());
+    }
     #[test]
     fn environment_binding_compares_owned_directory_identity() {
         let temp = tempfile::tempdir().unwrap();

@@ -23,6 +23,106 @@ function onboardingTrial(appName, platform, env) {
 function onboardingDeadline(trial, startupDeadline, totalDeadline, now) {
   return trial ? Math.min(totalDeadline, now + 25000) : startupDeadline;
 }
+// This passive receipt never relaxes the page-count guard or sends input.
+function correlationFacts() {
+  return {schemaVersion:1,mechanism:'codex-main-aux-correlation',diagnosticsOnly:true,
+    status:'initial-main-unavailable',totalPages:null,stableSamples:0,
+    heldMainUnchanged:false,auxRouteMatched:false,mainScopeUnique:false,
+    auxMainControlsAbsent:false,auxComposerAbsent:false,guarded:false,
+    mainDocumentFocused:null,auxDocumentFocused:null,main:null,aux:null};
+}
+function correlationScope() {
+  const visible=e=>{const r=e.getBoundingClientRect(),s=getComputedStyle(e);
+    return e.isConnected&&r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden';};
+  const all=selector=>[...document.querySelectorAll(selector)].filter(visible);
+  const radios=all('input[type="radio"][name="conversational-onboarding-inline-role"]');
+  const legends=all('fieldset > legend').filter(e=>e.innerText.trim()==='Select the kind of work you do');
+  const engineering=radios.filter(e=>e.value==='engineering');
+  const dialogs=all('[role="dialog"],[role="alertdialog"]');
+  const tokens=['relative','flex','h-full','min-h-0','w-full','flex-col','bg-transparent','tracking-normal','text-default','select-text'];
+  const fieldset=legends.length===1?legends[0].parentElement:null;
+  const scope=fieldset?.closest('div'+tokens.map(t=>`[class~="${t}"]`).join(''));
+  const mainScope=!!scope&&radios.length===11&&engineering.length===1&&dialogs.length===1
+    &&scope.contains(fieldset)&&radios.every(e=>fieldset.contains(e))
+    &&dialogs[0].contains(scope)&&engineering[0].labels?.length===1
+    &&engineering[0].labels[0].innerText.trim()==='Engineering';
+  const cap=items=>Math.min(4096,items.length);
+  return {counts:{roleLegend:cap(legends),roleRadios:cap(radios),engineering:cap(engineering),
+      dialog:cap(dialogs),quickChatComposer:cap(all('textarea[data-avatar-overlay-composition-autofocus]')),
+      editable:cap(all('textarea,[contenteditable="true"],input:not([type="radio"]):not([type="checkbox"]):not([type="hidden"])'))},
+    mainScope,focused:document.hasFocus()};
+}
+async function correlationIdentity(page, deadline) {
+  let session;
+  const bounded=async promise=>{
+    const remaining=deadline-Date.now();if(remaining<=0)throw new Error('deadline');
+    let timer;try{return await Promise.race([promise,new Promise((_,reject)=>{
+      timer=setTimeout(()=>reject(new Error('deadline')),remaining);})]);}finally{clearTimeout(timer);}
+  };
+  try {
+    session=await bounded(page.context().newCDPSession(page));
+    const target=await bounded(session.send('Target.getTargetInfo'));
+    const tree=await bounded(session.send('Page.getFrameTree'));
+    const frame=tree.frameTree?.frame;
+    if(typeof target.targetInfo?.targetId!=='string'||!frame||typeof frame.id!=='string'
+      ||typeof frame.loaderId!=='string'||!frame.loaderId)throw new Error('identity');
+    const scope=await bounded(page.evaluate(correlationScope));
+    return {page,url:page.url(),target:target.targetInfo.targetId,frame:frame.id,
+      loader:frame.loaderId,frameUrl:frame.url,fragment:frame.urlFragment??'',scope};
+  } finally {if(session)await session.detach().catch(()=>{});}
+}
+function sameCorrelationIdentity(a,b) {
+  return a.page===b.page&&a.url===b.url&&a.target===b.target&&a.frame===b.frame
+    &&a.loader===b.loader&&a.frameUrl===b.frameUrl&&a.fragment===b.fragment;
+}
+async function bindCorrelationMain(page, browser, guard, deadline) {
+  try {
+    if(Date.now()>=deadline||!guard())return null;
+    const pages=browser.contexts().flatMap(c=>c.pages());
+    if(pages.length!==1||pages[0]!==page)return null;
+    const held=await correlationIdentity(page,deadline);
+    const after=browser.contexts().flatMap(c=>c.pages());
+    return Date.now()<deadline&&guard()&&after.length===1&&after[0]===page
+      &&held.scope.mainScope&&held.scope.focused?held:null;
+  } catch{return null;}
+}
+async function observeMainAux(held,browser,guard,deadline,auxRoute,
+  identity=correlationIdentity,pause=ms=>new Promise(r=>setTimeout(r,ms))) {
+  const facts=correlationFacts();
+  const pages=()=>browser.contexts().flatMap(c=>c.pages());
+  const stop=status=>{facts.status=status;return facts;};
+  try {
+    const first=pages();facts.totalPages=first.length<=32?first.length:null;
+    if(!held)return facts;
+    if(first.length!==2)return stop('page-count');
+    if(!first.includes(held.page))return stop('identity-changed');
+    const auxiliary=first.find(p=>p!==held.page);
+    if(auxRoute(auxiliary.url())!=='avatarOverlay')return stop('source-scope');
+    const initialAux=await identity(auxiliary,deadline);
+    for(let sample=0;sample<2;sample++) {
+      if(Date.now()>=deadline)return stop('deadline');
+      if(!guard())return stop('ownership-lost');
+      const current=pages();
+      if(current.length!==2||!current.includes(held.page)||!current.includes(auxiliary))return stop('identity-changed');
+      const main=await identity(held.page,deadline),aux=await identity(auxiliary,deadline);
+      if(Date.now()>=deadline)return stop('deadline');
+      if(!guard())return stop('ownership-lost');
+      if(!sameCorrelationIdentity(held,main)||!sameCorrelationIdentity(initialAux,aux))return stop('identity-changed');
+      const finalPages=pages();
+      if(finalPages.length!==2||!finalPages.includes(held.page)||!finalPages.includes(auxiliary))return stop('identity-changed');
+      facts.heldMainUnchanged=true;facts.auxRouteMatched=true;facts.mainScopeUnique=main.scope.mainScope;
+      facts.main=main.scope.counts;facts.aux=aux.scope.counts;
+      facts.mainDocumentFocused=main.scope.focused;facts.auxDocumentFocused=aux.scope.focused;
+      facts.auxMainControlsAbsent=['roleLegend','roleRadios','engineering','dialog'].every(k=>facts.aux[k]===0);
+      facts.auxComposerAbsent=facts.aux.quickChatComposer===0&&facts.aux.editable===0;
+      if(!facts.mainScopeUnique||!facts.auxMainControlsAbsent||!facts.auxComposerAbsent
+        ||!facts.mainDocumentFocused||facts.auxDocumentFocused)return stop('source-scope');
+      facts.guarded=true;facts.stableSamples++;
+      if(sample===0)await pause(Math.min(100,Math.max(0,deadline-Date.now())));
+    }
+    return stop('observed');
+  } catch{return stop(Date.now()>=deadline?'deadline':'query-failed');}
+}
 async function run() {
   if (!['chatgpt-desktop', 'claude-desktop', 'pen-desktop'].includes(app)
       || !Number.isSafeInteger(request.ownerPid) || request.ownerPid <= 1
@@ -52,7 +152,10 @@ async function run() {
       pages = browser.contexts().flatMap(context => context.pages());
     }
     facts.pageCount = Math.min(4096, pages.length);
-    if (pages.length !== 1) { facts.errorCategory = 'target-ambiguous'; save(); return; }
+    if (pages.length !== 1) {
+      if (trial) { facts.mainAuxCorrelation=correlationFacts(); facts.mainAuxCorrelation.totalPages=pages.length<=32?pages.length:null; }
+      facts.errorCategory = 'target-ambiguous'; save(); return;
+    }
     const page = pages[0];
     let pageErrorCount = 0;
     page.on('pageerror', () => { pageErrorCount = Math.min(4096, pageErrorCount + 1); });
@@ -68,9 +171,16 @@ async function run() {
       const targetReady = app === 'chatgpt-desktop'
         && await page.evaluate(() => location.protocol === 'app:' && document.readyState === 'complete');
       if (!targetReady) { facts.errorCategory = 'invalid-request'; save(); return; }
+      const ownerGuard=()=>rootProof.descendant(connection.launcherPid)&&ownership.ownedEndpoint();
+      const correlationDeadline=onboardingDeadline(trial,deadline,totalDeadline,Date.now());
+      const heldMain=trial?await bindCorrelationMain(page,browser,ownerGuard,correlationDeadline):null;
       facts.publicOnboarding = await require('./codex-onboarding.cjs').run(page,
         () => rootProof.descendant(connection.launcherPid) && ownership.ownedEndpoint(),
-        onboardingDeadline(trial, deadline, totalDeadline, Date.now()));
+        correlationDeadline);
+      if(trial&&browser.contexts().flatMap(c=>c.pages()).length!==1) {
+        facts.mainAuxCorrelation=await observeMainAux(heldMain,browser,ownerGuard,correlationDeadline,
+          require('./codex-onboarding.cjs').sourceRoute);
+      }
     }
     const counts = await page.evaluate(appName => {
       const visible = e => e.isConnected && e.getBoundingClientRect().width > 0
