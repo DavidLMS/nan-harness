@@ -5,6 +5,8 @@ use tokio::process::{Child, Command};
 use process_wrap::tokio::{ChildWrapper, CommandWrap, JobObject, KillOnDrop};
 
 #[cfg(any(windows, test))]
+pub(crate) mod windows_correlation;
+#[cfg(any(windows, test))]
 mod windows_observation;
 
 pub(crate) trait Observation {
@@ -19,6 +21,8 @@ pub(crate) struct ProbeProcess {
     inner: Option<Box<dyn ChildWrapper>>,
     #[cfg(windows)]
     stop_observation: windows_observation::StopObservation,
+    #[cfg(windows)]
+    pub(crate) correlation_snapshot: Option<windows_correlation::Snapshot>,
 }
 
 impl ProbeProcess {
@@ -41,6 +45,7 @@ impl ProbeProcess {
             Ok(Self {
                 inner: Some(inner),
                 stop_observation: windows_observation::StopObservation::new(),
+                correlation_snapshot: None,
             })
         }
     }

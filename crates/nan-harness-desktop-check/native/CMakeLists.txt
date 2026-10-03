@@ -19,3 +19,10 @@ else()
   target_link_libraries(nanh-desktop-native PRIVATE X11::X11 Threads::Threads)
 endif()
 install(TARGETS nanh-desktop-native RUNTIME DESTINATION .)
+
+# This contract calls only pure ancestry logic with synthetic identities.
+add_executable(nanh-process-correlation-test process_correlation_test.cpp)
+add_custom_target(nanh-process-correlation-contract ALL
+  COMMAND $<TARGET_FILE:nanh-process-correlation-test>
+  DEPENDS nanh-process-correlation-test
+  COMMENT "Verify bounded process ancestry correlation")

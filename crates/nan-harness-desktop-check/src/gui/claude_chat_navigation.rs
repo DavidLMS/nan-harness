@@ -46,6 +46,8 @@ struct Facts {
     native_guard_verified: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     native_press_stage: Option<ChatPressStage>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    postcondition_counts: Option<serde_json::Value>,
 }
 impl Facts {
     fn value(&self) -> Option<serde_json::Value> {
@@ -171,6 +173,7 @@ impl Gui {
             self.navigation_guard(deadline, observations)
                 .inspect_err(|_| facts.native_guard_verified = false)?;
             let counts = self.claude_composer_inventory();
+            facts.postcondition_counts.clone_from(&counts);
             within(deadline).inspect_err(|_| facts.native_guard_verified = false)?;
             if counts.as_ref().is_some_and(postcondition) {
                 self.navigation_guard(deadline, observations)

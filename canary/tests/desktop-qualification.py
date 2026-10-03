@@ -1399,7 +1399,9 @@ class QualificationTests(unittest.TestCase):
             path = root / 'chat-navigation.json'
             complete = {**base, 'phase': 'completed', 'actionStatus': 'completed',
                         'preconditionsVerified': True, 'pressAttempted': True, 'chatPostconditionVerified': True}
-            for value in (base, complete, {**base, 'nativePressStage': 'chat'},
+            counts = dict.fromkeys('classicEditable classicVisible modernMessageEditable sendMessageVisible sendMessageEnabled startTaskVisible modeGroupVisible modeChatVisible modeChatEnabled modeCoworkVisible'.split(), 0)
+            for value in (base, complete, {**complete, 'postconditionCounts': counts},
+                          {**base, 'nativePressStage': 'chat'},
                           {**complete, 'nativePressStage': 'completed'},
                           {**complete, 'actionStatus': 'uncertain'},
                           {**complete, 'phase': 'postcondition', 'chatPostconditionVerified': False}):
@@ -1410,7 +1412,10 @@ class QualificationTests(unittest.TestCase):
                             {**base, 'chatPostconditionVerified': True}, {**complete, 'windowId': 5},
                             {**complete, 'diagnosticsOnly': False}, {**complete, 'actionStatus': 'PRIVATE'},
                             {**base, 'nativePressStage': 'completed'}, {**complete, 'nativePressStage': 'tree'},
-                            {**base, 'nativePressStage': 'PRIVATE'}):
+                            {**base, 'nativePressStage': 'PRIVATE'}, {**base, 'postconditionCounts': counts},
+                            {**complete, 'postconditionCounts': {**counts, 'prompt': 'PRIVATE'}},
+                            {**complete, 'postconditionCounts': {**counts, 'classicEditable': True}},
+                            {**complete, 'postconditionCounts': {**counts, 'classicEditable': 4097}}):
                 path.write_text(json.dumps(changed))
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'claude-desktop')
@@ -1635,6 +1640,54 @@ class QualificationTests(unittest.TestCase):
                 path.write_text(json.dumps(changed))
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'hermes-desktop')
+
+    def test_zed_tooltip_zoom_proof_has_closed_bounded_statuses(self):
+        value = dict(schemaVersion=1, mechanism='zed-panel-zoom', diagnosticsOnly=True,
+                     status='observed', maximizeMatches=0, minimizeMatches=0,
+                     stableMaximizeMatches=0, stableMinimizeMatches=0, correlatedButtons=0,
+                     checkedState='unavailable', uniqueCorrelation=False, activationAttempted=False)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / 'zoom.json'
+            for status, candidates, matches in (('unmeasured', 0, 0), ('unavailable', 0, 0),
+                                                ('missing', 3, 0), ('proved', 3, 1), ('ambiguous', 3, 2)):
+                item = {**value, 'tooltipStatus': status, 'tooltipCandidates': candidates, 'tooltipMatches': matches}
+                path.write_text(json.dumps(item))
+                self.assertEqual(q.semantic_observations(root, 'zed-desktop'), [item])
+            proof = {**value, 'tooltipStatus': 'proved', 'tooltipCandidates': 3, 'tooltipMatches': 1}
+            for changed in ({**proof, 'tooltip': 'PRIVATE'}, {**proof, 'tooltipStatus': 'PRIVATE'},
+                            {**proof, 'tooltipCandidates': 4}, {**proof, 'tooltipMatches': True},
+                            {**proof, 'tooltipMatches': 2}, {**proof, 'tooltipCandidates': 0},
+                            {**proof, 'tooltipStatus': 'missing'}, {**proof, 'tooltipStatus': 'unavailable'},
+                            {key: item for key, item in proof.items() if key != 'tooltipMatches'}):
+                path.write_text(json.dumps(changed))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'zed-desktop')
+
+    def test_windows_process_correlation_is_closed_and_not_job_membership(self):
+        value = dict(schemaVersion=1, mechanism='windows-process-correlation', diagnosticsOnly=True,
+                     status='observed', sameLauncherSurvives=False, verifiedDescendantsPresent=True,
+                     unlinkedMatchesPresent=True, matchedCount=2, verifiedDescendantCount=1, unlinkedCount=1)
+        evidence = ('sameLauncherSurvives', 'verifiedDescendantsPresent', 'unlinkedMatchesPresent',
+                    'matchedCount', 'verifiedDescendantCount', 'unlinkedCount')
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / 'correlation.json'
+            for item in (value, {**value, 'status': 'unavailable', **dict.fromkeys(evidence)},
+                         {**value, 'status': 'deadline', **dict.fromkeys(evidence)}):
+                path.write_text(json.dumps(item))
+                self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [item])
+            for changed in ({**value, 'pid': 7}, {**value, 'jobMembership': True},
+                            {**value, 'sameLauncherSurvives': 1}, {**value, 'matchedCount': True},
+                            {**value, 'matchedCount': 1}, {**value, 'verifiedDescendantsPresent': False},
+                            {**value, 'unlinkedMatchesPresent': False}, {**value, 'status': 'PRIVATE'},
+                            {**value, 'status': 'unavailable'}, {**value, 'matchedCount': 65}):
+                path.write_text(json.dumps(changed))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'claude-desktop')
+            path.write_text(json.dumps(value))
+            with self.assertRaises(ValueError):
+                q.semantic_observations(root, 'chatgpt-desktop')
 
     def test_codex_initial_binding_diagnostics_are_closed_and_not_acceptance(self):
         value = dict(schemaVersion=1, mechanism='renderer-inventory', diagnosticsOnly=True,

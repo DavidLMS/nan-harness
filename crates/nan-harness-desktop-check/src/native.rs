@@ -337,6 +337,26 @@ impl Native {
     }
 
     #[cfg(windows)]
+    pub(crate) fn process_correlation_until(
+        &self,
+        before: bool,
+        input: &[u8],
+        deadline: std::time::Instant,
+    ) -> Result<zeroize::Zeroizing<String>, FailureCategory> {
+        process::run_once_until(
+            &self.executable,
+            std::ffi::OsStr::new(if before {
+                "--claude-process-before"
+            } else {
+                "--claude-process-after"
+            }),
+            None,
+            input,
+            Some(deadline),
+        )
+    }
+
+    #[cfg(windows)]
     pub(crate) fn process_presence_until(
         &self,
         claude: bool,

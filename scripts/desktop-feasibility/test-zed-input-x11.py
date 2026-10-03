@@ -34,6 +34,43 @@ class Transport(unittest.TestCase):
         with patch.object(sys, 'argv', ['helper', mode]), patch.object(sys, 'stdin', stdin):
             return module['main']()
 
+    def test_source_on_proof_requires_enabled_visible_live_toggle(self):
+        required = sum(1 << bit for bit in (8, 20, 25, 30))
+        self.assertTrue(module['enabled_toggle_on']((required, 0)))
+        for bit in (8, 20, 25, 30):
+            self.assertFalse(module['enabled_toggle_on']((required & ~(1 << bit), 0)))
+        for words in ((required | (1 << 6), 0), (required,), (required, 0, 0), (required, -1)):
+            self.assertFalse(module['enabled_toggle_on'](words))
+
+    def test_zoom_hover_retains_exact_owned_toggle_and_never_clicks(self):
+        request = dict(pid=20, window=40, x=25, y=35, bus=':1.2',
+                       path='/org/a11y/atspi/accessible/3', bounds=[10, 20, 30, 30])
+        for changed, expected, motions in [(False, 0, 1), (True, 3, 1)]:
+            queries, actions = [], []
+            def proof(*args, **kwargs):
+                queries.append(kwargs)
+                return (11 if changed and len(queries) > 1 else 10, 20, 30, 30)
+            def read(args, **kwargs):
+                return b'40' if args[1] == 'getactivewindow' else b'20'
+            with patch.dict(module['zoom_hover'].__globals__, normalized_retry_point=proof,
+                            owned_frame=lambda *args: True), \
+                    patch.object(subprocess, 'check_output', side_effect=read), \
+                    patch.object(subprocess, 'run', side_effect=lambda args, **kwargs: actions.append(args)):
+                self.assertEqual(self.call('zoom-hover', json.dumps(request).encode()), expected)
+            self.assertEqual(len(actions), motions)
+            self.assertTrue(all(action[1] == 'mousemove' for action in actions))
+            self.assertTrue(all(query['toggle'] and query['hit_point'] == (25, 35) for query in queries))
+
+    def test_zoom_hover_rejects_malformed_and_unowned_without_input(self):
+        request = dict(pid=20, window=40, x=25, y=35, bus=':1.2',
+                       path='/org/a11y/atspi/accessible/3', bounds=[10, 20, 30, 30])
+        with patch.object(subprocess, 'run') as action:
+            self.assertEqual(self.call('zoom-hover', b'{}'), 2)
+            with patch.object(subprocess, 'check_output', return_value=b'40'), \
+                    patch.dict(module['zoom_hover'].__globals__, owned_frame=lambda *args: False):
+                self.assertEqual(self.call('zoom-hover', json.dumps(request).encode()), 3)
+            action.assert_not_called()
+
     def test_corrected_transport_clicks_once_at_measured_client_point_or_not_at_all(self):
         request = json.dumps(dict(pid=20,window=40,x=137,y=269,bus=':1.2',path='/org/a11y/atspi/accessible/3')).encode()
         for case, package, expected_clicks in [('correct','noble-5build1',1),('unknown-package','unverified',0),('changed-before-click','noble-5build1',0)]:

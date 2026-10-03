@@ -1268,7 +1268,12 @@ async fn finish_scenario(
     claude_storage::record(spec);
     claude_native_storage::record(spec);
     record_absence(
-        Gui::ensure_absent_after_stop(spec.kind, gui),
+        Gui::ensure_absent_after_stop(
+            spec.kind,
+            gui,
+            #[cfg(windows)]
+            process.correlation_snapshot.take(),
+        ),
         CleanupStage::AbsenceAfterStop,
         outcome.err(),
         diagnostic,
@@ -1862,6 +1867,19 @@ async fn wait_for_stop(process: &mut ProbeProcess, limit: Duration) -> StopWaitD
     StopWaitDiagnostic { outcome, os_error }
 }
 
+#[cfg(windows)]
+fn capture_stop_correlation(process: &mut ProbeProcess, gui: Option<&Gui>) -> Duration {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    if let (Some(gui), Some(launcher)) = (gui, process.id()) {
+        process.correlation_snapshot = gui.capture_process_correlation(
+            launcher,
+            deadline.min(Instant::now() + Duration::from_secs(1)),
+        );
+    }
+    // The advisory query consumes the existing initial stop budget.
+    deadline.saturating_duration_since(Instant::now())
+}
+
 async fn stop(
     process: &mut ProbeProcess,
     gui: Option<&Gui>,
@@ -1869,6 +1887,10 @@ async fn stop(
 ) -> Result<(), StopFailure> {
     #[cfg(windows)]
     debug_assert!(process_group.is_none());
+    #[cfg(windows)]
+    let initial_wait_limit = capture_stop_correlation(process, gui);
+    #[cfg(not(windows))]
+    let initial_wait_limit = Duration::from_secs(10);
     if let Some(gui) = gui {
         let _ = gui.quit();
     }
@@ -1890,7 +1912,7 @@ async fn stop(
             os_error: None,
         },
     };
-    diagnostic.initial_wait = wait_for_stop(process, Duration::from_secs(10)).await;
+    diagnostic.initial_wait = wait_for_stop(process, initial_wait_limit).await;
     if diagnostic.initial_wait.outcome == StopWaitOutcome::Reaped {
         #[cfg(unix)]
         if process_group.is_none_or(group_absent) {

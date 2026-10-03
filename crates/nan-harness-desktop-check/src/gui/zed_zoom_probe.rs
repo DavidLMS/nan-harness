@@ -29,6 +29,9 @@ pub(super) struct Observation {
     checked_state: &'static str,
     unique_correlation: bool,
     activation_attempted: bool,
+    tooltip_status: &'static str,
+    tooltip_candidates: usize,
+    tooltip_matches: usize,
 }
 
 // Raw AT-SPI roles must not be inferred from another platform's semantic role mapping.
@@ -46,6 +49,18 @@ impl Observation {
             && self.matched_toggle_buttons == 1
             && self.matched_push_buttons == 0
             && self.checked_state == "on"
+    }
+
+    #[cfg(any(target_os = "linux", test))]
+    pub(super) fn record_tooltip(
+        &mut self,
+        status: &'static str,
+        candidates: usize,
+        matches: usize,
+    ) {
+        self.tooltip_status = status;
+        self.tooltip_candidates = candidates;
+        self.tooltip_matches = matches;
     }
 
     pub(super) fn unavailable(status: &'static str) -> Self {
@@ -66,6 +81,9 @@ impl Observation {
             checked_state: "unavailable",
             unique_correlation: false,
             activation_attempted: false,
+            tooltip_status: "unmeasured",
+            tooltip_candidates: 0,
+            tooltip_matches: 0,
         }
     }
 }
@@ -204,6 +222,50 @@ pub(super) struct CanonicalButton {
     role: u32,
     bounds: [i32; 4],
     toggle: String,
+}
+
+/// Retain only fresh, enabled source `ToggleButtons` with independently normalized bounds.
+#[cfg(any(target_os = "linux", test))]
+pub(super) fn active_candidates(
+    before: &[ElementData],
+    after: &[ElementData],
+    canonical: &[CanonicalButton],
+) -> Result<Vec<(usize, Rect)>, crate::report::Reason> {
+    let mut result = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for item in canonical {
+        let Some(button) = before.get(item.index) else {
+            return Err(crate::report::Reason::ActionUnsupported);
+        };
+        if !seen.insert(item.index) || item.bounds[2] <= 0 || item.bounds[3] <= 0 {
+            return Err(crate::report::Reason::ActionUnsupported);
+        }
+        if item.role != 62 || item.toggle != "on" {
+            continue;
+        }
+        if button.role != Role::Switch
+            || after
+                .iter()
+                .filter(|other| held_button(button, other))
+                .count()
+                != 1
+        {
+            return Err(crate::report::Reason::ActionUnsupported);
+        }
+        result.push((
+            item.index,
+            Rect {
+                x: item.bounds[0],
+                y: item.bounds[1],
+                width: item.bounds[2].cast_unsigned(),
+                height: item.bounds[3].cast_unsigned(),
+            },
+        ));
+        if result.len() > 3 {
+            return Err(crate::report::Reason::BudgetExceeded);
+        }
+    }
+    Ok(result)
 }
 
 #[cfg(any(target_os = "linux", test))]
@@ -365,6 +427,9 @@ mod tests {
     #[test]
     fn nested_push_button_and_source_toggle_remain_distinct_and_ambiguous() {
         let push = button();
+        let mut observation = Observation::unavailable("observed");
+        observation.record_tooltip("proved", 3, 1);
+        assert!(!observation.proves_zoomed());
         let mut toggle = button();
         toggle.role = Role::Switch;
         toggle.stable_id = Some("separate-held-toggle".into());
@@ -394,6 +459,66 @@ mod tests {
         assert_eq!(push_only.matched_role, "push-button");
         assert_eq!(push_only.checked_state, "unavailable");
         assert!(push_only.unique_correlation);
+    }
+
+    #[test]
+    fn tooltip_candidates_require_unique_live_enabled_source_identity() {
+        let mut toggle = button();
+        toggle.role = Role::Switch;
+        let record = CanonicalButton {
+            index: 0,
+            role: 62,
+            bounds: [10, 20, 30, 30],
+            toggle: "on".into(),
+        };
+        assert_eq!(
+            active_candidates(
+                std::slice::from_ref(&toggle),
+                std::slice::from_ref(&toggle),
+                &[record]
+            )
+            .unwrap()
+            .len(),
+            1
+        );
+        let mut disabled = toggle.clone();
+        disabled.states.enabled = false;
+        let record = CanonicalButton {
+            index: 0,
+            role: 62,
+            bounds: [10, 20, 30, 30],
+            toggle: "on".into(),
+        };
+        assert!(active_candidates(&[toggle.clone()], &[disabled], &[record]).is_err());
+        let record = CanonicalButton {
+            index: 0,
+            role: 62,
+            bounds: [10, 20, 30, 30],
+            toggle: "on".into(),
+        };
+        assert!(
+            active_candidates(
+                std::slice::from_ref(&toggle),
+                &[toggle.clone(), toggle.clone()],
+                &[record]
+            )
+            .is_err()
+        );
+        let off = CanonicalButton {
+            index: 0,
+            role: 62,
+            bounds: [10, 20, 30, 30],
+            toggle: "off".into(),
+        };
+        assert!(
+            active_candidates(
+                std::slice::from_ref(&toggle),
+                std::slice::from_ref(&toggle),
+                &[off]
+            )
+            .unwrap()
+            .is_empty()
+        );
     }
 
     fn button() -> ElementData {

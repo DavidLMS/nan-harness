@@ -285,10 +285,10 @@ def semantic_observations(directory, app):
         if type(value) is not dict:
             raise ValueError('invalid semantic observation')
         mechanism = value.get('mechanism')
-        if mechanism not in {'codex-renderer-qualification', 'qualification-runner-failure', 'hermes-windows-catalog-readiness', 'hermes-renderer-qualification', 'zed-native-copy', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'zed-retry-visual', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'codex-project-preflight', 'windows-process-absence', 'windows-post-stop-process', 'windows-process-baseline', 'windows-process-settlement', 'windows-owned-stop', 'claude-owned-configuration', 'claude-restore', 'claude-model-discovery', 'claude-window-stack', 'claude-window-focus', 'claude-chat-navigation', 'claude-window-fit', 'claude-storage-use', 'claude-native-storage', 'claude-private-storage-stage', 'claude-native-composer', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}:
+        if mechanism not in {'codex-renderer-qualification', 'qualification-runner-failure', 'hermes-windows-catalog-readiness', 'hermes-renderer-qualification', 'zed-native-copy', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'zed-retry-visual', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'codex-project-preflight', 'windows-process-absence', 'windows-post-stop-process', 'windows-process-baseline', 'windows-process-settlement', 'windows-owned-stop', 'windows-process-correlation', 'claude-owned-configuration', 'claude-restore', 'claude-model-discovery', 'claude-window-stack', 'claude-window-focus', 'claude-chat-navigation', 'claude-window-fit', 'claude-storage-use', 'claude-native-storage', 'claude-private-storage-stage', 'claude-native-composer', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}:
             continue
         expected = 'hermes-renderer-qualification' if app == 'hermes-desktop' else 'zed-native-copy'
-        if (mechanism != expected and mechanism not in {'codex-renderer-qualification', 'qualification-runner-failure', 'hermes-windows-catalog-readiness', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'zed-retry-visual', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'codex-project-preflight', 'windows-process-absence', 'windows-post-stop-process', 'windows-process-baseline', 'windows-process-settlement', 'windows-owned-stop', 'claude-owned-configuration', 'claude-restore', 'claude-model-discovery', 'claude-window-stack', 'claude-window-focus', 'claude-chat-navigation', 'claude-window-fit', 'claude-storage-use', 'claude-native-storage', 'claude-private-storage-stage', 'claude-native-composer', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}) or type(value.get('schemaVersion')) is not int or value['schemaVersion'] != 1:
+        if (mechanism != expected and mechanism not in {'codex-renderer-qualification', 'qualification-runner-failure', 'hermes-windows-catalog-readiness', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'zed-retry-visual', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'codex-project-preflight', 'windows-process-absence', 'windows-post-stop-process', 'windows-process-baseline', 'windows-process-settlement', 'windows-owned-stop', 'windows-process-correlation', 'claude-owned-configuration', 'claude-restore', 'claude-model-discovery', 'claude-window-stack', 'claude-window-focus', 'claude-chat-navigation', 'claude-window-fit', 'claude-storage-use', 'claude-native-storage', 'claude-private-storage-stage', 'claude-native-composer', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}) or type(value.get('schemaVersion')) is not int or value['schemaVersion'] != 1:
             raise ValueError('semantic observation identity differs')
         record = {'schemaVersion': 1, 'mechanism': mechanism}
         if mechanism == 'codex-project-preflight':
@@ -411,6 +411,19 @@ def semantic_observations(directory, app):
                       'stableMinimizeMatches', 'correlatedButtons'}
             fields = counts | {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'status',
                                'checkedState', 'uniqueCorrelation', 'activationAttempted'}
+            tooltip_fields = {'tooltipStatus', 'tooltipCandidates', 'tooltipMatches'}
+            if tooltip_fields & set(value):
+                if (tooltip_fields - set(value)
+                        or type(value['tooltipStatus']) is not str
+                        or value['tooltipStatus'] not in {'unmeasured', 'proved', 'missing', 'ambiguous', 'unavailable'}
+                        or any(type(value[key]) is not int or not 0 <= value[key] <= 3 for key in tooltip_fields - {'tooltipStatus'})
+                        or value['tooltipMatches'] > value['tooltipCandidates']
+                        or value['tooltipStatus'] in {'unmeasured', 'unavailable'} and (value['tooltipCandidates'] != 0 or value['tooltipMatches'] != 0)
+                        or value['tooltipStatus'] == 'missing' and value['tooltipMatches'] != 0
+                        or value['tooltipStatus'] == 'proved' and value['tooltipMatches'] != 1
+                        or value['tooltipStatus'] == 'ambiguous' and value['tooltipMatches'] < 2):
+                    raise ValueError('invalid Zed source tooltip proof')
+                fields |= tooltip_fields
             role_fields = {'matchedPushButtons', 'matchedToggleButtons', 'nestedContainingControls', 'matchedRole'}
             present_roles = role_fields & set(value)
             if present_roles:
@@ -488,7 +501,7 @@ def semantic_observations(directory, app):
             flags = set('preconditionsVerified pressAttempted chatPostconditionVerified nativeGuardVerified'.split())
             fields = flags | set('schemaVersion mechanism diagnosticsOnly phase actionStatus'.split())
             phase, action = value.get('phase'), value.get('actionStatus')
-            if (set(value) - {'nativePressStage'} != fields or app != 'claude-desktop' or value['diagnosticsOnly'] is not True
+            if (set(value) - {'nativePressStage', 'postconditionCounts'} != fields or app != 'claude-desktop' or value['diagnosticsOnly'] is not True
                     or type(phase) is not str or phase not in {'preflight', 'press', 'postcondition', 'completed'}
                     or type(action) is not str or action not in {'not-attempted', 'completed', 'uncertain'}
                     or any(type(value[key]) is not bool for key in flags)):
@@ -500,6 +513,13 @@ def semantic_observations(directory, app):
                         or (stage in {'completed', 'press-uncertain'}) != value['pressAttempted']):
                     raise ValueError('invalid Claude native Chat press stage')
                 record['nativePressStage'] = stage
+            if 'postconditionCounts' in value:
+                counts = value['postconditionCounts']
+                keys = set('classicEditable classicVisible modernMessageEditable sendMessageVisible sendMessageEnabled startTaskVisible modeGroupVisible modeChatVisible modeChatEnabled modeCoworkVisible'.split())
+                if (phase not in {'postcondition', 'completed'} or type(counts) is not dict or set(counts) != keys
+                        or any(count is not None and (type(count) is not int or not 0 <= count <= 4096) for count in counts.values())):
+                    raise ValueError('invalid Claude Chat postcondition counts')
+                record['postconditionCounts'] = counts
             attempted, ready, post, guarded = (value[key] for key in
                 ('pressAttempted', 'preconditionsVerified', 'chatPostconditionVerified', 'nativeGuardVerified'))
             if (attempted != (action != 'not-attempted') or attempted and not ready
@@ -510,6 +530,23 @@ def semantic_observations(directory, app):
                 raise ValueError('inconsistent Claude Chat navigation observation')
             record.update(diagnosticsOnly=True, phase=phase, actionStatus=action,
                           **{key: value[key] for key in flags})
+        elif mechanism == 'windows-process-correlation':
+            flags = {'sameLauncherSurvives', 'verifiedDescendantsPresent', 'unlinkedMatchesPresent'}
+            counts = {'matchedCount', 'verifiedDescendantCount', 'unlinkedCount'}
+            fields = flags | counts | {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'status'}
+            if (app != 'claude-desktop' or set(value) != fields or value['diagnosticsOnly'] is not True
+                    or type(value['status']) is not str or value['status'] not in {'observed', 'unavailable', 'deadline'}):
+                raise ValueError('invalid Windows process correlation')
+            if value['status'] == 'observed':
+                if (any(type(value[key]) is not bool for key in flags)
+                        or any(type(value[key]) is not int or not 0 <= value[key] <= 64 for key in counts)
+                        or value['matchedCount'] != value['verifiedDescendantCount'] + value['unlinkedCount']
+                        or value['verifiedDescendantsPresent'] != (value['verifiedDescendantCount'] > 0)
+                        or value['unlinkedMatchesPresent'] != (value['unlinkedCount'] > 0)):
+                    raise ValueError('invalid Windows process correlation counts')
+            elif any(value[key] is not None for key in flags | counts):
+                raise ValueError('incomplete Windows process correlation')
+            record.update({key: value[key] for key in fields - {'schemaVersion', 'mechanism'}})
         elif mechanism == 'windows-owned-stop':
             flags = {'wrapperPresent', 'launcherHandleAvailable', 'jobClosed'}
             fields = flags | {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'terminateResult'}

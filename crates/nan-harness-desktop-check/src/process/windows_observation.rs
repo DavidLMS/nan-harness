@@ -50,69 +50,70 @@ impl StopObservation {
 
     #[cfg(windows)]
     pub(super) fn record(&self) {
-        use std::io::Write as _;
-        use std::os::windows::fs::MetadataExt as _;
-        use std::path::PathBuf;
-        if std::env::var("GITHUB_ACTIONS").as_deref() != Ok("true")
-            || std::env::var("RUNNER_ENVIRONMENT").as_deref() != Ok("github-hosted")
-            || std::env::var("RUNNER_OS").as_deref() != Ok("Windows")
-            || std::env::var("NANH_DESKTOP_QUALIFICATION_MODE").as_deref() != Ok("startup-baseline")
-            || std::env::var("NANH_DESKTOP_RENDERER_APP").as_deref() != Ok("claude-desktop")
-            || std::env::var("NANH_CLAUDE_WINDOWS_PROFILE_POLICY").as_deref() != Ok("private-env")
-        {
-            return;
+        record_value(&self.value(), "windows-owned-stop");
+    }
+}
+
+#[cfg(windows)]
+pub(super) fn record_value(value: &serde_json::Value, prefix: &str) {
+    use std::io::Write as _;
+    use std::os::windows::fs::MetadataExt as _;
+    use std::path::PathBuf;
+    if std::env::var("GITHUB_ACTIONS").as_deref() != Ok("true")
+        || std::env::var("RUNNER_ENVIRONMENT").as_deref() != Ok("github-hosted")
+        || std::env::var("RUNNER_OS").as_deref() != Ok("Windows")
+        || std::env::var("NANH_DESKTOP_QUALIFICATION_MODE").as_deref() != Ok("startup-baseline")
+        || std::env::var("NANH_DESKTOP_RENDERER_APP").as_deref() != Ok("claude-desktop")
+        || std::env::var("NANH_CLAUDE_WINDOWS_PROFILE_POLICY").as_deref() != Ok("private-env")
+    {
+        return;
+    }
+    let Some(directory) = std::env::var_os("NANH_DESKTOP_QUALIFICATION_FACTS").map(PathBuf::from)
+    else {
+        return;
+    };
+    let Ok(metadata) = std::fs::symlink_metadata(&directory) else {
+        return;
+    };
+    if !metadata.is_dir() || metadata.is_symlink() || !directory.is_absolute() {
+        return;
+    }
+    // Windows canonicalization adds a verbatim prefix. Reject reparse
+    // components first, then use the canonical directory for the write.
+    let mut ancestor = PathBuf::new();
+    for component in directory.components() {
+        ancestor.push(component.as_os_str());
+        if !ancestor.is_absolute() {
+            continue;
         }
-        let Some(directory) =
-            std::env::var_os("NANH_DESKTOP_QUALIFICATION_FACTS").map(PathBuf::from)
-        else {
+        let Ok(metadata) = std::fs::symlink_metadata(&ancestor) else {
             return;
         };
-        let Ok(metadata) = std::fs::symlink_metadata(&directory) else {
-            return;
-        };
-        if !metadata.is_dir() || metadata.is_symlink() || !directory.is_absolute() {
+        if metadata.file_attributes() & 0x400 != 0 {
             return;
         }
-        // Windows canonicalization adds a verbatim prefix. Reject reparse
-        // components first, then use the canonical directory for the write.
-        let mut ancestor = PathBuf::new();
-        for component in directory.components() {
-            ancestor.push(component.as_os_str());
-            if !ancestor.is_absolute() {
-                continue;
-            }
-            let Ok(metadata) = std::fs::symlink_metadata(&ancestor) else {
-                return;
-            };
-            if metadata.file_attributes() & 0x400 != 0 {
-                return;
-            }
-        }
-        let Ok(directory) = directory.canonicalize() else {
-            return;
-        };
-        if nan_harness_private_fs::restrict_path(
-            &directory,
-            nan_harness_private_fs::PrivatePathKind::Directory,
-        )
-        .is_err()
-        {
-            return;
-        }
-        let Ok(bytes) = serde_json::to_vec(&self.value()) else {
-            return;
-        };
-        let mut nonce = [0_u8; 8];
-        if getrandom::fill(&mut nonce).is_err() {
-            return;
-        }
-        let path = directory.join(format!(
-            "windows-owned-stop-{}.json",
-            u64::from_le_bytes(nonce)
-        ));
-        if let Ok(mut file) = nan_harness_private_fs::open_private_new(&path) {
-            let _ = file.write_all(&bytes).and_then(|()| file.sync_all());
-        }
+    }
+    let Ok(directory) = directory.canonicalize() else {
+        return;
+    };
+    if nan_harness_private_fs::restrict_path(
+        &directory,
+        nan_harness_private_fs::PrivatePathKind::Directory,
+    )
+    .is_err()
+    {
+        return;
+    }
+    let Ok(bytes) = serde_json::to_vec(value) else {
+        return;
+    };
+    let mut nonce = [0_u8; 8];
+    if getrandom::fill(&mut nonce).is_err() {
+        return;
+    }
+    let path = directory.join(format!("{prefix}-{}.json", u64::from_le_bytes(nonce)));
+    if let Ok(mut file) = nan_harness_private_fs::open_private_new(&path) {
+        let _ = file.write_all(&bytes).and_then(|()| file.sync_all());
     }
 }
 

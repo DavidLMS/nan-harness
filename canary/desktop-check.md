@@ -1799,3 +1799,34 @@ prompt readback, ownership, accessibility hit testing and cursor checks remain
 mandatory for the later single Retry action. These changes are candidates for
 hosted verification, not additional qualified acceptance cells. Pen remains
 excluded from the active qualification matrix.
+
+The complete local `cargo check-all` gate passed on `33e0cc2a` with serial
+Rust tests and incremental compilation disabled, including all 333 desktop
+checker tests. Its Linux hosted quality run rejected an unused diagnostic
+accessor in test builds; the subsequent fix now exercises that accessor in the independent
+window-query contract test.
+
+Run [37116677735](https://github.com/DavidLMS/nan-harness/actions/runs/37116677735)
+acquired Claude macOS's editor in all three fresh sessions, observed no login
+controls, completed authenticated model discovery, and passed cleanup. Chat
+navigation still stopped before input: the native transport and caller both
+added a line terminator, so the strict helper rejected the request. Commit
+`929c2ec5` removes the duplicate terminator and adds a synthetic transport
+regression test that rejects the formerly malformed request.
+
+Run [37116675663](https://github.com/DavidLMS/nan-harness/actions/runs/37116675663)
+confirms that the isolated Codex ancestors no longer prevent Linux and macOS
+startup. Renderer binding remains unproved on all three platforms. The next
+closed initial-document receipt reports only route categories and identity-field
+presence, without URLs, target identifiers, frame identifiers or application
+content. This diagnostic never grants an input capability.
+
+Run [37116681120](https://github.com/DavidLMS/nan-harness/actions/runs/37116681120)
+refused Linux Zed's first Send because the selected zoom control remained
+unproved. Zero matching icon rectangles also explain its per-button containment
+rejection counts; those counts alone do not prove a coordinate conversion bug.
+Run [37116679406](https://github.com/DavidLMS/nan-harness/actions/runs/37116679406)
+issued Claude Windows's owned wrapper termination and released the wrapper,
+but independent process absence still failed. Neither wrapper release nor a
+future process-ancestry diagnostic can substitute for that cleanup verdict.
+These measurements add no qualified cells.

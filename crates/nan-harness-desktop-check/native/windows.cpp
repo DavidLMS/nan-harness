@@ -15,6 +15,7 @@
 
 #if !defined(_WIN32)
 int process_presence(bool) { return 5; }
+int process_correlation(bool) { return 5; }
 int windows_claude_storage() { return 5; }
 #if !defined(__APPLE__)
 int fit_window(const std::string&) { return 5; }
@@ -814,6 +815,106 @@ int activate_window(const std::string& request) {
 #include <windows.h>
 #include <tlhelp32.h>
 #include <shlobj.h>
+
+// Private wire identities stay in the checker RAM, never in public diagnostics.
+#include <vector>
+struct CorrelationIdentity { DWORD pid; ULONGLONG created; bool descendant; };
+#include "process_correlation.hpp"
+static bool correlation_time(std::uint32_t pid, std::uint64_t& value) {
+    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!process) return false;
+    FILETIME created{}, exited{}, kernel{}, user{};
+    const bool ok = GetProcessTimes(process, &created, &exited, &kernel, &user) != FALSE;
+    CloseHandle(process);
+    value = (static_cast<ULONGLONG>(created.dwHighDateTime) << 32) | created.dwLowDateTime;
+    return ok && value != 0;
+}
+static bool correlation_snapshot(DWORD checker, std::vector<CorrelationEntry>& rows) {
+    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snapshot == INVALID_HANDLE_VALUE) return false;
+    struct Guard { HANDLE value; ~Guard() { CloseHandle(value); } } guard{snapshot};
+    PROCESSENTRY32W row{}; row.dwSize = sizeof(row);
+    if (!Process32FirstW(snapshot, &row)) return false;
+    bool own = false; unsigned matches = 0;
+    do {
+        if (rows.size() >= 65536) return false;
+        const auto end = std::find(std::begin(row.szExeFile), std::end(row.szExeFile), L'\0');
+        if (end == std::end(row.szExeFile) || end == std::begin(row.szExeFile)) return false;
+        const std::wstring name(std::begin(row.szExeFile), end);
+        if (name.find_first_of(L"/\\") != std::wstring::npos) return false;
+        const bool matching = _wcsicmp(name.c_str(), L"Claude.exe") == 0;
+        if (matching && ++matches > 64) return false;
+        own = own || row.th32ProcessID == checker;
+        rows.push_back({row.th32ProcessID, row.th32ParentProcessID, matching});
+    } while (Process32NextW(snapshot, &row));
+    return GetLastError() == ERROR_NO_MORE_FILES && own;
+}
+int process_correlation(bool before) {
+    std::string request;
+    struct RequestGuard { std::string& value; ~RequestGuard() { if (!value.empty()) SecureZeroMemory(value.data(), value.size()); } } request_guard{request};
+    char character;
+    while (std::cin.get(character)) {
+        if (request.size() >= 8192) return 2;
+        request.push_back(character);
+    }
+    std::istringstream input(request); DWORD checker = 0, launcher = 0;
+    if (!(input >> checker >> launcher) || checker == 0 || launcher == 0) return 2;
+    std::vector<CorrelationEntry> rows;
+    if (!correlation_snapshot(checker, rows)) { std::cout << "unavailable\n"; return 0; }
+    if (before) {
+        std::string extra; if (input >> extra) return 2;
+        std::uint64_t launcher_time = 0;
+        if (!correlation_time(launcher, launcher_time)) { std::cout << "unavailable\n"; return 0; }
+        std::vector<CorrelationEntry> confirm;
+        if (!correlation_snapshot(checker, confirm)) { std::cout << "unavailable\n"; return 0; }
+        std::vector<CorrelationIdentity> verified{{launcher, launcher_time, false}};
+        for (const auto& row : rows) {
+            if (!row.matching || row.pid == launcher) continue;
+            std::uint64_t created = 0;
+            if (correlation_time(row.pid, created)
+                && historical_descendant(rows, confirm, row.pid, launcher, launcher_time,
+                    created, correlation_time)) verified.push_back({row.pid, created, true});
+        }
+        // Recheck the root identity after the snapshot and ancestor queries.
+        std::uint64_t final_time = 0;
+        if (!correlation_time(launcher, final_time) || final_time != launcher_time) { std::cout << "unavailable\n"; return 0; }
+        std::cout << "snapshot " << verified.size() << '\n';
+        for (const auto& item : verified) std::cout << item.pid << ' ' << item.created << ' ' << item.descendant << '\n';
+    } else {
+        unsigned count = 0; if (!(input >> count) || count == 0 || count > 65) return 2;
+        std::vector<CorrelationIdentity> verified;
+        for (unsigned i = 0; i < count; ++i) {
+            DWORD pid = 0; ULONGLONG created = 0; unsigned descendant = 0;
+            if (!(input >> pid >> created >> descendant) || pid == 0 || created == 0 || descendant > 1) return 2;
+            if (std::any_of(verified.begin(), verified.end(), [pid](const auto& v) { return v.pid == pid; })) return 2;
+            verified.push_back({pid, created, descendant == 1});
+        }
+        std::string extra; if (input >> extra || verified.front().pid != launcher || verified.front().descendant) return 2;
+        std::vector<CorrelationEntry> confirm;
+        if (!correlation_snapshot(checker, confirm)) { std::cout << "unavailable\n"; return 0; }
+        if (std::count_if(rows.begin(), rows.end(), [](const auto& e) { return e.matching; })
+            != std::count_if(confirm.begin(), confirm.end(), [](const auto& e) { return e.matching; })) {
+            std::cout << "unavailable\n"; return 0;
+        }
+        bool launcher_alive = false; unsigned matches = 0, linked = 0, unlinked = 0;
+        std::uint64_t time = 0;
+        const bool launcher_present = std::any_of(rows.begin(), rows.end(), [launcher](const auto& e) { return e.pid == launcher; });
+        if (launcher_present && !correlation_time(launcher, time)) { std::cout << "unavailable\n"; return 0; }
+        launcher_alive = launcher_present && time == verified.front().created;
+        for (const auto& row : rows) {
+            if (!row.matching) continue;
+            const auto stable = std::find_if(confirm.begin(), confirm.end(), [&](const auto& e) { return e.pid == row.pid && e.matching; });
+            if (stable == confirm.end()) { std::cout << "unavailable\n"; return 0; }
+            ++matches;
+            if (!correlation_time(row.pid, time)) { std::cout << "unavailable\n"; return 0; }
+            const auto found = std::find_if(verified.begin(), verified.end(), [&](const auto& v) { return v.pid == row.pid && v.created == time && v.descendant; });
+            if (found == verified.end()) ++unlinked; else ++linked;
+        }
+        std::cout << "observed " << launcher_alive << ' ' << matches << ' ' << linked << ' ' << unlinked << '\n';
+    }
+    SecureZeroMemory(request.data(), request.size());
+    return std::cout ? 0 : 4;
+}
 
 // Fixed known-folder metadata only: never enumerates or opens profile files.
 static bool storage_metadata(const std::wstring& path, bool directory, bool& present) {

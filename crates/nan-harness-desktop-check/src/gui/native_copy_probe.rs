@@ -141,6 +141,22 @@ fn valid_pointer_request(payload: &str) -> bool {
     })
 }
 
+fn valid_zoom_request(payload: &str) -> bool {
+    let Ok(mut value) = serde_json::from_str::<serde_json::Value>(payload) else {
+        return false;
+    };
+    let Some(bounds) = value
+        .as_object_mut()
+        .and_then(|object| object.remove("bounds"))
+    else {
+        return false;
+    };
+    let Ok(bounds) = serde_json::from_value::<[i32; 4]>(bounds) else {
+        return false;
+    };
+    bounds[2] > 0 && bounds[3] > 0 && valid_pointer_request(&value.to_string())
+}
+
 fn pointer_transport_diagnostic(code: Option<i32>) {
     if std::env::var("GITHUB_ACTIONS").as_deref() != Ok("true")
         || std::env::var("RUNNER_ENVIRONMENT").as_deref() != Ok("github-hosted")
@@ -204,13 +220,15 @@ fn neutral_input(executable: &Path, mode: &str, prompt: &str) -> Result<(), Reas
                 | "retry-click"
                 | "panel-zoom"
                 | "atspi-observe"
+                | "zoom-hover"
         )
         || (mode == "type" && prompt.is_empty())
         || (mode == "activate-accessibility" && !valid_activation_request(prompt))
         || (mode == "retry-click" && (!cfg!(target_os = "linux") || !valid_pointer_request(prompt)))
+        || (mode == "zoom-hover" && (!cfg!(target_os = "linux") || !valid_zoom_request(prompt)))
         || (!matches!(
             mode,
-            "type" | "activate-accessibility" | "retry-click" | "atspi-observe"
+            "type" | "activate-accessibility" | "retry-click" | "atspi-observe" | "zoom-hover"
         ) && !prompt.is_empty())
     {
         return Err(Reason::IsolationUnavailable);
@@ -762,6 +780,8 @@ impl NativeClipboardSession<'_> {
             layout_policy_enabled()?,
             self.facts.input.clipboard_verified,
         )? {
+            #[cfg(target_os = "linux")]
+            let zoom_deadline = Instant::now() + Duration::from_secs(10);
             self.gui
                 .native_copy_guard(&mut self.facts, "layout-zoom-before")?;
             Gui::neutral_key("panel-zoom")?;
@@ -769,9 +789,24 @@ impl NativeClipboardSession<'_> {
                 .native_copy_guard(&mut self.facts, "layout-zoom-after")?;
             self.facts.input.clipboard_verified = false;
             self.gui.verify_native_copy_input(&mut self.facts, prompt)?;
+            #[cfg(target_os = "linux")]
+            let mut observation = self.panel_zoom_observation("pre-send")?;
+            #[cfg(not(target_os = "linux"))]
             let observation = self.panel_zoom_observation("pre-send")?;
+            #[cfg(target_os = "linux")]
+            let proof = if observation.proves_zoomed() {
+                Ok(true)
+            } else {
+                self.panel_zoom_tooltip(&mut observation, zoom_deadline)
+            };
+            #[cfg(not(target_os = "linux"))]
+            let proof: Result<bool, Reason> = Ok(observation.proves_zoomed());
             self.record_panel_zoom(&observation)?;
-            if !observation.proves_zoomed() {
+            #[cfg(target_os = "linux")]
+            if Instant::now() >= zoom_deadline {
+                return Err(Reason::BudgetExceeded);
+            }
+            if !proof? {
                 return Err(Reason::ActionUnsupported);
             }
         }
@@ -1150,6 +1185,135 @@ impl NativeClipboardSession<'_> {
         self.gui
             .native_copy_guard(&mut self.facts, "retry-revalidate")?;
         Ok(result)
+    }
+
+    #[cfg(target_os = "linux")]
+    fn panel_zoom_tooltip(
+        &mut self,
+        observation: &mut super::zed_zoom_probe::Observation,
+        deadline: Instant,
+    ) -> Result<bool, Reason> {
+        observation.record_tooltip("unavailable", 0, 0);
+        let app = self.gui.app.as_ref().ok_or(Reason::SelectorNotMatched)?;
+        let before: Vec<_> = app
+            .locator("switch")
+            .elements()
+            .map_err(map_error)?
+            .iter()
+            .map(|element| element.data().clone())
+            .collect();
+        if before.len() > 64 {
+            return Err(Reason::BudgetExceeded);
+        }
+        let empty = super::native_icon_probe::ZoomMatches {
+            maximize: Vec::new(),
+            minimize: Vec::new(),
+            maximize_matches: 0,
+            minimize_matches: 0,
+        };
+        let canonical = self.observe_atspi_geometry(&empty, &before, "pre-send")?;
+        let app = self.gui.app.as_ref().ok_or(Reason::SelectorNotMatched)?;
+        let after: Vec<_> = app
+            .locator("switch")
+            .elements()
+            .map_err(map_error)?
+            .iter()
+            .map(|element| element.data().clone())
+            .collect();
+        let candidates = super::zed_zoom_probe::active_candidates(&before, &after, &canonical)?;
+        let count = candidates.len();
+        let mut matched = 0;
+        for (index, bounds) in candidates {
+            self.clear_zoom_tooltip(deadline)?;
+            self.hover_zoom_candidate(&before[index], bounds, deadline)?;
+            if self.wait_zoom_tooltip(true, deadline)? {
+                // Recheck the retained source node and its ON state after the tooltip appears.
+                self.hover_zoom_candidate(&before[index], bounds, deadline)?;
+                matched += 1;
+            }
+            self.clear_zoom_tooltip(deadline)?;
+        }
+        if Instant::now() >= deadline {
+            return Err(Reason::BudgetExceeded);
+        }
+        let status = match matched {
+            0 => "missing",
+            1 => "proved",
+            _ => "ambiguous",
+        };
+        observation.record_tooltip(status, count, matched);
+        Ok(matched == 1)
+    }
+
+    #[cfg(target_os = "linux")]
+    fn hover_zoom_candidate(
+        &mut self,
+        button: &xa11y::ElementData,
+        bounds: xa11y::Rect,
+        deadline: Instant,
+    ) -> Result<(), Reason> {
+        if deadline.saturating_duration_since(Instant::now()) < Duration::from_secs(3) {
+            return Err(Reason::BudgetExceeded);
+        }
+        self.gui
+            .native_copy_guard(&mut self.facts, "retry-revalidate")?;
+        let (pid, window, point) = self.gui.visual.native_pointer_target(bounds)?;
+        if button.pid != Some(pid) {
+            return Err(Reason::FocusChanged);
+        }
+        let bus = button
+            .raw
+            .get("bus_name")
+            .and_then(serde_json::Value::as_str)
+            .ok_or(Reason::ActionUnsupported)?;
+        let path = button.stable_id.as_ref().ok_or(Reason::ActionUnsupported)?;
+        let request = serde_json::to_string(&serde_json::json!({"pid":pid,"window":window,"x":point.x,"y":point.y,"bus":bus,"path":path,"bounds":[bounds.x,bounds.y,bounds.width,bounds.height]})).map_err(|_| Reason::ActionUnsupported)?;
+        let executable =
+            std::env::var_os("FEASIBILITY_ZED_INPUT_DRIVER").ok_or(Reason::IsolationUnavailable)?;
+        neutral_input(Path::new(&executable), "zoom-hover", &request)?;
+        self.gui
+            .native_copy_guard(&mut self.facts, "retry-revalidate")?;
+        if Instant::now() >= deadline {
+            return Err(Reason::BudgetExceeded);
+        }
+        Ok(())
+    }
+
+    #[cfg(target_os = "linux")]
+    fn wait_zoom_tooltip(&mut self, present: bool, deadline: Instant) -> Result<bool, Reason> {
+        let until = deadline.min(Instant::now() + Duration::from_secs(1));
+        loop {
+            if Instant::now() >= deadline {
+                return Err(Reason::BudgetExceeded);
+            }
+            self.gui
+                .native_copy_guard(&mut self.facts, "retry-tooltip-query")?;
+            let app = self.gui.app.as_ref().ok_or(Reason::SelectorNotMatched)?;
+            let count = control_count(&app.locator("static_text[value=\"Disable Full Screen\"]"))?;
+            if count > 1 {
+                return Err(Reason::SelectorNotMatched);
+            }
+            if (count == 1) == present {
+                return Ok(true);
+            }
+            if Instant::now() >= until {
+                return Ok(false);
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    fn clear_zoom_tooltip(&mut self, deadline: Instant) -> Result<(), Reason> {
+        self.gui
+            .native_copy_guard(&mut self.facts, "retry-tooltip-reset")?;
+        self.gui.visual.neutral_pointer()?;
+        self.gui
+            .native_copy_guard(&mut self.facts, "retry-tooltip-clear")?;
+        if !self.wait_zoom_tooltip(false, deadline)? {
+            return Err(Reason::SelectorNotMatched);
+        }
+        Ok(())
     }
 
     #[cfg(target_os = "linux")]

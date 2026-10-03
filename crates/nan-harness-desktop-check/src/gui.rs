@@ -306,9 +306,34 @@ impl Gui {
         Self::ensure_absent(kind)
     }
 
+    #[cfg(windows)]
+    pub(crate) fn capture_process_correlation(
+        &self,
+        launcher: u32,
+        deadline: Instant,
+    ) -> Option<crate::process::windows_correlation::Snapshot> {
+        if self.kind != DesktopHarnessKind::Claude
+            || std::env::var("GITHUB_ACTIONS").as_deref() != Ok("true")
+            || std::env::var("RUNNER_ENVIRONMENT").as_deref() != Ok("github-hosted")
+            || std::env::var("RUNNER_OS").as_deref() != Ok("Windows")
+            || std::env::var("NANH_DESKTOP_QUALIFICATION_MODE").as_deref() != Ok("startup-baseline")
+            || std::env::var("NANH_CLAUDE_WINDOWS_PROFILE_POLICY").as_deref() != Ok("private-env")
+        {
+            return None;
+        }
+        let request = zeroize::Zeroizing::new(format!("{} {launcher}\n", std::process::id()));
+        let wire = self
+            .visual
+            .absence_native()
+            .process_correlation_until(true, request.as_bytes(), deadline)
+            .ok()?;
+        crate::process::windows_correlation::Snapshot::parse(wire, launcher)
+    }
+
     pub(crate) fn ensure_absent_after_stop(
         kind: DesktopHarnessKind,
         gui: Option<&Self>,
+        #[cfg(windows)] correlation: Option<crate::process::windows_correlation::Snapshot>,
     ) -> Result<(), AbsenceFailure> {
         #[cfg(windows)]
         if kind == DesktopHarnessKind::Claude {
@@ -326,6 +351,19 @@ impl Gui {
             let native = gui
                 .map(|held| held.visual.absence_native())
                 .or(prepared.as_ref());
+            let wire = correlation.and_then(|snapshot| {
+                native?
+                    .process_correlation_until(
+                        false,
+                        snapshot.request().as_bytes(),
+                        deadline.min(Instant::now() + Duration::from_secs(1)),
+                    )
+                    .ok()
+            });
+            crate::process::windows_correlation::record(
+                wire.as_deref().map(String::as_str),
+                Instant::now() >= deadline,
+            );
             let mut observed = false;
             let mut settlement = process_absence::ProcessSettlement::default();
             let outcome = settle_absence(

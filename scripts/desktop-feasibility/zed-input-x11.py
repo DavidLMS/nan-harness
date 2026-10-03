@@ -260,7 +260,15 @@ class RetryHitFailure(ValueError):
         self.category = category
 
 
-def normalized_retry_point(request, active, geometry, facts=None, return_bounds=False, hit_point=None):
+def enabled_toggle_on(states):
+    words = tuple(states)
+    if len(words) != 2 or any(not 0 <= int(word) <= 4294967295 for word in words):
+        return False
+    bits = int(words[0]) | (int(words[1]) << 32)
+    return all(bits & (1 << bit) for bit in (8, 20, 25, 30)) and not bits & (1 << 6)
+
+
+def normalized_retry_point(request, active, geometry, facts=None, return_bounds=False, hit_point=None, toggle=False):
     import dbus
     bus = None
     try:
@@ -276,8 +284,12 @@ def normalized_retry_point(request, active, geometry, facts=None, return_bounds=
         role = component.GetRole(dbus_interface='org.a11y.atspi.Accessible', timeout=0.5)
         name = component.Get('org.a11y.atspi.Accessible', 'Name',
             dbus_interface='org.freedesktop.DBus.Properties', timeout=0.5)
-        if int(role) != 43 or str(name) != 'Retry':
+        if int(role) != (62 if toggle else 43) or (not toggle and str(name) != 'Retry'):
             raise ValueError('retry control changed')
+        if toggle:
+            states = component.GetState(dbus_interface='org.a11y.atspi.Accessible', timeout=0.5)
+            if not enabled_toggle_on(states):
+                raise ValueError('toggle state changed')
         screen = tuple(int(value) for value in component.GetExtents(dbus.UInt32(0),
             dbus_interface='org.a11y.atspi.Component', timeout=0.5))
         window = tuple(int(value) for value in component.GetExtents(dbus.UInt32(1),
@@ -611,6 +623,57 @@ def retry_click(payload):
         publish_observation(facts)
 
 
+def zoom_hover(payload):
+    """Read-only retained ToggleButton hit proof surrounding one ordinary hover."""
+    try:
+        request = json.loads(payload)
+        if (type(request) is not dict or set(request) != {'pid', 'window', 'x', 'y', 'bus', 'path', 'bounds'}
+                or any(type(request[key]) is not int for key in ('pid', 'window', 'x', 'y'))
+                or not 1 < request['pid'] <= 2147483647 or not 0 < request['window'] <= 4294967295
+                or not isinstance(request['bus'], str) or not re.fullmatch(r':[0-9]+\.[0-9]+', request['bus'])
+                or not isinstance(request['path'], str) or not re.fullmatch(r'/org/a11y/atspi/accessible/[A-Za-z0-9_/]+', request['path'])
+                or type(request['bounds']) is not list or len(request['bounds']) != 4
+                or any(type(value) is not int or not -2147483648 <= value <= 2147483647 for value in request['bounds'])
+                or any(value <= 0 for value in request['bounds'][2:])
+                or any(not -32768 <= request[key] <= 32767 for key in ('x', 'y'))):
+            return 2
+        deadline = time.monotonic() + 3
+        point = (request['x'], request['y'])
+        def owned_snapshot():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise ValueError('hover deadline')
+            active_bytes = subprocess.check_output(['/usr/bin/xdotool', 'getactivewindow'],
+                timeout=remaining, stderr=subprocess.DEVNULL)
+            if len(active_bytes) > 32 or not active_bytes.strip().isdigit():
+                raise ValueError('invalid active window')
+            active = int(active_bytes)
+            if not owned_frame(active, request['window']):
+                raise ValueError('window ownership changed')
+            pid = subprocess.check_output(['/usr/bin/xdotool', 'getwindowpid', str(active)],
+                timeout=max(0.001, deadline - time.monotonic()), stderr=subprocess.DEVNULL)
+            if len(pid) > 32 or not pid.strip().isdigit() or int(pid) != request['pid']:
+                raise ValueError('process ownership changed')
+            snapshot = independent_client_snapshot(active)
+            geometry = (*snapshot[0], *snapshot[2])
+            if (normalized_retry_point(request, active, geometry, return_bounds=True, hit_point=point, toggle=True)
+                    != tuple(request['bounds']) or point != (request['bounds'][0] + request['bounds'][2] // 2,
+                                                            request['bounds'][1] + request['bounds'][3] // 2)):
+                raise ValueError('toggle geometry changed')
+            if time.monotonic() >= deadline:
+                raise ValueError('hover deadline')
+            return active, geometry
+        before = owned_snapshot()
+        subprocess.run(['/usr/bin/xdotool', 'mousemove', '--sync', str(point[0]), str(point[1])],
+            check=True, timeout=max(0.001, deadline - time.monotonic()),
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if owned_snapshot() != before:
+            raise ValueError('hover identity changed')
+        return 0
+    except Exception:
+        return 3
+
+
 def main():
     if len(sys.argv) != 2:
         return 2
@@ -621,6 +684,8 @@ def main():
     if sys.argv[1] == 'atspi-observe':
         import runpy
         return runpy.run_path(str(Path(__file__).with_name('zed-atspi-observe.py')))['run'](payload)
+    if sys.argv[1] == 'zoom-hover':
+        return zoom_hover(payload)
     if sys.argv[1] == 'retry-click':
         return retry_click(payload)
     if sys.argv[1] not in KEYS or payload:
