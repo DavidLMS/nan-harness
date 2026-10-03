@@ -17,13 +17,13 @@
 int process_presence(bool) { return 5; }
 int windows_claude_storage() { return 5; }
 #if !defined(__APPLE__)
-int claude_chat_press() { return 5; }
 int fit_window(const std::string&) { return 5; }
 #endif
 int window_state(const std::string&) { return 5; }
 #endif
 
 #if !defined(__APPLE__)
+int claude_chat_press() { return 5; }
 int activate_window(const std::string&) { return 5; }
 int observe_claude() { return 5; }
 int claude_known_folders() { return 5; }
