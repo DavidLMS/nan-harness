@@ -38,3 +38,22 @@ UiaAncestry classify_uia_ancestry(const std::vector<CorrelationEntry>& rows,
     }
     return UiaAncestry::Unavailable;
 }
+
+// Only identities admitted through the complete ancestry proof may reach this
+// final check. The caller queries retained HANDLEs, never reopens these PIDs.
+struct UiaRetainedIdentity { std::uint32_t pid; std::uint64_t creation; };
+template<class Query>
+bool uia_collection_identity(std::uint32_t root, std::uint64_t root_time,
+    const std::vector<UiaRetainedIdentity>& children, Query query) {
+    if (!root || !root_time || children.size() > 64) return false;
+    std::uint64_t actual = 0;
+    if (!query(root, actual) || actual != root_time) return false;
+    std::vector<std::uint32_t> seen;
+    for (const auto& child : children) {
+        if (!child.pid || child.pid == root || !child.creation
+            || std::find(seen.begin(), seen.end(), child.pid) != seen.end()) return false;
+        seen.push_back(child.pid);
+        if (!query(child.pid, actual) || actual != child.creation) return false;
+    }
+    return query(root, actual) && actual == root_time;
+}

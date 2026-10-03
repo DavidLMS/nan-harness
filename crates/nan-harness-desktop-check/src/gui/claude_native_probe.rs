@@ -82,6 +82,77 @@ fn linux_mode_counts(mut query: impl FnMut(&str) -> Option<usize>) -> serde_json
     serde_json::json!({"status":status,"sourceCount":values})
 }
 
+const MODE_GROUP: &str =
+    "group[visible=\"true\"][name=\"Mode\"], group[visible=\"true\"][description=\"Mode\"]";
+
+fn mode_shape_queries() -> Vec<(String, String)> {
+    let mut queries = Vec::new();
+    for (key, role) in [
+        ("button", "button"),
+        ("radio", "radio_button"),
+        ("switch", "switch"),
+        ("staticText", "static_text"),
+    ] {
+        queries.push((format!("{key}All"), role.to_owned()));
+        queries.push((format!("{key}Visible"), format!("{role}[visible=\"true\"]")));
+    }
+    for (key, label) in [("chat", "Chat"), ("cowork", "Cowork")] {
+        for (suffix, attention) in [
+            ("All", ""),
+            ("AwaitingAll", ", awaiting your input"),
+            ("UnreadAll", ", unread activity"),
+            ("WorkingAll", ", working"),
+        ] {
+            let label = format!("{label}{attention}");
+            let selector = ["button", "radio_button", "switch", "static_text"]
+                .into_iter()
+                .flat_map(|role| ["name", "description"].map(move |name| (role, name)))
+                .map(|(role, name)| format!("{role}[{name}=\"{label}\"]"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            queries.push((format!("{key}{suffix}"), selector));
+        }
+    }
+    queries
+}
+
+fn mode_shape_counts(
+    mut query: impl FnMut(&str) -> Option<usize>,
+    mut identity: impl FnMut() -> bool,
+) -> serde_json::Value {
+    let mut counts = serde_json::Map::new();
+    let mut valid = identity();
+    for (key, selector) in mode_shape_queries() {
+        let count = if valid {
+            query(&selector).filter(|count| *count <= 4096)
+        } else {
+            None
+        };
+        valid &= count.is_some();
+        counts.insert(key, count.into());
+    }
+    valid &= identity();
+    if !valid {
+        for value in counts.values_mut() {
+            *value = serde_json::Value::Null;
+        }
+    }
+    serde_json::json!({"status":if valid {"observed"} else {"unavailable"},"counts":counts})
+}
+
+fn same_mode_identity(held: &xa11y::Element, fresh: &xa11y::Element, pid: Option<u32>) -> bool {
+    let before = held.data();
+    let after = fresh.data();
+    pid.is_some()
+        && before.pid == pid
+        && after.pid == pid
+        && before.stable_id.as_ref().is_some_and(|id| !id.is_empty())
+        && before.stable_id == after.stable_id
+        && before.bounds.is_some()
+        && before.bounds == after.bounds
+        && std::sync::Arc::ptr_eq(held.provider(), fresh.provider())
+}
+
 fn counts(mut query: impl FnMut(&str) -> Option<usize>) -> serde_json::Value {
     let mut count = |selector: &str| query(selector).filter(|value| *value <= 4096);
     let labelled = |role: &str, label: &str, editable: bool| {
@@ -197,6 +268,39 @@ impl Gui {
         }
     }
 
+    fn linux_mode_shape(&self) -> serde_json::Value {
+        let held = self
+            .app
+            .as_ref()
+            .and_then(|app| app.locator(MODE_GROUP).elements().ok())
+            .filter(|elements| elements.len() == 1)
+            .and_then(|mut elements| elements.pop());
+        let Some(held) = held else {
+            return mode_shape_counts(|_| None, || false);
+        };
+        let identity = || {
+            self.app.as_ref().is_some_and(|app| {
+                app.locator(MODE_GROUP)
+                    .elements()
+                    .ok()
+                    .is_some_and(|elements| {
+                        elements.len() == 1 && same_mode_identity(&held, &elements[0], app.pid)
+                    })
+            })
+        };
+        let query = |selector: &str| {
+            xa11y::Locator::new(
+                std::sync::Arc::clone(held.provider()),
+                Some(held.data().clone()),
+                selector,
+            )
+            .elements()
+            .ok()
+            .map(|elements| elements.len())
+        };
+        mode_shape_counts(query, identity)
+    }
+
     pub(super) fn claude_composer_inventory(&self) -> Option<serde_json::Value> {
         let mac = cfg!(target_os = "macos")
             && std::env::var("RUNNER_OS").as_deref() == Ok("macOS")
@@ -228,6 +332,7 @@ impl Gui {
         let mut inventory = counts(query);
         if linux {
             inventory["linuxModeRoles"] = linux_mode_counts(query);
+            inventory["linuxModeRoles"]["roleShape"] = self.linux_mode_shape();
         }
         Some(inventory)
     }
@@ -249,7 +354,8 @@ pub(super) fn record(directory: &Path, owner: u32, source_count: &serde_json::Va
                 "modeSourceSha256":"62ffbc1b8a3e4440ae77a33be142afd1914796f945bcd75d58cfe73679925f61",
                 "segmentedSourceSha256":"1fe986422649ab736613079340a52157efd7791b96e0b9c00c46681731b7a4ea",
                 "radioSourceSha256":"9c6ff87b4eaf0e9ad25e6329536f4337586b015e0f868389e72480c1769920a9",
-                "status":roles["status"],"sourceCount":roles["sourceCount"]});
+                "status":roles["status"],"sourceCount":roles["sourceCount"],
+                "roleShape":roles["roleShape"]});
         if let Ok(mut file) =
             open_private_new(&directory.join(format!("claude-linux-mode-roles-{owner}.json")))
         {
@@ -389,6 +495,55 @@ mod tests {
         assert_eq!(result["modeGroupVisible"], 2);
         assert!(result["classicEditable"].is_null());
     }
+
+    #[test]
+    fn mode_shape_separates_labels_visibility_and_rejects_replacement() {
+        let mut proofs = 0;
+        let observed = super::mode_shape_counts(
+            |selector| {
+                Some(usize::from(
+                    selector == "button" || selector.contains("name=\"Chat\""),
+                ))
+            },
+            || {
+                proofs += 1;
+                true
+            },
+        );
+        assert_eq!(proofs, 2);
+        assert_eq!(observed["counts"]["buttonAll"], 1);
+        assert_eq!(observed["counts"]["buttonVisible"], 0);
+        assert_eq!(observed["counts"]["chatAll"], 1);
+        assert_eq!(observed["status"], "observed");
+        let mut proofs = 0;
+        let replaced = super::mode_shape_counts(
+            |_| Some(1),
+            || {
+                proofs += 1;
+                proofs == 1
+            },
+        );
+        assert_eq!(replaced["status"], "unavailable");
+        assert!(
+            replaced["counts"]
+                .as_object()
+                .unwrap()
+                .values()
+                .all(serde_json::Value::is_null)
+        );
+        for bad in [None, Some(4097)] {
+            let failed = super::mode_shape_counts(|_| bad, || true);
+            assert_eq!(failed["status"], "unavailable");
+            assert!(
+                failed["counts"]
+                    .as_object()
+                    .unwrap()
+                    .values()
+                    .all(serde_json::Value::is_null)
+            );
+        }
+    }
+
     #[test]
     fn linux_mode_distinguishes_radios_and_exact_attention_labels() {
         let counts = super::linux_mode_counts(|selector| {

@@ -15,6 +15,7 @@
 #include <chrono>
 #include <cstdint>
 #include <iostream>
+#include <memory>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -47,6 +48,23 @@ struct Collection {
     const char* stage = "query";
     ProcessHandle root_process;
     std::uint64_t root_creation{};
+    struct RetainedChild {
+        UiaRetainedIdentity identity;
+        std::unique_ptr<ProcessHandle> process;
+    };
+    std::vector<RetainedChild> retained_children;
+    bool retained_identity() const {
+        std::vector<UiaRetainedIdentity> identities;
+        for (const auto& child : retained_children) identities.push_back(child.identity);
+        const auto query = [&](std::uint32_t pid, std::uint64_t& time) {
+            if (!within()) return false;
+            if (pid == request.pid) return live_creation(root_process.value, time) && within();
+            for (const auto& child : retained_children)
+                if (child.identity.pid == pid) return live_creation(child.process->value, time) && within();
+            return false;
+        };
+        return uia_collection_identity(request.pid, root_creation, identities, query) && within();
+    }
     bool within() const { return Clock::now() < deadline; }
     static bool contains(const RECT& a, const RECT& b) {
         return b.right>b.left && b.bottom>b.top && a.left<=b.left && a.top<=b.top && a.right>=b.right && a.bottom>=b.bottom;
@@ -72,6 +90,7 @@ struct Collection {
             if(!GetWindowThreadProcessId(above,&pid) || !GetWindowRect(above,&front)) {stage="query";return false;}
             if(pid==request.pid || IntersectRect(&intersection,&front,&bounds)) {stage="occlusion";return false;}
         }
+        if (!retained_identity()) {stage="descendant-correlation-unavailable";return false;}
         return within();
     }
     bool process_snapshot(std::vector<CorrelationEntry>& rows) const {
@@ -88,27 +107,41 @@ struct Collection {
         } while (Process32NextW(snapshot.value, &row));
         return GetLastError() == ERROR_NO_MORE_FILES && root_present && within();
     }
-    const char* mismatched_descendant(DWORD child) {
+    const char* retain_descendant(DWORD child) {
         constexpr auto unavailable = "descendant-correlation-unavailable";
         std::uint64_t before = 0;
         if (!within() || !live_creation(root_process.value, before) || before != root_creation)
             return unavailable;
+        for (const auto& prior : retained_children) {
+            if (prior.identity.pid == child) {
+                std::uint64_t current = 0;
+                return live_creation(prior.process->value, current)
+                    && current == prior.identity.creation && guard() ? nullptr : unavailable;
+            }
+        }
+        if (retained_children.size() >= 64) {stage="limit";return "limit";}
+        auto process = std::make_unique<ProcessHandle>(
+            OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE, child));
+        std::uint64_t child_creation = 0;
+        if (!live_creation(process->value, child_creation) || !within()) return unavailable;
         std::vector<CorrelationEntry> rows, confirm;
         if (!process_snapshot(rows) || !process_snapshot(confirm)) return unavailable;
         const auto query = [&](std::uint32_t pid, std::uint64_t& time) {
             if (!within()) return false;
-            ProcessHandle process(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE, pid));
-            return live_creation(process.value, time) && within();
+            if (pid == child) return live_creation(process->value, time) && within();
+            if (pid == request.pid) return live_creation(root_process.value, time) && within();
+            ProcessHandle parent(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE, pid));
+            return live_creation(parent.value, time) && within();
         };
-        std::uint64_t child_creation = 0;
-        if (!query(child, child_creation)) return unavailable;
         const auto relation = classify_uia_ancestry(rows, confirm, child, request.pid,
             root_creation, child_creation, query);
         std::uint64_t after = 0;
         if (!within() || !live_creation(root_process.value, after) || after != root_creation
             || !guard()) return unavailable;
         switch (relation) {
-            case UiaAncestry::Owned: return "owned-descendant-process";
+            case UiaAncestry::Owned:
+                retained_children.push_back({{child, child_creation}, std::move(process)});
+                return retained_identity() ? nullptr : unavailable;
             case UiaAncestry::Foreign: return "foreign-descendant-process";
             case UiaAncestry::Unavailable: return unavailable;
         }
@@ -127,9 +160,9 @@ struct Collection {
             stage=depth==0?"root-process-query":"descendant-process-query";return false;
         }
         if(const char* rejected=uia_process_identity_failure(pid,request.pid,depth==0)) {
-            stage=depth>0 && pid>0 && static_cast<DWORD>(pid)!=request.pid
-                ? mismatched_descendant(static_cast<DWORD>(pid)) : rejected;
-            return false;
+            const char* failure = depth>0 && pid>0 && static_cast<DWORD>(pid)!=request.pid
+                ? retain_descendant(static_cast<DWORD>(pid)) : rejected;
+            if (failure) {stage=failure;return false;}
         }
         if(FAILED(element->get_CurrentControlType(&type)) || FAILED(element->get_CurrentName(&name))) return false;
         std::wstring text;

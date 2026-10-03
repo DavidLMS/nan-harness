@@ -44,6 +44,38 @@ def perform_once(snapshot, invoke, deadline, facts, clock=time.monotonic, post_g
     return post_guard() and clock() < deadline
 
 
+def observe_retained_target(states_query, identity_query, sealed, guard, deadline, clock=time.monotonic):
+    """Observe one retained node; a transport error never means Defunct."""
+    def guarded():
+        try:
+            return clock() < deadline and guard() and clock() < deadline
+        except Exception:
+            return False
+    if not guarded():
+        return 'unavailable', False
+    state = 'unavailable'
+    try:
+        raw_states = states_query()
+        states = tuple(int(value) for value in raw_states) if len(raw_states) == 2 else ()
+        if len(states) == 2 and all(0 <= value <= 4294967295 for value in states):
+            if states[0] & (1 << 6):
+                state = 'defunct'
+            elif clock() < deadline:
+                role, name, extents = identity_query()
+                valid = (type(role) is int and 0 <= role <= 256 and type(name) is str
+                         and len(name) <= 512 and len(extents) == 2
+                         and all(len(rect) == 4 and all(type(value) is int for value in rect)
+                                 and rect[2] > 0 and rect[3] > 0 for rect in extents))
+                if valid:
+                    state = ('unchanged' if (role, name, extents, states) == sealed else 'changed')
+    except Exception:
+        # UnknownObject also covers UnsupportedInterface in pinned AccessKit.
+        state = 'unavailable'
+    if not guarded():
+        return 'unavailable', False
+    return state, True
+
+
 def close_transport(bus, publish, facts):
     closed = True
     try:
@@ -136,7 +168,21 @@ def run(payload):
             return (int(owner) == request['pid'] and result == str(held[0][0]).encode()
                     and driver['owned_frame'](held[0][0], request['window'])
                     and driver['independent_client_snapshot'](held[0][0]) == held[0][1])
-        return 0 if perform_once(snapshot, invoke, deadline, facts, post_guard=post_guard) else 3
+        if not perform_once(snapshot, invoke, deadline, facts, post_guard=post_guard):
+            return 3
+        def target_states():
+            return node.GetState(dbus_interface='org.a11y.atspi.Accessible', timeout=timeout())
+        def target_identity():
+            role = int(node.GetRole(dbus_interface='org.a11y.atspi.Accessible', timeout=timeout()))
+            name = str(node.Get('org.a11y.atspi.Accessible', 'Name',
+                dbus_interface='org.freedesktop.DBus.Properties', timeout=timeout()))
+            extents = tuple(tuple(int(value) for value in node.GetExtents(dbus.UInt32(kind),
+                dbus_interface='org.a11y.atspi.Component', timeout=timeout())) for kind in (0, 1))
+            return role, name, extents
+        state, guarded = observe_retained_target(target_states, target_identity,
+            (43, 'Retry', held[0][2], held[0][3]), post_guard, deadline)
+        facts['postTargetState'] = state
+        return 0 if guarded else 3
     except (OSError, ValueError, TimeoutError, subprocess.SubprocessError):
         return 3
     except Exception:

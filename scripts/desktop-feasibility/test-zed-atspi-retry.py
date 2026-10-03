@@ -74,5 +74,43 @@ class NativeActionTests(unittest.TestCase):
         self.assertFalse(module.valid_request(dict(request, secret='private')))
         self.assertFalse(module.valid_request(dict(request, pid=True)))
 
+class RetainedTargetTests(unittest.TestCase):
+    def test_one_retained_observation_classifies_without_replaying(self):
+        sealed = (43, 'Retry', ((1, 2, 3, 4), (1, 2, 3, 4)), (256, 0))
+        for expected, states, identity in (
+                ('unchanged', (256, 0), sealed[:3]),
+                ('changed', (0, 0), sealed[:3]),
+                ('changed', (256, 0), (43, 'Retry', ((2, 2, 3, 4), (2, 2, 3, 4)))),
+                ('defunct', (64, 0), None)):
+            queries = []
+            def state_query():
+                queries.append('state')
+                return states
+            def identity_query():
+                queries.append('identity')
+                return identity
+            self.assertEqual(module.observe_retained_target(state_query, identity_query,
+                sealed, lambda: True, 4, lambda: 0), (expected, True))
+            self.assertEqual(queries, ['state'] if expected == 'defunct' else ['state', 'identity'])
+
+    def test_transport_failure_is_unavailable_and_elapsed_deadline_never_queries(self):
+        queries = []
+        def failed():
+            queries.append('state')
+            raise RuntimeError('org.freedesktop.DBus.Error.UnknownObject PRIVATE')
+        self.assertEqual(module.observe_retained_target(failed, lambda: None,
+            (), lambda: True, 4, lambda: 0), ('unavailable', True))
+        self.assertEqual(module.observe_retained_target(failed, lambda: None,
+            (), lambda: True, 4, lambda: 4), ('unavailable', False))
+        self.assertEqual(queries, ['state'])
+        def lost_guard():
+            raise TimeoutError('private guard detail')
+        self.assertEqual(module.observe_retained_target(failed, lambda: None,
+            (), lost_guard, 4, lambda: 0), ('unavailable', False))
+        self.assertEqual(queries, ['state'])
+        guards = iter([True, False])
+        self.assertEqual(module.observe_retained_target(lambda: (64, 0), lambda: None,
+            (), lambda: next(guards), 4, lambda: 0), ('unavailable', False))
+
 if __name__ == '__main__':
     unittest.main()

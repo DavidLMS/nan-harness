@@ -1152,6 +1152,25 @@ class QualificationTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'hermes-desktop')
 
+    def test_retained_zed_post_target_state_is_advisory_and_closed(self):
+        facts = dict(schemaVersion=1, mechanism='zed-atspi-retry', diagnosticsOnly=True,
+                     method='atspi-click', stage='postflight', actionAttempted=True, forwarded=True)
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'facts.json'
+            for state in ('unchanged', 'defunct', 'changed', 'unavailable'):
+                value = {**facts, 'postTargetState': state}
+                path.write_text(json.dumps(value))
+                self.assertEqual(q.semantic_observations(root, 'zed-desktop'), [value])
+            path.write_text(json.dumps(facts))
+            self.assertEqual(q.semantic_observations(root, 'zed-desktop'), [facts])
+            for changed in ({'postTargetState': None}, {'postTargetState': 'PRIVATE'},
+                            {'postTargetState': 'defunct', 'stage': 'action'},
+                            {'postTargetState': 'unavailable', 'forwarded': False},
+                            {'postTargetState': 'changed', 'detail': 'PRIVATE'}):
+                path.write_text(json.dumps({**facts, **changed}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'zed-desktop')
+
     def test_atspi_geometry_diagnostics_reject_private_or_inconsistent_counts(self):
         names = 'sampledButtons identityRejected stateRejected stabilityRejected containmentRejected offsetExpected offsetMissing offsetInconsistent toggleOn toggleOff toggleUnknown'.split()
         value = dict(schemaVersion=1, mechanism='zed-atspi-geometry', diagnosticsOnly=True,
@@ -2635,6 +2654,25 @@ class ClaudeLinuxModeRolesTests(unittest.TestCase):
                            {'sourceCount': {**value['sourceCount'], 'chatRadioVisible': True}},
                            {'sourceCount': {**value['sourceCount'], 'chatRadioVisible': 4097}}):
                 path.write_text(json.dumps({**value, **change}))
+                with self.assertRaises(ValueError): q.semantic_observations(root, 'claude-desktop')
+            shape_keys = 'buttonAll buttonVisible radioAll radioVisible switchAll switchVisible staticTextAll staticTextVisible chatAll chatAwaitingAll chatUnreadAll chatWorkingAll coworkAll coworkAwaitingAll coworkUnreadAll coworkWorkingAll'.split()
+            shape_counts = dict.fromkeys(shape_keys, 0)
+            shape_counts.update(buttonAll=1, chatAll=1)
+            shape = dict(status='observed', counts=shape_counts)
+            path.write_text(json.dumps({**value, 'roleShape': shape}))
+            observed = q.semantic_observations(root, 'claude-desktop')[0]
+            self.assertEqual(observed['roleShape']['counts']['chatAll'], 1)
+            self.assertEqual(observed['roleShape']['counts']['buttonVisible'], 0)
+            unavailable = dict(status='unavailable', counts=dict.fromkeys(shape_keys))
+            path.write_text(json.dumps({**value, 'roleShape': unavailable}))
+            self.assertEqual(q.semantic_observations(root, 'claude-desktop')[0]['roleShape'], unavailable)
+            for bad in ({**shape, 'name': 'PRIVATE'}, {**shape, 'status': []},
+                        {**shape, 'counts': {**shape_counts, 'buttonAll': True}},
+                        {**shape, 'counts': {**shape_counts, 'buttonAll': 4097}},
+                        {**shape, 'counts': {**shape_counts, 'buttonVisible': 2}},
+                        {**shape, 'counts': {**shape_counts, 'raw': 1}},
+                        {**unavailable, 'counts': shape_counts}):
+                path.write_text(json.dumps({**value, 'roleShape': bad}))
                 with self.assertRaises(ValueError): q.semantic_observations(root, 'claude-desktop')
             nulls = dict.fromkeys(value['sourceCount'])
             for status, group in [('group-unavailable', 0), ('group-ambiguous', 2),

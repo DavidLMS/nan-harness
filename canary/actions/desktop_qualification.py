@@ -924,6 +924,8 @@ def semantic_observations(directory, app):
                           radioSourceSha256='9c6ff87b4eaf0e9ad25e6329536f4337586b015e0f868389e72480c1769920a9')
             fields = set(hashes) | set('schemaVersion mechanism diagnosticsOnly sourceVersion status sourceCount'.split())
             keys = set('modeGroupVisible chatButtonVisible chatButtonEnabled chatRadioVisible chatRadioEnabled coworkButtonVisible coworkButtonEnabled coworkRadioVisible coworkRadioEnabled'.split())
+            if 'roleShape' in value:
+                fields.add('roleShape')
             counts = value.get('sourceCount')
             if (app != 'claude-desktop' or set(value) != fields or value['diagnosticsOnly'] is not True
                     or value['sourceVersion'] != '2.9939.4' or any(value[key] != digest for key, digest in hashes.items())
@@ -940,6 +942,19 @@ def semantic_observations(directory, app):
                     or (status == 'group-ambiguous' and (group is None or group < 2))
                     or (status == 'query-failed' and group not in {None, 1})):
                 raise ValueError('inconsistent passive Linux Claude mode roles')
+            if 'roleShape' in value:
+                shape = value['roleShape']
+                shape_keys = set('buttonAll buttonVisible radioAll radioVisible switchAll switchVisible staticTextAll staticTextVisible chatAll chatAwaitingAll chatUnreadAll chatWorkingAll coworkAll coworkAwaitingAll coworkUnreadAll coworkWorkingAll'.split())
+                if (type(shape) is not dict or set(shape) != {'status', 'counts'}
+                        or type(shape['status']) is not str or shape['status'] not in {'observed', 'unavailable'}
+                        or type(shape['counts']) is not dict or set(shape['counts']) != shape_keys):
+                    raise ValueError('invalid Linux Mode shape')
+                shape_counts = shape['counts']
+                if ((shape['status'] == 'observed' and any(type(count) is not int or not 0 <= count <= 4096 for count in shape_counts.values()))
+                        or (shape['status'] == 'unavailable' and any(count is not None for count in shape_counts.values()))
+                        or (shape['status'] == 'observed' and any(shape_counts[key + 'Visible'] > shape_counts[key + 'All'] for key in ('button', 'radio', 'switch', 'staticText')))):
+                    raise ValueError('inconsistent Linux Mode shape')
+                record['roleShape'] = dict(status=shape['status'], counts=dict(shape_counts))
             record.update(diagnosticsOnly=True, sourceVersion=value['sourceVersion'], status=status,
                           sourceCount=dict(counts), **hashes)
         elif mechanism == 'claude-native-composer':
@@ -1160,7 +1175,7 @@ def semantic_observations(directory, app):
                 record['inputDelivery'] = dict(delivery)
         elif mechanism == 'zed-atspi-retry':
             fields = set('schemaVersion mechanism diagnosticsOnly method stage actionAttempted forwarded'.split())
-            if (set(value) != fields or app != 'zed-desktop' or value['diagnosticsOnly'] is not True
+            if (set(value) - {'postTargetState'} != fields or app != 'zed-desktop' or value['diagnosticsOnly'] is not True
                     or value['method'] != 'atspi-click'
                     or type(value['stage']) is not str
                     or value['stage'] not in {'policy', 'request', 'preflight', 'action', 'forwarded', 'postflight'}
@@ -1171,6 +1186,12 @@ def semantic_observations(directory, app):
                 raise ValueError('invalid Zed native action receipt')
             record.update(diagnosticsOnly=True, method=value['method'], stage=value['stage'],
                           actionAttempted=value['actionAttempted'], forwarded=value['forwarded'])
+            if 'postTargetState' in value:
+                if (value['stage'] != 'postflight' or not value['forwarded']
+                        or type(value['postTargetState']) is not str
+                        or value['postTargetState'] not in {'unchanged', 'defunct', 'changed', 'unavailable'}):
+                    raise ValueError('invalid retained Zed target observation')
+                record['postTargetState'] = value['postTargetState']
         elif mechanism == 'zed-pointer-transport':
             if set(value) != set('schemaVersion mechanism diagnosticsOnly stage'.split()) or app != 'zed-desktop' or value['diagnosticsOnly'] is not True:
                 raise ValueError('invalid Zed pointer transport identity')

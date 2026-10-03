@@ -302,27 +302,72 @@ static bool focused_identity(AXUIElementRef focused, const Node& control, pid_t 
     return focused && CFEqual(focused, control.element) && pid == expected_pid
         && role == control.role && CGRectEqualToRect(bounds, control.bounds);
 }
-static bool focused_composer(const Request& request, const Node& control) {
-    if (!owned(request)) return false;
+enum class ComposerFocus { Focused, PendingIdentity, Rejected };
+struct FocusIdentity {
+    AXUIElementRef element = nullptr;
+    pid_t pid = 0;
+    std::string role;
+    CGRect bounds = CGRectZero;
+};
+static ComposerFocus composer_focus_identity(const FocusIdentity& focused, const Node& control,
+                                             const Request& request, bool target_unchanged,
+                                             bool query_failed) {
+    const auto bounds = focused.bounds;
+    if (query_failed || !target_unchanged || !focused.element || focused.pid != static_cast<pid_t>(request.pid)
+        || focused.role.empty() || !std::isfinite(bounds.origin.x) || !std::isfinite(bounds.origin.y)
+        || !std::isfinite(bounds.size.width) || !std::isfinite(bounds.size.height)
+        || bounds.size.width <= 0 || bounds.size.height <= 0 || !CGRectContainsRect(request.bounds, bounds))
+        return ComposerFocus::Rejected;
+    if (CFEqual(focused.element, control.element))
+        return focused_identity(focused.element, control, focused.pid, request.pid, focused.role, bounds)
+            ? ComposerFocus::Focused : ComposerFocus::Rejected;
+    return ComposerFocus::PendingIdentity;
+}
+static ComposerFocus focused_composer(const Request& request, const Node& control) {
+    if (!owned(request) || ax_query_failed) return ComposerFocus::Rejected;
     AXUIElementRef app = AXUIElementCreateApplication(request.pid);
-    if (!app) return false;
+    if (!app) return ComposerFocus::Rejected;
     if (AXUIElementSetMessagingTimeout(app, .1F) != kAXErrorSuccess) {
         CFRelease(app);
-        return false;
+        return ComposerFocus::Rejected;
     }
-    auto value = attribute(app, kAXFocusedUIElementAttribute);
+    CFTypeRef value = nullptr;
+    const auto error = AXUIElementCopyAttributeValue(app, kAXFocusedUIElementAttribute, &value);
     CFRelease(app);
-    bool matches = false;
-    if (value && CFGetTypeID(value) == AXUIElementGetTypeID()) {
-        auto focused = static_cast<AXUIElementRef>(value);
-        pid_t pid = 0;
-        CGRect bounds;
-        matches = AXUIElementGetPid(focused, &pid) == kAXErrorSuccess && rectangle(focused, bounds)
-            && focused_identity(focused, control, pid, request.pid,
-                                string_attribute(focused, kAXRoleAttribute), bounds);
+    ComposerFocus state = ComposerFocus::Rejected;
+    if (error == kAXErrorSuccess && value && CFGetTypeID(value) == AXUIElementGetTypeID()) {
+        FocusIdentity focused;
+        focused.element = static_cast<AXUIElementRef>(value);
+        CGRect target_bounds;
+        pid_t target_pid = 0;
+        const bool target_unchanged = AXUIElementGetPid(control.element, &target_pid) == kAXErrorSuccess
+            && target_pid == static_cast<pid_t>(request.pid) && rectangle(control.element, target_bounds)
+            && CGRectEqualToRect(target_bounds, control.bounds)
+            && string_attribute(control.element, kAXRoleAttribute) == control.role;
+        const bool queried = AXUIElementGetPid(focused.element, &focused.pid) == kAXErrorSuccess
+            && rectangle(focused.element, focused.bounds);
+        if (queried) focused.role = string_attribute(focused.element, kAXRoleAttribute);
+        state = composer_focus_identity(focused, control, request, target_unchanged, !queried || ax_query_failed);
     }
     if (value) CFRelease(value);
-    return matches && !ax_query_failed && owned(request);
+    return owned(request) ? state : ComposerFocus::Rejected;
+}
+// Focus is requested once by input(). Only a valid earlier focus identity may
+// settle passively; uncertainty is terminal and no key is issued while pending.
+template<class Query, class Within, class Pause>
+static bool settle_composer_focus(Query query, Within within_deadline, Pause pause) {
+    while (within_deadline()) {
+        const auto state = query();
+        if (!within_deadline() || state == ComposerFocus::Rejected) return false;
+        if (state == ComposerFocus::Focused) return true;
+        pause();
+    }
+    return false;
+}
+static bool wait_focused_composer(const Request& request, const Node& control) {
+    return settle_composer_focus([&] { return focused_composer(request, control); },
+        [&] { return within(request); },
+        [] { std::this_thread::sleep_for(std::chrono::milliseconds(20)); });
 }
 static const char* input(const Request& request, const Tree& tree) {
     if (!chat(tree)) return "mode";
@@ -339,22 +384,23 @@ static const char* input(const Request& request, const Tree& tree) {
     if (!owned(request)) return "input-focus-guard";
     if (AXUIElementSetAttributeValue(control.element, kAXFocusedAttribute, kCFBooleanTrue) != kAXErrorSuccess)
         return "input-focus-setting";
+    if (!wait_focused_composer(request, control)) return "input-focused-identity";
     if (request.mode == "input-replace-owned") {
-        if (!focused_composer(request, control)) return "input-focused-identity";
         if (!key(0, true)) return "input-replace-select-key";
     }
     if (!owned(request)) return "input-prompt-before-guard";
     if (!clipboard_write(request.prompt)) return "input-prompt-clipboard";
     if (!owned(request)) return "input-prompt-after-guard";
-    if (request.mode == "input-replace-owned" && !focused_composer(request, control))
-        return "input-focused-identity";
+    if (!wait_focused_composer(request, control)) return "input-focused-identity";
     if (!key(9, true)) return "input-paste-key";
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
     if (!owned(request)) return "input-readback-before-guard";
     if (!clipboard_write(request.sentinel)) return "input-sentinel-clipboard";
     if (!owned(request)) return "input-sentinel-after-guard";
+    if (!wait_focused_composer(request, control)) return "input-focused-identity";
     if (!key(0, true)) return "input-readback-select-key";
     if (!owned(request)) return "input-readback-select-guard";
+    if (!wait_focused_composer(request, control)) return "input-focused-identity";
     if (!key(8, true)) return "input-readback-copy-key";
     while (within(request) && !clipboard_matches(request.prompt)) std::this_thread::sleep_for(std::chrono::milliseconds(20));
     bool copied = clipboard_matches(request.prompt);
@@ -362,6 +408,7 @@ static const char* input(const Request& request, const Tree& tree) {
         copied && string_attribute(control.element, kAXValueAttribute) == request.prompt);
     if (readback_failure) return readback_failure;
     if (!owned(request)) return "input-collapse-guard";
+    if (!wait_focused_composer(request, control)) return "input-focused-identity";
     if (!key(124, false)) return "input-collapse-key";
     Tree fresh;
     if (!fresh.collect(request) || !chat(fresh) || !retained(fresh, control)) return "control";

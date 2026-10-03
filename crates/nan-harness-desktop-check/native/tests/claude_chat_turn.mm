@@ -35,6 +35,61 @@ int main() {
     assert(!focused_identity(focus_control.element, focus_control, 8, 7, "AXTextArea", focus_control.bounds));
     assert(!focused_identity(focus_control.element, focus_control, 7, 7, "AXButton", focus_control.bounds));
     assert(!focused_identity(focus_control.element, focus_control, 7, 7, "AXTextArea", CGRectZero));
+    Request focus_request;
+    focus_request.pid = 7;
+    focus_request.bounds = CGRectMake(0, 0, 100, 100);
+    FocusIdentity focused{focus_control.element, 7, "AXTextArea", focus_control.bounds};
+    assert(composer_focus_identity(focused, focus_control, focus_request, true, false) == ComposerFocus::Focused);
+    auto previous = focused;
+    previous.element = reinterpret_cast<AXUIElementRef>(CFSTR("previous-copy-control"));
+    previous.role = "AXButton";
+    previous.bounds = CGRectMake(60, 60, 10, 10);
+    assert(composer_focus_identity(previous, focus_control, focus_request, true, false) == ComposerFocus::PendingIdentity);
+    assert(composer_focus_identity(previous, focus_control, focus_request, false, false) == ComposerFocus::Rejected);
+    assert(composer_focus_identity(previous, focus_control, focus_request, true, true) == ComposerFocus::Rejected);
+    auto replaced = focused;
+    replaced.element = previous.element;
+    assert(composer_focus_identity(replaced, focus_control, focus_request, true, false) == ComposerFocus::PendingIdentity);
+    assert(composer_focus_identity(replaced, focus_control, focus_request, false, false) == ComposerFocus::Rejected);
+    auto moved = focused;
+    moved.bounds.origin.x += 1;
+    assert(composer_focus_identity(moved, focus_control, focus_request, true, false) == ComposerFocus::Rejected);
+    auto foreign = previous;
+    foreign.pid = 8;
+    assert(composer_focus_identity(foreign, focus_control, focus_request, true, false) == ComposerFocus::Rejected);
+    auto outside = previous;
+    outside.bounds.origin.x = 1000;
+    assert(composer_focus_identity(outside, focus_control, focus_request, true, false) == ComposerFocus::Rejected);
+    auto missing = previous;
+    missing.element = nullptr;
+    assert(composer_focus_identity(missing, focus_control, focus_request, true, false) == ComposerFocus::Rejected);
+    unsigned queries = 0, pauses = 0, keys = 0;
+    assert(!settle_composer_focus([&] { ++queries; return ComposerFocus::Focused; },
+        [] { return false; }, [&] { ++pauses; }));
+    assert(queries == 0 && pauses == 0 && keys == 0);
+    const bool settled = settle_composer_focus([&] {
+        ++queries;
+        assert(keys == 0);
+        return composer_focus_identity(queries == 1 ? replaced : focused,
+            focus_control, focus_request, true, false);
+    }, [] { return true; }, [&] { ++pauses; });
+    if (settled) ++keys;
+    assert(queries == 2 && pauses == 1 && keys == 1);
+    queries = pauses = keys = 0;
+    const bool rejected = settle_composer_focus([&] {
+        ++queries; return ComposerFocus::Rejected;
+    }, [] { return true; }, [&] { ++pauses; });
+    if (rejected) ++keys;
+    assert(queries == 1 && pauses == 0 && keys == 0);
+    unsigned checks = 0;
+    assert(!settle_composer_focus([&] { ++queries; return ComposerFocus::Focused; },
+        [&] { return ++checks == 1; }, [&] { ++pauses; }));
+    assert(queries == 2 && pauses == 0 && keys == 0);
+    checks = queries = pauses = 0;
+    assert(!settle_composer_focus([&] { ++queries; return ComposerFocus::PendingIdentity; },
+        [&] { return ++checks <= 2; }, [&] { ++pauses; }));
+    assert(queries == 1 && pauses == 1);
+
     assert(tree_node_failure(33, 0, true, true, true, false) == std::string("tree-limit"));
     assert(tree_node_failure(0, 1024, true, true, true, false) == std::string("tree-limit"));
     assert(tree_node_failure(0, 0, false, true, true, false) == std::string("deadline"));
