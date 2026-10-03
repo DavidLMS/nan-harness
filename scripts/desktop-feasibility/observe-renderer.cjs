@@ -487,7 +487,7 @@ async function run() {
       recordLinuxDialog(await observeLinuxDialog(initialMain,browser,ownerGuard,deadline));
     }
     const titleCatalog=require('./codex-dialog-catalog.cjs');
-    if(['linux','darwin'].includes(process.platform)&&titleCatalog.policy(app,process.platform,process.env)) {
+    if(['linux','darwin','win32'].includes(process.platform)&&titleCatalog.policy(app,process.platform,process.env)) {
       // Passive title evidence uses the captured sole main document, independently
       // of role-onboarding controls hidden behind an active startup dialog.
       const soleGuard=passiveCatalogGuard(browser,page,ownerGuard);
@@ -506,11 +506,6 @@ async function run() {
       const mainGuard=trial&&heldMain?heldMainGuard(heldMain,browser,ownerGuard,correlationDeadline,
         require('./codex-onboarding.cjs').sourceRoute,correlationIdentity,
         ms=>new Promise(resolve=>setTimeout(resolve,ms)),false,true):undefined;
-      if(process.platform==='win32'&&titleCatalog.policy(app,process.platform,process.env)) {
-        recordStaticDialog(await titleCatalog.observe(heldMain,process.platform,
-          {guard:mainGuard||(()=>false),identity:p=>correlationIdentity(p,deadline,false),
-            same:sameCorrelationIdentity,deadline}));
-      }
       facts.publicOnboarding = await require('./codex-onboarding.cjs').run(page,
         ownerGuard,
         correlationDeadline,mainGuard);

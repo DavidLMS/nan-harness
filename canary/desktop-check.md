@@ -2551,3 +2551,31 @@ original deadline and retained identity/geometry. Pending reads never
 authorize input; hard rejection, transport failure and deadline expiry remain
 terminal. Nine focused runtime tests, 109 strict qualification tests, static
 catalog contracts and CLI/checker Clippy pass on the updated tree.
+
+
+[Updated-source Codex run 37158752056](https://github.com/DavidLMS/nan-harness/actions/runs/37158752056)
+passes installation and exact release admission on macOS/Linux `26.930.41038`,
+but neither cell qualifies. Linux consistently observes a nonempty referenced
+DialogTitle with no match in the inspected 63-title catalog. macOS rejects the
+passive scope or changed identity. Windows remains unqualified and its title
+reader reports deadline/query rejection after role binding. The Windows passive
+reader now uses the original captured sole main document before role binding,
+with the same ownership, document identity, two-read and original deadline
+guards as macOS/Linux; action guards remain unchanged. All three cells pass
+cleanup with zero invalid diagnostic events.
+
+[Claude macOS 37158753060](https://github.com/DavidLMS/nan-harness/actions/runs/37158753060)
+again copies two verified turns in one session, then receives an unknown Read
+tool error. A separate session exhausts its native-turn deadline before a
+verified submission. Public static inspection of the exact SDK `0.3.286` binary
+establishes its single `Error calling tool (Read): ` wrapper. The classifier
+now removes that wrapper only for selected Read inside one complete tool-error
+envelope; marker verification is unchanged. Optional inventory counts only
+the source-proven `mcp__nanh-read-fixture__read_file` offer under the existing
+private hosted fixture policy. It does not select or invoke that tool.
+
+Windows startup trials now explicitly set the supported managed
+`coworkTabEnabled=false` configuration in the owned temporary profile. The
+exact Windows `2.19675.0` bootstrap/schema supports that field in third-party
+deployment. This does not prove classic Chat is selected: retained runtime
+mode/editor observations remain required, and no input authority is added.
