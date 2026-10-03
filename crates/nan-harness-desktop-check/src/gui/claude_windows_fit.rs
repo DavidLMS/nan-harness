@@ -1,6 +1,18 @@
 //! One pre-input fit may reveal the original owned Windows Claude window.
 use crate::native::{GuardFailure, Snapshot, Window};
 
+/// Passive attachment may lack display containment; it never proves readiness.
+pub(super) fn pending_candidate(
+    snapshot: &Snapshot,
+    original: &Window,
+    eligible: &[&Window],
+) -> Result<Window, GuardFailure> {
+    if let Some(off_display) = candidate(snapshot, original, eligible, false) {
+        return Ok(off_display);
+    }
+    super::claude_windows_ready::candidate(snapshot, original, eligible)
+}
+
 pub(super) fn candidate(
     snapshot: &Snapshot,
     original: &Window,
@@ -50,6 +62,14 @@ mod tests {
             parse("FG 10 42\nDISPLAY 0 0 1920 1080\nWIN 42 10 1800 100 800 600 636c61756465\n");
         let original = valid.windows[0].clone();
         assert!(candidate(&valid, &original, &[&original], false).is_some());
+        assert_eq!(
+            pending_candidate(&valid, &original, &[&original]).unwrap(),
+            original
+        );
+        assert_eq!(
+            super::super::claude_windows_ready::candidate(&valid, &original, &[&original]),
+            Err(GuardFailure::OffDisplay)
+        );
         assert!(candidate(&valid, &original, &[&original], true).is_none());
         assert!(candidate(&valid, &original, &[], false).is_none());
         assert!(candidate(&valid, &original, &[&original, &original], false).is_none());
@@ -73,6 +93,35 @@ mod tests {
             let snapshot = parse(text);
             let current = snapshot.windows.last().unwrap();
             assert!(candidate(&snapshot, current, &[current], false).is_none());
+        }
+    }
+}
+
+#[cfg(windows)]
+pub(super) fn record(helper_succeeded: bool) {
+    use std::io::Write as _;
+    if !super::claude_windows_ready::policy() {
+        return;
+    }
+    let Some(directory) = std::env::var_os("NANH_DESKTOP_QUALIFICATION_FACTS") else {
+        return;
+    };
+    let Some(directory) =
+        super::qualification_directory::canonical_directory(std::path::Path::new(&directory))
+    else {
+        return;
+    };
+    let mut nonce = [0; 8];
+    if getrandom::fill(&mut nonce).is_err() {
+        return;
+    }
+    let value = serde_json::json!({"schemaVersion":1,"mechanism":"claude-windows-fit",
+        "diagnosticsOnly":true,"phase":"final-ready","fitAttempted":true,"helperSucceeded":helper_succeeded});
+    if let Ok(bytes) = serde_json::to_vec(&value) {
+        if let Ok(mut file) = nan_harness_private_fs::open_private_new(
+            directory.join(format!("claude-fit-{}.json", u64::from_le_bytes(nonce))),
+        ) {
+            let _ = file.write_all(&bytes).and_then(|()| file.sync_all());
         }
     }
 }

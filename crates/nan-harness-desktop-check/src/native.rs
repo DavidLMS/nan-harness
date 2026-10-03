@@ -20,6 +20,8 @@ pub(crate) use image::prepare_ocr_image;
 pub(crate) use mac_chat::ChatPressStage;
 #[cfg(target_os = "macos")]
 pub(crate) use mac_chat_turn::ChatTurnStage;
+#[cfg(target_os = "macos")]
+pub(crate) use mac_chat_turn::{ChatActionPhase, failure_label};
 pub(crate) use ocr::Page;
 pub(crate) use process::FailureCategory;
 #[cfg(windows)]

@@ -178,6 +178,9 @@ jobs:
           echo "FEASIBILITY_WINDOWS_PROOF_PYTHON=$(python3 -c 'import sys; from pathlib import Path; print(Path(sys.executable).resolve(strict=True))')" >> "$GITHUB_ENV"
       - name: Build exact branch binaries
         run: cargo build --locked -p nan-harness-desktop-check -p nan-harness-cli --features nan-harness-cli/desktop-qualification --bins
+      - name: Verify Windows Claude acquisition policy without an application
+        if: runner.os == 'Windows' && matrix.app == 'claude-desktop'
+        run: cargo test --locked -p nan-harness-desktop-check --lib gui::claude_windows
       - name: Verify Windows qualification directory isolation
         if: runner.os == 'Windows' && matrix.app == 'claude-desktop'
         run: cargo test --locked -p nan-harness-desktop-check --lib gui::qualification_directory::tests

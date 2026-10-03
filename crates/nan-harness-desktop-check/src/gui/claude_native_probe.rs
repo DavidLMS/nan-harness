@@ -103,21 +103,25 @@ impl Gui {
         loop {
             // Reuse the original-window acquisition checks and its absolute
             // deadline. A source editor cannot waive native stability or focus.
-            self.visual
-                .finish_windows_initial_acquisition(process, deadline)?;
+            self.visual.observe_windows_pending(process, deadline)?;
             let count = |label: &str| {
                 self.app.as_ref()?.locator(&format!(
                     "text_area[visible=\"true\"][editable=\"true\"][name=\"{label}\"], text_area[visible=\"true\"][editable=\"true\"][description=\"{label}\"], text_field[visible=\"true\"][editable=\"true\"][name=\"{label}\"], text_field[visible=\"true\"][editable=\"true\"][description=\"{label}\"]"
                 )).elements().ok().map(|elements| elements.len())
             };
             let classic = count("Write your prompt to Claude");
-            self.visual
-                .finish_windows_initial_acquisition(process, deadline)?;
+            self.visual.observe_windows_pending(process, deadline)?;
             let modern = count("Message");
-            self.visual
-                .finish_windows_initial_acquisition(process, deadline)?;
+            self.visual.observe_windows_pending(process, deadline)?;
             if source_composer_ready(classic, modern) {
-                return Ok(());
+                // Source readiness precedes the sole fit and strict final display proof.
+                self.visual
+                    .finish_windows_initial_acquisition(process, deadline)?;
+                if source_composer_ready(count("Write your prompt to Claude"), count("Message")) {
+                    self.visual
+                        .finish_windows_initial_acquisition(process, deadline)?;
+                    return Ok(());
+                }
             }
             std::thread::sleep(
                 std::time::Duration::from_millis(200)

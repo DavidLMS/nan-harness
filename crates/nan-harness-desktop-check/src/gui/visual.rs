@@ -373,15 +373,7 @@ impl Visual {
             if let Some(window) = windows.first() {
                 require_owned_candidate(window, owner)?;
                 #[cfg(windows)]
-                if initial_windows_fit(
-                    &native,
-                    &snapshot,
-                    window,
-                    previous.as_ref() == Some(*window),
-                    &mut windows_fit,
-                    process,
-                    deadline,
-                )? {
+                if initial_windows_fit(&native, &snapshot, window, &mut windows_fit)? {
                     previous = None;
                     settle.reset();
                     stability = super::stability::Stability::default();
@@ -523,6 +515,54 @@ impl Visual {
     }
 
     #[cfg(windows)]
+    pub(super) fn observe_windows_pending<P: Observation>(
+        &self,
+        process: &mut P,
+        deadline: Instant,
+    ) -> Result<(), AcquisitionFailure> {
+        let fail = |reason| {
+            acquisition_failure(
+                reason,
+                crate::diagnostics::GuiAcquisitionStage::WindowStability,
+            )
+        };
+        if Instant::now() >= deadline {
+            return Err(fail(Reason::DesktopUnavailable));
+        }
+        require_running(process).map_err(fail)?;
+        let owner = process
+            .id()
+            .ok_or_else(|| fail(Reason::ApplicationExited))?;
+        let original = self.window.borrow().clone();
+        require_owned_candidate(&original, owner)?;
+        let snapshot = self
+            .native
+            .windows_until(deadline)
+            .map_err(|error| fail(error.reason()))?;
+        let candidates =
+            eligible_windows(DesktopHarnessKind::Claude, &snapshot.windows).collect::<Vec<_>>();
+        let current =
+            super::claude_windows_fit::pending_candidate(&snapshot, &original, &candidates)
+                .map_err(|error| {
+                    (
+                        error.reason(),
+                        crate::diagnostics::GuiAcquisitionStage::WindowStability,
+                        guard_error_category(error),
+                        None,
+                        None,
+                    )
+                })?;
+        require_running(process).map_err(fail)?;
+        require_owned_candidate(&current, owner)?;
+        if Instant::now() >= deadline {
+            return Err(fail(Reason::DesktopUnavailable));
+        }
+        // This transport binding cannot pass guard() while off display.
+        *self.window.borrow_mut() = current;
+        Ok(())
+    }
+
+    #[cfg(windows)]
     pub(super) fn finish_windows_initial_acquisition<P: Observation>(
         &self,
         process: &mut P,
@@ -563,17 +603,28 @@ impl Visual {
                 &candidates,
                 self.windows_fitted.get(),
             ) {
-                if previous.as_ref() != Some(&fit) {
-                    stability.observe(Some(&fit), previous.as_ref());
+                stability.observe(Some(&fit), previous.as_ref());
+                let ready = settle.ready(
+                    true,
+                    Instant::now(),
+                    previous.as_ref() == Some(&fit),
+                    deadline,
+                );
+                if !ready {
                     previous = Some(fit);
-                    settle.reset();
-                    std::thread::sleep(Duration::from_millis(200));
+                    std::thread::sleep(
+                        Duration::from_millis(200)
+                            .min(deadline.saturating_duration_since(Instant::now())),
+                    );
                     continue;
                 }
                 require_running(process).map_err(failure)?;
                 require_owned_candidate(&fit, owner)?;
-                fit_owned_window_until(&self.native, &fit, deadline)?;
+                // An uncertain mutation consumes the sole attempt as well.
                 self.windows_fitted.set(true);
+                let fitted = fit_owned_window_until(&self.native, &fit, deadline);
+                super::claude_windows_fit::record(fitted.is_ok());
+                fitted?;
                 require_owned_candidate(&fit, owner)?;
                 settle.reset();
                 stability = super::stability::Stability::default();
@@ -627,11 +678,19 @@ impl Visual {
         mode: &str,
         values: [&str; 3],
         deadline: Instant,
+        mut observe: impl FnMut(crate::native::ChatActionPhase, Option<FailureCategory>),
     ) -> Result<crate::native::ChatTurnStage, Reason> {
-        self.guard()?;
+        use crate::native::ChatActionPhase as Phase;
+        observe(Phase::BeforeGuard, None);
+        self.guard_observed(|category| observe(Phase::BeforeGuard, Some(category)))?;
+        observe(Phase::AfterGuard, None);
+        observe(Phase::Transport, None);
         self.native
             .claude_chat_turn(&self.window.borrow(), mode, values, deadline)
-            .map_err(FailureCategory::reason)
+            .map_err(|category| {
+                observe(Phase::Transport, Some(category));
+                category.reason()
+            })
     }
 
     pub(super) fn pid(&self) -> u32 {
@@ -639,13 +698,23 @@ impl Visual {
     }
 
     pub(super) fn guard(&self) -> Result<(), Reason> {
+        self.guard_observed(|_| {})
+    }
+
+    pub(super) fn guard_observed(
+        &self,
+        mut observe: impl FnMut(FailureCategory),
+    ) -> Result<(), Reason> {
         let expected = self.window.borrow().clone();
         let snapshot = if crate::native::claude_focus_policy()
             && matches_app(DesktopHarnessKind::Claude, &expected.name)
         {
             self.native
                 .windows_with_focus(expected.pid)
-                .map_err(FailureCategory::reason)?
+                .map_err(|category| {
+                    observe(category);
+                    category.reason()
+                })?
         } else {
             self.native.windows()?
         };
@@ -1105,38 +1174,30 @@ struct WindowsInitialFit {
 }
 
 #[cfg(windows)]
-fn initial_windows_fit<P: Observation>(
+fn initial_windows_fit(
     native: &Native,
     snapshot: &Snapshot,
     window: &Window,
-    unchanged: bool,
     state: &mut WindowsInitialFit,
-    process: &mut P,
-    deadline: Instant,
 ) -> Result<bool, AcquisitionFailure> {
     if !state.fitted && !state.claude {
         fit_owned_window(native, window)?;
         state.fitted = true;
         return Ok(true);
     }
-    if state.claude
-        && unchanged
-        && super::claude_windows_fit::candidate(snapshot, window, &[window], state.fitted).is_some()
-    {
-        require_running(process).map_err(|reason| {
-            acquisition_failure(reason, crate::diagnostics::GuiAcquisitionStage::ProcessLive)
-        })?;
-        let owner = process.id().ok_or_else(|| {
-            acquisition_failure(
-                Reason::ApplicationExited,
-                crate::diagnostics::GuiAcquisitionStage::ProcessLive,
-            )
-        })?;
-        require_owned_candidate(window, owner)?;
-        fit_owned_window_until(native, window, deadline)?;
-        state.fitted = true;
-        require_owned_candidate(window, owner)?;
-        return Ok(true);
+    if state.claude {
+        // Attachment is passive. The only fit belongs to source-ready finalization.
+        super::claude_windows_fit::pending_candidate(snapshot, window, &[window]).map_err(
+            |error| {
+                (
+                    error.reason(),
+                    crate::diagnostics::GuiAcquisitionStage::WindowStability,
+                    guard_error_category(error),
+                    None,
+                    None,
+                )
+            },
+        )?;
     }
     if state.fitted && !snapshot.contains_display(window) {
         return Err(postcondition_geometry_failure());

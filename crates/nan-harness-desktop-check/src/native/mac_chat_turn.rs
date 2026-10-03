@@ -5,6 +5,31 @@ use zeroize::Zeroizing;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "kebab-case")]
+pub(crate) enum ChatActionPhase {
+    BeforeGuard,
+    AfterGuard,
+    Transport,
+    PostGuard,
+    Completed,
+}
+
+pub(crate) const fn failure_label(category: super::FailureCategory) -> &'static str {
+    use super::FailureCategory as F;
+    match category {
+        F::InvalidInput => "invalid-input",
+        F::Spawn => "spawn",
+        F::Pipe => "pipe",
+        F::Output => "output",
+        F::Timeout => "timeout",
+        F::NonzeroExit => "nonzero-exit",
+        F::WindowChanged => "window-changed",
+        F::WindowQueryRejected => "window-query-rejected",
+        F::SessionUnavailable => "session-unavailable",
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
 pub(crate) enum ChatTurnStage {
     Request,
     Window,
@@ -161,6 +186,32 @@ mod tests {
         ] {
             assert_eq!(ChatTurnStage::parse(&format!("turn {name}\n")), Some(stage));
             assert_eq!(ChatTurnStage::parse(&format!("turn {name}\nPRIVATE")), None);
+        }
+    }
+    #[test]
+    fn action_transport_diagnostics_are_closed_protocol_labels() {
+        use super::super::FailureCategory as F;
+        for (phase, label) in [
+            (ChatActionPhase::BeforeGuard, "before-guard"),
+            (ChatActionPhase::AfterGuard, "after-guard"),
+            (ChatActionPhase::Transport, "transport"),
+            (ChatActionPhase::PostGuard, "post-guard"),
+            (ChatActionPhase::Completed, "completed"),
+        ] {
+            assert_eq!(serde_json::to_value(phase).unwrap(), label);
+        }
+        for (failure, label) in [
+            (F::InvalidInput, "invalid-input"),
+            (F::Spawn, "spawn"),
+            (F::Pipe, "pipe"),
+            (F::Output, "output"),
+            (F::Timeout, "timeout"),
+            (F::NonzeroExit, "nonzero-exit"),
+            (F::WindowChanged, "window-changed"),
+            (F::WindowQueryRejected, "window-query-rejected"),
+            (F::SessionUnavailable, "session-unavailable"),
+        ] {
+            assert_eq!(failure_label(failure), label);
         }
     }
     #[test]

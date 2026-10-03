@@ -48,12 +48,17 @@ function windowsProof(mode, value, root) {
     return false;
   }
 }
+let unixFailure='unmeasured';
+function failure() { return unixFailure; }
 function descendant(pid) {
   if (process.platform === 'win32') return windowsProof('descendant', pid, Number(owner));
+  unixFailure='unmeasured';
   for (let depth = 0; depth < 32 && pid > 1; depth++) {
     if (String(pid) === owner) return true;
-    pid = parentPid(pid);
+    try { pid = parentPid(pid); }
+    catch (error) { unixFailure='ancestor-query';throw error; }
   }
+  if(unixFailure==='unmeasured')unixFailure='ancestor-unowned';
   return false;
 }
 function parentPid(pid) {
@@ -62,6 +67,7 @@ function parentPid(pid) {
     const parent = require('node:child_process').execFileSync('/bin/ps',
       ['-o', 'ppid=', '-p', String(pid)], { encoding: 'utf8', timeout: 2000,
         maxBuffer: 4096, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    if(!/^[0-9]+$/.test(parent))unixFailure='ancestor-query';
     return /^[0-9]+$/.test(parent) ? Number(parent) : 0;
   }
   const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
@@ -69,13 +75,16 @@ function parentPid(pid) {
 }
 function ownedEndpoint() {
   if (process.platform === 'win32') return windowsProof('endpoint', Number(port), Number(owner));
+  unixFailure='unmeasured';
   if (process.platform === 'darwin') {
+    let stage='listener-query';
     // lsof selects listeners by port; reject wildcard/non-loopback bindings.
     try {
       const listing = require('node:child_process').execFileSync('/usr/sbin/lsof',
         ['-nP', '-a', `-iTCP:${port}`, '-sTCP:LISTEN', '-Fpn'],
         { encoding: 'utf8', timeout: 2000, maxBuffer: 65536,
           stdio: ['ignore', 'pipe', 'ignore'] });
+      stage='listener-shape';
       const listeners = [];
       let pid = 0;
       let descriptor = null;
@@ -85,18 +94,24 @@ function ownedEndpoint() {
         else if (field.startsWith('n') && pid > 1 && descriptor !== null) {
           listeners.push({ pid, endpoint: field.slice(1) }); descriptor = null;
         }
-        else return false;
+        else {unixFailure=listing.trim()?'listener-shape':'listener-unavailable';return false;}
       }
-      return listeners.length === 1 && listeners[0].endpoint === `127.0.0.1:${port}`
-        && descendant(listeners[0].pid);
-    } catch { return false; }
+      if(listeners.length!==1||listeners[0].endpoint!==`127.0.0.1:${port}`) {
+        unixFailure=listeners.length===0?'listener-unavailable':'listener-shape';return false;
+      }
+      stage='ancestor-query';
+      const result=descendant(listeners[0].pid);
+      if(!result&&unixFailure==='ancestor-unowned')unixFailure='listener-unowned';
+      return result;
+    } catch { unixFailure=stage;return false; }
   }
   // Associate the LISTEN socket inode with a child of the nanh launcher.
+  try {
   const hexPort = Number(port).toString(16).toUpperCase().padStart(4, '0');
   const sockets = fs.readFileSync('/proc/net/tcp', 'utf8').trim().split('\n').slice(1)
     .map(line => line.trim().split(/\s+/))
     .filter(row => row[1] === `0100007F:${hexPort}` && row[3] === '0A');
-  if (sockets.length !== 1) return false;
+  if(sockets.length!==1){unixFailure=sockets.length===0?'listener-unavailable':'listener-shape';return false;}
   const inode = `socket:[${sockets[0][9]}]`;
   for (const pid of fs.readdirSync('/proc').filter(x => /^\d+$/.test(x))) {
     try {
@@ -106,7 +121,9 @@ function ownedEndpoint() {
       }
     } catch { /* Processes can exit between enumeration and inspection. */ }
   }
+  unixFailure='listener-unowned';
   return false;
+  } catch(error) {unixFailure='listener-query';throw error;}
 }
-return { ownedEndpoint, descendant, parentPid, windowsProof };
+return { ownedEndpoint, descendant, parentPid, windowsProof, failure };
 };

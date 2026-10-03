@@ -327,7 +327,20 @@ async function run() {
       facts.errorCategory = 'target-ambiguous'; save(); return;
     }
     const page = pages[0];
-    const ownerGuard=()=>rootProof.descendant(connection.launcherPid)&&ownership.ownedEndpoint();
+    const ownerGuard=()=>{
+      const record=proof=>{
+        const reason=typeof proof.failure==='function'?proof.failure():'unmeasured';
+        if(['ancestor-unowned','ancestor-query','listener-unavailable','listener-shape',
+          'listener-unowned','listener-query','unmeasured'].includes(reason))facts.nativeOwnershipFailure=reason;
+      };
+      let proof=rootProof;
+      try {
+        if(!proof.descendant(connection.launcherPid)){record(proof);return false;}
+        proof=ownership;
+        if(!proof.ownedEndpoint()){record(proof);return false;}
+        return true;
+      } catch(error){record(proof);throw error;}
+    };
     if(trial)facts.initialMainBinding=initialMainFacts();
     const initialMain=trial?await captureCorrelationMain(page,browser,ownerGuard,deadline,
       correlationIdentity,ms=>new Promise(resolve=>setTimeout(resolve,ms)),facts.initialMainBinding):null;
@@ -354,7 +367,7 @@ async function run() {
         require('./codex-onboarding.cjs').sourceRoute,correlationIdentity,
         ms=>new Promise(resolve=>setTimeout(resolve,ms)),false,true):undefined;
       facts.publicOnboarding = await require('./codex-onboarding.cjs').run(page,
-        () => rootProof.descendant(connection.launcherPid) && ownership.ownedEndpoint(),
+        ownerGuard,
         correlationDeadline,mainGuard);
       const bindingVerified=!!mainGuard&&await mainGuard();
       const codingComposerReady=bindingVerified&&await page.evaluate(require('./codex-onboarding.cjs').codingScope);

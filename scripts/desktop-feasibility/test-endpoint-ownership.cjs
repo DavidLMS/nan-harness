@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const source = fs.readFileSync(`${__dirname}/endpoint-ownership.cjs`, 'utf8');
 const proof = source.slice(source.indexOf('function saveWindowsProof('), source.indexOf('return { ownedEndpoint'));
-function trial(listing, parents, failure = false) {
+function trial(listing, parents, failure = false, details = false) {
   let calls = 0;
   const context = { owner: '20', port: '43210', process: { platform: 'darwin' }, require(name) {
     assert.equal(name, 'node:child_process');
@@ -12,7 +12,7 @@ function trial(listing, parents, failure = false) {
       calls++;
       assert.equal(options.timeout, 2000);
       assert.equal(options.stdio[2], 'ignore');
-      if (failure) throw new Error('private operational error');
+      if(failure&&!(failure==='parent'&&command==='/usr/sbin/lsof'))throw new Error('private operational error');
       if (command === '/usr/sbin/lsof') {
         assert.deepEqual(Array.from(args), ['-nP', '-a', '-iTCP:43210', '-sTCP:LISTEN', '-Fpn']);
         return listing;
@@ -25,7 +25,7 @@ function trial(listing, parents, failure = false) {
   vm.runInNewContext(proof, context);
   const owned = context.ownedEndpoint();
   assert(calls <= 33);
-  return owned;
+  return details?{owned,reason:context.failure(),calls}:owned;
 }
 assert(trial('p40\nf3\nn127.0.0.1:43210\n', { 40: 30, 30: 20 }));
 assert(!trial('p40\nf3\nn127.0.0.1:43210\n', { 40: 1 }));
@@ -125,3 +125,37 @@ console.log('Native Windows Win32 transport: guarded cases passed');
   assert.equal(receipts.length, 4104); // Diagnostic policy cannot modify the proof verdict.
 }
 console.log('Native Windows proof receipt: earlier failures retained across proof objects');
+
+for(const [listing,parents,failure,reason] of [
+  ['p40\nf3\nn127.0.0.1:43210\n',{40:1},false,'listener-unowned'],
+  ['p40\nf3\nn127.0.0.1:43210\n',{40:'PRIVATE malformed'},false,'ancestor-query'],
+  ['p40\nf3\nn127.0.0.1:43210\n',{40:20},'parent','ancestor-query'],
+  ['',{},false,'listener-unavailable'],
+  ['p40\nn127.0.0.1:43210\n',{40:20},false,'listener-shape'],
+  ['p40\nf3\nn*:43210\n',{40:20},false,'listener-shape'],
+  ['',{},true,'listener-query'],
+]) {
+  const result=trial(listing,parents,failure,true);
+  assert.equal(result.owned,false);assert.equal(result.reason,reason);
+  assert(!JSON.stringify(result).includes('PRIVATE'));
+}
+const renderer=fs.readFileSync(`${__dirname}/observe-renderer.cjs`,'utf8');
+const guardStart=renderer.indexOf('    const ownerGuard=()=>');
+const guardEnd=renderer.indexOf('\n    };',guardStart)+7;
+for(const [component,reason,throwing] of [
+  ['root','ancestor-query',false],['listener','listener-unavailable',false],
+  ['root','ancestor-query',true],['listener','listener-query',true],
+  ['listener','PRIVATE unknown',false],
+]) {
+  const facts={},calls=[];
+  const native=part=>({failure:()=>reason,
+    descendant(){calls.push(part);if(component===part&&throwing)throw Error('PRIVATE');return component!==part;},
+    ownedEndpoint(){calls.push(part);if(component===part&&throwing)throw Error('PRIVATE');return component!==part;}});
+  const guard=vm.runInNewContext(`(()=>{${renderer.slice(guardStart,guardEnd)}return ownerGuard;})()`,
+    {facts,connection:{launcherPid:40},rootProof:native('root'),ownership:native('listener')});
+  if(throwing)assert.throws(guard);else assert.equal(guard(),false);
+  assert.equal(calls.length,component==='root'?1:2);
+  assert.equal(facts.nativeOwnershipFailure,reason==='PRIVATE unknown'?undefined:reason);
+  assert(!JSON.stringify(facts).includes('PRIVATE'));
+}
+console.log('Unix ownership failure diagnostic: same queries and throw semantics passed');

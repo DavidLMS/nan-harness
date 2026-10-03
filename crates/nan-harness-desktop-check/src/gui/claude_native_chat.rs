@@ -1,6 +1,7 @@
 //! Source-bound native Chat conversation input and assistant-only clipboard readback.
 use super::{Gui, clipboard};
 use crate::native::ChatTurnStage;
+use crate::native::{ChatActionPhase, failure_label};
 use crate::provider::ProviderGate;
 use crate::report::Reason;
 use nan_harness_private_fs::open_private_new;
@@ -17,6 +18,8 @@ struct Facts {
     mechanism: &'static str,
     diagnostics_only: bool,
     stage: ChatTurnStage,
+    action_phase: Option<ChatActionPhase>,
+    transport_failure: Option<&'static str>,
     submitted_turns: u8,
     input_verified_turns: u8,
     copied_responses: u8,
@@ -30,6 +33,8 @@ impl Default for Facts {
             mechanism: "claude-native-chat",
             diagnostics_only: true,
             stage: ChatTurnStage::Request,
+            action_phase: None,
+            transport_failure: None,
             submitted_turns: 0,
             input_verified_turns: 0,
             copied_responses: 0,
@@ -99,17 +104,28 @@ impl ClaudeNativeChatSession<'_> {
         if Instant::now() >= deadline {
             return Err(Reason::Timeout);
         }
-        self.gui.visual.guard()?;
+        self.facts.action_phase = Some(ChatActionPhase::BeforeGuard);
+        self.facts.transport_failure = None;
         let sentinel = Zeroizing::new(nonce()?);
-        let stage =
-            self.gui
-                .visual
-                .claude_chat_turn(mode, [&self.prompt, marker, &sentinel], deadline)?;
+        let facts = &mut self.facts;
+        let stage = self.gui.visual.claude_chat_turn(
+            mode,
+            [&self.prompt, marker, &sentinel],
+            deadline,
+            |phase, failure| {
+                facts.action_phase = Some(phase);
+                facts.transport_failure = failure.map(failure_label);
+            },
+        )?;
         self.facts.stage = stage;
-        self.gui.visual.guard()?;
+        self.facts.action_phase = Some(ChatActionPhase::PostGuard);
+        self.gui.visual.guard_observed(|category| {
+            self.facts.transport_failure = Some(failure_label(category));
+        })?;
         if Instant::now() >= deadline {
             return Err(Reason::Timeout);
         }
+        self.facts.action_phase = Some(ChatActionPhase::Completed);
         Ok(stage)
     }
     pub(crate) fn new_turn(&mut self, prompt: &str) -> Result<(), Reason> {

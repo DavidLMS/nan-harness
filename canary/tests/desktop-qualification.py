@@ -1773,6 +1773,19 @@ class QualificationTests(unittest.TestCase):
                 q.semantic_observations(root, 'chatgpt-desktop')
             self.assertEqual(q.envelope('claude-desktop', 'windows', 'x86_64', 'a' * 40)['qualification'], 'unqualified')
 
+    def test_claude_windows_fit_receipt_has_no_identity_or_geometry(self):
+        value = dict(schemaVersion=1, mechanism='claude-windows-fit', diagnosticsOnly=True,
+                     phase='final-ready', fitAttempted=True, helperSucceeded=True)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'fit.json'
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(tmp, 'claude-desktop'), [value])
+            for changed in ({**value, 'phase': 'initial'}, {**value, 'fitAttempted': False},
+                            {**value, 'helperSucceeded': 1}, {**value, 'bounds': 'PRIVATE'}):
+                path.write_text(json.dumps(changed))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(tmp, 'claude-desktop')
+
     def test_claude_native_chat_receipt_is_closed_and_not_qualification(self):
         value = dict(schemaVersion=1, mechanism='claude-native-chat', diagnosticsOnly=True,
                      stage='completed', submittedTurns=3, inputVerifiedTurns=3, copiedResponses=3,
@@ -1784,6 +1797,22 @@ class QualificationTests(unittest.TestCase):
                 path.write_text(json.dumps(item))
                 self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [item])
                 self.assertEqual(q.envelope('claude-desktop', 'macos', 'aarch64', 'a' * 40)['qualification'], 'unqualified')
+            for phase in (None, 'before-guard', 'after-guard', 'transport', 'post-guard', 'completed'):
+                item = {**value, 'actionPhase': phase, 'transportFailure': None}
+                path.write_text(json.dumps(item))
+                self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [item])
+            for phase in ('before-guard', 'transport', 'post-guard'):
+                item = {**value, 'stage': 'deadline', 'actionPhase': phase, 'transportFailure': 'timeout'}
+                path.write_text(json.dumps(item))
+                self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [item])
+            for changes in ({'actionPhase': 'PRIVATE', 'transportFailure': None},
+                            {'actionPhase': 'transport', 'transportFailure': 'PRIVATE'},
+                            {'actionPhase': None, 'transportFailure': 'output'},
+                            {'actionPhase': 'completed', 'transportFailure': 'timeout'},
+                            {'actionPhase': 'transport'}, {'transportFailure': None}):
+                path.write_text(json.dumps({**value, **changes}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'claude-desktop')
             for stage in ('tree-query', 'tree-duplicate', 'tree-type', 'tree-limit', 'tree-pid',
                           'tree-focus', 'tree-window', 'input-initial-unavailable', 'input-initial-nonempty',
                           'input-clipboard-mismatch', 'input-value-mismatch'):
@@ -1929,6 +1958,17 @@ class QualificationTests(unittest.TestCase):
                      app='chatgpt-desktop', endpointOwned=True, launcherOwned=True, attached=True,
                      pageCount=1, textareaCount=0, editableCount=0, sendCount=0,
                      retryCount=0, newThreadCount=0, loginCount=0, dialogCount=0, errorCategory=None)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'inventory.json'
+            for reason in ('ancestor-unowned', 'ancestor-query', 'listener-unavailable', 'listener-shape',
+                           'listener-unowned', 'listener-query', 'unmeasured'):
+                item = {**value, 'nativeOwnershipFailure': reason}
+                path.write_text(json.dumps(item))
+                self.assertEqual(q.semantic_observations(tmp, 'chatgpt-desktop')[0]['nativeOwnershipFailure'], reason)
+            for reason in ('PRIVATE', None, True, {'pid': 1}):
+                path.write_text(json.dumps({**value, 'nativeOwnershipFailure': reason}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(tmp, 'chatgpt-desktop')
         empty = dict.fromkeys('loading unsupported disabled error chatgptChoice apiKeyChoice'.split(), 0)
         observations = [dict(status=key, counts={**empty, key: 1})
                         for key in ('loading', 'unsupported', 'disabled', 'error')]
@@ -2261,6 +2301,17 @@ class HermesReadinessTests(unittest.TestCase):
             sampled = {**classified, 'pointerChecks': 9, 'pointerPositionMatches': 9, 'pointerChildMatches': 9}
             path.write_text(json.dumps({**value, 'cursorSelection': sampled}))
             self.assertEqual(q.semantic_observations(tmp, 'zed-desktop')[0]['cursorSelection'], sampled)
+            boundary = {**sampled, 'guardBeforeVerified': 56, 'guardAfterVerified': 56,
+                        'accessibleChecks': 56, 'accessibleExactMatches': 56,
+                        'pointerChecks': 45, 'pointerPositionMatches': 45, 'pointerChildMatches': 45,
+                        'cursorChecks': 46,
+                        'cursorClasses': dict(hand=0, arrow=46, notallowed=0, transparent=0, unknown=0)}
+            path.write_text(json.dumps({**value, 'cursorSelection': boundary}))
+            self.assertEqual(q.semantic_observations(tmp, 'zed-desktop')[0]['cursorSelection'], boundary)
+            for key in ('cursorChecks', 'accessibleChecks', 'guardBeforeVerified'):
+                path.write_text(json.dumps({**value, 'cursorSelection': {**boundary, key: boundary[key] + 1}}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(tmp, 'zed-desktop')
             for changes in ({'pointerChecks': 46}, {'pointerChecks': True},
                             {'pointerPositionMatches': 10}, {'pointerChildMatches': 8},
                             {'pointerChildMatches': 'PRIVATE'}, {'rawPosition': [1, 2]}):
