@@ -1924,3 +1924,56 @@ checker library tests, 87 qualification contracts, both Codex behavioral suites
 and pure native selector/process fixtures. Actual macOS conversation behavior
 and Windows descendant termination still require disposable hosted evidence.
 The final repository-wide gate will run on the final converged source.
+
+
+### Hosted continuation, 2026-10-03
+
+The full local repository gate passed on `8c514f5c` with serial Rust tests and
+incremental compilation disabled. Later changes have focused verification;
+they still require the final gate on the converged tree.
+
+Run [37123153883](https://github.com/DavidLMS/nan-harness/actions/runs/37123153883)
+verified Windows Claude cleanup against five retained owned descendants, with
+independent application and global absence checks passing. Startup still
+blocked on changed window geometry. The Windows initial-readiness policy was
+subsequently found to reject Python's ordinary drive path because Rust
+canonicalization adds a verbatim prefix. The corrected policy validates every
+original ancestor against reparse points before retaining its canonical path.
+A hosted synthetic directory test precedes the next Claude measurement.
+
+Run [37125059406](https://github.com/DavidLMS/nan-harness/actions/runs/37125059406)
+completed all three Zed Linux candidate hovers under one thirty-second absolute
+zoom-proof budget. None exposed the exact source tooltip, so input submission
+remained blocked. The original ten-second allocation could not reach its first
+hover while preserving the required helper reserve. The longer allocation
+changes timing only; unique control proof and all ownership guards remain
+mandatory.
+
+Run [37125317940](https://github.com/DavidLMS/nan-harness/actions/runs/37125317940)
+reached the macOS Claude conversation controller in two fresh sessions. Both
+rejected input readback before Send. This is progress past acquisition, not
+conversation qualification. The controller's next receipt distinguishes an
+unavailable or nonempty initial value from clipboard and native value
+mismatches without publishing text.
+
+Run [37124585800](https://github.com/DavidLMS/nan-harness/actions/runs/37124585800)
+confirmed Codex Windows' original main renderer and the source-known inert
+auxiliary renderer. Role selection remained blocked before any click. The
+next diagnostic distinguishes the exact rejected main/auxiliary proof and
+elapsed deadlines. Passive startup classifications remain unknown; they do
+not establish a login requirement. No additional cell is qualified by these
+observations. Pen remains deferred.
+
+Pinned GPUI source inspection subsequently established that tooltip titles are
+raw `SharedString` elements without accessibility IDs. The absence of the
+Disable Full Screen text is therefore inconclusive. Tooltip observations no
+longer authorize zoom; the retained ON control and unique source icon remain
+required. Existing WINDOW-to-client normalization already handles a missing
+AccessKit screen origin. The failed association now needs source-raster
+calibration, rather than another coordinate offset or weaker match threshold.
+
+Run [37125656759](https://github.com/DavidLMS/nan-harness/actions/runs/37125656759)
+stopped at the synthetic Windows directory contracts before application
+installation. Normal and verbatim directory spellings were rejected, while the
+junction rejection test passed. This runner result does not measure Claude
+startup and must not be interpreted as an application failure.
