@@ -52,6 +52,9 @@ pub(crate) enum ChatTurnStage {
     Control,
     Scope,
     ScopeAnchorAbsent,
+    ScopeHeadingAbsent,
+    ScopeAssistantHeadingAbsent,
+    ScopeMarkerHeadingAbsent,
     ScopeAnchorAmbiguous,
     ScopeControlAbsent,
     ScopeControlAmbiguous,
@@ -73,6 +76,9 @@ impl ChatTurnStage {
             self,
             Self::Scope
                 | Self::ScopeAnchorAbsent
+                | Self::ScopeHeadingAbsent
+                | Self::ScopeAssistantHeadingAbsent
+                | Self::ScopeMarkerHeadingAbsent
                 | Self::ScopeAnchorAmbiguous
                 | Self::ScopeControlAbsent
                 | Self::ScopeControlAmbiguous
@@ -105,6 +111,9 @@ impl ChatTurnStage {
             "turn control\n" => Some(Self::Control),
             "turn scope\n" => Some(Self::Scope),
             "turn scope-anchor-absent\n" => Some(Self::ScopeAnchorAbsent),
+            "turn scope-heading-absent\n" => Some(Self::ScopeHeadingAbsent),
+            "turn scope-assistant-heading-absent\n" => Some(Self::ScopeAssistantHeadingAbsent),
+            "turn scope-marker-heading-absent\n" => Some(Self::ScopeMarkerHeadingAbsent),
             "turn scope-anchor-ambiguous\n" => Some(Self::ScopeAnchorAmbiguous),
             "turn scope-control-absent\n" => Some(Self::ScopeControlAbsent),
             "turn scope-control-ambiguous\n" => Some(Self::ScopeControlAmbiguous),
@@ -196,6 +205,15 @@ mod tests {
     fn scoped_selector_failures_remain_passive_and_payload_free() {
         for (label, stage) in [
             ("scope-anchor-absent", ChatTurnStage::ScopeAnchorAbsent),
+            ("scope-heading-absent", ChatTurnStage::ScopeHeadingAbsent),
+            (
+                "scope-assistant-heading-absent",
+                ChatTurnStage::ScopeAssistantHeadingAbsent,
+            ),
+            (
+                "scope-marker-heading-absent",
+                ChatTurnStage::ScopeMarkerHeadingAbsent,
+            ),
             (
                 "scope-anchor-ambiguous",
                 ChatTurnStage::ScopeAnchorAmbiguous,

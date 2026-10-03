@@ -110,6 +110,17 @@ int main() {
     tree.nodes.push_back(fixture(3, "AXStaticText", "NAN_CHECK_EXPECTED_FAILURE"));
     assert(scoped_control(tree, request, true, &scope_failure) == -1);
     assert(std::string(scope_failure) == "scope-anchor-ambiguous");
+    Tree response_scope;
+    const char* response_failure = nullptr;
+    assert(scoped_control(response_scope, request, false, &response_failure) == -1);
+    assert(std::string(response_failure) == "scope-heading-absent");
+    response_scope.nodes.push_back(fixture(-1, "AXHeading", "You said: fresh assistant"));
+    assert(scoped_control(response_scope, request, false, &response_failure) == -1);
+    assert(std::string(response_failure) == "scope-assistant-heading-absent");
+    response_scope.nodes[0].label = "Claude responded: stale assistant";
+    response_scope.nodes.push_back(fixture(0, "AXStaticText", "fresh assistant"));
+    assert(scoped_control(response_scope, request, false, &response_failure) == -1);
+    assert(std::string(response_failure) == "scope-marker-heading-absent");
     Request submission_request;
     submission_request.bounds = CGRectMake(0, 0, 800, 600);
     auto identity = reinterpret_cast<AXUIElementRef>(CFSTR("retained-control"));

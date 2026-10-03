@@ -366,7 +366,16 @@ static int scoped_control(const Tree& tree, const Request& request, bool retry, 
             : node.role == "AXHeading" && node.label.rfind("Claude responded:", 0) == 0 && node.label.find(request.marker) != std::string::npos;
         if (matches) anchors.push_back(i);
     }
-    if (anchors.empty()) return reject("scope-anchor-absent");
+    if (anchors.empty()) {
+        if (retry) return reject("scope-anchor-absent");
+        unsigned headings = 0, assistant_headings = 0;
+        for (const auto& node : tree.nodes) if (node.role == "AXHeading") {
+            ++headings;
+            if (node.label.rfind("Claude responded:", 0) == 0) ++assistant_headings;
+        }
+        return reject(headings == 0 ? "scope-heading-absent" : assistant_headings == 0
+            ? "scope-assistant-heading-absent" : "scope-marker-heading-absent");
+    }
     if (anchors.size() != 1) return reject("scope-anchor-ambiguous");
     bool ambiguous_control = false;
     bool mismatched_prompt = false;

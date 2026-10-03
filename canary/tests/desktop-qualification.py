@@ -1883,7 +1883,8 @@ class QualificationTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'claude-desktop')
             for stage in ('tree-query', 'tree-duplicate', 'tree-type', 'tree-limit', 'tree-pid',
-                          'tree-focus', 'tree-window', 'scope-anchor-absent', 'scope-anchor-ambiguous',
+                          'tree-focus', 'tree-window', 'scope-anchor-absent', 'scope-heading-absent', 'scope-assistant-heading-absent',
+                          'scope-marker-heading-absent', 'scope-anchor-ambiguous',
                           'scope-control-absent', 'scope-control-ambiguous', 'scope-heading-ambiguous', 'scope-prompt-mismatch',
                           'input-initial-unavailable', 'input-initial-nonempty',
                           'input-clipboard-mismatch', 'input-value-mismatch'):
