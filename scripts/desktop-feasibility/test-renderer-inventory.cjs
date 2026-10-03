@@ -56,6 +56,34 @@ assert.equal(trial([], 'claude-desktop', connectionError), 'unmeasured');
 assert.equal(trial([], 'chatgpt-desktop', '', 11), 'unmeasured');
 console.log('Renderer inventory: closed startup headings passed');
 
+// Execute the actual standalone browser callback: role identity is independent
+// of a separate dialog, while duplicate source roots must never identify main.
+function roleSourceScope({dialogCount=1,duplicateRoot=false,foreignFieldset=false}={}) {
+  const node=()=>({isConnected:true,getBoundingClientRect:()=>({width:10,height:10})});
+  const scope={...node(),contains:e=>e===fieldset||radios.includes(e)};
+  const fieldset={...node(),contains:e=>radios.includes(e)};
+  const legend={...node(),innerText:'Select the kind of work you do',parentElement:fieldset};
+  const radios=Array.from({length:11},node);
+  radios[0].value='engineering';radios[0].labels=[{innerText:'Engineering'}];
+  const dialogs=Array.from({length:dialogCount},()=>({...node(),contains:()=>false}));
+  if(foreignFieldset)scope.contains=()=>false;
+  const read=vm.runInNewContext(`(${source.slice(source.indexOf('function correlationScope()'),source.indexOf('async function correlationIdentity('))})`,{
+    document:{hasFocus:()=>true,querySelectorAll:selector=>
+      selector.startsWith('div[class~=')?(duplicateRoot?[scope,node()]:[scope])
+        :selector.startsWith('input[type="radio"]')?radios
+        :selector==='fieldset > legend'?[legend]
+        :selector==='[role="dialog"],[role="alertdialog"]'?dialogs:[]},
+    getComputedStyle:()=>({display:'block',visibility:'visible'})});
+  return read();
+}
+for(const dialogCount of [0,1,2]) {
+  const scope=roleSourceScope({dialogCount});
+  assert.equal(scope.mainScope,true);
+  assert.equal(scope.counts.dialog,dialogCount);
+}
+assert.equal(roleSourceScope({duplicateRoot:true}).mainScope,false);
+assert.equal(roleSourceScope({foreignFieldset:true}).mainScope,false);
+
 // Passive main/aux binding never sends input or changes the singleton guard.
 (async () => {
   let clock=0;

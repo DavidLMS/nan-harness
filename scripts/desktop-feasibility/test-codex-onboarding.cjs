@@ -186,6 +186,12 @@ async function trial(options={}) {
  }
  assert(!JSON.stringify(completeOverlay.facts).includes("You're all set"));
  assert(!JSON.stringify(completeOverlay.facts).includes('openai.com'));
+ // Passive admission of the held main/known auxiliary does not admit a
+ // separate modal or waive ordinary control actionability.
+ const admittedWithForeignDialog=await trial({foreignPage:true,admitAux:true,modal:true});
+ assert.equal(admittedWithForeignDialog.facts.actionabilityFailure,'foreign-overlay');
+ assert.equal(admittedWithForeignDialog.roleClicks,0);
+ assert.equal(admittedWithForeignDialog.continueClicks,0);
  const knownAux=await trial({foreignPage:true,admitAux:true});
  assert.equal(knownAux.roleClicks,1);assert.equal(knownAux.continueClicks,1);assert.equal(knownAux.facts.taskScopeProved,true);
  const lostAux=await trial({foreignPage:true,admitAux:true,auxOwnershipLostAfterClick:true});

@@ -41,10 +41,13 @@ function correlationScope() {
   const dialogs=all('[role="dialog"],[role="alertdialog"]');
   const tokens=['relative','flex','h-full','min-h-0','w-full','flex-col','bg-transparent','tracking-normal','text-default','select-text'];
   const fieldset=legends.length===1?legends[0].parentElement:null;
-  const scope=fieldset?.closest('div'+tokens.map(t=>`[class~="${t}"]`).join(''));
-  const mainScope=!!scope&&radios.length===11&&engineering.length===1&&dialogs.length===1
+  const roots=all('div'+tokens.map(t=>`[class~="${t}"]`).join(''));
+  const scope=roots.length===1?roots[0]:null;
+  // The source role page is an ordinary div. Foreign dialogs govern input
+  // separately; their presence or containment cannot establish page identity.
+  const mainScope=!!scope&&radios.length===11&&engineering.length===1
     &&scope.contains(fieldset)&&radios.every(e=>fieldset.contains(e))
-    &&dialogs[0].contains(scope)&&engineering[0].labels?.length===1
+    &&engineering[0].labels?.length===1
     &&engineering[0].labels[0].innerText.trim()==='Engineering';
   const cap=items=>Math.min(4096,items.length);
   return {counts:{roleLegend:cap(legends),roleRadios:cap(radios),engineering:cap(engineering),
