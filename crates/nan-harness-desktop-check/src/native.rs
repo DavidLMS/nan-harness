@@ -3,6 +3,8 @@
 #[cfg(target_os = "macos")]
 mod identity;
 mod image;
+#[cfg(any(target_os = "macos", test))]
+mod mac_fit;
 mod ocr;
 mod process;
 mod window;
@@ -416,12 +418,31 @@ impl Native {
         deadline: std::time::Instant,
     ) -> Result<(), Reason> {
         let argument = format!("--fit-window {} {}", window.id, window.pid);
-        let output =
-            process::run_fit_until(&self.executable, std::ffi::OsStr::new(&argument), deadline)?;
-        if !output.trim().is_empty() || std::time::Instant::now() >= deadline {
+        let output = match process::run_fit_until(
+            &self.executable,
+            std::ffi::OsStr::new(&argument),
+            deadline,
+        ) {
+            Ok(output) => output,
+            Err(reason) => {
+                mac_fit::record("transport");
+                return Err(reason);
+            }
+        };
+        let Some(stage) = mac_fit::parse(&output) else {
+            mac_fit::record("invalid-output");
+            return Err(Reason::WindowChanged);
+        };
+        if std::time::Instant::now() >= deadline {
+            mac_fit::record("transport");
             return Err(Reason::WindowChanged);
         }
-        Ok(())
+        mac_fit::record(stage);
+        if stage == "completed" {
+            Ok(())
+        } else {
+            Err(Reason::ActionUnsupported)
+        }
     }
 
     pub(crate) fn recognize(&self, screenshot: &Screenshot) -> Result<Page, Reason> {

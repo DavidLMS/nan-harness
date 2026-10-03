@@ -552,6 +552,11 @@ static bool fit_mac_proof(std::uint64_t id, pid_t pid, AxFocus& focus, bool requ
     }
     return safe && found && (require_off_display ? !contained : contained);
 }
+// Closed stage output is rejected by the caller; only empty timely output proves fit.
+static int mac_fit_rejected(const char* stage) {
+    std::cout << "fit-rejected " << stage << '\n';
+    return std::cout ? 0 : 4;
+}
 int fit_window(const std::string& request) {
     @autoreleasepool {
         std::istringstream input(request);
@@ -559,9 +564,9 @@ int fit_window(const std::string& request) {
         std::uint64_t id = 0, pid = 0;
         if (!(input >> id_text >> pid_text) || (input >> extra)
             || !parse_identity_token(id_text, id) || !parse_identity_token(pid_text, pid)
-            || id == 0 || id > UINT32_MAX || pid == 0 || pid > static_cast<std::uint64_t>(std::numeric_limits<pid_t>::max())) return 5;
+            || id == 0 || id > UINT32_MAX || pid == 0 || pid > static_cast<std::uint64_t>(std::numeric_limits<pid_t>::max())) return mac_fit_rejected("request");
         AxFocus before;
-        if (!fit_mac_proof(id, static_cast<pid_t>(pid), before, true)) return 5;
+        if (!fit_mac_proof(id, static_cast<pid_t>(pid), before, true)) return mac_fit_rejected("initial-proof");
         NSScreen* selected = nil;
         CGFloat area = -1;
         for (NSScreen* screen in NSScreen.screens) {
@@ -570,32 +575,33 @@ int fit_window(const std::string& request) {
             CGFloat current = CGRectIsNull(intersection) ? 0 : intersection.size.width * intersection.size.height;
             if (current > area) { selected = screen; area = current; }
         }
-        if (!selected || NSScreen.screens.count == 0) return 5;
+        if (!selected || NSScreen.screens.count == 0) return mac_fit_rejected("screen");
         NSRect visible = selected.visibleFrame;
         CGFloat top = NSMaxY([NSScreen.screens[0] frame]);
         CGRect target;
-        if (!mac_fit_rectangle(before.bounds, NSRectToCGRect(visible), top, target)) return 5;
+        if (!mac_fit_rectangle(before.bounds, NSRectToCGRect(visible), top, target)) return mac_fit_rejected("rectangle");
         Boolean position_settable = false, size_settable = false;
         if (AXUIElementIsAttributeSettable(before.focused, kAXPositionAttribute, &position_settable) != kAXErrorSuccess
             || AXUIElementIsAttributeSettable(before.focused, kAXSizeAttribute, &size_settable) != kAXErrorSuccess
-            || !position_settable || !size_settable) return 5;
+            || !position_settable || !size_settable) return mac_fit_rejected("settable");
         AxFocus final_before;
         if (!fit_mac_proof(id, static_cast<pid_t>(pid), final_before, true)
-            || !CFEqual(before.focused, final_before.focused) || !CGRectEqualToRect(before.bounds, final_before.bounds)) return 5;
+            || !CFEqual(before.focused, final_before.focused) || !CGRectEqualToRect(before.bounds, final_before.bounds)) return mac_fit_rejected("identity-recheck");
         AXValueRef size = AXValueCreate(kAXValueTypeCGSize, &target.size);
         AXValueRef position = AXValueCreate(kAXValueTypeCGPoint, &target.origin);
-        if (!size || !position) { if (size) CFRelease(size); if (position) CFRelease(position); return 5; }
+        if (!size || !position) { if (size) CFRelease(size); if (position) CFRelease(position); return mac_fit_rejected("allocation"); }
         AXError resized = AXUIElementSetAttributeValue(before.focused, kAXSizeAttribute, size);
         AXError moved = resized == kAXErrorSuccess ? AXUIElementSetAttributeValue(before.focused, kAXPositionAttribute, position) : resized;
         CFRelease(size); CFRelease(position);
-        if (resized != kAXErrorSuccess || moved != kAXErrorSuccess) return 5;
+        if (resized != kAXErrorSuccess) return mac_fit_rejected("size");
+        if (moved != kAXErrorSuccess) return mac_fit_rejected("position");
         const auto settle_deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
         do {
             AxFocus after;
             if (fit_mac_proof(id, static_cast<pid_t>(pid), after, false)) return 0;
             std::this_thread::sleep_for(std::chrono::milliseconds(20));
         } while (std::chrono::steady_clock::now() < settle_deadline);
-        return 5;
+        return mac_fit_rejected("postcondition");
     }
 }
 int activate_window(const std::string& request) {

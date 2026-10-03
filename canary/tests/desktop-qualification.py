@@ -1220,6 +1220,60 @@ class QualificationTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 q.semantic_observations(root, 'chatgpt-desktop')
 
+    def test_claude_chat_navigation_is_one_observed_action_not_qualification(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            base = dict(schemaVersion=1, mechanism='claude-chat-navigation', diagnosticsOnly=True,
+                        phase='preflight', actionStatus='not-attempted', preconditionsVerified=False,
+                        pressAttempted=False, chatPostconditionVerified=False, nativeGuardVerified=True)
+            path = root / 'chat-navigation.json'
+            complete = {**base, 'phase': 'completed', 'actionStatus': 'completed',
+                        'preconditionsVerified': True, 'pressAttempted': True, 'chatPostconditionVerified': True}
+            for value in (base, complete, {**complete, 'actionStatus': 'uncertain'},
+                          {**complete, 'phase': 'postcondition', 'chatPostconditionVerified': False}):
+                path.write_text(json.dumps(value))
+                self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [value])
+            for changed in ({**complete, 'preconditionsVerified': False}, {**complete, 'nativeGuardVerified': False},
+                            {**base, 'pressAttempted': True}, {**complete, 'actionStatus': 'not-attempted'},
+                            {**base, 'chatPostconditionVerified': True}, {**complete, 'windowId': 5},
+                            {**complete, 'diagnosticsOnly': False}, {**complete, 'actionStatus': 'PRIVATE'}):
+                path.write_text(json.dumps(changed))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'claude-desktop')
+
+    def test_windows_process_settlement_preserves_unknown_and_ordered_results(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            base = dict(schemaVersion=1, mechanism='windows-process-settlement', diagnosticsOnly=True,
+                        firstState='present', lastState='query-failed', queryCount=2)
+            path = root / 'settlement.json'
+            for value in (base, {**base, 'firstState': 'not-queried', 'lastState': 'not-queried', 'queryCount': 0},
+                          {**base, 'firstState': 'absent', 'lastState': 'absent', 'queryCount': 1},
+                          {**base, 'queryCount': None}):
+                path.write_text(json.dumps(value))
+                self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [value])
+            for changed in ({**base, 'queryCount': True}, {**base, 'queryCount': 129},
+                            {**base, 'queryCount': 0}, {**base, 'queryCount': 1},
+                            {**base, 'firstState': 'not-queried'}, {**base, 'lastState': 'PRIVATE'},
+                            {**base, 'pid': 99}, {**base, 'diagnosticsOnly': False}):
+                path.write_text(json.dumps(changed))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'claude-desktop')
+
+    def test_claude_window_fit_stages_reject_unclosed_identity_and_success_claims(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            value = dict(schemaVersion=1, mechanism='claude-window-fit', diagnosticsOnly=True, stage='postcondition')
+            path = root / 'window-fit.json'
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [value])
+            for changed in ({**value, 'stage': 'PRIVATE'}, {**value, 'stage': True},
+                            {**value, 'windowId': 10}, {**value, 'qualified': True},
+                            {**value, 'diagnosticsOnly': False}):
+                path.write_text(json.dumps(changed))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'claude-desktop')
+
     def test_claude_private_storage_stages_reject_paths_and_wrong_phase(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -1303,6 +1357,10 @@ class QualificationTests(unittest.TestCase):
             valid += [dict(ancestorBoundsStatus=state, checkedAncestorCount=count,
                            centerWithinPublishedAncestors=None)
                       for state, count in (('unavailable', 0), ('cycle', 2), ('limit', 64))]
+            historical = list(valid)
+            valid.extend({**extension, 'ancestorQueryStage': 'complete' if extension['ancestorBoundsStatus'] == 'complete'
+                          else 'chain' if extension['ancestorBoundsStatus'] in ('cycle', 'limit') else 'ancestor-bounds'}
+                         for extension in historical)
             for extension in valid:
                 value = {**base, **extension}
                 path.write_text(json.dumps(value))
@@ -1310,6 +1368,9 @@ class QualificationTests(unittest.TestCase):
             for extension in ({**valid[0], 'centerWithinPublishedAncestors': 1},
                               {**valid[0], 'checkedAncestorCount': True},
                               {**valid[0], 'ancestorBoundsStatus': 'PRIVATE'},
+                              {**valid[0], 'ancestorQueryStage': 'PRIVATE'},
+                              {**valid[0], 'ancestorQueryStage': 'ancestor-bounds'},
+                              {**valid[2], 'ancestorQueryStage': 'complete'},
                               {**valid[2], 'centerWithinPublishedAncestors': True},
                               {**valid[-1], 'checkedAncestorCount': 63},
                               {'ancestorBoundsStatus': 'complete'},

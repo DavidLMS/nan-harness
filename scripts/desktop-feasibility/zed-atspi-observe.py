@@ -13,9 +13,11 @@ COUNTS = ('sampledButtons', 'identityRejected', 'stateRejected', 'stabilityRejec
           'toggleOn', 'toggleOff', 'toggleUnknown')
 
 
-def ancestor_result(status='unavailable', count=0, within=None):
+def ancestor_result(status='unavailable', count=0, within=None, stage=None):
     return dict(centerWithinPublishedAncestors=within,
-                ancestorBoundsStatus=status, checkedAncestorCount=count)
+                ancestorBoundsStatus=status, checkedAncestorCount=count,
+                ancestorQueryStage=stage or ('complete' if status == 'complete' else
+                    'chain' if status in ('cycle', 'limit') else 'unavailable'))
 
 
 def published_ancestors(held, application, bounds, read, deadline, clock=time.monotonic):
@@ -26,11 +28,12 @@ def published_ancestors(held, application, bounds, read, deadline, clock=time.mo
     within = True
     while True:
         if clock() >= deadline:
-            return ancestor_result(count=len(signature)), None
+            return ancestor_result(count=len(signature), stage='deadline'), None
+        stage = 'parent'
         try:
             parent, extent = read(current)
             if clock() >= deadline:
-                return ancestor_result(count=len(signature)), None
+                return ancestor_result(count=len(signature), stage='deadline'), None
             if (not isinstance(parent, tuple) or len(parent) != 2
                     or any(type(part) is not str for part in parent)):
                 raise ValueError('invalid parent')
@@ -41,15 +44,19 @@ def published_ancestors(held, application, bounds, read, deadline, clock=time.mo
             if len(signature) == 64:
                 return ancestor_result('limit', 64), None
             if parent[0] != held[0] or not parent[1] or parent[1].endswith('/null'):
-                return ancestor_result(count=len(signature)), None
+                return ancestor_result(count=len(signature), stage='parent'), None
+            stage = 'ancestor-bounds'
             extent = rectangle(extent)
             within = within and extent[0] <= center[0] < extent[0] + extent[2] \
                 and extent[1] <= center[1] < extent[1] + extent[3]
             signature.append((parent, extent))
             visited.add(parent)
             current = parent
-        except (ValueError, TypeError, OSError, TimeoutError):
-            return ancestor_result(count=len(signature)), None
+        except TimeoutError:
+            return ancestor_result(count=len(signature), stage='deadline'), None
+        except (ValueError, TypeError, OSError):
+            stage = getattr(read, 'query_stage', stage) if stage == 'parent' else stage
+            return ancestor_result(count=len(signature), stage=stage), None
 
 
 def compare_ancestors(first, second):
@@ -58,7 +65,7 @@ def compare_ancestors(first, second):
     if (first_signature is None or second_signature is None):
         return second_facts if second_signature is None else first_facts
     if first_signature != second_signature or first_facts != second_facts:
-        return ancestor_result(count=second_facts['checkedAncestorCount'])
+        return ancestor_result(count=second_facts['checkedAncestorCount'], stage='comparison')
     return second_facts
 
 
@@ -67,8 +74,9 @@ def retry_ancestors(request, expected, deadline):
     try:
         import dbus
     except ImportError:
-        return ancestor_result(), None
+        return ancestor_result(stage='dbus-import'), None
     bus = None
+    stage = 'bus'
     try:
         def remaining():
             value = min(0.1, deadline - time.monotonic())
@@ -83,41 +91,54 @@ def retry_ancestors(request, expected, deadline):
         def owned():
             return int(daemon.GetConnectionUnixProcessID(request['bus'],
                 dbus_interface='org.freedesktop.DBus', timeout=remaining())) == request['pid']
+        stage = 'owner'
         if not owned():
-            return ancestor_result(), None
+            return ancestor_result(stage=stage), None
         held = (request['bus'], request['path'])
         obj = bus.get_object(*held)
+        stage = 'identity'
         if (int(obj.GetRole(dbus_interface='org.a11y.atspi.Accessible', timeout=remaining())) != 43
                 or str(obj.Get('org.a11y.atspi.Accessible', 'Name',
                     dbus_interface='org.freedesktop.DBus.Properties', timeout=remaining())) != 'Retry'):
-            return ancestor_result(), None
+            return ancestor_result(stage=stage), None
+        stage = 'retry-bounds'
         bounds = rectangle([int(n) for n in obj.GetExtents(dbus.UInt32(1),
             dbus_interface='org.a11y.atspi.Component', timeout=remaining())])
         if expected is not None and bounds != expected:
-            return ancestor_result(), None
+            return ancestor_result(stage=stage), None
+        stage = 'application'
         application = tuple(str(n) for n in obj.GetApplication(
             dbus_interface='org.a11y.atspi.Accessible', timeout=remaining()))
         if len(application) != 2 or application[0] != held[0] or application == held:
-            return ancestor_result(), None
+            return ancestor_result(stage=stage), None
         def read(identity):
-            node = bus.get_object(*identity)
-            parent = tuple(str(n) for n in node.Get('org.a11y.atspi.Accessible', 'Parent',
-                dbus_interface='org.freedesktop.DBus.Properties', timeout=remaining()))
-            if len(parent) != 2:
-                raise ValueError('invalid parent')
-            if parent == application:
-                return parent, None
-            if parent[0] != held[0] or parent[1].endswith('/null'):
-                return parent, None
-            ancestor = bus.get_object(*parent)
-            extent = [int(n) for n in ancestor.GetExtents(dbus.UInt32(1),
-                dbus_interface='org.a11y.atspi.Component', timeout=remaining())]
-            return parent, extent
+            try:
+                read.query_stage = 'parent'
+                node = bus.get_object(*identity)
+                parent = tuple(str(n) for n in node.Get('org.a11y.atspi.Accessible', 'Parent',
+                    dbus_interface='org.freedesktop.DBus.Properties', timeout=remaining()))
+                if len(parent) != 2:
+                    raise ValueError('invalid parent')
+                if parent == application:
+                    return parent, None
+                if parent[0] != held[0] or parent[1].endswith('/null'):
+                    return parent, None
+                read.query_stage = 'ancestor-bounds'
+                ancestor = bus.get_object(*parent)
+                extent = [int(n) for n in ancestor.GetExtents(dbus.UInt32(1),
+                    dbus_interface='org.a11y.atspi.Component', timeout=remaining())]
+                return parent, extent
+            except dbus.DBusException:
+                raise OSError("ancestor query failed") from None
+        stage = 'chain'
         facts, signature = published_ancestors(held, application, bounds, read, deadline)
         result = facts, (bounds, application, signature) if signature is not None else None
-        return result if owned() else (ancestor_result(), None)
-    except (dbus.DBusException, ValueError, TypeError, TimeoutError):
-        return ancestor_result(), None
+        stage = 'owner'
+        return result if owned() else (ancestor_result(stage=stage), None)
+    except TimeoutError:
+        return ancestor_result(stage='deadline'), None
+    except (dbus.DBusException, ValueError, TypeError):
+        return ancestor_result(stage=stage), None
     finally:
         if bus is not None:
             bus.close()

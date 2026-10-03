@@ -862,6 +862,7 @@ impl Gui {
             if let Some(counts) = composer_inventory {
                 super::claude_native_probe::record(directory, owner, &counts);
             }
+            self.claude_chat_navigation(directory, owner, composer_observations)?;
             let value = serde_json::json!({"schemaVersion":1, "mechanism":"renderer-startup-baseline", "diagnosticsOnly":true, "windowAcquired":true, "rendererInstrumented":false, "accessibilityInventory": inventory});
             open_private_new(&directory.join(format!("baseline-{owner}.json")))
                 .and_then(|mut file| file.write_all(value.to_string().as_bytes()))

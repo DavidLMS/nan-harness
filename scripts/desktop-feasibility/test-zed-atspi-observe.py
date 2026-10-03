@@ -29,11 +29,13 @@ class Tests(unittest.TestCase):
             return m.published_ancestors(held, app, (10, 20, 40, 20), chain.__getitem__, 10, lambda: 0)
         first = collect((0, 0, 80, 80))
         self.assertEqual(m.compare_ancestors(first, first), dict(
-            centerWithinPublishedAncestors=True, ancestorBoundsStatus='complete', checkedAncestorCount=1))
+            centerWithinPublishedAncestors=True, ancestorBoundsStatus='complete', checkedAncestorCount=1,
+            ancestorQueryStage='complete'))
         clipped = collect((0, 0, 20, 20))
         self.assertFalse(m.compare_ancestors(clipped, clipped)['centerWithinPublishedAncestors'])
         changed = collect((0, 0, 90, 90))
         self.assertIsNone(m.compare_ancestors(first, changed)['centerWithinPublishedAncestors'])
+        self.assertEqual(m.compare_ancestors(first, changed)['ancestorQueryStage'], 'comparison')
         self.assertNotIn('/group', json.dumps(m.compare_ancestors(first, first)))
 
     def test_ancestor_cycles_foreign_owner_missing_bounds_and_limit_remain_unknown(self):
@@ -43,9 +45,9 @@ class Tests(unittest.TestCase):
         cyclic = collect(lambda _: (held, (0, 0, 100, 100)))
         self.assertEqual(cyclic[0]['ancestorBoundsStatus'], 'cycle')
         foreign = collect(lambda _: ((':1.3', '/group'), (0, 0, 100, 100)))
-        self.assertEqual(foreign[0], m.ancestor_result())
+        self.assertEqual(foreign[0], m.ancestor_result(stage='parent'))
         missing = collect(lambda _: ((':1.2', '/group'), None))
-        self.assertEqual(missing[0], m.ancestor_result())
+        self.assertEqual(missing[0], m.ancestor_result(stage='ancestor-bounds'))
         index = 0
         def endless(_):
             nonlocal index
@@ -59,7 +61,26 @@ class Tests(unittest.TestCase):
         clock = iter([0, 11])
         result = m.published_ancestors((':1.2', '/retry'), (':1.2', '/app'),
             (10, 20, 40, 20), lambda _: ((':1.2', '/app'), None), 10, lambda: next(clock))
-        self.assertEqual(result, (m.ancestor_result(), None))
+        self.assertEqual(result, (m.ancestor_result(stage='deadline'), None))
+
+    def test_ancestor_query_failure_and_malformed_payload_stages_are_private(self):
+        held, app = (':1.2', '/retry'), (':1.2', '/app')
+        def collect(read):
+            return m.published_ancestors(held, app, (10, 20, 40, 20), read, 10, lambda: 0)[0]
+        malformed_parent = collect(lambda _: (('PRIVATE',), None))
+        self.assertEqual(malformed_parent['ancestorQueryStage'], 'parent')
+        malformed_extent = collect(lambda _: ((':1.2', '/parent'), (0, 0, -1, 10)))
+        self.assertEqual(malformed_extent['ancestorQueryStage'], 'ancestor-bounds')
+        def failed_read(_):
+            raise OSError('PRIVATE error payload')
+        for stage in ('parent', 'ancestor-bounds'):
+            failed_read.query_stage = stage
+            result = collect(failed_read)
+            self.assertEqual(result['ancestorQueryStage'], stage)
+            self.assertNotIn('PRIVATE', json.dumps(result))
+        def expired_read(_):
+            raise TimeoutError('PRIVATE timeout')
+        self.assertEqual(collect(expired_read)['ancestorQueryStage'], 'deadline')
 
     def request(self):
         return m.validate(dict(pid=71, window=91,

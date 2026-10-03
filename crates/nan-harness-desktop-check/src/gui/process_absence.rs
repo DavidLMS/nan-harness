@@ -1,7 +1,67 @@
 //! Read-only process absence supplements window absence before restoration.
+#[cfg(any(windows, test))]
 use crate::report::Reason;
 #[cfg(windows)]
 use nan_harness_core::DesktopHarnessKind;
+
+#[cfg(any(windows, test))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum SettlementState {
+    NotQueried,
+    Present,
+    Absent,
+    QueryFailed,
+}
+
+#[derive(Default)]
+pub(super) struct ProcessSettlement {
+    #[cfg(any(windows, test))]
+    first: Option<SettlementState>,
+    #[cfg(any(windows, test))]
+    last: Option<SettlementState>,
+    #[cfg(any(windows, test))]
+    count: u16,
+}
+
+#[cfg(any(windows, test))]
+impl ProcessSettlement {
+    fn observe(&mut self, result: Result<bool, Reason>) {
+        let state = match result {
+            Ok(true) => SettlementState::Present,
+            Ok(false) => SettlementState::Absent,
+            Err(_) => SettlementState::QueryFailed,
+        };
+        self.first.get_or_insert(state);
+        self.last = Some(state);
+        self.count = self.count.saturating_add(1);
+    }
+
+    fn facts(&self) -> serde_json::Value {
+        serde_json::json!({"schemaVersion":1, "mechanism":"windows-process-settlement",
+            "diagnosticsOnly":true,
+            "firstState":self.first.unwrap_or(SettlementState::NotQueried),
+            "lastState":self.last.unwrap_or(SettlementState::NotQueried),
+            "queryCount":(self.count <= 128).then_some(self.count)})
+    }
+
+    #[cfg(windows)]
+    pub(super) fn record(&self) {
+        save_facts(self.facts());
+    }
+}
+
+#[cfg(any(windows, test))]
+fn observed_query(
+    query: impl FnOnce() -> Result<bool, Reason>,
+    observer: Option<&mut ProcessSettlement>,
+) -> Result<bool, Reason> {
+    let result = query();
+    if let Some(observer) = observer {
+        observer.observe(result);
+    }
+    result
+}
 
 #[cfg(windows)]
 pub(super) fn ensure_absent(
@@ -64,6 +124,7 @@ pub(super) fn inspect_absent(
     kind: DesktopHarnessKind,
     deadline: std::time::Instant,
     native: Option<&crate::native::Native>,
+    observer: Option<&mut ProcessSettlement>,
 ) -> Result<(), Reason> {
     let image: &[u8] = match kind {
         DesktopHarnessKind::ChatGpt => b"ChatGPT.exe",
@@ -82,7 +143,7 @@ pub(super) fn inspect_absent(
             &prepared
         }
     };
-    if inspect(native, deadline, image)? {
+    if observed_query(|| inspect(native, deadline, image), observer)? {
         Err(Reason::AlreadyRunning)
     } else {
         Ok(())
@@ -128,6 +189,7 @@ fn before_launch_facts(state: PostStopState) -> serde_json::Value {
 pub(super) fn observe_after_accessibility_rejection(
     deadline: std::time::Instant,
     native: Option<&crate::native::Native>,
+    observer: Option<&mut ProcessSettlement>,
 ) {
     if std::env::var("GITHUB_ACTIONS").as_deref() != Ok("true")
         || std::env::var("RUNNER_ENVIRONMENT").as_deref() != Ok("github-hosted")
@@ -146,7 +208,7 @@ pub(super) fn observe_after_accessibility_rejection(
     };
     let result = native
         .ok_or(Reason::DesktopUnavailable)
-        .and_then(|native| inspect(native, deadline, b"Claude.exe"));
+        .and_then(|native| observed_query(|| inspect(native, deadline, b"Claude.exe"), observer));
     let state = match result {
         Ok(true) => PostStopState::Present,
         Ok(false) => PostStopState::Absent,
@@ -282,6 +344,92 @@ fn parse_presence(output: &str) -> Result<bool, InspectionStage> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn settlement_preserves_actual_results_without_repeating_queries() {
+        let mut observer = ProcessSettlement::default();
+        assert_eq!(observer.facts()["firstState"], "not-queried");
+        assert_eq!(observer.facts()["queryCount"], 0);
+        let mut queries = 0;
+        for expected in [
+            Ok(true),
+            Ok(true),
+            Err(Reason::DesktopUnavailable),
+            Ok(false),
+        ] {
+            assert_eq!(
+                observed_query(
+                    || {
+                        queries += 1;
+                        expected
+                    },
+                    Some(&mut observer)
+                ),
+                expected
+            );
+        }
+        assert_eq!(queries, 4);
+        let facts = observer.facts();
+        assert_eq!(facts.as_object().unwrap().len(), 6);
+        assert_eq!(facts["firstState"], "present");
+        assert_eq!(facts["lastState"], "absent");
+        assert_eq!(facts["queryCount"], 4);
+        assert_eq!(
+            observed_query(|| Err(Reason::AlreadyRunning), None),
+            Err(Reason::AlreadyRunning)
+        );
+    }
+
+    #[test]
+    fn settlement_overflow_is_explicit_and_retains_first_and_latest_states() {
+        let mut observer = ProcessSettlement::default();
+        for _ in 0..128 {
+            observer.observe(Ok(true));
+        }
+        assert_eq!(observer.facts()["queryCount"], 128);
+        observer.observe(Err(Reason::DesktopUnavailable));
+        let facts = observer.facts();
+        assert!(facts["queryCount"].is_null());
+        assert_eq!(facts["firstState"], "present");
+        assert_eq!(facts["lastState"], "query-failed");
+    }
+
+    #[test]
+    fn settlement_deadline_records_only_queries_that_were_attempted() {
+        use std::cell::Cell;
+        use std::time::{Duration, Instant};
+        let start = Instant::now();
+        let deadline = start + Duration::from_millis(100);
+        let clock = Cell::new(start);
+        let mut observer = ProcessSettlement::default();
+        let outcome = wait_absent(
+            |bound| {
+                observed_query(
+                    || {
+                        assert_eq!(bound, deadline);
+                        clock.set(deadline);
+                        Ok(false)
+                    },
+                    Some(&mut observer),
+                )
+            },
+            || clock.get(),
+            |_| panic!("no pause after expiry"),
+            deadline,
+        );
+        assert_eq!(outcome, Err(Reason::CleanupFailed));
+        assert_eq!(observer.facts()["lastState"], "absent");
+        assert_eq!(observer.facts()["queryCount"], 1);
+        let mut unqueried = ProcessSettlement::default();
+        let outcome = wait_absent(
+            |_| observed_query(|| panic!("expired query"), Some(&mut unqueried)),
+            || deadline,
+            |_| panic!("expired pause"),
+            deadline,
+        );
+        assert_eq!(outcome, Err(Reason::CleanupFailed));
+        assert_eq!(unqueried.facts()["queryCount"], 0);
+    }
+
     use super::*;
     use std::{
         cell::Cell,

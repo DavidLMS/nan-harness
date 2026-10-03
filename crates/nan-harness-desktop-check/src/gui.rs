@@ -1,12 +1,12 @@
 //! Native controls are resolved inside one app; native errors never enter public reports.
 
 mod accessibility_probe;
+mod claude_chat_navigation;
 mod claude_native_probe;
 mod clipboard;
 mod dom_probe;
 mod native_copy_probe;
 mod native_icon_probe;
-#[cfg(any(windows, test))]
 mod process_absence;
 mod stability;
 mod visual;
@@ -271,7 +271,7 @@ fn settle_absence(
 
 impl Gui {
     pub(crate) fn ensure_absent(kind: DesktopHarnessKind) -> Result<(), AbsenceFailure> {
-        Self::absence_snapshot(kind, None, None, false)
+        Self::absence_snapshot(kind, None, None, false, None)
     }
 
     pub(crate) fn ensure_absent_before_launch(
@@ -283,7 +283,7 @@ impl Gui {
                 stage: AbsenceStage::NativeWindows,
                 reason,
             })?;
-            return Self::absence_snapshot(kind, None, Some(&native), true);
+            return Self::absence_snapshot(kind, None, Some(&native), true, None);
         }
         Self::ensure_absent(kind)
     }
@@ -309,9 +309,16 @@ impl Gui {
                 .map(|held| held.visual.absence_native())
                 .or(prepared.as_ref());
             let mut observed = false;
-            return settle_absence(
+            let mut settlement = process_absence::ProcessSettlement::default();
+            let outcome = settle_absence(
                 |bound| {
-                    let result = Self::absence_snapshot(kind, Some(bound), native, false);
+                    let result = Self::absence_snapshot(
+                        kind,
+                        Some(bound),
+                        native,
+                        false,
+                        Some(&mut settlement),
+                    );
                     let ax_presence = result.as_ref().err().is_some_and(|failure| {
                         failure.stage == AbsenceStage::AccessibilityEnumeration
                             && failure.reason == Reason::AlreadyRunning
@@ -322,7 +329,11 @@ impl Gui {
                         Instant::now(),
                         bound,
                     ) {
-                        process_absence::observe_after_accessibility_rejection(bound, native);
+                        process_absence::observe_after_accessibility_rejection(
+                            bound,
+                            native,
+                            Some(&mut settlement),
+                        );
                     }
                     // Independent evidence never overrides the original absence verdict.
                     result
@@ -331,6 +342,8 @@ impl Gui {
                 std::thread::sleep,
                 deadline,
             );
+            settlement.record();
+            return outcome;
         }
         #[cfg(not(windows))]
         let _ = gui;
@@ -342,6 +355,7 @@ impl Gui {
         deadline: Option<Instant>,
         retained_native: Option<&crate::native::Native>,
         before_launch: bool,
+        settlement: Option<&mut process_absence::ProcessSettlement>,
     ) -> Result<(), AbsenceFailure> {
         let require_budget = |stage| {
             if deadline.is_some_and(|bound| Instant::now() >= bound) {
@@ -383,7 +397,7 @@ impl Gui {
         };
         #[cfg(not(windows))]
         let native_absence = {
-            let _ = (retained_native, before_launch);
+            let _ = (retained_native, before_launch, settlement);
             visual::Visual::ensure_absent(kind)
         };
         native_absence.map_err(|reason| AbsenceFailure {
@@ -393,7 +407,9 @@ impl Gui {
         require_budget(AbsenceStage::ProcessEnumeration)?;
         #[cfg(windows)]
         match deadline {
-            Some(bound) => process_absence::inspect_absent(kind, bound, retained_native),
+            Some(bound) => {
+                process_absence::inspect_absent(kind, bound, retained_native, settlement)
+            }
             None => process_absence::ensure_absent(kind, retained_native, before_launch),
         }
         .map_err(|reason| AbsenceFailure {

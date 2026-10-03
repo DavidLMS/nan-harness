@@ -304,7 +304,9 @@ jobs:
       - name: Enable Claude macOS official native-folder acquisition trial
         if: runner.os == 'macOS' && matrix.app == 'claude-desktop' && inputs.experiment == 'startup-baseline'
         shell: bash
-        run: echo 'NANH_CLAUDE_MAC_PROFILE_POLICY=native-known-folders' >> "$GITHUB_ENV"
+        run: |
+          echo 'NANH_CLAUDE_MAC_PROFILE_POLICY=native-known-folders' >> "$GITHUB_ENV"
+          echo 'NANH_CLAUDE_MAC_CHAT_NAVIGATION=1' >> "$GITHUB_ENV"
       - name: Enable Claude Windows private-profile observations
         if: runner.os == 'Windows' && matrix.app == 'claude-desktop' && inputs.experiment == 'startup-baseline'
         shell: bash

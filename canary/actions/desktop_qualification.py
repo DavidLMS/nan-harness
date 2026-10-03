@@ -231,10 +231,10 @@ def semantic_observations(directory, app):
         if type(value) is not dict:
             raise ValueError('invalid semantic observation')
         mechanism = value.get('mechanism')
-        if mechanism not in {'hermes-windows-catalog-readiness', 'hermes-renderer-qualification', 'zed-native-copy', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'zed-retry-visual', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'windows-process-absence', 'windows-post-stop-process', 'windows-process-baseline', 'claude-owned-configuration', 'claude-restore', 'claude-model-discovery', 'claude-window-stack', 'claude-window-focus', 'claude-storage-use', 'claude-native-storage', 'claude-private-storage-stage', 'claude-native-composer', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}:
+        if mechanism not in {'hermes-windows-catalog-readiness', 'hermes-renderer-qualification', 'zed-native-copy', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'zed-retry-visual', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'windows-process-absence', 'windows-post-stop-process', 'windows-process-baseline', 'windows-process-settlement', 'claude-owned-configuration', 'claude-restore', 'claude-model-discovery', 'claude-window-stack', 'claude-window-focus', 'claude-chat-navigation', 'claude-window-fit', 'claude-storage-use', 'claude-native-storage', 'claude-private-storage-stage', 'claude-native-composer', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}:
             continue
         expected = 'hermes-renderer-qualification' if app == 'hermes-desktop' else 'zed-native-copy'
-        if (mechanism != expected and mechanism not in {'hermes-windows-catalog-readiness', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'zed-retry-visual', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'windows-process-absence', 'windows-post-stop-process', 'windows-process-baseline', 'claude-owned-configuration', 'claude-restore', 'claude-model-discovery', 'claude-window-stack', 'claude-window-focus', 'claude-storage-use', 'claude-native-storage', 'claude-private-storage-stage', 'claude-native-composer', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}) or type(value.get('schemaVersion')) is not int or value['schemaVersion'] != 1:
+        if (mechanism != expected and mechanism not in {'hermes-windows-catalog-readiness', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'zed-retry-visual', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'windows-process-absence', 'windows-post-stop-process', 'windows-process-baseline', 'windows-process-settlement', 'claude-owned-configuration', 'claude-restore', 'claude-model-discovery', 'claude-window-stack', 'claude-window-focus', 'claude-chat-navigation', 'claude-window-fit', 'claude-storage-use', 'claude-native-storage', 'claude-private-storage-stage', 'claude-native-composer', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}) or type(value.get('schemaVersion')) is not int or value['schemaVersion'] != 1:
             raise ValueError('semantic observation identity differs')
         record = {'schemaVersion': 1, 'mechanism': mechanism}
         if mechanism == 'hermes-windows-catalog-readiness':
@@ -422,6 +422,46 @@ def semantic_observations(directory, app):
                     raise ValueError('invalid Claude configuration observation flag')
                 record[key] = value[key]
             record['diagnosticsOnly'] = True
+        elif mechanism == 'claude-chat-navigation':
+            flags = set('preconditionsVerified pressAttempted chatPostconditionVerified nativeGuardVerified'.split())
+            fields = flags | set('schemaVersion mechanism diagnosticsOnly phase actionStatus'.split())
+            phase, action = value.get('phase'), value.get('actionStatus')
+            if (set(value) != fields or app != 'claude-desktop' or value['diagnosticsOnly'] is not True
+                    or type(phase) is not str or phase not in {'preflight', 'press', 'postcondition', 'completed'}
+                    or type(action) is not str or action not in {'not-attempted', 'completed', 'uncertain'}
+                    or any(type(value[key]) is not bool for key in flags)):
+                raise ValueError('invalid Claude Chat navigation identity')
+            attempted, ready, post, guarded = (value[key] for key in
+                ('pressAttempted', 'preconditionsVerified', 'chatPostconditionVerified', 'nativeGuardVerified'))
+            if (attempted != (action != 'not-attempted') or attempted and not ready
+                    or phase == 'preflight' and (attempted or post)
+                    or phase != 'preflight' and not attempted
+                    or post and not (attempted and ready and guarded)
+                    or (phase == 'completed') != post):
+                raise ValueError('inconsistent Claude Chat navigation observation')
+            record.update(diagnosticsOnly=True, phase=phase, actionStatus=action,
+                          **{key: value[key] for key in flags})
+        elif mechanism == 'windows-process-settlement':
+            fields = set('schemaVersion mechanism diagnosticsOnly firstState lastState queryCount'.split())
+            states = {'present', 'absent', 'query-failed', 'not-queried'}
+            first, last, count = value.get('firstState'), value.get('lastState'), value.get('queryCount')
+            if (set(value) != fields or app != 'claude-desktop' or value['diagnosticsOnly'] is not True
+                    or type(first) is not str or first not in states or type(last) is not str or last not in states
+                    or count is not None and (type(count) is not int or not 0 <= count <= 128)
+                    or count == 0 and (first != 'not-queried' or last != 'not-queried')
+                    or count != 0 and ('not-queried' in (first, last))
+                    or count == 1 and first != last):
+                raise ValueError('invalid Windows process settlement observation')
+            record.update(diagnosticsOnly=True, firstState=first, lastState=last, queryCount=count)
+        elif mechanism == 'claude-window-fit':
+            fields = set('schemaVersion mechanism diagnosticsOnly stage'.split())
+            stages = {'completed', 'request', 'initial-proof', 'screen', 'rectangle', 'settable',
+                      'identity-recheck', 'allocation', 'size', 'position', 'postcondition',
+                      'transport', 'invalid-output'}
+            if (set(value) != fields or app != 'claude-desktop' or value['diagnosticsOnly'] is not True
+                    or type(value['stage']) is not str or value['stage'] not in stages):
+                raise ValueError('invalid Claude window fit observation')
+            record.update(diagnosticsOnly=True, stage=value['stage'])
         elif mechanism == 'claude-window-focus':
             fields = {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'status', 'nativeForegroundWindowMatchedHeld'}
             statuses = {'proved', 'untrusted', 'query-error', 'focus-mismatch', 'not-standard',
@@ -568,6 +608,17 @@ def semantic_observations(directory, app):
             present_modifiers = modifier_fields & set(value)
             ancestor_fields = {'centerWithinPublishedAncestors', 'ancestorBoundsStatus', 'checkedAncestorCount'}
             present_ancestors = ancestor_fields & set(value)
+            ancestor_stage_fields = {'ancestorQueryStage'}
+            if 'ancestorQueryStage' in value:
+                stage = value['ancestorQueryStage']
+                stages = {'unavailable', 'dbus-import', 'bus', 'owner', 'identity', 'retry-bounds',
+                          'application', 'parent', 'ancestor-bounds', 'comparison', 'deadline', 'chain', 'complete'}
+                state = value.get('ancestorBoundsStatus')
+                if (present_ancestors != ancestor_fields or type(stage) is not str or stage not in stages
+                        or (state == 'complete') != (stage == 'complete')
+                        or state in {'cycle', 'limit'} and stage != 'chain'):
+                    raise ValueError('invalid Zed ancestor query stage')
+                record['ancestorQueryStage'] = stage
             if present_ancestors:
                 state, count = value.get('ancestorBoundsStatus'), value.get('checkedAncestorCount')
                 within = value.get('centerWithinPublishedAncestors')
@@ -579,7 +630,7 @@ def semantic_observations(directory, app):
                     raise ValueError('invalid Zed published ancestor observation')
                 record.update(centerWithinPublishedAncestors=within, ancestorBoundsStatus=state,
                               checkedAncestorCount=count)
-            if (set(value) - modifier_fields - ancestor_fields not in (base, base | {'inputDelivery'}, base | coordinate_fields,
+            if (set(value) - modifier_fields - ancestor_fields - ancestor_stage_fields not in (base, base | {'inputDelivery'}, base | coordinate_fields,
                                   base | coordinate_fields | {'inputDelivery'}, base | coordinate_fields | authority_fields,
                                   base | coordinate_fields | authority_fields | {'inputDelivery'})
                     or present_modifiers and present_modifiers != modifier_fields

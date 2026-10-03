@@ -363,20 +363,21 @@ impl Visual {
                 if fitted && !snapshot.contains_display(window) {
                     return Err(postcondition_geometry_failure());
                 }
+                let unchanged = previous.as_ref() == Some(*window);
+                let ready = settle.ready(extended_settle, Instant::now(), unchanged, deadline);
                 #[cfg(target_os = "macos")]
-                if initial_mac_fit(&native, &snapshot, window, kind, &mut mac_fitted, deadline)? {
+                // Geometry mutation and incomplete initial focus both invalidate continuity.
+                if initial_mac_fit(&native, &snapshot, window, kind, &mut mac_fitted, deadline)?
+                    || ready && !initial_readiness(&native, &snapshot, window, owner, deadline)?
+                {
                     require_owned_candidate(window, owner)?;
                     previous = None;
                     settle.reset();
                     stability = super::stability::Stability::default();
                     continue;
                 }
-                let unchanged = previous.as_ref() == Some(*window);
-                let ready = settle.ready(extended_settle, Instant::now(), unchanged, deadline);
                 if ready {
                     stability.save();
-                    #[cfg(target_os = "macos")]
-                    initial_readiness(&native, &snapshot, window, owner, deadline)?;
                     return Ok(Self {
                         window: RefCell::new((*window).clone()),
                         native,
@@ -1314,13 +1315,21 @@ fn scoped_composer_guard(snapshot: &Snapshot, window: &Window) -> Result<(), Gua
 }
 
 #[cfg(any(test, target_os = "macos"))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InitialFocus {
+    Ready,
+    Pending,
+    Rejected,
+}
+
+#[cfg(any(test, target_os = "macos"))]
 fn initial_owned_focus<Query, Own, Now>(
     window: &Window,
     deadline: Instant,
     query: Query,
     mut ownership: Own,
     mut now: Now,
-) -> Result<bool, AcquisitionFailure>
+) -> Result<InitialFocus, AcquisitionFailure>
 where
     Query: FnOnce() -> Option<Snapshot>,
     Own: FnMut() -> Result<(), AcquisitionFailure>,
@@ -1343,14 +1352,20 @@ where
     if now() >= deadline {
         return Err(timeout());
     }
-    if fresh.is_some_and(|snapshot| snapshot.claude_focused_guard_failure(window).is_ok()) {
+    let state = match fresh {
+        Some(snapshot) if snapshot.claude_focused_guard_failure(window).is_ok() => {
+            InitialFocus::Ready
+        }
+        Some(snapshot) if snapshot.claude_focus_pending(window) => InitialFocus::Pending,
+        _ => InitialFocus::Rejected,
+    };
+    if state != InitialFocus::Rejected {
         ownership()?;
         if now() >= deadline {
             return Err(timeout());
         }
-        return Ok(true);
     }
-    Ok(false)
+    Ok(state)
 }
 
 #[cfg(target_os = "macos")]
@@ -1360,7 +1375,7 @@ fn initial_readiness(
     window: &Window,
     owner: u32,
     deadline: Instant,
-) -> Result<(), AcquisitionFailure> {
+) -> Result<bool, AcquisitionFailure> {
     if crate::native::claude_focus_policy()
         && matches_app(DesktopHarnessKind::Claude, &window.name)
         && snapshot.guard_failure(window) == Err(GuardFailure::SameProcessWindow)
@@ -1376,7 +1391,7 @@ fn initial_readiness(
                 )
             })
         };
-        if initial_owned_focus(
+        match initial_owned_focus(
             window,
             deadline,
             || {
@@ -1387,7 +1402,9 @@ fn initial_readiness(
             ownership,
             Instant::now,
         )? {
-            return Ok(());
+            InitialFocus::Ready => return Ok(true),
+            InitialFocus::Pending => return Ok(false),
+            InitialFocus::Rejected => {}
         }
     }
     if let Err(failure) = snapshot.non_foreground_failure(window) {
@@ -1410,7 +1427,7 @@ fn initial_readiness(
         ));
     }
     if snapshot.guard_failure(window) != Err(GuardFailure::ForegroundChanged) {
-        return Ok(());
+        return Ok(true);
     }
     let activation_deadline = Instant::now() + Duration::from_secs(2);
     activate_and_wait(
@@ -1435,6 +1452,7 @@ fn initial_readiness(
         },
         activation_deadline,
     )
+    .map(|()| true)
     .map_err(|(reason, category)| {
         (
             reason,
@@ -1947,7 +1965,34 @@ mod tests {
                 || Ok(()),
                 || start
             ),
-            Ok(true)
+            Ok(InitialFocus::Ready)
+        );
+    }
+
+    #[test]
+    fn initial_incomplete_focus_waits_without_proving_readiness() {
+        let state = Snapshot::parse("FG 7 0\nDISPLAY 0 0 2000 2000\nWIN 99 7 1800 1800 10 10 436c61756465 3\nWIN 1 7 10 20 800 600 436c61756465 0\nFOCUS query-error 0\nFOCUS_QUERY before focused-window cannot-complete\nFOCUS_WINDOW query-error 0\n").unwrap();
+        let held = state.windows[1].clone();
+        let now = Instant::now();
+        let deadline = now + Duration::from_secs(45);
+        let ownership_checks = Cell::new(0);
+        let result = initial_owned_focus(
+            &held,
+            deadline,
+            || Some(state.clone()),
+            || {
+                ownership_checks.set(ownership_checks.get() + 1);
+                Ok(())
+            },
+            || now,
+        );
+        assert_eq!(result, Ok(InitialFocus::Pending));
+        assert_eq!(ownership_checks.get(), 2);
+        let mut obscured = state;
+        obscured.windows[0].bounds = held.bounds;
+        assert_eq!(
+            initial_owned_focus(&held, deadline, || Some(obscured), || Ok(()), || now),
+            Ok(InitialFocus::Rejected)
         );
     }
 

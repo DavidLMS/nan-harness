@@ -6,7 +6,7 @@ use nan_harness_private_fs::open_private_new;
 use std::io::Write as _;
 use std::path::Path;
 
-fn mode_button(label: &str, enabled: bool) -> String {
+pub(super) fn mode_button(label: &str, enabled: bool) -> String {
     let enabled = if enabled { "[enabled=\"true\"]" } else { "" };
     ["name", "description"].into_iter().flat_map(|group_name| {
         ["name", "description"].map(move |button_name| {

@@ -29,8 +29,10 @@ All verify response, real file-tool use, controlled provider failure, UI Retry
 recovery and application, global and clipboard cleanup without OCR. Hermes
 observes Chromium 144.0.7559.236; Electron's separate version and Zed's runtime
 version remain unobserved. Exact commits and artifact hashes are recorded in
-each closed result. Ten cells in the five-application, three-platform matrix
-remain unqualified. The three Pen cells are blocked by vendor activation: no
+each closed result. Five of the thirteen cells with official native distribution
+are qualified; eight remain open. Linux Claude and Linux Codex have no official
+native desktop distribution and are unsupported, making ten unqualified cells
+in the complete fifteen-cell inventory. The three Pen cells are blocked by vendor activation: no
 official account-free route is established, and no test account is authorized.
 Personal-machine isolation and live-provider behavior still require separate
 evidence.
@@ -41,7 +43,8 @@ verification failures exposed instability. Shorter synthetic prompts restored
 three ARM64 passes in [run 34272339383](https://github.com/DavidLMS/nan-harness/actions/runs/34272339383).
 Live verification remains untested. Linux now starts in Zed's stateless mode,
 which avoids its single-instance socket exceeding the private journal path's
-Unix socket limit; interaction and cleanup remain unqualified.
+Unix socket limit. Reply, file-tool and cleanup checks now pass, while explicit
+Retry recovery still prevents full qualification.
 
 Windows probes default to `isolation-unavailable` before app launch. Native
 qualification proved that redirected AppData
@@ -116,8 +119,8 @@ The manual `desktop-check-qualification.yml` workflow evaluates the initial
 Linux x64, macOS ARM64 and Windows x64 matrix. A pending backend remains an
 explicit unqualified cell and prevents aggregate acceptance. Current qualified semantic
 adapters cover Zed on macOS ARM64 and Windows x64, and Hermes on Linux x64 and
-macOS ARM64; additional application and platform adapters require their own
-native evidence.
+macOS ARM64 and Windows x64; additional application and platform adapters
+require their own native evidence.
 
 Until the qualification workflow is present on the default branch, use the
 registered `Desktop semantic automation feasibility` workflow on the integration
@@ -130,15 +133,16 @@ the full acceptance gate. Implemented adapters are accepted only when their
 full native result meets the gate; implementation and feasibility alone do not
 qualify a cell.
 
-Five cells are qualified, leaving ten remaining cells. The following
+Five of thirteen native-supported cells are qualified, leaving eight open;
+the two additional Linux cells are unsupported. The following
 observations describe completed runs, rather than additional qualification:
 
 | Application | Linux x64 | macOS ARM64 | Windows x64 |
 | --- | --- | --- | --- |
 | Zed | Response and file-tool steps pass; pointer and accessibility Retry acknowledgements do not produce provider recovery. | Three complete probes pass the expanded retry policy. | Three complete probes pass with direct native clipboard transport and all cleanup checks. |
 | Hermes | Three complete probes pass with renderer process ownership. | Three complete probes pass with private native userData and bounded cold-start waits. | Three complete probes pass after ordinary onboarding dismissal and fresh catalog readiness, including explicit UI Retry and cleanup. |
-| ChatGPT / Codex | Owned document loads without a composer; the latest completed startup diagnostic passes cleanup. | Renderer observation remains intermittent; cleanup passes. | All three probes acquire a renderer, but a foreign overlay blocks the public role form before action. Process absence and all cleanup pass. |
-| Claude | Three uninstrumented windows acquired. Explicit native accessibility returns zero visible editors or login buttons. Official account-free gateway remains unqualified. | Compiled Foundation preflight passes; native-folder storage is created and a window is acquired, then the focus guard rejects. The process is active with an eligible window at failure; cleanup passes. Configuration consumption remains unproved. | Stable owned window acquired; no editable controls observed and cleanup fails. |
+| ChatGPT / Codex | No official native desktop distribution; unpacked feasibility observations do not qualify Linux. | Renderer observation remains intermittent; cleanup passes. | All three probes acquire a renderer, but a foreign overlay blocks the public role form before action. Process absence and all cleanup pass. |
+| Claude | No official native desktop distribution. | Two of three windows acquired in completed trials, with one exact classic composer and Start task; no Send message. Latest trial rejects incomplete initial focus. Cleanup passes. Guarded Chat navigation and conversation verification remain open. | Owned window acquired, no editable observed, cleanup unproved. Native known-folder metadata is fresh and unchanged; private-profile observation remains unavailable. A later session preflight fails before app execution. |
 | Pen | Software GLES removes GPU startup failure; three fresh sessions show sign-in and no editor. No official account-free route found for the frozen release. | Two probes expose composer/Send; another exposes sign-in. Conversation adapter remains unimplemented. | Owned renderer loads sign-in and a dialog; conversation adapter remains unimplemented. |
 
 The completed evidence is available in runs
@@ -1623,7 +1627,9 @@ supports managed MCP servers, including local stdio tools. The current trial
 has not yet established a guarded composer, a response-scoped assertion or an
 installed fixture tool. Those proofs remain necessary before coding acceptance.
 
-Local `cargo check-all` passes on `6d66721b`. The next macOS Claude trial
+Local `cargo check-all` and the hosted Linux gate
+[37083450089](https://github.com/DavidLMS/nan-harness/actions/runs/37083450089)
+pass on `6d66721b`. The next macOS Claude trial
 [37083447503](https://github.com/DavidLMS/nan-harness/actions/runs/37083447503)
 again acquires two of three initial windows, with all cleanup checks passing.
 Both acquired inventories identify exactly one classic source-labelled editable,
@@ -1656,3 +1662,42 @@ mouse movement. Only a closed containment/status/count result leaves memory;
 references and rectangles remain transient. This can falsify published ancestor
 containment but cannot prove GPUI's rendered content-mask hitbox or callback.
 The original single click, owned-window guards and deadline remain in force.
+
+macOS Claude
+[37084353789](https://github.com/DavidLMS/nan-harness/actions/runs/37084353789)
+stops before inventory on the first trial: initial AX focus queries report
+CannotComplete while a nonintersecting, non-normal-layer same-process panel is
+above the sole eligible window. Cleanup passes. The initial acquisition phase
+now applies the already-defined read-only pending-focus predicate, rechecks
+ownership and resets continuity within the original 45-second deadline. It
+never treats an incomplete query as readiness or retries a fit. The one-time
+native fit also publishes its closed failure stage; only timely empty helper
+output still proves successful fit.
+
+Windows Claude
+[37084355297](https://github.com/DavidLMS/nan-harness/actions/runs/37084355297)
+does not reach application qualification: the closed desktop-session preflight
+step fails. No application version or native probe exists, so this is not
+compatibility evidence and does not diagnose the preflight's cause. The next
+trial records first/last results and exact bounded counts of existing post-stop
+process queries. It adds no query and changes no cleanup verdict or deadline.
+
+Linux Zed
+[37084356150](https://github.com/DavidLMS/nan-harness/actions/runs/37084356150)
+passes reply/tool acceptance and cleanup in all three trials; Retry recovery
+still fails. All three ancestor observations are unavailable with zero checked
+bounds. This cannot establish clipping. Pinned AccessKit confirms GetApplication
+is a method and Parent is a property; changing those APIs blindly is unwarranted.
+A closed query-stage observation will distinguish the failed existing read.
+
+
+The next macOS startup trial permits one ordinary public Chat navigation only
+when fresh source-scoped Mode/Chat counts, nonempty stable AX identity, owned
+foreground and unchanged native window all agree. A separate absolute five-second
+navigation phase remains inside the worker watchdog; it is never reset. Failed
+or uncertain AX completion is observed without a second press. Only classic
+composer plus Send message and absence of Start task proves the navigation
+postcondition. No conversation input, response assertion or qualification is
+added. xa11y cache handles are freshly allocated per query and cannot establish
+AX identity; the guard uses stable identifier, PID, bounds and the exact source
+scope instead.
