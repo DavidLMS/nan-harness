@@ -23,8 +23,8 @@ async function trial(options={}) {
  dialog.querySelectorAll=selector=>selector.startsWith('input')?(options.ambiguousDialog?[radio,radio]:[radio]):[legend];
  if(options.onboardingDialog||options.alertDialog||options.ambiguousDialog||options.duplicateDialog)
   doc.querySelectorAll=selector=>selector.startsWith('input')?[radio]:options.duplicateDialog?[dialog,foreign]:[dialog];
- const form={classList:{contains:t=>['m-auto','flex','w-full','shrink-0','flex-col','items-center','justify-between','py-4'].includes(t)&&!(options.overlayWrongLayout&&t==='m-auto')}};
- const heading={innerText:options.overlayHeading??(options.overlayLookalike?'All set':"You're all set")};
+ const form={classList:{contains:t=>(options.computerHistory?['pointer-events-auto','relative','hide-scrollbar','flex','flex-col','gap-6','overflow-y-auto','pb-10']:['m-auto','flex','w-full','shrink-0','flex-col','items-center','justify-between','py-4']).includes(t)&&!options.overlayWrongLayout}};
+ const heading={tagName:options.computerHistory?'H2':'DIV',classList:{contains:t=>options.computerHistory&&['heading-dialog','select-none'].includes(t)},innerText:options.overlayHeading??(options.overlayLookalike?'All set':"You're all set")};
  const finish={innerText:'Continue',disabled:false,getAttribute:k=>k==='type'?'submit':null};
  const terms={classList:{contains:()=>true},getAttribute:()=>options.overlayWrongLink?'https://example.invalid':'https://openai.com/terms'};
  const privacy={classList:{contains:()=>true},getAttribute:()=> 'https://openai.com/privacy'};
@@ -38,7 +38,7 @@ async function trial(options={}) {
  root.querySelectorAll=s=>absent?(s.startsWith('input')?[]:s==='button'?[startControl]:options.noTaskScope?[]:[acknowledgement]):s.startsWith('input')?[radio]:[legend];
  label.closest=s=>s.startsWith('div')?root:null;
  foreign.getAttribute=k=>k==='role'?'dialog':null;
- const setupButtons=(options.importSetupButtons??[]).map(innerText=>({...button,innerText}));
+ const setupButtons=(options.importSetupButtons??[]).map(innerText=>({...button,innerText,getAttribute:k=>k==='type'?(innerText.startsWith('Allow')?'submit':'button'):null}));
  foreign.querySelectorAll=s=>s.startsWith('input')?[]:s==='button'?setupButtons:s==='form'?[form]:s.startsWith('[class')?(options.overlayWrongHeadingStyle?[]:[heading]):s==='[role="heading"],h1,h2,h3'?(options.overlayDuplicateHeading?[heading,heading]:[heading]):[];
  if(options.overlayDialogReplacement)doc.querySelectorAll=s=>s.startsWith('input')?[radio]:overlayReads?[{...foreign}]:[foreign];
  if(options.overlayMultiple)doc.querySelectorAll=s=>s.startsWith('input')?[radio]:overlayReads?[foreign,dialog]:[foreign];
@@ -188,6 +188,16 @@ async function trial(options={}) {
  const legend=await trial({wrongLegend:true});assert.equal(legend.facts.roleProofFailure,'legend-count');
  for(const [opts,reason] of [[{badScope:true},'scope-count'],[{login:true},'login-present'],[{noGroup:true},'group-absent'],[{duplicateLabel:true},'label-count'],[{badAssociation:true},'label-association'],[{finalLoss:true},'ownership-lost']]) {const r=await trial(opts);assert.equal(r.facts.roleProofFailure,reason);assert.equal(r.roleClicks,0);assert.equal(r.continueClicks,0);}
  const good=await trial();assert.equal(good.roleClicks,1);assert.equal(good.continueClicks,1);assert.equal(good.facts.roleScopeAbsent,true);assert.equal(good.facts.stage,'coding-readiness');assert.equal(good.facts.errorCategory,null);
+ const history=await trial({modal:true,computerHistory:true,overlayHeading:'Connect Computer History',importSetupButtons:['Customize apps','Not now','Allow all apps']});
+ assert.equal(history.facts.foreignOverlay,'other');
+ assert.equal(history.facts.foreignOverlayFingerprint,'computer-history-consent');
+ assert.equal(history.facts.foreignOverlaySourceCounts.computerHistoryTitleCount,1);
+ assert.equal(history.roleClicks+history.continueClicks,0);
+ for(const change of [{overlayWrongLayout:true},{importSetupButtons:['Not now']},{importSetupButtons:['Customize apps','Not now','Not now']}]) {
+  const result=await trial({modal:true,computerHistory:true,overlayHeading:'Connect Computer History',importSetupButtons:['Customize apps','Not now','Allow all apps'],...change});
+  assert.notEqual(result.facts.foreignOverlayFingerprint,'computer-history-consent');
+  assert.equal(result.roleClicks+result.continueClicks,0);
+ }
  const completeOverlay=await trial({modal:true});
  assert.equal(completeOverlay.facts.foreignOverlay,'chatgpt-onboarding-complete');
  assert.equal(completeOverlay.facts.foreignOverlayProof,'classified');

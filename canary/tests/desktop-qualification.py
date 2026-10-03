@@ -2281,6 +2281,16 @@ class QualificationTests(unittest.TestCase):
                 q.public_onboarding({**surface, 'foreignOverlayHeading': invalid}, 'chatgpt-desktop')
         with self.assertRaises(ValueError):
             q.public_onboarding({**blocked, 'foreignOverlayHeading': 'unknown'}, 'chatgpt-desktop')
+        source_counts = dict(computerHistoryTitleCount=1, computerHistoryFormCount=1,
+                             computerHistoryNotNowCount=1, computerHistoryCustomizeCount=1, computerHistoryAllowCount=1,
+                             projectImportTitleCount=0, projectImportContinueCount=0, projectImportNotNowCount=1)
+        history = {**surface, 'foreignOverlay': 'other', 'foreignOverlayFingerprint': 'computer-history-consent',
+                   'foreignOverlayHeading': 'computer-history-consent', 'foreignOverlaySourceCounts': source_counts}
+        self.assertEqual(q.public_onboarding(history, 'chatgpt-desktop'), history)
+        for invalid in ({**source_counts, 'PRIVATE': 'PRIVATE'}, {**source_counts, 'computerHistoryTitleCount': True},
+                        {**source_counts, 'projectImportTitleCount': 33}, {**source_counts, 'computerHistoryFormCount': 0}):
+            with self.assertRaises(ValueError):
+                q.public_onboarding({**history, 'foreignOverlaySourceCounts': invalid}, 'chatgpt-desktop')
         counts = dict(titleCount=1, continueCount=1, notNowCount=1, skipCount=0)
         measured = {**surface, 'foreignOverlayHeading': 'imported-setup',
                     'foreignOverlayImportSetup': counts}

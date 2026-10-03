@@ -69,7 +69,7 @@ def main_aux_correlation(value, app):
 
 
 def public_onboarding(setup, app):
-    shape = set(setup) - {'rejectedPageInventory', 'taskScopeProved', 'taskClickAttempted', 'taskClickCompleted', 'codingComposerReady', 'mainGuardFailure', 'pageSetFailure', 'foreignOverlayImportSetup'} if type(setup) is dict else set()
+    shape = set(setup) - {'rejectedPageInventory', 'taskScopeProved', 'taskClickAttempted', 'taskClickCompleted', 'codingComposerReady', 'mainGuardFailure', 'pageSetFailure', 'foreignOverlayImportSetup', 'foreignOverlaySourceCounts'} if type(setup) is dict else set()
     booleans = {'conversationalScope', 'engineeringControl', 'roleClickAttempted',
                 'roleClickCompleted', 'engineeringChecked', 'continueControl',
                 'continueClickAttempted', 'continueClickCompleted', 'roleScopeAbsent'}
@@ -185,14 +185,14 @@ def public_onboarding(setup, app):
                     'unknown', 'enclosing-role-dialog', 'enclosing-role-alertdialog', 'enclosing-role-aria-modal',
                     'separate-dialog', 'separate-alertdialog', 'separate-menu'}
                 or type(setup['foreignOverlayFingerprint']) is not str or setup['foreignOverlayFingerprint'] not in {
-                    'not-applicable', 'heading-mismatch', 'form-mismatch', 'continue-mismatch', 'legal-links-mismatch', 'matched'}
+                    'not-applicable', 'heading-mismatch', 'form-mismatch', 'continue-mismatch', 'legal-links-mismatch', 'matched', 'computer-history-consent'}
                 or (setup['foreignOverlayFingerprint'] != 'not-applicable' and setup['foreignOverlaySurface'] != 'separate-dialog')
                 or (setup['foreignOverlayFingerprint'] == 'matched') != (setup['foreignOverlay'] == 'chatgpt-onboarding-complete')):
             raise ValueError('invalid public onboarding overlay surface')
     if 'foreignOverlayHeading' in setup:
         if (setup.get('foreignOverlayProof') != 'classified'
                 or type(setup['foreignOverlayHeading']) is not str or setup['foreignOverlayHeading'] not in {
-                    'all-set', 'external-import', 'skip-confirmation', 'imported-setup', 'unknown', 'ambiguous'}):
+                    'all-set', 'external-import', 'skip-confirmation', 'imported-setup', 'computer-history-consent', 'project-import', 'unknown', 'ambiguous'}):
             raise ValueError('invalid public onboarding overlay heading')
     if 'foreignOverlayImportSetup' in setup:
         counts = setup['foreignOverlayImportSetup']
@@ -210,6 +210,23 @@ def public_onboarding(setup, app):
             raise ValueError('inconsistent imported setup dialog observation')
     elif setup.get('foreignOverlayHeading') == 'imported-setup':
         raise ValueError('missing imported setup dialog observation')
+    if 'foreignOverlaySourceCounts' in setup:
+        counts = setup['foreignOverlaySourceCounts']
+        keys = {'computerHistoryTitleCount', 'computerHistoryFormCount', 'computerHistoryNotNowCount',
+                'computerHistoryCustomizeCount', 'computerHistoryAllowCount', 'projectImportTitleCount',
+                'projectImportContinueCount', 'projectImportNotNowCount'}
+        if (setup.get('foreignOverlayProof') != 'classified' or setup.get('foreignOverlaySurface') != 'separate-dialog'
+                or type(counts) is not dict or set(counts) != keys
+                or any(type(count) is not int or not 0 <= count <= 32 for count in counts.values())):
+            raise ValueError('invalid source dialog count diagnostic')
+        if setup.get('foreignOverlayFingerprint') == 'computer-history-consent' and (
+                setup.get('foreignOverlay') != 'other' or setup.get('foreignOverlayHeading') != 'computer-history-consent'
+                or any(counts[key] != 1 for key in ('computerHistoryTitleCount', 'computerHistoryFormCount',
+                                                  'computerHistoryNotNowCount', 'computerHistoryCustomizeCount'))
+                or counts['computerHistoryAllowCount'] != 1):
+            raise ValueError('inconsistent Computer History consent diagnostic')
+    elif setup.get('foreignOverlayFingerprint') == 'computer-history-consent':
+        raise ValueError('missing Computer History source counts')
     return setup
 
 

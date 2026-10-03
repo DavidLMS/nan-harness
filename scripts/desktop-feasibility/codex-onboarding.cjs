@@ -83,8 +83,8 @@ function foreignSurface(control) {
   return {document,scope,dialog:dialogs.length===1?dialogs[0]:null};
 }
 function classifyForeign(control,held) {
-  let surface='unknown', heading='unknown', importSetup=null;
-  const result=(category,proof='classified',fingerprint='not-applicable')=>({category,proof,surface,fingerprint,heading,importSetup});
+  let surface='unknown', heading='unknown', importSetup=null, sourceCounts=null;
+  const result=(category,proof='classified',fingerprint='not-applicable')=>({category,proof,surface,fingerprint,heading,importSetup,sourceCounts});
   const visible=e=>{if(!e)return false;const r=e.getBoundingClientRect(),s=getComputedStyle(e);
     return e.isConnected&&r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden';};
   if(control.ownerDocument!==document||!control.isConnected||held.document!==document) return result('guard-rejected','document-replaced');
@@ -98,7 +98,7 @@ function classifyForeign(control,held) {
   if(dialog!==held.dialog)return result('guard-rejected','dialog-replaced');
   // Public heading text is classified independently of the stronger style fingerprint.
   const publicHeadings=[...dialog.querySelectorAll('[role="heading"],h1,h2,h3')].filter(visible);
-  const known=new Map([["You're all set",'all-set'],['Import from other AI apps','external-import'],['Skip setup?','skip-confirmation'],['Continue with your existing setup','imported-setup']]);
+  const known=new Map([["You're all set",'all-set'],['Import from other AI apps','external-import'],['Skip setup?','skip-confirmation'],['Continue with your existing setup','imported-setup'],['Connect Computer History','computer-history-consent'],['Select settings to import','project-import']]);
   const matches=publicHeadings.map(e=>known.get(e.innerText.trim())).filter(Boolean);
   heading=matches.length>1?'ambiguous':matches[0]??'unknown';
   const setupTitleCount=publicHeadings.filter(e=>e.innerText.trim()==='Continue with your existing setup').length;
@@ -117,6 +117,25 @@ function classifyForeign(control,held) {
   surface=enclosing ? (role==='dialog'?'enclosing-role-dialog':role==='alertdialog'?'enclosing-role-alertdialog':role===null&&dialog.getAttribute('aria-modal')==='true'?'enclosing-role-aria-modal':'unknown')
     : role==='dialog'?'separate-dialog':role==='alertdialog'?'separate-alertdialog':role==='menu'?'separate-menu':'unknown';
   if(role!=='dialog'||enclosing||dialog.querySelectorAll(group).length)return result('other');
+  const sourceButtons=[...dialog.querySelectorAll('button')].filter(visible);
+  const historyForms=[...dialog.querySelectorAll('form')].filter(e=>visible(e)&&['pointer-events-auto','relative','hide-scrollbar','flex','flex-col','gap-6','overflow-y-auto','pb-10'].every(t=>e.classList.contains(t)));
+  const countTitle=text=>publicHeadings.filter(e=>e.innerText.trim()===text).length;
+  const countButton=(text,type)=>sourceButtons.filter(e=>e.innerText.trim()===text&&(type===null||e.getAttribute('type')===type)).length;
+  const measured={computerHistoryTitleCount:countTitle('Connect Computer History'),
+    computerHistoryFormCount:historyForms.length,computerHistoryNotNowCount:countButton('Not now','button'),
+    computerHistoryCustomizeCount:countButton('Customize apps','button'),
+    computerHistoryAllowCount:countButton('Allow access','submit')+countButton('Allow all apps','submit'),
+    projectImportTitleCount:countTitle('Select settings to import'),
+    projectImportContinueCount:countButton('Continue',null),projectImportNotNowCount:countButton('Not now',null)};
+  if(Object.values(measured).every(count=>count<=32))sourceCounts=measured;
+
+  if(sourceCounts&&sourceCounts.computerHistoryTitleCount===1&&sourceCounts.computerHistoryFormCount===1
+      &&sourceCounts.computerHistoryNotNowCount===1&&sourceCounts.computerHistoryCustomizeCount===1
+      &&sourceCounts.computerHistoryAllowCount===1) {
+    const sourceTitle=publicHeadings.find(e=>e.innerText.trim()==='Connect Computer History');
+    if(sourceTitle.tagName==='H2'&&['heading-dialog','select-none'].every(t=>sourceTitle.classList.contains(t))
+        &&historyForms[0].contains(sourceTitle))return result('other','classified','computer-history-consent');
+  }
   const headings=[...dialog.querySelectorAll('[class~="text-3xl"][class~="leading-9"][class~="font-normal"]')].filter(e=>visible(e)&&e.innerText.trim()==="You're all set");
   const forms=[...dialog.querySelectorAll('form')].filter(e=>visible(e)&&['m-auto','flex','w-full','shrink-0','flex-col','items-center','justify-between','py-4'].every(t=>e.classList.contains(t)));
   if(headings.length!==1)return result('other','classified','heading-mismatch');
@@ -277,6 +296,7 @@ async function run(page, ownerGuard, deadline, rejected, mainGuard) {
                   facts.foreignOverlayFingerprint=second.fingerprint;
                   facts.foreignOverlayHeading=second.heading;
                   if(second.importSetup!==null)facts.foreignOverlayImportSetup=second.importSetup;
+                  if(second.sourceCounts!==null)facts.foreignOverlaySourceCounts=second.sourceCounts;
                 }
               } else if(second.category==='guard-rejected' && facts.foreignOverlayProof==='unmeasured') {
                 facts.foreignOverlayProof=second.proof;
