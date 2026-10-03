@@ -335,6 +335,18 @@ impl Gui {
         self.visual
             .absence_native()
             .start_owned_cleanup_holder(launcher, expected, digest, deadline)
+            .map_err(|error| {
+                let stage = match error {
+                    crate::native::FailureCategory::Timeout => "deadline",
+                    crate::native::FailureCategory::InvalidInput => "request",
+                    crate::native::FailureCategory::Output => return error,
+                    _ => "transport",
+                };
+                crate::process::windows_correlation::record_preflight(&serde_json::json!({
+                    "schemaVersion":1,"mechanism":"windows-owned-cleanup-preflight",
+                    "diagnosticsOnly":true,"stage":stage}));
+                error
+            })
             .ok()
     }
 

@@ -1712,6 +1712,26 @@ class QualificationTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'zed-desktop')
 
+    def test_windows_cleanup_preflight_failure_is_closed_and_not_acceptance(self):
+        value = dict(schemaVersion=1, mechanism='windows-owned-cleanup-preflight',
+                     diagnosticsOnly=True, stage='deadline')
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / 'failure.json'
+            for stage in 'request path file-open file-hash file-identity process-open snapshot inspector-parent ancestry target-open target-identity owner-recheck deadline transport'.split():
+                item = {**value, 'stage': stage}
+                path.write_text(json.dumps(item))
+                self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [item])
+            for changed in ({**value, 'stage': 'PRIVATE'}, {**value, 'path': 'PRIVATE'},
+                            {**value, 'diagnosticsOnly': False}, {**value, 'stage': None}):
+                path.write_text(json.dumps(changed))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'claude-desktop')
+            path.write_text(json.dumps(value))
+            with self.assertRaises(ValueError):
+                q.semantic_observations(root, 'chatgpt-desktop')
+            self.assertEqual(q.envelope('claude-desktop', 'windows', 'x86_64', 'a' * 40)['qualification'], 'unqualified')
+
     def test_claude_native_chat_receipt_is_closed_and_not_qualification(self):
         value = dict(schemaVersion=1, mechanism='claude-native-chat', diagnosticsOnly=True,
                      stage='completed', submittedTurns=3, inputVerifiedTurns=3, copiedResponses=3,

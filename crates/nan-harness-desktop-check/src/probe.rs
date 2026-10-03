@@ -1892,7 +1892,8 @@ fn capture_stop_correlation(process: &mut ProbeProcess, gui: Option<&Gui>) -> Du
     let deadline = Instant::now() + Duration::from_secs(10);
     if let (Some(gui), Some(launcher)) = (gui, process.id()) {
         let query_deadline = deadline.min(Instant::now() + Duration::from_secs(1));
-        process.correlation_snapshot = gui.capture_process_correlation(launcher, query_deadline);
+        // Retention is required for cleanup; advisory sampling uses only its
+        // remaining allowance rather than starving the holder's file proof.
         process.cleanup_holder = process
             .cleanup_executable
             .as_ref()
@@ -1900,6 +1901,7 @@ fn capture_stop_correlation(process: &mut ProbeProcess, gui: Option<&Gui>) -> Du
             .and_then(|(expected, digest)| {
                 gui.capture_owned_cleanup(launcher, expected, digest, query_deadline)
             });
+        process.correlation_snapshot = gui.capture_process_correlation(launcher, query_deadline);
     }
     // The advisory query consumes the existing initial stop budget.
     deadline.saturating_duration_since(Instant::now())

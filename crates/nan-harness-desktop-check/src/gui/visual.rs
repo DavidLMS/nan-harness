@@ -1446,6 +1446,7 @@ where
             InitialFocus::Ready
         }
         Some(snapshot) if snapshot.claude_focus_pending(window) => InitialFocus::Pending,
+        Some(snapshot) if initial_geometry_pending(&snapshot, window) => InitialFocus::Pending,
         _ => InitialFocus::Rejected,
     };
     if state != InitialFocus::Rejected {
@@ -1455,6 +1456,24 @@ where
         }
     }
     Ok(state)
+}
+
+// A resize during the initial AX query invalidates continuity, not target identity.
+// It can only restart initial settling; it never supplies a successful binding.
+#[cfg(any(test, target_os = "macos"))]
+fn initial_geometry_pending(snapshot: &Snapshot, original: &Window) -> bool {
+    let candidates =
+        eligible_windows(DesktopHarnessKind::Claude, &snapshot.windows).collect::<Vec<_>>();
+    if candidates.len() != 1 {
+        return false;
+    }
+    let current = candidates[0];
+    current.id == original.id
+        && current.pid == original.pid
+        && current.name == original.name
+        && current.bounds != original.bounds
+        && (final_initial_candidate(snapshot, original).is_ok()
+            || snapshot.claude_focus_pending(current))
 }
 
 #[cfg(target_os = "macos")]
@@ -2022,6 +2041,42 @@ mod tests {
             final_initial_candidate(&hidden, &original),
             Err(GuardFailure::Occluded)
         );
+    }
+
+    #[test]
+    fn same_initial_identity_resize_resets_settling_without_accepting_or_ignoring_unsafe_proof() {
+        let original = Snapshot::parse("FG 7 0\nDISPLAY 0 0 2000 2000\nWIN 99 7 1800 1800 10 10 436c61756465 3\nWIN 1 7 10 20 800 600 436c61756465 0\nFOCUS proved 1\nFOCUS_WINDOW proved 1\n").unwrap().windows[1].clone();
+        let resized = Snapshot::parse("FG 7 0\nDISPLAY 0 0 2000 2000\nWIN 99 7 1800 1800 10 10 436c61756465 3\nWIN 1 7 10 20 900 700 436c61756465 0\nFOCUS identity-changed 0\nFOCUS_QUERY after position cannot-complete\nFOCUS_WINDOW proved 1\n").unwrap();
+        let now = Instant::now();
+        assert_eq!(
+            initial_owned_focus(
+                &original,
+                now + Duration::from_secs(45),
+                || Some(resized.clone()),
+                || Ok(()),
+                || now
+            ),
+            Ok(InitialFocus::Pending)
+        );
+        let proved_resize = Snapshot::parse("FG 7 0\nDISPLAY 0 0 2000 2000\nWIN 99 7 1800 1800 10 10 436c61756465 3\nWIN 1 7 10 20 900 700 436c61756465 0\nFOCUS proved 1\nFOCUS_WINDOW proved 1\n").unwrap();
+        assert_eq!(
+            initial_owned_focus(
+                &original,
+                now + Duration::from_secs(45),
+                || Some(proved_resize),
+                || Ok(()),
+                || now
+            ),
+            Ok(InitialFocus::Pending)
+        );
+        for text in [
+            "FG 7 0\nDISPLAY 0 0 2000 2000\nWIN 2 7 10 20 900 700 436c61756465 0\nFOCUS proved 2\nFOCUS_WINDOW proved 2\n",
+            "FG 7 0\nDISPLAY 0 0 2000 2000\nWIN 99 7 10 20 100 100 436c61756465 3\nWIN 1 7 10 20 900 700 436c61756465 0\nFOCUS proved 1\nFOCUS_WINDOW proved 1\n",
+            "FG 7 0\nDISPLAY 0 0 2000 2000\nWIN 1 7 10 20 900 700 436c61756465 0\nFOCUS query-error 0\nFOCUS_QUERY before focused-window no-value\nFOCUS_WINDOW proved 1\n",
+        ] {
+            let unsafe_snapshot = Snapshot::parse(text).unwrap();
+            assert!(!initial_geometry_pending(&unsafe_snapshot, &original));
+        }
     }
 
     #[test]

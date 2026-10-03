@@ -29,6 +29,35 @@ pub(crate) fn ready(line: &str) -> Option<(usize, u64)> {
     let tick = words[2].parse::<u64>().ok()?;
     (count <= 64 && tick > 0).then_some((count, tick))
 }
+pub(crate) fn preflight(line: &str) -> Option<serde_json::Value> {
+    let mut words = line.split_whitespace();
+    if words.next()? != "unavailable" {
+        return None;
+    }
+    let stage = words.next()?;
+    if words.next().is_some()
+        || !matches!(
+            stage,
+            "request"
+                | "path"
+                | "file-open"
+                | "file-hash"
+                | "file-identity"
+                | "process-open"
+                | "snapshot"
+                | "inspector-parent"
+                | "ancestry"
+                | "target-open"
+                | "target-identity"
+                | "owner-recheck"
+        )
+    {
+        return None;
+    }
+    Some(serde_json::json!({"schemaVersion":1,
+        "mechanism":"windows-owned-cleanup-preflight","diagnosticsOnly":true,"stage":stage}))
+}
+
 fn cutoff(anchor: u64, received: Instant, deadline: Instant) -> Option<u64> {
     let elapsed = deadline.checked_duration_since(received)?.as_millis();
     // The native anchor predates its receipt. Margin also excludes coarse-clock
@@ -139,9 +168,21 @@ impl Holder {
         )
         .map_err(|_| FailureCategory::Pipe)?;
         let line = holder.line(deadline)?;
-        (holder.retained, holder.native_anchor) = ready(&line).ok_or(FailureCategory::Output)?;
-        holder.received_anchor = Instant::now();
+        holder.accept_ready(&line)?;
         Ok(holder)
+    }
+
+    fn accept_ready(&mut self, line: &str) -> Result<(), FailureCategory> {
+        if let Some(value) = preflight(line) {
+            #[cfg(windows)]
+            crate::process::windows_correlation::record_preflight(&value);
+            #[cfg(not(windows))]
+            let _ = value;
+            return Err(FailureCategory::Output);
+        }
+        (self.retained, self.native_anchor) = ready(line).ok_or(FailureCategory::Output)?;
+        self.received_anchor = Instant::now();
+        Ok(())
     }
     fn line(&self, deadline: Instant) -> Result<String, FailureCategory> {
         let duration = deadline
@@ -231,6 +272,37 @@ pub(crate) fn result(line: &str, retained: usize) -> Option<serde_json::Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn preflight_classifies_only_closed_complete_native_rejections() {
+        for stage in [
+            "request",
+            "path",
+            "file-open",
+            "file-hash",
+            "file-identity",
+            "process-open",
+            "snapshot",
+            "inspector-parent",
+            "ancestry",
+            "target-open",
+            "target-identity",
+            "owner-recheck",
+        ] {
+            let value = preflight(&format!("unavailable {stage}\n")).unwrap();
+            assert_eq!(value["stage"], stage);
+            assert_eq!(value.as_object().unwrap().len(), 4);
+        }
+        for line in [
+            "unavailable",
+            "unavailable secret",
+            "unavailable path private",
+            "ready path",
+            "unavailable C:\\private",
+        ] {
+            assert!(preflight(line).is_none());
+        }
+    }
+
     #[test]
     fn cutoff_uses_held_clock_and_shortens_original_deadline() {
         let received = Instant::now();

@@ -883,6 +883,7 @@ int process_correlation(bool before) {
     }
     std::istringstream input(request); DWORD checker = 0, launcher = 0;
     if (!(input >> checker >> launcher) || checker == 0 || launcher == 0) return 2;
+    stage = "snapshot";
     std::vector<CorrelationEntry> rows;
     if (!correlation_snapshot(checker, rows)) { std::cout << "unavailable\n"; return 0; }
     if (before) {
@@ -892,7 +893,8 @@ int process_correlation(bool before) {
         std::vector<CorrelationEntry> confirm;
         if (!correlation_snapshot(checker, confirm)) { std::cout << "unavailable\n"; return 0; }
         std::vector<CorrelationIdentity> verified{{launcher, launcher_time, false}};
-        for (const auto& row : rows) {
+        stage = "ancestry";
+    for (const auto& row : rows) {
             if (!row.matching || row.pid == launcher) continue;
             std::uint64_t created = 0;
             if (correlation_time(row.pid, created)
@@ -1008,7 +1010,8 @@ static bool cleanup_line(std::string& line) {
     return false;
 }
 int owned_cleanup_holder() {
-    auto unavailable = [] { std::cout << "unavailable\n" << std::flush; return 0; };
+    const char* stage = "request";
+    auto unavailable = [&] { std::cout << "unavailable " << stage << '\n' << std::flush; return 0; };
     std::string request;
     if (!cleanup_line(request)) return unavailable();
     std::istringstream input(request); DWORD checker = 0, launcher = 0;
@@ -1022,6 +1025,7 @@ int owned_cleanup_holder() {
         if (parsed.ec != std::errc() || parsed.ptr != encoded.data() + i + 2 || byte == 0) return unavailable();
         path.push_back(static_cast<char>(byte));
     }
+    stage = "path";
     const int wide_size = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path.data(), static_cast<int>(path.size()), nullptr, 0);
     if (wide_size <= 0) return unavailable();
     std::wstring expected_path(static_cast<std::size_t>(wide_size), L'\0');
@@ -1030,19 +1034,26 @@ int owned_cleanup_holder() {
     // The checker sends the canonical installed executable, never a CLI wrapper.
     if (expected_path.rfind(L"\\\\?\\", 0) != 0 || expected_path.size() < 15
         || _wcsicmp(expected_path.substr(expected_path.find_last_of(L"\\") + 1).c_str(), L"Claude.exe") != 0) return unavailable();
+    stage = "file-open";
     CleanupHandle expected_file(CreateFileW(expected_path.c_str(), GENERIC_READ, FILE_SHARE_READ,
         nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr));
-    if (expected_file.value == INVALID_HANDLE_VALUE || !pinned_digest(expected_file.value, digest)) return unavailable();
+    if (expected_file.value == INVALID_HANDLE_VALUE) return unavailable();
+    stage = "file-hash";
+    if (!pinned_digest(expected_file.value, digest)) return unavailable();
+    stage = "file-identity";
     BY_HANDLE_FILE_INFORMATION expected{}; wchar_t canonical[32768] = {};
     const DWORD canonical_size = GetFinalPathNameByHandleW(expected_file.value, canonical, 32768, FILE_NAME_NORMALIZED);
     if (!GetFileInformationByHandle(expected_file.value, &expected) || canonical_size == 0 || canonical_size >= 32768
         || _wcsicmp(canonical, expected_path.c_str()) != 0 || expected.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) return unavailable();
+    stage = "process-open";
     CleanupHandle owner(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE, checker));
     CleanupHandle root(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, launcher));
     std::uint64_t root_time = 0;
     if (!owner.value || !root.value || !held_creation(root.value, root_time)) return unavailable();
+    stage = "snapshot";
     std::vector<CorrelationEntry> rows, confirm;
     if (!correlation_snapshot(checker, rows) || !correlation_snapshot(checker, confirm)) return unavailable();
+    stage = "inspector-parent";
     const auto self = std::find_if(rows.begin(), rows.end(), [](const auto& row) { return row.pid == GetCurrentProcessId(); });
     if (self == rows.end() || self->parent != checker) return unavailable();
     struct Target {
@@ -1052,15 +1063,19 @@ int owned_cleanup_holder() {
     std::vector<Target> targets;
     for (const auto& row : rows) {
         if (!row.matching) continue;
+        stage = "ancestry";
         std::uint64_t created = 0;
         if (!correlation_time(row.pid, created) || !historical_descendant(rows, confirm, row.pid,
             launcher, root_time, created, correlation_time)) return unavailable();
+        stage = "target-open";
         HANDLE handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE | SYNCHRONIZE, FALSE, row.pid);
         if (!handle) return unavailable();
         targets.emplace_back(handle, created);
+        stage = "target-identity";
         std::uint64_t held_time = 0;
         if (!held_creation(handle, held_time) || held_time != created || !held_image(handle, expected, expected_path)) return unavailable();
     }
+    stage = "owner-recheck";
     std::uint64_t final_root_time = 0;
     if (!held_creation(root.value, final_root_time) || final_root_time != root_time
         || WaitForSingleObject(owner.value, 0) != WAIT_TIMEOUT) return unavailable();

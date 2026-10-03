@@ -94,6 +94,11 @@ pub(crate) fn record_cleanup(value: &serde_json::Value) {
     super::windows_observation::record_value(value, "windows-owned-descendant-cleanup");
 }
 
+#[cfg(windows)]
+pub(crate) fn record_preflight(value: &serde_json::Value) {
+    super::windows_observation::record_value(value, "windows-owned-cleanup-preflight");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
