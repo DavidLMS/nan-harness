@@ -1835,6 +1835,27 @@ class QualificationTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'chatgpt-desktop')
 
+    def test_windows_endpoint_counts_preserve_earlier_failures_without_private_identity(self):
+        allowed = 'owned process-budget ancestry-cycle process-unavailable parent-unavailable parent-reused session-mismatch ancestry-limit listener-unavailable query-failed transport-timeout transport-failed unclassified'.split()
+        value = dict(schemaVersion=1, mechanism='windows-endpoint-proof', diagnosticsOnly=True,
+                     category='owned', categoryCounts={**dict.fromkeys(allowed, 0), 'owned': 2, 'parent-reused': 1})
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / 'proof.json'
+            for item in (value, {key: item for key, item in value.items() if key != 'categoryCounts'},
+                         {**value, 'categoryCounts': {**value['categoryCounts'], 'owned': 4096}}):
+                path.write_text(json.dumps(item))
+                self.assertEqual(q.semantic_observations(root, 'chatgpt-desktop'), [item])
+            for counts in ({**value['categoryCounts'], 'pid': 7},
+                           {**value['categoryCounts'], 'owned': 0},
+                           {**value['categoryCounts'], 'owned': True},
+                           {**value['categoryCounts'], 'owned': 4097},
+                           {key: count for key, count in value['categoryCounts'].items() if key != 'query-failed'}):
+                path.write_text(json.dumps({**value, 'categoryCounts': counts}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'chatgpt-desktop')
+            self.assertEqual(q.envelope('chatgpt-desktop', 'windows', 'x86_64', 'a' * 40)['qualification'], 'unqualified')
+
     def test_codex_managed_sign_in_observation_cannot_authorize_input(self):
         value = dict(schemaVersion=1, mechanism='renderer-inventory', diagnosticsOnly=True,
                      app='chatgpt-desktop', endpointOwned=True, launcherOwned=True, attached=True,

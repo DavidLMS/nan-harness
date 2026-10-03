@@ -84,3 +84,44 @@ for (const result of ['true', 'true\n', 'query-failed']) {
   assert.equal(context.ownedEndpoint(), result === 'true');
 }
 console.log('Native Windows Win32 transport: guarded cases passed');
+
+// Exercise the actual module's shared counter and guarded writer without native calls.
+{
+  const receipts = [], results = ['listener-unavailable', 'true', 'parent-reused', 'true'];
+  let nativeCalls = 0;
+  const sandbox = {exports: {}, __dirname: '/owned', process: {platform: 'win32', pid: 7,
+    env: {GITHUB_ACTIONS: 'true', RUNNER_ENVIRONMENT: 'github-hosted',
+      NANH_DESKTOP_QUALIFICATION_FACTS: '/owned-facts'}}, require(name) {
+    if (name === 'node:fs') return {lstatSync: () => ({isDirectory: () => true}),
+      writeFileSync: (_path, bytes, options) => {assert.equal(options.mode, 0o600); receipts.push(JSON.parse(bytes));},
+      renameSync: () => {}};
+    if (name === 'node:path') return require(name);
+    assert.equal(name, 'node:child_process');
+    return {execFileSync: () => {nativeCalls++; return results.shift();}};
+  }};
+  vm.runInNewContext(source, sandbox);
+  const rootProof = sandbox.exports.proof('20', 43210);
+  const listenerProof = sandbox.exports.proof('30', 43210);
+  assert.equal(rootProof.descendant(30), false);
+  assert.equal(listenerProof.ownedEndpoint(), true);
+  assert.equal(rootProof.descendant(30), false);
+  assert.equal(listenerProof.ownedEndpoint(), true);
+  assert.equal(nativeCalls, 4); // Counting adds no native measurement.
+  const last = receipts.at(-1);
+  assert.equal(last.category, 'owned');
+  assert.equal(last.categoryCounts.owned, 2);
+  assert.equal(last.categoryCounts['listener-unavailable'], 1);
+  assert.equal(last.categoryCounts['parent-reused'], 1);
+  assert.equal(last.categoryCounts['query-failed'], 0);
+  assert(Object.values(last.categoryCounts).every(count => Number.isInteger(count) && count >= 0 && count <= 4096));
+  assert(!JSON.stringify(last).includes('owned-facts'));
+  assert(!JSON.stringify(last).includes('43210'));
+  for (let i = 0; i < 4100; i++) { results.push('true'); assert.equal(listenerProof.ownedEndpoint(), true); }
+  assert.equal(receipts.at(-1).categoryCounts.owned, 4096);
+  assert.equal(nativeCalls, 4104);
+  sandbox.process.env.RUNNER_ENVIRONMENT = 'self-hosted';
+  results.push('true');
+  assert.equal(listenerProof.ownedEndpoint(), true);
+  assert.equal(receipts.length, 4104); // Diagnostic policy cannot modify the proof verdict.
+}
+console.log('Native Windows proof receipt: earlier failures retained across proof objects');

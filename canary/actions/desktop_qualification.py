@@ -375,11 +375,18 @@ def semantic_observations(directory, app):
                 raise ValueError('invalid Codex relaunch observation')
             record.update(diagnosticsOnly=True, stage=value['stage'])
         elif mechanism == 'windows-endpoint-proof':
-            if set(value) != set('schemaVersion mechanism diagnosticsOnly category'.split()) or value['diagnosticsOnly'] is not True:
+            if set(value) - {'categoryCounts'} != set('schemaVersion mechanism diagnosticsOnly category'.split()) or value['diagnosticsOnly'] is not True:
                 raise ValueError('invalid Windows endpoint proof identity')
             allowed = {'owned', 'process-budget', 'ancestry-cycle', 'process-unavailable', 'parent-unavailable', 'parent-reused', 'session-mismatch', 'ancestry-limit', 'listener-unavailable', 'query-failed', 'transport-timeout', 'transport-failed', 'unclassified'}
             if type(value['category']) is not str or value['category'] not in allowed:
                 raise ValueError('invalid Windows endpoint proof category')
+            if 'categoryCounts' in value:
+                counts = value['categoryCounts']
+                if (type(counts) is not dict or set(counts) != allowed
+                        or any(type(count) is not int or not 0 <= count <= 4096 for count in counts.values())
+                        or counts[value['category']] == 0):
+                    raise ValueError('invalid Windows endpoint proof counts')
+                record['categoryCounts'] = dict(counts)
             record.update(diagnosticsOnly=True, category=value['category'])
         elif mechanism == 'claude-native-root-preflight':
             fields = {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'stage', 'failure'}

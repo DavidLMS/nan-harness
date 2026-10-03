@@ -91,6 +91,17 @@ pub(super) fn run_fit_until(
     run_once_until(executable, argument, None, &[], Some(deadline)).map_err(FailureCategory::reason)
 }
 
+#[cfg(any(target_os = "macos", all(test, unix)))]
+pub(super) fn run_focus_until(
+    executable: &Path,
+    argument: &OsStr,
+    deadline: Instant,
+) -> Result<Zeroizing<String>, FailureCategory> {
+    // Retain the ordinary helper cap while respecting the original acquisition clock.
+    let deadline = deadline.min(Instant::now() + Duration::from_secs(15));
+    run_once_until(executable, argument, None, &[], Some(deadline))
+}
+
 #[cfg(any(windows, test))]
 pub(super) fn run_windows_until(
     executable: &Path,
@@ -381,6 +392,52 @@ mod tests {
             .is_err()
         );
         assert_eq!(std::fs::read_to_string(count).unwrap(), "attempt\n");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn focus_transport_never_spawns_expired_or_retries_failure() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let root = tempfile::tempdir().unwrap();
+        let executable = root.path().join("focus-fixture");
+        let count = root.path().join("calls");
+        let body = format!(
+            "#!/bin/sh\n[ \"$1\" = --version ] && exit 0\nprintf 'attempt\\n' >> '{}'\nexit 5\n",
+            count.display()
+        );
+        let body = body.replace(
+            "exit 5\n",
+            "[ \"$1\" = \"--windows-focus 8\" ] && exec sleep 5\nexit 5\n",
+        );
+        std::fs::write(&executable, body).unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+        nan_harness_test_support::executable_fixture::wait_until_ready(&executable).unwrap();
+        assert_eq!(
+            run_focus_until(&executable, OsStr::new("--windows-focus 7"), Instant::now()),
+            Err(FailureCategory::Timeout)
+        );
+        assert!(!count.exists());
+        assert_eq!(
+            run_focus_until(
+                &executable,
+                OsStr::new("--windows-focus 7"),
+                Instant::now() + Duration::from_secs(1)
+            ),
+            Err(FailureCategory::NonzeroExit)
+        );
+        assert_eq!(std::fs::read_to_string(&count).unwrap(), "attempt\n");
+        assert_eq!(
+            run_focus_until(
+                &executable,
+                OsStr::new("--windows-focus 8"),
+                Instant::now() + Duration::from_millis(100)
+            ),
+            Err(FailureCategory::Timeout)
+        );
+        assert_eq!(
+            std::fs::read_to_string(count).unwrap(),
+            "attempt\nattempt\n"
+        );
     }
 
     #[cfg(target_os = "macos")]

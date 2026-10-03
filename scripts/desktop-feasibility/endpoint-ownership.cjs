@@ -1,4 +1,10 @@
 // Bound native ancestry and listener ownership; no application data is read.
+// Process-local advisory observations survive separate ancestry/listener proof objects.
+const windowsProofCategoryCounts = Object.fromEntries([
+  'owned', 'process-budget', 'ancestry-cycle', 'process-unavailable', 'parent-unavailable',
+  'parent-reused', 'session-mismatch', 'ancestry-limit', 'listener-unavailable',
+  'query-failed', 'unclassified', 'transport-timeout', 'transport-failed',
+].map(category => [category, 0]));
 exports.proof = function(owner, port) {
 const fs = require("node:fs");
 function saveWindowsProof(category) {
@@ -9,7 +15,10 @@ function saveWindowsProof(category) {
     const path = require('node:path');
     if (!path.isAbsolute(directory) || !fs.lstatSync(directory).isDirectory()) return;
     const output = path.join(directory, `windows-proof-${process.pid}.json`);
-    const value = { schemaVersion: 1, mechanism: 'windows-endpoint-proof', diagnosticsOnly: true, category };
+    if (!Object.hasOwn(windowsProofCategoryCounts, category)) return;
+    windowsProofCategoryCounts[category] = Math.min(4096, windowsProofCategoryCounts[category] + 1);
+    const value = { schemaVersion: 1, mechanism: 'windows-endpoint-proof', diagnosticsOnly: true, category,
+      categoryCounts: {...windowsProofCategoryCounts} };
     fs.writeFileSync(`${output}.tmp`, JSON.stringify(value) + '\n', { mode: 0o600 });
     fs.renameSync(`${output}.tmp`, output);
   } catch { /* A missing diagnostic never authorizes an action. */ }

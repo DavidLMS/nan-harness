@@ -864,11 +864,13 @@ impl Gui {
                 "retryCount": count("button[visible=\"true\"][name=\"Retry\"], button[visible=\"true\"][name=\"Try again\"]"),
                 "loginCount": count("button[visible=\"true\"][name=\"Sign in\"], button[visible=\"true\"][name=\"Log in\"]")});
             let composer_inventory = self.claude_composer_inventory();
-            // Only role/known-control counts leave memory; this never sends input.
-            self.observe_hosted_startup(composer_observations)?;
+            // The first guard proved the scope for these passive source counts.
+            // Preserve this diagnostic even if the final guard rejects a later
+            // window change; recording never authorizes input or acceptance.
             if let Some(counts) = composer_inventory {
                 super::claude_native_probe::record(directory, owner, &counts);
             }
+            self.observe_hosted_startup(composer_observations)?;
             #[cfg(target_os = "macos")]
             self.claude_chat_navigation(directory, owner, composer_observations)?;
             let value = serde_json::json!({"schemaVersion":1, "mechanism":"renderer-startup-baseline", "diagnosticsOnly":true, "windowAcquired":true, "rendererInstrumented":false, "accessibilityInventory": inventory});

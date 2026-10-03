@@ -455,8 +455,8 @@ impl Visual {
             ownership()?;
             let snapshot = self
                 .native
-                .windows_with_focus(original.pid)
-                .map_err(|error| failure(error.reason()))?;
+                .windows_with_focus_until(original.pid, deadline)
+                .map_err(initial_focus_transport_failure)?;
             if eligible_windows(DesktopHarnessKind::Claude, &snapshot.windows)
                 .find(|window| {
                     window.id == original.id
@@ -1107,6 +1107,17 @@ fn visual_error_category(reason: Reason) -> ComposerErrorCategory {
     }
 }
 
+#[cfg(any(test, target_os = "macos"))]
+fn initial_focus_transport_failure(error: FailureCategory) -> AcquisitionFailure {
+    (
+        error.reason(),
+        crate::diagnostics::GuiAcquisitionStage::WindowStability,
+        native_error_category(error),
+        None,
+        None,
+    )
+}
+
 fn native_error_category(category: FailureCategory) -> ComposerErrorCategory {
     match category {
         FailureCategory::Spawn => ComposerErrorCategory::NativeHelperSpawn,
@@ -1366,12 +1377,9 @@ fn initial_mac_fit(
         && crate::native::claude_focus_policy()
         && snapshot.off_display_relation(window).is_some()
     {
-        let fresh = native.windows_with_focus(window.pid).map_err(|reason| {
-            acquisition_failure(
-                reason.reason(),
-                crate::diagnostics::GuiAcquisitionStage::WindowStability,
-            )
-        })?;
+        let fresh = native
+            .windows_with_focus_until(window.pid, deadline)
+            .map_err(initial_focus_transport_failure)?;
         if !mac_fit_precondition(&fresh, window) || Instant::now() >= deadline {
             return Err(acquisition_failure(
                 Reason::WindowChanged,
@@ -1530,13 +1538,13 @@ fn initial_geometry_pending(snapshot: &Snapshot, original: &Window) -> bool {
 }
 
 #[cfg(target_os = "macos")]
-fn initial_readiness(
+fn initial_claude_readiness(
     native: &Native,
     snapshot: &Snapshot,
     window: &Window,
     owner: u32,
     deadline: Instant,
-) -> Result<bool, AcquisitionFailure> {
+) -> Result<Option<bool>, AcquisitionFailure> {
     if crate::native::claude_focus_policy()
         && matches_app(DesktopHarnessKind::Claude, &window.name)
         && snapshot.guard_failure(window) == Err(GuardFailure::SameProcessWindow)
@@ -1553,26 +1561,51 @@ fn initial_readiness(
             })
         };
         let mut decision_snapshot = None;
-        match initial_owned_focus(
+        let mut transport_failure = None;
+        let decision = initial_owned_focus(
             window,
             deadline,
             || {
-                let fresh = native.windows_with_focus(window.pid).ok()?;
+                let fresh = match native.windows_with_focus_until(window.pid, deadline) {
+                    Ok(snapshot) => snapshot,
+                    Err(error) => {
+                        transport_failure = Some(error);
+                        return None;
+                    }
+                };
                 record_claude_stack(&fresh, window);
                 decision_snapshot = Some(fresh.clone());
                 Some(fresh)
             },
             ownership,
             Instant::now,
-        )? {
-            InitialFocus::Ready => return Ok(true),
-            InitialFocus::Pending => return Ok(false),
+        );
+        if let Some(error) = transport_failure {
+            return Err(initial_focus_transport_failure(error));
+        }
+        match decision? {
+            InitialFocus::Ready => return Ok(Some(true)),
+            InitialFocus::Pending => return Ok(Some(false)),
             InitialFocus::Rejected => {
                 if let Some(fresh) = decision_snapshot.as_ref() {
                     record_claude_snapshot(fresh, window, "initial-decision");
                 }
             }
         }
+    }
+    Ok(None)
+}
+
+#[cfg(target_os = "macos")]
+fn initial_readiness(
+    native: &Native,
+    snapshot: &Snapshot,
+    window: &Window,
+    owner: u32,
+    deadline: Instant,
+) -> Result<bool, AcquisitionFailure> {
+    if let Some(ready) = initial_claude_readiness(native, snapshot, window, owner, deadline)? {
+        return Ok(ready);
     }
     if let Err(failure) = snapshot.non_foreground_failure(window) {
         if crate::native::claude_focus_policy()
@@ -1581,7 +1614,7 @@ fn initial_readiness(
             observe_initial_rejection(
                 failure,
                 window,
-                || native.windows_with_focus(window.pid),
+                || native.windows_with_focus_until(window.pid, deadline),
                 |fresh| record_claude_stack(fresh, window),
             );
         }
@@ -2193,6 +2226,32 @@ mod tests {
             ),
             Ok(InitialFocus::Ready)
         );
+    }
+
+    #[test]
+    fn focus_acquisition_preserves_closed_transport_cause() {
+        for (error, category) in [
+            (
+                FailureCategory::Timeout,
+                ComposerErrorCategory::NativeHelperTimeout,
+            ),
+            (
+                FailureCategory::Pipe,
+                ComposerErrorCategory::NativeHelperPipe,
+            ),
+            (
+                FailureCategory::NonzeroExit,
+                ComposerErrorCategory::NativeHelperNonzeroExit,
+            ),
+        ] {
+            let failure = initial_focus_transport_failure(error);
+            assert_eq!(failure.0, Reason::ActionUnsupported);
+            assert_eq!(
+                failure.1,
+                crate::diagnostics::GuiAcquisitionStage::WindowStability
+            );
+            assert_eq!(failure.2, category);
+        }
     }
 
     #[test]

@@ -370,6 +370,21 @@ impl Native {
         ChatTurnStage::parse(&output).ok_or(FailureCategory::Output)
     }
 
+    #[cfg(target_os = "macos")]
+    pub(crate) fn windows_with_focus_until(
+        &self,
+        owned_pid: u32,
+        deadline: std::time::Instant,
+    ) -> Result<Snapshot, FailureCategory> {
+        if !claude_focus_policy() || owned_pid == 0 {
+            return Err(FailureCategory::InvalidInput);
+        }
+        let argument = format!("--windows-focus {owned_pid}");
+        let output =
+            process::run_focus_until(&self.executable, std::ffi::OsStr::new(&argument), deadline)?;
+        Snapshot::parse(&output).map_err(|_| FailureCategory::Pipe)
+    }
+
     pub(crate) fn windows_with_focus(&self, owned_pid: u32) -> Result<Snapshot, FailureCategory> {
         if !claude_focus_policy() {
             return self.windows_with_category();
