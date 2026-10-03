@@ -102,6 +102,15 @@ struct Node {
     CGRect bounds = CGRectZero;
     bool enabled = false;
 };
+struct NodePropertyPlan {
+    bool control_metadata;
+    bool current_token;
+};
+static NodePropertyPlan node_property_plan(const std::string& role, const std::string& label) {
+    // All target/retained callers select buttons or the source composer. Text
+    // and grouping nodes contribute only role, label and ancestry to scope.
+    return {role == "AXButton" || role == "AXTextArea", role == "AXButton" && label == "Chat"};
+}
 static const char* tree_node_failure(unsigned depth, std::size_t count, bool in_time,
                                      bool pid_read, bool pid_matches, bool duplicate) {
     if (depth > 32 || count >= 1024) return "tree-limit";
@@ -129,11 +138,14 @@ struct Tree {
         node.label = string_attribute(element, kAXDescriptionAttribute);
         if (node.label.empty()) node.label = string_attribute(element, kAXTitleAttribute);
         if (node.label.empty()) node.label = string_attribute(element, kAXValueAttribute);
-        node.current = string_attribute(element, CFSTR("AXARIACurrent"));
-        auto enabled = attribute(element, kAXEnabledAttribute);
-        node.enabled = enabled && CFGetTypeID(enabled) == CFBooleanGetTypeID() && CFBooleanGetValue(static_cast<CFBooleanRef>(enabled));
-        if (enabled) CFRelease(enabled);
-        rectangle(element, node.bounds);
+        const auto plan = node_property_plan(node.role, node.label);
+        if (plan.current_token) node.current = string_attribute(element, CFSTR("AXARIACurrent"));
+        if (plan.control_metadata) {
+            auto enabled = attribute(element, kAXEnabledAttribute);
+            node.enabled = enabled && CFGetTypeID(enabled) == CFBooleanGetTypeID() && CFBooleanGetValue(static_cast<CFBooleanRef>(enabled));
+            if (enabled) CFRelease(enabled);
+            rectangle(element, node.bounds);
+        }
         int index = static_cast<int>(nodes.size());
         nodes.push_back(std::move(node));
         if (ax_query_failed) return reject("tree-query");

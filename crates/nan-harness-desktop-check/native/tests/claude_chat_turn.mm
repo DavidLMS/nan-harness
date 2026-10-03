@@ -48,6 +48,18 @@ int main() {
         assert(std::string(terminal_tree.failure) == terminal);
     }
     ax_query_failed = false;
+    for (const char* role : {"AXGroup", "AXHeading", "AXStaticText", "AXWindow"}) {
+        auto plan = node_property_plan(role, "Chat");
+        assert(!plan.control_metadata && !plan.current_token);
+    }
+    for (const char* name : {"Copy", "Retry", "Start task", "Send message"}) {
+        auto plan = node_property_plan("AXButton", name);
+        assert(plan.control_metadata && !plan.current_token);
+    }
+    auto mode_plan = node_property_plan("AXButton", "Chat");
+    assert(mode_plan.control_metadata && mode_plan.current_token);
+    auto editor_plan = node_property_plan("AXTextArea", "Write your prompt to Claude");
+    assert(editor_plan.control_metadata && !editor_plan.current_token);
     Request request;
     request.prompt = "fresh user";
     request.marker = "fresh assistant";
@@ -55,6 +67,11 @@ int main() {
     tree.nodes = {fixture(-1, "AXWindow", ""), fixture(0, "AXGroup", "Mode"),
         fixture(1, "AXButton", "Chat", "page"), fixture(0, "AXGroup", ""),
         fixture(3, "AXHeading", "Claude responded: fresh assistant"), fixture(3, "AXButton", "Copy")};
+    for (auto& node : tree.nodes) {
+        auto plan = node_property_plan(node.role, node.label);
+        if (!plan.control_metadata) { node.enabled = false; node.bounds = CGRectZero; }
+        if (!plan.current_token) node.current.clear();
+    }
     assert(chat(tree));
     assert(scoped_control(tree, request, false) == 5);
     tree.nodes.push_back(fixture(3, "AXButton", "Copy"));
@@ -87,6 +104,9 @@ int main() {
     CFRelease(submission.nodes[0].element);
     submission.nodes[0].element = reinterpret_cast<AXUIElementRef>(CFRetain(CFSTR("replacement")));
     assert(enabled_submission(submission, initial, submission_request) == -1);
+    tree.nodes[2].enabled = false;
+    assert(!chat(tree));
+    tree.nodes[2].enabled = true;
     tree.nodes[2].current = "false";
     assert(!chat(tree));
 }
