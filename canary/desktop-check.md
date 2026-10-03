@@ -1622,3 +1622,37 @@ describes account-free local device identity; the official
 supports managed MCP servers, including local stdio tools. The current trial
 has not yet established a guarded composer, a response-scoped assertion or an
 installed fixture tool. Those proofs remain necessary before coding acceptance.
+
+Local `cargo check-all` passes on `6d66721b`. The next macOS Claude trial
+[37083447503](https://github.com/DavidLMS/nan-harness/actions/runs/37083447503)
+again acquires two of three initial windows, with all cleanup checks passing.
+Both acquired inventories identify exactly one classic source-labelled editable,
+no Send message control and one Start task control. This supports investigating
+Cowork-to-Chat navigation; it does not authorize submitting a Cowork task.
+The next passive inventory scopes Chat/Cowork counts under the exact Mode group
+from the frozen renderer, rather than matching a global Chat button.
+
+Windows Claude
+[37083448793](https://github.com/DavidLMS/nan-harness/actions/runs/37083448793)
+acquires a window with no generic editable, then fails cleanup at the bounded
+process-enumeration deadline. Unlike earlier runs it provides no positive
+post-stop presence receipt. Its native known-folder observations are valid and
+fresh before launch; all four fixed file-presence flags remain false afterward.
+The isolated-profile receipt remains missing, so neither environment inheritance
+nor storage location is established. Closed capture/read/decode stage receipts
+will identify why the isolated-profile observation is unavailable.
+
+Source investigation rejects two proposed shortcuts. The pinned x11rb cursor
+loader does not publish cursor names through XFixes, so a rendered hand cursor
+cannot be inferred from a missing server name. The Codex avatar's initial
+nonfocusable setting is mutable during QuickChat; its exact route alone cannot
+justify a two-page exception. Public dismissal retains that renderer for ten
+minutes, and forced target closure can recreate it. No such exception or closure
+has been added.
+
+The next Linux Zed diagnostic compares the held Retry's published WINDOW bounds
+against its same-application ancestor bounds before and after the existing
+mouse movement. Only a closed containment/status/count result leaves memory;
+references and rectangles remain transient. This can falsify published ancestor
+containment but cannot prove GPUI's rendered content-mask hitbox or callback.
+The original single click, owned-window guards and deadline remain in force.

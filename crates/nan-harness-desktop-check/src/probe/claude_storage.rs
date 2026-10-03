@@ -123,17 +123,78 @@ fn command_directory_matches(
                 == Some(expected)
     })
 }
-pub(super) fn capture(spec: &ProbeSpec, command: &tokio::process::Command) {
-    let Some((roots, _)) = scope(spec) else {
+#[derive(Clone, Copy, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum StorageStage {
+    Captured,
+    ScopeRejected,
+    WorkspaceUnavailable,
+    HomeUnavailable,
+    EnvironmentUnbound,
+    RootRejected,
+    RootCreateFailed,
+    SnapshotUnavailable,
+    CheckpointWriteFailed,
+    CheckpointReadFailed,
+    CheckpointDecodeFailed,
+    Recorded,
+}
+
+fn record_stage(spec: &ProbeSpec, phase: &'static str, stage: StorageStage) {
+    if !cfg!(windows)
+        || spec.kind != DesktopHarnessKind::Claude
+        || spec.session != crate::cli::SessionMode::GithubHosted
+        || std::env::var("RUNNER_OS").as_deref() != Ok("Windows")
+        || std::env::var("GITHUB_ACTIONS").as_deref() != Ok("true")
+        || std::env::var("RUNNER_ENVIRONMENT").as_deref() != Ok("github-hosted")
+        || std::env::var("NANH_CLAUDE_WINDOWS_PROFILE_POLICY").as_deref() != Ok("private-env")
+        || std::env::var("NANH_DESKTOP_QUALIFICATION_MODE").as_deref() != Ok("startup-baseline")
+    {
         return;
+    }
+    let Some(directory) = std::env::var_os("NANH_DESKTOP_QUALIFICATION_FACTS").map(PathBuf::from)
+    else {
+        return;
+    };
+    if !directory.is_absolute() || directory.ancestors().any(|path| !regular_directory(path)) {
+        return;
+    }
+    let Ok(directory) = directory.canonicalize() else {
+        return;
+    };
+    let mut nonce = [0; 8];
+    if getrandom::fill(&mut nonce).is_err() {
+        return;
+    }
+    let path = directory.join(format!(
+        "claude-private-storage-stage-{}.json",
+        u64::from_le_bytes(nonce)
+    ));
+    let value = serde_json::json!({"schemaVersion":1,"mechanism":"claude-private-storage-stage",
+        "diagnosticsOnly":true,"phase":phase,"stage":stage});
+    if let Ok(file) = nan_harness_private_fs::open_private_new(&path) {
+        let _ = serde_json::to_writer(file, &value);
+    }
+}
+
+pub(super) fn capture(spec: &ProbeSpec, command: &tokio::process::Command) {
+    let stage = capture_inner(spec, command)
+        .err()
+        .unwrap_or(StorageStage::Captured);
+    record_stage(spec, "before-launch", stage);
+}
+
+fn capture_inner(spec: &ProbeSpec, command: &tokio::process::Command) -> Result<(), StorageStage> {
+    let Some((roots, _)) = scope(spec) else {
+        return Err(StorageStage::ScopeRejected);
     };
     let workspace = spec.workspace.canonicalize().ok();
     let Some(workspace) = workspace else {
-        return;
+        return Err(StorageStage::WorkspaceUnavailable);
     };
     let home = workspace.join("profile").join("home");
     if !regular_directory(&home) {
-        return;
+        return Err(StorageStage::HomeUnavailable);
     }
     for (key, expected) in [
         ("HOME", home.clone()),
@@ -142,43 +203,46 @@ pub(super) fn capture(spec: &ProbeSpec, command: &tokio::process::Command) {
         ("APPDATA", home.join("AppData").join("Roaming")),
     ] {
         if !command_directory_matches(command, key, &expected) {
-            return;
+            return Err(StorageStage::EnvironmentUnbound);
         }
     }
     for root in &roots {
         let mut current = spec.workspace.canonicalize().unwrap_or_default();
         let Ok(relative) = root.strip_prefix(&current) else {
-            return;
+            return Err(StorageStage::RootRejected);
         };
         for part in relative.components() {
             current.push(part);
             if std::fs::symlink_metadata(&current)
                 .is_ok_and(|m| m.file_type().is_symlink() || !m.is_dir())
             {
-                return;
+                return Err(StorageStage::RootRejected);
             }
         }
         if nan_harness_private_fs::create_private_dir_all(root).is_err() {
-            return;
+            return Err(StorageStage::RootCreateFailed);
         }
     }
     let Some(before) = observe(&roots) else {
-        return;
+        return Err(StorageStage::SnapshotUnavailable);
     };
     let path = spec.workspace.join("claude-storage-before.private");
-    if let Ok(file) = nan_harness_private_fs::open_private_new(&path) {
-        let _ = serde_json::to_writer(file, &before);
-    }
+    let file = nan_harness_private_fs::open_private_new(&path)
+        .map_err(|_| StorageStage::CheckpointWriteFailed)?;
+    serde_json::to_writer(file, &before).map_err(|_| StorageStage::CheckpointWriteFailed)
 }
 pub(super) fn record(spec: &ProbeSpec) {
     let Some((roots, directory)) = scope(spec) else {
+        record_stage(spec, "after-stop", StorageStage::ScopeRejected);
         return;
     };
     let path = spec.workspace.join("claude-storage-before.private");
     let Ok((file, _)) = nan_harness_private_fs::open_private_read(&path) else {
+        record_stage(spec, "after-stop", StorageStage::CheckpointReadFailed);
         return;
     };
     let Ok(before) = serde_json::from_reader::<_, Presence>(file.take(1024)) else {
+        record_stage(spec, "after-stop", StorageStage::CheckpointDecodeFailed);
         return;
     };
     let _ = std::fs::remove_file(path);
@@ -187,6 +251,15 @@ pub(super) fn record(spec: &ProbeSpec) {
         && !before.third_party.third_party_local_state
         && !before.third_party.third_party_preferences;
     let after = observe(&roots);
+    record_stage(
+        spec,
+        "after-stop",
+        if after.is_some() {
+            StorageStage::Recorded
+        } else {
+            StorageStage::SnapshotUnavailable
+        },
+    );
     let facts = serde_json::json!({"schemaVersion":1,"mechanism":"claude-storage-use","diagnosticsOnly":true,"freshBefore":fresh,"observationValid":after.is_some(),"before":before,"after":after.unwrap_or_default()});
     let mut nonce = [0; 8];
     if getrandom::fill(&mut nonce).is_err() {

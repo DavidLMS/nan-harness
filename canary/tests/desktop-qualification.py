@@ -1220,6 +1220,21 @@ class QualificationTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 q.semantic_observations(root, 'chatgpt-desktop')
 
+    def test_claude_private_storage_stages_reject_paths_and_wrong_phase(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            value = dict(schemaVersion=1, mechanism='claude-private-storage-stage', diagnosticsOnly=True,
+                         phase='before-launch', stage='environment-unbound')
+            path = root / 'private-storage-stage.json'
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [value])
+            for changed in ({**value, 'stage': 'checkpoint-read-failed'}, {**value, 'phase': 'PRIVATE'},
+                            {**value, 'diagnosticsOnly': False}, {**value, 'path': 'PRIVATE'},
+                            {**value, 'stage': True}):
+                path.write_text(json.dumps(changed))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'claude-desktop')
+
     def test_claude_native_composer_is_source_bound_and_never_accepts_payload(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -1233,6 +1248,15 @@ class QualificationTests(unittest.TestCase):
             path = root / 'composer.json'
             path.write_text(json.dumps(value))
             self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [value])
+            mode = {**value, 'modeSourceSha256': '0d16680f19e10d03bc11e7797d842d01159da37b5ab410cad9b7307f7eeef3aa',
+                    'sourceCount': {**counts, 'modeGroupVisible': 1, 'modeChatVisible': 1,
+                                    'modeChatEnabled': 1, 'modeCoworkVisible': 1}}
+            path.write_text(json.dumps(mode))
+            self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [mode])
+            for invalid in ({**mode, 'modeSourceSha256': '0' * 64}, {**mode, 'sourceCount': counts}):
+                path.write_text(json.dumps(invalid))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'claude-desktop')
             for changed in ({**value, 'sourceVersion': 'other'}, {**value, 'classicSourceSha256': '0' * 64},
                             {**value, 'diagnosticsOnly': False}, {**value, 'text': 'PRIVATE'},
                             {**value, 'sourceCount': {**counts, 'classicEditable': True}},
@@ -1265,6 +1289,34 @@ class QualificationTests(unittest.TestCase):
                 path.write_text(json.dumps(changed))
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'claude-desktop')
+
+    def test_zed_published_ancestor_bounds_are_closed_and_do_not_certify_hitbox(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            base = dict(schemaVersion=1, mechanism='zed-pointer-observation', diagnosticsOnly=True,
+                        maximizedHorizontal=True, maximizedVertical=True, enabled=True, sensitive=True,
+                        showing=None, visible=None, defunct=False, retryContains=True,
+                        pointerTarget='client', pointerChild='client')
+            path = root / 'ancestor.json'
+            valid = [dict(ancestorBoundsStatus='complete', checkedAncestorCount=3,
+                          centerWithinPublishedAncestors=within) for within in (True, False)]
+            valid += [dict(ancestorBoundsStatus=state, checkedAncestorCount=count,
+                           centerWithinPublishedAncestors=None)
+                      for state, count in (('unavailable', 0), ('cycle', 2), ('limit', 64))]
+            for extension in valid:
+                value = {**base, **extension}
+                path.write_text(json.dumps(value))
+                self.assertEqual(q.semantic_observations(root, 'zed-desktop'), [value])
+            for extension in ({**valid[0], 'centerWithinPublishedAncestors': 1},
+                              {**valid[0], 'checkedAncestorCount': True},
+                              {**valid[0], 'ancestorBoundsStatus': 'PRIVATE'},
+                              {**valid[2], 'centerWithinPublishedAncestors': True},
+                              {**valid[-1], 'checkedAncestorCount': 63},
+                              {'ancestorBoundsStatus': 'complete'},
+                              {**valid[0], 'bounds': [0, 0, 1, 1]}):
+                path.write_text(json.dumps({**base, **extension}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'zed-desktop')
 
     def test_input_delivery_is_advisory_closed_and_distinguishes_unmeasured(self):
         with tempfile.TemporaryDirectory() as tmp:

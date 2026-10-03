@@ -363,6 +363,16 @@ def retry_click(payload):
             second_geometry, facts['coordinatePackage'])
         facts['coordinateRelation'], facts['coordinateAuthority'] = relation, authority
         point = normalized_retry_point(request, active, geometry, facts)
+        ancestor_module, ancestor_before = None, None
+        if (os.environ.get('NANH_ZED_XRECORD') == '1'
+                and sys.platform == 'linux'
+                and os.environ.get('GITHUB_ACTIONS') == 'true'
+                and os.environ.get('RUNNER_ENVIRONMENT') == 'github-hosted'
+                and os.environ.get('RUNNER_OS') == 'Linux'):
+            import runpy
+            ancestor_module = runpy.run_path(str(Path(__file__).with_name('zed-atspi-observe.py')))
+            ancestor_before = ancestor_module['retry_ancestors'](request, None, deadline)
+            facts.update(ancestor_module['ancestor_result']())
         stage = 14
         # --sync waits for motion and can hang when the pointer is already here.
         # Dispatch once and prove the resulting position instead.
@@ -377,6 +387,13 @@ def retry_click(payload):
         stage = 15
         if owned_foreground() != (0, active):
             return 11
+        if ancestor_module is not None:
+            ancestor_after = ancestor_module['retry_ancestors'](request, None, deadline)
+            if owned_foreground() != (0, active):
+                return 11
+            if run(['getmouselocation', '--shell'], 'position') != (px, py, pointer_window):
+                return 14
+            facts.update(ancestor_module['compare_ancestors'](ancestor_before, ancestor_after))
         observer = None
         if (os.environ.get('NANH_ZED_XRECORD') == '1'
                 and sys.platform == 'linux'

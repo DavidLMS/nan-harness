@@ -153,6 +153,12 @@ class Transport(unittest.TestCase):
         request = json.dumps(dict(pid=20, window=40, x=100, y=200,
             bus=':1.2', path='/org/a11y/atspi/accessible/3')).encode()
         clock, observations, clicks = [0], [], []
+        def readonly_sampler(path):
+            self.assertEqual(Path(path).name, 'zed-atspi-observe.py')
+            unknown = dict(centerWithinPublishedAncestors=None,
+                ancestorBoundsStatus='unavailable', checkedAncestorCount=0)
+            return dict(retry_ancestors=lambda *args:(unknown, None),
+                ancestor_result=lambda:unknown, compare_ancestors=lambda *args:unknown)
         def execute(args, **kwargs):
             if args[1] == 'getmouselocation':
                 clock[0] = 3.2
@@ -169,13 +175,13 @@ class Transport(unittest.TestCase):
              patch.object(sys, 'platform', 'linux'), \
              patch('time.monotonic', side_effect=lambda: clock[0]), \
              patch('subprocess.run', side_effect=execute), \
-             patch('runpy.run_path') as spawn, \
+             patch('runpy.run_path', side_effect=readonly_sampler) as spawn, \
              patch.dict(module['main'].__globals__,
                 normalized_retry_point=lambda request, active, geometry, facts=None: (100,200),
                 pointer_child=lambda *args:'client',
                 publish_observation=lambda facts:observations.append(facts)):
             self.assertEqual(self.call('retry-click', request),0)
-            spawn.assert_not_called()
+            self.assertEqual(spawn.call_count, 1)
         self.assertEqual(len(clicks),1)
         self.assertEqual(observations[0]['inputDelivery'], dict(status='unavailable',
             stage='budget-insufficient',pressCount=None,releaseCount=None,orderedPair=None))

@@ -13,6 +13,116 @@ COUNTS = ('sampledButtons', 'identityRejected', 'stateRejected', 'stabilityRejec
           'toggleOn', 'toggleOff', 'toggleUnknown')
 
 
+def ancestor_result(status='unavailable', count=0, within=None):
+    return dict(centerWithinPublishedAncestors=within,
+                ancestorBoundsStatus=status, checkedAncestorCount=count)
+
+
+def published_ancestors(held, application, bounds, read, deadline, clock=time.monotonic):
+    """Window-coordinate bounds only; AccessKit rectangles do not expose GPUI masks."""
+    current, visited, signature = held, {held}, []
+    x, y, width, height = rectangle(bounds)
+    center = (x + width // 2, y + height // 2)
+    within = True
+    while True:
+        if clock() >= deadline:
+            return ancestor_result(count=len(signature)), None
+        try:
+            parent, extent = read(current)
+            if clock() >= deadline:
+                return ancestor_result(count=len(signature)), None
+            if (not isinstance(parent, tuple) or len(parent) != 2
+                    or any(type(part) is not str for part in parent)):
+                raise ValueError('invalid parent')
+            if parent == application:
+                return ancestor_result('complete', len(signature), within), tuple(signature)
+            if parent in visited:
+                return ancestor_result('cycle', len(signature)), None
+            if len(signature) == 64:
+                return ancestor_result('limit', 64), None
+            if parent[0] != held[0] or not parent[1] or parent[1].endswith('/null'):
+                return ancestor_result(count=len(signature)), None
+            extent = rectangle(extent)
+            within = within and extent[0] <= center[0] < extent[0] + extent[2] \
+                and extent[1] <= center[1] < extent[1] + extent[3]
+            signature.append((parent, extent))
+            visited.add(parent)
+            current = parent
+        except (ValueError, TypeError, OSError, TimeoutError):
+            return ancestor_result(count=len(signature)), None
+
+
+def compare_ancestors(first, second):
+    first_facts, first_signature = first
+    second_facts, second_signature = second
+    if (first_signature is None or second_signature is None):
+        return second_facts if second_signature is None else first_facts
+    if first_signature != second_signature or first_facts != second_facts:
+        return ancestor_result(count=second_facts['checkedAncestorCount'])
+    return second_facts
+
+
+def retry_ancestors(request, expected, deadline):
+    """Private transient references stay in memory; only compare_ancestors facts escape."""
+    try:
+        import dbus
+    except ImportError:
+        return ancestor_result(), None
+    bus = None
+    try:
+        def remaining():
+            value = min(0.1, deadline - time.monotonic())
+            if value <= 0:
+                raise TimeoutError('deadline')
+            return value
+        session = dbus.SessionBus()
+        address = session.get_object('org.a11y.Bus', '/org/a11y/bus').GetAddress(
+            dbus_interface='org.a11y.Bus', timeout=remaining())
+        bus = dbus.bus.BusConnection(str(address))
+        daemon = bus.get_object('org.freedesktop.DBus', '/org/freedesktop/DBus')
+        def owned():
+            return int(daemon.GetConnectionUnixProcessID(request['bus'],
+                dbus_interface='org.freedesktop.DBus', timeout=remaining())) == request['pid']
+        if not owned():
+            return ancestor_result(), None
+        held = (request['bus'], request['path'])
+        obj = bus.get_object(*held)
+        if (int(obj.GetRole(dbus_interface='org.a11y.atspi.Accessible', timeout=remaining())) != 43
+                or str(obj.Get('org.a11y.atspi.Accessible', 'Name',
+                    dbus_interface='org.freedesktop.DBus.Properties', timeout=remaining())) != 'Retry'):
+            return ancestor_result(), None
+        bounds = rectangle([int(n) for n in obj.GetExtents(dbus.UInt32(1),
+            dbus_interface='org.a11y.atspi.Component', timeout=remaining())])
+        if expected is not None and bounds != expected:
+            return ancestor_result(), None
+        application = tuple(str(n) for n in obj.GetApplication(
+            dbus_interface='org.a11y.atspi.Accessible', timeout=remaining()))
+        if len(application) != 2 or application[0] != held[0] or application == held:
+            return ancestor_result(), None
+        def read(identity):
+            node = bus.get_object(*identity)
+            parent = tuple(str(n) for n in node.Get('org.a11y.atspi.Accessible', 'Parent',
+                dbus_interface='org.freedesktop.DBus.Properties', timeout=remaining()))
+            if len(parent) != 2:
+                raise ValueError('invalid parent')
+            if parent == application:
+                return parent, None
+            if parent[0] != held[0] or parent[1].endswith('/null'):
+                return parent, None
+            ancestor = bus.get_object(*parent)
+            extent = [int(n) for n in ancestor.GetExtents(dbus.UInt32(1),
+                dbus_interface='org.a11y.atspi.Component', timeout=remaining())]
+            return parent, extent
+        facts, signature = published_ancestors(held, application, bounds, read, deadline)
+        result = facts, (bounds, application, signature) if signature is not None else None
+        return result if owned() else (ancestor_result(), None)
+    except (dbus.DBusException, ValueError, TypeError, TimeoutError):
+        return ancestor_result(), None
+    finally:
+        if bus is not None:
+            bus.close()
+
+
 def observation(status='unavailable'):
     return dict(schemaVersion=1, mechanism='zed-atspi-geometry', diagnosticsOnly=True,
                 status=status, phase='pre-retry', **dict.fromkeys(COUNTS, 0))

@@ -231,10 +231,10 @@ def semantic_observations(directory, app):
         if type(value) is not dict:
             raise ValueError('invalid semantic observation')
         mechanism = value.get('mechanism')
-        if mechanism not in {'hermes-windows-catalog-readiness', 'hermes-renderer-qualification', 'zed-native-copy', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'zed-retry-visual', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'windows-process-absence', 'windows-post-stop-process', 'windows-process-baseline', 'claude-owned-configuration', 'claude-restore', 'claude-model-discovery', 'claude-window-stack', 'claude-window-focus', 'claude-storage-use', 'claude-native-storage', 'claude-native-composer', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}:
+        if mechanism not in {'hermes-windows-catalog-readiness', 'hermes-renderer-qualification', 'zed-native-copy', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'zed-retry-visual', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'windows-process-absence', 'windows-post-stop-process', 'windows-process-baseline', 'claude-owned-configuration', 'claude-restore', 'claude-model-discovery', 'claude-window-stack', 'claude-window-focus', 'claude-storage-use', 'claude-native-storage', 'claude-private-storage-stage', 'claude-native-composer', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}:
             continue
         expected = 'hermes-renderer-qualification' if app == 'hermes-desktop' else 'zed-native-copy'
-        if (mechanism != expected and mechanism not in {'hermes-windows-catalog-readiness', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'zed-retry-visual', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'windows-process-absence', 'windows-post-stop-process', 'windows-process-baseline', 'claude-owned-configuration', 'claude-restore', 'claude-model-discovery', 'claude-window-stack', 'claude-window-focus', 'claude-storage-use', 'claude-native-storage', 'claude-native-composer', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}) or type(value.get('schemaVersion')) is not int or value['schemaVersion'] != 1:
+        if (mechanism != expected and mechanism not in {'hermes-windows-catalog-readiness', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'zed-retry-visual', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'windows-process-absence', 'windows-post-stop-process', 'windows-process-baseline', 'claude-owned-configuration', 'claude-restore', 'claude-model-discovery', 'claude-window-stack', 'claude-window-focus', 'claude-storage-use', 'claude-native-storage', 'claude-private-storage-stage', 'claude-native-composer', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}) or type(value.get('schemaVersion')) is not int or value['schemaVersion'] != 1:
             raise ValueError('semantic observation identity differs')
         record = {'schemaVersion': 1, 'mechanism': mechanism}
         if mechanism == 'hermes-windows-catalog-readiness':
@@ -504,6 +504,21 @@ def semantic_observations(directory, app):
                 raise ValueError('inconsistent Claude native storage observation')
             record.update(diagnosticsOnly=True, freshBefore=value['freshBefore'],
                           observationValid=value['observationValid'], before=value['before'], after=value['after'])
+        elif mechanism == 'claude-private-storage-stage':
+            fields = set('schemaVersion mechanism diagnosticsOnly phase stage'.split())
+            stages = {
+                'before-launch': {'captured', 'scope-rejected', 'workspace-unavailable', 'home-unavailable',
+                                  'environment-unbound', 'root-rejected', 'root-create-failed',
+                                  'snapshot-unavailable', 'checkpoint-write-failed'},
+                'after-stop': {'scope-rejected', 'checkpoint-read-failed', 'checkpoint-decode-failed',
+                               'recorded', 'snapshot-unavailable'},
+            }
+            phase, stage = value.get('phase'), value.get('stage')
+            if (set(value) != fields or app != 'claude-desktop' or value['diagnosticsOnly'] is not True
+                    or type(phase) is not str or phase not in stages
+                    or type(stage) is not str or stage not in stages[phase]):
+                raise ValueError('invalid Claude private storage stage')
+            record.update(diagnosticsOnly=True, phase=phase, stage=stage)
         elif mechanism == 'claude-native-composer':
             hashes = {
                 'classicSourceSha256': '6e6be632eb7adc0e66c1bb795448269d6c1f3ffe8821bea59d9e9374671cf0ea',
@@ -511,14 +526,23 @@ def semantic_observations(directory, app):
                 'modernSourceSha256': 'a9f54a8a154e19f86a9d9d696b808bd693904b5e47ec63517abb635003a4244d',
             }
             fields = set(hashes) | set('schemaVersion mechanism diagnosticsOnly sourceVersion sourceCount'.split())
+            mode_hash = value.get('modeSourceSha256')
+            if 'modeSourceSha256' in value:
+                if mode_hash != '0d16680f19e10d03bc11e7797d842d01159da37b5ab410cad9b7307f7eeef3aa':
+                    raise ValueError('invalid Claude mode source identity')
+                fields.add('modeSourceSha256')
             counts = value.get('sourceCount')
             keys = set('classicEditable classicVisible modernMessageEditable sendMessageVisible sendMessageEnabled startTaskVisible'.split())
+            if 'modeSourceSha256' in value:
+                keys.update('modeGroupVisible modeChatVisible modeChatEnabled modeCoworkVisible'.split())
             if (set(value) != fields or app != 'claude-desktop' or value['diagnosticsOnly'] is not True
                     or value['sourceVersion'] != '2.19675.0' or any(value[key] != digest for key, digest in hashes.items())
                     or type(counts) is not dict or set(counts) != keys
                     or any(count is not None and (type(count) is not int or not 0 <= count <= 4096) for count in counts.values())):
                 raise ValueError('invalid Claude native composer observation')
             record.update(diagnosticsOnly=True, sourceVersion=value['sourceVersion'], sourceCount=dict(counts), **hashes)
+            if 'modeSourceSha256' in value:
+                record['modeSourceSha256'] = mode_hash
         elif mechanism == 'claude-storage-use':
             fields = set('schemaVersion mechanism diagnosticsOnly freshBefore observationValid before after'.split())
             storage = set('claudeLocalState claudePreferences thirdPartyLocalState thirdPartyPreferences'.split())
@@ -542,7 +566,20 @@ def semantic_observations(directory, app):
             authority_fields = {'coordinatePackage', 'coordinateRelation', 'coordinateAuthority'}
             modifier_fields = {'modifierState', 'buttonsHeld'}
             present_modifiers = modifier_fields & set(value)
-            if (set(value) - modifier_fields not in (base, base | {'inputDelivery'}, base | coordinate_fields,
+            ancestor_fields = {'centerWithinPublishedAncestors', 'ancestorBoundsStatus', 'checkedAncestorCount'}
+            present_ancestors = ancestor_fields & set(value)
+            if present_ancestors:
+                state, count = value.get('ancestorBoundsStatus'), value.get('checkedAncestorCount')
+                within = value.get('centerWithinPublishedAncestors')
+                if (present_ancestors != ancestor_fields or type(state) is not str
+                        or state not in {'complete', 'unavailable', 'cycle', 'limit'}
+                        or type(count) is not int or not 0 <= count <= 64
+                        or (type(within) is not bool if state == 'complete' else within is not None)
+                        or state == 'limit' and count != 64):
+                    raise ValueError('invalid Zed published ancestor observation')
+                record.update(centerWithinPublishedAncestors=within, ancestorBoundsStatus=state,
+                              checkedAncestorCount=count)
+            if (set(value) - modifier_fields - ancestor_fields not in (base, base | {'inputDelivery'}, base | coordinate_fields,
                                   base | coordinate_fields | {'inputDelivery'}, base | coordinate_fields | authority_fields,
                                   base | coordinate_fields | authority_fields | {'inputDelivery'})
                     or present_modifiers and present_modifiers != modifier_fields
