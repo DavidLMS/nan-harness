@@ -1,6 +1,7 @@
 //! Native controls are resolved inside one app; native errors never enter public reports.
 
 mod accessibility_probe;
+mod claude_native_probe;
 mod clipboard;
 mod dom_probe;
 mod native_copy_probe;

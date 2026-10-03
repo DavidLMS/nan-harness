@@ -856,8 +856,12 @@ impl Gui {
                 "editableCount": count("text_area[visible=\"true\"][editable=\"true\"], text_field[visible=\"true\"][editable=\"true\"]"),
                 "retryCount": count("button[visible=\"true\"][name=\"Retry\"], button[visible=\"true\"][name=\"Try again\"]"),
                 "loginCount": count("button[visible=\"true\"][name=\"Sign in\"], button[visible=\"true\"][name=\"Log in\"]")});
+            let composer_inventory = self.claude_composer_inventory();
             // Only role/known-control counts leave memory; this never sends input.
             self.observe_hosted_startup(composer_observations)?;
+            if let Some(counts) = composer_inventory {
+                super::claude_native_probe::record(directory, owner, &counts);
+            }
             let value = serde_json::json!({"schemaVersion":1, "mechanism":"renderer-startup-baseline", "diagnosticsOnly":true, "windowAcquired":true, "rendererInstrumented":false, "accessibilityInventory": inventory});
             open_private_new(&directory.join(format!("baseline-{owner}.json")))
                 .and_then(|mut file| file.write_all(value.to_string().as_bytes()))

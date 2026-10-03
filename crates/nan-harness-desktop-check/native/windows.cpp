@@ -15,6 +15,7 @@
 
 #if !defined(_WIN32)
 int process_presence(bool) { return 5; }
+int windows_claude_storage() { return 5; }
 #if !defined(__APPLE__)
 int fit_window(const std::string&) { return 5; }
 #endif
@@ -645,6 +646,52 @@ int activate_window(const std::string& request) {
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <tlhelp32.h>
+#include <shlobj.h>
+
+// Fixed known-folder metadata only: never enumerates or opens profile files.
+static bool storage_metadata(const std::wstring& path, bool directory, bool& present) {
+    DWORD attributes = GetFileAttributesW(path.c_str());
+    if (attributes == INVALID_FILE_ATTRIBUTES) {
+        DWORD error = GetLastError();
+        present = false;
+        return error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND;
+    }
+    if (attributes & FILE_ATTRIBUTE_REPARSE_POINT) return false;
+    present = true;
+    return bool(attributes & FILE_ATTRIBUTE_DIRECTORY) == directory;
+}
+
+static bool storage_root(REFKNOWNFOLDERID folder, const wchar_t* name, bool& state, bool& preferences) {
+    PWSTR value = nullptr;
+    HRESULT result = SHGetKnownFolderPath(folder, KF_FLAG_DONT_VERIFY, nullptr, &value);
+    if (FAILED(result) || !value) {
+        if (value) CoTaskMemFree(value);
+        return false;
+    }
+    std::wstring root(value);
+    CoTaskMemFree(value);
+    bool exists = false;
+    if (!storage_metadata(root, true, exists) || !exists) return false;
+    root += L"\\";
+    root += name;
+    if (!storage_metadata(root, true, exists)) return false;
+    if (!exists) { state = preferences = false; return true; }
+    if (!storage_metadata(root + L"\\Local State", false, state)) return false;
+    bool default_exists = false;
+    if (!storage_metadata(root + L"\\Default", true, default_exists)) return false;
+    if (!default_exists) { preferences = false; return true; }
+    return storage_metadata(root + L"\\Default\\Preferences", false, preferences);
+}
+
+int windows_claude_storage() {
+    bool normal_state = false, normal_preferences = false;
+    bool third_state = false, third_preferences = false;
+    if (!storage_root(FOLDERID_RoamingAppData, L"Claude", normal_state, normal_preferences)
+        || !storage_root(FOLDERID_LocalAppData, L"Claude-3p", third_state, third_preferences)) return 5;
+    std::cout << "storage " << normal_state << ' ' << normal_preferences << ' '
+        << third_state << ' ' << third_preferences << '\n';
+    return std::cout ? 0 : 4;
+}
 
 // Only the complete read-only snapshot may establish absence. The caller's
 // checker PID (not this helper's PID) must occur in the snapshot.

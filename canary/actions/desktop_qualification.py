@@ -231,10 +231,10 @@ def semantic_observations(directory, app):
         if type(value) is not dict:
             raise ValueError('invalid semantic observation')
         mechanism = value.get('mechanism')
-        if mechanism not in {'hermes-windows-catalog-readiness', 'hermes-renderer-qualification', 'zed-native-copy', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'zed-retry-visual', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'windows-process-absence', 'windows-post-stop-process', 'windows-process-baseline', 'claude-owned-configuration', 'claude-restore', 'claude-model-discovery', 'claude-window-stack', 'claude-window-focus', 'claude-storage-use', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}:
+        if mechanism not in {'hermes-windows-catalog-readiness', 'hermes-renderer-qualification', 'zed-native-copy', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'zed-retry-visual', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'windows-process-absence', 'windows-post-stop-process', 'windows-process-baseline', 'claude-owned-configuration', 'claude-restore', 'claude-model-discovery', 'claude-window-stack', 'claude-window-focus', 'claude-storage-use', 'claude-native-storage', 'claude-native-composer', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}:
             continue
         expected = 'hermes-renderer-qualification' if app == 'hermes-desktop' else 'zed-native-copy'
-        if (mechanism != expected and mechanism not in {'hermes-windows-catalog-readiness', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'zed-retry-visual', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'windows-process-absence', 'windows-post-stop-process', 'windows-process-baseline', 'claude-owned-configuration', 'claude-restore', 'claude-model-discovery', 'claude-window-stack', 'claude-window-focus', 'claude-storage-use', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}) or type(value.get('schemaVersion')) is not int or value['schemaVersion'] != 1:
+        if (mechanism != expected and mechanism not in {'hermes-windows-catalog-readiness', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'zed-retry-visual', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'windows-process-absence', 'windows-post-stop-process', 'windows-process-baseline', 'claude-owned-configuration', 'claude-restore', 'claude-model-discovery', 'claude-window-stack', 'claude-window-focus', 'claude-storage-use', 'claude-native-storage', 'claude-native-composer', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}) or type(value.get('schemaVersion')) is not int or value['schemaVersion'] != 1:
             raise ValueError('semantic observation identity differs')
         record = {'schemaVersion': 1, 'mechanism': mechanism}
         if mechanism == 'hermes-windows-catalog-readiness':
@@ -487,6 +487,38 @@ def semantic_observations(directory, app):
                 raise ValueError('invalid Claude model discovery observation')
             record.update(diagnosticsOnly=True, authenticatedModelsCount=count,
                           complete=value['complete'], modelDiscoverySeen=seen)
+        elif mechanism == 'claude-native-storage':
+            fields = set('schemaVersion mechanism diagnosticsOnly freshBefore observationValid before after'.split())
+            storage = set('claudeLocalState claudePreferences thirdPartyLocalState thirdPartyPreferences'.split())
+            if (set(value) != fields or app != 'claude-desktop' or value['diagnosticsOnly'] is not True
+                    or type(value['observationValid']) is not bool):
+                raise ValueError('invalid Claude native storage observation identity')
+            for phase in ('before', 'after'):
+                flags = value[phase]
+                if flags is not None and (type(flags) is not dict or set(flags) != storage
+                                          or any(type(flag) is not bool for flag in flags.values())):
+                    raise ValueError('invalid Claude native storage observation flags')
+            expected_fresh = None if value['before'] is None else not any(value['before'].values())
+            if (value['freshBefore'] is not expected_fresh
+                    or value['observationValid'] is not (value['before'] is not None and value['after'] is not None)):
+                raise ValueError('inconsistent Claude native storage observation')
+            record.update(diagnosticsOnly=True, freshBefore=value['freshBefore'],
+                          observationValid=value['observationValid'], before=value['before'], after=value['after'])
+        elif mechanism == 'claude-native-composer':
+            hashes = {
+                'classicSourceSha256': '6e6be632eb7adc0e66c1bb795448269d6c1f3ffe8821bea59d9e9374671cf0ea',
+                'sendSourceSha256': '69d43f83ac78605402b590559cfb9bd355215336a193cedf80cc30b246c1db60',
+                'modernSourceSha256': 'a9f54a8a154e19f86a9d9d696b808bd693904b5e47ec63517abb635003a4244d',
+            }
+            fields = set(hashes) | set('schemaVersion mechanism diagnosticsOnly sourceVersion sourceCount'.split())
+            counts = value.get('sourceCount')
+            keys = set('classicEditable classicVisible modernMessageEditable sendMessageVisible sendMessageEnabled startTaskVisible'.split())
+            if (set(value) != fields or app != 'claude-desktop' or value['diagnosticsOnly'] is not True
+                    or value['sourceVersion'] != '2.19675.0' or any(value[key] != digest for key, digest in hashes.items())
+                    or type(counts) is not dict or set(counts) != keys
+                    or any(count is not None and (type(count) is not int or not 0 <= count <= 4096) for count in counts.values())):
+                raise ValueError('invalid Claude native composer observation')
+            record.update(diagnosticsOnly=True, sourceVersion=value['sourceVersion'], sourceCount=dict(counts), **hashes)
         elif mechanism == 'claude-storage-use':
             fields = set('schemaVersion mechanism diagnosticsOnly freshBefore observationValid before after'.split())
             storage = set('claudeLocalState claudePreferences thirdPartyLocalState thirdPartyPreferences'.split())

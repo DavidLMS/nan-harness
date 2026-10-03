@@ -39,8 +39,18 @@ fn scope(spec: &ProbeSpec) -> Option<([PathBuf; 2], PathBuf)> {
     }
     let workspace = spec.workspace.canonicalize().ok()?;
     let roots = [
-        workspace.join("profile/home/AppData/Roaming/Claude"),
-        workspace.join("profile/home/AppData/Local/Claude-3p"),
+        workspace
+            .join("profile")
+            .join("home")
+            .join("AppData")
+            .join("Roaming")
+            .join("Claude"),
+        workspace
+            .join("profile")
+            .join("home")
+            .join("AppData")
+            .join("Local")
+            .join("Claude-3p"),
     ];
     for root in &roots {
         for parent in root.ancestors() {
@@ -121,15 +131,15 @@ pub(super) fn capture(spec: &ProbeSpec, command: &tokio::process::Command) {
     let Some(workspace) = workspace else {
         return;
     };
-    let home = workspace.join("profile/home");
+    let home = workspace.join("profile").join("home");
     if !regular_directory(&home) {
         return;
     }
     for (key, expected) in [
         ("HOME", home.clone()),
         ("USERPROFILE", home.clone()),
-        ("LOCALAPPDATA", home.join("AppData/Local")),
-        ("APPDATA", home.join("AppData/Roaming")),
+        ("LOCALAPPDATA", home.join("AppData").join("Local")),
+        ("APPDATA", home.join("AppData").join("Roaming")),
     ] {
         if !command_directory_matches(command, key, &expected) {
             return;

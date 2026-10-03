@@ -132,6 +132,64 @@ pub(crate) struct Native {
     executable: PathBuf,
 }
 
+#[cfg(any(windows, test))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ClaudeStoragePresence {
+    #[serde(flatten)]
+    normal: NormalClaudeStorage,
+    #[serde(flatten)]
+    third_party: ThirdPartyClaudeStorage,
+}
+
+#[cfg(any(windows, test))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NormalClaudeStorage {
+    claude_local_state: bool,
+    claude_preferences: bool,
+}
+
+#[cfg(any(windows, test))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ThirdPartyClaudeStorage {
+    third_party_local_state: bool,
+    third_party_preferences: bool,
+}
+
+#[cfg(any(windows, test))]
+impl ClaudeStoragePresence {
+    pub(crate) fn fresh(self) -> bool {
+        !self.normal.claude_local_state
+            && !self.normal.claude_preferences
+            && !self.third_party.third_party_local_state
+            && !self.third_party.third_party_preferences
+    }
+
+    fn parse(output: &str) -> Option<Self> {
+        let fields: Vec<_> = output.strip_suffix('\n')?.split(' ').collect();
+        let ["storage", normal, preferences, third, third_preferences] = fields.as_slice() else {
+            return None;
+        };
+        let bit = |value: &str| match value {
+            "0" => Some(false),
+            "1" => Some(true),
+            _ => None,
+        };
+        Some(Self {
+            normal: NormalClaudeStorage {
+                claude_local_state: bit(normal)?,
+                claude_preferences: bit(preferences)?,
+            },
+            third_party: ThirdPartyClaudeStorage {
+                third_party_local_state: bit(third)?,
+                third_party_preferences: bit(third_preferences)?,
+            },
+        })
+    }
+}
+
 fn parse_known_folders(bytes: &[u8]) -> Option<bool> {
     match bytes {
         b"true\n" => Some(true),
@@ -244,6 +302,15 @@ impl Native {
         deadline: std::time::Instant,
     ) -> Result<zeroize::Zeroizing<String>, FailureCategory> {
         process::run_process_presence_until(&self.executable, claude, deadline)
+    }
+
+    #[cfg(any(windows, test))]
+    pub(crate) fn claude_storage_until(
+        &self,
+        deadline: std::time::Instant,
+    ) -> Option<ClaudeStoragePresence> {
+        let output = process::run_claude_storage_until(&self.executable, deadline).ok()?;
+        ClaudeStoragePresence::parse(&output)
     }
 
     #[cfg(any(windows, test))]
@@ -395,6 +462,64 @@ pub(crate) fn claude_focus_policy() -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn native_storage_protocol_distinguishes_freshness_and_rejects_partial_output() {
+        let fresh = ClaudeStoragePresence::parse("storage 0 0 0 0\n").unwrap();
+        assert!(fresh.fresh());
+        let existing = ClaudeStoragePresence::parse("storage 0 0 1 0\n").unwrap();
+        assert!(!existing.fresh());
+        assert!(existing.third_party.third_party_local_state);
+        let value = serde_json::to_value(existing).unwrap();
+        assert_eq!(value.as_object().unwrap().len(), 4);
+        assert_eq!(value["thirdPartyLocalState"], true);
+        assert_eq!(
+            serde_json::from_value::<ClaudeStoragePresence>(value.clone()).unwrap(),
+            existing
+        );
+        let mut extra = value;
+        extra["privatePath"] = serde_json::json!("rejected");
+        assert!(serde_json::from_value::<ClaudeStoragePresence>(extra).is_err());
+        for invalid in [
+            "storage 0 0 0\n",
+            "storage 0 0 0 2\n",
+            "storage 0 0 0 0",
+            "storage 0 0 0 0\nprivate",
+            "storage  0 0 0 0\n",
+        ] {
+            assert!(ClaudeStoragePresence::parse(invalid).is_none());
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn native_storage_transport_observes_only_closed_output_and_failed_child() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let directory = tempfile::tempdir().unwrap();
+        let executable = directory.path().join("synthetic-storage-helper");
+        std::fs::write(&executable, "#!/bin/sh\n[ \"$1\" = --version ] && exit 0\n[ \"$1\" = --windows-claude-storage ] || exit 1\nprintf 'storage 0 0 1 0\\n'\n").unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+        nan_harness_test_support::executable_fixture::wait_until_ready(&executable).unwrap();
+        let native = Native {
+            directory,
+            executable,
+        };
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+        assert!(
+            native
+                .claude_storage_until(deadline)
+                .unwrap()
+                .third_party
+                .third_party_local_state
+        );
+        assert!(
+            native
+                .claude_storage_until(std::time::Instant::now())
+                .is_none()
+        );
+        std::fs::remove_file(&native.executable).unwrap();
+        assert!(native.claude_storage_until(deadline).is_none());
+    }
+
     #[cfg(unix)]
     #[test]
     fn bounded_absence_reuses_prepared_synthetic_helper_and_parses_complete_inventory() {

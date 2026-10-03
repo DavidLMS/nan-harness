@@ -1585,3 +1585,40 @@ acquisition phases. The helper rechecks original CGID/PID, AX object identity,
 clear stack and foreground before mutation and verifies full display containment
 afterward. Pure geometry/precondition/deadline fixtures pass. Actual hosted fit
 and the original post-fit stability guards remain required for acceptance.
+
+The complete local and hosted Linux quality gates pass on `3c44cf18`; hosted
+[37081875534](https://github.com/DavidLMS/nan-harness/actions/runs/37081875534)
+completed successfully. macOS Claude
+[37081870838](https://github.com/DavidLMS/nan-harness/actions/runs/37081870838)
+acquires the window in two of three repetitions after the one-time fit. Those
+two inventories report one generic editable and no login controls; this does
+not identify a prompt composer. All three cleanup checks pass and all three
+trials observe authenticated model discovery. The remaining initial acquisition
+failure has no more specific fit-stage evidence.
+
+Windows Claude
+[37081873118](https://github.com/DavidLMS/nan-harness/actions/runs/37081873118)
+proves complete process absence before launch and positive Claude process
+presence after owned stop. Cleanup fails on the first repetition, preventing
+later trials. This excludes a pre-existing process at the initial check but
+does not prove job escape, broker activation or environment loss. The private
+storage receipt is still missing. Component-wise joins replace slash-containing
+joins after Windows extended-path canonicalization; this correction requires a
+new hosted observation.
+
+The next startup trials add two advisory diagnostics. On macOS, exact labels
+from the frozen official 2.19675.0 renderer identify classic prompt and Send
+controls separately from generic editables. Only bounded counts and reference
+source hashes are exported; these do not independently verify loaded renderer
+bytes or authorize input. On Windows, fixed known-folder metadata is observed
+before launch and after owned stop, alongside isolated-profile metadata. A
+failed query stays unavailable rather than being classified as fresh. No file
+contents, paths, credentials or app logs are exported, and no native known
+folder is created, copied or removed. These observations do not qualify a cell.
+
+The official [Claude third-party deployment documentation](https://claude.com/docs/third-party/claude-desktop)
+describes account-free local device identity; the official
+[extension documentation](https://claude.com/docs/third-party/claude-desktop/extensions)
+supports managed MCP servers, including local stdio tools. The current trial
+has not yet established a guarded composer, a response-scoped assertion or an
+installed fixture tool. Those proofs remain necessary before coding acceptance.

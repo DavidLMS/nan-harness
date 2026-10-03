@@ -1195,6 +1195,56 @@ class QualificationTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'claude-desktop')
 
+    def test_claude_native_storage_preserves_unavailable_and_rejects_false_freshness(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            flags = dict(claudeLocalState=False, claudePreferences=False,
+                         thirdPartyLocalState=False, thirdPartyPreferences=False)
+            base = dict(schemaVersion=1, mechanism='claude-native-storage', diagnosticsOnly=True,
+                        freshBefore=None, observationValid=False, before=None, after=None)
+            path = root / 'native-storage.json'
+            valid = [base, {**base, 'before': flags, 'freshBefore': True},
+                     {**base, 'before': flags, 'after': flags, 'freshBefore': True, 'observationValid': True},
+                     {**base, 'before': {**flags, 'claudeLocalState': True}, 'freshBefore': False}]
+            for value in valid:
+                path.write_text(json.dumps(value))
+                self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [value])
+            for value in ({**base, 'freshBefore': True}, {**base, 'observationValid': True},
+                          {**base, 'rawPath': 'PRIVATE'}, {**base, 'diagnosticsOnly': False},
+                          {**base, 'before': {**flags, 'claudeLocalState': 1}},
+                          {**valid[2], 'freshBefore': False}, {**base, 'freshBefore': 0}):
+                path.write_text(json.dumps(value))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'claude-desktop')
+            path.write_text(json.dumps(base))
+            with self.assertRaises(ValueError):
+                q.semantic_observations(root, 'chatgpt-desktop')
+
+    def test_claude_native_composer_is_source_bound_and_never_accepts_payload(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            counts = dict(classicEditable=1, classicVisible=1, modernMessageEditable=0,
+                          sendMessageVisible=1, sendMessageEnabled=0, startTaskVisible=None)
+            value = dict(schemaVersion=1, mechanism='claude-native-composer', diagnosticsOnly=True,
+                         sourceVersion='2.19675.0', sourceCount=counts,
+                         classicSourceSha256='6e6be632eb7adc0e66c1bb795448269d6c1f3ffe8821bea59d9e9374671cf0ea',
+                         sendSourceSha256='69d43f83ac78605402b590559cfb9bd355215336a193cedf80cc30b246c1db60',
+                         modernSourceSha256='a9f54a8a154e19f86a9d9d696b808bd693904b5e47ec63517abb635003a4244d')
+            path = root / 'composer.json'
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [value])
+            for changed in ({**value, 'sourceVersion': 'other'}, {**value, 'classicSourceSha256': '0' * 64},
+                            {**value, 'diagnosticsOnly': False}, {**value, 'text': 'PRIVATE'},
+                            {**value, 'sourceCount': {**counts, 'classicEditable': True}},
+                            {**value, 'sourceCount': {**counts, 'classicEditable': 4097}},
+                            {**value, 'sourceCount': {**counts, 'selector': 'PRIVATE'}}):
+                path.write_text(json.dumps(changed))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'claude-desktop')
+            path.write_text(json.dumps(value))
+            with self.assertRaises(ValueError):
+                q.semantic_observations(root, 'chatgpt-desktop')
+
     def test_claude_storage_use_is_closed_and_cannot_certify_consumption(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

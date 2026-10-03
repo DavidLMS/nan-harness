@@ -123,6 +123,20 @@ pub(super) fn run_process_presence_until(
     )
 }
 
+#[cfg(any(windows, test))]
+pub(super) fn run_claude_storage_until(
+    executable: &Path,
+    deadline: Instant,
+) -> Result<Zeroizing<String>, FailureCategory> {
+    run_once_until(
+        executable,
+        OsStr::new("--windows-claude-storage"),
+        None,
+        &[],
+        Some(deadline),
+    )
+}
+
 fn run_once(
     executable: &Path,
     argument: &OsStr,
