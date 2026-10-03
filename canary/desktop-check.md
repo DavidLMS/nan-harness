@@ -2449,3 +2449,42 @@ The first static-title catalog is exercised by
 and [Codex Linux 37156026993](https://github.com/DavidLMS/nan-harness/actions/runs/37156026993),
 with [quality run 37156028197](https://github.com/DavidLMS/nan-harness/actions/runs/37156028197).
 Dispatch is not evidence of completion or qualification.
+
+
+The retained UIA experiment
+[Claude Windows 37155937963](https://github.com/DavidLMS/nan-harness/actions/runs/37155937963)
+now collects a complete 141-node guarded tree with one classic editor and one
+Start task control. This is passive inventory evidence, not input or response
+qualification. Start task is also used by a new Chat; it does not identify
+Cowork. Current-mode proof is required before an input adapter.
+[Claude Linux 37155939393](https://github.com/DavidLMS/nan-harness/actions/runs/37155939393)
+finds exactly two visible buttons relative to the retained Mode group, with
+zero tested source-label matches.
+[Zed Linux 37155940550](https://github.com/DavidLMS/nan-harness/actions/runs/37155940550)
+verifies response and tool in all three sessions, but the retained Retry target
+is unchanged after forwarding. Independent recovery is still absent.
+
+[Claude macOS 37155936892](https://github.com/DavidLMS/nan-harness/actions/runs/37155936892)
+is blocked by readiness/runtime guards. One session submits input and observes
+the fixture response, then rejects a tree query as `same-process-window`; no
+new exact-focus failure is established by this run. Initial focus receipts
+cannot distinguish the rejected runtime predicate. The runtime guard now
+records that exact rejected snapshot separately, without another query or
+refreshing held geometry.
+
+The first Codex static-title runs remain unqualified: macOS rejects the
+catalog guard in all sessions, while one Linux session observes one referenced
+title with no known static match. The macOS passive reader now uses the
+original captured sole main document before role binding. Input/action guards
+are unchanged; a source-scope predicate for controls hidden behind the modal
+is no longer a prerequisite for reading its title. All six application runs
+above pass cleanup and emit zero invalid diagnostic events.
+[Quality run 37156028197](https://github.com/DavidLMS/nan-harness/actions/runs/37156028197)
+passes the complete hosted gate and experiment contracts at `d936c222`.
+
+Follow-ups dispatched at `45838176`:
+[Codex Windows 37156447227](https://github.com/DavidLMS/nan-harness/actions/runs/37156447227),
+[Codex Linux 37156518819](https://github.com/DavidLMS/nan-harness/actions/runs/37156518819),
+and [Claude macOS 37156658157](https://github.com/DavidLMS/nan-harness/actions/runs/37156658157).
+Their results remain pending. GitHub API requests temporarily returned HTTP
+503; named closed qualification artifacts were retrieved after recovery.

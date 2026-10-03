@@ -293,6 +293,12 @@ function publishCodexBinding(output,owner,connection,guard) {
       ||process.platform!=='win32'&&(metadata.mode&0o077)!==0)throw new Error('private-root');
   fs.writeFileSync(bindingPath,JSON.stringify(checkpoint)+'\n',{mode:0o600,flag:'wx'});
 }
+function passiveCatalogGuard(browser,page,ownerGuard) {
+  return ()=>{
+    const pages=browser.contexts().flatMap(context=>context.pages());
+    return pages.length===1&&pages[0]===page&&ownerGuard();
+  };
+}
 function recordStaticDialog(value) {
   const destination=`${output}.dialog-title.json`;
   try {
@@ -481,9 +487,10 @@ async function run() {
       recordLinuxDialog(await observeLinuxDialog(initialMain,browser,ownerGuard,deadline));
     }
     const titleCatalog=require('./codex-dialog-catalog.cjs');
-    if(process.platform==='linux'&&titleCatalog.policy(app,process.platform,process.env)) {
-      const soleGuard=()=>browser.contexts().flatMap(c=>c.pages()).length===1
-        &&browser.contexts().flatMap(c=>c.pages())[0]===page&&ownerGuard();
+    if(['linux','darwin'].includes(process.platform)&&titleCatalog.policy(app,process.platform,process.env)) {
+      // Passive title evidence uses the captured sole main document, independently
+      // of role-onboarding controls hidden behind an active startup dialog.
+      const soleGuard=passiveCatalogGuard(browser,page,ownerGuard);
       recordStaticDialog(await titleCatalog.observe(initialMain,process.platform,
         {guard:soleGuard,identity:p=>correlationIdentity(p,deadline,false),same:sameCorrelationIdentity,deadline}));
     }
@@ -499,7 +506,7 @@ async function run() {
       const mainGuard=trial&&heldMain?heldMainGuard(heldMain,browser,ownerGuard,correlationDeadline,
         require('./codex-onboarding.cjs').sourceRoute,correlationIdentity,
         ms=>new Promise(resolve=>setTimeout(resolve,ms)),false,true):undefined;
-      if(['darwin','win32'].includes(process.platform)&&titleCatalog.policy(app,process.platform,process.env)) {
+      if(process.platform==='win32'&&titleCatalog.policy(app,process.platform,process.env)) {
         recordStaticDialog(await titleCatalog.observe(heldMain,process.platform,
           {guard:mainGuard||(()=>false),identity:p=>correlationIdentity(p,deadline,false),
             same:sameCorrelationIdentity,deadline}));

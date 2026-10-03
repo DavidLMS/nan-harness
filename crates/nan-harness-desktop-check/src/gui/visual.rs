@@ -771,6 +771,9 @@ impl Visual {
             return Err(FailureCategory::Timeout.reason());
         }
         Self::guard_snapshot_observed(&snapshot, &expected, |failure| {
+            // Publish the exact rejected runtime proof, independently of the
+            // earlier acquisition receipt. Never refresh the retained geometry.
+            record_claude_snapshot(&snapshot, &expected, "runtime-rejection");
             observe(None, Some(failure));
         })
     }
@@ -2183,6 +2186,7 @@ fn record_claude_snapshot(snapshot: &Snapshot, held: &Window, phase: &str) {
         let suffix = match phase {
             "initial" => "",
             "initial-decision" => "-initial-decision",
+            "runtime-rejection" => "-runtime-rejection",
             _ => "-final",
         };
         let focus_path = directory.join(format!(
@@ -2203,7 +2207,7 @@ fn record_claude_snapshot(snapshot: &Snapshot, held: &Window, phase: &str) {
             if let Some(agreement) = snapshot.window_focus_agreement() {
                 facts["windowOnlyAgreement"] = serde_json::to_value(agreement).unwrap_or_default();
             }
-            if phase == "initial-decision" {
+            if matches!(phase, "initial-decision" | "runtime-rejection") {
                 facts["guardCategory"] = initial_decision_guard(snapshot, original).into();
             }
             if phase == "final-stability" {
@@ -2225,6 +2229,27 @@ fn record_claude_snapshot(snapshot: &Snapshot, held: &Window, phase: &str) {
 mod tests {
     use super::*;
     use crate::native::FitFailure;
+
+    #[test]
+    fn runtime_rejection_uses_retained_geometry_even_with_fresh_focus() {
+        let original = Snapshot::parse(
+            "FG 7 0\nDISPLAY 0 0 2000 2000\nWIN 1 7 10 20 800 600 436c61756465 0\nFOCUS proved 1\nFOCUS_WINDOW proved 1\n",
+        ).unwrap();
+        let held = original.windows[0].clone();
+        let resized = Snapshot::parse(
+            "FG 7 0\nDISPLAY 0 0 2000 2000\nWIN 1 7 10 20 900 600 436c61756465 0\nFOCUS proved 1\nFOCUS_WINDOW proved 1\n",
+        ).unwrap();
+        assert_eq!(
+            initial_decision_guard(&resized, &held),
+            Some("bounds-changed")
+        );
+        assert_eq!(resized.focus_observation(&held).unwrap().1, Some(false));
+        assert_eq!(
+            resized.window_focus_observation(&held).unwrap().1,
+            Some(false)
+        );
+        assert_eq!(held.bounds.width, 800);
+    }
 
     #[test]
     fn rejected_guard_observes_same_snapshot_without_another_query() {

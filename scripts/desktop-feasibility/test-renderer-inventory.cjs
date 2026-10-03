@@ -396,3 +396,17 @@ assert.equal(publicDialogTrial(['Could not load workspaces','Could not load work
 assert.equal(publicDialogTrial(['Could not load workspaces'],['Try again'],2).status,'ambiguous');
 assert.equal(publicDialogTrial(['Could not load workspaces'],['Try again'],1,'claude-desktop'),undefined);
 console.log('Renderer public modal classifier: exact source pair and privacy passed');
+
+// A passive catalog does not require role controls behind a startup modal.
+const passiveStart=source.indexOf('function passiveCatalogGuard(');
+const passiveEnd=source.indexOf('function recordStaticDialog(',passiveStart);
+const passive=vm.runInNewContext(`(() => { ${source.slice(passiveStart,passiveEnd)} return passiveCatalogGuard; })()`);
+const immutablePage={},replacementPage={};let passivePages=[immutablePage],passiveOwner=true,proofs=0;
+const passiveBrowser={contexts:()=>[{pages:()=>passivePages}]};
+const passiveGuard=passive(passiveBrowser,immutablePage,()=>{++proofs;return passiveOwner;});
+assert.equal(passiveGuard(),true);assert.equal(proofs,1);
+passivePages=[replacementPage];assert.equal(passiveGuard(),false);
+passivePages=[immutablePage,replacementPage];assert.equal(passiveGuard(),false);
+passivePages=[];assert.equal(passiveGuard(),false);
+passivePages=[immutablePage];passiveOwner=false;assert.equal(passiveGuard(),false);
+console.log('Renderer passive title guard: held sole page and fresh ownership, independent of role controls passed');

@@ -686,6 +686,30 @@ class QualificationTests(unittest.TestCase):
                     with self.assertRaises(ValueError):
                         q.semantic_observations(root, 'zed-desktop')
 
+    def test_runtime_rejection_retains_closed_fresh_proofs_and_guard(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'focus.json'
+            value = dict(schemaVersion=1, mechanism='claude-window-focus', diagnosticsOnly=True,
+                         phase='runtime-rejection', guardCategory='same-process-window',
+                         status='proved', nativeForegroundWindowMatchedHeld=True, query=None,
+                         windowOnlyStatus='query-error', windowOnlyMatchedHeld=None,
+                         windowOnlyQuery=dict(phase='before', stage='main-window', error='cannot-complete'))
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(Path(root), 'claude-desktop'), [value])
+            for change in ({'guardCategory': None}, {'guardCategory': 'PRIVATE'},
+                           {'guardCategory': True}, {'candidateState': 'proved'},
+                           {'windowOnlyMatchedHeld': True}, {'windowId': 'PRIVATE'}):
+                path.write_text(json.dumps({**value, **change}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(Path(root), 'claude-desktop')
+            path.write_text(json.dumps(value))
+            with self.assertRaises(ValueError):
+                q.semantic_observations(Path(root), 'zed-desktop')
+            del value['guardCategory']
+            path.write_text(json.dumps(value))
+            with self.assertRaises(ValueError):
+                q.semantic_observations(Path(root), 'claude-desktop')
+
     def test_initial_decision_requires_closed_category_from_same_snapshot(self):
         with tempfile.TemporaryDirectory() as root:
             path = Path(root) / 'focus.json'

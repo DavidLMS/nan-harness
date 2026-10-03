@@ -810,19 +810,21 @@ def semantic_observations(directory, app):
                     raise ValueError('invalid Claude window-only focus observation')
                 record.update(windowOnlyStatus=window_status, windowOnlyMatchedHeld=window_matched)
             if 'phase' in value:
-                if type(value['phase']) is not str or value['phase'] not in {'initial', 'final-stability', 'initial-decision'}:
+                if type(value['phase']) is not str or value['phase'] not in {'initial', 'final-stability', 'initial-decision', 'runtime-rejection'}:
                     raise ValueError('invalid Claude focus phase')
                 record['phase'] = value['phase']
             if 'guardCategory' in value:
                 category = value['guardCategory']
-                if (value.get('phase') != 'initial-decision'
+                if (value.get('phase') not in {'initial-decision', 'runtime-rejection'}
                         or category is not None and (type(category) is not str or category not in {
                             'identity-missing', 'bounds-changed', 'foreground-changed',
                             'same-process-window', 'off-display', 'occluded'})):
-                    raise ValueError('invalid Claude initial decision category')
+                    raise ValueError('invalid Claude decision category')
+                if value.get('phase') == 'runtime-rejection' and category is None:
+                    raise ValueError('missing Claude runtime rejection category')
                 record['guardCategory'] = category
-            elif value.get('phase') == 'initial-decision':
-                raise ValueError('missing Claude initial decision category')
+            elif value.get('phase') in {'initial-decision', 'runtime-rejection'}:
+                raise ValueError('missing Claude decision category')
             if 'candidateState' in value:
                 if (value.get('phase') != 'final-stability' or type(value['candidateState']) is not str
                         or value['candidateState'] not in {'absent', 'ambiguous', 'identity-changed', 'bounds-changed',
