@@ -91,6 +91,10 @@ fn native_receipt(
     match result {
         Ok(stage) => {
             facts.native_press_stage = Some(stage);
+            if stage == ChatPressStage::CurrentChat {
+                facts.preconditions_verified = true;
+                facts.native_guard_verified = true;
+            }
             if !stage.attempted() {
                 return Ok(false);
             }
@@ -219,6 +223,17 @@ fn record(directory: &Path, owner: u32, facts: &Facts) {
 mod tests {
     use super::{Facts, native_receipt, postcondition, preflight, press_once, within};
     use crate::{native::ChatPressStage, report::Reason};
+    #[test]
+    fn already_current_chat_does_not_press_or_claim_a_transition() {
+        let mut facts = Facts::default();
+        assert!(!native_receipt(&mut facts, Ok(ChatPressStage::CurrentChat)).unwrap());
+        let value = facts.value().unwrap();
+        assert_eq!(value["pressAttempted"], false);
+        assert_eq!(value["preconditionsVerified"], true);
+        assert_eq!(value["nativeGuardVerified"], true);
+        assert_eq!(value["chatPostconditionVerified"], false);
+        assert_eq!(value["phase"], "preflight");
+    }
     #[test]
     fn source_counts_require_unique_scoped_controls_and_chat_transition() {
         let mut counts = serde_json::json!({"modeGroupVisible":1,"modeChatVisible":1,"modeChatEnabled":1,"classicEditable":1,"startTaskVisible":1,"sendMessageVisible":0});

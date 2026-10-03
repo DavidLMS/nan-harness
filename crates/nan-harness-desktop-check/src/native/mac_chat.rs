@@ -14,6 +14,7 @@ pub(crate) enum ChatPressStage {
     Deadline,
     PressUncertain,
     Completed,
+    CurrentChat,
 }
 impl ChatPressStage {
     pub(super) fn parse(output: &str) -> Option<Self> {
@@ -28,6 +29,7 @@ impl ChatPressStage {
             "chat hit-test\n" => Some(Self::HitTest),
             "chat deadline\n" => Some(Self::Deadline),
             "chat press-uncertain\n" => Some(Self::PressUncertain),
+            "chat current-chat\n" => Some(Self::CurrentChat),
             "chat completed\n" => Some(Self::Completed),
             _ => None,
         }
@@ -42,6 +44,7 @@ mod tests {
     #[test]
     fn only_completed_or_uncertain_native_receipts_indicate_an_action() {
         for stage in [
+            ChatPressStage::CurrentChat,
             ChatPressStage::Request,
             ChatPressStage::Tree,
             ChatPressStage::ControlRecheck,

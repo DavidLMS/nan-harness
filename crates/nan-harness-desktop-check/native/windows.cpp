@@ -584,6 +584,19 @@ bool chat_control_agreement(unsigned groups, unsigned buttons, bool same_control
         && held.size.width > 0 && held.size.height > 0
         && CGRectEqualToRect(held, fresh) && CGRectContainsRect(window, held);
 }
+// Chromium maps the source aria-current token to AXARIACurrent. Only the
+// exact page token can prove the retained Chat pill is already active.
+bool chat_current_page(CFTypeRef value) {
+    return value && CFGetTypeID(value) == CFStringGetTypeID()
+        && CFEqual(value, CFSTR("page"));
+}
+static bool chat_is_current(AXUIElementRef button) {
+    CFTypeRef value = nullptr;
+    bool current = AXUIElementCopyAttributeValue(button, CFSTR("AXARIACurrent"), &value)
+        == kAXErrorSuccess && chat_current_page(value);
+    if (value) CFRelease(value);
+    return current;
+}
 struct ChatControls {
     AXUIElementRef button = nullptr;
     CGRect bounds{};
@@ -710,6 +723,10 @@ int claude_chat_press() {
         if (enabled) CFRelease(enabled);
         if (!still_enabled) return chat_result("control-recheck");
         if (!chat_timely(deadline)) return chat_result("deadline");
+        bool held_current = chat_is_current(held.button);
+        bool fresh_current = chat_is_current(current.button);
+        if (!chat_timely(deadline)) return chat_result("deadline");
+        if (held_current && fresh_current) return chat_result("current-chat");
         return chat_result(AXUIElementPerformAction(held.button, kAXPressAction) == kAXErrorSuccess ? "completed" : "press-uncertain");
     }
 }

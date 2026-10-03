@@ -19,8 +19,15 @@ static CFDictionaryRef record(std::int64_t pid, std::int64_t id, std::int64_t la
     return result;
 }
 const char* classify_ax_error(AXError);
+bool chat_current_page(CFTypeRef);
 bool chat_control_agreement(unsigned, unsigned, bool, CGRect, CGRect, CGRect);
 int main() {
+    assert(chat_current_page(CFSTR("page")));
+    assert(!chat_current_page(CFSTR("true")));
+    assert(!chat_current_page(CFSTR("false")));
+    assert(!chat_current_page(CFSTR("PRIVATE")));
+    assert(!chat_current_page(kCFBooleanTrue));
+    assert(!chat_current_page(nullptr));
     auto chat = CGRectMake(20, 30, 60, 30);
     auto main_window = CGRectMake(10, 20, 800, 600);
     assert(chat_control_agreement(1, 1, true, chat, chat, main_window));

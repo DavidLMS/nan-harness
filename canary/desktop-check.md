@@ -1830,3 +1830,43 @@ issued Claude Windows's owned wrapper termination and released the wrapper,
 but independent process absence still failed. Neither wrapper release nor a
 future process-ancestry diagnostic can substitute for that cleanup verdict.
 These measurements add no qualified cells.
+
+
+### Source identity and bounded native follow-up
+
+Hosted quality run [37118762408](https://github.com/DavidLMS/nan-harness/actions/runs/37118762408)
+passed on `12528df4`. Native results on that source add no qualified cells:
+
+- Claude macOS run [37118758818](https://github.com/DavidLMS/nan-harness/actions/runs/37118758818)
+  completed one guarded Chat press, but the last measured counts remained one
+  classic editor, one Start task control and zero Send message controls. Two
+  other sessions failed stable-window acquisition; cleanup passed throughout.
+- Claude Windows run [37118760617](https://github.com/DavidLMS/nan-harness/actions/runs/37118760617)
+  observed five surviving processes with retained creation-time descendant
+  identities, zero unlinked matches and no surviving launcher. This proves
+  historical ancestry, not Job membership. Independent cleanup still failed.
+- Zed Linux run [37118756754](https://github.com/DavidLMS/nan-harness/actions/runs/37118756754)
+  exhausted the original zoom-proof budget before any Send. The candidate now
+  reuses already retained canonical candidates while rechecking ownership,
+  selected state, geometry and native hit identity at each hover; the deadline
+  and unique-tooltip requirement are unchanged.
+
+Codex run [37118189156](https://github.com/DavidLMS/nan-harness/actions/runs/37118189156)
+proved initial target/frame/loader presence on the exact primary route in all
+nine probes. Later main binding failed. The pinned onboarding source renders
+its role form inside an ordinary div, independently of visible foreign dialogs.
+The candidate identifies exactly one source role root; separate modal guards
+still block every role/Continue click. Synthetic fixtures prove this separation
+and reject duplicate source roots.
+
+Claude's pinned macOS renderer uses Start task when the composer is on a new
+agent route; that label alone does not identify Cowork. Its mode pill instead
+sets `aria-current="page"` when active. Chromium's
+[native mapping](https://chromium.googlesource.com/chromium/src/+/HEAD/ui/accessibility/platform/ax_platform_node_cocoa.mm)
+exposes the token as `AXARIACurrent`. A candidate checks that exact token twice
+on the retained, uniquely scoped Chat control after the existing window,
+geometry and hit proofs. A `current-chat` receipt means no press was attempted;
+it neither asserts a navigation transition nor qualifies conversation behavior.
+Unknown/unsupported values retain the existing guarded one-press path. Pure
+CoreFoundation tests reject booleans and other tokens; no native application is
+launched locally.

@@ -1402,6 +1402,7 @@ class QualificationTests(unittest.TestCase):
             counts = dict.fromkeys('classicEditable classicVisible modernMessageEditable sendMessageVisible sendMessageEnabled startTaskVisible modeGroupVisible modeChatVisible modeChatEnabled modeCoworkVisible'.split(), 0)
             for value in (base, complete, {**complete, 'postconditionCounts': counts},
                           {**base, 'nativePressStage': 'chat'},
+                          {**base, 'nativePressStage': 'current-chat', 'preconditionsVerified': True},
                           {**complete, 'nativePressStage': 'completed'},
                           {**complete, 'actionStatus': 'uncertain'},
                           {**complete, 'phase': 'postcondition', 'chatPostconditionVerified': False}):
@@ -1412,7 +1413,9 @@ class QualificationTests(unittest.TestCase):
                             {**base, 'chatPostconditionVerified': True}, {**complete, 'windowId': 5},
                             {**complete, 'diagnosticsOnly': False}, {**complete, 'actionStatus': 'PRIVATE'},
                             {**base, 'nativePressStage': 'completed'}, {**complete, 'nativePressStage': 'tree'},
-                            {**base, 'nativePressStage': 'PRIVATE'}, {**base, 'postconditionCounts': counts},
+                            {**base, 'nativePressStage': 'PRIVATE'},
+                            {**base, 'nativePressStage': 'current-chat'},
+                            {**complete, 'nativePressStage': 'current-chat'}, {**base, 'postconditionCounts': counts},
                             {**complete, 'postconditionCounts': {**counts, 'prompt': 'PRIVATE'}},
                             {**complete, 'postconditionCounts': {**counts, 'classicEditable': True}},
                             {**complete, 'postconditionCounts': {**counts, 'classicEditable': 4097}}):

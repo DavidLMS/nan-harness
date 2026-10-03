@@ -508,7 +508,7 @@ def semantic_observations(directory, app):
                 raise ValueError('invalid Claude Chat navigation identity')
             if 'nativePressStage' in value:
                 stage = value['nativePressStage']
-                stages = {'request', 'initial-proof', 'window-bounds', 'tree', 'mode', 'chat', 'control-recheck', 'hit-test', 'deadline', 'press-uncertain', 'completed'}
+                stages = {'request', 'initial-proof', 'window-bounds', 'tree', 'mode', 'chat', 'control-recheck', 'hit-test', 'deadline', 'press-uncertain', 'completed', 'current-chat'}
                 if (type(stage) is not str or stage not in stages
                         or (stage in {'completed', 'press-uncertain'}) != value['pressAttempted']):
                     raise ValueError('invalid Claude native Chat press stage')
@@ -526,7 +526,8 @@ def semantic_observations(directory, app):
                     or phase == 'preflight' and (attempted or post)
                     or phase != 'preflight' and not attempted
                     or post and not (attempted and ready and guarded)
-                    or (phase == 'completed') != post):
+                    or (phase == 'completed') != post
+                    or value.get('nativePressStage') == 'current-chat' and not (phase == 'preflight' and ready and guarded)):
                 raise ValueError('inconsistent Claude Chat navigation observation')
             record.update(diagnosticsOnly=True, phase=phase, actionStatus=action,
                           **{key: value[key] for key in flags})
