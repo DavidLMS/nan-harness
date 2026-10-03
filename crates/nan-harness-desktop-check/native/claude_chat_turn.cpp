@@ -376,26 +376,36 @@ static bool wait_focused_composer(const Request& request, const Node& control) {
     return focused;
 }
 enum class PastedValue { Ready, Pending, Rejected };
-static PastedValue pasted_value_state(const std::string& value, const std::string& prompt,
-                                     bool valid_value, bool exact_focus) {
-    if (!valid_value || !exact_focus || value.size()>1024) return PastedValue::Rejected;
-    if (value==prompt) return PastedValue::Ready;
-    return prompt.compare(0,value.size(),value)==0 ? PastedValue::Pending : PastedValue::Rejected;
-}
-static PastedValue pasted_composer_value(const Request& request, const Node& control) {
-    if (focused_composer(request,control)!=ComposerFocus::Focused) return PastedValue::Rejected;
-    auto value=attribute(control.element,kAXValueAttribute);
+struct PrivateInputValue {
+    std::string value;
+    ~PrivateInputValue() { std::fill(value.begin(),value.end(),'\0'); }
+};
+static bool private_input_value(CFTypeRef value, std::string& result) {
     char buffer[4097]{};
     const bool valid=value && CFGetTypeID(value)==CFStringGetTypeID()
         && CFStringGetLength(static_cast<CFStringRef>(value))<=1024
         && CFStringGetCString(static_cast<CFStringRef>(value),buffer,sizeof(buffer),kCFStringEncodingUTF8);
-    if (value) CFRelease(value);
-    std::string observed=valid ? buffer : "";
+    if (valid) result=buffer;
     std::fill(std::begin(buffer),std::end(buffer),'\0');
+    return valid && result.size()<=1024;
+}
+static PastedValue pasted_value_state(const std::string& value, const std::string& prompt,
+                                     bool valid_value, bool exact_focus, const std::string& initial = "") {
+    if (!valid_value || !exact_focus || value.size()>1024) return PastedValue::Rejected;
+    if (value==prompt) return PastedValue::Ready;
+    // An asynchronous paste may still expose the exact pre-paste value. This
+    // observation only permits waiting; submission still requires exact prompt.
+    if (value==initial) return PastedValue::Pending;
+    return prompt.compare(0,value.size(),value)==0 ? PastedValue::Pending : PastedValue::Rejected;
+}
+static PastedValue pasted_composer_value(const Request& request, const Node& control, const std::string& initial) {
+    if (focused_composer(request,control)!=ComposerFocus::Focused) return PastedValue::Rejected;
+    auto value=attribute(control.element,kAXValueAttribute);
+    PrivateInputValue observed;
+    const bool valid=private_input_value(value,observed.value);
+    if (value) CFRelease(value);
     const bool focused=focused_composer(request,control)==ComposerFocus::Focused;
-    const auto state=pasted_value_state(observed,request.prompt,valid && !ax_query_failed,focused);
-    std::fill(observed.begin(),observed.end(),'\0');
-    return state;
+    return pasted_value_state(observed.value,request.prompt,valid && !ax_query_failed,focused,initial);
 }
 template<class Query, class Within, class Pause>
 static bool settle_pasted_value(Query query, Within within_deadline, Pause pause) {
@@ -407,9 +417,9 @@ static bool settle_pasted_value(Query query, Within within_deadline, Pause pause
     }
     return false;
 }
-static bool wait_pasted_value(const Request& request, const Node& control) {
+static bool wait_pasted_value(const Request& request, const Node& control, const std::string& initial) {
     request.deadline_phase="deadline-input-paste";
-    return settle_pasted_value([&] { return pasted_composer_value(request,control); },
+    return settle_pasted_value([&] { return pasted_composer_value(request,control,initial); },
         [&] { return within(request); },
         [] { std::this_thread::sleep_for(std::chrono::milliseconds(20)); });
 }
@@ -423,6 +433,8 @@ static const char* input(const Request& request, const Tree& tree) {
     if (!target(control, request) || !contained_control(tree.nodes[send], request)) return "control";
     auto initial_value = attribute(control.element, kAXValueAttribute);
     const char* initial_failure = initial_input_failure(initial_value, ax_query_failed, request.mode == "input-replace-owned");
+    PrivateInputValue initial;
+    if (!initial_failure && !private_input_value(initial_value,initial.value)) initial_failure="input-initial-unavailable";
     if (initial_value) CFRelease(initial_value);
     if (initial_failure) return initial_failure;
     if (!owned(request)) return "input-focus-guard";
@@ -437,7 +449,7 @@ static const char* input(const Request& request, const Tree& tree) {
     if (!owned(request)) return "input-prompt-after-guard";
     if (!wait_focused_composer(request, control)) return "input-focused-identity";
     if (!key(9, true)) return "input-paste-key";
-    if (!wait_pasted_value(request,control)) return "input-value-mismatch";
+    if (!wait_pasted_value(request,control,initial.value)) return "input-value-mismatch";
     request.deadline_phase="deadline-input-readback";
     if (!owned(request)) return "input-readback-before-guard";
     if (!clipboard_write(request.sentinel)) return "input-sentinel-clipboard";

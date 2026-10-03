@@ -10,6 +10,10 @@ int main() {
     assert(pasted_value_state("pro","prompt",true,true)==PastedValue::Pending);
     assert(pasted_value_state("prompt","prompt",true,true)==PastedValue::Ready);
     assert(pasted_value_state("foreign","prompt",true,true)==PastedValue::Rejected);
+    assert(pasted_value_state("previous","prompt",true,true,"previous")==PastedValue::Pending);
+    assert(pasted_value_state("other","prompt",true,true,"previous")==PastedValue::Rejected);
+    assert(pasted_value_state("previous","prompt",true,false,"previous")==PastedValue::Rejected);
+    assert(pasted_value_state("prompt","prompt",true,true,"previous")==PastedValue::Ready);
     assert(pasted_value_state("prompt","prompt",false,true)==PastedValue::Rejected);
     assert(pasted_value_state("prompt","prompt",true,false)==PastedValue::Rejected);
     assert(pasted_value_state(std::string(1025,'x'),"prompt",true,true)==PastedValue::Rejected);

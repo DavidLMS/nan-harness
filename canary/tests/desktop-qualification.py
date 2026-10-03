@@ -2961,6 +2961,14 @@ class CodexStaticDialogTitleTests(unittest.TestCase):
                 for patch in ({'guardFailure': 'PRIVATE'}, {'rejectionStage': 'query'}, {'guardFailure': []}):
                     path.write_text(json.dumps({**rejected, **patch}))
                     with self.assertRaises(ValueError): q.semantic_observations(root, 'chatgpt-desktop')
+            shape = dict(pageRoleLegend=1, dialogRoleLegend=0, pageRoleRadios=11, dialogRoleRadios=0,
+                         pageEngineering=1, dialogEngineering=0, dialogContinue=1, dialogGetStarted=0)
+            path.write_text(json.dumps({**value, 'sourceShape': shape}))
+            self.assertEqual(q.semantic_observations(root, 'chatgpt-desktop')[0]['sourceShape'], shape)
+            for changed in ({**shape, 'raw': 'PRIVATE'}, {**shape, 'dialogEngineering': 2},
+                            {**shape, 'pageRoleRadios': True}, {**shape, 'dialogContinue': 4097}):
+                path.write_text(json.dumps({**value, 'sourceShape': changed}))
+                with self.assertRaises(ValueError): q.semantic_observations(root, 'chatgpt-desktop')
             for change in ({'sourceVersion': '26.930.31730'}, {'text': 'PRIVATE'}, {'platform': []}, {'status': []}, {'sourceTitleIds': ['PRIVATE']},
                            {'sourceTitleIds': value['sourceTitleIds'] * 2}, {'titleReferenceCount': True},
                            {'sourceTitleIds': ['unadmitted.static.title']},

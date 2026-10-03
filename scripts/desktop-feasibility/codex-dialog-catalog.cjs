@@ -25,7 +25,7 @@ function facts(platform) {
  return {schemaVersion:1,mechanism:'codex-static-dialog-title',diagnosticsOnly:true,
   sourceVersion:platform==='linux'?linuxCatalog.sourceVersion:platform==='darwin'?macCatalog.sourceVersion:catalog.sourceVersion,platform:platform==='win32'?'windows':platform==='darwin'?'macos':'linux',
   artifactSha256:pin.artifact,wrapperSourceSha256:pin.wrapper,catalogSha256:platform==='win32'?windowsCatalogSha256:platform==='linux'?linuxCatalogSha256:platform==='darwin'?macCatalogSha256:catalogSha256,
-  status:'guard-rejected',rejectionStage:'unmeasured',guardFailure:null,titleReferenceCount:null,matchCount:null,sourceTitleEmpty:null,sourceTitleIds:[]};
+  status:'guard-rejected',sourceShape:null,rejectionStage:'unmeasured',guardFailure:null,titleReferenceCount:null,matchCount:null,sourceTitleEmpty:null,sourceTitleIds:[]};
 }
 // Standalone callbacks: no closure references, app text or DOM IDs leave the page.
 function holdDialog() {
@@ -72,9 +72,18 @@ function classifyTitle({held,entries}) {
  if(title.tagName!=='H2')return reject('title-tag');
  const text=title.textContent;
  if(typeof text!=='string'||text.length>512)return reject('title-text');
+ const legends=[...document.querySelectorAll('fieldset > legend')].filter(e=>visible(e)&&e.textContent?.trim()==='Select the kind of work you do');
+ const radios=[...document.querySelectorAll('input[type="radio"][name="conversational-onboarding-inline-role"]')];
+ const engineering=radios.filter(e=>e.getAttribute('value')==='engineering');
+ const buttons=[...held.dialog.querySelectorAll('button')].filter(visible);
+ const lists=[legends,legends.filter(e=>held.dialog.contains(e)),radios,radios.filter(e=>held.dialog.contains(e)),
+  engineering,engineering.filter(e=>held.dialog.contains(e)),buttons.filter(e=>e.textContent?.trim()==='Continue'),
+  buttons.filter(e=>e.textContent?.trim()==='Get Started')];
+ const sourceShape=lists.some(e=>e.length>4096)?null:Object.fromEntries(
+  ['pageRoleLegend','dialogRoleLegend','pageRoleRadios','dialogRoleRadios','pageEngineering','dialogEngineering','dialogContinue','dialogGetStarted'].map((key,i)=>[key,lists[i].length]));
  const matches=[...new Set(entries.filter(e=>e.text===text.trim()).map(e=>e.id))].sort();
  return {status:matches.length===1?'matched':matches.length?'ambiguous':'unknown',
-  titleReferenceCount:1,matchCount:matches.length,sourceTitleEmpty:text.trim().length===0,sourceTitleIds:matches,rejectionStage:null,guardFailure:null};
+  sourceShape,titleReferenceCount:1,matchCount:matches.length,sourceTitleEmpty:text.trim().length===0,sourceTitleIds:matches,rejectionStage:null,guardFailure:null};
 }
 async function observe(held,platform,{guard,identity,same,deadline}) {
  const result=facts(platform);let handle;

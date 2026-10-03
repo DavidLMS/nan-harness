@@ -10,7 +10,8 @@ function fixture(text='Skip setup?') {
   getBoundingClientRect:()=>({width:100,height:100}),contains:e=>e===title,
   getAttribute:k=>k==='role'?'dialog':k==='aria-labelledby'?title.id:null};
  let dialogs=[dialog],ids=[title];
- doc.querySelectorAll=s=>s==='[id]'?ids:dialogs;
+ doc.querySelectorAll=s=>s==='[id]'?ids:s.includes('[role=')?dialogs:[];
+ dialog.querySelectorAll=()=>[];
  const context={document:doc,getComputedStyle:e=>e.style};
  const classify=vm.runInNewContext('('+helper.classifyTitle.toString()+')',context);
  return {doc,title,dialog,context,classify,setDialogs:v=>dialogs=v,setIds:v=>ids=v,
@@ -61,6 +62,17 @@ async function main() {
   const f=fixture(text);const entries=Object.values(Object.fromEntries(linux.entries.map(e=>[e.id,e])));
   assert.equal(f.classify({held:f.held,entries}).sourceTitleIds[0],id);
  }
+ const underneath=fixture('UNKNOWN');
+ const legend={textContent:'Select the kind of work you do',isConnected:true,getBoundingClientRect:()=>({width:10,height:10}),style:{display:'block',visibility:'visible'}};
+ const radio={getAttribute:k=>k==='value'?'engineering':null};
+ const originalQuery=underneath.doc.querySelectorAll;
+ underneath.doc.querySelectorAll=s=>s==='fieldset > legend'?[legend]:s.startsWith('input[type="radio"]')?[radio]:originalQuery(s);
+ const outside=underneath.classify({held:underneath.held,entries:underneath.entries});
+ assert.equal(outside.status,'unknown');assert.equal(outside.sourceShape.pageEngineering,1);assert.equal(outside.sourceShape.dialogEngineering,0);
+ const originalContains=underneath.dialog.contains;underneath.dialog.contains=e=>originalContains(e)||e===legend||e===radio;
+ const inside=underneath.classify({held:underneath.held,entries:underneath.entries});
+ assert.equal(inside.status,'unknown');assert.equal(inside.sourceShape.dialogEngineering,1);assert.equal(inside.sourceShape.dialogRoleLegend,1);
+ assert.equal(JSON.stringify(inside).includes('Select the kind'),false);
  const excessive=fixture();assert.equal(excessive.classify({held:excessive.held,entries:Array(257).fill({id:'known',text:'fixed'})}).rejectionStage,'scope');
  const f=fixture();
  let result=f.classify({held:f.held,entries:f.entries});

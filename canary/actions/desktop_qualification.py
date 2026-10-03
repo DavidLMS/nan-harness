@@ -1377,6 +1377,8 @@ def semantic_observations(directory, app):
                 fields.add('sourceTitleEmpty')
             if 'guardFailure' in value:
                 fields.add('guardFailure')
+            if 'sourceShape' in value:
+                fields.add('sourceShape')
             if 'rejectionStage' in value:
                 fields.add('rejectionStage')
             platform = value.get('platform')
@@ -1420,6 +1422,16 @@ def semantic_observations(directory, app):
                         or failure not in {'held-document', 'page-set', 'native-ownership',
                                            'retained-document', 'document-focus', 'catalog-limit'}):
                     raise ValueError('invalid passive Codex scope guard')
+            if 'sourceShape' in value:
+                shape = value['sourceShape']
+                shape_keys = {'pageRoleLegend', 'dialogRoleLegend', 'pageRoleRadios', 'dialogRoleRadios',
+                              'pageEngineering', 'dialogEngineering', 'dialogContinue', 'dialogGetStarted'}
+                if shape is not None and (value['status'] == 'guard-rejected' or type(shape) is not dict
+                        or set(shape) != shape_keys or any(type(count) is not int or not 0 <= count <= 4096 for count in shape.values())
+                        or shape['dialogRoleLegend'] > shape['pageRoleLegend'] or shape['dialogRoleRadios'] > shape['pageRoleRadios']
+                        or shape['dialogEngineering'] > shape['pageEngineering'] or shape['pageEngineering'] > shape['pageRoleRadios']
+                        or shape['dialogEngineering'] > shape['dialogRoleRadios']):
+                    raise ValueError('invalid passive Codex dialog source shape')
             record.update({key: value[key] for key in fields - {'schemaVersion', 'mechanism'}})
         elif mechanism == 'renderer-inventory':
             fields = set('schemaVersion mechanism diagnosticsOnly app endpointOwned launcherOwned attached pageCount textareaCount editableCount sendCount retryCount newThreadCount loginCount dialogCount errorCategory'.split())
