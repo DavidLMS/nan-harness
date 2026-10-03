@@ -121,7 +121,13 @@ impl ClaudeNativeChatSession<'_> {
                 self.facts.submitted_turns += 1;
                 Ok(())
             }
-            Ok(ChatTurnStage::InputMismatch) => Err(Reason::InputMismatch),
+            Ok(
+                ChatTurnStage::InputMismatch
+                | ChatTurnStage::InputInitialUnavailable
+                | ChatTurnStage::InputInitialNonempty
+                | ChatTurnStage::InputClipboardMismatch
+                | ChatTurnStage::InputValueMismatch,
+            ) => Err(Reason::InputMismatch),
             Ok(_) => Err(Reason::ActionUnsupported),
             Err(reason) => {
                 self.facts.stage = ChatTurnStage::ActionUncertain;

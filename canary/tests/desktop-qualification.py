@@ -1769,6 +1769,12 @@ class QualificationTests(unittest.TestCase):
                 path.write_text(json.dumps(item))
                 self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [item])
                 self.assertEqual(q.envelope('claude-desktop', 'macos', 'aarch64', 'a' * 40)['qualification'], 'unqualified')
+            for stage in ('input-initial-unavailable', 'input-initial-nonempty',
+                          'input-clipboard-mismatch', 'input-value-mismatch'):
+                item = {**value, 'stage': stage, 'submittedTurns': 0, 'inputVerifiedTurns': 0,
+                        'copiedResponses': 0, 'retryAttempted': False}
+                path.write_text(json.dumps(item))
+                self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [item])
             for changed in ({**value, 'prompt': 'PRIVATE'}, {**value, 'stage': 'PRIVATE'},
                             {**value, 'submittedTurns': True}, {**value, 'copiedResponses': 4},
                             {**value, 'inputVerifiedTurns': 2}, {**value, 'retryAttempted': 1},

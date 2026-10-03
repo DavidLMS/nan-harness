@@ -227,6 +227,17 @@ static const char* press(const Request& request, const Node& node, const char* s
     if (AXUIElementPerformAction(node.element, kAXPressAction) != kAXErrorSuccess) return "action-uncertain";
     return owned(request) ? success : "action-uncertain";
 }
+// Classify the already-read value without another accessibility query.
+static const char* initial_input_failure(CFTypeRef value, bool query_failed) {
+    if (query_failed || !value || CFGetTypeID(value) != CFStringGetTypeID()) return "input-initial-unavailable";
+    if (CFStringGetLength(static_cast<CFStringRef>(value)) != 0) return "input-initial-nonempty";
+    return nullptr;
+}
+static const char* input_readback_failure(bool clipboard_verified, bool value_verified) {
+    if (!clipboard_verified) return "input-clipboard-mismatch";
+    if (!value_verified) return "input-value-mismatch";
+    return nullptr;
+}
 static const char* input(const Request& request, const Tree& tree) {
     if (!chat(tree)) return "mode";
     int editor = unique(tree, "AXTextArea", "Write your prompt to Claude");
@@ -236,15 +247,18 @@ static const char* input(const Request& request, const Tree& tree) {
     const auto& control = tree.nodes[editor];
     if (!target(control, request) || !contained_control(tree.nodes[send], request)) return "control";
     auto initial_value = attribute(control.element, kAXValueAttribute);
-    bool empty_value = initial_value && CFGetTypeID(initial_value) == CFStringGetTypeID() && CFStringGetLength(static_cast<CFStringRef>(initial_value)) == 0;
+    const char* initial_failure = initial_input_failure(initial_value, ax_query_failed);
     if (initial_value) CFRelease(initial_value);
-    if (!empty_value || ax_query_failed) return "input-mismatch";
+    if (initial_failure) return initial_failure;
     if (!owned(request) || AXUIElementSetAttributeValue(control.element, kAXFocusedAttribute, kCFBooleanTrue) != kAXErrorSuccess) return "focus";
     if (!owned(request) || !clipboard_write(request.prompt) || !owned(request) || !key(9, true)) return "focus";
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
     if (!owned(request) || !clipboard_write(request.sentinel) || !owned(request) || !key(0, true) || !owned(request) || !key(8, true)) return "focus";
     while (within(request) && !clipboard_matches(request.prompt)) std::this_thread::sleep_for(std::chrono::milliseconds(20));
-    if (!clipboard_matches(request.prompt) || string_attribute(control.element, kAXValueAttribute) != request.prompt) return "input-mismatch";
+    bool copied = clipboard_matches(request.prompt);
+    const char* readback_failure = input_readback_failure(copied,
+        copied && string_attribute(control.element, kAXValueAttribute) == request.prompt);
+    if (readback_failure) return readback_failure;
     if (!owned(request) || !key(124, false)) return "focus";
     Tree fresh;
     if (!fresh.collect(request) || !chat(fresh) || !retained(fresh, control)) return "control";

@@ -559,7 +559,7 @@ def semantic_observations(directory, app):
             counts = {'submittedTurns', 'inputVerifiedTurns', 'copiedResponses'}
             flags = {'retryAttempted', 'clipboardCleared'}
             fields = counts | flags | {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'stage'}
-            stages = set('request window tree mode composer focus input-mismatch control scope deadline action-uncertain response-mismatch sent copied retry-ready retried completed'.split())
+            stages = set('request window tree mode composer focus input-mismatch input-initial-unavailable input-initial-nonempty input-clipboard-mismatch input-value-mismatch control scope deadline action-uncertain response-mismatch sent copied retry-ready retried completed'.split())
             if (app != 'claude-desktop' or set(value) != fields or value['diagnosticsOnly'] is not True
                     or type(value['stage']) is not str or value['stage'] not in stages
                     or any(type(value[key]) is not bool for key in flags)

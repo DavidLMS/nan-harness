@@ -6,6 +6,15 @@ static Node fixture(int parent, const char* role, const char* label, const char*
     return {nullptr, parent, role, label, current, CGRectZero, true};
 }
 int main() {
+    assert(initial_input_failure(nullptr, false) == std::string("input-initial-unavailable"));
+    assert(initial_input_failure(kCFBooleanTrue, false) == std::string("input-initial-unavailable"));
+    assert(initial_input_failure(CFSTR(""), true) == std::string("input-initial-unavailable"));
+    assert(initial_input_failure(CFSTR("private existing input"), false) == std::string("input-initial-nonempty"));
+    assert(initial_input_failure(CFSTR(""), false) == nullptr);
+    assert(input_readback_failure(false, false) == std::string("input-clipboard-mismatch"));
+    assert(input_readback_failure(false, true) == std::string("input-clipboard-mismatch"));
+    assert(input_readback_failure(true, false) == std::string("input-value-mismatch"));
+    assert(input_readback_failure(true, true) == nullptr);
     Request request;
     request.prompt = "fresh user";
     request.marker = "fresh assistant";

@@ -13,6 +13,10 @@ pub(crate) enum ChatTurnStage {
     Composer,
     Focus,
     InputMismatch,
+    InputInitialUnavailable,
+    InputInitialNonempty,
+    InputClipboardMismatch,
+    InputValueMismatch,
     Control,
     Scope,
     Deadline,
@@ -35,6 +39,10 @@ impl ChatTurnStage {
             "turn composer\n" => Some(Self::Composer),
             "turn focus\n" => Some(Self::Focus),
             "turn input-mismatch\n" => Some(Self::InputMismatch),
+            "turn input-initial-unavailable\n" => Some(Self::InputInitialUnavailable),
+            "turn input-initial-nonempty\n" => Some(Self::InputInitialNonempty),
+            "turn input-clipboard-mismatch\n" => Some(Self::InputClipboardMismatch),
+            "turn input-value-mismatch\n" => Some(Self::InputValueMismatch),
             "turn control\n" => Some(Self::Control),
             "turn scope\n" => Some(Self::Scope),
             "turn deadline\n" => Some(Self::Deadline),
@@ -112,6 +120,28 @@ mod tests {
             "PRIVATE",
         ] {
             assert_eq!(ChatTurnStage::parse(invalid), None);
+        }
+    }
+    #[test]
+    fn input_failures_remain_exact_payload_free_receipts() {
+        for (name, stage) in [
+            ("input-mismatch", ChatTurnStage::InputMismatch),
+            (
+                "input-initial-unavailable",
+                ChatTurnStage::InputInitialUnavailable,
+            ),
+            (
+                "input-initial-nonempty",
+                ChatTurnStage::InputInitialNonempty,
+            ),
+            (
+                "input-clipboard-mismatch",
+                ChatTurnStage::InputClipboardMismatch,
+            ),
+            ("input-value-mismatch", ChatTurnStage::InputValueMismatch),
+        ] {
+            assert_eq!(ChatTurnStage::parse(&format!("turn {name}\n")), Some(stage));
+            assert_eq!(ChatTurnStage::parse(&format!("turn {name}\nPRIVATE")), None);
         }
     }
     #[test]
