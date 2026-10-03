@@ -98,21 +98,23 @@ function classifyForeign(control,held) {
   if(dialog!==held.dialog)return result('guard-rejected','dialog-replaced');
   // Diagnostic only: measure the same held overlay and control, never admit input.
   actionability=(()=>{
-    const blank={status:'unavailable',dialogOpacityZero:null,ancestorOpacityZero:null,
+    const blank={status:'unavailable',unavailableReason:null,dialogOpacityZero:null,ancestorOpacityZero:null,
       dialogPointerEventsNone:null,ancestorPointerEventsNone:null,inert:null,stateClosed:null,
       targetOwnedPointCount:null,dialogOwnedPointCount:null,otherPointCount:null};
+    const unavailable=reason=>({...blank,unavailableReason:reason});
     const measured={...blank,status:'observed',dialogOpacityZero:false,ancestorOpacityZero:false,
       dialogPointerEventsNone:false,ancestorPointerEventsNone:false,inert:false,stateClosed:false};
     let e=dialog,depth=0;
     while(e) {
-      if(++depth>64||e.ownerDocument!==document||!e.isConnected)return blank;
+      if(++depth>64)return unavailable('ancestor-limit');
+      if(e.ownerDocument!==document||!e.isConnected)return unavailable('ancestor-detached');
       const style=getComputedStyle(e),raw=style.opacity;
-      if(typeof raw!=='string'||! /^(?:0(?:\.\d+)?|1(?:\.0+)?)$/.test(raw))return blank;
+      if(typeof raw!=='string'||! /^(?:0(?:\.\d+)?|1(?:\.0+)?)$/.test(raw))return unavailable('opacity-invalid');
       const opacity=Number(raw);
-      if(!Number.isFinite(opacity)||opacity<0||opacity>1)return blank;
+      if(!Number.isFinite(opacity)||opacity<0||opacity>1)return unavailable('opacity-invalid');
       if(e===dialog) {measured.dialogOpacityZero=opacity===0;measured.dialogPointerEventsNone=style.pointerEvents==='none';}
       else {measured.ancestorOpacityZero ||= opacity===0;measured.ancestorPointerEventsNone ||= style.pointerEvents==='none';}
-      if(typeof style.pointerEvents!=='string'||!style.pointerEvents)return blank;
+      if(typeof style.pointerEvents!=='string'||!style.pointerEvents)return unavailable('pointer-property-invalid');
       measured.inert ||= e.inert===true||e.hasAttribute('inert');
       measured.stateClosed ||= e.getAttribute('data-state')==='closed';
       e=e.parentElement;
@@ -121,10 +123,10 @@ function classifyForeign(control,held) {
       control.clientLeft,control.clientTop,control.clientWidth,control.clientHeight,innerWidth,innerHeight];
     if(values.some(v=>!Number.isFinite(v))||r.width<=0||r.height<=0
         ||control.clientWidth<=0||control.clientHeight<=0||innerWidth<=0||innerHeight<=0
-        ||values.some(v=>Math.abs(v)>16384)||control.clientLeft<0||control.clientTop<0)return blank;
+        ||values.some(v=>Math.abs(v)>16384)||control.clientLeft<0||control.clientTop<0)return unavailable('geometry-invalid');
     const left=r.left+control.clientLeft,top=r.top+control.clientTop;
     if(left<0||top<0||left+control.clientWidth>innerWidth||top+control.clientHeight>innerHeight
-        ||control.clientLeft+control.clientWidth>r.width||control.clientTop+control.clientHeight>r.height)return blank;
+        ||control.clientLeft+control.clientWidth>r.width||control.clientTop+control.clientHeight>r.height)return unavailable('geometry-outside');
     measured.targetOwnedPointCount=0;measured.dialogOwnedPointCount=0;measured.otherPointCount=0;
     for(const x of [1/6,1/2,5/6])for(const y of [1/6,1/2,5/6]) {
       const front=document.elementFromPoint(left+x*control.clientWidth,top+y*control.clientHeight);

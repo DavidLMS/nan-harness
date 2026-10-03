@@ -2336,7 +2336,15 @@ class QualificationTests(unittest.TestCase):
         unavailable['status'] = 'unavailable'
         self.assertEqual(q.public_onboarding({**surface, 'foreignOverlayActionability': unavailable},
                                             'chatgpt-desktop')['foreignOverlayActionability'], unavailable)
-        for invalid in ({**actionability, 'rawStyle': 'PRIVATE'}, {**actionability, 'status': []},
+        for reason in ('ancestor-limit', 'ancestor-detached', 'opacity-invalid',
+                       'pointer-property-invalid', 'geometry-invalid', 'geometry-outside'):
+            typed = {**unavailable, 'unavailableReason': reason}
+            self.assertEqual(q.public_onboarding({**surface, 'foreignOverlayActionability': typed},
+                                                'chatgpt-desktop')['foreignOverlayActionability'], typed)
+        for invalid in ({**actionability, 'unavailableReason': 'geometry-invalid'},
+                        {**unavailable, 'unavailableReason': None},
+                        {**unavailable, 'unavailableReason': 'PRIVATE'},
+                        {**actionability, 'rawStyle': 'PRIVATE'}, {**actionability, 'status': []},
                         {**actionability, 'inert': 1}, {**actionability, 'otherPointCount': 2},
                         {**actionability, 'dialogOwnedPointCount': True},
                         {**unavailable, 'targetOwnedPointCount': 0}):

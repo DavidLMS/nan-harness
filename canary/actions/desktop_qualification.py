@@ -216,9 +216,17 @@ def public_onboarding(setup, app):
                  'ancestorPointerEventsNone', 'inert', 'stateClosed'}
         counts = {'targetOwnedPointCount', 'dialogOwnedPointCount', 'otherPointCount'}
         if (setup.get('foreignOverlayProof') != 'classified'
-                or type(observation) is not dict or set(observation) != bools | counts | {'status'}
+                or type(observation) is not dict or set(observation) - {'unavailableReason'} != bools | counts | {'status'}
                 or type(observation['status']) is not str or observation['status'] not in {'observed', 'unavailable'}):
             raise ValueError('invalid passive overlay actionability observation')
+        if 'unavailableReason' in observation:
+            reason = observation['unavailableReason']
+            reasons = {'ancestor-limit', 'ancestor-detached', 'opacity-invalid',
+                       'pointer-property-invalid', 'geometry-invalid', 'geometry-outside'}
+            if (observation['status'] == 'observed' and reason is not None
+                    or observation['status'] == 'unavailable' and
+                    (type(reason) is not str or reason not in reasons)):
+                raise ValueError('invalid passive overlay unavailability reason')
         if observation['status'] == 'unavailable':
             if any(observation[key] is not None for key in bools | counts):
                 raise ValueError('invalid unavailable overlay actionability observation')

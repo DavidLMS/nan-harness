@@ -320,9 +320,10 @@ async function trial(options={}) {
    const m=r.facts.foreignOverlayActionability;assert.ok(m);
    if(opts.overlayOutside||opts.overlayBadOpacity||opts.overlayLongAncestors) {
      assert.equal(m.status,'unavailable');assert.equal(m.targetOwnedPointCount,null);
+     assert.equal(m.unavailableReason,opts.overlayOutside?'geometry-outside':opts.overlayBadOpacity?'opacity-invalid':'ancestor-limit');
      assert.equal(m.dialogOwnedPointCount,null);assert.equal(m.otherPointCount,null);
    } else {
-     assert.equal(m.status,'observed');
+     assert.equal(m.status,'observed');assert.equal(m.unavailableReason,null);
      assert.equal(m.targetOwnedPointCount+m.dialogOwnedPointCount+m.otherPointCount,9);
      if(opts.overlayZero)assert.equal(m.dialogOpacityZero,true);
      if(opts.overlayPointerNone)assert.equal(m.dialogPointerEventsNone,true);
