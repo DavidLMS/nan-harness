@@ -22,6 +22,7 @@ BACKENDS = {('zed-desktop', 'macos', 'aarch64'): 'native-thread-export',
 BACKENDS.update({(app, platform, architecture): 'renderer-inventory'
                  for app in ('chatgpt-desktop', 'claude-desktop', 'pen-desktop')
                  for platform, architecture, _ in TARGETS})
+BACKENDS[('chatgpt-desktop', 'windows', 'x86_64')] = 'renderer-dom'
 RUNNER_FAILURES = set('windows-ownership-helper-missing windows-ownership-helper-invalid prepared-identity-mismatch prepared-app-unavailable prepared-executable-missing prepared-executable-changed host-platform-mismatch backend-unavailable frozen-app-unavailable report-absent claude-windows-executable-invalid claude-windows-bootstrap-invalid claude-windows-bootstrap-mismatch claude-windows-release-mismatch claude-windows-policy-invalid codex-project-release-mismatch invalid-preflight execution-failed'.split())
 STEPS = {'launched', 'input-submitted', 'response-verified', 'tool-verified', 'error-recovered'}
 COMMIT = re.compile(r'[0-9a-f]{40}\Z')
@@ -65,7 +66,7 @@ def main_aux_correlation(value, app):
 
 
 def public_onboarding(setup, app):
-    shape = set(setup) - {'rejectedPageInventory', 'taskScopeProved'} if type(setup) is dict else set()
+    shape = set(setup) - {'rejectedPageInventory', 'taskScopeProved', 'taskClickAttempted', 'taskClickCompleted', 'codingComposerReady'} if type(setup) is dict else set()
     booleans = {'conversationalScope', 'engineeringControl', 'roleClickAttempted',
                 'roleClickCompleted', 'engineeringChecked', 'continueControl',
                 'continueClickAttempted', 'continueClickCompleted', 'roleScopeAbsent'}
@@ -75,7 +76,7 @@ def public_onboarding(setup, app):
                 'label-count', 'label-association', 'checked-mismatch', 'final-ownership'}
     sessions = {'unmeasured', 'guard-missing', 'deadline-invalid', 'deadline-expired', 'platform', 'host-policy', 'onboarding-policy'}
     stages = {'session', 'role-proof', 'role-action', 'role-readback', 'continue-action',
-              'scope-transition', 'stopped-after-role'}
+              'scope-transition', 'stopped-after-role', 'task-action', 'coding-readiness'}
     errors = {None, 'invalid-session', 'scope-not-matched', 'role-already-selected',
               'action-blocked', 'role-readback-failed', 'continue-not-matched',
               'ownership-lost', 'scope-remained', 'action-uncertain', 'observation-failed'}
@@ -121,6 +122,14 @@ def public_onboarding(setup, app):
             raise ValueError('invalid Codex task scope proof')
         if setup['taskScopeProved'] and not setup['roleScopeAbsent']:
             raise ValueError('inconsistent Codex task scope proof')
+    for key in ('taskClickAttempted', 'taskClickCompleted', 'codingComposerReady'):
+        if key in setup and type(setup[key]) is not bool:
+            raise ValueError('invalid Codex coding readiness flag')
+    if (setup.get('taskClickCompleted') and not setup.get('taskClickAttempted')
+            or setup.get('taskClickAttempted') and not all(setup.get(key) for key in
+                ('roleClickCompleted', 'continueClickCompleted', 'taskScopeProved'))
+            or setup.get('codingComposerReady') and setup['stage'] != 'coding-readiness'):
+        raise ValueError('inconsistent Codex coding readiness')
     specific_overlay_failures = {
         'deadline-expired': {'deadline-expired'},
         'ownership-lost': {'ownership-lost', 'final-ownership', 'page-count', 'page-changed', 'url-changed', 'query-failed'},
@@ -274,10 +283,10 @@ def semantic_observations(directory, app):
         if type(value) is not dict:
             raise ValueError('invalid semantic observation')
         mechanism = value.get('mechanism')
-        if mechanism not in {'qualification-runner-failure', 'hermes-windows-catalog-readiness', 'hermes-renderer-qualification', 'zed-native-copy', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'zed-retry-visual', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'windows-process-absence', 'windows-post-stop-process', 'windows-process-baseline', 'windows-process-settlement', 'claude-owned-configuration', 'claude-restore', 'claude-model-discovery', 'claude-window-stack', 'claude-window-focus', 'claude-chat-navigation', 'claude-window-fit', 'claude-storage-use', 'claude-native-storage', 'claude-private-storage-stage', 'claude-native-composer', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}:
+        if mechanism not in {'codex-renderer-qualification', 'qualification-runner-failure', 'hermes-windows-catalog-readiness', 'hermes-renderer-qualification', 'zed-native-copy', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'zed-retry-visual', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'windows-process-absence', 'windows-post-stop-process', 'windows-process-baseline', 'windows-process-settlement', 'claude-owned-configuration', 'claude-restore', 'claude-model-discovery', 'claude-window-stack', 'claude-window-focus', 'claude-chat-navigation', 'claude-window-fit', 'claude-storage-use', 'claude-native-storage', 'claude-private-storage-stage', 'claude-native-composer', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}:
             continue
         expected = 'hermes-renderer-qualification' if app == 'hermes-desktop' else 'zed-native-copy'
-        if (mechanism != expected and mechanism not in {'qualification-runner-failure', 'hermes-windows-catalog-readiness', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'zed-retry-visual', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'windows-process-absence', 'windows-post-stop-process', 'windows-process-baseline', 'windows-process-settlement', 'claude-owned-configuration', 'claude-restore', 'claude-model-discovery', 'claude-window-stack', 'claude-window-focus', 'claude-chat-navigation', 'claude-window-fit', 'claude-storage-use', 'claude-native-storage', 'claude-private-storage-stage', 'claude-native-composer', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}) or type(value.get('schemaVersion')) is not int or value['schemaVersion'] != 1:
+        if (mechanism != expected and mechanism not in {'codex-renderer-qualification', 'qualification-runner-failure', 'hermes-windows-catalog-readiness', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'zed-retry-visual', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'windows-process-absence', 'windows-post-stop-process', 'windows-process-baseline', 'windows-process-settlement', 'claude-owned-configuration', 'claude-restore', 'claude-model-discovery', 'claude-window-stack', 'claude-window-focus', 'claude-chat-navigation', 'claude-window-fit', 'claude-storage-use', 'claude-native-storage', 'claude-private-storage-stage', 'claude-native-composer', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}) or type(value.get('schemaVersion')) is not int or value['schemaVersion'] != 1:
             raise ValueError('semantic observation identity differs')
         record = {'schemaVersion': 1, 'mechanism': mechanism}
         if mechanism == 'hermes-windows-catalog-readiness':
@@ -683,12 +692,24 @@ def semantic_observations(directory, app):
                     raise ValueError('invalid Zed published ancestor observation')
                 record.update(centerWithinPublishedAncestors=within, ancestorBoundsStatus=state,
                               checkedAncestorCount=count)
-            if (set(value) - modifier_fields - ancestor_fields - ancestor_stage_fields not in (base, base | {'inputDelivery'}, base | coordinate_fields,
+            if (set(value) - modifier_fields - ancestor_fields - ancestor_stage_fields - {'cursorSelection'} not in (base, base | {'inputDelivery'}, base | coordinate_fields,
                                   base | coordinate_fields | {'inputDelivery'}, base | coordinate_fields | authority_fields,
                                   base | coordinate_fields | authority_fields | {'inputDelivery'})
                     or present_modifiers and present_modifiers != modifier_fields
                     or app != 'zed-desktop' or value['diagnosticsOnly'] is not True):
                 raise ValueError('invalid Zed pointer observation identity')
+            if 'cursorSelection' in value:
+                selection = value['cursorSelection']
+                fields = {'status', 'sampledPoints', 'exactPointerMatched', 'accessibleHitVerified'}
+                if (type(selection) is not dict or set(selection) != fields
+                        or type(selection['status']) is not str or selection['status'] not in {'matched', 'unavailable', 'no-hit', 'deadline', 'identity-rejected'}
+                        or type(selection['sampledPoints']) is not int or not 0 <= selection['sampledPoints'] <= 9
+                        or any(type(selection[key]) is not bool for key in ('exactPointerMatched', 'accessibleHitVerified'))
+                        or (selection['status'] == 'matched') != (selection['exactPointerMatched'] and selection['accessibleHitVerified'])
+                        or selection['status'] == 'matched' and selection['sampledPoints'] == 0
+                        or selection['status'] != 'matched' and (selection['exactPointerMatched'] or selection['accessibleHitVerified'])):
+                    raise ValueError('invalid Zed cursor selection')
+                record['cursorSelection'] = dict(selection)
             if present_modifiers:
                 state = value['modifierState']
                 if (type(state) is not str or state not in {'none', 'shift', 'control', 'lock', 'other-modifier', 'mixed', 'unknown'}
@@ -822,9 +843,22 @@ def semantic_observations(directory, app):
                     or type(value['errorCategory']) is not str or value['errorCategory'] not in RUNNER_FAILURES):
                 raise ValueError('invalid qualification runner failure')
             record.update(diagnosticsOnly=True, errorCategory=value['errorCategory'])
+        elif mechanism == 'codex-renderer-qualification':
+            flags = set('endpointOwned targetVerified attached bindingVerified auxiliaryInert codingComposerReady uniqueComposer inputReadback inputSubmitted userTurnObserved responseVerified errorObserved retryControl retryAttempted retryCompleted providerResponseVerified'.split())
+            fields = flags | set('schemaVersion mechanism diagnosticsOnly assistantTurnCount providerGenerationCount errorCategory'.split())
+            errors = {None, 'ownership-lost', 'composer-unavailable', 'stale-turn', 'input-mismatch', 'action-uncertain', 'retry-unavailable', 'response-timeout', 'query-failed', 'invalid-request'}
+            if (app != 'chatgpt-desktop' or set(value) != fields or value['diagnosticsOnly'] is not True
+                    or any(type(value[key]) is not bool for key in flags)
+                    or type(value['assistantTurnCount']) is not int or not 0 <= value['assistantTurnCount'] <= 4096
+                    or value['providerGenerationCount'] is not None and (type(value['providerGenerationCount']) is not int or not 0 <= value['providerGenerationCount'] <= 4096)
+                    or value['errorCategory'] is not None and type(value['errorCategory']) is not str
+                    or value['errorCategory'] not in errors
+                    or value['retryCompleted'] and not value['retryAttempted']):
+                raise ValueError('invalid Codex renderer qualification')
+            record.update({key: value[key] for key in fields - {'schemaVersion', 'mechanism'}})
         elif mechanism == 'renderer-inventory':
             fields = set('schemaVersion mechanism diagnosticsOnly app endpointOwned launcherOwned attached pageCount textareaCount editableCount sendCount retryCount newThreadCount loginCount dialogCount errorCategory'.split())
-            if set(value) - {'documentState', 'startupScreen', 'landingCounts', 'onboardingCounts', 'publicOnboarding', 'mainAuxCorrelation'} != fields or value['app'] != app or value['diagnosticsOnly'] is not True:
+            if set(value) - {'documentState', 'startupScreen', 'landingCounts', 'onboardingCounts', 'publicOnboarding', 'mainAuxCorrelation', 'codexSession'} != fields or value['app'] != app or value['diagnosticsOnly'] is not True:
                 raise ValueError('invalid renderer inventory identity')
             for key in ('endpointOwned', 'launcherOwned', 'attached'):
                 flag(record, value, key)
@@ -844,6 +878,15 @@ def semantic_observations(directory, app):
                 record['onboardingCounts'] = counts
             if 'mainAuxCorrelation' in value:
                 record['mainAuxCorrelation'] = main_aux_correlation(value['mainAuxCorrelation'], app)
+            if 'codexSession' in value:
+                session = value['codexSession']
+                flags = {'bindingVerified', 'codingComposerReady', 'auxiliaryInert'}
+                if (app != 'chatgpt-desktop' or type(session) is not dict or set(session) != flags | {'pageCount'}
+                        or any(type(session[key]) is not bool for key in flags)
+                        or type(session['pageCount']) is not int or not 0 <= session['pageCount'] <= 32
+                        or session['codingComposerReady'] and not (session['bindingVerified'] and session['auxiliaryInert'])):
+                    raise ValueError('invalid Codex session observation')
+                record['codexSession'] = dict(session)
             if 'publicOnboarding' in value:
                 record['publicOnboarding'] = public_onboarding(value['publicOnboarding'], app)
             if 'startupScreen' in value:

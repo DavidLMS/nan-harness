@@ -253,7 +253,7 @@ def accessibility_observation(component, dbus, window, facts):
         pass
 
 
-def normalized_retry_point(request, active, geometry, facts=None):
+def normalized_retry_point(request, active, geometry, facts=None, return_bounds=False, hit_point=None):
     import dbus
     bus = None
     try:
@@ -278,7 +278,29 @@ def normalized_retry_point(request, active, geometry, facts=None):
         if facts is not None:
             accessibility_observation(component, dbus, window, facts)
             facts['retryOffsetRelation'] = retry_offset_relation(screen, window, geometry)
-        return coordinate_point(screen, window, geometry)
+        point = coordinate_point(screen, window, geometry)
+        if hit_point is not None:
+            ancestor = component
+            seen = set()
+            for _ in range(16):
+                if int(ancestor.GetRole(dbus_interface='org.a11y.atspi.Accessible', timeout=0.2)) == 23:
+                    hit = ancestor.GetAccessibleAtPoint(dbus.Int32(hit_point[0] - geometry[0]),
+                        dbus.Int32(hit_point[1] - geometry[1]), dbus.UInt32(1),
+                        dbus_interface='org.a11y.atspi.Component', timeout=0.2)
+                    if tuple(str(value) for value in hit) != (request['bus'], request['path']):
+                        raise ValueError('retry hit ambiguous')
+                    break
+                parent = ancestor.Get('org.a11y.atspi.Accessible', 'Parent',
+                    dbus_interface='org.freedesktop.DBus.Properties', timeout=0.2)
+                reference = tuple(str(value) for value in parent)
+                if (reference in seen or reference[0] != request['bus']
+                        or not re.fullmatch(r'/org/a11y/atspi/accessible/[A-Za-z0-9_/]+', reference[1])):
+                    raise ValueError('retry root unavailable')
+                seen.add(reference)
+                ancestor = bus.get_object(*reference)
+            else:
+                raise ValueError('retry root unavailable')
+        return (geometry[0] + window[0], geometry[1] + window[1], window[2], window[3]) if return_bounds else point
     except dbus.DBusException:
         raise ValueError('accessibility query unavailable') from None
     finally:
@@ -298,6 +320,48 @@ def coordinate_point(screen, window, geometry):
     if screen != window and screen != expected:
         raise ValueError('coordinate conversion unavailable')
     return gx + x + width // 2, gy + y + height // 2
+
+
+def interior_points(bounds):
+    x, y, width, height = bounds
+    if width < 3 or height < 3:
+        raise ValueError('retry interior unavailable')
+    points = [(x + width // 2, y + height // 2)]
+    points.extend((x + width * column // 4, y + height * row // 4)
+                  for row in (1, 2, 3) for column in (1, 2, 3))
+    return list(dict.fromkeys(points))
+
+
+def select_live_retry_point(bounds, move, prove, matches, deadline, pause=time.sleep, observation=None):
+    # Hover only until one stable public hand cursor and held accessible hit
+    # agree. Never replay an activation or select a point after the click.
+    for point in interior_points(bounds):
+        if time.monotonic() >= deadline:
+            if observation is not None:
+                observation['status'] = 'deadline'
+            raise ValueError('retry hit deadline')
+        try:
+            prove(point)
+        except (ValueError, OSError, subprocess.SubprocessError):
+            if observation is not None:
+                observation['status'] = 'identity-rejected'
+            raise
+        move(point)
+        if observation is not None:
+            observation['sampledPoints'] += 1
+        pause(min(0.02, max(0, deadline - time.monotonic())))
+        if not matches():
+            continue
+        prove(point)
+        pause(min(0.02, max(0, deadline - time.monotonic())))
+        if matches():
+            prove(point)
+            if observation is not None:
+                observation.update(status='matched', exactPointerMatched=True, accessibleHitVerified=True)
+            return point
+    if observation is not None:
+        observation['status'] = 'no-hit'
+    raise ValueError('retry live hit unavailable')
 
 
 def retry_click(payload):
@@ -363,6 +427,29 @@ def retry_click(payload):
             second_geometry, facts['coordinatePackage'])
         facts['coordinateRelation'], facts['coordinateAuthority'] = relation, authority
         point = normalized_retry_point(request, active, geometry, facts)
+        live_cursor = None
+        if os.environ.get('NANH_ZED_CURSOR_HIT') == '1':
+            facts['cursorSelection'] = dict(status='unavailable', sampledPoints=0,
+                exactPointerMatched=False, accessibleHitVerified=False)
+            if (sys.platform != 'linux' or os.environ.get('GITHUB_ACTIONS') != 'true'
+                    or os.environ.get('RUNNER_ENVIRONMENT') != 'github-hosted'
+                    or os.environ.get('RUNNER_OS') != 'Linux'):
+                return 18
+            import runpy
+            module = runpy.run_path(str(Path(__file__).with_name('zed-cursor-hit.py')))
+            held_bounds = normalized_retry_point(request, active, geometry, return_bounds=True)
+            def cursor_scope():
+                return (owned_foreground() == (0, active)
+                        and independent_client_snapshot(active) == second_geometry)
+            def prove_hit(candidate):
+                if (not cursor_scope() or time.monotonic() >= deadline
+                        or normalized_retry_point(request, active, geometry,
+                            return_bounds=True, hit_point=candidate) != held_bounds):
+                    raise ValueError('retry live identity changed')
+            live_cursor = module['PointerShape'](request['pid'], cursor_scope, deadline)
+            point = select_live_retry_point(held_bounds,
+                lambda candidate: run(['mousemove', '--', str(candidate[0]), str(candidate[1])]),
+                prove_hit, live_cursor.matches, deadline, observation=facts['cursorSelection'])
         ancestor_module, ancestor_before = None, None
         if (os.environ.get('NANH_ZED_XRECORD') == '1'
                 and sys.platform == 'linux'
@@ -376,7 +463,8 @@ def retry_click(payload):
         stage = 14
         # --sync waits for motion and can hang when the pointer is already here.
         # Dispatch once and prove the resulting position instead.
-        run(['mousemove', '--', str(point[0]), str(point[1])])
+        if live_cursor is None:
+            run(['mousemove', '--', str(point[0]), str(point[1])])
         px, py, pointer_window = run(['getmouselocation', '--shell'], 'position')
         if (px, py) != point:
             return 14
@@ -420,7 +508,7 @@ def retry_click(payload):
                 observer = module['Observer'](request['pid'], active, record_scope,
                                               budget=min(3, remaining - .5))
             if (not record_scope()
-                    or normalized_retry_point(request, active, geometry) != point):
+                    or (live_cursor is None and normalized_retry_point(request, active, geometry) != point)):
                 if observer is not None:
                     facts['inputDelivery'] = observer.finish()
                 return 18
@@ -429,6 +517,11 @@ def retry_click(payload):
                 or owned_foreground() != (0, active) or time.monotonic() >= deadline):
             return 18
         stage = 16
+        if live_cursor is not None:
+            prove_hit(point)
+            if (run(['getmouselocation', '--shell'], 'position') != (px, py, pointer_window)
+                    or not live_cursor.matches()):
+                return 18
         # One ordinary activation, never another press after an uncertain receipt.
         run(['click', '--clearmodifiers', '1'])
         if observer is not None:
@@ -437,6 +530,9 @@ def retry_click(payload):
     except (ValueError, TypeError, OSError, subprocess.SubprocessError, ImportError):
         return locals().get("stage", 2)
     finally:
+        live_cursor = locals().get('live_cursor')
+        if live_cursor is not None:
+            live_cursor.close()
         observer = locals().get('observer')
         if observer is not None:
             observer.close()

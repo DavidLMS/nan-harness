@@ -4,7 +4,7 @@ const vm=require('node:vm');
 const source=fs.readFileSync(`${__dirname}/codex-onboarding.cjs`,'utf8');
 async function trial(options={}) {
  let inventoryOwnerLost=false;
- let now=0,checked=false,absent=false,roleClicks=0,continueClicks=0,samples=0,overlayReads=0,legendReads=0;
+ let now=0,checked=false,absent=false,roleClicks=0,continueClicks=0,taskClicks=0,samples=0,overlayReads=0,legendReads=0;
  const root={parentElement:null};
  const fieldset={parentElement:root};
  const label={kind:'label',tagName:'LABEL',parentElement:fieldset,innerText:'Engineering'};
@@ -19,7 +19,7 @@ async function trial(options={}) {
   getBoundingClientRect:()=>({left:10,top:10,width:80,height:40}),
   getAttribute:()=>null,closest:()=>null,contains:x=>x===e||(e===label&&x===radio)});
  dialog.getAttribute=key=>key==='role'?(options.alertDialog?'alertdialog':'dialog'):null;
- dialog.contains=e=>[root,fieldset,label,radio,button,legend].includes(e);
+ dialog.contains=e=>[root,fieldset,label,radio,button,legend,startControl].includes(e);
  dialog.querySelectorAll=selector=>selector.startsWith('input')?(options.ambiguousDialog?[radio,radio]:[radio]):[legend];
  if(options.onboardingDialog||options.alertDialog||options.ambiguousDialog||options.duplicateDialog)
   doc.querySelectorAll=selector=>selector.startsWith('input')?[radio]:options.duplicateDialog?[dialog,foreign]:[dialog];
@@ -32,9 +32,9 @@ async function trial(options={}) {
   getBoundingClientRect:()=>({left:10,top:10,width:80,height:40})});
  form.contains=e=>e===heading;
  form.querySelectorAll=s=>s==='button'?[finish]:s==='a'?[terms,privacy]:[];
- root.contains=e=>[label,radio,button].includes(e);
+ root.contains=e=>[label,radio,button,startControl].includes(e);
  const acknowledgement={textContent:'Engineering—got it. I can map an unfamiliar codebase, plan and build features, trace bugs across logs and tests, and run checks to verify behavior.',children:[],isConnected:true,getBoundingClientRect:()=>({width:80,height:40})};
- const startControl={...acknowledgement,textContent:'Get Started'};
+ const startControl={...button,kind:'task',textContent:'Get Started',children:[]};elements.task=startControl;
  root.querySelectorAll=s=>absent?(s.startsWith('input')?[]:s==='button'?[startControl]:options.noTaskScope?[]:[acknowledgement]):s.startsWith('input')?[radio]:[legend];
  label.closest=s=>s.startsWith('div')?root:null;
  foreign.getAttribute=k=>k==='role'?'dialog':null;
@@ -53,6 +53,7 @@ async function trial(options={}) {
   constructor(e){this.element=e;this.disposed=false;}
   async evaluate(fn,arg){if(this.disposed)throw Error('PRIVATE disposed handle');return evaluate(fn,this.element,arg);}
   async click(params){assert.equal(params.force,undefined);assert.ok(params.position);if(this.element===label){roleClicks++;if(options.uncertain==='role')throw Error('private');checked=!options.readbackFail;}
+   else if(this.element.kind==='task'){taskClicks++;if(options.uncertain==='task')throw Error('private');}
    else {continueClicks++;if(options.uncertain==='continue')throw Error('private');absent=!options.remain;}}
   async evaluateHandle(fn){return {value:evaluate(fn,this.element),dispose:async()=>{}};}
   async dispose(){this.disposed=true;}
@@ -61,20 +62,20 @@ async function trial(options={}) {
   constructor(kind){this.kind=kind;if(kind==='roleFieldsets')this.members=[{legend:true,group:true},...(options.extraFieldset?[{legend:false,group:false}]:[]),...(options.duplicateRoleFieldset?[{legend:true,group:true}]:[])];}
   filter(predicate){if(this.members&&predicate.has)this.members=this.members.filter(e=>predicate.has.kind==='legend'?e.legend:e.group);return this;}
   locator(s){return new Locator(s==='..'?'fieldset':s.startsWith('xpath=')?'scope':s==='fieldset:visible'?'roleFieldsets':s==='fieldset'?'fieldset':s==='label'?'label':s.includes(':checked')?'checked':s.includes('value=')?'radio':'radios');}
-  getByRole(_r,o){return new Locator(o.name==='Continue'?'continue':'login');}
+  getByRole(_r,o){return new Locator(o.name==='Continue'?'continue':o.name==='Get Started'?'task':'login');}
   async count(){
    if(this.kind==='legend'){legendReads++;if(options.overlayDeadlineDuringProof&&legendReads>=3)now=1201;if(options.overlayLegendLost&&legendReads>=3)return 0;}
    if(this.kind==='scope'&&options.overlayScopeLost&&legendReads>=3)return 0;
    return this.kind==='label'?(options.duplicateLabel?2:1):this.kind==='scope'?(options.badScope?0:1):this.kind==='fieldset'?(options.extraFieldset?2:1):this.kind==='login'?(options.login?1:0):this.kind==='roleFieldsets'?this.members.length:this.kind==='legend'?(options.wrongLegend?0:options.duplicateRoleFieldset?2:1):this.kind==='radios'?(absent||options.noGroup?0:11):this.kind==='checked'?(checked?(options.multipleChecked?2:1):0):this.kind==='continue'?(options.duplicateContinue?2:1):this.kind==='radio'?(options.duplicateRadio?2:1):1;}
   async isEnabled(){return this.kind==='radio'?!(options.radioDisabled||options.loading&&now<300):this.kind!=='continue'||!options.disabled;}
   async isChecked(){return checked;}
-  element(){return this.kind==='label'?label:this.kind==='continue'?button:this.kind==='radio'?radio:this.kind==='fieldset'?fieldset:root;}
+  element(){return this.kind==='label'?label:this.kind==='continue'?button:this.kind==='task'?startControl:this.kind==='radio'?radio:this.kind==='fieldset'?fieldset:root;}
   async evaluate(fn,arg){if(options.remount&&arg instanceof Handle&&samples>0)return false;return evaluate(fn,this.element(),arg);}
   async elementHandle(){return new Handle(this.element());}
  }
  const mainFrame={};
  const extraPage={url:()=>options.foreignUrl??'about:blank',evaluate:async()=>{if(options.inventoryOwnerLoss)inventoryOwnerLost=true;if(options.inventoryDeadline)now=1201;return options.visibility??'hidden';}};
- const page={evaluate:async()=> 'visible',mainFrame:()=>options.overlayFrameChange&&overlayReads?{}:mainFrame,locator:s=>new Locator(s.startsWith('fieldset > legend')?'legend':'radios'),
+ const page={evaluate:async fn=>fn.name==='codingScope'?taskClicks===1&&!options.noCodingScope:'visible',mainFrame:()=>options.overlayFrameChange&&overlayReads?{}:mainFrame,locator:s=>new Locator(s.startsWith('fieldset > legend')?'legend':'radios'),
   url:()=>options.urlChange&&roleClicks>0?'app://codex/index.html?PRIVATE_ROUTE':'app://codex/index.html',
   context:()=>({browser:()=>({contexts:()=>[{pages:()=>options.foreignPage?[page,extraPage]:options.replacedPage?[{}]:[page]}]})})};
  const sandbox={exports:{},URL,process:{platform:options.platform??'win32',env:{GITHUB_ACTIONS:options.noHost?'false':'true',RUNNER_ENVIRONMENT:'github-hosted',RUNNER_OS:'Windows',NANH_CODEX_PUBLIC_ONBOARDING:options.noOptin?undefined:'engineering'}},Date:{now:()=>now},clearTimeout:()=>{},setTimeout:(f,ms)=>{if(ms<=100){now+=100;f();}}};
@@ -84,7 +85,7 @@ async function trial(options={}) {
  const budget=options.expired?0:options.invalidDeadline?NaN:options.excessBudget?25001:1200;
  const facts=await sandbox.exports.run(page,options.noGuard?undefined:guard,budget,options.admitAux?async()=>!options.auxOwnershipLostAfterClick||roleClicks===0:undefined);
  assert(!JSON.stringify(facts).includes('PRIVATE'));
- return {facts,roleClicks,continueClicks};
+ return {facts,roleClicks,continueClicks,taskClicks};
 }
 (async()=>{
  for(const [opts,reason] of [[{expired:true},'deadline-expired'],[{invalidDeadline:true},'deadline-invalid'],
@@ -130,7 +131,7 @@ async function trial(options={}) {
  const duplicate=await trial({duplicateRadio:true});assert.equal(duplicate.facts.roleProofFailure,'engineering-count');
  const legend=await trial({wrongLegend:true});assert.equal(legend.facts.roleProofFailure,'legend-count');
  for(const [opts,reason] of [[{badScope:true},'scope-count'],[{login:true},'login-present'],[{noGroup:true},'group-absent'],[{duplicateLabel:true},'label-count'],[{badAssociation:true},'label-association'],[{finalLoss:true},'ownership-lost']]) {const r=await trial(opts);assert.equal(r.facts.roleProofFailure,reason);assert.equal(r.roleClicks,0);assert.equal(r.continueClicks,0);}
- const good=await trial();assert.equal(good.roleClicks,1);assert.equal(good.continueClicks,1);assert.equal(good.facts.roleScopeAbsent,true);assert.equal(good.facts.stage,'stopped-after-role');assert.equal(good.facts.errorCategory,null);
+ const good=await trial();assert.equal(good.roleClicks,1);assert.equal(good.continueClicks,1);assert.equal(good.facts.roleScopeAbsent,true);assert.equal(good.facts.stage,'coding-readiness');assert.equal(good.facts.errorCategory,null);
  const completeOverlay=await trial({modal:true});
  assert.equal(completeOverlay.facts.foreignOverlay,'chatgpt-onboarding-complete');
  assert.equal(completeOverlay.facts.foreignOverlayProof,'classified');
@@ -189,6 +190,12 @@ async function trial(options={}) {
  assert.equal(lostAux.roleClicks,1);assert.equal(lostAux.continueClicks,0);assert.equal(lostAux.facts.roleProofFailure,'page-count');
  const missingTask=await trial({noTaskScope:true});
  assert.equal(missingTask.continueClicks,1);assert.equal(missingTask.facts.roleScopeAbsent,true);assert.equal(missingTask.facts.taskScopeProved,false);assert.equal(missingTask.facts.errorCategory,'scope-remained');
+ const uncertainTask=await trial({uncertain:'task'});
+ assert.equal(uncertainTask.taskClicks,1);assert.equal(uncertainTask.facts.taskClickAttempted,true);
+ assert.equal(uncertainTask.facts.taskClickCompleted,false);assert.equal(uncertainTask.facts.codingComposerReady,false);
+ const missingComposer=await trial({noCodingScope:true});
+ assert.equal(missingComposer.taskClicks,1);assert.equal(missingComposer.facts.taskClickCompleted,true);
+ assert.equal(missingComposer.facts.codingComposerReady,false);
  const ownDialog=await trial({onboardingDialog:true});assert.equal(ownDialog.roleClicks,1);assert.equal(ownDialog.continueClicks,1);assert.equal(ownDialog.facts.roleScopeAbsent,true);
  assert.equal((await trial({modal:true})).facts.roleProofFailure,'control-not-actionable');
  assert.equal((await trial({modal:true})).facts.actionabilityFailure,'foreign-overlay');

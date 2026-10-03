@@ -20,7 +20,15 @@ function sample(control) {
     // a dialog. Only its own enclosing dialog can admit an ordinary click.
     if (dialog.getAttribute('role')!=='dialog' || !dialog.contains(control)
         || dialog.querySelectorAll('input[type="radio"][name="conversational-onboarding-inline-role"][value="engineering"]').length!==1
-        || [...dialog.querySelectorAll('fieldset > legend')].filter(e=>visible(e)&&e.innerText.trim()==='Select the kind of work you do').length!==1) return blocked('foreign-overlay');
+        || [...dialog.querySelectorAll('fieldset > legend')].filter(e=>visible(e)&&e.innerText.trim()==='Select the kind of work you do').length!==1) {
+      const acknowledgement='Engineering—got it. I can map an unfamiliar codebase, plan and build features, trace bugs across logs and tests, and run checks to verify behavior.';
+      const acknowledgements=[...dialog.querySelectorAll('*')].filter(e=>visible(e)&&e.textContent?.trim()===acknowledgement
+        &&![...e.children].some(child=>child.textContent?.trim()===acknowledgement));
+      if(dialog.getAttribute('role')!=='dialog'||!dialog.contains(control)||control.tagName!=='BUTTON'
+          ||control.textContent?.trim()!=='Get Started'||acknowledgements.length!==1
+          ||dialog.querySelectorAll('input[name="conversational-onboarding-inline-role"]').length!==0
+          ||[...dialog.querySelectorAll('button')].filter(e=>visible(e)&&e.textContent?.trim()==='Get Started').length!==1) return blocked('foreign-overlay');
+    }
   }
   for (let e = control, depth = 0; e; e = e.parentElement) {
     if (++depth > 64 || getComputedStyle(e).pointerEvents === 'none') return blocked('pointer-disabled');
@@ -52,6 +60,17 @@ function taskContinuation(scope) {
     &&![...e.children].some(child=>child.textContent.trim()===acknowledgement));
   const start=[...scope.querySelectorAll('button')].filter(e=>visible(e)&&e.textContent.trim()==='Get Started');
   return acknowledgementNodes.length===1&&start.length===1;
+}
+
+// Exact public local-coding markers from the frozen local conversation thread.
+function codingScope() {
+  const visible=e=>{const r=e.getBoundingClientRect(),s=getComputedStyle(e);
+    return e.isConnected&&r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden'&&!e.closest('[inert]');};
+  const all=selector=>[...document.querySelectorAll(selector)].filter(visible);
+  const editors=all('[data-thread-find-composer] .ProseMirror[contenteditable="true"]');
+  return editors.length===1&&all('[data-thread-find-target="conversation"]').length===1
+    &&all('[role="dialog"],[role="alertdialog"],[role="menu"],[aria-modal="true"]').length===0
+    &&editors[0].getAttribute('aria-disabled')!=='true';
 }
 
 // Exact immutable final-onboarding surface. No arbitrary app payload is returned.
@@ -142,7 +161,7 @@ async function run(page, ownerGuard, deadline, rejected, mainGuard) {
     stage:'session', errorCategory:null, conversationalScope:false, engineeringControl:false,
     roleClickAttempted:false, roleClickCompleted:false, engineeringChecked:false,
     continueControl:false, continueClickAttempted:false, continueClickCompleted:false,
-    roleScopeAbsent:false, taskScopeProved:false, roleProofFailure:'unmeasured', sessionProofFailure:'unmeasured'};
+    roleScopeAbsent:false, taskScopeProved:false, taskClickAttempted:false, taskClickCompleted:false, codingComposerReady:false, roleProofFailure:'unmeasured', sessionProofFailure:'unmeasured'};
   const stop = category => { facts.errorCategory=category; return facts; };
   const sessionFailure = typeof ownerGuard !== 'function' ? 'guard-missing'
     : !Number.isFinite(deadline) || !Number.isFinite(maxWaitMs) || maxWaitMs > 25000 ? 'deadline-invalid'
@@ -302,10 +321,24 @@ async function run(page, ownerGuard, deadline, rejected, mainGuard) {
       if (await page.locator(GROUP).count()===0) {
         facts.roleScopeAbsent=true;
         if(await scope.count()===1&&await scope.evaluate(taskContinuation)&&await ownedEndpoint()&&Date.now()<deadline) {
-          facts.taskScopeProved=true;facts.stage='stopped-after-role';return facts;
+          facts.taskScopeProved=true;break;
         }
       }
       await wait(100);
+    }
+    if(!facts.taskScopeProved)return stop('scope-remained');
+    facts.stage='task-action';
+    const taskButton=scope.getByRole('button',{name:'Get Started',exact:true});
+    const taskProof=async()=>Date.now()<deadline&&await ownedEndpoint()
+      &&await scope.count()===1&&await scope.evaluate(taskContinuation)
+      &&await taskButton.count()===1&&await taskButton.isEnabled()
+      &&await taskButton.evaluate(e=>e.tagName==='BUTTON');
+    if(!await click(taskButton,taskProof,'taskClickAttempted','taskClickCompleted'))return stop('action-blocked');
+    facts.stage='coding-readiness';
+    while(Date.now()<deadline) {
+      if(!await ownedEndpoint())return stop('ownership-lost');
+      if(await page.evaluate(codingScope)) {facts.codingComposerReady=true;return facts;}
+      await wait(Math.min(100,Math.max(0,deadline-Date.now())));
     }
     return stop('scope-remained');
   } catch { return stop(facts.roleClickAttempted || facts.continueClickAttempted ? 'action-uncertain':'observation-failed'); }
@@ -359,3 +392,4 @@ exports.candidate = candidate;
 exports.scopeFingerprint = SCOPE;
 
 exports.taskContinuation=taskContinuation;
+exports.codingScope=codingScope;

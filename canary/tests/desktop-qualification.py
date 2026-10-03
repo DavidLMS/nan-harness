@@ -22,6 +22,27 @@ runner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(runner)
 
 
+class CodexDriverFactsTests(unittest.TestCase):
+    def test_closed_driver_facts_reject_private_payloads_and_unproved_retry(self):
+        flags = 'endpointOwned targetVerified attached bindingVerified auxiliaryInert codingComposerReady uniqueComposer inputReadback inputSubmitted userTurnObserved responseVerified errorObserved retryControl retryAttempted retryCompleted providerResponseVerified'.split()
+        value = {key: False for key in flags}
+        value.update(schemaVersion=1, mechanism='codex-renderer-qualification', diagnosticsOnly=True,
+                     assistantTurnCount=0, providerGenerationCount=None, errorCategory='composer-unavailable')
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'facts.json'
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(tmp, 'chatgpt-desktop'), [value])
+            for changes in ({'assistantText': 'PRIVATE'}, {'errorCategory': 'PRIVATE'},
+                            {'assistantTurnCount': True}, {'providerGenerationCount': 4097},
+                            {'retryCompleted': True}, {'bindingVerified': 1}):
+                path.write_text(json.dumps({**value, **changes}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(tmp, 'chatgpt-desktop')
+            path.write_text(json.dumps(value))
+            with self.assertRaises(ValueError):
+                q.semantic_observations(tmp, 'claude-desktop')
+
+
 class RunnerTests(unittest.TestCase):
     def test_zed_panel_zoom_diagnostic_is_explicit_linux_only_and_private(self):
         source = {key: 'synthetic' for key in runner.ZED_HELPERS}
@@ -394,7 +415,7 @@ class QualificationTests(unittest.TestCase):
         cells = q.matrix()['include']
         self.assertEqual(len(cells), 15)
         self.assertEqual(len({(c['app'], c['platform'], c['architecture']) for c in cells}), 15)
-        self.assertEqual(sum(c['backend'] != 'renderer-inventory' for c in cells), 6)
+        self.assertEqual(sum(c['backend'] != 'renderer-inventory' for c in cells), 7)
         self.assertEqual({(c['platform'], c['architecture']) for c in cells},
                          {('linux', 'x86_64'), ('macos', 'aarch64'), ('windows', 'x86_64')})
         with self.assertRaises(ValueError):

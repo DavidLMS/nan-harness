@@ -711,7 +711,14 @@ impl<'a> RendererSession<'a> {
             || value["endpointOwned"] != true
             || value["launcherOwned"] != true
             || value["attached"] != true
-            || value["pageCount"] != 1
+            || (value["pageCount"] != 1
+                && !(std::env::var("NANH_DESKTOP_RENDERER_APP").as_deref()
+                    == Ok("chatgpt-desktop")
+                    && value["pageCount"] == 2
+                    && value["codexSession"]["pageCount"] == 2
+                    && value["codexSession"]["bindingVerified"] == true
+                    && value["codexSession"]["auxiliaryInert"] == true
+                    && value["codexSession"]["codingComposerReady"] == true))
         {
             return Err(Reason::ActionUnsupported);
         }
@@ -897,6 +904,9 @@ impl Gui {
         result: &mut ProbeResult,
         provider: &ProviderGate,
     ) -> Result<(), Reason> {
+        if self.kind == nan_harness_core::DesktopHarnessKind::ChatGpt {
+            return self.probe_codex_dom(directory, owner, marker, result, provider);
+        }
         // DOM targets are owned through native window and socket ancestry proofs.
         // Requiring an AX foreground provider would defeat this renderer adapter.
         self.visual.guard()?;

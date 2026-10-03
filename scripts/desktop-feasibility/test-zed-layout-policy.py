@@ -27,6 +27,20 @@ class Policy(unittest.TestCase):
         with self.assertRaises(ValueError):
             environment(app='hermes-desktop')
 
+    def test_cursor_trial_is_forwarded_only_to_hosted_linux_zed(self):
+        source = {key: 'synthetic' for key in runner.ZED_HELPERS}
+        source.update(GITHUB_ACTIONS='true', RUNNER_ENVIRONMENT='github-hosted', RUNNER_OS='Linux',
+                      FEASIBILITY_ZED_INPUT_DRIVER_MODE='paste', FEASIBILITY_ZED_RESPONSE_METHOD='thread-export',
+                      NANH_ZED_CURSOR_HIT='1')
+        args = (Path('/facts'), Path('/nanh'), '/zed')
+        self.assertEqual(runner.qualification_environment('zed-desktop', *args, source)['NANH_ZED_CURSOR_HIT'], '1')
+        for changes in ({'RUNNER_OS': 'macOS'}, {'RUNNER_OS': 'Windows'},
+                        {'NANH_ZED_CURSOR_HIT': 'force'}, {'RUNNER_ENVIRONMENT': 'self-hosted'}):
+            with self.assertRaises(ValueError):
+                runner.qualification_environment('zed-desktop', *args, {**source, **changes})
+        with self.assertRaises(ValueError):
+            runner.qualification_environment('hermes-desktop', *args, source)
+
 
 if __name__ == '__main__':
     unittest.main()

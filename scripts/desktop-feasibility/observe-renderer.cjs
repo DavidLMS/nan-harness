@@ -130,7 +130,7 @@ function heldMainGuard(held, browser, owner, deadline, route,
   let auxiliary=null, auxiliaryIdentity=null;
   const pages=()=>browser.contexts().flatMap(context=>context.pages());
   const valid=()=>Date.now()<deadline&&owner()===true;
-  return async function prove() {
+  const prove=async function prove() {
     if(!held||!valid())return false;
     try {
       const initial=pages();
@@ -163,6 +163,17 @@ function heldMainGuard(held, browser, owner, deadline, route,
       return true;
     } catch {return false;}
   };
+  const privateIdentity=value=>value&&Object.fromEntries(['url','target','frame','loader','frameUrl','fragment'].map(key=>[key,value[key]]));
+  prove.binding=()=>({schemaVersion:1,main:privateIdentity(held),auxiliary:privateIdentity(auxiliaryIdentity)});
+  return prove;
+}
+function publishCodexBinding(output,owner,connection,guard) {
+  const root=path.dirname(output),bindingPath=path.join(root,`main-binding-${owner}.private`);
+  const checkpoint={...guard.binding(),ownerPid:owner,launcherPid:connection.launcherPid,port:connection.port};
+  const metadata=fs.lstatSync(root);
+  if(!metadata.isDirectory()||metadata.isSymbolicLink()
+      ||process.platform!=='win32'&&(metadata.mode&0o077)!==0)throw new Error('private-root');
+  fs.writeFileSync(bindingPath,JSON.stringify(checkpoint)+'\n',{mode:0o600,flag:'wx'});
 }
 async function run() {
   if (!['chatgpt-desktop', 'claude-desktop', 'pen-desktop'].includes(app)
@@ -215,10 +226,16 @@ async function run() {
       const ownerGuard=()=>rootProof.descendant(connection.launcherPid)&&ownership.ownedEndpoint();
       const correlationDeadline=onboardingDeadline(trial,deadline,totalDeadline,Date.now());
       const heldMain=trial?await bindCorrelationMain(page,browser,ownerGuard,correlationDeadline):null;
+      const mainGuard=trial&&heldMain?heldMainGuard(heldMain,browser,ownerGuard,correlationDeadline,
+        require('./codex-onboarding.cjs').sourceRoute):undefined;
       facts.publicOnboarding = await require('./codex-onboarding.cjs').run(page,
         () => rootProof.descendant(connection.launcherPid) && ownership.ownedEndpoint(),
-        correlationDeadline, trial&&heldMain?heldMainGuard(heldMain,browser,ownerGuard,correlationDeadline,
-          require('./codex-onboarding.cjs').sourceRoute):undefined);
+        correlationDeadline,mainGuard);
+      const bindingVerified=!!mainGuard&&await mainGuard();
+      const codingComposerReady=bindingVerified&&await page.evaluate(require('./codex-onboarding.cjs').codingScope);
+      facts.codexSession={bindingVerified,codingComposerReady:!!codingComposerReady,auxiliaryInert:bindingVerified,
+        pageCount:Math.min(32,browser.contexts().flatMap(context=>context.pages()).length)};
+      if(bindingVerified)publishCodexBinding(output,request.ownerPid,connection,mainGuard);
       if(trial&&browser.contexts().flatMap(c=>c.pages()).length!==1) {
         facts.mainAuxCorrelation=await observeMainAux(heldMain,browser,ownerGuard,correlationDeadline,
           require('./codex-onboarding.cjs').sourceRoute);

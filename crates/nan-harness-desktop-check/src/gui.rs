@@ -4,6 +4,7 @@ mod accessibility_probe;
 mod claude_chat_navigation;
 mod claude_native_probe;
 mod clipboard;
+mod codex_dom_probe;
 mod dom_probe;
 mod native_copy_probe;
 mod native_icon_probe;
@@ -12,6 +13,7 @@ mod stability;
 mod visual;
 mod zed_zoom_probe;
 
+pub(crate) use codex_dom_probe::CodexDomSession;
 pub(crate) use dom_probe::{DomAction, DomPurpose, DomTurn, RendererSession};
 pub(crate) use native_copy_probe::NativeClipboardSession;
 

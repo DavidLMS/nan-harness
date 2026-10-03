@@ -3,7 +3,8 @@
 use super::{ProbeSpec, select_read_tool, visual_marker};
 use crate::cli::{SessionMode, VerificationPolicy};
 use crate::gui::{
-    ComposerFailure, DomAction, DomPurpose, DomTurn, Gui, NativeClipboardSession, RendererSession,
+    CodexDomSession, ComposerFailure, DomAction, DomPurpose, DomTurn, Gui, NativeClipboardSession,
+    RendererSession,
 };
 use crate::provider::ProviderGate;
 use crate::report::{CheckStep, InputMode, ProbeResult, Reason, ResponseVerification};
@@ -62,6 +63,24 @@ impl SemanticBackend {
         scenario: SemanticScenario<'_>,
         result: &mut ProbeResult,
     ) -> Result<(), Reason> {
+        if self.kind == DesktopHarnessKind::ChatGpt {
+            {
+                let mut inventory = RendererSession::new(process, &self.directory)?;
+                inventory.inventory()?;
+            }
+            let mut session = CodexDomSession::new(process, &self.directory)?;
+            session.turn(
+                DomTurn {
+                    prompt: "Check this connection",
+                    marker: scenario.marker,
+                    action: DomAction::Ready,
+                    purpose: DomPurpose::Response,
+                },
+                scenario.gate,
+            )?;
+            let mut ui = SemanticUi::Codex(session);
+            return complete_scenario(&mut ui, &scenario, &self.directory, result).await;
+        }
         let mut session = RendererSession::new(process, &self.directory)?;
         if self.kind != DesktopHarnessKind::Hermes {
             session.inventory()?;
@@ -126,6 +145,7 @@ impl SemanticBackend {
 enum SemanticUi<'a> {
     Zed(Box<NativeClipboardSession<'a>>),
     Renderer(RendererSession<'a>),
+    Codex(CodexDomSession<'a>),
 }
 
 impl SemanticUi<'_> {
@@ -135,7 +155,7 @@ impl SemanticUi<'_> {
                 InputMode::NativeClipboardAndKeyboard,
                 ResponseVerification::NativeThreadExport,
             ),
-            Self::Renderer(_) => (
+            Self::Renderer(_) | Self::Codex(_) => (
                 InputMode::RendererDomAndKeyboard,
                 ResponseVerification::RendererDom,
             ),
@@ -166,6 +186,15 @@ impl SemanticUi<'_> {
                 },
                 gate,
             ),
+            Self::Codex(session) => session.turn(
+                DomTurn {
+                    prompt,
+                    marker,
+                    action: DomAction::Submit,
+                    purpose,
+                },
+                gate,
+            ),
         }
     }
 
@@ -177,7 +206,7 @@ impl SemanticUi<'_> {
                 gate.fail_next_scenario(true);
                 400
             }
-            Self::Renderer(_) => {
+            Self::Renderer(_) | Self::Codex(_) => {
                 gate.fail_recoverable_scenario(true);
                 503
             }
@@ -208,13 +237,22 @@ impl SemanticUi<'_> {
                 },
                 gate,
             ),
+            Self::Codex(session) => session.turn(
+                DomTurn {
+                    prompt: "Check the expected provider failure",
+                    marker,
+                    action: DomAction::Retry,
+                    purpose: DomPurpose::Response,
+                },
+                gate,
+            ),
         }
     }
 
     fn finish(self, gate: &ProviderGate, outcome: Result<(), Reason>) -> Result<(), Reason> {
         match self {
             Self::Zed(session) => session.finish(gate, outcome),
-            Self::Renderer(_) => outcome,
+            Self::Renderer(_) | Self::Codex(_) => outcome,
         }
     }
 }

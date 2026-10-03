@@ -294,6 +294,7 @@ jobs:
         if: runner.os == 'Linux' && matrix.app == 'zed-desktop' && inputs.experiment == 'deterministic-full'
         shell: bash
         run: |
+          echo 'NANH_ZED_CURSOR_HIT=1' >> "$GITHUB_ENV"
           echo 'NANH_ZED_XRECORD=1' >> "$GITHUB_ENV"
           echo 'NANH_ZED_LAYOUT_POLICY=zoom-before-send' >> "$GITHUB_ENV"
           echo 'NANH_ZED_PANEL_ZOOM=observe' >> "$GITHUB_ENV"

@@ -111,6 +111,10 @@ def qualification_environment(app, facts, real_nanh, executable, inherited=None)
     source = os.environ if inherited is None else inherited
     if source.get('GITHUB_ACTIONS') != 'true' or source.get('RUNNER_ENVIRONMENT') != 'github-hosted':
         raise ValueError('disposable hosted session required')
+    if source.get('NANH_ZED_CURSOR_HIT') is not None and app != 'zed-desktop':
+        raise ValueError('Zed cursor hit trial is unavailable')
+    if source.get('NANH_CLAUDE_MAC_CHAT_NAVIGATION') is not None and app != 'claude-desktop':
+        raise ValueError('Claude native Chat navigation is unavailable')
     layout = source.get('NANH_ZED_LAYOUT_POLICY')
     if layout is not None and (app != 'zed-desktop' or source.get('RUNNER_OS') != 'Linux' or layout != 'zoom-before-send'):
         raise ValueError('Zed layout trial is unavailable')
@@ -137,6 +141,11 @@ def qualification_environment(app, facts, real_nanh, executable, inherited=None)
             environment['NANH_ZED_LAYOUT_POLICY'] = layout
         if zoom is not None:
             environment['NANH_ZED_PANEL_ZOOM'] = zoom
+        cursor = source.get('NANH_ZED_CURSOR_HIT')
+        if cursor is not None:
+            if cursor != '1' or source.get('RUNNER_OS') != 'Linux':
+                raise ValueError('Zed cursor hit trial is unavailable')
+            environment['NANH_ZED_CURSOR_HIT'] = cursor
         delivery = source.get('NANH_ZED_XRECORD')
         if delivery is not None:
             if delivery != '1' or source.get('RUNNER_OS') != 'Linux':
@@ -187,6 +196,13 @@ def qualification_environment(app, facts, real_nanh, executable, inherited=None)
                 raise ValueError('Claude native profile policy is unavailable')
             validate_claude_bundle(Path(executable))
             environment['NANH_CLAUDE_MAC_PROFILE_POLICY'] = profile_policy
+        navigation = source.get('NANH_CLAUDE_MAC_CHAT_NAVIGATION')
+        if navigation is not None:
+            if (navigation != '1' or app != 'claude-desktop'
+                    or source.get('RUNNER_OS') != 'macOS' or mode != 'startup-baseline'
+                    or profile_policy != 'native-known-folders'):
+                raise ValueError('Claude native Chat navigation is unavailable')
+            environment['NANH_CLAUDE_MAC_CHAT_NAVIGATION'] = navigation
         windows_profile = source.get('NANH_CLAUDE_WINDOWS_PROFILE_POLICY')
         if windows_profile is not None:
             if (windows_profile != 'private-env' or app != 'claude-desktop'
@@ -194,6 +210,8 @@ def qualification_environment(app, facts, real_nanh, executable, inherited=None)
                 raise ValueError('claude-windows-policy-invalid')
             validate_claude_windows_bundle(Path(executable))
             environment['NANH_CLAUDE_WINDOWS_PROFILE_POLICY'] = windows_profile
+        if app == 'chatgpt-desktop':
+            environment['FEASIBILITY_CODEX_DOM_DRIVER'] = str(Path(__file__).with_name('codex-dom.cjs').resolve())
         policy = source.get('NANH_DESKTOP_QUALIFICATION_NAMESPACE_POLICY', 'default')
         if policy not in {'default', 'scoped-apparmor-userns'}:
             raise ValueError('namespace policy is invalid')
