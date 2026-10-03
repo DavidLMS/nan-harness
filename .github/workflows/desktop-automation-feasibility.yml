@@ -149,6 +149,7 @@ jobs:
         shell: bash
         run: |
           echo 'FEASIBILITY_ZED_MAXIMIZED=1' >> "$GITHUB_ENV"
+          echo 'NANH_ZED_X11_VIEWPORT=large' >> "$GITHUB_ENV"
           echo 'FEASIBILITY_ZED_INPUT_DRIVER=/usr/bin/python3' >> "$GITHUB_ENV"
           echo "FEASIBILITY_ZED_INPUT_SCRIPT=$GITHUB_WORKSPACE/scripts/desktop-feasibility/zed-input-x11.py" >> "$GITHUB_ENV"
           echo 'FEASIBILITY_ZED_INPUT_DRIVER_MODE=paste' >> "$GITHUB_ENV"
