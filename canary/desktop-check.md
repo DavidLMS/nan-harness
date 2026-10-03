@@ -2121,10 +2121,96 @@ alongside PID and endpoint. The parser already requires that field;
 [lsof's field-output contract](https://lsof.readthedocs.io/en/stable/manpage/)
 does not guarantee it implicitly. A disposable synthetic child listener tests
 actual owned ancestry and rejection of foreign ancestry without launching an
-application or retaining process identities. Strict single-loopback-listener
-and ownership requirements are unchanged. Hosted verification of this change
-is required before attributing any Codex progress to it.
+application or retaining process identities. At revision `e7332918`, the proof
+still required one listener record. The bounded multi-owned-listener follow-up
+and its hosted result are recorded below.
 
 There are still five qualified active cells and seven open active cells. Pen
 remains deferred. Acquisition and diagnostic improvements are not additional
 acceptance results.
+
+### Response scope and owned acquisition follow-up (2026-10-03)
+
+The [30c Codex macOS trial](https://github.com/DavidLMS/nan-harness/actions/runs/37133477016)
+identifies two complete loopback-listener records in two processes. Revision
+`1fc6d7e5` permits at most four complete exact-endpoint records only when every
+listener process freshly descends from the original launch owner. All native
+queries share one bounded deadline, clipped to the caller's existing deadline;
+no process ownership proof is cached across actions. Malformed, foreign,
+non-loopback and excessive listener sets remain rejected. Synthetic native
+listener and deterministic parser/deadline fixtures pass; hosted acceptance
+still requires the full independent conversation and cleanup checks.
+
+The [30c Claude Windows trial](https://github.com/DavidLMS/nan-harness/actions/runs/37133479080)
+identifies one foreign overlapping window at passive attachment, with the
+original off-display foreground window still uniquely owned and no same-process
+window ahead. Revision `4fd39d86` permits passive source-editor inspection and
+the sole owned no-activate/no-z-order fit in this state. Fresh strict display,
+foreground and occlusion checks remain mandatory before input. The two pure
+Windows acquisition tests pass. This is a startup experiment; Windows and Linux
+still require platform-specific native conversation controllers before full
+qualification is possible.
+
+The [f223 Claude macOS trial](https://github.com/DavidLMS/nan-harness/actions/runs/37134065950)
+verifies input and Send in two sessions. Both independently observe a provider
+generation and completed fixture response without provider failure. The native
+assistant anchor remains absent, so neither session verifies Copy or Retry.
+Chromium's native heading Value is a numeric heading level; its name can be
+Title or Description. Revision `8c4de894` selects the exact source assistant
+prefix from those attributes on the same heading, rejects conflicting names,
+and retains marker uniqueness and row-bound control checks. Revision `03562514`
+reports a remaining action budget exhausted by the teardown reserve as Timeout,
+without extending the budget or replaying input. Pure native selection,
+transport and deadline fixtures pass.
+
+The [default-viewport Zed Linux trial](https://github.com/DavidLMS/nan-harness/actions/runs/37132548916)
+verifies input, response and the read-tool scenario in all three sessions,
+then rejects Retry before any click. Ancestor bounds are invalid geometry in
+all three; owned client-child and actual pointer checks still match.
+The [larger-viewport experiment](https://github.com/DavidLMS/nan-harness/actions/runs/37134063867)
+also fails to make Retry actionable and introduces two tool input mismatches.
+Revision `fabe93a5` restores the default viewport. A resize is not a demonstrated
+fix, and the cursor/actionability requirement is unchanged.
+
+The immutable `3b71ef65` integration passed both the complete local gate and
+[hosted Linux quality gate](https://github.com/DavidLMS/nan-harness/actions/runs/37132550745).
+The immutable `f223df0d` tree also passed the complete local gate. These quality
+results do not promote native cells: five active cells remain qualified, seven
+remain open, and Pen is deferred.
+
+The complete local gate also passed on immutable `03562514`. Its
+[Codex macOS trial](https://github.com/DavidLMS/nan-harness/actions/runs/37135593304)
+proves endpoint ownership in all three sessions, but rejects an unknown separate
+dialog before the first role click. The multi-listener correction fixes this
+acquisition boundary; it does not establish account or conversation readiness.
+Revision `7b5aa2ab` adds a passive, source-defined imported-setup title/button
+classifier. It cannot dismiss a dialog or authorize another action.
+
+The [03562514 Claude Windows trial](https://github.com/DavidLMS/nan-harness/actions/runs/37135595388)
+acquires the original window, observes one source editor, completes the sole fit
+and reaches strict startup readiness in its first session. The second session
+loses foreground before acquisition and fails cleanup; the third is not run.
+The retained-descendant cleanup was skipped when no Gui existed. Revision
+`aa6c3ceb` retains handles through the standalone native transport in that case,
+under the same hosted policy, original launcher ancestry, executable digest
+and cleanup deadline. It does not authorize terminating a name-matched process.
+The bounded holder protocol tests pass; hosted verification remains necessary.
+
+Claude's frozen response-summary implementation limits the accessible heading
+summary to 160 characters. The previous semantic word marker is at least 178
+characters. Revision `0aeb6f65` uses a 32-digit hexadecimal marker in semantic
+scenarios, preserving all 128 random bits and exact full-response clipboard
+verification. Pure fixtures confirm round-trip entropy and preservation by the
+actual frozen summary function. Its [macOS trial](https://github.com/DavidLMS/nan-harness/actions/runs/37136424228)
+still observes a completed provider response without a native response anchor;
+this correction is necessary for that summary contract but is not a sufficient
+fix. Revision `029ef1f2` distinguishes no native heading, no assistant-prefix
+heading and no marker in an assistant heading, using only the already-collected
+tree and closed failure labels. It adds no input or accessibility queries.
+
+The [12d6a0f6 Zed Linux trial](https://github.com/DavidLMS/nan-harness/actions/runs/37136660987)
+again verifies input, response and the tool scenario in all three sessions.
+The bounded passive X11 inventory reports zero mapped or unmapped owned transient
+Dialog windows in each session. The blocked-parent Dialog hypothesis is therefore
+not supported by this trial; Retry still rejects before any click. Native
+cleanup passes and the strict privacy reducer reports zero invalid events.
