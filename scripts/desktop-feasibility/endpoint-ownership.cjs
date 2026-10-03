@@ -52,30 +52,48 @@ let unixFailure='unmeasured';
 let listenerShape = null;
 function failureDetails() { return unixFailure === 'listener-shape' ? listenerShape : null; }
 function failure() { return unixFailure; }
-function descendant(pid) {
+function proofDeadline(callerDeadline) {
+  const now = Date.now();
+  if (callerDeadline !== undefined && !Number.isSafeInteger(callerDeadline)) {
+    throw new Error('native proof deadline invalid');
+  }
+  return Math.min(now + 8000, callerDeadline ?? Infinity);
+}
+function remainingTimeout(deadline) {
+  const remaining = deadline - Date.now();
+  if (remaining <= 0) throw new Error('native proof deadline expired');
+  return Math.min(2000, remaining);
+}
+function descendant(pid, callerDeadline) {
   if (process.platform === 'win32') return windowsProof('descendant', pid, Number(owner));
   unixFailure='unmeasured';
+  const deadline = process.platform === 'darwin' ? proofDeadline(callerDeadline) : undefined;
   for (let depth = 0; depth < 32 && pid > 1; depth++) {
-    if (String(pid) === owner) return true;
-    try { pid = parentPid(pid); }
+    try {
+      if (process.platform === 'darwin') remainingTimeout(deadline);
+      if (String(pid) === owner) return true;
+      pid = parentPid(pid, deadline);
+    }
     catch (error) { unixFailure='ancestor-query';throw error; }
   }
   if(unixFailure==='unmeasured')unixFailure='ancestor-unowned';
   return false;
 }
-function parentPid(pid) {
+function parentPid(pid, callerDeadline) {
   if (!Number.isSafeInteger(pid) || pid <= 1) return 0;
   if (process.platform === 'darwin') {
+    const deadline = proofDeadline(callerDeadline);
     const parent = require('node:child_process').execFileSync('/bin/ps',
-      ['-o', 'ppid=', '-p', String(pid)], { encoding: 'utf8', timeout: 2000,
+      ['-o', 'ppid=', '-p', String(pid)], { encoding: 'utf8', timeout: remainingTimeout(deadline),
         maxBuffer: 4096, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    remainingTimeout(deadline);
     if(!/^[0-9]+$/.test(parent))unixFailure='ancestor-query';
     return /^[0-9]+$/.test(parent) ? Number(parent) : 0;
   }
   const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
   return Number(stat.slice(stat.lastIndexOf(')') + 2).split(' ')[1]);
 }
-function ownedEndpoint() {
+function ownedEndpoint(callerDeadline) {
   listenerShape = null;
   if (process.platform === 'win32') return windowsProof('endpoint', Number(port), Number(owner));
   unixFailure='unmeasured';
@@ -83,11 +101,13 @@ function ownedEndpoint() {
     let stage='listener-query';
     // lsof selects listeners by port; reject wildcard/non-loopback bindings.
     try {
+      const deadline = proofDeadline(callerDeadline);
       const listing = require('node:child_process').execFileSync('/usr/sbin/lsof',
         // Recent lsof versions no longer emit the file descriptor implicitly.
         ['-nP', '-a', `-iTCP:${port}`, '-sTCP:LISTEN', '-Fpfn'],
-        { encoding: 'utf8', timeout: 2000, maxBuffer: 65536,
+        { encoding: 'utf8', timeout: remainingTimeout(deadline), maxBuffer: 65536,
           stdio: ['ignore', 'pipe', 'ignore'] });
+      remainingTimeout(deadline);
       stage='listener-shape';
       const listeners = [];
       const listenerPids = new Set();
@@ -96,10 +116,18 @@ function ownedEndpoint() {
       let shapeReason = null;
       for (const field of listing.trim().split('\n')) {
         if (/^p[0-9]+$/.test(field)) {
+          if (descriptor !== null) shapeReason ??= 'unexpected-field';
           pid = Number(field.slice(1));
+          if (!Number.isSafeInteger(pid) || pid <= 1 || pid > 2147483647) {
+            shapeReason ??= 'unexpected-field';
+          }
           descriptor = null;
         } else if (/^f[0-9]+$/.test(field)) {
+          if (descriptor !== null) shapeReason ??= 'unexpected-field';
           descriptor = Number(field.slice(1));
+          if (!Number.isSafeInteger(descriptor) || descriptor > 2147483647) {
+            shapeReason ??= 'malformed-descriptor';
+          }
         } else if (field.startsWith('n') && pid > 1 && descriptor !== null) {
           listeners.push({ pid, endpoint: field.slice(1) });
           listenerPids.add(pid);
@@ -109,13 +137,14 @@ function ownedEndpoint() {
             : field.startsWith('n') && pid > 1 ? 'missing-descriptor' : 'unexpected-field';
         }
       }
-      if (shapeReason || listeners.length !== 1
-          || listeners[0].endpoint !== `127.0.0.1:${port}`) {
+      if (descriptor !== null) shapeReason ??= 'unexpected-field';
+      if (shapeReason || listeners.length === 0 || listeners.length > 4
+          || listeners.some(listener => listener.endpoint !== `127.0.0.1:${port}`)) {
         unixFailure = shapeReason ? (listing.trim() ? 'listener-shape' : 'listener-unavailable')
           : listeners.length === 0 ? 'listener-unavailable' : 'listener-shape';
         if (unixFailure === 'listener-shape') {
           listenerShape = {
-            reason: shapeReason ?? (listeners.length > 1 ? 'multiple-listeners' : 'endpoint-mismatch'),
+            reason: shapeReason ?? (listeners.length > 4 ? 'multiple-listeners' : 'endpoint-mismatch'),
             listenerCount: listeners.length <= 4096 ? listeners.length : null,
             uniquePidCount: listenerPids.size <= 4096 ? listenerPids.size : null,
           };
@@ -123,9 +152,16 @@ function ownedEndpoint() {
         return false;
       }
       stage='ancestor-query';
-      const result=descendant(listeners[0].pid);
-      if(!result&&unixFailure==='ancestor-unowned')unixFailure='listener-unowned';
-      return result;
+      // Multiple records can be aliases or distinct sockets. No alias claim is
+      // needed: every exact endpoint must independently belong to this owner.
+      for (const listenerPid of listenerPids) {
+        if (!descendant(listenerPid, deadline)) {
+          if (unixFailure === 'ancestor-unowned') unixFailure = 'listener-unowned';
+          return false;
+        }
+      }
+      remainingTimeout(deadline);
+      return true;
     } catch { unixFailure=stage;return false; }
   }
   // Associate the LISTEN socket inode with a child of the nanh launcher.

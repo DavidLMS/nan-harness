@@ -300,16 +300,16 @@ async function run() {
       || !Number.isSafeInteger(connection.port) || connection.port <= 1024 || connection.port > 65535) {
     facts.errorCategory = 'invalid-request'; save(); return;
   }
-  const rootProof = require('./endpoint-ownership.cjs').proof(String(request.ownerPid), String(connection.port));
-  facts.launcherOwned = rootProof.descendant(connection.launcherPid);
-  if (!facts.launcherOwned) { facts.errorCategory = 'launcher-unowned'; save(); return; }
-  const ownership = require('./endpoint-ownership.cjs').proof(String(connection.launcherPid), String(connection.port));
   const trial = onboardingTrial(app, process.platform, process.env);
   const started = Date.now();
   const deadline = started + (trial ? 35000 : 25000);
   const totalDeadline = started + (trial ? 60000 : 25000);
-  while (Date.now() < deadline && !ownership.ownedEndpoint()) await new Promise(r => setTimeout(r, 250));
-  facts.endpointOwned = ownership.ownedEndpoint();
+  const rootProof = require('./endpoint-ownership.cjs').proof(String(request.ownerPid), String(connection.port));
+  facts.launcherOwned = rootProof.descendant(connection.launcherPid, deadline);
+  if (!facts.launcherOwned) { facts.errorCategory = 'launcher-unowned'; save(); return; }
+  const ownership = require('./endpoint-ownership.cjs').proof(String(connection.launcherPid), String(connection.port));
+  while (Date.now() < deadline && !ownership.ownedEndpoint(deadline)) await new Promise(r => setTimeout(r, 250));
+  facts.endpointOwned = ownership.ownedEndpoint(deadline);
   if (!facts.endpointOwned) { facts.errorCategory = 'endpoint-unowned'; save(); return; }
   const browser = await chromium.connectOverCDP(`http://127.0.0.1:${connection.port}`, { timeout: 2000, noDefaults: true });
   try {
@@ -317,7 +317,7 @@ async function run() {
     let pages = browser.contexts().flatMap(context => context.pages());
     // The debugger can listen before the application creates its first page.
     // Wait for that page, but never choose among multiple application targets.
-    while (pages.length === 0 && Date.now() < deadline && ownership.ownedEndpoint()) {
+    while (pages.length === 0 && Date.now() < deadline && ownership.ownedEndpoint(deadline)) {
       await new Promise(r => setTimeout(r, 250));
       pages = browser.contexts().flatMap(context => context.pages());
     }
@@ -338,9 +338,9 @@ async function run() {
       };
       let proof=rootProof;
       try {
-        if(!proof.descendant(connection.launcherPid)){record(proof);return false;}
+        if(!proof.descendant(connection.launcherPid,totalDeadline)){record(proof);return false;}
         proof=ownership;
-        if(!proof.ownedEndpoint()){record(proof);return false;}
+        if(!proof.ownedEndpoint(totalDeadline)){record(proof);return false;}
         return true;
       } catch(error){record(proof);throw error;}
     };
@@ -350,13 +350,13 @@ async function run() {
     let pageErrorCount = 0;
     page.on('pageerror', () => { pageErrorCount = Math.min(4096, pageErrorCount + 1); });
     const documentDeadline = Math.min(deadline, Date.now() + 10000);
-    while (Date.now() < documentDeadline && ownership.ownedEndpoint()) {
+    while (Date.now() < documentDeadline && ownership.ownedEndpoint(documentDeadline)) {
       const loaded = await page.evaluate(() => document.readyState === 'complete'
         && document.body !== null && document.querySelectorAll('button,input,textarea,[contenteditable="true"]').length > 0);
       if (loaded) break;
       await new Promise(r => setTimeout(r, 250));
     }
-    if (!ownership.ownedEndpoint()) { facts.endpointOwned = false; facts.errorCategory = 'endpoint-unowned'; save(); return; }
+    if (!ownership.ownedEndpoint(documentDeadline)) { facts.endpointOwned = false; facts.errorCategory = 'endpoint-unowned'; save(); return; }
     if (process.env.NANH_CODEX_PUBLIC_ONBOARDING !== undefined) {
       const targetReady = app === 'chatgpt-desktop'
         && await page.evaluate(() => location.protocol === 'app:' && document.readyState === 'complete');

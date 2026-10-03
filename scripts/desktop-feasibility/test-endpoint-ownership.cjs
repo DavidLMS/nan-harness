@@ -24,7 +24,7 @@ function trial(listing, parents, failure = false, details = false) {
   } };
   vm.runInNewContext(proof, context);
   const owned = context.ownedEndpoint();
-  assert(calls <= 33);
+  assert(calls <= 129);
   return details?{owned,reason:context.failure(),shape:context.failureDetails(),calls}:owned;
 }
 assert(trial('p40\nf3\nn127.0.0.1:43210\n', { 40: 30, 30: 20 }));
@@ -32,7 +32,7 @@ assert(!trial('p40\nf3\nn127.0.0.1:43210\n', { 40: 1 }));
 assert(!trial('p40\nf3\nn*:43210\n', { 40: 20 }));
 assert(!trial('p40\nf3\nn[::1]:43210\n', { 40: 20 }));
 assert(!trial('p40\nf3\nn127.0.0.1:43211\n', { 40: 20 }));
-assert(!trial('p40\nf3\nn127.0.0.1:43210\np41\nf4\nn127.0.0.1:43210\n', { 40: 20, 41: 20 }));
+assert(trial('p40\nf3\nn127.0.0.1:43210\np41\nf4\nn127.0.0.1:43210\n', { 40: 20, 41: 20 }));
 assert(!trial('p40\nf3\nn127.0.0.1:43210\n', { 40: 41, 41: 40 }));
 assert(!trial('p40\nf3\nn127.0.0.1:43210\n', { 40: 'private-invalid' }));
 assert(!trial('p40\nf3\nn127.0.0.1:43210\n', { 40: 20 }, true));
@@ -44,8 +44,7 @@ for (const [listing, reason, count, pids] of [
   ['p40\nn127.0.0.1:43210\n', 'missing-descriptor', 0, 0],
   ['p40\nf3\nxPRIVATE\nn127.0.0.1:43210\n', 'unexpected-field', 1, 1],
   ['p40\nf3\nn*:43210\n', 'endpoint-mismatch', 1, 1],
-  ['p40\nf3\nn127.0.0.1:43210\np40\nf4\nn127.0.0.1:43210\n', 'multiple-listeners', 2, 1],
-  ['p40\nf3\nn127.0.0.1:43210\np41\nf4\nn127.0.0.1:43210\n', 'multiple-listeners', 2, 2],
+  [Array.from({length:5},(_,i)=>`p${40+i}\nf3\nn127.0.0.1:43210`).join('\n'), 'multiple-listeners', 5, 5],
 ]) {
   const result = trial(listing, {40:20,41:20}, false, true);
   assert.equal(result.owned, false);
@@ -66,6 +65,52 @@ assert.equal(overflowShape.reason, 'multiple-listeners');
 assert.equal(overflowShape.listenerCount, null);
 assert.equal(overflowShape.uniquePidCount, null);
 console.log('Native macOS listener shape: closed same-query diagnostic passed');
+const twoListeners = 'p40\nf3\nn127.0.0.1:43210\np41\nf4\nn127.0.0.1:43210\n';
+assert(!trial(twoListeners, {40:20,41:1}));
+assert(!trial(twoListeners + 'f99\n', {40:20,41:20}));
+assert(!trial(twoListeners.replace('p41', 'p9007199254740993'), {40:20}));
+assert(!trial(twoListeners.replace('f4', 'f9007199254740993'), {40:20,41:20}));
+assert(!trial(twoListeners.replace('p41\nf4', 'p41\nfPRIVATE'), {40:20,41:20}));
+assert(!trial(twoListeners.replace('p41\nf4', 'p41'), {40:20,41:20}));
+assert(!trial(twoListeners.replace(/43210\n$/, '43211\n'), {40:20,41:20}));
+assert.equal(trial(twoListeners.replace('p41','p40'), {40:20}, false, true).calls, 2);
+function timedListeners(advance, callerDeadline) {
+  let now = 1000;
+  const calls = [];
+  const context = {owner:'20',port:'43210',Date:{now:()=>now},
+    process:{platform:'darwin'},require() { return {execFileSync(command,args,options) {
+      assert(options.timeout > 0 && options.timeout <= 2000);
+      calls.push({command,timeout:options.timeout});
+      now += advance;
+      return command === '/usr/sbin/lsof' ? twoListeners : '20';
+    }}; }};
+  vm.runInNewContext(proof, context);
+  return {owned:context.ownedEndpoint(callerDeadline),calls,reason:context.failure()};
+}
+assert.equal(timedListeners(1000, undefined).owned, true);
+assert.equal(timedListeners(3000, undefined).owned, false); // Same8s, not8s per PID.
+const clipped = timedListeners(500, 2200);
+assert.equal(clipped.owned, false);
+assert.equal(clipped.calls.at(-1).timeout, 200);
+assert.equal(timedListeners(0,1000).calls.length,0);
+assert.equal(timedListeners(0,'PRIVATE').calls.length,0);
+{
+  let listenerCalls = 0, parentCalls = 0;
+  const context = {owner:'20',port:'43210',process:{platform:'darwin'},require() {
+    return {execFileSync(command,args) {
+      if (command === '/usr/sbin/lsof') { listenerCalls++; return twoListeners; }
+      parentCalls++;
+      return listenerCalls === 2 && args[3] === '41' ? '1' : '20';
+    }};
+  }};
+  vm.runInNewContext(proof, context);
+  assert.equal(context.ownedEndpoint(), true);
+  assert.equal(context.ownedEndpoint(), false);
+  assert.equal(context.failure(), 'listener-unowned');
+  assert.equal(listenerCalls, 2);
+  assert.equal(parentCalls, 4); // Every distinct PID is reproved on each invocation.
+}
+console.log('Native macOS bounded owned listeners: all-owned and shared deadline passed');
 console.log('Native macOS endpoint ownership: guarded cases passed');
 
 for (const result of ['true', 'false', 'true\n', 'private unexpected value']) {
@@ -178,10 +223,10 @@ for(const [component,reason,throwing] of [
   const facts={},calls=[];
   const shape={reason:'multiple-listeners',listenerCount:2,uniquePidCount:1};
   const native=part=>({failure:()=>reason,failureDetails:()=>reason==='listener-shape'?shape:null,
-    descendant(){calls.push(part);if(component===part&&throwing)throw Error('PRIVATE');return component!==part;},
-    ownedEndpoint(){calls.push(part);if(component===part&&throwing)throw Error('PRIVATE');return component!==part;}});
+    descendant(_pid,deadline){assert.equal(deadline,123456);calls.push(part);if(component===part&&throwing)throw Error('PRIVATE');return component!==part;},
+    ownedEndpoint(deadline){assert.equal(deadline,123456);calls.push(part);if(component===part&&throwing)throw Error('PRIVATE');return component!==part;}});
   const guard=vm.runInNewContext(`(()=>{${renderer.slice(guardStart,guardEnd)}return ownerGuard;})()`,
-    {facts,connection:{launcherPid:40},rootProof:native('root'),ownership:native('listener')});
+    {facts,totalDeadline:123456,connection:{launcherPid:40},rootProof:native('root'),ownership:native('listener')});
   if(throwing)assert.throws(guard);else assert.equal(guard(),false);
   assert.equal(calls.length,component==='root'?1:2);
   assert.equal(facts.nativeOwnershipFailure,reason==='PRIVATE unknown'?undefined:reason);
