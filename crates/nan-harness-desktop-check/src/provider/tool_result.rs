@@ -50,6 +50,17 @@ enum ErrorCategory {
     Unknown,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum ErrorEnvelope {
+    SingleXmlReadWrapper,
+    SingleXmlOther,
+    PlainReadWrapper,
+    PlainOther,
+    MultipleOrIncompleteXml,
+    MixedFragments,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ToolResultObservation {
@@ -60,6 +71,7 @@ pub(crate) struct ToolResultObservation {
     shape: Shape,
     tool_error_detected: bool,
     error_category: ErrorCategory,
+    error_envelope: Option<ErrorEnvelope>,
 }
 
 impl ToolResultObservation {
@@ -72,6 +84,7 @@ impl ToolResultObservation {
             shape: Shape::Absent,
             tool_error_detected: false,
             error_category: ErrorCategory::None,
+            error_envelope: None,
         };
         let mut seen = Vec::new();
         let mut inspected = 0;
@@ -109,6 +122,7 @@ impl ToolResultObservation {
                     result.status = "limit";
                     return result;
                 }
+                let envelope = error.map(|_| observed_error_envelope(shape, &text, selected_tool));
                 seen.push((shape, text));
                 result.result_present = true;
                 result.result_count += 1;
@@ -124,6 +138,12 @@ impl ToolResultObservation {
                         } else {
                             category
                         };
+                    result.error_envelope = match (result.error_envelope, envelope) {
+                        (Some(prior), Some(current)) if prior != current => {
+                            Some(ErrorEnvelope::MixedFragments)
+                        }
+                        (_, current) => current,
+                    };
                     result.tool_error_detected = true;
                 }
             }
@@ -199,6 +219,42 @@ fn classify(
         category,
         texts,
     ))
+}
+
+fn observed_error_envelope(shape: Shape, texts: &[&str], selected: SelectedTool) -> ErrorEnvelope {
+    let text = match (shape, texts) {
+        (Shape::String, [text]) => text.strip_prefix("Tool error: ").unwrap_or(text),
+        (Shape::TextArray, ["Tool error", text]) => text,
+        _ => return ErrorEnvelope::MixedFragments,
+    }
+    .trim();
+    let read_wrapper = |body: &str| {
+        matches!(selected, SelectedTool::Read)
+            && body
+                .strip_prefix("Error calling tool (Read): ")
+                .is_some_and(|inner| !inner.starts_with("Error calling tool (Read): "))
+    };
+    if text.contains("<tool_use_error>") || text.contains("</tool_use_error>") {
+        let Some(body) = text
+            .strip_prefix("<tool_use_error>")
+            .and_then(|body| body.strip_suffix("</tool_use_error>"))
+        else {
+            return ErrorEnvelope::MultipleOrIncompleteXml;
+        };
+        if body.contains("<tool_use_error>") || body.contains("</tool_use_error>") {
+            return ErrorEnvelope::MultipleOrIncompleteXml;
+        }
+        return if read_wrapper(body.trim()) {
+            ErrorEnvelope::SingleXmlReadWrapper
+        } else {
+            ErrorEnvelope::SingleXmlOther
+        };
+    }
+    if read_wrapper(text) {
+        ErrorEnvelope::PlainReadWrapper
+    } else {
+        ErrorEnvelope::PlainOther
+    }
 }
 
 fn selected_error_category(text: &str, selected_tool: SelectedTool) -> ErrorCategory {
@@ -350,6 +406,71 @@ mod tests {
         let facts =
             ToolResultObservation::collect(&[request("tool", json!(valid))], SelectedTool::Read);
         assert!(!facts.tool_error_detected);
+    }
+
+    #[test]
+    fn error_envelope_formats_are_closed_without_changing_categories() {
+        for (body, expected) in [
+            (
+                "<tool_use_error>Error calling tool (Read): private unknown</tool_use_error>",
+                ErrorEnvelope::SingleXmlReadWrapper,
+            ),
+            (
+                "<tool_use_error>private unknown</tool_use_error>",
+                ErrorEnvelope::SingleXmlOther,
+            ),
+            (
+                "Error calling tool (Read): private unknown",
+                ErrorEnvelope::PlainReadWrapper,
+            ),
+            ("private unknown", ErrorEnvelope::PlainOther),
+            (
+                "<tool_use_error>private unknown",
+                ErrorEnvelope::MultipleOrIncompleteXml,
+            ),
+            (
+                "<tool_use_error><tool_use_error>private</tool_use_error></tool_use_error>",
+                ErrorEnvelope::MultipleOrIncompleteXml,
+            ),
+        ] {
+            let facts = ToolResultObservation::collect(
+                &[request("tool", json!(format!("Tool error: {body}")))],
+                SelectedTool::Read,
+            );
+            assert_eq!(facts.error_envelope, Some(expected));
+            assert_eq!(facts.error_category, ErrorCategory::Unknown);
+            assert!(!serde_json::to_string(&facts).unwrap().contains("private"));
+        }
+        let array = request(
+            "tool",
+            json!([
+                {"type":"text","text":"Tool error"},
+                {"type":"text","text":"<tool_use_error>private"},
+                {"type":"text","text":"</tool_use_error>"}
+            ]),
+        );
+        let facts = ToolResultObservation::collect(&[array], SelectedTool::Read);
+        assert_eq!(facts.error_envelope, Some(ErrorEnvelope::MixedFragments));
+        let facts = ToolResultObservation::collect(
+            &[request("tool", json!("plain result"))],
+            SelectedTool::Read,
+        );
+        assert_eq!(facts.error_envelope, None);
+        let facts = ToolResultObservation::collect(
+            &[request("assistant", json!("Tool error: private"))],
+            SelectedTool::Read,
+        );
+        assert_eq!(facts.error_envelope, None);
+        let facts = ToolResultObservation::collect(
+            &[request(
+                "tool",
+                json!(
+                    "Tool error: <tool_use_error>Error calling tool (Read): private</tool_use_error>"
+                ),
+            )],
+            SelectedTool::ReadFile,
+        );
+        assert_eq!(facts.error_envelope, Some(ErrorEnvelope::SingleXmlOther));
     }
 
     #[test]

@@ -610,6 +610,33 @@ class QualificationTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'zed-desktop')
 
+    def test_windows_chat_only_mode_and_capabilities_are_passive_closed(self):
+        base = dict(schemaVersion=1, mechanism='claude-windows-uia', diagnosticsOnly=True,
+                    phase='post-ready', status='observed', nativeGuardVerified=True, treeComplete=True,
+                    nodeCount=107, classicEditorCount=1, modernEditorCount=0, sendControlCount=0,
+                    startTaskControlCount=1, assistantHeadingCount=0, copyControlCount=0)
+        mode = dict(status='chat', modeGroupCount=1, chatCount=1, coworkCount=0,
+                    currentChatCount=1, currentCoworkCount=0)
+        capability = dict(status='observed', valuePattern=True, valueReadOnly=False, valueEmpty=True,
+                          password=False, keyboardFocusable=True, startTaskInvokePattern=True)
+        with tempfile.TemporaryDirectory() as root:
+            path=Path(root)/'uia.json'
+            for status in ('chat', 'missing'):
+                path.write_text(json.dumps({**base, 'currentMode': {**mode, 'status': status}}))
+                self.assertEqual(q.semantic_observations(root, 'claude-desktop')[0]['currentMode']['status'], status)
+            valid={**base, 'currentMode':mode, 'chatCapability':capability}
+            path.write_text(json.dumps(valid))
+            self.assertEqual(q.semantic_observations(root, 'claude-desktop')[0]['chatCapability'],capability)
+            for change in ({'valueEmpty':'PRIVATE'}, {'status':'changed'}, {'path':'PRIVATE'},
+                           {'valuePattern':False}, {'keyboardFocusable':None}):
+                path.write_text(json.dumps({**valid,'chatCapability':{**capability,**change}}))
+                with self.assertRaises(ValueError): q.semantic_observations(root, 'claude-desktop')
+            unknown={key:None for key in capability if key!='status'}
+            path.write_text(json.dumps({**valid,'chatCapability':{**unknown,'status':'unavailable'}}))
+            self.assertEqual(q.semantic_observations(root, 'claude-desktop')[0]['chatCapability']['status'],'unavailable')
+            path.write_text(json.dumps({**valid,'currentMode':{**mode,'status':'missing'}}))
+            with self.assertRaises(ValueError): q.semantic_observations(root, 'claude-desktop')
+
     def test_tool_result_diagnostics_are_closed_and_do_not_certify_file_read(self):
         oracle = dict(schemaVersion=1, mechanism='semantic-provider-oracle', stage='tool',
                       toolCompleted=True, toolRecordingBounded=True, toolVerified=False,
@@ -640,6 +667,32 @@ class QualificationTests(unittest.TestCase):
             self.assertEqual(q.semantic_observations(root, 'claude-desktop')[0]['toolResult'], absent)
             path.write_text(json.dumps(oracle))
             self.assertNotIn('toolResult', q.semantic_observations(root, 'claude-desktop')[0])
+
+    def test_tool_error_envelope_is_optional_closed_and_noncertifying(self):
+        oracle = dict(schemaVersion=1, mechanism='semantic-provider-oracle', stage='tool',
+                      toolCompleted=True, toolRecordingBounded=True, toolVerified=False,
+                      fixtureResponseVerified=True, failureObserved=False)
+        result = dict(selectedTool='read', resultPresent=True, resultCount=1,
+                      status='complete', shape='string', toolErrorDetected=True,
+                      errorCategory='unknown')
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'provider.json'
+            for envelope in ('single-xml-read-wrapper', 'single-xml-other', 'plain-read-wrapper',
+                             'plain-other', 'multiple-or-incomplete-xml', 'mixed-fragments'):
+                path.write_text(json.dumps({**oracle, 'toolResult': {**result, 'errorEnvelope': envelope}}))
+                public = q.semantic_observations(root, 'claude-desktop')[0]
+                self.assertEqual(public['toolResult']['errorEnvelope'], envelope)
+                self.assertFalse(public['toolVerified'])
+            for change in ({'errorEnvelope': None}, {'errorEnvelope': 'PRIVATE'},
+                           {'errorEnvelope': {}}, {'errorEnvelope': True},
+                           {'errorEnvelope': 'plain-read-wrapper', 'selectedTool': 'read-file'},
+                           {'errorEnvelope': 'plain-other', 'toolErrorDetected': False, 'errorCategory': 'none'}):
+                path.write_text(json.dumps({**oracle, 'toolResult': {**result, **change}}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'claude-desktop')
+            nonerror = {**result, 'toolErrorDetected': False, 'errorCategory': 'none', 'errorEnvelope': None}
+            path.write_text(json.dumps({**oracle, 'toolResult': nonerror}))
+            self.assertIsNone(q.semantic_observations(root, 'claude-desktop')[0]['toolResult']['errorEnvelope'])
 
     def test_provider_oracle_and_retry_tooltip_diagnostics_are_closed(self):
         with tempfile.TemporaryDirectory() as root:
@@ -2059,6 +2112,14 @@ class QualificationTests(unittest.TestCase):
                 path.write_text(json.dumps(item))
                 self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [item])
                 self.assertEqual(q.envelope('claude-desktop', 'macos', 'aarch64', 'a' * 40)['qualification'], 'unqualified')
+            for deadline in ('deadline-window', 'deadline-tree', 'deadline-focus', 'deadline-input',
+                             'deadline-press', 'deadline-copy', 'deadline-retry-ready', 'deadline-retry'):
+                item={**value, 'stage':deadline, 'submittedTurns':0, 'inputVerifiedTurns':0,
+                      'copiedResponses':0, 'retryAttempted':False}
+                path.write_text(json.dumps(item))
+                self.assertEqual(q.semantic_observations(root, 'claude-desktop'),[item])
+                path.write_text(json.dumps({**item,'stage':deadline+' PRIVATE'}))
+                with self.assertRaises(ValueError): q.semantic_observations(root,'claude-desktop')
             for phase in (None, 'before-guard', 'after-guard', 'transport', 'post-guard', 'completed'):
                 item = {**value, 'actionPhase': phase, 'transportFailure': None}
                 path.write_text(json.dumps(item))
@@ -2788,7 +2849,7 @@ class CodexStaticDialogTitleTests(unittest.TestCase):
                      sourceVersion='26.930.31730', platform='windows',
                      artifactSha256='f7b0266d6c00d4743da01d62bc82488f7ec5560c642501758119cb9885f67c87',
                      wrapperSourceSha256='5e3a36d643393af861d2009584f64289f2247928e793f1985fe12cfec803a40b',
-                     catalogSha256='dff2a1184ab65c0ad8497ea90984ccb19be01c09f6a025a8e1e9d96b3bc4f467',
+                     catalogSha256='33c7d300500d793461b578c82b09b2cc748fe5f4ef99dd44e1e1151e857d63df',
                      status='guard-rejected', titleReferenceCount=None, matchCount=None,
                      sourceTitleIds=[], sourceTitleEmpty=None, rejectionStage='title-tag')
         with tempfile.TemporaryDirectory() as root:
@@ -2813,7 +2874,7 @@ class CodexStaticDialogTitleTests(unittest.TestCase):
                      sourceVersion='26.930.41038', platform='linux',
                      artifactSha256='ee7854145554718d7239d01ea37d44f6ba1e0ba4a93f47ac097d6e0f964da47c',
                      wrapperSourceSha256='c3c9a86a6d9c3a2a8cecaf0a6a22527c69f89949cb0d8958896bc86131e9c6c9',
-                     catalogSha256='1922e550abd0c95c9190ae82478f07f1485cdc07e6c9132a16c11a3314229816',
+                     catalogSha256='8a8578475a1914678e7a76d3de03a5bba4bb44b4f44de35ad4f158418b009b2f',
                      status='matched', titleReferenceCount=1, matchCount=1,
                      sourceTitleIds=['chatgpt.global_search.modal.title'])
         with tempfile.TemporaryDirectory() as root:
@@ -2837,7 +2898,7 @@ class CodexStaticDialogTitleTests(unittest.TestCase):
                      sourceVersion='26.930.41038', platform='macos',
                      artifactSha256='f6cf4d2e9b69aeefa33adda4bcd1a2d306357f5253a1ac6049700870c28dd0c7',
                      wrapperSourceSha256='0703d0aa97450d6d21346e1c79c887a5bf9062cd0069e8251ec03748a33b6dd0',
-                     catalogSha256='cb0dad04840297918677c21b87182b4845117e90c93b414a428dabcd4d332a93',
+                     catalogSha256='858a67a053e8082f48c699afd2a9000f17d40ae3007c6a75895b1c894378d688',
                      status='matched', titleReferenceCount=1, matchCount=1,
                      sourceTitleIds=['electron.onboarding.conversationalOnboarding.skipDialog.title'])
         with tempfile.TemporaryDirectory() as root:
@@ -2847,7 +2908,7 @@ class CodexStaticDialogTitleTests(unittest.TestCase):
             windows = {**value, 'platform': 'windows', 'sourceVersion': '26.930.31730',
                        'artifactSha256': 'f7b0266d6c00d4743da01d62bc82488f7ec5560c642501758119cb9885f67c87',
                        'wrapperSourceSha256': '5e3a36d643393af861d2009584f64289f2247928e793f1985fe12cfec803a40b',
-                       'catalogSha256': 'dff2a1184ab65c0ad8497ea90984ccb19be01c09f6a025a8e1e9d96b3bc4f467'}
+                       'catalogSha256': '33c7d300500d793461b578c82b09b2cc748fe5f4ef99dd44e1e1151e857d63df'}
             path.write_text(json.dumps(windows))
             self.assertEqual(q.semantic_observations(root, 'chatgpt-desktop')[0]['platform'], 'windows')
             for key in ('artifactSha256', 'wrapperSourceSha256', 'catalogSha256'):
@@ -2870,9 +2931,12 @@ class CodexStaticDialogTitleTests(unittest.TestCase):
                         'titleReferenceCount': None if count is None else 1}
                 path.write_text(json.dumps(item))
                 self.assertEqual(q.semantic_observations(root, 'chatgpt-desktop')[0]['status'], status)
+            for identity in ('workspaceOnboarding.dialogTitle', 'work.onboarding.role.new.question'):
+                path.write_text(json.dumps({**value, 'sourceTitleIds': [identity]}))
+                self.assertEqual(q.semantic_observations(root, 'chatgpt-desktop')[0]['sourceTitleIds'], [identity])
             for change in ({'sourceVersion': '26.930.31730'}, {'text': 'PRIVATE'}, {'platform': []}, {'status': []}, {'sourceTitleIds': ['PRIVATE']},
                            {'sourceTitleIds': value['sourceTitleIds'] * 2}, {'titleReferenceCount': True},
-                           {'sourceTitleIds': ['codex.mcpTool.confirmFollowUp.widgetStateTitle']},
+                           {'sourceTitleIds': ['unadmitted.static.title']},
                            {'matchCount': True}, {'matchCount': 2}, {'artifactSha256': '0' * 64},
                            {'wrapperSourceSha256': '0' * 64}, {'catalogSha256': '0' * 64},
                            {'status': 'guard-rejected'}, {'status': 'unknown'}, {'sourceVersion': 'PRIVATE'}):

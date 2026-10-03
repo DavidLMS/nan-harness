@@ -2599,3 +2599,41 @@ Clippy pass. An earlier complete gate failed in synthetic process-fixture
 timing/exit assertions while edits and focused builds were concurrent; the
 serial checker rerun passes every assertion. A clean complete gate on the
 committed tree remains required.
+
+The clean complete gate on `3e369e31` passes locally; hosted quality-only
+[37159909557](https://github.com/DavidLMS/nan-harness/actions/runs/37159909557)
+also passes. The preceding parallel checker run exposed synthetic transport
+timing failures; the unchanged serial suite passes. Native measurements remain
+separate from these quality checks.
+
+[Claude Windows 37159781018](https://github.com/DavidLMS/nan-harness/actions/runs/37159781018)
+observes a complete 107-node owned tree, one classic editor, one Start task
+control and a unique current Chat button with Cowork absent. This establishes
+the supported Chat-only configuration. Current-mode classification now accepts
+that source-supported shape while retaining historical conservative `missing`
+receipts. Optional passive capability facts report Value/Invoke support,
+read-only/empty state, password and keyboard-focus properties after two equal
+retained-control reads and attachment/ownership guards. They authorize no input.
+
+[Claude macOS 37159782030](https://github.com/DavidLMS/nan-harness/actions/runs/37159782030)
+verifies submitted/copied responses in two sessions, then fails Read; a third
+session exhausts its native deadline. The owned MCP offer diagnostic was absent
+because it incorrectly bound the fixture to the checker worker's current
+directory. It now binds the canonical private fixture parent, with file
+identity, permissions, size and script checks preserved. Read error-envelope
+diagnostics and native deadline-phase labels are closed enums; neither changes
+the marker oracle or budgets. No session is newly qualified.
+
+[Codex Linux 37159907401](https://github.com/DavidLMS/nan-harness/actions/runs/37159907401)
+still observes an unmatched nonempty DialogTitle against the 168-title catalog.
+[Codex Windows 37159908338](https://github.com/DavidLMS/nan-harness/actions/runs/37159908338)
+now measures an unmatched title before role binding in one session; other
+sessions reject query/deadline. All these native runs pass cleanup and emit zero
+invalid diagnostic events. Exact public bundle inspection expands the catalogs
+to Linux 186, macOS 187 and Windows 192 source-bound fixed titles. Source coverage
+does not establish the identity or actionability of an observed dialog.
+
+The next Linux Claude startup trial explicitly disables Cowork through the
+exact official `2.9939.4` managed configuration. It requires the admitted release
+and artifact, GitHub-hosted Linux startup mode, and canonical private checker
+profile roots; defaults remain unchanged. This trial adds no GUI actions.

@@ -79,6 +79,14 @@ pub(crate) enum ChatTurnStage {
     ScopeHeadingAmbiguous,
     ScopePromptMismatch,
     Deadline,
+    DeadlineWindow,
+    DeadlineTree,
+    DeadlineFocus,
+    DeadlineInput,
+    DeadlinePress,
+    DeadlineCopy,
+    DeadlineRetryReady,
+    DeadlineRetry,
     ActionUncertain,
     ResponseMismatch,
     Sent,
@@ -155,6 +163,14 @@ impl ChatTurnStage {
             "turn scope-heading-ambiguous\n" => Some(Self::ScopeHeadingAmbiguous),
             "turn scope-prompt-mismatch\n" => Some(Self::ScopePromptMismatch),
             "turn deadline\n" => Some(Self::Deadline),
+            "turn deadline-window\n" => Some(Self::DeadlineWindow),
+            "turn deadline-tree\n" => Some(Self::DeadlineTree),
+            "turn deadline-focus\n" => Some(Self::DeadlineFocus),
+            "turn deadline-input\n" => Some(Self::DeadlineInput),
+            "turn deadline-press\n" => Some(Self::DeadlinePress),
+            "turn deadline-copy\n" => Some(Self::DeadlineCopy),
+            "turn deadline-retry-ready\n" => Some(Self::DeadlineRetryReady),
+            "turn deadline-retry\n" => Some(Self::DeadlineRetry),
             "turn action-uncertain\n" => Some(Self::ActionUncertain),
             "turn response-mismatch\n" => Some(Self::ResponseMismatch),
             "turn sent\n" => Some(Self::Sent),
@@ -224,6 +240,26 @@ pub(super) fn request(
 mod tests {
     use super::*;
 
+    #[test]
+    fn deadline_phases_are_terminal_closed_and_legacy_deadline_remains_valid() {
+        for phase in [
+            "deadline",
+            "deadline-window",
+            "deadline-tree",
+            "deadline-focus",
+            "deadline-input",
+            "deadline-press",
+            "deadline-copy",
+            "deadline-retry-ready",
+            "deadline-retry",
+        ] {
+            let stage = ChatTurnStage::parse(&format!("turn {phase}\n")).unwrap();
+            assert!(!stage.passive_pending());
+            assert_eq!(serde_json::to_value(stage).unwrap(), phase);
+            assert!(ChatTurnStage::parse(&format!("turn {phase} PRIVATE\n")).is_none());
+        }
+        assert!(ChatTurnStage::parse("turn deadline-private\n").is_none());
+    }
     #[test]
     fn input_boundary_failures_are_closed_terminal_receipts() {
         for (label, expected) in [

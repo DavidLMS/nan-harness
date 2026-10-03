@@ -141,6 +141,8 @@ def qualification_environment(app, facts, real_nanh, executable, inherited=None)
         raise ValueError('Zed panel zoom diagnostic is unavailable')
     if source.get('NANH_CODEX_PROJECT_POLICY') is not None and app != 'chatgpt-desktop':
         raise ValueError('Codex native project policy is unavailable')
+    if source.get('NANH_CLAUDE_LINUX_CHAT_ONLY') is not None and (app != 'claude-desktop' or source.get('RUNNER_OS') != 'Linux' or source.get('NANH_DESKTOP_QUALIFICATION_MODE') != 'startup-baseline' or source.get('NANH_CLAUDE_LINUX_CHAT_ONLY') != '1'):
+        raise ValueError('Claude Linux Chat-only trial is unavailable')
     environment = {key: value for key, value in source.items() if key in SESSION_ENV}
     if source.get('RUNNER_OS') == 'Windows':
         for key in WINDOWS_PROOF:
@@ -327,6 +329,10 @@ def run(args):
             and release.get('digest') == 'sha256:3cfddb23bf2911e05e27b4ed3856b8e795df94643b2c35b59deb317cf995bca0'
             and environment.get('NANH_DESKTOP_QUALIFICATION_MODE') == 'startup-baseline'):
         environment['NANH_CLAUDE_LINUX_SOURCE_POLICY'] = 'official-2.9939.4'
+    if os.environ.get('NANH_CLAUDE_LINUX_CHAT_ONLY') is not None:
+        if environment.get('NANH_CLAUDE_LINUX_SOURCE_POLICY') != 'official-2.9939.4':
+            raise ValueError('Claude Linux Chat-only source differs')
+        environment['NANH_CLAUDE_LINUX_CHAT_ONLY'] = '1'
     if environment.get('NANH_CODEX_PROJECT_POLICY') is not None:
         if args.app != 'chatgpt-desktop' or args.platform not in CODEX_PROJECT_RELEASES:
             raise ValueError('Codex native project trial platform differs')

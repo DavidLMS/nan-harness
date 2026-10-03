@@ -20,7 +20,7 @@ async function main() {
  const linux=require('./codex-dialog-title-catalog-linux.json');
  assert.equal(linux.sourceVersion,'26.930.41038');
  assert.equal(require('node:crypto').createHash('sha256').update(require('node:fs').readFileSync(require.resolve('./codex-dialog-title-catalog-linux.json'))).digest('hex'),helper.facts('linux').catalogSha256);
- assert.equal(new Set(linux.entries.map(e=>e.id)).size,168);
+ assert.equal(new Set(linux.entries.map(e=>e.id)).size,186);
  const lf=fixture('Global search');
  assert.equal(lf.classify({held:lf.held,entries:Object.values(Object.fromEntries(linux.entries.map(e=>[e.id,e])))}).status,'matched');
  assert.equal(helper.facts('linux').sourceVersion,'26.930.41038');
@@ -29,11 +29,23 @@ async function main() {
  assert.equal(helper.policy('chatgpt-desktop','linux',linuxEnv),true);
  assert.equal(helper.policy('chatgpt-desktop','linux',{...linuxEnv,NANH_CODEX_PROJECT_ARTIFACT_SHA256:'e0174d8d0a5f4141145458c814f3c2d863dd67e942b868785a1f5dac9cba3e16'}),false);
  const mac=require('./codex-dialog-title-catalog-macos.json');
- assert.equal(new Set(mac.entries.map(e=>e.id)).size,24);
+ assert.equal(new Set(mac.entries.map(e=>e.id)).size,187);
  assert.equal(require('node:crypto').createHash('sha256').update(require('node:fs').readFileSync(require.resolve('./codex-dialog-title-catalog-macos.json'))).digest('hex'),helper.facts('darwin').catalogSha256);
  assert.equal(helper.facts('win32').sourceVersion,'26.930.31730');
  for(const [text,id]of [['Welcome to ChatGPT','workspaceOnboarding.dialogTitle'],['What kind of work do you do?','work.onboarding.role.new.question']]) {
   const f=fixture(text);const entries=Object.values(Object.fromEntries(linux.entries.map(e=>[e.id,e])));
+  assert.equal(f.classify({held:f.held,entries}).sourceTitleIds[0],id);
+ }
+ for(const [text,id]of [['Welcome to ChatGPT','workspaceOnboarding.dialogTitle'],['What kind of work do you do?','work.onboarding.role.new.question']]) {
+  const f=fixture(text);const entries=Object.values(Object.fromEntries(mac.entries.map(e=>[e.id,e])));
+  assert.equal(f.classify({held:f.held,entries}).sourceTitleIds[0],id);
+ }
+ for(const [text,id]of [["Process details", "source.dialogTitle.processDetails"], ["Health workspace onboarding", "health.onboarding.dialogLabel"]]) {
+  const f=fixture(text);const entries=Object.values(Object.fromEntries(linux.entries.map(e=>[e.id,e])));
+  assert.equal(f.classify({held:f.held,entries}).sourceTitleIds[0],id);
+ }
+ for(const [text,id]of [["Email", "restricted.aeon.email.dialog.loadingTitle"], ["Analysis", "chatgpt.pythonExecution.analysisTitle"]]) {
+  const f=fixture(text);const entries=Object.values(Object.fromEntries(require('./codex-dialog-title-catalog-windows.json').entries.map(e=>[e.id,e])));
   assert.equal(f.classify({held:f.held,entries}).sourceTitleIds[0],id);
  }
  const excessive=fixture();assert.equal(excessive.classify({held:excessive.held,entries:Array(257).fill({id:'known',text:'fixed'})}).rejectionStage,'scope');
@@ -87,8 +99,8 @@ async function main() {
  assert.equal(new Set(catalog.entries.map(e=>e.id)).size,63);
  for(const [text,id]of [['Global search','chatgpt.global_search.modal.title'],['Import from your browser','settings.browserUse.profileImport.title'],['Import unverified extensions?','settings.browserUse.profileImport.extensionsConfirmationTitle']]) {const added=fixture(text);assert.equal(added.classify({held:added.held,entries:added.entries}).sourceTitleIds[0],id);}
  const windowsCatalog=require('./codex-dialog-title-catalog-windows.json');
- assert.equal(new Set(windowsCatalog.entries.map(e=>e.id)).size,63);
- assert.ok(windowsCatalog.entries.every(e=>catalog.entries.some(original=>original.id===e.id&&original.text===e.text)));
+ assert.equal(new Set(windowsCatalog.entries.map(e=>e.id)).size,192);
+ assert.ok(catalog.entries.filter(e=>e.platform==='windows').every(original=>windowsCatalog.entries.some(e=>original.id===e.id&&original.text===e.text)));
  d.title.textContent='Skip setup?';reads=0;
  page.evaluate=async(fn,arg)=>{reads++;return vm.runInNewContext('('+fn.toString()+')',d.context)({...arg,held:arg.held.value});};
  const windows=await helper.observe(held,'win32',opts);

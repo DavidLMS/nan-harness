@@ -6,6 +6,15 @@ static Node fixture(int parent, const char* role, const char* label, const char*
     return {nullptr, parent, role, label, current, CGRectZero, true};
 }
 int main() {
+    Request diagnostic;
+    for (const char* phase : {"deadline-window", "deadline-tree", "deadline-focus", "deadline-input",
+            "deadline-press", "deadline-copy", "deadline-retry-ready", "deadline-retry"}) {
+        diagnostic.deadline_phase=phase;
+        assert(std::string(deadline_result(diagnostic,"control",true))==phase);
+        assert(std::string(deadline_result(diagnostic,"action-uncertain",true))=="action-uncertain");
+        assert(std::string(deadline_result(diagnostic,"copied",false))=="copied");
+    }
+
     const auto parsed_budget = [](unsigned millis, const char* suffix = "") {
         std::istringstream frame("input 7 8 0 0 800 600 " + std::to_string(millis) + " 1000 9 70 - 73\n" + suffix);
         auto* original = std::cin.rdbuf(frame.rdbuf());

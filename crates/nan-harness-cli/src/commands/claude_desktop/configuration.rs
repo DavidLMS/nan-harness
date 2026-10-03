@@ -34,6 +34,10 @@ pub(super) fn apply_gateway(
     )?;
     #[cfg(feature = "desktop-qualification")]
     let chat_only = chat_only || windows_chat_only;
+    #[cfg(feature = "desktop-qualification")]
+    let linux_chat_only = qualification_linux::requested(paths)?;
+    #[cfg(feature = "desktop-qualification")]
+    let chat_only = chat_only || linux_chat_only;
     let mut documents = paths
         .documents()
         .into_iter()

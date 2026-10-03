@@ -1,11 +1,11 @@
 // Passive exact public DialogTitle literals; never an input or dismissal policy.
 const macCatalog=require('./codex-dialog-title-catalog-macos.json');
-const macCatalogSha256='cb0dad04840297918677c21b87182b4845117e90c93b414a428dabcd4d332a93';
+const macCatalogSha256='858a67a053e8082f48c699afd2a9000f17d40ae3007c6a75895b1c894378d688';
 const linuxCatalog=require('./codex-dialog-title-catalog-linux.json');
-const linuxCatalogSha256='1922e550abd0c95c9190ae82478f07f1485cdc07e6c9132a16c11a3314229816';
+const linuxCatalogSha256='8a8578475a1914678e7a76d3de03a5bba4bb44b4f44de35ad4f158418b009b2f';
 const catalog=require('./codex-dialog-title-catalog.json');
 const windowsCatalog=require('./codex-dialog-title-catalog-windows.json');
-const windowsCatalogSha256='dff2a1184ab65c0ad8497ea90984ccb19be01c09f6a025a8e1e9d96b3bc4f467';
+const windowsCatalogSha256='33c7d300500d793461b578c82b09b2cc748fe5f4ef99dd44e1e1151e857d63df';
 const pins={
  win32:{artifact:'f7b0266d6c00d4743da01d62bc82488f7ec5560c642501758119cb9885f67c87',wrapper:'5e3a36d643393af861d2009584f64289f2247928e793f1985fe12cfec803a40b',runner:'Windows'},
  linux:{artifact:'ee7854145554718d7239d01ea37d44f6ba1e0ba4a93f47ac097d6e0f964da47c',wrapper:'c3c9a86a6d9c3a2a8cecaf0a6a22527c69f89949cb0d8958896bc86131e9c6c9',runner:'Linux'},

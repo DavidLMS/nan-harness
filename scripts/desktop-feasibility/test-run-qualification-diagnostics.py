@@ -68,5 +68,28 @@ class Publication(unittest.TestCase):
             self.assertEqual(published['invalidEvents'], 0)
 
 
+class LinuxChatPolicy(unittest.TestCase):
+    def test_chat_trial_requires_hosted_linux_startup_and_waits_for_release_admission(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = dict(GITHUB_ACTIONS='true', RUNNER_ENVIRONMENT='github-hosted',
+                          RUNNER_OS='Linux', NANH_DESKTOP_QUALIFICATION_MODE='startup-baseline',
+                          NANH_CLAUDE_LINUX_CHAT_ONLY='1')
+
+            def environment(values=source, app='claude-desktop'):
+                return runner.qualification_environment(app, root, root / 'nanh', root / 'claude', values)
+
+            # The flag is forwarded only after run() admits the exact release.
+            self.assertNotIn('NANH_CLAUDE_LINUX_CHAT_ONLY', environment())
+            for change in ({'RUNNER_OS': 'macOS'}, {'GITHUB_ACTIONS': 'false'},
+                           {'RUNNER_ENVIRONMENT': 'self-hosted'},
+                           {'NANH_DESKTOP_QUALIFICATION_MODE': 'renderer'},
+                           {'NANH_CLAUDE_LINUX_CHAT_ONLY': '0'}):
+                with self.assertRaises(ValueError):
+                    environment({**source, **change})
+            with self.assertRaises(ValueError):
+                environment(app='chatgpt-desktop')
+
+
 if __name__ == '__main__':
     unittest.main()

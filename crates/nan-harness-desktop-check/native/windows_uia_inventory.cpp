@@ -1,5 +1,6 @@
 #include "uia_request_frame.hpp"
 #include "uia_current_mode.hpp"
+#include "uia_chat_capability.hpp"
 #include "uia_attachment.hpp"
 #include "uia_process_identity.hpp"
 #include "uia_process_ancestry.hpp"
@@ -61,6 +62,9 @@ struct Collection {
         std::vector<ComPtr<IUIAutomationElement>> groups;
         bool available = true;
     };
+    std::vector<ComPtr<IUIAutomationElement>> classic_controls, start_controls;
+    const char* capability_status = "unavailable";
+    UiaChatCapability capability;
     ModeSample initial_mode;
     const char* mode_status = "unavailable";
     UiaModeCounts mode_counts;
@@ -197,6 +201,70 @@ struct Collection {
         mode_status = uia_mode_status(first.counts, true, unchanged);
         if (unchanged) mode_counts = first.counts;
     }
+    bool source_control(IUIAutomationElement* element, int expected_type, const wchar_t* expected_name,
+                        std::array<long,4>& bounds, bool& enabled) {
+        if (!within()) return false;
+        int type=0; BOOL offscreen=TRUE, active=FALSE; RECT rect{}; BSTR name=nullptr;
+        if (FAILED(element->get_CurrentControlType(&type)) || type!=expected_type
+            || FAILED(element->get_CurrentName(&name))) { if(name) SysFreeString(name); return false; }
+        const bool matches=name && SysStringLen(name)<=128 && std::wstring(name,SysStringLen(name))==expected_name;
+        if(name) { SecureZeroMemory(name,SysStringLen(name)*sizeof(wchar_t)); SysFreeString(name); }
+        if (!matches || FAILED(element->get_CurrentIsOffscreen(&offscreen)) || offscreen
+            || FAILED(element->get_CurrentIsEnabled(&active))
+            || FAILED(element->get_CurrentBoundingRectangle(&rect)) || !contains(request.bounds,rect)
+            || !within()) return false;
+        bounds={rect.left,rect.top,rect.right,rect.bottom}; enabled=active;
+        return true;
+    }
+    bool read_capability(IUIAutomationElement* editor, IUIAutomationElement* start,
+                         UiaChatCapability& result) {
+        if (!within()) return false;
+        if (!source_control(editor,UIA_EditControlTypeId,L"Write your prompt to Claude",result.editor_bounds,result.editor_enabled)
+            || !result.editor_enabled
+            || !source_control(start,UIA_ButtonControlTypeId,L"Start task",result.start_bounds,result.start_enabled)) return false;
+        BOOL password=TRUE, keyboard=FALSE;
+        if (FAILED(editor->get_CurrentIsPassword(&password))
+            || FAILED(editor->get_CurrentIsKeyboardFocusable(&keyboard)) || !within()) return false;
+        result.password=password; result.keyboard_focusable=keyboard;
+        ComPtr<IUIAutomationValuePattern> value;
+        HRESULT queried=editor->GetCurrentPatternAs(UIA_ValuePatternId, IID_PPV_ARGS(&value));
+        if (FAILED(queried) && queried != UIA_E_NOTSUPPORTED) return false;
+        result.value_pattern=value.Get() != nullptr;
+        if (value) {
+            BOOL read_only=TRUE; BSTR text=nullptr;
+            if (FAILED(value->get_CurrentIsReadOnly(&read_only))) return false;
+            HRESULT read=value->get_CurrentValue(&text);
+            const unsigned length=text ? SysStringLen(text) : 0;
+            if (text) { SecureZeroMemory(text,length*sizeof(wchar_t)); SysFreeString(text); }
+            if (FAILED(read) || length>65536 || !within()) return false;
+            result.read_only=read_only; result.value_empty=length==0;
+        }
+        ComPtr<IUIAutomationInvokePattern> invoke;
+        queried=start->GetCurrentPatternAs(UIA_InvokePatternId, IID_PPV_ARGS(&invoke));
+        if (FAILED(queried) && queried != UIA_E_NOTSUPPORTED) return false;
+        result.invoke_pattern=invoke.Get() != nullptr;
+        return uia_chat_capability_valid(result) && within();
+    }
+    void observe_capability(IUIAutomationElement* root) {
+        if (std::string(mode_status)=="unavailable" || std::string(mode_status)=="changed") {
+            capability_status=mode_status; return;
+        }
+        const bool chat=std::string(mode_status)=="chat";
+        capability_status=uia_chat_capability_status(static_cast<unsigned>(classic_controls.size()),static_cast<unsigned>(start_controls.size()),chat,true,true);
+        if (std::string(capability_status)!="observed") return;
+        capability_status="unavailable";
+        const auto editor=classic_controls.front(), start=start_controls.front();
+        const auto attached=[&] { return mode_attached(editor.Get(),root) && mode_attached(start.Get(),root); };
+        UiaChatCapability first,second;
+        if (!guard() || !attached() || !read_capability(editor.Get(),start.Get(),first)
+            || !attached() || !guard() || !read_capability(editor.Get(),start.Get(),second)
+            || !attached() || !guard()) return;
+        ComPtr<IUIAutomationElement> fresh; BOOL same=FALSE;
+        if (FAILED(automation->ElementFromHandle(request.window,&fresh)) || !fresh
+            || FAILED(automation->CompareElements(root,fresh.Get(),&same)) || !within()) return;
+        capability_status=uia_chat_capability_status(1,1,chat,true,same && first==second);
+        if (std::string(capability_status)=="observed") capability=first;
+    }
     bool retained_identity() const {
         std::vector<UiaRetainedIdentity> identities;
         for (const auto& child : retained_children) identities.push_back(child.identity);
@@ -324,9 +392,11 @@ struct Collection {
             initial_mode.available = false;
         if(type==UIA_EditControlTypeId && !offscreen && enabled) {
             classic+=text==L"Write your prompt to Claude";modern+=text==L"Message";
+            if(text==L"Write your prompt to Claude") classic_controls.emplace_back(element);
         }
         if(type==UIA_ButtonControlTypeId && !offscreen) {
             sends+=text==L"Send message";starts+=text==L"Start task";copies+=text==L"Copy";
+            if(text==L"Start task") start_controls.emplace_back(element);
         }
         if(type==UIA_TextControlTypeId) {
             VARIANT heading;VariantInit(&heading);
@@ -370,6 +440,15 @@ int windows_claude_uia_inventory() {
             else std::cout << ' ' << collection.mode_counts.groups << ' ' << collection.mode_counts.chat
                 << ' ' << collection.mode_counts.cowork << ' ' << collection.mode_counts.current_chat
                 << ' ' << collection.mode_counts.current_cowork;
+            std::cout << " capability " << collection.capability_status;
+            if (std::string(collection.capability_status)!="observed") std::cout << " - - - - - -";
+            else {
+                const auto& c=collection.capability;
+                const auto optional=[](std::optional<bool> value) { return value ? (*value ? "1" : "0") : "-"; };
+                std::cout << ' ' << c.value_pattern << ' ' << optional(c.read_only)
+                    << ' ' << optional(c.value_empty) << ' ' << c.password
+                    << ' ' << c.keyboard_focusable << ' ' << c.invoke_pattern;
+            }
         }
         std::cout<<'\n';return std::cout?0:4;
     };
@@ -378,7 +457,7 @@ int windows_claude_uia_inventory() {
     if(FAILED(initialized)) {collection.stage="com";return emit(false);}
     struct Uninitialize {
         Collection& collection;
-        ~Uninitialize(){collection.held.clear();collection.walker.Reset();collection.automation.Reset();CoUninitialize();}
+        ~Uninitialize(){collection.classic_controls.clear();collection.start_controls.clear();collection.held.clear();collection.walker.Reset();collection.automation.Reset();CoUninitialize();}
     } uninitialize{collection};
     ComPtr<IUIAutomation2> automation;
     if(FAILED(CoCreateInstance(CLSID_CUIAutomation8,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&automation)))
@@ -393,6 +472,7 @@ int windows_claude_uia_inventory() {
         collection.stage="root-replaced";return emit(false);
     }
     collection.observe_mode(fresh_root.Get());
+    collection.observe_capability(fresh_root.Get());
     if(!collection.guard()) return emit(false);
     return emit(true);
 }

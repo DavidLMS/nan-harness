@@ -44,7 +44,7 @@ inline const char* uia_mode_status(const UiaModeCounts& counts, bool available, 
     if (!unchanged) return "changed";
     if (counts.groups > 1 || counts.chat > 1 || counts.cowork > 1
         || counts.current_chat + counts.current_cowork > 1) return "ambiguous";
-    if (counts.groups != 1 || counts.chat != 1 || counts.cowork != 1
+    if (counts.groups != 1 || counts.chat + counts.cowork == 0
         || counts.current_chat + counts.current_cowork != 1) return "missing";
     return counts.current_chat ? "chat" : "cowork";
 }

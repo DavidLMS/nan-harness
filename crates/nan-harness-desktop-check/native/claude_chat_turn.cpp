@@ -23,6 +23,7 @@ struct Request {
     std::uint64_t cutoff = 0;
     CGRect bounds = CGRectZero;
     Clock::time_point deadline;
+    mutable const char* deadline_phase = "deadline-window";
     ~Request() { for (auto value : {&prompt, &marker, &sentinel}) std::fill(value->begin(), value->end(), '\0'); }
 };
 static bool decode(const std::string& hex, std::string& result) {
@@ -280,6 +281,7 @@ static bool key(CGKeyCode code, bool command) {
     return true;
 }
 static const char* press(const Request& request, const Node& node, const char* success) {
+    request.deadline_phase = "deadline-press";
     if (!target(node, request) || !owned(request)) return "control";
     Tree fresh;
     if (!fresh.collect(request) || !retained(fresh, node) || !owned(request)) return "control";
@@ -365,9 +367,12 @@ static bool settle_composer_focus(Query query, Within within_deadline, Pause pau
     return false;
 }
 static bool wait_focused_composer(const Request& request, const Node& control) {
-    return settle_composer_focus([&] { return focused_composer(request, control); },
+    request.deadline_phase = "deadline-focus";
+    const bool focused = settle_composer_focus([&] { return focused_composer(request, control); },
         [&] { return within(request); },
         [] { std::this_thread::sleep_for(std::chrono::milliseconds(20)); });
+    if (focused) request.deadline_phase = "deadline-input";
+    return focused;
 }
 static const char* input(const Request& request, const Tree& tree) {
     if (!chat(tree)) return "mode";
@@ -467,8 +472,12 @@ static const char* action(const Request& request, const Tree& tree) {
     if (!retry && !clipboard_write(request.sentinel)) return "response-mismatch";
     const char* result = press(request, tree.nodes[index], retry ? "retried" : "copied");
     if (std::string(result) != "copied") return result;
+    request.deadline_phase = "deadline-copy";
     while (within(request) && !clipboard_matches(request.marker)) std::this_thread::sleep_for(std::chrono::milliseconds(20));
     return clipboard_matches(request.marker) && owned(request) ? "copied" : "response-mismatch";
+}
+static const char* deadline_result(const Request& request, const char* stage, bool expired) {
+    return expired && std::string(stage) != "action-uncertain" ? request.deadline_phase : stage;
 }
 } // namespace
 int claude_chat_turn() {
@@ -478,9 +487,17 @@ int claude_chat_turn() {
         if (request(value)) {
             Tree tree;
             if (!owned(value)) stage = "window";
-            else if (!tree.collect(value)) stage = tree.failure ? tree.failure : "tree-query";
-            else stage = input_mode(value.mode) ? input(value, tree) : action(value, tree);
-            if (!within(value) && std::string(stage) != "action-uncertain") stage = "deadline";
+            else {
+                value.deadline_phase = "deadline-tree";
+                if (!tree.collect(value)) stage = tree.failure ? tree.failure : "tree-query";
+                else {
+                    value.deadline_phase = input_mode(value.mode) ? "deadline-input"
+                        : value.mode == "copy" ? "deadline-copy"
+                        : value.mode == "retry-ready" ? "deadline-retry-ready" : "deadline-retry";
+                    stage = input_mode(value.mode) ? input(value, tree) : action(value, tree);
+                }
+            }
+            stage = deadline_result(value, stage, !within(value));
         }
         std::cout << "turn " << stage << '\n';
         return std::cout ? 0 : 5;

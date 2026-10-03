@@ -561,14 +561,7 @@ fn owned_read_fixture_policy(fixture: &Path) -> bool {
         }
     }
     let valid = || -> Option<()> {
-        let workspace = std::env::current_dir().ok()?.canonicalize().ok()?;
-        if fixture != workspace.join("read-target.txt")
-            || fixture.canonicalize().ok()?.as_path() != fixture
-        {
-            return None;
-        }
-        let (file, _) = nan_harness_private_fs::open_private_read(fixture).ok()?;
-        if file.metadata().ok()?.len() > 4096 {
+        if !owned_read_fixture_workspace(fixture) {
             return None;
         }
         for key in ["NANH_CLAUDE_MCP_SCRIPT", "NANH_CLAUDE_MCP_PYTHON"] {
@@ -598,10 +591,76 @@ fn owned_read_fixture_policy(fixture: &Path) -> bool {
     valid().is_some()
 }
 
+#[cfg(any(target_os = "macos", all(test, unix)))]
+fn owned_read_fixture_workspace(fixture: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt as _;
+    let valid = || -> Option<()> {
+        let workspace = fixture.parent()?;
+        if !workspace.is_absolute()
+            || fixture.file_name()? != "read-target.txt"
+            || workspace.canonicalize().ok()?.as_path() != workspace
+            || fixture.canonicalize().ok()?.as_path() != fixture
+        {
+            return None;
+        }
+        let directory = std::fs::symlink_metadata(workspace).ok()?;
+        let entry = std::fs::symlink_metadata(fixture).ok()?;
+        if !directory.is_dir()
+            || directory.mode() & 0o077 != 0
+            || !entry.is_file()
+            || entry.nlink() != 1
+            || entry.mode() & 0o077 != 0
+            || directory.uid() != entry.uid()
+            || entry.len() > 4096
+        {
+            return None;
+        }
+        let (file, _) = nan_harness_private_fs::open_private_read(fixture).ok()?;
+        let opened = file.metadata().ok()?;
+        (opened.dev() == entry.dev() && opened.ino() == entry.ino()).then_some(())
+    };
+    valid().is_some()
+}
+
 #[cfg(test)]
 mod owned_fixture_tests {
     use super::owned_read_fixture_count;
     use serde_json::json;
+    #[cfg(unix)]
+    #[test]
+    fn fixture_binds_private_parent_independently_of_worker_current_directory() {
+        use super::owned_read_fixture_workspace;
+        use std::io::Write as _;
+        use std::os::unix::fs::{PermissionsExt as _, symlink};
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path().canonicalize().unwrap().join("workspace");
+        nan_harness_private_fs::create_private_dir(&root).unwrap();
+        let fixture = root.join("read-target.txt");
+        nan_harness_private_fs::open_private_new(&fixture)
+            .unwrap()
+            .write_all(b"fixture")
+            .unwrap();
+        assert_ne!(std::env::current_dir().unwrap(), root);
+        assert!(owned_read_fixture_workspace(&fixture));
+        let wrong_name = root.join("different.txt");
+        nan_harness_private_fs::open_private_new(&wrong_name).unwrap();
+        assert!(!owned_read_fixture_workspace(&wrong_name));
+        let alias = temporary.path().join("alias");
+        symlink(&root, &alias).unwrap();
+        assert!(!owned_read_fixture_workspace(
+            &alias.join("read-target.txt")
+        ));
+        std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(!owned_read_fixture_workspace(&fixture));
+        std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let link = root.join("hard-link");
+        std::fs::hard_link(&fixture, &link).unwrap();
+        assert!(!owned_read_fixture_workspace(&fixture));
+        std::fs::remove_file(link).unwrap();
+        std::fs::write(&fixture, vec![b'x'; 4097]).unwrap();
+        assert!(!owned_read_fixture_workspace(&fixture));
+    }
+
     #[test]
     fn exact_fixture_offer_is_counted_without_selecting_aliases() {
         let request = json!({"tools":[

@@ -52,7 +52,7 @@ pub(super) fn parse(wire: &str) -> Option<serde_json::Value> {
         return None;
     }
     let words = line.split(' ').collect::<Vec<_>>();
-    if !matches!(words.len(), 9 | 16) || words[0] != "uia" {
+    if !matches!(words.len(), 9 | 16 | 24) || words[0] != "uia" {
         return None;
     }
     let status = words[1];
@@ -79,8 +79,61 @@ pub(super) fn parse(wire: &str) -> Option<serde_json::Value> {
     for (key, count) in COUNT_KEYS.into_iter().zip(numbers) {
         value[key] = count.into();
     }
-    if words.len() == 16 {
-        value["currentMode"] = parse_mode(&words[9..], numbers_node_count(&value)?)?;
+    if words.len() >= 16 {
+        value["currentMode"] = parse_mode(&words[9..16], numbers_node_count(&value)?)?;
+    }
+    if words.len() == 24 {
+        value["chatCapability"] = parse_capability(&words[16..], &value)?;
+    }
+    Some(value)
+}
+fn parse_capability(words: &[&str], inventory: &serde_json::Value) -> Option<serde_json::Value> {
+    const KEYS: [&str; 6] = [
+        "valuePattern",
+        "valueReadOnly",
+        "valueEmpty",
+        "password",
+        "keyboardFocusable",
+        "startTaskInvokePattern",
+    ];
+    if words.len() != 8
+        || words[0] != "capability"
+        || !["observed", "missing", "ambiguous", "unavailable", "changed"].contains(&words[1])
+    {
+        return None;
+    }
+    let observed = words[1] == "observed";
+    let mut value = serde_json::json!({"status":words[1]});
+    for (key, word) in KEYS.into_iter().zip(&words[2..]) {
+        value[key] = match *word {
+            "-" => serde_json::Value::Null,
+            "0" if observed => false.into(),
+            "1" if observed => true.into(),
+            _ => return None,
+        };
+    }
+    if observed {
+        if inventory["currentMode"]["status"] != "chat"
+            || inventory["classicEditorCount"] != 1
+            || inventory["startTaskControlCount"] != 1
+            || [
+                "valuePattern",
+                "password",
+                "keyboardFocusable",
+                "startTaskInvokePattern",
+            ]
+            .iter()
+            .any(|key| !value[key].is_boolean())
+        {
+            return None;
+        }
+        let readable = value["valuePattern"] == true;
+        if ["valueReadOnly", "valueEmpty"]
+            .iter()
+            .any(|key| value[key].is_boolean() != readable)
+        {
+            return None;
+        }
     }
     Some(value)
 }
@@ -138,14 +191,17 @@ fn parse_mode(words: &[&str], node_count: usize) -> Option<serde_json::Value> {
     }
     let expected = if counts[0] > 1 || counts[1] > 1 || counts[2] > 1 || counts[3] + counts[4] > 1 {
         "ambiguous"
-    } else if counts[0] != 1 || counts[1] != 1 || counts[2] != 1 || counts[3] + counts[4] != 1 {
+    } else if counts[0] != 1 || counts[1] + counts[2] == 0 || counts[3] + counts[4] != 1 {
         "missing"
     } else if counts[3] == 1 {
         "chat"
     } else {
         "cowork"
     };
-    if status != expected {
+    let legacy_missing = status == "missing"
+        && matches!(expected, "chat" | "cowork")
+        && (counts[1] == 0 || counts[2] == 0);
+    if status != expected && !legacy_missing {
         return None;
     }
     for (key, count) in KEYS.into_iter().zip(counts) {
@@ -156,6 +212,30 @@ fn parse_mode(words: &[&str], node_count: usize) -> Option<serde_json::Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn chat_only_and_passive_capabilities_preserve_legacy_protocol() {
+        for mode in ["chat", "missing"] {
+            assert!(
+                parse(&format!(
+                    "uia observed 20 1 0 0 1 0 0 mode {mode} 1 1 0 1 0\n"
+                ))
+                .is_some()
+            );
+        }
+        let prefix = "uia observed 20 1 0 0 1 0 0 mode chat 1 1 0 1 0";
+        let value = parse(&format!("{prefix} capability observed 1 0 1 0 1 1\n")).unwrap();
+        assert_eq!(value["chatCapability"]["valueEmpty"], true);
+        assert!(parse(&format!("{prefix} capability observed 0 - - 0 1 1\n")).is_some());
+        assert!(parse(&format!("{prefix} capability unavailable - - - - - -\n")).is_some());
+        for wire in [
+            "observed 0 0 1 0 1 1",
+            "observed 1 - 1 0 1 1",
+            "changed 1 0 1 0 1 1",
+            "observed 1 0 1 0 1 PRIVATE",
+        ] {
+            assert!(parse(&format!("{prefix} capability {wire}\n")).is_none());
+        }
+    }
     #[test]
     fn current_mode_is_optional_closed_and_never_partial() {
         let value = parse("uia observed 20 1 0 0 1 0 0 mode chat 1 1 1 1 0\n").unwrap();
