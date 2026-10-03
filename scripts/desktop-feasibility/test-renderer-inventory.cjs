@@ -60,7 +60,7 @@ console.log('Renderer inventory: closed startup headings passed');
 (async () => {
   let clock=0;
   const helper=vm.runInNewContext(`(() => { ${source.slice(timingStart,timingEnd)}
-    return {observeMainAux,correlationScope,correlationIdentity,captureCorrelationMain,bindCorrelationMain,heldMainGuard}; })()`,
+    return {observeMainAux,correlationScope,correlationIdentity,captureCorrelationMain,bindCorrelationMain,heldMainGuard,initialMainFacts,initialMainRoute}; })()`,
     {Date:{now:()=>clock},setTimeout,clearTimeout,URL});
   const empty={roleLegend:0,roleRadios:0,engineering:0,dialog:0,quickChatComposer:0,editable:0};
   function fixture() {
@@ -133,6 +133,22 @@ console.log('Renderer inventory: closed startup headings passed');
     detach:async()=>{detached++;}})}),evaluate:async()=>({counts:empty,focused:false,mainScope:false})};
   clock=0;const identity=await helper.correlationIdentity(page,1000);
   assert.equal(identity.loader,'private-loader');assert.equal(detached,1);
+  const closed=helper.initialMainFacts();
+  const soleBrowser={contexts:()=>[{pages:()=>[page]}]};
+  assert.ok(await helper.captureCorrelationMain(page,soleBrowser,()=>true,1000,
+    helper.correlationIdentity,async ms=>{clock+=ms;},closed));
+  assert.equal(closed.status,'captured');assert.equal(closed.route,'primary');
+  assert.equal(closed.targetPresent,true);assert.equal(closed.framePresent,true);
+  assert.equal(closed.loaderPresent,true);assert.equal(JSON.stringify(closed).includes('private-'),false);
+  assert.equal(helper.initialMainRoute('app://-/index.html?initialRoute=PRIVATE_PATH'),'primary-query');
+  assert.equal(helper.initialMainRoute('app://-/index.html#PRIVATE'),'primary-fragment');
+  assert.equal(helper.initialMainRoute('https://private.invalid/PRIVATE'),'other');
+  const rejected=helper.initialMainFacts();
+  const queryPage={url:()=> 'app://-/index.html?initialRoute=PRIVATE_PATH'};
+  assert.equal(await helper.captureCorrelationMain(queryPage,{contexts:()=>[{pages:()=>[queryPage]}]},
+    ()=>true,1000,async()=>{throw Error('no query permitted');},async()=>{},rejected),null);
+  assert.equal(rejected.status,'route-rejected');assert.equal(rejected.route,'primary-query');
+  assert.equal(JSON.stringify(rejected).includes('PRIVATE'),false);
   // Capture full immutable identity while loading/sole, without evaluating
   // source DOM. Confirm only after readiness and the source-known aux appears.
   f=fixture();f.setPages([f.main]);let ready=false,scopeQueries=0;

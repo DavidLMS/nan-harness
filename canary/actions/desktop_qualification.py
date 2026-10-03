@@ -912,7 +912,7 @@ def semantic_observations(directory, app):
             record.update({key: value[key] for key in fields - {'schemaVersion', 'mechanism'}})
         elif mechanism == 'renderer-inventory':
             fields = set('schemaVersion mechanism diagnosticsOnly app endpointOwned launcherOwned attached pageCount textareaCount editableCount sendCount retryCount newThreadCount loginCount dialogCount errorCategory'.split())
-            if set(value) - {'documentState', 'startupScreen', 'landingCounts', 'onboardingCounts', 'publicOnboarding', 'mainAuxCorrelation', 'codexSession'} != fields or value['app'] != app or value['diagnosticsOnly'] is not True:
+            if set(value) - {'documentState', 'startupScreen', 'landingCounts', 'onboardingCounts', 'publicOnboarding', 'mainAuxCorrelation', 'codexSession', 'initialMainBinding'} != fields or value['app'] != app or value['diagnosticsOnly'] is not True:
                 raise ValueError('invalid renderer inventory identity')
             for key in ('endpointOwned', 'launcherOwned', 'attached'):
                 flag(record, value, key)
@@ -930,6 +930,23 @@ def semantic_observations(directory, app):
                         or any(type(item) is not int or not 0 <= item <= 4096 for item in counts.values())):
                     raise ValueError('invalid renderer onboarding counts')
                 record['onboardingCounts'] = counts
+            if 'initialMainBinding' in value:
+                binding = value['initialMainBinding']
+                flags = {'targetPresent', 'framePresent', 'loaderPresent'}
+                if (app != 'chatgpt-desktop' or type(binding) is not dict
+                        or set(binding) != flags | {'status', 'route'}
+                        or any(type(binding[key]) is not bool for key in flags)
+                        or type(binding['status']) is not str or binding['status'] not in {
+                            'unmeasured', 'captured', 'deadline', 'ownership-lost', 'page-count',
+                            'route-rejected', 'identity-query-failed', 'identity-rejected',
+                            'identity-changed', 'query-failed'}
+                        or type(binding['route']) is not str or binding['route'] not in {
+                            'unmeasured', 'blank', 'primary', 'primary-query',
+                            'primary-fragment', 'other-app', 'other'}
+                        or binding['status'] == 'captured' and (
+                            binding['route'] != 'primary' or not all(binding[key] for key in flags))):
+                    raise ValueError('invalid Codex initial main binding')
+                record['initialMainBinding'] = binding
             if 'mainAuxCorrelation' in value:
                 record['mainAuxCorrelation'] = main_aux_correlation(value['mainAuxCorrelation'], app)
             if 'codexSession' in value:

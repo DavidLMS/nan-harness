@@ -52,7 +52,7 @@ function correlationScope() {
       editable:cap(all('textarea,[contenteditable="true"],input:not([type="radio"]):not([type="checkbox"]):not([type="hidden"])'))},
     mainScope,focused:document.hasFocus()};
 }
-async function correlationIdentity(page, deadline, includeScope=true) {
+async function correlationIdentity(page, deadline, includeScope=true, diagnostic=null) {
   let session;
   const bounded=async promise=>{
     const remaining=deadline-Date.now();if(remaining<=0)throw new Error('deadline');
@@ -64,6 +64,11 @@ async function correlationIdentity(page, deadline, includeScope=true) {
     const target=await bounded(session.send('Target.getTargetInfo'));
     const tree=await bounded(session.send('Page.getFrameTree'));
     const frame=tree.frameTree?.frame;
+    if(diagnostic) {
+      diagnostic.targetPresent=typeof target.targetInfo?.targetId==='string'&&target.targetInfo.targetId.length>0;
+      diagnostic.framePresent=typeof frame?.id==='string'&&frame.id.length>0;
+      diagnostic.loaderPresent=typeof frame?.loaderId==='string'&&frame.loaderId.length>0;
+    }
     if(typeof target.targetInfo?.targetId!=='string'||!target.targetInfo.targetId
       ||!frame||typeof frame.id!=='string'||!frame.id||typeof frame.url!=='string'
       ||typeof frame.loaderId!=='string'||!frame.loaderId)throw new Error('identity');
@@ -82,8 +87,22 @@ function officialInitialMain(identity) {
     &&typeof identity.loader==='string'&&identity.loader.length>0
     &&identity.url==='app://-/index.html'&&identity.frameUrl===identity.url&&identity.fragment==='';
 }
+function initialMainFacts() {
+  return {status:'unmeasured',route:'unmeasured',targetPresent:false,framePresent:false,loaderPresent:false};
+}
+function initialMainRoute(url) {
+  if(url===''||url==='about:blank')return 'blank';
+  try {
+    const parsed=new URL(url);
+    if(parsed.protocol!=='app:')return 'other';
+    if(parsed.host!=='-'||parsed.pathname!=='/index.html')return 'other-app';
+    if(parsed.hash)return 'primary-fragment';
+    return parsed.search?'primary-query':'primary';
+  } catch{return 'other';}
+}
 async function captureCorrelationMain(page,browser,guard,deadline,identity=correlationIdentity,
-  pause=ms=>new Promise(resolve=>setTimeout(resolve,ms))) {
+  pause=ms=>new Promise(resolve=>setTimeout(resolve,ms)),diagnostic=null) {
+  const stop=status=>{if(diagnostic)diagnostic.status=status;return null;};
   try {
     const commitDeadline=Math.min(deadline,Date.now()+10000);
     let held=null;
@@ -91,26 +110,32 @@ async function captureCorrelationMain(page,browser,guard,deadline,identity=corre
     // Wait only before binding; once bound, a reload never grants a new identity.
     while(Date.now()<commitDeadline&&guard()) {
       const pages=browser.contexts().flatMap(c=>c.pages());
-      if(pages.length!==1||pages[0]!==page)return null;
+      if(pages.length!==1||pages[0]!==page)return stop('page-count');
       const url=page.url();
-      if(url!==''&&url!=='about:blank'&&url!=='app://-/index.html')return null;
+      if(diagnostic)diagnostic.route=initialMainRoute(url);
+      if(url!==''&&url!=='about:blank'&&url!=='app://-/index.html')return stop('route-rejected');
       if(url==='app://-/index.html') {
-        try { held=await identity(page,commitDeadline,false); } catch { held=null; }
+        try { held=await identity(page,commitDeadline,false,diagnostic); } catch { held=null;if(diagnostic)diagnostic.status='identity-query-failed'; }
         if(held) {
-          if(!officialInitialMain(held))return null;
+          if(!officialInitialMain(held))return stop('identity-rejected');
           break;
         }
       }
       await pause(Math.min(50,Math.max(0,commitDeadline-Date.now())));
     }
-    if(!held||Date.now()>=commitDeadline||!guard())return null;
+    if(!guard())return stop('ownership-lost');
+    if(!held||Date.now()>=commitDeadline)return stop('deadline');
     const between=browser.contexts().flatMap(c=>c.pages());
-    if(between.length!==1||between[0]!==page)return null;
+    if(between.length!==1||between[0]!==page)return stop('page-count');
     const fresh=await identity(page,deadline,false);
     const after=browser.contexts().flatMap(c=>c.pages());
-    return Date.now()<deadline&&guard()&&after.length===1&&after[0]===page
-      &&sameCorrelationIdentity(held,fresh)&&officialInitialMain(fresh)?held:null;
-  } catch{return null;}
+    if(Date.now()>=deadline)return stop('deadline');
+    if(!guard())return stop('ownership-lost');
+    if(after.length!==1||after[0]!==page)return stop('page-count');
+    if(!sameCorrelationIdentity(held,fresh)||!officialInitialMain(fresh))return stop('identity-changed');
+    if(diagnostic)diagnostic.status='captured';
+    return held;
+  } catch{return stop('query-failed');}
 }
 async function bindCorrelationMain(held,browser,guard,deadline,route,
   identity=correlationIdentity,pause=ms=>new Promise(resolve=>setTimeout(resolve,ms))) {
@@ -249,7 +274,9 @@ async function run() {
     }
     const page = pages[0];
     const ownerGuard=()=>rootProof.descendant(connection.launcherPid)&&ownership.ownedEndpoint();
-    const initialMain=trial?await captureCorrelationMain(page,browser,ownerGuard,deadline):null;
+    if(trial)facts.initialMainBinding=initialMainFacts();
+    const initialMain=trial?await captureCorrelationMain(page,browser,ownerGuard,deadline,
+      correlationIdentity,ms=>new Promise(resolve=>setTimeout(resolve,ms)),facts.initialMainBinding):null;
     let pageErrorCount = 0;
     page.on('pageerror', () => { pageErrorCount = Math.min(4096, pageErrorCount + 1); });
     const documentDeadline = Math.min(deadline, Date.now() + 10000);

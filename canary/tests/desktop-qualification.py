@@ -1636,6 +1636,29 @@ class QualificationTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'hermes-desktop')
 
+    def test_codex_initial_binding_diagnostics_are_closed_and_not_acceptance(self):
+        value = dict(schemaVersion=1, mechanism='renderer-inventory', diagnosticsOnly=True,
+                     app='chatgpt-desktop', endpointOwned=True, launcherOwned=True, attached=True,
+                     pageCount=1, textareaCount=0, editableCount=0, sendCount=0,
+                     retryCount=0, newThreadCount=0, loginCount=0, dialogCount=0, errorCategory=None)
+        binding = dict(status='captured', route='primary', targetPresent=True,
+                       framePresent=True, loaderPresent=True)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / 'inventory.json'
+            for item in (binding, {**binding, 'status': 'route-rejected', 'route': 'primary-query'},
+                         {**binding, 'status': 'deadline', 'loaderPresent': False}):
+                path.write_text(json.dumps({**value, 'initialMainBinding': item}))
+                self.assertEqual(q.semantic_observations(root, 'chatgpt-desktop')[0]['initialMainBinding'], item)
+            self.assertEqual(q.envelope('chatgpt-desktop', 'linux', 'x86_64', 'a' * 40)['qualification'], 'unqualified')
+            for changed in ({**binding, 'url': 'PRIVATE'}, {**binding, 'status': 'PRIVATE'},
+                            {**binding, 'route': 'PRIVATE'}, {**binding, 'loaderPresent': 1},
+                            {**binding, 'loaderPresent': False}, {**binding, 'route': 'primary-query'},
+                            {key: item for key, item in binding.items() if key != 'framePresent'}):
+                path.write_text(json.dumps({**value, 'initialMainBinding': changed}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'chatgpt-desktop')
+
     def test_renderer_inventory_is_closed_and_cannot_claim_acceptance(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
