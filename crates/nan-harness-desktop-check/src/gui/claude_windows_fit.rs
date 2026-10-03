@@ -119,7 +119,7 @@ pub(super) fn record(helper_succeeded: bool) {
         "diagnosticsOnly":true,"phase":"final-ready","fitAttempted":true,"helperSucceeded":helper_succeeded});
     if let Ok(bytes) = serde_json::to_vec(&value) {
         if let Ok(mut file) = nan_harness_private_fs::open_private_new(
-            directory.join(format!("claude-fit-{}.json", u64::from_le_bytes(nonce))),
+            &directory.join(format!("claude-fit-{}.json", u64::from_le_bytes(nonce))),
         ) {
             let _ = file.write_all(&bytes).and_then(|()| file.sync_all());
         }
