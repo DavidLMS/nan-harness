@@ -710,6 +710,29 @@ class QualificationTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 q.semantic_observations(Path(root), 'claude-desktop')
 
+    def test_windows_current_mode_is_closed_optional_and_advisory(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'uia.json'
+            value = dict(schemaVersion=1, mechanism='claude-windows-uia', diagnosticsOnly=True,
+                         phase='post-ready', status='observed', nativeGuardVerified=True, treeComplete=True,
+                         nodeCount=141, classicEditorCount=1, modernEditorCount=0, sendControlCount=0,
+                         startTaskControlCount=1, assistantHeadingCount=0, copyControlCount=0)
+            mode = dict(status='chat', modeGroupCount=1, chatCount=1, coworkCount=1,
+                        currentChatCount=1, currentCoworkCount=0)
+            path.write_text(json.dumps({**value, 'currentMode': mode}))
+            self.assertEqual(q.semantic_observations(Path(root), 'claude-desktop')[0]['currentMode'], mode)
+            for status in ('unavailable', 'changed'):
+                unknown = {key: None for key in mode if key != 'status'}
+                path.write_text(json.dumps({**value, 'currentMode': {**unknown, 'status': status}}))
+                q.semantic_observations(Path(root), 'claude-desktop')
+            for change in ({'status': 'PRIVATE'}, {'status': 'changed'}, {'currentCoworkCount': 1},
+                           {'chatCount': True}, {'modeGroupCount': 142}, {'rawLabel': 'PRIVATE'}):
+                path.write_text(json.dumps({**value, 'currentMode': {**mode, **change}}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(Path(root), 'claude-desktop')
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(Path(root), 'claude-desktop')[0], value)
+
     def test_initial_decision_requires_closed_category_from_same_snapshot(self):
         with tempfile.TemporaryDirectory() as root:
             path = Path(root) / 'focus.json'

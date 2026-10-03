@@ -54,3 +54,27 @@ add_custom_target(nanh-uia-process-ancestry-contract ALL
   COMMAND $<TARGET_FILE:nanh-uia-process-ancestry-test>
   DEPENDS nanh-uia-process-ancestry-test
   COMMENT "Verify passive UIA descendant ancestry classification")
+
+# Public property grammar and source mode classification only; no UIA calls.
+add_executable(nanh-uia-current-mode-test tests/uia_current_mode.cpp)
+add_custom_target(nanh-uia-current-mode-contract ALL
+  COMMAND $<TARGET_FILE:nanh-uia-current-mode-test>
+  DEPENDS nanh-uia-current-mode-test
+  COMMENT "Verify passive UIA current-mode classification")
+
+add_executable(nanh-uia-attachment-test tests/uia_attachment.cpp)
+add_custom_target(nanh-uia-attachment-contract ALL
+  COMMAND $<TARGET_FILE:nanh-uia-attachment-test>
+  DEPENDS nanh-uia-attachment-test
+  COMMENT "Verify retained UIA subtree attachment")
+
+# Contracts use assert; release builds must execute their checks as well.
+foreach(contract_target IN ITEMS nanh-process-correlation-test nanh-uia-request-frame-test
+    nanh-uia-process-identity-test nanh-uia-process-ancestry-test nanh-uia-current-mode-test
+    nanh-uia-attachment-test)
+  if(MSVC)
+    target_compile_options(${contract_target} PRIVATE /UNDEBUG)
+  else()
+    target_compile_options(${contract_target} PRIVATE -UNDEBUG)
+  endif()
+endforeach()

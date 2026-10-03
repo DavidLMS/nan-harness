@@ -647,12 +647,32 @@ def semantic_observations(directory, app):
                                'nativeGuardVerified', 'treeComplete'}
             statuses = set('observed query deadline identity foreground bounds visibility display limit occlusion duplicate element-identity root-process-query root-process-mismatch root-process-zero root-process-invalid descendant-process-query descendant-process-mismatch descendant-process-zero descendant-process-invalid owned-descendant-process foreign-descendant-process descendant-correlation-unavailable heading-property com root-replaced transport protocol policy directory'.split())
             observed = value.get('status') == 'observed'
-            if (app != 'claude-desktop' or set(value) != fields or value['diagnosticsOnly'] is not True
+            if (app != 'claude-desktop' or set(value) - {'currentMode'} != fields or value['diagnosticsOnly'] is not True
                     or value['phase'] != 'post-ready' or type(value['status']) is not str or value['status'] not in statuses
                     or value['nativeGuardVerified'] is not observed or value['treeComplete'] is not observed
                     or any((type(value[key]) is not int or not 0 <= value[key] <= 1024) if observed else value[key] is not None for key in counts)
                     or observed and (value['nodeCount'] == 0 or any(value[key] > value['nodeCount'] for key in counts))):
                 raise ValueError('invalid passive Windows Claude UIA diagnostic')
+            if 'currentMode' in value:
+                mode = value['currentMode']
+                keys = {'modeGroupCount', 'chatCount', 'coworkCount', 'currentChatCount', 'currentCoworkCount'}
+                if (not observed or type(mode) is not dict or set(mode) != keys | {'status'}
+                        or type(mode['status']) is not str or mode['status'] not in {'chat', 'cowork', 'missing', 'ambiguous', 'unavailable', 'changed'}):
+                    raise ValueError('invalid Windows Claude current mode')
+                if mode['status'] in {'unavailable', 'changed'}:
+                    if any(mode[key] is not None for key in keys):
+                        raise ValueError('partial Windows Claude mode')
+                else:
+                    if (any(type(mode[key]) is not int or not 0 <= mode[key] <= value['nodeCount'] for key in keys)
+                            or mode['currentChatCount'] > mode['chatCount'] or mode['currentCoworkCount'] > mode['coworkCount']):
+                        raise ValueError('invalid Windows Claude mode counts')
+                    current = mode['currentChatCount'] + mode['currentCoworkCount']
+                    expected = ('ambiguous' if any(mode[key] > 1 for key in ('modeGroupCount', 'chatCount', 'coworkCount')) or current > 1
+                                else 'missing' if any(mode[key] != 1 for key in ('modeGroupCount', 'chatCount', 'coworkCount')) or current != 1
+                                else 'chat' if mode['currentChatCount'] == 1 else 'cowork')
+                    if mode['status'] != expected:
+                        raise ValueError('contradictory Windows Claude mode')
+                record['currentMode'] = dict(mode)
             record.update({key: value[key] for key in fields - {'schemaVersion', 'mechanism'}})
         elif mechanism == 'claude-windows-fit':
             fields = {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'phase', 'fitAttempted', 'helperSucceeded'}

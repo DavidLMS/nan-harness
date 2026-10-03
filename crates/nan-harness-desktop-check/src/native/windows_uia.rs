@@ -52,15 +52,17 @@ pub(super) fn parse(wire: &str) -> Option<serde_json::Value> {
         return None;
     }
     let words = line.split(' ').collect::<Vec<_>>();
-    if words.len() != 9 || words[0] != "uia" {
+    if !matches!(words.len(), 9 | 16) || words[0] != "uia" {
         return None;
     }
     let status = words[1];
     if status != "observed" {
-        return (FAILURES.contains(&status) && words[2..].iter().all(|word| *word == "-"))
-            .then(|| failure(status));
+        return (words.len() == 9
+            && FAILURES.contains(&status)
+            && words[2..].iter().all(|word| *word == "-"))
+        .then(|| failure(status));
     }
-    let numbers = words[2..]
+    let numbers = words[2..9]
         .iter()
         .map(|word| {
             (!word.is_empty() && word.bytes().all(|byte| byte.is_ascii_digit()))
@@ -77,11 +79,112 @@ pub(super) fn parse(wire: &str) -> Option<serde_json::Value> {
     for (key, count) in COUNT_KEYS.into_iter().zip(numbers) {
         value[key] = count.into();
     }
+    if words.len() == 16 {
+        value["currentMode"] = parse_mode(&words[9..], numbers_node_count(&value)?)?;
+    }
+    Some(value)
+}
+fn numbers_node_count(value: &serde_json::Value) -> Option<usize> {
+    value["nodeCount"]
+        .as_u64()
+        .and_then(|count| usize::try_from(count).ok())
+}
+fn parse_mode(words: &[&str], node_count: usize) -> Option<serde_json::Value> {
+    const KEYS: [&str; 5] = [
+        "modeGroupCount",
+        "chatCount",
+        "coworkCount",
+        "currentChatCount",
+        "currentCoworkCount",
+    ];
+    if words.len() != 7
+        || words[0] != "mode"
+        || ![
+            "chat",
+            "cowork",
+            "missing",
+            "ambiguous",
+            "unavailable",
+            "changed",
+        ]
+        .contains(&words[1])
+    {
+        return None;
+    }
+    let status = words[1];
+    let mut value = serde_json::json!({"status": status});
+    if matches!(status, "unavailable" | "changed") {
+        if !words[2..].iter().all(|word| *word == "-") {
+            return None;
+        }
+        for key in KEYS {
+            value[key] = serde_json::Value::Null;
+        }
+        return Some(value);
+    }
+    let counts = words[2..]
+        .iter()
+        .map(|word| {
+            (!word.is_empty() && word.bytes().all(|byte| byte.is_ascii_digit()))
+                .then(|| word.parse::<usize>().ok())
+                .flatten()
+        })
+        .collect::<Option<Vec<_>>>()?;
+    if counts.iter().any(|count| *count > node_count)
+        || counts[3] > counts[1]
+        || counts[4] > counts[2]
+    {
+        return None;
+    }
+    let expected = if counts[0] > 1 || counts[1] > 1 || counts[2] > 1 || counts[3] + counts[4] > 1 {
+        "ambiguous"
+    } else if counts[0] != 1 || counts[1] != 1 || counts[2] != 1 || counts[3] + counts[4] != 1 {
+        "missing"
+    } else if counts[3] == 1 {
+        "chat"
+    } else {
+        "cowork"
+    };
+    if status != expected {
+        return None;
+    }
+    for (key, count) in KEYS.into_iter().zip(counts) {
+        value[key] = count.into();
+    }
     Some(value)
 }
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn current_mode_is_optional_closed_and_never_partial() {
+        let value = parse("uia observed 20 1 0 0 1 0 0 mode chat 1 1 1 1 0\n").unwrap();
+        assert_eq!(value["currentMode"]["status"], "chat");
+        assert!(
+            parse("uia observed 20 1 0 0 1 0 0\n")
+                .unwrap()
+                .get("currentMode")
+                .is_none()
+        );
+        for status in ["unavailable", "changed"] {
+            assert!(
+                parse(&format!(
+                    "uia observed 20 1 0 0 1 0 0 mode {status} - - - - -\n"
+                ))
+                .unwrap()["currentMode"]["chatCount"]
+                    .is_null()
+            );
+        }
+        for suffix in [
+            "mode PRIVATE 1 1 1 1 0",
+            "mode chat 1 1 1 1 1",
+            "mode changed 1 1 1 1 0",
+            "mode chat 1 21 1 1 0",
+            "mode chat 1 1 1 true 0",
+        ] {
+            assert!(parse(&format!("uia observed 20 1 0 0 1 0 0 {suffix}\n")).is_none());
+        }
+    }
     #[test]
     fn accepts_only_complete_closed_protocol() {
         assert_eq!(

@@ -2507,3 +2507,18 @@ refuses the frozen project-release policy before qualification. Its
 `codex-project-release-mismatch` receipt establishes a policy mismatch, not a
 particular new application version or native compatibility failure. Updated
 source provenance is required before changing any artifact pin.
+
+
+Windows UIA inventory now includes optional advisory current-mode proof. It
+recognizes the source Mode group and visible enabled Chat/Cowork buttons,
+reads bounded `AriaProperties` for exact `current=page`, and compares retained
+group/button identities twice. The initial projection reuses the complete
+inventory walk; the second projection is limited to retained Mode subtrees.
+Fresh bounded parent chains must reach the exact retained root before and
+after the second projection. Unavailable, detached or changed proof discards
+all mode counts. This adds no input or Invoke action and changes no acceptance
+condition. Pure property, attachment and ownership fixtures execute with
+assertions enabled on release builds across platforms. Focused Rust transport
+tests, 107 strict qualification tests, native pure contracts and checker Clippy
+pass; hosted Windows compilation and actual current-mode evidence remain
+required.

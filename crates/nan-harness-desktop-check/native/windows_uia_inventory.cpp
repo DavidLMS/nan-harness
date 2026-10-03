@@ -1,4 +1,6 @@
 #include "uia_request_frame.hpp"
+#include "uia_current_mode.hpp"
+#include "uia_attachment.hpp"
 #include "uia_process_identity.hpp"
 #include "uia_process_ancestry.hpp"
 
@@ -53,6 +55,148 @@ struct Collection {
         std::unique_ptr<ProcessHandle> process;
     };
     std::vector<RetainedChild> retained_children;
+    struct ModeSample {
+        UiaModeCounts counts;
+        std::vector<ComPtr<IUIAutomationElement>> identities;
+        std::vector<ComPtr<IUIAutomationElement>> groups;
+        bool available = true;
+    };
+    ModeSample initial_mode;
+    const char* mode_status = "unavailable";
+    UiaModeCounts mode_counts;
+    bool project_mode(IUIAutomationElement* element, int type, const std::wstring& label,
+                      bool& in_mode, ModeSample& sample, BOOL offscreen, BOOL enabled) {
+        if (type == UIA_GroupControlTypeId && label == L"Mode") {
+            BOOL group_offscreen = TRUE, group_enabled = FALSE;
+            if (FAILED(element->get_CurrentIsOffscreen(&group_offscreen))
+                || FAILED(element->get_CurrentIsEnabled(&group_enabled))) return false;
+            if (group_offscreen || !group_enabled) return within();
+            ++sample.counts.groups;
+            ComPtr<IUIAutomationElement> retained = element;
+            sample.identities.push_back(retained);
+            sample.groups.push_back(retained);
+            in_mode = true;
+        }
+        if (in_mode && type == UIA_ButtonControlTypeId && (label == L"Chat" || label == L"Cowork")) {
+            if (!offscreen && enabled) {
+                VARIANT properties; VariantInit(&properties);
+                HRESULT result = element->GetCurrentPropertyValue(UIA_AriaPropertiesPropertyId, &properties);
+                std::optional<bool> current;
+                if (SUCCEEDED(result) && properties.vt == VT_BSTR) {
+                    const unsigned length = properties.bstrVal ? SysStringLen(properties.bstrVal) : 0;
+                    if (length <= 2048) {
+                        std::wstring aria(properties.bstrVal ? properties.bstrVal : L"", length);
+                        current = uia_current_page(aria);
+                        if (!aria.empty()) SecureZeroMemory(aria.data(), aria.size() * sizeof(wchar_t));
+                    }
+                    if (properties.bstrVal) SecureZeroMemory(properties.bstrVal, length * sizeof(wchar_t));
+                }
+                VariantClear(&properties);
+                if (!current) return false;
+                if (label == L"Chat") { ++sample.counts.chat; sample.counts.current_chat += *current; }
+                else { ++sample.counts.cowork; sample.counts.current_cowork += *current; }
+                ComPtr<IUIAutomationElement> retained = element;
+                sample.identities.push_back(retained);
+            }
+        }
+        return within();
+    }
+    bool mode_walk(IUIAutomationElement* element, unsigned depth, bool in_mode,
+                   ModeSample& sample, unsigned& visited) {
+        if (!within() || depth > 32 || ++visited > 64) return false;
+        int type = 0, pid = 0;
+        BSTR name = nullptr;
+        if (FAILED(element->get_CurrentControlType(&type))
+            || FAILED(element->get_CurrentProcessId(&pid))
+            || FAILED(element->get_CurrentName(&name))) {
+            if (name) SysFreeString(name);
+            return false;
+        }
+        std::wstring label;
+        if (name) {
+            const unsigned length = SysStringLen(name);
+            if (length <= 65536) label.assign(name, length);
+            SecureZeroMemory(name, length * sizeof(wchar_t)); SysFreeString(name);
+            if (length > 65536) return false;
+        }
+        struct WipeLabel { std::wstring& value; ~WipeLabel() {
+            if (!value.empty()) SecureZeroMemory(value.data(), value.size() * sizeof(wchar_t));
+        }} wipe{label};
+        bool owned = pid == static_cast<int>(request.pid);
+        for (const auto& child : retained_children) owned = owned || pid == static_cast<int>(child.identity.pid);
+        if (!owned) return false;
+        BOOL offscreen = TRUE, enabled = FALSE;
+        if (type == UIA_ButtonControlTypeId &&
+            (FAILED(element->get_CurrentIsOffscreen(&offscreen))
+             || FAILED(element->get_CurrentIsEnabled(&enabled)))) return false;
+        if (!project_mode(element, type, label, in_mode, sample, offscreen, enabled)) return false;
+        ComPtr<IUIAutomationElement> child;
+        if (FAILED(walker->GetFirstChildElement(element, &child))) return false;
+        while (child) {
+            if (!mode_walk(child.Get(), depth + 1, in_mode, sample, visited)) return false;
+            ComPtr<IUIAutomationElement> next;
+            if (FAILED(walker->GetNextSiblingElement(child.Get(), &next))) return false;
+            child = next;
+        }
+        return within();
+    }
+    bool mode_attached(IUIAutomationElement* element, IUIAutomationElement* root) {
+        ComPtr<IUIAutomationElement> retained = element, retained_root = root;
+        const auto parent = [&](const ComPtr<IUIAutomationElement>& child)
+            -> std::optional<ComPtr<IUIAutomationElement>> {
+            if (!within()) return std::nullopt;
+            ComPtr<IUIAutomationElement> value;
+            if (FAILED(walker->GetParentElement(child.Get(), &value)) || !value || !within())
+                return std::nullopt;
+            return value;
+        };
+        const auto equal = [&](const ComPtr<IUIAutomationElement>& left,
+                               const ComPtr<IUIAutomationElement>& right) -> std::optional<bool> {
+            if (!within()) return std::nullopt;
+            BOOL same = FALSE;
+            if (FAILED(automation->CompareElements(left.Get(), right.Get(), &same)) || !within())
+                return std::nullopt;
+            return same != FALSE;
+        };
+        const auto owned = [&](const ComPtr<IUIAutomationElement>& node) {
+            if (!within()) return false;
+            int pid = 0;
+            if (FAILED(node->get_CurrentProcessId(&pid)) || !within()) return false;
+            if (pid == static_cast<int>(request.pid)) return true;
+            for (const auto& child : retained_children)
+                if (pid == static_cast<int>(child.identity.pid)) return true;
+            return false;
+        };
+        return uia_attached_to_root(retained, retained_root, parent, equal, owned,
+                                    [&] { return within(); });
+    }
+    void observe_mode(IUIAutomationElement* root) {
+        // Global uniqueness was measured by the existing complete inventory.
+        // Re-read only the retained source Mode subtrees, never the whole app.
+        const auto& first = initial_mode;
+        if (!first.available || first.groups.size() > 32 || !guard()) return;
+        ModeSample second;
+        unsigned visited = 0;
+        for (const auto& group : first.groups) {
+            if (!mode_attached(group.Get(), root)
+                || !mode_walk(group.Get(), 0, false, second, visited)
+                || !mode_attached(group.Get(), root)) return;
+        }
+        if (!guard()) return;
+        ComPtr<IUIAutomationElement> current_root;
+        BOOL root_same = FALSE;
+        if (FAILED(automation->ElementFromHandle(request.window, &current_root)) || !current_root
+            || FAILED(automation->CompareElements(root, current_root.Get(), &root_same))) return;
+        bool unchanged = root_same && first.counts == second.counts
+            && first.identities.size() == second.identities.size();
+        for (std::size_t index = 0; unchanged && index < first.identities.size(); ++index) {
+            BOOL same = FALSE;
+            if (FAILED(automation->CompareElements(first.identities[index].Get(), second.identities[index].Get(), &same))) return;
+            unchanged = same;
+        }
+        mode_status = uia_mode_status(first.counts, true, unchanged);
+        if (unchanged) mode_counts = first.counts;
+    }
     bool retained_identity() const {
         std::vector<UiaRetainedIdentity> identities;
         for (const auto& child : retained_children) identities.push_back(child.identity);
@@ -147,7 +291,7 @@ struct Collection {
         }
         return unavailable;
     }
-    bool append(IUIAutomationElement* element,unsigned depth) {
+    bool append(IUIAutomationElement* element,unsigned depth, bool in_mode = false) {
         if(!within()) {stage="deadline";return false;}
         if(depth>32 || ++nodes>1024) {stage="limit";return false;}
         for(const auto& prior:held) {
@@ -176,6 +320,8 @@ struct Collection {
         if(type==UIA_EditControlTypeId || type==UIA_ButtonControlTypeId) {
             if(FAILED(element->get_CurrentIsOffscreen(&offscreen)) || FAILED(element->get_CurrentIsEnabled(&enabled))) return false;
         }
+        if (initial_mode.available && !project_mode(element, type, text, in_mode, initial_mode, offscreen, enabled))
+            initial_mode.available = false;
         if(type==UIA_EditControlTypeId && !offscreen && enabled) {
             classic+=text==L"Write your prompt to Claude";modern+=text==L"Message";
         }
@@ -194,7 +340,7 @@ struct Collection {
         ComPtr<IUIAutomationElement> child;
         if(FAILED(walker->GetFirstChildElement(element,&child))) return false;
         while(child) {
-            if(!append(child.Get(),depth+1)) return false;
+            if(!append(child.Get(),depth+1,in_mode)) return false;
             ComPtr<IUIAutomationElement> next;
             if(FAILED(walker->GetNextSiblingElement(child.Get(),&next))) return false;
             child=next;
@@ -217,6 +363,14 @@ int windows_claude_uia_inventory() {
         std::cout<<"uia "<<(complete?"observed":collection.stage)<<' ';
         if(complete) std::cout<<collection.nodes<<' '<<collection.classic<<' '<<collection.modern<<' '<<collection.sends<<' '<<collection.starts<<' '<<collection.headings<<' '<<collection.copies;
         else std::cout<<"- - - - - - -";
+        if (complete) {
+            std::cout << " mode " << collection.mode_status;
+            if (std::string(collection.mode_status) == "unavailable" || std::string(collection.mode_status) == "changed")
+                std::cout << " - - - - -";
+            else std::cout << ' ' << collection.mode_counts.groups << ' ' << collection.mode_counts.chat
+                << ' ' << collection.mode_counts.cowork << ' ' << collection.mode_counts.current_chat
+                << ' ' << collection.mode_counts.current_cowork;
+        }
         std::cout<<'\n';return std::cout?0:4;
     };
     if(!collection.guard()) return emit(false);
@@ -238,6 +392,7 @@ int windows_claude_uia_inventory() {
         || FAILED(automation->CompareElements(root.Get(),fresh_root.Get(),&same)) || !same) {
         collection.stage="root-replaced";return emit(false);
     }
+    collection.observe_mode(fresh_root.Get());
     if(!collection.guard()) return emit(false);
     return emit(true);
 }
