@@ -80,14 +80,26 @@ async function trial(options={}) {
   context:()=>({browser:()=>({contexts:()=>[{pages:()=>options.foreignPage?[page,extraPage]:options.replacedPage?[{}]:[page]}]})})};
  const sandbox={exports:{},URL,process:{platform:options.platform??'win32',env:{GITHUB_ACTIONS:options.noHost?'false':'true',RUNNER_ENVIRONMENT:'github-hosted',RUNNER_OS:options.runnerOs??'Windows',NANH_CODEX_PUBLIC_ONBOARDING:options.noOptin?undefined:'engineering'}},Date:{now:()=>now},clearTimeout:()=>{},setTimeout:(f,ms)=>{if(ms<=100){now+=100;f();}}};
  vm.runInNewContext(source,sandbox);
- let guards=0;
+ let guards=0,mainProofs=0;
  const guard=()=>{guards++;if(options.guardThrows)throw Error('PRIVATE');if(options.guardExhaustsBudget&&guards>=3||options.overlayBudgetExpired&&overlayReads>0)now=1201;return !inventoryOwnerLost&&!(options.overlayOwnerDuringProof&&legendReads>=3)&&!(options.overlayOwnerLoss&&overlayReads>0)&&!options.initialOwnerLoss&&!(options.ownerLossBeforeRole&&guards>=3)&&!(options.ownerLoss&&roleClicks>0)&&!(options.finalLoss&&guards>=2);};
  const budget=options.expired?0:options.invalidDeadline?NaN:options.excessBudget?25001:1200;
- const facts=await sandbox.exports.run(page,options.noGuard?undefined:guard,budget,options.admitAux?async()=>!options.auxOwnershipLostAfterClick||roleClicks===0:undefined);
+ const facts=await sandbox.exports.run(page,options.noGuard?undefined:guard,budget,options.admitAux?async()=>{mainProofs++;if(options.auxDeadlineAfterProof)now=1201;return !(options.auxOwnershipLostDuringProof&&legendReads>0)&&(!options.auxOwnershipLostAfterClick||roleClicks===0);}:undefined);
  assert(!JSON.stringify(facts).includes('PRIVATE'));
- return {facts,roleClicks,continueClicks,taskClicks};
+ return {facts,roleClicks,continueClicks,taskClicks,mainProofs,legendReads};
 }
 (async()=>{
+ const freshAuxLost=await trial({foreignPage:true,admitAux:true,auxOwnershipLostDuringProof:true});
+ assert.equal(freshAuxLost.roleClicks,0);
+ assert.equal(freshAuxLost.continueClicks,0);
+ assert(freshAuxLost.legendReads>0); // A fresh post-DOM proof still runs; no cross-await cache.
+ const auxClock=await trial({foreignPage:true,admitAux:true,auxDeadlineAfterProof:true});
+ assert.equal(auxClock.facts.roleProofFailure,'deadline-expired');
+ assert.equal(auxClock.roleClicks,0);
+ assert.equal(auxClock.continueClicks,0);
+ const afterClickLost=await trial({foreignPage:true,admitAux:true,auxOwnershipLostAfterClick:true});
+ assert.equal(afterClickLost.roleClicks,1);
+ assert.equal(afterClickLost.continueClicks,0);
+
  for(const [opts,reason] of [[{expired:true},'deadline-expired'],[{invalidDeadline:true},'deadline-invalid'],
   [{excessBudget:true},'deadline-invalid'],[{noGuard:true},'guard-missing'],[{platform:'freebsd'},'platform'],[{platform:'linux'},'host-policy'],
   [{noHost:true},'host-policy'],[{noOptin:true},'onboarding-policy']]) {

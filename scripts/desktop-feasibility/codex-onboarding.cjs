@@ -128,13 +128,17 @@ async function run(page, ownerGuard, deadline, rejected, mainGuard) {
   const ownedEndpoint = async () => {
     const fail = reason => { facts.roleProofFailure=reason; return false; };
     try {
+      if (Date.now() >= deadline) return fail('deadline-expired');
       if (typeof ownerGuard !== 'function' || ownerGuard() !== true) return fail('ownership-lost');
+      if (Date.now() >= deadline) return fail('deadline-expired');
       // Read renderer identity after the synchronous native proof, which can
       // block while a page or route changes. Never reuse its earlier snapshot.
       const browser = page.context().browser();
       const pages = browser?.contexts().flatMap(context => context.pages());
       if (!pages) return fail('query-failed');
-      if (pages.length !== 1 && !(typeof mainGuard === 'function' && await mainGuard())) {
+      const mainProved = typeof mainGuard === 'function' ? await mainGuard() : false;
+      if (Date.now() >= deadline && mainProved) return fail('deadline-expired');
+      if (pages.length !== 1 && !mainProved) {
         // Retain only a bounded protocol inventory of the rejected snapshot.
         // This never authorizes choosing among renderer targets.
         if (pages.length > 32) facts.rejectedPageInventory={status:'overflow'};
@@ -152,7 +156,7 @@ async function run(page, ownerGuard, deadline, rejected, mainGuard) {
         return fail('page-count');
       }
       if (!pages.includes(page) || pages.length === 1 && pages[0] !== page) return fail('page-changed');
-      if (typeof mainGuard === 'function' && !await mainGuard()) return fail('ownership-lost');
+      if (typeof mainGuard === 'function' && !mainProved) return fail('ownership-lost');
       if (page.url() !== originalUrl) return fail('url-changed');
       return true;
     } catch { return fail('query-failed'); }
@@ -218,7 +222,7 @@ async function run(page, ownerGuard, deadline, rejected, mainGuard) {
         let held;
         const guard=async frame=>{
           if(Date.now()>=deadline){facts.foreignOverlayProof='deadline-expired';return false;}
-          if(!await ownedEndpoint()){facts.foreignOverlayProof='ownership-lost';return false;}
+          if(!await ownedEndpoint()){facts.foreignOverlayProof=facts.roleProofFailure==='deadline-expired'?'deadline-expired':'ownership-lost';return false;}
           if(Date.now()>=deadline){facts.foreignOverlayProof='deadline-expired';return false;}
           if(page.mainFrame()!==frame){facts.foreignOverlayProof='frame-replaced';return false;}
           if(!await reprove()){
@@ -229,7 +233,7 @@ async function run(page, ownerGuard, deadline, rejected, mainGuard) {
           if(!await control.evaluate((e,original)=>e===original,handle)){
             facts.foreignOverlayProof='control-replaced';return false;
           }
-          if(!await ownedEndpoint()){facts.foreignOverlayProof='ownership-lost';return false;}
+          if(!await ownedEndpoint()){facts.foreignOverlayProof=facts.roleProofFailure==='deadline-expired'?'deadline-expired':'ownership-lost';return false;}
           if(Date.now()>=deadline){facts.foreignOverlayProof='deadline-expired';return false;}
           return true;
         };
