@@ -209,7 +209,8 @@ async function observeMainAux(held,browser,guard,deadline,auxRoute,
 // Source confirmation and focused/inert proofs happen before any input.
 // Later source-known inert avatar pages never become selectable input targets.
 function heldMainGuard(held, browser, owner, deadline, route,
-  identity=correlationIdentity, pause=ms=>new Promise(resolve=>setTimeout(resolve,ms)),requireMainScope=false) {
+  identity=correlationIdentity, pause=ms=>new Promise(resolve=>setTimeout(resolve,ms)),requireMainScope=false,allowInitialAppearance=false) {
+  let actionsStarted=false,appearanceRetried=false;
   let auxiliary=null, auxiliaryIdentity=null, failure='unmeasured', failureDetails=null;
   const reject=reason=>{failure=reason;return false;};
   const rejectPageSet=(reason,initial,current)=>{
@@ -224,7 +225,7 @@ function heldMainGuard(held, browser, owner, deadline, route,
     if(owner()!==true)return reject('native-ownership');
     return Date.now()<deadline||reject('deadline');
   };
-  const prove=async function prove() {
+  const measure=async function measure() {
     failure='unmeasured';failureDetails=null;
     try {
       if(!held)return reject('main-identity');
@@ -245,7 +246,7 @@ function heldMainGuard(held, browser, owner, deadline, route,
         if(!valid())return false;
         if(!sameCorrelationIdentity(held,main))return reject('main-identity');
         if(!main.scope.focused)return reject('main-focus');
-        if(requireMainScope&&!main.scope.mainScope)return reject('main-scope');
+        if((requireMainScope||allowInitialAppearance&&!actionsStarted)&&!main.scope.mainScope)return reject('main-scope');
         if(extra) {
           const aux=await identity(extra,deadline);
           const expected=auxiliaryIdentity??candidateAux;
@@ -266,6 +267,18 @@ function heldMainGuard(held, browser, owner, deadline, route,
       return true;
     } catch {return reject(Date.now()>=deadline?'deadline':'query-failed');}
   };
+  const prove=async()=>{
+    if(await measure())return true;
+    const changed=failureDetails;
+    if(!allowInitialAppearance||actionsStarted||appearanceRetried||auxiliary||failure!=='page-set'
+      ||!changed||changed.initialCount!==1||changed.currentCount!==2||!changed.heldPresent
+      ||!['before-sample-changed','after-sample-changed'].includes(changed.reason))return false;
+    // Discard the incomplete observation. A single fresh measurement must prove
+    // both immutable main and newly appearing source auxiliary twice before input.
+    appearanceRetried=true;
+    return measure();
+  };
+  prove.sealInitialActions=()=>{actionsStarted=true;};
   prove.failure=()=>failure;
   prove.failureDetails=()=>failure==='page-set'?failureDetails:null;
   const privateIdentity=value=>value&&Object.fromEntries(['url','target','frame','loader','frameUrl','fragment'].map(key=>[key,value[key]]));
@@ -338,7 +351,8 @@ async function run() {
         require('./codex-onboarding.cjs').sourceRoute,correlationIdentity,
         ms=>new Promise(resolve=>setTimeout(resolve,ms)),facts.initialMainConfirmation):null;
       const mainGuard=trial&&heldMain?heldMainGuard(heldMain,browser,ownerGuard,correlationDeadline,
-        require('./codex-onboarding.cjs').sourceRoute):undefined;
+        require('./codex-onboarding.cjs').sourceRoute,correlationIdentity,
+        ms=>new Promise(resolve=>setTimeout(resolve,ms)),false,true):undefined;
       facts.publicOnboarding = await require('./codex-onboarding.cjs').run(page,
         () => rootProof.descendant(connection.launcherPid) && ownership.ownedEndpoint(),
         correlationDeadline,mainGuard);

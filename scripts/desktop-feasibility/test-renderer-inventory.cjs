@@ -168,6 +168,23 @@ assert.equal(roleSourceScope({foreignFieldset:true}).mainScope,false);
   assert.equal(await overflow(),false);
   assert.equal(overflow.failureDetails().initialCount,null);
   assert.equal(overflow.failureDetails().currentCount,null);
+  for(const unsafe of ['safe','route','focused','editable','owner','deadline','sealed']) {
+    f=fixture();f.setPages([f.main]);let appeared=false;
+    f.setAlter((r)=>{
+      if(!appeared){appeared=true;f.setPages([f.main,f.aux]);}
+      if(r.page===f.aux&&unsafe==='focused')r.scope.focused=true;
+      if(r.page===f.aux&&unsafe==='editable')r.scope.counts.editable=1;
+      if(unsafe==='deadline')clock=1001;
+    });
+    const guard=helper.heldMainGuard(f.held,f.browser,()=>unsafe!=='owner'||!appeared,1000,
+      ()=>unsafe==='route'?'unknown':'avatarOverlay',f.identity,async()=>{},true,true);
+    if(unsafe==='sealed')guard.sealInitialActions();
+    assert.equal(await guard(),unsafe==='safe');
+    if(unsafe==='safe') {
+      assert(guard.binding().auxiliary);
+      assert.equal(await guard(),true);
+    }
+  }
   // The auxiliary capability retains immutable identities across real actions;
   // the main role may transition while the auxiliary must remain inert.
   f=fixture();let owner=true;

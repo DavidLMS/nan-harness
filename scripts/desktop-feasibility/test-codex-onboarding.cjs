@@ -80,7 +80,7 @@ async function trial(options={}) {
   context:()=>({browser:()=>({contexts:()=>[{pages:()=>options.foreignPage?[page,extraPage]:options.replacedPage?[{}]:[page]}]})})};
  const sandbox={exports:{},URL,process:{platform:options.platform??'win32',env:{GITHUB_ACTIONS:options.noHost?'false':'true',RUNNER_ENVIRONMENT:'github-hosted',RUNNER_OS:options.runnerOs??'Windows',NANH_CODEX_PUBLIC_ONBOARDING:options.noOptin?undefined:'engineering'}},Date:{now:()=>now},clearTimeout:()=>{},setTimeout:(f,ms)=>{if(ms<=100){now+=100;f();}}};
  vm.runInNewContext(source,sandbox);
- let guards=0,mainProofs=0;
+ let guards=0,mainProofs=0,sealed=0;
  const guard=()=>{guards++;if(options.guardThrows)throw Error('PRIVATE');if(options.guardExhaustsBudget&&guards>=3||options.overlayBudgetExpired&&overlayReads>0)now=1201;return !inventoryOwnerLost&&!(options.overlayOwnerDuringProof&&legendReads>=3)&&!(options.overlayOwnerLoss&&overlayReads>0)&&!options.initialOwnerLoss&&!(options.ownerLossBeforeRole&&guards>=3)&&!(options.ownerLoss&&roleClicks>0)&&!(options.finalLoss&&guards>=2);};
  const budget=options.expired?0:options.invalidDeadline?NaN:options.excessBudget?25001:1200;
  const mainGuard=options.admitAux?async()=>{
@@ -89,13 +89,21 @@ async function trial(options={}) {
   return !options.auxGuardFailure&&!options.auxDeadlineFailedProof
     &&!(options.auxOwnershipLostDuringProof&&legendReads>0)&&(!options.auxOwnershipLostAfterClick||roleClicks===0);
  }:undefined;
+ if(mainGuard)mainGuard.sealInitialActions=()=>{sealed++;};
  if(mainGuard)mainGuard.failureDetails=()=>options.pageSetDetails;
  if(mainGuard)mainGuard.failure=()=>options.auxDeadlineFailedProof?'deadline':options.auxGuardFailure??'native-ownership';
  const facts=await sandbox.exports.run(page,options.noGuard?undefined:guard,budget,mainGuard);
  assert(!JSON.stringify(facts).includes('PRIVATE'));
- return {facts,roleClicks,continueClicks,taskClicks,mainProofs,legendReads};
+ return {facts,roleClicks,continueClicks,taskClicks,mainProofs,legendReads,sealed};
 }
 (async()=>{
+ const sealedAttempt=await trial({admitAux:true,uncertain:'role'});
+ assert.equal(sealedAttempt.sealed,1);
+ assert.equal(sealedAttempt.roleClicks,1);
+ assert.equal(sealedAttempt.continueClicks,0);
+ assert.equal(sealedAttempt.facts.roleClickCompleted,false);
+ const noInputSeal=await trial({admitAux:true,initialOwnerLoss:true});
+ assert.equal(noInputSeal.sealed,0);
  for(const reason of ['main-focus','auxiliary-controls','query-failed']) {
   const blocked=await trial({admitAux:true,auxGuardFailure:reason});
   assert.equal(blocked.facts.mainGuardFailure,reason);assert.equal(blocked.roleClicks,0);assert.equal(blocked.continueClicks,0);

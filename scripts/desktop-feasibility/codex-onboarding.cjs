@@ -293,6 +293,9 @@ async function run(page, ownerGuard, deadline, rejected, mainGuard) {
       if (!candidate(first,final) || !final.points.some(p=>p.x===point.x&&p.y===point.y)) return await blocked('unstable');
       if (!await ownedEndpoint()) return false;
       if (Date.now() >= deadline) { facts.roleProofFailure='deadline-expired'; return false; }
+      // Seal before recording the first attempt, including uncertain click failures.
+      if(before==='roleClickAttempted'&&typeof mainGuard?.sealInitialActions==='function')
+        mainGuard.sealInitialActions();
       facts[before]=true;
       await handle.click({position:point,timeout:Math.max(1,Math.min(2000,deadline-Date.now()))});
       facts[after]=true;
