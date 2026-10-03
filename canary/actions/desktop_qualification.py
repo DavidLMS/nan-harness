@@ -870,7 +870,7 @@ def semantic_observations(directory, app):
             present_modifiers = modifier_fields & set(value)
             ancestor_fields = {'centerWithinPublishedAncestors', 'ancestorBoundsStatus', 'checkedAncestorCount'}
             present_ancestors = ancestor_fields & set(value)
-            ancestor_stage_fields = {'ancestorQueryStage'}
+            ancestor_stage_fields = {'ancestorQueryStage', 'ancestorBoundsFailure'}
             if 'ancestorQueryStage' in value:
                 stage = value['ancestorQueryStage']
                 stages = {'unavailable', 'dbus-import', 'bus', 'owner', 'identity', 'retry-bounds',
@@ -881,6 +881,14 @@ def semantic_observations(directory, app):
                         or state in {'cycle', 'limit'} and stage != 'chain'):
                     raise ValueError('invalid Zed ancestor query stage')
                 record['ancestorQueryStage'] = stage
+            if 'ancestorBoundsFailure' in value:
+                failure = value['ancestorBoundsFailure']
+                if (present_ancestors != ancestor_fields or value.get('ancestorBoundsStatus') != 'unavailable'
+                        or value.get('ancestorQueryStage') != 'ancestor-bounds'
+                        or type(failure) is not str or failure not in {
+                            'component-unavailable', 'query-failed', 'invalid-geometry', 'unmeasured'}):
+                    raise ValueError('invalid Zed ancestor bounds failure')
+                record['ancestorBoundsFailure'] = failure
             if present_ancestors:
                 state, count = value.get('ancestorBoundsStatus'), value.get('checkedAncestorCount')
                 within = value.get('centerWithinPublishedAncestors')

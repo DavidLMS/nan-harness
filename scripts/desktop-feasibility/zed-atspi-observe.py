@@ -13,11 +13,36 @@ COUNTS = ('sampledButtons', 'identityRejected', 'stateRejected', 'stabilityRejec
           'toggleOn', 'toggleOff', 'toggleUnknown')
 
 
-def ancestor_result(status='unavailable', count=0, within=None, stage=None):
-    return dict(centerWithinPublishedAncestors=within,
+def ancestor_result(status='unavailable', count=0, within=None, stage=None, failure=None):
+    result = dict(centerWithinPublishedAncestors=within,
                 ancestorBoundsStatus=status, checkedAncestorCount=count,
                 ancestorQueryStage=stage or ('complete' if status == 'complete' else
                     'chain' if status in ('cycle', 'limit') else 'unavailable'))
+    if failure is not None:
+        result['ancestorBoundsFailure'] = failure
+    return result
+
+
+class AncestorBoundsError(ValueError):
+    def __init__(self, category):
+        super().__init__('ancestor bounds unavailable')
+        self.category = category
+
+
+def component_bounds(interfaces, read_extent):
+    if (not isinstance(interfaces, (list, tuple))
+            or len(interfaces) > 32 or any(type(value) is not str for value in interfaces)):
+        raise AncestorBoundsError('query-failed')
+    if 'org.a11y.atspi.Component' not in interfaces:
+        raise AncestorBoundsError('component-unavailable')
+    try:
+        return rectangle(read_extent())
+    except (TypeError, ValueError):
+        raise AncestorBoundsError('invalid-geometry') from None
+    except TimeoutError:
+        raise
+    except OSError:
+        raise AncestorBoundsError('query-failed') from None
 
 
 def published_ancestors(held, application, bounds, read, deadline, clock=time.monotonic):
@@ -46,7 +71,10 @@ def published_ancestors(held, application, bounds, read, deadline, clock=time.mo
             if parent[0] != held[0] or not parent[1] or parent[1].endswith('/null'):
                 return ancestor_result(count=len(signature), stage='parent'), None
             stage = 'ancestor-bounds'
-            extent = rectangle(extent)
+            try:
+                extent = rectangle(extent)
+            except (ValueError, TypeError):
+                raise AncestorBoundsError('invalid-geometry') from None
             within = within and extent[0] <= center[0] < extent[0] + extent[2] \
                 and extent[1] <= center[1] < extent[1] + extent[3]
             signature.append((parent, extent))
@@ -54,6 +82,9 @@ def published_ancestors(held, application, bounds, read, deadline, clock=time.mo
             current = parent
         except TimeoutError:
             return ancestor_result(count=len(signature), stage='deadline'), None
+        except AncestorBoundsError as error:
+            return ancestor_result(count=len(signature), stage='ancestor-bounds',
+                failure=error.category), None
         except (ValueError, TypeError, OSError):
             stage = getattr(read, 'query_stage', stage) if stage == 'parent' else stage
             return ancestor_result(count=len(signature), stage=stage), None
@@ -125,10 +156,15 @@ def retry_ancestors(request, expected, deadline):
                     return parent, None
                 read.query_stage = 'ancestor-bounds'
                 ancestor = bus.get_object(*parent)
-                extent = [int(n) for n in ancestor.GetExtents(dbus.UInt32(1),
-                    dbus_interface='org.a11y.atspi.Component', timeout=remaining())]
-                return parent, extent
+                interfaces = [str(n) for n in ancestor.GetInterfaces(
+                    dbus_interface='org.a11y.atspi.Accessible', timeout=remaining())]
+                def read_extent():
+                    return [int(n) for n in ancestor.GetExtents(dbus.UInt32(1),
+                        dbus_interface='org.a11y.atspi.Component', timeout=remaining())]
+                return parent, component_bounds(interfaces, read_extent)
             except dbus.DBusException:
+                if read.query_stage == 'ancestor-bounds':
+                    raise AncestorBoundsError('query-failed') from None
                 raise OSError("ancestor query failed") from None
         stage = 'chain'
         facts, signature = published_ancestors(held, application, bounds, read, deadline)

@@ -1602,6 +1602,20 @@ class QualificationTests(unittest.TestCase):
                 value = {**base, **extension}
                 path.write_text(json.dumps(value))
                 self.assertEqual(q.semantic_observations(root, 'zed-desktop'), [value])
+            partial = dict(ancestorBoundsStatus='unavailable', checkedAncestorCount=2,
+                           centerWithinPublishedAncestors=None, ancestorQueryStage='ancestor-bounds')
+            for failure in ('component-unavailable', 'query-failed', 'invalid-geometry', 'unmeasured'):
+                value = {**base, **partial, 'ancestorBoundsFailure': failure}
+                path.write_text(json.dumps(value))
+                self.assertEqual(q.semantic_observations(root, 'zed-desktop'), [value])
+            for extension in ({**partial, 'ancestorBoundsFailure': 'PRIVATE'},
+                              {**partial, 'ancestorBoundsFailure': None},
+                              {**partial, 'ancestorBoundsFailure': 'query-failed', 'ancestorQueryStage': 'parent'},
+                              {**valid[0], 'ancestorBoundsFailure': 'query-failed'},
+                              {'ancestorBoundsFailure': 'component-unavailable'}):
+                path.write_text(json.dumps({**base, **extension}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'zed-desktop')
             for extension in ({**valid[0], 'centerWithinPublishedAncestors': 1},
                               {**valid[0], 'checkedAncestorCount': True},
                               {**valid[0], 'ancestorBoundsStatus': 'PRIVATE'},

@@ -58,7 +58,7 @@ class Tests(unittest.TestCase):
         foreign = collect(lambda _: ((':1.3', '/group'), (0, 0, 100, 100)))
         self.assertEqual(foreign[0], m.ancestor_result(stage='parent'))
         missing = collect(lambda _: ((':1.2', '/group'), None))
-        self.assertEqual(missing[0], m.ancestor_result(stage='ancestor-bounds'))
+        self.assertEqual(missing[0], m.ancestor_result(stage='ancestor-bounds', failure='invalid-geometry'))
         index = 0
         def endless(_):
             nonlocal index
@@ -92,6 +92,41 @@ class Tests(unittest.TestCase):
         def expired_read(_):
             raise TimeoutError('PRIVATE timeout')
         self.assertEqual(collect(expired_read)['ancestorQueryStage'], 'deadline')
+
+    def test_component_absence_and_invalid_geometry_are_distinct_without_extent_fallback(self):
+        reads = []
+        with self.assertRaises(m.AncestorBoundsError) as missing:
+            m.component_bounds(['org.a11y.atspi.Accessible'], lambda: reads.append(True))
+        self.assertEqual(missing.exception.category, 'component-unavailable')
+        self.assertEqual(reads, [])
+        for extent in ((0,0,0,20), (0,0,20,-1), ('PRIVATE',0,20,20)):
+            with self.assertRaises(m.AncestorBoundsError) as invalid:
+                m.component_bounds(['org.a11y.atspi.Component'], lambda: extent)
+            self.assertEqual(invalid.exception.category, 'invalid-geometry')
+            self.assertNotIn('PRIVATE', str(invalid.exception))
+        with self.assertRaises(m.AncestorBoundsError) as failed:
+            m.component_bounds(['org.a11y.atspi.Component'],
+                lambda: (_ for _ in ()).throw(OSError('PRIVATE')))
+        self.assertEqual(failed.exception.category, 'query-failed')
+        with self.assertRaises(TimeoutError):
+            m.component_bounds(['org.a11y.atspi.Component'],
+                lambda: (_ for _ in ()).throw(TimeoutError('PRIVATE')))
+
+    def test_partial_ancestor_success_retains_count_but_never_containment(self):
+        held, parent, app = (':1.2','/retry'), (':1.2','/group'), (':1.2','/app')
+        for failure in ('component-unavailable','invalid-geometry','query-failed'):
+            def read(current):
+                if current == held:
+                    return parent, (0,0,100,100)
+                raise m.AncestorBoundsError(failure)
+            first = m.published_ancestors(held, app, (10,20,40,20), read, 10, lambda: 0)
+            result = m.compare_ancestors(first, first)
+            self.assertEqual(result['checkedAncestorCount'], 1)
+            self.assertEqual(result['ancestorBoundsStatus'], 'unavailable')
+            self.assertEqual(result['ancestorBoundsFailure'], failure)
+            self.assertIsNone(result['centerWithinPublishedAncestors'])
+            self.assertIsNone(first[1])
+            self.assertNotIn('/group', json.dumps(result))
 
     def request(self):
         return m.validate(dict(pid=71, window=91,
