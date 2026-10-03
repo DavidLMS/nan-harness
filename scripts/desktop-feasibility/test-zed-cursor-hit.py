@@ -26,6 +26,38 @@ def cursor_file(frames):
 
 
 class CursorTests(unittest.TestCase):
+    def test_size_zero_preserves_explicit_environment_selection(self):
+        size = CURSOR['cursor_size']
+        self.assertEqual(size({'XCURSOR_SIZE': '0'}, {'Xcursor.size': '32'}, (800, 600)),
+                         (0, 'environment'))
+        self.assertEqual(size({}, {'Xcursor.size': '32'}, (800, 600)), (32, 'resource'))
+        self.assertEqual(size({}, {'Xft.dpi': '96'}, (800, 600)), (21, 'dpi'))
+        self.assertEqual(size({}, {}, (800, 600)), (12, 'screen'))
+
+    def test_classification_requires_exact_image_and_rejects_ambiguity(self):
+        image = (2, 1, 1, 0, (1, 2))
+        classify = CURSOR['classify_image']
+        self.assertEqual(classify(image, {'hand': [image], 'arrow': []}), 'hand')
+        self.assertEqual(classify(image, {'hand': [image], 'arrow': [image]}), 'unknown')
+        self.assertEqual(classify((2, 1, 0, 0, (1, 2)), {'hand': [image]}), 'unknown')
+        self.assertEqual(classify((1, 1, 0, 0, (0,)), {}), 'transparent')
+        self.assertEqual(classify((2, 1, 0, 0, (0, 0)), {}), 'unknown')
+
+    def test_classification_reuses_one_sample_and_does_not_change_hand_oracle(self):
+        class Sample:
+            size_provenance = 'resource'
+            calls = 0
+            def matches(self):
+                self.calls += 1
+                self.last_classification = 'arrow'
+                return False
+        sample, observation = Sample(), {'cursorChecks': 0, 'cursorExactMatches': 0}
+        self.assertFalse(INPUT['sampled_cursor_match'](sample.matches, observation))
+        self.assertEqual(sample.calls, 1)
+        self.assertEqual(observation['cursorClasses']['arrow'], 1)
+        self.assertEqual(observation['cursorExactMatches'], 0)
+        self.assertEqual(observation['cursorSizeSource'], 'resource')
+
     def test_exact_pixels_hotspot_and_nearest_size_first_tie(self):
         data = cursor_file([(16, [0xff000001, 0xff000002]), (32, [3, 4])])
         self.assertEqual(CURSOR['parse_images'](data, 24), [(2, 1, 1, 0, (0xff000001, 0xff000002))])
@@ -196,6 +228,7 @@ class CursorTests(unittest.TestCase):
             shape.display, shape.fix, shape.xlib = 1, Fix(), Library()
             shape.deadline, shape.guard = time.monotonic() + 1, lambda: True
             shape.images = [(2, 1, 1, 0, (0xff000001, 0xff000002))]
+            shape.references = {"hand": shape.images}
             self.assertTrue(shape.matches())
             image.xhot = 0
             self.assertFalse(shape.matches())

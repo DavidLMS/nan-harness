@@ -22,6 +22,22 @@ runner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(runner)
 
 
+class CodexProjectPreflightTests(unittest.TestCase):
+    def test_rejected_stage_is_closed_and_never_qualifies(self):
+        value = dict(schemaVersion=1, mechanism='codex-project-preflight', diagnosticsOnly=True, stage='workspace')
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'facts.json'
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(tmp, 'chatgpt-desktop'), [value])
+            for changes in ({'stage': 'PRIVATE'}, {'stage': None}, {'path': 'PRIVATE'}, {'diagnosticsOnly': False}):
+                path.write_text(json.dumps({**value, **changes}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(tmp, 'chatgpt-desktop')
+            path.write_text(json.dumps(value))
+            with self.assertRaises(ValueError):
+                q.semantic_observations(tmp, 'claude-desktop')
+
+
 class CodexDriverFactsTests(unittest.TestCase):
     def test_closed_driver_facts_reject_private_payloads_and_unproved_retry(self):
         flags = 'endpointOwned targetVerified attached bindingVerified auxiliaryInert codingComposerReady uniqueComposer inputReadback inputSubmitted userTurnObserved responseVerified errorObserved retryControl retryAttempted retryCompleted providerResponseVerified'.split()
@@ -213,6 +229,24 @@ class RunnerTests(unittest.TestCase):
                                              {**source, 'FEASIBILITY_HERMES_NAMESPACE_POLICY': 'no-sandbox'})
         with self.assertRaises(ValueError):
             runner.qualification_environment('zed-desktop', Path('/facts'), Path('/nanh'), '/app', source)
+
+    def test_claude_read_fixture_policy_is_mac_owned_and_source_bound(self):
+        source = dict(GITHUB_ACTIONS='true', RUNNER_ENVIRONMENT='github-hosted', RUNNER_OS='macOS',
+                      NANH_DESKTOP_QUALIFICATION_MODE='startup-baseline',
+                      NANH_CLAUDE_MAC_PROFILE_POLICY='native-known-folders',
+                      NANH_CLAUDE_MAC_CHAT_NAVIGATION='1', NANH_CLAUDE_MCP_FIXTURE='read-only',
+                      NANH_CLAUDE_MCP_SCRIPT='/untrusted', NANH_CLAUDE_MCP_PYTHON='/untrusted')
+        with patch.object(runner, 'validate_claude_bundle'):
+            environment = runner.qualification_environment('claude-desktop', Path('/facts'), Path('/nanh'), '/app', source)
+            self.assertEqual(environment['NANH_CLAUDE_MCP_SCRIPT'], str(ROOT / 'scripts/desktop-feasibility/claude-read-fixture.py'))
+            self.assertNotIn('/untrusted', str(environment))
+            for changes in ({'RUNNER_OS': 'Linux'}, {'NANH_CLAUDE_MCP_FIXTURE': 'arbitrary'},
+                            {'NANH_CLAUDE_MAC_CHAT_NAVIGATION': '0'},
+                            {'NANH_CLAUDE_MAC_PROFILE_POLICY': 'electron-user-data-dir'}):
+                with self.assertRaises(ValueError):
+                    runner.qualification_environment('claude-desktop', Path('/facts'), Path('/nanh'), '/app', {**source, **changes})
+            with patch.object(runner, 'digest', return_value='0' * 64), self.assertRaises(ValueError):
+                runner.qualification_environment('claude-desktop', Path('/facts'), Path('/nanh'), '/app', source)
 
     def trial(self, mutation=None, report_mutation=None):
         with tempfile.TemporaryDirectory() as root:
@@ -1795,6 +1829,15 @@ class HermesReadinessTests(unittest.TestCase):
             path = Path(tmp) / 'pointer.json'
             path.write_text(json.dumps({**value, 'cursorSelection': selection}))
             self.assertEqual(q.semantic_observations(tmp, 'zed-desktop')[0]['cursorSelection'], selection)
+            classified = {**selection, 'cursorClasses': dict(hand=0, arrow=9, notallowed=0, transparent=0, unknown=0),
+                          'cursorSizeSource': 'screen'}
+            path.write_text(json.dumps({**value, 'cursorSelection': classified}))
+            self.assertEqual(q.semantic_observations(tmp, 'zed-desktop')[0]['cursorSelection'], classified)
+            for changes in ({'cursorSizeSource': 'PRIVATE'}, {'cursorClasses': {'rawPixels': 'PRIVATE'}},
+                            {'cursorSizeSource': None}, {'cursorChecks': 8}):
+                path.write_text(json.dumps({**value, 'cursorSelection': {**classified, **changes}}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(tmp, 'zed-desktop')
             for changes in ({'failureReason': 'PRIVATE'}, {'cursorChecks': 20},
                             {'accessibleChecks': True}, {'accessibleExactMatches': 10},
                             {'cursorExactMatches': 10}, {'rawPixels': 'PRIVATE'},

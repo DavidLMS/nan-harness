@@ -41,6 +41,8 @@ mod process;
 #[cfg(feature = "desktop-qualification")]
 mod qualification_config;
 #[cfg(feature = "desktop-qualification")]
+mod qualification_mcp;
+#[cfg(feature = "desktop-qualification")]
 mod qualification_models;
 #[cfg(feature = "desktop-qualification")]
 mod qualification_restore;

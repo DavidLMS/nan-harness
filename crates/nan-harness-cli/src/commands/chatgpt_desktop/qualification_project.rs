@@ -82,24 +82,85 @@ fn private_directory(path: &Path) -> std::io::Result<PathBuf> {
     path.canonicalize().map_err(|_| denied())
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum Stage {
+    Policy,
+    Release,
+    Facts,
+    Electron,
+    Workspace,
+    RootComponent,
+    ProfileBinding,
+    Fixture,
+    ExecutableHash,
+}
+
+fn record_failure(stage: Stage, debug: bool) {
+    let expected = inspected_target(std::env::consts::OS).map(|target| target.0);
+    if debug
+        || expected.is_none()
+        || std::env::var("GITHUB_ACTIONS").as_deref() != Ok("true")
+        || std::env::var("RUNNER_ENVIRONMENT").as_deref() != Ok("github-hosted")
+        || expected != std::env::var("RUNNER_OS").ok().as_deref()
+    {
+        return;
+    }
+    let Some(directory) = std::env::var_os("NANH_DESKTOP_QUALIFICATION_FACTS").map(PathBuf::from)
+    else {
+        return;
+    };
+    if private_directory(&directory).ok().as_ref() != Some(&directory) {
+        return;
+    }
+    let value = serde_json::json!({"schemaVersion":1,"mechanism":"codex-project-preflight",
+        "diagnosticsOnly":true,"stage":stage});
+    let path = directory.join(format!(
+        "codex-project-preflight-{}.json",
+        std::process::id()
+    ));
+    if let Ok(bytes) = serde_json::to_vec(&value)
+        && let Ok(mut file) = nan_harness_private_fs::open_private_new(&path)
+    {
+        use std::io::Write as _;
+        let _ = file.write_all(&bytes).and_then(|()| file.sync_all());
+    }
+}
+
+#[cfg(test)]
 fn workspace(
     cwd: &Path,
     profile: &Path,
     facts: &Path,
     electron: &Path,
 ) -> std::io::Result<PathBuf> {
+    workspace_staged(cwd, profile, facts, electron, &mut Stage::Workspace)
+}
+
+fn workspace_staged(
+    cwd: &Path,
+    profile: &Path,
+    facts: &Path,
+    electron: &Path,
+    stage: &mut Stage,
+) -> std::io::Result<PathBuf> {
+    *stage = Stage::Workspace;
     let cwd = private_directory(cwd)?;
     let mut expected = cwd.clone();
+    *stage = Stage::RootComponent;
     for component in ["profile", "nanh", "chatgpt-desktop", "profile"] {
         expected.push(component);
         private_directory(&expected)?;
     }
+    *stage = Stage::ProfileBinding;
     if private_directory(profile)? != expected.canonicalize().map_err(|_| denied())?
         || private_directory(electron)? != private_directory(&cwd.join("profile/codex-desktop"))?
     {
         return Err(denied());
     }
+    *stage = Stage::Facts;
     private_directory(facts)?;
+    *stage = Stage::Fixture;
     let fixture = cwd.join("read-target.txt");
     let metadata = std::fs::symlink_metadata(&fixture).map_err(|_| denied())?;
     if !metadata.is_file()
@@ -158,30 +219,46 @@ pub(super) fn apply(
         .iter()
         .map(|&key| (key, std::env::var(key).unwrap_or_default()))
         .collect();
-    if !admitted(std::env::consts::OS, debug, &environment) {
-        return Err(ChatGptDesktopError::InvalidInstallation);
-    }
-    let executable = inspected_release(
-        std::env::consts::OS,
-        &installation.app_version.to_string(),
-        &std::env::var("NANH_CODEX_PROJECT_ARTIFACT_SHA256").unwrap_or_default(),
-    )
-    .ok_or(ChatGptDesktopError::InvalidInstallation)?;
-    let facts = std::env::var_os("NANH_DESKTOP_QUALIFICATION_FACTS")
-        .map(PathBuf::from)
+    let mut stage = Stage::Policy;
+    let outcome = (|| {
+        if !admitted(std::env::consts::OS, debug, &environment) {
+            return Err(ChatGptDesktopError::InvalidInstallation);
+        }
+        stage = Stage::Release;
+        let executable = inspected_release(
+            std::env::consts::OS,
+            &installation.app_version.to_string(),
+            &std::env::var("NANH_CODEX_PROJECT_ARTIFACT_SHA256").unwrap_or_default(),
+        )
         .ok_or(ChatGptDesktopError::InvalidInstallation)?;
-    let electron = std::env::var_os("CODEX_ELECTRON_USER_DATA_PATH")
-        .map(PathBuf::from)
-        .ok_or(ChatGptDesktopError::InvalidInstallation)?;
-    let cwd = std::env::current_dir().map_err(|_| ChatGptDesktopError::InvalidInstallation)?;
-    let cwd = workspace(&cwd, &profile.root, &facts, &electron)
-        .map_err(|_| ChatGptDesktopError::InvalidInstallation)?;
-    if executable_digest(&installation.executable)
-        .map_err(|_| ChatGptDesktopError::InvalidInstallation)?
-        != executable
-    {
-        return Err(ChatGptDesktopError::InvalidInstallation);
-    }
+        stage = Stage::Facts;
+        let facts = std::env::var_os("NANH_DESKTOP_QUALIFICATION_FACTS")
+            .map(PathBuf::from)
+            .ok_or(ChatGptDesktopError::InvalidInstallation)?;
+        stage = Stage::Electron;
+        let electron = std::env::var_os("CODEX_ELECTRON_USER_DATA_PATH")
+            .map(PathBuf::from)
+            .ok_or(ChatGptDesktopError::InvalidInstallation)?;
+        stage = Stage::Workspace;
+        let cwd = std::env::current_dir().map_err(|_| ChatGptDesktopError::InvalidInstallation)?;
+        let cwd = workspace_staged(&cwd, &profile.root, &facts, &electron, &mut stage)
+            .map_err(|_| ChatGptDesktopError::InvalidInstallation)?;
+        stage = Stage::ExecutableHash;
+        if executable_digest(&installation.executable)
+            .map_err(|_| ChatGptDesktopError::InvalidInstallation)?
+            != executable
+        {
+            return Err(ChatGptDesktopError::InvalidInstallation);
+        }
+        Ok(cwd)
+    })();
+    let cwd = match outcome {
+        Ok(cwd) => cwd,
+        Err(error) => {
+            record_failure(stage, debug);
+            return Err(error);
+        }
+    };
     command
         .arg("--open-project")
         .arg(cwd)
@@ -205,7 +282,11 @@ mod tests {
 
     #[test]
     fn hosted_policy_requires_all_public_trial_conditions() {
-        for (platform, runner_os) in [("windows", "Windows"), ("linux", "Linux"), ("macos", "macOS")] {
+        for (platform, runner_os) in [
+            ("windows", "Windows"),
+            ("linux", "Linux"),
+            ("macos", "macOS"),
+        ] {
             let mut environment: BTreeMap<_, _> = POLICY_KEYS
                 .iter()
                 .copied()
@@ -283,6 +364,9 @@ mod tests {
             cwd.canonicalize().unwrap()
         );
         let outside = private_tempdir();
+        let mut stage = Stage::Policy;
+        assert!(workspace_staged(cwd, outside.path(), &facts, &electron, &mut stage).is_err());
+        assert_eq!(stage, Stage::ProfileBinding);
         assert!(workspace(cwd, outside.path(), &facts, &electron).is_err());
         assert!(workspace(cwd, &profile, &facts, outside.path()).is_err());
         std::fs::remove_file(cwd.join("read-target.txt")).unwrap();
@@ -306,6 +390,19 @@ mod tests {
         assert!(workspace(directory.path(), &profile, directory.path(), &electron).is_ok());
         let parent = directory.path().join("profile/nanh");
         std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let mut stage = Stage::Policy;
+        assert!(
+            workspace_staged(
+                directory.path(),
+                &profile,
+                directory.path(),
+                &electron,
+                &mut stage
+            )
+            .is_err()
+        );
+        assert_eq!(stage, Stage::RootComponent);
+        assert_eq!(serde_json::to_value(stage).unwrap(), "root-component");
         assert!(workspace(directory.path(), &profile, directory.path(), &electron).is_err());
         std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o700)).unwrap();
         std::fs::remove_file(&fixture).unwrap();
@@ -313,6 +410,17 @@ mod tests {
         let foreign = outside.path().join("read-target.txt");
         nan_harness_private_fs::open_private_new(&foreign).unwrap();
         symlink(foreign, fixture).unwrap();
+        assert!(
+            workspace_staged(
+                directory.path(),
+                &profile,
+                directory.path(),
+                &electron,
+                &mut stage
+            )
+            .is_err()
+        );
+        assert_eq!(stage, Stage::Fixture);
         assert!(workspace(directory.path(), &profile, directory.path(), &electron).is_err());
         let target = directory.path().join("target");
         nan_harness_private_fs::create_private_dir_all(&target).unwrap();

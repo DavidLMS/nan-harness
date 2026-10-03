@@ -214,6 +214,20 @@ def qualification_environment(app, facts, real_nanh, executable, inherited=None)
                     or profile_policy != 'native-known-folders'):
                 raise ValueError('Claude native Chat navigation is unavailable')
             environment['NANH_CLAUDE_MAC_CHAT_NAVIGATION'] = navigation
+        mcp_fixture = source.get('NANH_CLAUDE_MCP_FIXTURE')
+        if mcp_fixture is not None:
+            if (mcp_fixture != 'read-only' or app != 'claude-desktop'
+                    or source.get('RUNNER_OS') != 'macOS' or mode != 'startup-baseline'
+                    or profile_policy != 'native-known-folders' or navigation != '1'):
+                raise ValueError('Claude read fixture policy is unavailable')
+            script = Path(__file__).with_name('claude-read-fixture.py').resolve(strict=True)
+            source_hash = 'ecb56f97d549f3040908f1bb8f0bb32235f9b48d9572ea348098135fe7999fc0'
+            if digest(script) != source_hash:
+                raise ValueError('Claude read fixture source differs')
+            environment.update(NANH_CLAUDE_MCP_FIXTURE=mcp_fixture,
+                               NANH_CLAUDE_MCP_PYTHON=str(Path(sys.executable).resolve(strict=True)),
+                               NANH_CLAUDE_MCP_SCRIPT=str(script),
+                               NANH_CLAUDE_MCP_SOURCE_SHA256=source_hash)
         windows_profile = source.get('NANH_CLAUDE_WINDOWS_PROFILE_POLICY')
         if windows_profile is not None:
             if (windows_profile != 'private-env' or app != 'claude-desktop'

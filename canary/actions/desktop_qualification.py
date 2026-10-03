@@ -285,13 +285,21 @@ def semantic_observations(directory, app):
         if type(value) is not dict:
             raise ValueError('invalid semantic observation')
         mechanism = value.get('mechanism')
-        if mechanism not in {'codex-renderer-qualification', 'qualification-runner-failure', 'hermes-windows-catalog-readiness', 'hermes-renderer-qualification', 'zed-native-copy', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'zed-retry-visual', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'windows-process-absence', 'windows-post-stop-process', 'windows-process-baseline', 'windows-process-settlement', 'claude-owned-configuration', 'claude-restore', 'claude-model-discovery', 'claude-window-stack', 'claude-window-focus', 'claude-chat-navigation', 'claude-window-fit', 'claude-storage-use', 'claude-native-storage', 'claude-private-storage-stage', 'claude-native-composer', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}:
+        if mechanism not in {'codex-renderer-qualification', 'qualification-runner-failure', 'hermes-windows-catalog-readiness', 'hermes-renderer-qualification', 'zed-native-copy', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'zed-retry-visual', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'codex-project-preflight', 'windows-process-absence', 'windows-post-stop-process', 'windows-process-baseline', 'windows-process-settlement', 'claude-owned-configuration', 'claude-restore', 'claude-model-discovery', 'claude-window-stack', 'claude-window-focus', 'claude-chat-navigation', 'claude-window-fit', 'claude-storage-use', 'claude-native-storage', 'claude-private-storage-stage', 'claude-native-composer', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}:
             continue
         expected = 'hermes-renderer-qualification' if app == 'hermes-desktop' else 'zed-native-copy'
-        if (mechanism != expected and mechanism not in {'codex-renderer-qualification', 'qualification-runner-failure', 'hermes-windows-catalog-readiness', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'zed-retry-visual', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'windows-process-absence', 'windows-post-stop-process', 'windows-process-baseline', 'windows-process-settlement', 'claude-owned-configuration', 'claude-restore', 'claude-model-discovery', 'claude-window-stack', 'claude-window-focus', 'claude-chat-navigation', 'claude-window-fit', 'claude-storage-use', 'claude-native-storage', 'claude-private-storage-stage', 'claude-native-composer', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}) or type(value.get('schemaVersion')) is not int or value['schemaVersion'] != 1:
+        if (mechanism != expected and mechanism not in {'codex-renderer-qualification', 'qualification-runner-failure', 'hermes-windows-catalog-readiness', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'zed-retry-visual', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'codex-project-preflight', 'windows-process-absence', 'windows-post-stop-process', 'windows-process-baseline', 'windows-process-settlement', 'claude-owned-configuration', 'claude-restore', 'claude-model-discovery', 'claude-window-stack', 'claude-window-focus', 'claude-chat-navigation', 'claude-window-fit', 'claude-storage-use', 'claude-native-storage', 'claude-private-storage-stage', 'claude-native-composer', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}) or type(value.get('schemaVersion')) is not int or value['schemaVersion'] != 1:
             raise ValueError('semantic observation identity differs')
         record = {'schemaVersion': 1, 'mechanism': mechanism}
-        if mechanism == 'hermes-windows-catalog-readiness':
+        if mechanism == 'codex-project-preflight':
+            fields = {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'stage'}
+            if (app != 'chatgpt-desktop' or set(value) != fields or value['diagnosticsOnly'] is not True
+                    or type(value['stage']) is not str or value['stage'] not in {
+                        'policy', 'release', 'facts', 'electron', 'workspace', 'root-component',
+                        'profile-binding', 'fixture', 'executable-hash'}):
+                raise ValueError('invalid Codex project preflight')
+            record.update(diagnosticsOnly=True, stage=value['stage'])
+        elif mechanism == 'hermes-windows-catalog-readiness':
             booleans = {'menuOpened', 'refreshAttempted', 'catalogVerified', 'modelRowVerified',
                         'menuDismissed', 'composerReverified'}
             fields = booleans | {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'stage', 'errorCategory'}
@@ -713,7 +721,8 @@ def semantic_observations(directory, app):
                 counts = {'guardBeforeVerified': 20, 'guardAfterVerified': 20, 'accessibleChecks': 20,
                           'accessibleExactMatches': 20, 'cursorChecks': 19, 'cursorExactMatches': 19}
                 extended = fields | set(counts) | {'failureReason'}
-                if (type(selection) is not dict or set(selection) not in (fields, extended)
+                classified = extended | {'cursorClasses', 'cursorSizeSource'}
+                if (type(selection) is not dict or set(selection) not in (fields, extended, classified)
                         or type(selection['status']) is not str or selection['status'] not in {'matched', 'unavailable', 'no-hit', 'deadline', 'identity-rejected'}
                         or type(selection['sampledPoints']) is not int or not 0 <= selection['sampledPoints'] <= 9
                         or any(type(selection[key]) is not bool for key in ('exactPointerMatched', 'accessibleHitVerified'))
@@ -721,7 +730,7 @@ def semantic_observations(directory, app):
                         or selection['status'] == 'matched' and selection['sampledPoints'] == 0
                         or selection['status'] != 'matched' and (selection['exactPointerMatched'] or selection['accessibleHitVerified'])):
                     raise ValueError('invalid Zed cursor selection')
-                if set(selection) == extended:
+                if set(selection) in (extended, classified):
                     reason = selection['failureReason']
                     if (any(type(selection[key]) is not int or not 0 <= selection[key] <= limit
                             for key, limit in counts.items())
@@ -733,6 +742,14 @@ def semantic_observations(directory, app):
                             or selection['cursorExactMatches'] > selection['cursorChecks']
                             or selection['status'] == 'matched' and reason is not None):
                         raise ValueError('invalid Zed cursor proof counters')
+                if set(selection) == classified:
+                    classes = selection['cursorClasses']
+                    if (type(classes) is not dict or set(classes) != {'hand', 'arrow', 'notallowed', 'transparent', 'unknown'}
+                            or any(type(count) is not int or not 0 <= count <= 19 for count in classes.values())
+                            or sum(classes.values()) != selection['cursorChecks']
+                            or type(selection['cursorSizeSource']) is not str
+                            or selection['cursorSizeSource'] not in {'environment', 'resource', 'dpi', 'screen'}):
+                        raise ValueError('invalid Zed cursor classification')
                 record['cursorSelection'] = dict(selection)
             if present_modifiers:
                 state = value['modifierState']

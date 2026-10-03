@@ -50,6 +50,8 @@ pub(super) fn apply_gateway(
     profile.remove("inferenceModels");
     #[cfg(feature = "desktop-qualification")]
     configure_chat_trial(profile, chat_only);
+    #[cfg(feature = "desktop-qualification")]
+    qualification_mcp::configure(paths, profile)?;
 
     for (document, path) in documents.into_iter().zip(paths.documents()) {
         let mut payload =

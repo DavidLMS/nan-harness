@@ -126,19 +126,33 @@ def find_icon(paths, theme, name, home, visited=None):
     return None
 
 
-def expected_images(env, resources, dimensions):
+def cursor_size(env, resources, dimensions):
+    size = env.get("XCURSOR_SIZE")
+    if size is not None and re.fullmatch(r"[0-9]{1,9}", size):
+        return int(size), "environment"
+    resource = int(resources.get("Xcursor.size", "0"))
+    if resource:
+        return resource, "resource"
+    dpi = int(resources.get("Xft.dpi", "0"))
+    return (dpi * 16 // 72, "dpi") if dpi else (min(dimensions) // 48, "screen")
+
+
+def classify_image(actual, references):
+    matches = [kind for kind, images in references.items() if actual in images]
+    if len(matches) == 1:
+        return matches[0]
+    if not matches and actual[0:4] == (1, 1, 0, 0) and actual[4] == (0,):
+        return "transparent"
+    return "unknown"
+
+
+def expected_images(env, resources, dimensions, names=("pointer", "hand", "hand2")):
     theme = env.get('XCURSOR_THEME', resources.get('Xcursor.theme'))
-    size = env.get('XCURSOR_SIZE')
-    if size is not None and not re.fullmatch(r'[0-9]{1,9}', size):
-        size = None
-    desired = int(size) if size is not None else int(resources.get('Xcursor.size', '0'))
-    if not desired:
-        dpi = int(resources.get('Xft.dpi', '0'))
-        desired = dpi * 16 // 72 if dpi else min(dimensions) // 48
-    if not 1 <= desired <= 512:
+    desired, _ = cursor_size(env, resources, dimensions)
+    if not 0 <= desired <= 512:
         raise ValueError('cursor size')
     paths = search_paths(env)
-    for name in ('pointer', 'hand', 'hand2'):
+    for name in names:
         data = find_icon(paths, theme, name, env.get('HOME')) if theme else None
         if data is None:
             data = find_icon(paths, 'default', name, env.get('HOME'))
@@ -215,6 +229,15 @@ class PointerShape:
             screen = self.xlib.XDefaultScreen(self.display)
             dimensions = (self.xlib.XDisplayWidth(self.display, screen), self.xlib.XDisplayHeight(self.display, screen))
             self.images = expected_images(env, resources, dimensions)
+            _, self.size_provenance = cursor_size(env, resources, dimensions)
+            self.references = {'hand': self.images}
+            for kind, names in (('arrow', ('left_ptr',)),
+                                ('notallowed', ('not-allowed', 'crossed_circle'))):
+                try:
+                    self.references[kind] = expected_images(env, resources, dimensions, names)
+                except (ValueError, OSError):
+                    self.references[kind] = []
+            self.last_classification = 'unknown'
             self.fix = ctypes.CDLL('libXfixes.so.3')
             self.fix.XFixesGetCursorImage.argtypes = [ctypes.c_void_p]
             self.fix.XFixesGetCursorImage.restype = ctypes.POINTER(CursorImage)
@@ -225,6 +248,7 @@ class PointerShape:
             raise
 
     def matches(self):
+        self.last_classification = "unknown"
         if (not self.guard() or time.monotonic() >= self.deadline
                 or self.process_stat.read_bytes().rsplit(b')', 1)[1].split()[19] != self.process_start):
             return False
@@ -237,7 +261,10 @@ class PointerShape:
                 return False
             actual = (image.width, image.height, image.xhot, image.yhot,
                       tuple(image.pixels[index] & 0xffffffff for index in range(image.width * image.height)))
-            return actual in self.images and self.guard() and time.monotonic() < self.deadline
+            valid = self.guard() and time.monotonic() < self.deadline
+            if valid:
+                self.last_classification = classify_image(actual, self.references)
+            return actual in self.images and valid
         finally:
             self.xlib.XFree(pointer)
 

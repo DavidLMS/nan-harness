@@ -368,6 +368,14 @@ def sampled_cursor_match(matches, observation):
     if observation is not None:
         observation['cursorChecks'] += 1
     matched = matches()
+    owner = getattr(matches, '__self__', None)
+    if observation is not None and owner is not None and hasattr(owner, 'last_classification'):
+        kind = owner.last_classification
+        if kind in ('hand', 'arrow', 'notallowed', 'transparent', 'unknown'):
+            counts = observation.setdefault('cursorClasses', dict.fromkeys(
+                ('hand', 'arrow', 'notallowed', 'transparent', 'unknown'), 0))
+            counts[kind] += 1
+        observation['cursorSizeSource'] = owner.size_provenance
     if matched and observation is not None:
         observation['cursorExactMatches'] += 1
     return matched
