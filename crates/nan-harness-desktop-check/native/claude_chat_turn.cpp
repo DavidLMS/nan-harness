@@ -36,6 +36,9 @@ static bool decode(const std::string& hex, std::string& result) {
     }
     return true;
 }
+static bool input_mode(const std::string& mode) {
+    return mode == "input" || mode == "input-replace-owned";
+}
 static bool request(Request& value) {
     std::string line, prompt, marker, sentinel, trailing;
     if (!std::getline(std::cin, line) || line.size() > 8192 || std::cin.peek() != EOF) return false;
@@ -44,7 +47,7 @@ static bool request(Request& value) {
     if (!(input >> value.mode >> value.window >> value.pid >> x >> y >> width >> height >> value.millis >> value.cutoff >> value.owner >> prompt >> marker >> sentinel) || input >> trailing) return false;
     if (!value.cutoff || value.owner < 2 || !value.window || value.pid < 2 || !value.millis || value.millis > 5000 || !std::isfinite(x) || !std::isfinite(y)
         || !std::isfinite(width) || !std::isfinite(height) || width < 300 || height < 200) return false;
-    if (value.mode != "input" && value.mode != "copy" && value.mode != "retry-ready" && value.mode != "retry") return false;
+    if (!input_mode(value.mode) && value.mode != "copy" && value.mode != "retry-ready" && value.mode != "retry") return false;
     if (!decode(prompt, value.prompt) || !decode(marker, value.marker) || !decode(sentinel, value.sentinel) || value.sentinel.empty()) return false;
     value.bounds = CGRectMake(x, y, width, height);
     value.deadline = Clock::now() + std::chrono::milliseconds(value.millis);
@@ -228,15 +231,42 @@ static const char* press(const Request& request, const Node& node, const char* s
     return owned(request) ? success : "action-uncertain";
 }
 // Classify the already-read value without another accessibility query.
-static const char* initial_input_failure(CFTypeRef value, bool query_failed) {
+static const char* initial_input_failure(CFTypeRef value, bool query_failed, bool replace_owned = false) {
     if (query_failed || !value || CFGetTypeID(value) != CFStringGetTypeID()) return "input-initial-unavailable";
-    if (CFStringGetLength(static_cast<CFStringRef>(value)) != 0) return "input-initial-nonempty";
+    if (!replace_owned && CFStringGetLength(static_cast<CFStringRef>(value)) != 0) return "input-initial-nonempty";
     return nullptr;
 }
 static const char* input_readback_failure(bool clipboard_verified, bool value_verified) {
     if (!clipboard_verified) return "input-clipboard-mismatch";
     if (!value_verified) return "input-value-mismatch";
     return nullptr;
+}
+static bool focused_identity(AXUIElementRef focused, const Node& control, pid_t pid,
+                             pid_t expected_pid, const std::string& role, CGRect bounds) {
+    return focused && CFEqual(focused, control.element) && pid == expected_pid
+        && role == control.role && CGRectEqualToRect(bounds, control.bounds);
+}
+static bool focused_composer(const Request& request, const Node& control) {
+    if (!owned(request)) return false;
+    AXUIElementRef app = AXUIElementCreateApplication(request.pid);
+    if (!app) return false;
+    if (AXUIElementSetMessagingTimeout(app, .1F) != kAXErrorSuccess) {
+        CFRelease(app);
+        return false;
+    }
+    auto value = attribute(app, kAXFocusedUIElementAttribute);
+    CFRelease(app);
+    bool matches = false;
+    if (value && CFGetTypeID(value) == AXUIElementGetTypeID()) {
+        auto focused = static_cast<AXUIElementRef>(value);
+        pid_t pid = 0;
+        CGRect bounds;
+        matches = AXUIElementGetPid(focused, &pid) == kAXErrorSuccess && rectangle(focused, bounds)
+            && focused_identity(focused, control, pid, request.pid,
+                                string_attribute(focused, kAXRoleAttribute), bounds);
+    }
+    if (value) CFRelease(value);
+    return matches && !ax_query_failed && owned(request);
 }
 static const char* input(const Request& request, const Tree& tree) {
     if (!chat(tree)) return "mode";
@@ -247,11 +277,16 @@ static const char* input(const Request& request, const Tree& tree) {
     const auto& control = tree.nodes[editor];
     if (!target(control, request) || !contained_control(tree.nodes[send], request)) return "control";
     auto initial_value = attribute(control.element, kAXValueAttribute);
-    const char* initial_failure = initial_input_failure(initial_value, ax_query_failed);
+    const char* initial_failure = initial_input_failure(initial_value, ax_query_failed, request.mode == "input-replace-owned");
     if (initial_value) CFRelease(initial_value);
     if (initial_failure) return initial_failure;
     if (!owned(request) || AXUIElementSetAttributeValue(control.element, kAXFocusedAttribute, kCFBooleanTrue) != kAXErrorSuccess) return "focus";
-    if (!owned(request) || !clipboard_write(request.prompt) || !owned(request) || !key(9, true)) return "focus";
+    if (request.mode == "input-replace-owned") {
+        if (!focused_composer(request, control) || !key(0, true)) return "focus";
+    }
+    if (!owned(request) || !clipboard_write(request.prompt) || !owned(request)) return "focus";
+    if (request.mode == "input-replace-owned" && !focused_composer(request, control)) return "focus";
+    if (!key(9, true)) return "focus";
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
     if (!owned(request) || !clipboard_write(request.sentinel) || !owned(request) || !key(0, true) || !owned(request) || !key(8, true)) return "focus";
     while (within(request) && !clipboard_matches(request.prompt)) std::this_thread::sleep_for(std::chrono::milliseconds(20));
@@ -311,7 +346,7 @@ int claude_chat_turn() {
             Tree tree;
             if (!owned(value)) stage = "window";
             else if (!tree.collect(value)) stage = "tree";
-            else stage = value.mode == "input" ? input(value, tree) : action(value, tree);
+            else stage = input_mode(value.mode) ? input(value, tree) : action(value, tree);
             if (!within(value) && std::string(stage) != "action-uncertain") stage = "deadline";
         }
         std::cout << "turn " << stage << '\n';

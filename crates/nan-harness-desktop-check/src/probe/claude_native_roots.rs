@@ -83,7 +83,7 @@ pub(super) fn enabled(spec: &ProbeSpec) -> Result<bool, Reason> {
     Ok(true)
 }
 
-pub(super) struct NativeRoots {
+pub(crate) struct NativeRoots {
     roots: Vec<OwnedRoot>,
 }
 struct OwnedRoot {
@@ -152,6 +152,14 @@ fn require_process_absence() -> Result<(), Failure> {
 }
 
 impl NativeRoots {
+    #[cfg(any(test, target_os = "macos"))]
+    pub(crate) fn verifies_created_roots(&self) -> bool {
+        self.roots.len() == 2
+            && self
+                .roots
+                .iter()
+                .all(|root| identity(&root.path) == Some(root.identity))
+    }
     pub(super) async fn prepare(spec: &ProbeSpec) -> Result<Option<Self>, Reason> {
         if !enabled(spec)? {
             return Ok(None);
@@ -310,13 +318,31 @@ mod tests {
         assert!(!support.join("Claude-3p").exists());
     }
     #[test]
+    fn rejects_missing_or_nonprivate_owned_roots() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let temp = tempfile::tempdir().unwrap();
+        let support = temp.path().canonicalize().unwrap();
+        let mut roots = NativeRoots::create(&support).unwrap();
+        assert!(roots.verifies_created_roots());
+        let path = roots.roots[0].path.clone();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(!roots.verifies_created_roots());
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(roots.verifies_created_roots());
+        std::fs::remove_dir(&path).unwrap();
+        assert!(!roots.verifies_created_roots());
+        roots.roots.clear();
+    }
+    #[test]
     fn detects_replaced_owned_root() {
         let temp = tempfile::tempdir().unwrap();
         let mut roots = NativeRoots::create(&temp.path().canonicalize().unwrap()).unwrap();
+        assert!(roots.verifies_created_roots());
         let path = roots.roots[0].path.clone();
         std::fs::rename(&path, temp.path().join("original")).unwrap();
         nan_harness_private_fs::create_private_dir(&path).unwrap();
         assert_ne!(identity(&path), Some(roots.roots[0].identity));
+        assert!(!roots.verifies_created_roots());
         roots.roots.clear();
     }
 }

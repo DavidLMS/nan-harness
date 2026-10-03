@@ -40,6 +40,7 @@ impl Default for Facts {
 }
 pub(crate) struct ClaudeNativeChatSession<'a> {
     gui: &'a Gui,
+    native_roots: &'a crate::probe::NativeRoots,
     destination: PathBuf,
     prompt: Zeroizing<String>,
     retry_ready: bool,
@@ -65,19 +66,22 @@ fn verified_clipboard_clear(
     }
 }
 impl Gui {
-    pub(crate) fn claude_native_chat_session(
-        &self,
+    pub(crate) fn claude_native_chat_session<'a>(
+        &'a self,
         directory: &Path,
-    ) -> Result<ClaudeNativeChatSession<'_>, Reason> {
+        native_roots: &'a crate::probe::NativeRoots,
+    ) -> Result<ClaudeNativeChatSession<'a>, Reason> {
         if self.kind != nan_harness_core::DesktopHarnessKind::Claude
             || !crate::native::claude_focus_policy()
             || std::env::var("NANH_CLAUDE_MAC_NATIVE_CHAT").as_deref() != Ok("1")
             || directory.canonicalize().ok().as_deref() != Some(directory)
+            || !native_roots.verifies_created_roots()
         {
             return Err(Reason::IsolationUnavailable);
         }
         Ok(ClaudeNativeChatSession {
             gui: self,
+            native_roots,
             destination: directory.join(format!("claude-native-chat-{}.json", nonce()?)),
             prompt: Zeroizing::new(String::new()),
             retry_ready: false,
@@ -109,12 +113,21 @@ impl ClaudeNativeChatSession<'_> {
         Ok(stage)
     }
     pub(crate) fn new_turn(&mut self, prompt: &str) -> Result<(), Reason> {
+        // Only roots created after proving both native directories absent can
+        // authorize replacing a draft. Keep their original identity and privacy.
+        if !self.native_roots.verifies_created_roots() {
+            return Err(Reason::IsolationUnavailable);
+        }
         if prompt.is_empty() || prompt.len() > 1024 || self.facts.submitted_turns >= 3 {
             return Err(Reason::InputMismatch);
         }
         self.retry_ready = false;
         self.prompt = Zeroizing::new(prompt.to_owned());
-        let result = self.action("input", "", Instant::now() + Duration::from_secs(5));
+        let result = self.action(
+            "input-replace-owned",
+            "",
+            Instant::now() + Duration::from_secs(5),
+        );
         match result {
             Ok(ChatTurnStage::Sent) => {
                 self.facts.input_verified_turns += 1;

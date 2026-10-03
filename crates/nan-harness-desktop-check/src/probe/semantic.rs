@@ -125,12 +125,17 @@ impl SemanticBackend {
         scenario: SemanticScenario<'_>,
         result: &mut ProbeResult,
         composer_observations: &mut Vec<ComposerFailure>,
+        native_roots: Option<&super::NativeRoots>,
     ) -> Result<(), Reason> {
+        #[cfg(not(target_os = "macos"))]
+        let _ = native_roots;
         #[cfg(target_os = "macos")]
         if self.kind == DesktopHarnessKind::Claude
             && std::env::var("NANH_CLAUDE_MAC_NATIVE_CHAT").as_deref() == Ok("1")
         {
-            let mut ui = SemanticUi::Claude(gui.claude_native_chat_session(&self.directory)?);
+            let roots = native_roots.ok_or(Reason::IsolationUnavailable)?;
+            let mut ui =
+                SemanticUi::Claude(gui.claude_native_chat_session(&self.directory, roots)?);
             let outcome = complete_scenario(&mut ui, &scenario, &self.directory, result).await;
             return ui.finish(scenario.gate, outcome);
         }

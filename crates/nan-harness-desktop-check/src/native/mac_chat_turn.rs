@@ -74,10 +74,12 @@ pub(super) fn request(
     cutoff: u64,
     owner: u32,
 ) -> Option<Zeroizing<String>> {
-    if !matches!(mode, "input" | "copy" | "retry-ready" | "retry")
-        || values
-            .iter()
-            .any(|value| value.len() > 1024 || value.contains('\0'))
+    if !matches!(
+        mode,
+        "input" | "input-replace-owned" | "copy" | "retry-ready" | "retry"
+    ) || values
+        .iter()
+        .any(|value| value.len() > 1024 || value.contains('\0'))
         || cutoff == 0
         || owner < 2
         || millis == 0
@@ -167,6 +169,16 @@ mod tests {
             9,
         )
         .unwrap();
+        let replacement = request(
+            &window,
+            "input-replace-owned",
+            ["fresh\nprompt", "", "sentinel"],
+            500,
+            1000,
+            9,
+        )
+        .unwrap();
+        assert!(replacement.starts_with("input-replace-owned "));
         assert!(!frame.contains('\n'));
         assert!(frame.contains(" 500 1000 9 "));
         assert!(!frame.contains("fresh"));

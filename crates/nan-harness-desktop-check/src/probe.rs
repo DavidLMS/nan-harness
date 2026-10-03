@@ -119,6 +119,7 @@ mod windows_process_tests {
 }
 
 mod claude_native_roots;
+pub(crate) use claude_native_roots::NativeRoots;
 mod claude_native_storage;
 mod claude_storage;
 mod hermes_policy;
@@ -698,7 +699,7 @@ async fn scenario(
 ) -> Result<(), Reason> {
     *diagnostic_allowed = validate_launch_binding(spec)?;
     prepare_scenario(spec).await?;
-    let mut native_roots = claude_native_roots::NativeRoots::prepare(spec).await?;
+    let mut native_roots = NativeRoots::prepare(spec).await?;
     let outcome = scenario_owned(
         spec,
         result,
@@ -706,6 +707,7 @@ async fn scenario(
         diagnostic,
         composer_observations,
         gui_acquisition,
+        native_roots.as_ref(),
     )
     .await;
     if let Some(roots) = &mut native_roots {
@@ -721,6 +723,7 @@ async fn scenario_owned(
     diagnostic: &mut Option<CleanupDiagnostic>,
     composer_observations: &mut Vec<ComposerFailure>,
     gui_acquisition: &mut Option<crate::diagnostics::GuiAcquisitionDiagnostic>,
+    native_roots: Option<&NativeRoots>,
 ) -> Result<(), Reason> {
     let experiment = HostedExperiment::from_spec(spec)?;
     let semantic = semantic::SemanticBackend::from_spec(spec)?;
@@ -755,6 +758,7 @@ async fn scenario_owned(
         final_marker: &final_marker,
         experiment: experiment.as_ref(),
         semantic: semantic.as_ref(),
+        native_roots,
     };
     let mut gui = None;
     let outcome = if conversation.uses_renderer() {
@@ -762,6 +766,9 @@ async fn scenario_owned(
     } else {
         let acquired = Gui::wait(spec.kind, &mut process);
         capture_failed_acquisition(acquired.is_err(), &mut process, spec, launch_observation);
+        // Retain the acquired native transport even when pre-input readiness
+        // fails: owned cleanup must not depend on permission to send input.
+        let acquired = acquired.map(|native_gui| gui.insert(native_gui));
         #[cfg(any(target_os = "macos", windows))]
         let acquired = acquired.and_then(|native_gui| {
             native_gui.finish_initial_ready(&mut process)?;
@@ -770,11 +777,9 @@ async fn scenario_owned(
         match acquired {
             Ok(native_gui) => {
                 result.steps.push(CheckStep::Launched);
-                let outcome = conversation
-                    .run(&native_gui, process.id(), result, composer_observations)
-                    .await;
-                gui = Some(native_gui);
-                outcome
+                conversation
+                    .run(native_gui, process.id(), result, composer_observations)
+                    .await
             }
             Err((
                 reason,
@@ -850,6 +855,7 @@ fn prepare_read_fixture(spec: &ProbeSpec, marker: &str) -> Result<PathBuf, Reaso
 // Keep conversation adapters separate from process acquisition and restoration.
 struct ConversationScenario<'a> {
     spec: &'a ProbeSpec,
+    native_roots: Option<&'a NativeRoots>,
     inventory: &'a ScriptedProvider,
     gate: &'a ProviderGate,
     fixture: &'a Path,
@@ -918,6 +924,7 @@ impl ConversationScenario<'_> {
                     },
                     result,
                     composer_observations,
+                    self.native_roots,
                 )
                 .await;
         }
