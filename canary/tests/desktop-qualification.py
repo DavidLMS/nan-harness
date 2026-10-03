@@ -1835,6 +1835,37 @@ class QualificationTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'chatgpt-desktop')
 
+    def test_codex_managed_sign_in_observation_cannot_authorize_input(self):
+        value = dict(schemaVersion=1, mechanism='renderer-inventory', diagnosticsOnly=True,
+                     app='chatgpt-desktop', endpointOwned=True, launcherOwned=True, attached=True,
+                     pageCount=1, textareaCount=0, editableCount=0, sendCount=0,
+                     retryCount=0, newThreadCount=0, loginCount=0, dialogCount=0, errorCategory=None)
+        empty = dict.fromkeys('loading unsupported disabled error chatgptChoice apiKeyChoice'.split(), 0)
+        observations = [dict(status=key, counts={**empty, key: 1})
+                        for key in ('loading', 'unsupported', 'disabled', 'error')]
+        observations.extend([dict(status='unknown', counts=empty),
+                             dict(status='sign-in-options', counts={**empty, 'apiKeyChoice': 1}),
+                             dict(status='ambiguous', counts={**empty, 'loading': 1, 'apiKeyChoice': 1}),
+                             dict(status='ambiguous', counts={**empty, 'loading': 2})])
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / 'inventory.json'
+            for item in observations:
+                path.write_text(json.dumps({**value, 'managedSignIn': item}))
+                self.assertEqual(q.semantic_observations(root, 'chatgpt-desktop')[0]['managedSignIn'], item)
+            item = observations[0]
+            for changed in ({**item, 'status': 'PRIVATE'}, {**item, 'url': 'PRIVATE'},
+                            {**item, 'status': 'unknown'}, {**item, 'counts': {**empty, 'loading': True}},
+                            {**item, 'counts': {**empty, 'loading': 33}},
+                            {**item, 'counts': {**empty, 'content': 'PRIVATE'}}):
+                path.write_text(json.dumps({**value, 'managedSignIn': changed}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'chatgpt-desktop')
+            path.write_text(json.dumps({**value, 'app': 'claude-desktop', 'managedSignIn': item}))
+            with self.assertRaises(ValueError):
+                q.semantic_observations(root, 'claude-desktop')
+            self.assertEqual(q.envelope('chatgpt-desktop', 'linux', 'x86_64', 'a' * 40)['qualification'], 'unqualified')
+
     def test_codex_source_screen_is_closed_passive_and_consistent(self):
         value = dict(schemaVersion=1, mechanism='renderer-inventory', diagnosticsOnly=True,
                      app='chatgpt-desktop', endpointOwned=True, launcherOwned=True, attached=True,

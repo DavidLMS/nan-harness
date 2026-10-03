@@ -346,7 +346,7 @@ async function run() {
         : appName !== 'pen-desktop' ? 'unmeasured'
         : headings.length === 1 && headings[0].textContent === 'Hardware acceleration unavailable' ? 'gpu-unavailable'
         : headings.length === 1 && headings[0].textContent === 'Failed to start pen.dev' ? 'startup-failed' : 'other';
-      let sourceScreen;
+      let sourceScreen, managedSignIn;
       if (appName === 'chatgpt-desktop') {
         // Frozen public headings, including the source's non-heading all-set title.
         // These are observations only; no category authorizes an action or login.
@@ -366,10 +366,26 @@ async function run() {
         const status = observed.length === 0 ? 'unknown'
           : observed.length === 1 && screenCounts[observed[0][0]] === 1 ? observed[0][1] : 'ambiguous';
         sourceScreen = {status, counts: screenCounts};
+        // The source renders pre-role sign-in requirements as status/alert
+        // text rather than headings. Match only complete public strings.
+        const notices = [...document.querySelectorAll('[role="status"],[role="alert"]')].filter(visible);
+        const notice = text => Math.min(32, notices.filter(e => (e.textContent || '').trim() === text).length);
+        const choice = text => Math.min(32, buttons.filter(e => (e.getAttribute('aria-label') || e.innerText || '') === text).length);
+        const requirements = {loading: notice('Loading sign-in requirements…'),
+          unsupported: notice('Update Codex on this machine to read its managed sign-in requirements'),
+          disabled: notice('Your administrator has disabled all available sign-in methods'),
+          error: notice('Unable to load sign-in requirements'),
+          chatgptChoice: choice('Continue with ChatGPT'), apiKeyChoice: choice('Enter API key')};
+        const statuses = ['loading', 'unsupported', 'disabled', 'error'].filter(key => requirements[key] > 0);
+        const choices = requirements.chatgptChoice + requirements.apiKeyChoice;
+        const requirementStatus = Object.values(requirements).some(count => count > 1) ? 'ambiguous'
+          : statuses.length === 0 ? (choices > 0 ? 'sign-in-options' : 'unknown')
+          : statuses.length === 1 && choices === 0 ? statuses[0] : 'ambiguous';
+        managedSignIn = {status: requirementStatus, counts: requirements};
       }
       return { textareaCount: count('textarea'), editableCount: count('[contenteditable="true"]'),
         startupScreen,
-        ...(sourceScreen ? {sourceScreen} : {}),
+        ...(sourceScreen ? {sourceScreen, managedSignIn} : {}),
         landingCounts: {
           importHeading: Math.min(4096, [...document.querySelectorAll('h1,h2,h3,[role="heading"]')]
             .filter(visible).filter(e => /^(Import other AI setup|Import work from other AI apps)$/.test(e.textContent || '')).length),

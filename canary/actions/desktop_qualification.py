@@ -1013,10 +1013,29 @@ def semantic_observations(directory, app):
             record.update({key: value[key] for key in fields - {'schemaVersion', 'mechanism'}})
         elif mechanism == 'renderer-inventory':
             fields = set('schemaVersion mechanism diagnosticsOnly app endpointOwned launcherOwned attached pageCount textareaCount editableCount sendCount retryCount newThreadCount loginCount dialogCount errorCategory'.split())
-            if set(value) - {'documentState', 'startupScreen', 'landingCounts', 'onboardingCounts', 'publicOnboarding', 'mainAuxCorrelation', 'codexSession', 'initialMainBinding', 'initialMainConfirmation', 'sourceScreen'} != fields or value['app'] != app or value['diagnosticsOnly'] is not True:
+            if set(value) - {'documentState', 'startupScreen', 'landingCounts', 'onboardingCounts', 'publicOnboarding', 'mainAuxCorrelation', 'codexSession', 'initialMainBinding', 'initialMainConfirmation', 'sourceScreen', 'managedSignIn'} != fields or value['app'] != app or value['diagnosticsOnly'] is not True:
                 raise ValueError('invalid renderer inventory identity')
             for key in ('endpointOwned', 'launcherOwned', 'attached'):
                 flag(record, value, key)
+            if 'managedSignIn' in value:
+                requirements = value['managedSignIn']
+                status_keys = {'loading', 'unsupported', 'disabled', 'error'}
+                keys = status_keys | {'chatgptChoice', 'apiKeyChoice'}
+                if (app != 'chatgpt-desktop' or type(requirements) is not dict
+                        or set(requirements) != {'status', 'counts'}
+                        or type(requirements['counts']) is not dict or set(requirements['counts']) != keys
+                        or any(type(count) is not int or not 0 <= count <= 32
+                               for count in requirements['counts'].values())):
+                    raise ValueError('invalid Codex managed sign-in observation')
+                counts = requirements['counts']
+                statuses = [key for key in status_keys if counts[key] > 0]
+                choices = counts['chatgptChoice'] + counts['apiKeyChoice']
+                expected = ('ambiguous' if any(count > 1 for count in counts.values())
+                            else ('sign-in-options' if choices > 0 else 'unknown') if not statuses
+                            else statuses[0] if len(statuses) == 1 and choices == 0 else 'ambiguous')
+                if type(requirements['status']) is not str or requirements['status'] != expected:
+                    raise ValueError('inconsistent Codex managed sign-in observation')
+                record['managedSignIn'] = requirements
             if 'sourceScreen' in value:
                 screen = value['sourceScreen']
                 headings = dict(gatewayHeading='gateway-connect', recoveryHeading='app-recovery',

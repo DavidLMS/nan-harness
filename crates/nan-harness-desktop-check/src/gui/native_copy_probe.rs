@@ -1271,9 +1271,17 @@ impl NativeClipboardSession<'_> {
         if deadline.saturating_duration_since(Instant::now()) < Duration::from_secs(3) {
             return Err(Reason::BudgetExceeded);
         }
-        self.gui
-            .native_copy_guard(&mut self.facts, "retry-revalidate")?;
-        let (pid, window, point) = self.gui.visual.native_pointer_target(bounds)?;
+        let (pid, window, point) =
+            self.gui
+                .visual
+                .native_pointer_target_with_guard(bounds, || {
+                    self.gui
+                        .native_copy_guard(&mut self.facts, "retry-revalidate")?;
+                    if Instant::now() >= deadline {
+                        return Err(Reason::BudgetExceeded);
+                    }
+                    Ok(())
+                })?;
         if button.pid != Some(pid) {
             return Err(Reason::FocusChanged);
         }
@@ -1286,6 +1294,11 @@ impl NativeClipboardSession<'_> {
         let request = serde_json::to_string(&serde_json::json!({"pid":pid,"window":window,"x":point.x,"y":point.y,"bus":bus,"path":path,"bounds":[bounds.x,bounds.y,bounds.width,bounds.height]})).map_err(|_| Reason::ActionUnsupported)?;
         let executable =
             std::env::var_os("FEASIBILITY_ZED_INPUT_DRIVER").ok_or(Reason::IsolationUnavailable)?;
+        // Ownership and encoding can consume the initial allowance. Retain the
+        // complete helper reserve at the actual transport boundary as well.
+        if deadline.saturating_duration_since(Instant::now()) < Duration::from_secs(3) {
+            return Err(Reason::BudgetExceeded);
+        }
         neutral_input(Path::new(&executable), "zoom-hover", &request)?;
         self.gui
             .native_copy_guard(&mut self.facts, "retry-revalidate")?;
@@ -1297,15 +1310,26 @@ impl NativeClipboardSession<'_> {
 
     #[cfg(target_os = "linux")]
     fn wait_zoom_tooltip(&mut self, present: bool, deadline: Instant) -> Result<bool, Reason> {
+        if Instant::now() >= deadline {
+            return Err(Reason::BudgetExceeded);
+        }
+        self.gui
+            .native_copy_guard(&mut self.facts, "retry-tooltip-query")?;
+        self.poll_zoom_tooltip(present, deadline)
+    }
+
+    #[cfg(target_os = "linux")]
+    fn poll_zoom_tooltip(&mut self, present: bool, deadline: Instant) -> Result<bool, Reason> {
         let until = deadline.min(Instant::now() + Duration::from_secs(1));
         loop {
             if Instant::now() >= deadline {
                 return Err(Reason::BudgetExceeded);
             }
-            self.gui
-                .native_copy_guard(&mut self.facts, "retry-tooltip-query")?;
             let app = self.gui.app.as_ref().ok_or(Reason::SelectorNotMatched)?;
             let count = control_count(&app.locator("static_text[value=\"Disable Full Screen\"]"))?;
+            if Instant::now() >= deadline {
+                return Err(Reason::BudgetExceeded);
+            }
             if count > 1 {
                 return Err(Reason::SelectorNotMatched);
             }
@@ -1316,17 +1340,36 @@ impl NativeClipboardSession<'_> {
                 return Ok(false);
             }
             std::thread::sleep(Duration::from_millis(50));
+            if Instant::now() >= deadline {
+                return Err(Reason::BudgetExceeded);
+            }
+            self.gui
+                .native_copy_guard(&mut self.facts, "retry-tooltip-query")?;
         }
     }
 
     #[cfg(target_os = "linux")]
     fn clear_zoom_tooltip(&mut self, deadline: Instant) -> Result<(), Reason> {
-        self.gui
-            .native_copy_guard(&mut self.facts, "retry-tooltip-reset")?;
-        self.gui.visual.neutral_pointer()?;
-        self.gui
-            .native_copy_guard(&mut self.facts, "retry-tooltip-clear")?;
-        if !self.wait_zoom_tooltip(false, deadline)? {
+        let mut before = true;
+        self.gui.visual.neutral_pointer_with_guard(|| {
+            if Instant::now() >= deadline {
+                return Err(Reason::BudgetExceeded);
+            }
+            let stage = if before {
+                "retry-tooltip-reset"
+            } else {
+                "retry-tooltip-clear"
+            };
+            before = false;
+            self.gui.native_copy_guard(&mut self.facts, stage)?;
+            if Instant::now() >= deadline {
+                return Err(Reason::BudgetExceeded);
+            }
+            Ok(())
+        })?;
+        // Its post-move guard immediately precedes the first read-only count.
+        // Later polls obtain fresh composite proofs themselves.
+        if !self.poll_zoom_tooltip(false, deadline)? {
             return Err(Reason::SelectorNotMatched);
         }
         Ok(())
@@ -1958,6 +2001,41 @@ impl Gui {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn pointer_boundary_preserves_both_proofs_and_never_replays_uncertain_motion() {
+        use std::cell::RefCell;
+        for (failed_guard, movement_failure, expected) in [
+            (None, false, vec!["guard", "move", "guard"]),
+            (Some(1), false, vec!["guard"]),
+            (Some(2), false, vec!["guard", "move", "guard"]),
+            (None, true, vec!["guard", "move", "guard"]),
+        ] {
+            let events = RefCell::new(Vec::new());
+            let mut guards = 0;
+            let result = super::super::visual::guarded_pointer_move(
+                || {
+                    events.borrow_mut().push("guard");
+                    guards += 1;
+                    if failed_guard == Some(guards) {
+                        Err(Reason::FocusChanged)
+                    } else {
+                        Ok(())
+                    }
+                },
+                || {
+                    events.borrow_mut().push("move");
+                    if movement_failure {
+                        Err(Reason::ActionUnsupported)
+                    } else {
+                        Ok(())
+                    }
+                },
+            );
+            assert_eq!(*events.borrow(), expected);
+            assert_eq!(result.is_ok(), failed_guard.is_none() && !movement_failure);
+        }
+    }
+
     #[test]
     fn atspi_icon_rectangles_preserve_signed_origins_and_reject_oversized_extents() {
         let rectangle = xa11y::Rect {

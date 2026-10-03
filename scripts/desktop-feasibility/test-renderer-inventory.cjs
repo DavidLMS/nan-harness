@@ -259,20 +259,20 @@ assert.equal(roleSourceScope({foreignFieldset:true}).mainScope,false);
 })().catch(error=>{console.error(error);process.exitCode=1;});
 
 // Run the production final DOM reducer with exact source titles and buttons.
-function sourceScreenFixture(titles, labels = [], app = 'chatgpt-desktop') {
+function sourceScreenFixture(titles, labels = [], app = 'chatgpt-desktop', notices = [], field = 'sourceScreen') {
   const node = text => ({textContent: text, innerText: text, isConnected: true,
     getAttribute: () => null, getBoundingClientRect: () => ({width: 10, height: 10})});
-  const headings = titles.map(node), buttons = labels.map(node);
+  const headings = titles.map(node), buttons = labels.map(node), alerts = notices.map(node);
   const callback = vm.runInNewContext(`(${source.slice(start, end)})`, {
     document: {readyState: 'complete', body: {innerText: ''}, querySelectorAll: selector =>
       selector === 'button,[role="button"]' ? buttons : selector === 'h1' ? headings
-        : selector.startsWith('h1,h2,h3') ? headings : []},
+        : selector.startsWith('h1,h2,h3') ? headings : selector === '[role="status"],[role="alert"]' ? alerts : []},
     location: {href: 'app:private', protocol: 'app:'}, getComputedStyle: () => ({visibility: 'visible'}),
   });
   const result = callback(app);
-  const bytes = JSON.stringify(result.sourceScreen);
-  for (const value of [...titles, ...labels]) if (bytes) assert(!bytes.includes(value));
-  return result.sourceScreen;
+  const bytes = JSON.stringify(result[field]);
+  for (const value of [...titles, ...labels, ...notices]) if (bytes) assert(!bytes.includes(value));
+  return result[field];
 }
 for (const [title, status] of [['Connect to your gateway','gateway-connect'],
   ['ChatGPT hit a snag','app-recovery'], ['Import from other AI apps','external-import'],
@@ -288,3 +288,21 @@ assert.equal(signIn.counts.continueSignIn, 1);
 assert.equal(sourceScreenFixture(['Connect to your gateway'], [], 'claude-desktop'), undefined);
 assert.equal(sourceScreenFixture(Array(40).fill('ChatGPT hit a snag')).counts.recoveryHeading, 32);
 console.log('Renderer source-screen classifier: privacy, ambiguity and bounded counts passed');
+
+const managed = (notices = [], labels = [], app = 'chatgpt-desktop') =>
+  sourceScreenFixture([], labels, app, notices, 'managedSignIn');
+for (const [message, status] of [['Loading sign-in requirements…', 'loading'],
+  ['Update Codex on this machine to read its managed sign-in requirements', 'unsupported'],
+  ['Your administrator has disabled all available sign-in methods', 'disabled'],
+  ['Unable to load sign-in requirements', 'error']]) {
+  assert.equal(managed([message]).status, status);
+  assert.equal(managed([message,message]).status, 'ambiguous');
+  assert.equal(managed([message], ['Enter API key']).status, 'ambiguous');
+}
+assert.equal(managed(['PRIVATE_UNKNOWN']).status, 'unknown');
+assert.equal(managed([], ['Enter API key']).status, 'sign-in-options');
+assert.equal(managed([], ['Continue with ChatGPT','Enter API key']).status, 'sign-in-options');
+assert.equal(managed([], ['Enter API key','Enter API key']).status, 'ambiguous');
+assert.equal(managed(Array(40).fill('Loading sign-in requirements…')).counts.loading, 32);
+assert.equal(managed([], [], 'claude-desktop'), undefined);
+console.log('Renderer managed sign-in classifier: exact source notices and passive choices passed');

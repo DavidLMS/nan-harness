@@ -848,6 +848,45 @@ impl Visual {
         ))
     }
 
+    #[cfg(target_os = "linux")]
+    pub(super) fn neutral_pointer_with_guard(
+        &self,
+        guard: impl FnMut() -> Result<(), Reason>,
+    ) -> Result<(), Reason> {
+        let window = self.window.borrow().bounds;
+        let point = native_hover_point(
+            window,
+            Rect {
+                x: window.x + 16,
+                y: window.y + 16,
+                width: 1,
+                height: 1,
+            },
+        )?;
+        guarded_pointer_move(guard, || {
+            xa11y::input_sim()
+                .map_err(map_error)?
+                .mouse()
+                .move_to(point)
+                .map_err(map_error)
+        })
+    }
+
+    #[cfg(target_os = "linux")]
+    pub(super) fn native_pointer_target_with_guard(
+        &self,
+        bounds: Rect,
+        mut guard: impl FnMut() -> Result<(), Reason>,
+    ) -> Result<(u32, u64, Point), Reason> {
+        guard()?;
+        let window = self.window.borrow();
+        Ok((
+            window.pid,
+            window.id,
+            native_hover_point(window.bounds, bounds)?,
+        ))
+    }
+
     pub(super) fn neutral_pointer(&self) -> Result<(), Reason> {
         let window = self.window.borrow().bounds;
         self.hover_native(Rect {
@@ -1241,6 +1280,20 @@ fn require_owned_candidate(window: &Window, owner: u32) -> Result<(), Acquisitio
             None,
         )
     })
+}
+
+// A single pointer action shares each composite ownership proof at its exact
+// boundary; nested visual-only snapshots add no independent proof.
+#[cfg(any(target_os = "linux", test))]
+pub(super) fn guarded_pointer_move(
+    mut guard: impl FnMut() -> Result<(), Reason>,
+    movement: impl FnOnce() -> Result<(), Reason>,
+) -> Result<(), Reason> {
+    guard()?;
+    let result = movement();
+    // Even uncertain movement gets a post-action guard; it is never retried.
+    guard()?;
+    result
 }
 
 fn require_running<P: Observation>(process: &mut P) -> Result<(), Reason> {
