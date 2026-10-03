@@ -587,7 +587,7 @@ def semantic_observations(directory, app):
             counts = {'submittedTurns', 'inputVerifiedTurns', 'copiedResponses'}
             flags = {'retryAttempted', 'clipboardCleared'}
             fields = counts | flags | {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'stage'}
-            stages = set('request window tree mode composer focus input-mismatch input-initial-unavailable input-initial-nonempty input-clipboard-mismatch input-value-mismatch control scope deadline action-uncertain response-mismatch sent copied retry-ready retried completed'.split())
+            stages = set('request window tree tree-query tree-duplicate tree-type tree-limit tree-pid tree-focus tree-window mode composer focus input-mismatch input-initial-unavailable input-initial-nonempty input-clipboard-mismatch input-value-mismatch control scope deadline action-uncertain response-mismatch sent copied retry-ready retried completed'.split())
             if (app != 'claude-desktop' or set(value) != fields or value['diagnosticsOnly'] is not True
                     or type(value['stage']) is not str or value['stage'] not in stages
                     or any(type(value[key]) is not bool for key in flags)
@@ -886,7 +886,11 @@ def semantic_observations(directory, app):
                           'accessibleExactMatches': 20, 'cursorChecks': 19, 'cursorExactMatches': 19}
                 extended = fields | set(counts) | {'failureReason'}
                 classified = extended | {'cursorClasses', 'cursorSizeSource'}
-                if (type(selection) is not dict or set(selection) not in (fields, extended, classified)
+                pointer_fields = {'pointerChecks', 'pointerPositionMatches', 'pointerChildMatches'}
+                pointer_proved = type(selection) is dict and pointer_fields <= set(selection)
+                if pointer_proved:
+                    counts = {key: 45 if key.startswith('cursor') else 55 for key in counts}
+                if (type(selection) is not dict or set(selection) not in (fields, extended, classified, extended | pointer_fields, classified | pointer_fields)
                         or type(selection['status']) is not str or selection['status'] not in {'matched', 'unavailable', 'no-hit', 'deadline', 'identity-rejected'}
                         or type(selection['sampledPoints']) is not int or not 0 <= selection['sampledPoints'] <= 9
                         or any(type(selection[key]) is not bool for key in ('exactPointerMatched', 'accessibleHitVerified'))
@@ -894,22 +898,29 @@ def semantic_observations(directory, app):
                         or selection['status'] == 'matched' and selection['sampledPoints'] == 0
                         or selection['status'] != 'matched' and (selection['exactPointerMatched'] or selection['accessibleHitVerified'])):
                     raise ValueError('invalid Zed cursor selection')
-                if set(selection) in (extended, classified):
+                if set(selection) in (extended, classified, extended | pointer_fields, classified | pointer_fields):
                     reason = selection['failureReason']
                     if (any(type(selection[key]) is not int or not 0 <= selection[key] <= limit
                             for key, limit in counts.items())
                             or reason is not None and (type(reason) is not str or reason not in {
                                 'cursor-unmatched', 'cursor-unstable', 'accessible-hit-mismatch',
-                                'accessible-query-unavailable', 'identity-rejected', 'deadline'})
+                                'accessible-query-unavailable', 'identity-rejected', 'deadline'} |
+                                ({'pointer-position', 'pointer-child'} if pointer_proved else set()))
                             or selection['accessibleExactMatches'] > selection['accessibleChecks']
                             or selection['guardAfterVerified'] > selection['guardBeforeVerified']
                             or selection['cursorExactMatches'] > selection['cursorChecks']
                             or selection['status'] == 'matched' and reason is not None):
                         raise ValueError('invalid Zed cursor proof counters')
-                if set(selection) == classified:
+                if pointer_proved:
+                    if (any(type(selection[key]) is not int or not 0 <= selection[key] <= 45 for key in pointer_fields)
+                            or selection['pointerPositionMatches'] > selection['pointerChecks']
+                            or selection['pointerChildMatches'] > selection['pointerPositionMatches']
+                            or selection['cursorChecks'] > selection['pointerChildMatches']):
+                        raise ValueError('invalid Zed pointer sample counters')
+                if set(selection) in (classified, classified | pointer_fields):
                     classes = selection['cursorClasses']
                     if (type(classes) is not dict or set(classes) != {'hand', 'arrow', 'notallowed', 'transparent', 'unknown'}
-                            or any(type(count) is not int or not 0 <= count <= 19 for count in classes.values())
+                            or any(type(count) is not int or not 0 <= count <= (45 if pointer_proved else 19) for count in classes.values())
                             or sum(classes.values()) != selection['cursorChecks']
                             or type(selection['cursorSizeSource']) is not str
                             or selection['cursorSizeSource'] not in {'environment', 'resource', 'dpi', 'screen'}):

@@ -393,7 +393,17 @@ def sampled_cursor_match(matches, observation):
     return matched
 
 
-def select_live_retry_point(bounds, move, prove, matches, deadline, pause=time.sleep, observation=None):
+def guarded_pointer_sample(point, position, child, observation):
+    observation['pointerChecks'] = observation.get('pointerChecks', 0) + 1
+    if position()[:2] != point:
+        raise RetryHitFailure('pointer-position')
+    observation['pointerPositionMatches'] = observation.get('pointerPositionMatches', 0) + 1
+    if child() not in ('client', 'client-descendant'):
+        raise RetryHitFailure('pointer-child')
+    observation['pointerChildMatches'] = observation.get('pointerChildMatches', 0) + 1
+
+
+def select_live_retry_point(bounds, move, prove, matches, deadline, pause=time.sleep, observation=None, pointer_proof=None):
     # Hover only until one stable public hand cursor and held accessible hit
     # agree. Never replay an activation or select a point after the click.
     if observation is not None:
@@ -401,6 +411,9 @@ def select_live_retry_point(bounds, move, prove, matches, deadline, pause=time.s
                       'accessibleExactMatches', 'cursorChecks', 'cursorExactMatches'):
             observation.setdefault(field, 0)
         observation.setdefault('failureReason', None)
+        if pointer_proof is not None:
+            for field in ('pointerChecks', 'pointerPositionMatches', 'pointerChildMatches'):
+                observation.setdefault(field, 0)
     unstable_cursor = False
 
     def proof(point):
@@ -422,18 +435,48 @@ def select_live_retry_point(bounds, move, prove, matches, deadline, pause=time.s
         move(point)
         if observation is not None:
             observation['sampledPoints'] += 1
-        pause(min(0.02, max(0, deadline - time.monotonic())))
-        if not sampled_cursor_match(matches, observation):
-            continue
-        proof(point)
-        pause(min(0.02, max(0, deadline - time.monotonic())))
-        if sampled_cursor_match(matches, observation):
+        point_deadline = min(deadline, time.monotonic() + 0.1)
+        consecutive = 0
+        for _ in range(5):
+            pause(min(0.02, max(0, point_deadline - time.monotonic())))
+            if time.monotonic() >= deadline:
+                if observation is not None:
+                    observation.update(status='deadline', failureReason='deadline')
+                raise RetryHitFailure('deadline')
+            if time.monotonic() >= point_deadline:
+                break
             proof(point)
-            if observation is not None:
-                observation.update(status='matched', exactPointerMatched=True,
-                                   accessibleHitVerified=True, failureReason=None)
-            return point
-        unstable_cursor = True
+            if pointer_proof is not None:
+                try:
+                    pointer_proof(point)
+                except (ValueError, OSError, subprocess.SubprocessError) as error:
+                    if observation is not None:
+                        reason = error.category if isinstance(error, RetryHitFailure) else 'identity-rejected'
+                        observation.update(status='identity-rejected', failureReason=reason)
+                    raise
+            if time.monotonic() >= point_deadline:
+                break
+            matched = sampled_cursor_match(matches, observation)
+            if time.monotonic() >= deadline:
+                if observation is not None:
+                    observation.update(status='deadline', failureReason='deadline')
+                raise RetryHitFailure('deadline')
+            if time.monotonic() >= point_deadline:
+                break
+            consecutive = consecutive + 1 if matched else 0
+            unstable_cursor |= matched
+            if consecutive == 2:
+                proof(point)
+                if time.monotonic() >= deadline:
+                    if observation is not None:
+                        observation.update(status='deadline', failureReason='deadline')
+                    raise RetryHitFailure('deadline')
+                if time.monotonic() >= point_deadline:
+                    break
+                if observation is not None:
+                    observation.update(status='matched', exactPointerMatched=True,
+                                       accessibleHitVerified=True, failureReason=None)
+                return point
     if observation is not None:
         observation.update(status='no-hit', failureReason=('cursor-unstable' if unstable_cursor
                                                          else 'cursor-unmatched'))
@@ -524,10 +567,19 @@ def retry_click(payload):
                     lambda point: normalized_retry_point(request, active, geometry,
                         return_bounds=True, hit_point=point) == held_bounds,
                     facts['cursorSelection'], deadline)
+            def prove_pointer(candidate):
+                if not cursor_scope():
+                    raise RetryHitFailure('identity-rejected')
+                guarded_pointer_sample(candidate,
+                    lambda: run(['getmouselocation', '--shell'], 'position'),
+                    lambda: pointer_child(request['window'], active), facts['cursorSelection'])
+                if not cursor_scope():
+                    raise RetryHitFailure('identity-rejected')
             live_cursor = module['PointerShape'](request['pid'], cursor_scope, deadline)
             point = select_live_retry_point(held_bounds,
                 lambda candidate: run(['mousemove', '--', str(candidate[0]), str(candidate[1])]),
-                prove_hit, live_cursor.matches, deadline, observation=facts['cursorSelection'])
+                prove_hit, live_cursor.matches, deadline, observation=facts['cursorSelection'],
+                pointer_proof=prove_pointer)
         ancestor_module, ancestor_before = None, None
         if (os.environ.get('NANH_ZED_XRECORD') == '1'
                 and sys.platform == 'linux'

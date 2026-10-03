@@ -9,6 +9,13 @@ pub(crate) enum ChatTurnStage {
     Request,
     Window,
     Tree,
+    TreeQuery,
+    TreeDuplicate,
+    TreeType,
+    TreeLimit,
+    TreePid,
+    TreeFocus,
+    TreeWindow,
     Mode,
     Composer,
     Focus,
@@ -30,11 +37,21 @@ pub(crate) enum ChatTurnStage {
     Completed,
 }
 impl ChatTurnStage {
+    pub(crate) fn passive_pending(self) -> bool {
+        matches!(self, Self::Scope | Self::Tree | Self::TreeQuery)
+    }
     pub(super) fn parse(output: &str) -> Option<Self> {
         match output {
             "turn request\n" => Some(Self::Request),
             "turn window\n" => Some(Self::Window),
             "turn tree\n" => Some(Self::Tree),
+            "turn tree-query\n" => Some(Self::TreeQuery),
+            "turn tree-duplicate\n" => Some(Self::TreeDuplicate),
+            "turn tree-type\n" => Some(Self::TreeType),
+            "turn tree-limit\n" => Some(Self::TreeLimit),
+            "turn tree-pid\n" => Some(Self::TreePid),
+            "turn tree-focus\n" => Some(Self::TreeFocus),
+            "turn tree-window\n" => Some(Self::TreeWindow),
             "turn mode\n" => Some(Self::Mode),
             "turn composer\n" => Some(Self::Composer),
             "turn focus\n" => Some(Self::Focus),
@@ -145,6 +162,53 @@ mod tests {
             assert_eq!(ChatTurnStage::parse(&format!("turn {name}\n")), Some(stage));
             assert_eq!(ChatTurnStage::parse(&format!("turn {name}\nPRIVATE")), None);
         }
+    }
+    #[test]
+    fn only_passive_pre_action_tree_queries_can_reacquire() {
+        fn observed(sequence: &[ChatTurnStage]) -> (usize, ChatTurnStage) {
+            for (index, stage) in sequence.iter().copied().enumerate() {
+                if !stage.passive_pending() {
+                    return (index + 1, stage);
+                }
+            }
+            panic!("fixture must end with a receipt");
+        }
+        assert_eq!(
+            observed(&[
+                ChatTurnStage::TreeQuery,
+                ChatTurnStage::Scope,
+                ChatTurnStage::Copied
+            ]),
+            (3, ChatTurnStage::Copied),
+        );
+        for terminal in [
+            ChatTurnStage::TreePid,
+            ChatTurnStage::TreeWindow,
+            ChatTurnStage::TreeFocus,
+            ChatTurnStage::TreeType,
+            ChatTurnStage::TreeDuplicate,
+            ChatTurnStage::TreeLimit,
+            ChatTurnStage::ActionUncertain,
+            ChatTurnStage::ResponseMismatch,
+            ChatTurnStage::Deadline,
+            ChatTurnStage::Sent,
+            ChatTurnStage::Retried,
+        ] {
+            assert_eq!(observed(&[terminal, ChatTurnStage::Copied]), (1, terminal));
+        }
+        for name in [
+            "tree-query",
+            "tree-duplicate",
+            "tree-type",
+            "tree-limit",
+            "tree-pid",
+            "tree-focus",
+            "tree-window",
+        ] {
+            assert!(ChatTurnStage::parse(&format!("turn {name}\n")).is_some());
+            assert!(ChatTurnStage::parse(&format!("turn {name}\nPRIVATE")).is_none());
+        }
+        assert!(ChatTurnStage::parse("turn tree-private-details\n").is_none());
     }
     #[test]
     fn action_request_is_one_private_frame_bound_to_owner_and_cutoff() {

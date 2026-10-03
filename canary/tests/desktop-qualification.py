@@ -1784,7 +1784,8 @@ class QualificationTests(unittest.TestCase):
                 path.write_text(json.dumps(item))
                 self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [item])
                 self.assertEqual(q.envelope('claude-desktop', 'macos', 'aarch64', 'a' * 40)['qualification'], 'unqualified')
-            for stage in ('input-initial-unavailable', 'input-initial-nonempty',
+            for stage in ('tree-query', 'tree-duplicate', 'tree-type', 'tree-limit', 'tree-pid',
+                          'tree-focus', 'tree-window', 'input-initial-unavailable', 'input-initial-nonempty',
                           'input-clipboard-mismatch', 'input-value-mismatch'):
                 item = {**value, 'stage': stage, 'submittedTurns': 0, 'inputVerifiedTurns': 0,
                         'copiedResponses': 0, 'retryAttempted': False}
@@ -2237,6 +2238,20 @@ class HermesReadinessTests(unittest.TestCase):
                           'cursorSizeSource': 'screen'}
             path.write_text(json.dumps({**value, 'cursorSelection': classified}))
             self.assertEqual(q.semantic_observations(tmp, 'zed-desktop')[0]['cursorSelection'], classified)
+            sampled = {**classified, 'pointerChecks': 9, 'pointerPositionMatches': 9, 'pointerChildMatches': 9}
+            path.write_text(json.dumps({**value, 'cursorSelection': sampled}))
+            self.assertEqual(q.semantic_observations(tmp, 'zed-desktop')[0]['cursorSelection'], sampled)
+            for changes in ({'pointerChecks': 46}, {'pointerChecks': True},
+                            {'pointerPositionMatches': 10}, {'pointerChildMatches': 8},
+                            {'pointerChildMatches': 'PRIVATE'}, {'rawPosition': [1, 2]}):
+                path.write_text(json.dumps({**value, 'cursorSelection': {**sampled, **changes}}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(tmp, 'zed-desktop')
+            for reason in ('pointer-position', 'pointer-child'):
+                rejected = {**selection, 'status': 'identity-rejected', 'failureReason': reason,
+                            'cursorChecks': 0, 'pointerChecks': 1, 'pointerPositionMatches': 0, 'pointerChildMatches': 0}
+                path.write_text(json.dumps({**value, 'cursorSelection': rejected}))
+                self.assertEqual(q.semantic_observations(tmp, 'zed-desktop')[0]['cursorSelection'], rejected)
             for changes in ({'cursorSizeSource': 'PRIVATE'}, {'cursorClasses': {'rawPixels': 'PRIVATE'}},
                             {'cursorSizeSource': None}, {'cursorChecks': 8}):
                 path.write_text(json.dumps({**value, 'cursorSelection': {**classified, **changes}}))

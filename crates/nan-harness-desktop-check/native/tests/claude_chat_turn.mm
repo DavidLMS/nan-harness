@@ -30,6 +30,24 @@ int main() {
     assert(!focused_identity(focus_control.element, focus_control, 8, 7, "AXTextArea", focus_control.bounds));
     assert(!focused_identity(focus_control.element, focus_control, 7, 7, "AXButton", focus_control.bounds));
     assert(!focused_identity(focus_control.element, focus_control, 7, 7, "AXTextArea", CGRectZero));
+    assert(tree_node_failure(33, 0, true, true, true, false) == std::string("tree-limit"));
+    assert(tree_node_failure(0, 1024, true, true, true, false) == std::string("tree-limit"));
+    assert(tree_node_failure(0, 0, false, true, true, false) == std::string("deadline"));
+    assert(tree_node_failure(0, 0, true, false, true, false) == std::string("tree-pid"));
+    assert(tree_node_failure(0, 0, true, true, false, false) == std::string("tree-pid"));
+    assert(tree_node_failure(0, 0, true, true, true, true) == std::string("tree-duplicate"));
+    assert(tree_node_failure(0, 0, true, true, true, false) == nullptr);
+    Tree failed_tree;
+    assert(!failed_tree.reject("tree-type"));
+    assert(!failed_tree.reject("tree-query"));
+    assert(std::string(failed_tree.failure) == "tree-type");
+    ax_query_failed = true;
+    for (const char* terminal : {"tree-pid", "tree-type", "tree-limit", "tree-window"}) {
+        Tree terminal_tree;
+        assert(!terminal_tree.reject(terminal));
+        assert(std::string(terminal_tree.failure) == terminal);
+    }
+    ax_query_failed = false;
     Request request;
     request.prompt = "fresh user";
     request.marker = "fresh assistant";

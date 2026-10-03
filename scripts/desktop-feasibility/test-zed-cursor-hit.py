@@ -3,6 +3,7 @@
 import runpy
 import ctypes
 from pathlib import Path
+from unittest.mock import patch
 import struct
 import tempfile
 import time
@@ -102,9 +103,47 @@ class CursorTests(unittest.TestCase):
         moved, proved, matches = [], [], iter([False, True, True])
         point = INPUT['select_live_retry_point']((100, 200, 40, 20), moved.append,
             proved.append, lambda: next(matches), time.monotonic() + 1, lambda _: None)
-        self.assertEqual(point, (110, 205))
-        self.assertEqual(len(moved), 2)
+        self.assertEqual(point, (120, 210))
+        self.assertEqual(len(moved), 1)
         self.assertEqual(proved[-2:], [point, point])
+
+    def test_pointer_position_and_child_are_proved_before_cursor_sampling(self):
+        for position, child, reason in [((0, 0, 1), 'client', 'pointer-position'),
+                                        ((10, 5, 1), 'other', 'pointer-child')]:
+            observed = dict(status='unavailable', sampledPoints=0)
+            samples = []
+            with self.assertRaises(ValueError):
+                INPUT['select_live_retry_point']((0, 0, 20, 10), lambda _: None,
+                    lambda _: None, lambda: samples.append(True) or True,
+                    time.monotonic() + 1, lambda _: None, observed,
+                    lambda point: INPUT['guarded_pointer_sample'](
+                        point, lambda: position, lambda: child, observed))
+            self.assertEqual(samples, [])
+            self.assertEqual(observed['failureReason'], reason)
+            self.assertEqual(observed['pointerChecks'], 1)
+
+    def test_delayed_hand_stays_on_same_point_but_late_hand_is_never_selected(self):
+        clock = [0.0]
+        def pause(seconds): clock[0] += seconds
+        samples = iter([False, True, True])
+        observed = dict(status='unavailable', sampledPoints=0)
+        with patch('time.monotonic', lambda: clock[0]):
+            point = INPUT['select_live_retry_point']((0, 0, 20, 10), lambda _: None,
+                lambda _: None, lambda: next(samples), 1, pause, observed,
+                lambda point: INPUT['guarded_pointer_sample'](
+                    point, lambda: (*point, 1), lambda: 'client', observed))
+        self.assertEqual(point, (10, 5))
+        self.assertEqual(observed['sampledPoints'], 1)
+        self.assertEqual(observed['pointerChecks'], 3)
+        self.assertEqual(observed['pointerChildMatches'], 3)
+        clock[0] = 0
+        def late(): clock[0] = 2; return True
+        observed = dict(status='unavailable', sampledPoints=0)
+        with patch('time.monotonic', lambda: clock[0]), self.assertRaises(ValueError):
+            INPUT['select_live_retry_point']((0, 0, 20, 10), lambda _: None,
+                lambda _: None, late, 1, pause, observed)
+        self.assertEqual(observed['status'], 'deadline')
+        self.assertFalse(observed.get('exactPointerMatched', False))
 
     def test_scan_all_mismatches_never_selects_or_activates(self):
         moved = []
@@ -138,13 +177,13 @@ class CursorTests(unittest.TestCase):
                                                      observation, deadline),
             lambda: True, deadline, lambda _: None, observation)
         self.assertEqual(observation, dict(status='matched', sampledPoints=1,
-            exactPointerMatched=True, accessibleHitVerified=True, guardBeforeVerified=3,
-            guardAfterVerified=3, accessibleChecks=3, accessibleExactMatches=3,
+            exactPointerMatched=True, accessibleHitVerified=True, guardBeforeVerified=4,
+            guardAfterVerified=4, accessibleChecks=4, accessibleExactMatches=4,
             cursorChecks=2, cursorExactMatches=2, failureReason=None))
 
     def test_cursor_mismatch_and_instability_are_distinct_without_activation(self):
-        for samples, reason, checks, matches in [([False] * 9, 'cursor-unmatched', 9, 0),
-                                                ([True, False] * 9, 'cursor-unstable', 18, 9)]:
+        for samples, reason, checks, matches in [([False] * 45, 'cursor-unmatched', 45, 0),
+                                                ([True, False, True, False, False] * 9, 'cursor-unstable', 45, 18)]:
             observed = dict(status='unavailable', sampledPoints=0,
                             exactPointerMatched=False, accessibleHitVerified=False)
             cursor = iter(samples)

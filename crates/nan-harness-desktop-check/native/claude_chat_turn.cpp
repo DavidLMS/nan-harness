@@ -102,15 +102,28 @@ struct Node {
     CGRect bounds = CGRectZero;
     bool enabled = false;
 };
+static const char* tree_node_failure(unsigned depth, std::size_t count, bool in_time,
+                                     bool pid_read, bool pid_matches, bool duplicate) {
+    if (depth > 32 || count >= 1024) return "tree-limit";
+    if (!in_time) return "deadline";
+    if (!pid_read || !pid_matches) return "tree-pid";
+    if (duplicate) return "tree-duplicate";
+    return nullptr;
+}
 struct Tree {
     std::vector<Node> nodes;
+    const char* failure = nullptr;
+    bool reject(const char* stage) { if (!failure) failure = stage; return false; }
     ~Tree() { for (auto& node : nodes) { if (node.element) CFRelease(node.element); std::fill(node.label.begin(), node.label.end(), '\0'); } }
     bool append(AXUIElementRef element, int parent, unsigned depth, const Request& request) {
-        if (depth > 32 || nodes.size() >= 1024 || !within(request)) return false;
+        if (depth > 32 || nodes.size() >= 1024) return reject("tree-limit");
+        if (!within(request)) return reject("deadline");
         pid_t pid = 0;
-        if (AXUIElementGetPid(element, &pid) != kAXErrorSuccess || pid != static_cast<pid_t>(request.pid)) return false;
-        AXUIElementSetMessagingTimeout(element, .1F);
-        for (const auto& prior : nodes) if (CFEqual(prior.element, element)) return false;
+        bool pid_read = AXUIElementGetPid(element, &pid) == kAXErrorSuccess;
+        bool duplicate = std::any_of(nodes.begin(), nodes.end(), [element](const Node& prior) { return CFEqual(prior.element, element); });
+        if (const char* stage = tree_node_failure(depth, nodes.size(), within(request), pid_read,
+                pid == static_cast<pid_t>(request.pid), duplicate)) return reject(stage);
+        if (AXUIElementSetMessagingTimeout(element, .1F) != kAXErrorSuccess) return reject("tree-query");
         Node node{static_cast<AXUIElementRef>(CFRetain(element)), parent};
         node.role = string_attribute(element, kAXRoleAttribute);
         node.label = string_attribute(element, kAXDescriptionAttribute);
@@ -123,29 +136,49 @@ struct Tree {
         rectangle(element, node.bounds);
         int index = static_cast<int>(nodes.size());
         nodes.push_back(std::move(node));
+        if (ax_query_failed) return reject("tree-query");
         auto children = attribute(element, kAXChildrenAttribute);
+        if (ax_query_failed) {
+            if (children) CFRelease(children);
+            return reject("tree-query");
+        }
         bool valid = !children || CFGetTypeID(children) == CFArrayGetTypeID();
+        if (!valid) reject("tree-type");
         if (valid && children) {
             auto array = static_cast<CFArrayRef>(children);
             valid = CFArrayGetCount(array) <= 1024;
+            if (!valid) reject("tree-limit");
             for (CFIndex i = 0; valid && i < CFArrayGetCount(array); ++i) {
                 auto child = static_cast<AXUIElementRef>(const_cast<void*>(CFArrayGetValueAtIndex(array, i)));
-                valid = CFGetTypeID(child) == AXUIElementGetTypeID() && append(child, index, depth + 1, request);
+                if (!child || CFGetTypeID(child) != AXUIElementGetTypeID()) valid = reject("tree-type");
+                else valid = append(child, index, depth + 1, request);
             }
         }
         if (children) CFRelease(children);
-        return valid && within(request);
+        if (!within(request)) return reject("deadline");
+        return valid;
     }
     bool collect(const Request& request) {
         ax_query_failed = false;
-        if (!owned(request)) return false;
+        failure = nullptr;
+        if (!owned(request)) return reject("tree-window");
         auto app = AXUIElementCreateApplication(request.pid);
-        AXUIElementSetMessagingTimeout(app, .1F);
+        if (!app) return reject("tree-query");
+        if (AXUIElementSetMessagingTimeout(app, .1F) != kAXErrorSuccess) {
+            CFRelease(app);
+            return reject("tree-query");
+        }
         auto window = attribute(app, kAXFocusedWindowAttribute);
         CFRelease(app);
-        bool valid = window && CFGetTypeID(window) == AXUIElementGetTypeID() && append(static_cast<AXUIElementRef>(window), -1, 0, request);
+        bool valid = false;
+        if (ax_query_failed) reject("tree-query");
+        else if (!window) reject("tree-focus");
+        else if (CFGetTypeID(window) != AXUIElementGetTypeID()) reject("tree-type");
+        else valid = append(static_cast<AXUIElementRef>(window), -1, 0, request);
         if (window) CFRelease(window);
-        return valid && !ax_query_failed && owned(request);
+        if (ax_query_failed) return reject("tree-query");
+        if (!owned(request)) return reject("tree-window");
+        return valid;
     }
 };
 static bool descendant(const Tree& tree, int index, int ancestor) {
@@ -345,7 +378,7 @@ int claude_chat_turn() {
         if (request(value)) {
             Tree tree;
             if (!owned(value)) stage = "window";
-            else if (!tree.collect(value)) stage = "tree";
+            else if (!tree.collect(value)) stage = tree.failure ? tree.failure : "tree-query";
             else stage = input_mode(value.mode) ? input(value, tree) : action(value, tree);
             if (!within(value) && std::string(stage) != "action-uncertain") stage = "deadline";
         }
