@@ -119,6 +119,7 @@ mod windows_process_tests {
 }
 
 mod claude_native_roots;
+mod claude_storage;
 mod hermes_policy;
 pub(crate) mod hermes_readiness;
 mod semantic;
@@ -1258,6 +1259,7 @@ async fn finish_scenario(
         });
         return Err(Reason::CleanupFailed);
     }
+    claude_storage::record(spec);
     record_absence(
         Gui::ensure_absent_after_stop(spec.kind, gui),
         CleanupStage::AbsenceAfterStop,
@@ -1771,6 +1773,7 @@ fn launch(
 ) -> Result<ProbeProcess, (Reason, crate::diagnostics::LaunchFailure)> {
     let command = launch_command(spec, gate)
         .map_err(|reason| (reason, crate::diagnostics::LaunchFailure::LaunchSetup))?;
+    claude_storage::capture(spec, &command);
     ProbeProcess::spawn(command).map_err(|_| {
         (
             Reason::UnsupportedVersion,

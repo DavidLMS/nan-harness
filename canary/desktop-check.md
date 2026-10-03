@@ -1518,3 +1518,18 @@ Frozen Windows Claude 2.19675.0 bootstrap resolves third-party storage using
 Real known-folder copying is not supported by this observation. Config-file
 presence and catalog requests remain distinct from consumed configuration or a
 usable composer. No account-free Pen composer route has been established.
+
+
+The checker now captures Windows Claude storage metadata before its own launch
+and records it after stopping the owned process tree, before restoration. This
+avoids depending on a CLI finalizer that JobObject termination can interrupt.
+The diagnostic requires the hosted startup trial, exact private child environment,
+fixed roots and no symlink substitution; it reads only file presence, not payloads.
+It cannot certify configuration consumption or qualify a startup-only backend.
+
+macOS Claude
+[37080447988](https://github.com/DavidLMS/nan-harness/actions/runs/37080447988)
+now identifies the final acquisition failure as `off-display`; both independent
+focus proofs pass and cleanup passes. The next distinct trial fits only the
+already-owned, exactly focused initial window to the public visible work area,
+then requires the original strict guards and stability before any input.
