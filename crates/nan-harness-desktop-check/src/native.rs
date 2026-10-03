@@ -12,6 +12,8 @@ mod mac_fit;
 mod ocr;
 mod process;
 mod window;
+#[cfg(any(windows, test))]
+mod windows_uia;
 
 #[cfg(target_os = "macos")]
 pub(crate) use crate::diagnostics::ClaudeIdentityObservation;
@@ -415,6 +417,47 @@ impl Native {
         deadline: std::time::Instant,
     ) -> Result<OwnedCleanupHolder, FailureCategory> {
         process::holder::Holder::start(&self.executable, launcher, expected, digest, deadline)
+    }
+
+    #[cfg(windows)]
+    pub(crate) fn claude_uia_inventory_until(
+        &self,
+        window: &Window,
+        deadline: std::time::Instant,
+    ) -> serde_json::Value {
+        let remaining = deadline
+            .saturating_duration_since(std::time::Instant::now())
+            .as_millis()
+            .min(3000);
+        if remaining == 0 {
+            return windows_uia::failure("deadline");
+        }
+        let right = i64::from(window.bounds.x) + i64::from(window.bounds.width);
+        let bottom = i64::from(window.bounds.y) + i64::from(window.bounds.height);
+        if i32::try_from(right).is_err() || i32::try_from(bottom).is_err() {
+            return windows_uia::failure("protocol");
+        }
+        let input = format!(
+            "{} {} {} {} {} {} {}\n",
+            window.id, window.pid, window.bounds.x, window.bounds.y, right, bottom, remaining
+        );
+        let result = process::run_once_until(
+            &self.executable,
+            std::ffi::OsStr::new("--windows-claude-uia-inventory"),
+            None,
+            input.as_bytes(),
+            Some(deadline),
+        );
+        if std::time::Instant::now() >= deadline {
+            return windows_uia::failure("deadline");
+        }
+        match result {
+            Ok(wire) => {
+                windows_uia::parse(&wire).unwrap_or_else(|| windows_uia::failure("protocol"))
+            }
+            Err(FailureCategory::Timeout) => windows_uia::failure("deadline"),
+            Err(_) => windows_uia::failure("transport"),
+        }
     }
 
     #[cfg(windows)]

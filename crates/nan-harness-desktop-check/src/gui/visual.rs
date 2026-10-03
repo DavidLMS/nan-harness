@@ -676,6 +676,12 @@ impl Visual {
         }
     }
 
+    #[cfg(windows)]
+    pub(super) fn claude_uia_inventory_until(&self, deadline: Instant) -> serde_json::Value {
+        self.native
+            .claude_uia_inventory_until(&self.window.borrow(), deadline)
+    }
+
     #[cfg(target_os = "macos")]
     pub(super) fn press_claude_chat(
         &self,

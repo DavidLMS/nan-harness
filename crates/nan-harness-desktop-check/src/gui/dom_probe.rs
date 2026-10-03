@@ -871,6 +871,8 @@ impl Gui {
                 super::claude_native_probe::record(directory, owner, &counts);
             }
             self.observe_hosted_startup(composer_observations)?;
+            #[cfg(windows)]
+            self.record_claude_windows_uia(directory);
             #[cfg(target_os = "macos")]
             self.claude_chat_navigation(directory, owner, composer_observations)?;
             let value = serde_json::json!({"schemaVersion":1, "mechanism":"renderer-startup-baseline", "diagnosticsOnly":true, "windowAcquired":true, "rendererInstrumented":false, "accessibilityInventory": inventory});

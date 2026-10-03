@@ -181,6 +181,9 @@ jobs:
       - name: Verify Windows Claude acquisition policy without an application
         if: runner.os == 'Windows' && matrix.app == 'claude-desktop'
         run: cargo test --locked -p nan-harness-desktop-check --lib gui::claude_windows
+      - name: Verify bounded Windows UIA receipt protocol without an application
+        if: runner.os == 'Windows' && matrix.app == 'claude-desktop'
+        run: cargo test --locked -p nan-harness-desktop-check --lib native::windows_uia
       - name: Verify Windows qualification directory isolation
         if: runner.os == 'Windows' && matrix.app == 'claude-desktop'
         run: cargo test --locked -p nan-harness-desktop-check --lib gui::qualification_directory::tests

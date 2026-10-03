@@ -249,6 +249,8 @@ pub(crate) struct Gui {
     visual: visual::Visual,
     #[cfg(any(target_os = "macos", windows))]
     initial_deadline: Cell<Option<Instant>>,
+    #[cfg(windows)]
+    initial_observation_deadline: Option<Instant>,
 }
 
 fn guard_then<T, Guard, Continuation>(
@@ -558,6 +560,8 @@ impl Gui {
             visual,
             #[cfg(any(target_os = "macos", windows))]
             initial_deadline: Cell::new(deadline),
+            #[cfg(windows)]
+            initial_observation_deadline: deadline,
         })
     }
 
@@ -1986,5 +1990,42 @@ mod tests {
             classify_process_groups(Ok(7), Ok(8)),
             Err(OwnershipFailure::DifferentGroup)
         );
+    }
+}
+
+#[cfg(windows)]
+impl Gui {
+    fn record_claude_windows_uia(&self, directory: &std::path::Path) {
+        use std::io::Write as _;
+        if self.kind != DesktopHarnessKind::Claude || !claude_windows_ready::policy() {
+            return;
+        }
+        let Some(expected) = std::env::var_os("NANH_DESKTOP_QUALIFICATION_FACTS") else {
+            return;
+        };
+        let Some(directory) = qualification_directory::canonical_directory(directory) else {
+            return;
+        };
+        if qualification_directory::canonical_directory(std::path::Path::new(&expected)).as_ref()
+            != Some(&directory)
+        {
+            return;
+        }
+        let Some(deadline) = self.initial_observation_deadline else {
+            return;
+        };
+        let deadline = deadline.min(Instant::now() + Duration::from_secs(3));
+        let value = self.visual.claude_uia_inventory_until(deadline);
+        let mut nonce = [0; 8];
+        if getrandom::fill(&mut nonce).is_err() {
+            return;
+        }
+        if let Ok(bytes) = serde_json::to_vec(&value)
+            && let Ok(mut file) = nan_harness_private_fs::open_private_new(
+                &directory.join(format!("claude-uia-{}.json", u64::from_le_bytes(nonce))),
+            )
+        {
+            let _ = file.write_all(&bytes).and_then(|()| file.sync_all());
+        }
     }
 }

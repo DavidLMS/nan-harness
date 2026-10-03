@@ -507,6 +507,24 @@ class QualificationTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 q.aggregate(root, 'a' * 40)
 
+    def test_windows_claude_uia_is_passive_strict_and_private(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'uia.json'
+            value = dict(schemaVersion=1, mechanism='claude-windows-uia', diagnosticsOnly=True,
+                         phase='post-ready', status='observed', nativeGuardVerified=True, treeComplete=True,
+                         nodeCount=12, classicEditorCount=1, modernEditorCount=0, sendControlCount=1,
+                         startTaskControlCount=0, assistantHeadingCount=1, copyControlCount=1)
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(root, 'claude-desktop')[0]['classicEditorCount'], 1)
+            for key, invalid in [('rawName', 'PRIVATE'), ('status', 'PRIVATE'), ('nodeCount', 0),
+                                 ('copyControlCount', 13), ('nativeGuardVerified', False), ('classicEditorCount', True)]:
+                path.write_text(json.dumps({**value, key: invalid}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'claude-desktop')
+            path.write_text(json.dumps(value))
+            with self.assertRaises(ValueError):
+                q.semantic_observations(root, 'zed-desktop')
+
     def test_semantic_observations_publish_only_closed_progress(self):
         with tempfile.TemporaryDirectory() as root:
             path = Path(root) / 'observation.json'
