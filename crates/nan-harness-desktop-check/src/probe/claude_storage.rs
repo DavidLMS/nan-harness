@@ -100,6 +100,19 @@ fn observe(roots: &[PathBuf; 2]) -> Option<Presence> {
         },
     })
 }
+fn command_directory_matches(
+    command: &tokio::process::Command,
+    key: &str,
+    expected: &Path,
+) -> bool {
+    command.as_std().get_envs().any(|(name, value)| {
+        name == key
+            && value
+                .and_then(|path| Path::new(path).canonicalize().ok())
+                .as_deref()
+                == Some(expected)
+    })
+}
 pub(super) fn capture(spec: &ProbeSpec, command: &tokio::process::Command) {
     let Some((roots, _)) = scope(spec) else {
         return;
@@ -118,11 +131,7 @@ pub(super) fn capture(spec: &ProbeSpec, command: &tokio::process::Command) {
         ("LOCALAPPDATA", home.join("AppData/Local")),
         ("APPDATA", home.join("AppData/Roaming")),
     ] {
-        if !command
-            .as_std()
-            .get_envs()
-            .any(|(k, v)| k == key && v == Some(expected.as_os_str()))
-        {
+        if !command_directory_matches(command, key, &expected) {
             return;
         }
     }
@@ -184,6 +193,19 @@ pub(super) fn record(spec: &ProbeSpec) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn environment_binding_compares_owned_directory_identity() {
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path().join("home");
+        std::fs::create_dir(&home).unwrap();
+        let canonical = home.canonicalize().unwrap();
+        let mut command = tokio::process::Command::new("unused-synthetic-program");
+        command.env("HOME", home.join("../home"));
+        assert!(command_directory_matches(&command, "HOME", &canonical));
+        assert!(!command_directory_matches(&command, "HOME", temp.path()));
+        command.env_remove("HOME");
+        assert!(!command_directory_matches(&command, "HOME", &canonical));
+    }
     #[test]
     fn fixed_presence_does_not_read_payload_and_missing_parent_is_absent() {
         let temp = tempfile::tempdir().unwrap();

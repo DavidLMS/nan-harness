@@ -816,7 +816,7 @@ async fn prepare_scenario(spec: &ProbeSpec) -> Result<(), Reason> {
     {
         return Err(Reason::IsolationUnavailable);
     }
-    Gui::ensure_absent(spec.kind).map_err(|failure| failure.reason)?;
+    Gui::ensure_absent_before_launch(spec.kind).map_err(|failure| failure.reason)?;
     require_endpoint_override(spec).await?;
     create_private_dir_all(&spec.workspace).map_err(|_| Reason::IsolationUnavailable)?;
     prepare_zed_profile(spec)?;

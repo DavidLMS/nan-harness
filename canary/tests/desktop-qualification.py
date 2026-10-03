@@ -1136,6 +1136,26 @@ class QualificationTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 q.semantic_observations(root, 'chatgpt-desktop')
 
+    def test_windows_claude_process_baseline_is_closed_and_initial_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / 'process-baseline.json'
+            value = dict(schemaVersion=1, mechanism='windows-process-baseline', diagnosticsOnly=True,
+                         app='claude-desktop', phase='before-launch', state='absent')
+            for state in ('absent', 'present', 'query-failed'):
+                current = {**value, 'state': state}
+                path.write_text(json.dumps(current))
+                self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [current])
+            for changed in ({**value, 'pid': 22}, {**value, 'state': True},
+                            {**value, 'state': 'PRIVATE'}, {**value, 'phase': 'after-stop'},
+                            {**value, 'diagnosticsOnly': False}):
+                path.write_text(json.dumps(changed))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'claude-desktop')
+            path.write_text(json.dumps(value))
+            with self.assertRaises(ValueError):
+                q.semantic_observations(root, 'chatgpt-desktop')
+
     def test_zed_retry_visual_is_advisory_closed_and_consistent(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

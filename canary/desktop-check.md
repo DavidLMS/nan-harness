@@ -1549,3 +1549,39 @@ baseline and correlates new stable exact-source Copy/Close icon candidates with
 the unchanged native Retry rectangle. It emits only closed counts and relations.
 Masks remain uncalibrated against GPUI, so even a unique matching cluster is
 advisory; this neither certifies the hitbox/callback nor changes the Retry click.
+
+
+The complete hosted Linux quality gate
+[37080540050](https://github.com/DavidLMS/nan-harness/actions/runs/37080540050)
+passes on `bc9cccea`. Windows Codex
+[37080450261](https://github.com/DavidLMS/nan-harness/actions/runs/37080450261)
+passes all three cleanup repetitions with the corrected process helper. Its
+public role onboarding remains blocked by an additional source-classified
+avatar renderer; no coding acceptance is claimed.
+
+Windows Claude
+[37080901135](https://github.com/DavidLMS/nan-harness/actions/runs/37080901135)
+still leaves positive process presence after stop. The new checker storage
+receipt is missing. Its child-environment binding compared raw Windows paths
+with extended canonical paths; it now compares directory identities instead.
+This source correction needs a new hosted observation. Initial absence now also
+checks exact Claude.exe presence, with a first-query baseline receipt; previous
+Claude prelaunch guards checked only AX and native windows. No process is killed
+because of a matching executable name.
+
+Linux Zed
+[37081092966](https://github.com/DavidLMS/nan-harness/actions/runs/37081092966)
+reports one Close match and no Copy match in each repetition, while reply/tool
+acceptance and cleanup still pass and Retry recovery still fails. The proposed
+Copy/Close pair is not a valid locator for every terminal error: pinned source
+renders ProviderRejection with Retry enabled and Copy disabled. Therefore missing
+Copy cannot establish missing rendered Retry or a wrong click target. The extra
+visual hook is removed; closed historical receipts remain decodable. No new
+native cell is qualified.
+
+The next macOS Claude trial fits the unique, independently focused owned initial
+window through public AX size/position attributes, at most once across both
+acquisition phases. The helper rechecks original CGID/PID, AX object identity,
+clear stack and foreground before mutation and verifies full display containment
+afterward. Pure geometry/precondition/deadline fixtures pass. Actual hosted fit
+and the original post-fit stability guards remain required for acceptance.

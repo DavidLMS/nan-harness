@@ -4,19 +4,59 @@ use crate::report::Reason;
 use nan_harness_core::DesktopHarnessKind;
 
 #[cfg(windows)]
-pub(super) fn ensure_absent(kind: DesktopHarnessKind) -> Result<(), Reason> {
-    if kind == DesktopHarnessKind::ChatGpt {
-        use std::time::{Duration, Instant};
-        let deadline = Instant::now() + Duration::from_secs(2);
-        let native = crate::native::Native::new()?;
-        return wait_absent(
-            |deadline| inspect(&native, deadline, b"ChatGPT.exe"),
-            Instant::now,
-            std::thread::sleep,
-            deadline,
-        );
+pub(super) fn ensure_absent(
+    kind: DesktopHarnessKind,
+    native: Option<&crate::native::Native>,
+    before_launch: bool,
+) -> Result<(), Reason> {
+    use std::time::{Duration, Instant};
+    let image: &[u8] = match kind {
+        DesktopHarnessKind::ChatGpt => b"ChatGPT.exe",
+        DesktopHarnessKind::Claude => b"Claude.exe",
+        _ => return Ok(()),
+    };
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let prepared;
+    let native = match native {
+        Some(native) => native,
+        None => {
+            prepared = crate::native::Native::new()?;
+            &prepared
+        }
+    };
+    let mut observed = false;
+    wait_absent(
+        |deadline| {
+            inspect_with_baseline(
+                || inspect(native, deadline, image),
+                &mut observed,
+                before_launch && kind == DesktopHarnessKind::Claude,
+                |state| save_facts(before_launch_facts(state)),
+            )
+        },
+        Instant::now,
+        std::thread::sleep,
+        deadline,
+    )
+}
+
+#[cfg(any(windows, test))]
+fn inspect_with_baseline(
+    mut query: impl FnMut() -> Result<bool, Reason>,
+    observed: &mut bool,
+    before_launch: bool,
+    mut record: impl FnMut(PostStopState),
+) -> Result<bool, Reason> {
+    let result = query();
+    if before_launch && !*observed {
+        *observed = true;
+        record(match result {
+            Ok(true) => PostStopState::Present,
+            Ok(false) => PostStopState::Absent,
+            Err(_) => PostStopState::QueryFailed,
+        });
     }
-    Ok(())
+    result
 }
 
 #[cfg(windows)]
@@ -76,6 +116,12 @@ enum PostStopState {
 fn post_stop_facts(state: PostStopState) -> serde_json::Value {
     serde_json::json!({"schemaVersion":1,"mechanism":"windows-post-stop-process",
         "diagnosticsOnly":true,"phase":"first-accessibility-rejection","state":state})
+}
+
+#[cfg(any(windows, test))]
+fn before_launch_facts(state: PostStopState) -> serde_json::Value {
+    serde_json::json!({"schemaVersion":1,"mechanism":"windows-process-baseline",
+        "diagnosticsOnly":true,"app":"claude-desktop","phase":"before-launch","state":state})
 }
 
 #[cfg(windows)]
@@ -241,6 +287,57 @@ mod tests {
         cell::Cell,
         time::{Duration, Instant},
     };
+    #[test]
+    fn prelaunch_guard_reuses_each_query_and_records_only_first_result() {
+        let mut observed = false;
+        let calls = Cell::new(0);
+        let mut records = Vec::new();
+        for present in [true, false] {
+            assert_eq!(
+                inspect_with_baseline(
+                    || {
+                        calls.set(calls.get() + 1);
+                        Ok(present)
+                    },
+                    &mut observed,
+                    true,
+                    |state| records.push(before_launch_facts(state))
+                ),
+                Ok(present)
+            );
+        }
+        assert_eq!(calls.get(), 2);
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0]["state"], "present");
+        let mut omitted = false;
+        assert_eq!(
+            inspect_with_baseline(
+                || Err(Reason::DesktopUnavailable),
+                &mut omitted,
+                false,
+                |_| panic!("restore cannot emit prelaunch receipt")
+            ),
+            Err(Reason::DesktopUnavailable)
+        );
+        assert!(!omitted);
+    }
+
+    #[test]
+    fn prelaunch_observation_is_closed_and_cannot_be_confused_with_post_stop() {
+        for (state, expected) in [
+            (PostStopState::Present, "present"),
+            (PostStopState::Absent, "absent"),
+            (PostStopState::QueryFailed, "query-failed"),
+        ] {
+            let facts = before_launch_facts(state);
+            assert_eq!(facts["state"], expected);
+            assert_eq!(facts["phase"], "before-launch");
+            assert_eq!(facts["app"], "claude-desktop");
+            assert_eq!(facts.as_object().unwrap().len(), 6);
+            assert_ne!(facts["mechanism"], post_stop_facts(state)["mechanism"]);
+        }
+    }
+
     #[test]
     fn independent_observation_only_claims_first_ax_presence_with_original_budget() {
         let now = Instant::now();

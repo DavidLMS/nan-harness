@@ -10,10 +10,14 @@
 #include <limits>
 #include <string>
 #include <sstream>
+#include <chrono>
+#include <thread>
 
 #if !defined(_WIN32)
 int process_presence(bool) { return 5; }
+#if !defined(__APPLE__)
 int fit_window(const std::string&) { return 5; }
+#endif
 int window_state(const std::string&) { return 5; }
 #endif
 
@@ -505,6 +509,94 @@ int observe_claude() {
     }
 }
 
+// Pure coordinate conversion shared with synthetic fixtures.
+bool mac_fit_rectangle(CGRect before, CGRect visible, CGFloat primary_top, CGRect& target) {
+    target = CGRectMake(visible.origin.x, primary_top - CGRectGetMaxY(visible),
+        std::min(before.size.width, visible.size.width), std::min(before.size.height, visible.size.height));
+    return std::isfinite(target.origin.x) && std::isfinite(target.origin.y)
+        && std::isfinite(target.size.width) && std::isfinite(target.size.height)
+        && target.size.width >= 300 && target.size.height >= 200;
+}
+// Fit only the independently focused original standard window. Never activates it.
+static bool fit_mac_proof(std::uint64_t id, pid_t pid, AxFocus& focus, bool require_off_display) {
+    if ([[[NSWorkspace sharedWorkspace] frontmostApplication] processIdentifier] != pid) return false;
+    auto application = [NSRunningApplication runningApplicationWithProcessIdentifier:pid];
+    if (!application || !application.active || application.hidden || !application.finishedLaunching) return false;
+    read_ax_focus(pid, focus);
+    if (std::string(focus.status) != "ready") return false;
+    auto windows = CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements, kCGNullWindowID);
+    if (!windows) return false;
+    unsigned matches = 0;
+    bool safe = CFArrayGetCount(windows) <= 1024 && match_focus_window(windows, pid, focus.bounds, matches) == id;
+    bool found = false;
+    for (CFIndex index = 0; safe && index < CFArrayGetCount(windows); ++index) {
+        auto window = static_cast<CFDictionaryRef>(CFArrayGetValueAtIndex(windows, index));
+        if (number(window, kCGWindowNumber) == id && number(window, kCGWindowOwnerPID) == pid) { found = true; break; }
+        if (number(window, kCGWindowLayer) == CGWindowLevelForKey(kCGCursorWindowLevelKey)) continue;
+        CGRect bounds;
+        auto value = static_cast<CFDictionaryRef>(CFDictionaryGetValue(window, kCGWindowBounds));
+        if (!value || !CGRectMakeWithDictionaryRepresentation(value, &bounds)) { safe = false; break; }
+        double alpha = 1;
+        auto alpha_value = static_cast<CFNumberRef>(CFDictionaryGetValue(window, kCGWindowAlpha));
+        if (alpha_value) CFNumberGetValue(alpha_value, kCFNumberDoubleType, &alpha);
+        if (alpha <= 0 || bounds.size.width <= 0 || bounds.size.height <= 0) continue;
+        if ((number(window, kCGWindowOwnerPID) == pid && number(window, kCGWindowLayer) == 0)
+            || CGRectIntersectsRect(bounds, focus.bounds)) safe = false;
+    }
+    CFRelease(windows);
+    bool contained = false;
+    for (NSScreen* screen in NSScreen.screens) {
+        auto display = static_cast<CGDirectDisplayID>([screen.deviceDescription[@"NSScreenNumber"] unsignedIntValue]);
+        contained = contained || CGRectContainsRect(CGDisplayBounds(display), focus.bounds);
+    }
+    return safe && found && (require_off_display ? !contained : contained);
+}
+int fit_window(const std::string& request) {
+    @autoreleasepool {
+        std::istringstream input(request);
+        std::string id_text, pid_text, extra;
+        std::uint64_t id = 0, pid = 0;
+        if (!(input >> id_text >> pid_text) || (input >> extra)
+            || !parse_identity_token(id_text, id) || !parse_identity_token(pid_text, pid)
+            || id == 0 || id > UINT32_MAX || pid == 0 || pid > static_cast<std::uint64_t>(std::numeric_limits<pid_t>::max())) return 5;
+        AxFocus before;
+        if (!fit_mac_proof(id, static_cast<pid_t>(pid), before, true)) return 5;
+        NSScreen* selected = nil;
+        CGFloat area = -1;
+        for (NSScreen* screen in NSScreen.screens) {
+            auto display = static_cast<CGDirectDisplayID>([screen.deviceDescription[@"NSScreenNumber"] unsignedIntValue]);
+            auto intersection = CGRectIntersection(CGDisplayBounds(display), before.bounds);
+            CGFloat current = CGRectIsNull(intersection) ? 0 : intersection.size.width * intersection.size.height;
+            if (current > area) { selected = screen; area = current; }
+        }
+        if (!selected || NSScreen.screens.count == 0) return 5;
+        NSRect visible = selected.visibleFrame;
+        CGFloat top = NSMaxY([NSScreen.screens[0] frame]);
+        CGRect target;
+        if (!mac_fit_rectangle(before.bounds, NSRectToCGRect(visible), top, target)) return 5;
+        Boolean position_settable = false, size_settable = false;
+        if (AXUIElementIsAttributeSettable(before.focused, kAXPositionAttribute, &position_settable) != kAXErrorSuccess
+            || AXUIElementIsAttributeSettable(before.focused, kAXSizeAttribute, &size_settable) != kAXErrorSuccess
+            || !position_settable || !size_settable) return 5;
+        AxFocus final_before;
+        if (!fit_mac_proof(id, static_cast<pid_t>(pid), final_before, true)
+            || !CFEqual(before.focused, final_before.focused) || !CGRectEqualToRect(before.bounds, final_before.bounds)) return 5;
+        AXValueRef size = AXValueCreate(kAXValueTypeCGSize, &target.size);
+        AXValueRef position = AXValueCreate(kAXValueTypeCGPoint, &target.origin);
+        if (!size || !position) { if (size) CFRelease(size); if (position) CFRelease(position); return 5; }
+        AXError resized = AXUIElementSetAttributeValue(before.focused, kAXSizeAttribute, size);
+        AXError moved = resized == kAXErrorSuccess ? AXUIElementSetAttributeValue(before.focused, kAXPositionAttribute, position) : resized;
+        CFRelease(size); CFRelease(position);
+        if (resized != kAXErrorSuccess || moved != kAXErrorSuccess) return 5;
+        const auto settle_deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
+        do {
+            AxFocus after;
+            if (fit_mac_proof(id, static_cast<pid_t>(pid), after, false)) return 0;
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        } while (std::chrono::steady_clock::now() < settle_deadline);
+        return 5;
+    }
+}
 int activate_window(const std::string& request) {
     @autoreleasepool {
         std::istringstream input(request);

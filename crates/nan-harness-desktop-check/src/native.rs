@@ -342,6 +342,21 @@ impl Native {
         ))
     }
 
+    #[cfg(target_os = "macos")]
+    pub(crate) fn fit_mac_owned_until(
+        &self,
+        window: &Window,
+        deadline: std::time::Instant,
+    ) -> Result<(), Reason> {
+        let argument = format!("--fit-window {} {}", window.id, window.pid);
+        let output =
+            process::run_fit_until(&self.executable, std::ffi::OsStr::new(&argument), deadline)?;
+        if !output.trim().is_empty() || std::time::Instant::now() >= deadline {
+            return Err(Reason::WindowChanged);
+        }
+        Ok(())
+    }
+
     pub(crate) fn recognize(&self, screenshot: &Screenshot) -> Result<Page, Reason> {
         let output = process::run(
             &self.executable,

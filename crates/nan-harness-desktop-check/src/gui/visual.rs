@@ -249,11 +249,20 @@ pub(super) struct Visual {
     native: Native,
     window: RefCell<Window>,
     scale: Cell<Option<f32>>,
+    #[cfg(target_os = "macos")]
+    mac_fit_identity: Cell<Option<(u64, u32)>>,
 }
 
 impl Visual {
     pub(super) fn ensure_absent(kind: DesktopHarnessKind) -> Result<(), Reason> {
         let native = Native::new()?;
+        Self::ensure_absent_with_native(&native, kind)
+    }
+
+    pub(super) fn ensure_absent_with_native(
+        native: &Native,
+        kind: DesktopHarnessKind,
+    ) -> Result<(), Reason> {
         confirm_absence(
             || {
                 let windows = native.windows_for_absence()?;
@@ -320,6 +329,8 @@ impl Visual {
         let mut stability = super::stability::Stability::default();
         #[cfg(windows)]
         let mut fitted = false;
+        #[cfg(target_os = "macos")]
+        let mut mac_fitted = None;
         loop {
             require_running(process).map_err(|reason| {
                 acquisition_failure(reason, crate::diagnostics::GuiAcquisitionStage::ProcessLive)
@@ -334,25 +345,14 @@ impl Visual {
             inventory.observe(kind, &snapshot.windows, owner);
             let windows = eligible_windows(kind, &snapshot.windows).collect::<Vec<_>>();
             if windows.len() > 1 {
-                return Err((
+                return Err(acquisition_failure(
                     Reason::InstallationAmbiguous,
                     crate::diagnostics::GuiAcquisitionStage::WindowCandidates,
-                    ComposerErrorCategory::Other,
-                    None,
-                    None,
                 ));
             }
             stability.observe(windows.first().copied(), previous.as_ref());
             if let Some(window) = windows.first() {
-                if let Err(failure) = super::process_ownership(window.pid, owner) {
-                    return Err((
-                        Reason::IsolationUnavailable,
-                        crate::diagnostics::GuiAcquisitionStage::WindowOwnership,
-                        failure.category(),
-                        None,
-                        None,
-                    ));
-                }
+                require_owned_candidate(window, owner)?;
                 #[cfg(windows)]
                 if !fitted {
                     fit_owned_window(&native, window)?;
@@ -362,6 +362,14 @@ impl Visual {
                 #[cfg(windows)]
                 if fitted && !snapshot.contains_display(window) {
                     return Err(postcondition_geometry_failure());
+                }
+                #[cfg(target_os = "macos")]
+                if initial_mac_fit(&native, &snapshot, window, kind, &mut mac_fitted, deadline)? {
+                    require_owned_candidate(window, owner)?;
+                    previous = None;
+                    settle.reset();
+                    stability = super::stability::Stability::default();
+                    continue;
                 }
                 let unchanged = previous.as_ref() == Some(*window);
                 let ready = settle.ready(extended_settle, Instant::now(), unchanged, deadline);
@@ -373,6 +381,8 @@ impl Visual {
                         window: RefCell::new((*window).clone()),
                         native,
                         scale: Cell::new(None),
+                        #[cfg(target_os = "macos")]
+                        mac_fit_identity: Cell::new(mac_fitted),
                     });
                 }
                 previous = Some((*window).clone());
@@ -463,6 +473,13 @@ impl Visual {
                 stability.observe(None, None);
                 pending = Some(snapshot.clone());
                 std::thread::sleep(Duration::from_millis(200));
+                continue;
+            }
+            if final_mac_fit(self, &snapshot, &original, owner, deadline)? {
+                pending = None;
+                previous = None;
+                settle.reset();
+                stability = super::stability::Stability::default();
                 continue;
             }
             pending = None;
@@ -1124,12 +1141,143 @@ fn wait_absent<T>(
     }
 }
 
+fn require_owned_candidate(window: &Window, owner: u32) -> Result<(), AcquisitionFailure> {
+    super::process_ownership(window.pid, owner).map_err(|failure| {
+        (
+            Reason::IsolationUnavailable,
+            crate::diagnostics::GuiAcquisitionStage::WindowOwnership,
+            failure.category(),
+            None,
+            None,
+        )
+    })
+}
+
 fn require_running<P: Observation>(process: &mut P) -> Result<(), Reason> {
     match process.try_wait() {
         Ok(None) => Ok(()),
         Ok(Some(_)) => Err(Reason::ApplicationExited),
         Err(_) => Err(Reason::IsolationUnavailable),
     }
+}
+
+#[cfg(target_os = "macos")]
+fn final_mac_fit(
+    visual: &Visual,
+    snapshot: &Snapshot,
+    original: &Window,
+    owner: u32,
+    deadline: Instant,
+) -> Result<bool, AcquisitionFailure> {
+    let candidates =
+        eligible_windows(DesktopHarnessKind::Claude, &snapshot.windows).collect::<Vec<_>>();
+    if candidates.len() != 1 {
+        return Ok(false);
+    }
+    let current = candidates[0];
+    if current.id != original.id
+        || current.pid != original.pid
+        || current.name != original.name
+        || snapshot.off_display_relation(current).is_none()
+    {
+        return Ok(false);
+    }
+    require_owned_candidate(current, owner)?;
+    let mut identity = visual.mac_fit_identity.get();
+    let fitted = initial_mac_fit(
+        &visual.native,
+        snapshot,
+        current,
+        DesktopHarnessKind::Claude,
+        &mut identity,
+        deadline,
+    )?;
+    visual.mac_fit_identity.set(identity);
+    require_owned_candidate(current, owner)?;
+    if Instant::now() >= deadline {
+        return Err(acquisition_failure(
+            Reason::DesktopUnavailable,
+            crate::diagnostics::GuiAcquisitionStage::WindowStability,
+        ));
+    }
+    Ok(fitted)
+}
+
+#[cfg(target_os = "macos")]
+fn initial_mac_fit(
+    native: &Native,
+    snapshot: &Snapshot,
+    window: &Window,
+    kind: DesktopHarnessKind,
+    mac_fitted: &mut Option<(u64, u32)>,
+    deadline: Instant,
+) -> Result<bool, AcquisitionFailure> {
+    if mac_fitted.is_some_and(|identity| identity != (window.id, window.pid)) {
+        return Err(acquisition_failure(
+            Reason::WindowChanged,
+            crate::diagnostics::GuiAcquisitionStage::WindowStability,
+        ));
+    }
+    if mac_fitted.is_none()
+        && kind == DesktopHarnessKind::Claude
+        && crate::native::claude_focus_policy()
+        && snapshot.off_display_relation(window).is_some()
+    {
+        let fresh = native.windows_with_focus(window.pid).map_err(|reason| {
+            acquisition_failure(
+                reason.reason(),
+                crate::diagnostics::GuiAcquisitionStage::WindowStability,
+            )
+        })?;
+        if !mac_fit_precondition(&fresh, window) || Instant::now() >= deadline {
+            return Err(acquisition_failure(
+                Reason::WindowChanged,
+                crate::diagnostics::GuiAcquisitionStage::WindowStability,
+            ));
+        }
+        native
+            .fit_mac_owned_until(window, deadline)
+            .map_err(|reason| {
+                acquisition_failure(
+                    reason,
+                    crate::diagnostics::GuiAcquisitionStage::WindowStability,
+                )
+            })?;
+        *mac_fitted = Some((window.id, window.pid));
+        return Ok(true);
+    }
+    Ok(false)
+}
+
+#[cfg(any(test, target_os = "macos"))]
+fn mac_fit_precondition(snapshot: &Snapshot, window: &Window) -> bool {
+    if snapshot.claude_focused_guard_failure(window) != Err(GuardFailure::OffDisplay)
+        || snapshot
+            .focus_observation(window)
+            .is_none_or(|v| v.1 != Some(true))
+        || snapshot
+            .window_focus_observation(window)
+            .is_none_or(|v| v.1 != Some(true))
+        || eligible_windows(DesktopHarnessKind::Claude, &snapshot.windows).count() != 1
+    {
+        return false;
+    }
+    let Some(index) = snapshot
+        .windows
+        .iter()
+        .position(|w| w.id == window.id && w.pid == window.pid && w.bounds == window.bounds)
+    else {
+        return false;
+    };
+    let overlaps = |a: Rect, b: Rect| {
+        i64::from(a.x) < i64::from(b.x) + i64::from(b.width)
+            && i64::from(b.x) < i64::from(a.x) + i64::from(a.width)
+            && i64::from(a.y) < i64::from(b.y) + i64::from(b.height)
+            && i64::from(b.y) < i64::from(a.y) + i64::from(a.height)
+    };
+    !snapshot.windows[..index]
+        .iter()
+        .any(|w| (w.pid == window.pid && w.layer == 0) || overlaps(w.bounds, window.bounds))
 }
 
 #[cfg(any(test, target_os = "macos"))]
@@ -1589,6 +1737,43 @@ fn record_claude_snapshot(snapshot: &Snapshot, held: &Window, phase: &str) {
 mod tests {
     use super::*;
     use crate::native::FitFailure;
+
+    #[test]
+    fn mac_fit_requires_original_off_display_focus_and_unoccluded_unique_window() {
+        let make = |display: &str, focus: &str, extra: &str| {
+            Snapshot::parse(&format!(
+                "FG 7 0\nDISPLAY {display}\n{extra}WIN 1 7 10 20 1200 800 436c61756465 0\n{focus}"
+            ))
+            .unwrap()
+        };
+        let proof = "FOCUS proved 1\nFOCUS_WINDOW proved 1\n";
+        let valid = make("0 0 1000 700", proof, "");
+        let original = valid.windows[0].clone();
+        assert!(mac_fit_precondition(&valid, &original));
+        assert!(!mac_fit_precondition(
+            &make("0 0 2000 2000", proof, ""),
+            &original
+        ));
+        assert!(!mac_fit_precondition(
+            &make("0 0 1000 700", "", ""),
+            &original
+        ));
+        assert!(!mac_fit_precondition(
+            &make("0 0 1000 700", proof, "WIN 2 8 0 0 50 50 4f74686572 0\n"),
+            &original
+        ));
+        assert!(!mac_fit_precondition(
+            &make(
+                "0 0 1000 700",
+                proof,
+                "WIN 2 7 1500 1500 300 200 436c61756465 0\n"
+            ),
+            &original
+        ));
+        let mut foreign = original.clone();
+        foreign.id = 9;
+        assert!(!mac_fit_precondition(&valid, &foreign));
+    }
 
     #[test]
     fn incomplete_initial_focus_never_contributes_to_stability_or_extends_deadline() {

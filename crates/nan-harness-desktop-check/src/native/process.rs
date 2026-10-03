@@ -79,6 +79,15 @@ pub(super) fn run_with_category_input(
     run_once(executable, argument, None, input)
 }
 
+#[cfg(target_os = "macos")]
+pub(super) fn run_fit_until(
+    executable: &Path,
+    argument: &OsStr,
+    deadline: Instant,
+) -> Result<Zeroizing<String>, Reason> {
+    run_once_until(executable, argument, None, &[], Some(deadline)).map_err(FailureCategory::reason)
+}
+
 #[cfg(any(windows, test))]
 pub(super) fn run_absence_until(
     executable: &Path,
@@ -259,6 +268,31 @@ pub(super) fn validate_image(image: &Screenshot) -> Result<(), Reason> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn fit_transport_never_spawns_after_deadline_or_retries_failed_action() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let directory = tempfile::tempdir().unwrap();
+        let executable = directory.path().join("fit");
+        let count = directory.path().join("count");
+        std::fs::write(&executable, format!("#!/bin/sh\n[ \"$1\" = --version ] && exit 0\nprintf 'attempt\\n' >> '{}'\nexit 5\n", count.display())).unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+        nan_harness_test_support::executable_fixture::wait_until_ready(&executable).unwrap();
+        assert!(
+            run_fit_until(&executable, OsStr::new("--fit-window 1 7"), Instant::now()).is_err()
+        );
+        assert!(!count.exists());
+        assert!(
+            run_fit_until(
+                &executable,
+                OsStr::new("--fit-window 1 7"),
+                Instant::now() + Duration::from_secs(1)
+            )
+            .is_err()
+        );
+        assert_eq!(std::fs::read_to_string(count).unwrap(), "attempt\n");
+    }
 
     #[cfg(unix)]
     #[test]

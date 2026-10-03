@@ -270,7 +270,21 @@ fn settle_absence(
 
 impl Gui {
     pub(crate) fn ensure_absent(kind: DesktopHarnessKind) -> Result<(), AbsenceFailure> {
-        Self::absence_snapshot(kind, None, None)
+        Self::absence_snapshot(kind, None, None, false)
+    }
+
+    pub(crate) fn ensure_absent_before_launch(
+        kind: DesktopHarnessKind,
+    ) -> Result<(), AbsenceFailure> {
+        #[cfg(windows)]
+        if kind == DesktopHarnessKind::Claude {
+            let native = crate::native::Native::new().map_err(|reason| AbsenceFailure {
+                stage: AbsenceStage::NativeWindows,
+                reason,
+            })?;
+            return Self::absence_snapshot(kind, None, Some(&native), true);
+        }
+        Self::ensure_absent(kind)
     }
 
     pub(crate) fn ensure_absent_after_stop(
@@ -296,7 +310,7 @@ impl Gui {
             let mut observed = false;
             return settle_absence(
                 |bound| {
-                    let result = Self::absence_snapshot(kind, Some(bound), native);
+                    let result = Self::absence_snapshot(kind, Some(bound), native, false);
                     let ax_presence = result.as_ref().err().is_some_and(|failure| {
                         failure.stage == AbsenceStage::AccessibilityEnumeration
                             && failure.reason == Reason::AlreadyRunning
@@ -326,6 +340,7 @@ impl Gui {
         kind: DesktopHarnessKind,
         deadline: Option<Instant>,
         retained_native: Option<&crate::native::Native>,
+        before_launch: bool,
     ) -> Result<(), AbsenceFailure> {
         let require_budget = |stage| {
             if deadline.is_some_and(|bound| Instant::now() >= bound) {
@@ -362,11 +377,12 @@ impl Gui {
         #[cfg(windows)]
         let native_absence = match (retained_native, deadline) {
             (Some(native), Some(bound)) => visual::Visual::ensure_absent_using(native, kind, bound),
+            (Some(native), None) => visual::Visual::ensure_absent_with_native(native, kind),
             _ => visual::Visual::ensure_absent(kind),
         };
         #[cfg(not(windows))]
         let native_absence = {
-            let _ = retained_native;
+            let _ = (retained_native, before_launch);
             visual::Visual::ensure_absent(kind)
         };
         native_absence.map_err(|reason| AbsenceFailure {
@@ -377,7 +393,7 @@ impl Gui {
         #[cfg(windows)]
         match deadline {
             Some(bound) => process_absence::inspect_absent(kind, bound, retained_native),
-            None => process_absence::ensure_absent(kind),
+            None => process_absence::ensure_absent(kind, retained_native, before_launch),
         }
         .map_err(|reason| AbsenceFailure {
             stage: AbsenceStage::ProcessEnumeration,
