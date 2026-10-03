@@ -1839,6 +1839,17 @@ class QualificationTests(unittest.TestCase):
                 item = {**value, 'stage': 'deadline', 'actionPhase': phase, 'transportFailure': 'timeout'}
                 path.write_text(json.dumps(item))
                 self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [item])
+            for observation in (None, dict(generationObserved=True, fixtureResponseVerified=True, failureObserved=False),
+                                dict(generationObserved=False, fixtureResponseVerified=False, failureObserved=False)):
+                item = {**value, 'providerObservation': observation}
+                path.write_text(json.dumps(item))
+                self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [item])
+            for observation in ('PRIVATE', {'generationObserved': True},
+                                dict(generationObserved=1, fixtureResponseVerified=False, failureObserved=False),
+                                dict(generationObserved=True, fixtureResponseVerified=False, failureObserved=False, prompt='PRIVATE')):
+                path.write_text(json.dumps({**value, 'providerObservation': observation}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'claude-desktop')
             for changes in ({'actionPhase': 'PRIVATE', 'transportFailure': None},
                             {'actionPhase': 'transport', 'transportFailure': 'PRIVATE'},
                             {'actionPhase': None, 'transportFailure': 'output'},
@@ -1848,7 +1859,9 @@ class QualificationTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'claude-desktop')
             for stage in ('tree-query', 'tree-duplicate', 'tree-type', 'tree-limit', 'tree-pid',
-                          'tree-focus', 'tree-window', 'input-initial-unavailable', 'input-initial-nonempty',
+                          'tree-focus', 'tree-window', 'scope-anchor-absent', 'scope-anchor-ambiguous',
+                          'scope-control-absent', 'scope-control-ambiguous', 'scope-heading-ambiguous', 'scope-prompt-mismatch',
+                          'input-initial-unavailable', 'input-initial-nonempty',
                           'input-clipboard-mismatch', 'input-value-mismatch'):
                 item = {**value, 'stage': stage, 'submittedTurns': 0, 'inputVerifiedTurns': 0,
                         'copiedResponses': 0, 'retryAttempted': False}

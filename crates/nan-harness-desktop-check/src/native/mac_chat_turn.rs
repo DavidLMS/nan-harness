@@ -51,6 +51,12 @@ pub(crate) enum ChatTurnStage {
     InputValueMismatch,
     Control,
     Scope,
+    ScopeAnchorAbsent,
+    ScopeAnchorAmbiguous,
+    ScopeControlAbsent,
+    ScopeControlAmbiguous,
+    ScopeHeadingAmbiguous,
+    ScopePromptMismatch,
     Deadline,
     ActionUncertain,
     ResponseMismatch,
@@ -63,7 +69,18 @@ pub(crate) enum ChatTurnStage {
 }
 impl ChatTurnStage {
     pub(crate) fn passive_pending(self) -> bool {
-        matches!(self, Self::Scope | Self::Tree | Self::TreeQuery)
+        matches!(
+            self,
+            Self::Scope
+                | Self::ScopeAnchorAbsent
+                | Self::ScopeAnchorAmbiguous
+                | Self::ScopeControlAbsent
+                | Self::ScopeControlAmbiguous
+                | Self::ScopeHeadingAmbiguous
+                | Self::ScopePromptMismatch
+                | Self::Tree
+                | Self::TreeQuery
+        )
     }
     pub(super) fn parse(output: &str) -> Option<Self> {
         match output {
@@ -87,6 +104,12 @@ impl ChatTurnStage {
             "turn input-value-mismatch\n" => Some(Self::InputValueMismatch),
             "turn control\n" => Some(Self::Control),
             "turn scope\n" => Some(Self::Scope),
+            "turn scope-anchor-absent\n" => Some(Self::ScopeAnchorAbsent),
+            "turn scope-anchor-ambiguous\n" => Some(Self::ScopeAnchorAmbiguous),
+            "turn scope-control-absent\n" => Some(Self::ScopeControlAbsent),
+            "turn scope-control-ambiguous\n" => Some(Self::ScopeControlAmbiguous),
+            "turn scope-heading-ambiguous\n" => Some(Self::ScopeHeadingAmbiguous),
+            "turn scope-prompt-mismatch\n" => Some(Self::ScopePromptMismatch),
             "turn deadline\n" => Some(Self::Deadline),
             "turn action-uncertain\n" => Some(Self::ActionUncertain),
             "turn response-mismatch\n" => Some(Self::ResponseMismatch),
@@ -147,6 +170,38 @@ pub(super) fn request(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scoped_selector_failures_remain_passive_and_payload_free() {
+        for (label, stage) in [
+            ("scope-anchor-absent", ChatTurnStage::ScopeAnchorAbsent),
+            (
+                "scope-anchor-ambiguous",
+                ChatTurnStage::ScopeAnchorAmbiguous,
+            ),
+            ("scope-control-absent", ChatTurnStage::ScopeControlAbsent),
+            (
+                "scope-control-ambiguous",
+                ChatTurnStage::ScopeControlAmbiguous,
+            ),
+            (
+                "scope-heading-ambiguous",
+                ChatTurnStage::ScopeHeadingAmbiguous,
+            ),
+            ("scope-prompt-mismatch", ChatTurnStage::ScopePromptMismatch),
+        ] {
+            assert_eq!(
+                ChatTurnStage::parse(&format!("turn {label}\n")),
+                Some(stage)
+            );
+            assert!(stage.passive_pending());
+            assert_eq!(
+                serde_json::to_string(&stage).unwrap(),
+                format!("\"{label}\"")
+            );
+        }
+        assert!(ChatTurnStage::parse("turn scope PRIVATE\n").is_none());
+    }
     #[test]
     fn receipts_cannot_certify_output_or_actions_from_partial_or_payload_text() {
         assert_eq!(

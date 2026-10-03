@@ -13,6 +13,14 @@ use zeroize::Zeroizing;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+struct ProviderObservation {
+    generation_observed: bool,
+    fixture_response_verified: bool,
+    failure_observed: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct Facts {
     schema_version: u8,
     mechanism: &'static str,
@@ -20,6 +28,7 @@ struct Facts {
     stage: ChatTurnStage,
     action_phase: Option<ChatActionPhase>,
     transport_failure: Option<&'static str>,
+    provider_observation: Option<ProviderObservation>,
     submitted_turns: u8,
     input_verified_turns: u8,
     copied_responses: u8,
@@ -35,6 +44,7 @@ impl Default for Facts {
             stage: ChatTurnStage::Request,
             action_phase: None,
             transport_failure: None,
+            provider_observation: None,
             submitted_turns: 0,
             input_verified_turns: 0,
             copied_responses: 0,
@@ -95,6 +105,13 @@ impl Gui {
     }
 }
 impl ClaudeNativeChatSession<'_> {
+    fn observe_provider(&mut self, gate: &ProviderGate) {
+        self.facts.provider_observation = Some(ProviderObservation {
+            generation_observed: gate.generation_count() > 0,
+            fixture_response_verified: gate.fixture_response_verified(),
+            failure_observed: gate.failure_observed(),
+        });
+    }
     fn action(
         &mut self,
         mode: &str,
@@ -164,9 +181,15 @@ impl ClaudeNativeChatSession<'_> {
             }
         }
     }
-    pub(crate) fn wait_response(&mut self, marker: &str, timeout: Duration) -> Result<(), Reason> {
+    pub(crate) fn wait_response(
+        &mut self,
+        marker: &str,
+        timeout: Duration,
+        gate: &ProviderGate,
+    ) -> Result<(), Reason> {
         let deadline = Instant::now() + timeout;
         loop {
+            self.observe_provider(gate);
             let until = deadline.min(Instant::now() + Duration::from_secs(5));
             match self.action("copy", marker, until)? {
                 ChatTurnStage::Copied => {
@@ -190,9 +213,14 @@ impl ClaudeNativeChatSession<'_> {
             );
         }
     }
-    pub(crate) fn wait_retry(&mut self, timeout: Duration) -> Result<(), Reason> {
+    pub(crate) fn wait_retry(
+        &mut self,
+        timeout: Duration,
+        gate: &ProviderGate,
+    ) -> Result<(), Reason> {
         let deadline = Instant::now() + timeout;
         loop {
+            self.observe_provider(gate);
             match self.action(
                 "retry-ready",
                 "NAN_CHECK_EXPECTED_FAILURE",

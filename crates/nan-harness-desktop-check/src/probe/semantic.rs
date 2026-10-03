@@ -204,8 +204,10 @@ impl SemanticUi<'_> {
             Self::Claude(session) => {
                 session.new_turn(prompt)?;
                 match purpose {
-                    DomPurpose::Response => session.wait_response(marker, Duration::from_secs(30)),
-                    DomPurpose::Failure => session.wait_retry(Duration::from_secs(30)),
+                    DomPurpose::Response => {
+                        session.wait_response(marker, Duration::from_secs(30), gate)
+                    }
+                    DomPurpose::Failure => session.wait_retry(Duration::from_secs(30), gate),
                 }
             }
             Self::Renderer(session) => session.turn(
@@ -267,7 +269,7 @@ impl SemanticUi<'_> {
             #[cfg(target_os = "macos")]
             Self::Claude(session) => {
                 session.retry_once()?;
-                session.wait_response(marker, Duration::from_secs(30))
+                session.wait_response(marker, Duration::from_secs(30), gate)
             }
             Self::Renderer(session) => session.turn(
                 DomTurn {

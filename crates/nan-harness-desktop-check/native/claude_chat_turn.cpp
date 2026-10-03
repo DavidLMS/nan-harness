@@ -346,7 +346,8 @@ static const char* input(const Request& request, const Tree& tree) {
     if (enabled_send < 0) return "control";
     return press(request, fresh.nodes[enabled_send], "sent");
 }
-static int scoped_control(const Tree& tree, const Request& request, bool retry) {
+static int scoped_control(const Tree& tree, const Request& request, bool retry, const char** failure = nullptr) {
+    auto reject = [failure](const char* stage) { if (failure) *failure = stage; return -1; };
     std::vector<int> anchors;
     for (std::size_t i = 0; i < tree.nodes.size(); ++i) {
         const auto& node = tree.nodes[i];
@@ -354,27 +355,35 @@ static int scoped_control(const Tree& tree, const Request& request, bool retry) 
             : node.role == "AXHeading" && node.label.rfind("Claude responded:", 0) == 0 && node.label.find(request.marker) != std::string::npos;
         if (matches) anchors.push_back(i);
     }
-    if (anchors.size() != 1) return -1;
+    if (anchors.empty()) return reject("scope-anchor-absent");
+    if (anchors.size() != 1) return reject("scope-anchor-ambiguous");
+    bool ambiguous_control = false;
+    bool mismatched_prompt = false;
     int ancestor = tree.nodes[anchors[0]].parent;
     for (unsigned depth = 0; ancestor >= 0 && depth < 6; ++depth, ancestor = tree.nodes[ancestor].parent) {
+        unsigned controls = 0;
+        for (std::size_t i = 0; i < tree.nodes.size(); ++i)
+            if (descendant(tree, i, ancestor) && tree.nodes[i].role == "AXButton" && tree.nodes[i].label == (retry ? "Retry" : "Copy")) ++controls;
+        if (controls > 1) ambiguous_control = true;
         int control = unique(tree, "AXButton", retry ? "Retry" : "Copy", ancestor);
         if (control < 0) continue;
         unsigned heading_count = 0;
         for (std::size_t i = 0; i < tree.nodes.size(); ++i) if (descendant(tree, i, ancestor) && tree.nodes[i].role == "AXHeading") ++heading_count;
-        if (heading_count > 1) return -1;
+        if (heading_count > 1) return reject("scope-heading-ambiguous");
         if (retry) {
             unsigned prompts = 0;
             for (std::size_t i = 0; i < tree.nodes.size(); ++i) if (descendant(tree, i, ancestor) && tree.nodes[i].label == request.prompt) ++prompts;
-            if (prompts != 1) continue;
+            if (prompts != 1) { mismatched_prompt = true; continue; }
         }
         return control;
     }
-    return -1;
+    return reject(mismatched_prompt ? "scope-prompt-mismatch" : ambiguous_control ? "scope-control-ambiguous" : "scope-control-absent");
 }
 static const char* action(const Request& request, const Tree& tree) {
     bool retry = request.mode != "copy";
-    int index = scoped_control(tree, request, retry);
-    if (index < 0) return "scope";
+    const char* failure = "scope";
+    int index = scoped_control(tree, request, retry, &failure);
+    if (index < 0) return failure;
     if (request.mode == "retry-ready") return target(tree.nodes[index], request) && owned(request) ? "retry-ready" : "control";
     if (!retry && !clipboard_write(request.sentinel)) return "response-mismatch";
     const char* result = press(request, tree.nodes[index], retry ? "retried" : "copied");
