@@ -1800,6 +1800,26 @@ class QualificationTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     q.semantic_observations(tmp, 'claude-desktop')
 
+    def test_claude_windows_fit_rejection_is_closed_and_never_readiness(self):
+        value = dict(schemaVersion=1, mechanism='claude-windows-fit-rejection', diagnosticsOnly=True,
+                     phase='pending-attachment', policyEnabled=True, fitAttempted=False,
+                     sourceComposerReady=None, candidateReason='overlap-ahead', guardFailure='off-display',
+                     eligibleCount=1, sameProcessAheadCount=0, overlapAheadCount=1)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'fit.json'
+            for item in (value, {**value, 'phase': 'final-ready', 'sourceComposerReady': True}):
+                path.write_text(json.dumps(item))
+                self.assertEqual(q.semantic_observations(tmp, 'claude-desktop'), [item])
+            for change in ({'phase': 'PRIVATE'}, {'sourceComposerReady': True}, {'candidateReason': 'PRIVATE'},
+                           {'guardFailure': 'PRIVATE'}, {'eligibleCount': True}, {'overlapAheadCount': 65},
+                           {'policyEnabled': 1}, {'bounds': [1, 2, 3, 4]}):
+                path.write_text(json.dumps({**value, **change}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(tmp, 'claude-desktop')
+            path.write_text(json.dumps(value))
+            with self.assertRaises(ValueError):
+                q.semantic_observations(tmp, 'chatgpt-desktop')
+
     def test_claude_native_chat_receipt_is_closed_and_not_qualification(self):
         value = dict(schemaVersion=1, mechanism='claude-native-chat', diagnosticsOnly=True,
                      stage='completed', submittedTurns=3, inputVerifiedTurns=3, copiedResponses=3,
@@ -1983,6 +2003,18 @@ class QualificationTests(unittest.TestCase):
                 path.write_text(json.dumps({**value, 'nativeOwnershipFailure': reason}))
                 with self.assertRaises(ValueError):
                     q.semantic_observations(tmp, 'chatgpt-desktop')
+            shape = dict(reason='multiple-listeners', listenerCount=2, uniquePidCount=1)
+            item = {**value, 'nativeOwnershipFailure': 'listener-shape', 'nativeListenerShape': shape}
+            path.write_text(json.dumps(item))
+            self.assertEqual(q.semantic_observations(tmp, 'chatgpt-desktop'), [item])
+            for change in ({'reason': 'PRIVATE'}, {'listenerCount': 4097}, {'listenerCount': True},
+                           {'uniquePidCount': 3}, {'endpoint': 'PRIVATE'}):
+                path.write_text(json.dumps({**item, 'nativeListenerShape': {**shape, **change}}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(tmp, 'chatgpt-desktop')
+            path.write_text(json.dumps({**item, 'nativeOwnershipFailure': 'ancestor-query'}))
+            with self.assertRaises(ValueError):
+                q.semantic_observations(tmp, 'chatgpt-desktop')
         empty = dict.fromkeys('loading unsupported disabled error chatgptChoice apiKeyChoice'.split(), 0)
         observations = [dict(status=key, counts={**empty, key: 1})
                         for key in ('loading', 'unsupported', 'disabled', 'error')]

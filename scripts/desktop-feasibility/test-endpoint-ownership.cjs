@@ -25,7 +25,7 @@ function trial(listing, parents, failure = false, details = false) {
   vm.runInNewContext(proof, context);
   const owned = context.ownedEndpoint();
   assert(calls <= 33);
-  return details?{owned,reason:context.failure(),calls}:owned;
+  return details?{owned,reason:context.failure(),shape:context.failureDetails(),calls}:owned;
 }
 assert(trial('p40\nf3\nn127.0.0.1:43210\n', { 40: 30, 30: 20 }));
 assert(!trial('p40\nf3\nn127.0.0.1:43210\n', { 40: 1 }));
@@ -39,6 +39,33 @@ assert(!trial('p40\nf3\nn127.0.0.1:43210\n', { 40: 20 }, true));
 assert(!trial('n127.0.0.1:43210\n', {}));
 assert(!trial('p40\nn127.0.0.1:43210\n', { 40: 20 }));
 assert(!trial('p40\nfPRIVATE\nn127.0.0.1:43210\n', { 40: 20 }));
+for (const [listing, reason, count, pids] of [
+  ['p40\nfPRIVATE\nn127.0.0.1:43210\n', 'malformed-descriptor', 0, 0],
+  ['p40\nn127.0.0.1:43210\n', 'missing-descriptor', 0, 0],
+  ['p40\nf3\nxPRIVATE\nn127.0.0.1:43210\n', 'unexpected-field', 1, 1],
+  ['p40\nf3\nn*:43210\n', 'endpoint-mismatch', 1, 1],
+  ['p40\nf3\nn127.0.0.1:43210\np40\nf4\nn127.0.0.1:43210\n', 'multiple-listeners', 2, 1],
+  ['p40\nf3\nn127.0.0.1:43210\np41\nf4\nn127.0.0.1:43210\n', 'multiple-listeners', 2, 2],
+]) {
+  const result = trial(listing, {40:20,41:20}, false, true);
+  assert.equal(result.owned, false);
+  assert.equal(result.reason, 'listener-shape');
+  assert.equal(result.shape.reason, reason);
+  assert.equal(result.shape.listenerCount, count);
+  assert.equal(result.shape.uniquePidCount, pids);
+  assert.equal(result.calls, 1); // No ancestry or second native query after shape rejection.
+  assert(!JSON.stringify(result).includes('PRIVATE'));
+  assert(!JSON.stringify(result).includes('43210'));
+}
+for (const [listing, failure] of [['',false], ['p40\nf3\nn127.0.0.1:43210\n',false], ['',true]]) {
+  assert.equal(trial(listing,{40:20},failure,true).shape, null);
+}
+const overflowListing = Array.from({length:4097}, (_,i)=>`p${i+40}\nf3\nn127.0.0.1:43210`).join('\n');
+const overflowShape = trial(overflowListing, {}, false, true).shape;
+assert.equal(overflowShape.reason, 'multiple-listeners');
+assert.equal(overflowShape.listenerCount, null);
+assert.equal(overflowShape.uniquePidCount, null);
+console.log('Native macOS listener shape: closed same-query diagnostic passed');
 console.log('Native macOS endpoint ownership: guarded cases passed');
 
 for (const result of ['true', 'false', 'true\n', 'private unexpected value']) {
@@ -145,10 +172,12 @@ const guardEnd=renderer.indexOf('\n    };',guardStart)+7;
 for(const [component,reason,throwing] of [
   ['root','ancestor-query',false],['listener','listener-unavailable',false],
   ['root','ancestor-query',true],['listener','listener-query',true],
+  ['listener','listener-shape',false],
   ['listener','PRIVATE unknown',false],
 ]) {
   const facts={},calls=[];
-  const native=part=>({failure:()=>reason,
+  const shape={reason:'multiple-listeners',listenerCount:2,uniquePidCount:1};
+  const native=part=>({failure:()=>reason,failureDetails:()=>reason==='listener-shape'?shape:null,
     descendant(){calls.push(part);if(component===part&&throwing)throw Error('PRIVATE');return component!==part;},
     ownedEndpoint(){calls.push(part);if(component===part&&throwing)throw Error('PRIVATE');return component!==part;}});
   const guard=vm.runInNewContext(`(()=>{${renderer.slice(guardStart,guardEnd)}return ownerGuard;})()`,
@@ -156,6 +185,7 @@ for(const [component,reason,throwing] of [
   if(throwing)assert.throws(guard);else assert.equal(guard(),false);
   assert.equal(calls.length,component==='root'?1:2);
   assert.equal(facts.nativeOwnershipFailure,reason==='PRIVATE unknown'?undefined:reason);
+  assert.deepEqual(facts.nativeListenerShape,reason==='listener-shape'?shape:undefined);
   assert(!JSON.stringify(facts).includes('PRIVATE'));
 }
 console.log('Unix ownership failure diagnostic: same queries and throw semantics passed');

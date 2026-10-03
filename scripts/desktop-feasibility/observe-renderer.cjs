@@ -332,6 +332,9 @@ async function run() {
         const reason=typeof proof.failure==='function'?proof.failure():'unmeasured';
         if(['ancestor-unowned','ancestor-query','listener-unavailable','listener-shape',
           'listener-unowned','listener-query','unmeasured'].includes(reason))facts.nativeOwnershipFailure=reason;
+        delete facts.nativeListenerShape;
+        const details=typeof proof.failureDetails==='function'?proof.failureDetails():null;
+        if(reason==='listener-shape'&&details)facts.nativeListenerShape=details;
       };
       let proof=rootProof;
       try {

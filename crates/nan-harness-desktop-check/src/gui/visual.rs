@@ -544,6 +544,13 @@ impl Visual {
         let current =
             super::claude_windows_fit::pending_candidate(&snapshot, &original, &candidates)
                 .map_err(|error| {
+                    super::claude_windows_fit::record_rejection(
+                        &snapshot,
+                        &original,
+                        &candidates,
+                        "pending-attachment",
+                        self.windows_fitted.get(),
+                    );
                     (
                         error.reason(),
                         crate::diagnostics::GuiAcquisitionStage::WindowStability,
@@ -634,6 +641,13 @@ impl Visual {
             let candidate =
                 super::claude_windows_ready::candidate(&snapshot, &original, &candidates).map_err(
                     |error| {
+                        super::claude_windows_fit::record_rejection(
+                            &snapshot,
+                            &original,
+                            &candidates,
+                            "final-ready",
+                            self.windows_fitted.get(),
+                        );
                         (
                             error.reason(),
                             crate::diagnostics::GuiAcquisitionStage::WindowStability,
@@ -1189,6 +1203,13 @@ fn initial_windows_fit(
         // Attachment is passive. The only fit belongs to source-ready finalization.
         super::claude_windows_fit::pending_candidate(snapshot, window, &[window]).map_err(
             |error| {
+                super::claude_windows_fit::record_rejection(
+                    snapshot,
+                    window,
+                    &[window],
+                    "initial-pending",
+                    state.fitted,
+                );
                 (
                     error.reason(),
                     crate::diagnostics::GuiAcquisitionStage::WindowStability,

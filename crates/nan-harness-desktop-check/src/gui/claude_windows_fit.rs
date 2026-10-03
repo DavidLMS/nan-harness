@@ -13,34 +13,67 @@ pub(super) fn pending_candidate(
     super::claude_windows_ready::candidate(snapshot, original, eligible)
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub(super) enum FitRejection {
+    AlreadyFitted,
+    CandidateCount,
+    IdentityMismatch,
+    NativeGuard,
+    DisplayRelationUnavailable,
+    SnapshotIdentityMissing,
+    SameProcessAhead,
+    OverlapAhead,
+}
+
+pub(super) fn assess(
+    snapshot: &Snapshot,
+    original: &Window,
+    eligible: &[&Window],
+    already_fitted: bool,
+) -> Result<Window, FitRejection> {
+    if already_fitted {
+        return Err(FitRejection::AlreadyFitted);
+    }
+    let [current] = eligible else {
+        return Err(FitRejection::CandidateCount);
+    };
+    if current.id != original.id || current.pid != original.pid || current.name != original.name {
+        return Err(FitRejection::IdentityMismatch);
+    }
+    if snapshot.guard_failure(current) != Err(GuardFailure::OffDisplay) {
+        return Err(FitRejection::NativeGuard);
+    }
+    if snapshot.off_display_relation(current).is_none() {
+        return Err(FitRejection::DisplayRelationUnavailable);
+    }
+    let index = snapshot
+        .windows
+        .iter()
+        .position(|window| window == *current)
+        .ok_or(FitRejection::SnapshotIdentityMissing)?;
+    if snapshot.windows[..index]
+        .iter()
+        .any(|window| window.pid == current.pid)
+    {
+        return Err(FitRejection::SameProcessAhead);
+    }
+    if snapshot.windows[..index]
+        .iter()
+        .any(|window| overlaps(window, current))
+    {
+        return Err(FitRejection::OverlapAhead);
+    }
+    Ok((*current).clone())
+}
+
 pub(super) fn candidate(
     snapshot: &Snapshot,
     original: &Window,
     eligible: &[&Window],
     already_fitted: bool,
 ) -> Option<Window> {
-    let [current] = eligible else { return None };
-    if already_fitted
-        || current.id != original.id
-        || current.pid != original.pid
-        || current.name != original.name
-        || snapshot.guard_failure(current) != Err(GuardFailure::OffDisplay)
-        || snapshot.off_display_relation(current).is_none()
-    {
-        return None;
-    }
-    let index = snapshot
-        .windows
-        .iter()
-        .position(|window| window == *current)?;
-    // OffDisplay precedes occlusion in the strict guard; prove the latter too.
-    if snapshot.windows[..index]
-        .iter()
-        .any(|window| window.pid == current.pid || overlaps(window, current))
-    {
-        return None;
-    }
-    Some((*current).clone())
+    assess(snapshot, original, eligible, already_fitted).ok()
 }
 
 fn overlaps(first: &Window, second: &Window) -> bool {
@@ -123,5 +156,88 @@ pub(super) fn record(helper_succeeded: bool) {
         ) {
             let _ = file.write_all(&bytes).and_then(|()| file.sync_all());
         }
+    }
+}
+
+#[cfg(windows)]
+pub(super) fn record_rejection(
+    snapshot: &Snapshot,
+    original: &Window,
+    eligible: &[&Window],
+    phase: &'static str,
+    fitted: bool,
+) {
+    use std::io::Write as _;
+    if !matches!(
+        phase,
+        "initial-pending" | "pending-attachment" | "final-ready"
+    ) || std::env::var("GITHUB_ACTIONS").as_deref() != Ok("true")
+        || std::env::var("RUNNER_ENVIRONMENT").as_deref() != Ok("github-hosted")
+        || std::env::var("RUNNER_OS").as_deref() != Ok("Windows")
+        || std::env::var("NANH_DESKTOP_QUALIFICATION_MODE").as_deref() != Ok("startup-baseline")
+        || std::env::var("NANH_CLAUDE_WINDOWS_PROFILE_POLICY").as_deref() != Ok("private-env")
+    {
+        return;
+    }
+    let Some(directory) = std::env::var_os("NANH_DESKTOP_QUALIFICATION_FACTS") else {
+        return;
+    };
+    let Some(directory) =
+        super::qualification_directory::canonical_directory(std::path::Path::new(&directory))
+    else {
+        return;
+    };
+    let Err(reason) = assess(snapshot, original, eligible, fitted) else {
+        return;
+    };
+    let current = eligible.iter().find(|window| {
+        window.id == original.id && window.pid == original.pid && window.name == original.name
+    });
+    let ahead = current.and_then(|current| {
+        snapshot
+            .windows
+            .iter()
+            .position(|window| window == *current)
+            .map(|index| (&snapshot.windows[..index], *current))
+    });
+    let guard = current
+        .and_then(|window| snapshot.guard_failure(window).err())
+        .map(|failure| match failure {
+            GuardFailure::IdentityMissing => "identity-missing",
+            GuardFailure::BoundsChanged => "bounds-changed",
+            GuardFailure::ForegroundChanged => "foreground-changed",
+            GuardFailure::SameProcessWindow => "same-process-window",
+            GuardFailure::OffDisplay => "off-display",
+            GuardFailure::Occluded => "occluded",
+        });
+    let same = ahead.map(|(windows, current)| {
+        windows
+            .iter()
+            .filter(|window| window.pid == current.pid)
+            .count()
+            .min(64)
+    });
+    let overlap = ahead.map(|(windows, current)| {
+        windows
+            .iter()
+            .filter(|window| overlaps(window, current))
+            .count()
+            .min(64)
+    });
+    let value = serde_json::json!({"schemaVersion":1,"mechanism":"claude-windows-fit-rejection","diagnosticsOnly":true,
+        "phase":phase,"policyEnabled":super::claude_windows_ready::policy(),"fitAttempted":fitted,
+        "sourceComposerReady":(phase == "final-ready").then_some(true),"candidateReason":reason,
+        "guardFailure":guard,"eligibleCount":eligible.len().min(64),"sameProcessAheadCount":same,"overlapAheadCount":overlap});
+    let mut nonce = [0; 8];
+    if getrandom::fill(&mut nonce).is_err() {
+        return;
+    }
+    if let Ok(bytes) = serde_json::to_vec(&value)
+        && let Ok(mut file) = nan_harness_private_fs::open_private_new(&directory.join(format!(
+            "claude-fit-rejection-{}.json",
+            u64::from_le_bytes(nonce)
+        )))
+    {
+        let _ = file.write_all(&bytes).and_then(|()| file.sync_all());
     }
 }

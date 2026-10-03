@@ -49,6 +49,8 @@ function windowsProof(mode, value, root) {
   }
 }
 let unixFailure='unmeasured';
+let listenerShape = null;
+function failureDetails() { return unixFailure === 'listener-shape' ? listenerShape : null; }
 function failure() { return unixFailure; }
 function descendant(pid) {
   if (process.platform === 'win32') return windowsProof('descendant', pid, Number(owner));
@@ -74,6 +76,7 @@ function parentPid(pid) {
   return Number(stat.slice(stat.lastIndexOf(')') + 2).split(' ')[1]);
 }
 function ownedEndpoint() {
+  listenerShape = null;
   if (process.platform === 'win32') return windowsProof('endpoint', Number(port), Number(owner));
   unixFailure='unmeasured';
   if (process.platform === 'darwin') {
@@ -87,18 +90,37 @@ function ownedEndpoint() {
           stdio: ['ignore', 'pipe', 'ignore'] });
       stage='listener-shape';
       const listeners = [];
+      const listenerPids = new Set();
       let pid = 0;
       let descriptor = null;
+      let shapeReason = null;
       for (const field of listing.trim().split('\n')) {
-        if (/^p[0-9]+$/.test(field)) { pid = Number(field.slice(1)); descriptor = null; }
-        else if (/^f[0-9]+$/.test(field)) descriptor = Number(field.slice(1));
-        else if (field.startsWith('n') && pid > 1 && descriptor !== null) {
-          listeners.push({ pid, endpoint: field.slice(1) }); descriptor = null;
+        if (/^p[0-9]+$/.test(field)) {
+          pid = Number(field.slice(1));
+          descriptor = null;
+        } else if (/^f[0-9]+$/.test(field)) {
+          descriptor = Number(field.slice(1));
+        } else if (field.startsWith('n') && pid > 1 && descriptor !== null) {
+          listeners.push({ pid, endpoint: field.slice(1) });
+          listenerPids.add(pid);
+          descriptor = null;
+        } else {
+          shapeReason ??= field.startsWith('f') ? 'malformed-descriptor'
+            : field.startsWith('n') && pid > 1 ? 'missing-descriptor' : 'unexpected-field';
         }
-        else {unixFailure=listing.trim()?'listener-shape':'listener-unavailable';return false;}
       }
-      if(listeners.length!==1||listeners[0].endpoint!==`127.0.0.1:${port}`) {
-        unixFailure=listeners.length===0?'listener-unavailable':'listener-shape';return false;
+      if (shapeReason || listeners.length !== 1
+          || listeners[0].endpoint !== `127.0.0.1:${port}`) {
+        unixFailure = shapeReason ? (listing.trim() ? 'listener-shape' : 'listener-unavailable')
+          : listeners.length === 0 ? 'listener-unavailable' : 'listener-shape';
+        if (unixFailure === 'listener-shape') {
+          listenerShape = {
+            reason: shapeReason ?? (listeners.length > 1 ? 'multiple-listeners' : 'endpoint-mismatch'),
+            listenerCount: listeners.length <= 4096 ? listeners.length : null,
+            uniquePidCount: listenerPids.size <= 4096 ? listenerPids.size : null,
+          };
+        }
+        return false;
       }
       stage='ancestor-query';
       const result=descendant(listeners[0].pid);
@@ -126,5 +148,5 @@ function ownedEndpoint() {
   return false;
   } catch(error) {unixFailure='listener-query';throw error;}
 }
-return { ownedEndpoint, descendant, parentPid, windowsProof, failure };
+return { ownedEndpoint, descendant, parentPid, windowsProof, failure, failureDetails };
 };

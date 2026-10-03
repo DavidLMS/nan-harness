@@ -303,10 +303,10 @@ def semantic_observations(directory, app):
         if type(value) is not dict:
             raise ValueError('invalid semantic observation')
         mechanism = value.get('mechanism')
-        if mechanism not in {'codex-renderer-qualification', 'qualification-runner-failure', 'hermes-windows-catalog-readiness', 'hermes-renderer-qualification', 'zed-native-copy', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'zed-retry-visual', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'codex-project-preflight', 'windows-process-absence', 'windows-post-stop-process', 'windows-process-baseline', 'windows-process-settlement', 'windows-owned-stop', 'windows-process-correlation', 'windows-owned-descendant-cleanup', 'windows-owned-cleanup-preflight', 'claude-owned-configuration', 'claude-restore', 'claude-model-discovery', 'claude-window-stack', 'claude-window-focus', 'claude-chat-navigation', 'claude-native-chat', 'claude-window-fit', 'claude-windows-fit', 'claude-storage-use', 'claude-native-storage', 'claude-private-storage-stage', 'claude-native-composer', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}:
+        if mechanism not in {'codex-renderer-qualification', 'qualification-runner-failure', 'hermes-windows-catalog-readiness', 'hermes-renderer-qualification', 'zed-native-copy', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'zed-retry-visual', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'codex-project-preflight', 'windows-process-absence', 'windows-post-stop-process', 'windows-process-baseline', 'windows-process-settlement', 'windows-owned-stop', 'windows-process-correlation', 'windows-owned-descendant-cleanup', 'windows-owned-cleanup-preflight', 'claude-owned-configuration', 'claude-restore', 'claude-model-discovery', 'claude-window-stack', 'claude-window-focus', 'claude-chat-navigation', 'claude-native-chat', 'claude-window-fit', 'claude-windows-fit', 'claude-windows-fit-rejection', 'claude-storage-use', 'claude-native-storage', 'claude-private-storage-stage', 'claude-native-composer', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}:
             continue
         expected = 'hermes-renderer-qualification' if app == 'hermes-desktop' else 'zed-native-copy'
-        if (mechanism != expected and mechanism not in {'codex-renderer-qualification', 'qualification-runner-failure', 'hermes-windows-catalog-readiness', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'zed-retry-visual', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'codex-project-preflight', 'windows-process-absence', 'windows-post-stop-process', 'windows-process-baseline', 'windows-process-settlement', 'windows-owned-stop', 'windows-process-correlation', 'windows-owned-descendant-cleanup', 'windows-owned-cleanup-preflight', 'claude-owned-configuration', 'claude-restore', 'claude-model-discovery', 'claude-window-stack', 'claude-window-focus', 'claude-chat-navigation', 'claude-native-chat', 'claude-window-fit', 'claude-windows-fit', 'claude-storage-use', 'claude-native-storage', 'claude-private-storage-stage', 'claude-native-composer', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}) or type(value.get('schemaVersion')) is not int or value['schemaVersion'] != 1:
+        if (mechanism != expected and mechanism not in {'codex-renderer-qualification', 'qualification-runner-failure', 'hermes-windows-catalog-readiness', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'zed-retry-visual', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'codex-project-preflight', 'windows-process-absence', 'windows-post-stop-process', 'windows-process-baseline', 'windows-process-settlement', 'windows-owned-stop', 'windows-process-correlation', 'windows-owned-descendant-cleanup', 'windows-owned-cleanup-preflight', 'claude-owned-configuration', 'claude-restore', 'claude-model-discovery', 'claude-window-stack', 'claude-window-focus', 'claude-chat-navigation', 'claude-native-chat', 'claude-window-fit', 'claude-windows-fit', 'claude-windows-fit-rejection', 'claude-storage-use', 'claude-native-storage', 'claude-private-storage-stage', 'claude-native-composer', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}) or type(value.get('schemaVersion')) is not int or value['schemaVersion'] != 1:
             raise ValueError('semantic observation identity differs')
         record = {'schemaVersion': 1, 'mechanism': mechanism}
         if mechanism == 'codex-project-preflight':
@@ -591,6 +591,23 @@ def semantic_observations(directory, app):
                 raise ValueError('invalid Claude final Windows fit diagnostic')
             record.update(diagnosticsOnly=True, phase='final-ready', fitAttempted=True,
                           helperSucceeded=value['helperSucceeded'])
+        elif mechanism == 'claude-windows-fit-rejection':
+            fields = set('schemaVersion mechanism diagnosticsOnly phase policyEnabled fitAttempted sourceComposerReady candidateReason guardFailure eligibleCount sameProcessAheadCount overlapAheadCount'.split())
+            if (app != 'claude-desktop' or set(value) != fields or value['diagnosticsOnly'] is not True
+                    or type(value['phase']) is not str or value['phase'] not in {'initial-pending', 'pending-attachment', 'final-ready'}
+                    or any(type(value[key]) is not bool for key in ('policyEnabled', 'fitAttempted'))
+                    or (value['sourceComposerReady'] is not True if value['phase'] == 'final-ready' else value['sourceComposerReady'] is not None)
+                    or type(value['candidateReason']) is not str or value['candidateReason'] not in {
+                        'already-fitted', 'candidate-count', 'identity-mismatch', 'native-guard',
+                        'display-relation-unavailable', 'snapshot-identity-missing', 'same-process-ahead', 'overlap-ahead'}
+                    or value['guardFailure'] is not None and (type(value['guardFailure']) is not str
+                        or value['guardFailure'] not in {'identity-missing', 'bounds-changed', 'foreground-changed',
+                                                       'same-process-window', 'off-display', 'occluded'})
+                    or type(value['eligibleCount']) is not int or not 0 <= value['eligibleCount'] <= 64
+                    or any(value[key] is not None and (type(value[key]) is not int or not 0 <= value[key] <= 64)
+                           for key in ('sameProcessAheadCount', 'overlapAheadCount'))):
+                raise ValueError('invalid Claude Windows fit rejection diagnostic')
+            record.update({key: value[key] for key in fields - {'schemaVersion', 'mechanism'}})
         elif mechanism == 'claude-native-chat':
             counts = {'submittedTurns', 'inputVerifiedTurns', 'copiedResponses'}
             flags = {'retryAttempted', 'clipboardCleared'}
@@ -1105,7 +1122,7 @@ def semantic_observations(directory, app):
             record.update({key: value[key] for key in fields - {'schemaVersion', 'mechanism'}})
         elif mechanism == 'renderer-inventory':
             fields = set('schemaVersion mechanism diagnosticsOnly app endpointOwned launcherOwned attached pageCount textareaCount editableCount sendCount retryCount newThreadCount loginCount dialogCount errorCategory'.split())
-            if set(value) - {'documentState', 'startupScreen', 'landingCounts', 'onboardingCounts', 'publicOnboarding', 'mainAuxCorrelation', 'codexSession', 'initialMainBinding', 'initialMainConfirmation', 'sourceScreen', 'managedSignIn', 'sourceDialog', 'nativeOwnershipFailure'} != fields or value['app'] != app or value['diagnosticsOnly'] is not True:
+            if set(value) - {'documentState', 'startupScreen', 'landingCounts', 'onboardingCounts', 'publicOnboarding', 'mainAuxCorrelation', 'codexSession', 'initialMainBinding', 'initialMainConfirmation', 'sourceScreen', 'managedSignIn', 'sourceDialog', 'nativeOwnershipFailure', 'nativeListenerShape'} != fields or value['app'] != app or value['diagnosticsOnly'] is not True:
                 raise ValueError('invalid renderer inventory identity')
             for key in ('endpointOwned', 'launcherOwned', 'attached'):
                 flag(record, value, key)
@@ -1115,6 +1132,19 @@ def semantic_observations(directory, app):
                         'listener-unavailable', 'listener-shape', 'listener-unowned', 'listener-query', 'unmeasured'}):
                     raise ValueError('invalid native renderer ownership diagnostic')
                 record['nativeOwnershipFailure'] = failure
+            if 'nativeListenerShape' in value:
+                shape = value['nativeListenerShape']
+                if (value.get('nativeOwnershipFailure') != 'listener-shape' or type(shape) is not dict
+                        or set(shape) != {'reason', 'listenerCount', 'uniquePidCount'}
+                        or type(shape['reason']) is not str or shape['reason'] not in {
+                            'unexpected-field', 'malformed-descriptor', 'missing-descriptor',
+                            'endpoint-mismatch', 'multiple-listeners'}
+                        or any(shape[key] is not None and (type(shape[key]) is not int or not 0 <= shape[key] <= 4096)
+                               for key in ('listenerCount', 'uniquePidCount'))
+                        or shape['listenerCount'] is not None and shape['uniquePidCount'] is not None
+                            and shape['uniquePidCount'] > shape['listenerCount']):
+                    raise ValueError('invalid native listener shape diagnostic')
+                record['nativeListenerShape'] = dict(shape)
             if 'sourceDialog' in value:
                 dialog = value['sourceDialog']
                 keys = {'dialogs', 'workspaceFailureTitle', 'retryButton'}
