@@ -1654,9 +1654,9 @@ fn prepare_zed_profile(spec: &ProbeSpec) -> Result<(), Reason> {
     let directory = spec.workspace.join("profile").join("zed").join("config");
     create_private_dir_all(&directory).map_err(|_| Reason::IsolationUnavailable)?;
     // Never let a probe update an existing app or send diagnostics elsewhere.
-    // Semantic probes fix the rem base used by the exact-source icon references.
+    // Semantic probes fix the palette and rem base of exact-source icon references.
     let settings: &[u8] = if spec.verification == crate::cli::VerificationPolicy::SemanticOnly {
-        br#"{"auto_update":false,"telemetry":{"metrics":false,"diagnostics":false},"ui_font_size":16,"agent_ui_font_size":16,"agent_buffer_font_size":16}"#
+        br#"{"auto_update":false,"telemetry":{"metrics":false,"diagnostics":false},"theme":"One Dark","ui_font_size":16,"agent_ui_font_size":16,"agent_buffer_font_size":16}"#
     } else {
         br#"{"auto_update":false,"telemetry":{"metrics":false,"diagnostics":false},"agent_ui_font_size":18,"agent_buffer_font_size":16}"#
     };
@@ -3036,6 +3036,7 @@ mod tests {
             &std::fs::read(semantic.workspace.join("profile/zed/config/settings.json")).unwrap(),
         )
         .unwrap();
+        assert_eq!(settings["theme"], "One Dark");
         assert_eq!(settings["ui_font_size"], 16);
         assert_eq!(settings["agent_ui_font_size"], 16);
         assert_eq!(settings["auto_update"], false);
