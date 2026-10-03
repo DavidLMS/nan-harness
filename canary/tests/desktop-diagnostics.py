@@ -33,6 +33,24 @@ def line(record, prefix=b"DESKTOP_INSTALL_DIAGNOSTIC:"):
 
 
 class DiagnosticTests(unittest.TestCase):
+    def test_parent_seal_failure_preserves_original_timeout_and_privacy(self):
+        record = dict(schemaVersion=1, app="chatgpt-desktop", probeIndex=1,
+                      mode="deterministic", stage="parent-journal-seal", failure="io",
+                      originalReason="timeout", reason="cleanup-failed")
+        capture = D.Capture("linux")
+        capture.observe(io.BytesIO(line(record, b"DESKTOP_PARENT_DIAGNOSTIC:")))
+        self.assertEqual(capture.events, [{"kind": "parent", "record": record}])
+        self.assertEqual(capture.invalid, 0)
+        for field, value in (("failure", "PRIVATE"), ("stage", "restore"),
+                             ("reason", "timeout"), ("originalReason", "cancelled"),
+                             ("path", "PRIVATE"), ("probeIndex", True)):
+            invalid = {**record, field: value}
+            with self.assertRaises(ValueError):
+                D.validate_record({"kind": "parent", "record": invalid})
+        for failure in ("io", "locked", "invalid", "conflict"):
+            D.validate_parent({**record, "failure": failure})
+        D.validate_parent({**record, "mode": "live", "probeIndex": None, "originalReason": None})
+
     def test_unknown_launcher_exit_preserves_closed_cleanup_without_masking_capture(self):
         record = {**native(), 'app': 'claude-desktop', 'launchExit': 'unknown'}
         capture = D.Capture('windows')

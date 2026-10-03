@@ -552,7 +552,20 @@ async fn run_probe(
         launch_wrapper: probe_launch_wrapper(args, &name),
     };
     let outcome = execute_probe(&spec, &root).await;
-    seal_probe(outcome, journal, &name)
+    seal_probe(
+        outcome,
+        journal,
+        &name,
+        crate::diagnostics::ParentProbeContext {
+            app,
+            probe_index: spec.probe_index,
+            mode: if live {
+                crate::diagnostics::ProbeMode::Live
+            } else {
+                crate::diagnostics::ProbeMode::Deterministic
+            },
+        },
+    )
 }
 
 /// Give each probe its own facts directory, named by the closed probe name.
@@ -569,29 +582,38 @@ fn probe_launch_wrapper(args: &RunArgs, name: &str) -> Option<crate::probe::Laun
     })
 }
 
-fn seal_probe(mut outcome: ProbeResult, journal: &mut Journal, name: &str) -> ProbeResult {
+fn seal_probe(
+    mut outcome: ProbeResult,
+    journal: &mut Journal,
+    name: &str,
+    context: crate::diagnostics::ParentProbeContext,
+) -> ProbeResult {
     if !matches!(
         outcome.reason,
         Some(Reason::CleanupFailed | Reason::Cancelled)
     ) && let Err(error) = journal.seal(name)
     {
-        report_seal_failure(&error, outcome.reason);
+        report_seal_failure(&error, outcome.reason, context);
         outcome.status = Status::Failed;
         outcome.reason = Some(Reason::CleanupFailed);
     }
     outcome
 }
 
-fn report_seal_failure(error: &crate::journal::JournalError, original: Option<Reason>) {
+fn report_seal_failure(
+    error: &crate::journal::JournalError,
+    original: Option<Reason>,
+    context: crate::diagnostics::ParentProbeContext,
+) {
+    use crate::diagnostics::{ParentSealDiagnostic, SealFailure};
     use crate::journal::JournalError;
-    // Never format the I/O error itself; it may carry a private path/message.
-    let (kind, code) = match error {
-        JournalError::Io(error) => ("io", error.raw_os_error()),
-        JournalError::Locked => ("locked", None),
-        JournalError::Invalid => ("invalid", None),
-        JournalError::Conflict => ("conflict", None),
+    let failure = match error {
+        JournalError::Io(_) => SealFailure::Io,
+        JournalError::Locked => SealFailure::Locked,
+        JournalError::Invalid => SealFailure::Invalid,
+        JournalError::Conflict => SealFailure::Conflict,
     };
-    eprintln!("Desktop seal diagnostic: {kind}, os-code={code:?}, original={original:?}");
+    ParentSealDiagnostic::new(context, failure, original).emit();
 }
 
 async fn execute_probe(spec: &ProbeSpec, root: &Path) -> ProbeResult {
@@ -1135,9 +1157,18 @@ mod tests {
             status: Status::Failed,
             steps: vec![crate::report::CheckStep::Launched],
             duration_milliseconds: 123,
-            ..ProbeResult::blocked(Reason::SelectorNotMatched)
+            ..ProbeResult::blocked(Reason::Timeout)
         };
-        let failed = seal_probe(original.clone(), &mut journal, "synthetic");
+        let failed = seal_probe(
+            original.clone(),
+            &mut journal,
+            "synthetic",
+            crate::diagnostics::ParentProbeContext {
+                app: DesktopHarnessKind::ChatGpt,
+                probe_index: Some(1),
+                mode: crate::diagnostics::ProbeMode::Deterministic,
+            },
+        );
         assert_eq!(failed.status, Status::Failed);
         assert_eq!(failed.reason, Some(Reason::CleanupFailed));
         assert_eq!(failed.steps, original.steps);

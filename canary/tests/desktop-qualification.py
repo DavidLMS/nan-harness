@@ -2730,6 +2730,15 @@ class CodexStaticDialogTitleTests(unittest.TestCase):
             path = Path(root) / 'title.json'
             path.write_text(json.dumps(value))
             self.assertEqual(q.semantic_observations(root, 'chatgpt-desktop')[0]['sourceTitleIds'], value['sourceTitleIds'])
+            windows = {**value, 'platform': 'windows',
+                       'artifactSha256': 'f7b0266d6c00d4743da01d62bc82488f7ec5560c642501758119cb9885f67c87',
+                       'wrapperSourceSha256': '5e3a36d643393af861d2009584f64289f2247928e793f1985fe12cfec803a40b',
+                       'catalogSha256': '27524df1c017bf62e2db2b5578ae60d4e102dcb2df0a0d7fe1faea0f410dc377'}
+            path.write_text(json.dumps(windows))
+            self.assertEqual(q.semantic_observations(root, 'chatgpt-desktop')[0]['platform'], 'windows')
+            for key in ('artifactSha256', 'wrapperSourceSha256', 'catalogSha256'):
+                path.write_text(json.dumps({**windows, key: value[key]}))
+                with self.assertRaises(ValueError): q.semantic_observations(root, 'chatgpt-desktop')
             for status, count, identities in [('unknown', 0, []), ('guard-rejected', None, []),
                                               ('ambiguous', 2, sorted(['keyboardShortcutsDialog.title', 'plugins.create.title']))]:
                 item = {**value, 'status': status, 'matchCount': count, 'sourceTitleIds': identities,

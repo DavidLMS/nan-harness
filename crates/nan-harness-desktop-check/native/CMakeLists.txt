@@ -11,6 +11,14 @@ if(APPLE)
   enable_language(OBJCXX)
   set_source_files_properties(windows.cpp claude_chat_turn.cpp PROPERTIES LANGUAGE OBJCXX)
   target_link_libraries(nanh-desktop-native PRIVATE "-framework AppKit" "-framework CoreGraphics" "-framework ApplicationServices")
+  # Synthetic nodes and focus receipts only; no native app or input API calls.
+  add_executable(nanh-claude-chat-turn-test tests/claude_chat_turn.mm)
+  target_compile_options(nanh-claude-chat-turn-test PRIVATE -UNDEBUG)
+  target_link_libraries(nanh-claude-chat-turn-test PRIVATE "-framework AppKit" "-framework CoreGraphics" "-framework ApplicationServices")
+  add_custom_target(nanh-claude-chat-turn-contract ALL
+    COMMAND $<TARGET_FILE:nanh-claude-chat-turn-test>
+    DEPENDS nanh-claude-chat-turn-test
+    COMMENT "Verify retained composer focus and source-bound chat selection")
 elseif(WIN32)
   target_link_libraries(nanh-desktop-native PRIVATE user32 dwmapi shell32 ole32 oleaut32 uiautomationcore uuid bcrypt)
 else()

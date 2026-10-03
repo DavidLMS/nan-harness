@@ -34,7 +34,7 @@ async function main() {
  }
  const invisible=fixture();invisible.dialog.inert=true;assert.equal(invisible.classify({held:invisible.held,entries:invisible.entries}),null);
  const pointer=fixture();pointer.dialog.style.pointerEvents='none';assert.equal(pointer.classify({held:pointer.held,entries:pointer.entries}),null);
- for(const platform of ['linux','darwin']) {
+ for(const platform of ['linux','darwin','win32']) {
   const pin=helper.pins[platform],env={GITHUB_ACTIONS:'true',RUNNER_ENVIRONMENT:'github-hosted',RUNNER_OS:pin.runner,NANH_CODEX_PUBLIC_ONBOARDING:'engineering',NANH_CODEX_PROJECT_POLICY:'open-project',NANH_CODEX_PROJECT_ARTIFACT_SHA256:pin.artifact};
   assert.equal(helper.policy('chatgpt-desktop',platform,env),true);
   for(const key of Object.keys(env))assert.equal(helper.policy('chatgpt-desktop',platform,{...env,[key]:'wrong'}),false);
@@ -53,6 +53,14 @@ async function main() {
  page.evaluate=async(fn,arg)=>{reads++;if(reads===2)d.title.textContent='changed';return vm.runInNewContext('('+fn.toString()+')',d.context)({...arg,held:arg.held.value});};
  const changed=await helper.observe(held,'darwin',opts);assert.equal(changed.status,'guard-rejected');assert.equal(changed.matchCount,null);
  assert.equal(new Set(catalog.entries.map(e=>e.id)).size,60);
+ const windowsCatalog=require('./codex-dialog-title-catalog-windows.json');
+ assert.equal(new Set(windowsCatalog.entries.map(e=>e.id)).size,60);
+ assert.ok(windowsCatalog.entries.every(e=>catalog.entries.some(original=>original.id===e.id&&original.text===e.text)));
+ d.title.textContent='Skip setup?';reads=0;
+ page.evaluate=async(fn,arg)=>{reads++;return vm.runInNewContext('('+fn.toString()+')',d.context)({...arg,held:arg.held.value});};
+ const windows=await helper.observe(held,'win32',opts);
+ assert.equal(windows.status,'matched');assert.equal(reads,2);
+ assert.equal(windows.platform,'windows');assert.equal(windows.artifactSha256,helper.pins.win32.artifact);
  assert.ok(catalog.entries.every(e=>!e.text.includes('{')&&/^[a-f0-9]{64}$/.test(e.sha)));
  console.log('PASS: static dialog titles, sr-only label projection, duplicates, immutable two reads, privacy; zero actions');
 }

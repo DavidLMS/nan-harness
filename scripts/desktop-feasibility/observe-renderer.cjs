@@ -499,7 +499,7 @@ async function run() {
       const mainGuard=trial&&heldMain?heldMainGuard(heldMain,browser,ownerGuard,correlationDeadline,
         require('./codex-onboarding.cjs').sourceRoute,correlationIdentity,
         ms=>new Promise(resolve=>setTimeout(resolve,ms)),false,true):undefined;
-      if(process.platform==='darwin'&&titleCatalog.policy(app,process.platform,process.env)) {
+      if(['darwin','win32'].includes(process.platform)&&titleCatalog.policy(app,process.platform,process.env)) {
         recordStaticDialog(await titleCatalog.observe(heldMain,process.platform,
           {guard:mainGuard||(()=>false),identity:p=>correlationIdentity(p,deadline,false),
             same:sameCorrelationIdentity,deadline}));

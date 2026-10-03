@@ -2420,11 +2420,32 @@ reads under original document/frame/loader/endpoint guards. Visually hidden
 source titles can identify an active visible dialog. Duplicate IDs, changed
 references and ambiguous labels reject or remain ambiguous. Only fixed public
 catalog IDs and bounded counts leave the page; no title text or DOM IDs do.
-Recognition authorizes no dismissal, input or qualification. Windows is
-outside this catalog policy.
+Recognition authorizes no dismissal, input or qualification. A separate Windows
+manifest now pins the same sixty IDs to the verified official MSIX, with its
+own artifact, wrapper and catalog hashes; macOS/Linux manifest bytes are unchanged.
 
 Focused verification passes: 378 serial checker tests, checker Clippy with
 warnings denied, synthetic native identity fixtures, nine Zed helper tests,
 105 strict qualification tests and the static-title Node suite. The new native
 behavior still requires hosted application evidence; no additional cell is
 qualified by these changes.
+
+
+The parent now emits a separate closed `parent-journal-seal` receipt when
+sealing changes a probe result to `cleanup-failed`. It preserves the original
+reason and distinguishes only `io`, `locked`, `invalid` and `conflict`; paths,
+messages and OS error payloads are excluded. It does not change sealing or
+cleanup policy. The macOS native build also runs the pure retained-composer
+fixture before installing any application, with assertions enabled in release
+builds.
+
+Hosted experiments dispatched for the retained identity changes:
+[Claude macOS 37155936892](https://github.com/DavidLMS/nan-harness/actions/runs/37155936892),
+[Claude Windows 37155937963](https://github.com/DavidLMS/nan-harness/actions/runs/37155937963),
+[Claude Linux 37155939393](https://github.com/DavidLMS/nan-harness/actions/runs/37155939393),
+and [Zed Linux 37155940550](https://github.com/DavidLMS/nan-harness/actions/runs/37155940550).
+The first static-title catalog is exercised by
+[Codex macOS 37156026123](https://github.com/DavidLMS/nan-harness/actions/runs/37156026123)
+and [Codex Linux 37156026993](https://github.com/DavidLMS/nan-harness/actions/runs/37156026993),
+with [quality run 37156028197](https://github.com/DavidLMS/nan-harness/actions/runs/37156028197).
+Dispatch is not evidence of completion or qualification.

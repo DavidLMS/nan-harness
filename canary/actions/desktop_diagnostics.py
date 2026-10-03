@@ -13,7 +13,7 @@ MAX_STREAM = 4 * 1024 * 1024
 MAX_EVENT = 4096
 MAX_EVENTS = 64
 MAX_BUNDLE = 512 * 1024
-PREFIXES = {b"DESKTOP_DIAGNOSTIC:": "native", b"DESKTOP_INSTALL_DIAGNOSTIC:": "install",
+PREFIXES = {b"DESKTOP_PARENT_DIAGNOSTIC:": "parent", b"DESKTOP_DIAGNOSTIC:": "native", b"DESKTOP_INSTALL_DIAGNOSTIC:": "install",
             b"DESKTOP_PREPARE_DIAGNOSTIC:": "prepare", b"DESKTOP_VERSION_DIAGNOSTIC:": "version"}
 APPS = set("chatgpt-desktop claude-desktop hermes-desktop pen-desktop zed-desktop".split())
 PLATFORMS = {"linux", "macos", "windows"}
@@ -403,9 +403,25 @@ def validate_stop(value):
             integer(step["osError"], -(2**31), 2**31 - 1)
 
 
+def validate_parent(record):
+    fields(record, {"schemaVersion", "app", "probeIndex", "mode", "stage", "failure", "originalReason", "reason"})
+    integer(record["schemaVersion"], 1, 1)
+    enum(record["app"], APPS)
+    enum(record["mode"], {"deterministic", "live"})
+    if record["mode"] == "live":
+        require(record["probeIndex"] is None)
+    else:
+        integer(record["probeIndex"], 0, 2)
+    enum(record["stage"], {"parent-journal-seal"})
+    enum(record["failure"], {"io", "locked", "invalid", "conflict"})
+    if record["originalReason"] is not None:
+        enum(record["originalReason"], REASONS - {"cleanup-failed", "cancelled"})
+    enum(record["reason"], {"cleanup-failed"})
+
+
 def validate_record(event, platform=None):
     fields(event, {"kind", "record"})
-    validators = {"native": validate_native, "install": validate_install, "prepare": validate_prepare,
+    validators = {"parent": validate_parent, "native": validate_native, "install": validate_install, "prepare": validate_prepare,
                   "version": validate_version}
     enum(event["kind"], validators)
     if event["kind"] == "native":

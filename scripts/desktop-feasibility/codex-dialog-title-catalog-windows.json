@@ -1,0 +1,439 @@
+{
+  "entries": [
+    {
+      "file": "add-sources-dialog-88244f93d4d9.js",
+      "id": "chatgptConversations.projectHome.textSource.title",
+      "platform": "windows",
+      "sha": "0a20e81383d7632661b97b2e32f65aad633f27aefe0204f112042a2162138b4f",
+      "text": "Add text source"
+    },
+    {
+      "file": "add-sources-dialog-88244f93d4d9.js",
+      "id": "chatgptProjectHome.website.title",
+      "platform": "windows",
+      "sha": "0a20e81383d7632661b97b2e32f65aad633f27aefe0204f112042a2162138b4f",
+      "text": "Add URL"
+    },
+    {
+      "file": "chatgpt-image-upload-reminder-dialog-d8ced68408a5.js",
+      "id": "chatgptConversations.imageUploadReminder.title",
+      "platform": "windows",
+      "sha": "2e2d0dddf7c13143aa30556d5b02d1b55212693679b49cba0e521a529c4d1fa9",
+      "text": "Check before sharing"
+    },
+    {
+      "file": "habitat-automation-migration-dialog-56fcc570b3f9.js",
+      "id": "inbox.automations.habitatMigration.title",
+      "platform": "windows",
+      "sha": "0fc34c577ca39780f053615e29493aa2e01f5eb180f2c0238deeb0d5e3cd0913",
+      "text": "Sync your local automations"
+    },
+    {
+      "file": "dialog-a6ed188d0273.js",
+      "id": "workspaceAgents.sharing.removeTitle",
+      "platform": "windows",
+      "sha": "62f9558d1fed7ebcc01d2912e74a9161e6da11f0948eacddd859c8ac3467331e",
+      "text": "Remove access?"
+    },
+    {
+      "file": "subscription-update-dialog-e7d1ec238bb5.js",
+      "id": "settings.usage.pricingPlanPage.subscriptionUpdate.title",
+      "platform": "windows",
+      "sha": "853c54814357c5bd1bb88150cb185b6e3e23eeba293163c5b257c06663d800bb",
+      "text": "Confirm plan changes"
+    },
+    {
+      "file": "settings-unsaved-changes-dialog-a8de0adc81a0.js",
+      "id": "settings.unsavedChanges.discardTitle",
+      "platform": "windows",
+      "sha": "292c928f34e1e5638f63824f887e054c0959c048526d7e8461eb33bef4a1cfb3",
+      "text": "Discard changes?"
+    },
+    {
+      "file": "dialog-a52f61133695.js",
+      "id": "appgenSettings.transfer.dialogTitle",
+      "platform": "windows",
+      "sha": "b83a6a753492ecb5418508dda744d30145d96b3dae074488f8c841e3f7cf21e8",
+      "text": "Transfer ownership"
+    },
+    {
+      "file": "app-connect-mfa-dialog-58c14b835740.js",
+      "id": "apps.connectMfa.title",
+      "platform": "windows",
+      "sha": "84312be072e8da4d353267f32d8bbf850516d152581d6048c2257fd903a05914",
+      "text": "Enable a second factor to continue"
+    },
+    {
+      "file": "trusted-contact-no-thanks-dialog-286cfc05d32d.js",
+      "id": "message.trustedContactNoThanksModal.title",
+      "platform": "windows",
+      "sha": "67fb0b3d07a185ec722e9c95ea244db5b7b7226db3567d985ef510f4ad49be0c",
+      "text": "Thanks for letting us know"
+    },
+    {
+      "file": "team-setup-dialog-6a225ce8a3f7.js",
+      "id": "teams.spaces.setup.loading",
+      "platform": "windows",
+      "sha": "86326d6bd4c936bcc9075ae80b1b196169e7df7062dc6f35da07f4e543f5f236",
+      "text": "Loading Spaces\u2026"
+    },
+    {
+      "file": "setup-dialog-ac67d4b01345.js",
+      "id": "restricted.aeon.slack.setup.title",
+      "platform": "windows",
+      "sha": "df1fce1c5dc95da55fb996fa8a629224fd0eec263afa742a997c4437bdb50744",
+      "text": "Add to Slack"
+    },
+    {
+      "file": "gpt-about-dialog-b12db5a5f08b.js",
+      "id": "chatgptConversations.gpts.about.loadError",
+      "platform": "windows",
+      "sha": "c9c237c00facfe7649eac3043e6263cbdd1bf07c1fc92afadaa485673203d873",
+      "text": "Couldn't load this GPT"
+    },
+    {
+      "file": "gpt-about-dialog-b12db5a5f08b.js",
+      "id": "chatgptConversations.gpts.about.loading",
+      "platform": "windows",
+      "sha": "c9c237c00facfe7649eac3043e6263cbdd1bf07c1fc92afadaa485673203d873",
+      "text": "Loading GPT details"
+    },
+    {
+      "file": "create-dialog-52f97e550b49.js",
+      "id": "restricted.environmentSetup.create.title",
+      "platform": "windows",
+      "sha": "9057a043062d9d37daa8080b61a7a6b4b94a498c26682ce392c072e9677d33b9",
+      "text": "Create a cloud environment"
+    },
+    {
+      "file": "chatgpt-keyboard-shortcuts-dialog-e5933225cef7.js",
+      "id": "keyboardShortcutsDialog.title",
+      "platform": "windows",
+      "sha": "2783ad4a7c41831e2af1216927f84ccfb7727f9fab6d020ef38354def988c990",
+      "text": "Keyboard shortcuts"
+    },
+    {
+      "file": "dialog-f32018eca2aa.js",
+      "id": "settings.chatGpt.sharedLinks.title",
+      "platform": "windows",
+      "sha": "086dc22a355387e37b819f83be003fa5cf6ed1de00eeacb28c1f0b74ce79914e",
+      "text": "Shared links"
+    },
+    {
+      "file": "dialog-f32018eca2aa.js",
+      "id": "settings.chatGpt.sharedLinks.deleteAllConfirmTitle",
+      "platform": "windows",
+      "sha": "086dc22a355387e37b819f83be003fa5cf6ed1de00eeacb28c1f0b74ce79914e",
+      "text": "Delete all shared links?"
+    },
+    {
+      "file": "attach-site-dialog-36cfdd74d6a3.js",
+      "id": "codex.space.sitePage.attach.title",
+      "platform": "windows",
+      "sha": "2f9d21003268b9d04587131c03fbcb836fbe5cc7c0a07b14aa751c09ebf8cfd3",
+      "text": "Add existing Site"
+    },
+    {
+      "file": "feedback-form-dialog-3429f4cb4271.js",
+      "id": "feedbackFormDialog.title",
+      "platform": "windows",
+      "sha": "c864dd6a5beb813ef47b6d0e7d4ce1381f38df78111e4ca7ade0f14b04b35123",
+      "text": "Share feedback"
+    },
+    {
+      "file": "appgen-change-slug-dialog-cefd4883317e.js",
+      "id": "appgenSettings.general.url.changeDialog.title",
+      "platform": "windows",
+      "sha": "1684508ab135c7bf4f8ec4623b71624bff2df85865be3a20bb34af110f56adf4",
+      "text": "Change URL"
+    },
+    {
+      "file": "artifact-feedback-dialog-b21572d3fb86.js",
+      "id": "artifactFeedback.title",
+      "platform": "windows",
+      "sha": "ff5a47024331a770a769a6d1adfa7497bab822c4ce923e494a871c1be048bfe0",
+      "text": "Help our team improve ChatGPT"
+    },
+    {
+      "file": "dialog-77041466dc6e.js",
+      "id": "composer.hooks.review.title",
+      "platform": "windows",
+      "sha": "a4e43eba3e5be67d711330e5abcc042f04e37f4a76328d858282d5da6eb881ca",
+      "text": "Review hooks"
+    },
+    {
+      "file": "voice-personalization-dialog-cb37bee583e1.js",
+      "id": "chatgpt.pepper.personalization.voice.title",
+      "platform": "windows",
+      "sha": "fddc99a1f2f909722e11b7811eecb5650d5f13dc8c0f2b982428f43c60e7088a",
+      "text": "Choose a voice"
+    },
+    {
+      "file": "renewal-dialog-18d26bd5ad9c.js",
+      "id": "settings.consumerBilling.renewalTitle",
+      "platform": "windows",
+      "sha": "b00f4e56b4f3cfc867bee732aa5a7521c332215583b9b794087725c010f1e488",
+      "text": "Confirm plan changes"
+    },
+    {
+      "file": "dialog-d7b345f9931f.js",
+      "id": "chatGpt.quietHours.active.title",
+      "platform": "windows",
+      "sha": "767a387e6a11eabd5e7191bddcc6ada6e21558ceb594182cc118cc2846e2313a",
+      "text": "Time for a break"
+    },
+    {
+      "file": "shared-task-dialog-a62c4ab236a1.js",
+      "id": "automations.sharing.preview.dialog.title",
+      "platform": "windows",
+      "sha": "fff40c73d71549341dbf8b4206aeeaedad289a3ef300b052d16e88d9c4b19156",
+      "text": "Shared with you"
+    },
+    {
+      "file": "shared-task-dialog-a62c4ab236a1.js",
+      "id": "automations.sharing.preview.dialog.title",
+      "platform": "windows",
+      "sha": "fff40c73d71549341dbf8b4206aeeaedad289a3ef300b052d16e88d9c4b19156",
+      "text": "Shared with you"
+    },
+    {
+      "file": "reboot-dialog-1708515e3b3a.js",
+      "id": "orbit.primary.reboot.title",
+      "platform": "windows",
+      "sha": "164516eeeffa9f891bbfd91b6e2ba0d3aafa0d44276d443fe166e64ba7efe8d8",
+      "text": "Reboot your dot?"
+    },
+    {
+      "file": "cloud-environment-packages-dialog-d691b89dbc81.js",
+      "id": "settings.cloudEnvironments.packages.title",
+      "platform": "windows",
+      "sha": "11a9e17776a220e4f37d9bfd3d73800ee56175a102905bf74850ecfe19bc2d05",
+      "text": "Preinstalled packages"
+    },
+    {
+      "file": "dialog-69af0d94e7f6.js",
+      "id": "profile.sharing.title",
+      "platform": "windows",
+      "sha": "abe98fff966d9de0409bc63c2b644bf7d5b654b87f4df3641fed78cd73715f11",
+      "text": "Share your profile"
+    },
+    {
+      "file": "upgrade-dialog-77c8763a4a73.js",
+      "id": "pricing.comparison.title",
+      "platform": "windows",
+      "sha": "b6fe451ce7cf990c0091d027fc807ca318ea44b7192157540c9c158226e9e9aa",
+      "text": "Upgrade your plan"
+    },
+    {
+      "file": "pending-edits-dialog-903fb6569983.js",
+      "id": "codex.writingBlock.confirmCloseTitle",
+      "platform": "windows",
+      "sha": "7147122f144ca737696dd34b390b1fe7b7fe357da211700f4ff0594c8c3ccbe6",
+      "text": "Close editor?"
+    },
+    {
+      "file": "gitlab-merge-request-form-dialog-ffdf007fd657.js",
+      "id": "localConversationPage.createPrModal.gitLabTitle",
+      "platform": "windows",
+      "sha": "b90ce7c5a6166012bccc53bce16d27439122168bf2ac9584ee73474a59517980",
+      "text": "Create merge request"
+    },
+    {
+      "file": "create-dialog-2eac62a0106d.js",
+      "id": "plugins.create.title",
+      "platform": "windows",
+      "sha": "f6ddfdf81ac978657fac2fcb4fd5308cfd0f1a880e5d00730e5b4daf29eae2fd",
+      "text": "New Plugin"
+    },
+    {
+      "file": "dictionary-dialog-b3a86edbb5e8.js",
+      "id": "speechSettings.content.customDictionary.page.title",
+      "platform": "windows",
+      "sha": "fe9218d0d9df72d6391699660ff255907b6df012109447d34ead4617a8716f4b",
+      "text": "Voice dictionary"
+    },
+    {
+      "file": "versions-dialog-486cefa538f1.js",
+      "id": "chatgpt.versions.title",
+      "platform": "windows",
+      "sha": "99d7bcb18240837b5e4866f2da0b7d004550f34b8654c051be5970f0ba9f7d68",
+      "text": "Versions"
+    },
+    {
+      "file": "create-project-dialog-eb35cda35fb0.js",
+      "id": "projectSetup.remoteSource.choose",
+      "platform": "windows",
+      "sha": "30d24a3807998d5e83766cc8345738638048bde3075044fe793e978fe5d48ff5",
+      "text": "Choose a source folder"
+    },
+    {
+      "file": "create-project-dialog-eb35cda35fb0.js",
+      "id": "projectSetupDialog.createMissingRemoteFolderTitle",
+      "platform": "windows",
+      "sha": "30d24a3807998d5e83766cc8345738638048bde3075044fe793e978fe5d48ff5",
+      "text": "Create missing folder?"
+    },
+    {
+      "file": "order-yubikey-dialog-bb067c9236d3.js",
+      "id": "settings.chatGpt.security.orderYubikey.title",
+      "platform": "windows",
+      "sha": "f0ada36fa23de446968c6a7d9e2ff832f21af78652b1b8d5f0d70b2b87156589",
+      "text": "Order a YubiKey"
+    },
+    {
+      "file": "codex-mobile-setup-dialog-27ad625a8103.js",
+      "id": "codexMobile.setupPage.waiting.pairing.fullscreenQrCodeTitle",
+      "platform": "windows",
+      "sha": "8c9eff8092c750ef0f6bd6357a1a33409c245feba796589a5f2d07b406d5ffcb",
+      "text": "Pairing QR code"
+    },
+    {
+      "file": "products-dialog-390ec9ca05e2.js",
+      "id": "businessProfiles.feedProducts.title",
+      "platform": "windows",
+      "sha": "7f5dee05df14d790bc0b4f61741c5a14dd0910368cd310efa612b1b0921780b4",
+      "text": "Products"
+    },
+    {
+      "file": "personal-workspace-access-blocked-dialog-595cfe033b4d.js",
+      "id": "personalWorkspaceAccessBlocked.title",
+      "platform": "windows",
+      "sha": "4248a58271b5e731e72ed6251a2632cac3da3f01bdd08dcb0eb454e7db1e2618",
+      "text": "Personal workspace access blocked"
+    },
+    {
+      "file": "education-dialog-d09ac9fdd6ab.js",
+      "id": "composer.worktreePrompt.education.title",
+      "platform": "windows",
+      "sha": "35f86e7ef6d115e7586ef01d14aedb49c6be74a52f542320352b3e1e95a8ccf8",
+      "text": "Worktrees that just work"
+    },
+    {
+      "file": "run-history-dialog-24058ed72996.js",
+      "id": "chatgpt.tasks.run_history.title",
+      "platform": "windows",
+      "sha": "e0f2c425aae957a9a6c8f6d14ae27030faca812a4be39a4dcfa0b3434657e80d",
+      "text": "Run history"
+    },
+    {
+      "file": "my-gpt-delete-dialog-10693d060150.js",
+      "id": "chatgptConversations.gpts.mine.deleteTitle",
+      "platform": "windows",
+      "sha": "f2569c8024e94c53f121df40b5bb88826ae62b57eec5b4bb31a4a55e45105c01",
+      "text": "Delete GPT"
+    },
+    {
+      "file": "keyboard-shortcuts-dialog-67edf0603cd2.js",
+      "id": "keyboardShortcutsDialog.title",
+      "platform": "windows",
+      "sha": "f36d32209ec382df9c06b737610fdbb6ba612589145e9b55d649e8279ad1362a",
+      "text": "Keyboard shortcuts"
+    },
+    {
+      "file": "chatgpt-saved-memory-source-delete-dialog-3166cc54f6e3.js",
+      "id": "chatgptConversations.summaryPanel.sources.memory.delete.title",
+      "platform": "windows",
+      "sha": "f99b1e7efdfec6aa617801dc85cdc807dd9c06dd57cce85e4b765939b1ad70e8",
+      "text": "Delete this memory?"
+    },
+    {
+      "file": "dialog-5f5b50a81caa.js",
+      "id": "chatgptConversations.projectSettings.title",
+      "platform": "windows",
+      "sha": "3d8d80dc05b67b1b440fc659e44096ef626a9f73418cd0654507a431cbd8dba7",
+      "text": "Project settings"
+    },
+    {
+      "file": "realtime-voice-picker-dialog-31744e1f5cbb.js",
+      "id": "settings.general.realtimeVoice.dialog.title",
+      "platform": "windows",
+      "sha": "3eebd298bf51eada2d68251a5567b573f77d1b26ddb336d6fe8e33187267bc1c",
+      "text": "Choose a voice"
+    },
+    {
+      "file": "permission-denied-dialog-9ca61d4246d4.js",
+      "id": "chatgptConversations.preciseLocation.permissionDenied.title",
+      "platform": "windows",
+      "sha": "7aa752b7b1ecfdb71c836cb1b93b3b3b8c581d804ef033a1cbbc6c719f0d56c5",
+      "text": "Turn on location access"
+    },
+    {
+      "file": "sites-handoff-dialog-1ffc7a37b1c6.js",
+      "id": "sitesPreview.handoff.title",
+      "platform": "windows",
+      "sha": "d1772c5c8eee4dd651476f599a4735962e4caca3c54b13de6e92ea107a48622b",
+      "text": "Continue your website in Work"
+    },
+    {
+      "file": "import-dialog-f8cfd3997c54.js",
+      "id": "personalVault.importTitle",
+      "platform": "windows",
+      "sha": "4989f5e3391c334d4958c57057268be9ff8e40cb22f6000133f580147031b05b",
+      "text": "Import local variables"
+    },
+    {
+      "file": "library-move-dialog-1c6f819b7f4f.js",
+      "id": "libraryNext.move.title",
+      "platform": "windows",
+      "sha": "d51e80af3fb161bd2dc1ef70fbeedfe75234a347b8df94fa14bf9ffbea37849b",
+      "text": "Move to\u2026"
+    },
+    {
+      "file": "downgrade-dialog-7974fc814f66.js",
+      "id": "settings.consumerBilling.downgradeTitle",
+      "platform": "windows",
+      "sha": "0b76737c5e4cef0f054c847eb73a969cbe311af0280e26782ae17a4c61fa2ff7",
+      "text": "Confirm plan changes"
+    },
+    {
+      "file": "onboarding-page-8f1bd4a0167f.js",
+      "id": "electron.onboarding.conversationalOnboarding.skipDialog.title",
+      "platform": "windows",
+      "sha": "0fbea310a401c47526f1effecf9a7dd0a9f99e932f25e87e464222ed69e12f9e",
+      "text": "Skip setup?"
+    },
+    {
+      "file": "delete-thread-dialog-d7ef8e123022.js",
+      "id": "sidebarElectron.deleteThreadDialog.title",
+      "platform": "windows",
+      "sha": "8b49b907f8a9e590fb4350b7e87363ec517cbff573a4d6ef0e7d065d37773d98",
+      "text": "Delete task?"
+    },
+    {
+      "file": "dialog-ae918ba8c790.js",
+      "id": "libraryNext.flashcards.dialogTitle",
+      "platform": "windows",
+      "sha": "98ccbdd5751dcb4904ba597f0373ca45bd5e5580eacd2eb4fcd1c12ac2283747",
+      "text": "Flashcards"
+    },
+    {
+      "file": "publish-dialog-d19aa386db30.js",
+      "id": "sitesPreview.share.title",
+      "platform": "windows",
+      "sha": "d1b79875fb996647f277e06f6eade62cf1a8d5bb07b879c1ed032a2a0f7071a7",
+      "text": "Ready to share your site?"
+    },
+    {
+      "file": "new-space-dialog-15018bc6bfb2.js",
+      "id": "codex.space.creation.discardTitle",
+      "platform": "windows",
+      "sha": "b65d132d040b5684e57f24a2cab71f12607090e1d576ea8cdc33b6d102088399",
+      "text": "Discard changes?"
+    },
+    {
+      "file": "dialog-52ad0ec1c75d.js",
+      "id": "workspaceAgents.schedules.editor.title",
+      "platform": "windows",
+      "sha": "7408de43fac61873875b76fad02f9f0dd7b580470ac520d3310b8c40e909d22a",
+      "text": "Scheduled automation"
+    },
+    {
+      "file": "chatgpt-onboarding-dialog-e70aed7f6061.js",
+      "id": "chatgpt.new-onboarding.all-done-2",
+      "platform": "windows",
+      "sha": "376f15ddb345010851ce7311c0c395f4f0dd7478528a830a798fa2d408847383",
+      "text": "You're all set"
+    }
+  ],
+  "sourceVersion": "26.930.31730"
+}

@@ -361,10 +361,98 @@ pub(crate) fn emit(event: DiagnosticEvent) {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ParentProbeContext {
+    pub(crate) app: DesktopHarnessKind,
+    pub(crate) probe_index: Option<usize>,
+    pub(crate) mode: ProbeMode,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum SealFailure {
+    Io,
+    Locked,
+    Invalid,
+    Conflict,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ParentSealDiagnostic {
+    schema_version: u8,
+    app: DesktopHarnessKind,
+    probe_index: Option<usize>,
+    mode: ProbeMode,
+    stage: ParentSealStage,
+    failure: SealFailure,
+    original_reason: Option<Reason>,
+    reason: Reason,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum ParentSealStage {
+    ParentJournalSeal,
+}
+
+impl ParentSealDiagnostic {
+    pub(crate) fn new(
+        context: ParentProbeContext,
+        failure: SealFailure,
+        original: Option<Reason>,
+    ) -> Self {
+        Self {
+            schema_version: 1,
+            app: context.app,
+            probe_index: context.probe_index,
+            mode: context.mode,
+            stage: ParentSealStage::ParentJournalSeal,
+            failure,
+            original_reason: original,
+            reason: Reason::CleanupFailed,
+        }
+    }
+
+    pub(crate) fn emit(self) {
+        if let Ok(line) = serde_json::to_string(&self) {
+            eprintln!("DESKTOP_PARENT_DIAGNOSTIC:{line}");
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::report::Reason;
+
+    #[test]
+    fn parent_seal_record_preserves_timeout_without_private_error_payload() {
+        let event = ParentSealDiagnostic::new(
+            ParentProbeContext {
+                app: DesktopHarnessKind::ChatGpt,
+                probe_index: Some(1),
+                mode: ProbeMode::Deterministic,
+            },
+            SealFailure::Io,
+            Some(Reason::Timeout),
+        );
+        let value = serde_json::to_value(event).unwrap();
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "schemaVersion": 1, "app": "chatgpt-desktop", "probeIndex": 1,
+                "mode": "deterministic", "stage": "parent-journal-seal", "failure": "io",
+                "originalReason": "timeout", "reason": "cleanup-failed"
+            })
+        );
+        let mut invalid = value.clone();
+        invalid["failure"] = serde_json::json!("PRIVATE");
+        assert!(serde_json::from_value::<ParentSealDiagnostic>(invalid).is_err());
+        let mut invalid = value;
+        invalid["message"] = serde_json::json!("PRIVATE");
+        assert!(serde_json::from_value::<ParentSealDiagnostic>(invalid).is_err());
+    }
 
     #[test]
     fn native_events_match_the_shared_transport_fixture() {
