@@ -131,6 +131,15 @@ fn hex(value: &str) -> Zeroizing<String> {
     }
     output
 }
+
+pub(super) fn helper_millis(millis: u32) -> Result<u32, super::FailureCategory> {
+    // Reserve transport teardown time without misclassifying an exhausted
+    // polling budget as a malformed private request.
+    millis
+        .checked_sub(50)
+        .filter(|value| *value > 0)
+        .ok_or(super::FailureCategory::Timeout)
+}
 pub(super) fn request(
     window: &Window,
     mode: &str,
@@ -170,6 +179,18 @@ pub(super) fn request(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn short_action_budgets_expire_before_a_helper_request() {
+        for millis in [0, 1, 49, 50] {
+            assert_eq!(
+                helper_millis(millis),
+                Err(super::super::FailureCategory::Timeout)
+            );
+        }
+        assert_eq!(helper_millis(51), Ok(1));
+        assert_eq!(helper_millis(5000), Ok(4950));
+    }
 
     #[test]
     fn scoped_selector_failures_remain_passive_and_payload_free() {

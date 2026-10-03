@@ -357,12 +357,7 @@ impl Native {
             })
             .ok_or(FailureCategory::InvalidInput)?;
         let cutoff = now
-            .checked_add(u64::from(
-                millis
-                    .checked_sub(50)
-                    .filter(|value| *value > 0)
-                    .ok_or(FailureCategory::InvalidInput)?,
-            ))
+            .checked_add(u64::from(mac_chat_turn::helper_millis(millis)?))
             .ok_or(FailureCategory::InvalidInput)?;
         let input =
             mac_chat_turn::request(window, mode, values, millis, cutoff, std::process::id())
