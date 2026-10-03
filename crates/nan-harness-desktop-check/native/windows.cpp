@@ -225,21 +225,37 @@ const char* classify_focus_agreement(bool stable_identity, unsigned matches) {
     return matches == 1 ? "proved" : matches == 0 ? "no-match" : "ambiguous";
 }
 
+// Pure precedence for the existing before/after proof; no OS calls or identities escape.
+const char* classify_focus_change(bool foreground_same, bool after_ready, bool elements_same, bool geometry_same) {
+    if (!foreground_same) return "foreground-changed";
+    if (!after_ready) return "after-proof-unready";
+    if (!elements_same) return "window-element-changed";
+    if (!geometry_same) return "geometry-changed";
+    return nullptr;
+}
+
 static void print_ax_focus(pid_t foreground, CFArrayRef windows, const AxFocus& before, bool window_only = false) {
     AxFocus after;
     if (std::string(before.status) == "ready") read_ax_focus(foreground, after, window_only);
     const char* status = before.status;
     std::uint64_t id = 0;
+    const char* agreement = nullptr;
     if (std::string(status) == "ready") {
-        bool stable = [[[NSWorkspace sharedWorkspace] frontmostApplication] processIdentifier] == foreground
-            && std::string(after.status) == "ready" && CFEqual(before.focused, after.focused)
-            && CFEqual(before.main, after.main) && CFEqual(before.input_window, after.input_window)
-            && CGRectEqualToRect(before.bounds, after.bounds);
+        bool foreground_same = [[[NSWorkspace sharedWorkspace] frontmostApplication] processIdentifier] == foreground;
+        bool after_ready = std::string(after.status) == "ready";
+        bool elements_same = after_ready && CFEqual(before.focused, after.focused)
+            && CFEqual(before.main, after.main) && CFEqual(before.input_window, after.input_window);
+        agreement = classify_focus_change(foreground_same, after_ready, elements_same,
+            after_ready && CGRectEqualToRect(before.bounds, after.bounds));
+        bool stable = agreement == nullptr;
         unsigned matches = 0;
         if (stable) id = match_focus_window(windows, foreground, before.bounds, matches);
         status = classify_focus_agreement(stable, matches);
     }
     std::cout << (window_only ? "FOCUS_WINDOW " : "FOCUS ") << status << ' ' << id << '\n';
+    if (agreement) {
+        std::cout << (window_only ? "FOCUS_WINDOW_AGREEMENT " : "FOCUS_AGREEMENT ") << agreement << '\n';
+    }
     const AxFocus& failed = before.query_stage ? before : after;
     if (failed.query_stage) {
         std::cout << (window_only ? "FOCUS_WINDOW_QUERY " : "FOCUS_QUERY ") << (before.query_stage ? "before" : "after") << ' '

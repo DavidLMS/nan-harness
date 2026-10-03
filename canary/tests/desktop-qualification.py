@@ -695,6 +695,28 @@ class QualificationTests(unittest.TestCase):
             path.write_text(json.dumps(value))
             self.assertEqual(q.semantic_observations(Path(root), 'claude-desktop'), [value])
 
+    def test_focus_agreement_reasons_require_the_corresponding_identity_failure(self):
+        focus = dict(schemaVersion=1, mechanism='claude-window-focus', diagnosticsOnly=True,
+                     status='identity-changed', nativeForegroundWindowMatchedHeld=None,
+                     windowOnlyStatus='identity-changed', windowOnlyMatchedHeld=None)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'facts.json'
+            for key, status_key in (('agreement', 'status'), ('windowOnlyAgreement', 'windowOnlyStatus')):
+                for reason in ('foreground-changed', 'after-proof-unready', 'window-element-changed', 'geometry-changed'):
+                    value = {**focus, key: reason}
+                    path.write_text(json.dumps(value))
+                    self.assertEqual(q.semantic_observations(tmp, 'claude-desktop'), [value])
+                    for change in ({key: 'PRIVATE'}, {key: None}, {key: True},
+                                   {status_key: 'query-error'}, {'privatePath': 'PRIVATE'}):
+                        path.write_text(json.dumps({**value, **change}))
+                        with self.assertRaises(ValueError):
+                            q.semantic_observations(tmp, 'claude-desktop')
+                value = {**focus, key: 'geometry-changed'}
+                del value[status_key]
+                path.write_text(json.dumps(value))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(tmp, 'claude-desktop')
+
     def test_independent_window_query_and_owned_stop_are_closed(self):
         focus = dict(schemaVersion=1, mechanism='claude-window-focus', diagnosticsOnly=True,
                      status='proved', nativeForegroundWindowMatchedHeld=True,

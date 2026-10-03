@@ -1956,6 +1956,12 @@ fn record_claude_snapshot(snapshot: &Snapshot, held: &Window, phase: &str) {
                 "windowOnlyQuery": snapshot.window_focus_query(),
                 "windowOnlyMatchedHeld": window_only.and_then(|value| value.1),
             });
+            if let Some(agreement) = snapshot.focus_agreement() {
+                facts["agreement"] = serde_json::to_value(agreement).unwrap_or_default();
+            }
+            if let Some(agreement) = snapshot.window_focus_agreement() {
+                facts["windowOnlyAgreement"] = serde_json::to_value(agreement).unwrap_or_default();
+            }
             if phase == "initial-decision" {
                 facts["guardCategory"] = initial_decision_guard(snapshot, original).into();
             }

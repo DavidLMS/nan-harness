@@ -114,6 +114,16 @@ enum FocusQueryError {
 }
 
 #[cfg(any(test, target_os = "macos"))]
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum FocusAgreement {
+    ForegroundChanged,
+    AfterProofUnready,
+    WindowElementChanged,
+    GeometryChanged,
+}
+
+#[cfg(any(test, target_os = "macos"))]
 #[derive(Clone)]
 struct FocusProof {
     status: FocusStatus,
@@ -155,6 +165,10 @@ pub(crate) struct Snapshot {
     window_focus_query: Option<FocusQuery>,
     #[cfg(any(test, target_os = "macos"))]
     window_focus: Option<FocusProof>,
+    #[cfg(any(test, target_os = "macos"))]
+    focus_agreement: Option<FocusAgreement>,
+    #[cfg(any(test, target_os = "macos"))]
+    window_focus_agreement: Option<FocusAgreement>,
     displays: Vec<Rect>,
     pub(crate) windows: Vec<Window>,
 }
@@ -289,6 +303,16 @@ impl Snapshot {
     }
 
     #[cfg(any(test, target_os = "macos"))]
+    pub(crate) fn focus_agreement(&self) -> Option<FocusAgreement> {
+        self.focus_agreement
+    }
+
+    #[cfg(any(test, target_os = "macos"))]
+    pub(crate) fn window_focus_agreement(&self) -> Option<FocusAgreement> {
+        self.window_focus_agreement
+    }
+
+    #[cfg(any(test, target_os = "macos"))]
     fn validate_focus_queries(&self) -> Result<(), Reason> {
         for (query, proof) in [
             (self.focus_query, &self.focus),
@@ -307,7 +331,84 @@ impl Snapshot {
                 }
             }
         }
+        for (agreement, proof) in [
+            (self.focus_agreement, &self.focus),
+            (self.window_focus_agreement, &self.window_focus),
+        ] {
+            if agreement.is_some()
+                && proof
+                    .as_ref()
+                    .is_none_or(|proof| proof.status != FocusStatus::IdentityChanged)
+            {
+                return Err(Reason::DesktopUnavailable);
+            }
+        }
         Ok(())
+    }
+
+    #[cfg(any(test, target_os = "macos"))]
+    fn parse_focus_record(&mut self, fields: &[&str]) -> Result<bool, Reason> {
+        if fields.first().is_none_or(|tag| !tag.starts_with("FOCUS")) {
+            return Ok(false);
+        }
+        match fields {
+            [tag @ ("FOCUS" | "FOCUS_WINDOW"), status, id]
+                if if *tag == "FOCUS" {
+                    self.focus.is_none()
+                } else {
+                    self.window_focus.is_none()
+                } =>
+            {
+                let proof = Some(FocusProof::parse(status, id)?);
+                if *tag == "FOCUS" {
+                    self.focus = proof;
+                } else {
+                    self.window_focus = proof;
+                }
+            }
+            [
+                tag @ ("FOCUS_QUERY" | "FOCUS_WINDOW_QUERY"),
+                phase,
+                stage,
+                error,
+            ] if if *tag == "FOCUS_QUERY" {
+                self.focus_query.is_none()
+            } else {
+                self.window_focus_query.is_none()
+            } =>
+            {
+                let query = Some(
+                    serde_json::from_value(serde_json::json!({
+                        "phase": phase, "stage": stage, "error": error,
+                    }))
+                    .map_err(|_| Reason::DesktopUnavailable)?,
+                );
+                if *tag == "FOCUS_QUERY" {
+                    self.focus_query = query;
+                } else {
+                    self.window_focus_query = query;
+                }
+            }
+            [tag @ ("FOCUS_AGREEMENT" | "FOCUS_WINDOW_AGREEMENT"), reason]
+                if if *tag == "FOCUS_AGREEMENT" {
+                    self.focus_agreement.is_none()
+                } else {
+                    self.window_focus_agreement.is_none()
+                } =>
+            {
+                let value = Some(
+                    serde_json::from_value(serde_json::json!(reason))
+                        .map_err(|_| Reason::DesktopUnavailable)?,
+                );
+                if *tag == "FOCUS_AGREEMENT" {
+                    self.focus_agreement = value;
+                } else {
+                    self.window_focus_agreement = value;
+                }
+            }
+            _ => return Err(Reason::DesktopUnavailable),
+        }
+        Ok(true)
     }
 
     pub(crate) fn parse(text: &str) -> Result<Self, Reason> {
@@ -331,51 +432,20 @@ impl Snapshot {
             window_focus_query: None,
             #[cfg(any(test, target_os = "macos"))]
             window_focus: None,
+            #[cfg(any(test, target_os = "macos"))]
+            focus_agreement: None,
+            #[cfg(any(test, target_os = "macos"))]
+            window_focus_agreement: None,
             displays: Vec::new(),
             windows: Vec::new(),
         };
         for line in lines {
             let fields = line.split_whitespace().collect::<Vec<_>>();
+            #[cfg(any(test, target_os = "macos"))]
+            if snapshot.parse_focus_record(&fields)? {
+                continue;
+            }
             match fields.as_slice() {
-                #[cfg(any(test, target_os = "macos"))]
-                [tag @ ("FOCUS" | "FOCUS_WINDOW"), status, id]
-                    if if *tag == "FOCUS" {
-                        snapshot.focus.is_none()
-                    } else {
-                        snapshot.window_focus.is_none()
-                    } =>
-                {
-                    let proof = Some(FocusProof::parse(status, id)?);
-                    if *tag == "FOCUS" {
-                        snapshot.focus = proof;
-                    } else {
-                        snapshot.window_focus = proof;
-                    }
-                }
-                #[cfg(any(test, target_os = "macos"))]
-                [
-                    tag @ ("FOCUS_QUERY" | "FOCUS_WINDOW_QUERY"),
-                    phase,
-                    stage,
-                    error,
-                ] if if *tag == "FOCUS_QUERY" {
-                    snapshot.focus_query.is_none()
-                } else {
-                    snapshot.window_focus_query.is_none()
-                } =>
-                {
-                    let query = Some(
-                        serde_json::from_value(serde_json::json!({
-                            "phase": phase, "stage": stage, "error": error,
-                        }))
-                        .map_err(|_| Reason::DesktopUnavailable)?,
-                    );
-                    if *tag == "FOCUS_QUERY" {
-                        snapshot.focus_query = query;
-                    } else {
-                        snapshot.window_focus_query = query;
-                    }
-                }
                 ["DISPLAY", x, y, width, height] => {
                     snapshot.displays.push(rect(x, y, width, height)?);
                 }
@@ -1064,6 +1134,39 @@ mod tests {
             overlap_area(rect(-65536, -65536, 65536, 65536), rect(0, 0, 65536, 65536)),
             0
         );
+    }
+
+    #[test]
+    fn agreement_records_are_closed_unique_and_require_identity_change() {
+        let header = "FG 7 0\nDISPLAY 0 0 2000 2000\nWIN 1 7 10 20 800 600 436c61756465 0\n";
+        let receipt = format!(
+            "{header}FOCUS identity-changed 0\nFOCUS_AGREEMENT geometry-changed\nFOCUS_WINDOW identity-changed 0\nFOCUS_WINDOW_AGREEMENT after-proof-unready\nFOCUS_WINDOW_QUERY after position cannot-complete\n"
+        );
+        let snapshot = Snapshot::parse(&receipt).unwrap();
+        assert_eq!(
+            snapshot.focus_agreement(),
+            Some(FocusAgreement::GeometryChanged)
+        );
+        assert_eq!(
+            snapshot.window_focus_agreement(),
+            Some(FocusAgreement::AfterProofUnready)
+        );
+        assert_eq!(
+            serde_json::to_value(snapshot.focus_agreement()).unwrap(),
+            "geometry-changed"
+        );
+        for invalid in [
+            "FOCUS proved 1\nFOCUS_AGREEMENT geometry-changed\n",
+            "FOCUS query-error 0\nFOCUS_AGREEMENT after-proof-unready\n",
+            "FOCUS identity-changed 0\nFOCUS_AGREEMENT PRIVATE\n",
+            "FOCUS identity-changed 0\nFOCUS_AGREEMENT geometry-changed\nFOCUS_AGREEMENT foreground-changed\n",
+            "FOCUS_AGREEMENT geometry-changed\n",
+            "FOCUS_WINDOW proved 1\nFOCUS_WINDOW_AGREEMENT window-element-changed\n",
+        ] {
+            assert!(Snapshot::parse(&format!("{header}{invalid}")).is_err());
+        }
+        let legacy = Snapshot::parse(&format!("{header}FOCUS identity-changed 0\n")).unwrap();
+        assert_eq!(legacy.focus_agreement(), None);
     }
 
     #[test]

@@ -7,6 +7,7 @@
 
 std::uint64_t match_focus_window(CFArrayRef, pid_t, CGRect, unsigned&);
 const char* classify_focus_agreement(bool, unsigned);
+const char* classify_focus_change(bool, bool, bool, bool);
 static CFDictionaryRef record(std::int64_t pid, std::int64_t id, std::int64_t layer, CGRect bounds) {
     const void* keys[] = {kCGWindowOwnerPID, kCGWindowNumber, kCGWindowLayer, kCGWindowBounds};
     auto owner = CFNumberCreate(nullptr, kCFNumberSInt64Type, &pid);
@@ -22,6 +23,11 @@ const char* classify_ax_error(AXError);
 bool chat_current_page(CFTypeRef);
 bool chat_control_agreement(unsigned, unsigned, bool, CGRect, CGRect, CGRect);
 int main() {
+    assert(classify_focus_change(true, true, true, true) == nullptr);
+    assert(std::string(classify_focus_change(false, false, false, false)) == "foreground-changed");
+    assert(std::string(classify_focus_change(true, false, false, false)) == "after-proof-unready");
+    assert(std::string(classify_focus_change(true, true, false, false)) == "window-element-changed");
+    assert(std::string(classify_focus_change(true, true, true, false)) == "geometry-changed");
     assert(chat_current_page(CFSTR("page")));
     assert(!chat_current_page(CFSTR("true")));
     assert(!chat_current_page(CFSTR("false")));

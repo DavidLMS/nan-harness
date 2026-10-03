@@ -638,7 +638,7 @@ def semantic_observations(directory, app):
             fields = {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'status', 'nativeForegroundWindowMatchedHeld'}
             statuses = {'proved', 'untrusted', 'query-error', 'focus-mismatch', 'not-standard',
                         'identity-changed', 'no-match', 'ambiguous'}
-            if (app != 'claude-desktop' or set(value) - {'phase', 'candidateState', 'guardCategory', 'windowOnlyQuery'} not in (fields, fields | {'query'}, fields | {'windowOnlyStatus', 'windowOnlyMatchedHeld'}, fields | {'query', 'windowOnlyStatus', 'windowOnlyMatchedHeld'}) or value['diagnosticsOnly'] is not True
+            if (app != 'claude-desktop' or set(value) - {'phase', 'candidateState', 'guardCategory', 'windowOnlyQuery', 'agreement', 'windowOnlyAgreement'} not in (fields, fields | {'query'}, fields | {'windowOnlyStatus', 'windowOnlyMatchedHeld'}, fields | {'query', 'windowOnlyStatus', 'windowOnlyMatchedHeld'}) or value['diagnosticsOnly'] is not True
                     or type(value['status']) is not str or value['status'] not in statuses
                     or (type(value['nativeForegroundWindowMatchedHeld']) is not bool
                         if value['status'] == 'proved' else value['nativeForegroundWindowMatchedHeld'] is not None)):
@@ -672,6 +672,14 @@ def semantic_observations(directory, app):
                 record['candidateState'] = value['candidateState']
             if 'windowOnlyQuery' in value and 'windowOnlyStatus' not in value:
                 raise ValueError('missing Claude window-only focus status')
+            for key, status_key in (('agreement', 'status'), ('windowOnlyAgreement', 'windowOnlyStatus')):
+                if key in value:
+                    agreement = value[key]
+                    if (value.get(status_key) != 'identity-changed' or type(agreement) is not str
+                            or agreement not in {'foreground-changed', 'after-proof-unready',
+                                                 'window-element-changed', 'geometry-changed'}):
+                        raise ValueError('invalid Claude focus agreement observation')
+                    record[key] = agreement
             for key, status_key in (('query', 'status'), ('windowOnlyQuery', 'windowOnlyStatus')):
                 query = value.get(key)
                 if query is not None:
