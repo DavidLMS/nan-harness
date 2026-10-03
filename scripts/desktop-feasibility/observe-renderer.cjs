@@ -293,6 +293,13 @@ function publishCodexBinding(output,owner,connection,guard) {
       ||process.platform!=='win32'&&(metadata.mode&0o077)!==0)throw new Error('private-root');
   fs.writeFileSync(bindingPath,JSON.stringify(checkpoint)+'\n',{mode:0o600,flag:'wx'});
 }
+function recordStaticDialog(value) {
+  const destination=`${output}.dialog-title.json`;
+  try {
+    fs.writeFileSync(`${destination}.tmp`,JSON.stringify(value)+'\n',{mode:0o600,flag:'wx'});
+    fs.renameSync(`${destination}.tmp`,destination);
+  } catch(_) {} // Advisory only; never changes the original inventory verdict.
+}
 function linuxDialogPolicy(appName,platform,env) {
   return onboardingTrial(appName,platform,env)&&platform==='linux'
     &&env.NANH_CODEX_PROJECT_POLICY==='open-project'
@@ -473,6 +480,13 @@ async function run() {
     if(linuxDialogPolicy(app,process.platform,process.env)) {
       recordLinuxDialog(await observeLinuxDialog(initialMain,browser,ownerGuard,deadline));
     }
+    const titleCatalog=require('./codex-dialog-catalog.cjs');
+    if(process.platform==='linux'&&titleCatalog.policy(app,process.platform,process.env)) {
+      const soleGuard=()=>browser.contexts().flatMap(c=>c.pages()).length===1
+        &&browser.contexts().flatMap(c=>c.pages())[0]===page&&ownerGuard();
+      recordStaticDialog(await titleCatalog.observe(initialMain,process.platform,
+        {guard:soleGuard,identity:p=>correlationIdentity(p,deadline,false),same:sameCorrelationIdentity,deadline}));
+    }
     if (process.env.NANH_CODEX_PUBLIC_ONBOARDING !== undefined) {
       const targetReady = app === 'chatgpt-desktop'
         && await page.evaluate(() => location.protocol === 'app:' && document.readyState === 'complete');
@@ -485,6 +499,11 @@ async function run() {
       const mainGuard=trial&&heldMain?heldMainGuard(heldMain,browser,ownerGuard,correlationDeadline,
         require('./codex-onboarding.cjs').sourceRoute,correlationIdentity,
         ms=>new Promise(resolve=>setTimeout(resolve,ms)),false,true):undefined;
+      if(process.platform==='darwin'&&titleCatalog.policy(app,process.platform,process.env)) {
+        recordStaticDialog(await titleCatalog.observe(heldMain,process.platform,
+          {guard:mainGuard||(()=>false),identity:p=>correlationIdentity(p,deadline,false),
+            same:sameCorrelationIdentity,deadline}));
+      }
       facts.publicOnboarding = await require('./codex-onboarding.cjs').run(page,
         ownerGuard,
         correlationDeadline,mainGuard);

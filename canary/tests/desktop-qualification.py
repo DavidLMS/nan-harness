@@ -2716,5 +2716,36 @@ class CodexLinuxInitialDialogTests(unittest.TestCase):
             path.write_text(json.dumps(value))
             with self.assertRaises(ValueError): q.semantic_observations(root, 'claude-desktop')
 
+
+class CodexStaticDialogTitleTests(unittest.TestCase):
+    def test_exact_catalog_pins_and_source_ids_are_passive_closed(self):
+        value = dict(schemaVersion=1, mechanism='codex-static-dialog-title', diagnosticsOnly=True,
+                     sourceVersion='26.930.31730', platform='macos',
+                     artifactSha256='bfda661a7c9ca44dac3168134058dd6007947cde318ade37d570c484329f6d41',
+                     wrapperSourceSha256='df6152796a7762d3956cbf2030bd8b17de90a4554513d786f11cd41f88b892d4',
+                     catalogSha256='6875f72d89a61cab995daccf0bf8075e78324c8e9981e653dcb46fd377e73ee8',
+                     status='matched', titleReferenceCount=1, matchCount=1,
+                     sourceTitleIds=['electron.onboarding.conversationalOnboarding.skipDialog.title'])
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'title.json'
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(root, 'chatgpt-desktop')[0]['sourceTitleIds'], value['sourceTitleIds'])
+            for status, count, identities in [('unknown', 0, []), ('guard-rejected', None, []),
+                                              ('ambiguous', 2, sorted(['keyboardShortcutsDialog.title', 'plugins.create.title']))]:
+                item = {**value, 'status': status, 'matchCount': count, 'sourceTitleIds': identities,
+                        'titleReferenceCount': None if count is None else 1}
+                path.write_text(json.dumps(item))
+                self.assertEqual(q.semantic_observations(root, 'chatgpt-desktop')[0]['status'], status)
+            for change in ({'text': 'PRIVATE'}, {'platform': []}, {'status': []}, {'sourceTitleIds': ['PRIVATE']},
+                           {'sourceTitleIds': value['sourceTitleIds'] * 2}, {'titleReferenceCount': True},
+                           {'sourceTitleIds': ['codex.mcpTool.confirmFollowUp.widgetStateTitle']},
+                           {'matchCount': True}, {'matchCount': 2}, {'artifactSha256': '0' * 64},
+                           {'wrapperSourceSha256': '0' * 64}, {'catalogSha256': '0' * 64},
+                           {'status': 'guard-rejected'}, {'status': 'unknown'}, {'sourceVersion': 'PRIVATE'}):
+                path.write_text(json.dumps({**value, **change}))
+                with self.assertRaises(ValueError): q.semantic_observations(root, 'chatgpt-desktop')
+            path.write_text(json.dumps(value))
+            with self.assertRaises(ValueError): q.semantic_observations(root, 'claude-desktop')
+
 if __name__ == '__main__':
     unittest.main()

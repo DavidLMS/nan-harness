@@ -1,0 +1,593 @@
+{
+  "entries": [
+    {
+      "file": "education-dialog-a707622260b8.js",
+      "id": "composer.worktreePrompt.education.title",
+      "platform": "mac",
+      "sha": "b11997bff26402e8b878cb93d608529be3904120f2d509f8fee0f567f26cf96f",
+      "text": "Worktrees that just work"
+    },
+    {
+      "file": "order-yubikey-dialog-f8f36280a0a7.js",
+      "id": "settings.chatGpt.security.orderYubikey.title",
+      "platform": "mac",
+      "sha": "090bba645488eeed48af223ff11cea7fd520bf2496ff0e867ec0abe373d0c035",
+      "text": "Order a YubiKey"
+    },
+    {
+      "file": "app-connect-mfa-dialog-dd2c103aa152.js",
+      "id": "apps.connectMfa.title",
+      "platform": "mac",
+      "sha": "1b13253ef853f140b44cebea051efd7c9a92d7928315106e1465fe3aa17017b6",
+      "text": "Enable a second factor to continue"
+    },
+    {
+      "file": "dictionary-dialog-59b1b91eb92e.js",
+      "id": "speechSettings.content.customDictionary.page.title",
+      "platform": "mac",
+      "sha": "8fe9f76f42ee0d41b4a4ac2063b039e54f87ac8042784261442301188762fbb0",
+      "text": "Voice dictionary"
+    },
+    {
+      "file": "create-dialog-47f09c15c2d8.js",
+      "id": "restricted.environmentSetup.create.title",
+      "platform": "mac",
+      "sha": "1ce038ddc958cb014125efdbeef738f9cbac1bdf1c2da96fbbbb457c1ba91e31",
+      "text": "Create a cloud environment"
+    },
+    {
+      "file": "chatgpt-keyboard-shortcuts-dialog-7bf3e0934c65.js",
+      "id": "keyboardShortcutsDialog.title",
+      "platform": "mac",
+      "sha": "bb11e667a8bba888e05a3f75a8bbc048790ebd08d61f3468f2d5ba1f90103f9e",
+      "text": "Keyboard shortcuts"
+    },
+    {
+      "file": "gpt-about-dialog-a785f672e935.js",
+      "id": "chatgptConversations.gpts.about.loadError",
+      "platform": "mac",
+      "sha": "7f07fe9e6832cc5de5658b8b279b66e814ee545aa9c550a805dbae5df25698a7",
+      "text": "Couldn't load this GPT"
+    },
+    {
+      "file": "gpt-about-dialog-a785f672e935.js",
+      "id": "chatgptConversations.gpts.about.loading",
+      "platform": "mac",
+      "sha": "7f07fe9e6832cc5de5658b8b279b66e814ee545aa9c550a805dbae5df25698a7",
+      "text": "Loading GPT details"
+    },
+    {
+      "file": "keyboard-shortcuts-dialog-9b86aaf8687b.js",
+      "id": "keyboardShortcutsDialog.title",
+      "platform": "mac",
+      "sha": "47d0c8bb7263fc37d9b00ebb3a0fb4bcbe5d72f9352b0017cf1d3dc9f6ed8d4b",
+      "text": "Keyboard shortcuts"
+    },
+    {
+      "file": "import-dialog-dbb0ae89b287.js",
+      "id": "personalVault.importTitle",
+      "platform": "mac",
+      "sha": "1e8b2b863b53c59204a5996518c865abcfa130b016a608e9eae90aad27a35416",
+      "text": "Import local variables"
+    },
+    {
+      "file": "chatgpt-onboarding-dialog-45f4e7bd7ec0.js",
+      "id": "chatgpt.new-onboarding.all-done-2",
+      "platform": "mac",
+      "sha": "9288ac148dc9d2445127b5933ca8e7a53136c0c4f2a07cd082d7d08b46d04537",
+      "text": "You're all set"
+    },
+    {
+      "file": "sites-handoff-dialog-d133871f79d9.js",
+      "id": "sitesPreview.handoff.title",
+      "platform": "mac",
+      "sha": "de3d17a53c29d80a35d2b824e25cadedd809f4b54620d5d07839a65eea611c12",
+      "text": "Continue your website in Work"
+    },
+    {
+      "file": "create-project-dialog-3488d7438c8c.js",
+      "id": "projectSetup.remoteSource.choose",
+      "platform": "mac",
+      "sha": "5f5d861a32d361913176213c458854824770c88930acfbf73352ff4801a5f68d",
+      "text": "Choose a source folder"
+    },
+    {
+      "file": "create-project-dialog-3488d7438c8c.js",
+      "id": "projectSetupDialog.createMissingRemoteFolderTitle",
+      "platform": "mac",
+      "sha": "5f5d861a32d361913176213c458854824770c88930acfbf73352ff4801a5f68d",
+      "text": "Create missing folder?"
+    },
+    {
+      "file": "codex-mobile-setup-dialog-1fede26881e0.js",
+      "id": "codexMobile.setupPage.waiting.pairing.fullscreenQrCodeTitle",
+      "platform": "mac",
+      "sha": "14ced7070e5a94466ff9c3c0b7b96b4c68e48b0eafde2953f4094b511aad3a43",
+      "text": "Pairing QR code"
+    },
+    {
+      "file": "voice-personalization-dialog-9832e89c0650.js",
+      "id": "chatgpt.pepper.personalization.voice.title",
+      "platform": "mac",
+      "sha": "317eadb800aceafae736b5787ad444b2bf29b7777382c0b97fbfef90d2ad6196",
+      "text": "Choose a voice"
+    },
+    {
+      "file": "setup-dialog-a0fe8c074c0f.js",
+      "id": "restricted.aeon.slack.setup.title",
+      "platform": "mac",
+      "sha": "dbe9fb17b937352cddb68cebecb1a3e1d9a1428380e8e546189827ca1a2a4113",
+      "text": "Add to Slack"
+    },
+    {
+      "file": "onboarding-page-5330b67eb049.js",
+      "id": "electron.onboarding.conversationalOnboarding.skipDialog.title",
+      "platform": "mac",
+      "sha": "05667867f6c8b4525a8009610dc942881bdcbff3a737a3dd3411e28956a88137",
+      "text": "Skip setup?"
+    },
+    {
+      "file": "create-dialog-5e3355054f2d.js",
+      "id": "plugins.create.title",
+      "platform": "mac",
+      "sha": "35fd6b77096aa9faec8cb9c4b1a6e1f5a63be524b19b5501a88f277a812b19e5",
+      "text": "New Plugin"
+    },
+    {
+      "file": "dialog-bcc9d97e45d7.js",
+      "id": "chatGpt.quietHours.active.title",
+      "platform": "mac",
+      "sha": "59ded498ca933dba75c78713d57f7e7ef497e2c1378eba8f126f48f41cb499bd",
+      "text": "Time for a break"
+    },
+    {
+      "file": "personal-workspace-access-blocked-dialog-71d865b194ae.js",
+      "id": "personalWorkspaceAccessBlocked.title",
+      "platform": "mac",
+      "sha": "8a59289b2af7efe203d78ff589342b1b891ad9b4055f305ae0a4177dce38b103",
+      "text": "Personal workspace access blocked"
+    },
+    {
+      "file": "dialog-9de5b78a09ff.js",
+      "id": "workspaceAgents.sharing.removeTitle",
+      "platform": "mac",
+      "sha": "3eda98f23cd33a0b4f145c1089bcd7005947202b929192496d3abbcbfd6dd028",
+      "text": "Remove access?"
+    },
+    {
+      "file": "publish-dialog-96e1ce58abc3.js",
+      "id": "sitesPreview.share.title",
+      "platform": "linux",
+      "sha": "5942f12d3e557ca2357520079922a48a379db7e11033b7d4a7f9ce794aa1edb2",
+      "text": "Ready to share your site?"
+    },
+    {
+      "file": "delete-thread-dialog-14dbbf6f4a1e.js",
+      "id": "sidebarElectron.deleteThreadDialog.title",
+      "platform": "linux",
+      "sha": "3237b668c54d45a05dc12da5ec73b3ba124ae4a0eec9f4a62bd42df3cbc3b6f8",
+      "text": "Delete task?"
+    },
+    {
+      "file": "appgen-change-slug-dialog-af2cf881f76a.js",
+      "id": "appgenSettings.general.url.changeDialog.title",
+      "platform": "linux",
+      "sha": "ce46c66a7916d0f92f3731ad24129fdbfccca2e06226632172d062ca5036bc59",
+      "text": "Change URL"
+    },
+    {
+      "file": "keyboard-shortcuts-dialog-be0ac4699aeb.js",
+      "id": "keyboardShortcutsDialog.title",
+      "platform": "linux",
+      "sha": "735625a22b350304538440810d14ac09e8b2ff59cbe19277afc80b441272acce",
+      "text": "Keyboard shortcuts"
+    },
+    {
+      "file": "dialog-fd9fee1ff6cd.js",
+      "id": "composer.hooks.review.title",
+      "platform": "linux",
+      "sha": "7f27866bb320bd7300fdc57a5d7fbea344c208ecbf137f58a76aac99bb6d9af3",
+      "text": "Review hooks"
+    },
+    {
+      "file": "my-gpt-delete-dialog-725f103bb446.js",
+      "id": "chatgptConversations.gpts.mine.deleteTitle",
+      "platform": "linux",
+      "sha": "00847912d6dfc1e6d85aaa4259ed22ed5c089333b35f52b394a2e10ce00acfa4",
+      "text": "Delete GPT"
+    },
+    {
+      "file": "chatgpt-saved-memory-source-delete-dialog-ea5f396ffc9b.js",
+      "id": "chatgptConversations.summaryPanel.sources.memory.delete.title",
+      "platform": "linux",
+      "sha": "b45dd3cd60c4e3bca9117095c341a298de76ab9a386202ffc1ea4afb762676e4",
+      "text": "Delete this memory?"
+    },
+    {
+      "file": "habitat-automation-migration-dialog-96d68fe1f313.js",
+      "id": "inbox.automations.habitatMigration.title",
+      "platform": "linux",
+      "sha": "814e9fff39f93f1aa32037b965ea8d58d0a00323a14f4fa5a9f9204531cbc656",
+      "text": "Sync your local automations"
+    },
+    {
+      "file": "dialog-e197c3dde513.js",
+      "id": "settings.chatGpt.sharedLinks.title",
+      "platform": "linux",
+      "sha": "d4e05592a7ff8f90d2fc961ccd7369f6c7eef1d9e5e6181102e5f58d7a932973",
+      "text": "Shared links"
+    },
+    {
+      "file": "dialog-e197c3dde513.js",
+      "id": "settings.chatGpt.sharedLinks.deleteAllConfirmTitle",
+      "platform": "linux",
+      "sha": "d4e05592a7ff8f90d2fc961ccd7369f6c7eef1d9e5e6181102e5f58d7a932973",
+      "text": "Delete all shared links?"
+    },
+    {
+      "file": "education-dialog-83a5388f571f.js",
+      "id": "composer.worktreePrompt.education.title",
+      "platform": "linux",
+      "sha": "05235969e25dee0a44fa475162434c4e2eef63b1979b975095f6acfa43415260",
+      "text": "Worktrees that just work"
+    },
+    {
+      "file": "subscription-update-dialog-adf8d842b96b.js",
+      "id": "settings.usage.pricingPlanPage.subscriptionUpdate.title",
+      "platform": "linux",
+      "sha": "7620ed05875b44b78744cf70a1fc051111ae2cf94ea5e140dfc9f38a6002b466",
+      "text": "Confirm plan changes"
+    },
+    {
+      "file": "renewal-dialog-113ee4f883e1.js",
+      "id": "settings.consumerBilling.renewalTitle",
+      "platform": "linux",
+      "sha": "31d982adf8b8dc9dbe3851034ea7fc3d8f36b4a718f6b16a65a1285d25bf6318",
+      "text": "Confirm plan changes"
+    },
+    {
+      "file": "create-project-dialog-f0f9e4d26069.js",
+      "id": "projectSetup.remoteSource.choose",
+      "platform": "linux",
+      "sha": "f7262a302201bb2696f46233f92be93c4c1f415a6244b4b6798906a6b7625817",
+      "text": "Choose a source folder"
+    },
+    {
+      "file": "create-project-dialog-f0f9e4d26069.js",
+      "id": "projectSetupDialog.createMissingRemoteFolderTitle",
+      "platform": "linux",
+      "sha": "f7262a302201bb2696f46233f92be93c4c1f415a6244b4b6798906a6b7625817",
+      "text": "Create missing folder?"
+    },
+    {
+      "file": "realtime-voice-picker-dialog-f4cd47ed796c.js",
+      "id": "settings.general.realtimeVoice.dialog.title",
+      "platform": "linux",
+      "sha": "ec4dcef0973da8c624793a22e2b2c69cc7c24c4ae2f0a6b9d27afde4d276b5e6",
+      "text": "Choose a voice"
+    },
+    {
+      "file": "dialog-34cac18fd77f.js",
+      "id": "chatgptConversations.projectSettings.title",
+      "platform": "linux",
+      "sha": "9804848b275b826564d57b0462101fde5f1d9d9a45378e9545046b86780bf2f3",
+      "text": "Project settings"
+    },
+    {
+      "file": "library-move-dialog-8dc0f2736ddd.js",
+      "id": "libraryNext.move.title",
+      "platform": "linux",
+      "sha": "c725d5b4dee27e991c290acdf4f9ec309e45a0639d5c1201638f888e2774e7d1",
+      "text": "Move to\u2026"
+    },
+    {
+      "file": "permission-denied-dialog-65b9f95c0d17.js",
+      "id": "chatgptConversations.preciseLocation.permissionDenied.title",
+      "platform": "linux",
+      "sha": "68e33f2b28ac5ecf773ec071e10cb8d4baafe81d3a23b78524f110a1506b5f41",
+      "text": "Turn on location access"
+    },
+    {
+      "file": "cloud-environment-packages-dialog-29e181516fe0.js",
+      "id": "settings.cloudEnvironments.packages.title",
+      "platform": "linux",
+      "sha": "cd6e0800cc989b5c90bf0121dcec5962bd58b5d5449a9c84dcfae17fa0fdc365",
+      "text": "Preinstalled packages"
+    },
+    {
+      "file": "dialog-efc593e458d2.js",
+      "id": "workspaceAgents.sharing.removeTitle",
+      "platform": "linux",
+      "sha": "039e7e217ea32e032a6ca51b6c632558b21babc06b0be81a3245486e6b644e15",
+      "text": "Remove access?"
+    },
+    {
+      "file": "upgrade-dialog-33b3f7c568b6.js",
+      "id": "pricing.comparison.title",
+      "platform": "linux",
+      "sha": "59c00a435a907a5162eb23f7dec37523c910c7416dbe383d7841a06912eec290",
+      "text": "Upgrade your plan"
+    },
+    {
+      "file": "create-dialog-8080ef1fa1dd.js",
+      "id": "plugins.create.title",
+      "platform": "linux",
+      "sha": "e3f7a7434b4bdca2f4e16f408aa465c1c304a871dd65484ec37d742f7490fc35",
+      "text": "New Plugin"
+    },
+    {
+      "file": "setup-dialog-3047d4125330.js",
+      "id": "restricted.aeon.slack.setup.title",
+      "platform": "linux",
+      "sha": "518985ea48aa4debea5ca504d66e197ffcf7a7e31fa90b2fd35b1f1f6d32608b",
+      "text": "Add to Slack"
+    },
+    {
+      "file": "onboarding-page-9ab58b7bf78b.js",
+      "id": "electron.onboarding.conversationalOnboarding.skipDialog.title",
+      "platform": "linux",
+      "sha": "b8dff84333a6cfb62341d43642087ba8d72dd31225ed2b3b8e29ad7da31372c6",
+      "text": "Skip setup?"
+    },
+    {
+      "file": "downgrade-dialog-32cedf2888d6.js",
+      "id": "settings.consumerBilling.downgradeTitle",
+      "platform": "linux",
+      "sha": "09578dce82a57b85228864d07a61174fc7971817935aa7f0abdec5549fc8420b",
+      "text": "Confirm plan changes"
+    },
+    {
+      "file": "dialog-f34e21925bfd.js",
+      "id": "appgenSettings.transfer.dialogTitle",
+      "platform": "linux",
+      "sha": "88b30a9fc26a3fd4348c58904455b59a495e98ceca6ee010004132bbc9972ae4",
+      "text": "Transfer ownership"
+    },
+    {
+      "file": "chatgpt-keyboard-shortcuts-dialog-1b1f7583d53a.js",
+      "id": "keyboardShortcutsDialog.title",
+      "platform": "linux",
+      "sha": "666e656a18a6a7b9cb887de17463760fa23b84478699291853da196d9c4a513c",
+      "text": "Keyboard shortcuts"
+    },
+    {
+      "file": "feedback-form-dialog-970ac5a8595c.js",
+      "id": "feedbackFormDialog.title",
+      "platform": "linux",
+      "sha": "10c7ee57be438d78d72b7d84ea4431c5635577e0f3545675a22b5ad31a19e9c1",
+      "text": "Share feedback"
+    },
+    {
+      "file": "personal-workspace-access-blocked-dialog-86fe9631fa5a.js",
+      "id": "personalWorkspaceAccessBlocked.title",
+      "platform": "linux",
+      "sha": "58c90dd18502ceee6e0df44fa13f69538f94ec405c931fb1f874757c06e47f2e",
+      "text": "Personal workspace access blocked"
+    },
+    {
+      "file": "chatgpt-image-upload-reminder-dialog-5e482bdb8d15.js",
+      "id": "chatgptConversations.imageUploadReminder.title",
+      "platform": "linux",
+      "sha": "efaf3c3ae79985f7cdf18fc2b16d5f45227786be44368590c8abbe1e555fe08d",
+      "text": "Check before sharing"
+    },
+    {
+      "file": "voice-personalization-dialog-3c4560409e69.js",
+      "id": "chatgpt.pepper.personalization.voice.title",
+      "platform": "linux",
+      "sha": "88615bc2b0c231c4ec451738bb4479e3dbb174601a7a1a25ac853b26af4e5070",
+      "text": "Choose a voice"
+    },
+    {
+      "file": "order-yubikey-dialog-ebc3c2eee0c7.js",
+      "id": "settings.chatGpt.security.orderYubikey.title",
+      "platform": "linux",
+      "sha": "33d7453726ef194bb5558143e0cc99eb54d087784c2bed9a940e2972664aa1df",
+      "text": "Order a YubiKey"
+    },
+    {
+      "file": "codex-mobile-setup-dialog-39c31ee7283b.js",
+      "id": "codexMobile.setupPage.waiting.pairing.fullscreenQrCodeTitle",
+      "platform": "linux",
+      "sha": "72117e62e18d084a783909ac7f68919fdd0ef4247da12ee862a0182ea2f6ff04",
+      "text": "Pairing QR code"
+    },
+    {
+      "file": "artifact-feedback-dialog-3907ffb1a4d8.js",
+      "id": "artifactFeedback.title",
+      "platform": "linux",
+      "sha": "9bb0b48958b88f4f433ddfea4a9f1b9a7f16265fab4825f157930c27debad5e3",
+      "text": "Help our team improve ChatGPT"
+    },
+    {
+      "file": "attach-site-dialog-c9de9915e521.js",
+      "id": "codex.space.sitePage.attach.title",
+      "platform": "linux",
+      "sha": "047e943b4a37165294bb5a3cd208af81ee798a63ffb56141db47a927de84b62e",
+      "text": "Add existing Site"
+    },
+    {
+      "file": "products-dialog-c36aab794b05.js",
+      "id": "businessProfiles.feedProducts.title",
+      "platform": "linux",
+      "sha": "8b89e166cf86a95a034fd1d5dd286d8ec6fc0f05370d15400b9ea59da0477541",
+      "text": "Products"
+    },
+    {
+      "file": "reboot-dialog-41bf06bd6e1f.js",
+      "id": "orbit.primary.reboot.title",
+      "platform": "linux",
+      "sha": "fcf3cd95ff7f378967c21338c54bf8aed4156983648c2e31f91300fddad16020",
+      "text": "Reboot your dot?"
+    },
+    {
+      "file": "gpt-about-dialog-8c14aa14ea66.js",
+      "id": "chatgptConversations.gpts.about.loadError",
+      "platform": "linux",
+      "sha": "fbf0582635b0df5c8e223e8ca6a12895ffac3d7485cb3f5dd47c853e4ae67758",
+      "text": "Couldn't load this GPT"
+    },
+    {
+      "file": "gpt-about-dialog-8c14aa14ea66.js",
+      "id": "chatgptConversations.gpts.about.loading",
+      "platform": "linux",
+      "sha": "fbf0582635b0df5c8e223e8ca6a12895ffac3d7485cb3f5dd47c853e4ae67758",
+      "text": "Loading GPT details"
+    },
+    {
+      "file": "dialog-bf919bdd864e.js",
+      "id": "workspaceAgents.schedules.editor.title",
+      "platform": "linux",
+      "sha": "b96fea61e03343657e0479328dd1a7c1baa06b5894a295767124459b6d75c01f",
+      "text": "Scheduled automation"
+    },
+    {
+      "file": "dialog-9786a345191d.js",
+      "id": "libraryNext.flashcards.dialogTitle",
+      "platform": "linux",
+      "sha": "2c939aa830d6349d20d904ce61a2c3d055dd83f082b403be5fa406fb64848d29",
+      "text": "Flashcards"
+    },
+    {
+      "file": "shared-task-dialog-839ed1060a3b.js",
+      "id": "automations.sharing.preview.dialog.title",
+      "platform": "linux",
+      "sha": "256efa2829fe8a8edf0d8b69c33da5c60b4baef9e053800518dd7ab56f54be3b",
+      "text": "Shared with you"
+    },
+    {
+      "file": "shared-task-dialog-839ed1060a3b.js",
+      "id": "automations.sharing.preview.dialog.title",
+      "platform": "linux",
+      "sha": "256efa2829fe8a8edf0d8b69c33da5c60b4baef9e053800518dd7ab56f54be3b",
+      "text": "Shared with you"
+    },
+    {
+      "file": "app-connect-mfa-dialog-a00f88e6d133.js",
+      "id": "apps.connectMfa.title",
+      "platform": "linux",
+      "sha": "0947a5738daa20b9d5bde6c03b14f033ecd170229df57f595aceaa6c91d257f9",
+      "text": "Enable a second factor to continue"
+    },
+    {
+      "file": "settings-unsaved-changes-dialog-852efdc8dc57.js",
+      "id": "settings.unsavedChanges.discardTitle",
+      "platform": "linux",
+      "sha": "d2377ce1756bec2da2657ab864c24747a5f634da3fc3818127ea389faf935b1a",
+      "text": "Discard changes?"
+    },
+    {
+      "file": "versions-dialog-5b7948cca3f0.js",
+      "id": "chatgpt.versions.title",
+      "platform": "linux",
+      "sha": "4de04479b9970b4d7b4aefa5bb0d8b67961e8ad27dad456c741af71e5b3523ea",
+      "text": "Versions"
+    },
+    {
+      "file": "gitlab-merge-request-form-dialog-b02e2568ad07.js",
+      "id": "localConversationPage.createPrModal.gitLabTitle",
+      "platform": "linux",
+      "sha": "0ca3c52c05f5adc62e20632c190e732ae956a474843be4a0fab4b5be4d8d51e5",
+      "text": "Create merge request"
+    },
+    {
+      "file": "chatgpt-onboarding-dialog-fe7cc69e351d.js",
+      "id": "chatgpt.new-onboarding.all-done-2",
+      "platform": "linux",
+      "sha": "16b6c59e36aa19da0c4ec1560b6cedec43fabffeca2601710cb6f25f22c593cc",
+      "text": "You're all set"
+    },
+    {
+      "file": "pending-edits-dialog-ec008c965a22.js",
+      "id": "codex.writingBlock.confirmCloseTitle",
+      "platform": "linux",
+      "sha": "0391eed81593837186dbf7b66b8c90e6785d07752700f4384518d1561140c62a",
+      "text": "Close editor?"
+    },
+    {
+      "file": "create-dialog-ca1e778333c4.js",
+      "id": "restricted.environmentSetup.create.title",
+      "platform": "linux",
+      "sha": "f520d5fa090e2e0f2b72d3efd33461225fb84e1aa20ca73afcdce4548837a09e",
+      "text": "Create a cloud environment"
+    },
+    {
+      "file": "dialog-5f6026163c9a.js",
+      "id": "chatGpt.quietHours.active.title",
+      "platform": "linux",
+      "sha": "762a57bc5aec932e4b748307e533749ebd721dbaeb90f9b476f9e7428c950670",
+      "text": "Time for a break"
+    },
+    {
+      "file": "dictionary-dialog-ab7006cb8694.js",
+      "id": "speechSettings.content.customDictionary.page.title",
+      "platform": "linux",
+      "sha": "5894c1625b5f3b2a93f2de787bbadc11547c60959b9c86afa19106d50fdbcc4a",
+      "text": "Voice dictionary"
+    },
+    {
+      "file": "run-history-dialog-482ce0dcb788.js",
+      "id": "chatgpt.tasks.run_history.title",
+      "platform": "linux",
+      "sha": "53159da4004ae2a909a8e2dcbac62961ce8f55c7eca3d49f855aff183d2978fb",
+      "text": "Run history"
+    },
+    {
+      "file": "import-dialog-5ec148dd18df.js",
+      "id": "personalVault.importTitle",
+      "platform": "linux",
+      "sha": "08f19694376d618027aa7ce285309fd402cc1ad55af759cd927dae5fb411eb96",
+      "text": "Import local variables"
+    },
+    {
+      "file": "dialog-ec2c76c663b0.js",
+      "id": "profile.sharing.title",
+      "platform": "linux",
+      "sha": "78ec51af7d8bbefd5262caebdf7068ceb6f237203f861a256983a52a55abef5d",
+      "text": "Share your profile"
+    },
+    {
+      "file": "trusted-contact-no-thanks-dialog-d955c79ebc58.js",
+      "id": "message.trustedContactNoThanksModal.title",
+      "platform": "linux",
+      "sha": "9da0334296774c1b69f4127003d083b26f272d2118f315da1a34ee74ff4518a4",
+      "text": "Thanks for letting us know"
+    },
+    {
+      "file": "new-space-dialog-54643f18ad08.js",
+      "id": "codex.space.creation.discardTitle",
+      "platform": "linux",
+      "sha": "d8c07c97336c9c3ff8e62060f19d5af9c57c1ba0712fc92d8896e142bf3cd37a",
+      "text": "Discard changes?"
+    },
+    {
+      "file": "team-setup-dialog-bd8710cf6b16.js",
+      "id": "teams.spaces.setup.loading",
+      "platform": "linux",
+      "sha": "7de6e73e579b33aa22adff1024b95e27b7a8cf74f436e15d6a17188eefd9207e",
+      "text": "Loading Spaces\u2026"
+    },
+    {
+      "file": "add-sources-dialog-25f60cda3354.js",
+      "id": "chatgptConversations.projectHome.textSource.title",
+      "platform": "linux",
+      "sha": "6d8df742383afa365baf3c48135837614f5497305ede6389ed1a31a792ef51a4",
+      "text": "Add text source"
+    },
+    {
+      "file": "add-sources-dialog-25f60cda3354.js",
+      "id": "chatgptProjectHome.website.title",
+      "platform": "linux",
+      "sha": "6d8df742383afa365baf3c48135837614f5497305ede6389ed1a31a792ef51a4",
+      "text": "Add URL"
+    },
+    {
+      "file": "sites-handoff-dialog-33a832d9ab6a.js",
+      "id": "sitesPreview.handoff.title",
+      "platform": "linux",
+      "sha": "8dc480a42b13428f4e4b82494a9f6922cdd3e7531a9c0771245a31dae6814b15",
+      "text": "Continue your website in Work"
+    }
+  ],
+  "sourceVersion": "26.930.31730"
+}

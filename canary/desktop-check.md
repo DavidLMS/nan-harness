@@ -2379,3 +2379,52 @@ sibling; exit-status cases already use `/bin/sh`. That extra fixture launch has
 been removed without changing the assertions. All seven focused process tests
 and the independent discovery sentinel now pass. The converged final gate must
 still pass before this iteration is considered verified.
+
+
+### Retained native identities and passive dialog titles
+
+Commit `045d1562` passed the complete local gate and hosted
+[quality run 37154433018](https://github.com/DavidLMS/nan-harness/actions/runs/37154433018).
+Actual application evidence remains separate:
+
+- [Claude macOS 37154355791](https://github.com/DavidLMS/nan-harness/actions/runs/37154355791)
+  verifies input and response in two sessions, then rejects the next input at
+  `input-focused-identity`. A passive wait now requires the exact retained
+  composer before every existing key, within the original request deadline.
+  Different owned focus may settle; target mutation or ownership loss rejects.
+- [Claude Windows 37154068497](https://github.com/DavidLMS/nan-harness/actions/runs/37154068497)
+  identifies the first rejected descendant as owned. Passive collection now
+  retains verified child process handles and creation identities through the
+  complete inventory, alongside the original live root and window guards.
+  Foreign, unreported, changed or unavailable identities still discard counts.
+- Claude Linux now measures sixteen role/label counts relative to the retained
+  Mode group, with stable provider, PID, accessibility identity and bounds
+  before and after. Counts remain advisory and unavailable queries stay null.
+- Zed Linux now records the retained Retry target after its sole native action.
+  Defunct, changed or unchanged targets do not certify recovery; independent
+  provider recovery and resumed assistant export remain required.
+
+[Codex macOS 37154355809](https://github.com/DavidLMS/nan-harness/actions/runs/37154355809)
+measures an active unknown dialog: three of nine passive points belong to the
+dialog and none to the intended control. It cannot be ignored as a stale
+overlay. [Codex Linux 37154355548](https://github.com/DavidLMS/nan-harness/actions/runs/37154355548)
+recognizes none of the four known startup dialogs and also fails cleanup; no
+specific cleanup cause is established by its closed diagnostics.
+
+A new diagnostic-only catalog contains sixty source-verified static DialogTitle
+message IDs from official Codex `26.930.31730` on macOS and Linux. The manifest
+records per-callsite hashes and the helper requires exact platform artifact
+pins. Both source wrappers render Radix DialogTitle as an `h2` referenced by
+the dialog. The reader retains that exact title and dialog across two matching
+reads under original document/frame/loader/endpoint guards. Visually hidden
+source titles can identify an active visible dialog. Duplicate IDs, changed
+references and ambiguous labels reject or remain ambiguous. Only fixed public
+catalog IDs and bounded counts leave the page; no title text or DOM IDs do.
+Recognition authorizes no dismissal, input or qualification. Windows is
+outside this catalog policy.
+
+Focused verification passes: 378 serial checker tests, checker Clippy with
+warnings denied, synthetic native identity fixtures, nine Zed helper tests,
+105 strict qualification tests and the static-title Node suite. The new native
+behavior still requires hosted application evidence; no additional cell is
+qualified by these changes.
