@@ -176,8 +176,25 @@ static bool retained(const Tree& tree, const Node& node) {
         && fresh.label == node.label && fresh.enabled == node.enabled && CGRectEqualToRect(fresh.bounds, node.bounds)) ++count;
     return count == 1;
 }
+static bool contained_control(const Node& node, const Request& request) {
+    return CGRectContainsRect(request.bounds, node.bounds) && node.bounds.size.width > 0 && node.bounds.size.height > 0;
+}
 static bool target(const Node& node, const Request& request) {
-    return node.enabled && CGRectContainsRect(request.bounds, node.bounds) && node.bounds.size.width > 0 && node.bounds.size.height > 0;
+    return node.enabled && contained_control(node, request);
+}
+// Typing can enable the same source-defined button; identity and geometry cannot change.
+static int enabled_submission(const Tree& tree, const Node& original, const Request& request) {
+    int result = -1;
+    unsigned candidates = 0;
+    for (std::size_t i = 0; i < tree.nodes.size(); ++i) {
+        const auto& node = tree.nodes[i];
+        if (node.role != "AXButton" || (node.label != "Start task" && node.label != "Send message")) continue;
+        ++candidates;
+        if (node.element && original.element && CFEqual(node.element, original.element)
+            && node.role == original.role && node.label == original.label
+            && CGRectEqualToRect(node.bounds, original.bounds) && target(node, request)) result = static_cast<int>(i);
+    }
+    return candidates == 1 ? result : -1;
 }
 static bool clipboard_write(const std::string& value) {
     NSString* string = [[NSString alloc] initWithBytes:value.data() length:value.size() encoding:NSUTF8StringEncoding];
@@ -217,7 +234,7 @@ static const char* input(const Request& request, const Tree& tree) {
     if (send < 0) send = unique(tree, "AXButton", "Send message");
     if (editor < 0 || send < 0 || request.prompt.empty()) return "composer";
     const auto& control = tree.nodes[editor];
-    if (!target(control, request) || !target(tree.nodes[send], request)) return "control";
+    if (!target(control, request) || !contained_control(tree.nodes[send], request)) return "control";
     auto initial_value = attribute(control.element, kAXValueAttribute);
     bool empty_value = initial_value && CFGetTypeID(initial_value) == CFStringGetTypeID() && CFStringGetLength(static_cast<CFStringRef>(initial_value)) == 0;
     if (initial_value) CFRelease(initial_value);
@@ -231,7 +248,9 @@ static const char* input(const Request& request, const Tree& tree) {
     if (!owned(request) || !key(124, false)) return "focus";
     Tree fresh;
     if (!fresh.collect(request) || !chat(fresh) || !retained(fresh, control)) return "control";
-    return press(request, tree.nodes[send], "sent");
+    int enabled_send = enabled_submission(fresh, tree.nodes[send], request);
+    if (enabled_send < 0) return "control";
+    return press(request, fresh.nodes[enabled_send], "sent");
 }
 static int scoped_control(const Tree& tree, const Request& request, bool retry) {
     std::vector<int> anchors;

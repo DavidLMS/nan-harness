@@ -27,6 +27,24 @@ int main() {
     assert(scoped_control(tree, request, true) == 5);
     tree.nodes.push_back(fixture(3, "AXStaticText", "fresh user"));
     assert(scoped_control(tree, request, true) == -1);
+    Request submission_request;
+    submission_request.bounds = CGRectMake(0, 0, 800, 600);
+    auto identity = reinterpret_cast<AXUIElementRef>(CFSTR("retained-control"));
+    Node initial = {identity, 0, "AXButton", "Start task", "", CGRectMake(20, 20, 100, 40), false};
+    Tree submission;
+    submission.nodes.push_back(initial);
+    CFRetain(identity);
+    assert(enabled_submission(submission, initial, submission_request) == -1);
+    submission.nodes[0].enabled = true;
+    assert(enabled_submission(submission, initial, submission_request) == 0);
+    submission.nodes.push_back(submission.nodes[0]);
+    CFRetain(identity);
+    assert(enabled_submission(submission, initial, submission_request) == -1);
+    CFRelease(submission.nodes.back().element);
+    submission.nodes.pop_back();
+    CFRelease(submission.nodes[0].element);
+    submission.nodes[0].element = reinterpret_cast<AXUIElementRef>(CFRetain(CFSTR("replacement")));
+    assert(enabled_submission(submission, initial, submission_request) == -1);
     tree.nodes[2].current = "false";
     assert(!chat(tree));
 }
