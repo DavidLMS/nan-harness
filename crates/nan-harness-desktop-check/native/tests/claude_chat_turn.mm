@@ -6,6 +6,11 @@ static Node fixture(int parent, const char* role, const char* label, const char*
     return {nullptr, parent, role, label, current, CGRectZero, true};
 }
 int main() {
+    assert(assistant_heading_label("generic description", "Claude responded: fixture") == "Claude responded: fixture");
+    assert(assistant_heading_label("Claude responded: fixture", "") == "Claude responded: fixture");
+    assert(assistant_heading_label("Claude responded: fixture", "Claude responded: other").empty());
+    assert(assistant_heading_label("generic description", "other heading") == "generic description");
+
     assert(initial_input_failure(nullptr, false) == std::string("input-initial-unavailable"));
     assert(initial_input_failure(kCFBooleanTrue, false) == std::string("input-initial-unavailable"));
     assert(initial_input_failure(CFSTR(""), true) == std::string("input-initial-unavailable"));

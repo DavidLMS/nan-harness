@@ -119,6 +119,13 @@ static const char* tree_node_failure(unsigned depth, std::size_t count, bool in_
     if (duplicate) return "tree-duplicate";
     return nullptr;
 }
+// Chromium exposes heading names in Title or Description; heading Value is a level.
+static std::string assistant_heading_label(const std::string& description, const std::string& title) {
+    const auto source = [](const std::string& text) { return text.rfind("Claude responded:", 0) == 0; };
+    if (source(description) && source(title) && description != title) return {};
+    if (source(title)) return title;
+    return description;
+}
 struct Tree {
     std::vector<Node> nodes;
     const char* failure = nullptr;
@@ -136,8 +143,12 @@ struct Tree {
         Node node{static_cast<AXUIElementRef>(CFRetain(element)), parent};
         node.role = string_attribute(element, kAXRoleAttribute);
         node.label = string_attribute(element, kAXDescriptionAttribute);
-        if (node.label.empty()) node.label = string_attribute(element, kAXTitleAttribute);
-        if (node.label.empty()) node.label = string_attribute(element, kAXValueAttribute);
+        if (node.role == "AXHeading") {
+            const auto title = string_attribute(element, kAXTitleAttribute);
+            node.label = assistant_heading_label(node.label, title);
+            if (node.label.empty() && title.rfind("Claude responded:", 0) != 0) node.label = title;
+        } else if (node.label.empty()) node.label = string_attribute(element, kAXTitleAttribute);
+        if (node.label.empty() && node.role != "AXHeading") node.label = string_attribute(element, kAXValueAttribute);
         const auto plan = node_property_plan(node.role, node.label);
         if (plan.current_token) node.current = string_attribute(element, CFSTR("AXARIACurrent"));
         if (plan.control_metadata) {
