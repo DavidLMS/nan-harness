@@ -18,7 +18,7 @@ pub(crate) use crate::diagnostics::ClaudeIdentityObservation;
 pub(crate) use image::prepare_ocr_image;
 #[cfg(any(target_os = "macos", test))]
 pub(crate) use mac_chat::ChatPressStage;
-#[cfg(any(target_os = "macos", test))]
+#[cfg(target_os = "macos")]
 pub(crate) use mac_chat_turn::ChatTurnStage;
 pub(crate) use ocr::Page;
 pub(crate) use process::FailureCategory;

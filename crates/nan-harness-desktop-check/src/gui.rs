@@ -544,8 +544,7 @@ impl Gui {
         }
         #[cfg(windows)]
         if let Some(deadline) = self.initial_deadline.take() {
-            self.visual
-                .finish_windows_initial_acquisition(process, deadline)?;
+            self.wait_initial_windows_claude_composer(process, deadline)?;
         }
         Ok(())
     }

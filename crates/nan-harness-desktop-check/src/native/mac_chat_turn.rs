@@ -22,6 +22,7 @@ pub(crate) enum ChatTurnStage {
     Copied,
     RetryReady,
     Retried,
+    #[cfg(target_os = "macos")]
     Completed,
 }
 impl ChatTurnStage {

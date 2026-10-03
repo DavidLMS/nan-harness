@@ -44,7 +44,7 @@ fn counts(mut query: impl FnMut(&str) -> Option<usize>) -> serde_json::Value {
     })
 }
 
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(target_os = "macos", windows, test))]
 fn source_composer_ready(classic: Option<usize>, modern: Option<usize>) -> bool {
     matches!((classic, modern), (Some(1), Some(0)) | (Some(0), Some(1)))
 }
@@ -94,6 +94,38 @@ impl Gui {
         }
     }
 
+    #[cfg(windows)]
+    pub(super) fn wait_initial_windows_claude_composer<P: crate::process::Observation>(
+        &self,
+        process: &mut P,
+        deadline: std::time::Instant,
+    ) -> Result<(), super::visual::AcquisitionFailure> {
+        loop {
+            // Reuse the original-window acquisition checks and its absolute
+            // deadline. A source editor cannot waive native stability or focus.
+            self.visual
+                .finish_windows_initial_acquisition(process, deadline)?;
+            let count = |label: &str| {
+                self.app.as_ref()?.locator(&format!(
+                    "text_area[visible=\"true\"][editable=\"true\"][name=\"{label}\"], text_area[visible=\"true\"][editable=\"true\"][description=\"{label}\"], text_field[visible=\"true\"][editable=\"true\"][name=\"{label}\"], text_field[visible=\"true\"][editable=\"true\"][description=\"{label}\"]"
+                )).elements().ok().map(|elements| elements.len())
+            };
+            let classic = count("Write your prompt to Claude");
+            self.visual
+                .finish_windows_initial_acquisition(process, deadline)?;
+            let modern = count("Message");
+            self.visual
+                .finish_windows_initial_acquisition(process, deadline)?;
+            if source_composer_ready(classic, modern) {
+                return Ok(());
+            }
+            std::thread::sleep(
+                std::time::Duration::from_millis(200)
+                    .min(deadline.saturating_duration_since(std::time::Instant::now())),
+            );
+        }
+    }
+
     pub(super) fn claude_composer_inventory(&self) -> Option<serde_json::Value> {
         let mac = cfg!(target_os = "macos")
             && std::env::var("RUNNER_OS").as_deref() == Ok("macOS")
@@ -103,7 +135,10 @@ impl Gui {
             && std::env::var("RUNNER_OS").as_deref() == Ok("Linux")
             && std::env::var("NANH_CLAUDE_LINUX_SOURCE_POLICY").as_deref()
                 == Ok("official-2.9939.4");
-        if !(mac || linux)
+        let windows = cfg!(windows)
+            && std::env::var("RUNNER_OS").as_deref() == Ok("Windows")
+            && std::env::var("NANH_CLAUDE_WINDOWS_PROFILE_POLICY").as_deref() == Ok("private-env");
+        if !(mac || linux || windows)
             || self.kind != DesktopHarnessKind::Claude
             || std::env::var("GITHUB_ACTIONS").as_deref() != Ok("true")
             || std::env::var("RUNNER_ENVIRONMENT").as_deref() != Ok("github-hosted")
@@ -136,7 +171,8 @@ pub(super) fn record(directory: &Path, owner: u32, source_count: &serde_json::Va
             return;
         }
     }
-    // Frozen official Mac ZIP 2.19675.0; the enclosing trial binds its artifact/app digests.
+    // Frozen official Mac ZIP and Windows MSIX 2.19675.0 contain byte-identical
+    // renderer chunks; the enclosing trial binds platform artifact/app digests.
     let mut value = serde_json::json!({"schemaVersion":1,"mechanism":"claude-native-composer",
         "diagnosticsOnly":true,"sourceVersion":"2.19675.0",
         "classicSourceSha256":"6e6be632eb7adc0e66c1bb795448269d6c1f3ffe8821bea59d9e9374671cf0ea",
@@ -178,6 +214,27 @@ mod tests {
         ] {
             assert!(!source_composer_ready(counts.0, counts.1));
         }
+    }
+
+    #[test]
+    fn readiness_does_not_misclassify_new_chat_send_state_as_cowork_or_login() {
+        let measured = counts(|selector| {
+            if selector.contains("Write your prompt to Claude") || selector.contains("Start task") {
+                Some(1)
+            } else {
+                Some(0)
+            }
+        });
+        assert_eq!(measured["startTaskVisible"], 1);
+        assert_eq!(measured["sendMessageEnabled"], 0);
+        assert!(source_composer_ready(
+            measured["classicEditable"]
+                .as_u64()
+                .and_then(|count| usize::try_from(count).ok()),
+            measured["modernMessageEditable"]
+                .as_u64()
+                .and_then(|count| usize::try_from(count).ok()),
+        ));
     }
 
     #[test]

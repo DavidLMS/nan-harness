@@ -1006,10 +1006,28 @@ def semantic_observations(directory, app):
             record.update({key: value[key] for key in fields - {'schemaVersion', 'mechanism'}})
         elif mechanism == 'renderer-inventory':
             fields = set('schemaVersion mechanism diagnosticsOnly app endpointOwned launcherOwned attached pageCount textareaCount editableCount sendCount retryCount newThreadCount loginCount dialogCount errorCategory'.split())
-            if set(value) - {'documentState', 'startupScreen', 'landingCounts', 'onboardingCounts', 'publicOnboarding', 'mainAuxCorrelation', 'codexSession', 'initialMainBinding', 'initialMainConfirmation'} != fields or value['app'] != app or value['diagnosticsOnly'] is not True:
+            if set(value) - {'documentState', 'startupScreen', 'landingCounts', 'onboardingCounts', 'publicOnboarding', 'mainAuxCorrelation', 'codexSession', 'initialMainBinding', 'initialMainConfirmation', 'sourceScreen'} != fields or value['app'] != app or value['diagnosticsOnly'] is not True:
                 raise ValueError('invalid renderer inventory identity')
             for key in ('endpointOwned', 'launcherOwned', 'attached'):
                 flag(record, value, key)
+            if 'sourceScreen' in value:
+                screen = value['sourceScreen']
+                headings = dict(gatewayHeading='gateway-connect', recoveryHeading='app-recovery',
+                                importHeading='external-import', allSetHeading='all-set',
+                                permissionHeading='permission-setup')
+                keys = set(headings) | {'continueSignIn'}
+                if (app != 'chatgpt-desktop' or type(screen) is not dict
+                        or set(screen) != {'status', 'counts'}
+                        or type(screen['counts']) is not dict or set(screen['counts']) != keys
+                        or any(type(count) is not int or not 0 <= count <= 32
+                               for count in screen['counts'].values())):
+                    raise ValueError('invalid Codex source screen')
+                present = [key for key in headings if screen['counts'][key] > 0]
+                expected = ('unknown' if not present else headings[present[0]]
+                            if len(present) == 1 and screen['counts'][present[0]] == 1 else 'ambiguous')
+                if type(screen['status']) is not str or screen['status'] != expected:
+                    raise ValueError('inconsistent Codex source screen')
+                record['sourceScreen'] = screen
             if 'landingCounts' in value:
                 counts = value['landingCounts']
                 keys = {'importHeading', 'importDismiss', 'createProject', 'sourceFolders', 'projectName'}

@@ -1815,6 +1815,40 @@ class QualificationTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'chatgpt-desktop')
 
+    def test_codex_source_screen_is_closed_passive_and_consistent(self):
+        value = dict(schemaVersion=1, mechanism='renderer-inventory', diagnosticsOnly=True,
+                     app='chatgpt-desktop', endpointOwned=True, launcherOwned=True, attached=True,
+                     pageCount=1, textareaCount=0, editableCount=0, sendCount=0,
+                     retryCount=0, newThreadCount=0, loginCount=0, dialogCount=0, errorCategory=None)
+        headings = dict(gatewayHeading='gateway-connect', recoveryHeading='app-recovery',
+                        importHeading='external-import', allSetHeading='all-set',
+                        permissionHeading='permission-setup')
+        empty = dict.fromkeys((*headings, 'continueSignIn'), 0)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / 'inventory.json'
+            screens = [dict(status='unknown', counts={**empty, 'continueSignIn': 1}),
+                       dict(status='ambiguous', counts={**empty, 'gatewayHeading': 2}),
+                       dict(status='ambiguous', counts={**empty, 'gatewayHeading': 1, 'allSetHeading': 1})]
+            screens.extend(dict(status=status, counts={**empty, key: 1}) for key, status in headings.items())
+            for screen in screens:
+                path.write_text(json.dumps({**value, 'sourceScreen': screen}))
+                self.assertEqual(q.semantic_observations(root, 'chatgpt-desktop')[0]['sourceScreen'], screen)
+            screen = dict(status='unknown', counts=empty)
+            for changed in ({**screen, 'title': 'PRIVATE'}, {**screen, 'status': 'PRIVATE'},
+                            {**screen, 'status': 'gateway-connect'},
+                            {**screen, 'counts': {**empty, 'gatewayHeading': True}},
+                            {**screen, 'counts': {**empty, 'gatewayHeading': 33}},
+                            {**screen, 'counts': {**empty, 'url': 'PRIVATE'}},
+                            {**screen, 'counts': {key: count for key, count in empty.items() if key != 'continueSignIn'}}):
+                path.write_text(json.dumps({**value, 'sourceScreen': changed}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'chatgpt-desktop')
+            path.write_text(json.dumps({**value, 'app': 'claude-desktop', 'sourceScreen': screen}))
+            with self.assertRaises(ValueError):
+                q.semantic_observations(root, 'claude-desktop')
+            self.assertEqual(q.envelope('chatgpt-desktop', 'linux', 'x86_64', 'a' * 40)['qualification'], 'unqualified')
+
     def test_codex_main_confirmation_preserves_failed_guard_and_privacy(self):
         value = dict(schemaVersion=1, mechanism='renderer-inventory', diagnosticsOnly=True,
                      app='chatgpt-desktop', endpointOwned=True, launcherOwned=True, attached=True,

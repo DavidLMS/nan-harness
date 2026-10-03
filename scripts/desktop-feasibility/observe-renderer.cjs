@@ -346,8 +346,30 @@ async function run() {
         : appName !== 'pen-desktop' ? 'unmeasured'
         : headings.length === 1 && headings[0].textContent === 'Hardware acceleration unavailable' ? 'gpu-unavailable'
         : headings.length === 1 && headings[0].textContent === 'Failed to start pen.dev' ? 'startup-failed' : 'other';
+      let sourceScreen;
+      if (appName === 'chatgpt-desktop') {
+        // Frozen public headings, including the source's non-heading all-set title.
+        // These are observations only; no category authorizes an action or login.
+        const titles = [...document.querySelectorAll('h1,h2,h3,[role="heading"],[class~="text-3xl"][class~="leading-9"][class~="font-normal"]')].filter(visible);
+        const exact = labels => Math.min(32, titles.filter(e => labels.includes(e.textContent || '')).length);
+        const screenCounts = {
+          gatewayHeading: exact(['Connect to your gateway']),
+          recoveryHeading: exact(['ChatGPT hit a snag']),
+          importHeading: exact(['Import other AI setup', 'Import work from other AI apps', 'Import from other AI apps']),
+          allSetHeading: exact(["You're all set"]),
+          permissionHeading: exact(['Give ChatGPT access to your computer']),
+          continueSignIn: Math.min(32, buttons.filter(e => (e.getAttribute('aria-label') || e.innerText || '') === 'Continue to Sign In').length),
+        };
+        const categories = [['gatewayHeading', 'gateway-connect'], ['recoveryHeading', 'app-recovery'],
+          ['importHeading', 'external-import'], ['allSetHeading', 'all-set'], ['permissionHeading', 'permission-setup']];
+        const observed = categories.filter(([key]) => screenCounts[key] > 0);
+        const status = observed.length === 0 ? 'unknown'
+          : observed.length === 1 && screenCounts[observed[0][0]] === 1 ? observed[0][1] : 'ambiguous';
+        sourceScreen = {status, counts: screenCounts};
+      }
       return { textareaCount: count('textarea'), editableCount: count('[contenteditable="true"]'),
         startupScreen,
+        ...(sourceScreen ? {sourceScreen} : {}),
         landingCounts: {
           importHeading: Math.min(4096, [...document.querySelectorAll('h1,h2,h3,[role="heading"]')]
             .filter(visible).filter(e => /^(Import other AI setup|Import work from other AI apps)$/.test(e.textContent || '')).length),

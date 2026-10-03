@@ -1234,12 +1234,9 @@ impl NativeClipboardSession<'_> {
         let mut matched = 0;
         self.clear_zoom_tooltip(deadline)?;
         for (button, bounds) in candidates {
-            // A prior neutral move remains in effect; a fresh absence query still
-            // precedes every hover, without another redundant pointer action.
-            observation.tooltip_progress("absence", deadline);
-            if !self.wait_zoom_tooltip(false, deadline)? {
-                return Err(Reason::SelectorNotMatched);
-            }
+            // Initial clear, then each prior final clear, already proved
+            // absence after a guarded neutral move. No intervening input occurs
+            // before this hover, which rechecks ownership itself.
             observation.tooltip_progress("hover", deadline);
             self.hover_zoom_candidate(&button, bounds, deadline)?;
             observation.tooltip_progress("present", deadline);

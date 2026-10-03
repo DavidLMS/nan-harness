@@ -257,3 +257,34 @@ assert.equal(roleSourceScope({foreignFieldset:true}).mainScope,false);
   await assert.rejects(helper.correlationIdentity(missingLoader,1000,false));
   console.log('Renderer correlation: passive identity, early binding and privacy cases passed');
 })().catch(error=>{console.error(error);process.exitCode=1;});
+
+// Run the production final DOM reducer with exact source titles and buttons.
+function sourceScreenFixture(titles, labels = [], app = 'chatgpt-desktop') {
+  const node = text => ({textContent: text, innerText: text, isConnected: true,
+    getAttribute: () => null, getBoundingClientRect: () => ({width: 10, height: 10})});
+  const headings = titles.map(node), buttons = labels.map(node);
+  const callback = vm.runInNewContext(`(${source.slice(start, end)})`, {
+    document: {readyState: 'complete', body: {innerText: ''}, querySelectorAll: selector =>
+      selector === 'button,[role="button"]' ? buttons : selector === 'h1' ? headings
+        : selector.startsWith('h1,h2,h3') ? headings : []},
+    location: {href: 'app:private', protocol: 'app:'}, getComputedStyle: () => ({visibility: 'visible'}),
+  });
+  const result = callback(app);
+  const bytes = JSON.stringify(result.sourceScreen);
+  for (const value of [...titles, ...labels]) if (bytes) assert(!bytes.includes(value));
+  return result.sourceScreen;
+}
+for (const [title, status] of [['Connect to your gateway','gateway-connect'],
+  ['ChatGPT hit a snag','app-recovery'], ['Import from other AI apps','external-import'],
+  ["You're all set",'all-set'], ['Give ChatGPT access to your computer','permission-setup']]) {
+  assert.equal(sourceScreenFixture([title]).status, status);
+  assert.equal(sourceScreenFixture([title,title]).status, 'ambiguous');
+}
+assert.equal(sourceScreenFixture(['PRIVATE_UNKNOWN']).status, 'unknown');
+assert.equal(sourceScreenFixture(['Connect to your gateway','ChatGPT hit a snag']).status, 'ambiguous');
+const signIn = sourceScreenFixture([], ['Continue to Sign In']);
+assert.equal(signIn.status, 'unknown');
+assert.equal(signIn.counts.continueSignIn, 1);
+assert.equal(sourceScreenFixture(['Connect to your gateway'], [], 'claude-desktop'), undefined);
+assert.equal(sourceScreenFixture(Array(40).fill('ChatGPT hit a snag')).counts.recoveryHeading, 32);
+console.log('Renderer source-screen classifier: privacy, ambiguity and bounded counts passed');

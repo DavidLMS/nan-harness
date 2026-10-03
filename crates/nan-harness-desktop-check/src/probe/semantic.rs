@@ -126,27 +126,21 @@ impl SemanticBackend {
         result: &mut ProbeResult,
         composer_observations: &mut Vec<ComposerFailure>,
     ) -> Result<(), Reason> {
+        #[cfg(target_os = "macos")]
+        if self.kind == DesktopHarnessKind::Claude
+            && std::env::var("NANH_CLAUDE_MAC_NATIVE_CHAT").as_deref() == Ok("1")
+        {
+            let mut ui = SemanticUi::Claude(gui.claude_native_chat_session(&self.directory)?);
+            let outcome = complete_scenario(&mut ui, &scenario, &self.directory, result).await;
+            return ui.finish(scenario.gate, outcome);
+        }
+
         let mut ui = match self.kind {
             DesktopHarnessKind::Zed => {
                 SemanticUi::Zed(Box::new(gui.native_clipboard_session(&self.directory)?))
             }
             DesktopHarnessKind::Hermes => return Err(Reason::IsolationUnavailable),
-            DesktopHarnessKind::Claude => {
-                #[cfg(target_os = "macos")]
-                if std::env::var("NANH_CLAUDE_MAC_NATIVE_CHAT").as_deref() == Ok("1") {
-                    let mut ui =
-                        SemanticUi::Claude(gui.claude_native_chat_session(&self.directory)?);
-                    let outcome =
-                        complete_scenario(&mut ui, &scenario, &self.directory, result).await;
-                    return ui.finish(scenario.gate, outcome);
-                }
-                return gui.inventory_renderer(
-                    &self.directory,
-                    owner.ok_or(Reason::ApplicationExited)?,
-                    composer_observations,
-                );
-            }
-            DesktopHarnessKind::ChatGpt | DesktopHarnessKind::Pen => {
+            DesktopHarnessKind::Claude | DesktopHarnessKind::ChatGpt | DesktopHarnessKind::Pen => {
                 return gui.inventory_renderer(
                     &self.directory,
                     owner.ok_or(Reason::ApplicationExited)?,
