@@ -2522,3 +2522,32 @@ assertions enabled on release builds across platforms. Focused Rust transport
 tests, 107 strict qualification tests, native pure contracts and checker Clippy
 pass; hosted Windows compilation and actual current-mode evidence remain
 required.
+
+
+### Exact-source follow-up: Codex release drift and native guards
+
+The official macOS and Linux Codex artifacts now report `26.930.41038`;
+Windows remains at the previously inspected `26.930.31730` artifact. Separate
+platform catalogs bind the new artifact, executable and DialogTitle wrapper
+hashes. Linux admits 63 inspected static titles and macOS admits 24. A
+release mismatch still blocks input; these source updates do not establish
+native qualification. Static-title rejection now publishes an optional closed
+stage after two consistent measurements, without runtime text or DOM identity.
+
+[Claude Windows 37157851348](https://github.com/DavidLMS/nan-harness/actions/runs/37157851348)
+builds and observes a complete 141-node owned UIA tree, one classic editor and
+one Start task control. The retained Mode group is present, but the exact
+Chat/Cowork button counts are zero; current-mode status is `missing`. No mode
+or input action is authorized by that observation.
+[Claude macOS 37157852142](https://github.com/DavidLMS/nan-harness/actions/runs/37157852142)
+again reaches two submitted/copied responses in one session, then reports a
+completed Read tool error with unknown category. Both runs pass cleanup and
+emit zero invalid diagnostic events. Neither cell is qualified.
+
+A preceding macOS runtime receipt proves native foreground and full AX focus
+while the window-only AX query returns `cannot-complete`. Runtime guards now
+passively settle only that existing incomplete-read predicate under the
+original deadline and retained identity/geometry. Pending reads never
+authorize input; hard rejection, transport failure and deadline expiry remain
+terminal. Nine focused runtime tests, 109 strict qualification tests, static
+catalog contracts and CLI/checker Clippy pass on the updated tree.

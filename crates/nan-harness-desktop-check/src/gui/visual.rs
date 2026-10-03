@@ -759,23 +759,36 @@ impl Visual {
         {
             return Err(Reason::IsolationUnavailable);
         }
-        let snapshot = self
-            .native
-            .windows_with_focus_until(expected.pid, deadline)
-            .map_err(|category| {
-                observe(Some(category), None);
-                category.reason()
-            })?;
-        if Instant::now() >= deadline {
+        let mut transport_failure = None;
+        let result = settle_runtime_focus(
+            &expected,
+            deadline,
+            || {
+                self.native
+                    .windows_with_focus_until(expected.pid, deadline)
+                    .map_err(|category| {
+                        transport_failure = Some(category);
+                        category.reason()
+                    })
+            },
+            Instant::now,
+            std::thread::sleep,
+            |snapshot, failure| {
+                record_claude_snapshot(snapshot, &expected, "runtime-rejection");
+                observe(None, Some(failure));
+                if failure == GuardFailure::Occluded
+                    && let Some(diagnostic) = snapshot.occluders(&expected)
+                {
+                    crate::occlusion::emit(&diagnostic);
+                }
+            },
+        );
+        if let Some(category) = transport_failure {
+            observe(Some(category), None);
+        } else if result == Err(Reason::Timeout) {
             observe(Some(FailureCategory::Timeout), None);
-            return Err(FailureCategory::Timeout.reason());
         }
-        Self::guard_snapshot_observed(&snapshot, &expected, |failure| {
-            // Publish the exact rejected runtime proof, independently of the
-            // earlier acquisition receipt. Never refresh the retained geometry.
-            record_claude_snapshot(&snapshot, &expected, "runtime-rejection");
-            observe(None, Some(failure));
-        })
+        result
     }
 
     fn guard_snapshot(snapshot: &Snapshot, expected: &Window) -> Result<(), Reason> {
@@ -1699,6 +1712,66 @@ fn final_initial_candidate(snapshot: &Snapshot, original: &Window) -> Result<Win
     Ok(current.clone())
 }
 
+/// Retry only an incomplete public AX read. The retained window and original
+/// action deadline remain fixed; pending observations never authorize input.
+#[cfg(any(test, target_os = "macos"))]
+fn settle_runtime_focus<Query, Now, Pause, Reject>(
+    expected: &Window,
+    deadline: Instant,
+    mut query: Query,
+    mut now: Now,
+    mut pause: Pause,
+    mut reject: Reject,
+) -> Result<(), Reason>
+where
+    Query: FnMut() -> Result<Snapshot, Reason>,
+    Now: FnMut() -> Instant,
+    Pause: FnMut(Duration),
+    Reject: FnMut(&Snapshot, GuardFailure),
+{
+    let mut pending: Option<Snapshot> = None;
+    loop {
+        if now() >= deadline {
+            if let Some(snapshot) = &pending {
+                reject(snapshot, GuardFailure::SameProcessWindow);
+            }
+            return Err(Reason::Timeout);
+        }
+        let snapshot = match query() {
+            Ok(snapshot) => snapshot,
+            Err(reason) => {
+                if reason == Reason::Timeout
+                    && let Some(snapshot) = &pending
+                {
+                    reject(snapshot, GuardFailure::SameProcessWindow);
+                }
+                return Err(reason);
+            }
+        };
+        let verdict = snapshot.claude_focused_guard_failure(expected);
+        if now() >= deadline {
+            if let Err(failure) = verdict {
+                reject(&snapshot, failure);
+            } else if let Some(snapshot) = &pending {
+                reject(snapshot, GuardFailure::SameProcessWindow);
+            }
+            return Err(Reason::Timeout);
+        }
+        match verdict {
+            Ok(()) => return Ok(()),
+            Err(GuardFailure::SameProcessWindow) if snapshot.claude_focus_pending(expected) => {
+                pending = Some(snapshot);
+                let remaining = deadline.saturating_duration_since(now());
+                pause(remaining.min(Duration::from_millis(20)));
+            }
+            Err(failure) => {
+                reject(&snapshot, failure);
+                return Err(failure.reason());
+            }
+        }
+    }
+}
+
 fn scoped_composer_guard(snapshot: &Snapshot, window: &Window) -> Result<(), GuardFailure> {
     #[cfg(target_os = "macos")]
     if crate::native::claude_focus_policy() && matches_app(DesktopHarnessKind::Claude, &window.name)
@@ -2229,6 +2302,166 @@ fn record_claude_snapshot(snapshot: &Snapshot, held: &Window, phase: &str) {
 mod tests {
     use super::*;
     use crate::native::FitFailure;
+
+    fn runtime_focus_fixture(proofs: &str) -> Snapshot {
+        Snapshot::parse(&format!(
+            "FG 7 0\nDISPLAY 0 0 2000 2000\nWIN 99 7 1500 1500 10 10 50616e656c 3\nWIN 1 7 10 20 800 600 436c61756465 0\n{proofs}"
+        )).unwrap()
+    }
+
+    #[test]
+    fn runtime_pending_focus_settles_without_rebinding_or_input() {
+        use std::{cell::Cell, collections::VecDeque};
+        let pending = runtime_focus_fixture(
+            "FOCUS proved 1\nFOCUS_WINDOW query-error 0\nFOCUS_WINDOW_QUERY before main-window cannot-complete\n",
+        );
+        let held = pending.windows[1].clone();
+        let ready = runtime_focus_fixture("FOCUS proved 1\nFOCUS_WINDOW proved 1\n");
+        let mut snapshots = VecDeque::from([pending, ready]);
+        let start = Instant::now();
+        let elapsed = Cell::new(Duration::ZERO);
+        let calls = Cell::new(0);
+        let mut rejected = Vec::new();
+        let result = settle_runtime_focus(
+            &held,
+            start + Duration::from_secs(5),
+            || {
+                calls.set(calls.get() + 1);
+                Ok(snapshots.pop_front().unwrap())
+            },
+            || start + elapsed.get(),
+            |duration| {
+                assert!(duration <= Duration::from_millis(20));
+                elapsed.set(elapsed.get() + duration);
+            },
+            |_, failure| rejected.push(failure),
+        );
+        assert_eq!(result, Ok(()));
+        assert_eq!(calls.get(), 2);
+        assert!(rejected.is_empty());
+        assert_eq!(held.bounds.width, 800);
+    }
+
+    #[test]
+    fn runtime_pending_expiry_records_once_and_never_authorizes_input() {
+        use std::cell::Cell;
+        let pending = runtime_focus_fixture(
+            "FOCUS proved 1\nFOCUS_WINDOW query-error 0\nFOCUS_WINDOW_QUERY before main-window cannot-complete\n",
+        );
+        let held = pending.windows[1].clone();
+        let start = Instant::now();
+        let elapsed = Cell::new(Duration::ZERO);
+        let calls = Cell::new(0);
+        let mut rejected = Vec::new();
+        let result = settle_runtime_focus(
+            &held,
+            start + Duration::from_millis(30),
+            || {
+                calls.set(calls.get() + 1);
+                Ok(pending.clone())
+            },
+            || start + elapsed.get(),
+            |duration| elapsed.set(elapsed.get() + duration),
+            |snapshot, failure| {
+                assert!(snapshot.claude_focus_pending(&held));
+                rejected.push(failure);
+            },
+        );
+        assert_eq!(result, Err(Reason::Timeout));
+        assert_eq!(elapsed.get(), Duration::from_millis(30));
+        assert_eq!(calls.get(), 2);
+        assert_eq!(rejected, [GuardFailure::SameProcessWindow]);
+    }
+
+    #[test]
+    fn runtime_hard_rejections_and_transport_failures_are_not_retried() {
+        use std::cell::Cell;
+        let ready = runtime_focus_fixture("FOCUS proved 1\nFOCUS_WINDOW proved 1\n");
+        let held = ready.windows[1].clone();
+        let unsupported = runtime_focus_fixture(
+            "FOCUS proved 1\nFOCUS_WINDOW query-error 0\nFOCUS_WINDOW_QUERY before main-window no-value\n",
+        );
+        let mut moved = ready.clone();
+        moved.windows[1].bounds.width += 1;
+        let mut foreign = ready.clone();
+        foreign.windows[1].id += 1;
+        let mut overlap = ready.clone();
+        overlap.windows[0].bounds = held.bounds;
+        let mut normal = ready.clone();
+        normal.windows[0].layer = 0;
+        for snapshot in [unsupported, moved, foreign, overlap, normal] {
+            let start = Instant::now();
+            let calls = Cell::new(0);
+            let mut rejected = 0;
+            assert!(
+                settle_runtime_focus(
+                    &held,
+                    start + Duration::from_secs(5),
+                    || {
+                        calls.set(calls.get() + 1);
+                        Ok(snapshot.clone())
+                    },
+                    || start,
+                    |_| panic!("hard rejection must not poll"),
+                    |_, _| rejected += 1
+                )
+                .is_err()
+            );
+            assert_eq!(calls.get(), 1);
+            assert_eq!(rejected, 1);
+        }
+        let start = Instant::now();
+        let calls = Cell::new(0);
+        assert_eq!(
+            settle_runtime_focus(
+                &held,
+                start + Duration::from_secs(5),
+                || {
+                    calls.set(calls.get() + 1);
+                    Err(Reason::DesktopUnavailable)
+                },
+                || start,
+                |_| panic!("transport must not poll"),
+                |_, _| panic!("no snapshot")
+            ),
+            Err(Reason::DesktopUnavailable)
+        );
+        assert_eq!(calls.get(), 1);
+    }
+
+    #[test]
+    fn runtime_focus_proof_cannot_authorize_after_original_deadline() {
+        use std::cell::Cell;
+        let ready = runtime_focus_fixture("FOCUS proved 1\nFOCUS_WINDOW proved 1\n");
+        let held = ready.windows[1].clone();
+        let start = Instant::now();
+        assert_eq!(
+            settle_runtime_focus(
+                &held,
+                start,
+                || panic!("expired query"),
+                || start,
+                |_| panic!("expired sleep"),
+                |_, _| panic!("no snapshot")
+            ),
+            Err(Reason::Timeout)
+        );
+        let elapsed = Cell::new(Duration::ZERO);
+        assert_eq!(
+            settle_runtime_focus(
+                &held,
+                start + Duration::from_millis(10),
+                || {
+                    elapsed.set(Duration::from_millis(10));
+                    Ok(ready.clone())
+                },
+                || start + elapsed.get(),
+                |_| panic!("late proof"),
+                |_, _| panic!("ready snapshot")
+            ),
+            Err(Reason::Timeout)
+        );
+    }
 
     #[test]
     fn runtime_rejection_uses_retained_geometry_even_with_fresh_focus() {
