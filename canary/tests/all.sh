@@ -54,3 +54,9 @@ for test_script in \
   printf '==> canary/tests/%s\n' "$test_script"
   python3 "$tests_directory/$test_script"
 done
+
+# Offline source-bound SVG references have a separate, locked build-only graph.
+reference_manifest="$tests_directory/../../scripts/desktop-feasibility/zed-icon-raster/Cargo.toml"
+cargo fmt --manifest-path "$reference_manifest" --check
+cargo clippy --locked --manifest-path "$reference_manifest" --all-targets -- -D warnings
+cargo test --locked --manifest-path "$reference_manifest"
