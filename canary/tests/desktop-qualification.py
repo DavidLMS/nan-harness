@@ -1694,10 +1694,14 @@ class QualificationTests(unittest.TestCase):
                         'tooltipPhase': 'initial-clear'}
             path.write_text(json.dumps(progress))
             self.assertEqual(q.semantic_observations(root, 'zed-desktop'), [progress])
+            bounded = {**progress, 'tooltipStartRemainingMs': 30000, 'tooltipEndRemainingMs': 2200,
+                       'tooltipPhase': 'hover'}
+            path.write_text(json.dumps(bounded))
+            self.assertEqual(q.semantic_observations(root, 'zed-desktop'), [bounded])
             for changed in ({**progress, 'tooltipEndRemainingMs': 2201},
                             {**progress, 'tooltipStartRemainingMs': True},
                             {**progress, 'tooltipPhase': 'PRIVATE'},
-                            {**progress, 'tooltipStartRemainingMs': 10001},
+                            {**progress, 'tooltipStartRemainingMs': 30001},
                             {key: item for key, item in progress.items() if key != 'tooltipPhase'}):
                 path.write_text(json.dumps(changed))
                 with self.assertRaises(ValueError):

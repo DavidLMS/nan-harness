@@ -435,7 +435,7 @@ def semantic_observations(directory, app):
             progress = {'tooltipStartRemainingMs', 'tooltipEndRemainingMs', 'tooltipPhase'}
             if progress & set(value):
                 if (progress - set(value)
-                        or any(type(value[key]) is not int or not 0 <= value[key] <= 10000 for key in progress - {'tooltipPhase'})
+                        or any(type(value[key]) is not int or not 0 <= value[key] <= 30000 for key in progress - {'tooltipPhase'})
                         or value['tooltipEndRemainingMs'] > value['tooltipStartRemainingMs']
                         or type(value['tooltipPhase']) is not str or value['tooltipPhase'] not in {
                             'initial-clear', 'absence', 'hover', 'present', 'confirmation', 'final-clear', 'completed'}):

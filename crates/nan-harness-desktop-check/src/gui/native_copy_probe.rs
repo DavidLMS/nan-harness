@@ -787,7 +787,7 @@ impl NativeClipboardSession<'_> {
             self.facts.input.clipboard_verified,
         )? {
             #[cfg(target_os = "linux")]
-            let zoom_deadline = Instant::now() + Duration::from_secs(10);
+            let zoom_deadline = Instant::now() + super::zed_zoom_probe::ZED_ZOOM_PROOF_BUDGET;
             self.gui
                 .native_copy_guard(&mut self.facts, "layout-zoom-before")?;
             Gui::neutral_key("panel-zoom")?;

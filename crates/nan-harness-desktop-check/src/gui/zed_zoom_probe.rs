@@ -6,6 +6,11 @@ use serde::Serialize;
 use xa11y::Toggled;
 use xa11y::{ElementData, Rect, Role};
 
+// One allocation covers setup, all candidates and confirmation; polls never
+// renew it, and input/provider phases retain their own existing clocks.
+#[cfg(any(target_os = "linux", test))]
+pub(super) const ZED_ZOOM_PROOF_BUDGET: std::time::Duration = std::time::Duration::from_secs(30);
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct Observation {
@@ -74,7 +79,7 @@ impl Observation {
         let remaining = deadline
             .saturating_duration_since(std::time::Instant::now())
             .as_millis()
-            .min(10_000) as u16;
+            .min(30_000) as u16;
         self.tooltip_start_remaining_ms.get_or_insert(remaining);
         self.tooltip_end_remaining_ms = Some(remaining);
         self.tooltip_phase = Some(phase);
@@ -85,7 +90,7 @@ impl Observation {
             deadline
                 .saturating_duration_since(std::time::Instant::now())
                 .as_millis()
-                .min(10_000) as u16,
+                .min(30_000) as u16,
         );
     }
     pub(super) fn unavailable(status: &'static str) -> Self {
@@ -391,6 +396,17 @@ mod tests {
         assert_eq!(value["tooltipStartRemainingMs"], 0);
         assert_eq!(value["tooltipEndRemainingMs"], 0);
         assert_eq!(value["tooltipPhase"], "initial-clear");
+        assert_eq!(value["tooltipStatus"], "unmeasured");
+        assert_eq!(value["uniqueCorrelation"], false);
+
+        let mut future = Observation::unavailable("observed");
+        future.tooltip_progress(
+            "initial-clear",
+            std::time::Instant::now() + ZED_ZOOM_PROOF_BUDGET + std::time::Duration::from_secs(1),
+        );
+        let value = serde_json::to_value(future).unwrap();
+        assert_eq!(value["tooltipStartRemainingMs"], 30_000);
+        assert_eq!(value["tooltipEndRemainingMs"], 30_000);
         assert_eq!(value["tooltipStatus"], "unmeasured");
         assert_eq!(value["uniqueCorrelation"], false);
     }
