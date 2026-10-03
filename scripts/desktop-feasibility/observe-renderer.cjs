@@ -293,6 +293,119 @@ function publishCodexBinding(output,owner,connection,guard) {
       ||process.platform!=='win32'&&(metadata.mode&0o077)!==0)throw new Error('private-root');
   fs.writeFileSync(bindingPath,JSON.stringify(checkpoint)+'\n',{mode:0o600,flag:'wx'});
 }
+function linuxDialogPolicy(appName,platform,env) {
+  return onboardingTrial(appName,platform,env)&&platform==='linux'
+    &&env.NANH_CODEX_PROJECT_POLICY==='open-project'
+    &&env.NANH_CODEX_PROJECT_ARTIFACT_SHA256==='e0174d8d0a5f4141145458c814f3c2d863dd67e942b868785a1f5dac9cba3e16';
+}
+function linuxDialogFacts() {
+  return {schemaVersion:1,mechanism:'codex-linux-startup-dialog',diagnosticsOnly:true,
+    sourceVersion:'26.930.31730',
+    completeSourceSha256:'16b6c59e36aa19da0c4ec1560b6cedec43fabffeca2601710cb6f25f22c593cc',
+    onboardingSourceSha256:'b8dff84333a6cfb62341d43642087ba8d72dd31225ed2b3b8e29ad7da31372c6',
+    projectSourceSha256:'802041599f534cdc852760bcc3eb18bc4bdc2fda523b8983098c5946476504a9',
+    status:'guard-rejected',candidate:'unknown',
+    sourceCount:{dialogCount:null,allSetTitleCount:null,importedSetupTitleCount:null,
+      computerHistoryTitleCount:null,projectImportTitleCount:null,
+      allSetMatchCount:null,importedSetupMatchCount:null,computerHistoryMatchCount:null,projectImportMatchCount:null}};
+}
+function holdLinuxDialog() {
+  const visible=e=>{const r=e.getBoundingClientRect(),s=getComputedStyle(e);
+    return e.isConnected&&r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden';};
+  const dialogs=[...document.querySelectorAll('[role="dialog"],[aria-modal="true"],[role="alertdialog"]')].filter(visible);
+  return {document,dialog:dialogs.length===1?dialogs[0]:null};
+}
+// Standalone browser callback: static source predicates, no application callbacks.
+function matchLinuxDialog(held) {
+  const visible=e=>{if(!e)return false;const r=e.getBoundingClientRect(),s=getComputedStyle(e);
+    return e.isConnected&&r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden';};
+  if(held.document!==document||!document.hasFocus())return null;
+  const dialogs=[...document.querySelectorAll('[role="dialog"],[aria-modal="true"],[role="alertdialog"]')].filter(visible);
+  if(dialogs.length!==1||dialogs[0]!==held.dialog||held.dialog.ownerDocument!==document
+      ||held.dialog.getAttribute('role')!=='dialog')return null;
+  const dialog=held.dialog;
+  const titles=[...dialog.querySelectorAll('h1,h2,h3,[role="heading"],[class~="text-3xl"][class~="leading-9"][class~="font-normal"]')].filter(visible);
+  const buttons=[...dialog.querySelectorAll('button')].filter(visible);
+  const forms=[...dialog.querySelectorAll('form')].filter(visible);
+  const divs=[dialog,...dialog.querySelectorAll('div')].filter(visible);
+  if([titles,buttons,forms,divs].some(nodes=>nodes.length>512))return null;
+  const text=e=>e.innerText.trim();
+  const titleCount=label=>titles.filter(e=>text(e)===label).length;
+  const buttonCount=label=>buttons.filter(e=>text(e)===label).length;
+  const styled=(element,tokens)=>tokens.every(token=>element.classList.contains(token));
+  const oneTitle=label=>titles.find(e=>text(e)===label);
+  const counts={dialogCount:1,allSetTitleCount:titleCount("You're all set"),
+    importedSetupTitleCount:titleCount('Continue with your existing setup'),
+    computerHistoryTitleCount:titleCount('Connect Computer History'),
+    projectImportTitleCount:titleCount('Select settings to import'),
+    allSetMatchCount:0,importedSetupMatchCount:0,computerHistoryMatchCount:0,projectImportMatchCount:0};
+  if(Object.values(counts).some(count=>count>32))return null;
+  if(counts.allSetTitleCount===1) {
+    const title=oneTitle("You're all set");
+    const sourceForms=forms.filter(e=>styled(e,['m-auto','flex','w-full','shrink-0','flex-col','items-center','justify-between','py-4'])&&e.contains(title));
+    if(sourceForms.length===1&&styled(title,['text-3xl','leading-9','font-normal'])) {
+      const form=sourceForms[0],controls=[...form.querySelectorAll('button')].filter(visible),links=[...form.querySelectorAll('a')].filter(visible);
+      if(controls.length===1&&text(controls[0])==='Continue'&&controls[0].getAttribute('type')==='submit'
+          &&links.filter(e=>e.classList.contains('underline')&&e.getAttribute('href')==='https://openai.com/terms').length===1
+          &&links.filter(e=>e.classList.contains('underline')&&e.getAttribute('href')==='https://openai.com/privacy').length===1)counts.allSetMatchCount=1;
+    }
+  }
+  if(counts.importedSetupTitleCount===1) {
+    const title=oneTitle('Continue with your existing setup');
+    const roots=divs.filter(e=>e.contains(title)&&(
+      styled(e,['flex','w-full','max-w-3xl','flex-col','items-center','overflow-hidden','px-10','pb-10'])
+      ||styled(e,['flex','w-full','max-w-xl','flex-col','gap-6'])));
+    if(roots.length===1&&roots[0].contains(buttons.find(e=>text(e)==='Continue'))&&buttonCount('Continue')===1
+        &&((buttonCount('Not now')===1&&buttonCount('Skip')===0)||(buttonCount('Not now')===0&&buttonCount('Skip')===1)))counts.importedSetupMatchCount=1;
+  }
+  if(counts.computerHistoryTitleCount===1) {
+    const title=oneTitle('Connect Computer History');
+    const sourceForms=forms.filter(e=>e.contains(title)&&styled(e,['pointer-events-auto','relative','hide-scrollbar','flex','flex-col','gap-6','overflow-y-auto','pb-10']));
+    const typed=(label,type)=>buttons.filter(e=>text(e)===label&&e.getAttribute('type')===type).length;
+    if(title.tagName==='H2'&&styled(title,['heading-dialog','select-none'])&&sourceForms.length===1
+        &&typed('Customize apps','button')===1&&typed('Allow access','submit')+typed('Allow all apps','submit')===1
+        &&typed('Not now','button')<=1&&buttons.every(e=>sourceForms[0].contains(e)))counts.computerHistoryMatchCount=1;
+  }
+  if(counts.projectImportTitleCount===1) {
+    const roots=divs.filter(e=>styled(e,['max-h-[min(720px,calc(100vh-64px))]','overflow-hidden'])&&e.contains(oneTitle('Select settings to import')));
+    if(roots.length===1&&buttonCount('Continue')===1&&buttonCount('Not now')===1
+        &&buttons.every(e=>roots[0].contains(e))&&roots[0].querySelectorAll('[role="checkbox"],input[type="checkbox"]').length>0)counts.projectImportMatchCount=1;
+  }
+  const matches=[['all-set',counts.allSetMatchCount],['imported-setup',counts.importedSetupMatchCount],
+    ['computer-history',counts.computerHistoryMatchCount],['project-import',counts.projectImportMatchCount]].filter(([,count])=>count===1);
+  return {status:matches.length===1?'matched':matches.length>1?'ambiguous':'other',
+    candidate:matches.length===1?matches[0][0]:matches.length>1?'ambiguous':'unknown',sourceCount:counts};
+}
+async function observeLinuxDialog(held,browser,guard,deadline,identity=correlationIdentity) {
+  const facts=linuxDialogFacts();let handle;
+  const reprove=async()=>{
+    if(!held||Date.now()>=deadline||!guard())return false;
+    const pages=browser.contexts().flatMap(c=>c.pages());
+    if(pages.length!==1||pages[0]!==held.page||!officialInitialMain(held))return false;
+    const fresh=await identity(held.page,deadline,false);
+    return Date.now()<deadline&&guard()&&sameCorrelationIdentity(held,fresh)
+      &&browser.contexts().flatMap(c=>c.pages()).length===1
+      &&browser.contexts().flatMap(c=>c.pages())[0]===held.page;
+  };
+  try {
+    if(!await reprove())return facts;
+    handle=await held.page.evaluateHandle(holdLinuxDialog);
+    if(!await reprove())return facts;
+    const first=await held.page.evaluate(matchLinuxDialog,handle);
+    if(!first||!await reprove())return facts;
+    const second=await held.page.evaluate(matchLinuxDialog,handle);
+    if(!second||JSON.stringify(first)!==JSON.stringify(second)||!await reprove())return facts;
+    return {...facts,...second};
+  } catch{return facts;}finally{if(handle)await handle.dispose().catch(()=>{});}
+}
+function recordLinuxDialog(value) {
+  const destination=`${output}.linux-dialog.json`;
+  try {
+    fs.writeFileSync(`${destination}.tmp`,JSON.stringify(value)+'\n',{mode:0o600,flag:'wx'});
+    fs.renameSync(`${destination}.tmp`,destination);
+  } catch { /* Advisory-only recording cannot change the inventory verdict. */ }
+}
+
 async function run() {
   if (!['chatgpt-desktop', 'claude-desktop', 'pen-desktop'].includes(app)
       || !Number.isSafeInteger(request.ownerPid) || request.ownerPid <= 1
@@ -357,6 +470,9 @@ async function run() {
       await new Promise(r => setTimeout(r, 250));
     }
     if (!ownership.ownedEndpoint(documentDeadline)) { facts.endpointOwned = false; facts.errorCategory = 'endpoint-unowned'; save(); return; }
+    if(linuxDialogPolicy(app,process.platform,process.env)) {
+      recordLinuxDialog(await observeLinuxDialog(initialMain,browser,ownerGuard,deadline));
+    }
     if (process.env.NANH_CODEX_PUBLIC_ONBOARDING !== undefined) {
       const targetReady = app === 'chatgpt-desktop'
         && await page.evaluate(() => location.protocol === 'app:' && document.readyState === 'complete');

@@ -2647,5 +2647,36 @@ class ClaudeLinuxModeRolesTests(unittest.TestCase):
             path.write_text(json.dumps(value))
             with self.assertRaises(ValueError): q.semantic_observations(root, 'chatgpt-desktop')
 
+
+class CodexLinuxInitialDialogTests(unittest.TestCase):
+    def test_exact_pins_passive_counts_and_unavailable_are_closed(self):
+        names = ('allSet', 'importedSetup', 'computerHistory', 'projectImport')
+        counts = {'dialogCount': 1} | {name + suffix: 0 for name in names for suffix in ('TitleCount', 'MatchCount')}
+        value = dict(schemaVersion=1, mechanism='codex-linux-startup-dialog', diagnosticsOnly=True,
+                     sourceVersion='26.930.31730', status='other', candidate='unknown', sourceCount=counts,
+                     completeSourceSha256='16b6c59e36aa19da0c4ec1560b6cedec43fabffeca2601710cb6f25f22c593cc',
+                     onboardingSourceSha256='b8dff84333a6cfb62341d43642087ba8d72dd31225ed2b3b8e29ad7da31372c6',
+                     projectSourceSha256='802041599f534cdc852760bcc3eb18bc4bdc2fda523b8983098c5946476504a9')
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'dialog.json'
+            for name, candidate in zip(names, ('all-set', 'imported-setup', 'computer-history', 'project-import')):
+                measured = {**value, 'status': 'matched', 'candidate': candidate,
+                            'sourceCount': {**counts, name + 'TitleCount': 1, name + 'MatchCount': 1}}
+                path.write_text(json.dumps(measured))
+                self.assertEqual(q.semantic_observations(root, 'chatgpt-desktop')[0]['candidate'], candidate)
+            unavailable = {**value, 'status': 'guard-rejected', 'sourceCount': dict.fromkeys(counts)}
+            path.write_text(json.dumps(unavailable))
+            self.assertEqual(q.semantic_observations(root, 'chatgpt-desktop')[0]['status'], 'guard-rejected')
+            for change in ({'status': []}, {'candidate': 'PRIVATE'}, {'title': 'PRIVATE'},
+                           {'completeSourceSha256': '0' * 64}, {'sourceVersion': 'PRIVATE'},
+                           {'sourceCount': {**counts, 'dialogCount': True}},
+                           {'sourceCount': {**counts, 'allSetTitleCount': 33}},
+                           {'sourceCount': {**counts, 'allSetMatchCount': 1}},
+                           {'status': 'matched', 'candidate': 'all-set'}):
+                path.write_text(json.dumps({**value, **change}))
+                with self.assertRaises(ValueError): q.semantic_observations(root, 'chatgpt-desktop')
+            path.write_text(json.dumps(value))
+            with self.assertRaises(ValueError): q.semantic_observations(root, 'claude-desktop')
+
 if __name__ == '__main__':
     unittest.main()
