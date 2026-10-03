@@ -1,0 +1,311 @@
+//! A separate owned inspector retains verified handles across ordinary app shutdown.
+use super::FailureCategory;
+use std::{
+    io::{BufRead as _, BufReader, Read as _, Write as _},
+    path::Path,
+    process::{Child, ChildStdin, Command, Stdio},
+    sync::mpsc::{self, Receiver},
+    thread::JoinHandle,
+    time::Instant,
+};
+
+pub(crate) struct Holder {
+    child: Child,
+    input: ChildStdin,
+    output: Receiver<Option<String>>,
+    reader: Option<JoinHandle<()>>,
+    retained: usize,
+    triggered: bool,
+    native_anchor: u64,
+    received_anchor: Instant,
+}
+
+pub(crate) fn ready(line: &str) -> Option<(usize, u64)> {
+    let words = line.split_whitespace().collect::<Vec<_>>();
+    if words.len() != 3 || words[0] != "ready" {
+        return None;
+    }
+    let count = words[1].parse::<usize>().ok()?;
+    let tick = words[2].parse::<u64>().ok()?;
+    (count <= 64 && tick > 0).then_some((count, tick))
+}
+fn cutoff(anchor: u64, received: Instant, deadline: Instant) -> Option<u64> {
+    let elapsed = deadline.checked_duration_since(received)?.as_millis();
+    // The native anchor predates its receipt. Margin also excludes coarse-clock
+    // rounding; this cutoff shortens rather than renews the cleanup deadline.
+    anchor
+        .checked_add(u64::try_from(elapsed).ok()?)?
+        .checked_sub(50)
+}
+
+impl Holder {
+    pub(crate) fn start(
+        executable: &Path,
+        launcher: u32,
+        expected: &Path,
+        digest: &str,
+        deadline: Instant,
+    ) -> Result<Self, FailureCategory> {
+        if digest.len() != 64
+            || !digest
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
+        {
+            return Err(FailureCategory::InvalidInput);
+        }
+        if Instant::now() >= deadline {
+            return Err(FailureCategory::Timeout);
+        }
+        let expected = expected
+            .canonicalize()
+            .map_err(|_| FailureCategory::InvalidInput)?;
+        if expected
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_none_or(|name| !name.eq_ignore_ascii_case("Claude.exe"))
+        {
+            return Err(FailureCategory::InvalidInput);
+        }
+        let bytes = expected
+            .to_str()
+            .ok_or(FailureCategory::InvalidInput)?
+            .as_bytes();
+        if bytes.len() > 2048 || launcher == 0 {
+            return Err(FailureCategory::InvalidInput);
+        }
+        let mut encoded = String::with_capacity(bytes.len() * 2);
+        for byte in bytes {
+            use std::fmt::Write as _;
+            write!(encoded, "{byte:02x}").map_err(|_| FailureCategory::InvalidInput)?;
+        }
+        let mut command = Command::new(executable);
+        command
+            .arg("--claude-owned-cleanup-holder")
+            .env_clear()
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+        for name in ["SystemRoot", "WINDIR"] {
+            if let Some(value) = std::env::var_os(name) {
+                command.env(name, value);
+            }
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt as _;
+            command.creation_flags(0x0800_0000);
+        }
+        let mut child = command.spawn().map_err(|_| FailureCategory::Spawn)?;
+        let Some(input) = child.stdin.take() else {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(FailureCategory::Pipe);
+        };
+        let Some(stdout) = child.stdout.take() else {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(FailureCategory::Pipe);
+        };
+        let (send, output) = mpsc::channel();
+        let reader = std::thread::spawn(move || {
+            let mut reader = BufReader::new(stdout);
+            // Two bounded protocol lines only. No raw helper output leaves RAM.
+            for _ in 0..2 {
+                let mut line = String::new();
+                let result = reader.by_ref().take(129).read_line(&mut line);
+                if !matches!(result, Ok(1..=128)) || !line.ends_with('\n') {
+                    let _ = send.send(None);
+                    return;
+                }
+                if send.send(Some(line)).is_err() {
+                    return;
+                }
+            }
+        });
+        let mut holder = Self {
+            child,
+            input,
+            output,
+            reader: Some(reader),
+            retained: 0,
+            triggered: false,
+            native_anchor: 0,
+            received_anchor: Instant::now(),
+        };
+        writeln!(
+            holder.input,
+            "{} {launcher} {encoded} {digest}",
+            std::process::id()
+        )
+        .map_err(|_| FailureCategory::Pipe)?;
+        let line = holder.line(deadline)?;
+        (holder.retained, holder.native_anchor) = ready(&line).ok_or(FailureCategory::Output)?;
+        holder.received_anchor = Instant::now();
+        Ok(holder)
+    }
+    fn line(&self, deadline: Instant) -> Result<String, FailureCategory> {
+        let duration = deadline
+            .checked_duration_since(Instant::now())
+            .ok_or(FailureCategory::Timeout)?;
+        let line = self
+            .output
+            .recv_timeout(duration)
+            .map_err(|_| FailureCategory::Timeout)?
+            .ok_or(FailureCategory::Output)?;
+        if Instant::now() >= deadline {
+            return Err(FailureCategory::Timeout);
+        }
+        Ok(line)
+    }
+    pub(crate) fn cleanup(mut self, deadline: Instant) -> serde_json::Value {
+        if let Some(cutoff) = cutoff(self.native_anchor, self.received_anchor, deadline)
+            && deadline
+                .saturating_duration_since(Instant::now())
+                .as_millis()
+                > 50
+        {
+            self.triggered = true;
+            if writeln!(self.input, "cleanup {cutoff}").is_ok()
+                && let Ok(line) = self.line(deadline)
+                && let Some(value) = result(&line, self.retained)
+            {
+                return value;
+            }
+        }
+        failure(
+            if Instant::now() >= deadline {
+                "deadline"
+            } else {
+                "uncertain"
+            },
+            Some(self.retained),
+            self.triggered,
+            true,
+        )
+    }
+}
+impl Drop for Holder {
+    fn drop(&mut self) {
+        // This is only the inspector child; retained app handles are never reopened.
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+        if let Some(reader) = self.reader.take() {
+            let _ = reader.join();
+        }
+    }
+}
+
+pub(crate) fn failure(
+    status: &str,
+    retained: Option<usize>,
+    triggered: bool,
+    verified: bool,
+) -> serde_json::Value {
+    serde_json::json!({"schemaVersion":1,"mechanism":"windows-owned-descendant-cleanup","diagnosticsOnly":true,
+        "status":status,"retainedCount":retained,"alreadyExitedCount":null,"targetedCount":null,"exitedCount":null,"rejectedCount":null,
+        "triggerAttempted":triggered,"expectedExecutableVerified":verified,"historicalOwnershipVerified":verified})
+}
+pub(crate) fn result(line: &str, retained: usize) -> Option<serde_json::Value> {
+    let words = line.split_whitespace().collect::<Vec<_>>();
+    if words.len() != 6 || words[0] != "result" {
+        return None;
+    }
+    let counts = words[1..]
+        .iter()
+        .map(|value| value.parse::<usize>().ok())
+        .collect::<Option<Vec<_>>>()?;
+    if counts[0] != retained
+        || counts.iter().any(|n| *n > 64)
+        || counts[1] + counts[2] + counts[4] != retained
+        || counts[3] > counts[2]
+    {
+        return None;
+    }
+    Some(
+        serde_json::json!({"schemaVersion":1,"mechanism":"windows-owned-descendant-cleanup","diagnosticsOnly":true,
+        "status":if counts[4]==0&&counts[3]==counts[2]{"completed"}else{"partial"},"retainedCount":retained,
+        "alreadyExitedCount":counts[1],"targetedCount":counts[2],"exitedCount":counts[3],"rejectedCount":counts[4],
+        "triggerAttempted":true,"expectedExecutableVerified":true,"historicalOwnershipVerified":true}),
+    )
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn cutoff_uses_held_clock_and_shortens_original_deadline() {
+        let received = Instant::now();
+        assert_eq!(
+            cutoff(1000, received, received + std::time::Duration::from_secs(5)),
+            Some(5950)
+        );
+        assert_eq!(
+            cutoff(
+                1000,
+                received,
+                received
+                    .checked_sub(std::time::Duration::from_millis(1))
+                    .unwrap()
+            ),
+            None
+        );
+        assert_eq!(
+            cutoff(
+                u64::MAX,
+                received,
+                received + std::time::Duration::from_secs(5)
+            ),
+            None
+        );
+    }
+    #[test]
+    fn uncertain_cleanup_keeps_only_closed_known_preflight() {
+        let value = failure("deadline", Some(5), true, true);
+        assert_eq!(value["targetedCount"], serde_json::Value::Null);
+        assert_eq!(value["triggerAttempted"], true);
+        let unavailable = failure("unavailable", None, false, false);
+        assert_eq!(unavailable["historicalOwnershipVerified"], false);
+    }
+    #[cfg(not(windows))]
+    #[test]
+    fn bounded_holder_transport_has_one_trigger_and_no_late_success() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let directory = tempfile::tempdir().unwrap();
+        let helper = directory.path().join("helper");
+        let expected = directory.path().join("Claude.exe");
+        std::fs::write(&expected, []).unwrap();
+        std::fs::write(&helper,"#!/bin/sh\nread request\nprintf 'ready 0 100\\n'\nread trigger\nprintf 'result 0 0 0 0 0\\n'\n").unwrap();
+        std::fs::set_permissions(&helper, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let deadline = Instant::now() + std::time::Duration::from_secs(2);
+        let holder = Holder::start(&helper, 1, &expected, &"0".repeat(64), deadline).unwrap();
+        assert_eq!(holder.cleanup(deadline)["status"], "completed");
+        let holder = Holder::start(&helper, 1, &expected, &"0".repeat(64), deadline).unwrap();
+        let value = holder.cleanup(Instant::now());
+        assert_eq!(value["status"], "deadline");
+        assert_eq!(value["triggerAttempted"], false);
+        assert!(Holder::start(&helper, 1, &expected, &"0".repeat(64), Instant::now()).is_err());
+    }
+    #[test]
+    fn protocol_requires_complete_partition_and_never_exports_identity() {
+        assert_eq!(ready("ready 5 100\n"), Some((5, 100)));
+        assert_eq!(ready("ready 65 100\n"), None);
+        assert_eq!(
+            result("result 5 1 4 4 0", 5).unwrap()["status"],
+            "completed"
+        );
+        assert_eq!(result("result 5 1 3 2 1", 5).unwrap()["status"], "partial");
+        for line in [
+            "result 5 1 4 5 0",
+            "result 5 1 3 3 0",
+            "result 6 0 6 6 0",
+            "result 5 1 4 4 0 PRIVATE",
+        ] {
+            assert!(result(line, 5).is_none());
+        }
+        assert!(
+            !result("result 5 1 4 4 0", 5)
+                .unwrap()
+                .to_string()
+                .contains("pid")
+        );
+    }
+}

@@ -32,6 +32,12 @@ pub(super) struct Observation {
     tooltip_status: &'static str,
     tooltip_candidates: usize,
     tooltip_matches: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tooltip_start_remaining_ms: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tooltip_end_remaining_ms: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tooltip_phase: Option<&'static str>,
 }
 
 // Raw AT-SPI roles must not be inferred from another platform's semantic role mapping.
@@ -63,6 +69,25 @@ impl Observation {
         self.tooltip_matches = matches;
     }
 
+    #[cfg(any(target_os = "linux", test))]
+    pub(super) fn tooltip_progress(&mut self, phase: &'static str, deadline: std::time::Instant) {
+        let remaining = deadline
+            .saturating_duration_since(std::time::Instant::now())
+            .as_millis()
+            .min(10_000) as u16;
+        self.tooltip_start_remaining_ms.get_or_insert(remaining);
+        self.tooltip_end_remaining_ms = Some(remaining);
+        self.tooltip_phase = Some(phase);
+    }
+    #[cfg(target_os = "linux")]
+    pub(super) fn finish_tooltip_progress(&mut self, deadline: std::time::Instant) {
+        self.tooltip_end_remaining_ms = Some(
+            deadline
+                .saturating_duration_since(std::time::Instant::now())
+                .as_millis()
+                .min(10_000) as u16,
+        );
+    }
     pub(super) fn unavailable(status: &'static str) -> Self {
         Self {
             schema_version: 1,
@@ -84,6 +109,9 @@ impl Observation {
             tooltip_status: "unmeasured",
             tooltip_candidates: 0,
             tooltip_matches: 0,
+            tooltip_start_remaining_ms: None,
+            tooltip_end_remaining_ms: None,
+            tooltip_phase: None,
         }
     }
 }
@@ -355,6 +383,18 @@ pub(super) fn correlate_canonical(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn tooltip_progress_preserves_expired_budget_without_claiming_proof() {
+        let mut observation = Observation::unavailable("observed");
+        observation.tooltip_progress("initial-clear", std::time::Instant::now());
+        let value = serde_json::to_value(observation).unwrap();
+        assert_eq!(value["tooltipStartRemainingMs"], 0);
+        assert_eq!(value["tooltipEndRemainingMs"], 0);
+        assert_eq!(value["tooltipPhase"], "initial-clear");
+        assert_eq!(value["tooltipStatus"], "unmeasured");
+        assert_eq!(value["uniqueCorrelation"], false);
+    }
+
     #[test]
     fn zoom_postcondition_requires_stable_minimize_and_selected_owned_toggle() {
         let mut held = button();

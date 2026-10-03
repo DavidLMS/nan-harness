@@ -1870,3 +1870,57 @@ it neither asserts a navigation transition nor qualifies conversation behavior.
 Unknown/unsupported values retain the existing guarded one-press path. Pure
 CoreFoundation tests reject booleans and other tokens; no native application is
 launched locally.
+
+
+Run [37119592690](https://github.com/DavidLMS/nan-harness/actions/runs/37119592690)
+on `4ad1ef60` proves the source Chat pill is already current in both acquired
+macOS sessions. The exact native current-page token, unique scoped control,
+window ownership and hit proof succeed; no redundant Chat press occurs. Each
+session observes one classic editor, Start task and no login controls. The
+third session fails stable-window acquisition. All cleanup passes. This remains
+startup evidence, not conversation acceptance.
+
+Run [37119370868](https://github.com/DavidLMS/nan-harness/actions/runs/37119370868)
+on `c4ce9449` still leaves Codex unqualified on all platforms. Windows observes
+the 11-radio role form and later a second page; macOS/Linux observe no role
+form. Initial document capture succeeds everywhere. A closed confirmation
+receipt now distinguishes missing initial binding, changed document, unfocused
+document, unmatched source scope, rejected guard and deadline using only flags
+and source-control counts from existing queries. No focus action or identity
+rebind is inferred from this diagnostic.
+
+Run [37119372629](https://github.com/DavidLMS/nan-harness/actions/runs/37119372629)
+on `c4ce9449` still exhausts Zed Linux's zoom-proof budget before Send. The next
+receipt records the last fixed tooltip phase and bounded remaining milliseconds
+at entry/exit, without changing the deadline or authorizing input. The official
+Linux Claude 2.9939.4 source-label inventory is separately enabled only after
+the runner verifies its frozen release identity. Linux source hashes cannot be
+mixed with the inspected macOS hashes.
+
+
+The integrated native candidate adds a macOS Claude Chat controller. Its private
+request includes a fixed owned window, checker-parent identity and absolute
+monotonic cutoff; native actions reject parent loss or late execution. Input
+requires current Chat, one source-labelled editor, exact prompt readback and a
+single enabled source send control. Response Copy requires the fresh settled
+assistant heading and a unique control in its native scope. Retry requires the
+same failed prompt and controlled failure in one bounded scope; missing native
+relationships block input. Clipboard and independent provider observations are
+both required. The `native-assistant-clipboard` response method is distinct from
+Zed's thread export. Startup-only observations remain unqualified; the full
+backend requires all five steps in three fresh sessions and successful cleanup.
+
+Claude Windows retains verified native process handles before the ordinary
+owned-wrapper stop. A separate bounded holder locks the original executable,
+verifies its launch-time SHA256 and historical creation-time ancestry, and can
+terminate only those retained same-image handles after ordinary shutdown. It
+cannot acquire targets after the trigger or reopen a bare PID. Its action cutoff
+uses the original absence deadline, with parent-liveness and identity checks
+immediately before termination. An uncertain holder receipt never proves cleanup;
+the independent application/process absence check remains authoritative.
+
+Integrated focused checks passed: all-target locked checker Clippy, all 349
+checker library tests, 87 qualification contracts, both Codex behavioral suites
+and pure native selector/process fixtures. Actual macOS conversation behavior
+and Windows descendant termination still require disposable hosted evidence.
+The final repository-wide gate will run on the final converged source.

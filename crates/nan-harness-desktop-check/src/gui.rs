@@ -3,6 +3,8 @@
 mod accessibility_probe;
 #[cfg(any(target_os = "macos", test))]
 mod claude_chat_navigation;
+#[cfg(target_os = "macos")]
+mod claude_native_chat;
 mod claude_native_probe;
 #[cfg(any(windows, test))]
 mod claude_windows_ready;
@@ -16,6 +18,8 @@ mod stability;
 mod visual;
 mod zed_zoom_probe;
 
+#[cfg(target_os = "macos")]
+pub(crate) use claude_native_chat::ClaudeNativeChatSession;
 pub(crate) use codex_dom_probe::CodexDomSession;
 pub(crate) use dom_probe::{DomAction, DomPurpose, DomTurn, RendererSession};
 pub(crate) use native_copy_probe::NativeClipboardSession;
@@ -307,18 +311,40 @@ impl Gui {
     }
 
     #[cfg(windows)]
+    fn process_diagnostic_enabled(&self) -> bool {
+        !(self.kind != DesktopHarnessKind::Claude
+            || std::env::var("GITHUB_ACTIONS").as_deref() != Ok("true")
+            || std::env::var("RUNNER_ENVIRONMENT").as_deref() != Ok("github-hosted")
+            || std::env::var("RUNNER_OS").as_deref() != Ok("Windows")
+            || std::env::var("NANH_DESKTOP_QUALIFICATION_MODE").as_deref()
+                != Ok("startup-baseline")
+            || std::env::var("NANH_CLAUDE_WINDOWS_PROFILE_POLICY").as_deref() != Ok("private-env"))
+    }
+
+    #[cfg(windows)]
+    pub(crate) fn capture_owned_cleanup(
+        &self,
+        launcher: u32,
+        expected: &std::path::Path,
+        digest: &str,
+        deadline: Instant,
+    ) -> Option<crate::native::OwnedCleanupHolder> {
+        if !self.process_diagnostic_enabled() {
+            return None;
+        }
+        self.visual
+            .absence_native()
+            .start_owned_cleanup_holder(launcher, expected, digest, deadline)
+            .ok()
+    }
+
+    #[cfg(windows)]
     pub(crate) fn capture_process_correlation(
         &self,
         launcher: u32,
         deadline: Instant,
     ) -> Option<crate::process::windows_correlation::Snapshot> {
-        if self.kind != DesktopHarnessKind::Claude
-            || std::env::var("GITHUB_ACTIONS").as_deref() != Ok("true")
-            || std::env::var("RUNNER_ENVIRONMENT").as_deref() != Ok("github-hosted")
-            || std::env::var("RUNNER_OS").as_deref() != Ok("Windows")
-            || std::env::var("NANH_DESKTOP_QUALIFICATION_MODE").as_deref() != Ok("startup-baseline")
-            || std::env::var("NANH_CLAUDE_WINDOWS_PROFILE_POLICY").as_deref() != Ok("private-env")
-        {
+        if !self.process_diagnostic_enabled() {
             return None;
         }
         let request = zeroize::Zeroizing::new(format!("{} {launcher}\n", std::process::id()));
@@ -334,6 +360,7 @@ impl Gui {
         kind: DesktopHarnessKind,
         gui: Option<&Self>,
         #[cfg(windows)] correlation: Option<crate::process::windows_correlation::Snapshot>,
+        #[cfg(windows)] holder: Option<crate::native::OwnedCleanupHolder>,
     ) -> Result<(), AbsenceFailure> {
         #[cfg(windows)]
         if kind == DesktopHarnessKind::Claude {
@@ -364,6 +391,11 @@ impl Gui {
                 wire.as_deref().map(String::as_str),
                 Instant::now() >= deadline,
             );
+            let cleanup = holder.map_or_else(
+                || crate::native::owned_cleanup_unavailable(),
+                |held| held.cleanup(deadline),
+            );
+            crate::process::windows_correlation::record_cleanup(&cleanup);
             let mut observed = false;
             let mut settlement = process_absence::ProcessSettlement::default();
             let outcome = settle_absence(

@@ -88,7 +88,7 @@ assert.equal(roleSourceScope({foreignFieldset:true}).mainScope,false);
 (async () => {
   let clock=0;
   const helper=vm.runInNewContext(`(() => { ${source.slice(timingStart,timingEnd)}
-    return {observeMainAux,correlationScope,correlationIdentity,captureCorrelationMain,bindCorrelationMain,heldMainGuard,initialMainFacts,initialMainRoute}; })()`,
+    return {observeMainAux,correlationScope,correlationIdentity,captureCorrelationMain,bindCorrelationMain,heldMainGuard,initialMainFacts,initialMainRoute,mainConfirmationFacts}; })()`,
     {Date:{now:()=>clock},setTimeout,clearTimeout,URL});
   const empty={roleLegend:0,roleRadios:0,engineering:0,dialog:0,quickChatComposer:0,editable:0};
   function fixture() {
@@ -124,6 +124,16 @@ assert.equal(roleSourceScope({foreignFieldset:true}).mainScope,false);
     r=>{r.scope.focused=true;},r=>{r.scope.counts.roleLegend=1;}]) {
     f=fixture();f.setAlter((r,n)=>{if(n===3)change(r);});
     assert.equal((await f.run()).status,'source-scope');
+  }
+  for(const [mutate,status] of [[r=>{r.loader='changed';},'identity-changed'],
+    [r=>{r.scope.mainScope=false;},'source-scope'],[r=>{r.scope.focused=false;},'document-unfocused']]) {
+    f=fixture();f.setAlter((r,n)=>{if(n===1)mutate(r);});
+    const facts=helper.mainConfirmationFacts();
+    assert.equal(await helper.bindCorrelationMain(f.held,f.browser,()=>true,1000,
+      ()=> 'avatarOverlay',f.identity,async()=>{},facts),null);
+    assert.equal(facts.status,status);
+    assert.deepEqual(Object.keys(facts).sort(),['counts','documentFocused','identityUnchanged','mainScopeUnique','status']);
+    assert.equal(JSON.stringify(facts).includes('app://'),false);
   }
   f=fixture();f.setAlter((r,n)=>{if(n===2)r.scope.mainScope=false;});
   assert.equal((await f.run()).status,'source-scope');

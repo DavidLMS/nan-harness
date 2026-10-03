@@ -27,4 +27,13 @@ int main() {
     times[1]=10; times[2]=20; times[3]=30;
     auto cycle=rows; cycle[1].parent=3;
     assert(!historical_descendant(cycle,cycle,3,1,10,30,query));
+    unsigned terminations=0;
+    for(const auto proof : std::vector<CleanupProof>{{false,true,true,true},{true,false,true,true},
+        {true,true,false,true},{true,true,true,false}}) {
+        assert(!terminate_verified_handle(proof,[&] { ++terminations;return true; }));
+    }
+    assert(terminations==0);
+    assert(terminate_verified_handle({true,true,true,true},[&] { ++terminations;return true; }));
+    assert(terminations==1);
+
 }

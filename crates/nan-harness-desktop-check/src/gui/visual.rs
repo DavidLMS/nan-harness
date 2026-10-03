@@ -582,6 +582,19 @@ impl Visual {
             .map_err(FailureCategory::reason)
     }
 
+    #[cfg(target_os = "macos")]
+    pub(super) fn claude_chat_turn(
+        &self,
+        mode: &str,
+        values: [&str; 3],
+        deadline: Instant,
+    ) -> Result<crate::native::ChatTurnStage, Reason> {
+        self.guard()?;
+        self.native
+            .claude_chat_turn(&self.window.borrow(), mode, values, deadline)
+            .map_err(FailureCategory::reason)
+    }
+
     pub(super) fn pid(&self) -> u32 {
         self.window.borrow().pid
     }

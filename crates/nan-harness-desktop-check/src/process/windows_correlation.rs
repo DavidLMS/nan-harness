@@ -89,6 +89,11 @@ pub(crate) fn record(wire: Option<&str>, deadline: bool) {
     super::windows_observation::record_value(&value, "windows-process-correlation");
 }
 
+#[cfg(windows)]
+pub(crate) fn record_cleanup(value: &serde_json::Value) {
+    super::windows_observation::record_value(value, "windows-owned-descendant-cleanup");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

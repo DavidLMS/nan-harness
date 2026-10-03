@@ -19,9 +19,11 @@ int activate_window(const std::string& request);
 int observe_claude();
 int claude_known_folders();
 int claude_chat_press();
+int claude_chat_turn();
 int windows_claude_storage();
 int process_presence(bool claude);
 int process_correlation(bool before);
+int owned_cleanup_holder();
 int clipboard_operation(const std::string& operation);
 
 int main(int argc, char** argv) {
@@ -40,12 +42,14 @@ int main(int argc, char** argv) {
         return activate_window(std::string(argv[1]).substr(18));
     if (argc == 2 && std::string(argv[1]).rfind("--windows-focus ", 0) == 0)
         return windows_focus(std::string(argv[1]).substr(16));
+    if (argc == 2 && std::string(argv[1]) == "--claude-owned-cleanup-holder") return owned_cleanup_holder();
     if (argc == 2 && std::string(argv[1]) == "--claude-process-before") return process_correlation(true);
     if (argc == 2 && std::string(argv[1]) == "--claude-process-after") return process_correlation(false);
     if (argc == 2 && std::string(argv[1]) == "--claude-process-presence") return process_presence(true);
     if (argc == 2 && std::string(argv[1]) == "--codex-process-presence") return process_presence(false);
     if (argc == 2 && std::string(argv[1]) == "--windows") return list_windows(true);
     if (argc == 2 && std::string(argv[1]) == "--windows-absence") return list_windows(false);
+    if (argc == 2 && std::string(argv[1]) == "--claude-chat-turn") return claude_chat_turn();
     if (argc == 2 && std::string(argv[1]) == "--claude-chat-press") return claude_chat_press();
     if (argc == 2 && std::string(argv[1]) == "--claude-known-folders") return claude_known_folders();
     if (argc == 2 && std::string(argv[1]) == "--windows-claude-storage") return windows_claude_storage();

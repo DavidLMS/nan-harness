@@ -33,3 +33,17 @@ bool historical_descendant(const std::vector<CorrelationEntry>& rows,
     }
     return false;
 }
+
+struct CleanupProof {
+    bool before_deadline;
+    bool owner_alive;
+    bool creation_matches;
+    bool image_matches;
+};
+// Only a retained handle can be passed to the callback. No PID lookup belongs
+// in this decision, and an uncertain proof never invokes termination.
+template<class Terminate>
+bool terminate_verified_handle(const CleanupProof& proof, Terminate terminate) {
+    return proof.before_deadline && proof.owner_alive && proof.creation_matches
+        && proof.image_matches && terminate();
+}

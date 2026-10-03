@@ -1213,6 +1213,18 @@ impl NativeClipboardSession<'_> {
         observation: &mut super::zed_zoom_probe::Observation,
         deadline: Instant,
     ) -> Result<bool, Reason> {
+        observation.tooltip_progress("initial-clear", deadline);
+        let result = self.perform_panel_zoom_tooltip(observation, deadline);
+        observation.finish_tooltip_progress(deadline);
+        result
+    }
+
+    #[cfg(target_os = "linux")]
+    fn perform_panel_zoom_tooltip(
+        &mut self,
+        observation: &mut super::zed_zoom_probe::Observation,
+        deadline: Instant,
+    ) -> Result<bool, Reason> {
         observation.record_tooltip("unavailable", 0, 0);
         let candidates = self
             .zoom_candidates
@@ -1224,14 +1236,19 @@ impl NativeClipboardSession<'_> {
         for (button, bounds) in candidates {
             // A prior neutral move remains in effect; a fresh absence query still
             // precedes every hover, without another redundant pointer action.
+            observation.tooltip_progress("absence", deadline);
             if !self.wait_zoom_tooltip(false, deadline)? {
                 return Err(Reason::SelectorNotMatched);
             }
+            observation.tooltip_progress("hover", deadline);
             self.hover_zoom_candidate(&button, bounds, deadline)?;
+            observation.tooltip_progress("present", deadline);
             if self.wait_zoom_tooltip(true, deadline)? {
+                observation.tooltip_progress("confirmation", deadline);
                 self.hover_zoom_candidate(&button, bounds, deadline)?;
                 matched += 1;
             }
+            observation.tooltip_progress("final-clear", deadline);
             self.clear_zoom_tooltip(deadline)?;
         }
         if Instant::now() >= deadline {
@@ -1242,6 +1259,7 @@ impl NativeClipboardSession<'_> {
             1 => "proved",
             _ => "ambiguous",
         };
+        observation.tooltip_progress("completed", deadline);
         observation.record_tooltip(status, count, matched);
         Ok(matched == 1)
     }

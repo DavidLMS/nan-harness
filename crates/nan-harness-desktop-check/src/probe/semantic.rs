@@ -2,6 +2,8 @@
 
 use super::{ProbeSpec, select_read_tool, visual_marker};
 use crate::cli::{SessionMode, VerificationPolicy};
+#[cfg(target_os = "macos")]
+use crate::gui::ClaudeNativeChatSession;
 use crate::gui::{
     CodexDomSession, ComposerFailure, DomAction, DomPurpose, DomTurn, Gui, NativeClipboardSession,
     RendererSession,
@@ -129,7 +131,22 @@ impl SemanticBackend {
                 SemanticUi::Zed(Box::new(gui.native_clipboard_session(&self.directory)?))
             }
             DesktopHarnessKind::Hermes => return Err(Reason::IsolationUnavailable),
-            DesktopHarnessKind::ChatGpt | DesktopHarnessKind::Claude | DesktopHarnessKind::Pen => {
+            DesktopHarnessKind::Claude => {
+                #[cfg(target_os = "macos")]
+                if std::env::var("NANH_CLAUDE_MAC_NATIVE_CHAT").as_deref() == Ok("1") {
+                    let mut ui =
+                        SemanticUi::Claude(gui.claude_native_chat_session(&self.directory)?);
+                    let outcome =
+                        complete_scenario(&mut ui, &scenario, &self.directory, result).await;
+                    return ui.finish(scenario.gate, outcome);
+                }
+                return gui.inventory_renderer(
+                    &self.directory,
+                    owner.ok_or(Reason::ApplicationExited)?,
+                    composer_observations,
+                );
+            }
+            DesktopHarnessKind::ChatGpt | DesktopHarnessKind::Pen => {
                 return gui.inventory_renderer(
                     &self.directory,
                     owner.ok_or(Reason::ApplicationExited)?,
@@ -144,6 +161,8 @@ impl SemanticBackend {
 
 enum SemanticUi<'a> {
     Zed(Box<NativeClipboardSession<'a>>),
+    #[cfg(target_os = "macos")]
+    Claude(ClaudeNativeChatSession<'a>),
     Renderer(RendererSession<'a>),
     Codex(CodexDomSession<'a>),
 }
@@ -154,6 +173,11 @@ impl SemanticUi<'_> {
             Self::Zed(_) => (
                 InputMode::NativeClipboardAndKeyboard,
                 ResponseVerification::NativeThreadExport,
+            ),
+            #[cfg(target_os = "macos")]
+            Self::Claude(_) => (
+                InputMode::NativeClipboardAndKeyboard,
+                ResponseVerification::NativeAssistantClipboard,
             ),
             Self::Renderer(_) | Self::Codex(_) => (
                 InputMode::RendererDomAndKeyboard,
@@ -171,6 +195,14 @@ impl SemanticUi<'_> {
     ) -> Result<(), Reason> {
         match self {
             Self::Zed(session) => {
+                session.new_turn(prompt)?;
+                match purpose {
+                    DomPurpose::Response => session.wait_response(marker, Duration::from_secs(30)),
+                    DomPurpose::Failure => session.wait_retry(Duration::from_secs(30)),
+                }
+            }
+            #[cfg(target_os = "macos")]
+            Self::Claude(session) => {
                 session.new_turn(prompt)?;
                 match purpose {
                     DomPurpose::Response => session.wait_response(marker, Duration::from_secs(30)),
@@ -206,6 +238,11 @@ impl SemanticUi<'_> {
                 gate.fail_next_scenario(true);
                 400
             }
+            #[cfg(target_os = "macos")]
+            Self::Claude(_) => {
+                gate.fail_recoverable_scenario(true);
+                503
+            }
             Self::Renderer(_) | Self::Codex(_) => {
                 gate.fail_recoverable_scenario(true);
                 503
@@ -225,6 +262,11 @@ impl SemanticUi<'_> {
     fn retry(&mut self, marker: &str, gate: &ProviderGate) -> Result<(), Reason> {
         match self {
             Self::Zed(session) => {
+                session.retry_once()?;
+                session.wait_response(marker, Duration::from_secs(30))
+            }
+            #[cfg(target_os = "macos")]
+            Self::Claude(session) => {
                 session.retry_once()?;
                 session.wait_response(marker, Duration::from_secs(30))
             }
@@ -252,6 +294,8 @@ impl SemanticUi<'_> {
     fn finish(self, gate: &ProviderGate, outcome: Result<(), Reason>) -> Result<(), Reason> {
         match self {
             Self::Zed(session) => session.finish(gate, outcome),
+            #[cfg(target_os = "macos")]
+            Self::Claude(session) => session.finish(gate, outcome),
             Self::Renderer(_) | Self::Codex(_) => outcome,
         }
     }

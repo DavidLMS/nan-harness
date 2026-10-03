@@ -56,7 +56,7 @@ jobs:
           platform = os.environ['SELECTED_PLATFORM']
           cells = [c for c in matrix(['pen-desktop'] if os.environ['SELECTED_APP'] == 'all' else [])['include'] if c['backend'] != 'pending'
                    and (selected == 'all' or c['app'] == selected)
-                   and (os.environ['SELECTED_EXPERIMENT'] != 'startup-baseline' or c['backend'] == 'renderer-inventory')
+                   and (os.environ['SELECTED_EXPERIMENT'] != 'startup-baseline' or c['backend'] in {'renderer-inventory', 'native-assistant-clipboard'})
                    and (platform == 'pilots' and (c['app'], c['platform']) in
                         {('zed-desktop', 'macos'), ('hermes-desktop', 'linux')}
                         or platform == 'all' or platform == c['platform']
@@ -303,12 +303,15 @@ jobs:
         shell: bash
         run: echo 'FEASIBILITY_HERMES_READINESS_POLICY=current-catalog' >> "$GITHUB_ENV"
       - name: Enable Claude macOS official native-folder acquisition trial
-        if: runner.os == 'macOS' && matrix.app == 'claude-desktop' && inputs.experiment == 'startup-baseline'
+        if: runner.os == 'macOS' && matrix.app == 'claude-desktop' && contains(fromJSON('["startup-baseline","deterministic-full"]'), inputs.experiment)
         shell: bash
         run: |
           echo 'NANH_CLAUDE_MAC_PROFILE_POLICY=native-known-folders' >> "$GITHUB_ENV"
           echo 'NANH_CLAUDE_MAC_CHAT_NAVIGATION=1' >> "$GITHUB_ENV"
           echo 'NANH_CLAUDE_MCP_FIXTURE=read-only' >> "$GITHUB_ENV"
+          if [ '${{ inputs.experiment }}' = 'deterministic-full' ]; then
+            echo 'NANH_CLAUDE_MAC_NATIVE_CHAT=1' >> "$GITHUB_ENV"
+          fi
       - name: Enable Claude Windows private-profile observations
         if: runner.os == 'Windows' && matrix.app == 'claude-desktop' && inputs.experiment == 'startup-baseline'
         shell: bash

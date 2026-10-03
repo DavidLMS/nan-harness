@@ -230,6 +230,23 @@ class RunnerTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             runner.qualification_environment('zed-desktop', Path('/facts'), Path('/nanh'), '/app', source)
 
+    def test_claude_native_chat_preserves_owned_profile_policy(self):
+        source = dict(GITHUB_ACTIONS='true', RUNNER_ENVIRONMENT='github-hosted', RUNNER_OS='macOS',
+                      NANH_DESKTOP_QUALIFICATION_MODE='renderer', NANH_CLAUDE_MAC_NATIVE_CHAT='1',
+                      NANH_CLAUDE_MAC_PROFILE_POLICY='native-known-folders')
+        args = ('claude-desktop', Path('/facts'), Path('/nanh'), '/app')
+        with patch.object(runner, 'validate_claude_bundle'):
+            environment = runner.qualification_environment(*args, inherited=source)
+            self.assertEqual(environment['NANH_CLAUDE_MAC_NATIVE_CHAT'], '1')
+            self.assertEqual(environment['NANH_DESKTOP_QUALIFICATION_MODE'], 'startup-baseline')
+            for changes in ({'RUNNER_OS': 'Linux'}, {'NANH_CLAUDE_MAC_NATIVE_CHAT': '0'},
+                            {'NANH_CLAUDE_MAC_PROFILE_POLICY': 'electron-user-data-dir'},
+                            {'RUNNER_ENVIRONMENT': 'self-hosted'}, {'NANH_DESKTOP_QUALIFICATION_MODE': 'PRIVATE'}):
+                with self.assertRaises(ValueError):
+                    runner.qualification_environment(*args, inherited={**source, **changes})
+            with self.assertRaises(ValueError):
+                runner.qualification_environment('chatgpt-desktop', *args[1:], inherited=source)
+
     def test_claude_read_fixture_policy_is_mac_owned_and_source_bound(self):
         source = dict(GITHUB_ACTIONS='true', RUNNER_ENVIRONMENT='github-hosted', RUNNER_OS='macOS',
                       NANH_DESKTOP_QUALIFICATION_MODE='startup-baseline',
@@ -451,7 +468,7 @@ class QualificationTests(unittest.TestCase):
         cells = q.matrix()['include']
         self.assertEqual(len(cells), 15)
         self.assertEqual(len({(c['app'], c['platform'], c['architecture']) for c in cells}), 15)
-        self.assertEqual(sum(c['backend'] != 'renderer-inventory' for c in cells), 9)
+        self.assertEqual(sum(c['backend'] != 'renderer-inventory' for c in cells), 10)
         self.assertEqual({(c['platform'], c['architecture']) for c in cells},
                          {('linux', 'x86_64'), ('macos', 'aarch64'), ('windows', 'x86_64')})
         with self.assertRaises(ValueError):
@@ -627,6 +644,9 @@ class QualificationTests(unittest.TestCase):
                      mainDocumentFocused=True, auxDocumentFocused=False,
                      main={**counts, 'roleLegend': 1, 'roleRadios': 11, 'engineering': 1, 'dialog': 1}, aux=counts)
         self.assertEqual(q.main_aux_correlation(value, 'chatgpt-desktop'), value)
+        for dialogs in (0, 2):
+            separate = {**value, 'main': {**value['main'], 'dialog': dialogs}}
+            self.assertEqual(q.main_aux_correlation(separate, 'chatgpt-desktop'), separate)
         for change in ({'status': 'PRIVATE'}, {'stableSamples': True}, {'stableSamples': 1},
                        {'guarded': False}, {'auxDocumentFocused': True}, {'main': None},
                        {'targetId': 'PRIVATE'}, {'aux': {**counts, 'editable': 4097}}):
@@ -1489,6 +1509,19 @@ class QualificationTests(unittest.TestCase):
                                     'modeChatEnabled': 1, 'modeCoworkVisible': 1}}
             path.write_text(json.dumps(mode))
             self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [mode])
+            linux = {**mode, 'sourceVersion': '2.9939.4',
+                     'classicSourceSha256': '26f823bafc90cff4a749bfad6916ee69e4c3189f18b54a4e958ca387939c1181',
+                     'sendSourceSha256': 'd076b2f208fc5e572d0f3cd39aba35c6bacbe100a82db569851a0ce2317fa05c',
+                     'modernSourceSha256': '5d1afc949ac69080ef6fe15491137ca0c3d2056991a9581537cba2bcc3724287',
+                     'modeSourceSha256': '62ffbc1b8a3e4440ae77a33be142afd1914796f945bcd75d58cfe73679925f61'}
+            path.write_text(json.dumps(linux))
+            self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [linux])
+            for mixed in ({**linux, 'modeSourceSha256': mode['modeSourceSha256']},
+                          {**linux, 'classicSourceSha256': mode['classicSourceSha256']},
+                          {**mode, 'sourceVersion': linux['sourceVersion']}):
+                path.write_text(json.dumps(mixed))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'claude-desktop')
             for invalid in ({**mode, 'modeSourceSha256': '0' * 64}, {**mode, 'sourceCount': counts}):
                 path.write_text(json.dumps(invalid))
                 with self.assertRaises(ValueError):
@@ -1657,6 +1690,18 @@ class QualificationTests(unittest.TestCase):
                 item = {**value, 'tooltipStatus': status, 'tooltipCandidates': candidates, 'tooltipMatches': matches}
                 path.write_text(json.dumps(item))
                 self.assertEqual(q.semantic_observations(root, 'zed-desktop'), [item])
+            progress = {**value, 'tooltipStartRemainingMs': 2200, 'tooltipEndRemainingMs': 0,
+                        'tooltipPhase': 'initial-clear'}
+            path.write_text(json.dumps(progress))
+            self.assertEqual(q.semantic_observations(root, 'zed-desktop'), [progress])
+            for changed in ({**progress, 'tooltipEndRemainingMs': 2201},
+                            {**progress, 'tooltipStartRemainingMs': True},
+                            {**progress, 'tooltipPhase': 'PRIVATE'},
+                            {**progress, 'tooltipStartRemainingMs': 10001},
+                            {key: item for key, item in progress.items() if key != 'tooltipPhase'}):
+                path.write_text(json.dumps(changed))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'zed-desktop')
             proof = {**value, 'tooltipStatus': 'proved', 'tooltipCandidates': 3, 'tooltipMatches': 1}
             for changed in ({**proof, 'tooltip': 'PRIVATE'}, {**proof, 'tooltipStatus': 'PRIVATE'},
                             {**proof, 'tooltipCandidates': 4}, {**proof, 'tooltipMatches': True},
@@ -1666,6 +1711,61 @@ class QualificationTests(unittest.TestCase):
                 path.write_text(json.dumps(changed))
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'zed-desktop')
+
+    def test_claude_native_chat_receipt_is_closed_and_not_qualification(self):
+        value = dict(schemaVersion=1, mechanism='claude-native-chat', diagnosticsOnly=True,
+                     stage='completed', submittedTurns=3, inputVerifiedTurns=3, copiedResponses=3,
+                     retryAttempted=True, clipboardCleared=True)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / 'native-chat.json'
+            for item in (value, {**value, 'stage': 'deadline', 'copiedResponses': 0}):
+                path.write_text(json.dumps(item))
+                self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [item])
+                self.assertEqual(q.envelope('claude-desktop', 'macos', 'aarch64', 'a' * 40)['qualification'], 'unqualified')
+            for changed in ({**value, 'prompt': 'PRIVATE'}, {**value, 'stage': 'PRIVATE'},
+                            {**value, 'submittedTurns': True}, {**value, 'copiedResponses': 4},
+                            {**value, 'inputVerifiedTurns': 2}, {**value, 'retryAttempted': 1},
+                            {**value, 'diagnosticsOnly': False},
+                            {**value, 'submittedTurns': 0, 'copiedResponses': 2}):
+                path.write_text(json.dumps(changed))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'claude-desktop')
+            path.write_text(json.dumps(value))
+            with self.assertRaises(ValueError):
+                q.semantic_observations(root, 'chatgpt-desktop')
+
+    def test_windows_owned_descendant_cleanup_does_not_replace_absence(self):
+        counts = set('retainedCount alreadyExitedCount targetedCount exitedCount rejectedCount'.split())
+        flags = set('triggerAttempted expectedExecutableVerified historicalOwnershipVerified'.split())
+        value = dict(schemaVersion=1, mechanism='windows-owned-descendant-cleanup', diagnosticsOnly=True,
+                     status='completed', retainedCount=5, alreadyExitedCount=1, targetedCount=4,
+                     exitedCount=4, rejectedCount=0, **dict.fromkeys(flags, True))
+        unavailable = {**value, 'status': 'unavailable', **dict.fromkeys(counts), **dict.fromkeys(flags, False)}
+        deadline = {**value, 'status': 'deadline', **dict.fromkeys(counts - {'retainedCount'})}
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / 'owned-cleanup.json'
+            for item in (value, unavailable, deadline, {**deadline, 'status': 'uncertain'}, {**unavailable, 'status': 'deadline'},
+                         {**value, 'status': 'partial', 'exitedCount': 3}):
+                path.write_text(json.dumps(item))
+                self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [item])
+                self.assertEqual(q.envelope('claude-desktop', 'windows', 'x86_64', 'a' * 40)['qualification'], 'unqualified')
+            for changed in ({**value, 'pid': 7}, {**value, 'executable': 'PRIVATE'},
+                            {**value, 'triggerAttempted': False}, {**value, 'expectedExecutableVerified': False},
+                            {**value, 'historicalOwnershipVerified': False}, {**value, 'retainedCount': True},
+                            {**value, 'retainedCount': 65}, {**value, 'targetedCount': 5},
+                            {**value, 'exitedCount': 5}, {**value, 'status': 'partial'},
+                            {**value, 'retainedCount': None}, {**value, 'diagnosticsOnly': False},
+                            {**unavailable, 'triggerAttempted': True}, {**unavailable, 'retainedCount': 0},
+                            {**deadline, 'targetedCount': 1}, {**deadline, 'retainedCount': None},
+                            {**deadline, 'historicalOwnershipVerified': False}, {**value, 'status': 'PRIVATE'}):
+                path.write_text(json.dumps(changed))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'claude-desktop')
+            path.write_text(json.dumps(value))
+            with self.assertRaises(ValueError):
+                q.semantic_observations(root, 'chatgpt-desktop')
 
     def test_windows_process_correlation_is_closed_and_not_job_membership(self):
         value = dict(schemaVersion=1, mechanism='windows-process-correlation', diagnosticsOnly=True,
@@ -1712,6 +1812,31 @@ class QualificationTests(unittest.TestCase):
                             {**binding, 'loaderPresent': False}, {**binding, 'route': 'primary-query'},
                             {key: item for key, item in binding.items() if key != 'framePresent'}):
                 path.write_text(json.dumps({**value, 'initialMainBinding': changed}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'chatgpt-desktop')
+
+    def test_codex_main_confirmation_preserves_failed_guard_and_privacy(self):
+        value = dict(schemaVersion=1, mechanism='renderer-inventory', diagnosticsOnly=True,
+                     app='chatgpt-desktop', endpointOwned=True, launcherOwned=True, attached=True,
+                     pageCount=1, textareaCount=0, editableCount=0, sendCount=0,
+                     retryCount=0, newThreadCount=0, loginCount=0, dialogCount=0, errorCategory=None)
+        counts = dict(roleLegend=1, roleRadios=11, engineering=1, dialog=0, quickChatComposer=0, editable=0)
+        facts = dict(status='confirmed', identityUnchanged=True, mainScopeUnique=True,
+                     documentFocused=True, counts=counts)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / 'main.json'
+            for item in (facts, {**facts, 'status': 'document-unfocused', 'documentFocused': False},
+                         dict(status='initial-missing', identityUnchanged=None, mainScopeUnique=None,
+                              documentFocused=None, counts=None)):
+                path.write_text(json.dumps({**value, 'initialMainConfirmation': item}))
+                self.assertEqual(q.semantic_observations(root, 'chatgpt-desktop')[0]['initialMainConfirmation'], item)
+            for changed in ({**facts, 'status': 'PRIVATE'}, {**facts, 'targetId': 'PRIVATE'},
+                            {**facts, 'identityUnchanged': False}, {**facts, 'documentFocused': 1},
+                            {**facts, 'counts': {**counts, 'roleRadios': True}},
+                            {**facts, 'counts': {**counts, 'roleRadios': 4097}},
+                            {**facts, 'counts': {**counts, 'roleRadios': 10}}):
+                path.write_text(json.dumps({**value, 'initialMainConfirmation': changed}))
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'chatgpt-desktop')
 

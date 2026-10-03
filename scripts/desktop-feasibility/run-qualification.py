@@ -124,6 +124,8 @@ def qualification_environment(app, facts, real_nanh, executable, inherited=None)
         raise ValueError('disposable hosted session required')
     if source.get('NANH_ZED_CURSOR_HIT') is not None and app != 'zed-desktop':
         raise ValueError('Zed cursor hit trial is unavailable')
+    if source.get('NANH_CLAUDE_MAC_NATIVE_CHAT') is not None and app != 'claude-desktop':
+        raise ValueError('Claude native Chat controller is unavailable')
     if source.get('NANH_CLAUDE_MAC_CHAT_NAVIGATION') is not None and app != 'claude-desktop':
         raise ValueError('Claude native Chat navigation is unavailable')
     layout = source.get('NANH_ZED_LAYOUT_POLICY')
@@ -187,6 +189,16 @@ def qualification_environment(app, facts, real_nanh, executable, inherited=None)
         mode = source.get('NANH_DESKTOP_QUALIFICATION_MODE', 'renderer')
         if mode not in {'renderer', 'startup-baseline'}:
             raise ValueError('renderer mode is invalid')
+        native_chat = source.get('NANH_CLAUDE_MAC_NATIVE_CHAT')
+        if native_chat is not None:
+            if (native_chat != '1' or app != 'claude-desktop' or source.get('RUNNER_OS') != 'macOS'
+                    or source.get('NANH_CLAUDE_MAC_PROFILE_POLICY') != 'native-known-folders'):
+                raise ValueError('Claude native Chat controller is unavailable')
+            # Full native Chat uses the same isolated known-folder acquisition,
+            # without admitting Claude's packaged renderer to CDP.
+            mode = 'startup-baseline'
+            environment['NANH_CLAUDE_MAC_NATIVE_CHAT'] = native_chat
+
         onboarding = source.get('NANH_CODEX_PUBLIC_ONBOARDING')
         if onboarding is not None:
             if (onboarding != 'engineering' or app != 'chatgpt-desktop'
@@ -296,6 +308,12 @@ def run(args):
     if report.exists() or report.is_symlink():
         raise ValueError('report destination already exists')
     environment = qualification_environment(args.app, facts, args.real_nanh, executable)
+    release = manifest['apps'][0]
+    if (args.app == 'claude-desktop' and args.platform == 'linux'
+            and release.get('version') == '2.9939.4'
+            and release.get('digest') == 'sha256:3cfddb23bf2911e05e27b4ed3856b8e795df94643b2c35b59deb317cf995bca0'
+            and environment.get('NANH_DESKTOP_QUALIFICATION_MODE') == 'startup-baseline'):
+        environment['NANH_CLAUDE_LINUX_SOURCE_POLICY'] = 'official-2.9939.4'
     if environment.get('NANH_CODEX_PROJECT_POLICY') is not None:
         if args.app != 'chatgpt-desktop' or args.platform not in CODEX_PROJECT_RELEASES:
             raise ValueError('Codex native project trial platform differs')

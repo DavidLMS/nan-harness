@@ -23,6 +23,12 @@ pub(crate) struct ProbeProcess {
     stop_observation: windows_observation::StopObservation,
     #[cfg(windows)]
     pub(crate) correlation_snapshot: Option<windows_correlation::Snapshot>,
+    #[cfg(windows)]
+    pub(crate) cleanup_holder: Option<crate::native::OwnedCleanupHolder>,
+    #[cfg(windows)]
+    pub(crate) cleanup_executable: Option<std::path::PathBuf>,
+    #[cfg(windows)]
+    pub(crate) cleanup_executable_sha256: Option<String>,
 }
 
 impl ProbeProcess {
@@ -46,6 +52,9 @@ impl ProbeProcess {
                 inner: Some(inner),
                 stop_observation: windows_observation::StopObservation::new(),
                 correlation_snapshot: None,
+                cleanup_holder: None,
+                cleanup_executable: None,
+                cleanup_executable_sha256: None,
             })
         }
     }

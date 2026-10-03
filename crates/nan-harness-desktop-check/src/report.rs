@@ -134,6 +134,7 @@ pub enum ResponseVerification {
     Accessibility,
     LocalOcr,
     NativeThreadExport,
+    NativeAssistantClipboard,
     RendererDom,
 }
 
@@ -200,17 +201,22 @@ impl ProbeResult {
     }
 
     fn validate(&self, live: bool, schema_version: u8) -> Result<(), ReportError> {
-        let native_export =
-            self.response_verification == Some(ResponseVerification::NativeThreadExport);
+        let native_response = matches!(
+            self.response_verification,
+            Some(
+                ResponseVerification::NativeThreadExport
+                    | ResponseVerification::NativeAssistantClipboard
+            )
+        );
         let renderer = self.response_verification == Some(ResponseVerification::RendererDom);
         let clipboard = self.input_mode == Some(InputMode::NativeClipboardAndKeyboard);
         let dom = self.input_mode == Some(InputMode::RendererDomAndKeyboard);
-        if (native_export || renderer || clipboard || dom)
+        if (native_response || renderer || clipboard || dom)
             && (schema_version < 3
-                || native_export && !clipboard
+                || native_response && !clipboard
                 || renderer && !dom
                 || self.response_verification.is_some()
-                    && (clipboard && !native_export || dom && !renderer))
+                    && (clipboard && !native_response || dom && !renderer))
         {
             return Err(ReportError::InvalidProbe);
         }
@@ -464,6 +470,10 @@ mod tests {
             (
                 InputMode::NativeClipboardAndKeyboard,
                 ResponseVerification::NativeThreadExport,
+            ),
+            (
+                InputMode::NativeClipboardAndKeyboard,
+                ResponseVerification::NativeAssistantClipboard,
             ),
             (
                 InputMode::RendererDomAndKeyboard,

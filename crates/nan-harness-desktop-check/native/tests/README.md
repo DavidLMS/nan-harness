@@ -23,3 +23,15 @@ clang++ -std=c++17 -x objective-c++ \
   -framework CoreGraphics -framework AppKit -framework ApplicationServices -o "$test_dir/focus" && \
   "$test_dir/focus"
 ```
+
+
+The Claude Chat turn fixture constructs synthetic accessibility nodes. It tests
+current-mode selection, assistant-only Copy and failed-prompt Retry scope without
+calling any native application, clipboard, accessibility or input API:
+
+```sh
+clang++ -std=c++17 -x objective-c++ \
+  crates/nan-harness-desktop-check/native/tests/claude_chat_turn.mm \
+  -framework CoreGraphics -framework AppKit -framework ApplicationServices -o "$test_dir/chat-turn" && \
+  "$test_dir/chat-turn"
+```

@@ -6,6 +6,8 @@ mod image;
 #[cfg(any(target_os = "macos", test))]
 mod mac_chat;
 #[cfg(any(target_os = "macos", test))]
+mod mac_chat_turn;
+#[cfg(any(target_os = "macos", test))]
 mod mac_fit;
 mod ocr;
 mod process;
@@ -16,8 +18,17 @@ pub(crate) use crate::diagnostics::ClaudeIdentityObservation;
 pub(crate) use image::prepare_ocr_image;
 #[cfg(any(target_os = "macos", test))]
 pub(crate) use mac_chat::ChatPressStage;
+#[cfg(any(target_os = "macos", test))]
+pub(crate) use mac_chat_turn::ChatTurnStage;
 pub(crate) use ocr::Page;
 pub(crate) use process::FailureCategory;
+#[cfg(windows)]
+pub(crate) use process::holder::Holder as OwnedCleanupHolder;
+#[cfg(windows)]
+pub(crate) fn owned_cleanup_unavailable() -> serde_json::Value {
+    process::holder::failure("unavailable", None, false, false)
+}
+
 pub(crate) use window::{DisplayRelation, ForegroundRelation, GuardFailure, Snapshot, Window};
 
 #[cfg(any(test, windows))]
@@ -312,6 +323,53 @@ impl Native {
         ChatPressStage::parse(&output).ok_or(FailureCategory::Output)
     }
 
+    #[cfg(target_os = "macos")]
+    pub(crate) fn claude_chat_turn(
+        &self,
+        window: &Window,
+        mode: &str,
+        values: [&str; 3],
+        deadline: std::time::Instant,
+    ) -> Result<ChatTurnStage, FailureCategory> {
+        if !claude_focus_policy()
+            || std::env::var("NANH_CLAUDE_MAC_NATIVE_CHAT").as_deref() != Ok("1")
+        {
+            return Err(FailureCategory::InvalidInput);
+        }
+        let millis = u32::try_from(
+            deadline
+                .saturating_duration_since(std::time::Instant::now())
+                .as_millis(),
+        )
+        .unwrap_or(5000)
+        .min(5000);
+        let ticks = nix::time::clock_gettime(nix::time::ClockId::CLOCK_MONOTONIC)
+            .map_err(|_| FailureCategory::InvalidInput)?;
+        let now = u64::try_from(ticks.tv_sec())
+            .ok()
+            .and_then(|seconds| seconds.checked_mul(1000))
+            .and_then(|seconds| {
+                u64::try_from(ticks.tv_nsec())
+                    .ok()
+                    .and_then(|nanos| seconds.checked_add(nanos / 1_000_000))
+            })
+            .ok_or(FailureCategory::InvalidInput)?;
+        let cutoff = now
+            .checked_add(u64::from(
+                millis
+                    .checked_sub(50)
+                    .filter(|value| *value > 0)
+                    .ok_or(FailureCategory::InvalidInput)?,
+            ))
+            .ok_or(FailureCategory::InvalidInput)?;
+        let input =
+            mac_chat_turn::request(window, mode, values, millis, cutoff, std::process::id())
+                .ok_or(FailureCategory::InvalidInput)?;
+        let output =
+            process::run_claude_chat_turn_until(&self.executable, input.as_bytes(), deadline)?;
+        ChatTurnStage::parse(&output).ok_or(FailureCategory::Output)
+    }
+
     pub(crate) fn windows_with_focus(&self, owned_pid: u32) -> Result<Snapshot, FailureCategory> {
         if !claude_focus_policy() {
             return self.windows_with_category();
@@ -334,6 +392,17 @@ impl Native {
             None,
         )?;
         Ok(Snapshot::parse(&output)?.windows)
+    }
+
+    #[cfg(windows)]
+    pub(crate) fn start_owned_cleanup_holder(
+        &self,
+        launcher: u32,
+        expected: &Path,
+        digest: &str,
+        deadline: std::time::Instant,
+    ) -> Result<OwnedCleanupHolder, FailureCategory> {
+        process::holder::Holder::start(&self.executable, launcher, expected, digest, deadline)
     }
 
     #[cfg(windows)]

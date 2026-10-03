@@ -140,16 +140,33 @@ async function captureCorrelationMain(page,browser,guard,deadline,identity=corre
     return held;
   } catch{return stop('query-failed');}
 }
+function mainConfirmationFacts() {
+  return {status:'unmeasured',identityUnchanged:null,mainScopeUnique:null,documentFocused:null,counts:null};
+}
 async function bindCorrelationMain(held,browser,guard,deadline,route,
-  identity=correlationIdentity,pause=ms=>new Promise(resolve=>setTimeout(resolve,ms))) {
+  identity=correlationIdentity,pause=ms=>new Promise(resolve=>setTimeout(resolve,ms)),diagnostic=null) {
+  const stop=status=>{if(diagnostic)diagnostic.status=status;return null;};
   try {
-    if(!held||Date.now()>=deadline||!guard())return null;
+    if(!held)return stop('initial-missing');
+    if(Date.now()>=deadline)return stop('deadline');
+    if(!guard())return stop('ownership-lost');
     const fresh=await identity(held.page,deadline);
-    if(Date.now()>=deadline||!guard()||!sameCorrelationIdentity(held,fresh)
-      ||!fresh.scope.mainScope||!fresh.scope.focused)return null;
+    if(diagnostic) {
+      diagnostic.identityUnchanged=sameCorrelationIdentity(held,fresh);
+      diagnostic.mainScopeUnique=fresh.scope.mainScope;
+      diagnostic.documentFocused=fresh.scope.focused;
+      diagnostic.counts=fresh.scope.counts;
+    }
+    if(Date.now()>=deadline)return stop('deadline');
+    if(!guard())return stop('ownership-lost');
+    if(!sameCorrelationIdentity(held,fresh))return stop('identity-changed');
+    if(!fresh.scope.mainScope)return stop('source-scope');
+    if(!fresh.scope.focused)return stop('document-unfocused');
     const proof=heldMainGuard(held,browser,guard,deadline,route,identity,pause,true);
-    return await proof()?fresh:null;
-  } catch{return null;}
+    if(!await proof())return stop(Date.now()>=deadline?'deadline':'guard-rejected');
+    if(diagnostic)diagnostic.status='confirmed';
+    return fresh;
+  } catch{return stop(Date.now()>=deadline?'deadline':'query-failed');}
 }
 async function observeMainAux(held,browser,guard,deadline,auxRoute,
   identity=correlationIdentity,pause=ms=>new Promise(r=>setTimeout(r,ms))) {
@@ -295,8 +312,10 @@ async function run() {
         && await page.evaluate(() => location.protocol === 'app:' && document.readyState === 'complete');
       if (!targetReady) { facts.errorCategory = 'invalid-request'; save(); return; }
       const correlationDeadline=onboardingDeadline(trial,deadline,totalDeadline,Date.now());
+      if(trial)facts.initialMainConfirmation=mainConfirmationFacts();
       const heldMain=trial?await bindCorrelationMain(initialMain,browser,ownerGuard,correlationDeadline,
-        require('./codex-onboarding.cjs').sourceRoute):null;
+        require('./codex-onboarding.cjs').sourceRoute,correlationIdentity,
+        ms=>new Promise(resolve=>setTimeout(resolve,ms)),facts.initialMainConfirmation):null;
       const mainGuard=trial&&heldMain?heldMainGuard(heldMain,browser,ownerGuard,correlationDeadline,
         require('./codex-onboarding.cjs').sourceRoute):undefined;
       facts.publicOnboarding = await require('./codex-onboarding.cjs').run(page,

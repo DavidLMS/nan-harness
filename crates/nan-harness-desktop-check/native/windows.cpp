@@ -16,6 +16,7 @@
 #if !defined(_WIN32)
 int process_presence(bool) { return 5; }
 int process_correlation(bool) { return 5; }
+int owned_cleanup_holder() { return 5; }
 int windows_claude_storage() { return 5; }
 #if !defined(__APPLE__)
 int fit_window(const std::string&) { return 5; }
@@ -554,6 +555,11 @@ static bool fit_mac_proof(std::uint64_t id, pid_t pid, AxFocus& focus, bool requ
     }
     return safe && found && (require_off_display ? !contained : contained);
 }
+// Shared owned-window proof for the separately scoped native Chat controller.
+bool claude_owned_mac_window(std::uint64_t id, pid_t pid, CGRect bounds) {
+    AxFocus focus;
+    return fit_mac_proof(id, pid, focus, false) && CGRectEqualToRect(bounds, focus.bounds);
+}
 static int chat_result(const char* stage) {
     std::cout << "chat " << stage << '\n';
     return std::cout ? 0 : 5;
@@ -832,6 +838,7 @@ int activate_window(const std::string& request) {
 #include <windows.h>
 #include <tlhelp32.h>
 #include <shlobj.h>
+#include <bcrypt.h>
 
 // Private wire identities stay in the checker RAM, never in public diagnostics.
 #include <vector>
@@ -930,6 +937,177 @@ int process_correlation(bool before) {
         std::cout << "observed " << launcher_alive << ' ' << matches << ' ' << linked << ' ' << unlinked << '\n';
     }
     SecureZeroMemory(request.data(), request.size());
+    return std::cout ? 0 : 4;
+}
+
+// Retained process handles, not reopened PIDs, are the only termination targets.
+struct CleanupHandle {
+    HANDLE value = INVALID_HANDLE_VALUE;
+    explicit CleanupHandle(HANDLE handle) : value(handle) {}
+    CleanupHandle(const CleanupHandle&) = delete;
+    CleanupHandle& operator=(const CleanupHandle&) = delete;
+    CleanupHandle(CleanupHandle&& other) noexcept : value(other.value) { other.value = INVALID_HANDLE_VALUE; }
+    ~CleanupHandle() { if (value != INVALID_HANDLE_VALUE && value != nullptr) CloseHandle(value); }
+};
+static bool held_creation(HANDLE process, std::uint64_t& time) {
+    FILETIME created{}, exited{}, kernel{}, user{};
+    if (!GetProcessTimes(process, &created, &exited, &kernel, &user)) return false;
+    time = (static_cast<std::uint64_t>(created.dwHighDateTime) << 32) | created.dwLowDateTime;
+    return time != 0;
+}
+static bool held_image(HANDLE process, const BY_HANDLE_FILE_INFORMATION& expected,
+    const std::wstring& expected_path) {
+    wchar_t path[32768] = {}; DWORD size = 32768;
+    if (!QueryFullProcessImageNameW(process, 0, path, &size) || size == 0 || size >= 32768) return false;
+    CleanupHandle file(CreateFileW(path, FILE_READ_ATTRIBUTES, FILE_SHARE_READ,
+        nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr));
+    if (file.value == INVALID_HANDLE_VALUE) return false;
+    BY_HANDLE_FILE_INFORMATION actual{};
+    wchar_t canonical[32768] = {};
+    const DWORD length = GetFinalPathNameByHandleW(file.value, canonical, 32768, FILE_NAME_NORMALIZED);
+    return length > 0 && length < 32768 && _wcsicmp(canonical, expected_path.c_str()) == 0
+        && GetFileInformationByHandle(file.value, &actual)
+        && actual.dwVolumeSerialNumber == expected.dwVolumeSerialNumber
+        && actual.nFileIndexHigh == expected.nFileIndexHigh && actual.nFileIndexLow == expected.nFileIndexLow
+        && actual.nFileSizeHigh == expected.nFileSizeHigh && actual.nFileSizeLow == expected.nFileSizeLow
+        && actual.ftLastWriteTime.dwHighDateTime == expected.ftLastWriteTime.dwHighDateTime
+        && actual.ftLastWriteTime.dwLowDateTime == expected.ftLastWriteTime.dwLowDateTime;
+}
+static bool pinned_digest(HANDLE file, const std::string& expected) {
+    if (expected.size() != 64 || expected.find_first_not_of("0123456789abcdef") != std::string::npos) return false;
+    LARGE_INTEGER length{};
+    if (!GetFileSizeEx(file, &length) || length.QuadPart < 0 || length.QuadPart > 512LL * 1024 * 1024) return false;
+    BCRYPT_ALG_HANDLE algorithm = nullptr; BCRYPT_HASH_HANDLE hash = nullptr;
+    if (BCryptOpenAlgorithmProvider(&algorithm, BCRYPT_SHA256_ALGORITHM, nullptr, 0) < 0) return false;
+    struct CryptoGuard { BCRYPT_ALG_HANDLE algorithm; BCRYPT_HASH_HANDLE& hash;
+        ~CryptoGuard() { if (hash) BCryptDestroyHash(hash); BCryptCloseAlgorithmProvider(algorithm, 0); } } guard{algorithm, hash};
+    if (BCryptCreateHash(algorithm, &hash, nullptr, 0, nullptr, 0, 0) < 0) return false;
+    std::array<unsigned char,65536> buffer{}; std::uint64_t total = 0;
+    while (true) {
+        DWORD read = 0;
+        if (!ReadFile(file, buffer.data(), static_cast<DWORD>(buffer.size()), &read, nullptr)) return false;
+        if (read == 0) break;
+        total += read;
+        if (total > static_cast<std::uint64_t>(length.QuadPart) || BCryptHashData(hash, buffer.data(), read, 0) < 0) return false;
+    }
+    std::array<unsigned char,32> digest{};
+    if (total != static_cast<std::uint64_t>(length.QuadPart) || BCryptFinishHash(hash, digest.data(), static_cast<ULONG>(digest.size()), 0) < 0) return false;
+    const char* hex = "0123456789abcdef"; std::string actual;
+    for (const auto byte : digest) { actual.push_back(hex[byte >> 4]); actual.push_back(hex[byte & 15]); }
+    SecureZeroMemory(buffer.data(), buffer.size());
+    return actual == expected;
+}
+
+static bool cleanup_line(std::string& line) {
+    line.clear(); char byte;
+    while (std::cin.get(byte)) {
+        if (byte == '\n') return true;
+        if (line.size() >= 8192 || byte == '\0' || byte == '\r') return false;
+        line.push_back(byte);
+    }
+    return false;
+}
+int owned_cleanup_holder() {
+    auto unavailable = [] { std::cout << "unavailable\n" << std::flush; return 0; };
+    std::string request;
+    if (!cleanup_line(request)) return unavailable();
+    std::istringstream input(request); DWORD checker = 0, launcher = 0;
+    std::string encoded, digest, extra;
+    if (!(input >> checker >> launcher >> encoded >> digest) || input >> extra || checker == 0 || launcher == 0
+        || encoded.empty() || encoded.size() % 2 != 0 || encoded.size() > 4096) return unavailable();
+    std::string path;
+    for (std::size_t i = 0; i < encoded.size(); i += 2) {
+        unsigned byte = 0;
+        const auto parsed = std::from_chars(encoded.data() + i, encoded.data() + i + 2, byte, 16);
+        if (parsed.ec != std::errc() || parsed.ptr != encoded.data() + i + 2 || byte == 0) return unavailable();
+        path.push_back(static_cast<char>(byte));
+    }
+    const int wide_size = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path.data(), static_cast<int>(path.size()), nullptr, 0);
+    if (wide_size <= 0) return unavailable();
+    std::wstring expected_path(static_cast<std::size_t>(wide_size), L'\0');
+    if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path.data(), static_cast<int>(path.size()), expected_path.data(), wide_size) != wide_size)
+        return unavailable();
+    // The checker sends the canonical installed executable, never a CLI wrapper.
+    if (expected_path.rfind(L"\\\\?\\", 0) != 0 || expected_path.size() < 15
+        || _wcsicmp(expected_path.substr(expected_path.find_last_of(L"\\") + 1).c_str(), L"Claude.exe") != 0) return unavailable();
+    CleanupHandle expected_file(CreateFileW(expected_path.c_str(), GENERIC_READ, FILE_SHARE_READ,
+        nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr));
+    if (expected_file.value == INVALID_HANDLE_VALUE || !pinned_digest(expected_file.value, digest)) return unavailable();
+    BY_HANDLE_FILE_INFORMATION expected{}; wchar_t canonical[32768] = {};
+    const DWORD canonical_size = GetFinalPathNameByHandleW(expected_file.value, canonical, 32768, FILE_NAME_NORMALIZED);
+    if (!GetFileInformationByHandle(expected_file.value, &expected) || canonical_size == 0 || canonical_size >= 32768
+        || _wcsicmp(canonical, expected_path.c_str()) != 0 || expected.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) return unavailable();
+    CleanupHandle owner(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE, checker));
+    CleanupHandle root(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, launcher));
+    std::uint64_t root_time = 0;
+    if (!owner.value || !root.value || !held_creation(root.value, root_time)) return unavailable();
+    std::vector<CorrelationEntry> rows, confirm;
+    if (!correlation_snapshot(checker, rows) || !correlation_snapshot(checker, confirm)) return unavailable();
+    const auto self = std::find_if(rows.begin(), rows.end(), [](const auto& row) { return row.pid == GetCurrentProcessId(); });
+    if (self == rows.end() || self->parent != checker) return unavailable();
+    struct Target {
+        CleanupHandle handle; std::uint64_t created; bool targeted = false;
+        Target(HANDLE value, std::uint64_t time) : handle(value), created(time) {}
+    };
+    std::vector<Target> targets;
+    for (const auto& row : rows) {
+        if (!row.matching) continue;
+        std::uint64_t created = 0;
+        if (!correlation_time(row.pid, created) || !historical_descendant(rows, confirm, row.pid,
+            launcher, root_time, created, correlation_time)) return unavailable();
+        HANDLE handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE | SYNCHRONIZE, FALSE, row.pid);
+        if (!handle) return unavailable();
+        targets.emplace_back(handle, created);
+        std::uint64_t held_time = 0;
+        if (!held_creation(handle, held_time) || held_time != created || !held_image(handle, expected, expected_path)) return unavailable();
+    }
+    std::uint64_t final_root_time = 0;
+    if (!held_creation(root.value, final_root_time) || final_root_time != root_time
+        || WaitForSingleObject(owner.value, 0) != WAIT_TIMEOUT) return unavailable();
+    std::cout << "ready " << targets.size() << ' ' << GetTickCount64() << '\n' << std::flush;
+    if (!cleanup_line(request)) return 0; // EOF drops handles without terminating any target.
+    std::istringstream trigger(request); std::string action; std::uint64_t cutoff = 0;
+    const auto now = GetTickCount64();
+    if (!(trigger >> action >> cutoff) || trigger >> extra || action != "cleanup"
+        || cutoff <= now || cutoff - now > 5000 || WaitForSingleObject(owner.value, 0) != WAIT_TIMEOUT) return unavailable();
+    unsigned already = 0, targeted = 0, rejected = 0;
+    // Unknown/new matching processes never become targets. If the complete
+    // post-stop inventory cannot correlate, none of the retained handles is used.
+    std::vector<CorrelationEntry> post;
+    if (!correlation_snapshot(checker, post)) {
+        return unavailable();
+    }
+    for (const auto& row : post) {
+        if (!row.matching) continue;
+        std::uint64_t created = 0;
+        const auto retained = std::find_if(targets.begin(), targets.end(), [&](const auto& target) {
+            return GetProcessId(target.handle.value) == row.pid;
+        });
+        if (retained == targets.end() || !correlation_time(row.pid, created) || created != retained->created) {
+            return unavailable();
+        }
+    }
+    for (auto& target : targets) {
+        if (GetTickCount64() >= cutoff || WaitForSingleObject(owner.value, 0) != WAIT_TIMEOUT) { ++rejected; continue; }
+        const DWORD state = WaitForSingleObject(target.handle.value, 0);
+        if (state == WAIT_OBJECT_0) { ++already; continue; }
+        std::uint64_t created = 0;
+        if (state != WAIT_TIMEOUT || !held_creation(target.handle.value, created) || created != target.created
+            || !held_image(target.handle.value, expected, expected_path)) { ++rejected; continue; }
+        if (!terminate_verified_handle({GetTickCount64() < cutoff,
+                WaitForSingleObject(owner.value, 0) == WAIT_TIMEOUT, true, true},
+            [&] { return TerminateProcess(target.handle.value, 1) != FALSE; })) { ++rejected; continue; }
+        target.targeted = true; ++targeted;
+    }
+    unsigned exited = 0;
+    do {
+        exited = 0;
+        for (const auto& target : targets) if (target.targeted && WaitForSingleObject(target.handle.value, 0) == WAIT_OBJECT_0) ++exited;
+        if (exited == targeted || GetTickCount64() >= cutoff) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    } while (true);
+    std::cout << "result " << targets.size() << ' ' << already << ' ' << targeted << ' ' << exited << ' ' << rejected << '\n' << std::flush;
+    SecureZeroMemory(request.data(), request.size()); SecureZeroMemory(path.data(), path.size());
     return std::cout ? 0 : 4;
 }
 

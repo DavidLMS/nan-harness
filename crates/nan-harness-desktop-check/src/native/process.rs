@@ -1,3 +1,6 @@
+#[cfg(any(windows, test))]
+pub(crate) mod holder;
+
 use crate::report::Reason;
 use std::{
     ffi::OsStr,
@@ -169,6 +172,21 @@ pub(super) fn run_chat_until(
     run_once_until(
         executable,
         OsStr::new("--claude-chat-press"),
+        None,
+        input,
+        Some(deadline),
+    )
+}
+
+#[cfg(target_os = "macos")]
+pub(super) fn run_claude_chat_turn_until(
+    executable: &Path,
+    input: &[u8],
+    deadline: Instant,
+) -> Result<Zeroizing<String>, FailureCategory> {
+    run_once_until(
+        executable,
+        OsStr::new("--claude-chat-turn"),
         None,
         input,
         Some(deadline),

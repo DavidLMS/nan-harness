@@ -1254,6 +1254,10 @@ async fn finish_scenario(
     gate: &ProviderGate,
     diagnostic: &mut Option<CleanupDiagnostic>,
 ) -> Result<(), Reason> {
+    #[cfg(windows)]
+    {
+        process.cleanup_executable = Some(spec.executable.clone());
+    }
     if let Err(failure) = stop(process, gui, process_group).await {
         *diagnostic = Some(CleanupDiagnostic {
             stage: CleanupStage::Stop,
@@ -1273,6 +1277,8 @@ async fn finish_scenario(
             gui,
             #[cfg(windows)]
             process.correlation_snapshot.take(),
+            #[cfg(windows)]
+            process.cleanup_holder.take(),
         ),
         CleanupStage::AbsenceAfterStop,
         outcome.err(),
@@ -1795,12 +1801,26 @@ fn launch(
         .map_err(|reason| (reason, crate::diagnostics::LaunchFailure::LaunchSetup))?;
     claude_storage::capture(spec, &command);
     claude_native_storage::capture(spec);
-    ProbeProcess::spawn(command).map_err(|_| {
+    #[cfg(windows)]
+    let cleanup_sha256 = (spec.kind == DesktopHarnessKind::Claude
+        && spec.session == crate::cli::SessionMode::GithubHosted
+        && std::env::var("NANH_CLAUDE_WINDOWS_PROFILE_POLICY").as_deref() == Ok("private-env")
+        && std::env::var("NANH_DESKTOP_QUALIFICATION_MODE").as_deref() == Ok("startup-baseline"))
+    .then(|| binary_digest(&spec.executable).ok())
+    .flatten();
+    let process = ProbeProcess::spawn(command).map_err(|_| {
         (
             Reason::UnsupportedVersion,
             crate::diagnostics::LaunchFailure::LauncherSpawn,
         )
-    })
+    })?;
+    #[cfg(windows)]
+    let process = {
+        let mut process = process;
+        process.cleanup_executable_sha256 = cleanup_sha256;
+        process
+    };
+    Ok(process)
 }
 
 fn restore_command(spec: &ProbeSpec) -> Result<Command, Reason> {
@@ -1871,10 +1891,15 @@ async fn wait_for_stop(process: &mut ProbeProcess, limit: Duration) -> StopWaitD
 fn capture_stop_correlation(process: &mut ProbeProcess, gui: Option<&Gui>) -> Duration {
     let deadline = Instant::now() + Duration::from_secs(10);
     if let (Some(gui), Some(launcher)) = (gui, process.id()) {
-        process.correlation_snapshot = gui.capture_process_correlation(
-            launcher,
-            deadline.min(Instant::now() + Duration::from_secs(1)),
-        );
+        let query_deadline = deadline.min(Instant::now() + Duration::from_secs(1));
+        process.correlation_snapshot = gui.capture_process_correlation(launcher, query_deadline);
+        process.cleanup_holder = process
+            .cleanup_executable
+            .as_ref()
+            .zip(process.cleanup_executable_sha256.as_deref())
+            .and_then(|(expected, digest)| {
+                gui.capture_owned_cleanup(launcher, expected, digest, query_deadline)
+            });
     }
     // The advisory query consumes the existing initial stop budget.
     deadline.saturating_duration_since(Instant::now())

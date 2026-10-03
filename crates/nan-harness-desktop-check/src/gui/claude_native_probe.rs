@@ -95,13 +95,18 @@ impl Gui {
     }
 
     pub(super) fn claude_composer_inventory(&self) -> Option<serde_json::Value> {
-        if !cfg!(target_os = "macos")
+        let mac = cfg!(target_os = "macos")
+            && std::env::var("RUNNER_OS").as_deref() == Ok("macOS")
+            && std::env::var("NANH_CLAUDE_MAC_PROFILE_POLICY").as_deref()
+                == Ok("native-known-folders");
+        let linux = cfg!(target_os = "linux")
+            && std::env::var("RUNNER_OS").as_deref() == Ok("Linux")
+            && std::env::var("NANH_CLAUDE_LINUX_SOURCE_POLICY").as_deref()
+                == Ok("official-2.9939.4");
+        if !(mac || linux)
             || self.kind != DesktopHarnessKind::Claude
             || std::env::var("GITHUB_ACTIONS").as_deref() != Ok("true")
             || std::env::var("RUNNER_ENVIRONMENT").as_deref() != Ok("github-hosted")
-            || std::env::var("RUNNER_OS").as_deref() != Ok("macOS")
-            || std::env::var("NANH_CLAUDE_MAC_PROFILE_POLICY").as_deref()
-                != Ok("native-known-folders")
             || std::env::var("NANH_DESKTOP_QUALIFICATION_MODE").as_deref() != Ok("startup-baseline")
         {
             return None;
@@ -132,13 +137,24 @@ pub(super) fn record(directory: &Path, owner: u32, source_count: &serde_json::Va
         }
     }
     // Frozen official Mac ZIP 2.19675.0; the enclosing trial binds its artifact/app digests.
-    let value = serde_json::json!({"schemaVersion":1,"mechanism":"claude-native-composer",
+    let mut value = serde_json::json!({"schemaVersion":1,"mechanism":"claude-native-composer",
         "diagnosticsOnly":true,"sourceVersion":"2.19675.0",
         "classicSourceSha256":"6e6be632eb7adc0e66c1bb795448269d6c1f3ffe8821bea59d9e9374671cf0ea",
         "sendSourceSha256":"69d43f83ac78605402b590559cfb9bd355215336a193cedf80cc30b246c1db60",
         "modernSourceSha256":"a9f54a8a154e19f86a9d9d696b808bd693904b5e47ec63517abb635003a4244d",
         "modeSourceSha256":"0d16680f19e10d03bc11e7797d842d01159da37b5ab410cad9b7307f7eeef3aa",
         "sourceCount":source_count});
+    if cfg!(target_os = "linux") {
+        value["sourceVersion"] = "2.9939.4".into();
+        value["classicSourceSha256"] =
+            "26f823bafc90cff4a749bfad6916ee69e4c3189f18b54a4e958ca387939c1181".into();
+        value["sendSourceSha256"] =
+            "d076b2f208fc5e572d0f3cd39aba35c6bacbe100a82db569851a0ce2317fa05c".into();
+        value["modernSourceSha256"] =
+            "5d1afc949ac69080ef6fe15491137ca0c3d2056991a9581537cba2bcc3724287".into();
+        value["modeSourceSha256"] =
+            "62ffbc1b8a3e4440ae77a33be142afd1914796f945bcd75d58cfe73679925f61".into();
+    }
     if let Ok(mut file) =
         open_private_new(&directory.join(format!("claude-native-composer-{owner}.json")))
     {
