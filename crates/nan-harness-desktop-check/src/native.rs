@@ -23,7 +23,7 @@ pub(crate) use mac_chat::ChatPressStage;
 #[cfg(target_os = "macos")]
 pub(crate) use mac_chat_turn::ChatTurnStage;
 #[cfg(target_os = "macos")]
-pub(crate) use mac_chat_turn::{ChatActionPhase, failure_label};
+pub(crate) use mac_chat_turn::{CHAT_TURN_MAX_MILLIS, ChatActionPhase, failure_label};
 pub(crate) use ocr::Page;
 pub(crate) use process::FailureCategory;
 #[cfg(windows)]
@@ -345,8 +345,8 @@ impl Native {
                 .saturating_duration_since(std::time::Instant::now())
                 .as_millis(),
         )
-        .unwrap_or(5000)
-        .min(5000);
+        .unwrap_or(CHAT_TURN_MAX_MILLIS)
+        .min(CHAT_TURN_MAX_MILLIS);
         let ticks = nix::time::clock_gettime(nix::time::ClockId::CLOCK_MONOTONIC)
             .map_err(|_| FailureCategory::InvalidInput)?;
         let now = u64::try_from(ticks.tv_sec())

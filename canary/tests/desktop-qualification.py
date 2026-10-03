@@ -957,6 +957,24 @@ class QualificationTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'hermes-desktop')
 
+    def test_owned_read_fixture_offer_count_is_optional_closed_and_claude_only(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'inventory.json'
+            value = dict(schemaVersion=1, mechanism='semantic-inventory', requestCount=1,
+                         toolCount=31, knownReadToolCount=1, readToolSelected=True)
+            for count in (0, 1, None):
+                path.write_text(json.dumps({**value, 'ownedReadFixtureToolCount': count}))
+                self.assertEqual(q.semantic_observations(root, 'claude-desktop')[0]
+                                 ['ownedReadFixtureToolCount'], count)
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'zed-desktop')
+            for count in (True, -1, 32, 4097, 'PRIVATE', {'name': 'PRIVATE'}):
+                path.write_text(json.dumps({**value, 'ownedReadFixtureToolCount': count}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'claude-desktop')
+            path.write_text(json.dumps(value))
+            self.assertNotIn('ownedReadFixtureToolCount', q.semantic_observations(root, 'claude-desktop')[0])
+
     def test_semantic_observation_bounds_and_symlink_rejection(self):
         with tempfile.TemporaryDirectory() as root:
             path = Path(root) / 'observation.json'

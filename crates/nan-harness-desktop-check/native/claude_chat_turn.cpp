@@ -45,7 +45,7 @@ static bool request(Request& value) {
     std::istringstream input(line);
     double x, y, width, height;
     if (!(input >> value.mode >> value.window >> value.pid >> x >> y >> width >> height >> value.millis >> value.cutoff >> value.owner >> prompt >> marker >> sentinel) || input >> trailing) return false;
-    if (!value.cutoff || value.owner < 2 || !value.window || value.pid < 2 || !value.millis || value.millis > 5000 || !std::isfinite(x) || !std::isfinite(y)
+    if (!value.cutoff || value.owner < 2 || !value.window || value.pid < 2 || !value.millis || value.millis > 15000 || !std::isfinite(x) || !std::isfinite(y)
         || !std::isfinite(width) || !std::isfinite(height) || width < 300 || height < 200) return false;
     if (!input_mode(value.mode) && value.mode != "copy" && value.mode != "retry-ready" && value.mode != "retry") return false;
     if (!decode(prompt, value.prompt) || !decode(marker, value.marker) || !decode(sentinel, value.sentinel) || value.sentinel.empty()) return false;

@@ -91,7 +91,7 @@ impl ToolResultObservation {
                     continue;
                 }
                 let content = message.get("content").unwrap_or(&Value::Null);
-                let Some((shape, error, text)) = classify(content) else {
+                let Some((shape, error, text)) = classify(content, selected_tool) else {
                     result.status = "limit";
                     result.shape = if result.result_present {
                         Shape::Mixed
@@ -132,14 +132,18 @@ impl ToolResultObservation {
     }
 }
 
-fn classify(content: &Value) -> Option<(Shape, Option<ErrorCategory>, Vec<&str>)> {
+fn classify(
+    content: &Value,
+    selected_tool: SelectedTool,
+) -> Option<(Shape, Option<ErrorCategory>, Vec<&str>)> {
     if let Some(text) = content.as_str() {
         if text.len() > MAX_TEXT_BYTES {
             return None;
         }
         return Some((
             Shape::String,
-            text.strip_prefix("Tool error: ").map(error_category),
+            text.strip_prefix("Tool error: ")
+                .map(|text| selected_error_category(text, selected_tool)),
             vec![text],
         ));
     }
@@ -175,7 +179,7 @@ fn classify(content: &Value) -> Option<(Shape, Option<ErrorCategory>, Vec<&str>)
         let mut category = ErrorCategory::Unknown;
         for part in parts.iter().skip(1) {
             if let Some(text) = part.get("text").and_then(Value::as_str) {
-                let found = error_category(text);
+                let found = selected_error_category(text, selected_tool);
                 if found != ErrorCategory::Unknown {
                     if category != ErrorCategory::Unknown && category != found {
                         return ErrorCategory::Unknown;
@@ -195,6 +199,22 @@ fn classify(content: &Value) -> Option<(Shape, Option<ErrorCategory>, Vec<&str>)
         category,
         texts,
     ))
+}
+
+fn selected_error_category(text: &str, selected_tool: SelectedTool) -> ErrorCategory {
+    if matches!(selected_tool, SelectedTool::Read)
+        && let Some(body) = text
+            .trim()
+            .strip_prefix("<tool_use_error>")
+            .and_then(|body| body.strip_suffix("</tool_use_error>"))
+        && !body.contains("<tool_use_error>")
+        && !body.contains("</tool_use_error>")
+        && let Some(inner) = body.trim().strip_prefix("Error calling tool (Read): ")
+    {
+        // The pinned SDK wraps thrown Read errors once inside this envelope.
+        return error_category(inner);
+    }
+    error_category(text)
 }
 
 fn error_category(text: &str) -> ErrorCategory {
@@ -265,6 +285,71 @@ mod tests {
         assert!(encoded.contains("file-not-found"));
         assert!(!encoded.contains("private path"));
         assert!(!encoded.contains("tool_use_error"));
+    }
+
+    #[test]
+    fn selected_read_wrapper_preserves_fixed_categories_without_exposing_content() {
+        for (prefix, expected) in [
+            ("File does not exist.", ErrorCategory::FileNotFound),
+            ("FileTooLargeError:", ErrorCategory::FileTooLarge),
+            ("MaxFileReadTokenExceededError:", ErrorCategory::ReadBudget),
+            ("EISDIR:", ErrorCategory::Directory),
+        ] {
+            let body = format!(
+                "<tool_use_error>Error calling tool (Read): {prefix} private</tool_use_error>"
+            );
+            for content in [
+                json!(format!("Tool error: {body}")),
+                json!([{"type":"text","text":"Tool error"}, {"type":"text","text":body}]),
+            ] {
+                let facts =
+                    ToolResultObservation::collect(&[request("tool", content)], SelectedTool::Read);
+                assert_eq!(facts.error_category, expected);
+                let encoded = serde_json::to_string(&facts).unwrap();
+                assert!(!encoded.contains("private"));
+                assert!(!encoded.contains("Error calling tool"));
+            }
+        }
+    }
+
+    #[test]
+    fn wrapper_requires_selected_read_complete_single_envelope_and_exact_spelling() {
+        let valid = "<tool_use_error>Error calling tool (Read): File does not exist. private</tool_use_error>";
+        for selected in [
+            SelectedTool::ReadFile,
+            SelectedTool::ReadFiles,
+            SelectedTool::ExecCommand,
+        ] {
+            let facts = ToolResultObservation::collect(
+                &[request("tool", json!(format!("Tool error: {valid}")))],
+                selected,
+            );
+            assert_eq!(facts.error_category, ErrorCategory::Unknown);
+        }
+        for body in [
+            "Error calling tool (Read): File does not exist.",
+            "<tool_use_error>Error calling tool (Read): File does not exist.",
+            "<tool_use_error>Error calling tool (read): File does not exist.</tool_use_error>",
+            "<tool_use_error>Error calling tool (read_file): File does not exist.</tool_use_error>",
+            "<tool_use_error>Error calling tool (Read): Error calling tool (Read): File does not exist.</tool_use_error>",
+            "<tool_use_error>Error calling tool (Read): <tool_use_error>File does not exist.</tool_use_error></tool_use_error>",
+            "<tool_use_error>Error calling tool (Read): unknown private</tool_use_error>",
+        ] {
+            assert_eq!(
+                selected_error_category(body, SelectedTool::Read),
+                ErrorCategory::Unknown
+            );
+        }
+        for role in ["assistant", "user"] {
+            let facts = ToolResultObservation::collect(
+                &[request(role, json!(format!("Tool error: {valid}")))],
+                SelectedTool::Read,
+            );
+            assert!(!facts.result_present);
+        }
+        let facts =
+            ToolResultObservation::collect(&[request("tool", json!(valid))], SelectedTool::Read);
+        assert!(!facts.tool_error_detected);
     }
 
     #[test]

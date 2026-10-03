@@ -1,6 +1,6 @@
 //! Source-bound native Chat conversation input and assistant-only clipboard readback.
 use super::{Gui, clipboard};
-use crate::native::{ChatActionPhase, failure_label};
+use crate::native::{CHAT_TURN_MAX_MILLIS, ChatActionPhase, failure_label};
 use crate::native::{ChatTurnStage, GuardFailure};
 use crate::provider::ProviderGate;
 use crate::report::Reason;
@@ -190,7 +190,7 @@ impl ClaudeNativeChatSession<'_> {
         let result = self.action(
             "input-replace-owned",
             "",
-            Instant::now() + Duration::from_secs(5),
+            Instant::now() + Duration::from_millis(u64::from(CHAT_TURN_MAX_MILLIS)),
         );
         match result {
             Ok(ChatTurnStage::Sent) => {
@@ -221,7 +221,8 @@ impl ClaudeNativeChatSession<'_> {
         let deadline = Instant::now() + timeout;
         loop {
             self.observe_provider(gate);
-            let until = deadline.min(Instant::now() + Duration::from_secs(5));
+            let until = deadline
+                .min(Instant::now() + Duration::from_millis(u64::from(CHAT_TURN_MAX_MILLIS)));
             match self.action("copy", marker, until)? {
                 ChatTurnStage::Copied => {
                     // The helper already checked exact clipboard bytes; independently
@@ -255,7 +256,8 @@ impl ClaudeNativeChatSession<'_> {
             match self.action(
                 "retry-ready",
                 "NAN_CHECK_EXPECTED_FAILURE",
-                deadline.min(Instant::now() + Duration::from_secs(5)),
+                deadline
+                    .min(Instant::now() + Duration::from_millis(u64::from(CHAT_TURN_MAX_MILLIS))),
             )? {
                 ChatTurnStage::RetryReady => {
                     self.retry_ready = true;
@@ -279,7 +281,7 @@ impl ClaudeNativeChatSession<'_> {
         match self.action(
             "retry",
             "NAN_CHECK_EXPECTED_FAILURE",
-            Instant::now() + Duration::from_secs(5),
+            Instant::now() + Duration::from_millis(u64::from(CHAT_TURN_MAX_MILLIS)),
         ) {
             Ok(ChatTurnStage::Retried) => {
                 self.facts.retry_attempted = true;

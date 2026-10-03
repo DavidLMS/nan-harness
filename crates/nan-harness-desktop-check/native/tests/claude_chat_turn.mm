@@ -6,6 +6,33 @@ static Node fixture(int parent, const char* role, const char* label, const char*
     return {nullptr, parent, role, label, current, CGRectZero, true};
 }
 int main() {
+    const auto parsed_budget = [](unsigned millis, const char* suffix = "") {
+        std::istringstream frame("input 7 8 0 0 800 600 " + std::to_string(millis) + " 1000 9 70 - 73\n" + suffix);
+        auto* original = std::cin.rdbuf(frame.rdbuf());
+        std::cin.clear();
+        Request parsed;
+        const bool valid = request(parsed);
+        std::cin.rdbuf(original);
+        std::cin.clear();
+        if (valid) {
+            assert(parsed.millis == millis && parsed.cutoff == 1000);
+            // A larger upfront relative cap never renews an exhausted absolute cutoff.
+            parsed.owner = static_cast<unsigned>(getppid());
+            parsed.cutoff = 1;
+            assert(!within(parsed));
+            parsed.cutoff = UINT64_MAX;
+            parsed.deadline = Clock::now() - std::chrono::milliseconds(1);
+            assert(!within(parsed));
+        }
+        return valid;
+    };
+    assert(parsed_budget(1));
+    assert(parsed_budget(5000));
+    assert(parsed_budget(15000));
+    assert(!parsed_budget(0));
+    assert(!parsed_budget(15001));
+    assert(!parsed_budget(15000, "trailing"));
+
     assert(assistant_heading_label("generic description", "Claude responded: fixture") == "Claude responded: fixture");
     assert(assistant_heading_label("Claude responded: fixture", "") == "Claude responded: fixture");
     assert(assistant_heading_label("Claude responded: fixture", "Claude responded: other").empty());

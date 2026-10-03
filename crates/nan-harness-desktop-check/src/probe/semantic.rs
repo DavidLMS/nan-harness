@@ -332,7 +332,22 @@ async fn complete_scenario(
 
     let requests = inventory.chat_requests();
     let selected = select_read_tool(&requests, fixture);
-    record_inventory(directory, &requests, selected.is_some())?;
+    let owned_fixture_scope = {
+        #[cfg(target_os = "macos")]
+        {
+            matches!(ui, SemanticUi::Claude(_)) && owned_read_fixture_policy(fixture)
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            false
+        }
+    };
+    record_inventory(
+        directory,
+        &requests,
+        selected.is_some(),
+        owned_fixture_scope,
+    )?;
     let (name, arguments) = selected.ok_or(Reason::ToolMismatch)?;
     let selected_tool = SelectedTool::from_name(&name).ok_or(Reason::ToolMismatch)?;
     let tool_marker = semantic_marker("NAN CHECK TOOL")?;
@@ -442,6 +457,13 @@ fn record_provider_oracle(
 }
 
 #[derive(Serialize)]
+#[serde(untagged)]
+enum OwnedReadFixtureCount {
+    Unavailable,
+    Observed(usize),
+}
+
+#[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct InventoryFacts {
     schema_version: u8,
@@ -450,12 +472,15 @@ struct InventoryFacts {
     tool_count: usize,
     known_read_tool_count: usize,
     read_tool_selected: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    owned_read_fixture_tool_count: Option<OwnedReadFixtureCount>,
 }
 
 fn record_inventory(
     directory: &Path,
     requests: &[serde_json::Value],
     selected: bool,
+    owned_fixture_scope: bool,
 ) -> Result<(), Reason> {
     let tools: Vec<_> = requests
         .iter()
@@ -468,6 +493,12 @@ fn record_inventory(
         request_count: requests.len(),
         tool_count: tools.len(),
         read_tool_selected: selected,
+        owned_read_fixture_tool_count: owned_fixture_scope.then(|| {
+            owned_read_fixture_count(requests).map_or(
+                OwnedReadFixtureCount::Unavailable,
+                OwnedReadFixtureCount::Observed,
+            )
+        }),
         known_read_tool_count: tools
             .iter()
             .filter(|tool| {
@@ -485,4 +516,107 @@ fn record_inventory(
     open_private_new(&directory.join(format!("inventory-{}.json", u64::from_le_bytes(nonce))))
         .and_then(|mut file| file.write_all(&bytes).and_then(|()| file.sync_all()))
         .map_err(|_| Reason::IsolationUnavailable)
+}
+
+fn owned_read_fixture_count(requests: &[serde_json::Value]) -> Option<usize> {
+    if requests.len() > 4096 {
+        return None;
+    }
+    let mut inspected = 0_usize;
+    let mut count = 0_usize;
+    for request in requests {
+        let Some(tools) = request.get("tools").and_then(serde_json::Value::as_array) else {
+            continue;
+        };
+        inspected = inspected.checked_add(tools.len())?;
+        if inspected > 4096 {
+            return None;
+        }
+        count += tools
+            .iter()
+            .filter(|tool| {
+                tool.pointer("/function/name")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("mcp__nanh-read-fixture__read_file")
+            })
+            .count();
+    }
+    Some(count)
+}
+
+#[cfg(target_os = "macos")]
+fn owned_read_fixture_policy(fixture: &Path) -> bool {
+    use sha2::{Digest as _, Sha256};
+    let expected = "ecb56f97d549f3040908f1bb8f0bb32235f9b48d9572ea348098135fe7999fc0";
+    for (key, value) in [
+        ("GITHUB_ACTIONS", "true"),
+        ("RUNNER_ENVIRONMENT", "github-hosted"),
+        ("RUNNER_OS", "macOS"),
+        ("NANH_CLAUDE_MAC_PROFILE_POLICY", "native-known-folders"),
+        ("NANH_CLAUDE_MCP_FIXTURE", "read-only"),
+        ("NANH_CLAUDE_MCP_SOURCE_SHA256", expected),
+    ] {
+        if std::env::var(key).as_deref() != Ok(value) {
+            return false;
+        }
+    }
+    let valid = || -> Option<()> {
+        let workspace = std::env::current_dir().ok()?.canonicalize().ok()?;
+        if fixture != workspace.join("read-target.txt")
+            || fixture.canonicalize().ok()?.as_path() != fixture
+        {
+            return None;
+        }
+        let (file, _) = nan_harness_private_fs::open_private_read(fixture).ok()?;
+        if file.metadata().ok()?.len() > 4096 {
+            return None;
+        }
+        for key in ["NANH_CLAUDE_MCP_SCRIPT", "NANH_CLAUDE_MCP_PYTHON"] {
+            let path = PathBuf::from(std::env::var_os(key)?);
+            let metadata = std::fs::symlink_metadata(&path).ok()?;
+            if !metadata.is_file() || !path.is_absolute() || path.canonicalize().ok()? != path {
+                return None;
+            }
+            if key == "NANH_CLAUDE_MCP_SCRIPT" {
+                if metadata.len() > 32768 {
+                    return None;
+                }
+                let bytes = std::fs::read(path).ok()?;
+                if Sha256::digest(bytes).as_slice()
+                    != [
+                        0xec, 0xb5, 0x6f, 0x97, 0xd5, 0x49, 0xf3, 0x04, 0x09, 0x08, 0xf1, 0xbb,
+                        0x8f, 0x0b, 0xb3, 0x22, 0x35, 0xf9, 0xb4, 0x8d, 0x95, 0x72, 0xea, 0x34,
+                        0x80, 0x98, 0x13, 0x5f, 0xe7, 0x99, 0x9f, 0xc0,
+                    ]
+                {
+                    return None;
+                }
+            }
+        }
+        Some(())
+    };
+    valid().is_some()
+}
+
+#[cfg(test)]
+mod owned_fixture_tests {
+    use super::owned_read_fixture_count;
+    use serde_json::json;
+    #[test]
+    fn exact_fixture_offer_is_counted_without_selecting_aliases() {
+        let request = json!({"tools":[
+            {"function":{"name":"mcp__nanh-read-fixture__read_file"}},
+            {"function":{"name":"mcp__nanh_read_fixture__read_file"}},
+            {"function":{"name":"mcp__other__read_file"}},
+            {"function":{"name":"Read"}},
+            {"name":"mcp__nanh-read-fixture__read_file"}
+        ]});
+        assert_eq!(owned_read_fixture_count(&[request]), Some(1));
+        assert_eq!(owned_read_fixture_count(&[json!({"tools":[]})]), Some(0));
+        assert_eq!(
+            owned_read_fixture_count(&[json!({"tools":vec![json!({});4097]})]),
+            None
+        );
+        assert_eq!(owned_read_fixture_count(&vec![json!({}); 4097]), None);
+    }
 }

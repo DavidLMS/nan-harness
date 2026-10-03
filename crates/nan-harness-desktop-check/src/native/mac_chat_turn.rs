@@ -3,6 +3,8 @@ use super::Window;
 use std::fmt::Write as _;
 use zeroize::Zeroizing;
 
+pub(crate) const CHAT_TURN_MAX_MILLIS: u32 = 15_000;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum ChatActionPhase {
@@ -199,7 +201,7 @@ pub(super) fn request(
         || cutoff == 0
         || owner < 2
         || millis == 0
-        || millis > 5000
+        || millis > CHAT_TURN_MAX_MILLIS
     {
         return None;
     }
@@ -298,6 +300,7 @@ mod tests {
         }
         assert_eq!(helper_millis(51), Ok(1));
         assert_eq!(helper_millis(5000), Ok(4950));
+        assert_eq!(helper_millis(CHAT_TURN_MAX_MILLIS), Ok(14_950));
     }
 
     #[test]
@@ -493,6 +496,31 @@ mod tests {
         assert!(request(&window, "input", ["prompt", "", "sentinel"], 500, 0, 9).is_none());
         assert!(request(&window, "input", ["prompt", "", "sentinel"], 500, 1000, 1).is_none());
         assert!(request(&window, "unknown", ["prompt", "", "sentinel"], 500, 1000, 9).is_none());
+        for millis in [1, 5000, CHAT_TURN_MAX_MILLIS] {
+            let framed = request(
+                &window,
+                "input",
+                ["prompt", "", "sentinel"],
+                millis,
+                1000,
+                9,
+            )
+            .unwrap();
+            assert!(framed.contains(&format!(" {millis} 1000 9 ")));
+        }
+        for millis in [0, CHAT_TURN_MAX_MILLIS + 1, u32::MAX] {
+            assert!(
+                request(
+                    &window,
+                    "input",
+                    ["prompt", "", "sentinel"],
+                    millis,
+                    1000,
+                    9
+                )
+                .is_none()
+            );
+        }
     }
     #[test]
     fn private_text_is_hex_framed_without_newlines_or_command_arguments() {

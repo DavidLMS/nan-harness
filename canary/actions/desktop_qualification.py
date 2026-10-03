@@ -1561,6 +1561,13 @@ def semantic_observations(directory, app):
             if type(value.get('readToolSelected')) is not bool:
                 raise ValueError('invalid semantic inventory flag')
             record['readToolSelected'] = value['readToolSelected']
+            if 'ownedReadFixtureToolCount' in value:
+                count = value['ownedReadFixtureToolCount']
+                if (app != 'claude-desktop' or (count is not None and
+                        (type(count) is not int or not 0 <= count <= 4096
+                         or count > value['toolCount']))):
+                    raise ValueError('invalid owned read fixture offer count')
+                record['ownedReadFixtureToolCount'] = count
         elif mechanism == 'windows-process-baseline':
             fields = set('schemaVersion mechanism diagnosticsOnly app phase state'.split())
             if (set(value) != fields or app != 'claude-desktop' or value['app'] != app
