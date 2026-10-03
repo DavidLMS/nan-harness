@@ -83,11 +83,28 @@ async function trial(options={}) {
  let guards=0,mainProofs=0;
  const guard=()=>{guards++;if(options.guardThrows)throw Error('PRIVATE');if(options.guardExhaustsBudget&&guards>=3||options.overlayBudgetExpired&&overlayReads>0)now=1201;return !inventoryOwnerLost&&!(options.overlayOwnerDuringProof&&legendReads>=3)&&!(options.overlayOwnerLoss&&overlayReads>0)&&!options.initialOwnerLoss&&!(options.ownerLossBeforeRole&&guards>=3)&&!(options.ownerLoss&&roleClicks>0)&&!(options.finalLoss&&guards>=2);};
  const budget=options.expired?0:options.invalidDeadline?NaN:options.excessBudget?25001:1200;
- const facts=await sandbox.exports.run(page,options.noGuard?undefined:guard,budget,options.admitAux?async()=>{mainProofs++;if(options.auxDeadlineAfterProof)now=1201;return !(options.auxOwnershipLostDuringProof&&legendReads>0)&&(!options.auxOwnershipLostAfterClick||roleClicks===0);}:undefined);
+ const mainGuard=options.admitAux?async()=>{
+  mainProofs++;
+  if(options.auxDeadlineAfterProof||options.auxDeadlineFailedProof)now=1201;
+  return !options.auxGuardFailure&&!options.auxDeadlineFailedProof
+    &&!(options.auxOwnershipLostDuringProof&&legendReads>0)&&(!options.auxOwnershipLostAfterClick||roleClicks===0);
+ }:undefined;
+ if(mainGuard)mainGuard.failure=()=>options.auxDeadlineFailedProof?'deadline':options.auxGuardFailure??'native-ownership';
+ const facts=await sandbox.exports.run(page,options.noGuard?undefined:guard,budget,mainGuard);
  assert(!JSON.stringify(facts).includes('PRIVATE'));
  return {facts,roleClicks,continueClicks,taskClicks,mainProofs,legendReads};
 }
 (async()=>{
+ for(const reason of ['main-focus','auxiliary-controls','query-failed']) {
+  const blocked=await trial({admitAux:true,auxGuardFailure:reason});
+  assert.equal(blocked.facts.mainGuardFailure,reason);assert.equal(blocked.roleClicks,0);assert.equal(blocked.continueClicks,0);
+ }
+ const failedLate=await trial({admitAux:true,auxDeadlineFailedProof:true});
+ assert.equal(failedLate.facts.roleProofFailure,'deadline-expired');
+ assert.equal(failedLate.facts.mainGuardFailure,'deadline');assert.equal(failedLate.roleClicks,0);
+ const privateFailure=await trial({admitAux:true,auxGuardFailure:'PRIVATE unsupported'});
+ assert.equal(privateFailure.facts.mainGuardFailure,undefined);assert.equal(privateFailure.roleClicks,0);
+
  const freshAuxLost=await trial({foreignPage:true,admitAux:true,auxOwnershipLostDuringProof:true});
  assert.equal(freshAuxLost.roleClicks,0);
  assert.equal(freshAuxLost.continueClicks,0);

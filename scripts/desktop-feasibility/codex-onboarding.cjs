@@ -137,7 +137,12 @@ async function run(page, ownerGuard, deadline, rejected, mainGuard) {
       const pages = browser?.contexts().flatMap(context => context.pages());
       if (!pages) return fail('query-failed');
       const mainProved = typeof mainGuard === 'function' ? await mainGuard() : false;
-      if (Date.now() >= deadline && mainProved) return fail('deadline-expired');
+      if (!mainProved && typeof mainGuard?.failure === 'function') {
+        const reason=mainGuard.failure();
+        if(['deadline','native-ownership','page-set','main-identity','main-focus','main-scope',
+          'auxiliary-route','auxiliary-identity','auxiliary-focus','auxiliary-controls','query-failed','unmeasured'].includes(reason)) facts.mainGuardFailure=reason;
+      }
+      if (Date.now() >= deadline) return fail('deadline-expired');
       if (pages.length !== 1 && !mainProved) {
         // Retain only a bounded protocol inventory of the rejected snapshot.
         // This never authorizes choosing among renderer targets.

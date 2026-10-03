@@ -69,7 +69,7 @@ def main_aux_correlation(value, app):
 
 
 def public_onboarding(setup, app):
-    shape = set(setup) - {'rejectedPageInventory', 'taskScopeProved', 'taskClickAttempted', 'taskClickCompleted', 'codingComposerReady'} if type(setup) is dict else set()
+    shape = set(setup) - {'rejectedPageInventory', 'taskScopeProved', 'taskClickAttempted', 'taskClickCompleted', 'codingComposerReady', 'mainGuardFailure'} if type(setup) is dict else set()
     booleans = {'conversationalScope', 'engineeringControl', 'roleClickAttempted',
                 'roleClickCompleted', 'engineeringChecked', 'continueControl',
                 'continueClickAttempted', 'continueClickCompleted', 'roleScopeAbsent'}
@@ -93,6 +93,13 @@ def public_onboarding(setup, app):
             or type(setup['sessionProofFailure']) is not str or setup['sessionProofFailure'] not in sessions
             or any(type(setup[key]) is not bool for key in booleans)):
         raise ValueError('invalid public onboarding diagnostic')
+    if 'mainGuardFailure' in setup:
+        failure = setup['mainGuardFailure']
+        if (type(failure) is not str or failure not in {
+                'deadline', 'native-ownership', 'page-set', 'main-identity', 'main-focus', 'main-scope',
+                'auxiliary-route', 'auxiliary-identity', 'auxiliary-focus', 'auxiliary-controls',
+                'query-failed', 'unmeasured'}):
+            raise ValueError('invalid public onboarding main guard diagnostic')
     if 'rejectedPageInventory' in setup:
         inventory = setup['rejectedPageInventory']
         counts = {'total', 'held', 'app', 'blank', 'devtools', 'other'}

@@ -145,20 +145,42 @@ assert.equal(roleSourceScope({foreignFieldset:true}).mainScope,false);
   // the main role may transition while the auxiliary must remain inert.
   f=fixture();let owner=true;
   let inputGuard=helper.heldMainGuard(f.held,f.browser,()=>owner,1000,()=> 'avatarOverlay',f.identity,async ms=>{clock+=ms;});
+  assert.equal(inputGuard.failure(),'unmeasured');
   assert.equal(await inputGuard(),true);
   f.setAlter(r=>{if(r.page===f.main){r.scope.mainScope=false;r.scope.counts.roleRadios=0;}});
   assert.equal(await inputGuard(),true);
   f.setAlter(r=>{if(r.page===f.aux)r.scope.counts.editable=1;});
   assert.equal(await inputGuard(),false);
-  for(const change of [r=>{r.loader='changed';},r=>{r.scope.focused=true;},r=>{r.scope.counts.dialog=1;}]) {
+  assert.equal(inputGuard.failure(),'auxiliary-controls');
+  for(const [change,reason] of [[r=>{r.loader='changed';},'auxiliary-identity'],[r=>{r.scope.focused=true;},'auxiliary-focus'],[r=>{r.scope.counts.dialog=1;},'auxiliary-controls']]) {
     f=fixture();inputGuard=helper.heldMainGuard(f.held,f.browser,()=>true,1000,()=> 'avatarOverlay',f.identity,async()=>{});
     assert.equal(await inputGuard(),true);
     f.setAlter(r=>{if(r.page===f.aux)change(r);});assert.equal(await inputGuard(),false);
+    assert.equal(inputGuard.failure(),reason);
   }
   f=fixture();inputGuard=helper.heldMainGuard(f.held,f.browser,()=>true,1000,()=> 'unknown',f.identity,async()=>{});
   assert.equal(await inputGuard(),false);
   f=fixture();inputGuard=helper.heldMainGuard(null,f.browser,()=>true,1000,()=> 'avatarOverlay',f.identity,async()=>{});
   assert.equal(await inputGuard(),false);
+  assert.equal(inputGuard.failure(),'main-identity');
+  const cases=[
+    [f=>f.setPages([f.main,f.aux,{}]),'page-set'],
+    [f=>f.setAlter(r=>{if(r.page===f.main)r.loader='PRIVATE replacement';}),'main-identity'],
+    [f=>f.setAlter(r=>{if(r.page===f.main)r.scope.focused=false;}),'main-focus'],
+    [f=>f.setAlter(r=>{if(r.page===f.main)r.scope.mainScope=false;}),'main-scope'],
+    [f=>f.setAlter(()=>{clock=1001;}),'deadline'],
+    [f=>f.setAlter(()=>{throw Error('PRIVATE query');}),'query-failed'],
+  ];
+  for(const [mutate,reason] of cases) {
+    f=fixture();mutate(f);
+    inputGuard=helper.heldMainGuard(f.held,f.browser,()=>true,1000,()=> 'avatarOverlay',f.identity,async()=>{},true);
+    assert.equal(await inputGuard(),false);assert.equal(inputGuard.failure(),reason);
+    assert(!JSON.stringify({failure:inputGuard.failure()}).includes('PRIVATE'));
+  }
+  f=fixture();inputGuard=helper.heldMainGuard(f.held,f.browser,()=>false,1000,()=> 'avatarOverlay',f.identity);
+  assert.equal(await inputGuard(),false);assert.equal(inputGuard.failure(),'native-ownership');
+  f=fixture();inputGuard=helper.heldMainGuard(f.held,f.browser,()=>true,1000,()=> 'unknown',f.identity);
+  assert.equal(await inputGuard(),false);assert.equal(inputGuard.failure(),'auxiliary-route');
   // The callback runs serialized in a standalone browser realm, without Node helpers.
   const scope=vm.runInNewContext(`(${helper.correlationScope.toString()})()`, {
     document:{querySelectorAll:()=>[],hasFocus:()=>false},getComputedStyle:()=>({})});

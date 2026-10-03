@@ -2040,6 +2040,14 @@ class QualificationTests(unittest.TestCase):
                      engineeringChecked=True, continueControl=True, continueClickAttempted=True,
                      continueClickCompleted=True, roleScopeAbsent=True, roleProofFailure='unmeasured', sessionProofFailure='unmeasured')
         self.assertEqual(q.public_onboarding(setup, 'chatgpt-desktop'), setup)
+        for reason in ('deadline', 'native-ownership', 'page-set', 'main-identity', 'main-focus', 'main-scope',
+                       'auxiliary-route', 'auxiliary-identity', 'auxiliary-focus', 'auxiliary-controls',
+                       'query-failed', 'unmeasured'):
+            measured = {**setup, 'mainGuardFailure': reason}
+            self.assertEqual(q.public_onboarding(measured, 'chatgpt-desktop'), measured)
+        for invalid in ('PRIVATE', None, True, {'path': 'PRIVATE'}):
+            with self.assertRaises(ValueError):
+                q.public_onboarding({**setup, 'mainGuardFailure': invalid}, 'chatgpt-desktop')
         inventory = dict(status='complete', total=2, held=1, app=1, blank=1, devtools=0, other=0)
         self.assertEqual(q.public_onboarding({**setup, 'rejectedPageInventory': inventory}, 'chatgpt-desktop')['rejectedPageInventory'], inventory)
         for invalid in ({**inventory, 'total': 1}, {**inventory, 'held': 2},

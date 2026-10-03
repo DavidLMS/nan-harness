@@ -210,43 +210,56 @@ async function observeMainAux(held,browser,guard,deadline,auxRoute,
 // Later source-known inert avatar pages never become selectable input targets.
 function heldMainGuard(held, browser, owner, deadline, route,
   identity=correlationIdentity, pause=ms=>new Promise(resolve=>setTimeout(resolve,ms)),requireMainScope=false) {
-  let auxiliary=null, auxiliaryIdentity=null;
+  let auxiliary=null, auxiliaryIdentity=null, failure='unmeasured';
+  const reject=reason=>{failure=reason;return false;};
   const pages=()=>browser.contexts().flatMap(context=>context.pages());
-  const valid=()=>Date.now()<deadline&&owner()===true;
+  const valid=()=>{
+    if(Date.now()>=deadline)return reject('deadline');
+    if(owner()!==true)return reject('native-ownership');
+    return Date.now()<deadline||reject('deadline');
+  };
   const prove=async function prove() {
-    if(!held||!valid())return false;
+    failure='unmeasured';
     try {
+      if(!held)return reject('main-identity');
+      if(!valid())return false;
       const initial=pages();
-      if(initial.length<1||initial.length>2||!initial.includes(held.page))return false;
+      if(initial.length<1||initial.length>2||!initial.includes(held.page))return reject('page-set');
       const extra=initial.find(page=>page!==held.page);
-      if(auxiliary&&extra!==auxiliary)return false;
-      if(extra&&route(extra.url())!=='avatarOverlay')return false;
+      if(auxiliary&&extra!==auxiliary)return reject('auxiliary-identity');
+      if(extra&&route(extra.url())!=='avatarOverlay')return reject('auxiliary-route');
       const samples=extra&&!auxiliary?2:1;
       let candidateAux=null;
       for(let sample=0;sample<samples;sample++) {
         if(!valid())return false;
         const before=pages();
-        if(before.length!==initial.length||!before.every(page=>initial.includes(page)))return false;
+        if(before.length!==initial.length||!before.every(page=>initial.includes(page)))return reject('page-set');
         const main=await identity(held.page,deadline);
-        if(!valid()||!sameCorrelationIdentity(held,main)||!main.scope.focused
-          ||requireMainScope&&!main.scope.mainScope)return false;
+        if(!valid())return false;
+        if(!sameCorrelationIdentity(held,main))return reject('main-identity');
+        if(!main.scope.focused)return reject('main-focus');
+        if(requireMainScope&&!main.scope.mainScope)return reject('main-scope');
         if(extra) {
           const aux=await identity(extra,deadline);
           const expected=auxiliaryIdentity??candidateAux;
-          if(!valid()||expected&&!sameCorrelationIdentity(expected,aux))return false;
+          if(!valid())return false;
+          if(expected&&!sameCorrelationIdentity(expected,aux))return reject('auxiliary-identity');
           const counts=aux.scope.counts;
-          if(aux.scope.focused||['roleLegend','roleRadios','engineering','dialog','quickChatComposer','editable']
-              .some(key=>counts[key]!==0))return false;
+          if(aux.scope.focused)return reject('auxiliary-focus');
+          if(['roleLegend','roleRadios','engineering','dialog','quickChatComposer','editable']
+              .some(key=>counts[key]!==0))return reject('auxiliary-controls');
           candidateAux=aux;
         }
         const after=pages();
-        if(!valid()||after.length!==initial.length||!after.every(page=>initial.includes(page)))return false;
+        if(!valid())return false;
+        if(after.length!==initial.length||!after.every(page=>initial.includes(page)))return reject('page-set');
         if(sample+1<samples)await pause(Math.min(100,Math.max(0,deadline-Date.now())));
       }
       if(extra&&!auxiliary){auxiliary=extra;auxiliaryIdentity=candidateAux;}
       return true;
-    } catch {return false;}
+    } catch {return reject(Date.now()>=deadline?'deadline':'query-failed');}
   };
+  prove.failure=()=>failure;
   const privateIdentity=value=>value&&Object.fromEntries(['url','target','frame','loader','frameUrl','fragment'].map(key=>[key,value[key]]));
   prove.binding=()=>({schemaVersion:1,main:privateIdentity(held),auxiliary:privateIdentity(auxiliaryIdentity)});
   return prove;
