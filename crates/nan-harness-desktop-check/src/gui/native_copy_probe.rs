@@ -239,6 +239,7 @@ fn neutral_input(executable: &Path, mode: &str, prompt: &str) -> Result<(), Reas
         "RUNNER_OS",
         "NANH_DESKTOP_QUALIFICATION_FACTS",
         "NANH_ZED_XRECORD",
+        "NANH_ZED_CURSOR_HIT",
         "NANH_ZED_PANEL_ZOOM",
     ] {
         if let Some(value) = std::env::var_os(key) {
@@ -1820,7 +1821,7 @@ mod tests {
             &script,
             format!(
                 "[ \"${{NANH_ZED_XRECORD-unset}}\" = \"{expected}\" ] && \
-                 [ \"${{NAN_API_KEY-unset}}\" = unset ] && [ \"$1\" = select-all ]\n"
+                 [ \"${{NANH_ZED_CURSOR_HIT-unset}}\" = \"{expected}\" ] && [ \"${{NAN_API_KEY-unset}}\" = unset ] && [ \"$1\" = select-all ]\n"
             ),
         )
         .unwrap();
@@ -1835,6 +1836,7 @@ mod tests {
             .env("NANH_TEST_INPUT_ENV_CHILD", "1")
             .env("FEASIBILITY_ZED_INPUT_SCRIPT", &script)
             .env("NANH_ZED_XRECORD", "1")
+            .env("NANH_ZED_CURSOR_HIT", "1")
             .env("NAN_API_KEY", "synthetic-provider-key")
             .stdin(Stdio::null())
             .stdout(Stdio::null())
