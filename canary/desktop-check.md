@@ -2336,3 +2336,46 @@ defines zero as the default when the property is not reported. Synthetic native
 and strict wire-decoder tests preserve rejection and null counts for each case.
 Actual runner evidence is required before attributing the mismatch to that
 specific default.
+
+The follow-up
+[Windows run 37153026660](https://github.com/DavidLMS/nan-harness/actions/runs/37153026660)
+still reports `descendant-process-mismatch`, proving that the first rejected
+property is a different positive identity, not zero/default. A bounded passive
+ancestry observer now distinguishes a verified owned descendant, a complete
+stable foreign chain, and unavailable correlation. All three remain rejected
+with null counts. Root live-handle/creation proof, two bounded process snapshots,
+link creation ordering and the original deadline are retained; no renderer
+identity is admitted by this experiment.
+
+[Claude Linux run 37153349217](https://github.com/DavidLMS/nan-harness/actions/runs/37153349217)
+finds a unique visible Mode group in three sessions, but all eight exact-source
+button/radio counts are zero. This rules out the tested compact-radio/attention
+label selector variants as a sufficient fix; it does not prove those controls
+are unavailable through every native interface.
+[Claude macOS run 37153349373](https://github.com/DavidLMS/nan-harness/actions/runs/37153349373)
+again verifies input and response in two sessions, then fails at the following
+input's collapsed native focus boundary before the tool-result diagnostic can
+be written. No tool error or namespace conclusion is established by that run.
+Native input receipts now distinguish the original guard, focus-setting,
+clipboard and key-dispatch failures without adding queries or replaying input.
+
+The passive Codex measurement in
+[macOS run 37153177800](https://github.com/DavidLMS/nan-harness/actions/runs/37153177800)
+and all three sessions of
+[Windows run 37153358989](https://github.com/DavidLMS/nan-harness/actions/runs/37153358989)
+reports `geometry-outside`; the unknown separate dialog still blocks action.
+Passive samples now remain within the intersection of integer client dimensions
+and fractional DOMRect dimensions. This avoids rejecting a rounded client edge
+alone; viewport containment and all action guards remain unchanged. CSSOM View
+[defines clientWidth/clientHeight as integer properties](https://drafts.csswg.org/cssom-view/#extensions-to-the-element-interface).
+Actual evidence is still required to determine whether fractional rounding
+explains these receipts. All four cited application runs remain unqualified,
+pass cleanup and emit zero invalid diagnostic events.
+
+The intermediate local gate failed at five CLI fixture publication waits and
+one discovery sentinel. The process metadata fixtures unnecessarily executed
+newly created scripts even though assertions only inspect metadata or a missing
+sibling; exit-status cases already use `/bin/sh`. That extra fixture launch has
+been removed without changing the assertions. All seven focused process tests
+and the independent discovery sentinel now pass. The converged final gate must
+still pass before this iteration is considered verified.
