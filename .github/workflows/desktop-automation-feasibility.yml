@@ -334,6 +334,7 @@ jobs:
         shell: bash
         run: |
           echo 'NANH_CLAUDE_LINUX_CHAT_ONLY=1' >> "$GITHUB_ENV"
+          echo 'NANH_CLAUDE_LINUX_MCP_FIXTURE=read-only' >> "$GITHUB_ENV"
           if [ '${{ inputs.experiment }}' = 'deterministic-full' ]; then
             echo 'NANH_CLAUDE_LINUX_NATIVE_CHAT=first-turn' >> "$GITHUB_ENV"
           fi

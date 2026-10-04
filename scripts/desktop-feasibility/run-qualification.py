@@ -159,6 +159,13 @@ def qualification_environment(app, facts, real_nanh, executable, inherited=None)
         raise ValueError('Claude Linux native Chat trial is unavailable')
     if source.get('NANH_CLAUDE_LINUX_CHAT_ONLY') is not None and (app != 'claude-desktop' or source.get('RUNNER_OS') != 'Linux' or (source.get('NANH_DESKTOP_QUALIFICATION_MODE') != 'startup-baseline' and source.get('NANH_CLAUDE_LINUX_NATIVE_CHAT') != 'first-turn') or source.get('NANH_CLAUDE_LINUX_CHAT_ONLY') != '1'):
         raise ValueError('Claude Linux Chat-only trial is unavailable')
+    linux_mcp = source.get('NANH_CLAUDE_LINUX_MCP_FIXTURE')
+    if linux_mcp is not None and (linux_mcp != 'read-only' or app != 'claude-desktop'
+            or source.get('RUNNER_OS') != 'Linux'
+            or source.get('NANH_DESKTOP_QUALIFICATION_MODE') != 'startup-baseline'
+            or source.get('NANH_CLAUDE_LINUX_CHAT_ONLY') != '1'
+            or source.get('NANH_CLAUDE_MCP_FIXTURE') is not None):
+        raise ValueError('Claude Linux read fixture policy is unavailable')
     panel_layout = source.get('NANH_ZED_PANEL_LAYOUT')
     if panel_layout is not None and (panel_layout != 'fixed-wide' or app != 'zed-desktop'
             or source.get('RUNNER_OS') != 'Linux'
@@ -285,6 +292,15 @@ def qualification_environment(app, facts, real_nanh, executable, inherited=None)
                                NANH_CLAUDE_MCP_PYTHON=str(Path(sys.executable).resolve(strict=True)),
                                NANH_CLAUDE_MCP_SCRIPT=str(script),
                                NANH_CLAUDE_MCP_SOURCE_SHA256=source_hash)
+        if linux_mcp is not None:
+            script = Path(__file__).with_name('claude-read-fixture.py').resolve(strict=True)
+            source_hash = 'ecb56f97d549f3040908f1bb8f0bb32235f9b48d9572ea348098135fe7999fc0'
+            if digest(script) != source_hash:
+                raise ValueError('Claude Linux read fixture source differs')
+            environment.update(NANH_CLAUDE_LINUX_MCP_FIXTURE=linux_mcp,
+                               NANH_CLAUDE_MCP_PYTHON=str(Path(sys.executable).resolve(strict=True)),
+                               NANH_CLAUDE_MCP_SCRIPT=str(script),
+                               NANH_CLAUDE_MCP_SOURCE_SHA256=source_hash)
         windows_profile = source.get('NANH_CLAUDE_WINDOWS_PROFILE_POLICY')
         if windows_profile is not None:
             if (windows_profile != 'private-env' or app != 'claude-desktop'
@@ -404,6 +420,9 @@ def run(args):
         if environment.get('NANH_CLAUDE_LINUX_SOURCE_POLICY') != 'official-2.9939.4':
             raise ValueError('Claude Linux Chat-only source differs')
         environment['NANH_CLAUDE_LINUX_CHAT_ONLY'] = '1'
+    if environment.get('NANH_CLAUDE_LINUX_MCP_FIXTURE') is not None:
+        if environment.get('NANH_CLAUDE_LINUX_SOURCE_POLICY') != 'official-2.9939.4':
+            raise ValueError('Claude Linux read fixture source differs')
     if environment.get('NANH_CODEX_PROJECT_POLICY') is not None:
         if args.app != 'chatgpt-desktop' or args.platform not in CODEX_PROJECT_RELEASES:
             raise ValueError('Codex native project trial platform differs')

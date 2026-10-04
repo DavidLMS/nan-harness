@@ -70,16 +70,18 @@ pub(super) fn configure(
     paths: &DesktopPaths,
     profile: &mut Map<String, Value>,
 ) -> Result<(), ClaudeDesktopError> {
-    match std::env::var("NANH_CLAUDE_MCP_FIXTURE") {
-        Err(std::env::VarError::NotPresent) => return Ok(()),
-        Ok(value) if value == "read-only" => (),
+    let mac = std::env::var("NANH_CLAUDE_MCP_FIXTURE");
+    let linux = std::env::var("NANH_CLAUDE_LINUX_MCP_FIXTURE");
+    match (mac, linux) {
+        (Err(std::env::VarError::NotPresent), Err(std::env::VarError::NotPresent)) => return Ok(()),
+        (Ok(value), Err(std::env::VarError::NotPresent))
+            if value == "read-only"
+                && cfg!(target_os = "macos")
+                && std::env::var("RUNNER_OS").as_deref() == Ok("macOS")
+                && qualification_config::observation_directory(paths).is_some() => {}
+        (Err(std::env::VarError::NotPresent), Ok(value))
+            if value == "read-only" && super::qualification_linux::requested(paths)? => {}
         _ => return Err(ClaudeDesktopError::InvalidStatePath),
-    }
-    if !cfg!(target_os = "macos")
-        || std::env::var("RUNNER_OS").as_deref() != Ok("macOS")
-        || qualification_config::observation_directory(paths).is_none()
-    {
-        return Err(ClaudeDesktopError::InvalidStatePath);
     }
     let resolve = |key| std::env::var_os(key).map(PathBuf::from);
     let configuration = (|| {
@@ -91,8 +93,34 @@ pub(super) fn configure(
         )
     })()
     .ok_or(ClaudeDesktopError::InvalidStatePath)?;
+    let configuration = if std::env::var_os("NANH_CLAUDE_LINUX_MCP_FIXTURE").is_some() {
+        linux_entry(configuration)?
+    } else {
+        configuration
+    };
     // The enclosing desktop receipt snapshots and restores this whole document.
     install(profile, configuration)
+}
+
+fn linux_entry(mut configuration: Value) -> Result<Value, ClaudeDesktopError> {
+    let args = configuration["args"]
+        .as_array()
+        .filter(|args| args.len() == 5)
+        .ok_or(ClaudeDesktopError::InvalidStatePath)?;
+    // Fixed Python code, never a shell or interpolated workspace/script text.
+    // The fixture independently validates its original absolute root before reads.
+    let script = args[0].clone();
+    let workspace = args[2].clone();
+    let target = args[4].clone();
+    configuration["args"] = json!([
+        "-I",
+        "-c",
+        "import os,runpy,sys; script,root,target=sys.argv[1:]; os.chdir(root); sys.argv=[script,'--workspace',root,'--file',target]; runpy.run_path(script,run_name='__main__')",
+        script,
+        workspace,
+        target
+    ]);
+    Ok(configuration)
 }
 
 fn install(
@@ -120,6 +148,18 @@ fn install(
 mod tests {
     use super::*;
     use std::io::Write as _;
+    #[test]
+    fn linux_command_binds_private_cwd_without_shell_interpolation() {
+        let configuration = json!({"args":["/trusted/script.py","--workspace","/owned/space $x","--file","/owned/space $x/read-target.txt"],"env":{},"toolPolicy":{"read_file":"allow"}});
+        let result = linux_entry(configuration).expect("fixed Linux command");
+        assert_eq!(result["args"][0], "-I");
+        assert_eq!(result["args"][3], "/trusted/script.py");
+        assert_eq!(result["args"][4], "/owned/space $x");
+        assert!(!result["args"][2].as_str().unwrap().contains("$x"));
+        assert_eq!(result["toolPolicy"]["read_file"], "allow");
+        assert!(linux_entry(json!({"args":[]})).is_err());
+    }
+
     #[test]
     fn managed_fixture_preserves_unrelated_configuration_and_rejects_collision() {
         let mut profile = Map::new();
