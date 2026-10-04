@@ -31,10 +31,19 @@ pub(super) struct FailureTurnAuthority {
     context_ambiguous: bool,
     context_turns: u8,
     failure_armed: bool,
+    fixture_tools: FixtureToolAuthority,
     observed: bool,
     rejected_stream: u16,
     rejected_history: u16,
     rejected_context: u16,
+}
+#[derive(Default, Clone, Copy)]
+enum FixtureToolAuthority {
+    #[default]
+    Unobserved,
+    Learned([u8; 32]),
+    Ambiguous,
+    Authorized([u8; 32]),
 }
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct MainContext {
@@ -97,6 +106,22 @@ impl FailureTurnAuthority {
             rejected_context: self.rejected_context,
         }
     }
+    pub(super) fn authorize_fixture_context(&mut self) -> Result<(), ()> {
+        if self.prompts.len() != 2
+            || self.failure_armed
+            || self.observed
+            || self.context_ambiguous
+            || self.context_turns != 3
+            || !matches!(self.fixture_tools, FixtureToolAuthority::Learned(_))
+        {
+            return Err(());
+        }
+        let FixtureToolAuthority::Learned(tools) = self.fixture_tools else {
+            return Err(());
+        };
+        self.fixture_tools = FixtureToolAuthority::Authorized(tools);
+        Ok(())
+    }
     pub(super) fn armed(&self) -> bool {
         self.failure_armed
     }
@@ -123,6 +148,17 @@ impl FailureTurnAuthority {
             self.rejected_context = self.rejected_context.saturating_add(1).min(4096);
             return;
         };
+        if self.prompts.len() == 2 {
+            self.fixture_tools = match (self.fixture_tools, fixture_tools(body)) {
+                (FixtureToolAuthority::Unobserved, Some(tools)) => {
+                    FixtureToolAuthority::Learned(tools)
+                }
+                (FixtureToolAuthority::Learned(held), Some(tools)) if held == tools => {
+                    FixtureToolAuthority::Learned(held)
+                }
+                _ => FixtureToolAuthority::Ambiguous,
+            };
+        }
         let turn = self.prompts.len() - 1;
         self.context_turns |= 1 << turn;
         // Each verified turn must have one unambiguous instruction context and
@@ -156,7 +192,15 @@ impl FailureTurnAuthority {
             self.rejected_history = self.rejected_history.saturating_add(1).min(4096);
             return false;
         }
-        if main_context(body) != self.contexts[1] {
+        let context_matches = if let FixtureToolAuthority::Authorized(tools) = self.fixture_tools {
+            fixture_tools(body) == Some(tools)
+                && main_context(body)
+                    .zip(self.contexts[1])
+                    .is_some_and(|(current, held)| current.model == held.model)
+        } else {
+            main_context(body) == self.contexts[1]
+        };
+        if !context_matches {
             self.rejected_context = self.rejected_context.saturating_add(1).min(4096);
             return false;
         }
@@ -182,6 +226,63 @@ fn current_user_candidate(body: &Value, prompts: &[Zeroizing<String>]) -> bool {
                         && message.get("content").and_then(exact_text) == Some(prompt.as_str())
                 })
         })
+}
+// Exact bounded OpenAI tool definitions from the already verified main turn.
+// This fingerprint never authorizes a request without history/nonce/stream/model.
+fn fixture_tools(body: &Value) -> Option<[u8; 32]> {
+    let tools = body.get("tools")?.as_array()?;
+    if tools.is_empty() || tools.len() > 128 {
+        return None;
+    }
+    let mut names = std::collections::HashSet::new();
+    let mut fixture = false;
+    for tool in tools {
+        let object = tool.as_object()?;
+        if object.len() != 2 || tool.get("type")?.as_str()? != "function" {
+            return None;
+        }
+        let function = tool.get("function")?.as_object()?;
+        if function.keys().any(|key| {
+            !matches!(
+                key.as_str(),
+                "name" | "description" | "parameters" | "strict"
+            )
+        }) {
+            return None;
+        }
+        let name = function.get("name")?.as_str()?;
+        if name.is_empty() || name.len() > 128 || !names.insert(name) {
+            return None;
+        }
+        if function
+            .get("description")
+            .is_some_and(|value| value.as_str().is_none_or(|text| text.len() > 8192))
+            || function
+                .get("strict")
+                .is_some_and(|value| !value.is_boolean())
+        {
+            return None;
+        }
+        let parameters = function.get("parameters")?.as_object()?;
+        if parameters.get("type")?.as_str()? != "object" {
+            return None;
+        }
+        if name == "mcp__nanh-read-fixture__read_file" {
+            let properties = parameters.get("properties")?.as_object()?;
+            if properties.len() != 1
+                || properties.get("path")?.get("type")?.as_str()? != "string"
+                || parameters.get("required")?.as_array()? != &[Value::String("path".into())]
+            {
+                return None;
+            }
+            fixture = true;
+        }
+    }
+    let serialized = Zeroizing::new(serde_json::to_vec(tools).ok()?);
+    if !fixture || serialized.len() > 131_072 {
+        return None;
+    }
+    Some(Sha256::digest(serialized.as_slice()).into())
 }
 fn exact_text(value: &Value) -> Option<&str> {
     match value {
@@ -408,6 +509,57 @@ mod tests {
         assert!(!wire.contains("private"));
         assert!(!wire.contains("\"changed\""));
         assert!(authority.prepare("private three", true, false).is_err());
+    }
+
+    fn add_fixture_tools(mut body: Value) -> Value {
+        body["tools"] = json!([{"type":"function","function":{"name":"mcp__nanh-read-fixture__read_file","parameters":{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}}}]);
+        body
+    }
+    #[test]
+    fn fixture_context_requires_verified_tool_set_and_all_existing_causal_checks() {
+        let mut authority = FailureTurnAuthority::default();
+        authority.prepare("first", false, false).unwrap();
+        authority.learn_context(&request(&["first"], "one"));
+        authority.prepare("second", false, false).unwrap();
+        let second = add_fixture_tools(request(&["first", "second"], "two"));
+        authority.learn_context(&second);
+        authority.authorize_fixture_context().unwrap();
+        let epoch = authority.prepare("third", true, false).unwrap().unwrap();
+        let valid = add_fixture_tools(request(&["first", "second", "third"], "three"));
+        let mut different_tool = valid.clone();
+        different_tool["tools"][0]["function"]["description"] = json!("different definition");
+        let mut duplicate = valid.clone();
+        duplicate["tools"]
+            .as_array_mut()
+            .unwrap()
+            .push(valid["tools"][0].clone());
+        let mut model = valid.clone();
+        model["model"] = json!("other");
+        let mut nonstream = valid.clone();
+        nonstream["stream"] = json!(false);
+        for bad in [
+            request(&["first", "second", "third"], "three"),
+            different_tool,
+            duplicate,
+            model,
+            nonstream,
+            add_fixture_tools(request(&["third"], "three")),
+        ] {
+            assert!(!authority.observe(&bad));
+        }
+        assert!(!authority.observed(epoch));
+        assert!(authority.observe(&valid));
+        assert!(authority.observed(epoch));
+        assert!(!authority.observe(&valid));
+        let mut ambiguous = FailureTurnAuthority::default();
+        ambiguous.prepare("first", false, false).unwrap();
+        ambiguous.learn_context(&request(&["first"], "one"));
+        ambiguous.prepare("second", false, false).unwrap();
+        ambiguous.learn_context(&second);
+        let mut changed = second.clone();
+        changed["tools"][0]["function"]["description"] = json!("changed");
+        ambiguous.learn_context(&changed);
+        assert!(ambiguous.authorize_fixture_context().is_err());
     }
 
     #[test]

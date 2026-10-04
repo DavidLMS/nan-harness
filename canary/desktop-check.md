@@ -2713,3 +2713,21 @@ context/history/stream diagnostics are advisory and cannot qualify recovery.
 The main qualification workflow selects the same isolated Codex and Claude
 conversation paths as the scoped feasibility runs. Final full-matrix acceptance
 on a converged commit remains pending.
+
+
+### Claude managed fixture failure request authority
+
+The hosted macOS managed `read-only` MCP fixture may bind the controlled failure to the exact bounded OpenAI tool array from the second independently UI- and file-tool-verified main request. This alternative is enabled only after `FixtureRead`, the real tool result and copied fixture response pass, under the existing native-known-folders disposable profile policy. Default callers retain exact latest instruction-context matching.
+
+The admitted failure still requires streaming, the unchanged routed model and full exact three-user history with the private failure nonce only in the final user message. The tool array must contain one valid `mcp__nanh-read-fixture__read_file` definition and remain byte-equivalent after JSON serialization; missing, duplicate or changed tool definitions and ambiguous second-turn advertisements reject. The third instruction context must remain valid and bounded. Tool hashes, prompts and instructions stay private; a matching hash alone grants no authority. Failure injection remains consumed once per request epoch.
+
+Frozen Claude 2.19675.0 source proof: native title generation `JNr/YNr/ZNr` uses one template user and no tools; fallback `ePr` explicitly supplies `--tools ""`. Compaction uses one wrapped transcript user and only `summarize_conversation`. Connector auto-review can advertise tools, but creates a separate temporary conversation with one generated user prompt; it does not submit the exact three main user messages. These are fixed source exclusions, not title-keyword heuristics or instruction/date normalization.
+
+Public source hashes:
+
+__.vite__build__index.chunk-BZdcw7TE.js SHA256 0e794998a1ad175f651818913cba690de0724d92d7a946efc58ae0f08c7df226
+__.vite__build__index.chunk-oULTE0fJ.js SHA256 244dd4f5df73f3673422b8f0a06e6e74bec6064cc8832811da830fb929263160
+shared-9-mvoGrP5v.js SHA256 0e9e6ba098b3f72b8c2883dea74cbc67835b26862d2e89e5e6ef202e2458bcc9
+cd9350303-DEt9YaG0.js SHA256 622887bb47c413ea73e0b606678fe9760baeb4287c79d604b2ca5f971492a16d
+cf07a5c93-YV5wvunt.js SHA256 940d4b603ef691b327eaf32ff4f7e62145fd3fdbedd496afae95268cce91fa59
+c121d00d7-DNoZTY8y.js SHA256 1d5fc2aa282f32f7866bcde710c320194b76e8cdfb7394d47859ffbc8257f8ef

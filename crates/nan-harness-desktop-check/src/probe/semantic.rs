@@ -477,13 +477,7 @@ async fn complete_scenario(
         gate,
     )?;
     record_provider_oracle(directory, "tool", &tool, gate, Some(selected_tool))?;
-    if !tool.completed()
-        || !tool.recording_bounded()
-        || !gate.tool_verified()
-        || !gate.fixture_response_verified()
-    {
-        return Err(Reason::ToolMismatch);
-    }
+    verify_semantic_tool(&tool, gate, selected_tool, owned_fixture_scope)?;
     result.steps.push(CheckStep::ToolVerified);
 
     gate.arm_fixture_response("NAN_CHECK_EXPECTED_FAILURE")
@@ -514,6 +508,32 @@ async fn complete_scenario(
         return Err(Reason::ResponseMismatch);
     }
     result.steps.push(CheckStep::ErrorRecovered);
+    Ok(())
+}
+
+fn verify_semantic_tool(
+    tool: &ScriptedProvider,
+    gate: &ProviderGate,
+    selected_tool: SelectedTool,
+    owned_fixture_scope: bool,
+) -> Result<(), Reason> {
+    #[cfg(not(target_os = "macos"))]
+    let _ = (selected_tool, owned_fixture_scope);
+    if !tool.completed()
+        || !tool.recording_bounded()
+        || !gate.tool_verified()
+        || !gate.fixture_response_verified()
+    {
+        return Err(Reason::ToolMismatch);
+    }
+    #[cfg(target_os = "macos")]
+    if owned_fixture_scope
+        && matches!(selected_tool, SelectedTool::FixtureRead)
+        && std::env::var("NANH_CLAUDE_MCP_FIXTURE").as_deref() == Ok("read-only")
+    {
+        gate.authorize_claude_fixture_failure(selected_tool, owned_fixture_scope)
+            .map_err(|()| Reason::ProviderFailed)?;
+    }
     Ok(())
 }
 

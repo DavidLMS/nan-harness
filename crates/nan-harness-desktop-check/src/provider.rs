@@ -221,6 +221,37 @@ impl ProviderGate {
     }
 
     #[cfg(target_os = "macos")]
+    pub(crate) fn authorize_claude_fixture_failure(
+        &self,
+        selected: SelectedTool,
+        owned: bool,
+    ) -> Result<(), ()> {
+        if !owned
+            || !matches!(selected, SelectedTool::FixtureRead)
+            || self.state.live
+            || !self.tool_verified()
+            || !self.fixture_response_verified()
+            || [
+                ("GITHUB_ACTIONS", "true"),
+                ("RUNNER_ENVIRONMENT", "github-hosted"),
+                ("RUNNER_OS", "macOS"),
+                ("NANH_CLAUDE_MCP_FIXTURE", "read-only"),
+                ("NANH_CLAUDE_MAC_PROFILE_POLICY", "native-known-folders"),
+                ("NANH_CLAUDE_MAC_NATIVE_CHAT", "1"),
+                ("NANH_CLAUDE_MAC_CHAT_NAVIGATION", "1"),
+            ]
+            .into_iter()
+            .any(|(key, value)| std::env::var(key).as_deref() != Ok(value))
+        {
+            return Err(());
+        }
+        self.state
+            .failure_turn
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .authorize_fixture_context()
+    }
+    #[cfg(target_os = "macos")]
     pub(crate) fn prepare_claude_turn(
         &self,
         prompt: &str,
@@ -1153,6 +1184,78 @@ mod tests {
         assert_eq!(forwarded.load(Ordering::SeqCst), MAX_GENERATIONS);
         assert!(gate.budget_exceeded());
         task.abort();
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn fixture_tool_authority_injects_only_the_full_current_main_request() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let upstream = format!("http://{}/v1", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            axum::serve(
+                listener,
+                Router::new().fallback(|| async { (StatusCode::OK, final_json()) }),
+            )
+            .await
+            .unwrap();
+        });
+        let gate = ProviderGate::start(&upstream, Zeroizing::new("key".into()), false, "tool")
+            .await
+            .unwrap();
+        let body = |prompts: &[&str], context: &str| {
+            let mut messages = vec![json!({"role":"system","content":context})];
+            messages.extend(
+                prompts
+                    .iter()
+                    .map(|prompt| json!({"role":"user","content":prompt})),
+            );
+            json!({"model":"fixture","stream":true,"messages":messages,"tools":[{"type":"function","function":{"name":"mcp__nanh-read-fixture__read_file","parameters":{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}}}]})
+        };
+        let post = |value: Value| {
+            reqwest::Client::new()
+                .post(format!("{}/chat/completions", gate.base_url))
+                .bearer_auth(gate.session_token())
+                .json(&value)
+        };
+        for (index, prompt) in ["first", "second"].iter().enumerate() {
+            gate.prepare_claude_turn(prompt, false).unwrap();
+            assert_eq!(
+                post(body(&["first", "second"][..=index], "prior"))
+                    .send()
+                    .await
+                    .unwrap()
+                    .status(),
+                StatusCode::OK
+            );
+        }
+        // Tests the source-bound request discriminator independently of GUI policy admission.
+        gate.state
+            .failure_turn
+            .lock()
+            .unwrap()
+            .authorize_fixture_context()
+            .unwrap();
+        let epoch = gate.prepare_claude_turn("third", true).unwrap().unwrap();
+        assert_eq!(
+            post(body(&["third"], "title"))
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::OK
+        );
+        let mut wrong = body(&["first", "second", "third"], "changed");
+        wrong["tools"] = json!([]);
+        assert_eq!(post(wrong).send().await.unwrap().status(), StatusCode::OK);
+        assert!(!gate.claude_failure_turn_observed(epoch));
+        let valid = body(&["first", "second", "third"], "changed");
+        assert_eq!(
+            post(valid.clone()).send().await.unwrap().status(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        assert!(gate.claude_failure_turn_observed(epoch));
+        assert_eq!(post(valid).send().await.unwrap().status(), StatusCode::OK);
+        server.abort();
     }
 
     #[cfg(target_os = "macos")]
