@@ -1688,9 +1688,17 @@ def semantic_observations(directory, app):
                           'record-version', 'xres-version', 'xinput-extension', 'client-query',
                           'client-identity', 'context', 'enable', 'identity-recheck',
                           'armed', 'observation', 'cleanup'}
-                if (type(delivery) is not dict or set(delivery)-{'crossingHeaders'} not in (fields, fields | {'stage'})
+                if (type(delivery) is not dict or set(delivery)-{'crossingHeaders','captureEnd','failureReason'} not in (fields, fields | {'stage'})
                         or type(delivery['status']) is not str or delivery['status'] not in statuses):
                     raise ValueError('invalid Zed input delivery observation')
+                if 'captureEnd' in delivery and (delivery['status'] != 'complete'
+                        or type(delivery['captureEnd']) is not str or delivery['captureEnd'] not in {'finish','cutoff'}):
+                    raise ValueError('invalid Zed capture end')
+                if 'failureReason' in delivery and (delivery['status'] == 'complete'
+                        or type(delivery['failureReason']) is not str or delivery['failureReason'] not in {
+                            'worker-cutoff','worker-request','armed-select','native-pump',
+                            'finish-request','native-snapshot','receipt-validation'}):
+                    raise ValueError('invalid Zed record failure')
                 if 'stage' in delivery and (type(delivery['stage']) is not str or delivery['stage'] not in stages):
                     raise ValueError('invalid Zed input delivery stage')
                 if delivery['status'] == 'complete':

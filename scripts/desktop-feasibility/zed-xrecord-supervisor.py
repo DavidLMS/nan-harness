@@ -6,6 +6,9 @@ import select
 import subprocess
 import sys
 import time
+FAILURES = {'worker-cutoff', 'worker-request', 'armed-select', 'native-pump',
+            'finish-request', 'native-snapshot', 'receipt-validation'}
+
 STATUSES = {'complete', 'unavailable', 'timeout', 'query-failed', 'identity-failed'}
 
 STAGES = {'policy', 'budget-insufficient', 'request', 'library', 'display',
@@ -13,14 +16,20 @@ STAGES = {'policy', 'budget-insufficient', 'request', 'library', 'display',
           'client-identity', 'context', 'enable', 'identity-recheck', 'armed',
           'observation', 'cleanup'}
 
-def unobserved(status, stage=None):
+def unobserved(status, stage=None, failure=None):
     result = {'status': status, 'pressCount': None, 'releaseCount': None, 'orderedPair': None}
     if stage is not None:
         result['stage'] = stage
+    if failure is not None:
+        result['failureReason'] = failure
     return result
 
 def validate(value):
-    if type(value) is not dict or set(value)-{'crossingHeaders'} not in ({'status', 'pressCount', 'releaseCount', 'orderedPair'}, {'status', 'pressCount', 'releaseCount', 'orderedPair', 'stage'}) or value['status'] not in STATUSES:
+    if type(value) is not dict or set(value)-{'crossingHeaders', 'captureEnd', 'failureReason'} not in ({'status', 'pressCount', 'releaseCount', 'orderedPair'}, {'status', 'pressCount', 'releaseCount', 'orderedPair', 'stage'}) or value['status'] not in STATUSES:
+        raise ValueError('closed record rejected')
+    if 'failureReason' in value and (value['status'] == 'complete' or type(value['failureReason']) is not str or value['failureReason'] not in FAILURES):
+        raise ValueError('closed record rejected')
+    if 'captureEnd' in value and (value['status'] != 'complete' or type(value['captureEnd']) is not str or value['captureEnd'] not in {'finish', 'cutoff'}):
         raise ValueError('closed record rejected')
     if 'stage' in value and (type(value['stage']) is not str or value['stage'] not in STAGES):
         raise ValueError('closed record rejected')
@@ -182,6 +191,7 @@ def worker():
         return
     recorder = None
     stage = 'request'
+    failure = 'worker-request'
     try:
         request = json.loads(sys.stdin.buffer.readline(257), object_pairs_hook=unique)
         if type(request) is not dict or set(request) != {'pid', 'window', 'cutoff'} or type(request['pid']) is not int or (not 1 < request['pid'] <= 2147483647) or (type(request['window']) is not int) or (not 0 < request['window'] <= 4294967295):
@@ -194,7 +204,7 @@ def worker():
         NativeRecorder = native['NativeRecorder']
         Unavailable = native['Unavailable']
         try:
-            recorder = NativeRecorder(request['pid'], request['window'])
+            recorder = NativeRecorder(request['pid'], request['window'], cutoff=cutoff)
         except Unavailable as error:
             print(json.dumps(validate(unobserved('unavailable', error.stage))), flush=True)
             return
@@ -205,18 +215,34 @@ def worker():
         while True:
             remaining=cutoff-time.monotonic()
             if remaining<=0:
-                raise TimeoutError()
+                # Reject an already-ready invalid finish without blocking or renewing capture.
+                failure = 'finish-request'
+                ready, _, _ = select.select([sys.stdin.buffer], [], [], 0)
+                if ready and sys.stdin.buffer.readline(16) != b'finish\n':
+                    raise ValueError()
+                stage = 'observation'
+                result = {'status':'complete', 'stage':stage, 'captureEnd':'cutoff', **recorder.freeze()}
+                failure = 'receipt-validation'
+                print(json.dumps(validate(result)), flush=True)
+                return
+            failure = 'armed-select'
             ready, _, _=select.select([sys.stdin.buffer], [], [], min(.02,remaining))
+            failure = 'native-pump'
             recorder.pump()
             if ready:
+                failure = 'finish-request'
                 if sys.stdin.buffer.readline(16)!=b'finish\n':
                     raise ValueError()
                 break
         stage = 'observation'
-        result = {'status': 'complete', 'stage': stage, **recorder.snapshot()}
+        failure = 'native-snapshot'
+        result = {'status': 'complete', 'stage': stage, 'captureEnd':'finish', **recorder.snapshot()}
+        failure = 'receipt-validation'
         print(json.dumps(validate(result)), flush=True)
+    except TimeoutError:
+        print(json.dumps(unobserved('timeout', stage, 'worker-cutoff')), flush=True)
     except Exception:
-        print(json.dumps(unobserved('query-failed', stage)), flush=True)
+        print(json.dumps(unobserved('query-failed', stage, failure)), flush=True)
     finally:
         if recorder is not None:
             recorder.close()

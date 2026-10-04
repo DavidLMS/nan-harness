@@ -104,8 +104,10 @@ CALLBACK = C.CFUNCTYPE(None, C.c_void_p, C.POINTER(Intercept))
 class NativeRecorder:
     """One owned client connection only; synthetic tests never instantiate this."""
 
-    def __init__(self, pid, window):
+    def __init__(self, pid, window, cutoff=None):
         self.control = self.data = None
+        self.frozen = False
+        self.cutoff = float('inf') if cutoff is None else cutoff
         self.context = 0
         self.pid, self.window = (pid, window)
         self.stage = 'library'
@@ -204,6 +206,8 @@ class NativeRecorder:
 
     def _event(self, _, pointer):
         try:
+            if self.frozen or time.monotonic() >= self.cutoff:
+                return
             event = pointer.contents
             if event.category != 0:
                 return
@@ -211,21 +215,31 @@ class NativeRecorder:
                 self.counts.invalid = True
                 return
             data = C.string_at(event.data, 32)
-            self.counts.accept(event.category, bool(event.swapped), event.base, data)
+            if not self.frozen and time.monotonic() < self.cutoff:
+                self.counts.accept(event.category, bool(event.swapped), event.base, data)
         finally:
             self.record.XRecordFreeData(pointer)
 
     def pump(self):
+        if self.frozen or time.monotonic() >= self.cutoff:
+            return
         ready, _, _ = select.select([self.x.XConnectionNumber(self.data)], [], [], 0)
-        if ready:
+        if ready and not self.frozen and time.monotonic() < self.cutoff:
             self.record.XRecordProcessReplies(self.data)
+
+    def freeze(self):
+        # Stop admission BEFORE snapshot/cleanup. No Xlib read, pump or ownership
+        # query occurs here, so cutoff cannot silently start a new capture.
+        self.frozen = True
+        return self.counts.closed()
 
     def snapshot(self):
         self.pump()
+        result = self.freeze()
         self.stage = 'observation'
         if self._identity() != self.counts.base:
             raise Unavailable(self.stage)
-        return self.counts.closed()
+        return result
 
     def observe(self, seconds=0.5):
         if not 0 < seconds <= 1:
