@@ -901,6 +901,39 @@ mod configuration_persist_tests {
     }
 
     #[cfg(feature = "desktop-qualification")]
+    fn record_postinstall_fixture_outcome(result: Option<i32>) {
+        if std::env::var("NANH_CONFIGURATION_POSTINSTALL_OBSERVATION").as_deref() != Ok("1") {
+            return;
+        }
+        for (key, value) in [
+            ("GITHUB_ACTIONS", "true"),
+            ("RUNNER_ENVIRONMENT", "github-hosted"),
+            ("RUNNER_OS", "Windows"),
+        ] {
+            assert_eq!(std::env::var(key).as_deref(), Ok(value));
+        }
+        let source = std::env::var("GITHUB_SHA").unwrap();
+        assert!(source.len() == 40 && source.bytes().all(|byte| byte.is_ascii_hexdigit()));
+        let outcome = match result {
+            Some(0) => "passed",
+            Some(32) => "sharing-violation",
+            Some(33) => "other-failure",
+            Some(_) => "unexpected-exit",
+            None => "deadline-or-unavailable",
+        };
+        let directory = PathBuf::from(std::env::var_os("RUNNER_TEMP").unwrap());
+        let mut output = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(directory.join("configuration-fixture.json"))
+            .unwrap();
+        let facts = serde_json::json!({"schemaVersion":1,"mechanism":"windows-configuration-fixture",
+            "diagnosticsOnly":true,"sourceSha":source,"phase":"after-installation","outcome":outcome});
+        serde_json::to_writer(&mut output, &facts).unwrap();
+        output.sync_all().unwrap();
+    }
+
+    #[cfg(feature = "desktop-qualification")]
     #[test]
     fn production_std_rename_lifecycle_under_precreation_leases_restores_documents() {
         let base = std::env::var_os("RUNNER_TEMP")
@@ -918,8 +951,12 @@ mod configuration_persist_tests {
             )
             .unwrap();
             let directories = lifecycle_roots(&workspace);
+            let result = lifecycle_child(&workspace, Some(source_policy));
+            if expected == 0 {
+                record_postinstall_fixture_outcome(result);
+            }
             assert_eq!(
-                lifecycle_child(&workspace, Some(source_policy)),
+                result,
                 Some(expected),
                 "production writer returned an unexpected closed exit category"
             );
