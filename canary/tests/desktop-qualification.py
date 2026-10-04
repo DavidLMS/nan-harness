@@ -2505,6 +2505,17 @@ class QualificationTests(unittest.TestCase):
                 bad={**activation,'nativePendingStack':{**stack,'workArea':area}}
                 path.write_text(json.dumps({**value,'initialMainActivation':bad}))
                 with self.assertRaises(ValueError):q.semantic_observations(root,'chatgpt-desktop')
+            kinds=dict.fromkeys(('controlCenter','notificationCenter','systemUIServer','dock',
+                'windowServer','launcherOwned','checkerOwned','other','unobserved'),0)
+            kinds['unobserved']=1
+            measured={**activation,'nativePendingStack':{**stack,'occluderKinds':kinds}}
+            path.write_text(json.dumps({**value,'initialMainActivation':measured}))
+            self.assertEqual(q.semantic_observations(root,'chatgpt-desktop')[0]['initialMainActivation'],measured)
+            for change in ({'controlCenter':1},{'unobserved':True},{'other':1025},
+                           {'unobserved':None},{'pid':1},{'path':'PRIVATE'}):
+                bad={**activation,'nativePendingStack':{**stack,'occluderKinds':{**kinds,**change}}}
+                path.write_text(json.dumps({**value,'initialMainActivation':bad}))
+                with self.assertRaises(ValueError):q.semantic_observations(root,'chatgpt-desktop')
             levels=dict(menuLevelCount=1,statusLevelCount=0,dockLevelCount=0,otherLevelCount=0)
             measured={**activation,'nativePendingStack':{**stack,'elevatedLevels':levels}}
             path.write_text(json.dumps({**value,'initialMainActivation':measured}))

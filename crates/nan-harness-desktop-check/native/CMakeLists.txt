@@ -118,3 +118,15 @@ add_custom_target(nanh-codex-activation-identity-contract ALL
   COMMAND $<TARGET_FILE:nanh-codex-activation-identity-test>
   DEPENDS nanh-codex-activation-identity-test
   COMMENT "Verify retained native main identity without native queries")
+
+# Pure canonical-path categorization; no process/window API calls.
+add_executable(nanh-codex-occluder-kind-test tests/codex_occluder_kind.cpp)
+if(MSVC)
+  target_compile_options(nanh-codex-occluder-kind-test PRIVATE /UNDEBUG)
+else()
+  target_compile_options(nanh-codex-occluder-kind-test PRIVATE -UNDEBUG)
+endif()
+add_custom_target(nanh-codex-occluder-kind-contract ALL
+  COMMAND $<TARGET_FILE:nanh-codex-occluder-kind-test>
+  DEPENDS nanh-codex-occluder-kind-test
+  COMMENT "Verify closed canonical occluder categories without native queries")

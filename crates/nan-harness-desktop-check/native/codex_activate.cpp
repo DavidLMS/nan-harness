@@ -6,6 +6,7 @@
 #include <cmath>
 #include <iomanip>
 #include "codex_activation_identity.hpp"
+#include "codex_occluder_kind.hpp"
 #if defined(__APPLE__)
 #import <AppKit/AppKit.h>
 #include <ApplicationServices/ApplicationServices.h>
@@ -62,6 +63,48 @@ bool executable(const Request& r,pid_t pid,bool* ancestry_rejected=nullptr) {
     if(!owned&&ancestry_rejected)*ancestry_rejected=true;
     return owned;
 }
+struct OccluderOwner {
+    pid_t pid=0; CodexOccluderKind kind=CodexOccluderKind::Unobserved;
+    unsigned windows=0; std::vector<ProcessIdentity> chain;
+};
+bool stable_occluder(const Request& r,const OccluderOwner& owner) {
+    if(owner.chain.empty())return false;
+    for(const auto& held:owner.chain) {
+        ProcessIdentity fresh{};
+        if(!alive(r)||!identity(held.pid,fresh)||!same(held,fresh))return false;
+    }
+    return alive(r);
+}
+OccluderOwner occluder_owner(const Request& r,pid_t pid) {
+    OccluderOwner result;result.pid=pid;
+    ProcessIdentity original{};
+    char path[PROC_PIDPATHINFO_MAXSIZE]{},resolved[PATH_MAX]{};
+    if(!alive(r)||pid<=1||!identity(pid,original))return result;
+    const int length=proc_pidpath(pid,path,sizeof(path));
+    if(length<=0||unsigned(length)>=sizeof(path)||path[length]!='\0'
+        ||!realpath(path,resolved))return result;
+    result.chain.push_back(original);
+    // Exact public system paths need only stable process identity. Other owners
+    // require a complete stable ancestry chain; query failure is not "other".
+    result.kind=codex_occluder_kind(resolved,true,false,false,false);
+    if(result.kind==CodexOccluderKind::Unobserved) {
+        pid_t next=original.parent;bool complete=next==1;
+        for(unsigned depth=1;!complete&&depth<32&&alive(r);++depth) {
+            if(next<=1)break;
+            bool cycle=false;for(const auto& prior:result.chain)cycle=cycle||prior.pid==next;
+            if(cycle)break;
+            ProcessIdentity parent{};if(!identity(next,parent))break;
+            result.chain.push_back(parent);next=parent.parent;complete=next==1;
+        }
+        bool launcher=false,checker=false;
+        for(const auto& node:result.chain) {
+            launcher=launcher||node.pid==r.launcher;checker=checker||node.pid==r.root;
+        }
+        result.kind=codex_occluder_kind(resolved,true,complete,launcher,checker);
+    }
+    if(!stable_occluder(r,result))result.kind=CodexOccluderKind::Unobserved;
+    return result;
+}
 int64_t number(CFDictionaryRef row,CFStringRef key) {
     auto value=CFDictionaryGetValue(row,key);int64_t result=0;
     if(value&&CFGetTypeID(value)==CFNumberGetTypeID())CFNumberGetValue((CFNumberRef)value,kCFNumberSInt64Type,&result);
@@ -84,6 +127,7 @@ struct InventoryFailure {
     unsigned menu_level=0, status_level=0, dock_level=0, other_elevated=0;
     bool display_contained=false, workarea_measured=false, workarea_contained=false;
     unsigned workarea_overlap=0;
+    std::array<unsigned,9> occluder_kinds{};
 };
 // Diagnostic coordinate conversion only; full-display admission is unchanged.
 bool workarea(const Request& r,CGRect held,CGRect& usable) {
@@ -156,6 +200,7 @@ bool inventory(const Request& r,Binding& result,bool select,InventoryFailure* fa
         observation.workarea_measured=workarea(r,result.bounds,usable);
         observation.workarea_contained=observation.workarea_measured&&CGRectContainsRect(usable,result.bounds);
     }
+    std::vector<OccluderOwner> owners;
     for(CFIndex i=0;valid&&i<held;++i) {
         auto row=(CFDictionaryRef)CFArrayGetValueAtIndex(rows,i);
         if(number(row,kCGWindowLayer)==CGWindowLevelForKey(kCGCursorWindowLevelKey))continue;
@@ -167,6 +212,14 @@ bool inventory(const Request& r,Binding& result,bool select,InventoryFailure* fa
         if(CGRectIntersectsRect(bounds,result.bounds)
             ||(same_owner&&number(row,kCGWindowLayer)==0)) {
             if(CGRectIntersectsRect(bounds,result.bounds)) {
+                const pid_t owner_pid=pid_t(number(row,kCGWindowOwnerPID));
+                OccluderOwner* owner=nullptr;
+                for(auto& prior:owners)if(prior.pid==owner_pid){owner=&prior;break;}
+                if(!owner&&owners.size()<64) {
+                    owners.push_back(occluder_owner(r,owner_pid));owner=&owners.back();
+                }
+                if(owner)++owner->windows;
+                else ++observation.occluder_kinds[unsigned(CodexOccluderKind::Unobserved)];
                 if(observation.workarea_measured
                     &&CGRectIntersectsRect(CGRectIntersection(bounds,result.bounds),usable))++observation.workarea_overlap;
                 const auto level=number(row,kCGWindowLayer);
@@ -183,6 +236,10 @@ bool inventory(const Request& r,Binding& result,bool select,InventoryFailure* fa
             overlapping_ahead=true;
             owned_overlap=owned_overlap||same_owner;
         }
+    }
+    for(const auto& owner:owners) {
+        const auto kind=stable_occluder(r,owner)?owner.kind:CodexOccluderKind::Unobserved;
+        observation.occluder_kinds[unsigned(kind)]+=owner.windows;
     }
     bool contained=false;
     for(NSScreen* screen in NSScreen.screens) {
@@ -295,7 +352,9 @@ int codex_activate_main() {
                     <<(stack.display_contained?1:0)<<' '<<stack.menu_level<<' '<<stack.status_level<<' '
                     <<stack.dock_level<<' '<<stack.other_elevated<<' '
                     <<(stack.workarea_measured?1:0)<<' '<<(stack.workarea_contained?1:0)<<' '
-                    <<stack.workarea_overlap<<'\n';return 0;
+                    <<stack.workarea_overlap;
+                for(const auto value:stack.occluder_kinds)std::cout<<' '<<value;
+                std::cout<<'\n';return 0;
             }
             auto app=[NSRunningApplication runningApplicationWithProcessIdentifier:held.pid];
             AXUIElementRef application=AXUIElementCreateApplication(held.pid);CFTypeRef focused=nullptr;
