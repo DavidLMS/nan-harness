@@ -49,17 +49,27 @@ function sample(control) {
 
 // The frozen role Continue callback transitions into task setup. Disappearance
 // alone is not proof: retain its source scope and exact Engineering acknowledgement.
-function taskContinuation(scope) {
+function taskContinuation(scope, diagnostic=false) {
   const acknowledgement='Engineering—got it. I can map an unfamiliar codebase, plan and build features, trace bugs across logs and tests, and run checks to verify behavior.';
   const visible=e=>{const r=e.getBoundingClientRect(),style=getComputedStyle(e);
     return e.isConnected&&r.width>0&&r.height>0&&style.display!=='none'&&style.visibility!=='hidden';};
-  if(scope.ownerDocument!==document||!visible(scope)||scope.closest('[inert]'))return false;
-  if(scope.querySelectorAll('input[name="conversational-onboarding-inline-role"]').length!==0)return false;
-  const acknowledgementNodes=[...scope.querySelectorAll('*')].filter(e=>visible(e)
+  const connected=scope.ownerDocument===document&&scope.isConnected;
+  const showing=connected&&visible(scope)&&!scope.closest('[inert]');
+  const result={heldScopeConnected:connected,heldScopeVisible:showing,
+    roleRadioCount:null,exactAckLeafCount:null,exactGetStartedCount:null};
+  if(!showing)return diagnostic?result:false;
+  const radios=scope.querySelectorAll('input[name="conversational-onboarding-inline-role"]');
+  const nodes=[...scope.querySelectorAll('*')];
+  const buttons=[...scope.querySelectorAll('button')];
+  if(radios.length>4096||nodes.length>4096||buttons.length>4096)return diagnostic?result:false;
+  const acknowledgementNodes=nodes.filter(e=>visible(e)
     &&e.textContent.trim()===acknowledgement
     &&![...e.children].some(child=>child.textContent.trim()===acknowledgement));
-  const start=[...scope.querySelectorAll('button')].filter(e=>visible(e)&&e.textContent.trim()==='Get Started');
-  return acknowledgementNodes.length===1&&start.length===1;
+  const start=buttons.filter(e=>visible(e)&&e.textContent.trim()==='Get Started');
+  result.roleRadioCount=radios.length;
+  result.exactAckLeafCount=acknowledgementNodes.length;
+  result.exactGetStartedCount=start.length;
+  return diagnostic?result:radios.length===0&&acknowledgementNodes.length===1&&start.length===1;
 }
 
 // Exact public local-coding markers from the frozen local conversation thread.
@@ -422,11 +432,17 @@ async function run(page, ownerGuard, deadline, rejected, mainGuard, folderTrust)
     facts.stage='continue-action';
     if (!await click(button,continueProof,'continueClickAttempted','continueClickCompleted')) return stop('action-blocked');
     facts.stage='scope-transition';
+    const observeTask=async()=>{
+      const shape=await transitionScope.evaluate(taskContinuation,true);
+      facts.taskScopeObservation=shape;
+      return shape?.heldScopeConnected===true&&shape.heldScopeVisible===true
+        &&shape.roleRadioCount===0&&shape.exactAckLeafCount===1&&shape.exactGetStartedCount===1;
+    };
     while (Date.now()<deadline) {
       if (!await ownedEndpoint()) return stop('ownership-lost');
       if (await page.locator(GROUP).count()===0) {
         facts.roleScopeAbsent=true;
-        if(await transitionScope.evaluate(taskContinuation)&&await ownedEndpoint()&&Date.now()<deadline) {
+        if(await observeTask()&&await ownedEndpoint()&&Date.now()<deadline) {
           facts.taskScopeProved=true;break;
         }
       }
@@ -436,7 +452,7 @@ async function run(page, ownerGuard, deadline, rejected, mainGuard, folderTrust)
     facts.stage='task-action';
     const taskButton=page.getByRole('button',{name:'Get Started',exact:true});
     const taskProof=async()=>Date.now()<deadline&&await ownedEndpoint()
-      &&await transitionScope.evaluate(taskContinuation)
+      &&await observeTask()
       &&await taskButton.count()===1&&await taskButton.isEnabled()
       &&await taskButton.evaluate((element,held)=>element.tagName==='BUTTON'&&held.contains(element),transitionScope);
     if(!await click(taskButton,taskProof,'taskClickAttempted','taskClickCompleted'))return stop('action-blocked');

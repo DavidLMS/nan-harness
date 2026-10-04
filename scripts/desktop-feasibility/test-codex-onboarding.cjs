@@ -35,7 +35,7 @@ async function trial(options={}) {
  root.contains=e=>[label,radio,button,startControl].includes(e);
  const acknowledgement={textContent:'Engineering—got it. I can map an unfamiliar codebase, plan and build features, trace bugs across logs and tests, and run checks to verify behavior.',children:[],isConnected:true,getBoundingClientRect:()=>({width:80,height:40})};
  const startControl={...button,kind:'task',textContent:'Get Started',children:[]};elements.task=startControl;
- root.querySelectorAll=s=>absent?(s.startsWith('input')?[]:s==='button'?[startControl]:options.noTaskScope?[]:[acknowledgement]):s.startsWith('input')?[radio]:[legend];
+ root.querySelectorAll=s=>absent?(s.startsWith('input')?[]:s==='button'?(options.duplicateTask?[startControl,startControl]:[startControl]):options.noTaskScope?[]:[acknowledgement]):s.startsWith('input')?[radio]:[legend];
  label.closest=s=>s.startsWith('div')?root:null;
  foreign.getAttribute=k=>k==='role'?'dialog':null;
  const setupButtons=(options.importSetupButtons??[]).map(innerText=>({...button,innerText,getAttribute:k=>k==='type'?(innerText.startsWith('Allow')?'submit':'button'):null}));
@@ -297,7 +297,18 @@ async function trial(options={}) {
   const rejected=await trial(options);assert.equal(rejected.continueClicks,1);assert.equal(rejected.taskClicks,0);
  }
  const missingTask=await trial({noTaskScope:true});
+ assert.equal(missingTask.facts.taskScopeObservation.heldScopeConnected,true);
+ assert.equal(missingTask.facts.taskScopeObservation.exactAckLeafCount,0);
+ assert.equal(missingTask.facts.taskScopeObservation.exactGetStartedCount,1);
  assert.equal(missingTask.continueClicks,1);assert.equal(missingTask.facts.roleScopeAbsent,true);assert.equal(missingTask.facts.taskScopeProved,false);assert.equal(missingTask.facts.errorCategory,'scope-remained');
+ const detachedTask=await trial({scopeReplaced:true});
+ assert.equal(detachedTask.facts.taskScopeObservation.heldScopeConnected,false);
+ assert.equal(detachedTask.facts.taskScopeObservation.roleRadioCount,null);
+ assert.equal(detachedTask.taskClicks,0);
+ const duplicateTask=await trial({duplicateTask:true});
+ assert.equal(duplicateTask.facts.taskScopeObservation.exactGetStartedCount,2);
+ assert.equal(duplicateTask.taskClicks,0);
+ assert(!JSON.stringify(missingTask.facts.taskScopeObservation).includes('Engineering'));
  const uncertainTask=await trial({uncertain:'task'});
  assert.equal(uncertainTask.taskClicks,1);assert.equal(uncertainTask.facts.taskClickAttempted,true);
  assert.equal(uncertainTask.facts.taskClickCompleted,false);assert.equal(uncertainTask.facts.codingComposerReady,false);

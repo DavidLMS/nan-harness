@@ -2600,6 +2600,12 @@ class QualificationTests(unittest.TestCase):
                      engineeringChecked=True, continueControl=True, continueClickAttempted=True,
                      continueClickCompleted=True, roleScopeAbsent=True, roleProofFailure='unmeasured', sessionProofFailure='unmeasured')
         self.assertEqual(q.public_onboarding(setup, 'chatgpt-desktop'), setup)
+        task = dict(heldScopeConnected=True, heldScopeVisible=True,
+                    roleRadioCount=0, exactAckLeafCount=1, exactGetStartedCount=0)
+        measured = {**setup, 'taskScopeObservation':task}
+        self.assertEqual(q.public_onboarding(measured, 'chatgpt-desktop'), measured)
+        with self.assertRaises(ValueError):
+            q.public_onboarding({**setup, 'taskScopeObservation':{**task, 'rawText':'PRIVATE'}}, 'chatgpt-desktop')
         for reason in ('deadline', 'native-ownership', 'page-set', 'main-identity', 'main-focus', 'main-scope',
                        'auxiliary-route', 'auxiliary-identity', 'auxiliary-focus', 'auxiliary-controls',
                        'query-failed', 'unmeasured'):
@@ -2774,6 +2780,22 @@ class QualificationTests(unittest.TestCase):
             (root / 'inventory.json').write_text(json.dumps(value))
             self.assertEqual(q.semantic_observations(root, 'chatgpt-desktop'), [value])
             self.assertEqual(q.envelope('chatgpt-desktop', 'windows', 'x86_64', 'a' * 40)['qualification'], 'unqualified')
+
+class TaskScopeObservationTests(unittest.TestCase):
+    def test_closed_counts_preserve_pending_and_reject_private_or_inconsistent_shapes(self):
+        facts = dict(heldScopeConnected=True, heldScopeVisible=True,
+                     roleRadioCount=0, exactAckLeafCount=1, exactGetStartedCount=0)
+        self.assertEqual(q.task_scope_observation(facts), facts)
+        detached = {**facts, 'heldScopeConnected':False, 'heldScopeVisible':False,
+                    'roleRadioCount':None, 'exactAckLeafCount':None, 'exactGetStartedCount':None}
+        self.assertEqual(q.task_scope_observation(detached), detached)
+        for changed in ({**facts, 'rawText':'PRIVATE'}, {**facts, 'exactAckLeafCount':True},
+                        {**facts, 'exactGetStartedCount':4097}, {**facts, 'roleRadioCount':None},
+                        {**facts, 'heldScopeConnected':False}, {**facts, 'heldScopeVisible':False},
+                        {**facts, 'exactAckLeafCount':'PRIVATE'}):
+            with self.subTest(changed=changed), self.assertRaises(ValueError):
+                q.task_scope_observation(changed)
+
 
 class HermesReadinessTests(unittest.TestCase):
     def test_policy_is_windows_hosted_only_and_profile_is_not_inherited(self):

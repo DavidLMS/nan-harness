@@ -69,8 +69,23 @@ def main_aux_correlation(value, app):
     return value
 
 
+def task_scope_observation(value):
+    flags = {'heldScopeConnected', 'heldScopeVisible'}
+    counts = {'roleRadioCount', 'exactAckLeafCount', 'exactGetStartedCount'}
+    if (type(value) is not dict or set(value) != flags | counts
+            or any(type(value[key]) is not bool for key in flags)
+            or value['heldScopeVisible'] and not value['heldScopeConnected']
+            or any(value[key] is not None and (type(value[key]) is not int
+                   or not 0 <= value[key] <= 4096) for key in counts)):
+        raise ValueError('invalid held task scope diagnostic')
+    available = sum(value[key] is not None for key in counts)
+    if available not in {0, 3} or not value['heldScopeVisible'] and available:
+        raise ValueError('inconsistent held task scope diagnostic')
+    return value
+
+
 def public_onboarding(setup, app):
-    shape = set(setup) - {'folderTrust', 'rejectedPageInventory', 'taskScopeProved', 'taskClickAttempted', 'taskClickCompleted', 'codingComposerReady', 'mainGuardFailure', 'pageSetFailure', 'foreignOverlayImportSetup', 'foreignOverlaySourceCounts', 'foreignOverlayActionability'} if type(setup) is dict else set()
+    shape = set(setup) - {'folderTrust', 'rejectedPageInventory', 'taskScopeProved', 'taskClickAttempted', 'taskClickCompleted', 'codingComposerReady', 'taskScopeObservation', 'mainGuardFailure', 'pageSetFailure', 'foreignOverlayImportSetup', 'foreignOverlaySourceCounts', 'foreignOverlayActionability'} if type(setup) is dict else set()
     booleans = {'conversationalScope', 'engineeringControl', 'roleClickAttempted',
                 'roleClickCompleted', 'engineeringChecked', 'continueControl',
                 'continueClickAttempted', 'continueClickCompleted', 'roleScopeAbsent'}
@@ -94,6 +109,8 @@ def public_onboarding(setup, app):
             or type(setup['sessionProofFailure']) is not str or setup['sessionProofFailure'] not in sessions
             or any(type(setup[key]) is not bool for key in booleans)):
         raise ValueError('invalid public onboarding diagnostic')
+    if 'taskScopeObservation' in setup:
+        task_scope_observation(setup['taskScopeObservation'])
     if 'folderTrust' in setup:
         trust = setup['folderTrust']
         if (type(trust) is not dict or set(trust) - {'rejectionStage'} != {'status', 'clickAttempted', 'clickCompleted'}
