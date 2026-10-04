@@ -634,7 +634,7 @@ fn persist_closed_configuration(
     persist_closed_configuration_until(
         temporary,
         path,
-        std::time::Instant::now() + std::time::Duration::from_millis(250),
+        std::time::Instant::now() + Duration::from_millis(250),
     )
 }
 
@@ -704,7 +704,7 @@ mod configuration_persist_tests {
                 return Err(ClaudeDesktopError::InvalidStatePath);
             }
             if !qualification_prelaunch::enabled()
-                || super::super::qualification_config::observation_directory(&paths).is_none()
+                || qualification_config::observation_directory(&paths).is_none()
             {
                 return Err(ClaudeDesktopError::InvalidStatePath);
             }
@@ -717,13 +717,9 @@ mod configuration_persist_tests {
             ensure_no_pending_recovery(&paths)?;
             let receipt = Receipt::capture(&paths)?;
             receipt.write(&paths.receipt)?;
-            super::super::configuration::apply_gateway(
-                &paths,
-                "http://127.0.0.1:9",
-                "synthetic-token",
-            )?;
-            let normal = super::super::configuration::read_json_object(paths.documents()[0])?;
-            let managed = super::super::configuration::read_json_object(paths.documents()[3])?;
+            apply_gateway(&paths, "http://127.0.0.1:9", "synthetic-token")?;
+            let normal = read_json_object(paths.documents()[0])?;
+            let managed = read_json_object(paths.documents()[3])?;
             if normal.get("deploymentMode").and_then(Value::as_str) != Some("3p")
                 || managed.get("coworkTabEnabled").and_then(Value::as_bool) != Some(false)
             {
@@ -839,7 +835,7 @@ mod configuration_persist_tests {
             nan_harness_private_fs::create_private_dir_all(directory).unwrap();
         }
         let lease = |directory: &Path| {
-            std::fs::OpenOptions::new()
+            fs::OpenOptions::new()
                 .read(true)
                 .share_mode(1)
                 .custom_flags(0x0200_0000 | 0x0020_0000)
@@ -878,10 +874,10 @@ mod configuration_persist_tests {
         );
         let destination =
             workspace.join("profile/home/AppData/Roaming/Claude/claude_desktop_config.json");
-        let mut file = nan_harness_private_fs::open_private_new(&destination).unwrap();
+        let mut file = open_private_new(&destination).unwrap();
         file.write_all(b"{}").unwrap();
         drop(file);
-        let held = std::fs::OpenOptions::new()
+        let held = fs::OpenOptions::new()
             .read(true)
             .share_mode(1)
             .open(&destination)
@@ -1198,7 +1194,7 @@ mod configuration_persist_tests {
         let temp = tempfile::tempdir().unwrap();
         let destination = temp.path().join("config.json");
         let mut temporary = tempfile::Builder::new()
-            .make_in(temp.path(), nan_harness_private_fs::open_private_new)
+            .make_in(temp.path(), open_private_new)
             .unwrap();
         temporary.write_all(b"replacement").unwrap();
         temporary.as_file().sync_all().unwrap();
@@ -1207,13 +1203,13 @@ mod configuration_persist_tests {
         // The same source file ACL survives MoveFileEx, independently checked by
         // the private reader rather than inferred from a permission bit.
         assert!(nan_harness_private_fs::open_private_read(&destination).is_ok());
-        let held = std::fs::OpenOptions::new()
+        let held = fs::OpenOptions::new()
             .read(true)
             .share_mode(1)
             .open(&destination)
             .unwrap();
         let mut temporary = tempfile::Builder::new()
-            .make_in(temp.path(), nan_harness_private_fs::open_private_new)
+            .make_in(temp.path(), open_private_new)
             .unwrap();
         temporary.write_all(b"must not replace").unwrap();
         temporary.as_file().sync_all().unwrap();
@@ -1235,18 +1231,18 @@ mod configuration_persist_tests {
         let temp = tempfile::tempdir().unwrap();
         let destination = temp.path().join("config.json");
         fs::write(&destination, b"original").unwrap();
-        let held = std::fs::OpenOptions::new()
+        let held = fs::OpenOptions::new()
             .read(true)
             .share_mode(1)
             .open(&destination)
             .unwrap();
         let mut temporary = tempfile::Builder::new()
-            .make_in(temp.path(), nan_harness_private_fs::open_private_new)
+            .make_in(temp.path(), open_private_new)
             .unwrap();
         temporary.write_all(b"replacement").unwrap();
         temporary.as_file().sync_all().unwrap();
         let release = std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(40));
+            std::thread::sleep(Duration::from_millis(40));
             drop(held);
         });
         let result = persist_closed_configuration(temporary.into_temp_path(), &destination);
@@ -1260,25 +1256,25 @@ mod configuration_persist_tests {
         let temp = tempfile::tempdir().unwrap();
         let destination = temp.path().join("config.json");
         fs::write(&destination, b"original").unwrap();
-        let held = std::fs::OpenOptions::new()
+        let held = fs::OpenOptions::new()
             .read(true)
             .share_mode(1)
             .open(&destination)
             .unwrap();
         let mut temporary = tempfile::Builder::new()
-            .make_in(temp.path(), nan_harness_private_fs::open_private_new)
+            .make_in(temp.path(), open_private_new)
             .unwrap();
         temporary.write_all(b"replacement").unwrap();
         temporary.as_file().sync_all().unwrap();
         let original_path = temporary.path().to_path_buf();
         let release = std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(400));
+            std::thread::sleep(Duration::from_millis(400));
             drop(held);
         });
         let result = persist_closed_configuration_until(
             temporary.into_temp_path(),
             &destination,
-            std::time::Instant::now() + std::time::Duration::from_secs(2),
+            std::time::Instant::now() + Duration::from_secs(2),
         );
         release.join().unwrap();
         assert!(result.is_ok());
@@ -1312,7 +1308,7 @@ mod configuration_persist_tests {
             .chain([roaming, parent.as_path(), third_party.as_path()])
         {
             retained.push(
-                std::fs::OpenOptions::new()
+                fs::OpenOptions::new()
                     .read(true)
                     .share_mode(1)
                     .custom_flags(0x0200_0000 | 0x0020_0000)
@@ -1342,14 +1338,14 @@ mod configuration_persist_tests {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("config.json");
         fs::write(&path, b"original").unwrap();
-        let held = std::fs::OpenOptions::new()
+        let held = fs::OpenOptions::new()
             .read(true)
             .share_mode(1)
             .open(&path)
             .unwrap();
         let mut temporary = tempfile::Builder::new()
             .prefix(".nan-")
-            .make_in(temp.path(), nan_harness_private_fs::open_private_new)
+            .make_in(temp.path(), open_private_new)
             .unwrap();
         temporary.write_all(b"replacement").unwrap();
         temporary.flush().unwrap();
@@ -1357,7 +1353,7 @@ mod configuration_persist_tests {
         assert_eq!(initial.error.raw_os_error(), Some(32));
         assert_eq!(fs::read(&path).unwrap(), b"original");
         let release = std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(40));
+            std::thread::sleep(Duration::from_millis(40));
             drop(held);
         });
         let result = persist_windows_configuration(initial.file, &path);
@@ -1371,7 +1367,7 @@ mod configuration_persist_tests {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("config.json");
         fs::write(&path, b"original").unwrap();
-        let held = std::fs::OpenOptions::new()
+        let held = fs::OpenOptions::new()
             .read(true)
             .share_mode(1)
             .open(&path)
@@ -1386,7 +1382,7 @@ mod configuration_persist_tests {
         assert!(
             matches!(result, Err(ClaudeDesktopError::Write(error)) if error.raw_os_error()==Some(32))
         );
-        assert!(started.elapsed() < std::time::Duration::from_secs(2));
+        assert!(started.elapsed() < Duration::from_secs(2));
         assert_eq!(fs::read(&path).unwrap(), b"original");
         drop(held);
         assert_eq!(fs::read_dir(temp.path()).unwrap().count(), 1);
@@ -1415,7 +1411,7 @@ mod configuration_persist_tests {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("config.json");
         fs::write(&path, b"original").unwrap();
-        let held = std::fs::OpenOptions::new()
+        let held = fs::OpenOptions::new()
             .read(true)
             .share_mode(1)
             .open(&path)
@@ -1516,7 +1512,7 @@ mod configuration_persist_tests {
             .ancestors()
             .chain([roaming.as_path(), normal.as_path(), third_party.as_path()])
             .map(|directory| {
-                std::fs::OpenOptions::new()
+                fs::OpenOptions::new()
                     .read(true)
                     .share_mode(1)
                     .custom_flags(0x0200_0000 | 0x0020_0000)
