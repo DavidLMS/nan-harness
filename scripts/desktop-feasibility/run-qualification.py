@@ -10,6 +10,7 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(ROOT / 'canary/actions'))
 from cell import private_command, ensure_private_directory, write_json
 from desktop_diagnostics import Capture
