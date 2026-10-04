@@ -39,7 +39,10 @@ where
 
 fn upstream_error(error: &Value) -> ApiError {
     if ApiError::is_overload(error) {
-        ApiError::ServerOverloaded(crate::error::OverloadSource::Stream)
+        ApiError::ServerOverloaded(
+            crate::error::OverloadSource::Stream,
+            crate::error::RetryHint::Default,
+        )
     } else {
         ApiError::InvalidUpstream(upstream_error_detail(error))
     }

@@ -1,7 +1,9 @@
+mod retry_hint;
 use crate::diagnostics::{BridgeModelPolicy, BridgeReasoningRequest};
 use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
+pub(crate) use retry_hint::RetryHint;
 use serde_json::json;
 use std::fmt;
 use std::net::SocketAddr;
@@ -121,9 +123,13 @@ pub(crate) enum ApiError {
     #[error("NaN upstream request timed out during {0}")]
     UpstreamTimeout(UpstreamTimeoutPhase),
     #[error("NaN returned HTTP {status}: {message}")]
-    UpstreamStatus { status: StatusCode, message: String },
+    UpstreamStatus {
+        status: StatusCode,
+        message: String,
+        retry_hint: RetryHint,
+    },
     #[error("The provider is temporarily overloaded. Please try again.")]
-    ServerOverloaded(OverloadSource),
+    ServerOverloaded(OverloadSource, RetryHint),
     #[error(
         "{model}'s guardrails rejected this request. This may be a false positive. Try another model."
     )]
@@ -171,7 +177,7 @@ impl ApiError {
     ) -> Self {
         let parsed: serde_json::Value = serde_json::from_str(body).unwrap_or_default();
         if status == StatusCode::SERVICE_UNAVAILABLE && Self::is_overload(&parsed["error"]) {
-            return Self::ServerOverloaded(OverloadSource::Http);
+            return Self::ServerOverloaded(OverloadSource::Http, RetryHint::Default);
         }
         let message = parsed
             .pointer("/error/message")
@@ -192,6 +198,7 @@ impl ApiError {
             };
         }
         Self::UpstreamStatus {
+            retry_hint: RetryHint::Default,
             status,
             message: message
                 .replace(['\r', '\n'], " ")
@@ -201,12 +208,29 @@ impl ApiError {
         }
     }
 
+    pub(crate) fn with_retry_hint(mut self, hint: RetryHint) -> Self {
+        match &mut self {
+            Self::UpstreamStatus { retry_hint, .. } | Self::ServerOverloaded(_, retry_hint) => {
+                *retry_hint = hint;
+            }
+            _ => {}
+        }
+        self
+    }
+    fn retry_hint(&self) -> RetryHint {
+        match self {
+            Self::UpstreamStatus { retry_hint, .. } | Self::ServerOverloaded(_, retry_hint) => {
+                *retry_hint
+            }
+            _ => RetryHint::Default,
+        }
+    }
     pub(crate) fn is_overload(error: &serde_json::Value) -> bool {
         error.get("code").and_then(serde_json::Value::as_str) == Some("server_is_overloaded")
     }
 
     pub(crate) const fn response_code(&self) -> &'static str {
-        if matches!(self, Self::ServerOverloaded(_)) {
+        if matches!(self, Self::ServerOverloaded(_, _)) {
             "server_is_overloaded"
         } else {
             "server_error"
@@ -220,11 +244,11 @@ impl ApiError {
             Self::SearchDisabled => "NH-BRIDGE-106",
             Self::SearchUnconfigured => "NH-BRIDGE-112",
             Self::UpstreamTransport(_) | Self::UpstreamTimeout(_) => "NH-BRIDGE-103",
-            Self::UpstreamStatus { .. } | Self::ServerOverloaded(OverloadSource::Http) => {
+            Self::UpstreamStatus { .. } | Self::ServerOverloaded(OverloadSource::Http, _) => {
                 "NH-BRIDGE-104"
             }
             Self::ProviderContentFiltered { .. } => "NH-PROVIDER-CONTENT-FILTERED",
-            Self::InvalidUpstream(_) | Self::ServerOverloaded(OverloadSource::Stream) => {
+            Self::InvalidUpstream(_) | Self::ServerOverloaded(OverloadSource::Stream, _) => {
                 "NH-BRIDGE-105"
             }
             Self::CoordinatorUnavailable(_) => "NH-BRIDGE-107",
@@ -244,7 +268,7 @@ impl ApiError {
             | Self::BudgetExhausted(_) => StatusCode::BAD_REQUEST,
             Self::SearchDisabled => StatusCode::NOT_FOUND,
             Self::UpstreamTimeout(_) => StatusCode::GATEWAY_TIMEOUT,
-            Self::ServerOverloaded(_)
+            Self::ServerOverloaded(_, _)
             | Self::SearchUnconfigured
             | Self::CoordinatorUnavailable(_)
             | Self::CoordinatorQueueTimeout
@@ -279,13 +303,13 @@ impl ApiError {
             | Self::UpstreamTransport(_)
             | Self::UpstreamTimeout(_)
             | Self::UpstreamStatus { .. }
-            | Self::ServerOverloaded(_)
+            | Self::ServerOverloaded(_, _)
             | Self::InvalidUpstream(_) => "api_error",
         }
     }
 
     pub(crate) fn event_data(&self) -> serde_json::Value {
-        if matches!(self, Self::ServerOverloaded(_)) {
+        if matches!(self, Self::ServerOverloaded(_, _)) {
             return json!({"type":"error", "error":{"type":"api_error", "code":self.response_code(), "message":self.to_string()}});
         }
         json!({
@@ -323,7 +347,15 @@ impl From<nan_harness_coordinator::CoordinatorError> for ApiError {
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        (self.status(), Json(self.event_data())).into_response()
+        let hint = self.retry_hint();
+        let mut response = (self.status(), Json(self.event_data())).into_response();
+        if hint == RetryHint::NoRetry {
+            response.headers_mut().insert(
+                "x-should-retry",
+                axum::http::HeaderValue::from_static("false"),
+            );
+        }
+        response
     }
 }
 

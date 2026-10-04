@@ -168,11 +168,13 @@ async fn ensure_success(
     if status.is_success() {
         return Ok(response);
     }
+    let retry_hint = response.retry_hint();
     Err(match response.read_final_error_body().await {
         FinalErrorBody::Complete(body) => {
-            ApiError::from_provider_response(status, &body, Some(model))
+            ApiError::from_provider_response(status, &body, Some(model)).with_retry_hint(retry_hint)
         }
         FinalErrorBody::Incomplete => ApiError::UpstreamStatus {
+            retry_hint,
             status,
             message: FINAL_ERROR_FALLBACK_MESSAGE.to_owned(),
         },

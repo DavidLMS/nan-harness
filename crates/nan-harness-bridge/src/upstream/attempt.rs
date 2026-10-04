@@ -32,7 +32,11 @@ impl RetryLease {
         // Observe even when no local retry fits: other requests must honor the
         // provider cooldown, and the original response must remain available.
         let delay = self.delay_for_retry(outcome, hint, attempt).await;
-        let retry_allowed = !final_attempt && budget.reserve_wait(delay, outcome);
+        let suppressed = result.as_ref().ok().is_some_and(|response| {
+            crate::error::RetryHint::from_headers(response.headers())
+                == crate::error::RetryHint::NoRetry
+        });
+        let retry_allowed = !final_attempt && !suppressed && budget.reserve_wait(delay, outcome);
         let classified = classify_attempt(result, !retry_allowed, capture).await;
         if retry_allowed {
             tokio::time::sleep(delay).await;
@@ -113,7 +117,11 @@ pub(crate) async fn classify_attempt(
     match result {
         Ok(response) => {
             crate::upstream_capture::record_response_metadata(capture, &response);
-            if retryable_status(response.status()) && !final_attempt {
+            if retryable_status(response.status())
+                && !final_attempt
+                && crate::error::RetryHint::from_headers(response.headers())
+                    != crate::error::RetryHint::NoRetry
+            {
                 crate::upstream_capture::handle_retry_response_body(capture, response).await;
                 UpstreamAttempt::Retry
             } else {

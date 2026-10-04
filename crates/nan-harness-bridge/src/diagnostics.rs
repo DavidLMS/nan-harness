@@ -95,8 +95,8 @@ impl BridgeDiagnostic {
         let http_status = match error {
             ApiError::UpstreamStatus { status, .. } => Some(status.as_u16()),
             ApiError::ProviderContentFiltered { .. } => Some(400),
-            ApiError::ServerOverloaded(crate::error::OverloadSource::Http) => Some(503),
-            ApiError::ServerOverloaded(crate::error::OverloadSource::Stream)
+            ApiError::ServerOverloaded(crate::error::OverloadSource::Http, _) => Some(503),
+            ApiError::ServerOverloaded(crate::error::OverloadSource::Stream, _)
             | ApiError::Unauthorized
             | ApiError::InvalidRequest(_)
             | ApiError::SearchDisabled
@@ -201,7 +201,7 @@ fn diagnostic_fields(
         }
         ApiError::UpstreamTimeout(_) => (BridgeDiagnosticReason::UpstreamTimeout, None, None, None),
         ApiError::UpstreamStatus { .. }
-        | ApiError::ServerOverloaded(crate::error::OverloadSource::Http) => {
+        | ApiError::ServerOverloaded(crate::error::OverloadSource::Http, _) => {
             (BridgeDiagnosticReason::UpstreamStatus, None, None, None)
         }
         ApiError::ProviderContentFiltered { .. } => (
@@ -211,7 +211,7 @@ fn diagnostic_fields(
             None,
         ),
         ApiError::InvalidUpstream(_)
-        | ApiError::ServerOverloaded(crate::error::OverloadSource::Stream) => (
+        | ApiError::ServerOverloaded(crate::error::OverloadSource::Stream, _) => (
             BridgeDiagnosticReason::InvalidUpstreamResponse,
             None,
             None,

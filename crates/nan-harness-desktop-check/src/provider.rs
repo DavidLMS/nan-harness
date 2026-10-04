@@ -263,11 +263,16 @@ async fn models(State(state): State<Arc<GateState>>) -> Response {
 async fn chat(State(state): State<Arc<GateState>>, Json(mut body): Json<Value>) -> Response {
     if state.expected_failure.load(Ordering::SeqCst) {
         state.failure_observed.store(true, Ordering::SeqCst);
-        return closed_error(
-            StatusCode::from_u16(state.expected_failure_status.load(Ordering::SeqCst))
-                .unwrap_or(StatusCode::BAD_REQUEST),
-            "NAN_CHECK_EXPECTED_FAILURE",
-        );
+        let status = StatusCode::from_u16(state.expected_failure_status.load(Ordering::SeqCst))
+            .unwrap_or(StatusCode::BAD_REQUEST);
+        let mut response = closed_error(status, "NAN_CHECK_EXPECTED_FAILURE");
+        if status == StatusCode::SERVICE_UNAVAILABLE {
+            response.headers_mut().insert(
+                "x-should-retry",
+                axum::http::HeaderValue::from_static("false"),
+            );
+        }
+        return response;
     }
     let count = state.generations.fetch_add(1, Ordering::SeqCst);
     if state.live && count >= MAX_GENERATIONS {
@@ -585,7 +590,23 @@ mod tests {
             .unwrap();
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
         assert!(gate.failure_observed());
+        assert!(response.headers().get("x-should-retry").is_none());
         assert!(!response.text().await.unwrap().contains("private-key"));
+        gate.state
+            .expected_failure_status
+            .store(503, Ordering::SeqCst);
+        let response = client
+            .post(format!("{}/chat/completions", gate.base_url))
+            .bearer_auth(gate.session_token())
+            .json(&json!({}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(response.headers().get("x-should-retry").unwrap(), "false");
+        let body: Value = response.json().await.unwrap();
+        assert_eq!(body["error"]["type"], "desktop_check");
+        assert_eq!(body["error"]["message"], "NAN_CHECK_EXPECTED_FAILURE");
         gate.fail_next_scenario(false);
         gate.state.generations.store(4, Ordering::SeqCst);
         let response = client
