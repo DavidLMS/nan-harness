@@ -2632,6 +2632,14 @@ class QualificationTests(unittest.TestCase):
                      engineeringChecked=True, continueControl=True, continueClickAttempted=True,
                      continueClickCompleted=True, roleScopeAbsent=True, roleProofFailure='unmeasured', sessionProofFailure='unmeasured')
         self.assertEqual(q.public_onboarding(setup, 'chatgpt-desktop'), setup)
+        for kind in ('get-started', 'skip-optional-capabilities'):
+            bound = {**setup, 'taskScopeProved':True, 'taskControlKind':kind}
+            self.assertEqual(q.public_onboarding(bound, 'chatgpt-desktop'), bound)
+        for changed in ({'taskControlKind':'PRIVATE'}, {'taskControlKind':[]},
+                        {'taskControlKind':'skip-optional-capabilities','taskScopeProved':False},
+                        {'taskControlKind':'skip-optional-capabilities','roleScopeAbsent':False}):
+            with self.assertRaises(ValueError):
+                q.public_onboarding({**setup, 'taskScopeProved':True, **changed}, 'chatgpt-desktop')
         task = dict(heldScopeConnected=True, heldScopeVisible=True,
                     roleRadioCount=0, exactAckLeafCount=1, exactGetStartedCount=0)
         measured = {**setup, 'taskScopeObservation':task}

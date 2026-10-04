@@ -6,7 +6,7 @@ const GROUP = 'input[type="radio"][name="conversational-onboarding-inline-role"]
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 // Standalone browser callback: no Node helpers or application internals.
-function sample(control) {
+function sample(control, optionalSkip=false) {
   const blocked=reason=>({blocked:reason});
   if (!['LABEL','BUTTON'].includes(control.tagName)) return blocked('unsupported-control');
   if (!control.isConnected || control.ownerDocument !== document || control.closest('[inert]')) return blocked('detached-or-inert');
@@ -25,9 +25,9 @@ function sample(control) {
       const acknowledgements=[...dialog.querySelectorAll('*')].filter(e=>visible(e)&&e.textContent?.trim()===acknowledgement
         &&![...e.children].some(child=>child.textContent?.trim()===acknowledgement));
       if(dialog.getAttribute('role')!=='dialog'||!dialog.contains(control)||control.tagName!=='BUTTON'
-          ||control.textContent?.trim()!=='Get Started'||acknowledgements.length!==1
+          ||control.textContent?.trim()!==(optionalSkip?'Skip':'Get Started')||acknowledgements.length!==1
           ||dialog.querySelectorAll('input[name="conversational-onboarding-inline-role"]').length!==0
-          ||[...dialog.querySelectorAll('button')].filter(e=>visible(e)&&e.textContent?.trim()==='Get Started').length!==1) return blocked('foreign-overlay');
+          ||[...dialog.querySelectorAll('button')].filter(e=>visible(e)&&e.textContent?.trim()===(optionalSkip?'Skip':'Get Started')).length!==1) return blocked('foreign-overlay');
     }
   }
   for (let e = control, depth = 0; e; e = e.parentElement) {
@@ -70,6 +70,24 @@ function taskContinuation(scope, diagnostic=false) {
   result.exactAckLeafCount=acknowledgementNodes.length;
   result.exactGetStartedCount=start.length;
   return diagnostic?result:radios.length===0&&acknowledgementNodes.length===1&&start.length===1;
+}
+
+// Qf's optional-capability footer from pinned Linux 26.930.41038.
+// This is the ordinary Skip callback; never a permission grant or task replay.
+function optionalCapabilities(scope) {
+  const visible=e=>{const r=e.getBoundingClientRect(),s=getComputedStyle(e);
+    return e.isConnected&&r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden'&&!e.closest('[inert]');};
+  if(scope.ownerDocument!==document||!visible(scope))return false;
+  const nodes=[...scope.querySelectorAll('*')],buttons=[...scope.querySelectorAll('button')];
+  if(nodes.length>4096||buttons.length>4096||scope.querySelectorAll('input[name="conversational-onboarding-inline-role"]').length!==0)return false;
+  const ack='Engineering—got it. I can map an unfamiliar codebase, plan and build features, trace bugs across logs and tests, and run checks to verify behavior.';
+  if(nodes.filter(e=>visible(e)&&e.textContent?.trim()===ack&&![...e.children].some(c=>c.textContent?.trim()===ack)).length!==1)return false;
+  if(buttons.some(e=>visible(e)&&e.textContent?.trim()==='Get Started'))return false;
+  const skips=buttons.filter(e=>visible(e)&&e.textContent?.trim()==='Skip');
+  if(skips.length!==1||skips[0].disabled||skips[0].getAttribute('aria-disabled')==='true')return false;
+  const footer=skips[0].parentElement?.parentElement;
+  return !!footer&&scope.contains(footer)&&footer.tagName==='DIV'
+    &&['relative','flex','shrink-0','flex-col','items-center','gap-3','px-10','pt-8','pb-12'].every(t=>footer.classList.contains(t));
 }
 
 // Exact public local-coding markers from the frozen local conversation thread.
@@ -368,16 +386,16 @@ async function run(page, ownerGuard, deadline, rejected, mainGuard, folderTrust)
     const handle = await control.elementHandle();
     if (!handle) return await blocked('detached-or-inert');
     try {
-      const first = await handle.evaluate(sample);
+      const first = await handle.evaluate(sample,facts.taskControlKind==='skip-optional-capabilities');
       if (first?.blocked) return await blocked(first.blocked);
       await wait(Math.min(100,Math.max(0,deadline-Date.now())));
       if (!await reprove() || !await control.evaluate((e, held)=>e===held,handle)) return false;
-      const second=await handle.evaluate(sample);
+      const second=await handle.evaluate(sample,facts.taskControlKind==='skip-optional-capabilities');
       if (second?.blocked) return await blocked(second.blocked);
       const point = candidate(first,second);
       if (!point) return await blocked(first?.points?.length && second?.points?.length?'unstable':'no-owned-point');
       if (!await reprove() || !await control.evaluate((e, held)=>e===held,handle)) return false;
-      const final=await handle.evaluate(sample);
+      const final=await handle.evaluate(sample,facts.taskControlKind==='skip-optional-capabilities');
       if (final?.blocked) return await blocked(final.blocked);
       if (!candidate(first,final) || !final.points.some(p=>p.x===point.x&&p.y===point.y)) return await blocked('unstable');
       if (!await ownedEndpoint()) return false;
@@ -432,25 +450,31 @@ async function run(page, ownerGuard, deadline, rejected, mainGuard, folderTrust)
     facts.stage='continue-action';
     if (!await click(button,continueProof,'continueClickAttempted','continueClickCompleted')) return stop('action-blocked');
     facts.stage='scope-transition';
+    let taskKind;
+    const skipAdmitted=process.platform==='linux'&&process.env.NANH_CODEX_PROJECT_ARTIFACT_SHA256==='ee7854145554718d7239d01ea37d44f6ba1e0ba4a93f47ac097d6e0f964da47c';
     const observeTask=async()=>{
       const shape=await transitionScope.evaluate(taskContinuation,true);
       facts.taskScopeObservation=shape;
-      return shape?.heldScopeConnected===true&&shape.heldScopeVisible===true
-        &&shape.roleRadioCount===0&&shape.exactAckLeafCount===1&&shape.exactGetStartedCount===1;
+      if(shape?.heldScopeConnected!==true||shape.heldScopeVisible!==true
+          ||shape.roleRadioCount!==0||shape.exactAckLeafCount!==1)return false;
+      const kind=shape.exactGetStartedCount===1?'get-started'
+        :shape.exactGetStartedCount===0&&skipAdmitted&&await transitionScope.evaluate(optionalCapabilities)?'skip-optional-capabilities':null;
+      if(kind===null||taskKind&&taskKind!==kind)return false;
+      taskKind=kind;return true;
     };
     while (Date.now()<deadline) {
       if (!await ownedEndpoint()) return stop('ownership-lost');
       if (await page.locator(GROUP).count()===0) {
         facts.roleScopeAbsent=true;
         if(await observeTask()&&await ownedEndpoint()&&Date.now()<deadline) {
-          facts.taskScopeProved=true;break;
+          facts.taskScopeProved=true;facts.taskControlKind=taskKind;break;
         }
       }
       await wait(100);
     }
     if(!facts.taskScopeProved)return stop('scope-remained');
     facts.stage='task-action';
-    const taskButton=page.getByRole('button',{name:'Get Started',exact:true});
+    const taskButton=page.getByRole('button',{name:facts.taskControlKind==='skip-optional-capabilities'?'Skip':'Get Started',exact:true});
     const taskProof=async()=>Date.now()<deadline&&await ownedEndpoint()
       &&await observeTask()
       &&await taskButton.count()===1&&await taskButton.isEnabled()
@@ -516,3 +540,5 @@ exports.scopeFingerprint = SCOPE;
 
 exports.taskContinuation=taskContinuation;
 exports.codingScope=codingScope;
+
+exports.optionalCapabilities=optionalCapabilities;

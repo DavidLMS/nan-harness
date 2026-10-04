@@ -33,8 +33,11 @@ async function trial(options={}) {
  form.contains=e=>e===heading;
  form.querySelectorAll=s=>s==='button'?[finish]:s==='a'?[terms,privacy]:[];
  root.contains=e=>[label,radio,button,startControl].includes(e);
- const acknowledgement={textContent:'Engineering—got it. I can map an unfamiliar codebase, plan and build features, trace bugs across logs and tests, and run checks to verify behavior.',children:[],isConnected:true,getBoundingClientRect:()=>({width:80,height:40})};
- const startControl={...button,kind:'task',textContent:'Get Started',children:[]};elements.task=startControl;
+ const acknowledgement={textContent:'Engineering—got it. I can map an unfamiliar codebase, plan and build features, trace bugs across logs and tests, and run checks to verify behavior.',children:[],isConnected:true,closest:()=>null,getBoundingClientRect:()=>({width:80,height:40})};
+ const startControl={...button,kind:'task',textContent:options.optionalSkip?'Skip':'Get Started',children:[]};elements.task=startControl;
+ const footer={tagName:'DIV',classList:{contains:t=>!options.wrongFooter&&['relative','flex','shrink-0','flex-col','items-center','gap-3','px-10','pt-8','pb-12'].includes(t)}};
+ startControl.parentElement={parentElement:footer};
+ root.contains=e=>[label,radio,button,startControl,footer].includes(e);
  root.querySelectorAll=s=>absent?(s.startsWith('input')?[]:s==='button'?(options.duplicateTask?[startControl,startControl]:[startControl]):options.noTaskScope?[]:[acknowledgement]):s.startsWith('input')?[radio]:[legend];
  label.closest=s=>s.startsWith('div')?root:null;
  foreign.getAttribute=k=>k==='role'?'dialog':null;
@@ -50,7 +53,7 @@ async function trial(options={}) {
  if(options.overlayLongAncestors) {let current=foreign;for(let i=0;i<65;i++){current.parentElement={ownerDocument:doc,isConnected:true,parentElement:null,inert:false,hasAttribute:()=>false,getAttribute:()=>null};current=current.parentElement;}}
  let diagnosticPoints=0;if(options.overlayMixedPoints)doc.elementFromPoint=()=>[label,foreign,dialog][diagnosticPoints++%3];
  if(options.overlayPointFront)doc.elementFromPoint=()=>options.overlayPointFront==='dialog'?foreign:options.overlayPointFront==='other'?dialog:label;
- const globals={document:doc,innerWidth:800,innerHeight:600,getComputedStyle:e=>({display:'block',visibility:'visible',
+ const globals={document:doc,innerWidth:800,innerHeight:600,getComputedStyle:e=>({display:options.hiddenTask&&e===startControl?'none':'block',visibility:'visible',
    opacity:options.overlayBadOpacity?'PRIVATE':e===foreign?(options.overlayZero?'0':'1'):
      e===foreign.parentElement&&options.overlayAncestorZero?'0':'1',
    pointerEvents:e===foreign&&options.overlayPointerNone?'none':e===foreign.parentElement&&options.overlayAncestorPointerNone?'none':'auto'})};
@@ -87,10 +90,10 @@ async function trial(options={}) {
  }
  const mainFrame={};
  const extraPage={url:()=>options.foreignUrl??'about:blank',evaluate:async()=>{if(options.inventoryOwnerLoss)inventoryOwnerLost=true;if(options.inventoryDeadline)now=1201;return options.visibility??'hidden';}};
- const page={getByRole:(_role,options)=>new Locator(options.name==='Get Started'?'task':'login'),evaluate:async fn=>fn.name==='codingScope'?taskClicks===1&&!options.noCodingScope:'visible',mainFrame:()=>options.overlayFrameChange&&overlayReads?{}:mainFrame,locator:s=>new Locator(s.startsWith('fieldset > legend')?'legend':'radios'),
+ const page={getByRole:(_role,options)=>new Locator(['Get Started','Skip'].includes(options.name)?'task':'login'),evaluate:async fn=>fn.name==='codingScope'?taskClicks===1&&!options.noCodingScope:'visible',mainFrame:()=>options.overlayFrameChange&&overlayReads?{}:mainFrame,locator:s=>new Locator(s.startsWith('fieldset > legend')?'legend':'radios'),
   url:()=>options.urlChange&&roleClicks>0?'app://codex/index.html?PRIVATE_ROUTE':'app://codex/index.html',
   context:()=>({browser:()=>({contexts:()=>[{pages:()=>options.foreignPage?[page,extraPage]:options.replacedPage?[{}]:[page]}]})})};
- const sandbox={exports:{},URL,process:{platform:options.platform??'win32',env:{GITHUB_ACTIONS:options.noHost?'false':'true',RUNNER_ENVIRONMENT:'github-hosted',RUNNER_OS:options.runnerOs??'Windows',NANH_CODEX_PUBLIC_ONBOARDING:options.noOptin?undefined:'engineering'}},Date:{now:()=>now},clearTimeout:()=>{},setTimeout:(f,ms)=>{if(ms<=100){now+=100;f();}}};
+ const sandbox={exports:{},URL,process:{platform:options.platform??'win32',env:{GITHUB_ACTIONS:options.noHost?'false':'true',RUNNER_ENVIRONMENT:'github-hosted',RUNNER_OS:options.runnerOs??'Windows',NANH_CODEX_PROJECT_ARTIFACT_SHA256:options.skipPin?'ee7854145554718d7239d01ea37d44f6ba1e0ba4a93f47ac097d6e0f964da47c':undefined,NANH_CODEX_PUBLIC_ONBOARDING:options.noOptin?undefined:'engineering'}},Date:{now:()=>now},clearTimeout:()=>{},setTimeout:(f,ms)=>{if(ms<=100){now+=100;f();}}};
  vm.runInNewContext(source,sandbox);
  let guards=0,mainProofs=0,sealed=0;
  const guard=()=>{guards++;if(options.guardThrows)throw Error('PRIVATE');if(options.guardExhaustsBudget&&guards>=3||options.overlayBudgetExpired&&overlayReads>0)now=1201;return !inventoryOwnerLost&&!(options.overlayOwnerDuringProof&&legendReads>=3)&&!(options.overlayOwnerLoss&&overlayReads>0)&&!options.initialOwnerLoss&&!(options.ownerLossBeforeRole&&guards>=3)&&!(options.ownerLoss&&roleClicks>0)&&!(options.finalLoss&&guards>=2);};
@@ -351,6 +354,12 @@ async function trial(options={}) {
      if(opts.overlayPointFront==='dialog')assert.equal(m.dialogOwnedPointCount,9);
      if(opts.overlayPointFront==='other')assert.equal(m.otherPointCount,9);
    }
+ }
+ const skip=await trial({optionalSkip:true,skipPin:true,platform:'linux',runnerOs:'Linux'});
+ assert.equal(skip.taskClicks,1);assert.equal(skip.facts.taskControlKind,'skip-optional-capabilities');assert.equal(skip.facts.codingComposerReady,true);
+ for(const options of [{hiddenTask:true},{wrongFooter:true},{duplicateTask:true},{scopeReplaced:true},{noTaskScope:true},{skipPin:false},{platform:'win32',runnerOs:'Windows'}]) {
+  const denied=await trial({optionalSkip:true,skipPin:true,platform:'linux',runnerOs:'Linux',...options});
+  assert.equal(denied.taskClicks,0);
  }
  console.log('PASS: public onboarding behavioral guards (closed proof branches + guarded loading)');
 })().catch(e=>{console.error(e);process.exitCode=1;});
