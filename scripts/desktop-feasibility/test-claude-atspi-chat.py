@@ -954,6 +954,13 @@ class CorrelatedNextInputTests(unittest.TestCase):
         self.assertFalse(c.submit('ungranted next prompt')['sendAttempted'])
         self.assertEqual((a.focus_count,a.paste_count,a.send_count,a.copy_actions),(0,0,0,0))
 
+    def test_lost_history_after_passive_admission_cannot_focus(self):
+        a,c,b,h=self.fixture();c.restore_next_input(b,h)
+        a.extra_after_focus=True
+        facts=c.submit('owned next prompt')
+        self.assertEqual(facts['failureBoundary'],'response-heading')
+        self.assertEqual((a.focus_count,a.paste_count,a.send_count),(0,0,0))
+
     def test_lost_history_between_focus_and_paste_cannot_input(self):
         a,c,b,h=self.fixture();c.restore_next_input(b,h)
         def focus(node):a.focus_count+=1;a.focus=True;a.extra_after_focus=True;return True

@@ -658,7 +658,9 @@ class Controller:
                 raise Rejected()
             if type(prompt) is not str or not prompt or len(prompt.encode()) > 4096:
                 raise Rejected()
-            self.proof() if self.restored else self.bind()
+            # Preparation is passive. The complete history proof below remains
+            # mandatory immediately before the first focus action.
+            self.proof(full_history=False) if self.restored else self.bind()
             nodes = self.tree()
             self.current_chat(nodes)
             if replace_owned:
@@ -977,7 +979,9 @@ class Controller:
         self.response_only = False
         self.adapter.key_guard = lambda: self.proof(
             focused=True, full_history=not self.readback_active)
-        self.proof()
+        # Two complete history snapshots above bracket editor admission. Check
+        # local custody now; submit rechecks history before granting any input.
+        self.proof(full_history=False)
 
     def empty_class_proof(self):
         if self.empty_class_witness is None or self.empty_class_dispatched:

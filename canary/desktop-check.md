@@ -3046,3 +3046,10 @@ document and original settling deadline, revalidates the unique failed user and
 error-scoped control, and requires fresh stable hit samples before its single
 Retry click. It rejects a changed document, changed failed turn or another
 detachment. This candidate has synthetic coverage; native confirmation is pending.
+
+Claude Linux's next-turn candidate removes two redundant full-history walks
+during passive preparation. The two complete snapshots bracketing editor
+admission remain, as do local custody checks and complete history verification
+immediately before focus, paste and Send. A regression test changes history
+after admission and requires rejection before any focus or input. Native timing
+and second-turn completion remain unproven.
