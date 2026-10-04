@@ -489,7 +489,7 @@ class QualificationTests(unittest.TestCase):
         cells = q.matrix()['include']
         self.assertEqual(len(cells), 15)
         self.assertEqual(len({(c['app'], c['platform'], c['architecture']) for c in cells}), 15)
-        self.assertEqual(sum(c['backend'] != 'renderer-inventory' for c in cells), 11)
+        self.assertEqual(sum(c['backend'] != 'renderer-inventory' for c in cells), 12)
         self.assertEqual({(c['platform'], c['architecture']) for c in cells},
                          {('linux', 'x86_64'), ('macos', 'aarch64'), ('windows', 'x86_64')})
         with self.assertRaises(ValueError):
@@ -1105,7 +1105,7 @@ class QualificationTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 q.semantic_observations(root, 'hermes-desktop')
 
-    def trial(self, mutate=lambda report: None, policy_count=3):
+    def trial(self, mutate=lambda report: None, policy_count=3, app='hermes-desktop'):
         with tempfile.TemporaryDirectory() as root:
             paths = {key: Path(root) / key for key in ('checker', 'launcher', 'real_nanh', 'prepared', 'frozen', 'report')}
             for key, path in paths.items():
@@ -1113,14 +1113,17 @@ class QualificationTests(unittest.TestCase):
             probe = dict(status='passed', steps=sorted(q.STEPS), inputMode='renderer-dom-and-keyboard', responseVerification='renderer-dom')
             report = dict(schemaVersion=3, platform='linux', architecture='x86_64',
                           nanHarness={'sha256': q.digest(paths['launcher'])}, cleanup='passed',
-                          results=[dict(app='hermes-desktop', appVersion='0.17.6', cleanup='passed',
+                          results=[dict(app=app, appVersion='0.17.6', cleanup='passed',
                                         deterministic=[copy.deepcopy(probe) for _ in range(3)])])
+            if app == 'claude-desktop':
+                for item in report['results'][0]['deterministic']:
+                    item.update(inputMode='native-clipboard-and-keyboard', responseVerification='native-assistant-clipboard')
             mutate(report)
-            manifest = {'apps': [dict(status='frozen', app='hermes-desktop', version='0.17.6', revision='b' * 40)]}
+            manifest = {'apps': [dict(status='frozen', app=app, version='0.17.6', revision='b' * 40)]}
             receipt = dict(schemaVersion=2, platform='linux', architecture='x86_64',
                            checker={'sha256': q.digest(paths['checker'])},
                            nanh={'sha256': q.digest(paths['launcher'])},
-                           frozen={'sha256': q.digest(paths['frozen']), 'model': 'qwen3.6'}, apps= [dict(app='hermes-desktop', executable={'sha256': 'c' * 64})])
+                           frozen={'sha256': q.digest(paths['frozen']), 'model': 'qwen3.6'}, apps= [dict(app=app, executable={'sha256': 'c' * 64})])
             with patch.object(q, 'read_frozen_manifest', return_value=manifest), \
                  patch.object(q, 'bounded_json', return_value=receipt), \
                  patch.object(q, 'semantic_observations', return_value=[dict(
@@ -1128,7 +1131,7 @@ class QualificationTests(unittest.TestCase):
                      autoRecoveryCycles=0, apiMaxRetries=3, configBeforeSha256='e' * 64,
                      configAfterSha256='f' * 64) for _ in range(policy_count)]), \
                  patch.object(q, 'validated_report', return_value=(report, 'd' * 64)):
-                return q.reduce_report(app='hermes-desktop', platform='linux', architecture='x86_64',
+                return q.reduce_report(app=app, platform='linux', architecture='x86_64',
                                        source_sha='a' * 40, model='qwen3.6', **paths)
 
     def test_full_three_probes_and_cleanup_are_required(self):
@@ -1143,6 +1146,19 @@ class QualificationTests(unittest.TestCase):
                    lambda r: r['results'][0]['deterministic'][0].update(inputMode='native-clipboard-and-keyboard')]
         for change in changes:
             self.assertEqual(self.trial(change)['qualification'], 'unqualified')
+
+    def test_linux_claude_qualifies_only_complete_native_recovery(self):
+        result = self.trial(app='claude-desktop', policy_count=0)
+        self.assertEqual(result['backend'], 'native-assistant-clipboard')
+        self.assertEqual(result['qualification'], 'deterministic-full')
+        for change in (
+            lambda r: r['results'][0]['deterministic'][0]['steps'].remove('error-recovered'),
+            lambda r: r['results'][0]['deterministic'][0]['steps'].remove('tool-verified'),
+            lambda r: r['results'][0]['deterministic'][0].update(responseVerification='local-ocr'),
+            lambda r: r['results'][0].update(cleanup='failed'),
+            lambda r: r.update(cleanup='failed'),
+        ):
+            self.assertEqual(self.trial(change, app='claude-desktop', policy_count=0)['qualification'], 'unqualified')
 
     def test_identity_mismatch_rejected_and_private_fields_not_copied(self):
         with self.assertRaises(ValueError):

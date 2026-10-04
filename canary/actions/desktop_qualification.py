@@ -24,6 +24,7 @@ BACKENDS.update({(app, platform, architecture): 'renderer-inventory'
                  for platform, architecture, _ in TARGETS})
 BACKENDS[('claude-desktop', 'macos', 'aarch64')] = 'native-assistant-clipboard'
 BACKENDS[('claude-desktop', 'windows', 'x86_64')] = 'native-assistant-clipboard'
+BACKENDS[('claude-desktop', 'linux', 'x86_64')] = 'native-assistant-clipboard'
 BACKENDS[('chatgpt-desktop', 'windows', 'x86_64')] = 'renderer-dom'
 BACKENDS[('chatgpt-desktop', 'linux', 'x86_64')] = 'renderer-dom'
 BACKENDS[('chatgpt-desktop', 'macos', 'aarch64')] = 'renderer-dom'
