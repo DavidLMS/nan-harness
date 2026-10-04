@@ -708,6 +708,11 @@ mod configuration_persist_tests {
             {
                 return Err(ClaudeDesktopError::InvalidStatePath);
             }
+            if std::env::var("NANH_CONFIGURATION_STD_RENAME_WORKER").as_deref() == Ok("1")
+                && !std_rename_policy_requested()?
+            {
+                return Err(ClaudeDesktopError::InvalidStatePath);
+            }
             let _lock = SessionLock::acquire(&paths.lock)?;
             ensure_no_pending_recovery(&paths)?;
             let receipt = Receipt::capture(&paths)?;
@@ -743,7 +748,7 @@ mod configuration_persist_tests {
     }
 
     #[cfg(feature = "desktop-qualification")]
-    fn lifecycle_child(workspace: &Path) -> Option<i32> {
+    fn lifecycle_child(workspace: &Path, source_policy: Option<&str>) -> Option<i32> {
         use std::process::{Command, Stdio};
         use std::time::{Duration, Instant};
         let home = workspace.join("profile/home");
@@ -775,8 +780,30 @@ mod configuration_persist_tests {
         ] {
             command.env_remove(key);
         }
-        let mut child = command.spawn().ok()?;
+        // This is the same configuration writer and source-policy branch as the
+        // launched CLI, bounded by this fixture's existing child watchdog.
+        for key in [
+            "NANH_CONFIGURATION_STD_RENAME_WORKER",
+            "NANH_CLAUDE_WINDOWS_PERSIST_POLICY",
+            "NANH_CLAUDE_WINDOWS_SOURCE_POLICY",
+            "NANH_CLAUDE_PERSIST_CUTOFF_MS",
+        ] {
+            command.env_remove(key);
+        }
         let deadline = Instant::now() + Duration::from_secs(5);
+        if let Some(source_policy) = source_policy {
+            let cutoff = std::time::SystemTime::now()
+                .checked_add(deadline.saturating_duration_since(Instant::now()))?
+                .duration_since(std::time::UNIX_EPOCH)
+                .ok()?
+                .as_millis();
+            command
+                .env("NANH_CONFIGURATION_STD_RENAME_WORKER", "1")
+                .env("NANH_CLAUDE_WINDOWS_PERSIST_POLICY", "std-rename")
+                .env("NANH_CLAUDE_WINDOWS_SOURCE_POLICY", source_policy)
+                .env("NANH_CLAUDE_PERSIST_CUTOFF_MS", cutoff.to_string());
+        }
+        let mut child = command.spawn().ok()?;
         loop {
             match child.try_wait() {
                 Ok(Some(status)) => {
@@ -845,7 +872,7 @@ mod configuration_persist_tests {
         .unwrap();
         let directories = lifecycle_roots(&workspace);
         assert_eq!(
-            lifecycle_child(&workspace),
+            lifecycle_child(&workspace, None),
             Some(0),
             "closed lifecycle failed"
         );
@@ -860,7 +887,7 @@ mod configuration_persist_tests {
             .open(&destination)
             .unwrap();
         assert_eq!(
-            lifecycle_child(&workspace),
+            lifecycle_child(&workspace, None),
             Some(32),
             "sharing failure not preserved"
         );
@@ -871,6 +898,52 @@ mod configuration_persist_tests {
             1
         );
         drop(directories);
+    }
+
+    #[cfg(feature = "desktop-qualification")]
+    #[test]
+    fn production_std_rename_lifecycle_under_precreation_leases_restores_documents() {
+        let base = std::env::var_os("RUNNER_TEMP")
+            .map(PathBuf::from)
+            .unwrap_or_else(std::env::temp_dir);
+        for (source_policy, expected) in [
+            ("official-2.19675.0-97910a066871", 0),
+            ("unadmitted-synthetic-policy", 33),
+        ] {
+            let temporary = tempfile::tempdir_in(&base).unwrap();
+            let workspace = temporary.path().canonicalize().unwrap();
+            nan_harness_private_fs::restrict_path(
+                &workspace,
+                nan_harness_private_fs::PrivatePathKind::Directory,
+            )
+            .unwrap();
+            let directories = lifecycle_roots(&workspace);
+            assert_eq!(
+                lifecycle_child(&workspace, Some(source_policy)),
+                Some(expected),
+                "production writer returned an unexpected closed exit category"
+            );
+            let paths = DesktopPaths::new(
+                &workspace.join("profile/home/AppData/Roaming/Claude"),
+                &workspace.join("profile/home/AppData/Local/Claude-3p"),
+                &workspace.join("profile/nanh"),
+            );
+            assert!(
+                paths.documents().into_iter().all(|path| !path.exists()),
+                "configuration destinations survived restoration or rejected policy"
+            );
+            for root in [
+                paths.documents()[0].parent().unwrap(),
+                paths.documents()[3].parent().unwrap(),
+            ] {
+                assert_eq!(
+                    fs::read_dir(root).unwrap().count(),
+                    0,
+                    "temporary configuration survived the bounded child"
+                );
+            }
+            drop(directories);
+        }
     }
 
     #[cfg(feature = "desktop-qualification")]
