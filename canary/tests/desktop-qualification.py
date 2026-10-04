@@ -3996,5 +3996,28 @@ class ClaudeLinuxOwnedInputTests(unittest.TestCase):
                 path.write_text(json.dumps(changed))
                 with self.assertRaises(ValueError):q.semantic_observations(root,'claude-desktop')
 
+class ClaudeWindowsProfileSealTests(unittest.TestCase):
+    def test_closed_stage_receipts_and_document_indices(self):
+        documents={'document-metadata','document-open','document-privacy','document-lock','document-json'}
+        stages=documents|{'initial-custody','native-policy','library-metadata','library-lock',
+            'configuration-values','final-custody','deadline','completed'}
+        with tempfile.TemporaryDirectory() as root:
+            path=Path(root)/'seal.json'
+            for stage in stages:
+                indices=range(3) if stage in documents else [None]
+                for index in indices:
+                    good=dict(schemaVersion=1,mechanism='claude-windows-profile-seal',diagnosticsOnly=True,
+                        stage=stage,documentIndex=index,completed=stage=='completed')
+                    path.write_text(json.dumps(good))
+                    self.assertEqual(q.semantic_observations(root,'claude-desktop'),[good])
+                    for changed in ({'stage':'private-path'},{'documentIndex':True},{'documentIndex':3},
+                        {'completed':not good['completed']},{'diagnosticsOnly':False},{'rawValue':'PRIVATE'},
+                        {'documentIndex':None if stage in documents else 0}):
+                        path.write_text(json.dumps(good|changed))
+                        with self.subTest(stage=stage,changed=changed), self.assertRaises(ValueError):
+                            q.semantic_observations(root,'claude-desktop')
+                    path.write_text(json.dumps(good))
+                    with self.assertRaises(ValueError):q.semantic_observations(root,'zed-desktop')
+
 if __name__ == '__main__':
     unittest.main()

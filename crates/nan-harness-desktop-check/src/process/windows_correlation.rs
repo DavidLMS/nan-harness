@@ -99,6 +99,11 @@ pub(crate) fn record_preflight(value: &serde_json::Value) {
     super::windows_observation::record_value(value, "windows-owned-cleanup-preflight");
 }
 
+#[cfg(windows)]
+pub(crate) fn record_profile_seal(value: &serde_json::Value) {
+    super::windows_observation::record_value(value, "claude-windows-profile-seal");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

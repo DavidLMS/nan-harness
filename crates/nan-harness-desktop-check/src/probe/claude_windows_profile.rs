@@ -9,6 +9,24 @@ use std::{
 const PROFILE_ID: &str = "6e616e68-6172-4e65-8000-000000000001";
 const MAX_CONFIG: u64 = 65_536;
 
+#[derive(Clone, Copy, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum SealStage {
+    InitialCustody,
+    NativePolicy,
+    LibraryMetadata,
+    LibraryLock,
+    DocumentMetadata,
+    DocumentOpen,
+    DocumentPrivacy,
+    DocumentLock,
+    DocumentJson,
+    ConfigurationValues,
+    FinalCustody,
+    Deadline,
+    Completed,
+}
+
 pub(crate) struct FreshClaudeWindowsProfile {
     workspace: PathBuf,
     root: PathBuf,
@@ -223,52 +241,83 @@ impl FreshClaudeWindowsProfile {
         deadline: Instant,
     ) -> Result<(), Reason> {
         use std::os::windows::fs::OpenOptionsExt as _;
-        if !self.configuration.is_empty()
-            || !self.directories.iter().all(retained_directory_regular)
-            || !self.native.claude_policy_absent(deadline)
-        {
-            return Err(Reason::IsolationUnavailable);
-        }
-        let library = self.root.join("configLibrary");
-        if !regular(&library, true) {
-            return Err(Reason::IsolationUnavailable);
-        }
-        self.directories
-            .push(lock_directory(&library).map_err(|_| Reason::IsolationUnavailable)?);
-        let mut files = Vec::new();
-        let mut values = Vec::new();
-        for path in [
-            self.root.join("claude_desktop_config.json"),
-            library.join("_meta.json"),
-            library.join(format!("{PROFILE_ID}.json")),
-        ] {
-            if !regular(&path, false) {
+        let mut stage = SealStage::InitialCustody;
+        let mut document_index = None;
+        let result = (|| {
+            if !self.configuration.is_empty()
+                || !self.directories.iter().all(retained_directory_regular)
+            {
                 return Err(Reason::IsolationUnavailable);
             }
-            let (private, status) = nan_harness_private_fs::open_private_read(&path)
-                .map_err(|_| Reason::IsolationUnavailable)?;
-            if status != nan_harness_private_fs::PrivateFileReadStatus::AlreadyPrivate {
+            stage = SealStage::NativePolicy;
+            if !self.native.claude_policy_absent(deadline) {
                 return Err(Reason::IsolationUnavailable);
             }
-            // Deny mutation/replacement after CLI configuration has completed.
-            let mut file = std::fs::OpenOptions::new()
-                .read(true)
-                .share_mode(1)
-                .custom_flags(0x0020_0000)
-                .open(&path)
-                .map_err(|_| Reason::IsolationUnavailable)?;
-            drop(private);
-            values.push(document(&mut file).ok_or(Reason::IsolationUnavailable)?);
-            files.push(file);
-        }
-        if !configured(&values, base, token)
-            || !self.directories.iter().all(retained_directory_regular)
-            || Instant::now() >= deadline
-        {
-            return Err(Reason::IsolationUnavailable);
-        }
-        self.configuration = files;
-        Ok(())
+            let library = self.root.join("configLibrary");
+            stage = SealStage::LibraryMetadata;
+            if !regular(&library, true) {
+                return Err(Reason::IsolationUnavailable);
+            }
+            stage = SealStage::LibraryLock;
+            self.directories
+                .push(lock_directory(&library).map_err(|_| Reason::IsolationUnavailable)?);
+            let mut files = Vec::new();
+            let mut values = Vec::new();
+            for (index, path) in [
+                self.root.join("claude_desktop_config.json"),
+                library.join("_meta.json"),
+                library.join(format!("{PROFILE_ID}.json")),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                document_index = Some(index);
+                stage = SealStage::DocumentMetadata;
+                if !regular(&path, false) {
+                    return Err(Reason::IsolationUnavailable);
+                }
+                stage = SealStage::DocumentOpen;
+                let (private, status) = nan_harness_private_fs::open_private_read(&path)
+                    .map_err(|_| Reason::IsolationUnavailable)?;
+                stage = SealStage::DocumentPrivacy;
+                if status != nan_harness_private_fs::PrivateFileReadStatus::AlreadyPrivate {
+                    return Err(Reason::IsolationUnavailable);
+                }
+                // Deny mutation/replacement after CLI configuration has completed.
+                stage = SealStage::DocumentLock;
+                let mut file = std::fs::OpenOptions::new()
+                    .read(true)
+                    .share_mode(1)
+                    .custom_flags(0x0020_0000)
+                    .open(&path)
+                    .map_err(|_| Reason::IsolationUnavailable)?;
+                drop(private);
+                stage = SealStage::DocumentJson;
+                values.push(document(&mut file).ok_or(Reason::IsolationUnavailable)?);
+                files.push(file);
+            }
+            document_index = None;
+            stage = SealStage::ConfigurationValues;
+            if !configured(&values, base, token) {
+                return Err(Reason::IsolationUnavailable);
+            }
+            stage = SealStage::FinalCustody;
+            if !self.directories.iter().all(retained_directory_regular) {
+                return Err(Reason::IsolationUnavailable);
+            }
+            stage = SealStage::Deadline;
+            if Instant::now() >= deadline {
+                return Err(Reason::IsolationUnavailable);
+            }
+            self.configuration = files;
+            stage = SealStage::Completed;
+            Ok(())
+        })();
+        crate::process::windows_correlation::record_profile_seal(&serde_json::json!({
+            "schemaVersion":1,"mechanism":"claude-windows-profile-seal","diagnosticsOnly":true,
+            "stage":stage,"documentIndex":document_index,"completed":result.is_ok()
+        }));
+        result
     }
     pub(crate) fn verifies_owned(&self, workspace: &Path, deadline: Instant) -> bool {
         self.configuration.len() == 3
