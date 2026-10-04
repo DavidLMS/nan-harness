@@ -104,15 +104,15 @@ impl ChatTurnStage {
     pub(crate) fn disclosure_ready(self) -> Option<bool> {
         if self == Self::FailureDetailsReady {
             Some(true)
-        } else if self.passive_retry_pending() {
+        } else if self.pre_action_pending() {
             Some(false)
         } else {
             None
         }
     }
-    // Ready modes never press a control. A changing error card may be measured
-    // again, but only a subsequent complete proof grants the one action.
-    pub(crate) fn passive_retry_pending(self) -> bool {
+    // Control is returned only before a press. Passive callers may measure again;
+    // a completed or uncertain action never grants another attempt.
+    pub(crate) fn pre_action_pending(self) -> bool {
         self == Self::Control || self.passive_pending()
     }
     pub(crate) fn passive_pending(self) -> bool {
@@ -640,7 +640,7 @@ mod tests {
 
     #[test]
     fn scoped_selector_failures_remain_passive_and_payload_free() {
-        assert!(ChatTurnStage::Control.passive_retry_pending());
+        assert!(ChatTurnStage::Control.pre_action_pending());
         assert_eq!(ChatTurnStage::Control.disclosure_ready(), Some(false));
         assert!(!ChatTurnStage::Control.passive_pending());
         for stage in [
@@ -648,7 +648,7 @@ mod tests {
             ChatTurnStage::Retried,
             ChatTurnStage::Window,
         ] {
-            assert!(!stage.passive_retry_pending());
+            assert!(!stage.pre_action_pending());
         }
         for (label, stage) in [
             ("scope-anchor-absent", ChatTurnStage::ScopeAnchorAbsent),

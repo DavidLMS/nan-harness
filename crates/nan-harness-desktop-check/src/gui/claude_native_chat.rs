@@ -298,7 +298,7 @@ impl ClaudeNativeChatSession<'_> {
                     self.facts.copied_responses += 1;
                     return Ok(());
                 }
-                stage if stage.passive_pending() => {}
+                stage if stage.pre_action_pending() => {}
                 ChatTurnStage::ResponseMismatch => return Err(Reason::ResponseMismatch),
                 _ => return Err(Reason::ActionUnsupported),
             }
@@ -377,7 +377,7 @@ impl ClaudeNativeChatSession<'_> {
                         None => return Err(Reason::ActionUnsupported),
                     }
                 }
-                stage if stage.passive_retry_pending() => {}
+                stage if stage.pre_action_pending() => {}
                 _ => return Err(Reason::ActionUnsupported),
             }
             if Instant::now() >= deadline {
