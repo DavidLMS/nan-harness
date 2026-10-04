@@ -84,7 +84,10 @@ for(const change of [{timeoutMs:45001},{action:'unknown'},{prompt:'arbitrary'},
   assert.equal(await ordinaryClick(locator,losing,Date.now()+1000,()=>{attempts++;}),false);
   assert.equal(clicks,1);assert.equal(attempts,1);assert.equal(disposed,2);
   const intercept={...locator,elementHandle:async()=>({...handle,evaluate:async()=>({blocked:'foreign-overlay'})})};
-  assert.equal(await ordinaryClick(intercept,guard,Date.now()+1000,()=>{attempts++;}),false);
+  let phase;
+  assert.equal(await ordinaryClick(intercept,guard,Date.now()+1000,()=>{attempts++;},guard,
+    value=>{phase=value;throw Error('observer failed');}),false);
+  assert.equal(phase,'sample-first');
   assert.equal(clicks,1);
   console.log('PASS: Codex source-bound turn oracle, immutable binding and single ordinary action');
 })().catch(error=>{console.error(error);process.exitCode=1;});

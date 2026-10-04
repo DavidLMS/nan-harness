@@ -169,6 +169,12 @@ for(const element of [modelElement([text('Qwen3.6 27B'),meta]),modelElement([tex
  for(const scenario of ['onboarding-missing-choice','onboarding-duplicate-choice','onboarding-duplicate-cover','onboarding-disabled','onboarding-replaced']) {
    const result=await trial(scenario);assert.equal(result.skipClicks,0,scenario);
    assert.equal(result.pillClicks,0);assert.equal(result.refreshClicks,0);assert.equal(result.facts.onboardingSkipped,false);
+   const observation=result.facts.onboardingObservation;
+   assert(observation,scenario);
+   if(scenario==='onboarding-missing-choice')assert.equal(observation.choiceCount,0);
+   if(scenario==='onboarding-duplicate-choice')assert.equal(observation.choiceCount,2);
+   if(scenario==='onboarding-disabled')assert.equal(observation.choiceEnabled,false);
+   assert(!JSON.stringify(observation).includes('PRIVATE'));
  }
  for(const scenario of ['onboarding-uncertain','onboarding-remains','onboarding-owner-loss']) {
    const result=await trial(scenario);assert.equal(result.skipClicks,1,scenario);

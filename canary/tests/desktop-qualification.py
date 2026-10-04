@@ -38,6 +38,23 @@ class CodexProjectPreflightTests(unittest.TestCase):
                 q.semantic_observations(tmp, 'claude-desktop')
 
 
+class ClaudeQueryTimingTests(unittest.TestCase):
+    def test_bounded_timing_is_advisory_and_rejects_private_fields(self):
+        timing = dict(calls=2, elapsedMs=11000, nativeWindowMs=2000, lastMs=9000)
+        value = dict(schemaVersion=1, mechanism='claude-linux-native-chat', diagnosticsOnly=True,
+                     stage='deadline', submittedTurns=1, inputVerifiedTurns=1, copiedResponses=1,
+                     retryAttempted=False, clipboardCleared=True, queryObservation=timing)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'facts.json'
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(tmp, 'claude-desktop'), [value])
+            for change in ({'path':'PRIVATE'}, {'calls':True}, {'elapsedMs':600001},
+                           {'nativeWindowMs':11001}, {'lastMs':-1}):
+                path.write_text(json.dumps({**value, 'queryObservation':{**timing, **change}}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(tmp, 'claude-desktop')
+
+
 class RendererCheckpointTests(unittest.TestCase):
     def test_partial_phase_is_closed_and_cannot_claim_completed_inventory(self):
         value=dict(schemaVersion=1,mechanism='renderer-inventory',diagnosticsOnly=True,
@@ -104,7 +121,8 @@ class CodexDriverFactsTests(unittest.TestCase):
             self.assertEqual(q.semantic_observations(tmp, 'chatgpt-desktop'), [value])
             for changes in ({'assistantText': 'PRIVATE'}, {'errorCategory': 'PRIVATE'},
                             {'assistantTurnCount': True}, {'providerGenerationCount': 4097},
-                            {'retryCompleted': True}, {'bindingVerified': 1}):
+                            {'retryCompleted': True}, {'bindingVerified': 1},
+                            {'retryClickPhase':'PRIVATE'}, {'retryClickPhase':True}):
                 path.write_text(json.dumps({**value, **changes}))
                 with self.assertRaises(ValueError):
                     q.semantic_observations(tmp, 'chatgpt-desktop')
@@ -1466,6 +1484,14 @@ class QualificationTests(unittest.TestCase):
             item = {**value, 'actionObservation': action}
             path.write_text(json.dumps(item))
             self.assertEqual(q.semantic_observations(root, 'hermes-desktop'), [item])
+            controls = dict(coverCount=1, choiceCount=0, coverVisible=True,
+                            choiceVisible=None, choiceEnabled=None)
+            path.write_text(json.dumps({**item, 'onboardingObservation': controls}))
+            self.assertEqual(q.semantic_observations(root, 'hermes-desktop')[0]['onboardingObservation'], controls)
+            for change in ({'choiceCount': True}, {'coverCount': 65}, {'choiceVisible': 'PRIVATE'}, {'text': 'PRIVATE'}):
+                path.write_text(json.dumps({**item, 'onboardingObservation': {**controls, **change}}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'hermes-desktop')
             skipped = {**item, 'onboardingSkipped': True}
             path.write_text(json.dumps(skipped))
             self.assertEqual(q.semantic_observations(root, 'hermes-desktop'), [skipped])
@@ -2182,8 +2208,10 @@ class QualificationTests(unittest.TestCase):
             headers=dict(status='observed',ownedNormalEnterCount=0,ownedNonNormalEnterCount=0,
                          ownedNormalLeaveCount=0,ownedMotionCount=9)
             valid.append({**valid[1],'crossingHeaders':headers})
+            valid.append({**valid[1],'crossingHeaders':{**headers,'eventOrder':['leave','enter','press','release']}})
             for change in ({'ownedMotionCount':65},{'ownedNormalEnterCount':True},
-                           {'rawEvent':'PRIVATE'},{'status':[]},{'ownedNormalLeaveCount':None}):
+                           {'rawEvent':'PRIVATE'},{'status':[]},{'ownedNormalLeaveCount':None},
+                           {'eventOrder':['PRIVATE']},{'eventOrder':['enter']*129},{'eventOrder':[True]}):
                 bad={**valid[1],'crossingHeaders':{**headers,**change}}
                 path.write_text(json.dumps({**value,'inputDelivery':bad}))
                 with self.assertRaises(ValueError):q.semantic_observations(root,'zed-desktop')
@@ -2418,6 +2446,21 @@ class QualificationTests(unittest.TestCase):
             path.write_text(json.dumps(value))
             with self.assertRaises(ValueError):
                 q.semantic_observations(tmp, 'zed-desktop')
+
+    def test_windows_operation_timing_is_closed_and_bounded(self):
+        timing = dict(budgetMs=15000, elapsedMs=15001, transportRemainingMs=14000,
+                      postGuardRemainingMs=2)
+        value = dict(schemaVersion=1, mechanism='claude-windows-native-chat', diagnosticsOnly=True,
+                     stage='action-uncertain', submittedTurns=3, inputVerifiedTurns=3, copiedResponses=2,
+                     retryAttempted=False, clipboardCleared=True, operationTiming=timing)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'chat.json'
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(tmp, 'claude-desktop'), [value])
+            for change in ({'text':'PRIVATE'}, {'budgetMs':True}, {'elapsedMs':600001},
+                           {'postGuardRemainingMs':15001}, {'transportRemainingMs':-1}):
+                path.write_text(json.dumps({**value, 'operationTiming':{**timing, **change}}))
+                with self.assertRaises(ValueError):q.semantic_observations(tmp, 'claude-desktop')
 
     def test_windows_failure_scope_counts_are_closed_without_qualifying_retry(self):
         counts = dict(serverErrorCount=1, failedUserHeadingCount=1, failedPromptTextCount=1,

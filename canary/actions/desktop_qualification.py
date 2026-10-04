@@ -906,7 +906,7 @@ def semantic_observations(directory, app):
                         'menuDismissed', 'composerReverified'}
             fields = booleans | {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'stage', 'errorCategory'}
             diagnostics = {'composerObservation', 'guardFailure'}
-            optional = {'actionObservation', 'onboardingSkipped'}
+            optional = {'actionObservation', 'onboardingSkipped', 'onboardingObservation'}
             stages = {'policy', 'onboarding', 'menu', 'refresh', 'catalog', 'dismiss', 'composer', 'ready'}
             errors = {None, 'policy-rejected', 'onboarding-unavailable', 'menu-unavailable', 'refresh-uncertain',
                       'catalog-unavailable', 'dismiss-uncertain', 'composer-changed', 'composer-unavailable'}
@@ -948,6 +948,15 @@ def semantic_observations(directory, app):
                             'unmeasured', 'none', 'onboarding', 'modal', 'other'}):
                     raise ValueError('invalid Hermes action observation')
                 record['actionObservation'] = action
+            if 'onboardingObservation' in value:
+                observation = value['onboardingObservation']
+                counts = {'coverCount', 'choiceCount'}
+                flags = {'coverVisible', 'choiceVisible', 'choiceEnabled'}
+                if (type(observation) is not dict or set(observation) != counts | flags
+                        or any(type(observation[key]) is not int or not 0 <= observation[key] <= 64 for key in counts)
+                        or any(observation[key] is not None and type(observation[key]) is not bool for key in flags)):
+                    raise ValueError('invalid Hermes onboarding controls')
+                record['onboardingObservation'] = observation
             if 'onboardingSkipped' in value:
                 if type(value['onboardingSkipped']) is not bool:
                     raise ValueError('invalid Hermes onboarding observation')
@@ -1257,13 +1266,24 @@ def semantic_observations(directory, app):
             stages.update('tree-depth tree-nodes tree-name-limit tree-text-limit tree-window-limit tree-process-limit'.split())
             stages.update('clipboard-owner clipboard-allocation clipboard-lock clipboard-empty clipboard-set clipboard-close clipboard-guard-before clipboard-guard-after clipboard-deadline-before clipboard-deadline-after clipboard-open-deadline'.split())
             phase_fields = {'actionPhase', 'transportFailure'}
-            if (app != 'claude-desktop' or set(value) - {'providerObservation', 'guardRejection', 'rowShape', 'scopeShape', 'failureAuthority', 'failureScopeCounts'} not in (fields, fields | phase_fields) or value['diagnosticsOnly'] is not True
+            if (app != 'claude-desktop' or set(value) - {'providerObservation', 'guardRejection', 'rowShape', 'scopeShape', 'failureAuthority', 'failureScopeCounts', 'operationTiming'} not in (fields, fields | phase_fields) or value['diagnosticsOnly'] is not True
                     or type(value['stage']) is not str or value['stage'] not in stages
                     or any(type(value[key]) is not bool for key in flags)
                     or any(type(value[key]) is not int or not 0 <= value[key] <= 3 for key in counts)
                     or value['submittedTurns'] > value['inputVerifiedTurns']
                     or value['copiedResponses'] > value['submittedTurns'] + int(value['retryAttempted'])):
                 raise ValueError('invalid Claude native Chat observation')
+            if 'operationTiming' in value:
+                timing = value['operationTiming']
+                required = {'budgetMs', 'elapsedMs'}
+                remaining = {'transportRemainingMs', 'postGuardRemainingMs'}
+                if (mechanism != 'claude-windows-native-chat' or type(timing) is not dict
+                        or set(timing) != required | remaining
+                        or any(type(timing[key]) is not int or not 0 <= timing[key] <= 600000 for key in required)
+                        or any(timing[key] is not None and (type(timing[key]) is not int
+                            or not 0 <= timing[key] <= timing['budgetMs']) for key in remaining)):
+                    raise ValueError('invalid Claude Windows operation timing')
+                record['operationTiming'] = timing
             if 'failureAuthority' in value:
                 authority = value['failureAuthority']
                 counters = {'rejectedStream', 'rejectedHistory', 'rejectedContext'}
@@ -1519,7 +1539,7 @@ def semantic_observations(directory, app):
         elif mechanism == 'claude-linux-native-chat':
             fields = {'schemaVersion','mechanism','diagnosticsOnly','stage','submittedTurns',
                       'inputVerifiedTurns','copiedResponses','retryAttempted','clipboardCleared'}
-            if (app != 'claude-desktop' or set(value) - {'failureBoundary','inputShape','embeddedTextObservation','ownedInputObservation','sendActionClass','sendActionObservation','emptyInputDrift','retryCandidateObservation','nativeTreeObservation'} != fields or value['diagnosticsOnly'] is not True
+            if (app != 'claude-desktop' or set(value) - {'failureBoundary','inputShape','embeddedTextObservation','ownedInputObservation','sendActionClass','sendActionObservation','emptyInputDrift','retryCandidateObservation','nativeTreeObservation','queryObservation'} != fields or value['diagnosticsOnly'] is not True
                     or type(value['stage']) is not str or value['stage'] not in {
                         'source','focus','paste','readback','send','input-not-empty','blocked',
                         'action-uncertain','deadline','clipboard-cleanup','sent','response-pending',
@@ -1533,6 +1553,16 @@ def semantic_observations(directory, app):
                     or value['stage'] == 'retry-forwarded' and not value['retryAttempted']
                     or value['stage'] == 'retry-diagnostic' and value['retryAttempted']):
                 raise ValueError('invalid Claude Linux native Chat diagnostic')
+            if 'queryObservation' in value:
+                timing = value['queryObservation']
+                timing_keys = {'calls', 'elapsedMs', 'nativeWindowMs', 'lastMs'}
+                if (type(timing) is not dict or set(timing) != timing_keys
+                        or any(type(timing[key]) is not int or not 0 <= timing[key] <= (
+                            100000 if key == 'calls' else 600000) for key in timing_keys)
+                        or timing['nativeWindowMs'] > timing['elapsedMs']
+                        or timing['lastMs'] > timing['elapsedMs']):
+                    raise ValueError('invalid Claude native query timing')
+                record['queryObservation'] = timing
             if 'nativeTreeObservation' in value:
                 if value['stage'] not in {'blocked','deadline','clipboard-cleanup','action-uncertain'}:
                     raise ValueError('unexpected Claude tree observation')
@@ -2164,11 +2194,18 @@ def semantic_observations(directory, app):
                 if 'crossingHeaders' in delivery:
                     headers=delivery['crossingHeaders']
                     keys={'ownedNormalEnterCount','ownedNonNormalEnterCount','ownedNormalLeaveCount','ownedMotionCount'}
-                    if (delivery['status']!='complete' or type(headers) is not dict or set(headers)!=keys|{'status'}
+                    if (delivery['status']!='complete' or type(headers) is not dict or set(headers)-{'eventOrder'}!=keys|{'status'}
                             or type(headers['status']) is not str or headers['status'] not in {'observed','unavailable'}
                             or headers['status']=='observed' and any(type(headers[key]) is not int or not 0<=headers[key]<=64 for key in keys)
                             or headers['status']=='unavailable' and any(headers[key] is not None for key in keys)):
                         raise ValueError('invalid Zed crossing-header observation')
+                    if 'eventOrder' in headers:
+                        order=headers['eventOrder']
+                        if (headers['status']=='unavailable' and order is not None
+                                or headers['status']=='observed' and (type(order) is not list or len(order)>128
+                                    or any(type(event) is not str or event not in {
+                                        'enter','non-normal-enter','leave','motion','press','release'} for event in order))):
+                            raise ValueError('invalid Zed crossing event order')
                 record['inputDelivery'] = dict(delivery)
         elif mechanism == 'zed-atspi-retry':
             fields = set('schemaVersion mechanism diagnosticsOnly method stage actionAttempted forwarded'.split())
@@ -2269,7 +2306,7 @@ def semantic_observations(directory, app):
             flags = set('endpointOwned targetVerified attached bindingVerified auxiliaryInert codingComposerReady uniqueComposer inputReadback inputSubmitted userTurnObserved responseVerified errorObserved retryControl retryAttempted retryCompleted providerResponseVerified'.split())
             fields = flags | set('schemaVersion mechanism diagnosticsOnly assistantTurnCount providerGenerationCount errorCategory'.split())
             errors = {None, 'ownership-lost', 'composer-unavailable', 'stale-turn', 'input-mismatch', 'action-uncertain', 'retry-unavailable', 'response-timeout', 'query-failed', 'invalid-request'}
-            if (app != 'chatgpt-desktop' or set(value) - {'preAttachFailure', 'composerAdmissionFailure', 'composerReadinessObservation'} != fields or value['diagnosticsOnly'] is not True
+            if (app != 'chatgpt-desktop' or set(value) - {'preAttachFailure', 'composerAdmissionFailure', 'composerReadinessObservation', 'retryClickPhase'} != fields or value['diagnosticsOnly'] is not True
                     or any(type(value[key]) is not bool for key in flags)
                     or type(value['assistantTurnCount']) is not int or not 0 <= value['assistantTurnCount'] <= 4096
                     or value['providerGenerationCount'] is not None and (type(value['providerGenerationCount']) is not int or not 0 <= value['providerGenerationCount'] <= 4096)
@@ -2278,6 +2315,9 @@ def semantic_observations(directory, app):
                     or value['retryCompleted'] and not value['retryAttempted']):
                 raise ValueError('invalid Codex renderer qualification')
             record.update({key: value[key] for key in fields - {'schemaVersion', 'mechanism'}})
+            if 'retryClickPhase' in value:
+                enum(record, value, 'retryClickPhase', {'admission','capture','sample-first',
+                     'revalidate','sample-second','sample-final','dispatch','post-guard','complete'})
             if 'preAttachFailure' in value:
                 if value['errorCategory'] != 'invalid-request' or value['attached']:
                     raise ValueError('unexpected Codex preattach failure')

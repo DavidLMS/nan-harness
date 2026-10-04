@@ -89,6 +89,23 @@ enum EmptyInputField {
     FocusOnlyStateChange,
     FocusAttempted,
 }
+#[derive(Clone, Copy, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct QueryObservation {
+    calls: u32,
+    elapsed_ms: u64,
+    native_window_ms: u64,
+    last_ms: u64,
+}
+fn query_observation(facts: &Value) -> Option<QueryObservation> {
+    let value: QueryObservation =
+        serde_json::from_value(facts.get("queryObservation")?.clone()).ok()?;
+    (value.calls <= 100_000
+        && value.elapsed_ms <= 600_000
+        && value.native_window_ms <= value.elapsed_ms
+        && value.last_ms <= value.elapsed_ms)
+        .then_some(value)
+}
 type EmptyInputDrift = std::collections::BTreeMap<EmptyInputField, bool>;
 fn native_tree_observation(facts: &Value) -> Option<Value> {
     let value = facts.get("nativeTreeObservation")?;
@@ -472,6 +489,9 @@ fn valid_binding(fields: &serde_json::Map<String, Value>) -> bool {
 // packet. Validate them together so no field can widen input authority.
 fn validate_diagnostics(facts: &Value) -> Option<()> {
     let fields = facts.as_object()?;
+    if fields.contains_key("queryObservation") && query_observation(facts).is_none() {
+        return None;
+    }
     if fields.contains_key("nativeTreeObservation") && native_tree_observation(facts).is_none() {
         return None;
     }
@@ -554,7 +574,7 @@ fn decode(bytes: &[u8]) -> Option<(Value, Option<Value>)> {
         return None;
     }
     let facts = value["facts"].as_object()?;
-    if !(11..=22).contains(&facts.len())
+    if !(11..=23).contains(&facts.len())
         || facts.keys().any(|key| {
             !FLAGS.contains(&key.as_str())
                 && ![
@@ -573,6 +593,7 @@ fn decode(bytes: &[u8]) -> Option<(Value, Option<Value>)> {
                     "retryAttempted",
                     "retryForwarded",
                     "nativeTreeObservation",
+                    "queryObservation",
                 ]
                 .contains(&key.as_str())
         })
@@ -797,6 +818,7 @@ pub(crate) struct ClaudeLinuxChatSession<'a> {
     retry_candidate: Option<Value>,
     retry: RetryState,
     native_tree: Option<Value>,
+    query_observation: Option<QueryObservation>,
     submitted: u8,
     verified: u8,
     copied: u8,
@@ -840,6 +862,7 @@ impl Gui {
             retry_candidate: None,
             retry: RetryState::NotStarted,
             native_tree: None,
+            query_observation: None,
             submitted: 0,
             verified: 0,
             copied: 0,
@@ -912,6 +935,7 @@ impl ClaudeLinuxChatSession<'_> {
         self.empty_input_drift = empty_input_drift(&facts);
         self.retry_candidate = retry_candidate_observation(&facts);
         self.native_tree = native_tree_observation(&facts);
+        self.query_observation = query_observation(&facts);
         facts["stage"]
             .as_str()
             .ok_or(Reason::ActionUnsupported)?
@@ -1121,6 +1145,9 @@ impl ClaudeLinuxChatSession<'_> {
         let mut facts = json!({"schemaVersion":1,"mechanism":"claude-linux-native-chat","diagnosticsOnly":true,
             "stage":self.stage,"submittedTurns":self.submitted,"inputVerifiedTurns":self.verified,
             "copiedResponses":self.copied,"retryAttempted":self.retry.attempted(),"clipboardCleared":cleared});
+        if let Some(timing) = self.query_observation {
+            facts["queryObservation"] = json!(timing);
+        }
         if let Some(tree) = self.native_tree {
             facts["nativeTreeObservation"] = tree;
         }
@@ -1557,5 +1584,28 @@ mod native_tree_tests {
         changed.as_object_mut().unwrap().remove("childCount");
         changed["rawObjectPath"] = json!("PRIVATE");
         assert!(native_tree_observation(&json!({"nativeTreeObservation":changed})).is_none());
+    }
+}
+
+#[cfg(test)]
+mod query_timing_tests {
+    use super::query_observation;
+    use serde_json::json;
+
+    #[test]
+    fn timing_rejects_private_fields_and_impossible_totals() {
+        let timing = json!({"calls":2,"elapsedMs":11000,"nativeWindowMs":2000,"lastMs":9000});
+        assert!(query_observation(&json!({"queryObservation":timing})).is_some());
+        for (key, value) in [
+            ("path", json!("PRIVATE")),
+            ("calls", json!(true)),
+            ("elapsedMs", json!(600001)),
+            ("nativeWindowMs", json!(11001)),
+            ("lastMs", json!(-1)),
+        ] {
+            let mut changed = timing.clone();
+            changed[key] = value;
+            assert!(query_observation(&json!({"queryObservation":changed})).is_none());
+        }
     }
 }

@@ -42,6 +42,14 @@ struct ProviderObservation {
     failure_observed: bool,
 }
 
+#[derive(Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct OperationTiming {
+    budget_ms: u128,
+    elapsed_ms: u128,
+    transport_remaining_ms: Option<u128>,
+    post_guard_remaining_ms: Option<u128>,
+}
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Facts {
@@ -51,6 +59,7 @@ struct Facts {
     stage: WindowsChatStage,
     action_phase: Option<&'static str>,
     transport_failure: Option<&'static str>,
+    operation_timing: OperationTiming,
     #[serde(skip_serializing_if = "Option::is_none")]
     guard_rejection: Option<GuardRejection>,
     provider_observation: Option<ProviderObservation>,
@@ -71,6 +80,7 @@ impl Default for Facts {
             stage: WindowsChatStage::Request,
             action_phase: None,
             transport_failure: None,
+            operation_timing: OperationTiming::default(),
             guard_rejection: None,
             provider_observation: None,
             failure_scope_counts: None,
@@ -156,6 +166,11 @@ impl ClaudeWindowsChatSession<'_> {
         if Instant::now() >= deadline {
             return Err(Reason::Timeout);
         }
+        let started = Instant::now();
+        self.facts.operation_timing = OperationTiming {
+            budget_ms: deadline.saturating_duration_since(started).as_millis(),
+            ..OperationTiming::default()
+        };
         self.facts.action_phase = Some("before-guard");
         self.facts.transport_failure = None;
         self.facts.guard_rejection = None;
@@ -171,6 +186,24 @@ impl ClaudeWindowsChatSession<'_> {
             deadline,
             |phase, failure, rejection| {
                 facts.action_phase = Some(phase);
+                let remaining = deadline
+                    .saturating_duration_since(Instant::now())
+                    .as_millis();
+                match phase {
+                    "transport" => {
+                        facts
+                            .operation_timing
+                            .transport_remaining_ms
+                            .get_or_insert(remaining);
+                    }
+                    "post-guard" => {
+                        facts
+                            .operation_timing
+                            .post_guard_remaining_ms
+                            .get_or_insert(remaining);
+                    }
+                    _ => {}
+                }
                 facts.transport_failure = failure.map(|value| match value {
                     crate::native::FailureCategory::InvalidInput => "invalid-input",
                     crate::native::FailureCategory::Spawn => "spawn",
@@ -185,6 +218,7 @@ impl ClaudeWindowsChatSession<'_> {
                 facts.guard_rejection = rejection.map(GuardRejection::from);
             },
         );
+        self.facts.operation_timing.elapsed_ms = started.elapsed().as_millis();
         let stage = match result {
             Ok(receipt) => {
                 if let Some(counts) = receipt.failure_scope {

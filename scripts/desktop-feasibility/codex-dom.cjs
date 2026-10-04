@@ -127,21 +127,31 @@ function sampleEditor(control,kind='editor') {
   return {rect:[r.left,r.top,r.width,r.height],points};
 }
 
-async function ordinaryClick(locator,guard,deadline,attempt,after=guard) {
+async function ordinaryClick(locator,guard,deadline,attempt,after=guard,observe=()=>{}) {
+  const phase=value=>{try {observe(value);}catch {}};
+  phase('admission');
   if(!await guard()||Date.now()>=deadline||await locator.count()!==1||!await locator.isEnabled())return false;
+  phase('capture');
   const handle=await locator.elementHandle();if(!handle)return false;
   try {
+    phase('sample-first');
     const first=await handle.evaluate(sampleEditor,'button');if(first.blocked)return false;
     await pause(Math.min(100,Math.max(0,deadline-Date.now())));
+    phase('revalidate');
     if(!await guard()||!await locator.evaluate((e,held)=>e===held,handle))return false;
+    phase('sample-second');
     const second=await handle.evaluate(sampleEditor,'button'),point=candidate(first,second);if(!point)return false;
     if(!await guard()||Date.now()>=deadline)return false;
+    phase('sample-final');
     const final=await handle.evaluate(sampleEditor,'button');
     if(!candidate(first,final)||!final.points.some(p=>p.x===point.x&&p.y===point.y))return false;
     if(!await guard()||Date.now()>=deadline)return false;
+    phase('dispatch');
     attempt();
     await handle.click({position:point,timeout:Math.max(1,Math.min(2000,deadline-Date.now()))});
-    return await after()&&Date.now()<deadline;
+    phase('post-guard');
+    if(!await after()||Date.now()>=deadline)return false;
+    phase('complete');return true;
   } finally {await handle.dispose();}
 }
 
@@ -264,7 +274,8 @@ async function runTurn(page,guard,request,deadline=Date.now()+request.timeoutMs)
       if(!facts.retryControl)return stop('retry-unavailable');
       retryWitness=await page.evaluateHandle(holdRetryContinuation,{prompt:request.prompt});
       const retryOwned=async()=>await owned()&&(await page.evaluate(retryContinuationObservation,{held:retryWitness,prompt:request.prompt,marker:request.expectedMarker})).userCount===1;
-      if(!await ordinaryClick(retry,retryOwned,deadline,()=>{facts.retryAttempted=true;}))return stop('action-uncertain');
+      if(!await ordinaryClick(retry,retryOwned,deadline,()=>{facts.retryAttempted=true;},retryOwned,
+        phase=>{facts.retryClickPhase=phase;}))return stop('action-uncertain');
       facts.retryCompleted=true;
     }
     while(Date.now()<deadline) {

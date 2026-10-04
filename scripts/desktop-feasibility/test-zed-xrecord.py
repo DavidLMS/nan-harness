@@ -21,12 +21,23 @@ class Tests(unittest.TestCase):
         for packet in (crossing(detail=2),crossing(mode=4),crossing(kind=8),event(kind=6),crossing(window=91)):
             c.accept(0,False,123,packet)
         self.assertEqual(c.closed()['crossingHeaders'],dict(status='observed',ownedNormalEnterCount=1,
-            ownedNonNormalEnterCount=1,ownedNormalLeaveCount=1,ownedMotionCount=1))
+            ownedNonNormalEnterCount=1,ownedNormalLeaveCount=1,ownedMotionCount=1,
+            eventOrder=['enter','non-normal-enter','leave','motion']))
         self.assertFalse(c.closed()['orderedPair'])
         self.assertNotIn('90',json.dumps(c.closed()))
         absent=Counts(90,131,123).closed()['crossingHeaders']
         self.assertEqual(absent['ownedNormalEnterCount'],0)  # absence is no consumption proof
         self.assertNotIn('focused',absent)
+
+    def test_event_order_distinguishes_identical_counts_before_click(self):
+        sequences=[]
+        for packets in ((crossing(),crossing(kind=8),event(),event(kind=5)),
+                        (crossing(kind=8),crossing(),event(),event(kind=5))):
+            counts=Counts(90,131,123)
+            for packet in packets:counts.accept(0,False,123,packet)
+            self.assertTrue(counts.closed()['orderedPair'])
+            sequences.append(counts.closed()['crossingHeaders']['eventOrder'])
+        self.assertEqual(sequences,[['enter','leave','press','release'],['leave','enter','press','release']])
 
     def test_invalid_or_truncated_crossing_headers_never_emit_invented_fields(self):
         for packet in (crossing()[:-1],crossing()+b'PRIVATE',crossing(mode=6),crossing(detail=8),

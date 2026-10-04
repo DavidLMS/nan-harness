@@ -113,6 +113,20 @@ impl Evidence {
 }
 
 #[derive(Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum RetryClickPhase {
+    Admission,
+    Capture,
+    SampleFirst,
+    Revalidate,
+    SampleSecond,
+    SampleFinal,
+    Dispatch,
+    PostGuard,
+    Complete,
+}
+
+#[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Facts {
     schema_version: u8,
@@ -134,6 +148,8 @@ struct Facts {
     retry_control: Evidence,
     retry_attempted: Evidence,
     retry_completed: Evidence,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    retry_click_phase: Option<RetryClickPhase>,
     error_category: Option<DriverError>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pre_attach_failure: Option<PreAttachFailure>,

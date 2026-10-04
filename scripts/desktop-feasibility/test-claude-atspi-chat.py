@@ -1536,4 +1536,25 @@ class NativeTreeDiagnosticTests(unittest.TestCase):
         with self.assertRaises(chat.Rejected):c.next_input_proof()
         self.assertEqual((a.paste_count,a.send_count),(0,0))
 
+class QueryTimingTests(unittest.TestCase):
+    def test_query_timing_preserves_timeout_and_counts_native_guard_cost(self):
+        adapter = Adapter()
+        controller = chat.Controller(adapter, {}, 10, clock=lambda: adapter.now)
+        def guard():
+            adapter.now += 2
+            return True
+        adapter.guard = guard
+        self.assertTrue(controller.query('guard'))
+        self.assertEqual(controller.facts['queryObservation'], dict(
+            calls=1, elapsedMs=2000, nativeWindowMs=2000, lastMs=2000))
+        def state(node):
+            adapter.now += 9
+            raise TimeoutError()
+        adapter.state = state
+        with self.assertRaises(TimeoutError):
+            controller.query('state', 'PRIVATE')
+        self.assertEqual(controller.facts['queryObservation'], dict(
+            calls=2, elapsedMs=11000, nativeWindowMs=2000, lastMs=9000))
+        self.assertNotIn('PRIVATE', str(controller.facts))
+
 if __name__=='__main__':unittest.main()

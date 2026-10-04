@@ -205,8 +205,16 @@ exports.run = async function run(page, session, ownedEndpoint, deadline, expecte
       let choiceReady=false;
       while (guard() && Date.now()<settleDeadline) {
         const covers=await cover.count(), choices=await choice.count();
+        const observation={coverCount:Math.min(64,covers),choiceCount:Math.min(64,choices),
+          coverVisible:null,choiceVisible:null,choiceEnabled:null};
+        facts.onboardingObservation=observation;
         if (covers!==1 || choices>1) throw new Error('onboarding');
-        if (choices===1 && await cover.isVisible() && await choice.isVisible() && await choice.isEnabled()) {
+        observation.coverVisible=await cover.isVisible();
+        if (choices===1) {
+          observation.choiceVisible=await choice.isVisible();
+          observation.choiceEnabled=await choice.isEnabled();
+        }
+        if (choices===1 && observation.coverVisible && observation.choiceVisible && observation.choiceEnabled) {
           choiceReady=true; break;
         }
         await delay(Math.min(100,Math.max(0,settleDeadline-Date.now())));

@@ -758,6 +758,7 @@ impl Visual {
                 observe("transport", Some(failure), None);
                 failure.reason()
             })?;
+        observe("post-guard", None, None);
         guard("post-guard", &mut observe)?;
         if Instant::now() >= deadline {
             return Err(Reason::Timeout);

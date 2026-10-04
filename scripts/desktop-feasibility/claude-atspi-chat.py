@@ -410,6 +410,20 @@ class Controller:
             toolVerified=False, recoveryVerified=False)
 
     def query(self, method, *args):
+        started = self.clock()
+        try:
+            return self._query(method, *args)
+        finally:
+            elapsed = min(600000, max(0, round((self.clock() - started) * 1000)))
+            timing = self.facts.setdefault('queryObservation', dict(
+                calls=0, elapsedMs=0, nativeWindowMs=0, lastMs=0))
+            timing['calls'] = min(100000, timing['calls'] + 1)
+            timing['elapsedMs'] = min(600000, timing['elapsedMs'] + elapsed)
+            timing['lastMs'] = elapsed
+            if method == 'guard':
+                timing['nativeWindowMs'] = min(600000, timing['nativeWindowMs'] + elapsed)
+
+    def _query(self, method, *args):
         self.boundary = QUERY_BOUNDARIES.get(method, 'request')
         if self.clock() >= self.deadline:
             raise TimeoutError()

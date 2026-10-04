@@ -141,7 +141,8 @@ class HeaderContracts(unittest.TestCase):
         value=dict(status='complete',pressCount=0,releaseCount=0,orderedPair=False,crossingHeaders=h)
         self.assertEqual(m.validate(value),value)
         for change in ({'ownedMotionCount':True},{'ownedMotionCount':65},{'rawWindow':'PRIVATE'},
-                       {'status':[]},{'ownedNormalEnterCount':None}):
+                       {'status':[]},{'ownedNormalEnterCount':None},{'eventOrder':['PRIVATE']},
+                       {'eventOrder':[True]},{'eventOrder':['enter']*129}):
             with self.assertRaises(ValueError):m.validate({**value,'crossingHeaders':{**h,**change}})
         with self.assertRaises(ValueError):m.validate({**value,'status':'timeout'})
 

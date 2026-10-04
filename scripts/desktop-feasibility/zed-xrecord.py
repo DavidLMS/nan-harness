@@ -21,6 +21,7 @@ class Counts:
         self.device = self.pressed_at = None
         self.ordered = False
         self.invalid = False
+        self.event_order = []
         self.crossings = dict(ownedNormalEnterCount=0, ownedNonNormalEnterCount=0,
                               ownedNormalLeaveCount=0, ownedMotionCount=0)
 
@@ -52,6 +53,9 @@ class Counts:
                 key = ('ownedNormalEnterCount' if mode == 0 else 'ownedNonNormalEnterCount') if event == 7 else (
                     'ownedNormalLeaveCount' if mode == 0 else None)
             if key:
+                self.event_order.append({'ownedNormalEnterCount':'enter',
+                    'ownedNonNormalEnterCount':'non-normal-enter',
+                    'ownedNormalLeaveCount':'leave', 'ownedMotionCount':'motion'}[key])
                 self.crossings[key] += 1
                 if self.crossings[key] > 64:
                     self.invalid = True
@@ -63,6 +67,7 @@ class Counts:
             return
         if detail != 1 or window != self.window:
             return
+        self.event_order.append('press' if event == 4 else 'release')
         if event == 4:
             self.press = min(2, self.press + 1)
             if self.device is not None or self.release:
@@ -77,6 +82,7 @@ class Counts:
     def closed(self):
         return {'pressCount': self.press, 'releaseCount': self.release, 'orderedPair': self.ordered and (not self.invalid),
                 'crossingHeaders': {'status':'unavailable' if self.invalid else 'observed',
+                    'eventOrder':None if self.invalid else list(self.event_order),
                     **{key:None if self.invalid else value for key,value in self.crossings.items()}}}
 
 class R8(C.Structure):

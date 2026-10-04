@@ -43,11 +43,18 @@ def validate(value):
     if 'crossingHeaders' in value:
         headers=value['crossingHeaders']
         keys={'ownedNormalEnterCount','ownedNonNormalEnterCount','ownedNormalLeaveCount','ownedMotionCount'}
-        if (value['status'] != 'complete' or type(headers) is not dict or set(headers)!=keys|{'status'}
+        if (value['status'] != 'complete' or type(headers) is not dict or set(headers)-{'eventOrder'}!=keys|{'status'}
             or type(headers['status']) is not str or headers['status'] not in {'observed','unavailable'}
             or headers['status']=='observed' and any(type(headers[k]) is not int or not 0<=headers[k]<=64 for k in keys)
             or headers['status']=='unavailable' and any(headers[k] is not None for k in keys)):
             raise ValueError('closed record rejected')
+        if 'eventOrder' in headers:
+            order=headers['eventOrder']
+            if (headers['status']=='unavailable' and order is not None
+                or headers['status']=='observed' and (type(order) is not list or len(order)>128
+                    or any(type(event) is not str or event not in {
+                        'enter','non-normal-enter','leave','motion','press','release'} for event in order))):
+                raise ValueError('closed record rejected')
     return value
 
 def unique(pairs):
