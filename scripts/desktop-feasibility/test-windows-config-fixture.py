@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import io
 from pathlib import Path
 import unittest
 
@@ -39,7 +40,7 @@ class ClosedFixtureTests(unittest.TestCase):
                 (b'PRIVATE-PATH error[E0425]: quoted output\nerror[PRIVATE]: no public code\n',
                  dict(category='no-code',rustcCodes=[],otherRustcCode=False,linkStage=False))):
             result=fixture.classify(output+suffix,False)
-            self.assertEqual(result['compileDiagnostics'],dict(expected,noCodeSignals=[]))
+            self.assertEqual({k:v for k,v in result['compileDiagnostics'].items() if k!='structured'},dict(expected,noCodeSignals=[]))
             self.assertFalse(result['fixtureStarted'])
             self.assertNotIn('PRIVATE',json.dumps(result))
             self.assertNotIn('E9999',json.dumps(result))
@@ -72,6 +73,73 @@ class ClosedFixtureTests(unittest.TestCase):
         self.assertEqual(fixture.compile_diagnostics(b'error: PRIVATE unknown error')['noCodeSignals'], [])
         result = fixture.compile_diagnostics(b'error: failed to read PRIVATE metadata')
         self.assertEqual(result['noCodeSignals'], ['metadata-file', 'read-file'])
+
+
+    def test_structured_compiler_messages_ignore_rendered_paths_and_unknown_codes(self):
+        def record(message,level='error',code=None,children=None):
+            return dict(reason='compiler-message',package_id='PRIVATE-PACKAGE',
+                target={'src_path':'PRIVATE-PATH'},message=dict(message=message,level=level,
+                code=code,children=children or [],spans=[{'file_name':'PRIVATE-SECRET'}],
+                rendered='error[E0425]: PRIVATE rendered only'))
+        def encoded(*records):
+            return b'\n'.join(json.dumps(r).encode() for r in records)+b'\n'
+        data=encoded(record("couldn't read PRIVATE: os error 5"),
+            record('PRIVATE coded',code={'code':'E0308','explanation':'PRIVATE'}),
+            record('PRIVATE unknown',code={'code':'E9999'}),
+            {'reason':'build-finished','success':False})
+        result=fixture.classify(data,False)
+        self.assertEqual(result['category'],'compile-failure')
+        details=result['compileDiagnostics']
+        self.assertEqual(details['rustcCodes'],['E0308'])
+        self.assertTrue(details['otherRustcCode'])
+        self.assertEqual(details['noCodeSignals'],['read-file'])
+        self.assertEqual(details['structured']['levels']['error'],3)
+        self.assertEqual(details['structured']['buildFinished'],'failed')
+        self.assertFalse(details['structured']['malformed'])
+        for private in ['PRIVATE','E9999','E0425','os error 5','couldn']:
+            self.assertNotIn(private,json.dumps(result))
+        warning=encoded(record('PRIVATE warning',level='warning',code={'code':'unused_variables'}),
+            {'reason':'build-finished','success':True})
+        details=fixture.compile_diagnostics(warning)
+        self.assertFalse(details['structured']['malformed'])
+        self.assertFalse(details['structured']['otherErrorMessage'])
+        self.assertEqual(details['structured']['levels']['warning'],1)
+        self.assertEqual(fixture.classify(warning,False)['category'],'unclassified-failure')
+        self.assertEqual(fixture.classify(data,True)['category'],'fixture-not-run')
+
+    def test_structured_unknown_error_children_and_malformed_records_are_bounded(self):
+        child=dict(message='PRIVATE note',level='note',code=None,children=[],rendered='PRIVATE')
+        record=dict(reason='compiler-message',message=dict(message='PRIVATE unknown',
+            level='error',code=None,children=[child],rendered='PRIVATE'))
+        data=json.dumps(record).encode()+b'\n'
+        result=fixture.classify(data,False)
+        details=result['compileDiagnostics']['structured']
+        self.assertTrue(details['otherErrorMessage'])
+        self.assertEqual(details['diagnosticCount'],2)
+        self.assertEqual(details['levels']['note'],1)
+        for malformed in [b'{PRIVATE\n',json.dumps({'reason':'compiler-message','message':None}).encode(),
+            json.dumps({'reason':'build-finished','success':'PRIVATE'}).encode(),
+            json.dumps({'reason':'compiler-message','message':{'level':{},'message':'PRIVATE'}}).encode(),
+            json.dumps({'reason':'compiler-message','message':{'level':'error','message':'\ud800'}}).encode()]:
+            facts=fixture.compile_diagnostics(malformed)['structured']
+            self.assertTrue(facts['malformed'])
+            self.assertNotIn('PRIVATE',json.dumps(facts))
+        details=fixture.compile_diagnostics(data*200)['structured']
+        self.assertEqual(details['diagnosticCount'],256)
+        self.assertTrue(details['malformed'])
+        self.assertEqual(fixture.classify(b'PRIVATE'*20000,False)['category'],'output-overflow')
+
+    def test_private_reader_filters_artifacts_before_bounded_diagnostics(self):
+        artifact=json.dumps(dict(reason='compiler-artifact',filenames=['PRIVATE']*30)).encode()+b'\n'
+        error=json.dumps(dict(reason='compiler-message',message=dict(message='PRIVATE error',
+            level='error',code={'code':'E0308'},children=[],rendered='PRIVATE'))).encode()+b'\n'
+        result=fixture.classify(fixture.read_private_output(io.BytesIO(artifact*2000+error)),False)
+        self.assertEqual(result['category'],'compile-failure')
+        self.assertEqual(result['compileDiagnostics']['rustcCodes'],['E0308'])
+        self.assertNotIn('PRIVATE',json.dumps(result))
+        for output in [b'PRIVATE'*22000,b'PRIVATE\n'*20000]:
+            self.assertEqual(fixture.classify(fixture.read_private_output(io.BytesIO(output)),False)['category'],
+                'output-overflow')
 
 if __name__ == '__main__':
     unittest.main()
