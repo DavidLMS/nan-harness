@@ -1,4 +1,4 @@
-//! Private causal authority: three submitted prompts and one stable main context.
+//! Private causal authority: three submitted prompts and unique verified-turn contexts.
 use serde::Serialize;
 use serde_json::Value;
 use sha2::{Digest as _, Sha256};
@@ -26,7 +26,7 @@ pub(crate) struct FailureAuthorityObservation {
 pub(super) struct FailureTurnAuthority {
     epoch: u64,
     prompts: Vec<Zeroizing<String>>,
-    context: Option<[u8; 32]>,
+    contexts: [Option<MainContext>; 2],
     context_ambiguous: bool,
     context_turns: u8,
     failure_armed: bool,
@@ -34,6 +34,11 @@ pub(super) struct FailureTurnAuthority {
     rejected_stream: u16,
     rejected_history: u16,
     rejected_context: u16,
+}
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct MainContext {
+    model: [u8; 32],
+    instructions: [u8; 32],
 }
 impl FailureTurnAuthority {
     pub(super) fn prepare(
@@ -56,7 +61,10 @@ impl FailureTurnAuthority {
         {
             return Err(());
         }
-        if failure && (self.context.is_none() || self.context_ambiguous || self.context_turns != 3)
+        if failure
+            && (self.contexts.iter().any(Option::is_none)
+                || self.context_ambiguous
+                || self.context_turns != 3)
         {
             return Err(());
         }
@@ -70,7 +78,7 @@ impl FailureTurnAuthority {
     }
     pub(super) fn rejection_observation(&self) -> FailureAuthorityObservation {
         FailureAuthorityObservation {
-            status: if self.context.is_none() {
+            status: if self.contexts.iter().all(Option::is_none) {
                 AuthorityRejection::ContextUnobserved
             } else if self.context_ambiguous {
                 AuthorityRejection::ContextChanged
@@ -122,14 +130,22 @@ impl FailureTurnAuthority {
             self.rejected_context = self.rejected_context.saturating_add(1).min(4096);
             return;
         };
-        self.context_turns |= 1 << (self.prompts.len() - 1);
-        match self.context {
-            Some(held) if held != context => {
-                self.context_ambiguous = true;
-                self.rejected_context = self.rejected_context.saturating_add(1).min(4096);
-            }
-            None => self.context = Some(context),
-            _ => {}
+        let turn = self.prompts.len() - 1;
+        self.context_turns |= 1 << turn;
+        // Each verified turn must have one unambiguous instruction context and
+        // the same routed model. A later turn can legitimately acquire new tool
+        // instructions; failure must still match the most recent verified turn.
+        if self.contexts[turn].is_some_and(|held| held != context)
+            || self
+                .contexts
+                .iter()
+                .flatten()
+                .any(|held| held.model != context.model)
+        {
+            self.context_ambiguous = true;
+            self.rejected_context = self.rejected_context.saturating_add(1).min(4096);
+        } else {
+            self.contexts[turn] = Some(context);
         }
     }
     pub(super) fn observe(&mut self, body: &Value) -> bool {
@@ -137,7 +153,7 @@ impl FailureTurnAuthority {
             || self.observed
             || self.context_ambiguous
             || !matches_history(body, &self.prompts)
-            || main_context(body) != self.context
+            || main_context(body) != self.contexts[1]
         {
             return false;
         }
@@ -219,7 +235,7 @@ fn matches_history(body: &Value, prompts: &[Zeroizing<String>]) -> bool {
             .and_then(Value::as_str)
             == Some("user")
 }
-fn main_context(body: &Value) -> Option<[u8; 32]> {
+fn main_context(body: &Value) -> Option<MainContext> {
     let model = body.get("model")?.as_str()?;
     if model.is_empty() || model.len() > 256 {
         return None;
@@ -238,8 +254,6 @@ fn main_context(body: &Value) -> Option<[u8; 32]> {
         return None;
     }
     let mut hash = Sha256::new();
-    hash.update((model.len() as u64).to_le_bytes());
-    hash.update(model.as_bytes());
     hash.update((context.len() as u64).to_le_bytes());
     for message in context {
         let text = Zeroizing::new(serde_json::to_string(message).ok()?);
@@ -249,7 +263,10 @@ fn main_context(body: &Value) -> Option<[u8; 32]> {
         hash.update((text.len() as u64).to_le_bytes());
         hash.update(text.as_bytes());
     }
-    Some(hash.finalize().into())
+    Some(MainContext {
+        model: Sha256::digest(model.as_bytes()).into(),
+        instructions: hash.finalize().into(),
+    })
 }
 #[cfg(test)]
 mod tests {
@@ -364,6 +381,7 @@ mod tests {
         authority.learn_context(&request(&["private two"], "main"));
         assert_eq!(authority.rejection_observation().rejected_history, 1);
         authority.learn_context(&request(&["private one", "private two"], "changed"));
+        authority.learn_context(&request(&["private one", "private two"], "conflicting"));
         let observation = authority.rejection_observation();
         assert_eq!(observation.status, AuthorityRejection::ContextChanged);
         assert_eq!(observation.rejected_context, 1);
@@ -371,5 +389,31 @@ mod tests {
         assert!(!wire.contains("private"));
         assert!(!wire.contains("\"changed\""));
         assert!(authority.prepare("private three", true, false).is_err());
+    }
+
+    #[test]
+    fn failure_requires_the_unique_latest_verified_context_and_unchanged_model() {
+        let mut authority = FailureTurnAuthority::default();
+        authority.prepare("first", false, false).unwrap();
+        authority.learn_context(&request(&["first"], "initial instructions"));
+        authority.prepare("second", false, false).unwrap();
+        authority.learn_context(&request(&["first", "second"], "tool instructions"));
+        let epoch = authority.prepare("third", true, false).unwrap().unwrap();
+        assert!(!authority.observe(&request(
+            &["first", "second", "third"],
+            "initial instructions"
+        )));
+        assert!(!authority.observe(&request(&["first", "second", "third"], "new instructions")));
+        assert!(authority.observe(&request(&["first", "second", "third"], "tool instructions")));
+        assert!(authority.observed(epoch));
+
+        let mut changed_model = FailureTurnAuthority::default();
+        changed_model.prepare("first", false, false).unwrap();
+        changed_model.learn_context(&request(&["first"], "initial instructions"));
+        changed_model.prepare("second", false, false).unwrap();
+        let mut request = request(&["first", "second"], "tool instructions");
+        request["model"] = json!("different fixture model");
+        changed_model.learn_context(&request);
+        assert!(changed_model.prepare("third", true, false).is_err());
     }
 }

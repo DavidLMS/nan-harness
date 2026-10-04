@@ -1189,11 +1189,14 @@ mod tests {
         for (index, prompt) in ["response nonce1", "tool nonce2"].iter().enumerate() {
             assert!(gate.prepare_claude_turn(prompt, false).unwrap().is_none());
             assert_eq!(
-                post(body(&["response nonce1", "tool nonce2"][..=index], "main"))
-                    .send()
-                    .await
-                    .unwrap()
-                    .status(),
+                post(body(
+                    &["response nonce1", "tool nonce2"][..=index],
+                    if index == 0 { "initial" } else { "main" },
+                ))
+                .send()
+                .await
+                .unwrap()
+                .status(),
                 StatusCode::OK
             );
         }
@@ -1206,6 +1209,7 @@ mod tests {
         let observation = serde_json::to_value(gate.claude_failure_authority_rejection()).unwrap();
         assert_eq!(observation["rejectedStream"], 1);
         assert_eq!(observation["learnedTurns"], 2);
+        assert_eq!(observation["rejectedContext"], 0);
         let epoch = gate
             .prepare_claude_turn("failure nonce3", true)
             .unwrap()

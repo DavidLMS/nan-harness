@@ -218,7 +218,8 @@ impl ClaudeNativeChatSession<'_> {
         failure: bool,
         gate: &ProviderGate,
     ) -> Result<(), Reason> {
-        if (failure && (self.facts.submitted_turns != 2 || self.facts.copied_responses != 2))
+        if self.facts.submitted_turns != self.facts.copied_responses
+            || (failure && self.facts.submitted_turns != 2)
             || self.failure_epoch.is_some()
         {
             return Err(Reason::ActionUnsupported);

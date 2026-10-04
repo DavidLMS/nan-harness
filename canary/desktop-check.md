@@ -2703,7 +2703,8 @@ A classic composer label alone does not prove which transcript/error renderer
 is active, and this correction does not establish successful recovery.
 
 The October 4 macOS candidate also supports a separate causal recovery mode:
-it requires two prior UI-verified turns with stable main-request context, a
+it requires two prior UI-verified turns with one unique instruction context per
+turn and the same routed model, an exact match to the latest verified context, a
 unique third user prompt, one consumed request-specific provider failure,
 a clean Chat before Send, and two same-call proofs of the current error group
 and retained **Try again** control. Legacy marker-based admission remains
