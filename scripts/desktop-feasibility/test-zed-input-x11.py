@@ -34,6 +34,73 @@ class Transport(unittest.TestCase):
         with patch.object(sys, 'argv', ['helper', mode]), patch.object(sys, 'stdin', stdin):
             return module['main']()
 
+    def test_decoration_candidate_is_inside_only_measured_held_frame(self):
+        frame=((0,0),(0,0),(1280,1024),1,1)
+        client=((1,20),(1,20),(1278,1003),1,40)
+        self.assertEqual(module['decoration_crossing_point'](frame,client,40),(640,10))
+        for changed in (((1,0),(1,0),(1278,1024),1,40),
+                        ((1,20),(1,20),(1278,1003),1,41),
+                        ((1,20),(2,20),(1278,1003),1,40),
+                        ((1,20),(1,20),(1280,1003),1,40)):
+            with self.assertRaises(ValueError):
+                module['decoration_crossing_point'](frame,changed,40)
+        with self.assertRaises(ValueError):
+            module['decoration_crossing_point'](((0,0),(0,0),(1280,1024),1,50),client,40)
+
+    def test_crossing_point_rejects_foreign_stack_or_offscreen_before_motion(self):
+        owner=[40];size=[1280];closed=[]
+        def translate(display,source,target,x,y,dx,dy,child):
+            child._obj.value=owner[0] if target==1 else 0
+            return 1
+        def geometry(display,window,root,x,y,width,height,border,depth):
+            root._obj.value=1;width._obj.value=size[0];height._obj.value=1024
+            return 1
+        def pointer(display,window,root,child,rx,ry,wx,wy,mask):
+            root._obj.value=1;child._obj.value=0;rx._obj.value=640;ry._obj.value=10
+            mask._obj.value=0;return 1
+        lib=types.SimpleNamespace(XOpenDisplay=lambda *args:1,
+            XCloseDisplay=lambda *args:closed.append(True),XTranslateCoordinates=translate,
+            XGetGeometry=geometry,XQueryPointer=pointer)
+        with patch.object(module['crossing_point_hit'].__globals__['ctypes'],'CDLL',return_value=lib):
+            self.assertEqual(module['crossing_point_hit'](1,40,(640,10)),(0,(640,10),0))
+            owner[0]=50
+            with self.assertRaises(ValueError):module['crossing_point_hit'](1,40,(640,10))
+            owner[0]=40;size[0]=100
+            with self.assertRaises(ValueError):module['crossing_point_hit'](1,40,(640,10))
+        self.assertEqual(len(closed),3)
+
+    def test_crossing_reproves_each_motion_and_never_replays_failed_action(self):
+        events=[];clock=[0]
+        def prove(point,after):events.append(('proof',point,after))
+        def move(point):events.append(('move',point))
+        motion=module['guarded_crossing_motion']
+        for point in ((640,10),(400,200)):
+            motion(point,move,prove,4,now=lambda:clock[0])
+        self.assertEqual(events,[('proof',(640,10),False),('move',(640,10)),
+            ('proof',(640,10),True),('proof',(400,200),False),('move',(400,200)),
+            ('proof',(400,200),True)])
+        events.clear()
+        def rejected(point,after):
+            events.append(('proof',after));raise ValueError('closed synthetic owner loss')
+        with self.assertRaises(ValueError):motion((640,10),move,rejected,4,now=lambda:0)
+        self.assertEqual(events,[('proof',False)])
+        events.clear()
+        def expiring(point,after):clock[0]=4
+        with self.assertRaises(ValueError):motion((640,10),move,expiring,4,now=lambda:clock[0])
+        self.assertEqual(events,[])
+        clock[0]=0
+        def uncertain(point):events.append(('move',point));clock[0]=4
+        with self.assertRaises(ValueError):motion((640,10),uncertain,prove,4,now=lambda:clock[0])
+        self.assertEqual([event for event in events if event[0]=='move'],[('move',(640,10))])
+
+    def test_crossing_opt_in_rejects_unowned_policy_before_any_transport(self):
+        request=json.dumps(dict(pid=20,window=40,x=100,y=200,bus=':1.2',
+            path='/org/a11y/atspi/accessible/3')).encode()
+        with patch.dict(os.environ,{'NANH_ZED_ENTER_POLICY':'owned-decoration-crossing',
+                'GITHUB_ACTIONS':'false'}),patch('subprocess.run') as transport:
+            self.assertEqual(self.call('retry-click',request),18)
+            transport.assert_not_called()
+
     def test_source_on_proof_requires_enabled_visible_live_toggle(self):
         required = sum(1 << bit for bit in (8, 20, 25, 30))
         self.assertTrue(module['enabled_toggle_on']((required, 0)))

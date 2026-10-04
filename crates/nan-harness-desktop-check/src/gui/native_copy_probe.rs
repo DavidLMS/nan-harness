@@ -270,6 +270,7 @@ fn neutral_input(executable: &Path, mode: &str, prompt: &str) -> Result<(), Reas
         "NANH_DESKTOP_QUALIFICATION_FACTS",
         "NANH_ZED_XRECORD",
         "NANH_ZED_CURSOR_HIT",
+        "NANH_ZED_ENTER_POLICY",
         "NANH_ZED_RETRY_METHOD",
         "NANH_ZED_PANEL_ZOOM",
     ] {
@@ -2131,11 +2132,17 @@ mod tests {
         } else {
             "unset"
         };
+        let enter_policy = if cfg!(target_os = "linux") {
+            "owned-decoration-crossing"
+        } else {
+            "unset"
+        };
         std::fs::write(
             &script,
             format!(
                 "[ \"${{NANH_ZED_XRECORD-unset}}\" = \"{expected}\" ] && \
-                 [ \"${{NANH_ZED_CURSOR_HIT-unset}}\" = \"{expected}\" ] && [ \"${{NAN_API_KEY-unset}}\" = unset ] && [ \"$1\" = select-all ]\n"
+                 [ \"${{NANH_ZED_CURSOR_HIT-unset}}\" = \"{expected}\" ] && \
+                 [ \"${{NANH_ZED_ENTER_POLICY-unset}}\" = \"{enter_policy}\" ] && [ \"${{NAN_API_KEY-unset}}\" = unset ] && [ \"$1\" = select-all ]\n"
             ),
         )
         .unwrap();
@@ -2151,6 +2158,7 @@ mod tests {
             .env("FEASIBILITY_ZED_INPUT_SCRIPT", &script)
             .env("NANH_ZED_XRECORD", "1")
             .env("NANH_ZED_CURSOR_HIT", "1")
+            .env("NANH_ZED_ENTER_POLICY", "owned-decoration-crossing")
             .env("NAN_API_KEY", "synthetic-provider-key")
             .stdin(Stdio::null())
             .stdout(Stdio::null())

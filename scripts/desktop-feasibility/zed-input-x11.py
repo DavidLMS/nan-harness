@@ -197,6 +197,74 @@ def pointer_child(frame, active, facts=None):
         xlib.XCloseDisplay(display)
 
 
+def decoration_crossing_point(frame, client, held_frame):
+    if (len(frame)!=5 or len(client)!=5 or client[4]!=held_frame
+            or frame[3]!=client[3] or frame[4]!=frame[3] or held_frame==frame[3]):
+        raise RetryHitFailure('identity-rejected')
+    (fx,fy),_,(fw,fh),_,_=frame
+    (cx,cy),(px,py),(cw,ch),_,_=client
+    if (min(fw,fh,cw,ch)<=0 or (px,py)!=(cx-fx,cy-fy)
+            or cx<fx or cy<fy+2 or cx+cw>fx+fw or cy+ch>fy+fh):
+        raise RetryHitFailure('identity-rejected')
+    point=(cx+cw//2,fy+(cy-fy)//2)
+    if not -32768<=point[0]<=32767 or not -32768<=point[1]<=32767:
+        raise RetryHitFailure('identity-rejected')
+    return point
+
+
+def crossing_point_hit(root, frame, point):
+    # Query the planned point before moving: no foreign/root hover is admitted.
+    xlib=ctypes.CDLL('libX11.so.6')
+    longp=ctypes.POINTER(ctypes.c_ulong);intp=ctypes.POINTER(ctypes.c_int)
+    xlib.XOpenDisplay.argtypes=[ctypes.c_char_p];xlib.XOpenDisplay.restype=ctypes.c_void_p
+    xlib.XCloseDisplay.argtypes=[ctypes.c_void_p]
+    xlib.XTranslateCoordinates.argtypes=[ctypes.c_void_p,ctypes.c_ulong,ctypes.c_ulong,
+        ctypes.c_int,ctypes.c_int,intp,intp,longp]
+    xlib.XTranslateCoordinates.restype=ctypes.c_int
+    xlib.XQueryPointer.argtypes=[ctypes.c_void_p,ctypes.c_ulong,longp,longp,intp,intp,intp,intp,
+        ctypes.POINTER(ctypes.c_uint)]
+    xlib.XQueryPointer.restype=ctypes.c_int
+    xlib.XGetGeometry.argtypes=[ctypes.c_void_p,ctypes.c_ulong,longp,intp,intp,
+        ctypes.POINTER(ctypes.c_uint),ctypes.POINTER(ctypes.c_uint),
+        ctypes.POINTER(ctypes.c_uint),ctypes.POINTER(ctypes.c_uint)]
+    xlib.XGetGeometry.restype=ctypes.c_int
+    display=xlib.XOpenDisplay(None)
+    if not display:raise RetryHitFailure('identity-rejected')
+    try:
+        geometry_root=ctypes.c_ulong();gx,gy=ctypes.c_int(),ctypes.c_int()
+        width,height,border,depth=(ctypes.c_uint() for _ in range(4))
+        if (not xlib.XGetGeometry(display,root,ctypes.byref(geometry_root),ctypes.byref(gx),ctypes.byref(gy),
+                ctypes.byref(width),ctypes.byref(height),ctypes.byref(border),ctypes.byref(depth))
+                or geometry_root.value!=root
+                or not 0<=point[0]<width.value or not 0<=point[1]<height.value):
+            raise RetryHitFailure('pointer-child')
+        x,y=ctypes.c_int(),ctypes.c_int();top,child=ctypes.c_ulong(),ctypes.c_ulong()
+        if (not xlib.XTranslateCoordinates(display,root,root,*point,ctypes.byref(x),ctypes.byref(y),ctypes.byref(top))
+                or top.value!=frame
+                or not xlib.XTranslateCoordinates(display,root,frame,*point,ctypes.byref(x),ctypes.byref(y),ctypes.byref(child))):
+            raise RetryHitFailure('pointer-child')
+        actual_root,actual_child=ctypes.c_ulong(),ctypes.c_ulong()
+        rx,ry,wx,wy=(ctypes.c_int() for _ in range(4));mask=ctypes.c_uint()
+        if (not xlib.XQueryPointer(display,frame,ctypes.byref(actual_root),ctypes.byref(actual_child),
+                ctypes.byref(rx),ctypes.byref(ry),ctypes.byref(wx),ctypes.byref(wy),ctypes.byref(mask))
+                or actual_root.value!=root or mask.value!=0):
+            raise RetryHitFailure('identity-rejected')
+        return child.value,(rx.value,ry.value),actual_child.value
+    finally:
+        xlib.XCloseDisplay(display)
+
+
+def guarded_crossing_motion(point,move,prove,deadline,now=None):
+    if now is None:now=time.monotonic
+    if now()>=deadline:raise RetryHitFailure('deadline')
+    prove(point,False)
+    if now()>=deadline:raise RetryHitFailure('deadline')
+    move(point)
+    if now()>=deadline:raise RetryHitFailure('deadline')
+    prove(point,True)
+    if now()>=deadline:raise RetryHitFailure('deadline')
+
+
 def publish_observation(facts):
     # Only closed facts reach the existing private qualification directory.
     if (os.environ.get('GITHUB_ACTIONS') != 'true'
@@ -533,6 +601,14 @@ def retry_click(payload):
                 or not 1 < request['pid'] <= 2147483647 or not 0 < request['window'] <= 4294967295
                 or any(not -32768 <= request[key] <= 32767 for key in ('x', 'y'))):
             return 2
+        crossing=os.environ.get('NANH_ZED_ENTER_POLICY')
+        if crossing is not None and (crossing!='owned-decoration-crossing'
+                or sys.platform!='linux' or os.environ.get('GITHUB_ACTIONS')!='true'
+                or os.environ.get('RUNNER_ENVIRONMENT')!='github-hosted'
+                or os.environ.get('RUNNER_OS')!='Linux'
+                or os.environ.get('NANH_ZED_CURSOR_HIT')!='1'
+                or os.environ.get('NANH_ZED_XRECORD')!='1'):
+            return 18
         deadline = time.monotonic() + 4
         def run(args, query=False):
             remaining = deadline - time.monotonic()
@@ -622,9 +698,32 @@ def retry_click(payload):
                     observer = record_module['Observer'](request['pid'], active, cursor_scope,
                         budget=min(3,remaining))
 
+            move=lambda candidate:run(['mousemove','--',str(candidate[0]),str(candidate[1])])
+            if crossing is not None:
+                if observer is None or observer.stage!='armed' or observer.result is not None:
+                    raise RetryHitFailure('identity-rejected')
+                frame_geometry=independent_client_snapshot(request['window'])
+                decoration=decoration_crossing_point(frame_geometry,second_geometry,request['window'])
+                def crossing_proof(candidate,after,decoration=False):
+                    if (not cursor_scope()
+                            or independent_client_snapshot(request['window'])!=frame_geometry):
+                        raise RetryHitFailure('identity-rejected')
+                    child,position,actual_child=crossing_point_hit(
+                        second_geometry[3],request['window'],candidate)
+                    expected=0 if decoration else active
+                    if child!=expected or after and (position!=candidate or actual_child!=expected):
+                        raise RetryHitFailure('pointer-child')
+                    if (not cursor_scope()
+                            or independent_client_snapshot(request['window'])!=frame_geometry):
+                        raise RetryHitFailure('identity-rejected')
+                guarded_crossing_motion(decoration,move,
+                    lambda candidate,after:crossing_proof(candidate,after,True),deadline)
+                ordinary_move=move
+                move=lambda candidate:guarded_crossing_motion(candidate,ordinary_move,crossing_proof,deadline)
+
             def select():
                 return select_live_retry_point(held_bounds,
-                    lambda candidate: run(['mousemove', '--', str(candidate[0]), str(candidate[1])]),
+                    move,
                     prove_hit, live_cursor.matches, deadline, observation=facts['cursorSelection'],
                     pointer_proof=prove_pointer)
             if os.environ.get('NANH_ZED_XRECORD') == '1':
