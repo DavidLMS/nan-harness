@@ -242,8 +242,27 @@ function codingScope(diagnostic=false) {
     composerSourceSha256:'7198ee078e78a748d03c3cc96f5c041d056584d762728fd0be23e695bc394da0',
     ...Object.fromEntries(Object.keys(ancestryCounts).map(k=>[k,ancestryComplete?ancestryCounts[k]:null])),
     sidebarNewChatHitActionable:ancestryComplete?sidebarHit:null};
+  const homeStateNodes=nodes.length<=4096?nodes:[];
+  const sourceHomes=homeStateNodes.filter(e=>visible(e)&&e.getAttribute('data-codex-composer-root')!==null
+    &&e.getAttribute('data-composer-placement')==='home');
+  const inHome=e=>sourceHomes.some(root=>root.contains(e));
+  const homeStateCounts={homeComposerCount:sourceHomes.length,
+    pendingTextareaCount:homeStateNodes.filter(e=>visible(e)&&inHome(e)&&e.tagName==='TEXTAREA'
+      &&e.getAttribute('data-pending-input-initialized')==='true').length,
+    pendingGroupCount:homeStateNodes.filter(e=>visible(e)&&inHome(e)&&e.classList?.contains('group/pending-composer')).length,
+    proseMirrorEditableCount:homeStateNodes.filter(e=>visible(e)&&inHome(e)&&e.getAttribute('contenteditable')==='true'
+      &&e.classList?.contains('ProseMirror')).length,
+    enabledSendCount:controls.filter(e=>inHome(e)&&e.tagName==='BUTTON'&&name(e)==='Send'
+      &&!e.disabled&&e.getAttribute('aria-disabled')!=='true').length,
+    disabledSendCount:controls.filter(e=>inHome(e)&&e.tagName==='BUTTON'&&name(e)==='Send'
+      &&(e.disabled||e.getAttribute('aria-disabled')==='true')).length,
+    workspaceControlCount:controls.filter(e=>inHome(e)&&e.getAttribute('data-composer-navigation-target')==='workspace-project').length};
+  const homeStateComplete=nodes.length<=4096&&Object.values(homeStateCounts).every(n=>n<=32);
+  const homeState={status:homeStateComplete?'observed':'overflow',sourcePlatform:'linux',sourceVersion:'26.930.41038',
+    composerSourceSha256:'7198ee078e78a748d03c3cc96f5c041d056584d762728fd0be23e695bc394da0',
+    ...Object.fromEntries(Object.keys(homeStateCounts).map(k=>[k,homeStateComplete?homeStateCounts[k]:null]))};
   const complete=Object.values(counts).every(n=>Number.isInteger(n)&&n>=0&&n<=32);
-  return {ready,navigation,home,ancestry,observation:{status:complete?'observed':'overflow',
+  return {ready,navigation,home,ancestry,homeState,observation:{status:complete?'observed':'overflow',
     ...Object.fromEntries(Object.keys(counts).map(k=>[k,complete?counts[k]:null]))}};
 }
 
@@ -639,6 +658,7 @@ async function run(page, ownerGuard, deadline, rejected, mainGuard, folderTrust)
         facts.codingNavigationObservation=coding.navigation;
         facts.codingHomeObservation=coding.home;
         facts.codingEditableObservation=coding.ancestry;
+        facts.codingHomeStateObservation=coding.homeState;
       }
       if(coding.ready===true) {facts.codingComposerReady=true;return facts;}
       if(skipAdmitted&&facts.taskControlKind==='skip-optional-capabilities'

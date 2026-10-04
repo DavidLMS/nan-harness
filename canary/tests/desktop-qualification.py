@@ -3773,5 +3773,26 @@ class CodexEditableAncestryTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             q.public_onboarding({**setup,'codingEditableObservation':{**overflow,'unboundCount':0}},'chatgpt-desktop')
 
+class CodexHomeStateTests(unittest.TestCase):
+    def test_pending_source_shape_is_closed_and_advisory(self):
+        observation=dict(status='observed',sourcePlatform='linux',sourceVersion='26.930.41038',
+            composerSourceSha256='7198ee078e78a748d03c3cc96f5c041d056584d762728fd0be23e695bc394da0',
+            homeComposerCount=1,pendingTextareaCount=1,pendingGroupCount=1,proseMirrorEditableCount=0,
+            enabledSendCount=0,disabledSendCount=1,workspaceControlCount=0)
+        setup=dict(schemaVersion=1,mechanism='codex-public-onboarding',diagnosticsOnly=True,
+            stage='coding-readiness',errorCategory=None,conversationalScope=True,engineeringControl=True,
+            roleClickAttempted=True,roleClickCompleted=True,engineeringChecked=True,continueControl=True,
+            continueClickAttempted=True,continueClickCompleted=True,roleScopeAbsent=True,
+            roleProofFailure='unmeasured',sessionProofFailure='unmeasured',taskScopeProved=True,
+            taskClickAttempted=True,taskClickCompleted=True,codingHomeStateObservation=observation)
+        self.assertEqual(q.public_onboarding(setup,'chatgpt-desktop'),setup)
+        for change in ({'homeComposerCount':0},{'enabledSendCount':True},{'disabledSendCount':33},
+                {'sourceVersion':'PRIVATE'},{'text':'PRIVATE'},{'pendingTextareaCount':None},
+                {'status':[]},{'status':{}}):
+            with self.assertRaises(ValueError):q.public_onboarding({**setup,'codingHomeStateObservation':{**observation,**change}},'chatgpt-desktop')
+        overflow={key:(None if key.endswith('Count') else value) for key,value in observation.items()}
+        overflow['status']='overflow'
+        self.assertEqual(q.public_onboarding({**setup,'codingHomeStateObservation':overflow},'chatgpt-desktop')['codingHomeStateObservation'],overflow)
+
 if __name__ == '__main__':
     unittest.main()

@@ -3,7 +3,7 @@ const source=fs.readFileSync(`${__dirname}/codex-onboarding.cjs`,'utf8');
 const start=source.indexOf('function codingScope('),end=source.indexOf('// Exact immutable final-onboarding',start);
 function read(options={},diagnostic=true) {
  const node=(text='',extra={})=>({textContent:text,children:[],isConnected:true,getBoundingClientRect:()=>({width:100,height:30}),
-   closest:()=>null,getAttribute:()=>null,...extra});
+   closest:()=>null,getAttribute:()=>null,contains:()=>false,...extra});
  const composer=node('',{getAttribute:()=>options.disabled?'true':null});
  const ack='Engineering—got it. I can map an unfamiliar codebase, plan and build features, trace bugs across logs and tests, and run checks to verify behavior.';
  const homeRoot=node('',{getAttribute:k=>k==='data-testid'?'chatgpt-work-home-page':null,
@@ -14,6 +14,18 @@ function read(options={},diagnostic=true) {
    classList:{contains:k=>k==='ProseMirror'&&!options.nonProseMirror}});
  const workspace=node('PRIVATE project name',{tagName:'BUTTON',getAttribute:k=>k==='data-composer-navigation-target'?'workspace-project':null});
  const sourceNodes=options.sourceHome?[homeRoot,localHome,homeEditor,workspace]:[];
+ if(options.pendingHome) {
+  const pending=node('',{classList:{contains:k=>k==='group/pending-composer'}});
+  const textarea=node('PRIVATE draft',{tagName:'TEXTAREA',getAttribute:k=>k==='data-pending-input-initialized'?'true':null});
+  const send=node('',{tagName:'BUTTON',disabled:true,getAttribute:k=>k==='aria-label'?'Send':null});
+  localHome.contains=e=>[pending,textarea,send].includes(e);
+  sourceNodes.push(localHome,pending,textarea,send);
+ }
+ if(options.liveHome) {
+  const send=node('',{tagName:'BUTTON',disabled:false,getAttribute:k=>k==='aria-label'?'Send':null});
+  localHome.contains=e=>[homeEditor,workspace,send].includes(e);
+  sourceNodes.push(localHome,homeEditor,workspace,send);
+ }
  if(options.sourceHome)homeEditor.parentElement=localHome;
  if(options.ancestryMarker) {
   const attrs=options.ancestryMarker;const parent=node('',{getAttribute:k=>attrs[k]??null});
@@ -89,3 +101,17 @@ assert.equal(read({sidebar:true,covered:true}).ancestry.sidebarNewChatHitActiona
 assert.equal(read({sidebar:true,duplicateSidebar:true}).ancestry.sidebarNewChatCount,2);
 assert.equal(read({sidebar:true,duplicateSidebar:true}).ancestry.sidebarNewChatHitActionable,false);
 console.log('PASS: source editable partition, bounded ancestry, sidebar diagnostic and privacy');
+
+const pending=read({pendingHome:true}).homeState;
+assert.equal(pending.homeComposerCount,1);assert.equal(pending.pendingTextareaCount,1);
+assert.equal(pending.pendingGroupCount,1);assert.equal(pending.disabledSendCount,1);
+assert.equal(pending.enabledSendCount,0);assert.equal(pending.proseMirrorEditableCount,0);
+const live=read({liveHome:true}).homeState;
+assert.equal(live.homeComposerCount,1);assert.equal(live.proseMirrorEditableCount,1);
+assert.equal(live.enabledSendCount,1);assert.equal(live.workspaceControlCount,1);
+assert.equal(live.pendingTextareaCount,0);assert(!JSON.stringify(live).includes('PRIVATE'));
+assert.equal(read({liveHome:true,nonProseMirror:true}).homeState.proseMirrorEditableCount,0);
+const homeStateOverflow=read({nodeOverflow:true}).homeState;
+assert.equal(homeStateOverflow.status,'overflow');
+for(const [key,value] of Object.entries(homeStateOverflow))if(key.endsWith('Count'))assert.equal(value,null);
+console.log('PASS: pending textarea and live home source counters remain advisory');
