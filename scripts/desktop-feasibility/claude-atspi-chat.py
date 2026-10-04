@@ -176,7 +176,7 @@ def input_text_inventory(root, children, resolved, links_used, read, result):
         placeholderAttributeLfMatch=any(result==value+'\n' for value in placeholders))
 
 
-def flatten_hypertext(root, query, pid, budget, observation=None, inventory=None):
+def flatten_hypertext(root, query, pid, budget, observation=None, inventory=None, capability=None):
     """Resolve embedded Text objects; never treat unknown objects as empty."""
     records, parents, children = [], {}, {}
     def read(method,node,*args):
@@ -285,6 +285,18 @@ def flatten_hypertext(root, query, pid, budget, observation=None, inventory=None
                     shape['exactFillerLfLeafCount']+=1
     detail = (input_text_inventory(root,children,resolved,links_used,read,result)
               if inventory is not None else None)
+    empty_witness=None
+    if capability is not None and detail is not None:
+        source=detail['sourceShape']
+        # Exact frozen dO decoration implies Gt(entire model doc) with
+        # ignoreWhitespace=false. Every unmapped native node is still sealed;
+        # no descendant is silently assumed empty or dropped from reproof.
+        if (detail['rootSingleParagraph'] and detail['paragraphCount']==1
+                and source['paragraphTagPCount']==1
+                and source['paragraphEmptyClassPairCount']==1
+                and source['unresolvedOtherRoleCount']==0
+                and detail['rootOnlyObjects'] and 0<len(result.encode())<=4096):
+            empty_witness=(root,result,tuple(records))
     # Reprove the entire owned attachment/text/link mapping, including zero-length leaves.
     for method,node,args,value in records:
         budget()
@@ -295,6 +307,8 @@ def flatten_hypertext(root, query, pid, budget, observation=None, inventory=None
         observation.update(shape)
     if detail is not None:
         inventory.update(detail)
+    if capability is not None:
+        capability['witness']=empty_witness
     return result
 
 
@@ -493,6 +507,7 @@ class Controller:
                 raise Rejected('policy')
             if not self.next_consumed:
                 self.next_input_proof()
+                self.empty_class_proof()
         self.state(self.editor, editable=True)
         # The exact retained native X11 foreground/client/clear-stack proof above
         # supplies window activation authority. AT-SPI ACTIVE is not required:
@@ -581,7 +596,7 @@ class Controller:
             initial = self.query('text', self.editor)
             if type(initial) is not str or len(initial.encode()) > 4096:
                 raise Rejected('input')
-            if initial != '' and not replace_owned:
+            if initial != '' and not replace_owned and getattr(self,'empty_class_witness',None) is None:
                 self.facts['inputShape'] = input_shape(initial)
                 embedded=getattr(self.adapter,'embedded_text_observation',None)
                 if embedded is not None:
@@ -606,6 +621,8 @@ class Controller:
             if replace_owned:
                 self.query('select_all_once')
                 self.proof(focused=True)
+            if getattr(self,'empty_class_witness',None) is not None:
+                self.adapter.before_paste=self.before_empty_class_paste
             self.query('paste_once', prompt)
             while True:
                 self.settle_focus()
@@ -614,7 +631,7 @@ class Controller:
                     raise Rejected()
                 if value == prompt:
                     break
-                if value and not prompt.startswith(value) and not (replace_owned and value == initial):
+                if value and not prompt.startswith(value) and not ((replace_owned or getattr(self,'empty_class_dispatched',False)) and value == initial):
                     raise Rejected()
                 self.sleep(min(.02, max(0, self.deadline - self.clock())))
             self.facts['stage'] = 'readback'
@@ -829,7 +846,9 @@ class Controller:
             raise Rejected('frame')
         initial = self.query('text',editor)
         inventory = getattr(self.adapter,'input_text_inventory',None)
-        if initial != '':
+        witness=getattr(self.adapter,'empty_class_witness',None)
+        allow_empty=getattr(self,'empty_class_opt_in',False) and witness is not None
+        if initial != '' and not allow_empty:
             if self.next_history_scope(history) != before:
                 raise Rejected('response')
             self.state(editor,editable=True)
@@ -854,11 +873,27 @@ class Controller:
             raise Rejected('response')
         self.editor,self.sealed_editor = editor,sealed
         self.next_history,self.next_witness = history,before
+        self.empty_class_witness=witness if allow_empty else None
+        self.empty_class_dispatched=False
         self.next_input = True
         self.next_consumed = False
         self.response_only = False
         self.adapter.key_guard = lambda: self.proof(focused=True)
         self.proof()
+
+    def empty_class_proof(self):
+        if self.empty_class_witness is None or self.empty_class_dispatched:
+            return
+        self.query('text',self.editor)
+        if getattr(self.adapter,'empty_class_witness',None)!=self.empty_class_witness:
+            raise Rejected('input')
+
+    def before_empty_class_paste(self):
+        if self.empty_class_witness is None or self.empty_class_dispatched:
+            raise Rejected('policy')
+        self.proof(focused=True)
+        self.empty_class_proof()
+        self.empty_class_dispatched=True
 
     def next_input_proof(self):
         if self.next_history_scope(self.next_history) != self.next_witness:
@@ -1117,10 +1152,14 @@ def native_adapter(request, deadline):
                 raise Rejected('source-owner')
         observation={}
         inventory={}
+        capability={}
+        adapter.empty_class_witness=None
         adapter.embedded_text_observation=None
         adapter.input_text_inventory=None
         result=flatten_hypertext(node,lambda method,target,*args:hypertext_query(adapter,method,target,*args),request['pid'],budget,observation,
-            inventory if request['mode']=='input-next-correlated' else None)
+            inventory if request['mode'] in ('input-next-correlated','input-next-empty-class') else None,
+            capability if request['mode']=='input-next-empty-class' else None)
+        adapter.empty_class_witness=capability.get('witness')
         adapter.input_text_inventory=inventory or None
         adapter.embedded_text_observation=observation or None
         if not guarded():
@@ -1136,7 +1175,17 @@ def native_adapter(request, deadline):
             raise Rejected()
     def paste(prompt):
         clipboard_write(prompt)
-        key('ctrl+v')
+        callback=getattr(adapter,'before_paste',None)
+        if callback is None:
+            key('ctrl+v')
+            return
+        if not adapter.key_guard() or not guarded():
+            raise Rejected()
+        callback()
+        adapter.before_paste=None
+        run(['/usr/bin/xdotool','key','--clearmodifiers','ctrl+v'])
+        if not guarded() or not adapter.key_guard():
+            raise Rejected()
     def readback(node):
         import secrets
         clipboard_write(secrets.token_hex(16))
@@ -1201,7 +1250,7 @@ def main():
         request = json.loads(raw)
         required = {'pid','bus','path','checkerPid','window','bounds','name','nativeExecutable',
             'deadline','mode','value','binding','profileAuthority','history'}
-        if type(request) is not dict or set(request)!=required or request['mode'] not in ('input','input-first-owned','input-next-correlated','copy'):
+        if type(request) is not dict or set(request)!=required or request['mode'] not in ('input','input-first-owned','input-next-correlated','input-next-empty-class','copy'):
             raise Rejected()
         if type(request['value']) is not str or len(request['value'].encode())>4096:
             raise Rejected()
@@ -1213,16 +1262,17 @@ def main():
         adapter = native_adapter(request,deadline)
         adapter.profile_guard = custody.verify
         controller = Controller(adapter,request,deadline)
-        if request['mode']=='input-next-correlated':
+        if request['mode'] in ('input-next-correlated','input-next-empty-class'):
             if request['binding'] is None:
                 raise Rejected('policy')
+            controller.empty_class_opt_in=request['mode']=='input-next-empty-class'
             controller.restore_next_input(request['binding'],request['history'])
         else:
             if request['history'] != []:
                 raise Rejected('policy')
             if request['binding'] is not None:
                 controller.restore(request['binding'], response=request['mode']=='copy')
-        if request['mode'] in ('input','input-first-owned','input-next-correlated'):
+        if request['mode'] in ('input','input-first-owned','input-next-correlated','input-next-empty-class'):
             facts = controller.submit(request['value'], request['mode']=='input-first-owned')
         else:
             if request['binding'] is None:

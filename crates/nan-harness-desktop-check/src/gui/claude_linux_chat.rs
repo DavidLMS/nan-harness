@@ -665,7 +665,7 @@ impl ClaudeLinuxChatSession<'_> {
         request["value"] = json!(value);
         request["binding"] = json!(self.binding);
         request["profileAuthority"] = self.profile.private_request(deadline)?;
-        request["history"] = if mode == "input-next-correlated" {
+        request["history"] = if matches!(mode, "input-next-correlated" | "input-next-empty-class") {
             self.history.private_request()
         } else {
             json!([])
@@ -721,7 +721,7 @@ impl ClaudeLinuxChatSession<'_> {
             self.replacement_consumed = true;
             "input-first-owned"
         } else if self.submitted > 0 {
-            "input-next-correlated"
+            "input-next-empty-class"
         } else {
             return Err(Reason::ActionUnsupported);
         };

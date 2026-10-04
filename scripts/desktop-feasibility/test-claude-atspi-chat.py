@@ -1028,4 +1028,57 @@ class SourceShapeDiagnosticsTests(unittest.TestCase):
             return r[(method,node,*args)]
         with self.assertRaises(chat.Rejected):chat.flatten_hypertext(root,query,7,lambda:None,inventory={})
 
+class EmptyClassCapabilityTests(unittest.TestCase):
+    def fixture(self):
+        a,c,b,h=CorrelatedNextInputTests.fixture(self,nonempty=True)
+        a.empty_class_witness=('sealed-editor','sealed-private-text')
+        c.empty_class_opt_in=True
+        paste=a.paste_once
+        def guarded_paste(prompt):
+            a.before_paste();paste(prompt)
+        a.paste_once=guarded_paste
+        return a,c,b,h
+    def test_exact_retained_history_capability_consumes_before_paste(self):
+        a,c,b,h=self.fixture();c.restore_next_input(b,h)
+        f=c.submit('owned next prompt')
+        self.assertTrue(f['sendForwarded']);self.assertTrue(c.empty_class_dispatched)
+        with self.assertRaises(chat.Rejected):c.before_empty_class_paste()
+        self.assertEqual(a.paste_count,1)
+    def test_source_attributes_or_native_text_change_after_focus_rejects(self):
+        a,c,b,h=self.fixture();c.restore_next_input(b,h)
+        focus=a.grab_focus
+        def changed(node):
+            result=focus(node);a.empty_class_witness=('changed-private-text',);return result
+        a.grab_focus=changed
+        f=c.submit('owned next prompt')
+        self.assertFalse(f['sendForwarded']);self.assertEqual(a.paste_count,0)
+    def test_capability_is_not_ordinary_restore_permission(self):
+        a,c,b,h=self.fixture();c.empty_class_opt_in=False
+        with self.assertRaises(chat.Rejected):c.restore_next_input(b,h)
+        self.assertEqual(a.paste_count,0)
+    def test_lost_history_still_blocks(self):
+        a,c,b,h=self.fixture();h[0]['marker']='different-private-marker'
+        with self.assertRaises(chat.Rejected):c.restore_next_input(b,h)
+        self.assertEqual(a.paste_count,0)
+    def test_exact_doc_empty_class_accepts_sealed_unmapped_text_without_dropping_it(self):
+        root,p,link,r=HypertextTests.fixture(self,child='cue')
+        extra=('owned','/unmapped')
+        r.update({('children',p):[extra],('owner',extra):7,('state',extra):0,
+            ('children',extra):[],('parent',extra):p,('role',root):61,('role',p):73,
+            ('role',extra):116,('count',extra):1,('text',extra,1):'\n',
+            ('attributes',root):{},('attributes',extra):{},
+            ('attributes',p):{'tag':'p','class':'is-empty is-editor-empty'}})
+        cap={};inventory={};chat.flatten_hypertext(root,lambda m,n,*a:r[(m,n,*a)],7,lambda:None,inventory=inventory,capability=cap)
+        self.assertFalse(inventory['completeTextCoverage']);self.assertIsNotNone(cap['witness'])
+        self.assertTrue(any(record[:3]==('text',extra,(1,)) for record in cap['witness'][2]))
+    def test_original_deadline_blocks_before_focus(self):
+        a,c,b,h=self.fixture();c.restore_next_input(b,h);c.deadline=c.clock()-1
+        f=c.submit('owned next prompt');self.assertFalse(f['sendForwarded']);self.assertEqual(a.paste_count,0)
+    def test_missing_exact_class_pair_no_native_capability(self):
+        root,p,link,r=HypertextTests.fixture(self,child='cue')
+        r.update({('role',root):61,('role',p):73,('attributes',root):{},
+            ('attributes',p):{'tag':'p','class':'is-editor-empty'}})
+        cap={};chat.flatten_hypertext(root,lambda m,n,*a:r[(m,n,*a)],7,lambda:None,inventory={},capability=cap)
+        self.assertIsNone(cap['witness'])
+
 if __name__=='__main__':unittest.main()
