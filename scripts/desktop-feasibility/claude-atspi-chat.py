@@ -330,8 +330,8 @@ class Controller:
         if self.query('owner', node) != self.root['pid']:
             raise Rejected('source-owner')
 
-    def tree(self):
-        root = (self.root['bus'], self.root['path'])
+    def tree(self, start=None):
+        root = start if start is not None else (self.root['bus'], self.root['path'])
         pending, seen, nodes = [(root, 0)], set(), []
         while pending:
             node, depth = pending.pop()
@@ -614,7 +614,7 @@ class Controller:
             editorIdentity=self.sealed_editor[0],editorBounds=self.sealed_editor[1],
             frameIdentity=self.sealed_frame[0],frameBounds=self.sealed_frame[1])
 
-    def restore(self, binding):
+    def restore(self, binding, response=False):
         if type(binding) is not dict or set(binding) != {'editor','frame','editorIdentity',
                 'editorBounds','frameIdentity','frameBounds'}:
             raise Rejected()
@@ -623,7 +623,60 @@ class Controller:
         self.sealed_editor = (tuple(binding['editorIdentity']),tuple(binding['editorBounds']))
         self.sealed_frame = (tuple(binding['frameIdentity']),tuple(binding['frameBounds']))
         self.restored = True
-        self.adapter.key_guard = lambda: self.proof(focused=True)
+        if response:
+            self.restore_response_editor()
+        else:
+            self.adapter.key_guard = lambda: self.proof(focused=True)
+            self.proof()
+
+    def response_frame_proof(self):
+        if not self.query('guard'):
+            raise Rejected('native-window')
+        self.state(self.frame, frame=True)
+        if (self.query('identity',self.frame),self.query('bounds',self.frame)) != self.sealed_frame:
+            raise Rejected('frame')
+        if self.query('client_bounds') != self.sealed_frame[1]:
+            raise Rejected('frame-client')
+        node,seen=self.frame,set()
+        for _ in range(32):
+            if node in seen:
+                raise Rejected('frame')
+            seen.add(node);self.owned(node)
+            identity=self.query('identity',node)
+            if node==(self.root['bus'],self.root['path']):
+                if identity[0]!=75:
+                    raise Rejected('source-owner')
+                break
+            self.state(node)
+            if node!=self.frame and identity[0] in (23,69):
+                raise Rejected('frame')
+            node=self.query('parent',node)
+        else:
+            raise Rejected('frame')
+        if not self.query('guard'):
+            raise Rejected('native-window')
+
+    def restore_response_editor(self):
+        # Read-only discovery after Send may find a moved/remounted composer.
+        # It never selects another window or grants keyboard input authority.
+        self.response_frame_proof()
+        nodes=self.tree(self.frame)
+        if any(node!=self.frame and identity[0] in (23,69) for node,identity in nodes):
+            raise Rejected('frame')
+        editors=[node for node,identity in nodes if identity[0] in (61,78,79)
+            and 'Write your prompt to Claude' in identity[1:]]
+        if len(editors)!=1:
+            raise Rejected('tree')
+        self.state(editors[0],editable=True)
+        current=(self.query('identity',editors[0]),self.query('bounds',editors[0]))
+        if not inside(current[1],self.sealed_frame[1]):
+            raise Rejected('frame-client')
+        self.response_frame_proof()
+        self.editor,self.sealed_editor=editors[0],current
+        self.current_chat(nodes)
+        def no_keys():
+            raise Rejected('policy')
+        self.adapter.key_guard=no_keys
         self.proof()
 
     def response_scope(self, marker):
@@ -927,7 +980,7 @@ def main():
         adapter.profile_guard = custody.verify
         controller = Controller(adapter,request,deadline)
         if request['binding'] is not None:
-            controller.restore(request['binding'])
+            controller.restore(request['binding'], response=request['mode']=='copy')
         if request['mode'] in ('input','input-first-owned'):
             facts = controller.submit(request['value'], request['mode']=='input-first-owned')
         else:

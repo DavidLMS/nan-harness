@@ -693,4 +693,64 @@ class NativeAdapterWiringTests(unittest.TestCase):
             self.assertEqual(native.hit(button,frame),expected)
             self.assertEqual(calls,[(frame,'GetAccessibleAtPoint','org.a11y.atspi.Component',(25,40,0))])
 
+class ResponseFrameRestoreTests(unittest.TestCase):
+    def restored(self, **options):
+        adapter,old,_=ResponseTests.case(self)
+        binding=old.binding();binding['editor']=['r','editor'];binding['frame']=['r','frame'];adapter.copy_actions=0
+        new_editor='editor2' if options.get('replaced') else 'editor'
+        for method in ('owner','identity','children','parent','state','bounds'):
+            original=getattr(adapter,method)
+            def call(node,*args,method=method,original=original):
+                node=node[1] if isinstance(node,tuple) else node
+                if options.get('replaced') and node=='editor':
+                    raise AssertionError('old detached editor was queried')
+                target='editor' if node=='editor2' else node
+                value=original(target,*args)
+                if method=='children' and node=='frame':
+                    value=[new_editor if item=='editor' else item for item in value]
+                    if options.get('duplicate'):value.append(new_editor)
+                    if options.get('absent'):value=[item for item in value if item!=new_editor]
+                if method=='parent' and node=='frame' and options.get('detached'):return 'foreign-parent'
+                if method=='owner' and node==new_editor and options.get('foreign'):return 8
+                if method=='state' and node==new_editor and options.get('hidden'):return 0
+                if method=='bounds' and node==new_editor:return (20,20,300,80) if not options.get('off_frame') else (900,20,30,30)
+                if method=='bounds' and node=='frame' and options.get('moved_frame'):return (1,0,800,600)
+                if method=='children':return [('r',item) for item in value]
+                if method=='parent':return value if isinstance(value,tuple) else ('r',value)
+                return value
+            setattr(adapter,method,call)
+        for method in ('attributes','focused','actions','invoke_once','hit'):
+            original=getattr(adapter,method)
+            def call(node,*args,original=original):
+                return original(node[1] if isinstance(node,tuple) else node,*args)
+            setattr(adapter,method,call)
+        if options.get('guard_loss'):adapter.guard=lambda:False
+        controller=chat.Controller(adapter,dict(pid=7,bus='r',path='root'),1,adapter.clock,adapter.sleep)
+        return adapter,controller,binding
+
+    def test_moved_or_remounted_editor_only_refreshes_response_scope(self):
+        for options in ({},{'replaced':True}):
+            adapter,controller,binding=self.restored(**options)
+            controller.restore(binding,response=True)
+            facts=controller.copy_response('private-marker')
+            self.assertTrue(facts['responseVerified']);self.assertEqual(adapter.copy_actions,1)
+            self.assertEqual(adapter.paste_count,0);self.assertEqual(adapter.focus_count,0)
+            with self.assertRaises(chat.Rejected):adapter.key_guard()
+
+    def test_original_frame_and_source_negatives_never_copy(self):
+        for options in ({'duplicate':True},{'absent':True},{'foreign':True},{'hidden':True},
+                {'off_frame':True},{'moved_frame':True},{'detached':True},{'guard_loss':True}):
+            adapter,controller,binding=self.restored(**options)
+            with self.assertRaises(Exception):controller.restore(binding,response=True)
+            self.assertEqual(adapter.copy_actions,0);self.assertEqual(adapter.paste_count,0)
+        adapter,controller,binding=self.restored(replaced=True)
+        adapter.now=2
+        with self.assertRaises(TimeoutError):controller.restore(binding,response=True)
+        self.assertEqual(adapter.copy_actions,0)
+
+    def test_input_restore_still_rejects_old_editor_movement(self):
+        adapter,controller,binding=self.restored()
+        with self.assertRaises(chat.Rejected):controller.restore(binding)
+        self.assertEqual(adapter.paste_count,0);self.assertEqual(adapter.copy_actions,0)
+
 if __name__=='__main__':unittest.main()
