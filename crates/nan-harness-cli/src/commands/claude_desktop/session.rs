@@ -678,6 +678,221 @@ pub(super) fn reject_symlink(path: &Path) -> Result<(), ClaudeDesktopError> {
 mod configuration_persist_tests {
     use super::*;
     use std::os::windows::fs::OpenOptionsExt as _;
+    #[cfg(feature = "desktop-qualification")]
+    #[derive(Clone, Copy, serde::Serialize)]
+    enum PrimitiveIoError {
+        #[serde(rename = "5")]
+        AccessDenied,
+        #[serde(rename = "32")]
+        SharingViolation,
+        #[serde(rename = "other")]
+        Other,
+    }
+    #[cfg(feature = "desktop-qualification")]
+    #[derive(Clone, Copy, Default, serde::Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct PrimitiveStage {
+        attempted: bool,
+        succeeded: bool,
+        raw_os_error: Option<PrimitiveIoError>,
+    }
+    #[cfg(feature = "desktop-qualification")]
+    impl PrimitiveStage {
+        fn from_result<T>(result: &std::io::Result<T>) -> Self {
+            Self {
+                attempted: true,
+                succeeded: result.is_ok(),
+                raw_os_error: result
+                    .as_ref()
+                    .err()
+                    .map(|error| match error.raw_os_error() {
+                        Some(5) => PrimitiveIoError::AccessDenied,
+                        Some(32) => PrimitiveIoError::SharingViolation,
+                        _ => PrimitiveIoError::Other,
+                    }),
+            }
+        }
+    }
+    #[cfg(feature = "desktop-qualification")]
+    #[derive(Default, serde::Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct PrimitiveStages {
+        setup: PrimitiveStage,
+        source_attributes: PrimitiveStage,
+        source_delete_open: PrimitiveStage,
+        absent_destination_std_rename: PrimitiveStage,
+        target_delete_open: PrimitiveStage,
+        target_blocked_std_rename: PrimitiveStage,
+        original_preserved: bool,
+        replacement_preserved: bool,
+    }
+    #[cfg(feature = "desktop-qualification")]
+    impl PrimitiveStages {
+        fn expected(&self) -> bool {
+            self.setup.succeeded
+                && self.source_attributes.succeeded
+                && self.source_delete_open.succeeded
+                && self.absent_destination_std_rename.succeeded
+                && matches!(
+                    self.target_delete_open.raw_os_error,
+                    Some(PrimitiveIoError::SharingViolation)
+                )
+                && matches!(
+                    self.target_blocked_std_rename.raw_os_error,
+                    Some(PrimitiveIoError::AccessDenied | PrimitiveIoError::SharingViolation)
+                )
+                && self.original_preserved
+                && self.replacement_preserved
+        }
+    }
+    #[cfg(feature = "desktop-qualification")]
+    // Query DELETE sharing without changing data, attributes, DACL, or pathname.
+    fn primitive_delete_open(path: &Path) -> std::io::Result<File> {
+        fs::OpenOptions::new()
+            .access_mode(0x0001_0000)
+            .share_mode(7)
+            .custom_flags(0x0020_0000)
+            .open(path)
+    }
+    #[cfg(feature = "desktop-qualification")]
+    fn primitive_prelaunch_roots(workspace: &Path) -> std::io::Result<Vec<File>> {
+        let local = workspace.join("profile/home/AppData/Local");
+        let roaming = workspace.join("profile/home/AppData/Roaming");
+        nan_harness_private_fs::create_private_dir_all(&local)?;
+        nan_harness_private_fs::create_private_dir_all(&roaming)?;
+        let lease = |path: &Path| {
+            fs::OpenOptions::new()
+                .read(true)
+                .share_mode(1)
+                .custom_flags(0x0200_0000 | 0x0020_0000)
+                .open(path)
+        };
+        let mut held = local
+            .ancestors()
+            .map(lease)
+            .collect::<std::io::Result<Vec<_>>>()?;
+        held.push(lease(&roaming)?);
+        for root in [roaming.join("Claude"), local.join("Claude-3p")] {
+            nan_harness_private_fs::create_private_dir(&root)?;
+            held.push(lease(&root)?);
+        }
+        Ok(held)
+    }
+    #[cfg(feature = "desktop-qualification")]
+    fn primitive_stages(
+        workspace: &Path,
+        leased: bool,
+        close_writer: bool,
+        retain_source: bool,
+    ) -> PrimitiveStages {
+        let mut record = PrimitiveStages::default();
+        let result = (|| -> std::io::Result<()> {
+            let _parents = if leased {
+                primitive_prelaunch_roots(workspace)?
+            } else {
+                Vec::new()
+            };
+            let directory = if leased {
+                workspace.join("profile/home/AppData/Roaming/Claude")
+            } else {
+                workspace.to_owned()
+            };
+            let mut source = tempfile::Builder::new().make_in(&directory, open_private_new)?;
+            source.write_all(b"original")?;
+            source.as_file().sync_all()?;
+            let (written, temporary) = source.into_parts();
+            let written = if close_writer {
+                drop(written);
+                None
+            } else {
+                Some(written)
+            };
+            let _reader = if retain_source {
+                Some(retained_rename_source(&temporary, 5)?)
+            } else {
+                None
+            };
+            record.setup = PrimitiveStage::from_result(&Ok(()));
+            // tempfile::keep uses exactly the same SetFileAttributesW(NORMAL)
+            // primitive as tempfile::persist, isolated before rename dispatch.
+            let source = temporary.keep().map_err(|error| error.error);
+            record.source_attributes = PrimitiveStage::from_result(&source);
+            let Ok(source) = source else {
+                return Ok(());
+            };
+            let probe = primitive_delete_open(&source);
+            record.source_delete_open = PrimitiveStage::from_result(&probe);
+            drop(probe);
+            let destination = directory.join("primitive-destination.json");
+            let rename = fs::rename(&source, &destination);
+            record.absent_destination_std_rename = PrimitiveStage::from_result(&rename);
+            if rename.is_err() {
+                return Ok(());
+            }
+            // Target sharing is isolated from the source's earlier writer state.
+            drop(written);
+            let target = fs::OpenOptions::new()
+                .read(true)
+                .share_mode(1)
+                .open(&destination)?;
+            let probe = primitive_delete_open(&destination);
+            record.target_delete_open = PrimitiveStage::from_result(&probe);
+            drop(probe);
+            let mut replacement = tempfile::Builder::new().make_in(&directory, open_private_new)?;
+            replacement.write_all(b"replacement")?;
+            replacement.as_file().sync_all()?;
+            let (replacement_file, replacement_path) = replacement.into_parts();
+            let replacement_file = if close_writer {
+                drop(replacement_file);
+                None
+            } else {
+                Some(replacement_file)
+            };
+            let rename = fs::rename(&replacement_path, &destination);
+            record.target_blocked_std_rename = PrimitiveStage::from_result(&rename);
+            record.original_preserved = fs::read(&destination)? == b"original";
+            record.replacement_preserved = fs::read(&replacement_path)? == b"replacement";
+            drop(target);
+            drop(replacement_file);
+            Ok(())
+        })();
+        if let Err(error) = result {
+            record.setup = PrimitiveStage::from_result(&Err::<(), _>(error));
+        }
+        record
+    }
+    #[cfg(feature = "desktop-qualification")]
+    #[test]
+    fn configuration_persist_primitive_stage_diagnostics() {
+        let mut records = Vec::new();
+        let mut passed = true;
+        for (kind, leased, closed, retained) in [
+            ("ordinary-open", false, false, false),
+            ("ordinary-closed", false, true, false),
+            ("qualification-closed", true, true, false),
+            ("qualification-retained-reader", true, true, true),
+        ] {
+            let outcome = (|| -> std::io::Result<PrimitiveStages> {
+                let temporary = tempfile::tempdir()?;
+                let workspace = temporary.path().canonicalize()?;
+                let record = primitive_stages(&workspace, leased, closed, retained);
+                Ok(record)
+            })();
+            let record = outcome.unwrap_or_else(|error| PrimitiveStages {
+                setup: PrimitiveStage::from_result(&Err::<(), _>(error)),
+                ..PrimitiveStages::default()
+            });
+            passed &= record.expected();
+            records.push(serde_json::json!({"kind":kind,"stages":record}));
+        }
+        println!(
+            "{}",
+            serde_json::json!({"schemaVersion":1,"mechanism":"windows-preinstall-persist-primitives",
+            "diagnosticsOnly":true,"records":records})
+        );
+        assert!(passed, "preinstall persistence primitive contract failed");
+    }
+
     // This child executes only configuration/session bookkeeping with placeholders.
     // No DesktopProcess, bridge listener, vendor executable or native query is used.
     #[cfg(feature = "desktop-qualification")]
