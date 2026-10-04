@@ -91,19 +91,33 @@ struct ChatInput {
         keys[3].ki.wVk=VK_CONTROL;keys[3].ki.dwFlags=KEYEVENTF_KEYUP;
         return within() && SendInput(4,keys,sizeof(INPUT))==4;
     }
-    bool clipboard_write(const std::wstring& text) {
-        if(!owned())return false;
+    const char* clipboard_write(const std::wstring& text) {
+        if(!owned())return time_left()?"clipboard-guard-before":"clipboard-deadline-before";
         HWND owner=CreateWindowExW(0,L"STATIC",L"",0,0,0,0,0,HWND_MESSAGE,nullptr,GetModuleHandleW(nullptr),nullptr);
-        if(!owner)return false;
+        if(!owner)return "clipboard-owner";
         const auto bytes=(text.size()+1)*sizeof(wchar_t);
-        HGLOBAL memory=GlobalAlloc(GMEM_MOVEABLE,bytes);bool transferred=false,success=false;
+        HGLOBAL memory=GlobalAlloc(GMEM_MOVEABLE,bytes);bool transferred=false;
+        const char* failure=memory?nullptr:"clipboard-allocation";
         if(memory) {
             void* locked=GlobalLock(memory);
-            if(locked) {
+            if(!locked)failure="clipboard-lock";
+            else {
                 memcpy(locked,text.c_str(),bytes);GlobalUnlock(memory);
-                if(OpenClipboard(owner)) {
-                    if(EmptyClipboard() && within() && SetClipboardData(CF_UNICODETEXT,memory))transferred=true;
-                    success=CloseClipboard() && transferred;
+                const bool opened=uia_chat_acquire_clipboard([&]{return OpenClipboard(owner)!=FALSE;},
+                    [&]{return within();},[&]{return collection.guard();},
+                    []{std::this_thread::sleep_for(std::chrono::milliseconds(20));});
+                if(!opened)failure=time_left()?"clipboard-guard-before":"clipboard-open-deadline";
+                else {
+                    // An acquisition may complete after the original cutoff.
+                    // Close its lock, but never Empty/Set in that case.
+                    if(!within())failure="clipboard-open-deadline";
+                    else if(!collection.guard())failure=time_left()?"clipboard-guard-before":"clipboard-open-deadline";
+                    else if(!EmptyClipboard())failure="clipboard-empty";
+                    else if(!within())failure="clipboard-open-deadline";
+                    else if(!SetClipboardData(CF_UNICODETEXT,memory))failure="clipboard-set";
+                    else transferred=true;
+                    const bool closed=CloseClipboard()!=FALSE;
+                    if(!closed && !failure)failure="clipboard-close";
                 }
             }
             if(!transferred) {
@@ -111,7 +125,9 @@ struct ChatInput {
                 GlobalFree(memory);
             }
         }
-        DestroyWindow(owner);return success && owned();
+        DestroyWindow(owner);
+        if(failure)return failure;
+        return owned()?nullptr:time_left()?"clipboard-guard-after":"clipboard-deadline-after";
     }
     std::optional<bool> clipboard_matches(const std::wstring& expected) {
         if(!owned() || !OpenClipboard(nullptr))return std::nullopt;
@@ -199,7 +215,7 @@ struct ChatInput {
         if(!collection.source_control(control.Get(),UIA_ButtonControlTypeId,name,bounds,enabled)
             || !enabled || !fresh_scope(scope,control.Get(),name,bounds))return "control";
         if(mode=="retry-ready")return "retry-ready";
-        if(mode=="copy" && !clipboard_write(sentinel))return "response-mismatch";
+        if(mode=="copy")if(const char* failure=clipboard_write(sentinel))return failure;
         ComPtr<IUIAutomationInvokePattern> action;
         if(FAILED(control->GetCurrentPatternAs(UIA_InvokePatternId,IID_PPV_ARGS(&action))) || !action
             || !fresh_scope(scope,control.Get(),name,bounds) || !within())return "control";
@@ -223,7 +239,7 @@ struct ChatInput {
         if(FAILED(editor->SetFocus()))return "input-focus-setting";
         if(!wait_focus())return "input-focused-identity";
         if(!key('A'))return "input-replace-select-key";
-        if(!clipboard_write(prompt))return "input-prompt-clipboard";
+        if(const char* failure=clipboard_write(prompt))return failure;
         if(focus()!=UiaChatInputValue::Ready)return "input-focused-identity";
         BSTR previous=nullptr;
         const HRESULT previous_result=value->get_CurrentValue(&previous);
@@ -234,7 +250,7 @@ struct ChatInput {
         if(!key('V'))return "input-paste-key";
         if(!uia_chat_settle([&]{return pasted();},[&]{return within();},
             []{std::this_thread::sleep_for(std::chrono::milliseconds(20));}))return "input-value-mismatch";
-        if(!clipboard_write(sentinel))return "input-sentinel-clipboard";
+        if(const char* failure=clipboard_write(sentinel))return failure;
         if(!key('A'))return "input-readback-select-key";
         if(!key('C'))return "input-readback-copy-key";
         // Clipboard copy may settle, but neither Copy nor any key is repeated.

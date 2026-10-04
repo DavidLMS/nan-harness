@@ -762,7 +762,7 @@ class Controller:
             editorIdentity=self.sealed_editor[0],editorBounds=self.sealed_editor[1],
             frameIdentity=self.sealed_frame[0],frameBounds=self.sealed_frame[1])
 
-    def restore(self, binding, response=False):
+    def load_binding(self, binding):
         if type(binding) is not dict or set(binding) != {'editor','frame','editorIdentity',
                 'editorBounds','frameIdentity','frameBounds'}:
             raise Rejected()
@@ -771,6 +771,9 @@ class Controller:
         self.sealed_editor = (tuple(binding['editorIdentity']),tuple(binding['editorBounds']))
         self.sealed_frame = (tuple(binding['frameIdentity']),tuple(binding['frameBounds']))
         self.restored = True
+
+    def restore(self, binding, response=False):
+        self.load_binding(binding)
         if response:
             self.restore_response_editor()
         else:
@@ -885,7 +888,11 @@ class Controller:
         if len({p for p,_ in history}) != len(history) or len({m for _,m in history}) != len(history):
             raise Rejected('policy')
         # Load the original frame without querying or adopting the old editor.
-        self.restore(binding,response=True)
+        self.load_binding(binding)
+        self.response_only = True
+        # next_history_scope already validates the original frame, complete tree,
+        # Chat mode and prior turns. A preceding response-only full traversal
+        # would duplicate the same work before any input is possible.
         before,nodes = self.next_history_scope(history,include_nodes=True)
         editors = [node for node,identity in nodes if identity[0] in (61,78,79)
             and 'Write your prompt to Claude' in identity[1:]]
@@ -1503,6 +1510,8 @@ def main():
             if facts['stage'] == 'source':
                 facts['stage'] = 'blocked'
             controller.failure(error)
+            if isinstance(error, TimeoutError):
+                facts['stage'] = 'deadline'
         else:
             facts['failureBoundary'] = error.boundary if isinstance(error, Rejected) and error.boundary else boundary
     if custody is not None:

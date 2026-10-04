@@ -1209,11 +1209,16 @@ class EmptyInputDriftTests(unittest.TestCase):
 
 
 class MainPacketTests(unittest.TestCase):
-    def packet(self, mode='input-next-empty-class', change=False):
+    def packet(self, mode='input-next-empty-class', change=False, restore_timeout=False):
         import io,json,sys
         from unittest.mock import patch
         a,c,b,h=EmptyClassCapabilityTests.fixture(self)
         if change:a.empty_class_witness=None
+        if restore_timeout:
+            def expired(*args):
+                c.boundary='tree-identity'
+                raise TimeoutError()
+            c.restore_next_input=expired
         class Custody:
             def __init__(self,*args):pass
             def verify(self):return True
@@ -1233,6 +1238,13 @@ class MainPacketTests(unittest.TestCase):
     def test_missing_decoration_main_emits_closed_diagnostic_packet(self):
         p=self.packet(change=True);self.assertEqual(p['facts']['stage'],'input-not-empty')
         self.assertEqual(p['facts']['failureBoundary'],'input');self.assertFalse(p['facts']['pasteAttempted'])
+    def test_restore_timeout_is_preserved_before_submit_and_never_dispatches(self):
+        p=self.packet(restore_timeout=True)
+        self.assertEqual(p['facts']['stage'],'deadline')
+        self.assertEqual(p['facts']['failureBoundary'],'tree-identity')
+        self.assertFalse(p['facts']['pasteAttempted'])
+        self.assertFalse(p['facts']['sendAttempted'])
+        self.assertIsNone(p['binding'])
     def test_invalid_mode_main_emits_request_rejection_packet(self):
         p=self.packet(mode='unrecognized');self.assertEqual(p['facts']['stage'],'blocked')
         self.assertEqual(p['facts']['failureBoundary'],'request');self.assertIsNone(p['binding'])

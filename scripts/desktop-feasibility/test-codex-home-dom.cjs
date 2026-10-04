@@ -19,8 +19,22 @@ function shape(change={}) {
 }
 assert.equal(shape(),true);
 for(const key of ['duplicate','foreign','modal','conversation','disabled','detached','wrongHome','overflow'])assert.equal(shape({[key]:true}),false,key);
+function buttonSample(change={}) {
+ const parent={isConnected:true,parentElement:null};
+ const button={tagName:'BUTTON',isConnected:true,parentElement:parent,disabled:!!change.disabled,readOnly:false,
+  getAttribute:()=>null,closest:()=>null,getBoundingClientRect:()=>({left:10,top:10,width:100,height:40}),
+  clientLeft:0,clientTop:0,clientWidth:100,clientHeight:40,contains:()=>false};
+ const document={querySelectorAll:()=>[],elementFromPoint:()=>change.covered?{}:button};
+ parent.ownerDocument=button.ownerDocument=document;
+ return vm.runInNewContext(`(${sampleEditor})(button,'button')`,{button,document,innerWidth:800,innerHeight:600,
+  getComputedStyle:e=>({display:'block',visibility:'visible',pointerEvents:e===parent||change.pointerDisabled?'none':'auto'})});
+}
+assert.equal(buttonSample().points.length,9,'child button opts into parent disabled hit area');
+assert.equal(buttonSample({pointerDisabled:true}).blocked,'pointer-disabled');
+assert.equal(buttonSample({covered:true}).points.length,0);
+assert.equal(buttonSample({disabled:true}).blocked,'disabled');
 async function trial(change={}) {
- let text=change.draft?'PRIVATE existing draft':'',sent=false,fills=0,clicks=0,replaced=false,owned=true,homeReads=0;
+ let text=change.draft?'PRIVATE existing draft':'',sent=false,fills=0,clicks=0,replaced=false,owned=true,homeReads=0,sendReads=0;
  const input={tagName:change.wrongTag?'BUTTON':'DIV',disabled:!!change.disabled,readOnly:!!change.readonly,classList:{contains:k=>k==='ProseMirror'},
   getAttribute:k=>k==='contenteditable'?'true':null,closest:()=>change.inert?{}:null,parentElement:null,
   get isConnected(){return !replaced;},get textContent(){return text;},
@@ -36,15 +50,17 @@ async function trial(change={}) {
   fill:async prompt=>{fills++;text=change.readback?'wrong':prompt;if(change.ownerAfterFill)owned=false;}};
  const handle={evaluate:async()=>({rect:[0,0,10,10],points:[{x:5,y:5}]}),dispose:async()=>{},
   click:async()=>{clicks++;sent=true;replaced=true;if(change.ownerAfterSend)owned=false;}};
- const send={count:async()=>1,isEnabled:async()=>true,elementHandle:async()=>handle,evaluate:async()=>true};
+ const send={count:async()=>{sendReads++;return change.duplicateSend?2:change.sendMissing?0:change.busySend&&sendReads<3?0:1;},isEnabled:async()=>!change.sendDisabled,elementHandle:async()=>handle,evaluate:async()=>true};
  const publicDOM={home:{status:'observed',homeComposerCount:0,pendingTextareaCount:0,proseMirrorEditableCount:0,workspaceControlCount:0},editable:{status:'observed',editableCount:0,codexThreadCount:0,classicChatGPTCount:0}};
  const page={evaluate:async(fn,arg)=>fn.name==='codingScope'?(arg?{publicDOM}:false):fn.name==='homeComposerScope'?(homeReads++,change.ownerDuringReadiness&&(owned=false),!change.notReady&&homeReads>(change.delayed?2:0)):
   {userCount:sent?1:0,assistantCount:sent?1:0,responseVerified:sent&&!change.wrongMarker},
   locator:selector=>selector.includes('ProseMirror')?editor:{getByRole:()=>send}};
- const facts=await runTurn(page,async()=>owned,{timeoutMs:1000,action:'submit',purpose:'response',prompt:'Check this connection',expectedMarker:'nonce'},Date.now()+(change.notReady?35:500));
+ const facts=await runTurn(page,async()=>owned,{timeoutMs:1000,action:'submit',purpose:'response',prompt:'Check this connection',expectedMarker:'nonce'},Date.now()+(change.notReady||change.sendMissing||change.sendDisabled?35:500));
  return {facts,fills,clicks,homeReads};
 }
 (async()=>{
+ const busy=await trial({busySend:true});assert.equal(busy.facts.responseVerified,true);assert.equal(busy.clicks,1);
+ for(const key of ['sendMissing','sendDisabled','duplicateSend']){const blocked=await trial({[key]:true});assert.equal(blocked.fills,1);assert.equal(blocked.clicks,0);assert.equal(blocked.facts.errorCategory,'action-uncertain');}
  const delayed=await trial({delayed:true});assert.equal(delayed.facts.responseVerified,true);assert(delayed.homeReads>=3);assert.equal(delayed.fills,1);
  const waiting=await trial({notReady:true});assert.equal(waiting.facts.composerAdmissionFailure,'scope-not-ready');assert.equal(waiting.facts.composerReadinessObservation.homeComposerCount,0);assert.equal(waiting.fills,0);assert.equal(waiting.clicks,0);
  const ownerWait=await trial({ownerDuringReadiness:true});assert.equal(ownerWait.facts.errorCategory,'ownership-lost');assert.equal(ownerWait.fills,0);assert.equal(ownerWait.facts.composerAdmissionFailure,undefined);

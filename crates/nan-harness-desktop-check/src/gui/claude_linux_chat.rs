@@ -897,6 +897,12 @@ impl ClaudeLinuxChatSession<'_> {
             .as_str()
             .ok_or(Reason::ActionUnsupported)?
             .clone_into(&mut self.stage);
+        if self.stage == "deadline" || Instant::now() >= deadline {
+            // Preserve an exhausted helper budget before another native-window
+            // query obscures it as a foreground failure. No later input is allowed.
+            self.stage = "deadline".into();
+            return Err(Reason::Timeout);
+        }
         if !self.gui.visual.linux_passive_composer_guard_until(deadline) {
             self.stage = "blocked".into();
             self.failure_boundary = Some(FailureBoundary::NativeWindow);

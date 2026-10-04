@@ -28,6 +28,17 @@ inline bool uia_chat_settle(Query query, Within within, Pause pause) {
     }
     return false;
 }
+// Only clipboard lock acquisition may settle. The caller owns a successful
+// lock (even if its call crossed the cutoff) and must close it without mutation.
+template<class Open, class Within, class Guard, class Pause>
+inline bool uia_chat_acquire_clipboard(Open open, Within within, Guard guard, Pause pause) {
+    while (within() && guard()) {
+        if (open()) return true;
+        if (!within()) return false;
+        pause();
+    }
+    return false;
+}
 inline std::optional<std::string> uia_chat_frame(std::istream& input) {
     char wire[16385]{};
     if (!input.getline(wire,sizeof(wire)) || input.eof()

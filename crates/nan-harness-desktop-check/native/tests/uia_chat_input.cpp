@@ -1,7 +1,32 @@
 #include "../uia_chat_input.hpp"
 #include <cassert>
 #include <sstream>
+static void clipboard_acquisition_contract() {
+    unsigned opens=0,pauses=0,mutations=0,closes=0;bool within=true,guard=true;
+    auto run=[&](unsigned failures,bool late,bool lose_guard) {
+        opens=pauses=mutations=closes=0;within=guard=true;
+        const bool acquired=uia_chat_acquire_clipboard([&] {
+            ++opens;if(opens<=failures)return false;
+            if(late)within=false;return true;
+        },[&]{return within;},[&]{return guard;},[&]{
+            ++pauses;if(lose_guard)guard=false;if(pauses>=3)within=false;
+        });
+        if(acquired) {if(within&&guard)++mutations;++closes;}
+        return acquired;
+    };
+    assert(run(0,false,false));assert(opens==1&&pauses==0&&mutations==1&&closes==1);
+    assert(run(2,false,false));assert(opens==3&&pauses==2&&mutations==1&&closes==1);
+    assert(!run(10,false,false));assert(opens==3&&mutations==0&&closes==0);
+    assert(!run(2,false,true));assert(opens==1&&mutations==0&&closes==0);
+    assert(run(0,true,false));assert(opens==1&&mutations==0&&closes==1);
+    opens=0;
+    assert(!uia_chat_acquire_clipboard([&]{++opens;return true;},[]{return false;},[]{return true;},[]{}));
+    assert(opens==0);
+    assert(!uia_chat_acquire_clipboard([&]{++opens;return true;},[]{return true;},[]{return false;},[]{}));
+    assert(opens==0);
+}
 int main() {
+    clipboard_acquisition_contract();
     assert(uia_chat_focus_state(true,true,true,true,true)==UiaChatInputValue::Ready);
     assert(uia_chat_focus_state(true,true,false,true,true)==UiaChatInputValue::Pending);
     for(unsigned index=0;index<4;++index) {

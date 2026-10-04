@@ -115,7 +115,7 @@ function taskContinuation(scope, diagnostic=false) {
   return diagnostic?result:radios.length===0&&acknowledgementNodes.length===1&&start.length===1;
 }
 
-// Qf's optional-capability footer from pinned Linux 26.930.41038.
+// Qf's optional-capability footer from the pinned platform 26.930.41038 assets.
 // This is the ordinary Skip callback; never a permission grant or task replay.
 function optionalCapabilities(scope) {
   const visible=e=>{const r=e.getBoundingClientRect(),s=getComputedStyle(e);
@@ -124,12 +124,14 @@ function optionalCapabilities(scope) {
   const nodes=[...scope.querySelectorAll('*')],buttons=[...scope.querySelectorAll('button')];
   if(nodes.length>4096||buttons.length>4096||scope.querySelectorAll('input[name="conversational-onboarding-inline-role"]').length!==0)return false;
   const ack='Engineering—got it. I can map an unfamiliar codebase, plan and build features, trace bugs across logs and tests, and run checks to verify behavior.';
-  if(nodes.filter(e=>visible(e)&&e.textContent?.trim()===ack&&![...e.children].some(c=>c.textContent?.trim()===ack)).length!==1)return false;
+  // The source task phase can replace the role acknowledgement. Its retained
+  // footer and ordinary Skip remain; Get Started still requires its acknowledgement.
+  if(nodes.filter(e=>visible(e)&&e.textContent?.trim()===ack&&![...e.children].some(c=>c.textContent?.trim()===ack)).length>1)return false;
   if(buttons.some(e=>visible(e)&&e.textContent?.trim()==='Get Started'))return false;
   const skips=buttons.filter(e=>visible(e)&&e.textContent?.trim()==='Skip');
   if(skips.length!==1||skips[0].disabled||skips[0].getAttribute('aria-disabled')==='true')return false;
   const footer=skips[0].parentElement?.parentElement;
-  return !!footer&&scope.contains(footer)&&footer.tagName==='DIV'
+  return !!footer&&nodes.includes(skips[0])&&nodes.includes(footer)&&scope.contains(footer)&&footer.tagName==='DIV'
     &&['relative','flex','shrink-0','flex-col','items-center','gap-3','px-10','pt-8','pb-12'].every(t=>footer.classList.contains(t));
 }
 
@@ -628,8 +630,8 @@ async function run(page, ownerGuard, deadline, rejected, mainGuard, folderTrust,
       const shape=await transitionScope.evaluate(taskContinuation,true);
       facts.taskScopeObservation=shape;
       if(shape?.heldScopeConnected!==true||shape.heldScopeVisible!==true
-          ||shape.roleRadioCount!==0||shape.exactAckLeafCount!==1)return false;
-      const kind=shape.exactGetStartedCount===1?'get-started'
+          ||shape.roleRadioCount!==0)return false;
+      const kind=shape.exactGetStartedCount===1&&shape.exactAckLeafCount===1?'get-started'
         :shape.exactGetStartedCount===0&&skipAdmitted&&await transitionScope.evaluate(optionalCapabilities)?'skip-optional-capabilities':null;
       if(kind===null||taskKind&&taskKind!==kind)return false;
       taskKind=kind;return true;

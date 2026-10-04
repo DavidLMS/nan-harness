@@ -1,5 +1,5 @@
 // Source-bound public Codex coding UI. No application stores, RPCs or injected actions.
-const {sample,candidate,codingScope,sourceRoute}=require('./codex-onboarding.cjs');
+const {candidate,codingScope,sourceRoute}=require('./codex-onboarding.cjs');
 const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 
 function turnObservation({prompt,marker}) {
@@ -27,9 +27,9 @@ function turnObservation({prompt,marker}) {
 
 // Input hit testing has its own public contenteditable contract; button-only
 // onboarding controls cannot establish a ProseMirror editor's actionability.
-function sampleEditor(control) {
+function sampleEditor(control,kind='editor') {
   const blocked=reason=>({blocked:reason});
-  if(control.tagName!=='DIV'||!control.classList.contains('ProseMirror')
+  if(kind==='button'?control.tagName!=='BUTTON':control.tagName!=='DIV'||!control.classList.contains('ProseMirror')
       ||control.getAttribute('contenteditable')!=='true')return blocked('unsupported-control');
   if(!control.isConnected||control.ownerDocument!==document||control.closest('[inert]'))return blocked('detached-or-inert');
   if(control.disabled||control.readOnly||control.getAttribute('aria-disabled')==='true')return blocked('disabled');
@@ -59,12 +59,12 @@ async function ordinaryClick(locator,guard,deadline,attempt,after=guard) {
   if(!await guard()||Date.now()>=deadline||await locator.count()!==1||!await locator.isEnabled())return false;
   const handle=await locator.elementHandle();if(!handle)return false;
   try {
-    const first=await handle.evaluate(sample);if(first.blocked)return false;
+    const first=await handle.evaluate(sampleEditor,'button');if(first.blocked)return false;
     await pause(Math.min(100,Math.max(0,deadline-Date.now())));
     if(!await guard()||!await locator.evaluate((e,held)=>e===held,handle))return false;
-    const second=await handle.evaluate(sample),point=candidate(first,second);if(!point)return false;
+    const second=await handle.evaluate(sampleEditor,'button'),point=candidate(first,second);if(!point)return false;
     if(!await guard()||Date.now()>=deadline)return false;
-    const final=await handle.evaluate(sample);
+    const final=await handle.evaluate(sampleEditor,'button');
     if(!candidate(first,final)||!final.points.some(p=>p.x===point.x&&p.y===point.y))return false;
     if(!await guard()||Date.now()>=deadline)return false;
     attempt();
@@ -168,6 +168,15 @@ async function runTurn(page,guard,request,deadline=Date.now()+request.timeoutMs)
       if(!facts.inputReadback)return stop('input-mismatch');
       if(!await inputGuard(true))return stop('ownership-lost');
       const send=page.locator(composerSelector).getByRole('button',{name:'Send',exact:true});
+      // Streaming may still expose Stop when the response marker first appears.
+      // Wait for ordinary Send without steering/queuing or changing the held draft.
+      while(Date.now()<deadline) {
+        if(!await inputGuard(true))return stop('ownership-lost');
+        const count=await send.count();
+        if(count>1)return stop('action-uncertain');
+        if(count===1&&await send.isEnabled())break;
+        await pause(Math.min(100,Math.max(0,deadline-Date.now())));
+      }
       if(!await ordinaryClick(send,()=>inputGuard(true),deadline,()=>{facts.inputSubmitted=true;},owned))return stop('action-uncertain');
       } finally {await heldEditor.dispose();}
     } else {

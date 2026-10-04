@@ -36,31 +36,34 @@ exact pointer hit; cursor artwork is advisory. Claude Linux's candidate performs
 matching the failed turn; its empty-input witness still rejects unexplained drift.
 None of these candidate changes establishes a new native pass by itself.
 
-The latest joint campaign, [37222871713](https://github.com/DavidLMS/nan-harness/actions/runs/37222871713),
-ran commit `05d6db398cac5f6be5f310c87b8c4dec124404ad`. All six jobs completed;
-none completed acceptance. Codex and Claude Linux stopped at a preinstall lint
-failure, repaired in `71588ac8`; those jobs provide no new application evidence.
-Claude Windows stopped after its first probe because cleanup failed.
+The latest joint campaign, [37224645407](https://github.com/DavidLMS/nan-harness/actions/runs/37224645407),
+ran commit `0cb28aa69f9ca8feff7e1284490d5fe11efc8349`. All six jobs completed;
+none completed acceptance. All six compile on their native runners; the Linux
+preinstall lint blocker is resolved. Application/global cleanup pass in every
+cell. Claude Windows stops after a first clipboard failure and a second
+foreground rejection; its third probe is not run.
 
 | Cell | Latest observed boundary | Next required evidence |
 | --- | --- | --- |
-| Zed Linux | Response/tool pass; Retry dispatched; provider generation count remains 5 before and after Retry in all sessions | A real recovery request and response with explicit GPUI X11 scale 1 |
-| Codex Linux | Latest campaign stops before installation; earlier first responses passed | Full native run after the preinstall lint correction |
-| Codex macOS | Attached DOM receipt rejects initial composer readiness before sampling the editor | Bounded readiness and stable original-target correlation across late inert avatar appearance |
-| Codex Windows | Profile preparation completes in all sessions; later launcher/endpoint correlation fails | Verify atomic child-file replacement under directory leases, then correlate the surviving application process |
-| Claude Linux | Latest campaign stops before installation; earlier first responses passed | Focus-sealed empty-input witness, subsequent turns, and ordinary accessible Retry |
-| Claude Windows | First provider response verified; tree limit and live-target image verification fail | Read the response without duplicated container labels and identify exact remaining tree/image failure |
+| Zed Linux | Response/tool pass; Retry dispatched; provider count stays 5 in all three sessions even at explicit scale 1 | Distinguish missing button activation from a callback that fails before a new provider request |
+| Codex Linux | First response passes in all three sessions; next input reads back exactly but Send rejects before submission | Correct button actionability for child pointer-events overrides and wait for the exact Send control |
+| Codex macOS | All three sessions reach the optional task phase with one Skip, no acknowledgement and no composer | Admit the pinned optional Skip footer after its acknowledgement disappears |
+| Codex Windows | Profile preparation completes; endpoint ownership succeeds dozens of times per session; final renderer receipt absent | Preserve the observer's last completed phase and resolve its remaining onboarding boundary |
+| Claude Linux | First response passes in all three sessions; next-turn preparation fails at differing query boundaries | Remove duplicated pre-input traversal and preserve deadline failures distinctly from ownership failures |
+| Claude Windows | First probe stops before paste at clipboard write; second loses foreground; cleanup now passes | Bounded nonmutating clipboard acquisition and exact remaining acquisition/guard failure |
 
-The grouped candidate permits atomic child-file replacement inside the retained
-Codex Windows profile while preserving the directory's DELETE-sharing denial.
-Claude Windows retains all tree nodes and identities, but omits unused aggregate
-container labels from chat text budgets. Closed subcauses distinguish depth,
-node, label and text limits, and process-image query/open/identity failures.
-Codex waits passively for its public composer within the original deadline;
-closed counts distinguish missing coding UI from editor actionability failure.
-Zed's hosted Linux semantic command sets the upstream-supported
-`GPUI_X11_SCALE_FACTOR=1`, removing Xft/RandR scale inference from the next trial.
-These are candidates, not proven causes or additional native passes.
+The current candidate repairs the Codex Send sampler's inherited-pointer veto
+and recognizes the source-pinned Mac optional Skip footer without requiring a
+role acknowledgement that the task phase can replace. Get Started retains its
+acknowledgement requirement. Claude Windows retries only unsuccessful
+OpenClipboard acquisition within the original cutoff; clipboard mutation and
+input actions are never repeated. Closed stages distinguish acquisition,
+allocation, mutation, guard and deadline failures. Claude Linux reuses its
+next-turn frame/tree/history validation instead of traversing the complete tree
+once more through response-only restoration; pre-submit timeout classification
+is retained. A small synthetic next-input fixture still performs over 2,000
+adapter queries during submit, so repeated full-tree proofs remain a performance
+concern, not a proven native timeout cause. These changes need native evidence.
 
 
 The hidden launch-wrapper option is restricted to deterministic ChatGPT startup

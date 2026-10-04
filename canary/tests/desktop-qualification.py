@@ -2263,6 +2263,7 @@ class QualificationTests(unittest.TestCase):
                      retryAttempted=False, clipboardCleared=True,
                      actionPhase='completed', transportFailure=None)
         stages = ['input-focus-guard', 'input-focus-setting', 'input-focused-identity', 'input-replace-select-key', 'input-prompt-before-guard', 'input-prompt-clipboard', 'input-prompt-after-guard', 'input-paste-key', 'input-readback-before-guard', 'input-sentinel-clipboard', 'input-sentinel-after-guard', 'input-readback-select-key', 'input-readback-select-guard', 'input-readback-copy-key', 'input-collapse-guard', 'input-collapse-key']
+        stages += 'clipboard-owner clipboard-allocation clipboard-lock clipboard-empty clipboard-set clipboard-close clipboard-guard-before clipboard-guard-after clipboard-deadline-before clipboard-deadline-after clipboard-open-deadline'.split()
         with tempfile.TemporaryDirectory() as root:
             path = Path(root) / 'facts.json'
             for stage in stages + ['focus', 'failure-details-ready', 'failure-details-opened']:
