@@ -42,6 +42,37 @@ records Pen as excluded rather than accepted. No test account is authorized.
 Personal-machine isolation and live-provider behavior still require separate
 evidence.
 
+The latest Linux Claude trial, [37200355002](https://github.com/DavidLMS/nan-harness/actions/runs/37200355002)
+(`08577d24`, official `2.9939.4`), sends and independently copies the first
+response in all three fresh sessions; the next input remains blocked. The
+AT-SPI Section/Grouping numeric roles are now used directly rather than ATK
+role values. Copy retains the original frame and grants no keyboard capability.
+
+The isolated Windows compiler trial, [37201830685](https://github.com/DavidLMS/nan-harness/actions/runs/37201830685),
+never installs or runs a vendor application and identifies 26 denied
+`unused_qualifications` errors in the configuration test module. These are
+corrected in `b80298e7`. Earlier aggregate PowerShell steps could hide failures
+in the first Cargo invocations; each invocation now checks its exit code.
+The post-installation failure was therefore not evidence of a configuration
+writer or sharing violation. A fresh complete native result is still required.
+
+[Codex macOS 37200417070](https://github.com/DavidLMS/nan-harness/actions/runs/37200417070)
+observes no native AXWebArea in the retained window. The next fully admitted
+macOS trial enables Chromium renderer accessibility at launch. Its point
+mapping remains read-only and does not waive focus or native hit verification.
+Linux Codex now retains the effective managed `CODEX_HOME` before launch and
+compares a private stable state snapshot with the selected project's exact
+source check icon. This observation does not yet grant Send; effective host
+and initial controller context still need corroboration.
+
+[Zed Linux 37200470498](https://github.com/DavidLMS/nan-harness/actions/runs/37200470498)
+verifies reply and file-tool use, but all sampled Retry points retain an arrow
+cursor. The recorder now freezes events already admitted before its original
+cutoff instead of discarding them when the cursor scan outlasts capture. Event
+headers are advisory; they do not prove GPUI consumed an event or authorize a
+click. The six open cells and the final same-commit production matrix remain
+pending.
+
 Native Zed 1.18.1 qualification on 2026-09-08 passed three complete deterministic
 scenarios on both macOS architectures in run 34265009005, but subsequent input
 verification failures exposed instability. Shorter synthetic prompts restored
