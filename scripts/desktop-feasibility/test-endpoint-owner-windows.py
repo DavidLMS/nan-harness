@@ -40,6 +40,24 @@ class Ownership(unittest.TestCase):
             self.assertEqual(prove('endpoint', 43210, 20, Native(listeners)), 'listener-unavailable')
         self.assertEqual(prove('endpoint', 43210, 20, Native([(40, True)], [(41, True)])), 'listener-unavailable')
 
+    def test_bridge_requires_exact_listener_and_original_launcher_ancestry(self):
+        class Native:
+            def __init__(self, listener, final=None, parents=None):
+                self.values = [listener, listener if final is None else final]
+                self.tree = {40: 20, 20: 10} if parents is None else parents
+            def listeners(self, port):
+                return self.values.pop(0)
+            def parents(self):
+                return self.tree
+            def identity(self, pid):
+                return (pid, 1) if pid in self.tree else None
+        prove = module['prove_bridge']
+        self.assertEqual(prove(43210, 40, 20, Native([(40, True)])), 'true')
+        for listener in ([], [(20, True)], [(41, True)], [(40, False)], [(40, True), (41, True)]):
+            self.assertEqual(prove(43210, 40, 20, Native(listener)), 'listener-unavailable')
+        self.assertEqual(prove(43210, 40, 20, Native([(40, True)], [(41, True)])), 'listener-unavailable')
+        self.assertNotEqual(prove(43210, 40, 20, Native([(40, True)], parents={40: 10,10: 1,20:10})), 'true')
+
     @unittest.skipUnless(sys.platform == 'win32', 'requires native Windows metadata')
     def test_native_snapshot_and_listener_belong_to_this_test_process(self):
         main = module['main']

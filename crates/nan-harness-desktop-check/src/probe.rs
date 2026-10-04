@@ -1007,8 +1007,7 @@ impl ConversationScenario<'_> {
         #[cfg(windows)]
         if let Some(profile) = profile.as_deref_mut() {
             profile.seal_configuration(
-                &self.gate.base_url,
-                self.gate.session_token(),
+                owner.ok_or(Reason::IsolationUnavailable)?,
                 Instant::now() + Duration::from_secs(1),
             )?;
         }

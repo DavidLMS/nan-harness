@@ -270,7 +270,7 @@ jobs:
         env:
           RUST_TEST_THREADS: 1
         run: |
-          cargo test --locked -p nan-harness-cli --features desktop-qualification --lib commands::claude_desktop::qualification_config::tests::windows_binding
+          cargo test --locked -p nan-harness-cli --features desktop-qualification --lib commands::claude_desktop::qualification_config::tests
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo test --locked -p nan-harness-cli --features desktop-qualification --lib commands::claude_desktop::session::configuration_persist_tests
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

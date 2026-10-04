@@ -125,6 +125,12 @@ pub(super) async fn run_ready_session(
         return restore_after(paths, Err(error));
     }
     #[cfg(feature = "desktop-qualification")]
+    if let Err(error) = bridge.with_session_token(|token| {
+        qualification_config::write_bridge_receipt(paths, bridge.base_url(), token)
+    }) {
+        return restore_after(paths, Err(error));
+    }
+    #[cfg(feature = "desktop-qualification")]
     {
         let token = zeroize::Zeroizing::new(bridge.with_session_token(str::to_owned));
         qualification_config::record(paths, bridge.base_url(), &token).await;

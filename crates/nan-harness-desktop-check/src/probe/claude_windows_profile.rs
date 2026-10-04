@@ -14,6 +14,7 @@ const MAX_CONFIG: u64 = 65_536;
 enum SealStage {
     InitialCustody,
     NativePolicy,
+    BridgeAuthority,
     LibraryMetadata,
     LibraryLock,
     DocumentMetadata,
@@ -58,6 +59,102 @@ impl SealObservation {
     }
 }
 
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct BridgeReceipt {
+    schema_version: u8,
+    process_id: u32,
+    base_url: String,
+    token: String,
+}
+impl Drop for BridgeReceipt {
+    fn drop(&mut self) {
+        zeroize::Zeroize::zeroize(&mut self.token);
+    }
+}
+impl BridgeReceipt {
+    fn port(&self) -> Option<u16> {
+        let url = url::Url::parse(&self.base_url).ok()?;
+        (self.schema_version == 1
+            && self.process_id > 1
+            && self.token.len() == 64
+            && self
+                .token
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+            && url.scheme() == "http"
+            && url.host_str() == Some("127.0.0.1")
+            && url.username().is_empty()
+            && url.password().is_none()
+            && url.path() == "/"
+            && url.query().is_none()
+            && url.fragment().is_none())
+        .then(|| url.port())
+        .flatten()
+        .filter(|p| *p > 1)
+    }
+}
+
+fn bridge_process_owned(port: u16, bridge: u32, launcher: u32, deadline: Instant) -> bool {
+    use std::io::Read as _;
+    use std::os::windows::process::CommandExt as _;
+    use std::process::{Command, Stdio};
+    let Some(python) = std::env::var_os("FEASIBILITY_WINDOWS_PROOF_PYTHON").map(PathBuf::from)
+    else {
+        return false;
+    };
+    let Some(script) = std::env::var_os("FEASIBILITY_WINDOWS_PROOF_SCRIPT").map(PathBuf::from)
+    else {
+        return false;
+    };
+    if [python.as_path(), script.as_path()]
+        .iter()
+        .any(|p| !p.is_absolute() || !p.is_file() || p.is_symlink())
+        || launcher <= 1
+        || Instant::now() >= deadline
+    {
+        return false;
+    }
+    let mut command = Command::new(python);
+    command
+        .env_clear()
+        .arg(script)
+        .args([
+            "bridge",
+            &port.to_string(),
+            &bridge.to_string(),
+            &launcher.to_string(),
+        ])
+        .creation_flags(0x0800_0000)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    if let Some(root) = std::env::var_os("SystemRoot") {
+        command.env("SystemRoot", root);
+    }
+    let Ok(mut child) = command.spawn() else {
+        return false;
+    };
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) if status.success() && Instant::now() < deadline => break,
+            Ok(None) if Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(5))
+            }
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return false;
+            }
+        }
+    }
+    let Some(output) = child.stdout.take() else {
+        return false;
+    };
+    let mut bytes = Vec::new();
+    output.take(64).read_to_end(&mut bytes).is_ok() && bytes == b"true" && Instant::now() < deadline
+}
+
 pub(crate) struct FreshClaudeWindowsProfile {
     workspace: PathBuf,
     root: PathBuf,
@@ -65,6 +162,7 @@ pub(crate) struct FreshClaudeWindowsProfile {
     root_directory_index: usize,
     library_directory_index: Option<usize>,
     configuration: Vec<File>,
+    bridge_receipt: Option<File>,
     native: Native,
 }
 fn privacy_label(value: nan_harness_private_fs::OwnedWindowsDacl) -> &'static str {
@@ -305,18 +403,20 @@ impl FreshClaudeWindowsProfile {
             library_directory_index: None,
             directories,
             configuration: Vec::new(),
+            bridge_receipt: None,
             native,
         }))
     }
     pub(crate) fn seal_configuration(
         &mut self,
-        base: &str,
-        token: &str,
+        launcher: u32,
         deadline: Instant,
     ) -> Result<(), Reason> {
         let mut observation = SealObservation::new();
         let result = (|| {
             self.check_initial_seal_custody(deadline, &mut observation)?;
+            observation.stage = SealStage::BridgeAuthority;
+            let (receipt_file, receipt) = self.seal_bridge_authority(launcher, deadline)?;
             let library = self.hold_configuration_library(&mut observation)?;
             let mut documents = Vec::new();
             for (index, path) in [
@@ -334,10 +434,62 @@ impl FreshClaudeWindowsProfile {
                     &mut observation,
                 )?);
             }
-            self.retain_sealed_configuration(documents, base, token, deadline, &mut observation)
+            self.retain_sealed_configuration(
+                documents,
+                &receipt.base_url,
+                &receipt.token,
+                deadline,
+                &mut observation,
+            )?;
+            self.bridge_receipt = Some(receipt_file);
+            Ok(())
         })();
         observation.record(result.is_ok());
         result
+    }
+    fn seal_bridge_authority(
+        &self,
+        launcher: u32,
+        deadline: Instant,
+    ) -> Result<(File, BridgeReceipt), Reason> {
+        use std::os::windows::fs::{MetadataExt as _, OpenOptionsExt as _};
+        let path = self.root.join(".nanh-bridge.private");
+        if !regular(&path, false) || !self.private_ancestors() || Instant::now() >= deadline {
+            return Err(Reason::IsolationUnavailable);
+        }
+        let mut file = std::fs::OpenOptions::new()
+            .read(true)
+            .access_mode(0x8002_0000)
+            .share_mode(1)
+            .custom_flags(0x0020_0000)
+            .open(path)
+            .map_err(|_| Reason::IsolationUnavailable)?;
+        let private = || {
+            file.metadata()
+                .is_ok_and(|m| m.is_file() && m.file_attributes() & 0x400 == 0)
+                && nan_harness_private_fs::classify_owned_windows_dacl(
+                    &file,
+                    nan_harness_private_fs::PrivatePathKind::File,
+                ) == nan_harness_private_fs::OwnedWindowsDacl::Protected
+        };
+        if !private() {
+            return Err(Reason::IsolationUnavailable);
+        }
+        let value = document(&mut file).ok_or(Reason::IsolationUnavailable)?;
+        let receipt: BridgeReceipt =
+            serde_json::from_value(value).map_err(|_| Reason::IsolationUnavailable)?;
+        let port = receipt.port().ok_or(Reason::IsolationUnavailable)?;
+        if !bridge_process_owned(port, receipt.process_id, launcher, deadline)
+            || !self.private_ancestors()
+            || Instant::now() >= deadline
+            || nan_harness_private_fs::classify_owned_windows_dacl(
+                &file,
+                nan_harness_private_fs::PrivatePathKind::File,
+            ) != nan_harness_private_fs::OwnedWindowsDacl::Protected
+        {
+            return Err(Reason::IsolationUnavailable);
+        }
+        Ok((file, receipt))
     }
     fn check_initial_seal_custody(
         &self,
@@ -499,7 +651,8 @@ impl FreshClaudeWindowsProfile {
     }
     pub(crate) fn verifies_owned(&self, workspace: &Path, deadline: Instant) -> bool {
         use std::os::windows::fs::MetadataExt as _;
-        self.configuration.len() == 3
+        self.bridge_receipt.is_some()
+            && self.configuration.len() == 3
             && workspace.canonicalize().ok().as_deref() == Some(self.workspace.as_path())
             && regular(&self.root, true)
             && self.private_ancestors()
@@ -547,6 +700,52 @@ fn owned_directory_custody(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn bridge_receipt_rejects_external_endpoints_credentials_and_unknown_fields() {
+        let valid = serde_json::json!({"schemaVersion":1,"processId":40,
+            "baseUrl":"http://127.0.0.1:43210","token":"a".repeat(64)});
+        let receipt: BridgeReceipt = serde_json::from_value(valid.clone()).unwrap();
+        assert_eq!(receipt.port(), Some(43210));
+        for base in [
+            "http://localhost:43210",
+            "https://127.0.0.1:43210",
+            "http://127.0.0.1:43210/v1",
+            "http://u@127.0.0.1:43210",
+            "http://127.0.0.1:43210?x=1",
+            "http://127.0.0.1:43210#x",
+        ] {
+            let mut value = valid.clone();
+            value["baseUrl"] = serde_json::json!(base);
+            assert_eq!(
+                serde_json::from_value::<BridgeReceipt>(value)
+                    .unwrap()
+                    .port(),
+                None
+            );
+        }
+        for token in ["A".repeat(64), "a".repeat(63), "g".repeat(64)] {
+            let mut value = valid.clone();
+            value["token"] = serde_json::json!(token);
+            assert_eq!(
+                serde_json::from_value::<BridgeReceipt>(value)
+                    .unwrap()
+                    .port(),
+                None
+            );
+        }
+        let mut value = valid.clone();
+        value["schemaVersion"] = serde_json::json!(2);
+        assert_eq!(
+            serde_json::from_value::<BridgeReceipt>(value)
+                .unwrap()
+                .port(),
+            None
+        );
+        let mut value = valid;
+        value["unknown"] = serde_json::json!(true);
+        assert!(serde_json::from_value::<BridgeReceipt>(value).is_err());
+    }
+
     #[test]
     fn retained_owned_root_and_inherited_library_admit_only_readonly_exact_files() {
         use nan_harness_private_fs::{OwnedWindowsDacl as Dacl, PrivatePathKind};

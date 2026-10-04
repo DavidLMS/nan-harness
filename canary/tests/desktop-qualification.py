@@ -4042,7 +4042,7 @@ class ClaudeLinuxTransportCauseTests(unittest.TestCase):
 class ClaudeWindowsProfileSealTests(unittest.TestCase):
     def test_closed_stage_receipts_and_document_indices(self):
         documents={'document-metadata','document-open','document-privacy','document-lock','document-json'}
-        stages=documents|{'initial-custody','native-policy','library-metadata','library-lock',
+        stages=documents|{'initial-custody','native-policy','bridge-authority','library-metadata','library-lock',
             'configuration-values','final-custody','deadline','completed'}
         with tempfile.TemporaryDirectory() as root:
             path=Path(root)/'seal.json'

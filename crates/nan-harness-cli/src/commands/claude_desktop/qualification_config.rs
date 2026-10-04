@@ -378,6 +378,47 @@ pub(super) fn observation_directory(paths: &DesktopPaths) -> Option<PathBuf> {
     Some(directory)
 }
 
+// Qualification-only private authority channel; never place this in public facts.
+pub(super) fn write_bridge_receipt(
+    paths: &DesktopPaths,
+    base_url: &str,
+    token: &str,
+) -> Result<(), super::ClaudeDesktopError> {
+    if !cfg!(windows) || std::env::var("NANH_CLAUDE_WINDOWS_CHAT_ONLY").as_deref() != Ok("1") {
+        return Ok(());
+    }
+    let roots = windows_roots(paths).ok_or(super::ClaudeDesktopError::InvalidStatePath)?;
+    write_private_bridge(&roots[1].join(".nanh-bridge.private"), base_url, token)
+}
+
+fn write_private_bridge(
+    path: &Path,
+    base_url: &str,
+    token: &str,
+) -> Result<(), super::ClaudeDesktopError> {
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct BridgeReceipt<'a> {
+        schema_version: u8,
+        process_id: u32,
+        base_url: &'a str,
+        token: &'a str,
+    }
+    let file =
+        nan_harness_private_fs::open_private_new(path).map_err(super::ClaudeDesktopError::Write)?;
+    serde_json::to_writer(
+        &file,
+        &BridgeReceipt {
+            schema_version: 1,
+            process_id: std::process::id(),
+            base_url,
+            token,
+        },
+    )
+    .map_err(super::ClaudeDesktopError::SerializeConfig)?;
+    file.sync_all().map_err(super::ClaudeDesktopError::Write)
+}
+
 pub(super) async fn record(paths: &DesktopPaths, base_url: &str, token: &str) {
     if cfg!(windows) && windows_roots(paths).is_none() {
         return;
@@ -471,6 +512,26 @@ mod tests {
             "inferenceGatewayApiKey":"synthetic-private-token", "inferenceGatewayAuthScheme":"bearer",
             "modelDiscoveryEnabled":true, "chatTabEnabled":true, "disableDeploymentModeChooser":true})),
         ]
+    }
+
+    #[test]
+    fn bridge_receipt_is_private_exclusive_and_separate_from_public_facts() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join(".nanh-bridge.private");
+        write_private_bridge(&path, "http://127.0.0.1:43210", "synthetic-secret").unwrap();
+        let original = std::fs::read(&path).unwrap();
+        let value: Value = serde_json::from_slice(&original).unwrap();
+        assert_eq!(value["processId"], std::process::id());
+        assert_eq!(value["baseUrl"], "http://127.0.0.1:43210");
+        assert_eq!(value["token"], "synthetic-secret");
+        assert!(write_private_bridge(&path, "http://127.0.0.1:43211", "replacement").is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+        assert_ne!(path.extension().unwrap(), "json");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            assert_eq!(path.metadata().unwrap().permissions().mode() & 0o777, 0o600);
+        }
     }
 
     #[test]

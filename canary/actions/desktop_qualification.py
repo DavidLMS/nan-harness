@@ -1609,7 +1609,7 @@ def semantic_observations(directory, app):
                           observationValid=value['observationValid'], before=value['before'], after=value['after'])
         elif mechanism == 'claude-windows-profile-seal':
             document_stages={'document-metadata','document-open','document-privacy','document-lock','document-json'}
-            stages=document_stages|{'initial-custody','native-policy','library-metadata','library-lock',
+            stages=document_stages|{'initial-custody','native-policy','bridge-authority','library-metadata','library-lock',
                 'configuration-values','final-custody','deadline','completed'}
             fields=set('schemaVersion mechanism diagnosticsOnly stage documentIndex completed'.split())
             privacy_fields={'rootPrivacy','libraryPrivacy','documentPrivacy'}

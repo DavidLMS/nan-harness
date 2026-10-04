@@ -147,7 +147,30 @@ def prove(mode, value, owner, native):
     return verdict
 
 
+def prove_bridge(port, bridge, launcher, native):
+    listeners = native.listeners(port)
+    if listeners != [(bridge, True)]:
+        return 'listener-unavailable'
+    parents = native.parents()
+    if parents is None:
+        return 'process-budget'
+    verdict = ancestry(bridge, launcher, parents, native.identity)
+    if verdict == 'true' and native.listeners(port) != listeners:
+        return 'listener-unavailable'
+    return verdict
+
+
 def main(arguments):
+    if sys.platform == 'win32' and len(arguments) == 4 and arguments[0] == 'bridge':
+        if not all(v.isascii() and v.isdecimal() for v in arguments[1:]):
+            return 'query-failed'
+        port, bridge, launcher = map(int, arguments[1:])
+        if not 1 < port <= 65535 or not all(1 < p <= 2147483647 for p in (bridge, launcher)):
+            return 'query-failed'
+        try:
+            return prove_bridge(port, bridge, launcher, Native())
+        except (OSError, ValueError, OverflowError):
+            return 'query-failed'
     if (sys.platform != 'win32' or len(arguments) != 3
             or arguments[0] not in ('endpoint', 'descendant')
             or not all(value.isascii() and value.isdecimal() for value in arguments[1:])):
