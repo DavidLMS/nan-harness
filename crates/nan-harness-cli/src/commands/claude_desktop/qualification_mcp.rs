@@ -274,7 +274,23 @@ mod tests {
             .join("../../scripts/desktop-feasibility/claude-read-fixture.py");
         let script = root.join("fixture.py");
         std::fs::copy(source, &script).expect("public fixture source");
-        let interpreter = std::env::current_exe().expect("synthetic executable");
+        let interpreter = std::env::current_exe()
+            .expect("synthetic executable")
+            .canonicalize()
+            .expect("canonical synthetic executable");
+        assert!(regular_absolute(&interpreter));
+        assert!(regular_absolute(&script));
+        let source_digest = Sha256::digest(std::fs::read(&script).expect("copied source"));
+        for (byte, encoded) in source_digest
+            .iter()
+            .zip(SOURCE_HASH.as_bytes().chunks_exact(2))
+        {
+            assert_eq!(
+                *byte,
+                u8::from_str_radix(std::str::from_utf8(encoded).unwrap(), 16).unwrap(),
+                "fixture source bytes must survive native checkout unchanged"
+            );
+        }
         let configuration =
             entry(&root, &interpreter, &script, SOURCE_HASH).expect("pinned configuration");
         assert_eq!(configuration["transport"], "stdio");
