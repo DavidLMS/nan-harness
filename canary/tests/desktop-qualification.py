@@ -2483,6 +2483,15 @@ class QualificationTests(unittest.TestCase):
             root=Path(tmp);path=root/'pending.json'
             path.write_text(json.dumps({**value,'initialMainActivation':activation}))
             self.assertEqual(q.semantic_observations(root,'chatgpt-desktop')[0]['initialMainActivation'],activation)
+            levels=dict(menuLevelCount=1,statusLevelCount=0,dockLevelCount=0,otherLevelCount=0)
+            measured={**activation,'nativePendingStack':{**stack,'elevatedLevels':levels}}
+            path.write_text(json.dumps({**value,'initialMainActivation':measured}))
+            self.assertEqual(q.semantic_observations(root,'chatgpt-desktop')[0]['initialMainActivation'],measured)
+            for change in ({'menuLevelCount':True},{'statusLevelCount':1},{'otherLevelCount':1025},
+                           {'rawWindowLevel':'PRIVATE'}, {'dockLevelCount':None}):
+                bad={**measured,'nativePendingStack':{**stack,'elevatedLevels':{**levels,**change}}}
+                path.write_text(json.dumps({**value,'initialMainActivation':bad}))
+                with self.assertRaises(ValueError):q.semantic_observations(root,'chatgpt-desktop')
             for changed in ({**stack,'normalOverlapCount':True},{**stack,'elevatedOverlapCount':0},
                             {**stack,'normalOverlapCount':1024},{**stack,'displayContained':False},
                             {**stack,'sample':'PRIVATE'},{**stack,'title':'PRIVATE'},None):

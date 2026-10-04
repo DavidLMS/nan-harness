@@ -87,12 +87,17 @@ function controller(config,owner,launcher,deadline,run=child.execFileSync,now=Da
       verificationPending=false;
       const result=execute('verify');
       if(result==='pending-external-stack\n'){verificationPending=true;return false;}
-      const pending=/^pending-external-stack (before|after) ([0-9]+) ([0-9]+) ([0-9]+) 1\n$/.exec(result);
+      const pending=/^pending-external-stack (before|after) ([0-9]+) ([0-9]+) ([0-9]+) 1(?: ([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+))?\n$/.exec(result);
       if(pending) {
-        const counts=pending.slice(2).map(Number),total=counts.reduce((a,b)=>a+b,0);
-        if(counts.every(v=>Number.isSafeInteger(v)&&v>=0&&v<=1024)&&total>0&&total<=1024) {
+        const counts=pending.slice(2,5).map(Number),total=counts.reduce((a,b)=>a+b,0);
+        const levels=pending[5]===undefined?null:pending.slice(5).map(Number);
+        if(counts.every(v=>Number.isSafeInteger(v)&&v>=0&&v<=1024)&&total>0&&total<=1024
+            &&(!levels||levels.every(v=>Number.isSafeInteger(v)&&v>=0&&v<=1024)
+              &&levels.reduce((a,b)=>a+b,0)===counts[1])) {
           nativePendingStack={sample:pending[1],normalOverlapCount:counts[0],
             elevatedOverlapCount:counts[1],lowerOverlapCount:counts[2],displayContained:true};
+          if(levels)nativePendingStack.elevatedLevels={menuLevelCount:levels[0],statusLevelCount:levels[1],
+            dockLevelCount:levels[2],otherLevelCount:levels[3]};
           verificationPending=true;return false;
         }
       }

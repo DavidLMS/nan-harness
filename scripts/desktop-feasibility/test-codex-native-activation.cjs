@@ -100,6 +100,10 @@ for(const result of ['pending-external-stack\n','PRIVATE\n']) {
 
 for(const [line,accepted] of [
  ['pending-external-stack after 0 1 0 1\n',true],
+ ['pending-external-stack after 0 1 0 1 1 0 0 0\n',true],
+ ['pending-external-stack after 0 1 0 1 0 0 0 1\n',true],
+ ['pending-external-stack after 0 1 0 1 1 1 0 0\n',false],
+ ['pending-external-stack after 0 1 0 1 1 0 0\n',false],
  ['pending-external-stack before 1 0 0 1\n',true],
  ['pending-external-stack after 0 0 0 1\n',false],
  ['pending-external-stack after 1024 1 0 1\n',false],

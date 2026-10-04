@@ -81,6 +81,7 @@ struct InventoryFailure {
     const char* reason="inventory-unavailable";
     unsigned candidates=0, executable_rejected=0, ancestry_rejected=0;
     unsigned normal_overlap=0, elevated_overlap=0, lower_overlap=0;
+    unsigned menu_level=0, status_level=0, dock_level=0, other_elevated=0;
     bool display_contained=false;
 };
 bool inventory(const Request& r,Binding& result,bool select,InventoryFailure* failure=nullptr,bool activation_only=false,bool* externally_occluded=nullptr) {
@@ -137,7 +138,13 @@ bool inventory(const Request& r,Binding& result,bool select,InventoryFailure* fa
             if(CGRectIntersectsRect(bounds,result.bounds)) {
                 const auto level=number(row,kCGWindowLayer);
                 if(level==0)++observation.normal_overlap;
-                else if(level>0)++observation.elevated_overlap;
+                else if(level>0) {
+                    ++observation.elevated_overlap;
+                    if(level==CGWindowLevelForKey(kCGMainMenuWindowLevelKey))++observation.menu_level;
+                    else if(level==CGWindowLevelForKey(kCGStatusWindowLevelKey))++observation.status_level;
+                    else if(level==CGWindowLevelForKey(kCGDockWindowLevelKey))++observation.dock_level;
+                    else ++observation.other_elevated;
+                }
                 else ++observation.lower_overlap;
             }
             overlapping_ahead=true;
@@ -252,7 +259,8 @@ int codex_activate_main() {
                 CFRelease(first);std::cout<<"pending-external-stack "
                     <<(second_occluded?"after":"before")<<' '<<stack.normal_overlap<<' '
                     <<stack.elevated_overlap<<' '<<stack.lower_overlap<<' '
-                    <<(stack.display_contained?1:0)<<'\n';return 0;
+                    <<(stack.display_contained?1:0)<<' '<<stack.menu_level<<' '<<stack.status_level<<' '
+                    <<stack.dock_level<<' '<<stack.other_elevated<<'\n';return 0;
             }
             auto app=[NSRunningApplication runningApplicationWithProcessIdentifier:held.pid];
             AXUIElementRef application=AXUIElementCreateApplication(held.pid);CFTypeRef focused=nullptr;
