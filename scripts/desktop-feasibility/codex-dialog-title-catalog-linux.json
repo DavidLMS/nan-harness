@@ -1844,6 +1844,18 @@
       "platform": "linux",
       "sha": "24223646bfac751e04c7ae16a773fdd4211b6e17f01f71eb402f00ace4bb4d4f",
       "text": "Lockdown mode is on for this chat"
+    },
+    {
+      "file": "app-initial-39a13ffe060c.js",
+      "id": "appHeader.installUpdate.confirmTitle",
+      "platform": "linux",
+      "sha": "28c6096af241a37a9a33a2e5601f0aa05426910d5c84d08824d852342a2b4d5d",
+      "text": "Update ChatGPT now?",
+      "binding": {
+        "file": "app-shared-30d5903c7657.js",
+        "sha": "c3c9a86a6d9c3a2a8cecaf0a6a22527c69f89949cb0d8958896bc86131e9c6c9",
+        "value": "ChatGPT"
+      }
     }
   ],
   "sourceVersion": "26.930.41038"

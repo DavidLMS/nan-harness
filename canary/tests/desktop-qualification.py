@@ -2926,7 +2926,7 @@ class CodexStaticDialogTitleTests(unittest.TestCase):
                      sourceVersion='26.930.31730', platform='windows',
                      artifactSha256='f7b0266d6c00d4743da01d62bc82488f7ec5560c642501758119cb9885f67c87',
                      wrapperSourceSha256='5e3a36d643393af861d2009584f64289f2247928e793f1985fe12cfec803a40b',
-                     catalogSha256='f8abc1e5d35a52584f7210bfed1a571eff798c962043df1b6457e9f9353fe560',
+                     catalogSha256='12698ae95f606b4a94d51876324674fe91822b7b906ebd694e96adb4c9fd3c34',
                      status='guard-rejected', titleReferenceCount=None, matchCount=None,
                      sourceTitleIds=[], sourceTitleEmpty=None, rejectionStage='title-tag')
         with tempfile.TemporaryDirectory() as root:
@@ -2951,14 +2951,14 @@ class CodexStaticDialogTitleTests(unittest.TestCase):
                      sourceVersion='26.930.41038', platform='linux',
                      artifactSha256='ee7854145554718d7239d01ea37d44f6ba1e0ba4a93f47ac097d6e0f964da47c',
                      wrapperSourceSha256='c3c9a86a6d9c3a2a8cecaf0a6a22527c69f89949cb0d8958896bc86131e9c6c9',
-                     catalogSha256='26db3a563b0019cc2495c167398aa1e1fc1a2151c696ba08694e1f53a0f9f4c5',
+                     catalogSha256='b7dc280dac5467303d67fd6d169ecb065b2a3eea9dca660c0e8f31e1cf096b88',
                      status='matched', titleReferenceCount=1, matchCount=1,
                      sourceTitleIds=['chatgpt.global_search.modal.title'])
         with tempfile.TemporaryDirectory() as root:
             path = Path(root) / 'title.json'
             path.write_text(json.dumps(value))
             self.assertEqual(q.semantic_observations(root, 'chatgpt-desktop')[0]['sourceVersion'], '26.930.41038')
-            for identity in ('workspaceOnboarding.dialogTitle', 'work.onboarding.role.new.question', 'desktop.windowCloseConfirmation.title', 'chatgptConversations.lockdown.dialog.title'):
+            for identity in ('workspaceOnboarding.dialogTitle', 'work.onboarding.role.new.question', 'desktop.windowCloseConfirmation.title', 'chatgptConversations.lockdown.dialog.title', 'appHeader.installUpdate.confirmTitle'):
                 path.write_text(json.dumps({**value, 'sourceTitleIds': [identity]}))
                 self.assertEqual(q.semantic_observations(root, 'chatgpt-desktop')[0]['sourceTitleIds'], [identity])
                 path.write_text(json.dumps({**value, 'platform': 'windows', 'sourceTitleIds': [identity]}))
@@ -2975,7 +2975,7 @@ class CodexStaticDialogTitleTests(unittest.TestCase):
                      sourceVersion='26.930.41038', platform='macos',
                      artifactSha256='f6cf4d2e9b69aeefa33adda4bcd1a2d306357f5253a1ac6049700870c28dd0c7',
                      wrapperSourceSha256='0703d0aa97450d6d21346e1c79c887a5bf9062cd0069e8251ec03748a33b6dd0',
-                     catalogSha256='cd6abfdffceb3e6765469e4d3745db61a44c9db39222eed03712c819fe3e215a',
+                     catalogSha256='d4a74b4e93e37b64302875ee3ec23dc66fc9ac68e8e000270332e982eee2eeb2',
                      status='matched', titleReferenceCount=1, matchCount=1,
                      sourceTitleIds=['electron.onboarding.conversationalOnboarding.skipDialog.title'])
         with tempfile.TemporaryDirectory() as root:
@@ -2985,7 +2985,7 @@ class CodexStaticDialogTitleTests(unittest.TestCase):
             windows = {**value, 'platform': 'windows', 'sourceVersion': '26.930.31730',
                        'artifactSha256': 'f7b0266d6c00d4743da01d62bc82488f7ec5560c642501758119cb9885f67c87',
                        'wrapperSourceSha256': '5e3a36d643393af861d2009584f64289f2247928e793f1985fe12cfec803a40b',
-                       'catalogSha256': 'f8abc1e5d35a52584f7210bfed1a571eff798c962043df1b6457e9f9353fe560'}
+                       'catalogSha256': '12698ae95f606b4a94d51876324674fe91822b7b906ebd694e96adb4c9fd3c34'}
             path.write_text(json.dumps(windows))
             self.assertEqual(q.semantic_observations(root, 'chatgpt-desktop')[0]['platform'], 'windows')
             for key in ('artifactSha256', 'wrapperSourceSha256', 'catalogSha256'):
@@ -3008,7 +3008,7 @@ class CodexStaticDialogTitleTests(unittest.TestCase):
                         'titleReferenceCount': None if count is None else 1}
                 path.write_text(json.dumps(item))
                 self.assertEqual(q.semantic_observations(root, 'chatgpt-desktop')[0]['status'], status)
-            for identity in ('workspaceOnboarding.dialogTitle', 'work.onboarding.role.new.question', 'desktop.windowCloseConfirmation.title', 'chatgptConversations.lockdown.dialog.title'):
+            for identity in ('workspaceOnboarding.dialogTitle', 'work.onboarding.role.new.question', 'desktop.windowCloseConfirmation.title', 'chatgptConversations.lockdown.dialog.title', 'appHeader.installUpdate.confirmTitle'):
                 path.write_text(json.dumps({**value, 'sourceTitleIds': [identity]}))
                 self.assertEqual(q.semantic_observations(root, 'chatgpt-desktop')[0]['sourceTitleIds'], [identity])
             for failure in ('held-document', 'page-set', 'native-ownership', 'retained-document', 'document-focus', 'catalog-limit'):
@@ -3040,7 +3040,7 @@ class CodexStaticDialogTitleTests(unittest.TestCase):
 
 class CodexCommandMenuShapeTests(unittest.TestCase):
     def test_only_closed_counts_and_exact_platform_catalog_can_be_recorded(self):
-        pins = {'windows': ('26.930.31730', 'f7b0266d6c00d4743da01d62bc82488f7ec5560c642501758119cb9885f67c87', '5e3a36d643393af861d2009584f64289f2247928e793f1985fe12cfec803a40b', 'f8abc1e5d35a52584f7210bfed1a571eff798c962043df1b6457e9f9353fe560'), 'linux': ('26.930.41038', 'ee7854145554718d7239d01ea37d44f6ba1e0ba4a93f47ac097d6e0f964da47c', 'c3c9a86a6d9c3a2a8cecaf0a6a22527c69f89949cb0d8958896bc86131e9c6c9', '26db3a563b0019cc2495c167398aa1e1fc1a2151c696ba08694e1f53a0f9f4c5'), 'macos': ('26.930.41038', 'f6cf4d2e9b69aeefa33adda4bcd1a2d306357f5253a1ac6049700870c28dd0c7', '0703d0aa97450d6d21346e1c79c887a5bf9062cd0069e8251ec03748a33b6dd0', 'cd6abfdffceb3e6765469e4d3745db61a44c9db39222eed03712c819fe3e215a')}
+        pins = {'windows': ('26.930.31730', 'f7b0266d6c00d4743da01d62bc82488f7ec5560c642501758119cb9885f67c87', '5e3a36d643393af861d2009584f64289f2247928e793f1985fe12cfec803a40b', '12698ae95f606b4a94d51876324674fe91822b7b906ebd694e96adb4c9fd3c34'), 'linux': ('26.930.41038', 'ee7854145554718d7239d01ea37d44f6ba1e0ba4a93f47ac097d6e0f964da47c', 'c3c9a86a6d9c3a2a8cecaf0a6a22527c69f89949cb0d8958896bc86131e9c6c9', 'b7dc280dac5467303d67fd6d169ecb065b2a3eea9dca660c0e8f31e1cf096b88'), 'macos': ('26.930.41038', 'f6cf4d2e9b69aeefa33adda4bcd1a2d306357f5253a1ac6049700870c28dd0c7', '0703d0aa97450d6d21346e1c79c887a5bf9062cd0069e8251ec03748a33b6dd0', 'd4a74b4e93e37b64302875ee3ec23dc66fc9ac68e8e000270332e982eee2eeb2')}
         for platform, (version, artifact, wrapper, catalog) in pins.items():
             value = dict(schemaVersion=1, mechanism='codex-static-dialog-title', diagnosticsOnly=True,
                          sourceVersion=version, platform=platform, artifactSha256=artifact,

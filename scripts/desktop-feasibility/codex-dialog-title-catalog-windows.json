@@ -1899,6 +1899,18 @@
       "platform": "windows",
       "sha": "32d7e8ccd7a41f1c03191d367274adbc49a64e1f247bb407800cd17811237960",
       "text": "Lockdown mode is on for this chat"
+    },
+    {
+      "file": "app-initial-74dc12f48352.js",
+      "id": "appHeader.installUpdate.confirmTitle",
+      "platform": "windows",
+      "sha": "7fe079aa06167a43e8f6b638f341f1171474a5980b6d08d6bb9b32613c62a797",
+      "text": "Update ChatGPT now?",
+      "binding": {
+        "file": "app-shared-2d992d47c83d.js",
+        "sha": "5e3a36d643393af861d2009584f64289f2247928e793f1985fe12cfec803a40b",
+        "value": "ChatGPT"
+      }
     }
   ],
   "sourceVersion": "26.930.31730"

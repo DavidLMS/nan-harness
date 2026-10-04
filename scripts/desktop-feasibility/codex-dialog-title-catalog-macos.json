@@ -1993,6 +1993,18 @@
       "platform": "macos",
       "sha": "07cde5692302059f22402b07614cac0a1e7cac3548a56c6a0796e37d3bbfe744",
       "text": "Lockdown mode is on for this chat"
+    },
+    {
+      "file": "app-initial-f5551f754e43.js",
+      "id": "appHeader.installUpdate.confirmTitle",
+      "platform": "mac",
+      "sha": "be620740a6218c263b32e3692ed2e40768624d984662731b0cbb359af47ebe8e",
+      "text": "Update ChatGPT now?",
+      "binding": {
+        "file": "app-shared-574bce91e0d1.js",
+        "sha": "0703d0aa97450d6d21346e1c79c887a5bf9062cd0069e8251ec03748a33b6dd0",
+        "value": "ChatGPT"
+      }
     }
   ],
   "sourceVersion": "26.930.41038"
