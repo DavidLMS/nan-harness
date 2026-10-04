@@ -568,4 +568,129 @@ mod configuration_persist_tests {
         drop(error);
         drop(held);
     }
+    #[test]
+    fn configuration_persist_child_worker() {
+        use std::io::Read as _;
+        if std::env::var("NANH_CONFIGURATION_PERSIST_WORKER").as_deref() != Ok("1") {
+            return;
+        }
+        let mut input = String::new();
+        std::io::stdin()
+            .take(4097)
+            .read_to_string(&mut input)
+            .unwrap();
+        if input.len() > 4096 {
+            std::process::exit(34);
+        }
+        let path = PathBuf::from(input);
+        if !path.is_absolute() || path.is_symlink() || !path.parent().is_some_and(Path::is_dir) {
+            std::process::exit(34);
+        }
+        let result = atomic_write_configuration(
+            &path,
+            b"{\"deploymentMode\":\"3p\"}\n",
+            None,
+            qualification_prelaunch::ConfigurationDocument::NormalConfig,
+        );
+        // Closed exit codes only; no child output or private path is retained.
+        std::process::exit(match result {
+            Ok(()) => 0,
+            Err(ClaudeDesktopError::Write(error)) if error.raw_os_error() == Some(32) => 32,
+            Err(_) => 33,
+        });
+    }
+
+    fn child_configuration_persist(path: &Path) -> Option<i32> {
+        use std::process::{Command, Stdio};
+        use std::time::{Duration, Instant};
+        let mut child = Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "commands::claude_desktop::session::configuration_persist_tests::configuration_persist_child_worker"])
+            .env("NANH_CONFIGURATION_PERSIST_WORKER", "1")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(path.to_str().unwrap().as_bytes())
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                return status.code();
+            }
+            if Instant::now() >= deadline {
+                child.kill().unwrap();
+                child.wait().unwrap();
+                return None;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    #[test]
+    fn configuration_persist_child_with_parent_retained_directory_handles() {
+        let temp = match std::env::var_os("RUNNER_TEMP") {
+            Some(value) => {
+                let directory = PathBuf::from(value);
+                assert!(
+                    directory.is_absolute() && directory.is_dir(),
+                    "invalid runner temporary directory"
+                );
+                tempfile::tempdir_in(directory).unwrap()
+            }
+            None => tempfile::tempdir().unwrap(),
+        };
+        let root = temp.path().canonicalize().unwrap();
+        let app_data = root.join("profile").join("home").join("AppData");
+        let local = app_data.join("Local");
+        let roaming = app_data.join("Roaming");
+        let normal = roaming.join("Claude");
+        let third_party = local.join("Claude-3p");
+        nan_harness_private_fs::create_private_dir_all(&normal).unwrap();
+        nan_harness_private_fs::create_private_dir_all(&third_party).unwrap();
+        let retained: Vec<_> = local
+            .ancestors()
+            .chain([roaming.as_path(), normal.as_path(), third_party.as_path()])
+            .map(|directory| {
+                std::fs::OpenOptions::new()
+                    .read(true)
+                    .share_mode(1)
+                    .custom_flags(0x0200_0000 | 0x0020_0000)
+                    .open(directory)
+                    .unwrap()
+            })
+            .collect();
+        let config = normal.join("claude_desktop_config.json");
+        let while_retained = child_configuration_persist(&config);
+        let while_retained_replace = child_configuration_persist(&config);
+        let third_party_config = third_party.join("claude_desktop_config.json");
+        let local_while_retained = child_configuration_persist(&third_party_config);
+        drop(retained);
+        let after_release = child_configuration_persist(&config);
+        assert_eq!(
+            after_release,
+            Some(0),
+            "child persistence after releasing directories failed"
+        );
+        assert_eq!(
+            while_retained,
+            Some(0),
+            "parent-directory sharing prevented child persistence (closed exit code)"
+        );
+        assert_eq!(
+            while_retained_replace,
+            Some(0),
+            "parent-directory sharing prevented child replacement (closed exit code)"
+        );
+        assert_eq!(
+            local_while_retained,
+            Some(0),
+            "parent-directory sharing prevented local child persistence (closed exit code)"
+        );
+        assert_eq!(fs::read(config).unwrap(), b"{\"deploymentMode\":\"3p\"}\n");
+    }
 }
