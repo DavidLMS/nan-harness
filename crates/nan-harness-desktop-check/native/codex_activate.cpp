@@ -129,8 +129,9 @@ bool attribute(const Request& r,AXUIElementRef element,CFStringRef name,CFTypeRe
     return alive(r)&&AXUIElementSetMessagingTimeout(element,0.1f)==kAXErrorSuccess
         &&AXUIElementCopyAttributeValue(element,name,&value)==kAXErrorSuccess&&value&&alive(r);
 }
-AXUIElementRef main_window(const Request& r,const Binding& held) {
-    if(!AXIsProcessTrusted()||!executable(r,held.pid))return nullptr;
+AXUIElementRef main_window(const Request& r,const Binding& held,const char** boundary=nullptr) {
+    if(!AXIsProcessTrusted()) { if(boundary)*boundary="trust";return nullptr; }
+    if(!executable(r,held.pid))return nullptr;
     AXUIElementRef app=AXUIElementCreateApplication(held.pid);CFTypeRef main=nullptr;
     if(!app)return nullptr;
     bool valid=attribute(r,app,kAXMainWindowAttribute,main);CFRelease(app);
@@ -176,18 +177,27 @@ bool parse(Request& r) {
 }
 }
 #endif
+#if defined(__APPLE__)
+static int activation_rejected(const char* boundary) {
+    std::cout << "activation-rejected " << boundary << '\n';
+    return std::cout ? 5 : 4;
+}
+#endif
 int codex_activate_main() {
 #if defined(__APPLE__)
     @autoreleasepool {
-        Request request;if(!parse(request))return 2;
+        Request request;if(!parse(request))return activation_rejected("request");
         Binding held=request.held;
-        if(!inventory(request,held,!request.action&&!request.verify))return 5;
-        AXUIElementRef first=main_window(request,held);if(!first)return 5;
+        if(!inventory(request,held,!request.action&&!request.verify))return activation_rejected("cg-inventory-before");
+        const char* boundary="ax-main-before";
+        AXUIElementRef first=main_window(request,held,&boundary);if(!first)return activation_rejected(boundary);
         Binding fresh=held;bool valid=inventory(request,fresh,false);
-        AXUIElementRef second=valid?main_window(request,held):nullptr;
+        boundary=valid?"ax-main-after":"cg-inventory-after";
+        AXUIElementRef second=valid?main_window(request,held,&boundary):nullptr;
+        if(valid&&second)boundary="identity";
         valid=valid&&second&&CFEqual(first,second)&&alive(request);
         if(second)CFRelease(second);
-        if(!valid){CFRelease(first);return 5;}
+        if(!valid){CFRelease(first);return activation_rejected(boundary);}
         if(request.verify) {
             auto app=[NSRunningApplication runningApplicationWithProcessIdentifier:held.pid];
             AXUIElementRef application=AXUIElementCreateApplication(held.pid);CFTypeRef focused=nullptr;

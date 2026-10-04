@@ -38,3 +38,14 @@ for(const scenario of ['ready','expired','late','action-error','malformed']) {
 }
 symlink=true;assert.throws(()=>controller(config,20,25,2000));
 console.log('Codex native activation private framing, cutoff, retained binding and consumed action passed');
+
+symlink=false;
+for(const boundary of ['request','cg-inventory-before','ax-main-before','cg-inventory-after','ax-main-after','identity','trust','PRIVATE']) {
+  let calls=0;
+  const native=controller(config,20,25,2000,()=>{
+    calls++;const error=Error('private transport');error.stdout=`activation-rejected ${boundary}\n`;throw error;
+  },()=>1000);
+  assert.throws(()=>native.prepare());
+  assert.equal(native.failure(),boundary==='PRIVATE'?null:boundary);
+  assert.equal(calls,1);
+}

@@ -686,7 +686,7 @@ impl Native {
             mac_fit::record("transport");
             return Err(Reason::WindowChanged);
         }
-        mac_fit::record(stage);
+        mac_fit::record_result(stage, mac_fit::position_error(&output));
         if stage == "completed" {
             Ok(())
         } else {

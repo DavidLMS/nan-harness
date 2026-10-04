@@ -22,18 +22,29 @@ function controller(config,owner,launcher,deadline,run=child.execFileSync,now=Da
     if(typeof file!=='string'||!path.isAbsolute(file)||fs.realpathSync(file)!==file
       ||!fs.lstatSync(file).isFile()||fs.lstatSync(file).isSymbolicLink())throw Error('native activation rejected');
   }
-  let held=null,cutoff=BigInt(config.cutoffNanos),attempted=false;
+  let held=null,cutoff=BigInt(config.cutoffNanos),attempted=false,nativeBoundary=null;
+  const boundaries=new Set(['request','cg-inventory-before','ax-main-before','cg-inventory-after','ax-main-after','identity','trust']);
   const execute=phase=>{
     const remaining=deadline-now();
     if(remaining<=0)throw Error('native activation expired');
     const input=[phase,process.pid,owner,launcher,cutoff.toString(),Buffer.from(config.executable).toString('hex'),
       ...(phase==='prepare'?[]:[held.tokens])].join(' ')+'\n';
-    const output=run(config.helper,['--codex-activate-main'],{input,encoding:'utf8',timeout:remaining,
-      maxBuffer:4096,stdio:['pipe','pipe','ignore']});
+    let output;
+    try {
+      output=run(config.helper,['--codex-activate-main'],{input,encoding:'utf8',timeout:remaining,
+        maxBuffer:4096,stdio:['pipe','pipe','ignore']});
+    } catch(error) {
+      if(phase==='prepare'&&typeof error?.stdout==='string'&&error.stdout.length<=128) {
+        const match=/^activation-rejected ([a-z-]+)\n$/.exec(error.stdout);
+        if(match&&boundaries.has(match[1]))nativeBoundary=match[1];
+      }
+      throw error;
+    }
     if(now()>=deadline)throw Error('native activation expired');
     return output;
   };
   return {
+    failure:()=>nativeBoundary,
     prepare() {
       if(held||attempted)throw Error('native activation consumed');
       held=binding(execute('prepare'));

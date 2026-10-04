@@ -919,9 +919,16 @@ def semantic_observations(directory, app):
             stages = {'completed', 'request', 'initial-proof', 'screen', 'rectangle', 'settable',
                       'identity-recheck', 'allocation', 'size', 'position', 'postcondition',
                       'transport', 'invalid-output'}
-            if (set(value) != fields or app != 'claude-desktop' or value['diagnosticsOnly'] is not True
+            if (set(value) - {'positionError'} != fields or app != 'claude-desktop' or value['diagnosticsOnly'] is not True
                     or type(value['stage']) is not str or value['stage'] not in stages):
                 raise ValueError('invalid Claude window fit observation')
+            if 'positionError' in value:
+                error = value['positionError']
+                if (value['stage'] != 'position' or type(error) is not str or error not in {
+                        'cannot-complete','attribute-unsupported','illegal-argument',
+                        'invalid-element','api-disabled','failure','other'}):
+                    raise ValueError('invalid Claude position error observation')
+                record['positionError'] = error
             record.update(diagnosticsOnly=True, stage=value['stage'])
         elif mechanism == 'claude-window-focus':
             fields = {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'status', 'nativeForegroundWindowMatchedHeld'}
@@ -1771,7 +1778,7 @@ def semantic_observations(directory, app):
             if 'initialMainActivation' in value:
                 activation = value['initialMainActivation']
                 if (app != 'chatgpt-desktop' or type(activation) is not dict
-                        or set(activation) != {'phase', 'status', 'activationAttempted', 'guardFailure'}
+                        or set(activation) - {'nativeBoundary'} != {'phase', 'status', 'activationAttempted', 'guardFailure'}
                         or type(activation['phase']) is not str or activation['phase'] not in {
                             'pre-proof', 'pre-identity', 'activation', 'polling', 'final-proof'}
                         or type(activation['status']) is not str or activation['status'] not in {
@@ -1786,6 +1793,14 @@ def semantic_observations(directory, app):
                         or activation['status'] == 'focused' and (
                             activation['phase'] != 'final-proof' or activation['guardFailure'] is not None)):
                     raise ValueError('invalid Codex initial main activation')
+                if 'nativeBoundary' in activation:
+                    boundary = activation['nativeBoundary']
+                    if (type(boundary) is not str or boundary not in {
+                            'request','cg-inventory-before','ax-main-before','cg-inventory-after',
+                            'ax-main-after','identity','trust'}
+                            or activation['activationAttempted'] or activation['status'] == 'focused'
+                            or activation['phase'] != 'pre-identity'):
+                        raise ValueError('invalid Codex native preparation boundary')
                 record['initialMainActivation'] = activation
             if 'initialMainConfirmation' in value:
                 confirmation = value['initialMainConfirmation']

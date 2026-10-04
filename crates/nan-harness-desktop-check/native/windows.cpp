@@ -818,6 +818,17 @@ static int mac_fit_rejected(const char* stage) {
     std::cout << "fit-rejected " << stage << '\n';
     return std::cout ? 5 : 4;
 }
+static const char* fit_ax_error(AXError error) {
+    switch (error) {
+    case kAXErrorCannotComplete: return "cannot-complete";
+    case kAXErrorAttributeUnsupported: return "attribute-unsupported";
+    case kAXErrorIllegalArgument: return "illegal-argument";
+    case kAXErrorInvalidUIElement: return "invalid-element";
+    case kAXErrorAPIDisabled: return "api-disabled";
+    case kAXErrorFailure: return "failure";
+    default: return "other";
+    }
+}
 int fit_window(const std::string& request) {
     @autoreleasepool {
         std::istringstream input(request);
@@ -855,7 +866,10 @@ int fit_window(const std::string& request) {
         AXError moved = resized == kAXErrorSuccess ? AXUIElementSetAttributeValue(before.focused, kAXPositionAttribute, position) : resized;
         CFRelease(size); CFRelease(position);
         if (resized != kAXErrorSuccess) return mac_fit_rejected("size");
-        if (moved != kAXErrorSuccess) return mac_fit_rejected("position");
+        if (moved != kAXErrorSuccess) {
+            std::cout << "fit-rejected position " << fit_ax_error(moved) << '\n';
+            return std::cout ? 5 : 4;
+        }
         const auto settle_deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
         do {
             AxFocus after;

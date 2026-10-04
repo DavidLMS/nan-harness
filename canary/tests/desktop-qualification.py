@@ -1777,6 +1777,17 @@ class QualificationTests(unittest.TestCase):
             root = Path(tmp)
             value = dict(schemaVersion=1, mechanism='claude-window-fit', diagnosticsOnly=True, stage='postcondition')
             path = root / 'window-fit.json'
+            for error in ('cannot-complete','attribute-unsupported','illegal-argument',
+                          'invalid-element','api-disabled','failure','other'):
+                measured = {**value, 'stage':'position', 'positionError':error}
+                path.write_text(json.dumps(measured))
+                self.assertEqual(q.semantic_observations(root,'claude-desktop'),[measured])
+            for measured in ({**value,'positionError':'failure'},
+                             {**value,'stage':'completed','positionError':'failure'},
+                             {**value,'stage':'position','positionError':'PRIVATE'},
+                             {**value,'stage':'position','positionError':True}):
+                path.write_text(json.dumps(measured))
+                with self.assertRaises(ValueError):q.semantic_observations(root,'claude-desktop')
             path.write_text(json.dumps(value))
             self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [value])
             for changed in ({**value, 'stage': 'PRIVATE'}, {**value, 'stage': True},
@@ -2464,6 +2475,16 @@ class QualificationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             path = root / 'main.json'
+            for boundary in ('request','cg-inventory-before','ax-main-before','cg-inventory-after',
+                             'ax-main-after','identity','trust'):
+                item = {**facts, 'phase':'pre-identity', 'status':'query-failed',
+                        'activationAttempted':False, 'nativeBoundary':boundary}
+                path.write_text(json.dumps({**value,'initialMainActivation':item}))
+                self.assertEqual(q.semantic_observations(root,'chatgpt-desktop')[0]['initialMainActivation'],item)
+                for invalid in ({**item,'nativeBoundary':'PRIVATE'}, {**item,'nativeBoundary':True},
+                                {**item,'phase':'polling'}, {**item,'activationAttempted':True}):
+                    path.write_text(json.dumps({**value,'initialMainActivation':invalid}))
+                    with self.assertRaises(ValueError):q.semantic_observations(root,'chatgpt-desktop')
             for item in (facts, {**facts, 'phase': 'final-proof', 'status': 'focused'},
                          {**facts, 'phase': 'pre-proof', 'status': 'rejected',
                           'activationAttempted': False, 'guardFailure': 'native-ownership'}):

@@ -399,7 +399,12 @@ async function focusCapturedMain(held,proof,deadline,identity=correlationIdentit
       await pause(Math.min(100,Math.max(0,deadline-Date.now())));
     }
     return stop('deadline');
-  } catch{return stop(Date.now()>=deadline?'deadline':'query-failed');}
+  } catch {
+    const boundary=typeof nativeActivation?.failure==='function'?nativeActivation.failure():null;
+    if(diagnostic&&['request','cg-inventory-before','ax-main-before','cg-inventory-after',
+      'ax-main-after','identity','trust'].includes(boundary))diagnostic.nativeBoundary=boundary;
+    return stop(Date.now()>=deadline?'deadline':'query-failed');
+  }
 }
 
 function publishCodexBinding(output,owner,connection,guard) {
