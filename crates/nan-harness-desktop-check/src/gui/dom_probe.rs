@@ -747,8 +747,12 @@ impl<'a> RendererSession<'a> {
                 })
                 .and_then(|value| value.checked_add(75_000_000_000))
                 .ok_or(Reason::IsolationUnavailable)?;
+            let helper = native
+                .executable()
+                .canonicalize()
+                .map_err(|_| Reason::IsolationUnavailable)?;
             request["nativeActivation"] = serde_json::json!({
-                "helper": native.executable(), "executable": executable, "cutoffNanos": cutoff.to_string()
+                "helper": helper, "executable": executable, "cutoffNanos": cutoff.to_string()
             });
         }
         open_private_new(&request_path)
