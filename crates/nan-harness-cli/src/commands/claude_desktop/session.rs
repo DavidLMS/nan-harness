@@ -719,6 +719,7 @@ mod configuration_persist_tests {
     struct PrimitiveStages {
         setup: PrimitiveStage,
         source_attributes: PrimitiveStage,
+        parent_delete_open: PrimitiveStage,
         source_delete_open: PrimitiveStage,
         absent_destination_std_rename: PrimitiveStage,
         target_delete_open: PrimitiveStage,
@@ -728,11 +729,28 @@ mod configuration_persist_tests {
     }
     #[cfg(feature = "desktop-qualification")]
     impl PrimitiveStages {
-        fn expected(&self) -> bool {
-            self.setup.succeeded
-                && self.source_attributes.succeeded
-                && self.source_delete_open.succeeded
-                && self.absent_destination_std_rename.succeeded
+        fn expected(&self, parent_share: Option<u32>) -> bool {
+            if !self.setup.succeeded
+                || !self.source_attributes.succeeded
+                || !self.source_delete_open.succeeded
+            {
+                return false;
+            }
+            if parent_share.is_some_and(|share| share & 4 == 0)
+                && !matches!(
+                    self.parent_delete_open.raw_os_error,
+                    Some(PrimitiveIoError::SharingViolation)
+                )
+            {
+                return false;
+            }
+            if parent_share == Some(1) {
+                return matches!(
+                    self.absent_destination_std_rename.raw_os_error,
+                    Some(PrimitiveIoError::SharingViolation)
+                );
+            }
+            self.absent_destination_std_rename.succeeded
                 && matches!(
                     self.target_delete_open.raw_os_error,
                     Some(PrimitiveIoError::SharingViolation)
@@ -745,17 +763,18 @@ mod configuration_persist_tests {
                 && self.replacement_preserved
         }
     }
+
     #[cfg(feature = "desktop-qualification")]
     // Query DELETE sharing without changing data, attributes, DACL, or pathname.
     fn primitive_delete_open(path: &Path) -> std::io::Result<File> {
         fs::OpenOptions::new()
             .access_mode(0x0001_0000)
             .share_mode(7)
-            .custom_flags(0x0020_0000)
+            .custom_flags(0x0200_0000 | 0x0020_0000)
             .open(path)
     }
     #[cfg(feature = "desktop-qualification")]
-    fn primitive_prelaunch_roots(workspace: &Path) -> std::io::Result<Vec<File>> {
+    fn primitive_prelaunch_roots(workspace: &Path, share: u32) -> std::io::Result<Vec<File>> {
         let local = workspace.join("profile/home/AppData/Local");
         let roaming = workspace.join("profile/home/AppData/Roaming");
         nan_harness_private_fs::create_private_dir_all(&local)?;
@@ -763,7 +782,7 @@ mod configuration_persist_tests {
         let lease = |path: &Path| {
             fs::OpenOptions::new()
                 .read(true)
-                .share_mode(1)
+                .share_mode(share)
                 .custom_flags(0x0200_0000 | 0x0020_0000)
                 .open(path)
         };
@@ -781,22 +800,27 @@ mod configuration_persist_tests {
     #[cfg(feature = "desktop-qualification")]
     fn primitive_stages(
         workspace: &Path,
-        leased: bool,
+        parent_share: Option<u32>,
         close_writer: bool,
         retain_source: bool,
     ) -> PrimitiveStages {
         let mut record = PrimitiveStages::default();
         let result = (|| -> std::io::Result<()> {
-            let _parents = if leased {
-                primitive_prelaunch_roots(workspace)?
+            let _parents = if let Some(share) = parent_share {
+                primitive_prelaunch_roots(workspace, share)?
             } else {
                 Vec::new()
             };
-            let directory = if leased {
+            let directory = if parent_share.is_some() {
                 workspace.join("profile/home/AppData/Roaming/Claude")
             } else {
                 workspace.to_owned()
             };
+            if parent_share.is_some() {
+                let probe = primitive_delete_open(&directory);
+                record.parent_delete_open = PrimitiveStage::from_result(&probe);
+                drop(probe);
+            }
             let mut source = tempfile::Builder::new().make_in(&directory, open_private_new)?;
             source.write_all(b"original")?;
             source.as_file().sync_all()?;
@@ -866,23 +890,25 @@ mod configuration_persist_tests {
     fn configuration_persist_primitive_stage_diagnostics() {
         let mut records = Vec::new();
         let mut passed = true;
-        for (kind, leased, closed, retained) in [
-            ("ordinary-open", false, false, false),
-            ("ordinary-closed", false, true, false),
-            ("qualification-closed", true, true, false),
-            ("qualification-retained-reader", true, true, true),
+        for (kind, parent_share, closed, retained) in [
+            ("ordinary-open", None, false, false),
+            ("ordinary-closed", None, true, false),
+            ("qualification-closed", Some(1), true, false),
+            ("qualification-retained-reader", Some(1), true, true),
+            ("qualification-write-shared", Some(3), true, true),
+            ("qualification-delete-shared", Some(7), true, true),
         ] {
             let outcome = (|| -> std::io::Result<PrimitiveStages> {
                 let temporary = tempfile::tempdir()?;
                 let workspace = temporary.path().canonicalize()?;
-                let record = primitive_stages(&workspace, leased, closed, retained);
+                let record = primitive_stages(&workspace, parent_share, closed, retained);
                 Ok(record)
             })();
             let record = outcome.unwrap_or_else(|error| PrimitiveStages {
                 setup: PrimitiveStage::from_result(&Err::<(), _>(error)),
                 ..PrimitiveStages::default()
             });
-            passed &= record.expected();
+            passed &= record.expected(parent_share);
             records.push(serde_json::json!({"kind":kind,"stages":record}));
         }
         println!(
