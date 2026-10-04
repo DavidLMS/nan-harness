@@ -1778,7 +1778,7 @@ def semantic_observations(directory, app):
             if 'initialMainActivation' in value:
                 activation = value['initialMainActivation']
                 if (app != 'chatgpt-desktop' or type(activation) is not dict
-                        or set(activation) - {'nativeBoundary'} != {'phase', 'status', 'activationAttempted', 'guardFailure'}
+                        or set(activation) - {'nativeBoundary','nativeInventoryFailure'} != {'phase', 'status', 'activationAttempted', 'guardFailure'}
                         or type(activation['phase']) is not str or activation['phase'] not in {
                             'pre-proof', 'pre-identity', 'activation', 'polling', 'final-proof'}
                         or type(activation['status']) is not str or activation['status'] not in {
@@ -1801,6 +1801,18 @@ def semantic_observations(directory, app):
                             or activation['activationAttempted'] or activation['status'] == 'focused'
                             or activation['phase'] != 'pre-identity'):
                         raise ValueError('invalid Codex native preparation boundary')
+                if 'nativeInventoryFailure' in activation:
+                    inventory = activation['nativeInventoryFailure']
+                    counts = {'candidateCount','executableRejectedCount','ancestryRejectedCount'}
+                    if (activation.get('nativeBoundary') not in {'cg-inventory-before','cg-inventory-after'}
+                            or type(inventory) is not dict or set(inventory) != counts | {'reason'}
+                            or type(inventory['reason']) is not str or inventory['reason'] not in {
+                                'inventory-unavailable','limit','metadata','geometry','process-identity','identity',
+                                'candidates-missing','candidates-ambiguous','other-owned-normal','overlapping-ahead',
+                                'off-display','deadline'}
+                            or any(type(inventory[k]) is not int or not 0 <= inventory[k] <= 1024 for k in counts)
+                            or sum(inventory[k] for k in counts) > 1024):
+                        raise ValueError('invalid Codex native inventory failure')
                 record['initialMainActivation'] = activation
             if 'initialMainConfirmation' in value:
                 confirmation = value['initialMainConfirmation']

@@ -2485,6 +2485,17 @@ class QualificationTests(unittest.TestCase):
                                 {**item,'phase':'polling'}, {**item,'activationAttempted':True}):
                     path.write_text(json.dumps({**value,'initialMainActivation':invalid}))
                     with self.assertRaises(ValueError):q.semantic_observations(root,'chatgpt-desktop')
+            inventory = dict(reason='candidates-missing',candidateCount=0,executableRejectedCount=2,ancestryRejectedCount=1)
+            item = dict(phase='pre-identity',status='query-failed',activationAttempted=False,
+                        guardFailure=None,nativeBoundary='cg-inventory-before',nativeInventoryFailure=inventory)
+            path.write_text(json.dumps({**value,'initialMainActivation':item}))
+            self.assertEqual(q.semantic_observations(root,'chatgpt-desktop')[0]['initialMainActivation'],item)
+            for invalid in ({**inventory,'reason':'PRIVATE'}, {**inventory,'candidateCount':True},
+                            {**inventory,'candidateCount':1025}, {**inventory,'path':'PRIVATE'}):
+                path.write_text(json.dumps({**value,'initialMainActivation':{**item,'nativeInventoryFailure':invalid}}))
+                with self.assertRaises(ValueError):q.semantic_observations(root,'chatgpt-desktop')
+            path.write_text(json.dumps({**value,'initialMainActivation':{**item,'nativeBoundary':'trust'}}))
+            with self.assertRaises(ValueError):q.semantic_observations(root,'chatgpt-desktop')
             for item in (facts, {**facts, 'phase': 'final-proof', 'status': 'focused'},
                          {**facts, 'phase': 'pre-proof', 'status': 'rejected',
                           'activationAttempted': False, 'guardFailure': 'native-ownership'}):

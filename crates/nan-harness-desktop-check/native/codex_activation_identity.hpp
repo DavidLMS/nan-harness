@@ -22,3 +22,13 @@ inline bool codex_inventory_admitted(bool complete,unsigned candidates,bool held
     return complete&&candidates==1&&held_present&&!other_owned_normal
         &&!overlapping_ahead&&fully_displayed;
 }
+
+// Preserve the first failed inventory observation unless the caller cutoff expired.
+inline const char* codex_inventory_failure_reason(const char* incomplete_reason,
+    bool complete,bool other_owned_normal,bool overlapping_ahead,bool fully_displayed,bool timely) {
+    if(!timely)return "deadline";
+    if(!complete)return incomplete_reason;
+    if(other_owned_normal)return "other-owned-normal";
+    if(overlapping_ahead)return "overlapping-ahead";
+    return fully_displayed?"identity":"off-display";
+}

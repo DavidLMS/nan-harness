@@ -49,3 +49,16 @@ for(const boundary of ['request','cg-inventory-before','ax-main-before','cg-inve
   assert.equal(native.failure(),boundary==='PRIVATE'?null:boundary);
   assert.equal(calls,1);
 }
+
+for(const [line,expected] of [
+ ['activation-rejected cg-inventory-before candidates-missing 0 2 1\n',true],
+ ['activation-rejected cg-inventory-before candidates-ambiguous 2 0 0\n',true],
+ ['activation-rejected cg-inventory-before geometry 0 0 0\n',true],
+ ['activation-rejected cg-inventory-before PRIVATE 0 0 0\n',false],
+ ['activation-rejected trust geometry 0 0 0\n',false],
+ ['activation-rejected cg-inventory-before geometry 1025 0 0\n',false],
+ ['activation-rejected cg-inventory-before geometry 0 0 0\nPRIVATE',false]]) {
+ const native=controller(config,20,25,2000,()=>{const e=Error('private');e.stdout=line;throw e;},()=>1000);
+ assert.throws(()=>native.prepare());
+ assert.equal(native.inventoryFailure()!==null,expected);
+}

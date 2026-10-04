@@ -402,7 +402,11 @@ async function focusCapturedMain(held,proof,deadline,identity=correlationIdentit
   } catch {
     const boundary=typeof nativeActivation?.failure==='function'?nativeActivation.failure():null;
     if(diagnostic&&['request','cg-inventory-before','ax-main-before','cg-inventory-after',
-      'ax-main-after','identity','trust'].includes(boundary))diagnostic.nativeBoundary=boundary;
+       'ax-main-after','identity','trust'].includes(boundary)) {
+      diagnostic.nativeBoundary=boundary;
+      const inventory=typeof nativeActivation?.inventoryFailure==='function'?nativeActivation.inventoryFailure():null;
+      if(inventory)diagnostic.nativeInventoryFailure=inventory;
+    }
     return stop(Date.now()>=deadline?'deadline':'query-failed');
   }
 }

@@ -54,11 +54,13 @@ bool descendant(const Request& r,pid_t child,pid_t ancestor) {
     }
     return false;
 }
-bool executable(const Request& r,pid_t pid) {
+bool executable(const Request& r,pid_t pid,bool* ancestry_rejected=nullptr) {
     char path[PROC_PIDPATHINFO_MAXSIZE]{}, resolved[PATH_MAX]{};
-    return alive(r)&&proc_pidpath(pid,path,sizeof(path))>0
-        && realpath(path,resolved)&&r.executable==resolved
-        && descendant(r,pid,r.launcher)&&descendant(r,r.launcher,r.root);
+    if(!alive(r)||proc_pidpath(pid,path,sizeof(path))<=0
+        ||!realpath(path,resolved)||r.executable!=resolved)return false;
+    bool owned=descendant(r,pid,r.launcher)&&descendant(r,r.launcher,r.root);
+    if(!owned&&ancestry_rejected)*ancestry_rejected=true;
+    return owned;
 }
 int64_t number(CFDictionaryRef row,CFStringRef key) {
     auto value=CFDictionaryGetValue(row,key);int64_t result=0;
@@ -75,12 +77,18 @@ bool rect(CFDictionaryRef row,CGRect& result) {
     return value&&CFGetTypeID(value)==CFDictionaryGetTypeID()
         &&CGRectMakeWithDictionaryRepresentation((CFDictionaryRef)value,&result)&&geometry(result);
 }
-bool inventory(const Request& r,Binding& result,bool select) {
-    if(!alive(r))return false;
+struct InventoryFailure {
+    const char* reason="inventory-unavailable";
+    unsigned candidates=0, executable_rejected=0, ancestry_rejected=0;
+};
+bool inventory(const Request& r,Binding& result,bool select,InventoryFailure* failure=nullptr) {
+    InventoryFailure observation;
+    if(!alive(r)){observation.reason="deadline";if(failure)*failure=observation;return false;}
     auto rows=CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly|kCGWindowListExcludeDesktopElements,kCGNullWindowID);
-    if(!rows)return false;
+    if(!rows){if(failure)*failure=observation;return false;}
     CFIndex count=CFArrayGetCount(rows), held=-1;unsigned candidates=0;
     bool valid=count<=1024, other_owned_normal=false, overlapping_ahead=false;
+    observation.reason=valid?"metadata":"limit";
     for(CFIndex i=0;valid&&i<count;++i) {
         auto row=(CFDictionaryRef)CFArrayGetValueAtIndex(rows,i);
         if(number(row,kCGWindowLayer)!=0)continue;
@@ -88,18 +96,25 @@ bool inventory(const Request& r,Binding& result,bool select) {
         if(!opacity||CFGetTypeID(opacity)!=CFNumberGetTypeID()
             ||!CFNumberGetValue((CFNumberRef)opacity,kCFNumberDoubleType,&alpha)||!std::isfinite(alpha)){valid=false;break;}
         if(alpha<=0)continue;
-        CGRect bounds{};if(!rect(row,bounds)){valid=false;break;}
+        CGRect bounds{};if(!rect(row,bounds)){observation.reason="geometry";valid=false;break;}
         pid_t pid=pid_t(number(row,kCGWindowOwnerPID));
         if(bounds.size.width<300||bounds.size.height<200)continue;
-        if(!executable(r,pid))continue;
+        bool ancestry_rejected=false;
+        if(!executable(r,pid,&ancestry_rejected)) {
+            if(ancestry_rejected)++observation.ancestry_rejected;
+            else ++observation.executable_rejected;
+            continue;
+        }
         ++candidates;held=i;
         Binding candidate{uint64_t(number(row,kCGWindowNumber)),pid,bounds,0,0};
         ProcessIdentity process{};
-        if(!identity(pid,process)){valid=false;break;}
+        if(!identity(pid,process)){observation.reason="process-identity";valid=false;break;}
         candidate.seconds=process.seconds;candidate.micros=process.micros;
         if(select)result=candidate;
-        else if(!same_codex_main(private_identity(result),private_identity(candidate)))valid=false;
+        else if(!same_codex_main(private_identity(result),private_identity(candidate))){observation.reason="identity";valid=false;}
     }
+    observation.candidates=candidates;
+    if(valid)observation.reason=candidates==0?"candidates-missing":candidates>1?"candidates-ambiguous":"identity";
     valid=valid&&candidates==1&&held>=0&&result.id!=0;
     for(CFIndex i=0;valid&&i<count;++i) {
         auto row=(CFDictionaryRef)CFArrayGetValueAtIndex(rows,i);
@@ -113,7 +128,7 @@ bool inventory(const Request& r,Binding& result,bool select) {
         double alpha=1;auto value=CFDictionaryGetValue(row,kCGWindowAlpha);
         if(value&&CFGetTypeID(value)==CFNumberGetTypeID())CFNumberGetValue((CFNumberRef)value,kCFNumberDoubleType,&alpha);
         if(alpha<=0)continue;
-        CGRect bounds{};if(!rect(row,bounds)){valid=false;break;}
+        CGRect bounds{};if(!rect(row,bounds)){observation.reason="geometry";valid=false;break;}
         if(CGRectIntersectsRect(bounds,result.bounds)
             ||(number(row,kCGWindowOwnerPID)==result.pid&&number(row,kCGWindowLayer)==0))overlapping_ahead=true;
     }
@@ -122,8 +137,14 @@ bool inventory(const Request& r,Binding& result,bool select) {
         auto id=[screen.deviceDescription[@"NSScreenNumber"] unsignedIntValue];
         contained=contained||CGRectContainsRect(CGDisplayBounds(id),result.bounds);
     }
-    CFRelease(rows);return codex_inventory_admitted(valid,candidates,held>=0,
-        other_owned_normal,overlapping_ahead,contained)&&alive(r);
+    CFRelease(rows);
+    bool timely=alive(r);
+    bool admitted=codex_inventory_admitted(valid,candidates,held>=0,
+        other_owned_normal,overlapping_ahead,contained)&&timely;
+    observation.reason=codex_inventory_failure_reason(observation.reason,valid,
+        other_owned_normal,overlapping_ahead,contained,timely);
+    if(failure)*failure=observation;
+    return admitted;
 }
 bool attribute(const Request& r,AXUIElementRef element,CFStringRef name,CFTypeRef& value) {
     return alive(r)&&AXUIElementSetMessagingTimeout(element,0.1f)==kAXErrorSuccess
@@ -178,8 +199,11 @@ bool parse(Request& r) {
 }
 #endif
 #if defined(__APPLE__)
-static int activation_rejected(const char* boundary) {
-    std::cout << "activation-rejected " << boundary << '\n';
+static int activation_rejected(const char* boundary,const InventoryFailure* inventory=nullptr) {
+    std::cout << "activation-rejected " << boundary;
+    if(inventory)std::cout << ' ' << inventory->reason << ' ' << inventory->candidates
+        << ' ' << inventory->executable_rejected << ' ' << inventory->ancestry_rejected;
+    std::cout << '\n';
     return std::cout ? 5 : 4;
 }
 #endif
@@ -188,16 +212,18 @@ int codex_activate_main() {
     @autoreleasepool {
         Request request;if(!parse(request))return activation_rejected("request");
         Binding held=request.held;
-        if(!inventory(request,held,!request.action&&!request.verify))return activation_rejected("cg-inventory-before");
+        InventoryFailure failure;
+        if(!inventory(request,held,!request.action&&!request.verify,&failure))return activation_rejected("cg-inventory-before",&failure);
         const char* boundary="ax-main-before";
         AXUIElementRef first=main_window(request,held,&boundary);if(!first)return activation_rejected(boundary);
-        Binding fresh=held;bool valid=inventory(request,fresh,false);
+        Binding fresh=held;bool valid=inventory(request,fresh,false,&failure);
+        bool inventory_valid=valid;
         boundary=valid?"ax-main-after":"cg-inventory-after";
         AXUIElementRef second=valid?main_window(request,held,&boundary):nullptr;
         if(valid&&second)boundary="identity";
         valid=valid&&second&&CFEqual(first,second)&&alive(request);
         if(second)CFRelease(second);
-        if(!valid){CFRelease(first);return activation_rejected(boundary);}
+        if(!valid){CFRelease(first);return activation_rejected(boundary,inventory_valid?nullptr:&failure);}
         if(request.verify) {
             auto app=[NSRunningApplication runningApplicationWithProcessIdentifier:held.pid];
             AXUIElementRef application=AXUIElementCreateApplication(held.pid);CFTypeRef focused=nullptr;

@@ -1,5 +1,6 @@
 #include "../codex_activation_identity.hpp"
 #include <cassert>
+#include <cstring>
 #include <limits>
 int main() {
     const CodexMainIdentity held{42,100,500,0,10,20,600,400};
@@ -22,4 +23,9 @@ int main() {
     changed=held;changed.x=std::numeric_limits<double>::quiet_NaN();assert(!same_codex_main(changed,changed));
     changed=held;changed.width=std::numeric_limits<double>::infinity();assert(!same_codex_main(changed,changed));
     changed=held;changed.micros=1000000;assert(!same_codex_main(changed,changed));
+    assert(std::strcmp(codex_inventory_failure_reason("geometry",false,true,true,false,true),"geometry")==0);
+    assert(std::strcmp(codex_inventory_failure_reason("metadata",false,false,false,true,false),"deadline")==0);
+    assert(std::strcmp(codex_inventory_failure_reason("identity",true,true,true,false,true),"other-owned-normal")==0);
+    assert(std::strcmp(codex_inventory_failure_reason("identity",true,false,true,false,true),"overlapping-ahead")==0);
+    assert(std::strcmp(codex_inventory_failure_reason("identity",true,false,false,false,true),"off-display")==0);
 }
