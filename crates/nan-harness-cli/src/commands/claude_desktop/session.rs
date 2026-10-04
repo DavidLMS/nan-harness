@@ -873,6 +873,92 @@ mod configuration_persist_tests {
         drop(directories);
     }
 
+    #[cfg(feature = "desktop-qualification")]
+    #[test]
+    fn std_rename_under_exact_fresh_profile_leases_preserves_source_identity() {
+        use std::time::{Duration, Instant};
+        let base = std::env::var_os("RUNNER_TEMP")
+            .map(PathBuf::from)
+            .unwrap_or_else(std::env::temp_dir);
+        let temporary = tempfile::tempdir_in(base).unwrap();
+        let workspace = temporary.path().canonicalize().unwrap();
+        nan_harness_private_fs::restrict_path(
+            &workspace,
+            nan_harness_private_fs::PrivatePathKind::Directory,
+        )
+        .unwrap();
+        // This existing fixture helper matches FreshClaudeWindowsProfile's exact
+        // READ-only directory sharing and lock-before-root-creation ordering.
+        let directories = lifecycle_roots(&workspace);
+        let destination =
+            workspace.join("profile/home/AppData/Roaming/Claude/claude_desktop_config.json");
+        let mut source = TempFileBuilder::new()
+            .prefix(".nan-")
+            .make_in(destination.parent().unwrap(), open_private_new)
+            .unwrap();
+        source.write_all(b"synthetic-normal-config").unwrap();
+        source.flush().unwrap();
+        source.as_file().sync_all().unwrap();
+        let expected = retained_rename_source(source.path(), 7).unwrap();
+        let mut boundary = qualification_prelaunch::StdRenameBoundary::OriginalSource;
+        assert!(
+            rename_written_configuration_once(
+                source,
+                &destination,
+                Instant::now() + Duration::from_secs(2),
+                &mut boundary
+            )
+            .is_ok(),
+            "closed leased-parent rename failed"
+        );
+        let actual = retained_rename_source(&destination, 5).unwrap();
+        assert!(actual == expected);
+        nan_harness_private_fs::verify_private_file(actual.as_file()).unwrap();
+        assert_eq!(fs::read(&destination).unwrap(), b"synthetic-normal-config");
+        drop(actual);
+        drop(expected);
+
+        // Under the SAME live parent leases, a genuine source DELETE-share
+        // denial must still fail once and retain both historical identities.
+        let mut replacement = TempFileBuilder::new()
+            .prefix(".nan-")
+            .make_in(destination.parent().unwrap(), open_private_new)
+            .unwrap();
+        replacement.write_all(b"replacement-fixture").unwrap();
+        replacement.flush().unwrap();
+        replacement.as_file().sync_all().unwrap();
+        let historical = replacement.path().to_owned();
+        let replacement_identity = retained_rename_source(&historical, 7).unwrap();
+        let denial = fs::OpenOptions::new()
+            .access_mode(0)
+            .share_mode(3)
+            .open(&historical)
+            .unwrap();
+        let absent_destination = destination.with_file_name("absent-synthetic.json");
+        let error = rename_written_configuration_once(
+            replacement,
+            &absent_destination,
+            Instant::now() + Duration::from_secs(2),
+            &mut boundary,
+        )
+        .unwrap_err();
+        assert_eq!(
+            boundary,
+            qualification_prelaunch::StdRenameBoundary::RenameDispatch
+        );
+        assert_eq!(error.error.raw_os_error(), Some(32));
+        assert!(!absent_destination.exists());
+        let retained = retained_rename_source(&historical, 7).unwrap();
+        assert!(retained == replacement_identity);
+        assert_eq!(fs::read(&historical).unwrap(), b"replacement-fixture");
+        assert_eq!(fs::read(&destination).unwrap(), b"synthetic-normal-config");
+        drop(retained);
+        drop(replacement_identity);
+        drop(denial);
+        drop(error);
+        drop(directories);
+    }
+
     #[test]
     fn std_rename_trial_preserves_original_private_object_and_failed_destination() {
         use std::time::{Duration, Instant};
