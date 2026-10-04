@@ -592,10 +592,15 @@ async function run() {
       if (!targetReady) { facts.errorCategory = 'invalid-request'; save(); return; }
       const correlationDeadline=onboardingDeadline(trial,deadline,totalDeadline);
       if(trial)facts.initialMainConfirmation=mainConfirmationFacts();
+      const macProfileCustody=process.platform==='darwin'&&request.codexProfileLoan!==undefined;
+      if(macProfileCustody&&ownerGuard()!==true){facts.errorCategory='endpoint-unowned';save();return;}
       const profileAuthority=request.codexProfileLoan===undefined?null:
-        require('./codex-profile-state.cjs').authority(request.codexProfileLoan,correlationDeadline,ownerGuard);
+        require('./codex-profile-state.cjs').authority(request.codexProfileLoan,correlationDeadline,
+          macProfileCustody?()=>Date.now()<correlationDeadline:ownerGuard);
+      if(macProfileCustody&&ownerGuard()!==true){profileAuthority?.close();facts.errorCategory='endpoint-unowned';save();return;}
       if(request.codexProfileLoan!==undefined&&(!profileAuthority||request.codexProfileLoan.directories[0].path!==request.ownedWorkspace)){profileAuthority?.close();facts.errorCategory='invalid-request';save();return;}
-      const onboardingOwnerGuard=profileAuthority?()=>ownerGuard()===true&&profileAuthority.verify():ownerGuard;
+      const onboardingOwnerGuard=profileAuthority?()=>ownerGuard()===true&&profileAuthority.verify()
+        &&(!macProfileCustody||ownerGuard()===true):ownerGuard;
       try {
       let folderTrust,trustGuard;
       if(trial&&request.ownedWorkspace!==undefined) {

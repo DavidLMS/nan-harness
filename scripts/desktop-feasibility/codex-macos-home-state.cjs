@@ -43,6 +43,17 @@ function sample(held,{opened,menu}) {
   return {matched:true};
 }
 
+// Only the retained-root filesystem read is synchronous inside this boundary.
+// Native ownership and original document/editor proofs stay outside the read.
+async function custodyPair(authority,prove) {
+  let before=false;try{before=await prove();}catch{}
+  if(before!==true)return {queried:false,pair:null};
+  let pair=null;
+  try{pair=authority.snapshotPair();}catch{}
+  let after=false;try{after=await prove();}catch{}
+  return {queried:true,pair:after===true&&pair&&typeof pair.then!=='function'?pair:null};
+}
+
 async function observe({page,alive,deadline,loan,workspace,ownerGuard,openMenu=false},
   {makeAuthority=require('./codex-profile-state.cjs').authority,
    project=require('./codex-profile-state.cjs').project,
@@ -53,23 +64,31 @@ async function observe({page,alive,deadline,loan,workspace,ownerGuard,openMenu=f
     menuClickAttempted:false,menuClickCompleted:false,inputAuthorized:false,sendAuthorized:false};
   let held,button,menu,context,a;
   const live=async()=>Date.now()<deadline&&await alive()===true&&Date.now()<deadline;
+  const ownedCustody=()=>Date.now()<deadline&&ownerGuard()===true&&a.verify()
+    &&ownerGuard()===true&&Date.now()<deadline;
   try {
     if(!loan||loan.platform!=='macos'||workspace!==loan.directories?.[0]?.path||!await live())return {...facts,reason:'custody'};
     if(typeof ownerGuard!=='function'||ownerGuard()!==true)return {...facts,reason:'custody'};
-    a=makeAuthority(loan,deadline,()=>ownerGuard()===true&&Date.now()<deadline);
-    if(!a||!a.verify())return {...facts,reason:'custody'};
+    // The original prelaunch root handles prove filesystem custody independently.
+    // Never run listener subprocesses once per root or filesystem verification.
+    a=makeAuthority(loan,deadline,()=>Date.now()<deadline);
+    if(ownerGuard()!==true)return {...facts,reason:'custody'};
+    if(!a||!ownedCustody())return {...facts,reason:'custody'};
     held=await page.evaluateHandle(capture);
     const first=await held.evaluate(sample,{opened:false,menu:null});
     const second=await held.evaluate(sample,{opened:false,menu:null});
-    if(!first.matched||!second.matched||JSON.stringify(first.rect)!==JSON.stringify(second.rect)||!await live()||!a.verify())return {...facts,reason:'home'};
-    context=makeContext({page,alive:live,deadline,pwProof:async()=>!!held&&await live()&&a.verify()
+    if(!first.matched||!second.matched||JSON.stringify(first.rect)!==JSON.stringify(second.rect)||!await live()||!ownedCustody())return {...facts,reason:'home'};
+    context=makeContext({page,alive:live,deadline,pwProof:async()=>!!held&&await live()&&ownedCustody()
       &&(await held.evaluate(sample,{opened:!!menu,menu:menu??null})).matched===true});
     const prepared=await context.prepare(held);
-    if(prepared.verified!==true||!await context.verifyHeld(held)||!a.verify())return {...facts,reason:'document'};
+    if(prepared.verified!==true||!await context.verifyHeld(held)||!ownedCustody())return {...facts,reason:'document'};
     facts.homeRetained=true;
-    facts.stateQueried=true;
-    const before=a.snapshotPair();
-    if(!before||!await context.verifyHeld(held)||!a.verify())return {...facts,reason:'state'};
+    const proveStateBoundary=async()=>Date.now()<deadline&&ownerGuard()===true&&a.verify()
+      &&await context.verifyHeld(held)&&a.verify()&&ownerGuard()===true&&Date.now()<deadline;
+    const firstRead=await custodyPair(a,proveStateBoundary);
+    facts.stateQueried=firstRead.queried;
+    const before=firstRead.pair;
+    if(!before)return {...facts,reason:'state'};
     facts.statePairStable=true;
     const candidate=project(before.first.value,workspace);
     if(!candidate)return {...facts,reason:'project'};
@@ -77,25 +96,25 @@ async function observe({page,alive,deadline,loan,workspace,ownerGuard,openMenu=f
     if(openMenu) {
       button=(await held.getProperty('button')).asElement();
       const last=await held.evaluate(sample,{opened:false,menu:null});
-      if(!button||!last.matched||JSON.stringify(first.rect)!==JSON.stringify(last.rect)||!await context.verifyHeld(held)||!a.verify())return {...facts,reason:'control'};
+      if(!button||!last.matched||JSON.stringify(first.rect)!==JSON.stringify(last.rect)||!await context.verifyHeld(held)||!ownedCustody())return {...facts,reason:'control'};
       facts.menuClickAttempted=true;
       await button.click({position:{x:first.rect[2]/2,y:first.rect[3]/2},timeout:Math.max(1,Math.min(2000,deadline-Date.now()))});
       facts.menuClickCompleted=true;
       const menus=page.locator('[cmdk-root]:visible');
-      if(!await live()||!a.verify()||await menus.count()!==1)return {...facts,reason:'menu'};
+      if(!await live()||!ownedCustody()||await menus.count()!==1)return {...facts,reason:'menu'};
       menu=await menus.elementHandle();
       if(!menu||!await context.verifyHeld(held))return {...facts,reason:'document'};
       for(let n=0;n<2;n++) {
-        if(!a.verify()||!await context.verifyHeld(held))return {...facts,reason:'document'};
+        if(!ownedCustody()||!await context.verifyHeld(held))return {...facts,reason:'document'};
         const observed=await page.evaluate(selected,{menu,projectId:candidate.projectId});
         if(observed.status!=='observed'||observed.selectedIdCorrelated!==true)return {...facts,reason:'selected-id'};
-        if(!a.verify()||!await context.verifyHeld(held))return {...facts,reason:'document'};
+        if(!ownedCustody()||!await context.verifyHeld(held))return {...facts,reason:'document'};
       }
       facts.selectedIdCorrelated=true;
     }
-    const after=a.snapshotPair();
+    const after=(await custodyPair(a,proveStateBoundary)).pair;
     if(!after||before.first.digest!==after.second.digest||!['dev','ino','uid','mode','nlink','size','mtimeNs','ctimeNs'].every(key=>typeof before.first.identity[key]==='bigint'&&before.first.identity[key]===after.second.identity[key])
-      ||!a.verify()||!await context.verifyHeld(held))return {...facts,statePairStable:false,selectedIdCorrelated:false,reason:'state-changed'};
+      ||!ownedCustody()||!await context.verifyHeld(held))return {...facts,statePairStable:false,selectedIdCorrelated:false,reason:'state-changed'};
     return {...facts,status:'observed',reason:openMenu?'menu-correlated':'state-observed'};
   }catch{return {...facts,reason:Date.now()>=deadline?'deadline':'query'};}
   finally {
@@ -105,3 +124,5 @@ async function observe({page,alive,deadline,loan,workspace,ownerGuard,openMenu=f
   }
 }
 exports.observe=observe;
+
+exports.custodyPair=custodyPair;
