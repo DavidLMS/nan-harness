@@ -85,7 +85,7 @@ def task_scope_observation(value):
 
 
 def public_onboarding(setup, app):
-    shape = set(setup) - {'folderTrust', 'rejectedPageInventory', 'taskScopeProved', 'taskClickAttempted', 'taskClickCompleted', 'codingComposerReady', 'taskScopeObservation', 'taskControlKind', 'codingReadinessObservation', 'taskSkipConfirmationAttempted', 'taskSkipConfirmationCompleted', 'taskSkipConfirmationProof', 'mainGuardFailure', 'pageSetFailure', 'foreignOverlayImportSetup', 'foreignOverlaySourceCounts', 'foreignOverlayActionability'} if type(setup) is dict else set()
+    shape = set(setup) - {'folderTrust', 'rejectedPageInventory', 'taskScopeProved', 'taskClickAttempted', 'taskClickCompleted', 'codingComposerReady', 'taskScopeObservation', 'taskControlKind', 'codingReadinessObservation', 'codingNavigationObservation', 'taskSkipConfirmationAttempted', 'taskSkipConfirmationCompleted', 'taskSkipConfirmationProof', 'mainGuardFailure', 'pageSetFailure', 'foreignOverlayImportSetup', 'foreignOverlaySourceCounts', 'foreignOverlayActionability'} if type(setup) is dict else set()
     booleans = {'conversationalScope', 'engineeringControl', 'roleClickAttempted',
                 'roleClickCompleted', 'engineeringChecked', 'continueControl',
                 'continueClickAttempted', 'continueClickCompleted', 'roleScopeAbsent'}
@@ -141,6 +141,32 @@ def public_onboarding(setup, app):
                 or coding['status'] == 'observed' and any(type(coding[key]) is not int or not 0 <= coding[key] <= 32 for key in keys)
                 or coding['status'] == 'overflow' and any(coding[key] is not None for key in keys)):
             raise ValueError('invalid Codex coding readiness observation')
+    if 'codingNavigationObservation' in setup:
+        nav = setup['codingNavigationObservation']
+        count_keys = {'codexButtonCount','codexLinkCount','codexMenuItemCount','chatModeTriggerCount',
+                      'codexModeTriggerCount','projectSelectorCount','newChatCount','projectsLinkCount'}
+        if (type(nav) is not dict or set(nav) != count_keys | {'status','sourceVersion','sourceSha256',
+                'uniqueCodexRole','uniqueCodexHitActionable'}
+                or nav['sourceVersion'] != '26.930.41038'
+                or nav['sourceSha256'] != '28c6096af241a37a9a33a2e5601f0aa05426910d5c84d08824d852342a2b4d5d'
+                or setup.get('taskClickCompleted') is not True or setup['stage'] != 'coding-readiness'
+                or type(nav['status']) is not str or nav['status'] not in {'observed','overflow'}):
+            raise ValueError('invalid Codex navigation observation')
+        if nav['status'] == 'overflow':
+            if any(nav[key] is not None for key in count_keys | {'uniqueCodexRole','uniqueCodexHitActionable'}):
+                raise ValueError('invalid Codex navigation overflow')
+        else:
+            if (any(type(nav[key]) is not int or not 0 <= nav[key] <= 32 for key in count_keys)
+                    or type(nav['uniqueCodexRole']) is not str
+                    or nav['uniqueCodexRole'] not in {'none','button','link','menuitem'}
+                    or type(nav['uniqueCodexHitActionable']) is not bool):
+                raise ValueError('invalid Codex navigation counts')
+            total = sum(nav[key] for key in ('codexButtonCount','codexLinkCount','codexMenuItemCount'))
+            expected = {'button':'codexButtonCount','link':'codexLinkCount','menuitem':'codexMenuItemCount'}
+            if ((total == 1) != (nav['uniqueCodexRole'] != 'none')
+                    or total == 1 and nav[expected[nav['uniqueCodexRole']]] != 1
+                    or nav['uniqueCodexHitActionable'] and total != 1):
+                raise ValueError('invalid Codex navigation identity')
     if 'taskScopeObservation' in setup:
         task_scope_observation(setup['taskScopeObservation'])
     if 'folderTrust' in setup:

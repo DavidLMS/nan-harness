@@ -6,7 +6,7 @@ const source = fs.readFileSync(`${__dirname}/observe-renderer.cjs`, 'utf8');
 const timingStart = source.indexOf('function onboardingTrial(');
 const timingEnd = source.indexOf('async function run()', timingStart);
 const timing = vm.runInNewContext(`(() => { ${source.slice(timingStart, timingEnd)}
-  return {onboardingTrial, onboardingDeadline}; })()`);
+  return {onboardingTrial, onboardingDeadline,onboardingBudget}; })()`);
 const hosted = {GITHUB_ACTIONS: 'true', RUNNER_ENVIRONMENT: 'github-hosted',
   RUNNER_OS: 'Windows', NANH_CODEX_PUBLIC_ONBOARDING: 'engineering'};
 assert.equal(timing.onboardingTrial('chatgpt-desktop', 'win32', hosted), true);
@@ -26,6 +26,10 @@ for(const now of [0,10000,35000,59000,61000]) {
 }
 assert.equal(timing.onboardingDeadline(true, 35000, 60000, 61000), 60000);
 assert.equal(timing.onboardingDeadline(false, 25000, 25000, 26000), 25000);
+assert.equal(timing.onboardingBudget(true,'win32'),120000);
+for(const platform of ['linux','darwin'])assert.equal(timing.onboardingBudget(true,platform),60000);
+for(const platform of ['win32','linux','darwin'])assert.equal(timing.onboardingBudget(false,platform),25000);
+assert.equal(timing.onboardingDeadline(true,35000,120000,121000),120000);
 const start = source.indexOf('const counts = await page.evaluate(') + 'const counts = await page.evaluate('.length;
 const end = source.indexOf('}, app);', start) + 1;
 function trial(headings, app = 'pen-desktop', bodyText = '', roleCount = 0) {

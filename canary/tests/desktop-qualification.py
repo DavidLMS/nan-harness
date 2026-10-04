@@ -2734,6 +2734,18 @@ class QualificationTests(unittest.TestCase):
             with self.assertRaises(ValueError):q.public_onboarding({**bound,'codingReadinessObservation':changed},'chatgpt-desktop')
         overflow = {key:None for key in coding if key != 'status'} | {'status':'overflow'}
         self.assertEqual(q.public_onboarding({**bound,'codingReadinessObservation':overflow},'chatgpt-desktop')['codingReadinessObservation'],overflow)
+        navigation = dict(status='observed',sourceVersion='26.930.41038',
+            sourceSha256='28c6096af241a37a9a33a2e5601f0aa05426910d5c84d08824d852342a2b4d5d',
+            codexButtonCount=1,codexLinkCount=0,codexMenuItemCount=0,chatModeTriggerCount=1,
+            codexModeTriggerCount=0,projectSelectorCount=0,newChatCount=0,projectsLinkCount=0,
+            uniqueCodexRole='button',uniqueCodexHitActionable=True)
+        observed = {**bound,'codingNavigationObservation':navigation}
+        self.assertEqual(q.public_onboarding(observed,'chatgpt-desktop'),observed)
+        for change in ({'sourceVersion':'PRIVATE'},{'codexButtonCount':True},
+                       {'codexButtonCount':33},{'uniqueCodexRole':'link'},
+                       {'codexLinkCount':1},{'rawName':'PRIVATE'},{'uniqueCodexRole':[]}):
+            with self.assertRaises(ValueError):
+                q.public_onboarding({**observed,'codingNavigationObservation':{**navigation,**change}},'chatgpt-desktop')
         for changed in ({'taskClickCompleted':False}, {'taskScopeProved':False}, {'stage':'task-action'}):
             with self.assertRaises(ValueError):q.public_onboarding({**bound,**changed},'chatgpt-desktop')
         task = dict(heldScopeConnected=True, heldScopeVisible=True,

@@ -152,8 +152,41 @@ function codingScope(diagnostic=false) {
       &&![...e.children].some(c=>c.textContent?.trim()===ack)).length:null,
     exactGetStartedCount:buttons.filter(e=>e.textContent?.trim()==='Get Started').length,
     exactSkipCount:buttons.filter(e=>e.textContent?.trim()==='Skip').length};
+  // Passive source labels are not navigation authority. Keep this in the same DOM read.
+  const controls=nodes.length<=4096?nodes.filter(e=>(['BUTTON','A'].includes(e.tagName)
+    ||e.getAttribute('role')==='menuitem')&&visible(e)):[];
+  const name=e=>e.getAttribute('aria-label')??e.textContent?.trim();
+  const codex=controls.filter(e=>name(e)==='Codex');
+  const role=e=>e.getAttribute('role')??(e.tagName==='BUTTON'?'button':e.tagName==='A'?'link':'unknown');
+  const unique=codex.length===1?codex[0]:null;
+  let hit=false;
+  if(unique) {
+    const r=unique.getBoundingClientRect(),x=r.left+r.width/2,y=r.top+r.height/2;
+    if(Number.isFinite(x)&&Number.isFinite(y)&&x>=0&&y>=0
+        &&x<document.documentElement.clientWidth&&y<document.documentElement.clientHeight) {
+      const target=document.elementFromPoint(x,y);
+      hit=!!target&&(target===unique||unique.contains(target))&&!unique.disabled
+        &&unique.getAttribute('aria-disabled')!=='true';
+    }
+  }
+  const navigationCounts={codexButtonCount:codex.filter(e=>role(e)==='button').length,
+    codexLinkCount:codex.filter(e=>role(e)==='link').length,
+    codexMenuItemCount:codex.filter(e=>role(e)==='menuitem').length,
+    chatModeTriggerCount:controls.filter(e=>name(e)==='Switch mode, current mode: ChatGPT'
+      ||name(e)==='Switch mode, current mode: ChatGPT Work').length,
+    codexModeTriggerCount:controls.filter(e=>name(e)==='Switch mode, current mode: Codex').length,
+    projectSelectorCount:controls.filter(e=>name(e)==='Select project').length,
+    newChatCount:controls.filter(e=>name(e)==='New chat').length,
+    projectsLinkCount:controls.filter(e=>role(e)==='link'&&name(e)==='Projects').length};
+  const navigationComplete=nodes.length<=4096&&Object.values(navigationCounts).every(n=>n<=32)
+    &&codex.every(e=>['button','link','menuitem'].includes(role(e)));
+  const navigation={status:navigationComplete?'observed':'overflow',
+    sourceVersion:'26.930.41038',sourceSha256:'28c6096af241a37a9a33a2e5601f0aa05426910d5c84d08824d852342a2b4d5d',
+    ...Object.fromEntries(Object.keys(navigationCounts).map(k=>[k,navigationComplete?navigationCounts[k]:null])),
+    uniqueCodexRole:navigationComplete?(unique?role(unique):'none'):null,
+    uniqueCodexHitActionable:navigationComplete?hit:null};
   const complete=Object.values(counts).every(n=>Number.isInteger(n)&&n>=0&&n<=32);
-  return {ready,observation:{status:complete?'observed':'overflow',
+  return {ready,navigation,observation:{status:complete?'observed':'overflow',
     ...Object.fromEntries(Object.keys(counts).map(k=>[k,complete?counts[k]:null]))}};
 }
 
@@ -342,7 +375,7 @@ async function run(page, ownerGuard, deadline, rejected, mainGuard, folderTrust)
     roleScopeAbsent:false, taskScopeProved:false, taskClickAttempted:false, taskClickCompleted:false, codingComposerReady:false, roleProofFailure:'unmeasured', sessionProofFailure:'unmeasured'};
   const stop = category => { facts.errorCategory=category; return facts; };
   const sessionFailure = typeof ownerGuard !== 'function' ? 'guard-missing'
-    : !Number.isFinite(deadline) || !Number.isFinite(maxWaitMs) || maxWaitMs > 60000 ? 'deadline-invalid'
+    : !Number.isFinite(deadline) || !Number.isFinite(maxWaitMs) || maxWaitMs > (process.platform==='win32'?120000:60000) ? 'deadline-invalid'
     : maxWaitMs < 1 ? 'deadline-expired'
     : !['win32','linux','darwin'].includes(process.platform) ? 'platform'
     : process.env.GITHUB_ACTIONS !== 'true' || process.env.RUNNER_ENVIRONMENT !== 'github-hosted'
@@ -545,6 +578,7 @@ async function run(page, ownerGuard, deadline, rejected, mainGuard, folderTrust)
       if(!await ownedEndpoint())return stop('ownership-lost');
       const coding=await page.evaluate(codingScope,true);
       facts.codingReadinessObservation=coding.observation;
+      if(process.platform==='linux'&&skipAdmitted)facts.codingNavigationObservation=coding.navigation;
       if(coding.ready===true) {facts.codingComposerReady=true;return facts;}
       if(skipAdmitted&&facts.taskControlKind==='skip-optional-capabilities'
           &&coding.observation.modalCount===1&&!confirmationConsumed) {

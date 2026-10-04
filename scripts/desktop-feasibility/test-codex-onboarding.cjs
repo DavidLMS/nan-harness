@@ -97,7 +97,8 @@ async function trial(options={}) {
  vm.runInNewContext(source,sandbox);
  let guards=0,mainProofs=0,sealed=0;
  const guard=()=>{guards++;if(options.guardThrows)throw Error('PRIVATE');if(options.guardExhaustsBudget&&guards>=3||options.overlayBudgetExpired&&overlayReads>0)now=1201;return !inventoryOwnerLost&&!(options.overlayOwnerDuringProof&&legendReads>=3)&&!(options.overlayOwnerLoss&&overlayReads>0)&&!options.initialOwnerLoss&&!(options.ownerLossBeforeRole&&guards>=3)&&!(options.ownerLoss&&roleClicks>0)&&!(options.finalLoss&&guards>=2);};
- const budget=options.expired?0:options.invalidDeadline?NaN:options.excessBudget?60001:options.fullBudget?60000:1200;
+ const maximum=options.platform==='linux'||options.platform==='darwin'?60000:120000;
+ const budget=options.expired?0:options.invalidDeadline?NaN:options.excessBudget?maximum+1:options.fullBudget?maximum:1200;
  let mainGuard=options.admitAux?async()=>{
   mainProofs++;
   if(options.auxDeadlineAfterProof||options.auxDeadlineFailedProof)now=1201;

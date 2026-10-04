@@ -25,6 +25,9 @@ function onboardingDeadline(trial, startupDeadline, totalDeadline) {
   // allocate another 25 seconds or truncate unused trial time.
   return trial ? totalDeadline : startupDeadline;
 }
+function onboardingBudget(trial, platform) {
+  return trial ? platform==='win32'?120000:60000 : 25000;
+}
 // This passive receipt never relaxes the page-count guard or sends input.
 function correlationFacts() {
   return {schemaVersion:1,mechanism:'codex-main-aux-correlation',diagnosticsOnly:true,
@@ -482,7 +485,7 @@ async function run() {
   const trial = onboardingTrial(app, process.platform, process.env);
   const started = Date.now();
   const deadline = started + (trial ? 35000 : 25000);
-  const totalDeadline = started + (trial ? 60000 : 25000);
+  const totalDeadline = started + onboardingBudget(trial,process.platform);
   const rootProof = require('./endpoint-ownership.cjs').proof(String(request.ownerPid), String(connection.port));
   facts.launcherOwned = rootProof.descendant(connection.launcherPid, deadline);
   if (!facts.launcherOwned) { facts.errorCategory = 'launcher-unowned'; save(); return; }

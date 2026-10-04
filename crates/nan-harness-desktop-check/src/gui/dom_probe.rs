@@ -925,9 +925,13 @@ fn inventory_driver_limit_for(
     ]
     .into_iter()
     .all(|(key, expected)| environment(key).as_deref() == Some(expected));
-    // The original trial has a shared 60s renderer clock on all three platforms;
-    // the parent adds bounded initialization/teardown headroom. Ordinary stays 35s.
-    Duration::from_secs(if public_setup_trial { 75 } else { 35 })
+    // Windows cold setup retains slower native ownership checks across every
+    // action. Allocate its 120s clock once; the parent adds teardown headroom.
+    Duration::from_secs(if public_setup_trial {
+        if platform == "windows" { 135 } else { 75 }
+    } else {
+        35
+    })
 }
 
 impl Gui {
@@ -1158,7 +1162,7 @@ mod tests {
             let read = |key: &str| environment.get(key).map(|value| (*value).to_owned());
             assert_eq!(
                 inventory_driver_limit_for(platform, read),
-                Duration::from_secs(75)
+                Duration::from_secs(if platform == "windows" { 135 } else { 75 })
             );
             assert_eq!(
                 inventory_driver_limit_for("freebsd", read),
