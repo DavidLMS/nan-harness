@@ -979,6 +979,7 @@ mod configuration_persist_tests {
         // All child output is suppressed; only fixed exit categories cross process.
         std::process::exit(match result {
             Ok(()) => 0,
+            Err(ClaudeDesktopError::Write(error)) if error.raw_os_error() == Some(5) => 5,
             Err(ClaudeDesktopError::Write(error)) if error.raw_os_error() == Some(32) => 32,
             Err(_) => 33,
         });
@@ -1078,7 +1079,7 @@ mod configuration_persist_tests {
         let lease = |directory: &Path| {
             fs::OpenOptions::new()
                 .read(true)
-                .share_mode(1)
+                .share_mode(3)
                 .custom_flags(0x0200_0000 | 0x0020_0000)
                 .open(directory)
                 .unwrap()
@@ -1125,8 +1126,8 @@ mod configuration_persist_tests {
             .unwrap();
         assert_eq!(
             lifecycle_child(&workspace, None),
-            Some(32),
-            "sharing failure not preserved"
+            Some(5),
+            "target-blocked access failure not preserved"
         );
         assert_eq!(fs::read(&destination).unwrap(), b"{}");
         drop(held);
@@ -1457,7 +1458,7 @@ mod configuration_persist_tests {
         let source = temporary.path().to_owned();
         let error =
             persist_closed_configuration(temporary.into_temp_path(), &destination).unwrap_err();
-        assert_eq!(error.error.raw_os_error(), Some(32));
+        assert_eq!(error.error.raw_os_error(), Some(5));
         let retained: &Path = error.path.as_ref();
         assert_eq!(retained, source);
         assert_eq!(fs::read(&destination).unwrap(), b"replacement");
@@ -1468,25 +1469,34 @@ mod configuration_persist_tests {
     }
 
     #[test]
-    fn closed_persist_retries_original_path_after_target_releases() {
+    fn closed_persist_retries_original_path_after_source_releases() {
         let temp = tempfile::tempdir().unwrap();
         let destination = temp.path().join("config.json");
         fs::write(&destination, b"original").unwrap();
-        let held = fs::OpenOptions::new()
-            .read(true)
-            .share_mode(1)
-            .open(&destination)
-            .unwrap();
         let mut temporary = tempfile::Builder::new()
             .make_in(temp.path(), open_private_new)
             .unwrap();
         temporary.write_all(b"replacement").unwrap();
         temporary.as_file().sync_all().unwrap();
+        let temporary = temporary.into_temp_path();
+        let held = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(3)
+            .open(&temporary)
+            .unwrap();
+        let source = temporary.to_path_buf();
+        let initial = temporary.persist(&destination).unwrap_err();
+        assert_eq!(initial.error.raw_os_error(), Some(32));
+        let retained: &Path = initial.path.as_ref();
+        assert_eq!(retained, source);
+        assert_eq!(fs::read(&source).unwrap(), b"replacement");
+        assert_eq!(fs::read(&destination).unwrap(), b"original");
+        let temporary = initial.path;
         let release = std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(40));
             drop(held);
         });
-        let result = persist_closed_configuration(temporary.into_temp_path(), &destination);
+        let result = persist_closed_configuration(temporary, &destination);
         release.join().unwrap();
         assert!(result.is_ok());
         assert_eq!(fs::read(destination).unwrap(), b"replacement");
@@ -1497,23 +1507,32 @@ mod configuration_persist_tests {
         let temp = tempfile::tempdir().unwrap();
         let destination = temp.path().join("config.json");
         fs::write(&destination, b"original").unwrap();
-        let held = fs::OpenOptions::new()
-            .read(true)
-            .share_mode(1)
-            .open(&destination)
-            .unwrap();
         let mut temporary = tempfile::Builder::new()
             .make_in(temp.path(), open_private_new)
             .unwrap();
         temporary.write_all(b"replacement").unwrap();
         temporary.as_file().sync_all().unwrap();
-        let original_path = temporary.path().to_path_buf();
+        let temporary = temporary.into_temp_path();
+        let held = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(3)
+            .open(&temporary)
+            .unwrap();
+        let source = temporary.to_path_buf();
+        let initial = temporary.persist(&destination).unwrap_err();
+        assert_eq!(initial.error.raw_os_error(), Some(32));
+        let retained: &Path = initial.path.as_ref();
+        assert_eq!(retained, source);
+        assert_eq!(fs::read(&source).unwrap(), b"replacement");
+        assert_eq!(fs::read(&destination).unwrap(), b"original");
+        let temporary = initial.path;
+        let original_path = temporary.to_path_buf();
         let release = std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(400));
             drop(held);
         });
         let result = persist_closed_configuration_until(
-            temporary.into_temp_path(),
+            temporary,
             &destination,
             std::time::Instant::now() + Duration::from_secs(2),
         );
@@ -1521,6 +1540,40 @@ mod configuration_persist_tests {
         assert!(result.is_ok());
         assert!(!original_path.exists());
         assert_eq!(fs::read(destination).unwrap(), b"replacement");
+    }
+
+    #[test]
+    fn closed_persist_source_sharing_failure_retains_original_path_until_cleanup() {
+        let temp = tempfile::tempdir().unwrap();
+        let destination = temp.path().join("config.json");
+        fs::write(&destination, b"original").unwrap();
+        let mut temporary = tempfile::Builder::new()
+            .make_in(temp.path(), open_private_new)
+            .unwrap();
+        temporary.write_all(b"replacement").unwrap();
+        temporary.as_file().sync_all().unwrap();
+        let temporary = temporary.into_temp_path();
+        let source = temporary.to_path_buf();
+        let held = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(3)
+            .open(&source)
+            .unwrap();
+        let error = persist_closed_configuration_until(
+            temporary,
+            &destination,
+            std::time::Instant::now() + Duration::from_millis(10),
+        )
+        .unwrap_err();
+        assert_eq!(error.error.raw_os_error(), Some(32));
+        let retained: &Path = error.path.as_ref();
+        assert_eq!(retained, source);
+        assert_eq!(fs::read(&source).unwrap(), b"replacement");
+        assert_eq!(fs::read(&destination).unwrap(), b"original");
+        drop(held);
+        drop(error);
+        assert!(!source.exists());
+        assert_eq!(fs::read_dir(temp.path()).unwrap().count(), 1);
     }
 
     #[test]
@@ -1551,7 +1604,7 @@ mod configuration_persist_tests {
             retained.push(
                 fs::OpenOptions::new()
                     .read(true)
-                    .share_mode(1)
+                    .share_mode(3)
                     .custom_flags(0x0200_0000 | 0x0020_0000)
                     .open(directory)
                     .unwrap(),
@@ -1575,23 +1628,25 @@ mod configuration_persist_tests {
         drop(retained);
     }
     #[test]
-    fn configuration_persist_retries_same_file_after_target_handle_release() {
+    fn configuration_persist_retries_same_file_after_source_handle_release() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("config.json");
         fs::write(&path, b"original").unwrap();
-        let held = fs::OpenOptions::new()
-            .read(true)
-            .share_mode(1)
-            .open(&path)
-            .unwrap();
         let mut temporary = tempfile::Builder::new()
             .prefix(".nan-")
             .make_in(temp.path(), open_private_new)
             .unwrap();
         temporary.write_all(b"replacement").unwrap();
         temporary.flush().unwrap();
+        let source = temporary.path().to_owned();
+        let held = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(3)
+            .open(&source)
+            .unwrap();
         let initial = temporary.persist(&path).unwrap_err();
         assert_eq!(initial.error.raw_os_error(), Some(32));
+        assert_eq!(initial.file.path(), source);
         assert_eq!(fs::read(&path).unwrap(), b"original");
         let release = std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(40));
@@ -1604,7 +1659,7 @@ mod configuration_persist_tests {
     }
 
     #[test]
-    fn configuration_persist_permanent_sharing_failure_preserves_original() {
+    fn configuration_persist_target_access_failure_preserves_original() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("config.json");
         fs::write(&path, b"original").unwrap();
@@ -1621,7 +1676,7 @@ mod configuration_persist_tests {
             qualification_prelaunch::ConfigurationDocument::NormalConfig,
         );
         assert!(
-            matches!(result, Err(ClaudeDesktopError::Write(error)) if error.raw_os_error()==Some(32))
+            matches!(result, Err(ClaudeDesktopError::Write(error)) if error.raw_os_error()==Some(5))
         );
         assert!(started.elapsed() < Duration::from_secs(2));
         assert_eq!(fs::read(&path).unwrap(), b"original");
@@ -1652,18 +1707,21 @@ mod configuration_persist_tests {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("config.json");
         fs::write(&path, b"original").unwrap();
-        let held = fs::OpenOptions::new()
-            .read(true)
-            .share_mode(1)
-            .open(&path)
-            .unwrap();
         let mut temporary = tempfile::NamedTempFile::new_in(temp.path()).unwrap();
         temporary.write_all(b"replacement").unwrap();
+        let source = temporary.path().to_owned();
+        let held = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(3)
+            .open(&source)
+            .unwrap();
         let error = persist_configuration_file(temporary, &path, false).unwrap_err();
         assert_eq!(error.error.raw_os_error(), Some(32));
         assert_eq!(fs::read(&path).unwrap(), b"original");
-        drop(error);
+        assert!(source.exists());
         drop(held);
+        drop(error);
+        assert!(!source.exists());
     }
     #[test]
     fn configuration_persist_child_worker() {
@@ -1755,7 +1813,7 @@ mod configuration_persist_tests {
             .map(|directory| {
                 fs::OpenOptions::new()
                     .read(true)
-                    .share_mode(1)
+                    .share_mode(3)
                     .custom_flags(0x0200_0000 | 0x0020_0000)
                     .open(directory)
                     .unwrap()

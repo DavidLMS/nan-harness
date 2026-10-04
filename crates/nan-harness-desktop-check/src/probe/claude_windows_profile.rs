@@ -22,13 +22,20 @@ fn regular(path: &Path, directory: bool) -> bool {
         m.file_attributes() & 0x400 == 0 && if directory { m.is_dir() } else { m.is_file() }
     })
 }
+fn retained_directory_regular(file: &File) -> bool {
+    use std::os::windows::fs::MetadataExt as _;
+    file.metadata()
+        .is_ok_and(|m| m.is_dir() && m.file_attributes() & 0x400 == 0)
+}
+
 fn lock_directory(path: &Path) -> std::io::Result<File> {
     use std::os::windows::fs::OpenOptionsExt as _;
-    // Child files remain writable; deny mutation, deletion and renaming of
-    // the retained directory itself (including conversion to a reparse point).
+    // Share reads/writes so child files can be atomically renamed. Withhold
+    // DELETE sharing to prevent deletion or renaming of this retained directory.
+    // Writable metadata can change; reject reparse points again during custody proof.
     let file = std::fs::OpenOptions::new()
         .read(true)
-        .share_mode(1)
+        .share_mode(3)
         .custom_flags(0x0200_0000 | 0x0020_0000)
         .open(path)?;
     let metadata = file.metadata()?;
@@ -216,7 +223,10 @@ impl FreshClaudeWindowsProfile {
         deadline: Instant,
     ) -> Result<(), Reason> {
         use std::os::windows::fs::OpenOptionsExt as _;
-        if !self.configuration.is_empty() || !self.native.claude_policy_absent(deadline) {
+        if !self.configuration.is_empty()
+            || !self.directories.iter().all(retained_directory_regular)
+            || !self.native.claude_policy_absent(deadline)
+        {
             return Err(Reason::IsolationUnavailable);
         }
         let library = self.root.join("configLibrary");
@@ -251,7 +261,10 @@ impl FreshClaudeWindowsProfile {
             values.push(document(&mut file).ok_or(Reason::IsolationUnavailable)?);
             files.push(file);
         }
-        if !configured(&values, base, token) || Instant::now() >= deadline {
+        if !configured(&values, base, token)
+            || !self.directories.iter().all(retained_directory_regular)
+            || Instant::now() >= deadline
+        {
             return Err(Reason::IsolationUnavailable);
         }
         self.configuration = files;
@@ -261,10 +274,7 @@ impl FreshClaudeWindowsProfile {
         self.configuration.len() == 3
             && workspace.canonicalize().ok().as_deref() == Some(self.workspace.as_path())
             && regular(&self.root, true)
-            && self
-                .directories
-                .iter()
-                .all(|f| f.metadata().is_ok_and(|m| m.is_dir()))
+            && self.directories.iter().all(retained_directory_regular)
             && self
                 .configuration
                 .iter()
@@ -283,6 +293,33 @@ mod tests {
             serde_json::json!({"appliedId":PROFILE_ID,"entries":[{"id":PROFILE_ID}]}),
             serde_json::json!({"inferenceProvider":"gateway","inferenceGatewayBaseUrl":"http://127.0.0.1:1","inferenceGatewayApiKey":"private-synthetic-sentinel","inferenceGatewayAuthScheme":"bearer","disableDeploymentModeChooser":true,"coworkTabEnabled":false}),
         ]
+    }
+    #[test]
+    fn retained_directory_allows_child_rename_without_delete_sharing() {
+        use std::io::Write as _;
+        use std::os::windows::fs::{MetadataExt as _, OpenOptionsExt as _};
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path().canonicalize().unwrap();
+        let held = lock_directory(&root).unwrap();
+        let source = root.join("source.json");
+        let destination = root.join("destination.json");
+        let mut file = nan_harness_private_fs::open_private_new(&source).unwrap();
+        file.write_all(b"private-fixture").unwrap();
+        file.sync_all().unwrap();
+        drop(file);
+        std::fs::rename(&source, &destination).unwrap();
+        assert_eq!(std::fs::read(&destination).unwrap(), b"private-fixture");
+        assert!(nan_harness_private_fs::open_private_read(&destination).is_ok());
+        let delete = std::fs::OpenOptions::new()
+            .access_mode(0x0001_0000)
+            .share_mode(7)
+            .custom_flags(0x0200_0000 | 0x0020_0000)
+            .open(&root)
+            .unwrap_err();
+        assert_eq!(delete.raw_os_error(), Some(32));
+        let metadata = held.metadata().unwrap();
+        assert!(metadata.is_dir() && metadata.file_attributes() & 0x400 == 0);
+        drop(held);
     }
     #[test]
     fn rejects_stale_or_redirected_configuration() {
