@@ -199,4 +199,53 @@ class BoundaryTests(unittest.TestCase):
         self.assertNotIn('PRIVATE',out.getvalue())
         self.assertFalse(facts['sendAttempted'])
 
+
+
+class MountReadinessTests(unittest.TestCase):
+    def case(self, *, mounts=True, loses_guard=False, duplicate=False, malformed=False):
+        adapter = Adapter()
+        adapter.scans = 0
+        children = adapter.children
+        def ready_children(node):
+            if node == 'root':
+                adapter.scans += 1
+            if node == 'frame':
+                if malformed:
+                    return None
+                if adapter.scans < 3 or not mounts:
+                    return ['mode', 'send']
+                if duplicate:
+                    return ['editor', 'editor', 'mode', 'send']
+            return children(node)
+        adapter.children = ready_children
+        adapter.guard = lambda: not (loses_guard and adapter.scans >= 1)
+        for name in ['owner','identity','children','parent','state','bounds','focused','text','grab_focus','attributes','actions','invoke_once']:
+            fn = getattr(adapter, name)
+            def wrap(node, *args, fn=fn, name=name):
+                value = fn('root' if node == ('r','root') else node, *args)
+                return ('r','root') if name == 'parent' and value == 'root' else value
+            setattr(adapter, name, wrap)
+        controller = chat.Controller(adapter, {'pid':7,'bus':'r','path':'root'}, .2,
+                                     adapter.clock, adapter.sleep)
+        return adapter, controller
+
+    def test_mounting_owned_tree_can_bind_without_input_or_deadline_reset(self):
+        adapter, controller = self.case()
+        controller.bind()
+        self.assertEqual(controller.editor, 'editor')
+        self.assertEqual(adapter.scans, 3)
+        self.assertEqual(adapter.now, .1)
+        self.assertEqual((adapter.focus_count, adapter.paste_count, adapter.send_count), (0,0,0))
+
+    def test_loss_expiry_duplicate_or_malformed_tree_never_act(self):
+        for options, error in [({'loses_guard':True}, chat.Rejected),
+                               ({'mounts':False}, TimeoutError),
+                               ({'duplicate':True}, chat.Rejected),
+                               ({'malformed':True}, chat.Rejected)]:
+            with self.subTest(options=options):
+                adapter, controller = self.case(**options)
+                with self.assertRaises(error): controller.bind()
+                self.assertLessEqual(adapter.now, controller.deadline)
+                self.assertEqual((adapter.focus_count, adapter.paste_count, adapter.send_count), (0,0,0))
+
 if __name__=='__main__':unittest.main()

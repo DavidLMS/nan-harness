@@ -97,11 +97,25 @@ class Controller:
         return bits
 
     def bind(self):
-        nodes = self.tree()
-        editors = [node for node, identity in nodes if identity[0] in (61, 78, 79)
-                   and 'Write your prompt to Claude' in identity[1:]]
-        if len(editors) != 1:
-            raise Rejected('tree')
+        while True:
+            if not self.query('guard'):
+                raise Rejected('native-window')
+            nodes = self.tree()
+            editors = [node for node, identity in nodes if identity[0] in (61, 78, 79)
+                       and 'Write your prompt to Claude' in identity[1:]]
+            # Only complete, owned trees with no source editor may be mounting.
+            # Duplicate editors and every query/ownership failure remain terminal.
+            if len(editors) > 1:
+                raise Rejected('tree')
+            if not self.query('guard'):
+                raise Rejected('native-window')
+            if editors:
+                break
+            self.boundary = 'tree'
+            remaining = self.deadline - self.clock()
+            if remaining <= 0:
+                raise TimeoutError()
+            self.sleep(min(0.05, remaining))
         self.editor = editors[0]
         self.adapter.key_guard = lambda: self.proof(focused=True)
         self.state(self.editor, editable=True)
