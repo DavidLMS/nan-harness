@@ -1830,6 +1830,20 @@
       "platform": "linux",
       "sha": "38d8ae13e6b873f4e069d9fd47b3bb9801b20da36963a9f08b9f4bc13dd028d7",
       "text": "Command menu"
+    },
+    {
+      "file": "dialog-f76cbec243d8.js",
+      "id": "desktop.windowCloseConfirmation.title",
+      "platform": "linux",
+      "sha": "45082ca0b376d377ba1877678d327a23d4ef9651398d02ad624a4f9ea5bbf9c5",
+      "text": "Are you sure you want to close the window?"
+    },
+    {
+      "file": "dialog-controller-f5d3f3957fb0.js",
+      "id": "chatgptConversations.lockdown.dialog.title",
+      "platform": "linux",
+      "sha": "24223646bfac751e04c7ae16a773fdd4211b6e17f01f71eb402f00ace4bb4d4f",
+      "text": "Lockdown mode is on for this chat"
     }
   ],
   "sourceVersion": "26.930.41038"

@@ -1885,6 +1885,20 @@
       "platform": "windows",
       "sha": "eca1e012235d19b3c7aed16f9f41476c04fbe31a8a1f6babebdd47aaa927f666",
       "text": "Command menu"
+    },
+    {
+      "file": "dialog-5d3e9f6113f2.js",
+      "id": "desktop.windowCloseConfirmation.title",
+      "platform": "windows",
+      "sha": "01b1535a56c81998e792a961632a6d884b99db572dead0df9aefad42324a455b",
+      "text": "Are you sure you want to close the window?"
+    },
+    {
+      "file": "dialog-controller-596fc47e2e41.js",
+      "id": "chatgptConversations.lockdown.dialog.title",
+      "platform": "windows",
+      "sha": "32d7e8ccd7a41f1c03191d367274adbc49a64e1f247bb407800cd17811237960",
+      "text": "Lockdown mode is on for this chat"
     }
   ],
   "sourceVersion": "26.930.31730"

@@ -1979,6 +1979,20 @@
       "platform": "mac",
       "sha": "6a94ba724f490cf0af6ff8bda8ed5198e1902be8eedd92557e632fd6ea5dd1c7",
       "text": "Command menu"
+    },
+    {
+      "file": "dialog-6af1ab4ee7b4.js",
+      "id": "desktop.windowCloseConfirmation.title",
+      "platform": "macos",
+      "sha": "8036251bbd24f7f6b050163d51213b417e02a84c9b5cab4c88713f156dd8f759",
+      "text": "Are you sure you want to close the window?"
+    },
+    {
+      "file": "dialog-controller-5487160291eb.js",
+      "id": "chatgptConversations.lockdown.dialog.title",
+      "platform": "macos",
+      "sha": "07cde5692302059f22402b07614cac0a1e7cac3548a56c6a0796e37d3bbfe744",
+      "text": "Lockdown mode is on for this chat"
     }
   ],
   "sourceVersion": "26.930.41038"
