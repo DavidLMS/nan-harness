@@ -2,6 +2,8 @@
 
 use super::{OwnedReadFixtureSelection, ProbeSpec, select_semantic_read_tool, semantic_marker};
 use crate::cli::{SessionMode, VerificationPolicy};
+#[cfg(target_os = "linux")]
+use crate::gui::ClaudeLinuxChatSession;
 #[cfg(target_os = "macos")]
 use crate::gui::ClaudeNativeChatSession;
 #[cfg(windows)]
@@ -65,6 +67,10 @@ impl SemanticBackend {
     }
 
     pub(super) fn uses_renderer(&self) -> bool {
+        #[cfg(target_os = "linux")]
+        if self.kind == DesktopHarnessKind::Claude && crate::gui::claude_linux_chat_policy() {
+            return false;
+        }
         self.kind != DesktopHarnessKind::Zed
             && std::env::var("NANH_DESKTOP_QUALIFICATION_MODE").as_deref() != Ok("startup-baseline")
     }
@@ -171,6 +177,14 @@ impl SemanticBackend {
             return ui.finish(scenario.gate, outcome);
         }
 
+        #[cfg(target_os = "linux")]
+        if self.kind == DesktopHarnessKind::Claude && crate::gui::claude_linux_chat_policy() {
+            let mut ui =
+                SemanticUi::ClaudeLinux(Box::new(gui.claude_linux_chat_session(&self.directory)?));
+            let outcome = complete_scenario(&mut ui, &scenario, &self.directory, result).await;
+            return ui.finish(scenario.gate, outcome);
+        }
+
         let mut ui = match self.kind {
             DesktopHarnessKind::Zed => {
                 SemanticUi::Zed(Box::new(gui.native_clipboard_session(&self.directory)?))
@@ -195,6 +209,8 @@ enum SemanticUi<'a> {
     Claude(Box<ClaudeNativeChatSession<'a>>),
     #[cfg(windows)]
     ClaudeWindows(ClaudeWindowsChatSession<'a>),
+    #[cfg(target_os = "linux")]
+    ClaudeLinux(Box<ClaudeLinuxChatSession<'a>>),
     Renderer(RendererSession<'a>),
     Codex(CodexDomSession<'a>),
 }
@@ -220,6 +236,11 @@ impl SemanticUi<'_> {
             ),
             #[cfg(windows)]
             Self::ClaudeWindows(_) => (
+                InputMode::NativeClipboardAndKeyboard,
+                ResponseVerification::NativeAssistantClipboard,
+            ),
+            #[cfg(target_os = "linux")]
+            Self::ClaudeLinux(_) => (
                 InputMode::NativeClipboardAndKeyboard,
                 ResponseVerification::NativeAssistantClipboard,
             ),
@@ -266,6 +287,16 @@ impl SemanticUi<'_> {
                     DomPurpose::Failure => session.wait_retry(Duration::from_secs(30), gate),
                 }
             }
+            #[cfg(target_os = "linux")]
+            Self::ClaudeLinux(session) => {
+                session.new_turn(prompt)?;
+                match purpose {
+                    DomPurpose::Response => {
+                        session.wait_response(marker, Duration::from_secs(30), gate)
+                    }
+                    DomPurpose::Failure => session.wait_retry(Duration::from_secs(30), gate),
+                }
+            }
             Self::Renderer(session) => session.turn(
                 DomTurn {
                     prompt,
@@ -304,6 +335,11 @@ impl SemanticUi<'_> {
                 gate.fail_recoverable_scenario(true);
                 503
             }
+            #[cfg(target_os = "linux")]
+            Self::ClaudeLinux(_) => {
+                gate.fail_recoverable_scenario(true);
+                503
+            }
             Self::Renderer(_) | Self::Codex(_) => {
                 gate.fail_recoverable_scenario(true);
                 503
@@ -336,6 +372,11 @@ impl SemanticUi<'_> {
                 session.retry_once()?;
                 session.wait_response(marker, Duration::from_secs(30), gate)
             }
+            #[cfg(target_os = "linux")]
+            Self::ClaudeLinux(session) => {
+                session.retry_once()?;
+                session.wait_response(marker, Duration::from_secs(30), gate)
+            }
             Self::Renderer(session) => session.turn(
                 DomTurn {
                     prompt: "Check the expected provider failure",
@@ -364,6 +405,8 @@ impl SemanticUi<'_> {
             Self::Claude(session) => session.finish(gate, outcome),
             #[cfg(windows)]
             Self::ClaudeWindows(session) => session.finish(gate, outcome),
+            #[cfg(target_os = "linux")]
+            Self::ClaudeLinux(session) => session.finish(gate, outcome),
             Self::Renderer(_) | Self::Codex(_) => outcome,
         }
     }

@@ -155,7 +155,9 @@ def qualification_environment(app, facts, real_nanh, executable, inherited=None)
         raise ValueError('Zed panel zoom diagnostic is unavailable')
     if source.get('NANH_CODEX_PROJECT_POLICY') is not None and app != 'chatgpt-desktop':
         raise ValueError('Codex native project policy is unavailable')
-    if source.get('NANH_CLAUDE_LINUX_CHAT_ONLY') is not None and (app != 'claude-desktop' or source.get('RUNNER_OS') != 'Linux' or source.get('NANH_DESKTOP_QUALIFICATION_MODE') != 'startup-baseline' or source.get('NANH_CLAUDE_LINUX_CHAT_ONLY') != '1'):
+    if source.get('NANH_CLAUDE_LINUX_NATIVE_CHAT') is not None and (app != 'claude-desktop' or source.get('RUNNER_OS') != 'Linux' or source.get('NANH_CLAUDE_LINUX_NATIVE_CHAT') != 'first-turn'):
+        raise ValueError('Claude Linux native Chat trial is unavailable')
+    if source.get('NANH_CLAUDE_LINUX_CHAT_ONLY') is not None and (app != 'claude-desktop' or source.get('RUNNER_OS') != 'Linux' or (source.get('NANH_DESKTOP_QUALIFICATION_MODE') != 'startup-baseline' and source.get('NANH_CLAUDE_LINUX_NATIVE_CHAT') != 'first-turn') or source.get('NANH_CLAUDE_LINUX_CHAT_ONLY') != '1'):
         raise ValueError('Claude Linux Chat-only trial is unavailable')
     panel_layout = source.get('NANH_ZED_PANEL_LAYOUT')
     if panel_layout is not None and (panel_layout != 'fixed-wide' or app != 'zed-desktop'
@@ -217,6 +219,9 @@ def qualification_environment(app, facts, real_nanh, executable, inherited=None)
         mode = source.get('NANH_DESKTOP_QUALIFICATION_MODE', 'renderer')
         if mode not in {'renderer', 'startup-baseline'}:
             raise ValueError('renderer mode is invalid')
+        if source.get('NANH_CLAUDE_LINUX_NATIVE_CHAT') == 'first-turn':
+            mode = 'startup-baseline'
+            environment['NANH_CLAUDE_LINUX_NATIVE_CHAT'] = 'first-turn'
         native_chat = source.get('NANH_CLAUDE_MAC_NATIVE_CHAT')
         if native_chat is not None:
             if (native_chat != '1' or app != 'claude-desktop' or source.get('RUNNER_OS') != 'macOS'
@@ -390,6 +395,11 @@ def run(args):
         environment['NANH_CLAUDE_LINUX_SOURCE_POLICY'] = 'official-2.9939.4'
         environment['FEASIBILITY_CLAUDE_VISIBILITY_DRIVER'] = str(
             Path(__file__).with_name('claude-atspi-visibility.py').resolve(strict=True))
+    if environment.get('NANH_CLAUDE_LINUX_NATIVE_CHAT') is not None:
+        if environment.get('NANH_CLAUDE_LINUX_SOURCE_POLICY') != 'official-2.9939.4':
+            raise ValueError('Claude Linux native Chat source differs')
+        environment['FEASIBILITY_CLAUDE_CHAT_DRIVER'] = str(
+            Path(__file__).with_name('claude-atspi-chat.py').resolve(strict=True))
     if os.environ.get('NANH_CLAUDE_LINUX_CHAT_ONLY') is not None:
         if environment.get('NANH_CLAUDE_LINUX_SOURCE_POLICY') != 'official-2.9939.4':
             raise ValueError('Claude Linux Chat-only source differs')

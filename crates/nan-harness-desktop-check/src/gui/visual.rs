@@ -762,6 +762,27 @@ impl Visual {
         Ok(result)
     }
 
+    #[cfg(target_os = "linux")]
+    pub(super) fn linux_chat_window_request(&self) -> serde_json::Value {
+        let window = self.window.borrow();
+        let name = if window.name.is_empty() {
+            "-".to_owned()
+        } else {
+            use std::fmt::Write as _;
+            window
+                .name
+                .as_bytes()
+                .iter()
+                .fold(String::new(), |mut name, byte| {
+                    let _ = write!(name, "{byte:02x}");
+                    name
+                })
+        };
+        serde_json::json!({"pid": window.pid, "window": window.id,
+            "bounds": [window.bounds.x, window.bounds.y, window.bounds.width, window.bounds.height],
+            "name": name, "nativeExecutable": self.native.executable()})
+    }
+
     pub(super) fn pid(&self) -> u32 {
         self.window.borrow().pid
     }

@@ -3325,5 +3325,33 @@ class ClaudePersistOwnerTests(unittest.TestCase):
             path.write_text(json.dumps({**unavailable,'ownerCount':0}))
             with self.assertRaises(ValueError):q.semantic_observations(root,'claude-desktop')
 
+
+class ClaudeLinuxNativeChatTests(unittest.TestCase):
+    def test_closed_partial_receipt_does_not_claim_recovery(self):
+        value=dict(schemaVersion=1,mechanism='claude-linux-native-chat',diagnosticsOnly=True,
+                   stage='sent',submittedTurns=1,inputVerifiedTurns=1,copiedResponses=0,
+                   retryAttempted=False,clipboardCleared=True)
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);path=root/'chat.json';path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(root,'claude-desktop'),[value])
+            for extra in ({'copiedResponses':2},{'inputVerifiedTurns':0},{'submittedTurns':True},
+                          {'retryAttempted':True},{'path':'PRIVATE'},{'stage':'PRIVATE'}):
+                path.write_text(json.dumps({**value,**extra}))
+                with self.assertRaises(ValueError):q.semantic_observations(root,'claude-desktop')
+            path.write_text(json.dumps(value))
+            with self.assertRaises(ValueError):q.semantic_observations(root,'zed-desktop')
+
+    def test_native_opt_in_only_accepts_owned_linux_trial(self):
+        source=dict(GITHUB_ACTIONS='true',RUNNER_ENVIRONMENT='github-hosted',RUNNER_OS='Linux',
+                    NANH_CLAUDE_LINUX_NATIVE_CHAT='first-turn',NANH_CLAUDE_LINUX_CHAT_ONLY='1')
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);helper=root/'helper';helper.write_text('fixture')
+            env=runner.qualification_environment('claude-desktop',root,helper,str(helper),source)
+            self.assertEqual(env['NANH_DESKTOP_QUALIFICATION_MODE'],'startup-baseline')
+            self.assertEqual(env['NANH_CLAUDE_LINUX_NATIVE_CHAT'],'first-turn')
+            for app,extra in [('zed-desktop',{}),('claude-desktop',{'RUNNER_OS':'macOS'}),
+                              ('claude-desktop',{'NANH_CLAUDE_LINUX_NATIVE_CHAT':'other'})]:
+                with self.assertRaises(ValueError):runner.qualification_environment(app,root,helper,str(helper),{**source,**extra})
+
 if __name__ == '__main__':
     unittest.main()

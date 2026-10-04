@@ -4,6 +4,8 @@ mod accessibility_probe;
 #[cfg(any(target_os = "macos", test))]
 mod claude_chat_navigation;
 #[cfg(target_os = "linux")]
+mod claude_linux_chat;
+#[cfg(target_os = "linux")]
 mod claude_linux_visibility;
 #[cfg(target_os = "macos")]
 mod claude_native_chat;
@@ -25,6 +27,10 @@ mod stability;
 mod visual;
 mod zed_zoom_probe;
 
+#[cfg(target_os = "linux")]
+pub(crate) use claude_linux_chat::ClaudeLinuxChatSession;
+#[cfg(target_os = "linux")]
+pub(crate) use claude_linux_chat::policy as claude_linux_chat_policy;
 #[cfg(target_os = "macos")]
 pub(crate) use claude_native_chat::ClaudeNativeChatSession;
 #[cfg(windows)]

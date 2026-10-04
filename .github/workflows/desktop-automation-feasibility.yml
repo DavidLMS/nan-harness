@@ -330,8 +330,13 @@ jobs:
             echo 'NANH_CLAUDE_MAC_NATIVE_CHAT=1' >> "$GITHUB_ENV"
           fi
       - name: Enable source-pinned Claude Linux Chat-only trial
-        if: runner.os == 'Linux' && matrix.app == 'claude-desktop' && inputs.experiment == 'startup-baseline'
-        run: echo 'NANH_CLAUDE_LINUX_CHAT_ONLY=1' >> "$GITHUB_ENV"
+        if: runner.os == 'Linux' && matrix.app == 'claude-desktop' && contains(fromJSON('["startup-baseline","deterministic-full"]'), inputs.experiment)
+        shell: bash
+        run: |
+          echo 'NANH_CLAUDE_LINUX_CHAT_ONLY=1' >> "$GITHUB_ENV"
+          if [ '${{ inputs.experiment }}' = 'deterministic-full' ]; then
+            echo 'NANH_CLAUDE_LINUX_NATIVE_CHAT=first-turn' >> "$GITHUB_ENV"
+          fi
       - name: Enable Claude Windows private-profile observations
         if: runner.os == 'Windows' && matrix.app == 'claude-desktop' && contains(fromJSON('["startup-baseline","deterministic-full"]'), inputs.experiment)
         shell: bash

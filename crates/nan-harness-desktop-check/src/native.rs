@@ -267,7 +267,7 @@ impl Native {
         })
     }
 
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     pub(crate) fn executable(&self) -> &Path {
         &self.executable
     }
