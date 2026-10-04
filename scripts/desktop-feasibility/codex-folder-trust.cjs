@@ -44,10 +44,10 @@ function sample({workspace,held}) {
   const visible=e=>{const r=e.getBoundingClientRect(),s=getComputedStyle(e);return e.isConnected&&r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden';};
   const dialogs=[...document.querySelectorAll('[role="dialog"],[role="alertdialog"],[aria-modal="true"],[role="menu"]')].filter(visible);
   if(dialogs.length===0)return {status:'absent'};
-  if(dialogs.length!==1||dialogs[0].getAttribute('role')!=='dialog')return {status:'blocked'};
+  if(dialogs.length!==1||dialogs[0].getAttribute('role')!=='dialog')return {status:'blocked',rejectionStage:'dialog'};
   const dialog=dialogs[0];
   const forms=[...dialog.querySelectorAll('form.select-none')].filter(visible);
-  if(forms.length!==1)return {status:'blocked'};
+  if(forms.length!==1)return {status:'blocked',rejectionStage:'form'};
   const form=forms[0];
   const titles=[...form.querySelectorAll('h2.contents')].filter(e=>{
     const style=getComputedStyle(e);
@@ -60,41 +60,57 @@ function sample({workspace,held}) {
   const trust=buttons.filter(e=>e.textContent.trim()==='Trust folder'&&e.getAttribute('type')==='submit');
   const cancel=buttons.filter(e=>e.textContent.trim()==='Cancel'&&e.getAttribute('type')==='button');
   if(titles.length!==1||titles[0].tagName!=='H2'||!titles[0].id
-      ||dialog.getAttribute('aria-labelledby')!==titles[0].id||lists.length!==1||items.length!==1||items[0].tagName!=='LI'
-      ||!items[0].classList.contains('break-all')||!visible(items[0])||items[0].textContent!==workspace
-      ||buttons.length!==2||trust.length!==1||cancel.length!==1||trust[0].disabled
+      ||dialog.getAttribute('aria-labelledby')!==titles[0].id)
+    return {status:'blocked',rejectionStage:'title'};
+  if(lists.length!==1||items.length!==1||items[0].tagName!=='LI'
+      ||!items[0].classList.contains('break-all')||!visible(items[0])||items[0].textContent!==workspace)
+    return {status:'blocked',rejectionStage:'path'};
+  if(buttons.length!==2||trust.length!==1||cancel.length!==1||trust[0].disabled
       ||trust[0].getAttribute('aria-disabled')==='true'
-      ||form.querySelectorAll('input,textarea,[contenteditable="true"]').length!==0)return {status:'blocked'};
+      ||form.querySelectorAll('input,textarea,[contenteditable="true"]').length!==0)
+    return {status:'blocked',rejectionStage:'controls'};
   const button=trust[0],rect=button.getBoundingClientRect();
-  if(![rect.left,rect.top,rect.width,rect.height].every(Number.isFinite))return {status:'blocked'};
+  if(![rect.left,rect.top,rect.width,rect.height].every(Number.isFinite))return {status:'blocked',rejectionStage:'hit'};
   const x=rect.left+rect.width/2,y=rect.top+rect.height/2,hit=document.elementFromPoint(x,y);
-  if(!hit||!button.contains(hit)||held&&(held.dialog!==dialog||held.form!==form||held.title!==titles[0]
+  if(!hit||!button.contains(hit))return {status:'blocked',rejectionStage:'hit'};
+  if(held&&(held.dialog!==dialog||held.form!==form||held.title!==titles[0]
       ||held.item!==items[0]||held.button!==button||held.left!==rect.left||held.top!==rect.top
-      ||held.width!==rect.width||held.height!==rect.height))return {status:'blocked'};
+      ||held.width!==rect.width||held.height!==rect.height))return {status:'blocked',rejectionStage:'identity'};
   return {status:'proved',dialog,form,title:titles[0],item:items[0],button,
     left:rect.left,top:rect.top,width:rect.width,height:rect.height};
 }
 async function run(page,guard,deadline,authority,seal=()=>{}) {
   const receipt={status:'blocked',clickAttempted:false,clickCompleted:false};
   let held;
-  const owned=async()=>Date.now()<deadline&&await authority.verify()===true
-    &&await guard()===true&&Date.now()<deadline&&await authority.verify()===true
-    &&Date.now()<deadline;
+  const reject=stage=>{receipt.rejectionStage=stage;return false;};
+  const owned=async()=>{
+    if(Date.now()>=deadline)return reject('deadline');
+    if(await authority.verify()!==true)return reject('authority');
+    if(await guard()!==true)return reject('guard');
+    if(Date.now()>=deadline)return reject('deadline');
+    if(await authority.verify()!==true)return reject('authority');
+    return Date.now()<deadline||reject('deadline');
+  };
+  const sampled=result=>{
+    if(result.status==='proved')return true;
+    return reject(result.rejectionStage);
+  };
   try {
     if(!authority||typeof authority.workspace!=='string'||!authority.workspace
-        ||typeof authority.verify!=='function'||!await owned())return receipt;
+        ||typeof authority.verify!=='function'){reject('authority');return receipt;}
+    if(!await owned())return receipt;
     held=await page.evaluateHandle(sample,{workspace:authority.workspace,held:null});
-    const first=await held.evaluate(e=>e.status);
-    if(first==='absent'){receipt.status='absent';return receipt;}
-    if(first!=='proved'||!await owned())return receipt;
+    const first=await held.evaluate(e=>({status:e.status,rejectionStage:e.rejectionStage}));
+    if(first.status==='absent'){receipt.status='absent';return receipt;}
+    if(!sampled(first)||!await owned())return receipt;
     await new Promise(resolve=>setTimeout(resolve,Math.min(100,Math.max(0,deadline-Date.now()))));
     if(!await owned())return receipt;
     const current=await page.evaluate(sample,{workspace:authority.workspace,held});
-    if(current.status!=='proved'||!await owned())return receipt;
+    if(!sampled(current)||!await owned())return receipt;
     const button=await held.evaluateHandle(e=>e.button);
     try {
       const final=await page.evaluate(sample,{workspace:authority.workspace,held});
-      if(final.status!=='proved'||!await owned())return receipt;
+      if(!sampled(final)||!await owned())return receipt;
       seal();
       receipt.clickAttempted=true;receipt.status='action-uncertain';
       await button.asElement().click({position:{x:final.width/2,y:final.height/2},
@@ -103,7 +119,10 @@ async function run(page,guard,deadline,authority,seal=()=>{}) {
       if(!await owned()){receipt.status='blocked';return receipt;}
       receipt.status='completed';return receipt;
     } finally {await button.dispose();}
-  } catch {return receipt;} finally {if(held)await held.dispose();authority?.close?.();}
+  } catch {
+    if(receipt.status==='completed')receipt.status='blocked';
+    reject(Date.now()>=deadline?'deadline':'query');return receipt;
+  } finally {if(held)await held.dispose();authority?.close?.();}
 }
 exports.sample=sample;
 exports.run=run;

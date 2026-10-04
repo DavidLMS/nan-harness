@@ -23,8 +23,10 @@ function fixture(options={}) {
 for(const options of [{path:'/private/other'}, {duplicate:true},{multiple:true},{disabled:true},{foreignHit:true},{duplicateButton:true},{titleNone:true},{titleHidden:true},{itemHidden:true}]) {
  fixture(options);assert.equal(sample({workspace:'/private/owned/workspace',held:null}).status,'blocked');
 }
+fixture({path:'/private/OTHER'});assert.equal(sample({workspace:'/private/owned/workspace',held:null}).rejectionStage,'path');
+fixture({disabled:true});assert.equal(sample({workspace:'/private/owned/workspace',held:null}).rejectionStage,'controls');
 fixture();const proved=sample({workspace:'/private/owned/workspace',held:null});assert.equal(proved.status,'proved');
-fixture();assert.equal(sample({workspace:'/private/owned/workspace',held:proved}).status,'blocked');
+fixture();assert.equal(sample({workspace:'/private/owned/workspace',held:proved}).rejectionStage,'identity');
 async function scenario({changed=false,guardLost=false,uncertain=false,expired=false}={}) {
  fixture();let clicks=0,proofs=0,disposed=0;
  const handle=value=>({evaluate:async fn=>fn(value),evaluateHandle:async fn=>handle(fn(value)),dispose:async()=>disposed++,asElement:()=>({click:async()=>{clicks++;if(uncertain)throw Error('private');}})});
@@ -37,10 +39,14 @@ async function scenario({changed=false,guardLost=false,uncertain=false,expired=f
 }
 (async()=>{
  let r=await scenario();assert.equal(r.result.status,'completed');assert.equal(r.clicks,1);
- for(const o of [{changed:true},{guardLost:true},{expired:true}]){r=await scenario(o);assert.equal(r.clicks,0);}
- r=await scenario({uncertain:true});assert.equal(r.clicks,1);assert.equal(r.result.status,'action-uncertain');
- assert.deepEqual(Object.keys(r.result).sort(),['clickAttempted','clickCompleted','status']);
+ for(const [o,stage] of [[{changed:true},'identity'],[{guardLost:true},'guard'],[{expired:true},'deadline']]){r=await scenario(o);assert.equal(r.clicks,0);assert.equal(r.result.rejectionStage,stage);}
+ r=await scenario({uncertain:true});assert.equal(r.clicks,1);assert.equal(r.result.status,'action-uncertain');assert.equal(r.result.rejectionStage,'query');
+ assert.deepEqual(Object.keys(r.result).sort(),['clickAttempted','clickCompleted','rejectionStage','status']);
  console.log('folder trust source/identity/action fixtures PASS');
+})().catch(e=>{console.error(e);process.exitCode=1;});
+(async()=>{
+ const result=await run({},async()=>true,Date.now()+1000,{workspace:'',verify:()=>false});
+ assert.equal(result.rejectionStage,'authority');assert.equal(result.clickAttempted,false);
 })().catch(e=>{console.error(e);process.exitCode=1;});
 const authority=require('./codex-folder-trust.cjs').authority;
 function filesystem({symlink=false,changed=false}={}) {

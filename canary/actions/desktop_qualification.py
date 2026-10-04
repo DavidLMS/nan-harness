@@ -96,7 +96,7 @@ def public_onboarding(setup, app):
         raise ValueError('invalid public onboarding diagnostic')
     if 'folderTrust' in setup:
         trust = setup['folderTrust']
-        if (type(trust) is not dict or set(trust) != {'status', 'clickAttempted', 'clickCompleted'}
+        if (type(trust) is not dict or set(trust) - {'rejectionStage'} != {'status', 'clickAttempted', 'clickCompleted'}
                 or type(trust['status']) is not str
                 or trust['status'] not in {'absent', 'blocked', 'completed', 'action-uncertain'}
                 or type(trust['clickAttempted']) is not bool or type(trust['clickCompleted']) is not bool
@@ -105,6 +105,13 @@ def public_onboarding(setup, app):
                 or trust['status'] == 'completed' and not (trust['clickAttempted'] and trust['clickCompleted'])
                 or trust['status'] == 'action-uncertain' and not (trust['clickAttempted'] and not trust['clickCompleted'])):
             raise ValueError('invalid public onboarding folder trust diagnostic')
+        if 'rejectionStage' in trust:
+            stage = trust['rejectionStage']
+            if (type(stage) is not str or stage not in {
+                    'authority', 'guard', 'deadline', 'dialog', 'form', 'title', 'path',
+                    'controls', 'hit', 'identity', 'query'}
+                    or trust['status'] not in {'blocked', 'action-uncertain'}):
+                raise ValueError('invalid folder trust rejection diagnostic')
     if 'mainGuardFailure' in setup:
         failure = setup['mainGuardFailure']
         if (type(failure) is not str or failure not in {
