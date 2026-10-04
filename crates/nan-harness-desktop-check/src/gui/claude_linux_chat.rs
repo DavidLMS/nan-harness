@@ -183,15 +183,24 @@ fn embedded_text_observation(facts: &Value) -> Option<EmbeddedTextObservation> {
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct OwnedInputSourceShape {
-    paragraph_tag_p_count: u8,
-    paragraph_empty_class_pair_count: u8,
-    paragraph_data_placeholder_count: u8,
-    unresolved_text_leaf_count: u8,
-    unresolved_other_role_count: u8,
-    unresolved_empty_text_count: u8,
-    unresolved_lf_text_count: u8,
-    unresolved_exact_result_count: u8,
-    unresolved_other_text_count: u8,
+    #[serde(rename = "paragraphTagPCount")]
+    paragraph_tag_p: u8,
+    #[serde(rename = "paragraphEmptyClassPairCount")]
+    paragraph_empty_class_pair: u8,
+    #[serde(rename = "paragraphDataPlaceholderCount")]
+    paragraph_data_placeholder: u8,
+    #[serde(rename = "unresolvedTextLeafCount")]
+    unresolved_text_leaf: u8,
+    #[serde(rename = "unresolvedOtherRoleCount")]
+    unresolved_other_role: u8,
+    #[serde(rename = "unresolvedEmptyTextCount")]
+    unresolved_empty_text: u8,
+    #[serde(rename = "unresolvedLfTextCount")]
+    unresolved_lf_text: u8,
+    #[serde(rename = "unresolvedExactResultCount")]
+    unresolved_exact_result: u8,
+    #[serde(rename = "unresolvedOtherTextCount")]
+    unresolved_other_text: u8,
 }
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -232,25 +241,24 @@ fn owned_input_observation(facts: &Value) -> Option<OwnedInputObservation> {
         .all(|n| n <= shape.node_count)
         && shape.source_shape.is_none_or(|source| {
             [
-                source.paragraph_tag_p_count,
-                source.paragraph_empty_class_pair_count,
-                source.paragraph_data_placeholder_count,
+                source.paragraph_tag_p,
+                source.paragraph_empty_class_pair,
+                source.paragraph_data_placeholder,
             ]
             .into_iter()
             .all(|n| n <= shape.paragraph_count)
-                && u16::from(source.unresolved_text_leaf_count)
-                    + u16::from(source.unresolved_other_role_count)
+                && u16::from(source.unresolved_text_leaf) + u16::from(source.unresolved_other_role)
                     == u16::from(shape.node_count - shape.resolved_node_count)
                 && [
-                    source.unresolved_empty_text_count,
-                    source.unresolved_lf_text_count,
-                    source.unresolved_exact_result_count,
-                    source.unresolved_other_text_count,
+                    source.unresolved_empty_text,
+                    source.unresolved_lf_text,
+                    source.unresolved_exact_result,
+                    source.unresolved_other_text,
                 ]
                 .into_iter()
                 .map(u16::from)
                 .sum::<u16>()
-                    == u16::from(source.unresolved_text_leaf_count)
+                    == u16::from(source.unresolved_text_leaf)
         })
         && shape.resolved_node_count > 0
         && shape.object_link_count < shape.node_count
