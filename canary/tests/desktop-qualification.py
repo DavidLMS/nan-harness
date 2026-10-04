@@ -38,6 +38,22 @@ class CodexProjectPreflightTests(unittest.TestCase):
                 q.semantic_observations(tmp, 'claude-desktop')
 
 
+class RendererCheckpointTests(unittest.TestCase):
+    def test_partial_phase_is_closed_and_cannot_claim_completed_inventory(self):
+        value=dict(schemaVersion=1,mechanism='renderer-inventory',diagnosticsOnly=True,
+            app='chatgpt-desktop',endpointOwned=True,launcherOwned=True,attached=True,
+            pageCount=1,textareaCount=0,editableCount=0,sendCount=0,retryCount=0,
+            newThreadCount=0,loginCount=0,dialogCount=0,errorCategory='unclassified',
+            observerStage='folder-trust')
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp)/'facts.json'
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(tmp,'chatgpt-desktop'),[value])
+            for changes in ({'observerStage':'PRIVATE'},{'observerStage':None},{'errorCategory':None}):
+                path.write_text(json.dumps({**value,**changes}))
+                with self.assertRaises(ValueError):q.semantic_observations(tmp,'chatgpt-desktop')
+
+
 class CodexDriverFactsTests(unittest.TestCase):
     def test_closed_driver_facts_reject_private_payloads_and_unproved_retry(self):
         flags = 'endpointOwned targetVerified attached bindingVerified auxiliaryInert codingComposerReady uniqueComposer inputReadback inputSubmitted userTurnObserved responseVerified errorObserved retryControl retryAttempted retryCompleted providerResponseVerified'.split()
@@ -602,7 +618,7 @@ class QualificationTests(unittest.TestCase):
             native = dict(schemaVersion=1, mechanism='zed-native-copy', stage='response-control',
                           substage='retry-control-query', guardKind=None, guardCategory=None,
                           blocker='selector-not-matched', clipboardCleanup='passed',
-                          retryControlCount=0, retrySelector='retry-name-or-description', retryActionReceipt='completion-unknown',
+                          retryControlCount=0, retryControlCountAfterActivation=1, retrySelector='retry-name-or-description', retryActionReceipt='completion-unknown',
                           input={'submitted': True, 'clipboardVerified': True, 'private': 'PRIVATE'},
                           response={'clipboardVerified': False, 'providerVerified': True})
             path.write_text(json.dumps(native))
@@ -610,8 +626,10 @@ class QualificationTests(unittest.TestCase):
             self.assertEqual(public[0]['substage'], 'retry-control-query')
             self.assertTrue(public[0]['inputSubmitted'])
             self.assertEqual(public[0]['retryControlCount'], 0)
+            self.assertEqual(public[0]['retryControlCountAfterActivation'], 1)
             self.assertEqual(public[0]['retrySelector'], 'retry-name-or-description')
             for field, invalid in [('retryControlCount', True), ('retryControlCount', 4097),
+                                   ('retryControlCountAfterActivation', True), ('retryControlCountAfterActivation', 4097),
                                    ('retrySelector', 'PRIVATE_SYNTHETIC'), ('retryActionReceipt', 'PRIVATE')]:
                 path.write_text(json.dumps({**native, field: invalid}))
                 with self.assertRaises(ValueError):

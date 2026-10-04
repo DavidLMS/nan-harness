@@ -2410,8 +2410,15 @@ def semantic_observations(directory, app):
             record.update({key: value[key] for key in fields - {'schemaVersion', 'mechanism'}})
         elif mechanism == 'renderer-inventory':
             fields = set('schemaVersion mechanism diagnosticsOnly app endpointOwned launcherOwned attached pageCount textareaCount editableCount sendCount retryCount newThreadCount loginCount dialogCount errorCategory'.split())
-            if set(value) - {'documentState', 'startupScreen', 'landingCounts', 'onboardingCounts', 'publicOnboarding', 'mainAuxCorrelation', 'codexSession', 'initialMainBinding', 'initialMainConfirmation', 'initialMainActivation', 'sourceScreen', 'managedSignIn', 'sourceDialog', 'nativeOwnershipFailure', 'nativeListenerShape'} != fields or value['app'] != app or value['diagnosticsOnly'] is not True:
+            if set(value) - {'observerStage', 'documentState', 'startupScreen', 'landingCounts', 'onboardingCounts', 'publicOnboarding', 'mainAuxCorrelation', 'codexSession', 'initialMainBinding', 'initialMainConfirmation', 'initialMainActivation', 'sourceScreen', 'managedSignIn', 'sourceDialog', 'nativeOwnershipFailure', 'nativeListenerShape'} != fields or value['app'] != app or value['diagnosticsOnly'] is not True:
                 raise ValueError('invalid renderer inventory identity')
+            if 'observerStage' in value:
+                if type(value['observerStage']) is not str:
+                    raise ValueError('invalid renderer checkpoint phase')
+                enum(record, value, 'observerStage', {'request', 'endpoint', 'attach', 'main-binding',
+                     'source-dialog', 'folder-trust', 'role-binding', 'onboarding', 'final-inventory', 'complete'})
+                if value['observerStage'] != 'complete' and value['errorCategory'] is None:
+                    raise ValueError('incomplete renderer checkpoint cannot claim completion')
             for key in ('endpointOwned', 'launcherOwned', 'attached'):
                 flag(record, value, key)
             if 'nativeOwnershipFailure' in value:
@@ -2931,7 +2938,7 @@ def semantic_observations(directory, app):
             enum(record, value, 'retryActionReceipt', {'acknowledged', 'completion-unknown', 'native-pointer-dispatched', 'native-atspi-forwarded'})
             enum(record, value, 'retrySelector', {'retry-name-or-description', 'retry-tooltip', 'retry-label'})
             enum(record, value, 'retryInventoryStatus', {'complete', 'budget-exceeded', 'query-error'})
-            for key in ('exportResumeCount', 'exportAgentCount', 'exportTotalAssistantTextCount', 'exportUserCount', 'exportAssistantTextCount', 'trustControlCount', 'panelControlCount', 'retryControlCount', 'retryTitleCount', 'retryCandidateCount', 'retryTooltipCount', 'retryLabelCount',
+            for key in ('exportResumeCount', 'exportAgentCount', 'exportTotalAssistantTextCount', 'exportUserCount', 'exportAssistantTextCount', 'trustControlCount', 'panelControlCount', 'retryControlCount', 'retryControlCountAfterActivation', 'retryTitleCount', 'retryCandidateCount', 'retryTooltipCount', 'retryLabelCount',
                         'retryInventoryTotal', 'retryInventoryButtons', 'retryInventoryStaticText',
                         'retryInventoryTitleMatches', 'retryInventoryGenerationMatches', 'retryInventoryRetryMatches'):
                 if key in value:

@@ -15,6 +15,10 @@ function save() {
   fs.writeFileSync(`${output}.tmp`, JSON.stringify(facts) + '\n', { mode: 0o600 });
   fs.renameSync(`${output}.tmp`, output);
 }
+function checkpoint(stage) {
+  facts.observerStage = stage;
+  save();
+}
 function onboardingTrial(appName, platform, env) {
   return appName === 'chatgpt-desktop' && ['win32','linux','darwin'].includes(platform)
     && env.GITHUB_ACTIONS === 'true' && env.RUNNER_ENVIRONMENT === 'github-hosted'
@@ -495,6 +499,7 @@ function recordLinuxDialog(value) {
 }
 
 async function run() {
+  checkpoint('request');
   if (!['chatgpt-desktop', 'claude-desktop', 'pen-desktop'].includes(app)
       || !Number.isSafeInteger(request.ownerPid) || request.ownerPid <= 1
       || !Number.isSafeInteger(connection.launcherPid) || connection.launcherPid <= 1
@@ -507,6 +512,7 @@ async function run() {
   const started = Date.now();
   const deadline = started + (trial ? 35000 : 25000);
   const totalDeadline = started + onboardingBudget(trial,process.platform);
+  checkpoint('endpoint');
   const rootProof = require('./endpoint-ownership.cjs').proof(String(request.ownerPid), String(connection.port));
   facts.launcherOwned = rootProof.descendant(connection.launcherPid, deadline);
   if (!facts.launcherOwned) { facts.errorCategory = 'launcher-unowned'; save(); return; }
@@ -514,6 +520,7 @@ async function run() {
   while (Date.now() < deadline && !ownership.ownedEndpoint(deadline)) await new Promise(r => setTimeout(r, 250));
   facts.endpointOwned = ownership.ownedEndpoint(deadline);
   if (!facts.endpointOwned) { facts.errorCategory = 'endpoint-unowned'; save(); return; }
+  checkpoint('attach');
   const browser = await chromium.connectOverCDP(`http://127.0.0.1:${connection.port}`, { timeout: 2000, noDefaults: true });
   try {
     facts.attached = true;
@@ -547,6 +554,7 @@ async function run() {
         return true;
       } catch(error){record(proof);throw error;}
     };
+    checkpoint('main-binding');
     if(trial)facts.initialMainBinding=initialMainFacts();
     const initialMain=trial?await captureCorrelationMain(page,browser,ownerGuard,deadline,
       correlationIdentity,ms=>new Promise(resolve=>setTimeout(resolve,ms)),facts.initialMainBinding):null;
@@ -594,6 +602,7 @@ async function run() {
     if(linuxDialogPolicy(app,process.platform,process.env)) {
       recordLinuxDialog(await observeLinuxDialog(initialMain,browser,ownerGuard,deadline));
     }
+    checkpoint('source-dialog');
     const titleCatalog=require('./codex-dialog-catalog.cjs');
     if(['linux','darwin','win32'].includes(process.platform)&&titleCatalog.policy(app,process.platform,process.env)) {
       // Passive title evidence uses the captured sole main document, independently
@@ -619,6 +628,7 @@ async function run() {
         &&(!macProfileCustody||ownerGuard()===true):ownerGuard;
       try {
       let folderTrust,trustGuard;
+      checkpoint('folder-trust');
       if(trial&&request.ownedWorkspace!==undefined) {
         const folderAuthority=require('./codex-folder-trust.cjs').authority(request.ownedWorkspace);
         trustGuard=(!profileAuthority&&focusGuard)||heldMainGuard(initialMain,browser,onboardingOwnerGuard,correlationDeadline,
@@ -629,6 +639,7 @@ async function run() {
         if(folderTrust.status==='completed'&&folderTrust.clickAttempted&&folderTrust.clickCompleted)
           trustGuard.allowPassiveFolderSettle();
       }
+      checkpoint('role-binding');
       const heldMain=trial?await bindCorrelationMain(initialMain,browser,onboardingOwnerGuard,correlationDeadline,
         require('./codex-onboarding.cjs').sourceRoute,correlationIdentity,
         ms=>new Promise(resolve=>setTimeout(resolve,ms)),facts.initialMainConfirmation,
@@ -639,6 +650,7 @@ async function run() {
       const mainGuard=folderTrust?.clickAttempted?(heldMain?trustGuard:undefined):trial&&heldMain?heldMainGuard(heldMain,browser,onboardingOwnerGuard,correlationDeadline,
         require('./codex-onboarding.cjs').sourceRoute,correlationIdentity,
         ms=>new Promise(resolve=>setTimeout(resolve,ms)),false,true,!directCDP,directCDP):undefined;
+      checkpoint('onboarding');
       facts.publicOnboarding = await require('./codex-onboarding.cjs').run(page,
         onboardingOwnerGuard,
         correlationDeadline,mainGuard,folderTrust,request.codexProfileLoan,directCDP);
@@ -654,6 +666,7 @@ async function run() {
       }
       } finally {profileAuthority?.close();}
     }
+    checkpoint('final-inventory');
     const counts = await page.evaluate(appName => {
       const visible = e => e.isConnected && e.getBoundingClientRect().width > 0
         && e.getBoundingClientRect().height > 0 && getComputedStyle(e).visibility === 'visible';
@@ -756,7 +769,9 @@ async function run() {
           frameCount: Math.min(4096, document.querySelectorAll('iframe,frame').length), pageErrorCount: 0 } };
     }, app);
     counts.documentState.pageErrorCount = pageErrorCount;
-    Object.assign(facts, counts, { errorCategory: null }); save();
+    Object.assign(facts, counts, { errorCategory: null }); checkpoint('complete');
+  } catch(error) {
+    facts.errorCategory='attachment-or-action-failed';save();throw error;
   } finally { await browser.close(); }
 }
 run().catch(() => { facts.errorCategory = 'attachment-or-action-failed'; save(); process.exitCode = 1; });

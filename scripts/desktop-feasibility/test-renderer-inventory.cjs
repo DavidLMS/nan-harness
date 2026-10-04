@@ -577,3 +577,21 @@ passivePages=[immutablePage,replacementPage];assert.equal(passiveGuard(),false);
 passivePages=[];assert.equal(passiveGuard(),false);
 passivePages=[immutablePage];passiveOwner=false;assert.equal(passiveGuard(),false);
 console.log('Renderer passive title guard: held sole page and fresh ownership, independent of role controls passed');
+
+// A later exception/termination cannot erase a previously sealed phase receipt.
+const checkpointRoot=fs.mkdtempSync(require('node:path').join(require('node:os').tmpdir(),'renderer-checkpoint-'));
+try {
+  const output=require('node:path').join(checkpointRoot,'facts.json');
+  const context=vm.createContext({fs,output,app:'chatgpt-desktop'});
+  vm.runInContext(source.slice(source.indexOf('const facts ='),timingStart),context);
+  vm.runInContext("checkpoint('request');facts.endpointOwned=true;checkpoint('folder-trust');",context);
+  assert.throws(()=>vm.runInContext("throw Error('synthetic interrupted operation')",context));
+  const receipt=JSON.parse(fs.readFileSync(output,'utf8'));
+  assert.equal(receipt.observerStage,'folder-trust');assert.equal(receipt.errorCategory,'unclassified');
+  assert.equal(receipt.endpointOwned,true);assert.equal(receipt.attached,false);
+  assert(!JSON.stringify(receipt).includes(checkpointRoot));
+  assert.equal(fs.existsSync(output+'.tmp'),false);
+  vm.runInContext("facts.errorCategory=null;checkpoint('complete');",context);
+  assert.equal(JSON.parse(fs.readFileSync(output,'utf8')).observerStage,'complete');
+} finally {fs.rmSync(checkpointRoot,{recursive:true,force:true});}
+console.log('Renderer checkpoint survives interrupted work without claiming completion');

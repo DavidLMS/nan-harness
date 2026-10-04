@@ -78,6 +78,8 @@ struct Facts {
     retry_control_count: Option<usize>,
     retry_selector: Option<&'static str>,
     retry_action_receipt: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    retry_control_count_after_activation: Option<usize>,
     retry_title_count: Option<usize>,
     retry_label_count: Option<usize>,
     retry_inventory_status: Option<&'static str>,
@@ -564,6 +566,7 @@ fn native_copy_facts() -> Facts {
         retry_control_count: None,
         retry_selector: None,
         retry_action_receipt: None,
+        retry_control_count_after_activation: None,
         retry_title_count: None,
         retry_label_count: None,
         retry_inventory_status: None,
@@ -1480,6 +1483,21 @@ impl NativeClipboardSession<'_> {
     }
 
     pub(crate) fn retry_once(&mut self) -> Result<(), Reason> {
+        let result = self.dispatch_retry_once();
+        if cfg!(target_os = "linux") && result.is_ok() {
+            // Retry clears the error callout before requesting another generation.
+            // This passive count distinguishes visible UI state from X11 delivery;
+            // only the independent provider/response oracle can certify recovery.
+            self.facts.retry_control_count_after_activation = self
+                .gui
+                .app
+                .as_ref()
+                .and_then(|app| control_count(&app.locator(RETRY_CONTROL)).ok());
+        }
+        result
+    }
+
+    fn dispatch_retry_once(&mut self) -> Result<(), Reason> {
         if !std::mem::take(&mut self.retry_ready) {
             return Err(Reason::ActionUnsupported);
         }

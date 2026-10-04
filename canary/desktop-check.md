@@ -65,6 +65,12 @@ is retained. A small synthetic next-input fixture still performs over 2,000
 adapter queries during submit, so repeated full-tree proofs remain a performance
 concern, not a proven native timeout cause. These changes need native evidence.
 
+The next joint candidate also seals renderer inventory checkpoints before each
+slow setup phase. An interrupted observer leaves a closed incomplete receipt;
+only the completed inventory may clear its error category. Zed records the
+passive Retry control count after its single activation, alongside the existing
+provider count. Neither diagnostic can independently qualify recovery.
+
 
 The hidden launch-wrapper option is restricted to deterministic ChatGPT startup
 diagnostics. Only application launch is instrumented; help, version and restore
