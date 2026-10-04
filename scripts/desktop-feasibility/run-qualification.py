@@ -162,7 +162,8 @@ def qualification_environment(app, facts, real_nanh, executable, inherited=None)
     linux_mcp = source.get('NANH_CLAUDE_LINUX_MCP_FIXTURE')
     if linux_mcp is not None and (linux_mcp != 'read-only' or app != 'claude-desktop'
             or source.get('RUNNER_OS') != 'Linux'
-            or source.get('NANH_DESKTOP_QUALIFICATION_MODE') != 'startup-baseline'
+            or (source.get('NANH_DESKTOP_QUALIFICATION_MODE') != 'startup-baseline'
+                and source.get('NANH_CLAUDE_LINUX_NATIVE_CHAT') != 'first-turn')
             or source.get('NANH_CLAUDE_LINUX_CHAT_ONLY') != '1'
             or source.get('NANH_CLAUDE_MCP_FIXTURE') is not None):
         raise ValueError('Claude Linux read fixture policy is unavailable')

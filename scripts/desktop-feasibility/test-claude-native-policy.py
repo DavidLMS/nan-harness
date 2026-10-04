@@ -41,6 +41,16 @@ class LinuxMcpPolicyTests(unittest.TestCase):
             self.assertEqual(result['NANH_CLAUDE_LINUX_MCP_FIXTURE'],'read-only')
             self.assertNotIn('NANH_CLAUDE_MCP_FIXTURE',result)
             self.assertEqual(result['NANH_CLAUDE_MCP_SOURCE_SHA256'],expected)
+            # Full workflow exports renderer first; the native controller selects
+            # startup acquisition without admitting packaged renderer automation.
+            full = {**source, 'NANH_DESKTOP_QUALIFICATION_MODE':'renderer',
+                    'NANH_CLAUDE_LINUX_NATIVE_CHAT':'first-turn'}
+            result = module.qualification_environment('claude-desktop',Path('/facts'),Path('/nanh'),Path('/Claude'),full)
+            self.assertEqual(result['NANH_DESKTOP_QUALIFICATION_MODE'],'startup-baseline')
+            self.assertEqual(result['NANH_CLAUDE_LINUX_MCP_FIXTURE'],'read-only')
+            with self.assertRaises(ValueError):
+                module.qualification_environment('claude-desktop',Path('/facts'),Path('/nanh'),Path('/Claude'),
+                    {**full, 'NANH_CLAUDE_LINUX_NATIVE_CHAT':'other'})
             for change in [{'RUNNER_OS':'macOS'},{'NANH_CLAUDE_LINUX_CHAT_ONLY':'0'},
                            {'NANH_DESKTOP_QUALIFICATION_MODE':'renderer'},
                            {'NANH_CLAUDE_LINUX_MCP_FIXTURE':'other'},
