@@ -146,20 +146,25 @@ observations describe completed runs, rather than additional qualification:
 | --- | --- | --- | --- |
 | Zed | Response and file-tool steps pass; pointer and accessibility Retry acknowledgements do not produce provider recovery. | Three complete probes pass the expanded retry policy. | Three complete probes pass with direct native clipboard transport and all cleanup checks. |
 | Hermes | Three complete probes pass with renderer process ownership. | Three complete probes pass with private native userData and bounded cold-start waits. | Three complete probes pass after ordinary onboarding dismissal and fresh catalog readiness, including explicit UI Retry and cleanup. |
-| ChatGPT / Codex | All three sessions complete folder trust, Engineering, Continue, Skip and its ordinary confirmation; the coding composer and conversation remain absent. | Two sessions acknowledge activation but retain one elevated overlap outside the classified menu, status and Dock levels; another starts focused and later rejects an auxiliary page transition. | All three sessions complete folder trust, Engineering, Continue, Skip and its ordinary confirmation; the coding composer and conversation remain absent. |
-| Claude | The owned editor and native window pass. Complete helper packets now decode; the single LF leaf has no exported BR/filler marker, so input remains blocked. | Three complete native probes pass input, response, file-tool, controlled failure recovery and cleanup. | All three sessions fail at the selected safe Rust rename dispatch with a sharing violation. Source identity, private-file checks and destination preflight succeed; parent-lease reproduction is pending. |
+| ChatGPT / Codex | All three sessions complete onboarding and expose one source-defined local home composer. The existing adapter requires a thread composer and conversation; the initial-send lifecycle still needs adaptation. | Two sessions acknowledge activation but retain one elevated overlap outside the classified menu, status and Dock levels; another starts focused and later rejects an auxiliary page transition. | All three sessions complete folder trust, Engineering, Continue, Skip and its ordinary confirmation; the coding composer and conversation remain absent. |
+| Claude | All three sessions verify the submitted draft through accessibility and clipboard readback; Send remains blocked by its multiple advertised actions. A unique activation-index adapter is under native evaluation. | Three complete native probes pass input, response, file-tool, controlled failure recovery and cleanup. | The actual launch still fails at the selected safe Rust rename dispatch with a sharing violation. Both retained-parent and production-writer lifecycle fixtures pass before installation; neither reproduces the actual failure. |
 | Pen | Software GLES removes GPU startup failure; three fresh sessions show sign-in and no editor. No official account-free route found for the frozen release. | Two probes expose composer/Send; another exposes sign-in. Conversation adapter remains unimplemented. | Owned renderer loads sign-in and a dialog; conversation adapter remains unimplemented. |
 
 Codex Linux completed onboarding in all three sessions in
 [37190228367](https://github.com/DavidLMS/nan-harness/actions/runs/37190228367).
 The later source-count run [37191551146](https://github.com/DavidLMS/nan-harness/actions/runs/37191551146)
 observes Codex as the current mode in two sessions; another rejects an ambiguous
-initial target. Current macOS evidence is
+initial target. [37194306290](https://github.com/DavidLMS/nan-harness/actions/runs/37194306290)
+then identifies exactly one local home composer in all three sessions through
+its source-defined editable ancestry. The Work-home page wrapper is absent;
+that wrapper cannot be a required marker for every local home composer.
+The result does not authorize input or qualify the initial-send adapter.
+Current macOS evidence is
 [37192174385](https://github.com/DavidLMS/nan-harness/actions/runs/37192174385),
 and Windows [37191553330](https://github.com/DavidLMS/nan-harness/actions/runs/37191553330).
-Current Claude evidence is Linux [37189761871](https://github.com/DavidLMS/nan-harness/actions/runs/37189761871),
+Current Claude evidence is Linux [37193728954](https://github.com/DavidLMS/nan-harness/actions/runs/37193728954),
 macOS [37188000425](https://github.com/DavidLMS/nan-harness/actions/runs/37188000425),
-and Windows [37192264910](https://github.com/DavidLMS/nan-harness/actions/runs/37192264910).
+and Windows [37194302818](https://github.com/DavidLMS/nan-harness/actions/runs/37194302818).
 Both cleanup scopes pass and invalid closed diagnostic events are zero in these runs.
 Only the macOS Claude result adds a qualified cell; a passing exact-commit
 production matrix and the final repository gate remain required.
@@ -169,6 +174,17 @@ creates only its own synthetic window and installs no vendor application. Warp
 and XTEST each deliver three owned motion events with the X/Y valuator mask
 required by GPUI. This refutes the proposed missing-motion-mask explanation for
 Zed Retry; it does not qualify Zed or change its pointer transport.
+
+The later owned-window observation in [37194304527](https://github.com/DavidLMS/nan-harness/actions/runs/37194304527)
+records motion headers during the existing Retry hover, with no normal Enter
+header during that interval. The cursor remains an arrow. This proves server
+delivery, not GPUI consumption; zero Enter does not establish whether the
+application had already received an Enter before observation began.
+Codex macOS [37193191000](https://github.com/DavidLMS/nan-harness/actions/runs/37193191000)
+places the owned window completely inside the usable screen area while the
+elevated overlap also intersects that area. Fitting the window into that area
+is therefore unsupported as a remedy. A bounded, read-only process-category
+diagnostic is under evaluation; input still requires a clear native stack.
 
 A Windows-only configuration persistence trial uses one safe Rust rename
 invocation with retained file identity and read-only private-DACL checks before
