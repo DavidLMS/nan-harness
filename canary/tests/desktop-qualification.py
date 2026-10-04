@@ -3717,5 +3717,32 @@ class ClaudeLinuxNativeChatTests(unittest.TestCase):
                               ('claude-desktop',{'NANH_CLAUDE_LINUX_NATIVE_CHAT':'other'})]:
                 with self.assertRaises(ValueError):runner.qualification_environment(app,root,helper,str(helper),{**source,**extra})
 
+class CodexEditableAncestryTests(unittest.TestCase):
+    def test_partition_source_pins_and_privacy(self):
+        observation=dict(status='observed',sourcePlatform='linux',sourceVersion='26.930.41038',
+            initialSourceSha256='28c6096af241a37a9a33a2e5601f0aa05426910d5c84d08824d852342a2b4d5d',
+            composerSourceSha256='7198ee078e78a748d03c3cc96f5c041d056584d762728fd0be23e695bc394da0',
+            editableCount=1,codexHomeCount=0,codexThreadCount=0,codexOtherCount=0,
+            classicChatGPTCount=0,genericInputCount=1,genericBodyCount=0,unboundCount=0,
+            sidebarNewChatCount=1,sidebarNewChatHitActionable=True)
+        setup=dict(schemaVersion=1,mechanism='codex-public-onboarding',diagnosticsOnly=True,
+            stage='coding-readiness',errorCategory=None,conversationalScope=True,engineeringControl=True,
+            roleClickAttempted=True,roleClickCompleted=True,engineeringChecked=True,continueControl=True,
+            continueClickAttempted=True,continueClickCompleted=True,roleScopeAbsent=True,
+            roleProofFailure='unmeasured',sessionProofFailure='unmeasured',taskScopeProved=True,
+            taskClickAttempted=True,taskClickCompleted=True,codingEditableObservation=observation)
+        self.assertEqual(q.public_onboarding(setup,'chatgpt-desktop'),setup)
+        for change in ({'editableCount':True},{'editableCount':2},{'unboundCount':33},
+                {'sidebarNewChatCount':2},{'sourcePlatform':'windows'},{'text':'PRIVATE'},
+                {'genericInputCount':None},{'sidebarNewChatHitActionable':'PRIVATE'}, {'status':[]}):
+            with self.assertRaises(ValueError):
+                q.public_onboarding({**setup,'codingEditableObservation':{**observation,**change}},'chatgpt-desktop')
+        overflow={key:(None if key.endswith('Count') or key=='sidebarNewChatHitActionable' else value)
+                  for key,value in observation.items()}
+        overflow['status']='overflow'
+        self.assertEqual(q.public_onboarding({**setup,'codingEditableObservation':overflow},'chatgpt-desktop')['codingEditableObservation'],overflow)
+        with self.assertRaises(ValueError):
+            q.public_onboarding({**setup,'codingEditableObservation':{**overflow,'unboundCount':0}},'chatgpt-desktop')
+
 if __name__ == '__main__':
     unittest.main()

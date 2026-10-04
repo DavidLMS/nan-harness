@@ -202,8 +202,48 @@ function codingScope(diagnostic=false) {
     composerSourceSha256:'7198ee078e78a748d03c3cc96f5c041d056584d762728fd0be23e695bc394da0',
     pageSourceSha256:'9c9d0d9247226d43edeb4606a539b518e3be06fb65aa37bd014984fbe3998ba9',
     ...Object.fromEntries(Object.keys(homeCounts).map(k=>[k,homeComplete?homeCounts[k]:null]))};
+  // Partition visible editables by frozen source ancestry; never grant input.
+  const ancestryCounts={editableCount:0,codexHomeCount:0,codexThreadCount:0,codexOtherCount:0,
+    classicChatGPTCount:0,genericInputCount:0,genericBodyCount:0,unboundCount:0,
+    sidebarNewChatCount:0};
+  let ancestryComplete=nodes.length<=4096;
+  for(const editor of nodes.filter(e=>visible(e)&&(e.getAttribute('contenteditable')==='true'
+      ||e.tagName==='TEXTAREA')&&!e.disabled&&!e.readOnly)) {
+    ancestryCounts.editableCount++;
+    const chain=[],seen=new Set();let current=editor;
+    while(current&&chain.length<64&&!seen.has(current)) {
+      seen.add(current);chain.push(current);current=current.parentElement;
+    }
+    if(current) {ancestryComplete=false;break;}
+    const codex=chain.find(e=>e.getAttribute('data-codex-composer-root')!==null);
+    const placement=codex?.getAttribute('data-composer-placement');
+    const category=codex?(placement==='home'?'codexHomeCount':placement==='thread'?'codexThreadCount':'codexOtherCount'):
+      chain.some(e=>e.getAttribute('data-chatgpt-composer')!==null)?'classicChatGPTCount':
+      chain.some(e=>e.getAttribute('data-composer-input')!==null)?'genericInputCount':
+      chain.some(e=>e.getAttribute('data-composer-body')!==null)?'genericBodyCount':'unboundCount';
+    ancestryCounts[category]++;
+  }
+  const sidebar=controls.filter(e=>e.tagName==='BUTTON'&&e.getAttribute('type')==='button'
+    &&e.classList?.contains('sidebar-item')&&name(e)==='New chat');
+  ancestryCounts.sidebarNewChatCount=sidebar.length;
+  let sidebarHit=false;
+  if(sidebar.length===1) {
+    const button=sidebar[0],r=button.getBoundingClientRect(),x=r.left+r.width/2,y=r.top+r.height/2;
+    if(Number.isFinite(x)&&Number.isFinite(y)&&x>=0&&y>=0
+        &&x<document.documentElement.clientWidth&&y<document.documentElement.clientHeight) {
+      const target=document.elementFromPoint(x,y);
+      sidebarHit=!!target&&(target===button||button.contains(target))&&!button.disabled
+        &&button.getAttribute('aria-disabled')!=='true';
+    }
+  }
+  ancestryComplete=ancestryComplete&&Object.values(ancestryCounts).every(n=>n<=32);
+  const ancestry={status:ancestryComplete?'observed':'overflow',sourcePlatform:'linux',sourceVersion:'26.930.41038',
+    initialSourceSha256:'28c6096af241a37a9a33a2e5601f0aa05426910d5c84d08824d852342a2b4d5d',
+    composerSourceSha256:'7198ee078e78a748d03c3cc96f5c041d056584d762728fd0be23e695bc394da0',
+    ...Object.fromEntries(Object.keys(ancestryCounts).map(k=>[k,ancestryComplete?ancestryCounts[k]:null])),
+    sidebarNewChatHitActionable:ancestryComplete?sidebarHit:null};
   const complete=Object.values(counts).every(n=>Number.isInteger(n)&&n>=0&&n<=32);
-  return {ready,navigation,home,observation:{status:complete?'observed':'overflow',
+  return {ready,navigation,home,ancestry,observation:{status:complete?'observed':'overflow',
     ...Object.fromEntries(Object.keys(counts).map(k=>[k,complete?counts[k]:null]))}};
 }
 
@@ -598,6 +638,7 @@ async function run(page, ownerGuard, deadline, rejected, mainGuard, folderTrust)
       if(process.platform==='linux'&&skipAdmitted) {
         facts.codingNavigationObservation=coding.navigation;
         facts.codingHomeObservation=coding.home;
+        facts.codingEditableObservation=coding.ancestry;
       }
       if(coding.ready===true) {facts.codingComposerReady=true;return facts;}
       if(skipAdmitted&&facts.taskControlKind==='skip-optional-capabilities'
