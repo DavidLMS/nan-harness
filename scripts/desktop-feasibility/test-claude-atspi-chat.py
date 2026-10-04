@@ -355,6 +355,25 @@ class ResponseAdapter(Adapter):
             return True
         return super().invoke_once(node,index)
 
+class TreeRejectionTests(unittest.TestCase):
+    def test_closed_rejection_does_not_export_native_identity(self):
+        for kind,expected in [('cycle','tree-cycle'),('depth','tree-depth'),
+                ('limit','tree-limit'),('identity','tree-identity'),('children','tree-children')]:
+            class TreeAdapter:
+                def owner(self,node):return 7
+                def identity(self,node):return [] if kind=='identity' else (39,'PRIVATE','')
+                def children(self,node):
+                    if kind=='cycle':return [node]
+                    if kind=='children':return 'PRIVATE'
+                    if kind=='limit':
+                        if node==0:return list(range(1,1024))
+                        return list(range(1024,2046)) if node==1023 else []
+                    return [node+1]
+            controller=chat.Controller(TreeAdapter(),dict(pid=7,bus='r',path='root'),1,clock=lambda:0)
+            with self.assertRaises(chat.Rejected) as rejected:controller.tree(0)
+            self.assertEqual(rejected.exception.boundary,expected)
+            self.assertNotIn('PRIVATE',str(rejected.exception))
+
 class ResponseTests(unittest.TestCase):
     def case(self,**options):
         adapter=ResponseAdapter(**options)
@@ -376,7 +395,7 @@ class ResponseTests(unittest.TestCase):
 class BoundaryTests(unittest.TestCase):
     run_case = ControllerTests.run_case
     def test_same_failed_query_boundary_without_extra_actions(self):
-        for options,boundary in [({'foreign':True},'source-owner'),({'duplicate':True},'tree'),
+        for options,boundary in [({'foreign':True},'source-owner'),({'duplicate':True},'tree-cycle'),
                 ({'moved_client':True},'frame-client'),({'wrong_mode':True},'mode'),
                 ({'initial':'unknown owned text'},'input'),({'guard_after_paste':True},'native-window'),
                 ({'invoke_error':True},'action')]:

@@ -35,6 +35,13 @@ enum FailureBoundary {
     NativeWindow,
     SourceOwner,
     Tree,
+    TreeCycle,
+    TreeDepth,
+    TreeLimit,
+    TreeIdentity,
+    TreeChildren,
+    ResponseHeading,
+    ResponseRow,
     State,
     Frame,
     FrameActive,
@@ -701,6 +708,28 @@ mod embedded_text_tests {
 mod helper_packet_tests {
     use super::decode;
     use serde_json::json;
+    #[test]
+    fn tree_rejections_remain_closed_without_exporting_native_nodes() {
+        for boundary in [
+            "tree-cycle",
+            "tree-depth",
+            "tree-limit",
+            "tree-identity",
+            "tree-children",
+            "response-heading",
+            "response-row",
+        ] {
+            let packet = json!({"facts":{"schemaVersion":1,"mechanism":"claude-linux-native-chat",
+                "diagnosticsOnly":true,"stage":"blocked","failureBoundary":boundary,
+                "inputVerified":false,"pasteAttempted":false,"sendAttempted":false,
+                "sendForwarded":false,"responseVerified":false,"toolVerified":false,
+                "recoveryVerified":false},"binding":null});
+            assert!(decode(&serde_json::to_vec(&packet).unwrap()).is_some());
+            let mut changed = packet.clone();
+            changed["facts"]["nativePath"] = json!("PRIVATE");
+            assert!(decode(&serde_json::to_vec(&changed).unwrap()).is_none());
+        }
+    }
     #[test]
     fn multi_action_packet_checks_exact_cardinality_and_private_fields() {
         let packet = json!({"facts":{"schemaVersion":1,"mechanism":"claude-linux-native-chat",

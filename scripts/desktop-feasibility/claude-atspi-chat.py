@@ -21,9 +21,9 @@ def inside(rect, outer):
             and rect[1] + rect[3] <= outer[1] + outer[3])
 
 
-BOUNDARIES = frozenset(('request','policy','native-window','source-owner','tree','state',
+BOUNDARIES = frozenset(('request','policy','native-window','source-owner','tree','tree-cycle','tree-depth','tree-limit','tree-identity','tree-children','response-heading','response-row','state',
     'frame','frame-active','frame-count','frame-client','client','mode','focus','input','clipboard','action','action-count','action-name','action-hit','response','transport'))
-QUERY_BOUNDARIES = dict(owner='source-owner', identity='tree', children='tree', parent='frame',
+QUERY_BOUNDARIES = dict(owner='source-owner', identity='tree-identity', children='tree-children', parent='frame',
     state='state', bounds='frame', guard='native-window', client_bounds='client',
     attributes='mode', focused='focus', grab_focus='focus', text='input', paste_once='input',
     copy_input_once='clipboard', clear_clipboard='clipboard', clipboard_sentinel='clipboard',
@@ -335,17 +335,21 @@ class Controller:
         pending, seen, nodes = [(root, 0)], set(), []
         while pending:
             node, depth = pending.pop()
-            if node in seen or depth > 32 or len(seen) >= 1024:
-                raise Rejected()
+            if node in seen:
+                raise Rejected('tree-cycle')
+            if depth > 32:
+                raise Rejected('tree-depth')
+            if len(seen) >= 1024:
+                raise Rejected('tree-limit')
             seen.add(node)
             self.owned(node)
             identity = self.query('identity', node)
             if type(identity) is not tuple or len(identity) != 3:
-                raise Rejected()
+                raise Rejected('tree-identity')
             nodes.append((node, identity))
             children = self.query('children', node)
             if type(children) is not list or len(children) > 1024 - len(seen):
-                raise Rejected()
+                raise Rejected('tree-children')
             pending.extend((child, depth + 1) for child in children)
         return nodes
 
@@ -684,22 +688,22 @@ class Controller:
         if not headings:
             return None
         if len(headings) != 1:
-            raise Rejected()
+            raise Rejected('response-heading')
         heading, parent, seen = headings[0], self.query('parent',headings[0]), set()
         for _ in range(6):
             if parent in seen or parent == self.frame:
-                raise Rejected()
+                raise Rejected('response-row')
             seen.add(parent)
             self.owned(parent)
             identity = self.query('identity',parent)
             if identity[0] not in (39,97):
-                raise Rejected()
+                raise Rejected('response-row')
             pending, subtree = [parent], []
             visited = set()
             while pending:
                 node = pending.pop()
                 if node in visited or len(visited) >= 256:
-                    raise Rejected()
+                    raise Rejected('response-row')
                 visited.add(node)
                 self.owned(node)
                 item = self.query('identity',node)
@@ -710,7 +714,7 @@ class Controller:
             if scopes == [heading] and len(copies) == 1:
                 return parent,heading,copies[0]
             parent = self.query('parent',parent)
-        raise Rejected()
+        raise Rejected('response-row')
 
     def copy_response(self, marker):
         try:
