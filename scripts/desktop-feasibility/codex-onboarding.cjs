@@ -92,14 +92,27 @@ function optionalCapabilities(scope) {
 }
 
 // Exact public local-coding markers from the frozen local conversation thread.
-function codingScope() {
+function codingScope(diagnostic=false) {
   const visible=e=>{const r=e.getBoundingClientRect(),s=getComputedStyle(e);
     return e.isConnected&&r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden'&&!e.closest('[inert]');};
   const all=selector=>[...document.querySelectorAll(selector)].filter(visible);
   const editors=all('[data-thread-find-composer] .ProseMirror[contenteditable="true"]');
-  return editors.length===1&&all('[data-thread-find-target="conversation"]').length===1
-    &&all('[role="dialog"],[role="alertdialog"],[role="menu"],[aria-modal="true"]').length===0
+  const conversations=all('[data-thread-find-target="conversation"]');
+  const modals=all('[role="dialog"],[role="alertdialog"],[role="menu"],[aria-modal="true"]');
+  const ready=editors.length===1&&conversations.length===1&&modals.length===0
     &&editors[0].getAttribute('aria-disabled')!=='true';
+  if(!diagnostic)return ready;
+  const ack='Engineering—got it. I can map an unfamiliar codebase, plan and build features, trace bugs across logs and tests, and run checks to verify behavior.';
+  const nodes=[...document.querySelectorAll('*')],buttons=all('button');
+  const counts={composerCount:editors.length,conversationCount:conversations.length,modalCount:modals.length,
+    roleRadioCount:all('input[name="conversational-onboarding-inline-role"]').length,
+    exactAckLeafCount:nodes.length<=4096?nodes.filter(e=>visible(e)&&e.textContent?.trim()===ack
+      &&![...e.children].some(c=>c.textContent?.trim()===ack)).length:null,
+    exactGetStartedCount:buttons.filter(e=>e.textContent?.trim()==='Get Started').length,
+    exactSkipCount:buttons.filter(e=>e.textContent?.trim()==='Skip').length};
+  const complete=Object.values(counts).every(n=>Number.isInteger(n)&&n>=0&&n<=32);
+  return {ready,observation:{status:complete?'observed':'overflow',
+    ...Object.fromEntries(Object.keys(counts).map(k=>[k,complete?counts[k]:null]))}};
 }
 
 // Exact immutable final-onboarding surface. No arbitrary app payload is returned.
@@ -485,7 +498,9 @@ async function run(page, ownerGuard, deadline, rejected, mainGuard, folderTrust)
     facts.stage='coding-readiness';
     while(Date.now()<deadline) {
       if(!await ownedEndpoint())return stop('ownership-lost');
-      if(await page.evaluate(codingScope)) {facts.codingComposerReady=true;return facts;}
+      const coding=await page.evaluate(codingScope,true);
+      facts.codingReadinessObservation=coding.observation;
+      if(coding.ready===true) {facts.codingComposerReady=true;return facts;}
       await wait(Math.min(100,Math.max(0,deadline-Date.now())));
     }
     return stop('scope-remained');

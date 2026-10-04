@@ -85,7 +85,7 @@ def task_scope_observation(value):
 
 
 def public_onboarding(setup, app):
-    shape = set(setup) - {'folderTrust', 'rejectedPageInventory', 'taskScopeProved', 'taskClickAttempted', 'taskClickCompleted', 'codingComposerReady', 'taskScopeObservation', 'taskControlKind', 'mainGuardFailure', 'pageSetFailure', 'foreignOverlayImportSetup', 'foreignOverlaySourceCounts', 'foreignOverlayActionability'} if type(setup) is dict else set()
+    shape = set(setup) - {'folderTrust', 'rejectedPageInventory', 'taskScopeProved', 'taskClickAttempted', 'taskClickCompleted', 'codingComposerReady', 'taskScopeObservation', 'taskControlKind', 'codingReadinessObservation', 'mainGuardFailure', 'pageSetFailure', 'foreignOverlayImportSetup', 'foreignOverlaySourceCounts', 'foreignOverlayActionability'} if type(setup) is dict else set()
     booleans = {'conversationalScope', 'engineeringControl', 'roleClickAttempted',
                 'roleClickCompleted', 'engineeringChecked', 'continueControl',
                 'continueClickAttempted', 'continueClickCompleted', 'roleScopeAbsent'}
@@ -115,6 +115,17 @@ def public_onboarding(setup, app):
                 or setup.get('taskScopeProved') is not True
                 or setup['roleScopeAbsent'] is not True):
             raise ValueError('invalid onboarding task control kind')
+    if 'codingReadinessObservation' in setup:
+        coding = setup['codingReadinessObservation']
+        keys = {'composerCount','conversationCount','modalCount','roleRadioCount',
+                'exactAckLeafCount','exactGetStartedCount','exactSkipCount'}
+        if (type(coding) is not dict or set(coding) != keys | {'status'}
+                or type(coding['status']) is not str or coding['status'] not in {'observed','overflow'}
+                or setup.get('taskScopeProved') is not True or setup.get('taskClickCompleted') is not True
+                or setup['stage'] != 'coding-readiness'
+                or coding['status'] == 'observed' and any(type(coding[key]) is not int or not 0 <= coding[key] <= 32 for key in keys)
+                or coding['status'] == 'overflow' and any(coding[key] is not None for key in keys)):
+            raise ValueError('invalid Codex coding readiness observation')
     if 'taskScopeObservation' in setup:
         task_scope_observation(setup['taskScopeObservation'])
     if 'folderTrust' in setup:

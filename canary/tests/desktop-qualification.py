@@ -2662,6 +2662,19 @@ class QualificationTests(unittest.TestCase):
                         {'taskControlKind':'skip-optional-capabilities','roleScopeAbsent':False}):
             with self.assertRaises(ValueError):
                 q.public_onboarding({**setup, 'taskScopeProved':True, **changed}, 'chatgpt-desktop')
+        coding = dict(status='observed',composerCount=1,conversationCount=0,modalCount=0,
+                      roleRadioCount=0,exactAckLeafCount=0,exactGetStartedCount=0,exactSkipCount=0)
+        bound = {**setup,'stage':'coding-readiness','taskScopeProved':True,'taskClickAttempted':True,
+                 'taskClickCompleted':True,'codingComposerReady':False,'codingReadinessObservation':coding}
+        self.assertEqual(q.public_onboarding(bound,'chatgpt-desktop'),bound)
+        for changed in ({**coding,'composerCount':True}, {**coding,'conversationCount':33},
+                        {**coding,'status':'PRIVATE'}, {**coding,'text':'PRIVATE'},
+                        {**coding,'status':'overflow'}, {**coding,'composerCount':None}):
+            with self.assertRaises(ValueError):q.public_onboarding({**bound,'codingReadinessObservation':changed},'chatgpt-desktop')
+        overflow = {key:None for key in coding if key != 'status'} | {'status':'overflow'}
+        self.assertEqual(q.public_onboarding({**bound,'codingReadinessObservation':overflow},'chatgpt-desktop')['codingReadinessObservation'],overflow)
+        for changed in ({'taskClickCompleted':False}, {'taskScopeProved':False}, {'stage':'task-action'}):
+            with self.assertRaises(ValueError):q.public_onboarding({**bound,**changed},'chatgpt-desktop')
         task = dict(heldScopeConnected=True, heldScopeVisible=True,
                     roleRadioCount=0, exactAckLeafCount=1, exactGetStartedCount=0)
         measured = {**setup, 'taskScopeObservation':task}
