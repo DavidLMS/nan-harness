@@ -141,6 +141,10 @@ def qualification_environment(app, facts, real_nanh, executable, inherited=None)
             or xi2 != '1' or source.get('NANH_ZED_CURSOR_HIT') != '1'
             or source.get('NANH_ZED_XRECORD') != '1'):
         raise ValueError('Zed passive XI2 payload diagnostic is unavailable')
+    cursor_theme = source.get('NANH_ZED_CURSOR_THEME')
+    if cursor_theme is not None and (app != 'zed-desktop' or source.get('RUNNER_OS') != 'Linux'
+            or cursor_theme != 'adwaita-24' or source.get('NANH_ZED_CURSOR_HIT') != '1'):
+        raise ValueError('Zed fixed cursor theme trial is unavailable')
     if source.get('NANH_CLAUDE_MAC_NATIVE_CHAT') is not None and app != 'claude-desktop':
         raise ValueError('Claude native Chat controller is unavailable')
     if source.get('NANH_CLAUDE_MAC_CHAT_NAVIGATION') is not None and app != 'claude-desktop':
@@ -223,6 +227,12 @@ def qualification_environment(app, facts, real_nanh, executable, inherited=None)
             if cursor != '1' or source.get('RUNNER_OS') != 'Linux':
                 raise ValueError('Zed cursor hit trial is unavailable')
             environment['NANH_ZED_CURSOR_HIT'] = cursor
+        if cursor_theme is not None:
+            # Frozen x11rb 0.13.2 loads theme and size once before cursor caching.
+            # Use an installed public theme in the disposable hosted trial only.
+            environment['XCURSOR_THEME'] = 'Adwaita'
+            environment['XCURSOR_SIZE'] = '24'
+
         delivery = source.get('NANH_ZED_XRECORD')
         if delivery is not None:
             if delivery != '1' or source.get('RUNNER_OS') != 'Linux':

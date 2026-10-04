@@ -53,6 +53,15 @@ class Tests(unittest.TestCase):
   for change in [{'NANH_ZED_XI2_PAYLOAD':'unknown'},{'RUNNER_OS':'macOS'},{'NANH_ZED_CURSOR_HIT':None},{'NANH_ZED_XRECORD':None}]:
    with self.subTest(change=change),self.assertRaises(ValueError):q.qualification_environment('zed-desktop',Path('/facts'),Path('/nanh'),Path('/zed'),source|change)
   with self.assertRaises(ValueError):q.qualification_environment('claude-desktop',Path('/facts'),Path('/nanh'),Path('/zed'),source)
+ def test_fixed_public_cursor_theme_does_not_forward_caller_paths(self):
+  source={'GITHUB_ACTIONS':'true','RUNNER_ENVIRONMENT':'github-hosted','RUNNER_OS':'Linux','NANH_ZED_CURSOR_HIT':'1','NANH_ZED_CURSOR_THEME':'adwaita-24','XCURSOR_PATH':'PRIVATE','XCURSOR_THEME':'PRIVATE','XCURSOR_SIZE':'999'}
+  source.update({key:'/synthetic/helper' for key in q.ZED_HELPERS})
+  source.update(FEASIBILITY_ZED_INPUT_DRIVER_MODE='paste',FEASIBILITY_ZED_RESPONSE_METHOD='thread-export')
+  result=q.qualification_environment('zed-desktop',Path('/facts'),Path('/nanh'),Path('/zed'),source)
+  self.assertEqual(result['XCURSOR_THEME'],'Adwaita');self.assertEqual(result['XCURSOR_SIZE'],'24');self.assertNotIn('XCURSOR_PATH',result)
+  for change in [{'NANH_ZED_CURSOR_THEME':'unknown'},{'RUNNER_OS':'macOS'},{'NANH_ZED_CURSOR_HIT':None}]:
+   with self.subTest(change=change),self.assertRaises(ValueError):q.qualification_environment('zed-desktop',Path('/facts'),Path('/nanh'),Path('/zed'),source|change)
+  with self.assertRaises(ValueError):q.qualification_environment('claude-desktop',Path('/facts'),Path('/nanh'),Path('/zed'),source)
  def test_claude_release_guards_run_before_prepared_lookup(self):
   for platform,flag in [('macos','NANH_CLAUDE_MAC_PROFILE_POLICY'),('windows','NANH_CLAUDE_WINDOWS_PROFILE_POLICY')]:
    args=SimpleNamespace(app='claude-desktop',platform=platform,source_sha='a'*40,frozen=Path('/synthetic'))
