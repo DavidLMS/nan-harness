@@ -22,7 +22,7 @@ def inside(rect, outer):
 
 
 BOUNDARIES = frozenset(('request','policy','native-window','source-owner','tree','state',
-    'frame','client','mode','focus','input','clipboard','action','response','transport'))
+    'frame','frame-active','frame-count','frame-client','client','mode','focus','input','clipboard','action','response','transport'))
 QUERY_BOUNDARIES = dict(owner='source-owner', identity='tree', children='tree', parent='frame',
     state='state', bounds='frame', guard='native-window', client_bounds='client',
     attributes='mode', focused='focus', grab_focus='focus', text='input', paste_once='input',
@@ -92,8 +92,10 @@ class Controller:
         bits = self.query('state', node)
         if (type(bits) is not int or not 0 <= bits < 2**64 or bits & (1 << 6)
                 or not bits & (1 << 30) or not bits & (1 << 25)
-                or editable and not bits & (1 << 7) or active and not bits & (1 << 1)):
+                or editable and not bits & (1 << 7)):
             raise Rejected('input' if editable else 'frame' if active else 'state')
+        if active and not bits & (1 << 1):
+            raise Rejected('frame-active')
         return bits
 
     def bind(self):
@@ -141,7 +143,7 @@ class Controller:
         else:
             raise Rejected()
         if len(frames) != 1:
-            raise Rejected('frame')
+            raise Rejected('frame-count')
         self.frame = frames[0]
         self.sealed_frame = (self.query('identity', self.frame), self.query('bounds', self.frame))
         self.proof()
@@ -166,7 +168,7 @@ class Controller:
             raise Rejected()
         client = self.query('client_bounds')
         if self.sealed_frame[1] != client or not inside(self.sealed_editor[1], client):
-            raise Rejected('client')
+            raise Rejected('frame-client')
         # Revalidate attachment, not merely a detached retained node with same PID.
         node, seen = self.editor, set()
         for _ in range(32):

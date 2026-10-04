@@ -2488,7 +2488,7 @@ class QualificationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             path = root / 'boundary.json'
-            for boundary in ('request','policy','native-window','source-owner','tree','state','frame','client',
+            for boundary in ('request','policy','native-window','source-owner','tree','state','frame','frame-active','frame-count','frame-client','client',
                              'mode','focus','input','clipboard','action','response','transport'):
                 path.write_text(json.dumps({**facts,'failureBoundary':boundary}))
                 record = q.semantic_observations(root,'claude-desktop')[0]

@@ -1000,7 +1000,7 @@ def semantic_observations(directory, app):
             if 'failureBoundary' in value:
                 boundary = value['failureBoundary']
                 if (type(boundary) is not str or boundary not in {
-                        'request','policy','native-window','source-owner','tree','state','frame','client',
+                        'request','policy','native-window','source-owner','tree','state','frame','frame-active','frame-count','frame-client','client',
                         'mode','focus','input','clipboard','action','response','transport'}
                         or value['stage'] not in {'blocked','action-uncertain','deadline','clipboard-cleanup',
                                                  'input-not-empty','response-mismatch'}):

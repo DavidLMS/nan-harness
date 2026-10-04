@@ -19,7 +19,7 @@ class Adapter:
     def owner(self, node):
         return 8 if self.changes.get('foreign') else 7
     def identity(self, node):
-        return {'root':(23 if self.changes.get('wrong_root_role') else 75,'Claude',''),'frame':(23,'Claude',''),
+        return {'root':(23 if self.changes.get('wrong_root_role') else 75,'Claude',''),'frame':(69 if self.changes.get('window_role') else 23,'Claude',''),
                 'editor':(61,'Write your prompt to Claude',''),
                 'mode':(39,'Mode',''),'chat':(43,'Chat',''),'send':(43,'Start task','')}[node]
     def children(self, node):
@@ -32,6 +32,7 @@ class Adapter:
         if node == 'root':return 0
         if node == 'frame' and self.changes.get('hidden_frame'):return 0
         bits = (1<<30)|(1<<25)|(1<<1)|(1<<7)|(1<<8)|(1<<24)
+        if node == 'frame' and self.changes.get('inactive_frame'):bits &= ~(1<<1)
         return bits & ~(1<<8) if node == 'send' and self.changes.get('disabled') else bits
     def bounds(self,node):
         if node=='frame':return (0,0,800,600)
@@ -85,6 +86,16 @@ class ControllerTests(unittest.TestCase):
         facts=controller.submit('private exact prompt')
         self.assertTrue(adapter.cleared)
         return adapter,controller,facts
+    def test_frame_rejections_are_precise_without_action(self):
+        for options, boundary in [({'inactive_frame':True},'frame-active'),
+                                  ({'window_role':True},'frame-count'),
+                                  ({'moved_client':True},'frame-client')]:
+            adapter, controller, facts = self.run_case(**options)
+            self.assertEqual(facts['failureBoundary'],boundary)
+            self.assertEqual(adapter.focus_count,0)
+            self.assertEqual(adapter.paste_count,0)
+            self.assertEqual(adapter.send_count,0)
+
     def test_one_verified_submission_never_qualifies_partial_controller(self):
         adapter,controller,facts=self.run_case()
         self.assertTrue(facts['inputVerified'])
@@ -176,7 +187,7 @@ class BoundaryTests(unittest.TestCase):
     run_case = ControllerTests.run_case
     def test_same_failed_query_boundary_without_extra_actions(self):
         for options,boundary in [({'foreign':True},'source-owner'),({'duplicate':True},'tree'),
-                ({'moved_client':True},'client'),({'wrong_mode':True},'mode'),
+                ({'moved_client':True},'frame-client'),({'wrong_mode':True},'mode'),
                 ({'initial':'unknown owned text'},'input'),({'guard_after_paste':True},'native-window'),
                 ({'invoke_error':True},'action')]:
             with self.subTest(options=options):
