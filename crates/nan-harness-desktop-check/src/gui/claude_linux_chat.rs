@@ -520,9 +520,7 @@ fn supervise(
         }
         let written = writer.join().ok()?.ok();
         let bytes = reader.join().ok()??;
-        if written.is_none() {
-            return None;
-        }
+        written?;
         if Instant::now() >= deadline {
             *failure = FailureBoundary::TransportDeadline;
             return None;
