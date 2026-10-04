@@ -204,6 +204,28 @@ jobs:
           path: ${{ runner.temp }}/desktop-qualification/windows-session.json
           if-no-files-found: ignore
           retention-days: 30
+      - name: Configure isolated native conversation paths
+        if: success() && matrix.backend != 'pending'
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "${{ matrix.app }}:$RUNNER_OS" in
+            chatgpt-desktop:*)
+              echo 'NANH_CODEX_PUBLIC_ONBOARDING=engineering' >> "$GITHUB_ENV"
+              echo 'NANH_CODEX_PROJECT_POLICY=open-project' >> "$GITHUB_ENV"
+              ;;
+          esac
+          if [[ '${{ matrix.app }}' == claude-desktop && "$RUNNER_OS" == macOS ]]; then
+            echo 'NANH_CLAUDE_MAC_PROFILE_POLICY=native-known-folders' >> "$GITHUB_ENV"
+            echo 'NANH_CLAUDE_MAC_CHAT_NAVIGATION=1' >> "$GITHUB_ENV"
+            echo 'NANH_CLAUDE_MAC_NATIVE_CHAT=1' >> "$GITHUB_ENV"
+            echo 'NANH_CLAUDE_MCP_FIXTURE=read-only' >> "$GITHUB_ENV"
+          elif [[ '${{ matrix.app }}' == claude-desktop && "$RUNNER_OS" == Windows ]]; then
+            echo 'NANH_CLAUDE_WINDOWS_PROFILE_POLICY=private-env' >> "$GITHUB_ENV"
+            echo 'NANH_CLAUDE_WINDOWS_CHAT_ONLY=1' >> "$GITHUB_ENV"
+            echo 'NANH_CLAUDE_WINDOWS_FRESH_PROFILE=1' >> "$GITHUB_ENV"
+            echo 'NANH_CLAUDE_WINDOWS_NATIVE_CHAT=1' >> "$GITHUB_ENV"
+          fi
       - name: Run full deterministic semantic qualification
         if: success() && matrix.backend != 'pending'
         shell: bash
