@@ -88,7 +88,7 @@ function project(value,workspace){
 }
 exports.project=project;
 exports.projectFailure=projectFailure;
-async function observe(page,guard,deadline,loan,workspace,menu,endpoint=async()=>guard()===true,contextObservation=null){
+async function observe(page,guard,deadline,loan,workspace,menu,endpoint=async()=>guard()===true,contextObservation=null,selectionTransition=null){
   const facts={status:'blocked',diagnosticsOnly:true,statePairStable:false,ordinaryLocalProjectObserved:false,
     selectedIdCorrelated:false,sendAuthorized:false};
   const a=authority(loan,deadline,guard);
@@ -98,7 +98,29 @@ async function observe(page,guard,deadline,loan,workspace,menu,endpoint=async()=
     const before=a.snapshotPair();if(!before)return {...facts,reason:'state'};
     const selected=project(before.first.value,workspace);if(!selected)return {...facts,reason:'project',projectFailure:projectFailure(before.first.value,workspace)};
     facts.ordinaryLocalProjectObserved=true;
+    const originalRecord=JSON.stringify(before.first.value['local-projects'][selected.projectId]);
+    let expected=before,transitioned=false;
     const sample=require('./codex-selected-project.cjs').sample;
+    if(selectionTransition){
+      if(!a.verify()||!await endpoint())return {...facts,reason:'guard'};
+      const initial=await page.evaluate(sample,{menu,projectId:selected.projectId});
+      if(!a.verify()||!await endpoint())return {...facts,reason:'guard'};
+      if(initial.reason==='selected-id'&&initial.selectedItemCount===0&&initial.matchingItemCount===1){
+        const sealed=a.snapshotPair();
+        if(!sealed||!stable(before.first.identity,sealed.second.identity)||before.first.digest!==sealed.second.digest
+          ||!a.verify()||!await endpoint())return {...facts,reason:'state-changed'};
+        const transition=await selectionTransition(selected,()=>a.verify());
+        if(!transition||!transition.menu||transition.completed!==true||!a.verify()||!await endpoint())return {...facts,reason:'selection-transition'};
+        menu=transition.menu;
+        expected=a.snapshotPair();
+        if(!expected||!a.verify()||!await endpoint())return {...facts,reason:'state-changed'};
+        const value=expected.first.value,p=project(value,workspace);
+        if(!p||p.projectId!==selected.projectId||JSON.stringify(value['local-projects'][selected.projectId])!==originalRecord
+          ||!exactKeys(value['selected-project'],['type','projectId'])||value['selected-project'].type!=='local'
+          ||value['selected-project'].projectId!==selected.projectId)return {...facts,reason:'selection-state'};
+        transitioned=true;
+      }
+    }
     for(let i=0;i<2;i++){
       if(!a.verify()||!await endpoint())return {...facts,reason:'guard'};
       const result=await page.evaluate(sample,{menu,projectId:selected.projectId});
@@ -111,13 +133,13 @@ async function observe(page,guard,deadline,loan,workspace,menu,endpoint=async()=
       }
     }
     const after=a.snapshotPair();
-    if(!after||!stable(before.first.identity,after.second.identity)||before.first.digest!==after.second.digest||!a.verify()||!await endpoint())return {...facts,reason:'state-changed'};
+    if(!after||!stable(expected.first.identity,after.second.identity)||expected.first.digest!==after.second.digest||!a.verify()||!await endpoint())return {...facts,reason:'state-changed'};
     const prewarmContext=contextObservation?await contextObservation(selected):undefined;
     if(contextObservation){
       const final=a.snapshotPair();
-      if(!final||!stable(before.first.identity,final.second.identity)||before.first.digest!==final.second.digest||!a.verify()||!await endpoint())return {...facts,reason:'state-changed'};
+      if(!final||!stable(expected.first.identity,final.second.identity)||expected.first.digest!==final.second.digest||!a.verify()||!await endpoint())return {...facts,reason:'state-changed'};
     }
-    return {...facts,status:'observed',statePairStable:true,selectedIdCorrelated:true,...(prewarmContext?{prewarmContext}:{})};
+    return {...facts,status:'observed',statePairStable:true,selectedIdCorrelated:true,...(transitioned?{ordinarySelectionCompleted:true}:{}),...(prewarmContext?{prewarmContext}:{})};
   }catch{return {...facts,reason:Date.now()>=deadline?'deadline':'query'};}
   finally{a.close();}
 }

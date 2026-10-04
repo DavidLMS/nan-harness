@@ -316,7 +316,14 @@ def public_onboarding(setup, app):
         menu=setup['workspaceMenuObservation']
         fixed={'diagnosticsOnly':True,'sendAuthorized':False}
         flags={'clickAttempted','clickCompleted'}
-        base=set(fixed)|flags|{'status'}
+        selectionflags={'selectionClickAttempted','selectionClickCompleted'}
+        present=set(menu)&selectionflags if type(menu) is dict else set()
+        if present and (present not in ({'selectionClickAttempted'},selectionflags)
+                or menu['selectionClickAttempted'] is not True
+                or 'selectionClickCompleted' in menu and menu['selectionClickCompleted'] is not True
+                or not menu.get('clickCompleted')):
+            raise ValueError('invalid Codex ordinary project selection')
+        base=set(fixed)|flags|{'status'}|present
         if (type(menu) is not dict or type(menu.get('status')) is not str
                 or menu['status'] not in {'observed','blocked'}
                 or any(menu.get(k) is not v for k,v in fixed.items())
@@ -339,10 +346,14 @@ def public_onboarding(setup, app):
                     or any(type(state.get(k)) is not bool for k in stateflags)):
                 raise ValueError('invalid Codex profile state observation')
             if state['status']=='observed':
-                if set(state)!=statebase|({'prewarmContext'} if 'prewarmContext' in state else set()) or not all(state[k] for k in stateflags):
+                if (set(state)!=statebase|({'prewarmContext'} if 'prewarmContext' in state else set())|({'ordinarySelectionCompleted'} if 'ordinarySelectionCompleted' in state else set())
+                        or not all(state[k] for k in stateflags)
+                        or 'ordinarySelectionCompleted' in state and (state['ordinarySelectionCompleted'] is not True
+                            or menu.get('selectionClickCompleted') is not True)
+                        or menu.get('selectionClickCompleted') is True and state.get('ordinarySelectionCompleted') is not True):
                     raise ValueError('inconsistent Codex selected project observation')
             elif (set(state)!=statebase|{'reason'}|({'projectFailure'} if 'projectFailure' in state else set())|({'selectedProjectObservation'} if 'selectedProjectObservation' in state else set()) or type(state['reason']) is not str
-                    or state['reason'] not in {'profile-custody','workspace','state','project','guard','selected-id','state-changed','deadline','query'}
+                    or state['reason'] not in {'profile-custody','workspace','state','project','guard','selected-id','state-changed','selection-transition','selection-state','deadline','query'}
                     or state['statePairStable'] or state['selectedIdCorrelated']):
                 raise ValueError('invalid Codex profile state boundary')
             if 'projectFailure' in state and (state['status']!='blocked' or state.get('reason')!='project'

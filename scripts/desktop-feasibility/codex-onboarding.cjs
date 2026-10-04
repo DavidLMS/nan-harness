@@ -666,7 +666,7 @@ async function run(page, ownerGuard, deadline, rejected, mainGuard, folderTrust,
           &&coding.homeState.enabledSendCount===1&&coding.homeState.workspaceControlCount===1
           &&coding.homeState.pendingTextareaCount===0&&coding.homeState.pendingGroupCount===0) {
         facts.workspaceMenuObservation=await require('./codex-workspace-menu.cjs').run(page,
-          ownedEndpoint,ownerGuard,deadline,profileLoan,profileLoan.directories[0].path);
+          ownedEndpoint,ownerGuard,deadline,profileLoan,profileLoan.directories[0].path,{frozenLinuxTrial:true});
         return stop('scope-remained');
       }
       if(coding.ready===true) {facts.codingComposerReady=true;return facts;}

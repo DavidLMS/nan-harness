@@ -2823,6 +2823,15 @@ class QualificationTests(unittest.TestCase):
         context=dict(verified=True,reason='verified',sourcePinned=True,newHomeController=True,
             localContext=True,retainedProject=True,retainedRoot=True,prewarmResolvedSelection=False,
             noPriorReservation=True,inputAuthorized=False)
+        selected_state={**state,'ordinarySelectionCompleted':True}
+        selected_menu={**menu,'selectionClickAttempted':True,'selectionClickCompleted':True,'profileStateObservation':selected_state}
+        self.assertEqual(q.public_onboarding({**setup,'workspaceMenuObservation':selected_menu},'chatgpt-desktop')['workspaceMenuObservation'],selected_menu)
+        for change in [{'selectionClickAttempted':False},{'selectionClickCompleted':False},
+                       {'selectionClickAttempted':1},{'rawProjectId':'PRIVATE'},
+                       {'profileStateObservation':state},
+                       {'profileStateObservation':selected_state|{'ordinarySelectionCompleted':False}}]:
+            with self.subTest(change=change),self.assertRaises(ValueError):
+                q.public_onboarding({**setup,'workspaceMenuObservation':selected_menu|change},'chatgpt-desktop')
         context_state={**state,'prewarmContext':context}
         self.assertEqual(q.public_onboarding({**setup,'workspaceMenuObservation':{**menu,'profileStateObservation':context_state}},'chatgpt-desktop')['workspaceMenuObservation']['profileStateObservation'],context_state)
         for change in ({'inputAuthorized':True},{'sourcePinned':False},{'reason':'PRIVATE'},

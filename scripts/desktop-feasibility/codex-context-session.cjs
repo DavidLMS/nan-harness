@@ -45,6 +45,9 @@ function create({page,alive,deadline,pwProof,makeWitness=require('./codex-send-c
     await verify(held);return {verified:true,reason:'verified',inputAuthorized:false};
    }catch(error){return failure(error);}
   },
+  async verifyHeld(held){
+   try{if(!editor)return false;return await verify(held);}catch{return false;}
+  },
   async observe(held,projectId,cwd){
    if(!editor)return blocked('editor-unavailable');
    try{await verify(held);const witness=makeWitness({session:{send},editor,guard:()=>verify(held),deadline,projectId,cwd,now});

@@ -39,7 +39,7 @@ function sample(held,{opened,menu}) {
   if(!id||!popup||popup.id!==id||overlays.some(e=>e!==popup&&!popup.contains(e)))return blocked;
   return {matched:true};
 }
-async function run(page,guard,ownerGuard,deadline,loan,workspace) {
+async function run(page,guard,ownerGuard,deadline,loan,workspace,selectionPolicy=null) {
   const facts={status:'blocked',diagnosticsOnly:true,clickAttempted:false,clickCompleted:false,sendAuthorized:false};
   const alive=async()=>Date.now()<deadline&&ownerGuard()===true&&await guard()===true&&Date.now()<deadline;
   let held,button,menu,context,prepared;
@@ -69,7 +69,44 @@ async function run(page,guard,ownerGuard,deadline,loan,workspace) {
     if(await menus.count()!==1)return {...facts,reason:'menu'};
     menu=await menus.elementHandle();
     if(!menu||!await alive()||!(await held.evaluate(sample,{opened:true,menu})).matched||!await alive())return {...facts,reason:'menu'};
-    const observation=await require('./codex-profile-state.cjs').observe(page,ownerGuard,deadline,loan,workspace,menu,alive,async selected=>prepared.verified?context.observe(held,selected.projectId,selected.workspace):prepared);
+    let selectionConsumed=false;
+    const transition=selectionPolicy?.frozenLinuxTrial===true&&Object.keys(selectionPolicy).length===1?async(selected,custody)=>{
+      if(selectionConsumed||!custody()||!await alive()||!(await held.evaluate(sample,{opened:true,menu})).matched)return null;
+      if(prepared.verified!==true||!await context.verifyHeld(held))return null;
+      const retainedGuard=async()=>custody()&&await alive()&&await context.verifyHeld(held)&&custody()&&await alive();
+      selectionConsumed=true;
+      const choice=require('./codex-project-choice.cjs');let retained,item;
+      try{
+        retained=await page.evaluateHandle(choice.capture,{menu,projectId:selected.projectId});
+        if(!await retainedGuard())return null;
+        const a=await retained.evaluate(choice.sample),b=await retained.evaluate(choice.sample);
+        if(!a.matched||!b.matched||JSON.stringify(a.rect)!==JSON.stringify(b.rect)||!await retainedGuard())return null;
+        item=(await retained.getProperty('item')).asElement();if(!item)return null;
+        const c=await retained.evaluate(choice.sample);
+        if(!c.matched||JSON.stringify(a.rect)!==JSON.stringify(c.rect)||!await retainedGuard()
+          ||!(await held.evaluate(sample,{opened:true,menu})).matched||!await retainedGuard())return null;
+        const selection=await page.evaluate(require('./codex-selected-project.cjs').sample,{menu,projectId:selected.projectId});
+        if(selection.reason!=='selected-id'||selection.selectedItemCount!==0||selection.matchingItemCount!==1||!await retainedGuard())return null;
+        facts.selectionClickAttempted=true;
+        await item.click({position:{x:a.rect[2]/2,y:a.rect[3]/2},timeout:Math.max(1,Math.min(2000,deadline-Date.now()))});
+        if(!custody()||!await alive())return null;
+        // No popup substitute: the original popup must close in this document.
+        if(!(await held.evaluate(sample,{opened:false,menu:null})).matched||!custody()||!await alive())return null;
+        await menu.dispose();menu=null;
+        const closedA=await held.evaluate(sample,{opened:false,menu:null}),closedB=await held.evaluate(sample,{opened:false,menu:null});
+        if(!closedA.matched||!closedB.matched||JSON.stringify(closedA.rect)!==JSON.stringify(closedB.rect)||!await retainedGuard())return null;
+        const final=await held.evaluate(sample,{opened:false,menu:null});
+        if(!final.matched||JSON.stringify(closedA.rect)!==JSON.stringify(final.rect)||!await retainedGuard())return null;
+        await button.click({position:{x:final.rect[2]/2,y:final.rect[3]/2},timeout:Math.max(1,Math.min(2000,deadline-Date.now()))});
+        if(!custody()||!await alive())return null;
+        const reopened=page.locator('[cmdk-root]:visible');if(await reopened.count()!==1)return null;
+        menu=await reopened.elementHandle();
+        if(!menu||!custody()||!await alive()||!(await held.evaluate(sample,{opened:true,menu})).matched||!await retainedGuard())return null;
+        facts.selectionClickCompleted=true;
+        return {completed:true,menu};
+      }finally{for(const h of [item,retained])if(h)try{await h.dispose();}catch{}}
+    }:null;
+    const observation=await require('./codex-profile-state.cjs').observe(page,ownerGuard,deadline,loan,workspace,menu,alive,async selected=>prepared.verified?context.observe(held,selected.projectId,selected.workspace):prepared,transition);
     if(!await alive()||!(await held.evaluate(sample,{opened:true,menu})).matched||!await alive())return {...facts,reason:'guard'};
     return {...facts,status:'observed',profileStateObservation:observation};
   } catch {return {...facts,reason:Date.now()>=deadline?'deadline':facts.clickAttempted?'action-uncertain':'query'};}
