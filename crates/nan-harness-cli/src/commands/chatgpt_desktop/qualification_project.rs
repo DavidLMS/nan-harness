@@ -268,7 +268,11 @@ pub(super) fn apply(
     // Chromium does not expose the web subtree on macOS until accessibility
     // is enabled. Scope this launch flag to the fully admitted owned trial.
     #[cfg(target_os = "macos")]
-    command.arg("--force-renderer-accessibility");
+    command
+        .arg("--force-renderer-accessibility")
+        // The inspected build-flavor module uses this exact opt-out for its
+        // updater. Keep the pinned official installation stable across probes.
+        .env("CODEX_SPARKLE_ENABLED", "false");
     command
         .arg("--open-project")
         .arg(cwd)
