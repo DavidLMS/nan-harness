@@ -1,8 +1,27 @@
 //! Private causal authority: three submitted prompts and one stable main context.
+use serde::Serialize;
 use serde_json::Value;
 use sha2::{Digest as _, Sha256};
 use zeroize::Zeroizing;
 
+#[derive(Serialize, Debug, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum AuthorityRejection {
+    ContextUnobserved,
+    ContextChanged,
+    PriorContextIncomplete,
+    Policy,
+}
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct FailureAuthorityObservation {
+    status: AuthorityRejection,
+    prepared_turns: u8,
+    learned_turns: u8,
+    rejected_stream: u16,
+    rejected_history: u16,
+    rejected_context: u16,
+}
 #[derive(Default)]
 pub(super) struct FailureTurnAuthority {
     epoch: u64,
@@ -12,6 +31,9 @@ pub(super) struct FailureTurnAuthority {
     context_turns: u8,
     failure_armed: bool,
     observed: bool,
+    rejected_stream: u16,
+    rejected_history: u16,
+    rejected_context: u16,
 }
 impl FailureTurnAuthority {
     pub(super) fn prepare(
@@ -46,20 +68,66 @@ impl FailureTurnAuthority {
         self.observed = false;
         Ok(failure.then_some(self.epoch))
     }
+    pub(super) fn rejection_observation(&self) -> FailureAuthorityObservation {
+        FailureAuthorityObservation {
+            status: if self.context.is_none() {
+                AuthorityRejection::ContextUnobserved
+            } else if self.context_ambiguous {
+                AuthorityRejection::ContextChanged
+            } else if self.context_turns != 3 {
+                AuthorityRejection::PriorContextIncomplete
+            } else {
+                AuthorityRejection::Policy
+            },
+            prepared_turns: u8::try_from(self.prompts.len()).unwrap_or(u8::MAX),
+            learned_turns: u8::try_from(self.context_turns.count_ones()).unwrap_or(u8::MAX),
+            rejected_stream: self.rejected_stream,
+            rejected_history: self.rejected_history,
+            rejected_context: self.rejected_context,
+        }
+    }
     pub(super) fn armed(&self) -> bool {
         self.failure_armed
     }
     pub(super) fn learn_context(&mut self, body: &Value) {
-        if self.failure_armed || self.prompts.is_empty() || !matches_history(body, &self.prompts) {
+        if self.failure_armed || self.prompts.is_empty() {
+            return;
+        }
+        // Count only a request containing the exact current prepared user text.
+        // Unrelated background/title traffic cannot alter these diagnostics.
+        let relevant = body
+            .get("messages")
+            .and_then(Value::as_array)
+            .is_some_and(|messages| {
+                messages.len() <= 512
+                    && messages.iter().any(|message| {
+                        message.get("role").and_then(Value::as_str) == Some("user")
+                            && message.get("content").and_then(exact_text)
+                                == self.prompts.last().map(|prompt| prompt.as_str())
+                    })
+            });
+        if !relevant {
+            return;
+        }
+        if body.get("stream") != Some(&Value::Bool(true)) {
+            self.rejected_stream = self.rejected_stream.saturating_add(1).min(4096);
+            return;
+        }
+        if !matches_history(body, &self.prompts) {
+            self.rejected_history = self.rejected_history.saturating_add(1).min(4096);
             return;
         }
         let Some(context) = main_context(body) else {
             self.context_ambiguous = true;
+            self.rejected_context = self.rejected_context.saturating_add(1).min(4096);
             return;
         };
         self.context_turns |= 1 << (self.prompts.len() - 1);
         match self.context {
-            Some(held) if held != context => self.context_ambiguous = true,
+            Some(held) if held != context => {
+                self.context_ambiguous = true;
+                self.rejected_context = self.rejected_context.saturating_add(1).min(4096);
+            }
             None => self.context = Some(context),
             _ => {}
         }
@@ -278,5 +346,30 @@ mod tests {
         one_request.learn_context(&request(&["first"], "main"));
         one_request.prepare("second", false, false).unwrap();
         assert!(one_request.prepare("third", true, false).is_err());
+    }
+    #[test]
+    fn rejection_diagnostics_ignore_background_and_distinguish_contracts() {
+        let mut authority = FailureTurnAuthority::default();
+        authority.prepare("private one", false, false).unwrap();
+        authority.learn_context(&request(&["background"], "other"));
+        assert_eq!(authority.rejection_observation().rejected_stream, 0);
+        let mut current = request(&["private one"], "main");
+        current["stream"] = json!(false);
+        authority.learn_context(&current);
+        assert_eq!(authority.rejection_observation().rejected_stream, 1);
+        current["stream"] = json!(true);
+        authority.learn_context(&current);
+        assert_eq!(authority.rejection_observation().learned_turns, 1);
+        authority.prepare("private two", false, false).unwrap();
+        authority.learn_context(&request(&["private two"], "main"));
+        assert_eq!(authority.rejection_observation().rejected_history, 1);
+        authority.learn_context(&request(&["private one", "private two"], "changed"));
+        let observation = authority.rejection_observation();
+        assert_eq!(observation.status, AuthorityRejection::ContextChanged);
+        assert_eq!(observation.rejected_context, 1);
+        let wire = serde_json::to_string(&observation).unwrap();
+        assert!(!wire.contains("private"));
+        assert!(!wire.contains("\"changed\""));
+        assert!(authority.prepare("private three", true, false).is_err());
     }
 }

@@ -24,6 +24,8 @@ use zeroize::Zeroizing;
 
 #[cfg(any(target_os = "macos", test))]
 mod failure_turn;
+#[cfg(target_os = "macos")]
+pub(crate) use failure_turn::FailureAuthorityObservation;
 #[cfg(any(target_os = "macos", test))]
 use failure_turn::FailureTurnAuthority;
 
@@ -240,6 +242,14 @@ impl ProviderGate {
             self.state.expected_failure.store(true, Ordering::SeqCst);
         }
         Ok(epoch.map(ClaudeFailureEpoch))
+    }
+    #[cfg(target_os = "macos")]
+    pub(crate) fn claude_failure_authority_rejection(&self) -> FailureAuthorityObservation {
+        self.state
+            .failure_turn
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .rejection_observation()
     }
     #[cfg(target_os = "macos")]
     pub(crate) fn claude_failure_turn_observed(&self, epoch: ClaudeFailureEpoch) -> bool {
@@ -1187,6 +1197,15 @@ mod tests {
                 StatusCode::OK
             );
         }
+        let mut nonstreaming = body(&["response nonce1", "tool nonce2"], "main");
+        nonstreaming["stream"] = json!(false);
+        assert_eq!(
+            post(nonstreaming).send().await.unwrap().status(),
+            StatusCode::OK
+        );
+        let observation = serde_json::to_value(gate.claude_failure_authority_rejection()).unwrap();
+        assert_eq!(observation["rejectedStream"], 1);
+        assert_eq!(observation["learnedTurns"], 2);
         let epoch = gate
             .prepare_claude_turn("failure nonce3", true)
             .unwrap()
@@ -1214,9 +1233,9 @@ mod tests {
         );
         assert!(gate.failure_observed());
         assert!(gate.claude_failure_turn_observed(epoch));
-        assert_eq!(gate.generation_count(), 3);
-        assert_eq!(post(current).send().await.unwrap().status(), StatusCode::OK);
         assert_eq!(gate.generation_count(), 4);
+        assert_eq!(post(current).send().await.unwrap().status(), StatusCode::OK);
+        assert_eq!(gate.generation_count(), 5);
         server.abort();
     }
 }

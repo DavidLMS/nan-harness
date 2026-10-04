@@ -55,6 +55,8 @@ struct Facts {
     guard_rejection: Option<GuardRejection>,
     provider_observation: Option<ProviderObservation>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    failure_authority: Option<crate::provider::FailureAuthorityObservation>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     row_shape: Option<crate::native::FailureRowShape>,
     #[serde(skip_serializing_if = "Option::is_none")]
     scope_shape: Option<crate::native::FailureScopeShape>,
@@ -75,6 +77,7 @@ impl Default for Facts {
             transport_failure: None,
             guard_rejection: None,
             provider_observation: None,
+            failure_authority: None,
             row_shape: None,
             scope_shape: None,
             submitted_turns: 0,
@@ -220,9 +223,12 @@ impl ClaudeNativeChatSession<'_> {
         {
             return Err(Reason::ActionUnsupported);
         }
-        self.failure_epoch = gate
-            .prepare_claude_turn(prompt, failure)
-            .map_err(|()| Reason::ProviderFailed)?;
+        self.failure_epoch = gate.prepare_claude_turn(prompt, failure).map_err(|()| {
+            if failure {
+                self.facts.failure_authority = Some(gate.claude_failure_authority_rejection());
+            }
+            Reason::ProviderFailed
+        })?;
         Ok(())
     }
     pub(crate) fn new_turn(&mut self, prompt: &str) -> Result<(), Reason> {

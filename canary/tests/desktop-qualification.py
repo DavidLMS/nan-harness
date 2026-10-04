@@ -3241,5 +3241,22 @@ class CodexFolderTrustTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             q.public_onboarding({**setup,'folderTrust':dict(status='absent',clickAttempted=False,clickCompleted=False)},'claude-desktop')
 
+class ClaudeFailureAuthorityTests(unittest.TestCase):
+    def test_failure_only_authority_is_closed_and_advisory(self):
+        value=dict(schemaVersion=1,mechanism='claude-native-chat',diagnosticsOnly=True,
+                   stage='copied',submittedTurns=2,inputVerifiedTurns=2,copiedResponses=2,
+                   retryAttempted=False,clipboardCleared=True)
+        authority=dict(status='context-unobserved',preparedTurns=2,learnedTurns=0,
+                       rejectedStream=1,rejectedHistory=0,rejectedContext=0)
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);path=root/'authority.json'
+            path.write_text(json.dumps({**value,'failureAuthority':authority}))
+            self.assertEqual(q.semantic_observations(root,'claude-desktop'),[{**value,'failureAuthority':authority}])
+            for extra in ({'status':'PRIVATE'}, {'learnedTurns':1}, {'rejectedStream':4097},
+                          {'rejectedHistory':True}, {'context':'PRIVATE'}, {'preparedTurns':[]},
+                          {'status':'prior-context-incomplete','learnedTurns':2}):
+                path.write_text(json.dumps({**value,'failureAuthority':{**authority,**extra}}))
+                with self.assertRaises(ValueError):q.semantic_observations(root,'claude-desktop')
+
 if __name__ == '__main__':
     unittest.main()
