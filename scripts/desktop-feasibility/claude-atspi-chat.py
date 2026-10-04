@@ -1092,7 +1092,18 @@ def snapshot_clear(text, held):
                    for window in windows[:index])
 
 
-def native_adapter(request, deadline):
+def work_cutoff(deadline, now):
+    # The supervisor retains its original cutoff. Stop native work earlier so
+    # private clipboard cleanup and the closed receipt can finish inside it.
+    if not now < deadline <= now + 15:
+        raise Rejected('policy')
+    cutoff = deadline - .5
+    if cutoff <= now:
+        raise TimeoutError()
+    return cutoff
+
+
+def native_adapter(request, deadline, cleanup_deadline=None):
     import os
     import subprocess
     import runpy
@@ -1118,16 +1129,20 @@ def native_adapter(request, deadline):
         driver = runpy.run_path(str(Path(__file__).with_name('zed-input-x11.py')))
     except Exception:
         raise Rejected('transport') from None
-    def run(argv, payload=None, output=False):
+    cleanup_deadline = deadline if cleanup_deadline is None else cleanup_deadline
+    if not deadline <= cleanup_deadline == request['deadline']:
+        raise Rejected('policy')
+    def run(argv, payload=None, output=False, cleanup=False):
         custody = getattr(adapter, 'profile_guard', None)
         if custody is None or not custody():
             raise Rejected('policy')
-        remaining = deadline - time.monotonic()
+        cutoff = cleanup_deadline if cleanup else deadline
+        remaining = cutoff - time.monotonic()
         if remaining <= 0 or os.getppid() != request['checkerPid']:
             raise TimeoutError()
         result = subprocess.run(argv, input=payload, stdout=subprocess.PIPE if output else subprocess.DEVNULL,
             stderr=subprocess.DEVNULL, timeout=remaining, check=True)
-        if time.monotonic() >= deadline or os.getppid() != request['checkerPid']:
+        if time.monotonic() >= cutoff or os.getppid() != request['checkerPid']:
             raise TimeoutError()
         if output and len(result.stdout) > 131072:
             raise Rejected()
@@ -1236,7 +1251,7 @@ def native_adapter(request, deadline):
     import secrets
     adapter.clipboard_sentinel = lambda: clipboard_write(secrets.token_hex(16))
     adapter.clipboard_read = lambda: run(['/usr/bin/xclip','-o','-selection','clipboard'],output=True).decode('utf8')
-    adapter.clear_clipboard = lambda: clipboard_write('')
+    adapter.clear_clipboard = lambda: run(['/usr/bin/xclip','-selection','clipboard'],b'',cleanup=True)
     return adapter
 
 
@@ -1266,9 +1281,10 @@ def main():
             raise Rejected()
         boundary = 'policy'
         custody = ProfileCustody(request['profileAuthority'], deadline)
-        adapter = native_adapter(request,deadline)
+        cutoff = work_cutoff(deadline, time.monotonic())
+        adapter = native_adapter(request,cutoff,cleanup_deadline=deadline)
         adapter.profile_guard = custody.verify
-        controller = Controller(adapter,request,deadline)
+        controller = Controller(adapter,request,cutoff)
         if request['mode'] in ('input-next-correlated','input-next-empty-class'):
             if request['binding'] is None:
                 raise Rejected('policy')

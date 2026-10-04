@@ -76,6 +76,15 @@ class Adapter:
 
 
 class InputShapeTests(unittest.TestCase):
+    def test_work_cutoff_reserves_receipt_time_inside_original_deadline(self):
+        self.assertEqual(chat.work_cutoff(15, 0), 14.5)
+        self.assertEqual(chat.work_cutoff(10, 9), 9.5)
+        with self.assertRaises(TimeoutError):
+            chat.work_cutoff(10, 9.6)
+        for deadline in (0, 16):
+            with self.assertRaises(chat.Rejected):
+                chat.work_cutoff(deadline, 0)
+
     def test_closed_shapes_and_private_mixed_content(self):
         for value,expected in [ ('\n\r\n',(3,True,True,False)),
                 (' \t',(2,False,True,False)), ('\u200b\ufeff',(2,False,False,True)),
