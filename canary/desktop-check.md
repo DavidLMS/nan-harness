@@ -46,10 +46,16 @@ The latest Linux Claude trial, [37208339146](https://github.com/DavidLMS/nan-har
 (`d158cdb2`, official `2.9939.4`), sends and independently copies the first
 response in all three fresh sessions. The next input is rejected: its 17
 characters match neither a retained prompt nor an actual placeholder attribute.
-Only three of five owned nodes resolve through Hypertext links; no empty-input
-or replacement capability is admitted. Application and global cleanup pass.
-A passive descendant-shape diagnostic is running in
-[37209554032](https://github.com/DavidLMS/nan-harness/actions/runs/37209554032).
+Only three of five owned nodes resolve through Hypertext links. Application and
+global cleanup pass. [37210099000](https://github.com/DavidLMS/nan-harness/actions/runs/37210099000)
+(`fb7eb4ea`) additionally observes the sole paragraph's exact source tag and
+whole-document-empty class pair in all three sessions; two unmapped Text
+leaves remain retained in the witness. `340bdcfe` introduces a separate
+source-proved empty-model capability: all text/link/attachment records and
+prior copied prompt/response history must remain unchanged through final paste
+proof. It never clears text before paste and still requires exact prompt
+readback before Send. The actual test is running in
+[37211315141](https://github.com/DavidLMS/nan-harness/actions/runs/37211315141).
 
 The Windows source-sharing and configuration lifecycle fixtures all pass in
 [37207929495](https://github.com/DavidLMS/nan-harness/actions/runs/37207929495)
@@ -58,8 +64,14 @@ The Windows source-sharing and configuration lifecycle fixtures all pass in
 (`cdfe879c`) acquires and fits the first window, then rejects profile isolation.
 Its cleanup also fails: the first descendant-holder preflight reaches its
 cutoff; the second stops all five retained descendants but final accessibility
-absence is not established. A closed profile-seal stage diagnostic is running
-in [37209405410](https://github.com/DavidLMS/nan-harness/actions/runs/37209405410).
+absence is not established. [37209405410](https://github.com/DavidLMS/nan-harness/actions/runs/37209405410)
+(`f1b20acc`) passes both cleanup checks and locates the isolation rejection at
+the first configuration file's privacy check. The repairing reader changed its
+DACL before rejecting; this does not establish the original descriptor shape.
+A nonmutating protected-or-exact-inherited classifier under the retained
+original private root is being integrated. General credential policy stays
+protected. `fb7eb4ea` also prioritizes original descendant retention within
+the same existing ten-second stop budget and reports closed preflight progress.
 Directory leases permit child renames and deny directory deletion; configuration
 file leases still deny writes. No rejected cleanup counts as acceptance.
 
@@ -75,9 +87,13 @@ Linux Codex [37208341472](https://github.com/DavidLMS/nan-harness/actions/runs/3
 (`d158cdb2`) reaches the home composer and attempts ordinary selection of the
 sole source-verified local project in two sessions. The retained guard rejects
 the transition before reopening the menu. Application and global cleanup pass;
-selection/context correlation and Send remain unproved. A closed transition
-stage diagnostic is running in
-[37209580327](https://github.com/DavidLMS/nan-harness/actions/runs/37209580327).
+selection/context correlation and Send remain unproved. [37210102136](https://github.com/DavidLMS/nan-harness/actions/runs/37210102136)
+(`fb7eb4ea`) locates the rejection immediately after the item click while
+checking original popup closure. `c0ceddd3` passively awaits that one closure
+within the original cutoff, rechecking the original CDP document and retained
+editor before and after every sample; full source proof is mandatory before
+reopening. Its actual test is running in
+[37211386151](https://github.com/DavidLMS/nan-harness/actions/runs/37211386151).
 Windows Codex's original-root custody and separate runtime source pins remain
 under development; Linux proof cannot be reused as Windows acceptance.
 
