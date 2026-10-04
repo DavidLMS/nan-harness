@@ -2708,12 +2708,17 @@ class QualificationTests(unittest.TestCase):
             root=Path(tmp);path=root/'shape.json'
             path.write_text(json.dumps({**facts,'embeddedTextObservation':shape}))
             self.assertEqual(q.semantic_observations(root,'claude-desktop')[0]['embeddedTextObservation'],shape)
+            for turns in (1,2):
+                completed={**facts,'submittedTurns':turns,'inputVerifiedTurns':turns,'copiedResponses':turns}
+                path.write_text(json.dumps({**completed,'embeddedTextObservation':shape}))
+                self.assertEqual(q.semantic_observations(root,'claude-desktop')[0]['embeddedTextObservation'],shape)
             for changed in ({**shape,'nodeCount':0},{**shape,'nodeCount':65},{**shape,'nodeCount':True},
                             {**shape,'paragraphCount':4},{**shape,'brLfLeafCount':2},
                             {**shape,'exactFillerLfLeafCount':2},{**shape,'attributes':'PRIVATE'},None):
                 path.write_text(json.dumps({**facts,'embeddedTextObservation':changed}))
                 with self.assertRaises(ValueError):q.semantic_observations(root,'claude-desktop')
             for changed in ({**facts,'stage':'sent'},{**facts,'submittedTurns':1},
+                            {**facts,'submittedTurns':3,'inputVerifiedTurns':3,'copiedResponses':3},
                             {key:value for key,value in facts.items() if key!='inputShape'}):
                 path.write_text(json.dumps({**changed,'embeddedTextObservation':shape}))
                 with self.assertRaises(ValueError):q.semantic_observations(root,'claude-desktop')

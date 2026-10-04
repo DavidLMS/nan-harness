@@ -1310,7 +1310,8 @@ def semantic_observations(directory, app):
                         or shape['nodeCount'] == 0 or shape['paragraphCount'] > shape['nodeCount']
                         or not shape['exactFillerLfLeafCount'] <= shape['brLfLeafCount'] <= shape['literalLfLeafCount'] <= shape['nodeCount']
                         or value['stage'] != 'input-not-empty' or 'inputShape' not in value
-                        or any(value[key] != 0 for key in ('submittedTurns','inputVerifiedTurns','copiedResponses'))
+                        or len({value[key] for key in ('submittedTurns','inputVerifiedTurns','copiedResponses')}) != 1
+                        or value['submittedTurns'] > 2
                         or value['retryAttempted'] is not False):
                     raise ValueError('invalid Claude Linux embedded text observation')
                 record['embeddedTextObservation'] = shape
