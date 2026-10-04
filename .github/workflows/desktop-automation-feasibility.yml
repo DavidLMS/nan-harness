@@ -109,7 +109,10 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-on-failure: true
+      - name: Compile exact synthetic fixture without a vendor application
+        run: cargo test --locked -p nan-harness-cli --features desktop-qualification --lib --no-run
       - name: Observe exact synthetic compiler fixture before any vendor metadata or installation
+        if: always()
         env:
           RUST_TEST_THREADS: 1
           NANH_CONFIGURATION_POSTINSTALL_OBSERVATION: '0'
