@@ -283,6 +283,7 @@ async function focusCapturedMain(held,proof,deadline,identity=correlationIdentit
     if(!before.scope.focused) {
       if(nativeActivation) {
         nativeActivation.prepare();
+        proof.allowPassiveActivationSettle?.();
         const second=await identity(held.page,deadline);
         if(Date.now()>=deadline||!same(held,second)||!second.scope.mainScope||!await proved())return rejected();
       }
@@ -327,7 +328,7 @@ async function focusCapturedMain(held,proof,deadline,identity=correlationIdentit
     const actionFailure=typeof nativeActivation?.actionFailure==='function'?nativeActivation.actionFailure():null;
     if(diagnostic&&actionFailure)diagnostic.nativeActivationFailure=actionFailure;
     return stop(Date.now()>=deadline?'deadline':'query-failed');
-  }
+  } finally {proof?.finishPassiveActivationSettle?.();}
 }
 
 function publishCodexBinding(output,owner,connection,guard) {
@@ -572,7 +573,7 @@ async function run() {
         const folderAuthority=require('./codex-folder-trust.cjs').authority(request.ownedWorkspace);
         trustGuard=focusGuard||heldMainGuard(initialMain,browser,ownerGuard,correlationDeadline,
           require('./codex-onboarding.cjs').sourceRoute,correlationIdentity,
-          ms=>new Promise(resolve=>setTimeout(resolve,ms)),false,false);
+          ms=>new Promise(resolve=>setTimeout(resolve,ms)),false,process.platform==='win32');
         folderTrust=await require('./codex-folder-trust.cjs').run(page,trustGuard,
           correlationDeadline,folderAuthority,()=>trustGuard.sealInitialActions());
         if(folderTrust.status==='completed'&&folderTrust.clickAttempted&&folderTrust.clickCompleted)

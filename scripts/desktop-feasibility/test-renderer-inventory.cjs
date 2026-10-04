@@ -207,6 +207,36 @@ assert.equal(roleSourceScope({foreignFieldset:true}).mainScope,false);
       assert.equal(await guard(),true);
     }
   }
+  // Cold activation gets one scoped passive restart, never a new target/input.
+  for(const unsafe of ['safe','route','focused','editable','owner','deadline','role','three','missing','sealed','closed']) {
+    f=fixture();f.setPages([f.main]);let appeared=false,owned=true;
+    const cold=helper.heldMainGuard(f.held,f.browser,()=>owned,1000,
+      value=>unsafe==='route'?'unknown':'avatarOverlay',f.identity,async()=>{},false,false,false);
+    assert.equal(cold.allowPassiveActivationSettle(),false); // No completed source proof.
+    assert.equal(await cold(),true);
+    if(unsafe==='sealed')cold.sealInitialActions();
+    assert.equal(cold.allowPassiveActivationSettle(),unsafe!=='sealed');
+    assert.equal(cold.allowPassiveActivationSettle(),false); // Never issue twice.
+    if(unsafe==='closed')cold.finishPassiveActivationSettle();
+    f.setAlter(r=>{
+      if(!appeared) {
+        appeared=true;
+        f.setPages(unsafe==='three'?[f.main,f.aux,{}]:unsafe==='missing'?[f.aux,{}]:[f.main,f.aux]);
+      }
+      if(r.page===f.main&&unsafe==='role')r.scope.mainScope=false;
+      if(r.page===f.aux&&unsafe==='focused')r.scope.focused=true;
+      if(r.page===f.aux&&unsafe==='editable')r.scope.counts.editable=1;
+      if(unsafe==='owner')owned=false;
+      if(unsafe==='deadline')clock=1001;
+    });
+    assert.equal(await cold(),unsafe==='safe');
+    if(unsafe==='safe') {
+      assert(cold.binding().auxiliary);
+      cold.finishPassiveActivationSettle();
+      f.setPages([f.main,{url:()=>f.aux.url()}]);
+      assert.equal(await cold(),false);assert.equal(cold.failure(),'auxiliary-identity');
+    } else assert.equal(cold.binding().auxiliary,null);
+  }
   // A completed Trust grants only passive settlement of one retained blank auxiliary.
   for(const failure of ['none','replacement','foreign-route','main-focus','main-identity','controls','deadline','no-ticket']) {
     f=fixture();f.setPages([f.main]);let url='about:blank';f.aux.url=()=>url;
@@ -246,6 +276,8 @@ assert.equal(roleSourceScope({foreignFieldset:true}).mainScope,false);
     f.main.bringToFront=async()=>{throw Error('CDP activation must not be appended');};
     f.setAlter(r=>{r.scope.focused=focused;});
     const proof=async()=>true;proof.requireDocumentFocus=()=>{};
+    proof.allowPassiveActivationSettle=()=>{calls.push('grant');};
+    proof.finishPassiveActivationSettle=()=>{calls.push('close');};
     const native={prepare(){calls.push('prepare');if(scenario==='association-rejected')throw Error('PRIVATE');
       if(scenario==='expired-prepare')clock=1000;
       if(scenario==='source-replaced')f.setAlter(r=>{r.loader='replacement';});},
@@ -256,8 +288,29 @@ assert.equal(roleSourceScope({foreignFieldset:true}).mainScope,false);
       async ms=>{clock+=ms;},facts,native),scenario==='ready');
     assert.equal(calls.filter(c=>c==='activate').length,
       ['association-rejected','source-replaced','expired-prepare'].includes(scenario)?0:1);
-    if(scenario==='ready')assert.deepEqual(calls,['prepare','activate','verify','verify']);
+    if(scenario==='ready')assert.deepEqual(calls,['prepare','grant','activate','verify','verify','close']);
+    assert.equal(calls.at(-1),'close');
+    assert.equal(calls.filter(c=>c==='grant').length,scenario==='association-rejected'?0:1);
     assert.equal(facts.activationAttempted,!['association-rejected','source-replaced','expired-prepare'].includes(scenario));
+  }
+  // Real retained guard: cold avatar appears during polling after ONE activation.
+  for(const unsafe of ['safe','controls','owner','replaced']) {
+    f=fixture();f.setPages([f.main]);let focused=false,armed=false,appeared=false,owned=true,activations=0;
+    f.setAlter(r=>{
+      if(r.page===f.main)r.scope.focused=focused;
+      if(armed&&!appeared){appeared=true;f.setPages([f.main,f.aux]);}
+      if(r.page===f.aux&&unsafe==='controls')r.scope.counts.editable=1;
+      if(appeared&&unsafe==='owner')owned=false;
+      if(appeared&&unsafe==='replaced')r.loader='replacement';
+    });
+    const proof=helper.heldMainGuard(f.held,f.browser,()=>owned,1000,()=> 'avatarOverlay',
+      f.identity,async ms=>{clock+=ms;},false,false,false);
+    const native={prepare(){},activate(){activations++;focused=true;armed=true;},verify(){return true;}};
+    assert.equal(await helper.focusCapturedMain(f.held,proof,1000,f.identity,undefined,
+      async ms=>{clock+=ms;},{},native),unsafe==='safe');
+    assert.equal(activations,1);
+    assert.equal(proof.allowPassiveActivationSettle(),false); // Finally permanently closed issuance.
+    if(unsafe==='safe')assert(proof.binding().auxiliary);
   }
   // Activation diagnostics use the original proof/read/action sequence only.
   for(const scenario of ['focused','deadline','pre-reject','activation-error','focus-lost']) {

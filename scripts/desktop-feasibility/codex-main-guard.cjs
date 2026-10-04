@@ -5,6 +5,7 @@ function createHeldMainGuard(held, browser, owner, deadline, route,
   identity,pause,requireMainScope,allowInitialAppearance,requireDocumentFocus,
   {sameCorrelationIdentity,settleFolderAuxiliary,now}) {
   let actionsStarted=false,appearanceRetried=false,folderSettleTicket=false,folderSettleGranted=false;
+  let activationSettleTicket=false,activationSettleGranted=false,mainScopeProved=false;
   let auxiliary=null, auxiliaryIdentity=null, failure='unmeasured', failureDetails=null;
   const reject=reason=>{failure=reason;return false;};
   const rejectPageSet=(reason,initial,current)=>{
@@ -21,7 +22,7 @@ function createHeldMainGuard(held, browser, owner, deadline, route,
     return now()<deadline||reject('deadline');
   };
   const measure=async function measure() {
-    failure='unmeasured';failureDetails=null;
+    failure='unmeasured';failureDetails=null;mainScopeProved=false;
     try {
       if(!held)return reject('main-identity');
       if(!timely())return false;
@@ -41,7 +42,7 @@ function createHeldMainGuard(held, browser, owner, deadline, route,
         if(!timely())return false;
         if(!sameCorrelationIdentity(held,main))return reject('main-identity');
         if(requireDocumentFocus&&!main.scope.focused)return reject('main-focus');
-        if((requireMainScope||allowInitialAppearance&&!actionsStarted)&&!main.scope.mainScope)return reject('main-scope');
+        if((requireMainScope||(allowInitialAppearance&&!actionsStarted)||activationSettleTicket)&&!main.scope.mainScope)return reject('main-scope');
         if(extra) {
           const aux=await identity(extra,deadline);
           const expected=auxiliaryIdentity??candidateAux;
@@ -56,6 +57,7 @@ function createHeldMainGuard(held, browser, owner, deadline, route,
         const after=pages();
         if(!valid())return false;
         if(after.length!==initial.length||!after.every(page=>initial.includes(page)))return rejectPageSet('after-sample-changed',initial,after);
+        mainScopeProved=main.scope.mainScope===true;
         if(sample+1<samples)await pause(Math.min(100,Math.max(0,deadline-now())));
       }
       if(extra&&!auxiliary){auxiliary=extra;auxiliaryIdentity=candidateAux;}
@@ -74,7 +76,7 @@ function createHeldMainGuard(held, browser, owner, deadline, route,
       return measure();
     }
     const changed=failureDetails;
-    if(!(allowInitialAppearance&&!actionsStarted||folderSettleTicket)||appearanceRetried||auxiliary||failure!=='page-set'
+    if(!(allowInitialAppearance&&!actionsStarted||folderSettleTicket||activationSettleTicket)||appearanceRetried||auxiliary||failure!=='page-set'
       ||!changed||changed.initialCount!==1||changed.currentCount!==2||!changed.heldPresent
       ||!['before-sample-changed','after-sample-changed'].includes(changed.reason))return false;
     // Discard the incomplete observation. A single fresh measurement must prove
@@ -82,6 +84,13 @@ function createHeldMainGuard(held, browser, owner, deadline, route,
     appearanceRetried=true;folderSettleTicket=false;
     return measure();
   };
+  // Issue only after native prepare in the initial focus caller. The latest
+  // complete native-bracketed main sample must already prove the role source.
+  prove.allowPassiveActivationSettle=()=>{
+    if(!timely()||actionsStarted||activationSettleGranted||auxiliary||appearanceRetried||!mainScopeProved)return false;
+    activationSettleGranted=true;activationSettleTicket=true;return true;
+  };
+  prove.finishPassiveActivationSettle=()=>{activationSettleTicket=false;};
   // Caller grants this only after the one folder trust action completed. It
   // authorizes one passive 1-to-2 measurement restart, never another input.
   prove.allowPassiveFolderSettle=()=>{
@@ -90,7 +99,7 @@ function createHeldMainGuard(held, browser, owner, deadline, route,
   };
   prove.finishPassiveFolderSettle=()=>{folderSettleTicket=false;};
   prove.requireDocumentFocus=()=>{requireDocumentFocus=true;};
-  prove.sealInitialActions=()=>{actionsStarted=true;};
+  prove.sealInitialActions=()=>{actionsStarted=true;activationSettleTicket=false;};
   prove.failure=()=>failure;
   prove.failureDetails=()=>failure==='page-set'?failureDetails:null;
   const privateIdentity=value=>value&&Object.fromEntries(['url','target','frame','loader','frameUrl','fragment'].map(key=>[key,value[key]]));
