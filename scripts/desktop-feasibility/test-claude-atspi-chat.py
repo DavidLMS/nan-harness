@@ -1435,6 +1435,23 @@ class RetryActionTests(unittest.TestCase):
         self.assertEqual(adapter.send_count,0)
 
 class NativeTreeDiagnosticTests(unittest.TestCase):
+    def test_transport_exception_at_cutoff_is_deadline_without_retry(self):
+        for method in ('owner', 'children', 'identity'):
+            a,c,b=ResponseFrameRestoreTests.restored(self)
+            calls=[]
+            def expired(node):
+                calls.append(node)
+                a.now=c.deadline
+                raise ValueError('PRIVATE transport timeout')
+            setattr(a,method,expired)
+            with self.assertRaises(TimeoutError):
+                c.query(method,('r','frame'))
+            self.assertEqual(len(calls),1)
+            if method in ('owner','children'):
+                self.assertEqual(c.facts['nativeTreeObservation']['reason'],'deadline')
+            self.assertNotIn('PRIVATE',str(c.facts))
+            self.assertEqual((a.paste_count,a.send_count),(0,0))
+
     def test_exact_failure_cause_never_retries_or_exports_data(self):
         for kind in ('unavailable','deadline','non-list','limit','duplicate','wrong-owner','null'):
             a,c,b=ResponseFrameRestoreTests.restored(self)

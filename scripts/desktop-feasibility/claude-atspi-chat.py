@@ -418,12 +418,18 @@ class Controller:
         try:
             result = getattr(self.adapter, method)(*args)
         except Exception as error:
+            # D-Bus reports an expired blocking call as its own exception type.
+            # The original clock, not the transport's exception class, decides
+            # whether this operation exhausted the shared work budget.
+            expired = isinstance(error, TimeoutError) or self.clock() >= self.deadline
             if method in ('owner','children'):
                 node=args[0] if args else None
                 null=(type(node) is tuple and len(node)==2
                     and (not node[0] or node[1]=='/org/a11y/atspi/null'))
                 self.tree_diagnostic(method,'null-reference' if null else
-                    'deadline' if isinstance(error,TimeoutError) else 'query-unavailable',node)
+                    'deadline' if expired else 'query-unavailable',node)
+            if expired:
+                raise TimeoutError() from None
             raise
 
         if custody is not None and not custody():

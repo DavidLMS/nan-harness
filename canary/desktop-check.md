@@ -36,7 +36,7 @@ exact pointer hit; cursor artwork is advisory. Claude Linux's candidate performs
 matching the failed turn; its empty-input witness still rejects unexplained drift.
 None of these candidate changes establishes a new native pass by itself.
 
-The latest joint campaign, [37224645407](https://github.com/DavidLMS/nan-harness/actions/runs/37224645407),
+The latest completed joint campaign, [37224645407](https://github.com/DavidLMS/nan-harness/actions/runs/37224645407),
 ran commit `0cb28aa69f9ca8feff7e1284490d5fe11efc8349`. All six jobs completed;
 none completed acceptance. All six compile on their native runners; the Linux
 preinstall lint blocker is resolved. Application/global cleanup pass in every
@@ -78,6 +78,28 @@ node and no ownership result survives a traversal. The neutral 101-node fixture
 reduces owner queries from 101 to two and rejects foreign or lost owners.
 This follows the [D-Bus unique-name contract](https://dbus.freedesktop.org/doc/dbus-specification.html#message-bus-names)
 and still requires hosted execution evidence.
+
+The subsequent campaign [37226254344](https://github.com/DavidLMS/nan-harness/actions/runs/37226254344)
+tests `2392f0c2c950bb036db9430a6f23cba9496e9bc3`, without that ownership-query
+optimization. Four completed cells provide these additional findings; the two
+remaining Codex results are not yet incorporated here:
+
+- Zed Linux's Retry count immediately after activation is 1, 0, 0 across the
+  three probes, while provider generation counts remain five. Final exports
+  contain no Resume or agent entries. Disappearance supports a UI transition,
+  not proof that the native retry callback completed. Response/tool and cleanup
+  pass; recovery remains unqualified.
+- Codex Windows retains an attached, owned endpoint and captured main document
+  in all three probes. Each observer stops in `source-dialog`, before the final
+  source-dialog receipt. Both cleanup checks pass.
+- Claude Linux again verifies the first response in all three probes; next-turn
+  queries fail at children/owner/children. Generic transport exceptions still
+  obscure whether the shared cutoff expired. The next candidate classifies an
+  exception at that cutoff as a deadline without retrying the operation.
+- Claude Windows passes prompt readback and submission and the provider verifies
+  the expected first response. Native response copying fails at `tree-depth`.
+  Cleanup rejects `target-image-path` after its snapshot; six verified
+  descendants remain. Later probes are correctly withheld after cleanup fails.
 
 
 The hidden launch-wrapper option is restricted to deterministic ChatGPT startup
