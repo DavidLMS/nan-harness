@@ -523,6 +523,192 @@ pub(super) fn reject_symlink(path: &Path) -> Result<(), ClaudeDesktopError> {
 mod configuration_persist_tests {
     use super::*;
     use std::os::windows::fs::OpenOptionsExt as _;
+    // This child executes only configuration/session bookkeeping with placeholders.
+    // No DesktopProcess, bridge listener, vendor executable or native query is used.
+    #[cfg(feature = "desktop-qualification")]
+    #[test]
+    fn configuration_lifecycle_child_worker() {
+        if std::env::var("NANH_CONFIGURATION_LIFECYCLE_WORKER").as_deref() != Ok("1") {
+            return;
+        }
+        let result = (|| {
+            let workspace = std::env::current_dir().map_err(ClaudeDesktopError::ReadConfig)?;
+            let profile = workspace.join("profile");
+            let paths = DesktopPaths::new(
+                &profile.join("home/AppData/Roaming/Claude"),
+                &profile.join("home/AppData/Local/Claude-3p"),
+                &profile.join("nanh"),
+            );
+            if !qualification_prelaunch::enabled()
+                || super::super::qualification_config::observation_directory(&paths).is_none()
+            {
+                return Err(ClaudeDesktopError::InvalidStatePath);
+            }
+            let _lock = SessionLock::acquire(&paths.lock)?;
+            ensure_no_pending_recovery(&paths)?;
+            let receipt = Receipt::capture(&paths)?;
+            receipt.write(&paths.receipt)?;
+            super::super::configuration::apply_gateway(
+                &paths,
+                "http://127.0.0.1:9",
+                "synthetic-token",
+            )?;
+            let normal = super::super::configuration::read_json_object(paths.documents()[0])?;
+            let managed = super::super::configuration::read_json_object(paths.documents()[3])?;
+            if normal.get("deploymentMode").and_then(Value::as_str) != Some("3p")
+                || managed.get("coworkTabEnabled").and_then(Value::as_bool) != Some(false)
+            {
+                return Err(ClaudeDesktopError::InvalidStatePath);
+            }
+            for document in paths.documents() {
+                nan_harness_private_fs::open_private_read(document)
+                    .map_err(ClaudeDesktopError::ReadConfig)?;
+            }
+            restore_receipt(&paths)?;
+            if paths.documents().into_iter().any(Path::exists) {
+                return Err(ClaudeDesktopError::InvalidStatePath);
+            }
+            Ok(())
+        })();
+        // All child output is suppressed; only fixed exit categories cross process.
+        std::process::exit(match result {
+            Ok(()) => 0,
+            Err(ClaudeDesktopError::Write(error)) if error.raw_os_error() == Some(32) => 32,
+            Err(_) => 33,
+        });
+    }
+
+    #[cfg(feature = "desktop-qualification")]
+    fn lifecycle_child(workspace: &Path) -> Option<i32> {
+        use std::process::{Command, Stdio};
+        use std::time::{Duration, Instant};
+        let home = workspace.join("profile/home");
+        let mut command = Command::new(std::env::current_exe().ok()?);
+        command.args(["--exact", "commands::claude_desktop::session::configuration_persist_tests::configuration_lifecycle_child_worker"])
+            .current_dir(workspace)
+            .env("NANH_CONFIGURATION_LIFECYCLE_WORKER", "1")
+            .env("GITHUB_ACTIONS", "true")
+            .env("RUNNER_ENVIRONMENT", "github-hosted")
+            .env("RUNNER_OS", "Windows")
+            .env("NANH_DESKTOP_QUALIFICATION_MODE", "startup-baseline")
+            .env("NANH_CLAUDE_WINDOWS_PROFILE_POLICY", "private-env")
+            .env("NANH_CLAUDE_WINDOWS_CHAT_ONLY", "1")
+            .env("NANH_CLAUDE_PRELAUNCH_DIAGNOSTICS", "1")
+            .env("NANH_DESKTOP_QUALIFICATION_FACTS", workspace.join("facts"))
+            .env("HOME", &home).env("USERPROFILE", &home)
+            .env("LOCALAPPDATA", home.join("AppData/Local"))
+            .env("APPDATA", home.join("AppData/Roaming"))
+            .env("NAN_HARNESS_CONFIG_DIR", workspace.join("profile/nanh"))
+            .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+        for key in [
+            "CLAUDE_USER_DATA_DIR",
+            "CLAUDE_CDP_AUTH",
+            "NANH_CLAUDE_MAC_CHAT_NAVIGATION",
+            "NANH_CLAUDE_LINUX_CHAT_ONLY",
+            "NANH_CLAUDE_MCP_FIXTURE",
+            "NANH_CLAUDE_LINUX_MCP_FIXTURE",
+            "NANH_CLAUDE_PERSIST_OWNERS",
+        ] {
+            command.env_remove(key);
+        }
+        let mut child = command.spawn().ok()?;
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    return (Instant::now() < deadline).then(|| status.code()).flatten();
+                }
+                Ok(None) => (),
+                Err(_) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return None;
+                }
+            }
+            if Instant::now() >= deadline {
+                child.kill().ok()?;
+                child.wait().ok()?;
+                return None;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    #[cfg(feature = "desktop-qualification")]
+    fn lifecycle_roots(workspace: &Path) -> Vec<File> {
+        let home = workspace.join("profile/home");
+        let local = home.join("AppData/Local");
+        let roaming = home.join("AppData/Roaming");
+        for directory in [
+            &local,
+            &roaming,
+            &workspace.join("facts"),
+            &workspace.join("profile/nanh"),
+        ] {
+            nan_harness_private_fs::create_private_dir_all(directory).unwrap();
+        }
+        let lease = |directory: &Path| {
+            std::fs::OpenOptions::new()
+                .read(true)
+                .share_mode(1)
+                .custom_flags(0x0200_0000 | 0x0020_0000)
+                .open(directory)
+                .unwrap()
+        };
+        // Match token preparation: hold every Local ancestor and Roaming BEFORE
+        // exclusive creation of either source-defined app root.
+        let mut held: Vec<_> = local.ancestors().map(lease).collect();
+        held.push(lease(&roaming));
+        for root in [roaming.join("Claude"), local.join("Claude-3p")] {
+            nan_harness_private_fs::create_private_dir(&root).unwrap();
+            held.push(lease(&root));
+        }
+        held
+    }
+
+    #[cfg(feature = "desktop-qualification")]
+    #[test]
+    fn configuration_lifecycle_under_real_precreation_leases_preserves_atomicity() {
+        let base = std::env::var_os("RUNNER_TEMP")
+            .map(PathBuf::from)
+            .unwrap_or_else(std::env::temp_dir);
+        let temporary = tempfile::tempdir_in(base).unwrap();
+        let workspace = temporary.path().canonicalize().unwrap();
+        nan_harness_private_fs::restrict_path(
+            &workspace,
+            nan_harness_private_fs::PrivatePathKind::Directory,
+        )
+        .unwrap();
+        let directories = lifecycle_roots(&workspace);
+        assert_eq!(
+            lifecycle_child(&workspace),
+            Some(0),
+            "closed lifecycle failed"
+        );
+        let destination =
+            workspace.join("profile/home/AppData/Roaming/Claude/claude_desktop_config.json");
+        let mut file = nan_harness_private_fs::open_private_new(&destination).unwrap();
+        file.write_all(b"{}").unwrap();
+        drop(file);
+        let held = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(1)
+            .open(&destination)
+            .unwrap();
+        assert_eq!(
+            lifecycle_child(&workspace),
+            Some(32),
+            "sharing failure not preserved"
+        );
+        assert_eq!(fs::read(&destination).unwrap(), b"{}");
+        drop(held);
+        assert_eq!(
+            fs::read_dir(destination.parent().unwrap()).unwrap().count(),
+            1
+        );
+        drop(directories);
+    }
+
     #[test]
     fn closed_persist_preserves_private_file_and_cleans_failed_original_path() {
         let temp = tempfile::tempdir().unwrap();
