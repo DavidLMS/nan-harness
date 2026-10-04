@@ -3061,3 +3061,36 @@ allowance that can outlive its parent. Passive role-binding samples save the
 existing scope/focus/count observations before another ownership check. The
 clock mismatch is established in source; its contribution to the campaign's
 onboarding failures still requires native evidence.
+
+The Windows Zed recovery receipt has a second-query ambiguity: readiness can
+find one named Retry, while dispatch later finds zero and leaves the readiness
+substage unchanged. Dispatch now performs the existing `retry-revalidate`
+custody guard before this query. A zero count at that stage means loss between
+readiness and dispatch, not failure of initial discovery. This diagnostic
+correction does not establish a successful Retry action.
+
+### Claude Windows managed read fixture candidate
+
+Static inspection of the official 2.19675.0 MSIX, whose SHA-256 exactly matches
+campaign 37232180513, establishes a supported alternative to its failing built-in
+Read tool. Desktop's `managedMcpServers` array accepts an HTTP entry with
+`name: "nanh-read-fixture"`, `transport: "http"`, a loopback `url`, and
+`toolPolicy: {"read_file": "allow"}`. With OAuth and helper fields omitted,
+successful anonymous MCP initialization does not require an account. This is
+source evidence, not a native qualification result. Do not forge
+`trustedDelivery` or bypass a consent boundary.
+
+Implement the bounded HTTP fixture in the checker lifecycle: start it after
+creating the real read target and before launching Claude, pass its endpoint
+only to the owned launcher, and stop it on every scenario exit. Retain private
+Windows directory and file handles, reject reparse points, prevent write/delete
+sharing on the file, and read its actual bytes on each accepted tool call. The
+fixture must never receive the expected response nonce or mark any acceptance
+oracle as satisfied. The existing provider and UI result checks remain mandatory.
+
+The [MCP Streamable HTTP contract](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports)
+permits JSON POST responses, empty 202 notification responses and 405 for an
+unused GET stream. Bound request size, count and lifetime; validate Origin and
+loopback authority; support the vendor's preliminary anonymous initialization
+as well as its subsequent actual connection. Test the protocol and file custody
+before enabling this candidate in the next grouped native campaign.
