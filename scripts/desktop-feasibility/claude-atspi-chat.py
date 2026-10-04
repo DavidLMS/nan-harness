@@ -697,7 +697,10 @@ class Controller:
             self.owned(parent)
             identity = self.query('identity',parent)
             if identity[0] not in (39,97):
-                raise Rejected('response-row')
+                # Wrappers do not grant row authority. Continue only along the
+                # owned, bounded chain to a panel/section with the exact heading.
+                parent = self.query('parent',parent)
+                continue
             pending, subtree = [parent], []
             visited = set()
             while pending:
@@ -712,7 +715,17 @@ class Controller:
             scopes = [node for node,item in subtree if item[0] == 83]
             copies = [node for node,item in subtree if item[0] == 43 and item[1] == 'Copy']
             if scopes == [heading] and len(copies) == 1:
-                return parent,heading,copies[0]
+                # A child enumeration alone may be stale during rendering.
+                # The retained Copy node must still attach to this exact row.
+                copy, ancestors = copies[0], set()
+                for _ in range(6):
+                    if copy in ancestors or copy == self.frame:
+                        raise Rejected('response-row')
+                    ancestors.add(copy);self.owned(copy)
+                    if copy == parent:
+                        return parent,heading,copies[0]
+                    copy = self.query('parent',copy)
+                raise Rejected('response-row')
             parent = self.query('parent',parent)
         raise Rejected('response-row')
 

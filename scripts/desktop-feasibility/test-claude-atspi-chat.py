@@ -333,6 +333,7 @@ class ResponseAdapter(Adapter):
     def __init__(self,**options):
         super().__init__(**options);self.clipboard='old';self.copy_actions=0
     def identity(self,node):
+        if node=='wrapper':return (80,'PRIVATE wrapper','')
         if node=='row':return (39,'','')
         if node=='heading':return (83,'Claude responded: private-marker','')
         if node in ('copy','copy2'):return (43,'Copy','')
@@ -340,9 +341,12 @@ class ResponseAdapter(Adapter):
         return super().identity(node)
     def children(self,node):
         if node=='frame':return ['editor','mode','send','row']+(['title'] if self.changes.get('title') else [])
-        if node=='row':return ['heading','copy']+(['copy2'] if self.changes.get('duplicate_copy') else [])
+        if node=='wrapper':return ['heading']
+        if node=='row':return ['wrapper' if self.changes.get('wrapper') else 'heading','copy']+(['copy2'] if self.changes.get('duplicate_copy') else [])
         return super().children(node)
     def parent(self,node):
+        if node=='wrapper':return 'wrapper' if self.changes.get('wrapper_cycle') else 'frame' if self.changes.get('wrapper_global') else 'row'
+        if node=='heading' and self.changes.get('wrapper'):return 'wrapper'
         if node in ('heading','copy','copy2'):return 'frame' if self.changes.get('global_copy') else 'row'
         if node in ('row','title'):return 'frame'
         return super().parent(node)
@@ -387,6 +391,14 @@ class ResponseTests(unittest.TestCase):
         c.bind();return adapter,c,c.copy_response('private-marker')
     def test_exact_assistant_scope_copy(self):
         a,c,f=self.case(title=True);self.assertTrue(f['responseVerified']);self.assertEqual(a.copy_actions,1)
+    def test_owned_wrapper_is_traversed_without_becoming_row_authority(self):
+        adapter,controller,facts=self.case(wrapper=True)
+        self.assertTrue(facts['responseVerified']);self.assertEqual(adapter.copy_actions,1)
+        self.assertNotIn('PRIVATE',str(facts))
+        for options in [dict(wrapper=True,wrapper_cycle=True),dict(wrapper=True,wrapper_global=True),
+                dict(wrapper=True,duplicate_copy=True),dict(wrapper=True,global_copy=True)]:
+            adapter,controller,facts=self.case(**options)
+            self.assertFalse(facts['responseVerified']);self.assertEqual(adapter.copy_actions,0)
     def test_global_or_duplicate_or_mismatch_reject(self):
         for options in [dict(global_copy=True),dict(duplicate_copy=True),dict(wrong_copy=True)]:
             with self.subTest(options=options):
