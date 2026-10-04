@@ -49,7 +49,7 @@ static bool request(Request& value) {
     if (!(input >> value.mode >> value.window >> value.pid >> x >> y >> width >> height >> value.millis >> value.cutoff >> value.owner >> prompt >> marker >> sentinel) || input >> trailing) return false;
     if (!value.cutoff || value.owner < 2 || !value.window || value.pid < 2 || !value.millis || value.millis > 15000 || !std::isfinite(x) || !std::isfinite(y)
         || !std::isfinite(width) || !std::isfinite(height) || width < 300 || height < 200) return false;
-    if (!input_mode(value.mode) && value.mode != "copy" && value.mode != "retry-ready" && value.mode != "retry" && value.mode != "failure-details") return false;
+    if (!input_mode(value.mode) && value.mode != "copy" && value.mode != "retry-ready" && value.mode != "retry" && value.mode != "failure-details" && value.mode != "failure-details-ready") return false;
     if (!decode(prompt, value.prompt) || !decode(marker, value.marker) || !decode(sentinel, value.sentinel) || value.sentinel.empty()) return false;
     value.bounds = CGRectMake(x, y, width, height);
     value.deadline = Clock::now() + std::chrono::milliseconds(value.millis);
@@ -636,6 +636,13 @@ static int failure_details_control(const Tree& tree, const Request& request, con
     return reject(heading_ambiguous ? "scope-heading-ambiguous" : control_ambiguous ? "scope-control-ambiguous"
         : prompt_mismatch ? "scope-prompt-mismatch" : "scope-control-absent");
 }
+static const char* failure_details_ready(const Request& request, const Tree& tree) {
+    const char* failure = "scope";
+    int index = failure_details_control(tree, request, &failure);
+    if (index < 0) return failure;
+    return chat(tree) && target(tree.nodes[index], request) && owned(request)
+        ? "failure-details-ready" : "control";
+}
 static const char* open_failure_details(const Request& request, const Tree& tree) {
     const char* failure = "scope";
     int index = failure_details_control(tree, request, &failure);
@@ -652,6 +659,7 @@ static const char* open_failure_details(const Request& request, const Tree& tree
     return owned(request) ? "failure-details-opened" : "action-uncertain";
 }
 static const char* action(const Request& request, const Tree& tree) {
+    if (request.mode == "failure-details-ready") return failure_details_ready(request, tree);
     if (request.mode == "failure-details") return open_failure_details(request, tree);
     bool retry = request.mode != "copy";
     const char* failure = "scope";
@@ -684,7 +692,7 @@ int claude_chat_turn() {
                     value.deadline_phase = input_mode(value.mode) ? "deadline-input"
                         : value.mode == "copy" ? "deadline-copy"
                         : value.mode == "retry-ready" ? "deadline-retry-ready" : "deadline-retry";
-                    if (value.mode == "failure-details")
+                    if (value.mode == "failure-details" || value.mode == "failure-details-ready")
                         row_shape_observed = observe_row_shape(tree, value, row_shape, [&] { return within(value); });
                     stage = input_mode(value.mode) ? input(value, tree) : action(value, tree);
                 }

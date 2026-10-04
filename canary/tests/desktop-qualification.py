@@ -2093,7 +2093,7 @@ class QualificationTests(unittest.TestCase):
         stages = ['input-focus-guard', 'input-focus-setting', 'input-focused-identity', 'input-replace-select-key', 'input-prompt-before-guard', 'input-prompt-clipboard', 'input-prompt-after-guard', 'input-paste-key', 'input-readback-before-guard', 'input-sentinel-clipboard', 'input-sentinel-after-guard', 'input-readback-select-key', 'input-readback-select-guard', 'input-readback-copy-key', 'input-collapse-guard', 'input-collapse-key']
         with tempfile.TemporaryDirectory() as root:
             path = Path(root) / 'facts.json'
-            for stage in stages + ['focus', 'failure-details-opened']:
+            for stage in stages + ['focus', 'failure-details-ready', 'failure-details-opened']:
                 path.write_text(json.dumps({**facts, 'stage': stage}))
                 value = q.semantic_observations(root, 'claude-desktop')[0]
                 self.assertEqual(value['stage'], stage)

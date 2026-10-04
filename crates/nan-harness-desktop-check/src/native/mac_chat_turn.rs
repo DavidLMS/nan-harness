@@ -94,12 +94,22 @@ pub(crate) enum ChatTurnStage {
     Sent,
     Copied,
     RetryReady,
+    FailureDetailsReady,
     FailureDetailsOpened,
     Retried,
     #[cfg(target_os = "macos")]
     Completed,
 }
 impl ChatTurnStage {
+    pub(crate) fn disclosure_ready(self) -> Option<bool> {
+        if self == Self::FailureDetailsReady {
+            Some(true)
+        } else if self.passive_pending() {
+            Some(false)
+        } else {
+            None
+        }
+    }
     pub(crate) fn passive_pending(self) -> bool {
         matches!(
             self,
@@ -181,6 +191,7 @@ impl ChatTurnStage {
             "turn sent\n" => Some(Self::Sent),
             "turn copied\n" => Some(Self::Copied),
             "turn retry-ready\n" => Some(Self::RetryReady),
+            "turn failure-details-ready\n" => Some(Self::FailureDetailsReady),
             "turn failure-details-opened\n" => Some(Self::FailureDetailsOpened),
             "turn retried\n" => Some(Self::Retried),
             _ => None,
@@ -231,7 +242,7 @@ impl ChatTurnReceipt {
                 row_shape: None,
             });
         }
-        if mode != "failure-details" {
+        if !matches!(mode, "failure-details" | "failure-details-ready") {
             return None;
         }
         let row_line = remainder.strip_suffix('\n')?.strip_prefix("rows ")?;
@@ -317,7 +328,13 @@ pub(super) fn request(
 ) -> Option<Zeroizing<String>> {
     if !matches!(
         mode,
-        "input" | "input-replace-owned" | "copy" | "retry-ready" | "retry" | "failure-details"
+        "input"
+            | "input-replace-owned"
+            | "copy"
+            | "retry-ready"
+            | "retry"
+            | "failure-details"
+            | "failure-details-ready"
     ) || values
         .iter()
         .any(|value| value.len() > 1024 || value.contains('\0'))
@@ -349,6 +366,7 @@ mod tests {
     fn failure_rows_are_closed_advisory_and_only_accepted_for_disclosure() {
         let observed = "turn scope-heading-ambiguous\nrows 2 0 1 1 1 1 1 1 1 1 1 1 0\n";
         let receipt = ChatTurnReceipt::parse(observed, "failure-details").unwrap();
+        assert!(ChatTurnReceipt::parse(observed, "failure-details-ready").is_some());
         assert_eq!(receipt.stage, ChatTurnStage::ScopeHeadingAmbiguous);
         let shape = receipt.row_shape.unwrap();
         assert_eq!(shape.counts.adjacent_pairs, 1);
@@ -710,5 +728,25 @@ mod tests {
     fn private_text_is_hex_framed_without_newlines_or_command_arguments() {
         assert_eq!(hex("fresh\nprompt").as_str(), "66726573680a70726f6d7074");
         assert_eq!(hex("").as_str(), "-");
+    }
+}
+
+#[cfg(test)]
+mod disclosure_readiness_tests {
+    use super::ChatTurnStage as S;
+    #[test]
+    fn pending_does_not_consume_disclosure_and_uncertainty_is_terminal() {
+        let mut attempts = 0;
+        for stage in [S::ScopeAnchorAbsent, S::TreeQuery, S::FailureDetailsReady] {
+            match stage.disclosure_ready() {
+                Some(true) => attempts += 1,
+                Some(false) => {}
+                None => panic!("unexpected terminal stage"),
+            }
+        }
+        assert_eq!(attempts, 1);
+        for stage in [S::ActionUncertain, S::TreePid, S::TreeWindow, S::Deadline] {
+            assert_eq!(stage.disclosure_ready(), None);
+        }
     }
 }

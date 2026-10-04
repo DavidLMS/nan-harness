@@ -263,12 +263,14 @@ impl ClaudeNativeChatSession<'_> {
         let deadline = Instant::now() + timeout;
         loop {
             self.observe_provider(gate);
-            match self.action(
+            let observed = self.action(
                 "retry-ready",
                 "NAN_CHECK_EXPECTED_FAILURE",
                 deadline
                     .min(Instant::now() + Duration::from_millis(u64::from(CHAT_TURN_MAX_MILLIS))),
-            )? {
+            );
+            self.observe_provider(gate);
+            match observed? {
                 ChatTurnStage::RetryReady => {
                     self.retry_ready = true;
                     return Ok(());
@@ -276,18 +278,34 @@ impl ClaudeNativeChatSession<'_> {
                 ChatTurnStage::ScopeAnchorAbsent
                     if gate.failure_observed() && !self.failure_details_attempted =>
                 {
-                    // Consume the disclosure before dispatch. An uncertain action
-                    // cannot be replayed, and Retry still requires the raw marker.
-                    self.failure_details_attempted = true;
-                    if self.action(
-                        "failure-details",
+                    let ready = self.action(
+                        "failure-details-ready",
                         "NAN_CHECK_EXPECTED_FAILURE",
                         deadline.min(
                             Instant::now() + Duration::from_millis(u64::from(CHAT_TURN_MAX_MILLIS)),
                         ),
-                    )? != ChatTurnStage::FailureDetailsOpened
-                    {
-                        return Err(Reason::ActionUnsupported);
+                    );
+                    self.observe_provider(gate);
+                    match ready?.disclosure_ready() {
+                        Some(true) => {
+                            // Consume only after passive proof. Dispatch uncertainty
+                            // cannot be replayed; Retry still requires the raw marker.
+                            self.failure_details_attempted = true;
+                            let opened = self.action(
+                                "failure-details",
+                                "NAN_CHECK_EXPECTED_FAILURE",
+                                deadline.min(
+                                    Instant::now()
+                                        + Duration::from_millis(u64::from(CHAT_TURN_MAX_MILLIS)),
+                                ),
+                            );
+                            self.observe_provider(gate);
+                            if opened? != ChatTurnStage::FailureDetailsOpened {
+                                return Err(Reason::ActionUnsupported);
+                            }
+                        }
+                        Some(false) => {}
+                        None => return Err(Reason::ActionUnsupported),
                     }
                 }
                 stage if stage.passive_pending() => {}
