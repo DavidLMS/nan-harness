@@ -14,7 +14,9 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "mac_owned_window.hpp"
 bool claude_owned_mac_window(std::uint64_t, pid_t, CGRect);
+MacOwnedWindowState claude_mac_window_state(std::uint64_t, pid_t, CGRect);
 namespace {
 using Clock = std::chrono::steady_clock;
 struct Request {
@@ -327,7 +329,9 @@ static ComposerFocus composer_focus_identity(const FocusIdentity& focused, const
     return ComposerFocus::PendingIdentity;
 }
 static ComposerFocus focused_composer(const Request& request, const Node& control) {
-    if (!owned(request) || ax_query_failed) return ComposerFocus::Rejected;
+    if (!within(request) || ax_query_failed) return ComposerFocus::Rejected;
+    const auto before_window = claude_mac_window_state(request.window, request.pid, request.bounds);
+    if (!within(request) || before_window == MacOwnedWindowState::Rejected) return ComposerFocus::Rejected;
     AXUIElementRef app = AXUIElementCreateApplication(request.pid);
     if (!app) return ComposerFocus::Rejected;
     if (AXUIElementSetMessagingTimeout(app, .1F) != kAXErrorSuccess) {
@@ -353,7 +357,14 @@ static ComposerFocus focused_composer(const Request& request, const Node& contro
         state = composer_focus_identity(focused, control, request, target_unchanged, !queried || ax_query_failed);
     }
     if (value) CFRelease(value);
-    return owned(request) ? state : ComposerFocus::Rejected;
+    if (!within(request)) return ComposerFocus::Rejected;
+    const auto after_window = claude_mac_window_state(request.window, request.pid, request.bounds);
+    if (!within(request) || after_window == MacOwnedWindowState::Rejected || state == ComposerFocus::Rejected)
+        return ComposerFocus::Rejected;
+    // Exact composer identity remains required for readiness. Incomplete window
+    // proof only allows another passive query under this same absolute cutoff.
+    return before_window == MacOwnedWindowState::PendingFocus || after_window == MacOwnedWindowState::PendingFocus
+        ? ComposerFocus::PendingIdentity : state;
 }
 // Focus is requested once by input(). Only a valid earlier focus identity may
 // settle passively; uncertainty is terminal and no key is issued while pending.
@@ -372,7 +383,9 @@ static bool wait_focused_composer(const Request& request, const Node& control) {
     request.deadline_phase = "deadline-focus";
     const bool focused = settle_composer_focus([&] { return focused_composer(request, control); },
         [&] { return within(request); },
-        [] { std::this_thread::sleep_for(std::chrono::milliseconds(20)); });
+        [&] { if (within(request)) std::this_thread::sleep_for(std::min(
+            std::chrono::duration_cast<std::chrono::milliseconds>(request.deadline - Clock::now()),
+            std::chrono::milliseconds(20))); });
     if (focused) request.deadline_phase = prior_phase;
     return focused;
 }
@@ -449,7 +462,7 @@ static const char* input(const Request& request, const Tree& tree) {
     if (request.mode == "input-replace-owned") {
         if (!key(0, true)) return "input-replace-select-key";
     }
-    if (!owned(request)) return "input-prompt-before-guard";
+    if (!wait_focused_composer(request, control)) return "input-prompt-before-guard";
     if (!clipboard_write(request.prompt)) return "input-prompt-clipboard";
     if (!owned(request)) return "input-prompt-after-guard";
     if (!wait_focused_composer(request, control)) return "input-focused-identity";

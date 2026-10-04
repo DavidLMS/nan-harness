@@ -2,10 +2,44 @@
 #include "../claude_chat_turn.cpp"
 #include <cassert>
 bool claude_owned_mac_window(std::uint64_t, pid_t, CGRect) { return false; }
+MacOwnedWindowState claude_mac_window_state(std::uint64_t, pid_t, CGRect) { return MacOwnedWindowState::Rejected; }
 static Node fixture(int parent, const char* role, const char* label, const char* current = "") {
     return {nullptr, parent, role, label, current, CGRectZero, true};
 }
 int main() {
+    const MacWindowSafety safe{true,true,true,true,true,true,true};
+    assert(classify_mac_owned_window(MacFocusRead::ReadyHeld,safe)==MacOwnedWindowState::Ready);
+    assert(classify_mac_owned_window(MacFocusRead::CannotComplete,safe)==MacOwnedWindowState::PendingFocus);
+    assert(classify_mac_owned_window(MacFocusRead::Rejected,safe)==MacOwnedWindowState::Rejected);
+    for (unsigned missing=0; missing<7; ++missing) {
+        auto unsafe=safe;
+        switch(missing) {
+            case 0: unsafe.foreground_same=false; break;
+            case 1: unsafe.application_ready=false; break;
+            case 2: unsafe.held_unique=false; break;
+            case 3: unsafe.held_geometry_same=false; break;
+            case 4: unsafe.held_normal=false; break;
+            case 5: unsafe.display_contained=false; break;
+            default: unsafe.stack_clear=false;
+        }
+        for (auto focus : {MacFocusRead::ReadyHeld, MacFocusRead::CannotComplete, MacFocusRead::Rejected})
+            assert(classify_mac_owned_window(focus,unsafe)==MacOwnedWindowState::Rejected);
+    }
+    unsigned passive_reads=0, passive_pauses=0, actions=1;
+    bool past_deadline=false;
+    const auto settled_window = settle_composer_focus([&] {
+        assert(actions==1); // The sole Select All is never replayed.
+        const auto state=classify_mac_owned_window(++passive_reads==1
+            ? MacFocusRead::CannotComplete : MacFocusRead::ReadyHeld,safe);
+        return state==MacOwnedWindowState::Ready ? ComposerFocus::Focused : ComposerFocus::PendingIdentity;
+    },[&] { return !past_deadline; },[&] { ++passive_pauses; });
+    if (settled_window) ++actions;
+    assert(passive_reads==2 && passive_pauses==1 && actions==2);
+    passive_reads=passive_pauses=0; actions=1;
+    assert(!settle_composer_focus([&] { ++passive_reads; return ComposerFocus::PendingIdentity; },
+        [&] { return !past_deadline; },[&] { ++passive_pauses; past_deadline=true; }));
+    assert(passive_reads==1 && passive_pauses==1 && actions==1);
+
     assert(pasted_value_state("","prompt",true,true)==PastedValue::Pending);
     assert(pasted_value_state("pro","prompt",true,true)==PastedValue::Pending);
     assert(pasted_value_state("prompt","prompt",true,true)==PastedValue::Ready);

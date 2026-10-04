@@ -55,6 +55,7 @@ static void window_record(std::uint64_t id, std::uint32_t pid, double x, double 
 #include <ApplicationServices/ApplicationServices.h>
 #include <libproc.h>
 #include "inventory.hpp"
+#include "mac_owned_window.hpp"
 
 // Query Foundation directly, without initializing AppKit or inspecting applications.
 int claude_known_folders() {
@@ -575,6 +576,65 @@ static bool fit_mac_proof(std::uint64_t id, pid_t pid, AxFocus& focus, bool requ
 bool claude_owned_mac_window(std::uint64_t id, pid_t pid, CGRect bounds) {
     AxFocus focus;
     return fit_mac_proof(id, pid, focus, false) && CGRectEqualToRect(bounds, focus.bounds);
+}
+// Read-only classification for passive composer settling. Existing bool callers
+// keep their original proof. Pending never authorizes an action.
+MacOwnedWindowState claude_mac_window_state(std::uint64_t id, pid_t pid, CGRect expected) {
+    const auto foreground = [&] { return [[[NSWorkspace sharedWorkspace] frontmostApplication] processIdentifier] == pid; };
+    auto application = [NSRunningApplication runningApplicationWithProcessIdentifier:pid];
+    MacWindowSafety safety{foreground(), application && application.active && !application.hidden
+        && application.finishedLaunching, false, false, false, false, false};
+    if (!safety.foreground_same || !safety.application_ready) return MacOwnedWindowState::Rejected;
+    AxFocus focus;
+    read_ax_focus(pid, focus);
+    MacFocusRead read = MacFocusRead::Rejected;
+    if (std::string(focus.status) == "ready" && CGRectEqualToRect(expected, focus.bounds))
+        read = MacFocusRead::ReadyHeld;
+    else if (std::string(focus.status) == "query-error" && focus.query_error
+        && std::string(focus.query_error) == "cannot-complete") read = MacFocusRead::CannotComplete;
+    if (read == MacFocusRead::Rejected) return MacOwnedWindowState::Rejected;
+    auto windows = CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements, kCGNullWindowID);
+    if (!windows) return MacOwnedWindowState::Rejected;
+    unsigned matches = 0;
+    safety.held_unique = CFArrayGetCount(windows) <= 1024
+        && match_focus_window(windows, pid, expected, matches) == id;
+    bool found = false, clear = safety.held_unique;
+    for (CFIndex index = 0; clear && index < CFArrayGetCount(windows); ++index) {
+        auto value = CFArrayGetValueAtIndex(windows, index);
+        if (!value || CFGetTypeID(value) != CFDictionaryGetTypeID()) { clear = false; break; }
+        auto window = static_cast<CFDictionaryRef>(value);
+        auto rectangle = CFDictionaryGetValue(window, kCGWindowBounds);
+        CGRect bounds;
+        if (!rectangle || !CGRectMakeWithDictionaryRepresentation(static_cast<CFDictionaryRef>(rectangle), &bounds)
+            || !std::isfinite(bounds.origin.x) || !std::isfinite(bounds.origin.y)
+            || !std::isfinite(bounds.size.width) || !std::isfinite(bounds.size.height)
+            || bounds.size.width < 0 || bounds.size.height < 0) { clear = false; break; }
+        double alpha = 1;
+        auto opacity = CFDictionaryGetValue(window, kCGWindowAlpha);
+        if (opacity && (CFGetTypeID(opacity) != CFNumberGetTypeID()
+            || !CFNumberGetValue(static_cast<CFNumberRef>(opacity), kCFNumberDoubleType, &alpha))) { clear = false; break; }
+        if (!std::isfinite(alpha)) { clear = false; break; }
+        if (number(window, kCGWindowNumber) == id && number(window, kCGWindowOwnerPID) == pid) {
+            found = true;
+            safety.held_geometry_same = CGRectEqualToRect(bounds, expected) && alpha > 0
+                && bounds.size.width >= 300 && bounds.size.height >= 200;
+            safety.held_normal = number(window, kCGWindowLayer) == 0;
+            break;
+        }
+        if (number(window, kCGWindowLayer) == CGWindowLevelForKey(kCGCursorWindowLevelKey)) continue;
+        if (alpha <= 0 || bounds.size.width == 0 || bounds.size.height == 0) continue;
+        if ((number(window, kCGWindowOwnerPID) == pid && number(window, kCGWindowLayer) == 0)
+            || CGRectIntersectsRect(bounds, expected)) clear = false;
+    }
+    CFRelease(windows);
+    safety.stack_clear = clear && found;
+    for (NSScreen* screen in NSScreen.screens) {
+        auto display = static_cast<CGDirectDisplayID>([screen.deviceDescription[@"NSScreenNumber"] unsignedIntValue]);
+        safety.display_contained = safety.display_contained || CGRectContainsRect(CGDisplayBounds(display), expected);
+    }
+    safety.foreground_same = safety.foreground_same && foreground();
+    safety.application_ready = safety.application_ready && application.active && !application.hidden && !application.terminated;
+    return classify_mac_owned_window(read, safety);
 }
 static int chat_result(const char* stage) {
     std::cout << "chat " << stage << '\n';
