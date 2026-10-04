@@ -15,5 +15,19 @@ const api=vm.runInNewContext(source.slice(begin,end)+';focusCapturedMain',{Date,
   assert.equal(result,['success','focused'].includes(scenario),scenario);
   assert.equal(activations,scenario==='focused'||scenario==='late'?0:1,scenario);
  }
+ for(const scenario of ['settled','deadline','changed','query-failed','rejected']) {
+  let now=0,activations=0,verifications=0,focus=false;
+  const clockApi=vm.runInNewContext(source.slice(begin,end)+';focusCapturedMain',{Date:{now:()=>now},setTimeout});
+  const held={page:{},key:'held'},proof=async()=>true;
+  proof.requireDocumentFocus=()=>{};
+  const native={prepare(){},activate(){activations++;focus=true;},verify(){
+   verifications++;if(scenario==='query-failed')throw Error('PRIVATE');
+   return scenario==='settled'&&verifications>2;
+  },pending:()=>!['query-failed','rejected'].includes(scenario)};
+  const identity=async()=>({key:scenario==='changed'&&verifications>0?'changed':'held',scope:{mainScope:true,focused:focus}});
+  const result=await clockApi(held,proof,500,identity,(a,b)=>a.key===b.key,async ms=>{now+=ms;},null,native);
+  assert.equal(result,scenario==='settled',scenario);assert.equal(activations,1,scenario);
+  if(['query-failed','rejected','changed'].includes(scenario))assert.equal(verifications,1,scenario);
+ }
  console.log('held page focus fixtures PASS');
 })().catch(e=>{console.error(e);process.exitCode=1});

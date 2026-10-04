@@ -22,7 +22,7 @@ function controller(config,owner,launcher,deadline,run=child.execFileSync,now=Da
     if(typeof file!=='string'||!path.isAbsolute(file)||fs.realpathSync(file)!==file
       ||!fs.lstatSync(file).isFile()||fs.lstatSync(file).isSymbolicLink())throw Error('native activation rejected');
   }
-  let held=null,cutoff=BigInt(config.cutoffNanos),attempted=false,nativeBoundary=null,nativeInventoryFailure=null,nativeActivationFailure=null;
+  let held=null,cutoff=BigInt(config.cutoffNanos),attempted=false,nativeBoundary=null,nativeInventoryFailure=null,nativeActivationFailure=null,verificationPending=false;
   const boundaries=new Set(['request','cg-inventory-before','ax-main-before','cg-inventory-after','ax-main-after','identity','trust']);
   const actionBoundaries=new Set([...boundaries,'app-unavailable','app-unfocused','foreground-unfocused',
     'focused-window-query','focused-window-type','focused-window-identity','app-activate','raise','deadline']);
@@ -67,6 +67,7 @@ function controller(config,owner,launcher,deadline,run=child.execFileSync,now=Da
     failure:()=>nativeBoundary,
     inventoryFailure:()=>nativeInventoryFailure,
     actionFailure:()=>nativeActivationFailure,
+    pending:()=>verificationPending,
     prepare() {
       if(held||attempted)throw Error('native activation consumed');
       held=binding(execute('prepare'));
@@ -82,7 +83,11 @@ function controller(config,owner,launcher,deadline,run=child.execFileSync,now=Da
     },
     verify() {
       if(!held||!attempted)return false;
-      return execute('verify')==='verified\n';
+      verificationPending=false;
+      const result=execute('verify');
+      if(result==='pending-external-stack\n'){verificationPending=true;return false;}
+      if(result!=='verified\n')throw Error('native verification rejected');
+      return true;
     },
   };
 }

@@ -301,7 +301,12 @@ async function focusCapturedMain(held,proof,deadline,identity=correlationIdentit
       if(!await proved())return rejected();
       const fresh=await identity(held.page,deadline);
       if(Date.now()>=deadline||!same(held,fresh)||!fresh.scope.mainScope||!await proved())return rejected();
-      if(nativeActivated&&!nativeActivation.verify())return rejected();
+      if(nativeActivated&&!nativeActivation.verify()) {
+        if(typeof nativeActivation.pending!=='function'||nativeActivation.pending()!==true)return rejected();
+        focusedSamples=0;
+        await pause(Math.min(100,Math.max(0,deadline-Date.now())));
+        continue;
+      }
       focusedSamples=fresh.scope.focused?focusedSamples+1:0;
       if(focusedSamples===2) {
         proof.requireDocumentFocus();

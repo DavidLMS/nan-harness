@@ -81,7 +81,7 @@ struct InventoryFailure {
     const char* reason="inventory-unavailable";
     unsigned candidates=0, executable_rejected=0, ancestry_rejected=0;
 };
-bool inventory(const Request& r,Binding& result,bool select,InventoryFailure* failure=nullptr,bool activation_only=false) {
+bool inventory(const Request& r,Binding& result,bool select,InventoryFailure* failure=nullptr,bool activation_only=false,bool* externally_occluded=nullptr) {
     InventoryFailure observation;
     if(!alive(r)){observation.reason="deadline";if(failure)*failure=observation;return false;}
     auto rows=CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly|kCGWindowListExcludeDesktopElements,kCGNullWindowID);
@@ -147,6 +147,7 @@ bool inventory(const Request& r,Binding& result,bool select,InventoryFailure* fa
         other_owned_normal,overlapping_ahead,contained,activation_only,owned_overlap)&&timely;
     observation.reason=codex_inventory_failure_reason(observation.reason,valid,
         other_owned_normal,overlapping_ahead,contained,timely);
+    if(externally_occluded)*externally_occluded=admitted&&overlapping_ahead&&!owned_overlap;
     if(failure)*failure=observation;
     return admitted;
 }
@@ -218,12 +219,13 @@ int codex_activate_main() {
         Binding held=request.held;
         InventoryFailure failure;
         // Bringing our sole owned window forward may start behind another app.
-        // Only activation admits that external occlusion; verification and every
-        // subsequent input still require the original complete clear-stack proof.
-        if(!inventory(request,held,!request.action&&!request.verify,&failure,!request.verify))return activation_rejected("cg-inventory-before",&failure);
+        // Verification can observe a pending external stack transition after
+        // activation; it never reports success or authorizes input while occluded.
+        bool first_occluded=false,second_occluded=false;
+        if(!inventory(request,held,!request.action&&!request.verify,&failure,true,&first_occluded))return activation_rejected("cg-inventory-before",&failure);
         const char* boundary="ax-main-before";
         AXUIElementRef first=main_window(request,held,&boundary);if(!first)return activation_rejected(boundary);
-        Binding fresh=held;bool valid=inventory(request,fresh,false,&failure,!request.verify);
+        Binding fresh=held;bool valid=inventory(request,fresh,false,&failure,true,&second_occluded);
         bool inventory_valid=valid;
         boundary=valid?"ax-main-after":"cg-inventory-after";
         AXUIElementRef second=valid?main_window(request,held,&boundary):nullptr;
@@ -232,6 +234,12 @@ int codex_activate_main() {
         if(second)CFRelease(second);
         if(!valid){CFRelease(first);return activation_rejected(boundary,inventory_valid?nullptr:&failure);}
         if(request.verify) {
+            // Both inventories and AX main identities above are complete and
+            // stable. Only an external overlap may settle passively; changes,
+            // owned overlaps and query failures still reject before this point.
+            if(first_occluded||second_occluded) {
+                CFRelease(first);std::cout<<"pending-external-stack\n";return 0;
+            }
             auto app=[NSRunningApplication runningApplicationWithProcessIdentifier:held.pid];
             AXUIElementRef application=AXUIElementCreateApplication(held.pid);CFTypeRef focused=nullptr;
             // Same ordered reads as the boolean proof; no failure retries them.

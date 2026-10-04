@@ -80,3 +80,20 @@ for(const phase of ['activate','verify'])for(const boundary of ['app-unavailable
  assert.throws(()=>native.activate()); // A diagnostic cannot replay consumed activation.
  assert.equal(calls.filter(x=>x==='activate').length,1);
 }
+
+for(const result of ['pending-external-stack\n','PRIVATE\n']) {
+ let calls=[],verified=false;
+ const native=controller(config,20,25,2000,(_h,_a,options)=>{
+  const phase=options.input.split(' ')[0];calls.push(phase);
+  if(phase==='prepare')return '42 100 10 20 600 400 500 0 1000000000\n';
+  if(phase==='activate')return 'activated\n';
+  if(verified)return 'verified\n';
+  return result;
+ },()=>1000);
+ native.prepare();native.activate();
+ if(result==='pending-external-stack\n') {
+  assert.equal(native.verify(),false);assert.equal(native.pending(),true);
+  verified=true;assert.equal(native.verify(),true);assert.equal(native.pending(),false);
+ } else {assert.throws(()=>native.verify());assert.equal(native.pending(),false);}
+ assert.throws(()=>native.activate());assert.equal(calls.filter(x=>x==='activate').length,1);
+}
