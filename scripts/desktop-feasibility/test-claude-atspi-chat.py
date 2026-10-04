@@ -961,10 +961,12 @@ class OwnedInputInventoryTests(unittest.TestCase):
         extra=('owned','/unmapped')
         r.update({('children',p):[extra],('owner',extra):7,('state',extra):0,
             ('children',extra):[],('parent',extra):p,('role',root):61,('role',p):73,
-            ('role',extra):116,('attributes',root):{},('attributes',p):{},('attributes',extra):{}})
+            ('role',extra):116,('count',extra):1,('text',extra,1):'\n',('attributes',root):{},('attributes',p):{},('attributes',extra):{}})
         inventory={}
         chat.flatten_hypertext(root,lambda m,n,*a:r[(m,n,*a)],7,lambda:None,inventory=inventory)
         self.assertFalse(inventory['completeTextCoverage'])
+        self.assertEqual(inventory['sourceShape']['unresolvedLfTextCount'],1)
+        self.assertEqual(inventory['sourceShape']['unresolvedTextLeafCount'],1)
         self.assertEqual((inventory['nodeCount'],inventory['resolvedNodeCount']),(3,2))
 
     def test_moving_placeholder_is_rejected_before_inventory_emission(self):
@@ -995,5 +997,35 @@ class OwnedInputInventoryTests(unittest.TestCase):
             self.assertEqual(result['knownPromptMatchCount'],int(exact))
             self.assertEqual((a.focus_count,a.paste_count,a.send_count),(0,0,0))
             self.assertNotIn(a.value,str(result))
+
+class SourceShapeDiagnosticsTests(unittest.TestCase):
+    fixture=HypertextTests.fixture
+    def test_unresolved_leaf_partition_and_source_attributes(self):
+        for value,key in [('', 'unresolvedEmptyTextCount'),('\n','unresolvedLfTextCount'),
+                          ('cue','unresolvedExactResultCount'),('other','unresolvedOtherTextCount')]:
+            root,p,link,r=self.fixture(child='cue');extra=('owned','/unmapped')
+            r.update({('children',p):[extra],('owner',extra):7,('state',extra):0,
+                ('children',extra):[],('parent',extra):p,('role',root):61,('role',p):73,
+                ('role',extra):116,('count',extra):len(value),('text',extra,len(value)):value,
+                ('attributes',root):{},('attributes',extra):{},('attributes',p):
+                {'tag':'p','class':'is-empty is-editor-empty','data-placeholder':'cue'}})
+            inventory={};chat.flatten_hypertext(root,lambda m,n,*a:r[(m,n,*a)],7,lambda:None,inventory=inventory)
+            source=inventory['sourceShape']
+            self.assertEqual(source[key],1);self.assertEqual(source['paragraphEmptyClassPairCount'],1)
+            self.assertFalse(inventory['completeTextCoverage']);self.assertNotIn('cue',str(source))
+    def test_unresolved_leaf_change_rejects(self):
+        root,p,link,r=self.fixture(child='cue');extra=('owned','/unmapped')
+        r.update({('children',p):[extra],('owner',extra):7,('state',extra):0,
+            ('children',extra):[],('parent',extra):p,('role',root):61,('role',p):73,
+            ('role',extra):116,('count',extra):1,('text',extra,1):'a',
+            ('attributes',root):{},('attributes',p):{},('attributes',extra):{}})
+        reads=0
+        def query(method,node,*args):
+            nonlocal reads
+            if method=='text' and node==extra:
+                reads+=1
+                if reads>1:return 'b'
+            return r[(method,node,*args)]
+        with self.assertRaises(chat.Rejected):chat.flatten_hypertext(root,query,7,lambda:None,inventory={})
 
 if __name__=='__main__':unittest.main()

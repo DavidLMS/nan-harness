@@ -180,13 +180,28 @@ fn embedded_text_observation(facts: &Value) -> Option<EmbeddedTextObservation> {
         .then_some(shape)
 }
 
-#[derive(Clone, Copy, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct OwnedInputSourceShape {
+    paragraph_tag_p_count: u8,
+    paragraph_empty_class_pair_count: u8,
+    paragraph_data_placeholder_count: u8,
+    unresolved_text_leaf_count: u8,
+    unresolved_other_role_count: u8,
+    unresolved_empty_text_count: u8,
+    unresolved_lf_text_count: u8,
+    unresolved_exact_result_count: u8,
+    unresolved_other_text_count: u8,
+}
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[expect(
     clippy::struct_excessive_bools,
-    reason = "Independent native text observations preserve the closed flat wire contract"
+    reason = "Independent native diagnostic bits preserve the closed wire contract"
 )]
 struct OwnedInputObservation {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    source_shape: Option<OwnedInputSourceShape>,
     node_count: u8,
     resolved_node_count: u8,
     paragraph_count: u8,
@@ -215,6 +230,28 @@ fn owned_input_observation(facts: &Value) -> Option<OwnedInputObservation> {
         ]
         .into_iter()
         .all(|n| n <= shape.node_count)
+        && shape.source_shape.is_none_or(|source| {
+            [
+                source.paragraph_tag_p_count,
+                source.paragraph_empty_class_pair_count,
+                source.paragraph_data_placeholder_count,
+            ]
+            .into_iter()
+            .all(|n| n <= shape.paragraph_count)
+                && u16::from(source.unresolved_text_leaf_count)
+                    + u16::from(source.unresolved_other_role_count)
+                    == u16::from(shape.node_count - shape.resolved_node_count)
+                && [
+                    source.unresolved_empty_text_count,
+                    source.unresolved_lf_text_count,
+                    source.unresolved_exact_result_count,
+                    source.unresolved_other_text_count,
+                ]
+                .into_iter()
+                .map(u16::from)
+                .sum::<u16>()
+                    == u16::from(source.unresolved_text_leaf_count)
+        })
         && shape.resolved_node_count > 0
         && shape.object_link_count < shape.node_count
         && shape.complete_text_coverage == (shape.resolved_node_count == shape.node_count)

@@ -1404,7 +1404,7 @@ def semantic_observations(directory, app):
                 shape = value['ownedInputObservation']
                 counts = set('nodeCount resolvedNodeCount paragraphCount rootChildCount textLeafCount otherRoleCount objectLinkCount knownPromptMatchCount'.split())
                 flags = set('completeTextCoverage rootSingleParagraph rootOnlyObjects placeholderAttributeMatch placeholderAttributeLfMatch latestPromptMatches'.split())
-                if (type(shape) is not dict or set(shape) != counts | flags
+                if (type(shape) is not dict or set(shape) - {'sourceShape'} != counts | flags
                         or any(type(shape[k]) is not int or not 0 <= shape[k] <= 64 for k in counts)
                         or any(type(shape[k]) is not bool for k in flags)
                         or shape['nodeCount'] == 0 or shape['resolvedNodeCount'] == 0
@@ -1421,6 +1421,17 @@ def semantic_observations(directory, app):
                         or value['submittedTurns'] != value['inputVerifiedTurns'] or value['submittedTurns'] != value['copiedResponses']
                         or not 1 <= value['submittedTurns'] <= 2 or value['retryAttempted'] is not False):
                     raise ValueError('invalid Claude Linux owned input observation')
+                if 'sourceShape' in shape:
+                    source=shape['sourceShape']
+                    paragraph=set('paragraphTagPCount paragraphEmptyClassPairCount paragraphDataPlaceholderCount'.split())
+                    totals=set('unresolvedTextLeafCount unresolvedOtherRoleCount'.split())
+                    kinds=set('unresolvedEmptyTextCount unresolvedLfTextCount unresolvedExactResultCount unresolvedOtherTextCount'.split())
+                    if (type(source) is not dict or set(source)!=paragraph|totals|kinds
+                            or any(type(n) is not int or not 0<=n<=64 for n in source.values())
+                            or any(source[k]>shape['paragraphCount'] for k in paragraph)
+                            or sum(source[k] for k in totals)!=shape['nodeCount']-shape['resolvedNodeCount']
+                            or sum(source[k] for k in kinds)!=source['unresolvedTextLeafCount']):
+                        raise ValueError('invalid Claude Linux owned input source shape')
                 record['ownedInputObservation'] = shape
             record.update({key:value[key] for key in fields - {'schemaVersion','mechanism'}})
         elif mechanism == 'claude-config-persist-owners':

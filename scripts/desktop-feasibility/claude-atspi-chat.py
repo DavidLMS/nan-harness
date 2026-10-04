@@ -138,8 +138,34 @@ def input_text_inventory(root, children, resolved, links_used, read, result):
     placeholders = {attrs[key] for attrs in attributes.values()
         for key in ('placeholder','placeholder-text','data-placeholder')
         if key in attrs and attrs[key]}
+    source = dict(paragraphTagPCount=0,paragraphEmptyClassPairCount=0,
+        paragraphDataPlaceholderCount=0,unresolvedTextLeafCount=0,
+        unresolvedOtherRoleCount=0,unresolvedEmptyTextCount=0,
+        unresolvedLfTextCount=0,unresolvedExactResultCount=0,
+        unresolvedOtherTextCount=0)
+    for node,attrs in attributes.items():
+        if roles[node]==73:
+            source['paragraphTagPCount']+=int(attrs.get('tag')=='p')
+            source['paragraphEmptyClassPairCount']+=int(set(attrs.get('class','').split())=={'is-empty','is-editor-empty'})
+            source['paragraphDataPlaceholderCount']+=int(bool(attrs.get('data-placeholder')))
+        if node in resolved:
+            continue
+        if children[node] or roles[node] not in (29,61,116):
+            source['unresolvedOtherRoleCount']+=1
+            continue
+        source['unresolvedTextLeafCount']+=1
+        count=read('count',node)
+        if type(count) is not int or not 0<=count<=4096:
+            raise Rejected('input')
+        text=read('text',node,count) if count else ''
+        if type(text) is not str or len(text)!=count or len(text.encode())>4096:
+            raise Rejected('input')
+        kind=('unresolvedEmptyTextCount' if text=='' else
+              'unresolvedLfTextCount' if text=='\n' else
+              'unresolvedExactResultCount' if text==result else 'unresolvedOtherTextCount')
+        source[kind]+=1
     root_text = read('text',root,read('count',root))
-    return dict(nodeCount=len(children),resolvedNodeCount=len(resolved),
+    return dict(sourceShape=source,nodeCount=len(children),resolvedNodeCount=len(resolved),
         paragraphCount=len(paragraphs),rootChildCount=len(children[root]),
         textLeafCount=sum(not children[n] and roles[n] in (29,61,116) for n in children),
         otherRoleCount=sum(role not in (29,61,73,78,79,116) for role in roles.values()),

@@ -3983,6 +3983,16 @@ class ClaudeLinuxOwnedInputTests(unittest.TestCase):
                 observed=q.semantic_observations(root,'claude-desktop')[0]
                 self.assertEqual(observed['ownedInputObservation'],relation)
                 self.assertEqual(observed['stage'],'input-not-empty')
+            source=dict(paragraphTagPCount=1,paragraphEmptyClassPairCount=1,
+                paragraphDataPlaceholderCount=1,unresolvedTextLeafCount=2,
+                unresolvedOtherRoleCount=1,unresolvedEmptyTextCount=0,
+                unresolvedLfTextCount=1,unresolvedExactResultCount=1,unresolvedOtherTextCount=0)
+            path.write_text(json.dumps(facts|{'ownedInputObservation':shape|{'sourceShape':source}}))
+            self.assertEqual(q.semantic_observations(root,'claude-desktop')[0]['ownedInputObservation']['sourceShape'],source)
+            for changed in ({'rawValue':'PRIVATE'},{'unresolvedOtherRoleCount':0},
+                {'unresolvedLfTextCount':2},{'paragraphTagPCount':2},{'unresolvedEmptyTextCount':True}):
+                path.write_text(json.dumps(facts|{'ownedInputObservation':shape|{'sourceShape':source|changed}}))
+                with self.assertRaises(ValueError):q.semantic_observations(root,'claude-desktop')
             for changed in ({**shape,'rawValue':'PRIVATE'},{**shape,'nodeCount':True},
                 {**shape,'resolvedNodeCount':0},{**shape,'resolvedNodeCount':6},
                 {**shape,'completeTextCoverage':True},{**shape,'objectLinkCount':5},
