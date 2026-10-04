@@ -82,8 +82,34 @@ struct InventoryFailure {
     unsigned candidates=0, executable_rejected=0, ancestry_rejected=0;
     unsigned normal_overlap=0, elevated_overlap=0, lower_overlap=0;
     unsigned menu_level=0, status_level=0, dock_level=0, other_elevated=0;
-    bool display_contained=false;
+    bool display_contained=false, workarea_measured=false, workarea_contained=false;
+    unsigned workarea_overlap=0;
 };
+// Diagnostic coordinate conversion only; full-display admission is unchanged.
+bool workarea(const Request& r,CGRect held,CGRect& usable) {
+    NSArray<NSScreen*>* screens=NSScreen.screens;
+    if(screens.count==0||screens.count>64||!alive(r))return false;
+    const CGRect primary=CGDisplayBounds(CGMainDisplayID());
+    if(!geometry(primary)||primary.origin.x!=0||primary.origin.y!=0)return false;
+    const CGFloat height=primary.size.height;
+    auto quartz=[height](NSRect frame) {
+        return CGRectMake(frame.origin.x,height-NSMaxY(frame),frame.size.width,frame.size.height);
+    };
+    if(!CGRectEqualToRect(quartz(screens[0].frame),primary))return false;
+    unsigned matches=0;
+    for(NSScreen* screen in screens) {
+        NSNumber* number=screen.deviceDescription[@"NSScreenNumber"];
+        if(![number isKindOfClass:NSNumber.class])return false;
+        const CGRect display=CGDisplayBounds(number.unsignedIntValue);
+        if(!CGRectContainsRect(display,held))continue;
+        ++matches;
+        const CGRect frame=quartz(screen.frame), visible=quartz(screen.visibleFrame);
+        if(!geometry(frame)||!geometry(visible)||!CGRectEqualToRect(frame,display)
+            ||!CGRectContainsRect(display,visible)||!alive(r))return false;
+        usable=visible;
+    }
+    return matches==1&&alive(r);
+}
 bool inventory(const Request& r,Binding& result,bool select,InventoryFailure* failure=nullptr,bool activation_only=false,bool* externally_occluded=nullptr) {
     InventoryFailure observation;
     if(!alive(r)){observation.reason="deadline";if(failure)*failure=observation;return false;}
@@ -125,6 +151,11 @@ bool inventory(const Request& r,Binding& result,bool select,InventoryFailure* fa
             &&(number(row,kCGWindowOwnerPID)==result.pid
                 ||descendant(r,pid_t(number(row,kCGWindowOwnerPID)),r.launcher)))other_owned_normal=true;
     }
+    CGRect usable{};
+    if(valid) {
+        observation.workarea_measured=workarea(r,result.bounds,usable);
+        observation.workarea_contained=observation.workarea_measured&&CGRectContainsRect(usable,result.bounds);
+    }
     for(CFIndex i=0;valid&&i<held;++i) {
         auto row=(CFDictionaryRef)CFArrayGetValueAtIndex(rows,i);
         if(number(row,kCGWindowLayer)==CGWindowLevelForKey(kCGCursorWindowLevelKey))continue;
@@ -136,6 +167,8 @@ bool inventory(const Request& r,Binding& result,bool select,InventoryFailure* fa
         if(CGRectIntersectsRect(bounds,result.bounds)
             ||(same_owner&&number(row,kCGWindowLayer)==0)) {
             if(CGRectIntersectsRect(bounds,result.bounds)) {
+                if(observation.workarea_measured
+                    &&CGRectIntersectsRect(CGRectIntersection(bounds,result.bounds),usable))++observation.workarea_overlap;
                 const auto level=number(row,kCGWindowLayer);
                 if(level==0)++observation.normal_overlap;
                 else if(level>0) {
@@ -260,7 +293,9 @@ int codex_activate_main() {
                     <<(second_occluded?"after":"before")<<' '<<stack.normal_overlap<<' '
                     <<stack.elevated_overlap<<' '<<stack.lower_overlap<<' '
                     <<(stack.display_contained?1:0)<<' '<<stack.menu_level<<' '<<stack.status_level<<' '
-                    <<stack.dock_level<<' '<<stack.other_elevated<<'\n';return 0;
+                    <<stack.dock_level<<' '<<stack.other_elevated<<' '
+                    <<(stack.workarea_measured?1:0)<<' '<<(stack.workarea_contained?1:0)<<' '
+                    <<stack.workarea_overlap<<'\n';return 0;
             }
             auto app=[NSRunningApplication runningApplicationWithProcessIdentifier:held.pid];
             AXUIElementRef application=AXUIElementCreateApplication(held.pid);CFTypeRef focused=nullptr;

@@ -1942,7 +1942,7 @@ def semantic_observations(directory, app):
                 if 'nativePendingStack' in activation:
                     stack=activation['nativePendingStack']
                     counts={'normalOverlapCount','elevatedOverlapCount','lowerOverlapCount'}
-                    if (type(stack) is not dict or set(stack)-{'elevatedLevels'}!=counts|{'sample','displayContained'}
+                    if (type(stack) is not dict or set(stack)-{'elevatedLevels','workArea'}!=counts|{'sample','displayContained'}
                             or type(stack['sample']) is not str or stack['sample'] not in {'before','after'}
                             or stack['displayContained'] is not True
                             or any(type(stack[key]) is not int or not 0<=stack[key]<=1024 for key in counts)
@@ -1956,6 +1956,16 @@ def semantic_observations(directory, app):
                                 or any(type(levels[key]) is not int or not 0<=levels[key]<=1024 for key in keys)
                                 or sum(levels.values())!=stack['elevatedOverlapCount']):
                             raise ValueError('invalid Codex elevated window levels')
+                    if 'workArea' in stack:
+                        area=stack['workArea']
+                        if (type(area) is not dict or set(area)!={'measured','windowContained','overlapIntersectionCount'}
+                                or type(area['measured']) is not bool
+                                or area['measured'] and (type(area['windowContained']) is not bool
+                                    or type(area['overlapIntersectionCount']) is not int
+                                    or not 0<=area['overlapIntersectionCount']<=sum(stack[key] for key in counts))
+                                or not area['measured'] and (area['windowContained'] is not None
+                                    or area['overlapIntersectionCount'] is not None)):
+                            raise ValueError('invalid Codex work-area observation')
                 if 'nativeActivationFailure' in activation:
                     failure = activation['nativeActivationFailure']
                     boundaries = {'request','cg-inventory-before','ax-main-before','cg-inventory-after',
