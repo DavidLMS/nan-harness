@@ -147,7 +147,7 @@ observations describe completed runs, rather than additional qualification:
 | Zed | Response and file-tool steps pass; pointer and accessibility Retry acknowledgements do not produce provider recovery. | Three complete probes pass the expanded retry policy. | Three complete probes pass with direct native clipboard transport and all cleanup checks. |
 | Hermes | Three complete probes pass with renderer process ownership. | Three complete probes pass with private native userData and bounded cold-start waits. | Three complete probes pass after ordinary onboarding dismissal and fresh catalog readiness, including explicit UI Retry and cleanup. |
 | ChatGPT / Codex | All three sessions complete onboarding and expose one source-defined local home composer. The existing adapter requires a thread composer and conversation; the initial-send lifecycle still needs adaptation. | Two sessions acknowledge activation but retain one elevated overlap outside the classified menu, status and Dock levels; another starts focused and later rejects an auxiliary page transition. | All three sessions complete folder trust, Engineering, Continue, Skip and its ordinary confirmation; the coding composer and conversation remain absent. |
-| Claude | All three sessions verify the submitted draft through accessibility and clipboard readback; Send remains blocked by its multiple advertised actions. A unique activation-index adapter is under native evaluation. | Three complete native probes pass input, response, file-tool, controlled failure recovery and cleanup. | The actual launch still fails at the selected safe Rust rename dispatch with a sharing violation. Both retained-parent and production-writer lifecycle fixtures pass before installation; neither reproduces the actual failure. |
+| Claude | All three sessions verify the exact draft and dispatch Send. Response verification stops at the retained editor guard; a response-only original-frame adapter is under evaluation. | Three complete native probes pass input, response, file-tool, controlled failure recovery and cleanup. | The actual launch still fails at the selected safe Rust rename dispatch with a sharing violation. The production-writer fixture passes before installation and fails after installation; its exact failure category is under evaluation. |
 | Pen | Software GLES removes GPU startup failure; three fresh sessions show sign-in and no editor. No official account-free route found for the frozen release. | Two probes expose composer/Send; another exposes sign-in. Conversation adapter remains unimplemented. | Owned renderer loads sign-in and a dialog; conversation adapter remains unimplemented. |
 
 Codex Linux completed onboarding in all three sessions in
@@ -162,7 +162,7 @@ The result does not authorize input or qualify the initial-send adapter.
 Current macOS evidence is
 [37192174385](https://github.com/DavidLMS/nan-harness/actions/runs/37192174385),
 and Windows [37191553330](https://github.com/DavidLMS/nan-harness/actions/runs/37191553330).
-Current Claude evidence is Linux [37193728954](https://github.com/DavidLMS/nan-harness/actions/runs/37193728954),
+Current Claude evidence is Linux [37195180348](https://github.com/DavidLMS/nan-harness/actions/runs/37195180348),
 macOS [37188000425](https://github.com/DavidLMS/nan-harness/actions/runs/37188000425),
 and Windows [37194302818](https://github.com/DavidLMS/nan-harness/actions/runs/37194302818).
 Both cleanup scopes pass and invalid closed diagnostic events are zero in these runs.
@@ -193,6 +193,11 @@ application trial. The default persistence path remains unchanged. This tests
 an alternative to tempfile's attribute-setting path. The later closed failure
 record proves that this alternative reaches the rename invocation and still
 receives a sharing violation; it does not identify the conflicting handle.
+The same synthetic production-writer lifecycle fixture passes before official
+installation and fails afterwards in [37194971798](https://github.com/DavidLMS/nan-harness/actions/runs/37194971798).
+This establishes an environment-dependent difference without launching the
+application in that fixture. The exact failure category must be established
+before treating it as a reproduction of the actual launch's sharing violation.
 
 The completed evidence is available in runs
 [36975359718](https://github.com/DavidLMS/nan-harness/actions/runs/36975359718)
