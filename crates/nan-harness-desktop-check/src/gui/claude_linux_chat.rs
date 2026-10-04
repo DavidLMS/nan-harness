@@ -1599,7 +1599,7 @@ mod query_timing_tests {
         for (key, value) in [
             ("path", json!("PRIVATE")),
             ("calls", json!(true)),
-            ("elapsedMs", json!(600001)),
+            ("elapsedMs", json!(600_001)),
             ("nativeWindowMs", json!(11001)),
             ("lastMs", json!(-1)),
         ] {
