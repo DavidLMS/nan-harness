@@ -928,7 +928,10 @@ mod configuration_persist_tests {
             return;
         }
         let result = (|| {
-            let workspace = std::env::current_dir().map_err(ClaudeDesktopError::ReadConfig)?;
+            // Match the canonical workspace spelling injected by the parent.
+            let workspace = std::env::current_dir()
+                .and_then(|directory| directory.canonicalize())
+                .map_err(ClaudeDesktopError::ReadConfig)?;
             let profile = workspace.join("profile");
             let expected = DesktopPaths::new(
                 &profile.join("home/AppData/Roaming/Claude"),
@@ -1236,7 +1239,7 @@ mod configuration_persist_tests {
         )
         .unwrap();
         // This existing fixture helper matches FreshClaudeWindowsProfile's exact
-        // READ-only directory sharing and lock-before-root-creation ordering.
+        // READ|WRITE directory sharing and lock-before-root-creation ordering.
         let directories = lifecycle_roots(&workspace);
         let destination =
             workspace.join("profile/home/AppData/Roaming/Claude/claude_desktop_config.json");
@@ -1278,7 +1281,7 @@ mod configuration_persist_tests {
         let historical = replacement.path().to_owned();
         let replacement_identity = retained_rename_source(&historical, 7).unwrap();
         let denial = fs::OpenOptions::new()
-            .access_mode(0)
+            .read(true)
             .share_mode(3)
             .open(&historical)
             .unwrap();
