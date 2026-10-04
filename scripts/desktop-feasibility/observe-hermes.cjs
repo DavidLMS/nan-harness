@@ -358,13 +358,13 @@ async function driveDom() {
   let retryHandle;
   let retryPosition;
   let secondCandidate;
+  const settleDeadline = Math.min(deadline, Date.now() + 5000);
   if (retryAction) {
     retryHandle = await send.elementHandle({ timeout: Math.max(1, deadline - Date.now()) });
     if (!retryHandle) { facts.errorCategory = 'send-unavailable'; saveFacts(); return; }
     let first;
     let second;
     let revealAttempted = false;
-    const settleDeadline = Math.min(deadline, Date.now() + 5000);
     const reprove = async () => ownedEndpoint() && await send.count() === 1 && await send.isEnabled()
       && await retryUser.count() === 1
       && await retryUser.evaluate((e, prompt) => e.innerText.trim() === prompt, request.prompt)
@@ -490,7 +490,32 @@ async function driveDom() {
       facts.errorCategory = 'send-unavailable'; saveFacts(); return;
     }
     facts.sendBlocker = await readiness();
-    const finalSample = await retryHandle.evaluate(sampleRetryInterior);
+    let finalSample = await retryHandle.evaluate(sampleRetryInterior);
+    // Closing owned onboarding can remount Retry after the first stable sample.
+    // Reacquire once before any Retry input, in the same document and budget.
+    if (finalSample.closed.status === 'detached' && facts.retryReveal === 'onboarding-skipped'
+        && facts.sendBlocker === null && Date.now() < settleDeadline) {
+      const replacement = await send.elementHandle({ timeout: Math.max(1, settleDeadline - Date.now()) });
+      const current = async () => ownedEndpoint() && Date.now() < settleDeadline
+        && await send.count() === 1 && await send.isEnabled() && await retryUser.count() === 1
+        && await retryUser.evaluate((e, prompt) => e.innerText.trim() === prompt, request.prompt)
+        && await errorProof() && await send.evaluate((button, sampled) => button === sampled, replacement);
+      if (!replacement || !await current()
+          || !await retryHandle.evaluate((old, next) => old.ownerDocument === next.ownerDocument, replacement)) {
+        facts.errorCategory = 'send-unavailable'; saveFacts(); return;
+      }
+      retryHandle = replacement;
+      const first = await retryHandle.evaluate(sampleRetryInterior);
+      await delay(Math.min(100, Math.max(0, settleDeadline - Date.now())));
+      const second = await retryHandle.evaluate(sampleRetryInterior);
+      retryPosition = stableCandidate(first, second);
+      secondCandidate = second.candidate;
+      if (!retryPosition || !await current()) {
+        facts.errorCategory = 'submit-action-intercepted'; saveFacts(); return;
+      }
+      facts.sendBlocker = await readiness();
+      finalSample = await retryHandle.evaluate(sampleRetryInterior);
+    }
     facts.retrySampleStatus = finalSample.closed.status;
     facts.retryHitTag = finalSample.closed.frontTag; facts.retryHitRegion = finalSample.closed.frontRegion;
     facts.retryHitAncestor = finalSample.closed.hitAncestor; facts.retryHitSharesTurnPair = finalSample.closed.sharesTurnPair;

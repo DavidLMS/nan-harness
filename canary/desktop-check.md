@@ -3039,3 +3039,10 @@ the single-line process transport. Its real Read tool also remains unsuccessful.
 Hermes macOS reports a detached retained Retry button after the owned onboarding
 dismissal in its failed session. Neither failure is accepted as a pass or hidden
 by a rerun. Correct and test the grouped candidate before another campaign.
+
+The next Hermes candidate permits one passive replacement of a detached Retry
+handle only after a completed owned onboarding dismissal. It retains the same
+document and original settling deadline, revalidates the unique failed user and
+error-scoped control, and requires fresh stable hit samples before its single
+Retry click. It rejects a changed document, changed failed turn or another
+detachment. This candidate has synthetic coverage; native confirmation is pending.

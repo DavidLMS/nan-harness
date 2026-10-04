@@ -100,8 +100,12 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
       return scenario === 'blocked-modal' ? 'modal' : scenario === 'blocked-menu' ? 'menu'
         : scenario === 'inert' ? 'inert' : null;
     },
-    async elementHandle() { retryHandles++; return {
-      async evaluate(callback) { samplingChoice = false; sampleCount++; hitButton.isConnected = scenario !== 'retry-detached' && !(scenario === 'command-detached' && escapes > 0); hitButton.disabled = scenario === 'retry-disabled'; hitButton.offsetWidth = scenario === 'retry-transformed' ? 40 : 20; hitButton.type = scenario === 'retry-wrong-type' ? 'submit' : 'button'; hitButton.ownerDocument = scenario === 'retry-foreign-document' ? {} : fixtureDocument; return callback(hitButton); },
+    async elementHandle() { retryHandles++; const generation = retryHandles; let handleSamples = 0; return {
+      async evaluate(callback) {
+        if (callback.toString().includes('old.ownerDocument')) return scenario !== 'onboarding-remount-document';
+        handleSamples++; samplingChoice = false; sampleCount++; hitButton.isConnected = scenario !== 'retry-detached' && !(scenario === 'command-detached' && escapes > 0); if (scenario?.startsWith('onboarding-remount') && skips > 0 && generation >= 2 && handleSamples >= 3
+          && (generation === 2 || scenario === 'onboarding-remount-again')) hitButton.isConnected = false;
+        hitButton.disabled = scenario === 'retry-disabled'; hitButton.offsetWidth = scenario === 'retry-transformed' ? 40 : 20; hitButton.type = scenario === 'retry-wrong-type' ? 'submit' : 'button'; hitButton.ownerDocument = scenario === 'retry-foreign-document' ? {} : fixtureDocument; return callback(hitButton); },
       async click(options) { return send.click(options); },
     }; },
     async scrollIntoViewIfNeeded() {},
@@ -129,7 +133,7 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
   };
   const errorCards = {
     async evaluate(callback, prompt) {
-      const user = { innerText: (['foreign-error-turn', 'delayed-foreign-error'].includes(scenario) || scenario === 'foreign-card-after-settle' && frames === 2 || scenario === 'foreign-card-during-wait' && sampleCount >= 2 || scenario === 'onboarding-foreign-pair' && skips > 0) ? 'Older unrelated user turn' : request.prompt,
+      const user = { innerText: (['foreign-error-turn', 'delayed-foreign-error'].includes(scenario) || scenario === 'foreign-card-after-settle' && frames === 2 || scenario === 'foreign-card-during-wait' && sampleCount >= 2 || scenario === 'onboarding-foreign-pair' && skips > 0 || scenario === 'onboarding-remount-foreign-pair' && retryHandles >= 3) ? 'Older unrelated user turn' : request.prompt,
         closest() { return pair; } };
       const pair = { querySelectorAll(selector) { assert.equal(selector, '[data-role="user"]'); return [user]; },
         closest() { return {}; } };
@@ -472,6 +476,17 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
   assert.equal(skipped.clicks, 1);
   assert.equal(skipped.escapes, 0);
   assert.equal(skipped.facts.retryReveal, 'onboarding-skipped');
+  const remounted = await trial({ ...retryRequest, timeoutMs: 1000 }, {}, 'onboarding-remount', true);
+  assert.equal(remounted.skips, 1);
+  assert.equal(remounted.retryHandles, 3);
+  assert.equal(remounted.clicks, 1);
+  assert.equal(remounted.facts.inputSubmitted, true);
+  for (const scenario of ['onboarding-remount-document', 'onboarding-remount-again', 'onboarding-remount-foreign-pair']) {
+    const rejected = await trial({ ...retryRequest, timeoutMs: 1000 }, {}, scenario, true);
+    assert.equal(rejected.skips, 1, scenario);
+    assert.equal(rejected.clicks, 0, scenario);
+    assert.equal(rejected.facts.inputSubmitted, false, scenario);
+  }
   for (const scenario of ['onboarding-remaining', 'onboarding-uncertain', 'onboarding-foreign-pair', 'onboarding-duplicate', 'onboarding-disabled', 'onboarding-missing', 'onboarding-forged']) {
     const blocked = await trial({ ...retryRequest, timeoutMs: 350 }, {}, scenario, true);
     assert.equal(blocked.clicks, 0, scenario);
