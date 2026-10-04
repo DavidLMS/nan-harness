@@ -1242,6 +1242,11 @@ mod configuration_persist_tests {
                 paths.documents()[0].parent().unwrap(),
                 paths.documents()[3].parent().unwrap(),
             ] {
+                if expected != 0 && root == paths.documents()[3].parent().unwrap() {
+                    // Rejected policy must not create the configuration library.
+                    assert!(!root.exists());
+                    continue;
+                }
                 assert_eq!(
                     fs::read_dir(root).unwrap().count(),
                     0,
