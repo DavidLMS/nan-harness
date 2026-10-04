@@ -290,12 +290,12 @@ jobs:
           NANH_CONFIGURATION_POSTINSTALL_OBSERVATION: '1'
         # Distinguish installer/environment effects from the passing preinstall fixture.
         # The child writer creates only its own temporary profile and launches no app.
-        run: cargo test --locked -p nan-harness-cli --features desktop-qualification --lib commands::claude_desktop::session::configuration_persist_tests::production_std_rename_lifecycle_under_precreation_leases_restores_documents -- --exact
+        run: python scripts/desktop-feasibility/windows-config-fixture.py
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always() && runner.os == 'Windows' && matrix.app == 'claude-desktop' && inputs.experiment == 'deterministic-full'
         with:
           name: deterministic-qualification-windows-config-fixture
-          path: ${{ runner.temp }}/configuration-fixture.json
+          path: ${{ runner.temp }}/configuration-fixture*.json
           if-no-files-found: ignore
           retention-days: 7
       - name: Prepare private receipt after installation environment exports
