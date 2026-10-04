@@ -63,6 +63,13 @@ enum FailureBoundary {
     ActionHit,
     Response,
     Transport,
+    TransportSpawn,
+    TransportIo,
+    TransportWait,
+    TransportStatus,
+    TransportSize,
+    TransportDecode,
+    TransportDeadline,
 }
 #[derive(Clone, Copy, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -452,6 +459,7 @@ fn supervise(
     driver: &Path,
     request: Zeroizing<String>,
     deadline: Instant,
+    failure: &mut FailureBoundary,
 ) -> Result<(Value, Option<Value>), Reason> {
     let mut command = Command::new("/usr/bin/python3");
     command.arg(driver).env_clear();
@@ -475,7 +483,11 @@ fn supervise(
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
-        .map_err(|_| Reason::ActionUnsupported)?;
+        .map_err(|_| {
+            *failure = FailureBoundary::TransportSpawn;
+            Reason::ActionUnsupported
+        })?;
+    *failure = FailureBoundary::TransportIo;
     let outcome = std::thread::scope(|scope| {
         let mut input = child.stdin.take()?;
         let output = child.stdout.take()?;
@@ -487,6 +499,7 @@ fn supervise(
         });
         let status = loop {
             if Instant::now() >= deadline {
+                *failure = FailureBoundary::TransportDeadline;
                 break None;
             }
             match child.try_wait() {
@@ -495,7 +508,10 @@ fn supervise(
                     Duration::from_millis(10)
                         .min(deadline.saturating_duration_since(Instant::now())),
                 ),
-                Err(_) => break None,
+                Err(_) => {
+                    *failure = FailureBoundary::TransportWait;
+                    break None;
+                }
             }
         };
         if status.is_none() {
@@ -504,13 +520,24 @@ fn supervise(
         }
         let written = writer.join().ok()?.ok();
         let bytes = reader.join().ok()??;
-        if written.is_none()
-            || !status.is_some_and(|status| status.success())
-            || bytes.len() > 65536
-            || Instant::now() >= deadline
-        {
+        if written.is_none() {
             return None;
         }
+        if Instant::now() >= deadline {
+            *failure = FailureBoundary::TransportDeadline;
+            return None;
+        }
+        if bytes.len() > 65536 {
+            *failure = FailureBoundary::TransportSize;
+            return None;
+        }
+        if !status.is_some_and(|status| status.success()) {
+            if !matches!(*failure, FailureBoundary::TransportWait) {
+                *failure = FailureBoundary::TransportStatus;
+            }
+            return None;
+        }
+        *failure = FailureBoundary::TransportDecode;
         decode(&bytes)
     });
     if outcome.is_none() {
@@ -672,7 +699,12 @@ impl ClaudeLinuxChatSession<'_> {
         };
         let payload = Zeroizing::new(request.to_string());
         self.failure_boundary = Some(FailureBoundary::Transport);
-        let (facts, binding) = supervise(&self.driver, payload, deadline)?;
+        let mut transport = FailureBoundary::Transport;
+        let outcome = supervise(&self.driver, payload, deadline, &mut transport);
+        if outcome.is_err() {
+            self.failure_boundary = Some(transport);
+        }
+        let (facts, binding) = outcome?;
         self.failure_boundary = failure_boundary(&facts);
         self.send_action_class = send_action_class(&facts);
         self.send_action_observation = send_action_observation(&facts);
@@ -1094,6 +1126,64 @@ mod owned_input_tests {
             let mut changed = valid.clone();
             changed[key] = value;
             assert!(owned_input_observation(&json!({"ownedInputObservation":changed})).is_none());
+        }
+    }
+}
+
+#[cfg(test)]
+mod main_mode_packet_tests {
+    use super::decode;
+    #[test]
+    fn actual_synthetic_main_packets_obey_decoder_contract() {
+        assert!(decode(br#"{"facts":{"schemaVersion":1,"mechanism":"claude-linux-native-chat","diagnosticsOnly":true,"stage":"sent","inputVerified":true,"pasteAttempted":true,"sendAttempted":true,"sendForwarded":true,"responseVerified":false,"toolVerified":false,"recoveryVerified":false,"sendActionClass":"click","sendActionObservation":{"actionCount":1,"activationMatchCount":1,"selectedIndex":0,"activationClass":"click"}},"binding":{"editor":["r","editor2"],"frame":["r","frame"],"editorIdentity":[61,"Write your prompt to Claude",""],"editorBounds":[20,20,300,80],"frameIdentity":[23,"Claude",""],"frameBounds":[0,0,800,600]}}"#).is_some());
+        assert!(decode(br#"{"facts":{"schemaVersion":1,"mechanism":"claude-linux-native-chat","diagnosticsOnly":true,"stage":"input-not-empty","inputVerified":false,"pasteAttempted":false,"sendAttempted":false,"sendForwarded":false,"responseVerified":false,"toolVerified":false,"recoveryVerified":false,"inputShape":{"charCount":21,"onlyLineBreaks":false,"onlyWhitespace":false,"onlyZeroWidthMarkers":false,"onlyObjectReplacement":false},"failureBoundary":"input"},"binding":null}"#).is_some());
+        assert!(decode(br#"{"facts":{"schemaVersion":1,"mechanism":"claude-linux-native-chat","diagnosticsOnly":true,"stage":"blocked","inputVerified":false,"pasteAttempted":false,"sendAttempted":false,"sendForwarded":false,"responseVerified":false,"toolVerified":false,"recoveryVerified":false,"failureBoundary":"request"},"binding":null}"#).is_some());
+    }
+}
+
+#[cfg(test)]
+mod transport_cause_tests {
+    use super::{FailureBoundary, supervise};
+    use std::{
+        fs,
+        time::{Duration, Instant},
+    };
+    use zeroize::Zeroizing;
+    #[test]
+    fn bounded_synthetic_driver_causes_remain_distinct() {
+        for (source, expected, budget) in [
+            (
+                "import sys; sys.stdout.write('invalid')",
+                "transport-decode",
+                2,
+            ),
+            ("import sys; sys.exit(7)", "transport-status", 2),
+            (
+                "import sys; sys.stdout.write('x'*70000)",
+                "transport-size",
+                2,
+            ),
+            ("import time; time.sleep(1)", "transport-deadline", 0),
+        ] {
+            let directory = tempfile::tempdir().unwrap();
+            let driver = directory.path().join("synthetic.py");
+            fs::write(&driver, source).unwrap();
+            let mut cause = FailureBoundary::Transport;
+            let timeout = if budget == 0 {
+                Duration::from_millis(20)
+            } else {
+                Duration::from_secs(budget)
+            };
+            assert!(
+                supervise(
+                    &driver,
+                    Zeroizing::new(String::new()),
+                    Instant::now() + timeout,
+                    &mut cause
+                )
+                .is_err()
+            );
+            assert_eq!(serde_json::to_value(cause).unwrap(), expected);
         }
     }
 }

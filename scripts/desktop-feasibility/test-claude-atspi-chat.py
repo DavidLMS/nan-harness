@@ -1081,4 +1081,33 @@ class EmptyClassCapabilityTests(unittest.TestCase):
         cap={};chat.flatten_hypertext(root,lambda m,n,*a:r[(m,n,*a)],7,lambda:None,inventory={},capability=cap)
         self.assertIsNone(cap['witness'])
 
+class MainPacketTests(unittest.TestCase):
+    def packet(self, mode='input-next-empty-class', change=False):
+        import io,json,sys
+        from unittest.mock import patch
+        a,c,b,h=EmptyClassCapabilityTests.fixture(self)
+        if change:a.empty_class_witness=None
+        class Custody:
+            def __init__(self,*args):pass
+            def verify(self):return True
+            def close(self):pass
+        request=dict(pid=7,bus='r',path='root',checkerPid=1,window=1,
+            bounds=[0,0,800,600],name='synthetic',nativeExecutable='/synthetic',
+            deadline=100,mode=mode,value='owned next prompt',binding=b,
+            profileAuthority={},history=h)
+        out=io.StringIO()
+        with patch.object(sys,'stdin',type('Input',(),{'buffer':io.BytesIO(json.dumps(request).encode())})()),patch.object(sys,'stdout',out),patch.object(chat,'ProfileCustody',Custody),patch.object(chat,'native_adapter',return_value=a),patch.object(chat,'Controller',return_value=c):
+            chat.main()
+        return json.loads(out.getvalue())
+    def test_new_mode_main_emits_existing_sent_packet(self):
+        p=self.packet();self.assertEqual(p['facts']['stage'],'sent')
+        self.assertTrue(p['facts']['sendForwarded']);self.assertEqual(set(p),{'facts','binding'})
+        self.assertEqual(len(p['binding']),6)
+    def test_missing_decoration_main_emits_closed_diagnostic_packet(self):
+        p=self.packet(change=True);self.assertEqual(p['facts']['stage'],'input-not-empty')
+        self.assertEqual(p['facts']['failureBoundary'],'input');self.assertFalse(p['facts']['pasteAttempted'])
+    def test_invalid_mode_main_emits_request_rejection_packet(self):
+        p=self.packet(mode='unrecognized');self.assertEqual(p['facts']['stage'],'blocked')
+        self.assertEqual(p['facts']['failureBoundary'],'request');self.assertIsNone(p['binding'])
+
 if __name__=='__main__':unittest.main()

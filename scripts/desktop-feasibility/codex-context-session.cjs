@@ -14,7 +14,7 @@ function connected(){
 }
 const blocked=reason=>({verified:false,reason,inputAuthorized:false});
 function create({page,alive,deadline,pwProof,makeWitness=require('./codex-send-context-witness.cjs').create,now=Date.now}){
- let session,editor,heldDOM,identity,closed=false;const group='nanh-passive-send-context';
+ let session,editor,heldDOM,identity,closed=false,proofFailure=null;const group='nanh-passive-send-context';
  const bounded=async work=>{let timer;try{return await Promise.race([work,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('deadline-or-owner')),Math.max(1,deadline-now()));})]);}finally{clearTimeout(timer);}};
  const fresh=async()=>{if(closed||now()>=deadline||!await alive()||now()>=deadline)throw Error('deadline-or-owner');};
  const send=async(method,params)=>{await fresh();const out=await bounded(session.send(method,{...params,...(method==='Runtime.callFunctionOn'?{objectGroup:group}:{})}));await fresh();if(out.exceptionDetails)throw Error('runtime-unavailable');return out;};
@@ -52,8 +52,9 @@ function create({page,alive,deadline,pwProof,makeWitness=require('./codex-send-c
   // Read-only document/retained-node proof during the one popup-close transition.
   // The complete PW source proof remains mandatory before subsequent input.
   async verifyRetainedDocument(){
-   try{if(!editor)return false;return await verifyDocument();}catch{return false;}
+   try{if(!editor){proofFailure='editor-unavailable';return false;}await verifyDocument();proofFailure=null;return true;}catch(error){proofFailure=failure(error).reason;return false;}
   },
+  retainedDocumentFailure:()=>proofFailure,
   async verifyHeld(held){
    try{if(!editor)return false;return await verify(held);}catch{return false;}
   },

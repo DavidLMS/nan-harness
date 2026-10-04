@@ -95,13 +95,15 @@ async function run(page,guard,ownerGuard,deadline,loan,workspace,selectionPolicy
         const closeCutoff=Math.min(deadline,Date.now()+2000);
         let closed=false;
         while(Date.now()<closeCutoff){
-          if(!custody()||!await alive()||!await context.verifyRetainedDocument())return null;
+          if(!custody()||!await alive()){facts.selectionFailure='deadline-or-owner';return null;}
+          if(!await context.verifyRetainedDocument()){facts.selectionFailure=context.retainedDocumentFailure();return null;}
           const state=await held.evaluate(sample,{opened:false,menu:null});
-          if(!custody()||!await alive()||!await context.verifyRetainedDocument())return null;
+          if(!custody()||!await alive()){facts.selectionFailure='deadline-or-owner';return null;}
+          if(!await context.verifyRetainedDocument()){facts.selectionFailure=context.retainedDocumentFailure();return null;}
           if(state.matched){closed=true;break;}
           await new Promise(resolve=>setTimeout(resolve,Math.min(50,Math.max(0,closeCutoff-Date.now()))));
         }
-        if(!closed)return null;
+        if(!closed){facts.selectionFailure='source-close-unproved';return null;}
         await menu.dispose();menu=null;
         facts.selectionStage='closed-source';
         const closedA=await held.evaluate(sample,{opened:false,menu:null}),closedB=await held.evaluate(sample,{opened:false,menu:null});

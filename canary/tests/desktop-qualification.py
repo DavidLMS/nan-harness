@@ -2832,6 +2832,15 @@ class QualificationTests(unittest.TestCase):
             pending=dict(status='blocked',diagnosticsOnly=True,clickAttempted=True,clickCompleted=True,
                 sendAuthorized=False,selectionClickAttempted=True,selectionStage=stage,reason='guard')
             self.assertEqual(q.public_onboarding(setup|{'workspaceMenuObservation':pending},'chatgpt-desktop')['workspaceMenuObservation'],pending)
+        transition=dict(status='blocked',diagnosticsOnly=True,clickAttempted=True,clickCompleted=True,
+            sendAuthorized=False,selectionClickAttempted=True,selectionStage='original-popup-close',reason='guard')
+        for cause in ['deadline-or-owner','identity-changed','editor-changed','editor-unavailable','runtime-unavailable','source-close-unproved']:
+            receipt=transition|{'selectionFailure':cause}
+            self.assertEqual(q.public_onboarding(setup|{'workspaceMenuObservation':receipt},'chatgpt-desktop')['workspaceMenuObservation'],receipt)
+        for changed in [{'selectionFailure':[]},{'selectionFailure':'PRIVATE'},
+            {'selectionFailure':'editor-changed','selectionStage':'item-click'},
+            {'selectionFailure':'editor-changed','status':'observed'}]:
+            with self.assertRaises(ValueError):q.public_onboarding(setup|{'workspaceMenuObservation':transition|changed},'chatgpt-desktop')
         for changed in ({'selectionStage':[]},{'selectionStage':'PRIVATE'},{'selectionStage':'item-click'}):
             with self.assertRaises(ValueError):q.public_onboarding(setup|{'workspaceMenuObservation':staged|changed},'chatgpt-desktop')
         for change in [{'selectionClickAttempted':False},{'selectionClickCompleted':False},
@@ -4013,6 +4022,21 @@ class ClaudeLinuxOwnedInputTests(unittest.TestCase):
                 {key:value for key,value in facts.items() if key!='embeddedTextObservation'}):
                 path.write_text(json.dumps(changed))
                 with self.assertRaises(ValueError):q.semantic_observations(root,'claude-desktop')
+
+class ClaudeLinuxTransportCauseTests(unittest.TestCase):
+    def test_closed_transport_causes_cannot_certify_submission(self):
+        good=dict(schemaVersion=1,mechanism='claude-linux-native-chat',diagnosticsOnly=True,
+            stage='blocked',submittedTurns=1,inputVerifiedTurns=1,copiedResponses=1,
+            retryAttempted=False,clipboardCleared=True)
+        with tempfile.TemporaryDirectory() as root:
+            path=Path(root)/'transport.json'
+            for cause in ['transport-spawn','transport-io','transport-wait','transport-status',
+                'transport-size','transport-decode','transport-deadline']:
+                receipt=good|{'failureBoundary':cause};path.write_text(json.dumps(receipt))
+                self.assertEqual(q.semantic_observations(root,'claude-desktop'),[receipt])
+                for changed in [{'stage':'sent'},{'failureBoundary':[]},{'failureBoundary':'PRIVATE'},{'rawStderr':'PRIVATE'}]:
+                    path.write_text(json.dumps(receipt|changed))
+                    with self.assertRaises(ValueError):q.semantic_observations(root,'claude-desktop')
 
 class ClaudeWindowsProfileSealTests(unittest.TestCase):
     def test_closed_stage_receipts_and_document_indices(self):
