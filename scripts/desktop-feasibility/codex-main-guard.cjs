@@ -3,11 +3,24 @@
 const guards=new WeakSet(),owners=new WeakMap();
 function createHeldMainGuard(held, browser, owner, deadline, route,
   identity,pause,requireMainScope,allowInitialAppearance,requireDocumentFocus,
-  {sameCorrelationIdentity,settleFolderAuxiliary,now,requireVisibleDocument=false}) {
+  {sameCorrelationIdentity,settleFolderAuxiliary,now,requireVisibleDocument=false,progress=()=>{}}) {
   let actionsStarted=false,appearanceRetried=false,folderSettleTicket=false,folderSettleGranted=false;
   let activationSettleTicket=false,activationSettleGranted=false,mainScopeProved=false;
   let auxiliary=null, auxiliaryIdentity=null, failure='unmeasured', failureDetails=null;
-  const reject=reason=>{failure=reason;return false;};
+  const started=now();
+  let nativeProofCount=0,nativeProofMs=0,identityCount=0,identityMs=0;
+  const checkpoint=phase=>{
+    const bounded=value=>Math.min(600000,Math.max(0,Math.floor(value)));
+    try {progress({phase,elapsedMs:bounded(now()-started),
+      nativeProofCount:Math.min(4096,nativeProofCount),nativeProofMs:bounded(nativeProofMs),
+      identityCount:Math.min(4096,identityCount),identityMs:bounded(identityMs)});}catch {}
+  };
+  const reject=reason=>{failure=reason;checkpoint('rejected');return false;};
+  const identify=async(page,phase)=>{
+    checkpoint(phase);const begin=now();identityCount++;
+    try {return await identity(page,deadline);}
+    finally {identityMs+=now()-begin;checkpoint(phase);}
+  };
   const rejectPageSet=(reason,initial,current)=>{
     const count=pages=>pages.length<=32?pages.length:null;
     failureDetails={reason,initialCount:count(initial),currentCount:count(current),
@@ -18,7 +31,10 @@ function createHeldMainGuard(held, browser, owner, deadline, route,
   const timely=()=>now()<deadline||reject('deadline');
   const valid=()=>{
     if(now()>=deadline)return reject('deadline');
-    if(owner()!==true)return reject('native-ownership');
+    checkpoint('native-ownership');const begin=now();nativeProofCount++;
+    let owned;
+    try {owned=owner();}finally {nativeProofMs+=now()-begin;checkpoint('native-ownership');}
+    if(owned!==true)return reject('native-ownership');
     return now()<deadline||reject('deadline');
   };
   const measure=async function measure() {
@@ -38,14 +54,14 @@ function createHeldMainGuard(held, browser, owner, deadline, route,
         if(!valid())return false;
         const before=pages();
         if(before.length!==initial.length||!before.every(page=>initial.includes(page)))return rejectPageSet('before-sample-changed',initial,before);
-        const main=await identity(held.page,deadline);
+        const main=await identify(held.page,'main-identity');
         if(!timely())return false;
         if(!sameCorrelationIdentity(held,main))return reject('main-identity');
         if(requireDocumentFocus&&!main.scope.focused)return reject('main-focus');
         if(requireVisibleDocument&&main.scope.visibleDocument!==true)return reject('main-scope');
         if((requireMainScope||(allowInitialAppearance&&!actionsStarted)||activationSettleTicket)&&!main.scope.mainScope)return reject('main-scope');
         if(extra) {
-          const aux=await identity(extra,deadline);
+          const aux=await identify(extra,'auxiliary-identity');
           const expected=auxiliaryIdentity??candidateAux;
           if(!timely())return false;
           if(expected&&!sameCorrelationIdentity(expected,aux))return reject('auxiliary-identity');
@@ -62,7 +78,7 @@ function createHeldMainGuard(held, browser, owner, deadline, route,
         if(sample+1<samples)await pause(Math.min(100,Math.max(0,deadline-now())));
       }
       if(extra&&!auxiliary){auxiliary=extra;auxiliaryIdentity=candidateAux;}
-      return true;
+      checkpoint('complete');return true;
     } catch {return reject(now()>=deadline?'deadline':'query-failed');}
   };
   const prove=async()=>{

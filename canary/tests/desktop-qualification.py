@@ -73,6 +73,24 @@ class RendererCheckpointTests(unittest.TestCase):
                 path.write_text(json.dumps({**value,**change}))
                 with self.assertRaises(ValueError):q.semantic_observations(tmp,'chatgpt-desktop')
 
+    def test_guard_progress_is_closed_and_keeps_partial_work_unqualified(self):
+        guard = dict(phase='main-identity', elapsedMs=3000, nativeProofCount=2,
+                     nativeProofMs=1800, identityCount=1, identityMs=20)
+        value = dict(schemaVersion=1, mechanism='renderer-inventory', diagnosticsOnly=True,
+            app='chatgpt-desktop', endpointOwned=True, launcherOwned=True, attached=True,
+            pageCount=1, textareaCount=0, editableCount=0, sendCount=0, retryCount=0,
+            newThreadCount=0, loginCount=0, dialogCount=0, errorCategory='unclassified',
+            observerStage='folder-trust', mainGuardObservation=guard)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'facts.json'
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(tmp, 'chatgpt-desktop'), [value])
+            for change in ({'phase': 'PRIVATE'}, {'path': 'PRIVATE'}, {'identityMs': True},
+                           {'nativeProofCount': 4097}, {'elapsedMs': -1}, {'identityMs': 600001}):
+                path.write_text(json.dumps({**value, 'mainGuardObservation': {**guard, **change}}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(tmp, 'chatgpt-desktop')
+
 
 class CodexDriverFactsTests(unittest.TestCase):
     def test_closed_driver_facts_reject_private_payloads_and_unproved_retry(self):

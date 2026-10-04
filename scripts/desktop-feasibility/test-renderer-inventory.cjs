@@ -626,3 +626,27 @@ try {
   assert.equal(JSON.parse(fs.readFileSync(output,'utf8')).observerStage,'complete');
 } finally {fs.rmSync(checkpointRoot,{recursive:true,force:true});}
 console.log('Renderer checkpoint survives interrupted work without claiming completion');
+
+// Persist the pending boundary before an awaited identity query. Diagnostics
+// cannot grant ownership, even when their consumer throws.
+(async()=>{
+  const {createHeldMainGuard}=require('./codex-main-guard.cjs');
+  let now=0,release,receipt,owned=true;
+  const page={},held={page,key:'main'};
+  const browser={contexts:()=>[{pages:()=>[page]}]};
+  const pending=new Promise(resolve=>{release=resolve;});
+  const guard=createHeldMainGuard(held,browser,()=>{now+=7;return owned;},1000,
+    ()=> 'avatarOverlay',async()=>{await pending;now+=11;return {key:'main',scope:{focused:true,mainScope:true}};},
+    async()=>{},false,false,true,{now:()=>now,sameCorrelationIdentity:(a,b)=>a.key===b.key,
+      settleFolderAuxiliary:async()=>false,progress:value=>{receipt=value;throw Error('observer unavailable');}});
+  const running=guard();
+  assert.equal(receipt.phase,'main-identity');
+  assert.equal(receipt.nativeProofCount,1);assert.equal(receipt.nativeProofMs,7);
+  release();assert.equal(await running,true);
+  assert.equal(receipt.phase,'complete');assert.equal(receipt.identityMs,11);
+  assert.equal(receipt.nativeProofMs,14);assert.equal(receipt.elapsedMs,25);
+  assert(!JSON.stringify(receipt).includes('mainScope'));
+  owned=false;assert.equal(await guard(),false);assert.equal(receipt.phase,'rejected');
+  assert.equal(guard.failure(),'native-ownership');
+  console.log('Retained guard pending boundary, timing and observer failure fixtures PASS');
+})().catch(error=>{console.error(error);process.exitCode=1;});

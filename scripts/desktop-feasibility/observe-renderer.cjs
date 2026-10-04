@@ -274,10 +274,10 @@ async function settleFolderAuxiliary(held,extra,pages,valid,deadline,route,ident
 // Later source-known inert avatar pages never become selectable input targets.
 function heldMainGuard(held, browser, owner, deadline, route,
   identity=correlationIdentity,pause=ms=>new Promise(resolve=>setTimeout(resolve,ms)),
-  requireMainScope=false,allowInitialAppearance=false,requireDocumentFocus=true,scopedDOM=false) {
+  requireMainScope=false,allowInitialAppearance=false,requireDocumentFocus=true,scopedDOM=false,progress=()=>{}) {
   return require('./codex-main-guard.cjs').createHeldMainGuard(held,browser,owner,deadline,route,
     identity,pause,requireMainScope,allowInitialAppearance,requireDocumentFocus,
-    {sameCorrelationIdentity,settleFolderAuxiliary,now:()=>Date.now(),requireVisibleDocument:scopedDOM});
+    {sameCorrelationIdentity,settleFolderAuxiliary,now:()=>Date.now(),requireVisibleDocument:scopedDOM,progress});
 }
 // One public page activation; it never substitutes for fresh focus/owner proof.
 async function focusCapturedMain(held,proof,deadline,identity=correlationIdentity,
@@ -660,7 +660,8 @@ async function run() {
         const folderAuthority=require('./codex-folder-trust.cjs').authority(request.ownedWorkspace);
         trustGuard=(!profileAuthority&&focusGuard)||heldMainGuard(initialMain,browser,onboardingOwnerGuard,correlationDeadline,
           require('./codex-onboarding.cjs').sourceRoute,correlationIdentity,
-          ms=>new Promise(resolve=>setTimeout(resolve,ms)),false,process.platform==='win32',!directCDP,directCDP);
+          ms=>new Promise(resolve=>setTimeout(resolve,ms)),false,process.platform==='win32',!directCDP,directCDP,
+          receipt=>{facts.mainGuardObservation=receipt;save();});
         folderTrust=await require('./codex-folder-trust.cjs').run(page,trustGuard,
           correlationDeadline,folderAuthority,()=>trustGuard.sealInitialActions(),
           receipt=>{facts.folderTrustObservation=receipt;save();});

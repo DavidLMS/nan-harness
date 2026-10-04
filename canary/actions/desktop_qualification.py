@@ -2427,13 +2427,24 @@ def semantic_observations(directory, app):
             record.update({key: value[key] for key in fields - {'schemaVersion', 'mechanism'}})
         elif mechanism == 'renderer-inventory':
             fields = set('schemaVersion mechanism diagnosticsOnly app endpointOwned launcherOwned attached pageCount textareaCount editableCount sendCount retryCount newThreadCount loginCount dialogCount errorCategory'.split())
-            if set(value) - {'observerStage', 'documentState', 'startupScreen', 'landingCounts', 'onboardingCounts', 'publicOnboarding', 'mainAuxCorrelation', 'codexSession', 'initialMainBinding', 'initialMainConfirmation', 'initialMainActivation', 'sourceScreen', 'managedSignIn', 'sourceDialog', 'nativeOwnershipFailure', 'nativeListenerShape', 'sourceDialogPhase', 'folderTrustObservation'} != fields or value['app'] != app or value['diagnosticsOnly'] is not True:
+            if set(value) - {'observerStage', 'documentState', 'startupScreen', 'landingCounts', 'onboardingCounts', 'publicOnboarding', 'mainAuxCorrelation', 'codexSession', 'initialMainBinding', 'initialMainConfirmation', 'initialMainActivation', 'sourceScreen', 'managedSignIn', 'sourceDialog', 'nativeOwnershipFailure', 'nativeListenerShape', 'sourceDialogPhase', 'folderTrustObservation', 'mainGuardObservation'} != fields or value['app'] != app or value['diagnosticsOnly'] is not True:
                 raise ValueError('invalid renderer inventory identity')
             if 'sourceDialogPhase' in value:
                 if app != 'chatgpt-desktop' or type(value['sourceDialogPhase']) is not str:
                     raise ValueError('invalid source dialog progress')
                 enum(record, value, 'sourceDialogPhase', {'guard-before', 'identity-before',
                      'hold-dialog', 'sample-first', 'sample-second', 'identity-after', 'guard-after', 'finished'})
+            if 'mainGuardObservation' in value:
+                guard = value['mainGuardObservation']
+                numbers = {'elapsedMs', 'nativeProofCount', 'nativeProofMs', 'identityCount', 'identityMs'}
+                if (app != 'chatgpt-desktop' or type(guard) is not dict
+                        or set(guard) != numbers | {'phase'}
+                        or type(guard['phase']) is not str or guard['phase'] not in {
+                            'native-ownership', 'main-identity', 'auxiliary-identity', 'complete', 'rejected'}
+                        or any(type(guard[key]) is not int or not 0 <= guard[key] <= (
+                            4096 if key.endswith('Count') else 600000) for key in numbers)):
+                    raise ValueError('invalid main guard progress')
+                record['mainGuardObservation'] = guard
             if 'folderTrustObservation' in value:
                 trust = value['folderTrustObservation']
                 phases = {'initial', 'authority-before', 'guard', 'authority-after', 'sample-initial',
