@@ -380,13 +380,17 @@ fn persist_written_configuration(
     {
         // Trial-only variation: close the fully written and synced file handle,
         // retaining tempfile's original RAII path and atomic replacement contract.
-        let result = persist_closed_configuration(temporary.into_temp_path(), path)
-            .inspect_err(|error| {
-                if error.error.raw_os_error() == Some(32) {
-                    qualification_persist_owners::observe_retained_path(&error.path, path);
-                }
-            })
-            .map_err(|error| ClaudeDesktopError::Write(error.error));
+        let result = persist_closed_configuration_until(
+            temporary.into_temp_path(),
+            path,
+            qualification_persist_owners::configuration_retry_deadline(),
+        )
+        .inspect_err(|error| {
+            if error.error.raw_os_error() == Some(32) {
+                qualification_persist_owners::observe_retained_path(&error.path, path);
+            }
+        })
+        .map_err(|error| ClaudeDesktopError::Write(error.error));
         return qualification_prelaunch::observe_configuration_persist(result, document);
     }
     #[cfg(all(windows, feature = "desktop-qualification"))]
@@ -483,13 +487,25 @@ fn persist_windows_configuration(
     }
 }
 
-#[cfg(all(windows, any(feature = "desktop-qualification", test)))]
+#[cfg(all(windows, test))]
 fn persist_closed_configuration(
-    mut temporary: tempfile::TempPath,
+    temporary: tempfile::TempPath,
     path: &Path,
 ) -> Result<(), tempfile::PathPersistError> {
+    persist_closed_configuration_until(
+        temporary,
+        path,
+        std::time::Instant::now() + std::time::Duration::from_millis(250),
+    )
+}
+
+#[cfg(all(windows, any(feature = "desktop-qualification", test)))]
+fn persist_closed_configuration_until(
+    mut temporary: tempfile::TempPath,
+    path: &Path,
+    deadline: std::time::Instant,
+) -> Result<(), tempfile::PathPersistError> {
     use std::time::{Duration, Instant};
-    let deadline = Instant::now() + Duration::from_millis(250);
     loop {
         match temporary.persist(path) {
             Ok(()) => return Ok(()),
@@ -768,6 +784,37 @@ mod configuration_persist_tests {
         let result = persist_closed_configuration(temporary.into_temp_path(), &destination);
         release.join().unwrap();
         assert!(result.is_ok());
+        assert_eq!(fs::read(destination).unwrap(), b"replacement");
+    }
+
+    #[test]
+    fn closed_persist_can_outlast_old_window_without_rewriting_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let destination = temp.path().join("config.json");
+        fs::write(&destination, b"original").unwrap();
+        let held = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(1)
+            .open(&destination)
+            .unwrap();
+        let mut temporary = tempfile::Builder::new()
+            .make_in(temp.path(), nan_harness_private_fs::open_private_new)
+            .unwrap();
+        temporary.write_all(b"replacement").unwrap();
+        temporary.as_file().sync_all().unwrap();
+        let original_path = temporary.path().to_path_buf();
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(400));
+            drop(held);
+        });
+        let result = persist_closed_configuration_until(
+            temporary.into_temp_path(),
+            &destination,
+            std::time::Instant::now() + std::time::Duration::from_secs(2),
+        );
+        release.join().unwrap();
+        assert!(result.is_ok());
+        assert!(!original_path.exists());
         assert_eq!(fs::read(destination).unwrap(), b"replacement");
     }
 

@@ -75,6 +75,24 @@ fn cutoff(value: &str, now: SystemTime, instant: Instant) -> Option<(u64, Instan
     (remaining > 0 && remaining <= 45_000)
         .then(|| (epoch, instant + Duration::from_millis(remaining)))
 }
+// A longer qualification retry window must consume the existing parent budget.
+#[cfg(windows)]
+pub(super) fn configuration_retry_deadline() -> Instant {
+    let now = Instant::now();
+    retry_deadline(
+        std::env::var("NANH_CLAUDE_PERSIST_CUTOFF_MS")
+            .ok()
+            .as_deref(),
+        SystemTime::now(),
+        now,
+    )
+}
+#[cfg(any(windows, test))]
+fn retry_deadline(value: Option<&str>, system: SystemTime, now: Instant) -> Instant {
+    value
+        .and_then(|value| cutoff(value, system, now))
+        .map_or(now, |(_, parent)| parent.min(now + Duration::from_secs(2)))
+}
 #[cfg(windows)]
 fn regular(path: &Path) -> bool {
     use std::os::windows::fs::MetadataExt as _;
@@ -291,6 +309,22 @@ mod tests {
                 .1
                 .duration_since(instant),
             Duration::from_millis(200)
+        );
+    }
+    #[test]
+    fn sharing_retry_is_clipped_to_original_parent_cutoff() {
+        let system = UNIX_EPOCH + Duration::from_secs(1);
+        let now = Instant::now();
+        for value in [None, Some("bad"), Some("1000"), Some("46001")] {
+            assert_eq!(retry_deadline(value, system, now), now);
+        }
+        assert_eq!(
+            retry_deadline(Some("1200"), system, now),
+            now + Duration::from_millis(200)
+        );
+        assert_eq!(
+            retry_deadline(Some("5000"), system, now),
+            now + Duration::from_secs(2)
         );
     }
     #[test]
