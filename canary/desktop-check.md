@@ -143,9 +143,17 @@ observations describe completed runs, rather than additional qualification:
 | --- | --- | --- | --- |
 | Zed | Response and file-tool steps pass; pointer and accessibility Retry acknowledgements do not produce provider recovery. | Three complete probes pass the expanded retry policy. | Three complete probes pass with direct native clipboard transport and all cleanup checks. |
 | Hermes | Three complete probes pass with renderer process ownership. | Three complete probes pass with private native userData and bounded cold-start waits. | Three complete probes pass after ordinary onboarding dismissal and fresh catalog readiness, including explicit UI Retry and cleanup. |
-| ChatGPT / Codex | Official Linux beta package; native conversation qualification remains open. | All three latest endpoints are owned; an unknown separate dialog blocks role selection. Cleanup passes. | All three probes acquire a renderer, but a foreign overlay blocks the public role form before action. Process absence and all cleanup pass. |
-| Claude | Official Linux beta package; native conversation qualification remains open. | Native Chat trials verify input and Send in some sessions; response scope and action stability still block qualification. Cleanup passes. | One classic editor is acquired after an owned window fit. Passive UIA readback remains unproved; cleanup now passes for both acquired and failed-acquisition sessions. |
+| ChatGPT / Codex | Three guarded clicks accept only the private test folder; the subsequent page/auxiliary transition still blocks conversation entry. | Original page and role source are identified; native focus activation/readiness remains unstable before onboarding. | The folder-consent dialog is source-identified, but its guarded Trust proof blocks before any click. Main/auxiliary ownership and inertness succeed in some sessions. |
+| Claude | A source editor and visible ancestor chain are proven; a native conversation controller remains incomplete. | Two sessions verify input, response and real file-tool use; request-specific failure authority blocks before the third Send. | The CLI cannot atomically persist normal configuration because of a sharing violation. Cross-process writes with retained profile-directory handles pass before vendor installation. |
 | Pen | Software GLES removes GPU startup failure; three fresh sessions show sign-in and no editor. No official account-free route found for the frozen release. | Two probes expose composer/Send; another exposes sign-in. Conversation adapter remains unimplemented. | Owned renderer loads sign-in and a dialog; conversation adapter remains unimplemented. |
+
+Current Codex evidence is [37173071111](https://github.com/DavidLMS/nan-harness/actions/runs/37173071111)
+and [37173859066](https://github.com/DavidLMS/nan-harness/actions/runs/37173859066).
+Current Claude evidence is Linux [37170788593](https://github.com/DavidLMS/nan-harness/actions/runs/37170788593),
+macOS [37173597014](https://github.com/DavidLMS/nan-harness/actions/runs/37173597014),
+and Windows [37173833091](https://github.com/DavidLMS/nan-harness/actions/runs/37173833091).
+Both cleanup scopes pass and invalid closed diagnostic events are zero in these runs.
+None adds a qualified cell.
 
 The completed evidence is available in runs
 [36975359718](https://github.com/DavidLMS/nan-harness/actions/runs/36975359718)
@@ -2693,3 +2701,14 @@ single-attempt requirements remain in force. Advisory row-shape retry counts
 now count this exact source control; absent row anchors remain unresolved.
 A classic composer label alone does not prove which transcript/error renderer
 is active, and this correction does not establish successful recovery.
+
+The October 4 macOS candidate also supports a separate causal recovery mode:
+it requires two prior UI-verified turns with stable main-request context, a
+unique third user prompt, one consumed request-specific provider failure,
+a clean Chat before Send, and two same-call proofs of the current error group
+and retained **Try again** control. Legacy marker-based admission remains
+unchanged. The current hosted result refuses to arm that capability; closed
+context/history/stream diagnostics are advisory and cannot qualify recovery.
+The main qualification workflow selects the same isolated Codex and Claude
+conversation paths as the scoped feasibility runs. Final full-matrix acceptance
+on a converged commit remains pending.
