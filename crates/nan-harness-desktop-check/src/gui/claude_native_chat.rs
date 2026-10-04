@@ -395,25 +395,33 @@ impl ClaudeNativeChatSession<'_> {
         {
             return Err(Reason::ActionUnsupported);
         }
-        match self.action(
-            "retry-temporal",
-            "NAN_CHECK_EXPECTED_FAILURE",
-            Instant::now() + Duration::from_millis(u64::from(CHAT_TURN_MAX_MILLIS)),
-        ) {
-            Ok(ChatTurnStage::Retried) => {
-                self.facts.retry_attempted = true;
-                Ok(())
+        let deadline = Instant::now() + Duration::from_millis(u64::from(CHAT_TURN_MAX_MILLIS));
+        loop {
+            match self.action("retry-temporal", "NAN_CHECK_EXPECTED_FAILURE", deadline) {
+                Ok(ChatTurnStage::Retried) => {
+                    self.facts.retry_attempted = true;
+                    return Ok(());
+                }
+                // The native helper has not pressed anything in this case.
+                // Recheck the complete held scope within this one consumed intent.
+                Ok(ChatTurnStage::Control) => {}
+                Ok(ChatTurnStage::ActionUncertain) => {
+                    self.facts.retry_attempted = true;
+                    return Err(Reason::ActionUnsupported);
+                }
+                Ok(_) => return Err(Reason::ActionUnsupported),
+                Err(reason) => {
+                    self.facts.retry_attempted = true;
+                    self.facts.stage = ChatTurnStage::ActionUncertain;
+                    return Err(reason);
+                }
             }
-            Ok(ChatTurnStage::ActionUncertain) => {
-                self.facts.retry_attempted = true;
-                Err(Reason::ActionUnsupported)
+            if Instant::now() >= deadline {
+                return Err(Reason::Timeout);
             }
-            Ok(_) => Err(Reason::ActionUnsupported),
-            Err(reason) => {
-                self.facts.retry_attempted = true;
-                self.facts.stage = ChatTurnStage::ActionUncertain;
-                Err(reason)
-            }
+            std::thread::sleep(
+                Duration::from_millis(100).min(deadline.saturating_duration_since(Instant::now())),
+            );
         }
     }
     pub(crate) fn finish(
