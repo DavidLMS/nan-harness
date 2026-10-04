@@ -144,8 +144,9 @@ impl SemanticBackend {
             && std::env::var("NANH_CLAUDE_MAC_NATIVE_CHAT").as_deref() == Ok("1")
         {
             let roots = authority.native_roots.ok_or(Reason::IsolationUnavailable)?;
-            let mut ui =
-                SemanticUi::Claude(gui.claude_native_chat_session(&self.directory, roots)?);
+            let mut ui = SemanticUi::Claude(Box::new(
+                gui.claude_native_chat_session(&self.directory, roots)?,
+            ));
             let outcome = complete_scenario(&mut ui, &scenario, &self.directory, result).await;
             return ui.finish(scenario.gate, outcome);
         }
@@ -191,7 +192,7 @@ impl SemanticBackend {
 enum SemanticUi<'a> {
     Zed(Box<NativeClipboardSession<'a>>),
     #[cfg(target_os = "macos")]
-    Claude(ClaudeNativeChatSession<'a>),
+    Claude(Box<ClaudeNativeChatSession<'a>>),
     #[cfg(windows)]
     ClaudeWindows(ClaudeWindowsChatSession<'a>),
     Renderer(RendererSession<'a>),
@@ -199,6 +200,13 @@ enum SemanticUi<'a> {
 }
 
 impl SemanticUi<'_> {
+    fn failure_prompt(&self) -> Result<String, Reason> {
+        match self {
+            #[cfg(target_os = "macos")]
+            Self::Claude(_) => semantic_marker("Check the expected provider failure"),
+            _ => Ok("Check the expected provider failure".into()),
+        }
+    }
     fn methods(&self) -> (InputMode, ResponseVerification) {
         match self {
             Self::Zed(_) => (
@@ -239,6 +247,7 @@ impl SemanticUi<'_> {
             }
             #[cfg(target_os = "macos")]
             Self::Claude(session) => {
+                session.prepare_turn(prompt, matches!(purpose, DomPurpose::Failure), gate)?;
                 session.new_turn(prompt)?;
                 match purpose {
                     DomPurpose::Response => {
@@ -287,10 +296,9 @@ impl SemanticUi<'_> {
                 400
             }
             #[cfg(target_os = "macos")]
-            Self::Claude(_) => {
-                gate.fail_recoverable_scenario(true);
-                503
-            }
+            // Claude arms a request-specific failure epoch immediately before
+            // its clean/Sent native turn, rather than failing detached requests.
+            Self::Claude(_) => 503,
             #[cfg(windows)]
             Self::ClaudeWindows(_) => {
                 gate.fail_recoverable_scenario(true);
@@ -438,8 +446,9 @@ async fn complete_scenario(
     gate.arm_fixture_response("NAN_CHECK_EXPECTED_FAILURE")
         .map_err(|()| Reason::ProviderFailed)?;
     ui.inject_failure(gate, directory)?;
+    let failure_prompt = ui.failure_prompt()?;
     let failure = ui.turn(
-        "Check the expected provider failure",
+        &failure_prompt,
         "NAN_CHECK_EXPECTED_FAILURE",
         DomPurpose::Failure,
         gate,

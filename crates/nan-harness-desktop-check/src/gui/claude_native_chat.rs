@@ -2,7 +2,7 @@
 use super::{Gui, clipboard};
 use crate::native::{CHAT_TURN_MAX_MILLIS, ChatActionPhase, failure_label};
 use crate::native::{ChatTurnStage, GuardFailure};
-use crate::provider::ProviderGate;
+use crate::provider::{ClaudeFailureEpoch, ProviderGate};
 use crate::report::Reason;
 use nan_harness_private_fs::open_private_new;
 use serde::Serialize;
@@ -85,11 +85,16 @@ impl Default for Facts {
         }
     }
 }
+struct SubmittedFailureTurn {
+    epoch: ClaudeFailureEpoch,
+}
 pub(crate) struct ClaudeNativeChatSession<'a> {
     gui: &'a Gui,
     native_roots: &'a crate::probe::NativeRoots,
     destination: PathBuf,
     prompt: Zeroizing<String>,
+    failure_epoch: Option<ClaudeFailureEpoch>,
+    submitted_failure: Option<SubmittedFailureTurn>,
     retry_ready: bool,
     failure_details_attempted: bool,
     facts: Facts,
@@ -132,6 +137,8 @@ impl Gui {
             native_roots,
             destination: directory.join(format!("claude-native-chat-{}.json", nonce()?)),
             prompt: Zeroizing::new(String::new()),
+            failure_epoch: None,
+            submitted_failure: None,
             retry_ready: false,
             failure_details_attempted: false,
             facts: Facts::default(),
@@ -140,10 +147,15 @@ impl Gui {
 }
 impl ClaudeNativeChatSession<'_> {
     fn observe_provider(&mut self, gate: &ProviderGate) {
+        let epoch = self
+            .submitted_failure
+            .as_ref()
+            .map(|turn| turn.epoch)
+            .or(self.failure_epoch);
         self.facts.provider_observation = Some(ProviderObservation {
             generation_observed: gate.generation_count() > 0,
             fixture_response_verified: gate.fixture_response_verified(),
-            failure_observed: gate.failure_observed(),
+            failure_observed: epoch.is_some_and(|epoch| gate.claude_failure_turn_observed(epoch)),
         });
     }
     fn action(
@@ -152,6 +164,12 @@ impl ClaudeNativeChatSession<'_> {
         marker: &str,
         deadline: Instant,
     ) -> Result<ChatTurnStage, Reason> {
+        if Instant::now() >= deadline {
+            return Err(Reason::Timeout);
+        }
+        if !self.native_roots.verifies_created_roots() {
+            return Err(Reason::IsolationUnavailable);
+        }
         if Instant::now() >= deadline {
             return Err(Reason::Timeout);
         }
@@ -191,6 +209,22 @@ impl ClaudeNativeChatSession<'_> {
         self.facts.action_phase = Some(ChatActionPhase::Completed);
         Ok(stage)
     }
+    pub(crate) fn prepare_turn(
+        &mut self,
+        prompt: &str,
+        failure: bool,
+        gate: &ProviderGate,
+    ) -> Result<(), Reason> {
+        if (failure && (self.facts.submitted_turns != 2 || self.facts.copied_responses != 2))
+            || self.failure_epoch.is_some()
+        {
+            return Err(Reason::ActionUnsupported);
+        }
+        self.failure_epoch = gate
+            .prepare_claude_turn(prompt, failure)
+            .map_err(|()| Reason::ProviderFailed)?;
+        Ok(())
+    }
     pub(crate) fn new_turn(&mut self, prompt: &str) -> Result<(), Reason> {
         // Only roots created after proving both native directories absent can
         // authorize replacing a draft. Keep their original identity and privacy.
@@ -204,7 +238,11 @@ impl ClaudeNativeChatSession<'_> {
         self.failure_details_attempted = false;
         self.prompt = Zeroizing::new(prompt.to_owned());
         let result = self.action(
-            "input-replace-owned",
+            if self.failure_epoch.is_some() {
+                "input-failure-owned"
+            } else {
+                "input-replace-owned"
+            },
             "",
             Instant::now() + Duration::from_millis(u64::from(CHAT_TURN_MAX_MILLIS)),
         );
@@ -212,6 +250,10 @@ impl ClaudeNativeChatSession<'_> {
             Ok(ChatTurnStage::Sent) => {
                 self.facts.input_verified_turns += 1;
                 self.facts.submitted_turns += 1;
+                self.submitted_failure = self
+                    .failure_epoch
+                    .take()
+                    .map(|epoch| SubmittedFailureTurn { epoch });
                 Ok(())
             }
             Ok(
@@ -269,8 +311,22 @@ impl ClaudeNativeChatSession<'_> {
         let deadline = Instant::now() + timeout;
         loop {
             self.observe_provider(gate);
+            let authority = self
+                .submitted_failure
+                .as_ref()
+                .is_some_and(|turn| gate.claude_failure_turn_observed(turn.epoch));
+            if !authority {
+                if Instant::now() >= deadline {
+                    return Err(Reason::Timeout);
+                }
+                std::thread::sleep(
+                    Duration::from_millis(100)
+                        .min(deadline.saturating_duration_since(Instant::now())),
+                );
+                continue;
+            }
             let observed = self.action(
-                "retry-ready",
+                "retry-ready-temporal",
                 "NAN_CHECK_EXPECTED_FAILURE",
                 deadline
                     .min(Instant::now() + Duration::from_millis(u64::from(CHAT_TURN_MAX_MILLIS))),
@@ -285,7 +341,7 @@ impl ClaudeNativeChatSession<'_> {
                     if gate.failure_observed() && !self.failure_details_attempted =>
                 {
                     let ready = self.action(
-                        "failure-details-ready",
+                        "failure-details-ready-temporal",
                         "NAN_CHECK_EXPECTED_FAILURE",
                         deadline.min(
                             Instant::now() + Duration::from_millis(u64::from(CHAT_TURN_MAX_MILLIS)),
@@ -298,7 +354,7 @@ impl ClaudeNativeChatSession<'_> {
                             // cannot be replayed; Retry still requires the raw marker.
                             self.failure_details_attempted = true;
                             let opened = self.action(
-                                "failure-details",
+                                "failure-details-temporal",
                                 "NAN_CHECK_EXPECTED_FAILURE",
                                 deadline.min(
                                     Instant::now()
@@ -326,11 +382,14 @@ impl ClaudeNativeChatSession<'_> {
         }
     }
     pub(crate) fn retry_once(&mut self) -> Result<(), Reason> {
-        if !std::mem::take(&mut self.retry_ready) || self.facts.retry_attempted {
+        if self.submitted_failure.is_none()
+            || !std::mem::take(&mut self.retry_ready)
+            || self.facts.retry_attempted
+        {
             return Err(Reason::ActionUnsupported);
         }
         match self.action(
-            "retry",
+            "retry-temporal",
             "NAN_CHECK_EXPECTED_FAILURE",
             Instant::now() + Duration::from_millis(u64::from(CHAT_TURN_MAX_MILLIS)),
         ) {

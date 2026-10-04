@@ -22,6 +22,11 @@ use subtle::ConstantTimeEq as _;
 use tokio::{net::TcpListener, sync::oneshot, task::JoinHandle};
 use zeroize::Zeroizing;
 
+#[cfg(any(target_os = "macos", test))]
+mod failure_turn;
+#[cfg(any(target_os = "macos", test))]
+use failure_turn::FailureTurnAuthority;
+
 const MAX_GENERATIONS: usize = 4;
 const MAX_OUTPUT_TOKENS: u64 = 2048;
 const MAX_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
@@ -66,6 +71,8 @@ struct GateState {
     generations: AtomicUsize,
     expected_failure: AtomicBool,
     failure_observed: AtomicBool,
+    #[cfg(any(target_os = "macos", test))]
+    failure_turn: Mutex<FailureTurnAuthority>,
     unauthorized: AtomicBool,
     budget_exceeded: AtomicBool,
     tool_marker: String,
@@ -74,6 +81,10 @@ struct GateState {
     fixture_oracle: Mutex<FixtureOracle>,
     expected_failure_status: AtomicU16,
 }
+
+#[cfg(target_os = "macos")]
+#[derive(Clone, Copy)]
+pub(crate) struct ClaudeFailureEpoch(u64);
 
 pub(crate) struct ProviderGate {
     pub(crate) base_url: String,
@@ -104,6 +115,8 @@ impl ProviderGate {
             generations: AtomicUsize::new(0),
             expected_failure: AtomicBool::new(false),
             failure_observed: AtomicBool::new(false),
+            #[cfg(any(target_os = "macos", test))]
+            failure_turn: Mutex::new(FailureTurnAuthority::default()),
             unauthorized: AtomicBool::new(false),
             budget_exceeded: AtomicBool::new(false),
             tool_marker: marker.into(),
@@ -205,6 +218,37 @@ impl ProviderGate {
         self.state.expected_failure.store(enabled, Ordering::SeqCst);
     }
 
+    #[cfg(target_os = "macos")]
+    pub(crate) fn prepare_claude_turn(
+        &self,
+        prompt: &str,
+        failure: bool,
+    ) -> Result<Option<ClaudeFailureEpoch>, ()> {
+        let mut authority = self
+            .state
+            .failure_turn
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let epoch = authority.prepare(prompt, failure, self.state.live)?;
+        if failure {
+            // Arm the request-specific epoch before exposing an injected status;
+            // no detached request can enter a legacy body-agnostic failure gap.
+            self.state.failure_observed.store(false, Ordering::SeqCst);
+            self.state
+                .expected_failure_status
+                .store(503, Ordering::SeqCst);
+            self.state.expected_failure.store(true, Ordering::SeqCst);
+        }
+        Ok(epoch.map(ClaudeFailureEpoch))
+    }
+    #[cfg(target_os = "macos")]
+    pub(crate) fn claude_failure_turn_observed(&self, epoch: ClaudeFailureEpoch) -> bool {
+        self.state
+            .failure_turn
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .observed(epoch.0)
+    }
     pub(crate) fn failure_observed(&self) -> bool {
         self.state.failure_observed.load(Ordering::SeqCst)
     }
@@ -261,7 +305,19 @@ async fn models(State(state): State<Arc<GateState>>) -> Response {
 }
 
 async fn chat(State(state): State<Arc<GateState>>, Json(mut body): Json<Value>) -> Response {
-    if state.expected_failure.load(Ordering::SeqCst) {
+    #[cfg(any(target_os = "macos", test))]
+    let inject_failure = {
+        let mut authority = state
+            .failure_turn
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        authority.learn_context(&body);
+        state.expected_failure.load(Ordering::SeqCst)
+            && (!authority.armed() || authority.observe(&body))
+    };
+    #[cfg(not(any(target_os = "macos", test)))]
+    let inject_failure = state.expected_failure.load(Ordering::SeqCst);
+    if inject_failure {
         state.failure_observed.store(true, Ordering::SeqCst);
         let status = StatusCode::from_u16(state.expected_failure_status.load(Ordering::SeqCst))
             .unwrap_or(StatusCode::BAD_REQUEST);
@@ -1087,5 +1143,80 @@ mod tests {
         assert_eq!(forwarded.load(Ordering::SeqCst), MAX_GENERATIONS);
         assert!(gate.budget_exceeded());
         task.abort();
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn claude_failure_authority_forwards_background_and_consumes_one_current_error() {
+        let router = Router::new().fallback(|| async {
+            (
+                StatusCode::OK,
+                [(axum::http::header::CONTENT_TYPE, "application/json")],
+                final_json(),
+            )
+        });
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let url = format!("http://{}/v1", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            axum::serve(listener, router).await.unwrap();
+        });
+        let gate = ProviderGate::start(&url, Zeroizing::new("key".into()), false, "tool")
+            .await
+            .unwrap();
+        let body = |prompts: &[&str], system: &str| {
+            let mut messages = vec![json!({"role":"system","content":system})];
+            for prompt in prompts {
+                messages.push(json!({"role":"user","content":prompt}));
+            }
+            json!({"stream":true,"model":"fixture","messages":messages})
+        };
+        let post = |value: Value| {
+            reqwest::Client::new()
+                .post(format!("{}/chat/completions", gate.base_url))
+                .bearer_auth(gate.session_token())
+                .json(&value)
+        };
+        for (index, prompt) in ["response nonce1", "tool nonce2"].iter().enumerate() {
+            assert!(gate.prepare_claude_turn(prompt, false).unwrap().is_none());
+            assert_eq!(
+                post(body(&["response nonce1", "tool nonce2"][..=index], "main"))
+                    .send()
+                    .await
+                    .unwrap()
+                    .status(),
+                StatusCode::OK
+            );
+        }
+        let epoch = gate
+            .prepare_claude_turn("failure nonce3", true)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            post(body(&["failure nonce3"], "title"))
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::OK
+        );
+        assert!(!gate.failure_observed());
+        assert!(!gate.claude_failure_turn_observed(epoch));
+        let current = body(
+            &["response nonce1", "tool nonce2", "failure nonce3"],
+            "main",
+        );
+        let failure = post(current.clone()).send().await.unwrap();
+        assert_eq!(failure.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(failure.headers().get("x-should-retry").unwrap(), "false");
+        assert_eq!(
+            failure.json::<Value>().await.unwrap()["error"]["message"],
+            "NAN_CHECK_EXPECTED_FAILURE"
+        );
+        assert!(gate.failure_observed());
+        assert!(gate.claude_failure_turn_observed(epoch));
+        assert_eq!(gate.generation_count(), 3);
+        assert_eq!(post(current).send().await.unwrap().status(), StatusCode::OK);
+        assert_eq!(gate.generation_count(), 4);
+        server.abort();
     }
 }

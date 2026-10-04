@@ -41,7 +41,7 @@ static bool decode(const std::string& hex, std::string& result) {
     return true;
 }
 static bool input_mode(const std::string& mode) {
-    return mode == "input" || mode == "input-replace-owned";
+    return mode == "input" || mode == "input-replace-owned" || mode == "input-failure-owned";
 }
 static bool request(Request& value) {
     std::string line, prompt, marker, sentinel, trailing;
@@ -51,7 +51,7 @@ static bool request(Request& value) {
     if (!(input >> value.mode >> value.window >> value.pid >> x >> y >> width >> height >> value.millis >> value.cutoff >> value.owner >> prompt >> marker >> sentinel) || input >> trailing) return false;
     if (!value.cutoff || value.owner < 2 || !value.window || value.pid < 2 || !value.millis || value.millis > 15000 || !std::isfinite(x) || !std::isfinite(y)
         || !std::isfinite(width) || !std::isfinite(height) || width < 300 || height < 200) return false;
-    if (!input_mode(value.mode) && value.mode != "copy" && value.mode != "retry-ready" && value.mode != "retry" && value.mode != "failure-details" && value.mode != "failure-details-ready") return false;
+    if (!input_mode(value.mode) && value.mode != "copy" && value.mode != "retry-ready" && value.mode != "retry" && value.mode != "failure-details" && value.mode != "failure-details-ready" && value.mode != "failure-details-temporal" && value.mode != "failure-details-ready-temporal" && value.mode != "retry-ready-temporal" && value.mode != "retry-temporal") return false;
     if (!decode(prompt, value.prompt) || !decode(marker, value.marker) || !decode(sentinel, value.sentinel) || value.sentinel.empty()) return false;
     value.bounds = CGRectMake(x, y, width, height);
     value.deadline = Clock::now() + std::chrono::milliseconds(value.millis);
@@ -441,8 +441,20 @@ static bool wait_pasted_value(const Request& request, const Node& control, const
         [&] { return within(request); },
         [] { std::this_thread::sleep_for(std::chrono::milliseconds(20)); });
 }
+static bool clean_failure_input(const Tree& tree, const Request& request, int draft_editor = -1) {
+    if (request.prompt.empty()) return false;
+    for (std::size_t i = 0; i < tree.nodes.size(); ++i) {
+        const auto& node = tree.nodes[i];
+        const bool draft = draft_editor >= 0 && descendant(tree, static_cast<int>(i), draft_editor);
+        if ((!draft && node.label.find(request.prompt) != std::string::npos)
+            || (node.role == "AXStaticText" && node.label == "Server error")
+            || (node.role == "AXButton" && node.label == "Try again")) return false;
+    }
+    return true;
+}
 static const char* input(const Request& request, const Tree& tree) {
     if (!chat(tree)) return "mode";
+    if (request.mode == "input-failure-owned" && !clean_failure_input(tree, request)) return "scope";
     int editor = unique(tree, "AXTextArea", "Write your prompt to Claude");
     int send = unique(tree, "AXButton", "Start task");
     if (send < 0) send = unique(tree, "AXButton", "Send message");
@@ -450,7 +462,7 @@ static const char* input(const Request& request, const Tree& tree) {
     const auto& control = tree.nodes[editor];
     if (!target(control, request) || !contained_control(tree.nodes[send], request)) return "control";
     auto initial_value = attribute(control.element, kAXValueAttribute);
-    const char* initial_failure = initial_input_failure(initial_value, ax_query_failed, request.mode == "input-replace-owned");
+    const char* initial_failure = initial_input_failure(initial_value, ax_query_failed, (request.mode == "input-replace-owned" || request.mode == "input-failure-owned"));
     PrivateInputValue initial;
     if (!initial_failure && !private_input_value(initial_value,initial.value)) initial_failure="input-initial-unavailable";
     if (initial_value) CFRelease(initial_value);
@@ -459,7 +471,7 @@ static const char* input(const Request& request, const Tree& tree) {
     if (AXUIElementSetAttributeValue(control.element, kAXFocusedAttribute, kCFBooleanTrue) != kAXErrorSuccess)
         return "input-focus-setting";
     if (!wait_focused_composer(request, control)) return "input-focused-identity";
-    if (request.mode == "input-replace-owned") {
+    if ((request.mode == "input-replace-owned" || request.mode == "input-failure-owned")) {
         if (!key(0, true)) return "input-replace-select-key";
     }
     if (!wait_focused_composer(request, control)) return "input-prompt-before-guard";
@@ -487,6 +499,13 @@ static const char* input(const Request& request, const Tree& tree) {
     if (!key(124, false)) return "input-collapse-key";
     Tree fresh;
     if (!fresh.collect(request) || !chat(fresh) || !retained(fresh, control)) return "control";
+    if (request.mode == "input-failure-owned") {
+        const int draft_editor = unique(fresh, "AXTextArea", "Write your prompt to Claude");
+        if (draft_editor < 0 || !CFEqual(fresh.nodes[draft_editor].element, control.element)) return "control";
+        // Only the retained composer may contain the freshly verified unsent draft.
+        // Existing transcript nonce and error controls remain globally forbidden.
+        if (!clean_failure_input(fresh, request, draft_editor)) return "scope";
+    }
     int enabled_send = enabled_submission(fresh, tree.nodes[send], request);
     if (enabled_send < 0) return "control";
     return press(request, fresh.nodes[enabled_send], "sent");
@@ -719,7 +738,74 @@ static const char* open_failure_details(const Request& request, const Tree& tree
     if (AXUIElementPerformAction(fresh.nodes[current].element, kAXPressAction) != kAXErrorSuccess) return "action-uncertain";
     return owned(request) ? "failure-details-opened" : "action-uncertain";
 }
+// This mode additionally requires a Rust-held clean/Sent/request-specific failure
+// capability. Native cross-call identity is the nonce user Heading, not a CF handle.
+static int temporal_control(const Tree& tree, const Request& request, bool details, const char** failure, int* error_group = nullptr) {
+    auto reject = [&](const char* stage) { *failure = stage; return -1; };
+    if (request.prompt.empty()) return reject("scope-prompt-mismatch");
+    unsigned headings=0, prompts=0, errors=0, retries=0;
+    int anchor=-1;
+    for (std::size_t i=0;i<tree.nodes.size();++i) {
+        const auto& node=tree.nodes[i];
+        headings += node.role=="AXHeading" && node.label=="You said: "+request.prompt;
+        prompts += node.label==request.prompt;
+        retries += node.role=="AXButton" && node.label==MODERN_RETRY_LABEL;
+        if (node.role=="AXStaticText" && node.label=="Server error") { ++errors; anchor=static_cast<int>(i); }
+    }
+    if (headings!=1 || prompts!=1) return reject("scope-prompt-mismatch");
+    if (errors!=1) return reject(errors?"scope-anchor-ambiguous":"scope-anchor-absent");
+    if (retries!=1) return reject(retries?"scope-control-ambiguous":"scope-control-absent");
+    int parent=tree.nodes[anchor].parent;
+    for (unsigned depth=0;parent>0 && depth<6;++depth,parent=tree.nodes[parent].parent) {
+        const auto& scope=tree.nodes[parent];
+        if (scope.role=="AXWindow" || scope.role=="AXWebArea" || scope.role=="AXScrollArea") break;
+        if (scope.role!="AXGroup") continue;
+        int retry=unique(tree,"AXButton",MODERN_RETRY_LABEL,parent);
+        if (retry<0) continue;
+        unsigned scope_headings=0;
+        for (std::size_t i=0;i<tree.nodes.size();++i) if (descendant(tree,i,parent)) {
+            scope_headings += tree.nodes[i].role=="AXHeading";
+        }
+        // The smallest shared error/control Group may never become the transcript.
+        if (scope_headings) return reject("scope-heading-ambiguous");
+        int index=details?unique(tree,"AXButton","View details",parent):retry;
+        if (index<0) return reject("scope-control-absent");
+        if (error_group) *error_group=parent;
+        return target(tree.nodes[retry],request) && target(tree.nodes[index],request)?index:-1;
+    }
+    return reject("scope-control-absent");
+}
+static const char* temporal_action(const Request& request, const Tree& tree) {
+    bool details=request.mode.rfind("failure-details",0)==0;
+    bool ready=request.mode.find("ready")!=std::string::npos;
+    const char* failure="scope";
+    int group=-1;
+    int index=temporal_control(tree,request,details,&failure,&group);
+    if (index<0) return failure;
+    if (!chat(tree) || !owned(request)) return "control";
+    Tree fresh;
+    if (!fresh.collect(request)) return fresh.failure?fresh.failure:"tree-query";
+    int fresh_group=-1;
+    int current=temporal_control(fresh,request,details,&failure,&fresh_group);
+    if (current<0) return failure;
+    for (const auto& node : tree.nodes) if ((node.role=="AXHeading" && node.label=="You said: "+request.prompt)
+        || node.label==request.prompt || (node.role=="AXStaticText" && node.label=="Server error")
+        || (node.role=="AXTextArea" && node.label=="Write your prompt to Claude")
+        || (node.role=="AXGroup" && node.label=="Mode")
+        || (node.role=="AXButton" && node.label=="Chat")) {
+        if (!retained(fresh,node)) return "control";
+    }
+    if (group<0 || fresh_group<0 || !retained(fresh,tree.nodes[group])
+        || !CFEqual(tree.nodes[group].element,fresh.nodes[fresh_group].element)) return "control";
+    if (!chat(fresh) || !retained(fresh,tree.nodes[index])
+        || !CFEqual(fresh.nodes[current].element,tree.nodes[index].element) || !owned(request)) return "control";
+    if (ready) return details?"failure-details-ready":"retry-ready";
+    request.deadline_phase="deadline-press";
+    if (AXUIElementPerformAction(fresh.nodes[current].element,kAXPressAction)!=kAXErrorSuccess) return "action-uncertain";
+    return owned(request)?(details?"failure-details-opened":"retried"):"action-uncertain";
+}
 static const char* action(const Request& request, const Tree& tree) {
+    if (request.mode.find("-temporal") != std::string::npos) return temporal_action(request, tree);
     if (request.mode == "failure-details-ready") return failure_details_ready(request, tree);
     if (request.mode == "failure-details") return open_failure_details(request, tree);
     bool retry = request.mode != "copy";
@@ -753,8 +839,8 @@ int claude_chat_turn() {
                 else {
                     value.deadline_phase = input_mode(value.mode) ? "deadline-input"
                         : value.mode == "copy" ? "deadline-copy"
-                        : value.mode == "retry-ready" ? "deadline-retry-ready" : "deadline-retry";
-                    if (value.mode == "failure-details" || value.mode == "failure-details-ready") {
+                        : (value.mode == "retry-ready" || value.mode == "retry-ready-temporal") ? "deadline-retry-ready" : "deadline-retry";
+                    if (value.mode == "failure-details" || value.mode == "failure-details-ready" || value.mode == "failure-details-temporal" || value.mode == "failure-details-ready-temporal") {
                         row_shape_observed = observe_row_shape(tree, value, row_shape, [&] { return within(value); });
                         scope_shape_observed = row_shape_observed && observe_scope_shape(tree, scope_shape, [&] { return within(value); });
                     }

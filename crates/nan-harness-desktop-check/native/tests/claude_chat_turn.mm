@@ -400,4 +400,55 @@ int main() {
     tree.nodes[2].enabled = true;
     tree.nodes[2].current = "false";
     assert(!chat(tree));
+
+    // Separate user/error rows plus prior verified headings: temporal authority
+    // never turns the feed itself into an ErrorCard or changes legacy admission.
+    Request temporal_request; temporal_request.prompt="failure nonce3";
+    temporal_request.bounds=CGRectMake(0,0,800,600);
+    Tree temporal;
+    temporal.nodes={fixture(-1,"AXWindow",""),fixture(0,"AXWebArea",""),
+        fixture(1,"AXGroup","feed"),fixture(2,"AXGroup","user"),
+        fixture(3,"AXHeading","You said: failure nonce3"),fixture(3,"AXStaticText","failure nonce3"),
+        fixture(2,"AXGroup","error"),fixture(6,"AXStaticText","Server error"),
+        fixture(6,"AXButton","Try again"),fixture(6,"AXButton","View details"),
+        fixture(2,"AXHeading","Claude responded: earlier verified response")};
+    for(auto& node:temporal.nodes) node.bounds=CGRectMake(20,20,30,30);
+    const char* temporal_failure="scope";
+    assert(temporal_control(temporal,temporal_request,false,&temporal_failure)==8);
+    assert(temporal_control(temporal,temporal_request,true,&temporal_failure)==9);
+    assert(failure_details_control(temporal,temporal_request)==-1); // Legacy stays strict.
+    temporal.nodes[8].parent=2; // Retry is not in the source ErrorCard group.
+    assert(temporal_control(temporal,temporal_request,false,&temporal_failure)==-1);
+    assert(std::string(temporal_failure)=="scope-heading-ambiguous");
+    temporal.nodes[8].parent=6;
+    temporal.nodes.push_back(fixture(6,"AXButton","Try again"));
+    assert(temporal_control(temporal,temporal_request,false,&temporal_failure)==-1);
+    temporal.nodes.pop_back();
+    temporal.nodes.push_back(fixture(2,"AXStaticText","Server error"));
+    assert(temporal_control(temporal,temporal_request,false,&temporal_failure)==-1);
+    temporal.nodes.pop_back();
+    temporal.nodes[4].label="You said: different prompt";
+    assert(temporal_control(temporal,temporal_request,false,&temporal_failure)==-1);
+    temporal.nodes[4].label="You said: failure nonce3";
+    temporal.nodes[8].enabled=false;
+    assert(temporal_control(temporal,temporal_request,false,&temporal_failure)==-1);
+    temporal.nodes[8].enabled=true;
+    Tree clean; clean.nodes={fixture(-1,"AXWindow",""),fixture(0,"AXTextArea","Write your prompt to Claude")};
+    assert(clean_failure_input(clean,temporal_request));
+    clean.nodes.push_back(fixture(1,"AXStaticText","failure nonce3"));
+    assert(!clean_failure_input(clean,temporal_request));
+    assert(clean_failure_input(clean,temporal_request,1));
+    clean.nodes.push_back(fixture(0,"AXStaticText","failure nonce3"));
+    assert(!clean_failure_input(clean,temporal_request,1)); clean.nodes.pop_back();
+    clean.nodes.push_back(fixture(1,"AXStaticText","Server error"));
+    assert(!clean_failure_input(clean,temporal_request,1)); clean.nodes.pop_back();
+    clean.nodes.push_back(fixture(1,"AXButton","Try again"));
+    assert(!clean_failure_input(clean,temporal_request,1)); clean.nodes.pop_back();
+    clean.nodes.pop_back();
+    clean.nodes.push_back(fixture(0,"AXStaticText","Server error"));
+    assert(!clean_failure_input(clean,temporal_request)); clean.nodes.pop_back();
+    clean.nodes.push_back(fixture(0,"AXButton","Try again"));
+    assert(!clean_failure_input(clean,temporal_request)); clean.nodes.pop_back();
+    clean.nodes.push_back(fixture(0,"AXHeading","You said: failure nonce3"));
+    assert(!clean_failure_input(clean,temporal_request));
 }

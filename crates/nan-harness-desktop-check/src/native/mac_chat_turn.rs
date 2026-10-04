@@ -314,7 +314,13 @@ impl ChatTurnReceipt {
                 scope_shape: None,
             });
         }
-        if !matches!(mode, "failure-details" | "failure-details-ready") {
+        if !matches!(
+            mode,
+            "failure-details"
+                | "failure-details-ready"
+                | "failure-details-temporal"
+                | "failure-details-ready-temporal"
+        ) {
             return None;
         }
         let (row_line, remainder) = remainder.split_once('\n')?;
@@ -414,6 +420,11 @@ pub(super) fn request(
             | "retry"
             | "failure-details"
             | "failure-details-ready"
+            | "input-failure-owned"
+            | "failure-details-temporal"
+            | "failure-details-ready-temporal"
+            | "retry-ready-temporal"
+            | "retry-temporal"
     ) || values
         .iter()
         .any(|value| value.len() > 1024 || value.contains('\0'))
@@ -850,6 +861,7 @@ mod tests {
 
 #[cfg(test)]
 mod disclosure_readiness_tests {
+    use super::ChatTurnReceipt;
     use super::ChatTurnStage as S;
     #[test]
     fn pending_does_not_consume_disclosure_and_uncertainty_is_terminal() {
@@ -865,5 +877,26 @@ mod disclosure_readiness_tests {
         for stage in [S::ActionUncertain, S::TreePid, S::TreeWindow, S::Deadline] {
             assert_eq!(stage.disclosure_ready(), None);
         }
+    }
+
+    #[test]
+    fn temporal_modes_preserve_closed_receipts_and_do_not_admit_extra_payloads() {
+        for mode in ["failure-details-temporal", "failure-details-ready-temporal"] {
+            assert!(
+                ChatTurnReceipt::parse(
+                    "turn scope-anchor-absent\nrows 0 0 1 1 1 1 0 0 0 0 0 0 0\n",
+                    mode
+                )
+                .is_some()
+            );
+            assert!(ChatTurnReceipt::parse("turn scope-anchor-absent\nPRIVATE", mode).is_none());
+        }
+        assert!(
+            ChatTurnReceipt::parse(
+                "turn retry-ready\nrows 0 0 1 1 1 1 0 0 0 0 0 0 0\n",
+                "retry-ready-temporal"
+            )
+            .is_none()
+        );
     }
 }
