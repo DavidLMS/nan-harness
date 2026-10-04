@@ -264,3 +264,55 @@ if (process.platform === 'darwin') {
     process.exitCode = 1;
   });
 }
+
+// Windows subprocesses consume the caller's original absolute budget.
+{
+  let now = 1000, calls = 0, timeout, late = false;
+  const context = {process: {platform: 'win32'}, owner: '20', port: '43210',
+    __dirname: '/owned', Date: {now: () => now}, require(name) {
+      assert.equal(name, 'node:child_process');
+      return {execFileSync(_command, _args, options) {
+        calls++; timeout = options.timeout;
+        if (late) now = 1200;
+        return 'true';
+      }};
+    }};
+  vm.runInNewContext(proof, context);
+  assert.equal(context.ownedEndpoint(1200), true);
+  assert.equal(timeout, 200);
+  assert.equal(context.descendant(30, 1150), true);
+  assert.equal(timeout, 150);
+  for (const invalid of [NaN, Infinity, 1.5, '1200', null]) {
+    assert.equal(context.ownedEndpoint(invalid), false);
+  }
+  assert.equal(calls, 2);
+  assert.equal(context.ownedEndpoint(1000), false);
+  assert.equal(calls, 2);
+  late = true;
+  assert.equal(context.ownedEndpoint(1200), false);
+  assert.equal(calls, 3);
+  now = 1000; late = false;
+  assert.equal(context.windowsProof('endpoint', 43210, 20), true);
+  assert.equal(timeout, 8000);
+}
+console.log('Windows original caller deadline: clipped, invalid, expired and late proofs passed');
+
+{
+  let now = 1000;
+  const receipts = [];
+  const sandbox = {exports: {}, __dirname: '/owned', Date: {now: () => now},
+    process: {platform: 'win32', pid: 7, env: {GITHUB_ACTIONS: 'true',
+      RUNNER_ENVIRONMENT: 'github-hosted', NANH_DESKTOP_QUALIFICATION_FACTS: '/facts'}},
+    require(name) {
+      if (name === 'node:fs') return {lstatSync: () => ({isDirectory: () => true}),
+        writeFileSync: (_path, bytes) => receipts.push(JSON.parse(bytes)), renameSync: () => {}};
+      if (name === 'node:path') return require(name);
+      assert.equal(name, 'node:child_process');
+      return {execFileSync: () => {now = 1200; return 'true';}};
+    }};
+  vm.runInNewContext(source, sandbox);
+  assert.equal(sandbox.exports.proof('20', 43210).ownedEndpoint(1200), false);
+  assert.equal(receipts.at(-1).category, 'transport-timeout');
+  assert.equal(receipts.at(-1).categoryCounts.owned, 0);
+  assert.equal(receipts.at(-1).categoryCounts['transport-timeout'], 1);
+}

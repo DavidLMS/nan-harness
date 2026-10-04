@@ -23,11 +23,17 @@ function saveWindowsProof(category) {
     fs.renameSync(`${output}.tmp`, output);
   } catch { /* A missing diagnostic never authorizes an action. */ }
 }
-function windowsProof(mode, value, root) {
+function windowsProof(mode, value, root, callerDeadline) {
   if (!['endpoint', 'descendant'].includes(mode) || !Number.isSafeInteger(value)
       || value <= 1 || value > (mode === 'endpoint' ? 65535 : 2147483647)
       || !Number.isSafeInteger(root) || root <= 1 || root > 2147483647) return false;
   try {
+    const deadline = proofDeadline(callerDeadline);
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) {
+      saveWindowsProof('transport-timeout');
+      return false;
+    }
     const python = process.env?.FEASIBILITY_WINDOWS_PROOF_PYTHON;
     const native = process.env?.GITHUB_ACTIONS === 'true'
       && process.env?.RUNNER_ENVIRONMENT === 'github-hosted'
@@ -36,8 +42,12 @@ function windowsProof(mode, value, root) {
       native ? [`${__dirname}/endpoint-owner-windows.py`, mode, String(value), String(root)]
         : ['-NoProfile', '-NonInteractive', '-File', `${__dirname}/endpoint-owner.ps1`,
            mode, String(value), String(root)],
-      { encoding: 'utf8', timeout: 8000, maxBuffer: 4096, windowsHide: true,
+      { encoding: 'utf8', timeout: Math.min(8000, remaining), maxBuffer: 4096, windowsHide: true,
         stdio: ['ignore', 'pipe', 'ignore'] });
+    if (Date.now() >= deadline) {
+      saveWindowsProof('transport-timeout');
+      return false;
+    }
     const categories = ['true', 'process-budget', 'ancestry-cycle', 'process-unavailable', 'parent-unavailable', 'parent-reused', 'session-mismatch', 'ancestry-limit', 'listener-unavailable', 'query-failed'];
     saveWindowsProof(categories.includes(result) ? (result === 'true' ? 'owned' : result) : 'unclassified');
     return result === 'true';
@@ -65,7 +75,7 @@ function remainingTimeout(deadline) {
   return Math.min(2000, remaining);
 }
 function descendant(pid, callerDeadline) {
-  if (process.platform === 'win32') return windowsProof('descendant', pid, Number(owner));
+  if (process.platform === 'win32') return windowsProof('descendant', pid, Number(owner), callerDeadline);
   unixFailure='unmeasured';
   const deadline = process.platform === 'darwin' ? proofDeadline(callerDeadline) : undefined;
   for (let depth = 0; depth < 32 && pid > 1; depth++) {
@@ -95,7 +105,7 @@ function parentPid(pid, callerDeadline) {
 }
 function ownedEndpoint(callerDeadline) {
   listenerShape = null;
-  if (process.platform === 'win32') return windowsProof('endpoint', Number(port), Number(owner));
+  if (process.platform === 'win32') return windowsProof('endpoint', Number(port), Number(owner), callerDeadline);
   unixFailure='unmeasured';
   if (process.platform === 'darwin') {
     let stage='listener-query';
