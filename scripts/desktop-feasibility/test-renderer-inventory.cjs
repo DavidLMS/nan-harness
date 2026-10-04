@@ -161,6 +161,23 @@ assert.equal(roleSourceScope({foreignFieldset:true}).mainScope,false);
     assert.equal(guard.failureDetails().heldPresent,held);
     assert.equal(Object.keys(guard.failureDetails()).length,4);
   }
+  // Each complete source sample is bracketed by fresh native ownership proofs.
+  // Ownership loss during either read must prevent publishing the auxiliary.
+  for(const lostAt of [1,2]) {
+    f=fixture();let owned=true,reads=0;
+    f.setAlter((r,n)=>{if(n===lostAt)owned=false;});
+    const guard=helper.heldMainGuard(f.held,f.browser,()=>{reads++;return owned;},1000,
+      ()=> 'avatarOverlay',f.identity,async()=>{});
+    assert.equal(await guard(),false);
+    assert.equal(guard.failure(),'native-ownership');
+    assert.equal(guard.binding().auxiliary,null);
+    assert.equal(reads,2);
+  }
+  f=fixture();let ownerReads=0;
+  const bounded=helper.heldMainGuard(f.held,f.browser,()=>{ownerReads++;return true;},1000,
+    ()=> 'avatarOverlay',f.identity,async()=>{});
+  assert.equal(await bounded(),true);assert.equal(ownerReads,4);
+  assert.equal(await bounded(),true);assert.equal(ownerReads,6);
   f=fixture();
   const between=helper.heldMainGuard(f.held,f.browser,()=>true,1000,
     ()=> 'avatarOverlay',f.identity,async()=>f.setPages([f.main]));

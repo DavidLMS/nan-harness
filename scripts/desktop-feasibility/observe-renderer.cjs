@@ -253,6 +253,7 @@ function heldMainGuard(held, browser, owner, deadline, route,
     return reject('page-set');
   };
   const pages=()=>browser.contexts().flatMap(context=>context.pages());
+  const timely=()=>Date.now()<deadline||reject('deadline');
   const valid=()=>{
     if(Date.now()>=deadline)return reject('deadline');
     if(owner()!==true)return reject('native-ownership');
@@ -262,7 +263,7 @@ function heldMainGuard(held, browser, owner, deadline, route,
     failure='unmeasured';failureDetails=null;
     try {
       if(!held)return reject('main-identity');
-      if(!valid())return false;
+      if(!timely())return false;
       const initial=pages();
       if(!initial.includes(held.page))return rejectPageSet('held-main-missing',initial,initial);
       if(initial.length<1||initial.length>2)return rejectPageSet('initial-count',initial,initial);
@@ -276,14 +277,14 @@ function heldMainGuard(held, browser, owner, deadline, route,
         const before=pages();
         if(before.length!==initial.length||!before.every(page=>initial.includes(page)))return rejectPageSet('before-sample-changed',initial,before);
         const main=await identity(held.page,deadline);
-        if(!valid())return false;
+        if(!timely())return false;
         if(!sameCorrelationIdentity(held,main))return reject('main-identity');
         if(requireDocumentFocus&&!main.scope.focused)return reject('main-focus');
         if((requireMainScope||allowInitialAppearance&&!actionsStarted)&&!main.scope.mainScope)return reject('main-scope');
         if(extra) {
           const aux=await identity(extra,deadline);
           const expected=auxiliaryIdentity??candidateAux;
-          if(!valid())return false;
+          if(!timely())return false;
           if(expected&&!sameCorrelationIdentity(expected,aux))return reject('auxiliary-identity');
           const counts=aux.scope.counts;
           if(aux.scope.focused)return reject('auxiliary-focus');
