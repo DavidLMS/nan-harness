@@ -712,13 +712,11 @@ fn same_named_retry_element(before: &xa11y::ElementData, after: &xa11y::ElementD
         && after.states.visible
 }
 
-// A missing export may settle before the original cutoff; a different control
-// is never a replacement for the captured Retry action. This only observes.
-fn wait_retained_retry<T>(
-    captured: &T,
+// An absent accessibility candidate may settle before the original cutoff.
+// Ambiguous candidates and failed ownership proofs remain terminal.
+fn wait_unique_retry<T>(
     deadline: Instant,
     mut sample: impl FnMut() -> Result<Vec<T>, Reason>,
-    same: impl Fn(&T, &T) -> bool,
 ) -> Result<T, Reason> {
     loop {
         if Instant::now() >= deadline {
@@ -735,14 +733,33 @@ fn wait_retained_retry<T>(
                     .into_iter()
                     .next()
                     .ok_or(Reason::SelectorNotMatched)?;
-                return if same(captured, &candidate) {
-                    Ok(candidate)
-                } else {
-                    Err(Reason::SelectorNotMatched)
-                };
+                return Ok(candidate);
             }
             _ => return Err(Reason::SelectorNotMatched),
         }
+    }
+}
+
+// Once captured, a different control never replaces the retained Retry action.
+fn wait_retained_retry<T>(
+    captured: &T,
+    deadline: Instant,
+    sample: impl FnMut() -> Result<Vec<T>, Reason>,
+    same: impl Fn(&T, &T) -> bool,
+) -> Result<T, Reason> {
+    let candidate = wait_unique_retry(deadline, sample)?;
+    if same(captured, &candidate) {
+        Ok(candidate)
+    } else {
+        Err(Reason::SelectorNotMatched)
+    }
+}
+
+fn retry_elements(retry: &xa11y::Locator) -> Result<Vec<xa11y::Element>, Reason> {
+    match retry.elements() {
+        Ok(elements) => Ok(elements),
+        Err(xa11y::Error::SelectorNotMatched { .. }) => Ok(Vec::new()),
+        Err(error) => Err(map_error(error)),
     }
 }
 
@@ -1034,19 +1051,22 @@ impl NativeClipboardSession<'_> {
                     self.retry_ready = true;
                     return Ok(());
                 }
-                self.facts.substage = "retry-element-capture";
-                let mut candidates = retry.elements().map_err(map_error)?;
-                if candidates.len() != 1 {
-                    return Err(Reason::SelectorNotMatched);
-                }
-                let captured = candidates.pop().ok_or(Reason::SelectorNotMatched)?;
+                let captured = wait_unique_retry(deadline, || {
+                    self.gui
+                        .native_copy_guard(&mut self.facts, "retry-element-capture")?;
+                    let candidates = retry_elements(&retry)?;
+                    self.facts.retry_control_count = Some(candidates.len());
+                    self.gui
+                        .native_copy_guard(&mut self.facts, "retry-element-capture")?;
+                    Ok(candidates)
+                })?;
                 let retained = wait_retained_retry(
                     &captured,
                     deadline,
                     || {
                         self.gui
                             .native_copy_guard(&mut self.facts, "retry-revalidate")?;
-                        let candidates = retry.elements().map_err(map_error)?;
+                        let candidates = retry_elements(&retry)?;
                         self.gui
                             .native_copy_guard(&mut self.facts, "retry-revalidate")?;
                         Ok(candidates)
@@ -1623,7 +1643,7 @@ impl NativeClipboardSession<'_> {
                     || {
                         self.gui
                             .native_copy_guard(&mut self.facts, "retry-revalidate")?;
-                        let candidates = retry.elements().map_err(map_error)?;
+                        let candidates = retry_elements(&retry)?;
                         self.facts.retry_control_count = Some(candidates.len());
                         self.gui
                             .native_copy_guard(&mut self.facts, "retry-revalidate")?;
@@ -2289,6 +2309,22 @@ mod tests {
             }
             assert!(!same_named_retry_element(&before, &changed));
         }
+    }
+
+    #[test]
+    fn initial_retry_capture_waits_for_presence_but_rejects_ambiguity() {
+        let mut observations = vec![vec![], vec![7]].into_iter();
+        let result = wait_unique_retry(Instant::now() + Duration::from_secs(1), || {
+            Ok(observations.next().unwrap_or_default())
+        });
+        assert_eq!(result, Ok(7));
+        let mut samples = 0;
+        let result = wait_unique_retry(Instant::now() + Duration::from_secs(1), || {
+            samples += 1;
+            Ok(vec![7, 8])
+        });
+        assert_eq!(result, Err(Reason::SelectorNotMatched));
+        assert_eq!(samples, 1);
     }
 
     #[test]
