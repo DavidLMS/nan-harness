@@ -602,7 +602,7 @@ fn seal_probe(
 
 fn report_seal_failure(
     error: &crate::journal::JournalError,
-    operation: Option<crate::journal::SealOperation>,
+    operation: Option<crate::journal::SealObservation>,
     original: Option<Reason>,
     context: crate::diagnostics::ParentProbeContext,
 ) {

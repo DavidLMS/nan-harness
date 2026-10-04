@@ -404,7 +404,7 @@ def validate_stop(value):
 
 
 def validate_parent(record):
-    fields(record, {"schemaVersion", "app", "probeIndex", "mode", "stage", "failure", "originalReason", "reason"}, {"ioKind", "sealOperation"})
+    fields(record, {"schemaVersion", "app", "probeIndex", "mode", "stage", "failure", "originalReason", "reason"}, {"ioKind", "sealOperation", "fingerprintFailure"})
     integer(record["schemaVersion"], 1, 1)
     enum(record["app"], APPS)
     enum(record["mode"], {"deterministic", "live"})
@@ -419,6 +419,12 @@ def validate_parent(record):
         enum(record["ioKind"], {"not-found", "permission-denied", "already-exists", "interrupted", "other"})
     if "sealOperation" in record:
         enum(record["sealOperation"], {"fingerprint", "persist"})
+    if "fingerprintFailure" in record:
+        require(record["failure"] == "io" and record.get("sealOperation") == "fingerprint")
+        context = record["fingerprintFailure"]
+        fields(context, {"artifactKind", "stage"})
+        enum(context["artifactKind"], {"probe-root", "workspace", "managed-profile", "probe-receipt", "probe-spec", "other-owned"})
+        enum(context["stage"], {"metadata", "directory-enumeration", "directory-entry", "symlink-target", "file-open", "file-read"})
     if record["originalReason"] is not None:
         enum(record["originalReason"], REASONS - {"cleanup-failed", "cancelled"})
     enum(record["reason"], {"cleanup-failed"})

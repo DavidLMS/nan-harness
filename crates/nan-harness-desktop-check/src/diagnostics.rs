@@ -410,6 +410,8 @@ pub(crate) struct ParentSealDiagnostic {
     io_kind: Option<SealIoKind>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     seal_operation: Option<crate::journal::SealOperation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    fingerprint_failure: Option<crate::journal::FingerprintFailure>,
     original_reason: Option<Reason>,
     reason: Reason,
 }
@@ -435,6 +437,7 @@ impl ParentSealDiagnostic {
             failure,
             io_kind: None,
             seal_operation: None,
+            fingerprint_failure: None,
             original_reason: original,
             reason: Reason::CleanupFailed,
         }
@@ -443,12 +446,15 @@ impl ParentSealDiagnostic {
     pub(crate) fn with_operation(
         mut self,
         error: &crate::journal::JournalError,
-        operation: Option<crate::journal::SealOperation>,
+        operation: Option<crate::journal::SealObservation>,
     ) -> Self {
         if let crate::journal::JournalError::Io(error) = error {
             self.io_kind = Some(seal_io_kind(error.kind()));
         }
-        self.seal_operation = operation;
+        if let Some(observation) = operation {
+            self.seal_operation = Some(observation.operation);
+            self.fingerprint_failure = observation.fingerprint_failure;
+        }
         self
     }
 

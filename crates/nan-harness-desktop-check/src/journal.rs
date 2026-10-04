@@ -64,6 +64,72 @@ pub(crate) enum SealOperation {
     Persist,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct SealObservation {
+    pub(crate) operation: SealOperation,
+    pub(crate) fingerprint_failure: Option<FingerprintFailure>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct FingerprintFailure {
+    artifact_kind: FingerprintArtifact,
+    stage: FingerprintStage,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum FingerprintArtifact {
+    ProbeRoot,
+    Workspace,
+    ManagedProfile,
+    ProbeReceipt,
+    ProbeSpec,
+    OtherOwned,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum FingerprintStage {
+    Metadata,
+    DirectoryEnumeration,
+    DirectoryEntry,
+    SymlinkTarget,
+    FileOpen,
+    FileRead,
+}
+
+fn fingerprint_failure(relative: &Path, stage: FingerprintStage) -> FingerprintFailure {
+    let components: Vec<_> = relative.components().take(3).collect();
+    let artifact_kind = match components.as_slice() {
+        [] => FingerprintArtifact::ProbeRoot,
+        [Component::Normal(a), Component::Normal(b), ..]
+            if *a == "workspace" && *b == "profile" =>
+        {
+            FingerprintArtifact::ManagedProfile
+        }
+        [Component::Normal(a), ..] if *a == "workspace" => FingerprintArtifact::Workspace,
+        [Component::Normal(a)] if *a == "probe.json" => FingerprintArtifact::ProbeReceipt,
+        [Component::Normal(a)] if *a == "spec.json" => FingerprintArtifact::ProbeSpec,
+        _ => FingerprintArtifact::OtherOwned,
+    };
+    FingerprintFailure {
+        artifact_kind,
+        stage,
+    }
+}
+
+fn fingerprint_io_failure(
+    relative: &Path,
+    stage: FingerprintStage,
+    error: io::Error,
+) -> (JournalError, Option<FingerprintFailure>) {
+    (
+        JournalError::Io(error),
+        Some(fingerprint_failure(relative, stage)),
+    )
+}
+
 impl Journal {
     /// Allocate a new run; existing runs and resources are never reused.
     ///
@@ -186,18 +252,33 @@ impl Journal {
     pub(crate) fn seal_observed(
         &mut self,
         name: &str,
-    ) -> Result<(), (JournalError, Option<SealOperation>)> {
+    ) -> Result<(), (JournalError, Option<SealObservation>)> {
         let index = self
             .state
             .resources
             .iter()
             .position(|entry| entry.name == name)
             .ok_or((JournalError::Invalid, None))?;
-        let fingerprint = tree_fingerprint(&self.root.join(name))
-            .map_err(|error| (error, Some(SealOperation::Fingerprint)))?;
+        let fingerprint =
+            tree_fingerprint_observed(&self.root.join(name)).map_err(|(error, context)| {
+                (
+                    error,
+                    Some(SealObservation {
+                        operation: SealOperation::Fingerprint,
+                        fingerprint_failure: context,
+                    }),
+                )
+            })?;
         self.state.resources[index].fingerprint = Some(fingerprint);
-        self.save()
-            .map_err(|error| (error, Some(SealOperation::Persist)))
+        self.save().map_err(|error| {
+            (
+                error,
+                Some(SealObservation {
+                    operation: SealOperation::Persist,
+                    fingerprint_failure: None,
+                }),
+            )
+        })
     }
 
     /// Remove only owned, unchanged resources; keep the journal for repeatable recovery.
@@ -269,57 +350,147 @@ fn safe_name(name: &str) -> bool {
 }
 
 fn tree_fingerprint(root: &Path) -> Result<String, JournalError> {
+    tree_fingerprint_observed(root).map_err(|(error, _)| error)
+}
+
+fn tree_fingerprint_observed(
+    root: &Path,
+) -> Result<String, (JournalError, Option<FingerprintFailure>)> {
     let mut pending = vec![root.to_path_buf()];
     let mut entries = Vec::new();
     let mut remaining = MAX_TREE_BYTES;
     while let Some(path) = pending.pop() {
         if entries.len() >= MAX_ENTRIES {
-            return Err(JournalError::Invalid);
+            return Err((JournalError::Invalid, None));
         }
-        let relative = path.strip_prefix(root).map_err(|_| JournalError::Invalid)?;
+        let relative = path
+            .strip_prefix(root)
+            .map_err(|_| (JournalError::Invalid, None))?;
         if relative.components().count() > 64 {
-            return Err(JournalError::Invalid);
+            return Err((JournalError::Invalid, None));
         }
-        let metadata = fs::symlink_metadata(&path)?;
+        let metadata = fs::symlink_metadata(&path)
+            .map_err(|error| fingerprint_io_failure(relative, FingerprintStage::Metadata, error))?;
         let payload = if metadata.file_type().is_symlink() {
-            format!("link:{}", fs::read_link(&path)?.to_string_lossy())
+            format!(
+                "link:{}",
+                fs::read_link(&path)
+                    .map_err(|error| (
+                        JournalError::Io(error),
+                        Some(fingerprint_failure(
+                            relative,
+                            FingerprintStage::SymlinkTarget
+                        ))
+                    ))?
+                    .to_string_lossy()
+            )
         } else if metadata.is_dir() {
-            for child in fs::read_dir(&path)? {
+            for child in fs::read_dir(&path).map_err(|error| {
+                fingerprint_io_failure(relative, FingerprintStage::DirectoryEnumeration, error)
+            })? {
                 if pending.len() + entries.len() >= MAX_ENTRIES {
-                    return Err(JournalError::Invalid);
+                    return Err((JournalError::Invalid, None));
                 }
-                pending.push(child?.path());
+                pending.push(
+                    child
+                        .map_err(|error| {
+                            fingerprint_io_failure(
+                                relative,
+                                FingerprintStage::DirectoryEntry,
+                                error,
+                            )
+                        })?
+                        .path(),
+                );
             }
             "directory".into()
         } else if metadata.is_file() {
             use sha2::{Digest as _, Sha256};
             let mut hasher = Sha256::new();
-            let mut file = File::open(&path)?;
+            let mut file = File::open(&path).map_err(|error| {
+                fingerprint_io_failure(relative, FingerprintStage::FileOpen, error)
+            })?;
             let mut buffer = vec![0u8; 64 * 1024];
             loop {
-                let count = file.read(&mut buffer)?;
+                let count = file.read(&mut buffer).map_err(|error| {
+                    fingerprint_io_failure(relative, FingerprintStage::FileRead, error)
+                })?;
                 if count == 0 {
                     break;
                 }
                 remaining = remaining
                     .checked_sub(count as u64)
-                    .ok_or(JournalError::Invalid)?;
+                    .ok_or((JournalError::Invalid, None))?;
                 hasher.update(&buffer[..count]);
             }
             digest(&hasher.finalize())
         } else {
-            return Err(JournalError::Conflict);
+            return Err((JournalError::Conflict, None));
         };
         entries.push((relative.to_path_buf(), payload));
     }
     entries.sort();
-    let bytes = serde_json::to_vec(&entries).map_err(|_| JournalError::Invalid)?;
+    let bytes = serde_json::to_vec(&entries).map_err(|_| (JournalError::Invalid, None))?;
     Ok(digest(&bytes))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn injected_permission_failure_keeps_source_and_closed_file_read_context() {
+        let error = io::Error::new(io::ErrorKind::PermissionDenied, "private message");
+        let (error, context) = fingerprint_io_failure(
+            Path::new("workspace/profile/private-name"),
+            FingerprintStage::FileRead,
+            error,
+        );
+        assert!(
+            matches!(error, JournalError::Io(ref source) if source.kind() == io::ErrorKind::PermissionDenied)
+        );
+        let value = serde_json::to_value(context.unwrap()).unwrap();
+        assert_eq!(
+            value,
+            serde_json::json!({"artifactKind":"managed-profile","stage":"file-read"})
+        );
+    }
+
+    #[test]
+    fn fingerprint_failure_classifies_only_fixed_owned_components() {
+        for (path, expected) in [
+            ("", FingerprintArtifact::ProbeRoot),
+            ("workspace/read-target.txt", FingerprintArtifact::Workspace),
+            (
+                "workspace/profile/home/state",
+                FingerprintArtifact::ManagedProfile,
+            ),
+            ("probe.json", FingerprintArtifact::ProbeReceipt),
+            ("spec.json", FingerprintArtifact::ProbeSpec),
+            ("nested/probe.json", FingerprintArtifact::OtherOwned),
+            ("private-name", FingerprintArtifact::OtherOwned),
+        ] {
+            let context = fingerprint_failure(Path::new(path), FingerprintStage::FileRead);
+            assert_eq!(context.artifact_kind, expected);
+            let serialized = serde_json::to_string(&context).unwrap();
+            assert!(!serialized.contains("private-name"));
+            assert!(!serialized.contains("read-target"));
+        }
+    }
+
+    #[test]
+    fn fingerprint_metadata_failure_preserves_io_kind_and_owned_root_context() {
+        let parent = tempfile::tempdir().unwrap();
+        let root = parent.path().join("missing-private-root");
+        let (error, context) = tree_fingerprint_observed(&root).unwrap_err();
+        assert!(
+            matches!(error, JournalError::Io(ref error) if error.kind() == io::ErrorKind::NotFound)
+        );
+        let context = context.unwrap();
+        assert_eq!(context.artifact_kind, FingerprintArtifact::ProbeRoot);
+        assert_eq!(context.stage, FingerprintStage::Metadata);
+        assert!(matches!(tree_fingerprint(&root), Err(JournalError::Io(_))));
+    }
 
     #[test]
     fn cleanup_preserves_preexisting_and_modified_content() {

@@ -61,6 +61,20 @@ class DiagnosticTests(unittest.TestCase):
                       {'sealOperation': 'PRIVATE'}, {'sealOperation': None}, {'error': 'PRIVATE'}):
             with self.assertRaises(ValueError): D.validate_parent({**legacy, **patch})
 
+    def test_fingerprint_context_is_atomic_closed_and_scoped(self):
+        record = dict(schemaVersion=1, app="chatgpt-desktop", probeIndex=0, mode="deterministic",
+                      stage="parent-journal-seal", failure="io", originalReason="timeout",
+                      reason="cleanup-failed", ioKind="permission-denied", sealOperation="fingerprint")
+        context = dict(artifactKind="managed-profile", stage="file-open")
+        D.validate_parent({**record, "fingerprintFailure": context})
+        for value in (True, None, "PRIVATE", {}, {**context, "path": "PRIVATE"},
+                      {**context, "stage": "PRIVATE"}, {**context, "artifactKind": True}):
+            with self.assertRaises(ValueError):
+                D.validate_parent({**record, "fingerprintFailure": value})
+        for patch in ({"failure": "invalid"}, {"sealOperation": "persist"}):
+            with self.assertRaises(ValueError):
+                D.validate_parent({**record, **patch, "fingerprintFailure": context})
+
     def test_unknown_launcher_exit_preserves_closed_cleanup_without_masking_capture(self):
         record = {**native(), 'app': 'claude-desktop', 'launchExit': 'unknown'}
         capture = D.Capture('windows')
