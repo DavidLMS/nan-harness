@@ -3069,6 +3069,15 @@ custody guard before this query. A zero count at that stage means loss between
 readiness and dispatch, not failure of initial discovery. This diagnostic
 correction does not establish a successful Retry action.
 
+The Windows named-control candidate now retains the original readiness cutoff
+and passively waits for the same unique visible semantic control before its one
+click. Changed owner, geometry, role, name, description or optional automation
+ID rejects the action. GPUI's ordinary element ID does not become a UIA
+AutomationId, so an absent AutomationId remains valid, as in the existing
+selector contract. Synthetic coverage includes that source-defined absence,
+temporary disappearance, replacement, duplicates, lost ownership and expiry.
+Other platforms and the tooltip discovery path keep their existing behavior.
+
 ### Claude Windows managed read fixture candidate
 
 Static inspection of the official 2.19675.0 MSIX, whose SHA-256 exactly matches

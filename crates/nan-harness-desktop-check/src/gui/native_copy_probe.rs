@@ -697,6 +697,55 @@ fn same_retry_element(before: &xa11y::Element, after: &xa11y::Element) -> bool {
         && before.stable_id == after.stable_id
 }
 
+fn same_named_retry_element(before: &xa11y::ElementData, after: &xa11y::ElementData) -> bool {
+    // GPUI's element ID is not a UIA AutomationId. Preserve the existing
+    // semantic identity boundary even when that optional property is absent.
+    before.pid.is_some()
+        && before.pid == after.pid
+        && before.bounds.is_some()
+        && before.bounds == after.bounds
+        && before.stable_id == after.stable_id
+        && before.role == after.role
+        && before.name == after.name
+        && before.description == after.description
+        && before.states.visible
+        && after.states.visible
+}
+
+// A missing export may settle before the original cutoff; a different control
+// is never a replacement for the captured Retry action. This only observes.
+fn wait_retained_retry<T>(
+    captured: &T,
+    deadline: Instant,
+    mut sample: impl FnMut() -> Result<Vec<T>, Reason>,
+    same: impl Fn(&T, &T) -> bool,
+) -> Result<T, Reason> {
+    loop {
+        if Instant::now() >= deadline {
+            return Err(Reason::Timeout);
+        }
+        let candidates = sample()?;
+        if Instant::now() >= deadline {
+            return Err(Reason::Timeout);
+        }
+        match candidates.len() {
+            0 => std::thread::sleep(Duration::from_millis(10)),
+            1 => {
+                let candidate = candidates
+                    .into_iter()
+                    .next()
+                    .ok_or(Reason::SelectorNotMatched)?;
+                return if same(captured, &candidate) {
+                    Ok(candidate)
+                } else {
+                    Err(Reason::SelectorNotMatched)
+                };
+            }
+            _ => return Err(Reason::SelectorNotMatched),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Serialize)]
 #[serde(rename_all = "kebab-case")]
 enum IconStage {
@@ -790,6 +839,7 @@ pub(crate) struct NativeClipboardSession<'a> {
     directory: &'a Path,
     facts: Facts,
     retry_ready: bool,
+    retry_deadline: Option<Instant>,
     layout: LayoutTrial,
     retry_element: Option<xa11y::Element>,
     icon_directory: Option<PathBuf>,
@@ -804,6 +854,7 @@ impl NativeClipboardSession<'_> {
             return Err(Reason::InputMismatch);
         }
         self.retry_ready = false;
+        self.retry_deadline = None;
         self.retry_element = None;
         self.facts.input = InputFacts::default();
         self.facts.response = ResponseFacts::default();
@@ -975,7 +1026,33 @@ impl NativeClipboardSession<'_> {
             let count = control_count(&retry)?;
             self.facts.retry_control_count = Some(count);
             if count == 1 {
-                retry.wait_visible(WAIT).map_err(map_error)?;
+                retry
+                    .wait_visible(deadline.saturating_duration_since(Instant::now()).min(WAIT))
+                    .map_err(map_error)?;
+                if !cfg!(target_os = "windows") {
+                    self.retry_ready = true;
+                    return Ok(());
+                }
+                let mut candidates = retry.elements().map_err(map_error)?;
+                if candidates.len() != 1 {
+                    return Err(Reason::SelectorNotMatched);
+                }
+                let captured = candidates.pop().ok_or(Reason::SelectorNotMatched)?;
+                let retained = wait_retained_retry(
+                    &captured,
+                    deadline,
+                    || {
+                        self.gui
+                            .native_copy_guard(&mut self.facts, "retry-revalidate")?;
+                        let candidates = retry.elements().map_err(map_error)?;
+                        self.gui
+                            .native_copy_guard(&mut self.facts, "retry-revalidate")?;
+                        Ok(candidates)
+                    },
+                    |before, after| same_named_retry_element(before.data(), after.data()),
+                )?;
+                self.retry_element = Some(retained);
+                self.retry_deadline = Some(deadline);
                 self.retry_ready = true;
                 return Ok(());
             }
@@ -1529,10 +1606,37 @@ impl NativeClipboardSession<'_> {
         if !std::mem::take(&mut self.retry_ready) {
             return Err(Reason::ActionUnsupported);
         }
+        let retained_deadline = self.retry_deadline.take();
         self.observe_panel_zoom()?;
         if let Some(captured) = self.retry_element.take() {
             self.gui
                 .native_copy_guard(&mut self.facts, "retry-revalidate")?;
+            if self.facts.retry_selector == Some("retry-name-or-description") {
+                let deadline = retained_deadline.ok_or(Reason::ActionUnsupported)?;
+                let app = self.gui.app.as_ref().ok_or(Reason::SelectorNotMatched)?;
+                let retry = app.locator(RETRY_CONTROL);
+                let button = wait_retained_retry(
+                    &captured,
+                    deadline,
+                    || {
+                        self.gui
+                            .native_copy_guard(&mut self.facts, "retry-revalidate")?;
+                        let candidates = retry.elements().map_err(map_error)?;
+                        self.facts.retry_control_count = Some(candidates.len());
+                        self.gui
+                            .native_copy_guard(&mut self.facts, "retry-revalidate")?;
+                        Ok(candidates)
+                    },
+                    |before, after| same_named_retry_element(before.data(), after.data()),
+                )?;
+                self.gui
+                    .native_copy_guard(&mut self.facts, "retry-before")?;
+                if Instant::now() >= deadline {
+                    return Err(Reason::Timeout);
+                }
+                self.facts.retry_action_receipt = Some(self.press_retry(&button)?);
+                return self.gui.native_copy_guard(&mut self.facts, "retry-after");
+            }
             if self.facts.retry_selector == Some("retry-label") {
                 let button = self
                     .retry_text_button()?
@@ -1572,6 +1676,8 @@ impl NativeClipboardSession<'_> {
             self.facts.retry_action_receipt = Some(self.press_retry(&matches[0])?);
             return self.gui.native_copy_guard(&mut self.facts, "retry-after");
         }
+        self.gui
+            .native_copy_guard(&mut self.facts, "retry-revalidate")?;
         let app = self.gui.app.as_ref().ok_or(Reason::SelectorNotMatched)?;
         let retry = app.locator(RETRY_CONTROL);
         let count = control_count(&retry)?;
@@ -1688,6 +1794,7 @@ impl Gui {
             directory,
             facts,
             retry_ready: false,
+            retry_deadline: None,
             layout: LayoutTrial::default(),
             retry_element: None,
             icon_directory: std::env::var_os("NANH_ZED_ICON_TEMPLATES")
@@ -2131,6 +2238,115 @@ mod tests {
             assert_eq!(*events.borrow(), expected);
             assert_eq!(result.is_ok(), failed_guard.is_none() && !movement_failure);
         }
+    }
+
+    #[test]
+    fn retained_named_retry_accepts_gpui_without_automation_id_and_rejects_changed_identity() {
+        let mut states = xa11y::StateSet::default();
+        states.visible = true;
+        let before = xa11y::ElementData {
+            role: xa11y::Role::Button,
+            name: Some("Retry".into()),
+            value: None,
+            description: None,
+            bounds: Some(xa11y::Rect {
+                x: 10,
+                y: 20,
+                width: 60,
+                height: 24,
+            }),
+            actions: Vec::new(),
+            states,
+            numeric_value: None,
+            min_value: None,
+            max_value: None,
+            stable_id: None,
+            pid: Some(42),
+            raw: std::collections::HashMap::default(),
+            handle: 1,
+        };
+        let mut current = before.clone();
+        // xa11y assigns a new cache handle to each query of the same UIA node.
+        current.handle = 2;
+        assert!(same_named_retry_element(&before, &current));
+        for field in 0..7 {
+            let mut changed = current.clone();
+            match field {
+                0 => changed.pid = Some(43),
+                1 => changed.bounds = None,
+                2 => changed.name = Some("Other".into()),
+                3 => changed.description = Some("Other".into()),
+                4 => changed.states.visible = false,
+                5 => changed.stable_id = Some("other".into()),
+                _ => changed.role = xa11y::Role::StaticText,
+            }
+            assert!(!same_named_retry_element(&before, &changed));
+        }
+    }
+
+    #[test]
+    fn retained_retry_waits_for_same_control_without_replacement() {
+        let mut observations = vec![vec![], vec![7]].into_iter();
+        let mut sampled = 0;
+        let button = wait_retained_retry(
+            &7,
+            Instant::now() + Duration::from_secs(1),
+            || {
+                sampled += 1;
+                Ok(observations.next().unwrap_or_default())
+            },
+            |before, after| before == after,
+        );
+        assert_eq!(button, Ok(7));
+        assert_eq!(sampled, 2);
+        for candidates in [vec![8], vec![7, 7], vec![7, 8]] {
+            let mut sampled = 0;
+            let result = wait_retained_retry(
+                &7,
+                Instant::now() + Duration::from_secs(1),
+                || {
+                    sampled += 1;
+                    Ok(candidates.clone())
+                },
+                |before, after| before == after,
+            );
+            assert_eq!(result, Err(Reason::SelectorNotMatched));
+            assert_eq!(sampled, 1);
+        }
+    }
+
+    #[test]
+    fn retained_retry_deadline_and_owner_failure_never_admit_action() {
+        let mut sampled = false;
+        let result = wait_retained_retry(
+            &7,
+            Instant::now(),
+            || {
+                sampled = true;
+                Ok(vec![7])
+            },
+            |before, after| before == after,
+        );
+        assert_eq!(result, Err(Reason::Timeout));
+        assert!(!sampled);
+        let result = wait_retained_retry(
+            &7,
+            Instant::now() + Duration::from_secs(1),
+            || Err(Reason::FocusChanged),
+            |before, after| before == after,
+        );
+        assert_eq!(result, Err(Reason::FocusChanged));
+        let cutoff = Instant::now() + Duration::from_millis(1);
+        let result = wait_retained_retry(
+            &7,
+            cutoff,
+            || {
+                std::thread::sleep(Duration::from_millis(2));
+                Ok(vec![7])
+            },
+            |before, after| before == after,
+        );
+        assert_eq!(result, Err(Reason::Timeout));
     }
 
     #[test]
