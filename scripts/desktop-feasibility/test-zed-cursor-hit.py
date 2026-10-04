@@ -145,6 +145,50 @@ class CursorTests(unittest.TestCase):
         self.assertEqual(observed['status'], 'deadline')
         self.assertFalse(observed.get('exactPointerMatched', False))
 
+    def test_fresh_query_cost_leaves_time_for_two_hand_samples(self):
+        clock = [0.0]
+        events = []
+        answers = iter([False, True, True])
+        def prove(point):
+            events.append('proof')
+            clock[0] += 0.020
+        def pointer(point):
+            events.append('pointer')
+            clock[0] += 0.015
+        def cursor():
+            events.append('cursor')
+            clock[0] += 0.010
+            return next(answers)
+        moved = []
+        with patch('time.monotonic', lambda: clock[0]):
+            point = INPUT['select_live_retry_point']((0, 0, 20, 10), moved.append,
+                prove, cursor, 0.4, lambda delay: clock.__setitem__(0, clock[0] + delay),
+                pointer_proof=pointer)
+        self.assertEqual(point, (10, 5))
+        self.assertEqual(moved, [point])
+        self.assertEqual(events, ['proof'] + ['proof', 'pointer', 'cursor'] * 3 + ['proof'])
+        self.assertLess(clock[0], 0.27)
+
+    def test_query_cost_cannot_authorize_late_hand_or_late_hover(self):
+        clock = [0.0]
+        moved = []
+        samples = []
+        def slow_proof(point): clock[0] += 0.12
+        with patch('time.monotonic', lambda: clock[0]), self.assertRaises(ValueError):
+            INPUT['select_live_retry_point']((0, 0, 20, 10), moved.append,
+                slow_proof, lambda: samples.append(True) or True, 0.1, lambda _: None)
+        self.assertEqual(moved, [])
+        self.assertEqual(samples, [])
+        clock[0] = 0
+        observed = dict(status='unavailable', sampledPoints=0)
+        def cursor(): clock[0] += 0.06; return True
+        with patch('time.monotonic', lambda: clock[0]), self.assertRaises(ValueError):
+            INPUT['select_live_retry_point']((0, 0, 20, 10), moved.append,
+                lambda _: None, cursor, 0.1,
+                lambda delay: clock.__setitem__(0, clock[0] + delay), observed)
+        self.assertEqual(observed['status'], 'deadline')
+        self.assertFalse(observed.get('exactPointerMatched', False))
+
     def test_scan_all_mismatches_never_selects_or_activates(self):
         moved = []
         with self.assertRaises(ValueError):

@@ -432,10 +432,16 @@ def select_live_retry_point(bounds, move, prove, matches, deadline, pause=time.s
                 observation.update(status='deadline', failureReason='deadline')
             raise ValueError('retry hit deadline')
         proof(point)
+        if time.monotonic() >= deadline:
+            if observation is not None:
+                observation.update(status='deadline', failureReason='deadline')
+            raise RetryHitFailure('deadline')
         move(point)
         if observation is not None:
             observation['sampledPoints'] += 1
-        point_deadline = min(deadline, time.monotonic() + 0.1)
+        # Fresh AX, client and pointer proofs consume this allowance too.
+        # Keep the original overall cutoff and five samples; never cache proofs.
+        point_deadline = min(deadline, time.monotonic() + 0.25)
         consecutive = 0
         for _ in range(5):
             pause(min(0.02, max(0, point_deadline - time.monotonic())))
