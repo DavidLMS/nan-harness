@@ -267,7 +267,7 @@ async function run(page, ownerGuard, deadline, rejected, mainGuard, folderTrust)
     facts.sessionProofFailure=sessionFailure;
     return stop('invalid-session');
   }
-  let scope, fieldset, radio, label, button;
+  let scope, fieldset, radio, label, button, transitionScope;
   async function proof(needChecked=false) {
     const fail = reason => { facts.roleProofFailure=reason; return false; };
     facts.roleProofFailure='unmeasured';
@@ -415,7 +415,10 @@ async function run(page, ownerGuard, deadline, rejected, mainGuard, folderTrust)
     if (await button.count() !== 1 || !await button.isEnabled()
         || !await button.evaluate(e=>e.tagName==='BUTTON')) return stop('continue-not-matched');
     facts.continueControl=true;
-    const continueProof=async()=>await proof(true)&&await button.count()===1&&await button.isEnabled();
+    transitionScope=await scope.elementHandle();
+    if(!transitionScope)return stop('continue-not-matched');
+    const continueProof=async()=>await proof(true)&&await button.count()===1&&await button.isEnabled()
+      &&await scope.evaluate((element,held)=>element===held,transitionScope);
     facts.stage='continue-action';
     if (!await click(button,continueProof,'continueClickAttempted','continueClickCompleted')) return stop('action-blocked');
     facts.stage='scope-transition';
@@ -423,7 +426,7 @@ async function run(page, ownerGuard, deadline, rejected, mainGuard, folderTrust)
       if (!await ownedEndpoint()) return stop('ownership-lost');
       if (await page.locator(GROUP).count()===0) {
         facts.roleScopeAbsent=true;
-        if(await scope.count()===1&&await scope.evaluate(taskContinuation)&&await ownedEndpoint()&&Date.now()<deadline) {
+        if(await transitionScope.evaluate(taskContinuation)&&await ownedEndpoint()&&Date.now()<deadline) {
           facts.taskScopeProved=true;break;
         }
       }
@@ -431,11 +434,11 @@ async function run(page, ownerGuard, deadline, rejected, mainGuard, folderTrust)
     }
     if(!facts.taskScopeProved)return stop('scope-remained');
     facts.stage='task-action';
-    const taskButton=scope.getByRole('button',{name:'Get Started',exact:true});
+    const taskButton=page.getByRole('button',{name:'Get Started',exact:true});
     const taskProof=async()=>Date.now()<deadline&&await ownedEndpoint()
-      &&await scope.count()===1&&await scope.evaluate(taskContinuation)
+      &&await transitionScope.evaluate(taskContinuation)
       &&await taskButton.count()===1&&await taskButton.isEnabled()
-      &&await taskButton.evaluate(e=>e.tagName==='BUTTON');
+      &&await taskButton.evaluate((element,held)=>element.tagName==='BUTTON'&&held.contains(element),transitionScope);
     if(!await click(taskButton,taskProof,'taskClickAttempted','taskClickCompleted'))return stop('action-blocked');
     facts.stage='coding-readiness';
     while(Date.now()<deadline) {
@@ -445,6 +448,7 @@ async function run(page, ownerGuard, deadline, rejected, mainGuard, folderTrust)
     }
     return stop('scope-remained');
   } catch { return stop(facts.roleClickAttempted || facts.continueClickAttempted ? 'action-uncertain':'observation-failed'); }
+  finally { if(transitionScope)await transitionScope.dispose(); }
 };
 // These routes are bound to the inspected Windows, Linux and macOS distributions' app-protocol and main chunks.
 function sourceRoute(raw) {

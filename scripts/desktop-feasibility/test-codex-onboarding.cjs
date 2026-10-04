@@ -66,7 +66,7 @@ async function trial(options={}) {
   async evaluate(fn,arg){if(this.disposed)throw Error('PRIVATE disposed handle');return evaluate(fn,this.element,arg);}
   async click(params){assert.equal(params.force,undefined);assert.ok(params.position);if(this.element===label){roleClicks++;if(options.uncertain==='role')throw Error('private');checked=!options.readbackFail;}
    else if(this.element.kind==='task'){taskClicks++;if(options.uncertain==='task')throw Error('private');}
-   else {continueClicks++;if(options.uncertain==='continue')throw Error('private');absent=!options.remain;}}
+   else {continueClicks++;if(options.uncertain==='continue')throw Error('private');absent=!options.remain;if(options.scopeReplaced)root.isConnected=false;}}
   async evaluateHandle(fn){return {value:evaluate(fn,this.element),dispose:async()=>{}};}
   async dispose(){this.disposed=true;}
  }
@@ -78,7 +78,7 @@ async function trial(options={}) {
   async count(){
    if(this.kind==='legend'){legendReads++;if(options.overlayDeadlineDuringProof&&legendReads>=3)now=1201;if(options.overlayLegendLost&&legendReads>=3)return 0;}
    if(this.kind==='scope'&&options.overlayScopeLost&&legendReads>=3)return 0;
-   return this.kind==='label'?(options.duplicateLabel?2:1):this.kind==='scope'?(options.badScope?0:1):this.kind==='fieldset'?(options.extraFieldset?2:1):this.kind==='login'?(options.login?1:0):this.kind==='roleFieldsets'?this.members.length:this.kind==='legend'?(options.wrongLegend?0:options.duplicateRoleFieldset?2:1):this.kind==='radios'?(absent||options.noGroup?0:11):this.kind==='checked'?(checked?(options.multipleChecked?2:1):0):this.kind==='continue'?(options.duplicateContinue?2:1):this.kind==='radio'?(options.duplicateRadio?2:1):1;}
+   return this.kind==='label'?(options.duplicateLabel?2:1):this.kind==='scope'?(absent||options.badScope?0:1):this.kind==='fieldset'?(options.extraFieldset?2:1):this.kind==='login'?(options.login?1:0):this.kind==='roleFieldsets'?this.members.length:this.kind==='legend'?(options.wrongLegend?0:options.duplicateRoleFieldset?2:1):this.kind==='radios'?(absent||options.noGroup?0:11):this.kind==='checked'?(checked?(options.multipleChecked?2:1):0):this.kind==='continue'?(options.duplicateContinue?2:1):this.kind==='radio'?(options.duplicateRadio?2:1):this.kind==='task'?(options.duplicateTask?2:1):1;}
   async isEnabled(){return this.kind==='radio'?!(options.radioDisabled||options.loading&&now<300):this.kind!=='continue'||!options.disabled;}
   async isChecked(){return checked;}
   element(){return this.kind==='label'?label:this.kind==='continue'?button:this.kind==='task'?startControl:this.kind==='radio'?radio:this.kind==='fieldset'?fieldset:root;}
@@ -87,7 +87,7 @@ async function trial(options={}) {
  }
  const mainFrame={};
  const extraPage={url:()=>options.foreignUrl??'about:blank',evaluate:async()=>{if(options.inventoryOwnerLoss)inventoryOwnerLost=true;if(options.inventoryDeadline)now=1201;return options.visibility??'hidden';}};
- const page={evaluate:async fn=>fn.name==='codingScope'?taskClicks===1&&!options.noCodingScope:'visible',mainFrame:()=>options.overlayFrameChange&&overlayReads?{}:mainFrame,locator:s=>new Locator(s.startsWith('fieldset > legend')?'legend':'radios'),
+ const page={getByRole:(_role,options)=>new Locator(options.name==='Get Started'?'task':'login'),evaluate:async fn=>fn.name==='codingScope'?taskClicks===1&&!options.noCodingScope:'visible',mainFrame:()=>options.overlayFrameChange&&overlayReads?{}:mainFrame,locator:s=>new Locator(s.startsWith('fieldset > legend')?'legend':'radios'),
   url:()=>options.urlChange&&roleClicks>0?'app://codex/index.html?PRIVATE_ROUTE':'app://codex/index.html',
   context:()=>({browser:()=>({contexts:()=>[{pages:()=>options.foreignPage?[page,extraPage]:options.replacedPage?[{}]:[page]}]})})};
  const sandbox={exports:{},URL,process:{platform:options.platform??'win32',env:{GITHUB_ACTIONS:options.noHost?'false':'true',RUNNER_ENVIRONMENT:'github-hosted',RUNNER_OS:options.runnerOs??'Windows',NANH_CODEX_PUBLIC_ONBOARDING:options.noOptin?undefined:'engineering'}},Date:{now:()=>now},clearTimeout:()=>{},setTimeout:(f,ms)=>{if(ms<=100){now+=100;f();}}};
@@ -291,6 +291,11 @@ async function trial(options={}) {
  assert.equal(knownAux.roleClicks,1);assert.equal(knownAux.continueClicks,1);assert.equal(knownAux.facts.taskScopeProved,true);
  const lostAux=await trial({foreignPage:true,admitAux:true,auxOwnershipLostAfterClick:true});
  assert.equal(lostAux.roleClicks,1);assert.equal(lostAux.continueClicks,0);assert.equal(lostAux.facts.roleProofFailure,'page-count');
+ const retainedTransition=await trial();
+ assert.equal(retainedTransition.facts.taskScopeProved,true);assert.equal(retainedTransition.taskClicks,1);
+ for(const options of [{scopeReplaced:true},{duplicateTask:true}]) {
+  const rejected=await trial(options);assert.equal(rejected.continueClicks,1);assert.equal(rejected.taskClicks,0);
+ }
  const missingTask=await trial({noTaskScope:true});
  assert.equal(missingTask.continueClicks,1);assert.equal(missingTask.facts.roleScopeAbsent,true);assert.equal(missingTask.facts.taskScopeProved,false);assert.equal(missingTask.facts.errorCategory,'scope-remained');
  const uncertainTask=await trial({uncertain:'task'});
