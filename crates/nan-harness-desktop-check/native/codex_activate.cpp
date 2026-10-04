@@ -7,6 +7,7 @@
 #include <iomanip>
 #include "codex_activation_identity.hpp"
 #include "codex_occluder_kind.hpp"
+#include "codex_point_stack.hpp"
 #if defined(__APPLE__)
 #import <AppKit/AppKit.h>
 #include <ApplicationServices/ApplicationServices.h>
@@ -340,20 +341,57 @@ bool visit_webareas(const Request& r,AXUIElementRef node,const Binding& held,
     CFRelease(children);if(!valid&&out.reason==std::string("measured"))out.reason="ax-query";
     return valid&&alive(r);
 }
-bool native_point_clear(const Request& r,const Binding& held,CGPoint point) {
+bool native_point_clear(const Request& r,const Binding& held,CGPoint point,const char** reason) {
     CFArrayRef rows=CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly,kCGNullWindowID);
-    if(!rows)return false;const CFIndex count=CFArrayGetCount(rows);bool valid=count<=1024,found=false;
-    for(CFIndex i=0;valid&&i<count;++i) {
-        auto row=(CFDictionaryRef)CFArrayGetValueAtIndex(rows,i);
-        if(uint64_t(number(row,kCGWindowNumber))==held.id){found=true;break;}
-        if(number(row,kCGWindowLayer)==CGWindowLevelForKey(kCGCursorWindowLevelKey))continue;
-        double alpha=0;auto value=CFDictionaryGetValue(row,kCGWindowAlpha);
-        valid=value&&CFGetTypeID(value)==CFNumberGetTypeID()
-            &&CFNumberGetValue((CFNumberRef)value,kCFNumberDoubleType,&alpha)&&std::isfinite(alpha);
-        if(!valid)break;if(alpha<=0)continue;
-        CGRect bounds{};valid=rect(row,bounds)&&!CGRectContainsPoint(bounds,point);
+    std::vector<CodexPointStackRow> sample;
+    const bool available=rows&&CFArrayGetCount(rows)<=1024;
+    if(available)for(CFIndex i=0;i<CFArrayGetCount(rows);++i) {
+        CodexPointStackRow item;
+        const auto value=CFArrayGetValueAtIndex(rows,i);
+        if(CFGetTypeID(value)!=CFDictionaryGetTypeID()){sample.push_back(item);continue;}
+        const auto row=(CFDictionaryRef)value;
+        auto integer=[row](CFStringRef key,int64_t& out) {
+            const auto value=CFDictionaryGetValue(row,key);
+            return value&&CFGetTypeID(value)==CFNumberGetTypeID()
+                &&CFNumberGetValue((CFNumberRef)value,kCFNumberSInt64Type,&out);
+        };
+        int64_t id=0,layer=0,pid=0;
+        item.identity_valid=integer(kCGWindowNumber,id)&&id>0&&integer(kCGWindowLayer,layer);
+        item.held=uint64_t(id)==held.id;
+        item.cursor=layer==CGWindowLevelForKey(kCGCursorWindowLevelKey);
+        CGRect bounds{};
+        item.bounds_valid=rect(row,bounds);
+        item.point_contained=item.bounds_valid&&CGRectContainsPoint(bounds,point);
+        item.held_metadata_valid=integer(kCGWindowOwnerPID,pid)&&pid>1&&item.bounds_valid;
+        item.held_unchanged=item.held_metadata_valid&&pid==held.pid&&layer==0
+            &&CGRectEqualToRect(bounds,held.bounds);
+        double alpha=0;const auto opacity=CFDictionaryGetValue(row,kCGWindowAlpha);
+        item.alpha_valid=opacity&&CFGetTypeID(opacity)==CFNumberGetTypeID()
+            &&CFNumberGetValue((CFNumberRef)opacity,kCFNumberDoubleType,&alpha)&&std::isfinite(alpha);
+        item.transparent=item.alpha_valid&&alpha<=0;
+        sample.push_back(item);
     }
-    CFRelease(rows);return valid&&found&&alive(r);
+    if(rows)CFRelease(rows);
+    const auto result=codex_point_stack_result(available,sample);
+    *reason=codex_point_stack_reason(result);
+    return result==CodexPointStackResult::Clear&&alive(r);
+}
+bool native_hit_window(const Request& r,const Binding& held,AXUIElementRef main,CGPoint point) {
+    if(!alive(r))return false;
+    AXUIElementRef system=AXUIElementCreateSystemWide(),hit=nullptr;
+    bool matched=false;
+    if(system&&AXUIElementSetMessagingTimeout(system,0.1f)==kAXErrorSuccess
+        &&AXUIElementCopyElementAtPosition(system,point.x,point.y,&hit)==kAXErrorSuccess&&hit) {
+        pid_t pid=0;CFTypeRef window=nullptr;
+        const bool owner=AXUIElementGetPid(hit,&pid)==kAXErrorSuccess&&pid==held.pid;
+        const bool self=CFEqual(hit,main);
+        const bool enclosing=owner&&!self&&attribute(r,hit,kAXWindowAttribute,window)
+            &&CFGetTypeID(window)==AXUIElementGetTypeID()&&CFEqual(window,main);
+        matched=codex_hit_is_held_window(owner,self,enclosing)&&alive(r);
+        if(window)CFRelease(window);
+    }
+    if(hit)CFRelease(hit);if(system)CFRelease(system);
+    return matched&&alive(r);
 }
 int point_observe(const Request& r,const Binding& held,AXUIElementRef main) {
     const char* reason="measured";WebAreaObservation first,second;
@@ -363,6 +401,7 @@ int point_observe(const Request& r,const Binding& held,AXUIElementRef main) {
     else if(!visit_webareas(r,main,held,0,second))reason=second.reason;
     else if(second.count!=1||!CFEqual(first.element,second.element)
         ||!CGRectEqualToRect(first.bounds,second.bounds))reason="ax-webarea-changed";
+    const char* point_reason="native-point-not-clear";
     bool stable=std::string(reason)=="measured",url_matched=stable&&first.url_matched&&second.url_matched,focus=false,dimensions=false,clear=false,hit_owned=false;
     if(stable) {
         auto app=[NSRunningApplication runningApplicationWithProcessIdentifier:held.pid];
@@ -375,21 +414,12 @@ int point_observe(const Request& r,const Binding& held,AXUIElementRef main) {
         dimensions=first.bounds.size.width==r.css_width&&first.bounds.size.height==r.css_height;
         if(focus&&dimensions) {
             CGPoint point=CGPointMake(first.bounds.origin.x+r.css_x,first.bounds.origin.y+r.css_y);
-            clear=native_point_clear(r,held,point);
-            AXUIElementRef system=AXUIElementCreateSystemWide(),hit=nullptr;
-            if(system&&AXUIElementSetMessagingTimeout(system,0.1f)==kAXErrorSuccess
-                &&AXUIElementCopyElementAtPosition(system,point.x,point.y,&hit)==kAXErrorSuccess&&hit) {
-                pid_t pid=0;CFTypeRef window=nullptr;
-                hit_owned=AXUIElementGetPid(hit,&pid)==kAXErrorSuccess&&pid==held.pid
-                    &&attribute(r,hit,kAXWindowAttribute,window)
-                    &&CFGetTypeID(window)==AXUIElementGetTypeID()&&CFEqual(window,main);
-                if(window)CFRelease(window);
-            }
-            if(hit)CFRelease(hit);if(system)CFRelease(system);
+            clear=native_point_clear(r,held,point,&point_reason);
+            hit_owned=native_hit_window(r,held,main,point);
         }
         if(!focus)reason="native-focus-unavailable";
         else if(!dimensions)reason="viewport-dimensions-mismatch";
-        else if(!clear)reason="native-point-not-clear";
+        else if(!clear)reason=point_reason;
         else if(!hit_owned)reason="native-hit-window-unproved";
         else reason=url_matched?"mapping-observed":"renderer-webarea-correlation-unproved";
     }
@@ -413,7 +443,9 @@ int point_observe(const Request& r,const Binding& held,AXUIElementRef main) {
             if(focused)CFRelease(focused);if(application)CFRelease(application);
             if(focus&&!final_focus){focus=false;reason="native-focus-unavailable";}
             if(clear&&!native_point_clear(r,held,CGPointMake(first.bounds.origin.x+r.css_x,
-                first.bounds.origin.y+r.css_y))){clear=false;reason="native-point-not-clear";}
+                first.bounds.origin.y+r.css_y),&point_reason)){clear=false;if(focus)reason=point_reason;}
+            if(hit_owned&&!native_hit_window(r,held,main,CGPointMake(first.bounds.origin.x+r.css_x,
+                first.bounds.origin.y+r.css_y))){hit_owned=false;if(focus&&clear)reason="native-hit-window-unproved";}
         }
     }
     // Recheck immutable identity after every read. No replacement/renewal/activation.

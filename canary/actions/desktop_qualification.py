@@ -88,10 +88,12 @@ def codex_point_observation(value):
     reasons={'measured','ax-limit-or-deadline','ax-query','ax-visibility-unavailable',
         'ax-webarea-geometry','ax-webarea-ambiguous','ax-webarea-missing','ax-webarea-changed',
         'native-focus-unavailable','viewport-dimensions-mismatch','native-point-not-clear',
+        'point-occluded','stack-unavailable','metadata-invalid','held-window-missing','held-window-changed',
         'native-hit-window-unproved','renderer-webarea-correlation-unproved','mapping-observed',
         'held-identity-or-deadline','cdp-identity-changed','cdp-child-frame-present',
         'css-viewport-unavailable','css-viewport-invalid','css-viewport-transform-unproved',
         'css-viewport-changed','cdp-held-identity-invalid','deadline-or-owner','deadline','observation-unavailable'}
+    stack_causes={'point-occluded','stack-unavailable','metadata-invalid','held-window-missing','held-window-changed'}
     base={'reason','mappingObserved','inputAuthorized'}
     counts={'firstWebAreaCount','secondWebAreaCount'}
     flags={'webAreaStable','nativeFocused','dimensionsMatched','nativePointClear',
@@ -110,6 +112,11 @@ def codex_point_observation(value):
             or not value['webAreaStable'] and any(value[key] for key in flags-{'heldIdentityStable'})
             or value['mappingObserved'] and not all(value[key] for key in flags)):
         raise ValueError('inconsistent Codex point observation')
+    if value['reason'] in stack_causes and (set(value)!=base|counts|flags
+            or not value['webAreaStable'] or not value['nativeFocused']
+            or not value['dimensionsMatched'] or value['nativePointClear']
+            or not value['heldIdentityStable']):
+        raise ValueError('inconsistent Codex point stack cause')
     return value
 
 

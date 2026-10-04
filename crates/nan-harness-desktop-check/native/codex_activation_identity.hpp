@@ -33,3 +33,10 @@ inline const char* codex_inventory_failure_reason(const char* incomplete_reason,
     if(overlapping_ahead)return "overlapping-ahead";
     return fully_displayed?"identity":"off-display";
 }
+
+// AXWindow is required for descendants of a window, not necessarily the window
+// itself. Exact held-window equality still requires the expected owner process.
+inline bool codex_hit_is_held_window(bool owner_matches,bool hit_is_main,
+    bool enclosing_window_matches) {
+    return owner_matches&&(hit_is_main||enclosing_window_matches);
+}

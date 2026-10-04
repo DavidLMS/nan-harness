@@ -8,6 +8,15 @@ for(const bad of [good+'PRIVATE',good.replace('mapping-observed','PRIVATE'),
   good.replace(' 1 1 1 1 1 1 1 1 1 ',' 1 1 1 1 1 1 1 1 0 '),
   good.replace('600','NaN'),good.replace('600','-1'),good.replace('1 1 1','2 1 1')])
   assert.throws(()=>parseNative(bad));
+for(const cause of ['point-occluded','stack-unavailable','metadata-invalid','held-window-missing','held-window-changed']) {
+  const wire=good.replace('mapping-observed',cause).replace('1 1 1 1 1 1 1 1 1','1 1 1 1 1 0 1 1 1');
+  const facts=parseNative(wire).facts;
+  assert.equal(facts.reason,cause);assert.equal(facts.nativePointClear,false);
+  assert.equal(facts.inputAuthorized,false);assert.equal(facts.mappingObserved,false);
+  assert(!JSON.stringify(facts).includes('600'));
+  assert.throws(()=>parseNative(good.replace('mapping-observed',cause)));
+  assert.throws(()=>parseNative(wire.replace('1 1 1 1 1 0 1 1 1','1 1 1 0 1 0 1 1 1')));
+}
 const held={url:'app://-/index.html',target:'PRIVATE-target',frame:'PRIVATE-frame',loader:'PRIVATE-loader',
   frameUrl:'app://-/index.html',fragment:''};
 const layout={clientWidth:600,clientHeight:400,pageX:0,pageY:0};

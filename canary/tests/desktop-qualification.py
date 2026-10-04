@@ -3861,6 +3861,14 @@ class CodexPointObservationTests(unittest.TestCase):
             dimensionsMatched=True,nativePointClear=True,nativeHitWindowMatched=True,
             heldIdentityStable=True,webAreaUrlMatched=True)
         self.assertEqual(q.codex_point_observation(good),good)
+        for cause in ['point-occluded','stack-unavailable','metadata-invalid','held-window-missing','held-window-changed']:
+            value={**good,'reason':cause,'mappingObserved':False,'nativePointClear':False}
+            self.assertEqual(q.codex_point_observation(value),value)
+            for change in ({'nativePointClear':True},{'nativeFocused':False},
+                           {'dimensionsMatched':False},{'heldIdentityStable':False},
+                           {'ownerPid':1},{'ownerName':'PRIVATE'},{'bounds':[1,2,3,4]}):
+                with self.assertRaises(ValueError):q.codex_point_observation({**value,**change})
+            with self.assertRaises(ValueError):q.codex_point_observation(dict(reason=cause,mappingObserved=False,inputAuthorized=False))
         blocked=dict(reason='observation-unavailable',mappingObserved=False,inputAuthorized=False)
         self.assertEqual(q.codex_point_observation(blocked),blocked)
         for changes in ({'reason':[]},{'reason':'PRIVATE'},{'inputAuthorized':True},

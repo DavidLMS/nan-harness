@@ -2,8 +2,10 @@
 const reasons=new Set(['measured','ax-limit-or-deadline','ax-query','ax-visibility-unavailable',
   'ax-webarea-geometry','ax-webarea-ambiguous','ax-webarea-missing','ax-webarea-changed',
   'native-focus-unavailable','viewport-dimensions-mismatch','native-point-not-clear',
+  'point-occluded','stack-unavailable','metadata-invalid','held-window-missing','held-window-changed',
   'native-hit-window-unproved','renderer-webarea-correlation-unproved','mapping-observed',
   'held-identity-or-deadline']);
+const stackCauses=new Set(['point-occluded','stack-unavailable','metadata-invalid','held-window-missing','held-window-changed']);
 function parseNative(value) {
   if(typeof value!=='string'||value.length>1024||!value.endsWith('\n'))throw Error('observation wire rejected');
   const fields=value.slice(0,-1).split(' ');
@@ -14,6 +16,7 @@ function parseNative(value) {
   const [stable,focused,dimensions,pointClear,hitWindow,heldStable,urlMatched]=bits.map(v=>v==='1');
   if(stable!==(fields.length===15)||stable&&(counts[0]!==1||counts[1]!==1)
     ||!stable&&(focused||dimensions||pointClear||hitWindow||urlMatched)
+    ||stackCauses.has(fields[1])&&!(stable&&focused&&dimensions&&!pointClear&&heldStable)
     ||fields[1]==='mapping-observed'&&!(stable&&focused&&dimensions&&pointClear&&hitWindow&&heldStable&&urlMatched))
     throw Error('observation wire rejected');
   let bounds=null;

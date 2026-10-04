@@ -3,6 +3,13 @@
 #include <cstring>
 #include <limits>
 int main() {
+    assert(codex_hit_is_held_window(true,true,false));
+    assert(codex_hit_is_held_window(true,false,true));
+    assert(!codex_hit_is_held_window(true,false,false));
+    assert(!codex_hit_is_held_window(false,true,false));
+    assert(!codex_hit_is_held_window(false,false,true));
+    assert(!codex_hit_is_held_window(false,true,true));
+
     const CodexMainIdentity held{42,100,500,0,10,20,600,400};
     assert(same_codex_main(held,held));
     assert(codex_inventory_admitted(true,1,true,false,false,true));
