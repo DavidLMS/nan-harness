@@ -3413,6 +3413,20 @@ class CodexFolderTrustTests(unittest.TestCase):
                      engineeringChecked=False, continueControl=False, continueClickAttempted=False,
                      continueClickCompleted=False, roleScopeAbsent=False,
                      roleProofFailure='unmeasured', sessionProofFailure='unmeasured')
+        for completed in (True,False):
+            measured = {**setup,'stage':'coding-readiness','roleScopeAbsent':True,
+                        'taskScopeProved':True,'taskControlKind':'skip-optional-capabilities',
+                        'taskClickAttempted':True,'taskClickCompleted':True,'codingComposerReady':False,
+                        'continueClickAttempted':True,'continueClickCompleted':True,
+                        'roleClickAttempted':True,'roleClickCompleted':True,
+                        'taskSkipConfirmationAttempted':True,'taskSkipConfirmationCompleted':completed}
+            self.assertEqual(q.public_onboarding(measured,'chatgpt-desktop'),measured)
+            for invalid in ({**measured,'taskSkipConfirmationAttempted':False},
+                            {**measured,'taskSkipConfirmationCompleted':1},
+                            {**measured,'taskControlKind':'get-started'},
+                            {**measured,'taskClickCompleted':False},
+                            {key:value for key,value in measured.items() if key!='taskSkipConfirmationCompleted'}):
+                with self.assertRaises(ValueError):q.public_onboarding(invalid,'chatgpt-desktop')
         for status, attempted, completed in (('absent',False,False),('blocked',False,False),
                                              ('blocked',True,True),('completed',True,True),
                                              ('action-uncertain',True,False)):

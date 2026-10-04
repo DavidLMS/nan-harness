@@ -85,7 +85,7 @@ def task_scope_observation(value):
 
 
 def public_onboarding(setup, app):
-    shape = set(setup) - {'folderTrust', 'rejectedPageInventory', 'taskScopeProved', 'taskClickAttempted', 'taskClickCompleted', 'codingComposerReady', 'taskScopeObservation', 'taskControlKind', 'codingReadinessObservation', 'mainGuardFailure', 'pageSetFailure', 'foreignOverlayImportSetup', 'foreignOverlaySourceCounts', 'foreignOverlayActionability'} if type(setup) is dict else set()
+    shape = set(setup) - {'folderTrust', 'rejectedPageInventory', 'taskScopeProved', 'taskClickAttempted', 'taskClickCompleted', 'codingComposerReady', 'taskScopeObservation', 'taskControlKind', 'codingReadinessObservation', 'taskSkipConfirmationAttempted', 'taskSkipConfirmationCompleted', 'mainGuardFailure', 'pageSetFailure', 'foreignOverlayImportSetup', 'foreignOverlaySourceCounts', 'foreignOverlayActionability'} if type(setup) is dict else set()
     booleans = {'conversationalScope', 'engineeringControl', 'roleClickAttempted',
                 'roleClickCompleted', 'engineeringChecked', 'continueControl',
                 'continueClickAttempted', 'continueClickCompleted', 'roleScopeAbsent'}
@@ -115,6 +115,14 @@ def public_onboarding(setup, app):
                 or setup.get('taskScopeProved') is not True
                 or setup['roleScopeAbsent'] is not True):
             raise ValueError('invalid onboarding task control kind')
+    confirmation = {'taskSkipConfirmationAttempted','taskSkipConfirmationCompleted'}
+    if confirmation & set(setup):
+        if (not confirmation <= set(setup) or any(type(setup[key]) is not bool for key in confirmation)
+                or setup['taskSkipConfirmationAttempted'] is not True
+                or setup.get('taskClickCompleted') is not True or setup.get('taskScopeProved') is not True
+                or setup.get('taskControlKind') != 'skip-optional-capabilities'
+                or setup['stage'] != 'coding-readiness'):
+            raise ValueError('invalid Codex skip confirmation receipt')
     if 'codingReadinessObservation' in setup:
         coding = setup['codingReadinessObservation']
         keys = {'composerCount','conversationCount','modalCount','roleRadioCount',

@@ -48,6 +48,39 @@ function sample(control, optionalSkip=false) {
   return {rect: [r.left,r.top,r.width,r.height], points};
 }
 
+// Frozen Qf/$d plain skip confirmation. Credit variants are deliberately unproved.
+function skipConfirmation(control, retained) {
+  const visible=e=>{const r=e.getBoundingClientRect(),s=getComputedStyle(e);
+    return e.isConnected&&r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden';};
+  const overlays=[...document.querySelectorAll('[role="dialog"],[role="alertdialog"],[role="menu"],[aria-modal="true"]')].filter(visible);
+  if(overlays.length!==1)return null;
+  const dialog=overlays[0],forms=[...dialog.querySelectorAll('form.select-none')].filter(visible);
+  if(dialog.getAttribute('role')!=='dialog'||forms.length!==1)return null;
+  const form=forms[0];
+  if(retained&&(retained.form!==form||retained.dialog!==dialog))return null;
+  const leaf=text=>[...form.querySelectorAll('*')].filter(e=>e.textContent?.trim()===text
+    &&![...e.children].some(c=>c.textContent?.trim()===text)&&visible(e));
+  const titles=[...form.querySelectorAll('h1,h2,h3,[role="heading"]')].filter(e=>e.isConnected
+    &&e.textContent?.trim()==='Skip setup?'&&getComputedStyle(e).display!=='none'
+    &&getComputedStyle(e).visibility!=='hidden');
+  const buttons=[...form.querySelectorAll('button')].filter(visible);
+  const keep=buttons.filter(e=>e.textContent?.trim()==='Keep setting up'&&e.getAttribute('type')==='submit');
+  const go=buttons.filter(e=>e.textContent?.trim()==='Go to ChatGPT'&&e.getAttribute('type')==='button');
+  if(titles.length!==1||leaf('You’ll go straight to ChatGPT').length!==1||buttons.length!==2
+      ||keep.length!==1||go.length!==1||go[0]!==control||control.disabled
+      ||control.getAttribute('aria-disabled')==='true'||control.closest('[inert]'))return null;
+  for(let e=control,depth=0;e;e=e.parentElement)
+    if(++depth>64||getComputedStyle(e).pointerEvents==='none')return null;
+  const r=control.getBoundingClientRect(),points=[];
+  for(const fy of [0.25,0.5,0.75])for(const fx of [0.25,0.5,0.75]) {
+    const x=r.left+control.clientLeft+control.clientWidth*fx,y=r.top+control.clientTop+control.clientHeight*fy;
+    if(x<0||y<0||x>=innerWidth||y>=innerHeight)continue;
+    const front=document.elementFromPoint(x,y);
+    if(front===control||control.contains(front))points.push({x:x-r.left-control.clientLeft,y:y-r.top-control.clientTop});
+  }
+  return {rect:[r.left,r.top,r.width,r.height],points};
+}
+
 // The frozen role Continue callback transitions into task setup. Disappearance
 // alone is not proof: retain its source scope and exact Engineering acknowledgement.
 function taskContinuation(scope, diagnostic=false) {
@@ -466,7 +499,8 @@ async function run(page, ownerGuard, deadline, rejected, mainGuard, folderTrust)
     if (!await click(button,continueProof,'continueClickAttempted','continueClickCompleted')) return stop('action-blocked');
     facts.stage='scope-transition';
     let taskKind;
-    const skipAdmitted=process.platform==='linux'&&process.env.NANH_CODEX_PROJECT_ARTIFACT_SHA256==='ee7854145554718d7239d01ea37d44f6ba1e0ba4a93f47ac097d6e0f964da47c';
+    const skipAdmitted=(process.platform==='linux'&&process.env.NANH_CODEX_PROJECT_ARTIFACT_SHA256==='ee7854145554718d7239d01ea37d44f6ba1e0ba4a93f47ac097d6e0f964da47c')
+      ||(process.platform==='win32'&&process.env.NANH_CODEX_PROJECT_ARTIFACT_SHA256==='f7b0266d6c00d4743da01d62bc82488f7ec5560c642501758119cb9885f67c87');
     const observeTask=async()=>{
       const shape=await transitionScope.evaluate(taskContinuation,true);
       facts.taskScopeObservation=shape;
@@ -496,11 +530,42 @@ async function run(page, ownerGuard, deadline, rejected, mainGuard, folderTrust)
       &&await taskButton.evaluate((element,held)=>element.tagName==='BUTTON'&&held.contains(element),transitionScope);
     if(!await click(taskButton,taskProof,'taskClickAttempted','taskClickCompleted'))return stop('action-blocked');
     facts.stage='coding-readiness';
+    let confirmationConsumed=false;
     while(Date.now()<deadline) {
       if(!await ownedEndpoint())return stop('ownership-lost');
       const coding=await page.evaluate(codingScope,true);
       facts.codingReadinessObservation=coding.observation;
       if(coding.ready===true) {facts.codingComposerReady=true;return facts;}
+      if(skipAdmitted&&facts.taskControlKind==='skip-optional-capabilities'
+          &&coding.observation.modalCount===1&&!confirmationConsumed) {
+        const confirmation=page.getByRole('button',{name:'Go to ChatGPT',exact:true});
+        if(await confirmation.count()===1) {
+          const held=await confirmation.elementHandle();
+          try {
+            if(!held||!await ownedEndpoint()||Date.now()>=deadline)return stop('action-blocked');
+            const form=await held.evaluateHandle(e=>e.closest('form'));
+            const dialog=await held.evaluateHandle(e=>e.closest('[role="dialog"]'));
+            const retained={form,dialog};
+            try {
+            const first=await held.evaluate(skipConfirmation,retained);
+            if(!first)return stop('action-blocked');
+            await wait(Math.min(100,Math.max(0,deadline-Date.now())));
+            if(!await ownedEndpoint()||Date.now()>=deadline
+                ||!await confirmation.evaluate((e,h)=>e===h,held))return stop('action-blocked');
+            const second=await held.evaluate(skipConfirmation,retained),point=candidate(first,second);
+            if(!point||!await ownedEndpoint()||Date.now()>=deadline)return stop('action-blocked');
+            const final=await held.evaluate(skipConfirmation,retained);
+            if(!candidate(first,final)||!final.points.some(p=>p.x===point.x&&p.y===point.y)
+                ||!await ownedEndpoint()||Date.now()>=deadline)return stop('action-blocked');
+            confirmationConsumed=true;
+            facts.taskSkipConfirmationAttempted=true;facts.taskSkipConfirmationCompleted=false;
+            await held.click({position:point,timeout:Math.max(1,Math.min(2000,deadline-Date.now()))});
+            facts.taskSkipConfirmationCompleted=true;
+            if(!await ownedEndpoint()||Date.now()>=deadline)return stop('action-blocked');
+            } finally {await form.dispose();await dialog.dispose();}
+          } finally {if(held)await held.dispose();}
+        }
+      }
       await wait(Math.min(100,Math.max(0,deadline-Date.now())));
     }
     return stop('scope-remained');
@@ -559,3 +624,5 @@ exports.taskContinuation=taskContinuation;
 exports.codingScope=codingScope;
 
 exports.optionalCapabilities=optionalCapabilities;
+
+exports.skipConfirmation=skipConfirmation;
