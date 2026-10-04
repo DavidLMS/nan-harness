@@ -73,6 +73,17 @@ class Transport(unittest.TestCase):
             with self.assertRaises(ValueError):module['crossing_point_hit'](1,40,(640,10))
         self.assertEqual(len(closed),3)
 
+    def test_decoration_child_must_be_the_measured_direct_held_frame_child(self):
+        bind=module['decoration_child_binding'];surface=((1,0),(0,0),(1278,20),1,40)
+        self.assertEqual(bind(50,41,40,1,(640,10),surface),(50,surface))
+        self.assertEqual(bind(0,41,40,1,(640,10),None),(0,None))
+        for child,snapshot in [(41,surface),(40,surface),(1,surface),(50,None),(0,surface),
+                (50,((1,0),(0,0),(1278,20),1,60)),
+                (50,((1,0),(0,0),(1278,20),2,40)),
+                (50,((1,11),(0,0),(1278,20),1,40)),
+                (50,((1,0),(0,0),(0,20),1,40))]:
+            with self.assertRaises(module['EntryCrossingFailure']):bind(child,41,40,1,(640,10),snapshot)
+
     def test_crossing_reproves_each_motion_and_never_replays_failed_action(self):
         events=[];clock=[0]
         def prove(point,after):events.append(('proof',point,after))

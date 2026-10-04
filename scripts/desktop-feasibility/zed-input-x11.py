@@ -215,6 +215,23 @@ def decoration_crossing_point(frame, client, held_frame):
     return point
 
 
+def decoration_child_binding(child, active, frame, root, point, snapshot):
+    # Window managers may render decoration in mapped children of the held
+    # outer frame. A hover may use that exact measured direct child, never the
+    # client or a child belonging to another frame. IDs/geometry stay private.
+    if child == 0:
+        if snapshot is not None:
+            raise EntryCrossingFailure('decoration-child-hit')
+        return child, None
+    if child in (active, frame, root) or snapshot is None or len(snapshot) != 5:
+        raise EntryCrossingFailure('decoration-child-hit')
+    (x,y),_,(width,height),measured_root,parent=snapshot
+    if (measured_root != root or parent != frame or width <= 0 or height <= 0
+            or not x <= point[0] < x+width or not y <= point[1] < y+height):
+        raise EntryCrossingFailure('decoration-child-hit')
+    return child,snapshot
+
+
 def crossing_point_hit(root, frame, point):
     # Query the planned point before moving: no foreign/root hover is admitted.
     xlib=ctypes.CDLL('libX11.so.6')
@@ -725,13 +742,24 @@ def retry_click(payload):
                 frame_geometry=independent_client_snapshot(request['window'])
                 entry['stage']='candidate'
                 decoration=decoration_crossing_point(frame_geometry,second_geometry,request['window'])
+                held_decoration=None
                 def crossing_proof(candidate,after,decoration=False):
+                    nonlocal held_decoration
                     if (not cursor_scope()
                             or independent_client_snapshot(request['window'])!=frame_geometry):
                         raise EntryCrossingFailure('identity-changed')
                     child,position,actual_child=crossing_point_hit(
                         second_geometry[3],request['window'],candidate)
-                    expected=0 if decoration else active
+                    expected=active
+                    if decoration:
+                        measured=independent_client_snapshot(child) if child else None
+                        binding=decoration_child_binding(child,active,request['window'],
+                            second_geometry[3],candidate,measured)
+                        if held_decoration is None:
+                            held_decoration=binding
+                        elif binding!=held_decoration:
+                            raise EntryCrossingFailure('identity-changed')
+                        expected=held_decoration[0]
                     if child!=expected:
                         raise EntryCrossingFailure('decoration-child-hit' if decoration else 'client-child-hit')
                     if after and position!=candidate:
@@ -740,6 +768,8 @@ def retry_click(payload):
                         raise EntryCrossingFailure('pointer-child-current')
                     if (not cursor_scope()
                             or independent_client_snapshot(request['window'])!=frame_geometry):
+                        raise EntryCrossingFailure('identity-changed')
+                    if decoration and child and independent_client_snapshot(child)!=held_decoration[1]:
                         raise EntryCrossingFailure('identity-changed')
                 guarded_crossing_motion(decoration,move,
                     lambda candidate,after:crossing_proof(candidate,after,True),deadline,
