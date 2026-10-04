@@ -536,7 +536,7 @@ fn std_rename_requested(
 #[cfg(all(windows, any(feature = "desktop-qualification", test)))]
 fn retained_rename_source(path: &Path, share: u32) -> std::io::Result<same_file::Handle> {
     use std::os::windows::fs::OpenOptionsExt as _;
-    let file = std::fs::OpenOptions::new()
+    let file = OpenOptions::new()
         .read(true)
         .access_mode(0x8002_0000)
         .share_mode(share)
@@ -922,7 +922,7 @@ mod configuration_persist_tests {
         source.as_file().sync_all().unwrap();
         let historical = source.path().to_owned();
         // Permit the existing writer, but forbid DELETE on this exact source.
-        let blocker = std::fs::OpenOptions::new()
+        let blocker = OpenOptions::new()
             .read(true)
             .share_mode(3)
             .open(&historical)
