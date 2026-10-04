@@ -2455,6 +2455,32 @@ class QualificationTests(unittest.TestCase):
                 q.semantic_observations(root, 'claude-desktop')
             self.assertEqual(q.envelope('chatgpt-desktop', 'linux', 'x86_64', 'a' * 40)['qualification'], 'unqualified')
 
+    def test_codex_activation_diagnostic_preserves_original_failure_and_privacy(self):
+        value = dict(schemaVersion=1, mechanism='renderer-inventory', diagnosticsOnly=True,
+                     app='chatgpt-desktop', endpointOwned=True, launcherOwned=True, attached=True,
+                     pageCount=1, textareaCount=0, editableCount=0, sendCount=0,
+                     retryCount=0, newThreadCount=0, loginCount=0, dialogCount=0, errorCategory=None)
+        facts = dict(phase='polling', status='deadline', activationAttempted=True, guardFailure=None)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / 'main.json'
+            for item in (facts, {**facts, 'phase': 'final-proof', 'status': 'focused'},
+                         {**facts, 'phase': 'pre-proof', 'status': 'rejected',
+                          'activationAttempted': False, 'guardFailure': 'native-ownership'}):
+                path.write_text(json.dumps({**value, 'initialMainActivation': item}))
+                self.assertEqual(q.semantic_observations(root, 'chatgpt-desktop')[0]['initialMainActivation'], item)
+            for item in ({**facts, 'phase': 'PRIVATE'}, {**facts, 'guardFailure': 'PRIVATE'},
+                         {**facts, 'status': 'PRIVATE'}, {**facts, 'url': 'PRIVATE'},
+                         {**facts, 'activationAttempted': 1}, {**facts, 'phase': 'pre-proof'},
+                         {**facts, 'status': 'focused'},
+                         {**facts, 'status': 'focused', 'phase': 'final-proof', 'guardFailure': 'deadline'}):
+                path.write_text(json.dumps({**value, 'initialMainActivation': item}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'chatgpt-desktop')
+            path.write_text(json.dumps({**value, 'app': 'claude-desktop', 'initialMainActivation': facts}))
+            with self.assertRaises(ValueError):
+                q.semantic_observations(root, 'claude-desktop')
+
     def test_codex_main_confirmation_preserves_failed_guard_and_privacy(self):
         value = dict(schemaVersion=1, mechanism='renderer-inventory', diagnosticsOnly=True,
                      app='chatgpt-desktop', endpointOwned=True, launcherOwned=True, attached=True,

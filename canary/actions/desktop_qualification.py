@@ -1625,7 +1625,7 @@ def semantic_observations(directory, app):
             record.update({key: value[key] for key in fields - {'schemaVersion', 'mechanism'}})
         elif mechanism == 'renderer-inventory':
             fields = set('schemaVersion mechanism diagnosticsOnly app endpointOwned launcherOwned attached pageCount textareaCount editableCount sendCount retryCount newThreadCount loginCount dialogCount errorCategory'.split())
-            if set(value) - {'documentState', 'startupScreen', 'landingCounts', 'onboardingCounts', 'publicOnboarding', 'mainAuxCorrelation', 'codexSession', 'initialMainBinding', 'initialMainConfirmation', 'sourceScreen', 'managedSignIn', 'sourceDialog', 'nativeOwnershipFailure', 'nativeListenerShape'} != fields or value['app'] != app or value['diagnosticsOnly'] is not True:
+            if set(value) - {'documentState', 'startupScreen', 'landingCounts', 'onboardingCounts', 'publicOnboarding', 'mainAuxCorrelation', 'codexSession', 'initialMainBinding', 'initialMainConfirmation', 'initialMainActivation', 'sourceScreen', 'managedSignIn', 'sourceDialog', 'nativeOwnershipFailure', 'nativeListenerShape'} != fields or value['app'] != app or value['diagnosticsOnly'] is not True:
                 raise ValueError('invalid renderer inventory identity')
             for key in ('endpointOwned', 'launcherOwned', 'attached'):
                 flag(record, value, key)
@@ -1730,6 +1730,25 @@ def semantic_observations(directory, app):
                             binding['route'] != 'primary' or not all(binding[key] for key in flags))):
                     raise ValueError('invalid Codex initial main binding')
                 record['initialMainBinding'] = binding
+            if 'initialMainActivation' in value:
+                activation = value['initialMainActivation']
+                if (app != 'chatgpt-desktop' or type(activation) is not dict
+                        or set(activation) != {'phase', 'status', 'activationAttempted', 'guardFailure'}
+                        or type(activation['phase']) is not str or activation['phase'] not in {
+                            'pre-proof', 'pre-identity', 'activation', 'polling', 'final-proof'}
+                        or type(activation['status']) is not str or activation['status'] not in {
+                            'focused', 'rejected', 'deadline', 'query-failed'}
+                        or type(activation['activationAttempted']) is not bool
+                        or activation['guardFailure'] is not None and (
+                            type(activation['guardFailure']) is not str or activation['guardFailure'] not in {
+                                'deadline', 'native-ownership', 'page-set', 'main-identity', 'main-focus', 'main-scope',
+                                'auxiliary-route', 'auxiliary-identity', 'auxiliary-focus', 'auxiliary-controls',
+                                'query-failed', 'unmeasured'})
+                        or activation['phase'] in {'pre-proof', 'pre-identity'} and activation['activationAttempted']
+                        or activation['status'] == 'focused' and (
+                            activation['phase'] != 'final-proof' or activation['guardFailure'] is not None)):
+                    raise ValueError('invalid Codex initial main activation')
+                record['initialMainActivation'] = activation
             if 'initialMainConfirmation' in value:
                 confirmation = value['initialMainConfirmation']
                 flags = {'identityUnchanged', 'mainScopeUnique', 'documentFocused'}

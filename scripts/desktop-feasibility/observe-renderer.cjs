@@ -335,34 +335,51 @@ function heldMainGuard(held, browser, owner, deadline, route,
 }
 // One public page activation; it never substitutes for fresh focus/owner proof.
 async function focusCapturedMain(held,proof,deadline,identity=correlationIdentity,
-  same=sameCorrelationIdentity,pause=ms=>new Promise(resolve=>setTimeout(resolve,ms))) {
+  same=sameCorrelationIdentity,pause=ms=>new Promise(resolve=>setTimeout(resolve,ms)),diagnostic=null) {
+  const phase=value=>{if(diagnostic)diagnostic.phase=value;};
+  const stop=status=>{if(diagnostic)diagnostic.status=status;return status==='focused';};
+  const rejected=()=>stop(Date.now()>=deadline?'deadline':'rejected');
+  const proved=async()=>{
+    const result=await proof();
+    if(!result&&diagnostic&&typeof proof.failure==='function') {
+      const reason=proof.failure();
+      if(['deadline','native-ownership','page-set','main-identity','main-focus','main-scope',
+        'auxiliary-route','auxiliary-identity','auxiliary-focus','auxiliary-controls','query-failed','unmeasured'].includes(reason))
+        diagnostic.guardFailure=reason;
+    }
+    return result;
+  };
   try {
-    if(!held||Date.now()>=deadline||!await proof())return false;
+    phase('pre-proof');
+    if(!held||Date.now()>=deadline||!await proved())return rejected();
+    phase('pre-identity');
     const before=await identity(held.page,deadline);
-    if(Date.now()>=deadline||!same(held,before)||!before.scope.mainScope||!await proof())return false;
+    if(Date.now()>=deadline||!same(held,before)||!before.scope.mainScope||!await proved())return rejected();
     if(!before.scope.focused) {
-      // Await the sole consumed operation. Parent watchdog owns cancellation;
-      // no detached timeout race may continue into downstream actions.
-      if(Date.now()>=deadline)return false;
+      // This is the same one consumed activation; no diagnostic retries it.
+      phase('activation');
+      if(Date.now()>=deadline)return rejected();
+      if(diagnostic)diagnostic.activationAttempted=true;
       await held.page.bringToFront();
     }
+    phase('polling');
     let focusedSamples=0;
     while(Date.now()<deadline) {
-      // Focus may arrive asynchronously. Only passive reads repeat, while
-      // owner, source scope, held identities and inert auxiliary remain strict.
-      if(!await proof())return false;
+      if(!await proved())return rejected();
       const fresh=await identity(held.page,deadline);
-      if(Date.now()>=deadline||!same(held,fresh)||!fresh.scope.mainScope||!await proof())return false;
+      if(Date.now()>=deadline||!same(held,fresh)||!fresh.scope.mainScope||!await proved())return rejected();
       focusedSamples=fresh.scope.focused?focusedSamples+1:0;
       if(focusedSamples===2) {
         proof.requireDocumentFocus();
-        return Date.now()<deadline&&await proof()&&Date.now()<deadline;
+        phase('final-proof');
+        return Date.now()<deadline&&await proved()&&Date.now()<deadline?stop('focused'):rejected();
       }
       await pause(Math.min(100,Math.max(0,deadline-Date.now())));
     }
-    return false;
-  } catch{return false;}
+    return stop('deadline');
+  } catch{return stop(Date.now()>=deadline?'deadline':'query-failed');}
 }
+
 function publishCodexBinding(output,owner,connection,guard) {
   const root=path.dirname(output),bindingPath=path.join(root,`main-binding-${owner}.private`);
   const checkpoint={...guard.binding(),ownerPid:owner,launcherPid:connection.launcherPid,port:connection.port};
@@ -571,7 +588,9 @@ async function run() {
       focusGuard=heldMainGuard(initialMain,browser,ownerGuard,deadline,
         require('./codex-onboarding.cjs').sourceRoute,correlationIdentity,
         ms=>new Promise(resolve=>setTimeout(resolve,ms)),false,false,false);
-      if(!await focusCapturedMain(initialMain,focusGuard,deadline)) {
+      facts.initialMainActivation={phase:'pre-proof',status:'unmeasured',activationAttempted:false,guardFailure:null};
+      if(!await focusCapturedMain(initialMain,focusGuard,deadline,correlationIdentity,
+        sameCorrelationIdentity,ms=>new Promise(resolve=>setTimeout(resolve,ms)),facts.initialMainActivation)) {
         facts.initialMainConfirmation=mainConfirmationFacts();
         await bindCorrelationMain(initialMain,browser,ownerGuard,deadline,
           require('./codex-onboarding.cjs').sourceRoute,correlationIdentity,

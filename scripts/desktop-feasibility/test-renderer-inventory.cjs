@@ -88,7 +88,7 @@ assert.equal(roleSourceScope({foreignFieldset:true}).mainScope,false);
 (async () => {
   let clock=0;
   const helper=vm.runInNewContext(`(() => { ${source.slice(timingStart,timingEnd)}
-    return {observeMainAux,correlationScope,correlationIdentity,captureCorrelationMain,bindCorrelationMain,heldMainGuard,initialMainFacts,initialMainRoute,mainConfirmationFacts}; })()`,
+    return {observeMainAux,correlationScope,correlationIdentity,captureCorrelationMain,bindCorrelationMain,heldMainGuard,initialMainFacts,initialMainRoute,mainConfirmationFacts,focusCapturedMain}; })()`,
     {Date:{now:()=>clock},setTimeout,clearTimeout,URL});
   const empty={roleLegend:0,roleRadios:0,engineering:0,dialog:0,quickChatComposer:0,editable:0};
   function fixture() {
@@ -201,6 +201,27 @@ assert.equal(roleSourceScope({foreignFieldset:true}).mainScope,false);
       if(r.page===f.aux&&failure==='controls')r.scope.counts.editable=1;});
     assert.equal(await settle(),failure==='none');
     if(failure==='none'){assert(settle.binding().auxiliary);assert.equal(await settle(),true);}
+  }
+  // Activation diagnostics use the original proof/read/action sequence only.
+  for(const scenario of ['focused','deadline','pre-reject','activation-error','focus-lost']) {
+    f=fixture();f.setPages([f.main]);let focused=false,activations=0,proofs=0;
+    f.main.bringToFront=async()=>{activations++;if(scenario==='activation-error')throw Error('PRIVATE');
+      if(scenario==='focused')focused=true;};
+    f.setAlter(r=>{r.scope.focused=focused;});
+    const proof=async()=>{proofs++;return scenario!=='pre-reject'&&(scenario!=='focus-lost'||activations===0);};
+    proof.failure=()=> 'native-ownership';proof.requireDocumentFocus=()=>{};
+    const facts={phase:'pre-proof',status:'unmeasured',activationAttempted:false,guardFailure:null};
+    assert.equal(await helper.focusCapturedMain(f.held,proof,1000,f.identity,undefined,
+      async ms=>{clock+=ms;},facts),scenario==='focused');
+    assert.equal(activations,scenario==='pre-reject'?0:1);
+    assert.equal(facts.activationAttempted,activations===1);
+    assert.equal(facts.status,scenario==='focused'?'focused':scenario==='deadline'?'deadline':
+      scenario==='activation-error'?'query-failed':'rejected');
+    assert.equal(facts.phase,scenario==='pre-reject'?'pre-proof':scenario==='activation-error'?'activation':
+      scenario==='focused'?'final-proof':'polling');
+    assert.equal(facts.guardFailure,['pre-reject','focus-lost'].includes(scenario)?'native-ownership':null);
+    if(scenario==='focused')assert.equal(proofs,7);
+    assert(!JSON.stringify(facts).includes('PRIVATE'));
   }
   // The auxiliary capability retains immutable identities across real actions;
   // the main role may transition while the auxiliary must remain inert.
