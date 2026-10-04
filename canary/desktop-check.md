@@ -3103,3 +3103,30 @@ unused GET stream. Bound request size, count and lifetime; validate Origin and
 loopback authority; support the vendor's preliminary anonymous initialization
 as well as its subsequent actual connection. Test the protocol and file custody
 before enabling this candidate in the next grouped native campaign.
+
+The candidate now implements that HTTP tool inside the checker worker. Its
+random loopback endpoint is generated before launch, passed only to the owned
+CLI, and checked against the retained applied configuration before UI input.
+The runner rejects caller-supplied endpoints and mixed platform fixture flags.
+Windows file handles deny writes/deletion; each tool call verifies the retained
+private target and reads its bytes. An unavailable server rejects the scenario
+instead of falling back to a different tool. Both provider and UI oracles still
+have to verify the real result, followed by the existing failure/recovery test.
+
+The server supports the vendor's probe and active initialization connections,
+bounded JSON requests, 202 notifications and an optional GET returning 405. It
+validates HTTP authority, Origin and protocol version, and has a 64-request and
+worker-lifetime limit. Normal teardown explicitly drains the server after app
+cleanup and releases its file handles; early failure cancels the in-process
+listener. Local HTTP, file-custody and CLI-entry tests pass. The existing Windows
+job additionally runs the Windows file-sharing and production configuration
+write/restore fixtures before installation. Native MCP discovery, actual tool
+execution and recovery on Windows remain pending the grouped campaign.
+
+The grouped Linux Zed candidate also records `transientDialogsBeforeDispatch`
+after the final hover proof and before its single click. This uses the existing
+closed census schema, includes unmapped owned dialogs, preserves the earlier
+and final observations, and rechecks the same owner and original cutoff. A
+positive count supports the source-defined input-blocking hypothesis; zero does
+not expose or rule out stale GPUI internal state. The census grants no input
+authority. Synthetic driver, transient-census and report-reducer checks pass.

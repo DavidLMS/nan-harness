@@ -93,6 +93,53 @@ class Policy(unittest.TestCase):
                     with self.assertRaises(ValueError): invoke({**source, **change})
                 with self.assertRaises(ValueError): invoke(source, 'chatgpt-desktop')
 
+    def test_windows_http_fixture_forwards_only_opt_in_under_native_profile_policy(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            helper = root / 'helper'
+            helper.write_text('synthetic')
+            source = dict(GITHUB_ACTIONS='true', RUNNER_ENVIRONMENT='github-hosted', RUNNER_OS='Windows',
+                          NANH_DESKTOP_QUALIFICATION_MODE='startup-baseline',
+                          NANH_CLAUDE_WINDOWS_PROFILE_POLICY='private-env', NANH_CLAUDE_WINDOWS_CHAT_ONLY='1',
+                          NANH_CLAUDE_WINDOWS_NATIVE_CHAT='1', NANH_CLAUDE_WINDOWS_FRESH_PROFILE='1',
+                          NANH_CLAUDE_WINDOWS_MCP_FIXTURE='read-only',
+                          FEASIBILITY_WINDOWS_PROOF_PYTHON=str(helper), FEASIBILITY_WINDOWS_PROOF_SCRIPT=str(helper))
+            with patch.object(runner, 'validate_claude_windows_bundle'):
+                def invoke(values=source, app='claude-desktop'):
+                    return runner.qualification_environment(app, root, helper, root / 'app/Claude.exe', values)
+                result = invoke()
+                self.assertEqual(result['NANH_CLAUDE_WINDOWS_MCP_FIXTURE'], 'read-only')
+                self.assertEqual(result['NANH_DESKTOP_QUALIFICATION_MODE'], 'startup-baseline')
+                for key in ('NANH_CLAUDE_WINDOWS_MCP_URL', 'NANH_CLAUDE_MCP_SCRIPT',
+                            'NANH_CLAUDE_MCP_PYTHON', 'NANH_CLAUDE_MCP_SOURCE_SHA256'):
+                    self.assertNotIn(key, result)
+                plain = {key: value for key, value in source.items()
+                         if key != 'NANH_CLAUDE_WINDOWS_MCP_FIXTURE'}
+                self.assertNotIn('NANH_CLAUDE_WINDOWS_MCP_FIXTURE', invoke(plain))
+                # Native policy already maps renderer requests to the startup backend.
+                self.assertEqual(invoke({**source, 'NANH_DESKTOP_QUALIFICATION_MODE': 'renderer'})[
+                    'NANH_DESKTOP_QUALIFICATION_MODE'], 'startup-baseline')
+                for key, value in (
+                        ('RUNNER_OS', 'Linux'), ('GITHUB_ACTIONS', 'false'),
+                        ('RUNNER_ENVIRONMENT', 'self-hosted'),
+                        ('NANH_DESKTOP_QUALIFICATION_MODE', 'unknown'),
+                        ('NANH_CLAUDE_WINDOWS_MCP_FIXTURE', 'unknown'),
+                        ('NANH_CLAUDE_WINDOWS_FRESH_PROFILE', None),
+                        ('NANH_CLAUDE_WINDOWS_NATIVE_CHAT', None),
+                        ('NANH_CLAUDE_WINDOWS_CHAT_ONLY', None),
+                        ('NANH_CLAUDE_WINDOWS_PROFILE_POLICY', None),
+                        ('NANH_CLAUDE_MCP_FIXTURE', 'read-only'),
+                        ('NANH_CLAUDE_LINUX_MCP_FIXTURE', 'read-only'),
+                        ('NANH_CLAUDE_WINDOWS_MCP_URL', 'http://127.0.0.1:1234/mcp'),
+                        ('NANH_CLAUDE_WINDOWS_MCP_URL', '')):
+                    with self.subTest(key=key, value=value), self.assertRaises(ValueError):
+                        invoke({**source, key: value})
+                for app in ('chatgpt-desktop', 'zed-desktop', 'hermes-desktop'):
+                    with self.subTest(app=app), self.assertRaises(ValueError):
+                        invoke(source, app)
+                with self.assertRaisesRegex(ValueError, 'URL must be derived'):
+                    invoke({**plain, 'NANH_CLAUDE_WINDOWS_MCP_URL': 'http://127.0.0.1:1234/mcp'})
+
     def test_bounded_asar_reader_binds_the_bootstrap_and_rejects_truncation(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()

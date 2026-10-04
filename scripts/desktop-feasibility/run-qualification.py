@@ -188,6 +188,19 @@ def qualification_environment(app, facts, real_nanh, executable, inherited=None)
         raise ValueError('Claude Linux native Chat trial is unavailable')
     if source.get('NANH_CLAUDE_LINUX_CHAT_ONLY') is not None and (app != 'claude-desktop' or source.get('RUNNER_OS') != 'Linux' or (source.get('NANH_DESKTOP_QUALIFICATION_MODE') != 'startup-baseline' and source.get('NANH_CLAUDE_LINUX_NATIVE_CHAT') != 'first-turn') or source.get('NANH_CLAUDE_LINUX_CHAT_ONLY') != '1'):
         raise ValueError('Claude Linux Chat-only trial is unavailable')
+    if source.get('NANH_CLAUDE_WINDOWS_MCP_URL') is not None:
+        raise ValueError('Claude Windows read fixture URL must be derived')
+    windows_mcp = source.get('NANH_CLAUDE_WINDOWS_MCP_FIXTURE')
+    if windows_mcp is not None and (
+            windows_mcp != 'read-only' or app != 'claude-desktop'
+            or source.get('RUNNER_OS') != 'Windows'
+            or source.get('NANH_CLAUDE_WINDOWS_FRESH_PROFILE') != '1'
+            or source.get('NANH_CLAUDE_WINDOWS_NATIVE_CHAT') != '1'
+            or source.get('NANH_CLAUDE_WINDOWS_CHAT_ONLY') != '1'
+            or source.get('NANH_CLAUDE_WINDOWS_PROFILE_POLICY') != 'private-env'
+            or source.get('NANH_CLAUDE_MCP_FIXTURE') is not None
+            or source.get('NANH_CLAUDE_LINUX_MCP_FIXTURE') is not None):
+        raise ValueError('Claude Windows read fixture policy is unavailable')
     linux_mcp = source.get('NANH_CLAUDE_LINUX_MCP_FIXTURE')
     if linux_mcp is not None and (linux_mcp != 'read-only' or app != 'claude-desktop'
             or source.get('RUNNER_OS') != 'Linux'
@@ -297,6 +310,11 @@ def qualification_environment(app, facts, real_nanh, executable, inherited=None)
             mode = 'startup-baseline'
             environment.update(NANH_CLAUDE_WINDOWS_NATIVE_CHAT='1',
                                NANH_CLAUDE_WINDOWS_FRESH_PROFILE='1')
+
+        if windows_mcp is not None:
+            if mode != 'startup-baseline':
+                raise ValueError('Claude Windows read fixture policy is unavailable')
+            environment['NANH_CLAUDE_WINDOWS_MCP_FIXTURE'] = windows_mcp
 
         onboarding = source.get('NANH_CODEX_PUBLIC_ONBOARDING')
         if onboarding is not None:

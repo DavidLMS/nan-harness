@@ -70,6 +70,9 @@ pub(super) fn configure(
     paths: &DesktopPaths,
     profile: &mut Map<String, Value>,
 ) -> Result<(), ClaudeDesktopError> {
+    if let Some(configuration) = windows_configuration(paths)? {
+        return install(profile, configuration);
+    }
     let mac = std::env::var("NANH_CLAUDE_MCP_FIXTURE");
     let linux = std::env::var("NANH_CLAUDE_LINUX_MCP_FIXTURE");
     match (mac, linux) {
@@ -100,6 +103,65 @@ pub(super) fn configure(
     };
     // The enclosing desktop receipt snapshots and restores this whole document.
     install(profile, configuration)
+}
+
+fn windows_http_entry(endpoint: &str) -> Option<Value> {
+    let url = url::Url::parse(endpoint).ok()?;
+    let nonce = url.path().strip_prefix("/mcp/")?;
+    if url.scheme() != "http"
+        || url.host_str() != Some("127.0.0.1")
+        || url.port().is_none_or(|port| port == 0)
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+        || nonce.len() != 32
+        || !nonce
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+        || url.as_str() != endpoint
+    {
+        return None;
+    }
+    Some(
+        json!({"name":"nanh-read-fixture","transport":"http","url":endpoint,
+        "toolPolicy":{"read_file":"allow"}}),
+    )
+}
+
+fn windows_configuration(paths: &DesktopPaths) -> Result<Option<Value>, ClaudeDesktopError> {
+    let policy = std::env::var("NANH_CLAUDE_WINDOWS_MCP_FIXTURE");
+    let endpoint = std::env::var("NANH_CLAUDE_WINDOWS_MCP_URL");
+    if matches!(policy, Err(std::env::VarError::NotPresent))
+        && matches!(endpoint, Err(std::env::VarError::NotPresent))
+    {
+        return Ok(None);
+    }
+    if policy.as_deref() != Ok("read-only")
+        || qualification_config::windows_roots(paths).is_none()
+        || ["NANH_CLAUDE_MCP_FIXTURE", "NANH_CLAUDE_LINUX_MCP_FIXTURE"]
+            .into_iter()
+            .any(|key| std::env::var_os(key).is_some())
+        || [
+            "NANH_CLAUDE_WINDOWS_FRESH_PROFILE",
+            "NANH_CLAUDE_WINDOWS_NATIVE_CHAT",
+            "NANH_CLAUDE_WINDOWS_CHAT_ONLY",
+        ]
+        .into_iter()
+        .any(|key| std::env::var(key).as_deref() != Ok("1"))
+        || std::env::current_dir()
+            .ok()
+            .and_then(|root| root.canonicalize().ok())
+            .and_then(|root| fixture_file(&root))
+            .is_none()
+    {
+        return Err(ClaudeDesktopError::InvalidStatePath);
+    }
+    endpoint
+        .ok()
+        .and_then(|endpoint| windows_http_entry(&endpoint))
+        .map(Some)
+        .ok_or(ClaudeDesktopError::InvalidStatePath)
 }
 
 fn linux_entry(mut configuration: Value) -> Result<Value, ClaudeDesktopError> {
@@ -148,6 +210,28 @@ fn install(
 mod tests {
     use super::*;
     use std::io::Write as _;
+    #[test]
+    fn windows_http_fixture_is_exact_loopback_without_auth_or_helpers() {
+        let endpoint = "http://127.0.0.1:12345/mcp/0123456789abcdef0123456789abcdef";
+        let entry = windows_http_entry(endpoint).expect("owned endpoint");
+        assert_eq!(
+            entry,
+            json!({"name":"nanh-read-fixture","transport":"http","url":endpoint,"toolPolicy":{"read_file":"allow"}})
+        );
+        for invalid in [
+            endpoint.replace("127.0.0.1", "localhost"),
+            endpoint.replace("127.0.0.1", "192.0.2.1"),
+            endpoint.replace(":12345", ":0"),
+            endpoint.replace(":12345", ""),
+            endpoint.replace("/mcp/", "/other/"),
+            format!("{endpoint}?token=private"),
+            format!("{endpoint}#private"),
+            endpoint.replace("http://", "http://user@"),
+            endpoint.to_uppercase(),
+        ] {
+            assert!(windows_http_entry(&invalid).is_none());
+        }
+    }
     #[test]
     fn linux_command_binds_private_cwd_without_shell_interpolation() {
         let configuration = json!({"args":["/trusted/script.py","--workspace","/owned/space $x","--file","/owned/space $x/read-target.txt"],"env":{},"toolPolicy":{"read_file":"allow"}});

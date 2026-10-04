@@ -146,6 +146,7 @@ mod claude_windows_profile;
 pub(crate) use claude_windows_profile::FreshClaudeWindowsProfile;
 mod hermes_policy;
 pub(crate) mod hermes_readiness;
+mod read_fixture_http;
 mod semantic;
 
 /// Opt-in startup diagnostic binding. Only the `chatgpt-desktop` launch runs
@@ -771,9 +772,13 @@ async fn scenario_owned(
         gate.expect_fixture_response(&final_marker)
             .map_err(|()| Reason::IsolationUnavailable)?;
     }
-    let prepared_launch = launch_command(spec, &gate).inspect_err(|_| {
+    let read_server = read_fixture_http::ReadFixtureServer::prepare(spec, &fixture).await?;
+    let mut prepared_launch = launch_command(spec, &gate).inspect_err(|_| {
         launch_observation.failure = Some(crate::diagnostics::LaunchFailure::LaunchSetup);
     })?;
+    if let Some(server) = &read_server {
+        prepared_launch.env(read_fixture_http::ENDPOINT, &server.url);
+    }
     #[cfg(not(windows))]
     if std::env::var_os("NANH_CLAUDE_WINDOWS_FRESH_PROFILE").is_some() {
         return Err(Reason::IsolationUnavailable);
@@ -817,6 +822,7 @@ async fn scenario_owned(
         final_marker: &final_marker,
         experiment: experiment.as_ref(),
         semantic: semantic.as_ref(),
+        read_server: read_server.as_ref(),
     };
     let mut gui = None;
     let outcome = if conversation.uses_renderer() {
@@ -860,7 +866,7 @@ async fn scenario_owned(
     // Release configuration locks before the existing receipt restoration.
     #[cfg(windows)]
     drop(fresh_windows_profile);
-    finish_scenario(
+    let finished = finish_scenario(
         spec,
         &mut process,
         gui.as_ref(),
@@ -869,7 +875,33 @@ async fn scenario_owned(
         &gate,
         diagnostic,
     )
-    .await
+    .await;
+    let stopped = match read_server {
+        Some(server) => server.stop().await,
+        None => Ok(()),
+    };
+    finish_fixture_shutdown(finished, stopped, diagnostic)
+}
+
+fn finish_fixture_shutdown(
+    outcome: Result<(), Reason>,
+    shutdown: Result<(), Reason>,
+    diagnostic: &mut Option<CleanupDiagnostic>,
+) -> Result<(), Reason> {
+    if shutdown.is_err() {
+        if diagnostic.is_none() {
+            *diagnostic = Some(CleanupDiagnostic {
+                stage: CleanupStage::Stop,
+                original_reason: outcome.err(),
+                reason: Reason::CleanupFailed,
+                absence: None,
+                stop: None,
+                restore: None,
+            });
+        }
+        return Err(Reason::CleanupFailed);
+    }
+    outcome
 }
 
 // Retain the transport for owned cleanup even when readiness denies input.
@@ -950,6 +982,11 @@ fn prepare_read_fixture(spec: &ProbeSpec, marker: &str) -> Result<PathBuf, Reaso
     open_private_new(&fixture)
         .and_then(|mut file| file.write_all(marker.as_bytes()))
         .map_err(|_| Reason::IsolationUnavailable)?;
+    if cfg!(windows) && std::env::var_os(read_fixture_http::POLICY).is_some() {
+        return fixture
+            .canonicalize()
+            .map_err(|_| Reason::IsolationUnavailable);
+    }
     Ok(fixture)
 }
 
@@ -963,6 +1000,7 @@ struct ConversationScenario<'a> {
     final_marker: &'a str,
     experiment: Option<&'a HostedExperiment>,
     semantic: Option<&'a semantic::SemanticBackend>,
+    read_server: Option<&'a read_fixture_http::ReadFixtureServer>,
 }
 
 impl ConversationScenario<'_> {
@@ -988,6 +1026,7 @@ impl ConversationScenario<'_> {
                     gate: self.gate,
                     fixture: self.fixture,
                     marker: self.final_marker,
+                    read_server: self.read_server,
                 },
                 result,
                 #[cfg(any(target_os = "linux", target_os = "macos", windows))]
@@ -1062,6 +1101,7 @@ impl ConversationScenario<'_> {
                         gate: self.gate,
                         fixture: self.fixture,
                         marker: self.final_marker,
+                        read_server: self.read_server,
                     },
                     result,
                     composer_observations,
@@ -3128,6 +3168,24 @@ mod tests {
         assert!(serde_json::from_value::<CleanupDiagnostic>(value.clone()).is_ok());
         value["message"] = json!("synthetic native message");
         assert!(serde_json::from_value::<CleanupDiagnostic>(value).is_err());
+    }
+
+    #[test]
+    fn fixture_shutdown_failure_takes_precedence_without_hiding_original_failure() {
+        for original in [Ok(()), Err(Reason::ToolMismatch)] {
+            let mut diagnostic = None;
+            assert_eq!(
+                finish_fixture_shutdown(original, Err(Reason::CleanupFailed), &mut diagnostic),
+                Err(Reason::CleanupFailed)
+            );
+            let record = diagnostic.as_ref().expect("closed shutdown receipt");
+            assert_eq!(record.original_reason, original.err());
+            assert_eq!(serde_json::to_value(record).unwrap()["stage"], "stop");
+            assert_eq!(
+                finish_fixture_shutdown(original, Ok(()), &mut None),
+                original
+            );
+        }
     }
 
     #[test]

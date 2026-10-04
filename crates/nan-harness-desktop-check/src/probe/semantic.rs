@@ -35,6 +35,7 @@ pub(super) struct SemanticScenario<'a> {
     pub gate: &'a ProviderGate,
     pub fixture: &'a Path,
     pub marker: &'a str,
+    pub read_server: Option<&'a super::read_fixture_http::ReadFixtureServer>,
 }
 
 pub(super) struct NativeInputAuthority<'a> {
@@ -463,6 +464,7 @@ async fn complete_scenario(
         gate,
         fixture,
         marker,
+        read_server,
     } = *scenario;
     let (input, response) = ui.methods();
     gate.arm_fixture_response(marker)
@@ -481,16 +483,30 @@ async fn complete_scenario(
         .extend([CheckStep::InputSubmitted, CheckStep::ResponseVerified]);
 
     let requests = inventory.chat_requests();
+    let retained_read_fixture = match read_server {
+        Some(server) if server.owns(fixture) => true,
+        Some(_) => return Err(Reason::IsolationUnavailable),
+        None => false,
+    };
     let owned_fixture_scope = {
         #[cfg(target_os = "macos")]
         {
+            let _ = retained_read_fixture;
             matches!(ui, SemanticUi::Claude(_)) && owned_read_fixture_policy(fixture)
         }
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(windows)]
         {
+            matches!(ui, SemanticUi::ClaudeWindows(_)) && retained_read_fixture
+        }
+        #[cfg(not(any(target_os = "macos", windows)))]
+        {
+            let _ = retained_read_fixture;
             false
         }
     };
+    if retained_read_fixture && !owned_fixture_scope {
+        return Err(Reason::IsolationUnavailable);
+    }
     let (selected, fixture_selection) =
         select_semantic_read_tool(&requests, fixture, owned_fixture_scope);
     record_inventory(

@@ -272,6 +272,7 @@ pub(crate) struct FreshClaudeWindowsProfile {
     library_directory_index: Option<usize>,
     configuration: Vec<File>,
     bridge_receipt: Option<File>,
+    mcp_url: Option<String>,
     native: Native,
 }
 fn privacy_label(value: nan_harness_private_fs::OwnedWindowsDacl) -> &'static str {
@@ -505,6 +506,14 @@ impl FreshClaudeWindowsProfile {
         if Instant::now() >= deadline {
             return Err(Reason::BudgetExceeded);
         }
+        let mcp_url = command
+            .as_std()
+            .get_envs()
+            .find(|(key, _)| *key == super::read_fixture_http::ENDPOINT)
+            .and_then(|(_, value)| value.and_then(|value| value.to_str()).map(str::to_owned));
+        if std::env::var_os(super::read_fixture_http::POLICY).is_some() != mcp_url.is_some() {
+            return Err(Reason::IsolationUnavailable);
+        }
         Ok(Some(Self {
             workspace,
             root,
@@ -513,6 +522,7 @@ impl FreshClaudeWindowsProfile {
             directories,
             configuration: Vec::new(),
             bridge_receipt: None,
+            mcp_url,
             native,
         }))
     }
@@ -785,6 +795,16 @@ impl FreshClaudeWindowsProfile {
         observation.document_index = None;
         observation.stage = SealStage::ConfigurationValues;
         observation.configuration_failure = configuration_failure(&values, base, token);
+        if let Some(url) = &self.mcp_url {
+            let expected = serde_json::json!([{"name":"nanh-read-fixture","transport":"http","url":url,"toolPolicy":{"read_file":"allow"}}]);
+            if values
+                .get(2)
+                .and_then(|value| value.get("managedMcpServers"))
+                != Some(&expected)
+            {
+                observation.configuration_failure = Some("alternate-configuration");
+            }
+        }
         if observation.configuration_failure.is_some() {
             return Err(Reason::IsolationUnavailable);
         }

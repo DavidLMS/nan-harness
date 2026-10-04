@@ -1014,6 +1014,12 @@ mod configuration_persist_tests {
             {
                 return Err(ClaudeDesktopError::InvalidStatePath);
             }
+            if let Ok(url) = std::env::var("NANH_CLAUDE_WINDOWS_MCP_URL") {
+                let expected = serde_json::json!([{"name":"nanh-read-fixture","transport":"http","url":url,"toolPolicy":{"read_file":"allow"}}]);
+                if managed.get("managedMcpServers") != Some(&expected) {
+                    return Err(ClaudeDesktopError::InvalidStatePath);
+                }
+            }
             stage = 11;
             for document in paths.documents() {
                 nan_harness_private_fs::open_private_read(document)
@@ -1050,7 +1056,7 @@ mod configuration_persist_tests {
     }
 
     #[cfg(feature = "desktop-qualification")]
-    fn lifecycle_child(workspace: &Path, source_policy: Option<&str>) -> Option<i32> {
+    fn lifecycle_child(workspace: &Path, source_policy: Option<&str>, mcp: bool) -> Option<i32> {
         use std::process::{Command, Stdio};
         use std::time::{Duration, Instant};
         let home = workspace.join("profile/home");
@@ -1078,6 +1084,8 @@ mod configuration_persist_tests {
             "NANH_CLAUDE_LINUX_CHAT_ONLY",
             "NANH_CLAUDE_MCP_FIXTURE",
             "NANH_CLAUDE_LINUX_MCP_FIXTURE",
+            "NANH_CLAUDE_WINDOWS_MCP_FIXTURE",
+            "NANH_CLAUDE_WINDOWS_MCP_URL",
             "NANH_CLAUDE_PERSIST_OWNERS",
         ] {
             command.env_remove(key);
@@ -1091,6 +1099,16 @@ mod configuration_persist_tests {
             "NANH_CLAUDE_PERSIST_CUTOFF_MS",
         ] {
             command.env_remove(key);
+        }
+        if mcp {
+            command
+                .env("NANH_CLAUDE_WINDOWS_MCP_FIXTURE", "read-only")
+                .env(
+                    "NANH_CLAUDE_WINDOWS_MCP_URL",
+                    "http://127.0.0.1:9/mcp/0123456789abcdef0123456789abcdef",
+                )
+                .env("NANH_CLAUDE_WINDOWS_FRESH_PROFILE", "1")
+                .env("NANH_CLAUDE_WINDOWS_NATIVE_CHAT", "1");
         }
         let deadline = Instant::now() + Duration::from_secs(5);
         if let Some(source_policy) = source_policy {
@@ -1161,6 +1179,28 @@ mod configuration_persist_tests {
 
     #[cfg(feature = "desktop-qualification")]
     #[test]
+    fn windows_managed_http_fixture_is_written_and_restored_by_production_lifecycle() {
+        let temporary = tempfile::tempdir().unwrap();
+        let workspace = temporary.path().canonicalize().unwrap();
+        nan_harness_private_fs::restrict_path(
+            &workspace,
+            nan_harness_private_fs::PrivatePathKind::Directory,
+        )
+        .unwrap();
+        let directories = lifecycle_roots(&workspace);
+        open_private_new(&workspace.join("read-target.txt"))
+            .unwrap()
+            .write_all(b"synthetic read target")
+            .unwrap();
+        assert_eq!(
+            lifecycle_child(&workspace, Some("official-2.19675.0-97910a066871"), true),
+            Some(0)
+        );
+        drop(directories);
+    }
+
+    #[cfg(feature = "desktop-qualification")]
+    #[test]
     fn configuration_lifecycle_under_real_precreation_leases_preserves_atomicity() {
         let base = std::env::var_os("RUNNER_TEMP")
             .map(PathBuf::from)
@@ -1174,7 +1214,7 @@ mod configuration_persist_tests {
         .unwrap();
         let directories = lifecycle_roots(&workspace);
         assert_eq!(
-            lifecycle_child(&workspace, None),
+            lifecycle_child(&workspace, None, false),
             Some(0),
             "closed lifecycle failed"
         );
@@ -1189,7 +1229,7 @@ mod configuration_persist_tests {
             .open(&destination)
             .unwrap();
         assert_eq!(
-            lifecycle_child(&workspace, None),
+            lifecycle_child(&workspace, None, false),
             Some(5),
             "target-blocked access failure not preserved"
         );
@@ -1253,7 +1293,7 @@ mod configuration_persist_tests {
             )
             .unwrap();
             let directories = lifecycle_roots(&workspace);
-            let result = lifecycle_child(&workspace, Some(source_policy));
+            let result = lifecycle_child(&workspace, Some(source_policy), false);
             if expected == 0 {
                 record_postinstall_fixture_outcome(result);
             }
