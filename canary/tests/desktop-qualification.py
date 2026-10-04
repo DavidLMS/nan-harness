@@ -2549,9 +2549,13 @@ class QualificationTests(unittest.TestCase):
             path = root / 'shape.json'
             path.write_text(json.dumps({**facts,'inputShape':shape}))
             self.assertEqual(q.semantic_observations(root,'claude-desktop')[0]['inputShape'],shape)
+            objects={**shape,'onlyLineBreaks':False,'onlyWhitespace':False,'onlyObjectReplacement':True}
+            path.write_text(json.dumps({**facts,'inputShape':objects}))
+            self.assertEqual(q.semantic_observations(root,'claude-desktop')[0]['inputShape'],objects)
             for changed in ({**shape,'charCount':True}, {**shape,'charCount':0},
                             {**shape,'charCount':4097}, {**shape,'onlyWhitespace':False},
-                            {**shape,'onlyZeroWidthMarkers':True}, {**shape,'value':'PRIVATE'}):
+                            {**shape,'onlyZeroWidthMarkers':True}, {**shape,'onlyObjectReplacement':True},
+                            {**objects,'onlyObjectReplacement':None}, {**objects,'onlyObjectReplacement':'PRIVATE'}, {**shape,'value':'PRIVATE'}):
                 path.write_text(json.dumps({**facts,'inputShape':changed}))
                 with self.assertRaises(ValueError):q.semantic_observations(root,'claude-desktop')
             path.write_text(json.dumps({**facts,'inputShape':shape,'stage':'sent'}))

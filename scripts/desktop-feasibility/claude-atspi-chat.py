@@ -35,7 +35,8 @@ def input_shape(value):
         raise Rejected('input')
     return dict(charCount=len(value),onlyLineBreaks=all(c in '\r\n' for c in value),
                 onlyWhitespace=value.isspace(),
-                onlyZeroWidthMarkers=all(c in '\u200b\u200c\u200d\u2060\ufeff' for c in value))
+                onlyZeroWidthMarkers=all(c in '\u200b\u200c\u200d\u2060\ufeff' for c in value),
+                onlyObjectReplacement=all(c == '\ufffc' for c in value))
 
 
 class Rejected(Exception):

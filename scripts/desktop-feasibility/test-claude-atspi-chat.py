@@ -81,9 +81,16 @@ class InputShapeTests(unittest.TestCase):
                 (' \t',(2,False,True,False)), ('\u200b\ufeff',(2,False,False,True)),
                 ('PRIVATE nonce\n',(14,False,False,False)), ('\n\u200b',(2,False,False,False)) ]:
             shape=chat.input_shape(value)
-            self.assertEqual(tuple(shape.values()),expected)
-            self.assertEqual(set(shape),{'charCount','onlyLineBreaks','onlyWhitespace','onlyZeroWidthMarkers'})
+            self.assertEqual(tuple(shape[key] for key in ['charCount','onlyLineBreaks','onlyWhitespace','onlyZeroWidthMarkers']),expected)
+            self.assertFalse(shape['onlyObjectReplacement'])
+            self.assertEqual(set(shape),{'charCount','onlyLineBreaks','onlyWhitespace','onlyZeroWidthMarkers','onlyObjectReplacement'})
             self.assertNotIn(value,str(shape))
+        for value in ['\ufffc','\ufffc\ufffc']:
+            shape=chat.input_shape(value)
+            self.assertTrue(shape['onlyObjectReplacement'])
+            self.assertFalse(any(shape[key] for key in ['onlyLineBreaks','onlyWhitespace','onlyZeroWidthMarkers']))
+        for value in ['\ufffcx','\ufffc\n','\ufffc\u200b']:
+            self.assertFalse(chat.input_shape(value)['onlyObjectReplacement'])
         for value in ['',True,None,'x'*4097]:
             with self.assertRaises(chat.Rejected):chat.input_shape(value)
 

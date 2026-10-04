@@ -1039,9 +1039,11 @@ def semantic_observations(directory, app):
             if 'inputShape' in value:
                 shape = value['inputShape']
                 flags = {'onlyLineBreaks','onlyWhitespace','onlyZeroWidthMarkers'}
-                if (type(shape) is not dict or set(shape) != flags | {'charCount'}
+                if (type(shape) is not dict or set(shape) - {'onlyObjectReplacement'} != flags | {'charCount'}
                         or type(shape['charCount']) is not int or not 1 <= shape['charCount'] <= 4096
                         or any(type(shape[key]) is not bool for key in flags)
+                        or 'onlyObjectReplacement' in shape and type(shape['onlyObjectReplacement']) is not bool
+                        or shape.get('onlyObjectReplacement') is True and any(shape[key] for key in flags)
                         or shape['onlyLineBreaks'] and not shape['onlyWhitespace']
                         or shape['onlyZeroWidthMarkers'] and (shape['onlyWhitespace'] or shape['onlyLineBreaks'])
                         or value['stage'] not in {'input-not-empty','blocked','deadline','clipboard-cleanup'}):

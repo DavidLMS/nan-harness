@@ -60,12 +60,25 @@ struct InputShape {
     only_line_breaks: bool,
     only_whitespace: bool,
     only_zero_width_markers: bool,
+    #[serde(
+        default,
+        deserialize_with = "optional_shape_flag",
+        skip_serializing_if = "Option::is_none"
+    )]
+    only_object_replacement: Option<bool>,
+}
+fn optional_shape_flag<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<bool>, D::Error> {
+    bool::deserialize(deserializer).map(Some)
 }
 impl InputShape {
     fn valid(self) -> bool {
         (1..=4096).contains(&self.char_count)
             && (!self.only_line_breaks || self.only_whitespace)
             && (!self.only_zero_width_markers || !self.only_whitespace && !self.only_line_breaks)
+            && (self.only_object_replacement != Some(true)
+                || !self.only_whitespace && !self.only_line_breaks && !self.only_zero_width_markers)
     }
 }
 fn input_shape(facts: &Value) -> Option<InputShape> {
@@ -500,7 +513,15 @@ mod input_shape_tests {
         let valid = json!({"inputShape":{"charCount":1,"onlyLineBreaks":true,
             "onlyWhitespace":true,"onlyZeroWidthMarkers":false}});
         assert!(input_shape(&valid).is_some());
+        assert!(
+            input_shape(&json!({"inputShape":{"charCount":1,"onlyLineBreaks":false,
+            "onlyWhitespace":false,"onlyZeroWidthMarkers":false,"onlyObjectReplacement":true}}))
+            .is_some()
+        );
         for shape in [
+            json!({"charCount":1,"onlyLineBreaks":false,"onlyWhitespace":false,"onlyZeroWidthMarkers":false,"onlyObjectReplacement":null}),
+            json!({"charCount":1,"onlyLineBreaks":false,"onlyWhitespace":true,"onlyZeroWidthMarkers":false,"onlyObjectReplacement":true}),
+            json!({"charCount":1,"onlyLineBreaks":false,"onlyWhitespace":false,"onlyZeroWidthMarkers":false,"onlyObjectReplacement":"PRIVATE"}),
             json!({"charCount":0,"onlyLineBreaks":false,"onlyWhitespace":false,"onlyZeroWidthMarkers":false}),
             json!({"charCount":4097,"onlyLineBreaks":false,"onlyWhitespace":false,"onlyZeroWidthMarkers":false}),
             json!({"charCount":true,"onlyLineBreaks":false,"onlyWhitespace":false,"onlyZeroWidthMarkers":false}),
