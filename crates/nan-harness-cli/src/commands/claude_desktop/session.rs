@@ -284,32 +284,91 @@ pub(super) fn atomic_write(
     permissions: Option<&Permissions>,
     private: bool,
 ) -> Result<(), ClaudeDesktopError> {
-    let parent = path.parent().ok_or(ClaudeDesktopError::InvalidStatePath)?;
+    atomic_write_inner(path, payload, permissions, private, None)
+}
+
+pub(super) fn atomic_write_configuration(
+    path: &Path,
+    payload: &[u8],
+    permissions: Option<&Permissions>,
+    document: qualification_prelaunch::ConfigurationDocument,
+) -> Result<(), ClaudeDesktopError> {
+    atomic_write_inner(path, payload, permissions, false, Some(document))
+}
+
+fn atomic_write_inner(
+    path: &Path,
+    payload: &[u8],
+    permissions: Option<&Permissions>,
+    private: bool,
+    document: Option<qualification_prelaunch::ConfigurationDocument>,
+) -> Result<(), ClaudeDesktopError> {
+    use qualification_prelaunch::ConfigurationSubstage as Substage;
+    fn observe<T>(
+        result: Result<T, ClaudeDesktopError>,
+        substage: Substage,
+        document: Option<qualification_prelaunch::ConfigurationDocument>,
+    ) -> Result<T, ClaudeDesktopError> {
+        if let Some(document) = document {
+            qualification_prelaunch::observe_configuration(result, substage, Some(document))
+        } else {
+            result
+        }
+    }
+    let parent = observe(
+        path.parent().ok_or(ClaudeDesktopError::InvalidStatePath),
+        Substage::ParentCreate,
+        document,
+    )?;
     if private {
-        nan_harness_private_fs::create_private_dir_all(parent)
-            .map_err(ClaudeDesktopError::CreateDirectory)?;
+        observe(
+            nan_harness_private_fs::create_private_dir_all(parent)
+                .map_err(ClaudeDesktopError::CreateDirectory),
+            Substage::ParentCreate,
+            document,
+        )?;
     } else {
-        fs::create_dir_all(parent).map_err(ClaudeDesktopError::CreateDirectory)?;
+        observe(
+            fs::create_dir_all(parent).map_err(ClaudeDesktopError::CreateDirectory),
+            Substage::ParentCreate,
+            document,
+        )?;
     }
-    reject_symlink(path)?;
-    let mut temporary = TempFileBuilder::new()
-        .prefix(".nan-")
-        .make_in(parent, open_private_new)
-        .map_err(ClaudeDesktopError::Write)?;
-    temporary
-        .write_all(payload)
-        .and_then(|()| temporary.flush())
-        .and_then(|()| temporary.as_file().sync_all())
-        .map_err(ClaudeDesktopError::Write)?;
-    if let Some(permissions) = permissions {
+    observe(reject_symlink(path), Substage::PathCheck, document)?;
+    let mut temporary = observe(
+        TempFileBuilder::new()
+            .prefix(".nan-")
+            .make_in(parent, open_private_new)
+            .map_err(ClaudeDesktopError::Write),
+        Substage::TemporaryCreate,
+        document,
+    )?;
+    observe(
         temporary
-            .as_file()
-            .set_permissions(permissions.clone())
-            .map_err(ClaudeDesktopError::Permissions)?;
+            .write_all(payload)
+            .and_then(|()| temporary.flush())
+            .and_then(|()| temporary.as_file().sync_all())
+            .map_err(ClaudeDesktopError::Write),
+        Substage::TemporaryWrite,
+        document,
+    )?;
+    if let Some(permissions) = permissions {
+        observe(
+            temporary
+                .as_file()
+                .set_permissions(permissions.clone())
+                .map_err(ClaudeDesktopError::Permissions),
+            Substage::TemporaryPermissions,
+            document,
+        )?;
     }
-    temporary
-        .persist(path)
-        .map_err(|error| ClaudeDesktopError::Write(error.error))?;
+    observe(
+        temporary
+            .persist(path)
+            .map_err(|error| ClaudeDesktopError::Write(error.error)),
+        Substage::Persist,
+        document,
+    )?;
     Ok(())
 }
 

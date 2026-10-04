@@ -1,5 +1,8 @@
 #[allow(clippy::wildcard_imports)]
 use super::*;
+use qualification_prelaunch::{
+    ConfigurationDocument, ConfigurationSubstage as Substage, observe_configuration,
+};
 
 pub(super) fn apply_gateway(
     paths: &DesktopPaths,
@@ -7,42 +10,54 @@ pub(super) fn apply_gateway(
     token: &str,
 ) -> Result<(), ClaudeDesktopError> {
     #[cfg(feature = "desktop-qualification")]
-    let chat_only = match std::env::var("NANH_CLAUDE_MAC_CHAT_NAVIGATION") {
-        Err(std::env::VarError::NotPresent) => false,
-        Ok(value)
-            if value == "1" && qualification_config::observation_directory(paths).is_some() =>
-        {
-            true
-        }
-        _ => return Err(ClaudeDesktopError::InvalidStatePath),
-    };
+    let chat_only = observe_configuration(
+        match std::env::var("NANH_CLAUDE_MAC_CHAT_NAVIGATION") {
+            Err(std::env::VarError::NotPresent) => Ok(false),
+            Ok(value)
+                if value == "1" && qualification_config::observation_directory(paths).is_some() =>
+            {
+                Ok(true)
+            }
+            _ => Err(ClaudeDesktopError::InvalidStatePath),
+        },
+        Substage::MacPolicy,
+        None,
+    )?;
     #[cfg(feature = "desktop-qualification")]
-    let windows_chat_only = windows_chat_trial(
-        std::env::var("NANH_CLAUDE_WINDOWS_CHAT_ONLY")
-            .map(Some)
-            .or_else(|error| match error {
-                std::env::VarError::NotPresent => Ok(None),
-                std::env::VarError::NotUnicode(_) => Err(ClaudeDesktopError::InvalidStatePath),
-            })?
-            .as_deref(),
-        cfg!(windows),
-        std::env::var("RUNNER_OS").ok().as_deref(),
-        std::env::var("NANH_CLAUDE_WINDOWS_PROFILE_POLICY")
-            .ok()
-            .as_deref(),
-        qualification_config::observation_directory(paths).is_some(),
+    let windows_chat_only = observe_configuration(
+        (|| {
+            windows_chat_trial(
+                std::env::var("NANH_CLAUDE_WINDOWS_CHAT_ONLY")
+                    .map(Some)
+                    .or_else(|error| match error {
+                        std::env::VarError::NotPresent => Ok(None),
+                        std::env::VarError::NotUnicode(_) => {
+                            Err(ClaudeDesktopError::InvalidStatePath)
+                        }
+                    })?
+                    .as_deref(),
+                cfg!(windows),
+                std::env::var("RUNNER_OS").ok().as_deref(),
+                std::env::var("NANH_CLAUDE_WINDOWS_PROFILE_POLICY")
+                    .ok()
+                    .as_deref(),
+                qualification_config::observation_directory(paths).is_some(),
+            )
+        })(),
+        Substage::WindowsPolicy,
+        None,
     )?;
     #[cfg(feature = "desktop-qualification")]
     let chat_only = chat_only || windows_chat_only;
     #[cfg(feature = "desktop-qualification")]
-    let linux_chat_only = qualification_linux::requested(paths)?;
+    let linux_chat_only = observe_configuration(
+        qualification_linux::requested(paths),
+        Substage::LinuxPolicy,
+        None,
+    )?;
     #[cfg(feature = "desktop-qualification")]
     let chat_only = chat_only || linux_chat_only;
-    let mut documents = paths
-        .documents()
-        .into_iter()
-        .map(read_json_object)
-        .collect::<Result<Vec<_>, _>>()?;
+    let mut documents = read_documents(paths)?;
     documents[0].insert("deploymentMode".to_owned(), json!("3p"));
     documents[1].insert("deploymentMode".to_owned(), json!("3p"));
 
@@ -73,14 +88,52 @@ pub(super) fn apply_gateway(
     #[cfg(feature = "desktop-qualification")]
     configure_chat_trial(profile, chat_only);
     #[cfg(feature = "desktop-qualification")]
-    qualification_mcp::configure(paths, profile)?;
+    observe_configuration(
+        qualification_mcp::configure(paths, profile),
+        Substage::ManagedMcp,
+        Some(ConfigurationDocument::Profile),
+    )?;
 
-    for (document, path) in documents.into_iter().zip(paths.documents()) {
-        let mut payload =
-            serde_json::to_vec_pretty(&document).map_err(ClaudeDesktopError::SerializeConfig)?;
+    write_documents(paths, documents)
+}
+
+fn read_documents(paths: &DesktopPaths) -> Result<Vec<Map<String, Value>>, ClaudeDesktopError> {
+    let documents = paths
+        .documents()
+        .into_iter()
+        .zip(ConfigurationDocument::all())
+        .map(|(path, document)| {
+            observe_configuration(
+                read_json_object(path),
+                Substage::DocumentRead,
+                Some(document),
+            )
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(documents)
+}
+
+fn write_documents(
+    paths: &DesktopPaths,
+    documents: Vec<Map<String, Value>>,
+) -> Result<(), ClaudeDesktopError> {
+    for ((document, path), kind) in documents
+        .into_iter()
+        .zip(paths.documents())
+        .zip(ConfigurationDocument::all())
+    {
+        let mut payload = observe_configuration(
+            serde_json::to_vec_pretty(&document).map_err(ClaudeDesktopError::SerializeConfig),
+            Substage::Serialize,
+            Some(kind),
+        )?;
         payload.push(b'\n');
-        let permissions = existing_permissions(path)?;
-        atomic_write(path, &payload, permissions.as_ref(), false)?;
+        let permissions = observe_configuration(
+            existing_permissions(path),
+            Substage::ExistingPermissions,
+            Some(kind),
+        )?;
+        atomic_write_configuration(path, &payload, permissions.as_ref(), kind)?;
     }
     Ok(())
 }

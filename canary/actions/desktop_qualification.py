@@ -935,13 +935,32 @@ def semantic_observations(directory, app):
             record.update({key: value[key] for key in fields - {'schemaVersion', 'mechanism'}})
         elif mechanism == 'claude-cli-prelaunch':
             fields = {'schemaVersion', 'mechanism', 'phase', 'stage', 'status', 'diagnosticsOnly'}
-            if (set(value) != fields or app != 'claude-desktop' or path.name != 'claude-cli-prelaunch.json'
+            optional = {'configurationSubstage', 'configurationDocument'}
+            if (not fields <= set(value) or set(value) - fields - optional or app != 'claude-desktop' or path.name != 'claude-cli-prelaunch.json'
                     or value['diagnosticsOnly'] is not True or value['phase'] != 'prelaunch'
                     or value['status'] != 'failed' or type(value['stage']) is not str or value['stage'] not in {
                         'persistence', 'remembered-model', 'paths', 'session-lock', 'pending-recovery',
                         'process-query', 'process-present', 'credentials', 'bridge', 'snapshot',
                         'receipt-write', 'configuration', 'vendor-launch'}):
                 raise ValueError('invalid Claude prelaunch observation')
+            if 'configurationSubstage' in value:
+                substage = value['configurationSubstage']
+                documents = {'normal-config', 'third-party-config', 'metadata', 'profile'}
+                policy = {'mac-policy', 'windows-policy', 'linux-policy'}
+                writes = {'serialize', 'existing-permissions', 'parent-create', 'path-check',
+                          'temporary-create', 'temporary-write', 'temporary-permissions', 'persist'}
+                if (value['stage'] != 'configuration' or type(substage) is not str
+                        or substage not in policy | writes | {'document-read', 'managed-mcp'}
+                        or (substage in policy and 'configurationDocument' in value)
+                        or (substage not in policy and (type(value.get('configurationDocument')) is not str
+                            or value['configurationDocument'] not in documents))
+                        or (substage == 'managed-mcp' and value.get('configurationDocument') != 'profile')):
+                    raise ValueError('invalid Claude configuration boundary')
+                record['configurationSubstage'] = substage
+                if 'configurationDocument' in value:
+                    record['configurationDocument'] = value['configurationDocument']
+            elif 'configurationDocument' in value:
+                raise ValueError('invalid Claude configuration boundary')
             record.update(diagnosticsOnly=True, phase=value['phase'], stage=value['stage'], status=value['status'])
         elif mechanism == 'claude-model-discovery':
             fields = {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'authenticatedModelsCount', 'complete', 'modelDiscoverySeen'}

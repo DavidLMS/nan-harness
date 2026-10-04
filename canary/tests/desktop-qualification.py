@@ -1592,6 +1592,29 @@ class QualificationTests(unittest.TestCase):
             path.rename(Path(directory) / 'wrong.json')
             with self.assertRaises(ValueError): q.semantic_observations(directory, 'claude-desktop')
 
+    def test_claude_configuration_boundary_preserves_legacy_and_rejects_private_payload(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'claude-cli-prelaunch.json'
+            base = dict(schemaVersion=1, mechanism='claude-cli-prelaunch', diagnosticsOnly=True,
+                        phase='prelaunch', stage='configuration', status='failed')
+            for supplement in ({}, {'configurationSubstage': 'windows-policy'},
+                               {'configurationSubstage': 'document-read', 'configurationDocument': 'normal-config'},
+                               {'configurationSubstage': 'persist', 'configurationDocument': 'profile'},
+                               {'configurationSubstage': 'managed-mcp', 'configurationDocument': 'profile'}):
+                path.write_text(json.dumps({**base, **supplement}))
+                self.assertEqual(q.semantic_observations(directory, 'claude-desktop')[0], {**base, **supplement})
+            for supplement in ({'configurationSubstage': 'PRIVATE_SENTINEL'},
+                               {'configurationSubstage': 'persist', 'configurationDocument': 'PRIVATE_SENTINEL'},
+                               {'configurationSubstage': 'persist', 'configurationDocument': []},
+                               {'configurationSubstage': 'persist', 'configurationDocument': {}},
+                               {'configurationSubstage': 'persist'}, {'configurationDocument': 'profile'},
+                               {'configurationSubstage': 'windows-policy', 'configurationDocument': 'profile'},
+                               {'configurationSubstage': 'managed-mcp', 'configurationDocument': 'metadata'},
+                               {'configurationSubstage': 'persist', 'configurationDocument': 'profile', 'error': 'PRIVATE_SENTINEL'},
+                               {'stage': 'snapshot', 'configurationSubstage': 'windows-policy'}):
+                path.write_text(json.dumps({**base, **supplement}))
+                with self.assertRaises(ValueError): q.semantic_observations(directory, 'claude-desktop')
+
     def test_claude_model_discovery_is_positive_only_and_payload_free(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
