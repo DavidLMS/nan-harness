@@ -76,8 +76,10 @@ impl DesktopPaths {
         Self {
             normal_config: normal_root.join("claude_desktop_config.json"),
             third_party_config: third_party_root.join("claude_desktop_config.json"),
-            meta: third_party_root.join("configLibrary/_meta.json"),
-            profile: third_party_root.join(format!("configLibrary/{PROFILE_ID}.json")),
+            meta: third_party_root.join("configLibrary").join("_meta.json"),
+            profile: third_party_root
+                .join("configLibrary")
+                .join(format!("{PROFILE_ID}.json")),
             receipt: state.join("claude-desktop-receipt.json"),
             backup_directory: state.join("claude-desktop-backup"),
             lock: state.join("claude-desktop.lock"),

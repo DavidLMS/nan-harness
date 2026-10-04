@@ -192,16 +192,19 @@ pub(super) fn windows_roots(paths: &DesktopPaths) -> Option<[PathBuf; 2]> {
         return None;
     }
     let workspace = std::env::current_dir().ok()?;
-    let home = workspace.join("profile/home");
-    let local = home.join("AppData/Local");
-    let roaming = home.join("AppData/Roaming");
+    let home = workspace.join("profile").join("home");
+    let local = home.join("AppData").join("Local");
+    let roaming = home.join("AppData").join("Roaming");
     for (key, expected) in [
         ("HOME", &home),
         ("USERPROFILE", &home),
         ("APPDATA", &roaming),
         ("LOCALAPPDATA", &local),
     ] {
-        if std::env::var_os(key).map(PathBuf::from).as_ref() != Some(expected) {
+        if !std::env::var_os(key)
+            .map(PathBuf::from)
+            .is_some_and(|actual| same_directory(&actual, expected))
+        {
             return None;
         }
     }
@@ -214,12 +217,14 @@ fn validated_windows_roots(
     roaming: &Path,
     local: &Path,
 ) -> Option<[PathBuf; 2]> {
-    let home = workspace.join("profile/home");
-    if roaming != home.join("AppData/Roaming") || local != home.join("AppData/Local") {
+    let home = workspace.join("profile").join("home");
+    if !same_directory(roaming, &home.join("AppData").join("Roaming"))
+        || !same_directory(local, &home.join("AppData").join("Local"))
+    {
         return None;
     }
     let roots = [roaming.join("Claude"), local.join("Claude-3p")];
-    if !documents_match_roots(paths, &roots) {
+    if !documents_match_windows_roots(paths, &roots) {
         return None;
     }
     let owned = workspace.join("profile").canonicalize().ok()?;
@@ -231,6 +236,90 @@ fn validated_windows_roots(
         return None;
     }
     Some(roots)
+}
+
+// Windows current_dir and canonicalize may use different drive-prefix spellings.
+// Compare existing directory identities, while rejecting any reparse ancestor.
+fn same_directory(actual: &Path, expected: &Path) -> bool {
+    fn canonical_directory(path: &Path) -> Option<PathBuf> {
+        if !path.is_absolute()
+            || path.ancestors().count() > 64
+            || path
+                .components()
+                .any(|component| matches!(component, std::path::Component::ParentDir))
+        {
+            return None;
+        }
+        for ancestor in path.ancestors() {
+            let metadata = std::fs::symlink_metadata(ancestor).ok()?;
+            if !metadata.is_dir() || metadata.file_type().is_symlink() {
+                return None;
+            }
+            #[cfg(windows)]
+            {
+                use std::os::windows::fs::MetadataExt as _;
+                if metadata.file_attributes() & 0x400 != 0 {
+                    return None;
+                }
+            }
+        }
+        path.canonicalize().ok()
+    }
+    canonical_directory(actual)
+        .zip(canonical_directory(expected))
+        .is_some_and(|(actual, expected)| actual == expected)
+}
+
+fn documents_match_windows_roots(paths: &DesktopPaths, roots: &[PathBuf; 2]) -> bool {
+    fn matches(path: &Path, root: &Path, leaf: &str, library: bool) -> bool {
+        if path.file_name() != Some(std::ffi::OsStr::new(leaf)) {
+            return false;
+        }
+        let Some(mut parent) = path.parent() else {
+            return false;
+        };
+        if library {
+            if parent.file_name() != Some(std::ffi::OsStr::new("configLibrary")) {
+                return false;
+            }
+            if let Ok(metadata) = std::fs::symlink_metadata(parent) {
+                if !metadata.is_dir() || metadata.file_type().is_symlink() {
+                    return false;
+                }
+                #[cfg(windows)]
+                {
+                    use std::os::windows::fs::MetadataExt as _;
+                    if metadata.file_attributes() & 0x400 != 0 {
+                        return false;
+                    }
+                }
+            } else if !matches!(parent.try_exists(), Ok(false)) {
+                return false;
+            }
+            let Some(root_parent) = parent.parent() else {
+                return false;
+            };
+            parent = root_parent;
+        }
+        same_directory(parent, root)
+    }
+    matches(
+        &paths.normal_config,
+        &roots[0],
+        "claude_desktop_config.json",
+        false,
+    ) && matches(
+        &paths.third_party_config,
+        &roots[1],
+        "claude_desktop_config.json",
+        false,
+    ) && matches(&paths.meta, &roots[1], "_meta.json", true)
+        && matches(
+            &paths.profile,
+            &roots[1],
+            &format!("{}.json", super::PROFILE_ID),
+            true,
+        )
 }
 
 fn documents_match_roots(paths: &DesktopPaths, roots: &[PathBuf; 2]) -> bool {
@@ -388,20 +477,54 @@ mod tests {
     fn windows_binding_rejects_foreign_roots_and_profile_documents() {
         let temp = tempfile::tempdir().unwrap();
         let workspace = temp.path().canonicalize().unwrap();
-        let roaming = workspace.join("profile/home/AppData/Roaming");
-        let local = workspace.join("profile/home/AppData/Local");
+        let roaming = workspace
+            .join("profile")
+            .join("home")
+            .join("AppData")
+            .join("Roaming");
+        let local = workspace
+            .join("profile")
+            .join("home")
+            .join("AppData")
+            .join("Local");
         for path in [roaming.join("Claude"), local.join("Claude-3p")] {
             nan_harness_private_fs::create_private_dir_all(&path).unwrap();
         }
         let mut paths = DesktopPaths::new(
             &roaming.join("Claude"),
             &local.join("Claude-3p"),
-            &workspace.join("profile/nanh"),
+            &workspace.join("profile").join("nanh"),
         );
         assert!(validated_windows_roots(&paths, &workspace, &roaming, &local).is_some());
         assert!(validated_windows_roots(&paths, &workspace, &local, &roaming).is_none());
         paths.profile = workspace.join("foreign-profile.json");
         assert!(validated_windows_roots(&paths, &workspace, &roaming, &local).is_none());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_binding_accepts_drive_prefix_alias_but_rejects_foreign_layout() {
+        let temp = tempfile::tempdir().unwrap();
+        let verbatim = temp.path().canonicalize().unwrap();
+        let text = verbatim.to_str().unwrap();
+        let ordinary = PathBuf::from(text.strip_prefix(r"\\?\").unwrap());
+        let home = verbatim.join("profile").join("home");
+        let local = home.join("AppData").join("Local");
+        let roaming = home.join("AppData").join("Roaming");
+        for root in [local.join("Claude-3p"), roaming.join("Claude")] {
+            nan_harness_private_fs::create_private_dir_all(&root).unwrap();
+        }
+        let paths = DesktopPaths::new(&roaming.join("Claude"), &local.join("Claude-3p"), &home);
+        assert!(validated_windows_roots(&paths, &ordinary, &roaming, &local).is_some());
+        assert!(same_directory(&ordinary, &verbatim));
+        assert!(!same_directory(&ordinary, &local));
+        assert_eq!(
+            paths.meta.parent().unwrap().file_name().unwrap(),
+            "configLibrary"
+        );
+        let mut foreign = paths;
+        foreign.meta = local.join("Claude-3p").join("other").join("_meta.json");
+        assert!(validated_windows_roots(&foreign, &ordinary, &roaming, &local).is_none());
     }
 
     #[test]
