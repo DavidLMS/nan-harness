@@ -3681,6 +3681,22 @@ class ClaudeLinuxNativeChatTests(unittest.TestCase):
             path.write_text(json.dumps(value))
             with self.assertRaises(ValueError):q.semantic_observations(root,'zed-desktop')
 
+    def test_send_action_class_and_boundaries_are_closed(self):
+        value=dict(schemaVersion=1,mechanism='claude-linux-native-chat',diagnosticsOnly=True,
+                   stage='blocked',submittedTurns=0,inputVerifiedTurns=1,copiedResponses=0,
+                   retryAttempted=False,clipboardCleared=True,failureBoundary='action-name')
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);path=root/'chat.json'
+            for name in ('click','press','none','multiple','other'):
+                path.write_text(json.dumps({**value,'sendActionClass':name}))
+                self.assertEqual(q.semantic_observations(root,'claude-desktop')[0]['sendActionClass'],name)
+            for extra in ({'sendActionClass':True},{'sendActionClass':'PRIVATE'},
+                          {'sendActionClass':{'text':'PRIVATE'}},
+                          {'sendActionClass':'press','inputVerifiedTurns':0},
+                          {'failureBoundary':'PRIVATE'}):
+                path.write_text(json.dumps({**value,**extra}))
+                with self.assertRaises(ValueError):q.semantic_observations(root,'claude-desktop')
+
     def test_native_opt_in_only_accepts_owned_linux_trial(self):
         source=dict(GITHUB_ACTIONS='true',RUNNER_ENVIRONMENT='github-hosted',RUNNER_OS='Linux',
                     NANH_CLAUDE_LINUX_NATIVE_CHAT='first-turn',NANH_CLAUDE_LINUX_CHAT_ONLY='1')

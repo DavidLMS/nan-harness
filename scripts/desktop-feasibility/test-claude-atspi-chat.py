@@ -518,4 +518,80 @@ class FreshProfileTests(unittest.TestCase):
         self.assertEqual((adapter.focus_count,adapter.paste_count,adapter.send_count),(0,0,0))
 
 
+
+
+class SendActionBoundaryTests(unittest.TestCase):
+    run_case = ControllerTests.run_case
+    def test_advertised_press_and_missing_hit_never_dispatch(self):
+        for method,value,boundary in [('actions',['unknown-private'],'action-name'),('actions',['click','click'],'action-name'),('hit',False,'action-hit')]:
+            original=getattr(Adapter,method)
+            try:
+                setattr(Adapter,method,lambda self,*args: value)
+                adapter,controller,facts=self.run_case()
+                self.assertTrue(facts['inputVerified'])
+                self.assertEqual(facts['failureBoundary'],boundary)
+                self.assertEqual(adapter.send_count,0)
+                self.assertFalse(facts['sendAttempted'])
+            finally:
+                setattr(Adapter,method,original)
+
+    def test_exact_press_uses_single_same_action(self):
+        original=Adapter.actions
+        try:
+            Adapter.actions=lambda self,node: ['press']
+            adapter,controller,facts=self.run_case()
+            self.assertTrue(facts['sendForwarded'])
+            self.assertEqual(facts['sendActionClass'],'press')
+            self.assertEqual(adapter.send_count,1)
+        finally:
+            Adapter.actions=original
+
+    def test_press_uncertain_never_replays(self):
+        original=Adapter.actions
+        try:
+            Adapter.actions=lambda self,node: ['press']
+            adapter,controller,facts=self.run_case(invoke_error=True)
+            self.assertEqual(adapter.send_count,1)
+            self.assertTrue(facts['sendAttempted'])
+            self.assertFalse(facts['sendForwarded'])
+            self.assertEqual(facts['stage'],'deadline')
+        finally:
+            Adapter.actions=original
+
+class ActionProtocolTests(unittest.TestCase):
+    def test_exact_wire_calls_and_typed_values(self):
+        class Wire:
+            def __init__(self,count,names):self.count=count;self.names=names;self.calls=[]
+            def call(self,node,method,interface,*args):
+                self.calls.append((node,method,interface,args))
+                if method=='Get':return self.count
+                return self.names[args[0]]
+        for names in (['click'],['press'],['private-unknown'],['click','press']):
+            wire=Wire(len(names),names)
+            self.assertEqual(chat.action_names(wire,'held'),names)
+            self.assertEqual(wire.calls[0],('held','Get','org.freedesktop.DBus.Properties',('org.a11y.atspi.Action','NActions')))
+            for index,call in enumerate(wire.calls[1:]):
+                self.assertEqual(call,('held','GetName','org.a11y.atspi.Action',(index,)))
+        Boolean=type('Boolean',(int,),{})
+        for count,names,boundary in [(True,[],'action-count'),(Boolean(1),['click'],'action-count'),
+                (1.0,['click'],'action-count'),(None,[],'action-count'),(9,[],'action-count'),
+                (1,[object()],'action-name'),(1,[True],'action-name'),(1,['x'*65],'action-name')]:
+            wire=Wire(count,names)
+            with self.assertRaises(chat.Rejected) as error:chat.action_names(wire,'held')
+            self.assertEqual(error.exception.boundary,boundary)
+            self.assertLessEqual(len(wire.calls),2)
+
+    def test_action_class_drift_is_not_dispatched(self):
+        original=Adapter.actions
+        try:
+            calls=[]
+            def actions(self,node):
+                calls.append(node);return ['click'] if len(calls)==1 else ['press']
+            Adapter.actions=actions
+            adapter,controller,facts=ControllerTests.run_case(self)
+            self.assertEqual(facts['failureBoundary'],'action-name')
+            self.assertEqual(adapter.send_count,0)
+            self.assertFalse(facts['sendAttempted'])
+        finally:Adapter.actions=original
+
 if __name__=='__main__':unittest.main()

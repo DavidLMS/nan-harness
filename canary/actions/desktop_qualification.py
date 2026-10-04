@@ -1095,7 +1095,7 @@ def semantic_observations(directory, app):
         elif mechanism == 'claude-linux-native-chat':
             fields = {'schemaVersion','mechanism','diagnosticsOnly','stage','submittedTurns',
                       'inputVerifiedTurns','copiedResponses','retryAttempted','clipboardCleared'}
-            if (app != 'claude-desktop' or set(value) - {'failureBoundary','inputShape','embeddedTextObservation'} != fields or value['diagnosticsOnly'] is not True
+            if (app != 'claude-desktop' or set(value) - {'failureBoundary','inputShape','embeddedTextObservation','sendActionClass'} != fields or value['diagnosticsOnly'] is not True
                     or type(value['stage']) is not str or value['stage'] not in {
                         'source','focus','paste','readback','send','input-not-empty','blocked',
                         'action-uncertain','deadline','clipboard-cleanup','sent','response-pending',
@@ -1105,11 +1105,17 @@ def semantic_observations(directory, app):
                     or not value['copiedResponses'] <= value['submittedTurns'] <= value['inputVerifiedTurns']
                     or value['retryAttempted'] is not False or type(value['clipboardCleared']) is not bool):
                 raise ValueError('invalid Claude Linux native Chat diagnostic')
+            if 'sendActionClass' in value:
+                if (type(value['sendActionClass']) is not str
+                        or value['sendActionClass'] not in {'click','press','none','multiple','other'}
+                        or value['inputVerifiedTurns'] < 1):
+                    raise ValueError('invalid Claude Linux Send action class')
+                record['sendActionClass'] = value['sendActionClass']
             if 'failureBoundary' in value:
                 boundary = value['failureBoundary']
                 if (type(boundary) is not str or boundary not in {
                         'request','policy','native-window','source-owner','tree','state','frame','frame-active','frame-count','frame-client','client',
-                        'mode','focus','input','clipboard','action','response','transport'}
+                        'mode','focus','input','clipboard','action','action-count','action-name','action-hit','response','transport'}
                         or value['stage'] not in {'blocked','action-uncertain','deadline','clipboard-cleanup',
                                                  'input-not-empty','response-mismatch'}):
                     raise ValueError('invalid Claude Linux Chat failure boundary')

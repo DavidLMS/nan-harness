@@ -46,9 +46,25 @@ enum FailureBoundary {
     Input,
     Clipboard,
     Action,
+    ActionCount,
+    ActionName,
+    ActionHit,
     Response,
     Transport,
 }
+#[derive(Clone, Copy, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum SendActionClass {
+    Click,
+    Press,
+    None,
+    Multiple,
+    Other,
+}
+fn send_action_class(facts: &Value) -> Option<SendActionClass> {
+    serde_json::from_value(facts.get("sendActionClass")?.clone()).ok()
+}
+
 fn failure_boundary(facts: &Value) -> Option<FailureBoundary> {
     serde_json::from_value(facts.get("failureBoundary")?.clone()).ok()
 }
@@ -166,7 +182,7 @@ fn decode(bytes: &[u8]) -> Option<(Value, Option<Value>)> {
         return None;
     }
     let facts = value["facts"].as_object()?;
-    if !(11..=14).contains(&facts.len())
+    if !(11..=15).contains(&facts.len())
         || facts.keys().any(|key| {
             !FLAGS.contains(&key.as_str())
                 && ![
@@ -177,6 +193,7 @@ fn decode(bytes: &[u8]) -> Option<(Value, Option<Value>)> {
                     "failureBoundary",
                     "inputShape",
                     "embeddedTextObservation",
+                    "sendActionClass",
                 ]
                 .contains(&key.as_str())
         })
@@ -206,6 +223,13 @@ fn decode(bytes: &[u8]) -> Option<(Value, Option<Value>)> {
         || value["facts"]["sendForwarded"] == true && value["facts"]["sendAttempted"] != true
         || value["facts"]["sendAttempted"] == true && value["facts"]["inputVerified"] != true
         || value["facts"]["responseVerified"] == true && value["facts"]["stage"] != "copied"
+    {
+        return None;
+    }
+    if facts.contains_key("sendActionClass")
+        && (!value["facts"]["inputVerified"].as_bool()?
+            || !["click", "press", "none", "multiple", "other"]
+                .contains(&value["facts"]["sendActionClass"].as_str()?))
     {
         return None;
     }
@@ -332,6 +356,7 @@ pub(crate) struct ClaudeLinuxChatSession<'a> {
     binding: Option<Value>,
     stage: String,
     failure_boundary: Option<FailureBoundary>,
+    send_action_class: Option<SendActionClass>,
     input_shape: Option<InputShape>,
     embedded_text_observation: Option<EmbeddedTextObservation>,
     submitted: u8,
@@ -366,6 +391,7 @@ impl Gui {
             binding: None,
             stage: "source".into(),
             failure_boundary: None,
+            send_action_class: None,
             input_shape: None,
             embedded_text_observation: None,
             submitted: 0,
@@ -419,6 +445,7 @@ impl ClaudeLinuxChatSession<'_> {
         self.failure_boundary = Some(FailureBoundary::Transport);
         let (facts, binding) = supervise(&self.driver, payload, deadline)?;
         self.failure_boundary = failure_boundary(&facts);
+        self.send_action_class = send_action_class(&facts);
         self.input_shape = input_shape(&facts);
         self.embedded_text_observation = embedded_text_observation(&facts);
         self.stage = facts["stage"]
@@ -534,6 +561,9 @@ impl ClaudeLinuxChatSession<'_> {
         if let Some(boundary) = self.failure_boundary {
             facts["failureBoundary"] = json!(boundary);
         }
+        if let Some(class) = self.send_action_class {
+            facts["sendActionClass"] = json!(class);
+        }
         if let Some(shape) = self.input_shape {
             facts["inputShape"] = json!(shape);
         }
@@ -618,6 +648,25 @@ mod embedded_text_tests {
 mod helper_packet_tests {
     use super::decode;
     use serde_json::json;
+    #[test]
+    fn send_action_packet_is_closed_and_requires_verified_input() {
+        let packet = json!({"facts":{"schemaVersion":1,"mechanism":"claude-linux-native-chat",
+            "diagnosticsOnly":true,"stage":"blocked","failureBoundary":"action-name",
+            "inputVerified":true,"pasteAttempted":true,"sendAttempted":false,"sendForwarded":false,
+            "responseVerified":false,"toolVerified":false,"recoveryVerified":false,"sendActionClass":"press"},
+            "binding":null});
+        assert!(decode(&serde_json::to_vec(&packet).unwrap()).is_some());
+        for (key, value) in [
+            ("sendActionClass", json!("PRIVATE")),
+            ("sendActionClass", json!(true)),
+            ("inputVerified", json!(false)),
+            ("failureBoundary", json!("PRIVATE")),
+        ] {
+            let mut changed = packet.clone();
+            changed["facts"][key] = value;
+            assert!(decode(&serde_json::to_vec(&changed).unwrap()).is_none());
+        }
+    }
     #[test]
     fn full_nonempty_helper_packet_accepts_all_reproved_optional_diagnostics() {
         let packet = json!({"facts":{

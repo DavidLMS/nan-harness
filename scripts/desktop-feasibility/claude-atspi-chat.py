@@ -22,12 +22,34 @@ def inside(rect, outer):
 
 
 BOUNDARIES = frozenset(('request','policy','native-window','source-owner','tree','state',
-    'frame','frame-active','frame-count','frame-client','client','mode','focus','input','clipboard','action','response','transport'))
+    'frame','frame-active','frame-count','frame-client','client','mode','focus','input','clipboard','action','action-count','action-name','action-hit','response','transport'))
 QUERY_BOUNDARIES = dict(owner='source-owner', identity='tree', children='tree', parent='frame',
     state='state', bounds='frame', guard='native-window', client_bounds='client',
     attributes='mode', focused='focus', grab_focus='focus', text='input', paste_once='input',
     copy_input_once='clipboard', clear_clipboard='clipboard', clipboard_sentinel='clipboard',
-    clipboard_read='clipboard', actions='action', hit='action', invoke_once='action')
+    clipboard_read='clipboard', actions='action-name', hit='action-hit', invoke_once='action')
+
+def action_names(adapter, node):
+    try:
+        count = adapter.call(node, 'Get', 'org.freedesktop.DBus.Properties',
+                             'org.a11y.atspi.Action', 'NActions')
+    except Exception as error:
+        raise Rejected('action-count') from error
+    # dbus.Boolean is an integer subclass; never interpret it as cardinality.
+    if (not isinstance(count, int) or isinstance(count, bool)
+            or type(count).__name__ == 'Boolean' or not 0 <= count <= 8):
+        raise Rejected('action-count')
+    names = []
+    for index in range(count):
+        try:
+            name = adapter.call(node, 'GetName', 'org.a11y.atspi.Action', index)
+        except Exception as error:
+            raise Rejected('action-name') from error
+        if not isinstance(name, str) or len(name) > 64:
+            raise Rejected('action-name')
+        names.append(name)
+    return names
+
 
 def input_shape(value):
     # Diagnostic only. These sets never grant replacement or submission authority.
@@ -529,6 +551,7 @@ class Controller:
                 raise Rejected()
             self.send = sends[0]
             sealed = (self.query('identity', self.send), self.query('bounds', self.send))
+            sealed_actions = None
             for _ in range(2):
                 self.proof(focused=True)
                 self.state(self.send)
@@ -539,8 +562,17 @@ class Controller:
                     raise Rejected()
                 if not inside(sealed[1], self.sealed_frame[1]):
                     raise Rejected()
-                if self.query('actions', self.send) != ['click'] or not self.query('hit', self.send, self.frame):
-                    raise Rejected()
+                actions = self.query('actions', self.send)
+                self.facts['sendActionClass'] = ('click' if actions == ['click'] else
+                    'press' if actions == ['press'] else 'none' if not actions else
+                    'multiple' if len(actions) > 1 else 'other')
+                if actions not in (['click'], ['press']):
+                    raise Rejected('action-name')
+                if sealed_actions is not None and actions != sealed_actions:
+                    raise Rejected('action-name')
+                sealed_actions = actions
+                if not self.query('hit', self.send, self.frame):
+                    raise Rejected('action-hit')
             self.facts['stage'] = 'send'
             self.send_attempted = True
             self.facts['sendAttempted'] = True
@@ -836,13 +868,7 @@ def native_adapter(request, deadline):
     adapter.paste_once = paste
     adapter.select_all_once = lambda: key('ctrl+a')
     adapter.copy_input_once = readback
-    def actions(node):
-        count = int(adapter.call(node,'Get','org.freedesktop.DBus.Properties',
-            'org.a11y.atspi.Action','NActions'))
-        if not 0 <= count <= 8:
-            raise Rejected()
-        return [str(adapter.call(node,'GetName','org.a11y.atspi.Action',i)) for i in range(count)]
-    adapter.actions = actions
+    adapter.actions = lambda node: action_names(adapter, node)
     adapter.invoke_once = lambda node,index: bool(adapter.call(node,'DoAction','org.a11y.atspi.Action',index))
     import secrets
     adapter.clipboard_sentinel = lambda: clipboard_write(secrets.token_hex(16))
