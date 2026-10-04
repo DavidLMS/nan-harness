@@ -247,6 +247,13 @@ jobs:
       - name: Verify retained Linux Codex profile custody without an application
         if: runner.os == 'Linux' && matrix.app == 'chatgpt-desktop'
         run: cargo test --locked -p nan-harness-desktop-check --lib probe::codex_linux_profile
+      - name: Verify retained macOS Codex profile custody without an application
+        if: runner.os == 'macOS' && matrix.app == 'chatgpt-desktop'
+        run: |
+          cargo clippy --locked -p nan-harness-desktop-check --all-features --all-targets -- -D warnings
+          cargo test --locked -p nan-harness-desktop-check --lib probe::codex_macos_profile
+          python3 scripts/desktop-feasibility/test-codex-macos-state.py
+          node scripts/desktop-feasibility/test-codex-macos-profile-state.cjs
       - name: Verify bounded Linux Claude native Chat receipts without an application
         if: runner.os == 'Linux' && matrix.app == 'claude-desktop'
         run: |

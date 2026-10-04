@@ -121,7 +121,11 @@ mod windows_process_tests {
 #[cfg(target_os = "linux")]
 mod codex_linux_profile;
 #[cfg(target_os = "linux")]
-pub(crate) use codex_linux_profile::FreshCodexLinuxProfile;
+pub(crate) use codex_linux_profile::FreshCodexLinuxProfile as FreshCodexProfile;
+#[cfg(target_os = "macos")]
+mod codex_macos_profile;
+#[cfg(target_os = "macos")]
+pub(crate) use codex_macos_profile::FreshCodexMacProfile as FreshCodexProfile;
 #[cfg(target_os = "linux")]
 mod claude_linux_profile;
 #[cfg(target_os = "linux")]
@@ -782,13 +786,13 @@ async fn scenario_owned(
         &prepared_launch,
         Instant::now() + Duration::from_secs(1),
     )?;
-    #[cfg(target_os = "linux")]
-    let mut fresh_codex_profile = FreshCodexLinuxProfile::prepare(
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    let mut fresh_codex_profile = FreshCodexProfile::prepare(
         spec,
         &prepared_launch,
         Instant::now() + Duration::from_secs(1),
     )?;
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     if let Some(profile) = fresh_codex_profile.as_mut() {
         profile.before_launch(&prepared_launch, Instant::now() + Duration::from_secs(1))?;
     }
@@ -816,7 +820,7 @@ async fn scenario_owned(
             .run_renderer(
                 &mut process,
                 result,
-                #[cfg(target_os = "linux")]
+                #[cfg(any(target_os = "linux", target_os = "macos"))]
                 fresh_codex_profile.as_ref(),
             )
             .await
@@ -967,7 +971,9 @@ impl ConversationScenario<'_> {
         &self,
         process: &mut ProbeProcess,
         result: &mut ProbeResult,
-        #[cfg(target_os = "linux")] codex_profile: Option<&FreshCodexLinuxProfile>,
+        #[cfg(any(target_os = "linux", target_os = "macos"))] codex_profile: Option<
+            &FreshCodexProfile,
+        >,
     ) -> Result<(), Reason> {
         self.semantic
             .ok_or(Reason::IsolationUnavailable)?
@@ -980,7 +986,7 @@ impl ConversationScenario<'_> {
                     marker: self.final_marker,
                 },
                 result,
-                #[cfg(target_os = "linux")]
+                #[cfg(any(target_os = "linux", target_os = "macos"))]
                 codex_profile,
             )
             .await
@@ -1799,9 +1805,9 @@ fn prepare_codex_profile(profile: &Path) -> Result<PathBuf, Reason> {
     let state = profile.join("nanh");
     let surface = state.join("chatgpt-desktop");
     let managed = surface.join("profile");
-    let retained_profile = cfg!(target_os = "linux")
+    let retained_profile = cfg!(any(target_os = "linux", target_os = "macos"))
         && std::env::var("NANH_CODEX_PUBLIC_ONBOARDING").as_deref() == Ok("engineering");
-    // The Linux trial retains and exclusively creates these roots before launch.
+    // The retained profile creates these roots exclusively before launch.
     // Other launches prepare each private ancestor before the CLI writes state.
     if !retained_profile {
         for directory in [&user_data, &state, &surface, &managed] {

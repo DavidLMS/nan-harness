@@ -631,8 +631,8 @@ pub(crate) struct RendererSession<'a> {
     directory: &'a Path,
     owner: u32,
     readiness_deadline: Instant,
-    #[cfg(target_os = "linux")]
-    codex_profile: Option<&'a crate::probe::FreshCodexLinuxProfile>,
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    codex_profile: Option<&'a crate::probe::FreshCodexProfile>,
 }
 
 fn renderer_guard(
@@ -664,15 +664,15 @@ impl<'a> RendererSession<'a> {
             directory,
             owner,
             readiness_deadline: Instant::now() + Duration::from_secs(125),
-            #[cfg(target_os = "linux")]
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
             codex_profile: None,
         })
     }
 
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     pub(crate) fn bind_codex_profile(
         &mut self,
-        profile: Option<&'a crate::probe::FreshCodexLinuxProfile>,
+        profile: Option<&'a crate::probe::FreshCodexProfile>,
     ) {
         self.codex_profile = profile;
     }
@@ -745,7 +745,7 @@ impl<'a> RendererSession<'a> {
         if let Some(workspace) = workspace {
             request["ownedWorkspace"] = serde_json::json!(workspace);
         }
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         if let Some(profile) = self.codex_profile {
             request["codexProfileLoan"] = profile.private_request(self.readiness_deadline)?;
         }
@@ -784,7 +784,7 @@ impl<'a> RendererSession<'a> {
         );
         std::fs::remove_file(request_path).map_err(|_| Reason::IsolationUnavailable)?;
         drop(native);
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         if self
             .codex_profile
             .is_some_and(|profile| !profile.verifies_owned(self.readiness_deadline))

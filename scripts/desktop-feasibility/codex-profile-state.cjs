@@ -1,6 +1,6 @@
 'use strict';
-// PRIVATE Linux profile loan. Fixed read-only state; no input capability.
-const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');
+// PRIVATE retained profile loan. Fixed read-only state; no input capability.
+const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto'),cp=require('node:child_process');
 const C=fs.constants,LIMIT=1024*1024;
 const SUFFIXES=['','profile','profile/home','profile/config','profile/nanh','profile/nanh/chatgpt-desktop','profile/nanh/chatgpt-desktop/profile','profile/codex-desktop'];
 const same=(a,b)=>a.dev===b.dev&&a.ino===b.ino&&a.uid===b.uid;
@@ -18,8 +18,8 @@ function authority(loan,deadline,guard=()=>true){
     })&&alive();}catch{return false;}
   }
   try{
-    if(process.platform!=='linux'||!exactKeys(loan,['schemaVersion','platform','directories','stateRootIndex','stateBasename','diagnosticsOnly'])
-      ||loan.schemaVersion!==1||loan.platform!=='linux'||loan.stateRootIndex!==6||loan.stateBasename!=='.codex-global-state.json'||loan.diagnosticsOnly!==true
+    if(!['linux','darwin'].includes(process.platform)||!exactKeys(loan,['schemaVersion','platform','directories','stateRootIndex','stateBasename','diagnosticsOnly'])
+      ||loan.schemaVersion!==1||loan.platform!==(process.platform==='darwin'?'macos':'linux')||loan.stateRootIndex!==6||loan.stateBasename!=='.codex-global-state.json'||loan.diagnosticsOnly!==true
       ||!Array.isArray(loan.directories)||loan.directories.length!==8||!alive())reject();
     const workspace=loan.directories[0]?.path;
     if(typeof workspace!=='string'||!path.isAbsolute(workspace)||path.normalize(workspace)!==workspace||fs.realpathSync(workspace)!==workspace)reject();
@@ -33,7 +33,27 @@ function authority(loan,deadline,guard=()=>true){
     }
     if(!verify())reject();
   }catch{close();return null;}
+  function macSnapshot(){
+    if(!verify())reject();
+    const remaining=deadline-Date.now();if(remaining<=0)reject();
+    const result=cp.spawnSync('/usr/bin/python3',[path.join(__dirname,'codex-macos-state.py')],{
+      input:JSON.stringify({loan,deadline,caller:process.pid}),encoding:'utf8',
+      timeout:Math.ceil(remaining),maxBuffer:2*LIMIT,windowsHide:true});
+    if(result.error||result.status!==0||result.signal||!verify())reject();
+    let wire;try{wire=JSON.parse(result.stdout);}catch{reject();}
+    const fields=['st_dev','st_ino','st_uid','st_mode','st_nlink','st_size','st_mtime_ns','st_ctime_ns'];
+    if(!exactKeys(wire,['bytes','identity'])||!exactKeys(wire.identity,fields)
+      ||typeof wire.bytes!=='string'||wire.bytes.length>Math.ceil(LIMIT/3)*4
+      ||fields.some(k=>typeof wire.identity[k]!=='string'||!/^\d{1,20}$/.test(wire.identity[k])))reject();
+    const bytes=Buffer.from(wire.bytes,'base64');if(bytes.length>LIMIT||bytes.toString('base64')!==wire.bytes)reject();
+    const raw=wire.identity,identity={dev:BigInt(raw.st_dev),ino:BigInt(raw.st_ino),uid:BigInt(raw.st_uid),
+      mode:BigInt(raw.st_mode),nlink:BigInt(raw.st_nlink),size:BigInt(raw.st_size),mtimeNs:BigInt(raw.st_mtime_ns),ctimeNs:BigInt(raw.st_ctime_ns)};
+    if(identity.uid!==BigInt(process.getuid())||identity.mode%4096n!==384n||identity.nlink!==1n||identity.size!==BigInt(bytes.length))reject();
+    let value;try{value=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(bytes));}catch{reject();}
+    if(!verify())reject();return {value,identity,digest:crypto.createHash('sha256').update(bytes).digest('hex')};
+  }
   function snapshot(){
+    if(process.platform==='darwin')return macSnapshot();
     let fd;
     try{
       if(!verify())reject();
