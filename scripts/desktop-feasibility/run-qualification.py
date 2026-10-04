@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'canary/actions'))
 from cell import private_command, ensure_private_directory, write_json
 from desktop_diagnostics import Capture
+from codex_release import CODEX_PROJECT_RELEASES, CODEX_PROJECT_VERSIONS
 from desktop_qualification import APPS, bounded_json, cell, digest, envelope
 from desktop_suite import read_frozen_manifest
 
@@ -69,20 +70,11 @@ def validate_claude_bundle(executable):
             raise ValueError('Claude bootstrap differs from the inspected release')
 
 
-CODEX_PROJECT_RELEASES = {
-    'macos': ('f6cf4d2e9b69aeefa33adda4bcd1a2d306357f5253a1ac6049700870c28dd0c7',
-              '418a460276b195f5642e43b320ec2821d6c34c646cb316ed2c0285546298243f'),
-    'windows': ('f7b0266d6c00d4743da01d62bc82488f7ec5560c642501758119cb9885f67c87',
-                'b35bf062c01d73da090c60e62186dc180c2a8545cb6fc9575b4403c8fa3db49e'),
-    'linux': ('ee7854145554718d7239d01ea37d44f6ba1e0ba4a93f47ac097d6e0f964da47c',
-              '207c4fbff7e2fcc1b0789448351ac6eed206206d94c5a0835e5f07c7cd73d6e3'),
-}
-
 
 def validate_codex_project_release(release, executable_hash, platform='windows'):
     # Native flags and renderer controls were inspected in each platform's bytes.
     pinned = CODEX_PROJECT_RELEASES.get(platform)
-    if (pinned is None or release.get('version') != ('26.930.41038' if platform != 'windows' else '26.930.31730')
+    if (pinned is None or release.get('version') != CODEX_PROJECT_VERSIONS.get(platform)
             or release.get('digest') != 'sha256:' + pinned[0]
             or executable_hash != pinned[1]):
         raise ValueError('Codex project trial requires the inspected official release')

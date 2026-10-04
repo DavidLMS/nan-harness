@@ -369,6 +369,8 @@ jobs:
           fi
           if [[ '${{ matrix.app }}' == zed-desktop || '${{ matrix.app }}' == hermes-desktop ]]; then
             python3 scripts/desktop-feasibility/freeze-official.py "${freeze_args[@]}" --app '${{ matrix.app }}' --platform '${{ matrix.platform }}' --output "$RUNNER_TEMP/semantic-feasibility/frozen.json"
+          elif [[ '${{ matrix.app }}' == chatgpt-desktop && '${{ inputs.experiment }}' == deterministic-full ]]; then
+            python3 scripts/desktop-feasibility/freeze-codex-inspected.py --platform '${{ matrix.platform }}' --artifacts "$RUNNER_TEMP/semantic-feasibility/artifacts" --output "$RUNNER_TEMP/semantic-feasibility/frozen.json"
           else
             "$FEASIBILITY_CHECKER" resolve --app '${{ matrix.app }}' --model qwen3.6 --artifacts "$RUNNER_TEMP/semantic-feasibility/artifacts" --output "$RUNNER_TEMP/semantic-feasibility/frozen.json"
           fi
