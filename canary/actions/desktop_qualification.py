@@ -70,7 +70,7 @@ def main_aux_correlation(value, app):
 
 
 def public_onboarding(setup, app):
-    shape = set(setup) - {'rejectedPageInventory', 'taskScopeProved', 'taskClickAttempted', 'taskClickCompleted', 'codingComposerReady', 'mainGuardFailure', 'pageSetFailure', 'foreignOverlayImportSetup', 'foreignOverlaySourceCounts', 'foreignOverlayActionability'} if type(setup) is dict else set()
+    shape = set(setup) - {'folderTrust', 'rejectedPageInventory', 'taskScopeProved', 'taskClickAttempted', 'taskClickCompleted', 'codingComposerReady', 'mainGuardFailure', 'pageSetFailure', 'foreignOverlayImportSetup', 'foreignOverlaySourceCounts', 'foreignOverlayActionability'} if type(setup) is dict else set()
     booleans = {'conversationalScope', 'engineeringControl', 'roleClickAttempted',
                 'roleClickCompleted', 'engineeringChecked', 'continueControl',
                 'continueClickAttempted', 'continueClickCompleted', 'roleScopeAbsent'}
@@ -94,6 +94,17 @@ def public_onboarding(setup, app):
             or type(setup['sessionProofFailure']) is not str or setup['sessionProofFailure'] not in sessions
             or any(type(setup[key]) is not bool for key in booleans)):
         raise ValueError('invalid public onboarding diagnostic')
+    if 'folderTrust' in setup:
+        trust = setup['folderTrust']
+        if (type(trust) is not dict or set(trust) != {'status', 'clickAttempted', 'clickCompleted'}
+                or type(trust['status']) is not str
+                or trust['status'] not in {'absent', 'blocked', 'completed', 'action-uncertain'}
+                or type(trust['clickAttempted']) is not bool or type(trust['clickCompleted']) is not bool
+                or trust['clickCompleted'] and not trust['clickAttempted']
+                or trust['status'] == 'absent' and (trust['clickAttempted'] or trust['clickCompleted'])
+                or trust['status'] == 'completed' and not (trust['clickAttempted'] and trust['clickCompleted'])
+                or trust['status'] == 'action-uncertain' and not (trust['clickAttempted'] and not trust['clickCompleted'])):
+            raise ValueError('invalid public onboarding folder trust diagnostic')
     if 'mainGuardFailure' in setup:
         failure = setup['mainGuardFailure']
         if (type(failure) is not str or failure not in {

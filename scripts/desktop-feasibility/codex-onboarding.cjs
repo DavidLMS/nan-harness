@@ -198,7 +198,7 @@ function candidate(a, b) {
   return a && b && !a.blocked && !b.blocked && JSON.stringify(a.rect) === JSON.stringify(b.rect)
     && a.points.find(p => b.points.some(q => p.x === q.x && p.y === q.y));
 }
-async function run(page, ownerGuard, deadline, rejected, mainGuard) {
+async function run(page, ownerGuard, deadline, rejected, mainGuard, folderTrust) {
   const maxWaitMs = deadline - Date.now();
   const originalUrl = page.url();
   const ownedEndpoint = async () => {
@@ -385,6 +385,10 @@ async function run(page, ownerGuard, deadline, rejected, mainGuard) {
   }
   try {
     facts.stage='role-proof';
+    if(folderTrust!==undefined) {
+      facts.folderTrust=folderTrust;
+      if(!['absent','completed'].includes(facts.folderTrust.status))return stop('action-blocked');
+    }
     // Frozen conversational parent disables controls during its pending work.
     // Only that positively matched, disabled control is a pollable startup state.
     while (!await proof()) {
@@ -455,9 +459,9 @@ function sourceRoute(raw) {
       ['/global-dictation','globalDictation'],['/debug','debug']]).get(route)??'unknown';
   } catch { return 'unknown'; }
 }
-exports.run=async function(page, ownerGuard, deadline, mainGuard) {
+exports.run=async function(page, ownerGuard, deadline, mainGuard, folderTrust) {
   let rejectedPages, rejectedUrls;
-  const facts=await run(page,ownerGuard,deadline,pages=>{rejectedPages=pages;rejectedUrls=pages.map(p=>p.url());},mainGuard);
+  const facts=await run(page,ownerGuard,deadline,pages=>{rejectedPages=pages;rejectedUrls=pages.map(p=>p.url());},mainGuard,folderTrust);
   if(!rejectedPages)return facts;
   const unavailable=()=>{facts.rejectedPageInventory.source={status:'unavailable'};return facts;};
   const stable=()=>{

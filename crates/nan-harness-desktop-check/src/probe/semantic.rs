@@ -23,6 +23,7 @@ use std::time::Duration;
 pub(super) struct SemanticBackend {
     directory: PathBuf,
     kind: DesktopHarnessKind,
+    workspace: PathBuf,
 }
 
 pub(super) struct SemanticScenario<'a> {
@@ -59,6 +60,7 @@ impl SemanticBackend {
         Ok(Some(Self {
             directory,
             kind: spec.kind,
+            workspace: spec.workspace.clone(),
         }))
     }
 
@@ -76,7 +78,7 @@ impl SemanticBackend {
         if self.kind == DesktopHarnessKind::ChatGpt {
             {
                 let mut inventory = RendererSession::new(process, &self.directory)?;
-                inventory.inventory()?;
+                inventory.inventory_with_workspace(&self.workspace)?;
             }
             let mut session = CodexDomSession::new(process, &self.directory)?;
             session.turn(

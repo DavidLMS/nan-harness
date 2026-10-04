@@ -505,15 +505,26 @@ async function run() {
       if (!targetReady) { facts.errorCategory = 'invalid-request'; save(); return; }
       const correlationDeadline=onboardingDeadline(trial,deadline,totalDeadline,Date.now());
       if(trial)facts.initialMainConfirmation=mainConfirmationFacts();
+      let folderTrust,trustGuard;
+      if(trial&&request.ownedWorkspace!==undefined) {
+        const folderAuthority=require('./codex-folder-trust.cjs').authority(request.ownedWorkspace);
+        trustGuard=heldMainGuard(initialMain,browser,ownerGuard,correlationDeadline,
+          require('./codex-onboarding.cjs').sourceRoute,correlationIdentity,
+          ms=>new Promise(resolve=>setTimeout(resolve,ms)),false,false);
+        folderTrust=await require('./codex-folder-trust.cjs').run(page,trustGuard,
+          correlationDeadline,folderAuthority,()=>trustGuard.sealInitialActions());
+      }
       const heldMain=trial?await bindCorrelationMain(initialMain,browser,ownerGuard,correlationDeadline,
         require('./codex-onboarding.cjs').sourceRoute,correlationIdentity,
         ms=>new Promise(resolve=>setTimeout(resolve,ms)),facts.initialMainConfirmation):null;
-      const mainGuard=trial&&heldMain?heldMainGuard(heldMain,browser,ownerGuard,correlationDeadline,
+      // Trust consumes initial admission; preserve its original auxiliary binding.
+      // Fresh role binding above must still succeed before subsequent input.
+      const mainGuard=folderTrust?.clickAttempted?(heldMain?trustGuard:undefined):trial&&heldMain?heldMainGuard(heldMain,browser,ownerGuard,correlationDeadline,
         require('./codex-onboarding.cjs').sourceRoute,correlationIdentity,
         ms=>new Promise(resolve=>setTimeout(resolve,ms)),false,true):undefined;
       facts.publicOnboarding = await require('./codex-onboarding.cjs').run(page,
         ownerGuard,
-        correlationDeadline,mainGuard);
+        correlationDeadline,mainGuard,folderTrust);
       const bindingVerified=!!mainGuard&&await mainGuard();
       const codingComposerReady=bindingVerified&&await page.evaluate(require('./codex-onboarding.cjs').codingScope);
       facts.codexSession={bindingVerified,codingComposerReady:!!codingComposerReady,auxiliaryInert:bindingVerified,

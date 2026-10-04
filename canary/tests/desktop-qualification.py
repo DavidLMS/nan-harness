@@ -3216,5 +3216,30 @@ class ClaudeLinuxVisibilityTests(unittest.TestCase):
                 self.assertEqual(q.semantic_observations(tmp, 'claude-desktop')[0], failed)
                 with self.assertRaises(ValueError): q.semantic_observations(tmp, 'chatgpt-desktop')
 
+class CodexFolderTrustTests(unittest.TestCase):
+    def test_owned_folder_trust_receipt_is_closed_and_preserves_uncertainty(self):
+        setup = dict(schemaVersion=1, mechanism='codex-public-onboarding', diagnosticsOnly=True,
+                     stage='role-proof', errorCategory='action-blocked', conversationalScope=False,
+                     engineeringControl=False, roleClickAttempted=False, roleClickCompleted=False,
+                     engineeringChecked=False, continueControl=False, continueClickAttempted=False,
+                     continueClickCompleted=False, roleScopeAbsent=False,
+                     roleProofFailure='unmeasured', sessionProofFailure='unmeasured')
+        for status, attempted, completed in (('absent',False,False),('blocked',False,False),
+                                             ('blocked',True,True),('completed',True,True),
+                                             ('action-uncertain',True,False)):
+            receipt = dict(status=status,clickAttempted=attempted,clickCompleted=completed)
+            value = {**setup,'folderTrust':receipt}
+            self.assertEqual(q.public_onboarding(value,'chatgpt-desktop'),value)
+        for receipt in (dict(status='PRIVATE',clickAttempted=False,clickCompleted=False),
+                        dict(status='completed',clickAttempted=False,clickCompleted=True),
+                        dict(status='absent',clickAttempted=True,clickCompleted=False),
+                        dict(status='action-uncertain',clickAttempted=True,clickCompleted=True),
+                        dict(status='blocked',clickAttempted=1,clickCompleted=False),
+                        dict(status='blocked',clickAttempted=False,clickCompleted=False,path='PRIVATE')):
+            with self.assertRaises(ValueError):
+                q.public_onboarding({**setup,'folderTrust':receipt},'chatgpt-desktop')
+        with self.assertRaises(ValueError):
+            q.public_onboarding({**setup,'folderTrust':dict(status='absent',clickAttempted=False,clickCompleted=False)},'claude-desktop')
+
 if __name__ == '__main__':
     unittest.main()

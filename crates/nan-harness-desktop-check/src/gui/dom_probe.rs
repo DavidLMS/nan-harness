@@ -672,6 +672,20 @@ impl<'a> RendererSession<'a> {
     }
 
     pub(crate) fn inventory(&mut self) -> Result<(), Reason> {
+        self.inventory_request(None)
+    }
+
+    pub(crate) fn inventory_with_workspace(&mut self, workspace: &Path) -> Result<(), Reason> {
+        let canonical = workspace
+            .canonicalize()
+            .map_err(|_| Reason::IsolationUnavailable)?;
+        if !workspace.is_absolute() || workspace.is_symlink() || !canonical.is_dir() {
+            return Err(Reason::IsolationUnavailable);
+        }
+        self.inventory_request(Some(&canonical))
+    }
+
+    fn inventory_request(&mut self, workspace: Option<&Path>) -> Result<(), Reason> {
         let directory = self.directory;
         let owner = self.owner;
         renderer_guard(self.process, owner)?;
@@ -683,7 +697,10 @@ impl<'a> RendererSession<'a> {
         }
         let request_path = directory.join(format!("renderer-inventory-{owner}.private"));
         let output_path = directory.join(format!("renderer-inventory-{owner}.json"));
-        let request = serde_json::json!({"ownerPid": owner, "connectionPath": directory.join(format!("connection-{owner}.json"))});
+        let mut request = serde_json::json!({"ownerPid": owner, "connectionPath": directory.join(format!("connection-{owner}.json"))});
+        if let Some(workspace) = workspace {
+            request["ownedWorkspace"] = serde_json::json!(workspace);
+        }
         open_private_new(&request_path)
             .and_then(|mut file| file.write_all(request.to_string().as_bytes()))
             .map_err(|_| Reason::IsolationUnavailable)?;
