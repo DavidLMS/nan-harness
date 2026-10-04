@@ -239,6 +239,26 @@ assert.equal(roleSourceScope({foreignFieldset:true}).mainScope,false);
   const expiredStartup=helper.heldMainGuard(f.held,f.browser,()=>true,60000,()=> 'avatarOverlay',f.identity);
   assert.equal(await helper.focusCapturedMain(f.held,expiredStartup,35000,f.identity),false);
   assert.equal(lateActivations,0);
+  // A scoped native replacement consumes one compound action, never CDP too.
+  for(const scenario of ['ready','association-rejected','post-native-rejected','source-replaced','expired-prepare','action-uncertain']) {
+    f=fixture();f.setPages([f.main]);clock=0;let focused=false;
+    const calls=[];
+    f.main.bringToFront=async()=>{throw Error('CDP activation must not be appended');};
+    f.setAlter(r=>{r.scope.focused=focused;});
+    const proof=async()=>true;proof.requireDocumentFocus=()=>{};
+    const native={prepare(){calls.push('prepare');if(scenario==='association-rejected')throw Error('PRIVATE');
+      if(scenario==='expired-prepare')clock=1000;
+      if(scenario==='source-replaced')f.setAlter(r=>{r.loader='replacement';});},
+      activate(){calls.push('activate');focused=true;if(scenario==='action-uncertain')throw Error('PRIVATE');},
+      verify(){calls.push('verify');return scenario!=='post-native-rejected';}};
+    const facts={phase:'pre-proof',status:'unmeasured',activationAttempted:false,guardFailure:null};
+    assert.equal(await helper.focusCapturedMain(f.held,proof,1000,f.identity,undefined,
+      async ms=>{clock+=ms;},facts,native),scenario==='ready');
+    assert.equal(calls.filter(c=>c==='activate').length,
+      ['association-rejected','source-replaced','expired-prepare'].includes(scenario)?0:1);
+    if(scenario==='ready')assert.deepEqual(calls,['prepare','activate','verify','verify']);
+    assert.equal(facts.activationAttempted,!['association-rejected','source-replaced','expired-prepare'].includes(scenario));
+  }
   // Activation diagnostics use the original proof/read/action sequence only.
   for(const scenario of ['focused','deadline','pre-reject','activation-error','focus-lost']) {
     f=fixture();f.setPages([f.main]);let focused=false,activations=0,proofs=0;

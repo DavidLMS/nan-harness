@@ -11,6 +11,7 @@
 #include <io.h>
 #endif
 
+int codex_activate_main();
 int list_windows(bool include_foreground);
 int windows_focus(const std::string& request);
 int fit_window(const std::string& request);
@@ -34,6 +35,7 @@ int main(int argc, char** argv) {
     _setmode(_fileno(stdin), _O_BINARY);
     _setmode(_fileno(stdout), _O_BINARY);
 #endif
+    if (argc == 2 && std::string(argv[1]) == "--codex-activate-main") return codex_activate_main();
     if (argc == 2 && std::string(argv[1]) == "--claude-policy-absence") return claude_policy_absence();
     if (argc == 2 && std::string(argv[1]) == "--clipboard-read") return clipboard_operation("read");
     if (argc == 2 && std::string(argv[1]) == "--clipboard-write") return clipboard_operation("write");

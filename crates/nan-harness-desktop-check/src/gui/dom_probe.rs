@@ -672,7 +672,7 @@ impl<'a> RendererSession<'a> {
     }
 
     pub(crate) fn inventory(&mut self) -> Result<(), Reason> {
-        self.inventory_request(None)
+        self.inventory_request(None, None)
     }
 
     pub(crate) fn inventory_with_workspace(&mut self, workspace: &Path) -> Result<(), Reason> {
@@ -682,10 +682,39 @@ impl<'a> RendererSession<'a> {
         if !workspace.is_absolute() || workspace.is_symlink() || !canonical.is_dir() {
             return Err(Reason::IsolationUnavailable);
         }
-        self.inventory_request(Some(&canonical))
+        self.inventory_request(Some(&canonical), None)
     }
 
-    fn inventory_request(&mut self, workspace: Option<&Path>) -> Result<(), Reason> {
+    #[cfg(target_os = "macos")]
+    pub(crate) fn inventory_with_native_activation(
+        &mut self,
+        workspace: &Path,
+        executable: &Path,
+    ) -> Result<(), Reason> {
+        if inventory_driver_limit() != Duration::from_secs(75) {
+            return self.inventory_with_workspace(workspace);
+        }
+        let canonical = workspace
+            .canonicalize()
+            .map_err(|_| Reason::IsolationUnavailable)?;
+        let executable = executable
+            .canonicalize()
+            .map_err(|_| Reason::IsolationUnavailable)?;
+        if !workspace.is_absolute()
+            || workspace.is_symlink()
+            || !canonical.is_dir()
+            || !executable.is_file()
+        {
+            return Err(Reason::IsolationUnavailable);
+        }
+        self.inventory_request(Some(&canonical), Some(&executable))
+    }
+
+    fn inventory_request(
+        &mut self,
+        workspace: Option<&Path>,
+        executable: Option<&Path>,
+    ) -> Result<(), Reason> {
         let directory = self.directory;
         let owner = self.owner;
         renderer_guard(self.process, owner)?;
@@ -695,11 +724,32 @@ impl<'a> RendererSession<'a> {
         if !driver.is_absolute() || !driver.is_file() || driver.is_symlink() {
             return Err(Reason::IsolationUnavailable);
         }
+        let native = executable
+            .map(|_| crate::native::Native::new())
+            .transpose()?;
         let request_path = directory.join(format!("renderer-inventory-{owner}.private"));
         let output_path = directory.join(format!("renderer-inventory-{owner}.json"));
         let mut request = serde_json::json!({"ownerPid": owner, "connectionPath": directory.join(format!("connection-{owner}.json"))});
         if let Some(workspace) = workspace {
             request["ownedWorkspace"] = serde_json::json!(workspace);
+        }
+        #[cfg(target_os = "macos")]
+        if let (Some(executable), Some(native)) = (executable, native.as_ref()) {
+            let ticks = nix::time::clock_gettime(nix::time::ClockId::CLOCK_MONOTONIC)
+                .map_err(|_| Reason::IsolationUnavailable)?;
+            let cutoff = u64::try_from(ticks.tv_sec())
+                .ok()
+                .and_then(|seconds| seconds.checked_mul(1_000_000_000))
+                .and_then(|value| {
+                    u64::try_from(ticks.tv_nsec())
+                        .ok()
+                        .and_then(|nanos| value.checked_add(nanos))
+                })
+                .and_then(|value| value.checked_add(75_000_000_000))
+                .ok_or(Reason::IsolationUnavailable)?;
+            request["nativeActivation"] = serde_json::json!({
+                "helper": native.executable(), "executable": executable, "cutoffNanos": cutoff.to_string()
+            });
         }
         open_private_new(&request_path)
             .and_then(|mut file| file.write_all(request.to_string().as_bytes()))
@@ -713,6 +763,7 @@ impl<'a> RendererSession<'a> {
             || renderer_guard(self.process, owner),
         );
         std::fs::remove_file(request_path).map_err(|_| Reason::IsolationUnavailable)?;
+        drop(native);
         outcome?;
         let mut bytes = Vec::new();
         open_private_read(&output_path)

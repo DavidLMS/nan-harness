@@ -26,6 +26,8 @@ pub(super) struct SemanticBackend {
     directory: PathBuf,
     kind: DesktopHarnessKind,
     workspace: PathBuf,
+    #[cfg(target_os = "macos")]
+    executable: PathBuf,
 }
 
 pub(super) struct SemanticScenario<'a> {
@@ -63,6 +65,8 @@ impl SemanticBackend {
             directory,
             kind: spec.kind,
             workspace: spec.workspace.clone(),
+            #[cfg(target_os = "macos")]
+            executable: spec.executable.clone(),
         }))
     }
 
@@ -84,6 +88,9 @@ impl SemanticBackend {
         if self.kind == DesktopHarnessKind::ChatGpt {
             {
                 let mut inventory = RendererSession::new(process, &self.directory)?;
+                #[cfg(target_os = "macos")]
+                inventory.inventory_with_native_activation(&self.workspace, &self.executable)?;
+                #[cfg(not(target_os = "macos"))]
                 inventory.inventory_with_workspace(&self.workspace)?;
             }
             let mut session = CodexDomSession::new(process, &self.directory)?;

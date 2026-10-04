@@ -4,12 +4,12 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_library(TESSERACT_LIBRARY NAMES tesseract tesseract55 PATHS "${NAN_OCR_PREFIX}/lib" NO_DEFAULT_PATH REQUIRED)
 find_library(LEPTONICA_LIBRARY NAMES leptonica leptonica-1.87.0 PATHS "${NAN_OCR_PREFIX}/lib" NO_DEFAULT_PATH REQUIRED)
-add_executable(nanh-desktop-native main.cpp windows.cpp clipboard.cpp claude_chat_turn.cpp windows_uia_inventory.cpp claude_policy.cpp)
+add_executable(nanh-desktop-native main.cpp windows.cpp clipboard.cpp claude_chat_turn.cpp windows_uia_inventory.cpp claude_policy.cpp codex_activate.cpp)
 target_include_directories(nanh-desktop-native PRIVATE "${NAN_OCR_PREFIX}/include")
 target_link_libraries(nanh-desktop-native PRIVATE "${TESSERACT_LIBRARY}" "${LEPTONICA_LIBRARY}")
 if(APPLE)
   enable_language(OBJCXX)
-  set_source_files_properties(windows.cpp claude_chat_turn.cpp PROPERTIES LANGUAGE OBJCXX)
+  set_source_files_properties(windows.cpp claude_chat_turn.cpp codex_activate.cpp PROPERTIES LANGUAGE OBJCXX)
   target_link_libraries(nanh-desktop-native PRIVATE "-framework AppKit" "-framework CoreGraphics" "-framework ApplicationServices")
   # Synthetic nodes and focus receipts only; no native app or input API calls.
   add_executable(nanh-claude-chat-turn-test tests/claude_chat_turn.mm)
@@ -106,3 +106,15 @@ add_custom_target(nanh-uia-chat-scope-contract ALL
   COMMAND $<TARGET_FILE:nanh-uia-chat-scope-test>
   DEPENDS nanh-uia-chat-scope-test
 )
+
+# Exact retained identities only; no native process/window calls.
+add_executable(nanh-codex-activation-identity-test tests/codex_activation_identity.cpp)
+if(MSVC)
+  target_compile_options(nanh-codex-activation-identity-test PRIVATE /UNDEBUG)
+else()
+  target_compile_options(nanh-codex-activation-identity-test PRIVATE -UNDEBUG)
+endif()
+add_custom_target(nanh-codex-activation-identity-contract ALL
+  COMMAND $<TARGET_FILE:nanh-codex-activation-identity-test>
+  DEPENDS nanh-codex-activation-identity-test
+  COMMENT "Verify retained native main identity without native queries")

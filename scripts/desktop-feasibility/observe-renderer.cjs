@@ -338,7 +338,7 @@ function heldMainGuard(held, browser, owner, deadline, route,
 }
 // One public page activation; it never substitutes for fresh focus/owner proof.
 async function focusCapturedMain(held,proof,deadline,identity=correlationIdentity,
-  same=sameCorrelationIdentity,pause=ms=>new Promise(resolve=>setTimeout(resolve,ms)),diagnostic=null) {
+  same=sameCorrelationIdentity,pause=ms=>new Promise(resolve=>setTimeout(resolve,ms)),diagnostic=null,nativeActivation=null) {
   const phase=value=>{if(diagnostic)diagnostic.phase=value;};
   const stop=status=>{if(diagnostic)diagnostic.status=status;return status==='focused';};
   const rejected=()=>stop(Date.now()>=deadline?'deadline':'rejected');
@@ -367,12 +367,21 @@ async function focusCapturedMain(held,proof,deadline,identity=correlationIdentit
       if(Date.now()>=deadline||!await proved())return rejected();
     }
     if(!before?.scope.mainScope)return rejected();
+    let nativeActivated=false;
     if(!before.scope.focused) {
+      if(nativeActivation) {
+        nativeActivation.prepare();
+        const second=await identity(held.page,deadline);
+        if(Date.now()>=deadline||!same(held,second)||!second.scope.mainScope||!await proved())return rejected();
+      }
       // This is the same one consumed activation; no diagnostic retries it.
       phase('activation');
       if(Date.now()>=deadline)return rejected();
       if(diagnostic)diagnostic.activationAttempted=true;
-      await held.page.bringToFront();
+      if(nativeActivation) {
+        nativeActivation.activate();
+        nativeActivated=true;
+      } else await held.page.bringToFront();
     }
     phase('polling');
     let focusedSamples=0;
@@ -380,6 +389,7 @@ async function focusCapturedMain(held,proof,deadline,identity=correlationIdentit
       if(!await proved())return rejected();
       const fresh=await identity(held.page,deadline);
       if(Date.now()>=deadline||!same(held,fresh)||!fresh.scope.mainScope||!await proved())return rejected();
+      if(nativeActivated&&!nativeActivation.verify())return rejected();
       focusedSamples=fresh.scope.focused?focusedSamples+1:0;
       if(focusedSamples===2) {
         proof.requireDocumentFocus();
@@ -600,9 +610,11 @@ async function run() {
       focusGuard=heldMainGuard(initialMain,browser,ownerGuard,totalDeadline,
         require('./codex-onboarding.cjs').sourceRoute,correlationIdentity,
         ms=>new Promise(resolve=>setTimeout(resolve,ms)),false,false,false);
+      const nativeActivation=require('./codex-native-activation.cjs').controller(
+        request.nativeActivation,request.ownerPid,connection.launcherPid,deadline);
       facts.initialMainActivation={phase:'pre-proof',status:'unmeasured',activationAttempted:false,guardFailure:null};
       if(!await focusCapturedMain(initialMain,focusGuard,deadline,correlationIdentity,
-        sameCorrelationIdentity,ms=>new Promise(resolve=>setTimeout(resolve,ms)),facts.initialMainActivation)) {
+        sameCorrelationIdentity,ms=>new Promise(resolve=>setTimeout(resolve,ms)),facts.initialMainActivation,nativeActivation)) {
         facts.initialMainConfirmation=mainConfirmationFacts();
         await bindCorrelationMain(initialMain,browser,ownerGuard,deadline,
           require('./codex-onboarding.cjs').sourceRoute,correlationIdentity,
