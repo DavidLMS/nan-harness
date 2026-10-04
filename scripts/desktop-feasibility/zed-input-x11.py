@@ -243,10 +243,12 @@ def crossing_point_hit(root, frame, point):
         if not 0<=point[0]<width.value or not 0<=point[1]<height.value:
             raise EntryCrossingFailure('off-display')
         x,y=ctypes.c_int(),ctypes.c_int();top,child=ctypes.c_ulong(),ctypes.c_ulong()
-        if (not xlib.XTranslateCoordinates(display,root,root,*point,ctypes.byref(x),ctypes.byref(y),ctypes.byref(top))
-                or top.value!=frame
-                or not xlib.XTranslateCoordinates(display,root,frame,*point,ctypes.byref(x),ctypes.byref(y),ctypes.byref(child))):
-            raise EntryCrossingFailure('point-ownership')
+        if not xlib.XTranslateCoordinates(display,root,root,*point,ctypes.byref(x),ctypes.byref(y),ctypes.byref(top)):
+            raise EntryCrossingFailure('query-unavailable')
+        if top.value!=frame:
+            raise EntryCrossingFailure('top-frame-hit')
+        if not xlib.XTranslateCoordinates(display,root,frame,*point,ctypes.byref(x),ctypes.byref(y),ctypes.byref(child)):
+            raise EntryCrossingFailure('query-unavailable')
         actual_root,actual_child=ctypes.c_ulong(),ctypes.c_ulong()
         rx,ry,wx,wy=(ctypes.c_int() for _ in range(4));mask=ctypes.c_uint()
         if (not xlib.XQueryPointer(display,frame,ctypes.byref(actual_root),ctypes.byref(actual_child),
@@ -730,8 +732,12 @@ def retry_click(payload):
                     child,position,actual_child=crossing_point_hit(
                         second_geometry[3],request['window'],candidate)
                     expected=0 if decoration else active
-                    if child!=expected or after and (position!=candidate or actual_child!=expected):
-                        raise EntryCrossingFailure('point-ownership')
+                    if child!=expected:
+                        raise EntryCrossingFailure('decoration-child-hit' if decoration else 'client-child-hit')
+                    if after and position!=candidate:
+                        raise EntryCrossingFailure('pointer-position')
+                    if after and actual_child!=expected:
+                        raise EntryCrossingFailure('pointer-child-current')
                     if (not cursor_scope()
                             or independent_client_snapshot(request['window'])!=frame_geometry):
                         raise EntryCrossingFailure('identity-changed')

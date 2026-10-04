@@ -1943,6 +1943,9 @@ class QualificationTests(unittest.TestCase):
             entry=dict(stage='candidate',failureReason='decoration-unavailable')
             path.write_text(json.dumps({**value,'entryCrossing':entry}))
             self.assertEqual(q.semantic_observations(root,'zed-desktop')[0]['entryCrossing'],entry)
+            for reason in ['top-frame-hit','decoration-child-hit','client-child-hit','pointer-position','pointer-child-current']:
+                path.write_text(json.dumps({**value,'entryCrossing':dict(stage='decoration-before',failureReason=reason)}))
+                self.assertEqual(q.semantic_observations(root,'zed-desktop')[0]['entryCrossing']['failureReason'],reason)
             path.write_text(json.dumps(value))
             self.assertNotIn('entryCrossing',q.semantic_observations(root,'zed-desktop')[0])
             for change in ({'stage':'PRIVATE'},{'failureReason':[]},{'failureReason':True},

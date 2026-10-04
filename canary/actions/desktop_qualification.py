@@ -1522,7 +1522,8 @@ def semantic_observations(directory, app):
                     'decoration-before','decoration-dispatch','decoration-after','decoration-complete',
                     'client-before','client-dispatch','client-after','client-complete'}
                 reasons={'observer-unavailable','frame-relationship','frame-geometry','decoration-unavailable',
-                    'off-display','point-ownership','pointer-state','identity-changed','deadline',
+                    'off-display','point-ownership','top-frame-hit','decoration-child-hit','client-child-hit',
+                    'pointer-position','pointer-child-current','pointer-state','identity-changed','deadline',
                     'query-unavailable','motion-uncertain'}
                 if (type(entry) is not dict or set(entry)!={'stage','failureReason'}
                         or type(entry['stage']) is not str or entry['stage'] not in stages
