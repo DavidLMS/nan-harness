@@ -2489,7 +2489,8 @@ class QualificationTests(unittest.TestCase):
                 measured={**activation,'nativePendingStack':{**stack,'workArea':area}}
                 path.write_text(json.dumps({**value,'initialMainActivation':measured}))
                 self.assertEqual(q.semantic_observations(root,'chatgpt-desktop')[0]['initialMainActivation'],measured)
-            for area in (dict(measured=False,windowContained=False,overlapIntersectionCount=0),
+            for area in (dict(measured=True,windowContained=True,overlapIntersectionCount=0),
+                         dict(measured=False,windowContained=False,overlapIntersectionCount=0),
                          dict(measured=True,windowContained=True,overlapIntersectionCount=2),
                          dict(measured=True,windowContained=True,overlapIntersectionCount=True),
                          dict(measured=True,windowContained=True,overlapIntersectionCount=1,rawBounds='PRIVATE')):

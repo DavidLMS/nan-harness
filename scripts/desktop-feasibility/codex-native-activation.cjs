@@ -96,7 +96,8 @@ function controller(config,owner,launcher,deadline,run=child.execFileSync,now=Da
             &&(!levels||levels.every(v=>Number.isSafeInteger(v)&&v>=0&&v<=1024)
               &&levels.reduce((a,b)=>a+b,0)===counts[1])
             &&(!area||Number.isSafeInteger(area[2])&&area[2]>=0&&area[2]<=total
-              &&(area[0]===1||area[1]===0&&area[2]===0))) {
+              &&(area[0]===1||area[1]===0&&area[2]===0)
+              &&(area[1]===0||area[2]===total))) {
           nativePendingStack={sample:pending[1],normalOverlapCount:counts[0],
             elevatedOverlapCount:counts[1],lowerOverlapCount:counts[2],displayContained:true};
           if(levels)nativePendingStack.elevatedLevels={menuLevelCount:levels[0],statusLevelCount:levels[1],

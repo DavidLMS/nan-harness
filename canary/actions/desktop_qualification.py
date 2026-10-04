@@ -1962,7 +1962,8 @@ def semantic_observations(directory, app):
                                 or type(area['measured']) is not bool
                                 or area['measured'] and (type(area['windowContained']) is not bool
                                     or type(area['overlapIntersectionCount']) is not int
-                                    or not 0<=area['overlapIntersectionCount']<=sum(stack[key] for key in counts))
+                                    or not 0<=area['overlapIntersectionCount']<=sum(stack[key] for key in counts)
+                                    or area['windowContained'] and area['overlapIntersectionCount']!=sum(stack[key] for key in counts))
                                 or not area['measured'] and (area['windowContained'] is not None
                                     or area['overlapIntersectionCount'] is not None)):
                             raise ValueError('invalid Codex work-area observation')
