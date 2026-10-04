@@ -24,7 +24,7 @@ on:
         description: Observation mechanism to evaluate
         type: choice
         default: native-copy-dom
-        options: [native-copy-dom, strict-semantic, deterministic-full, startup-baseline]
+        options: [native-copy-dom, strict-semantic, deterministic-full, startup-baseline, x11-motion-fixture]
 permissions:
   contents: read
 concurrency:
@@ -54,6 +54,8 @@ jobs:
           from desktop_qualification import matrix
           selected = os.environ['SELECTED_APP']
           platform = os.environ['SELECTED_PLATFORM']
+          if os.environ['SELECTED_EXPERIMENT'] == 'x11-motion-fixture' and (selected, platform) != ('zed-desktop', 'linux'):
+              raise SystemExit('The neutral motion fixture requires Zed Linux selection')
           cells = [c for c in matrix(['pen-desktop'] if os.environ['SELECTED_APP'] == 'all' else [])['include'] if c['backend'] != 'pending'
                    and (selected == 'all' or c['app'] == selected)
                    and (os.environ['SELECTED_EXPERIMENT'] != 'startup-baseline' or c['backend'] in {'renderer-inventory', 'native-assistant-clipboard'})
@@ -68,7 +70,33 @@ jobs:
           print('matrix=' + json.dumps({'include': cells}, separators=(',', ':')))
           PYTHON
 
+  x11-motion-fixture:
+    needs: select
+    if: inputs.experiment == 'x11-motion-fixture'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Prepare neutral X11 fixture dependencies
+        run: sudo apt-get update && sudo apt-get install -y xvfb xauth libxi6 libxtst6
+      - name: Measure owned neutral XI2 motion delivery without an application
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/desktop-feasibility/x11-motion-fixture/test-motion-fixture.py
+          xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/desktop-feasibility/x11-motion-fixture/motion-fixture.py > "$RUNNER_TEMP/motion-fixture.json"
+          python3 -c 'import json,sys; v=json.load(open(sys.argv[1])); print(v); sys.exit(v["status"] != "complete")' "$RUNNER_TEMP/motion-fixture.json"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.0
+        if: always()
+        with:
+          name: deterministic-qualification-x11-motion-fixture
+          path: ${{ runner.temp }}/motion-fixture.json
+          retention-days: 7
+
   native:
+    if: inputs.experiment != 'x11-motion-fixture'
     needs: select
     strategy:
       fail-fast: false
