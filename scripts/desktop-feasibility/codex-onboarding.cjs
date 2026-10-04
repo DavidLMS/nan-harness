@@ -638,6 +638,23 @@ async function run(page, ownerGuard, deadline, rejected, mainGuard, folderTrust,
       if (!await ownedEndpoint()) return stop('ownership-lost');
       if (await page.locator(GROUP).count()===0) {
         facts.roleScopeAbsent=true;
+        if(directCDP&&isHeldMainGuard(mainGuard,ownerGuard)&&require('./codex-dom.cjs').directCDPPolicy()) {
+          const coding=await page.evaluate(codingScope,true);
+          if(!await ownedEndpoint()||Date.now()>=deadline)return stop('ownership-lost');
+          facts.transitionPublicDOMObservation=coding.publicDOM;
+          facts.transitionReadinessObservation=coding.observation;
+          // Continue can lead directly to the public home instead of a task page.
+          // Prove it twice on the original owned document; no task action occurred.
+          if(await page.evaluate(require('./codex-dom.cjs').homeComposerScope)) {
+            if(!await ownedEndpoint()||Date.now()>=deadline)return stop('ownership-lost');
+            if(await page.evaluate(require('./codex-dom.cjs').homeComposerScope)) {
+              if(!await ownedEndpoint()||Date.now()>=deadline)return stop('ownership-lost');
+              facts.stage='coding-readiness';facts.codingComposerReady=true;
+              facts.homeAfterContinueReady=true;return facts;
+            }
+          }
+        }
+
         if(await observeTask()&&await ownedEndpoint()&&Date.now()<deadline) {
           facts.taskScopeProved=true;facts.taskControlKind=taskKind;break;
         }
@@ -669,7 +686,7 @@ async function run(page, ownerGuard, deadline, rejected, mainGuard, folderTrust,
         facts.codingEditableObservation=coding.ancestry;
         facts.codingHomeStateObservation=coding.homeState;
       }
-      if(directCDP&&require('./codex-dom.cjs').directCDPPolicy()
+      if(directCDP&&isHeldMainGuard(mainGuard,ownerGuard)&&require('./codex-dom.cjs').directCDPPolicy()
           &&await page.evaluate(require('./codex-dom.cjs').homeComposerScope)) {
         if(!await ownedEndpoint()||Date.now()>=deadline)return stop('ownership-lost');
         facts.codingComposerReady=true;return facts;

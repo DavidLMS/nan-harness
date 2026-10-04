@@ -34,6 +34,44 @@ HASH = re.compile(r'[0-9a-f]{64}\Z')
 VERSION = re.compile(r'[0-9]+(?:\.[0-9]+){2}(?:[-+][A-Za-z0-9.-]+)?\Z')
 
 
+def claude_native_tree(value):
+    fields = {'operation','reason','nodeScope','foreignBus','childCount','visitedCount'}
+    choices = {'operation': {'owner','children'}, 'reason': {'wrong-owner','query-unavailable','deadline','null-reference','non-list','limit','duplicate'},
+               'nodeScope': {'frame','editor','other'}}
+    if (type(value) is not dict or set(value) != fields
+            or any(type(value[k]) is not str or value[k] not in choices[k] for k in choices)
+            or type(value['foreignBus']) is not bool
+            or any(value[k] is not None and (type(value[k]) is not int or not 0 <= value[k] <= n)
+                   for k,n in [('childCount',1025),('visitedCount',1024)])):
+        raise ValueError('invalid Claude native tree observation')
+    return value
+
+
+def codex_windows_prepare(value):
+    fields = set('schemaVersion mechanism diagnosticsOnly stage cause bindingIndex ancestorCount ownedCount privacy emptyRoots codeHomeAbsent completed'.split())
+    stages = set('policy command ancestor-acquisition owned-acquisition privacy empty-roots code-home final-custody completed'.split())
+    causes = set('policy arguments cwd binding original-cutoff ancestor-budget directory-missing directory-access directory-sharing directory-open directory-metadata directory-reparse directory-type privacy directory-enumeration root-populated code-home-metadata code-home-present custody'.split())
+    if (type(value) is not dict or set(value) != fields or type(value['schemaVersion']) is not int
+            or value['schemaVersion'] != 1 or value['mechanism'] != 'codex-windows-profile-prepare'
+            or value['diagnosticsOnly'] is not True or type(value['stage']) is not str or value['stage'] not in stages
+            or value['cause'] is not None and (type(value['cause']) is not str or value['cause'] not in causes)
+            or value['bindingIndex'] is not None and (type(value['bindingIndex']) is not int or not 0 <= value['bindingIndex'] <= 7)
+            or any(type(value[k]) is not int or not 0 <= value[k] <= n for k,n in [('ancestorCount',64),('ownedCount',10)])
+            or type(value['privacy']) is not list or len(value['privacy']) != 11
+            or any(v is not None and (type(v) is not str or v not in {'protected','inherited','unexpected','unavailable'}) for v in value['privacy'])
+            or type(value['emptyRoots']) is not list or len(value['emptyRoots']) != 2
+            or any(v is not None and type(v) is not bool for v in value['emptyRoots'])
+            or value['codeHomeAbsent'] is not None and type(value['codeHomeAbsent']) is not bool
+            or type(value['completed']) is not bool or value['completed'] != (value['stage'] == 'completed')
+            or (value['cause'] is None) != value['completed']):
+        raise ValueError('invalid Codex Windows profile preparation')
+    if value['completed'] and not (value['ancestorCount'] > 0 and value['ownedCount'] == 10
+            and value['privacy'] == ['protected'] * 11 and value['emptyRoots'] == [True, True]
+            and value['codeHomeAbsent'] is True and value['bindingIndex'] is None):
+        raise ValueError('unproved Codex Windows profile preparation')
+    return value
+
+
 def claude_retry_candidate(value):
     counts = set('pendingUserCount conversationHeadingCount tryAgainCount retryCount candidateRowHeadingCount'.split())
     flags = set('historyMatched candidateEnabled candidateActionUnique candidateHitMatched candidateUserAncestorMatched'.split())
@@ -301,7 +339,7 @@ def public_mac_codex_home_state(value):
 
 
 def public_onboarding(setup, app):
-    shape = set(setup) - {'folderTrust', 'rejectedPageInventory', 'taskScopeProved', 'taskClickAttempted', 'taskClickCompleted', 'codingComposerReady', 'taskScopeObservation', 'taskControlKind', 'codingReadinessObservation', 'codingNavigationObservation', 'codingPublicDOMObservation', 'codingHomeObservation', 'codingEditableObservation', 'codingHomeStateObservation', 'workspaceMenuObservation', 'macHomeStateObservation', 'taskSkipConfirmationAttempted', 'taskSkipConfirmationCompleted', 'taskSkipConfirmationProof', 'mainGuardFailure', 'pageSetFailure', 'foreignOverlayImportSetup', 'foreignOverlaySourceCounts', 'foreignOverlayActionability'} if type(setup) is dict else set()
+    shape = set(setup) - {'transitionPublicDOMObservation', 'transitionReadinessObservation', 'homeAfterContinueReady', 'folderTrust', 'rejectedPageInventory', 'taskScopeProved', 'taskClickAttempted', 'taskClickCompleted', 'codingComposerReady', 'taskScopeObservation', 'taskControlKind', 'codingReadinessObservation', 'codingNavigationObservation', 'codingPublicDOMObservation', 'codingHomeObservation', 'codingEditableObservation', 'codingHomeStateObservation', 'workspaceMenuObservation', 'macHomeStateObservation', 'taskSkipConfirmationAttempted', 'taskSkipConfirmationCompleted', 'taskSkipConfirmationProof', 'mainGuardFailure', 'pageSetFailure', 'foreignOverlayImportSetup', 'foreignOverlaySourceCounts', 'foreignOverlayActionability'} if type(setup) is dict else set()
     booleans = {'conversationalScope', 'engineeringControl', 'roleClickAttempted',
                 'roleClickCompleted', 'engineeringChecked', 'continueControl',
                 'continueClickAttempted', 'continueClickCompleted', 'roleScopeAbsent'}
@@ -325,6 +363,26 @@ def public_onboarding(setup, app):
             or type(setup['sessionProofFailure']) is not str or setup['sessionProofFailure'] not in sessions
             or any(type(setup[key]) is not bool for key in booleans)):
         raise ValueError('invalid public onboarding diagnostic')
+    transition_fields = {'transitionPublicDOMObservation','transitionReadinessObservation'}
+    if transition_fields & set(setup):
+        if (not transition_fields <= set(setup) or setup['continueClickCompleted'] is not True
+                or setup['roleScopeAbsent'] is not True
+                or setup['stage'] not in {'scope-transition','task-action','coding-readiness'}):
+            raise ValueError('invalid Codex transition observation phase')
+        codex_public_dom(setup['transitionPublicDOMObservation'])
+        coding = setup['transitionReadinessObservation']
+        keys = set('composerCount conversationCount modalCount roleRadioCount exactAckLeafCount exactGetStartedCount exactSkipCount'.split())
+        if (type(coding) is not dict or set(coding) != keys | {'status'}
+                or type(coding['status']) is not str or coding['status'] not in {'observed','overflow'}
+                or coding['status'] == 'observed' and any(type(coding[k]) is not int or not 0 <= coding[k] <= 32 for k in keys)
+                or coding['status'] == 'overflow' and any(coding[k] is not None for k in keys)):
+            raise ValueError('invalid Codex transition readiness')
+    if 'homeAfterContinueReady' in setup:
+        if (setup['homeAfterContinueReady'] is not True or not transition_fields <= set(setup)
+                or setup['stage'] != 'coding-readiness' or setup.get('codingComposerReady') is not True
+                or any(setup.get(k) is not False for k in ('taskScopeProved','taskClickAttempted','taskClickCompleted'))
+                or setup['errorCategory'] is not None):
+            raise ValueError('invalid direct Codex home readiness')
     if 'taskControlKind' in setup:
         if (type(setup['taskControlKind']) is not str
                 or setup['taskControlKind'] not in {'get-started', 'skip-optional-capabilities'}
@@ -820,10 +878,10 @@ def semantic_observations(directory, app):
         if type(value) is not dict:
             raise ValueError('invalid semantic observation')
         mechanism = value.get('mechanism')
-        if mechanism not in {'codex-renderer-qualification', 'qualification-runner-failure', 'hermes-windows-catalog-readiness', 'hermes-renderer-qualification', 'zed-native-copy', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'zed-retry-visual', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-atspi-retry', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'codex-static-dialog-title', 'codex-linux-startup-dialog', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'codex-project-preflight', 'windows-process-absence', 'windows-post-stop-process', 'windows-process-baseline', 'windows-process-settlement', 'windows-owned-stop', 'windows-process-correlation', 'windows-owned-descendant-cleanup', 'windows-owned-cleanup-preflight', 'windows-owned-cleanup-preflight-progress', 'claude-owned-configuration', 'claude-restore', 'claude-model-discovery', 'claude-cli-prelaunch', 'claude-config-persist-owners', 'claude-window-stack', 'claude-window-focus', 'claude-chat-navigation', 'claude-native-chat', 'claude-windows-native-chat', 'claude-linux-native-chat', 'claude-window-fit', 'claude-windows-fit', 'claude-windows-uia', 'claude-windows-fit-rejection', 'claude-storage-use', 'claude-native-storage', 'claude-private-storage-stage', 'claude-windows-profile-seal', 'claude-native-composer', 'claude-linux-mode-roles', 'claude-linux-classic-visibility', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}:
+        if mechanism not in {'codex-renderer-qualification', 'qualification-runner-failure', 'hermes-windows-catalog-readiness', 'hermes-renderer-qualification', 'zed-native-copy', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'zed-retry-visual', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-atspi-retry', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'codex-static-dialog-title', 'codex-linux-startup-dialog', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'codex-project-preflight', 'windows-process-absence', 'windows-post-stop-process', 'windows-process-baseline', 'windows-process-settlement', 'windows-owned-stop', 'windows-process-correlation', 'windows-owned-descendant-cleanup', 'windows-owned-cleanup-preflight', 'windows-owned-cleanup-preflight-progress', 'claude-owned-configuration', 'claude-restore', 'claude-model-discovery', 'claude-cli-prelaunch', 'claude-config-persist-owners', 'claude-window-stack', 'claude-window-focus', 'claude-chat-navigation', 'claude-native-chat', 'claude-windows-native-chat', 'claude-linux-native-chat', 'claude-window-fit', 'claude-windows-fit', 'claude-windows-uia', 'claude-windows-fit-rejection', 'claude-storage-use', 'claude-native-storage', 'claude-private-storage-stage', 'claude-windows-profile-seal', 'codex-windows-profile-prepare', 'claude-native-composer', 'claude-linux-mode-roles', 'claude-linux-classic-visibility', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}:
             continue
         expected = 'hermes-renderer-qualification' if app == 'hermes-desktop' else 'zed-native-copy'
-        if (mechanism != expected and mechanism not in {'codex-renderer-qualification', 'qualification-runner-failure', 'hermes-windows-catalog-readiness', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'zed-retry-visual', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-atspi-retry', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'codex-static-dialog-title', 'codex-linux-startup-dialog', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'codex-project-preflight', 'windows-process-absence', 'windows-post-stop-process', 'windows-process-baseline', 'windows-process-settlement', 'windows-owned-stop', 'windows-process-correlation', 'windows-owned-descendant-cleanup', 'windows-owned-cleanup-preflight', 'windows-owned-cleanup-preflight-progress', 'claude-owned-configuration', 'claude-restore', 'claude-model-discovery', 'claude-cli-prelaunch', 'claude-config-persist-owners', 'claude-window-stack', 'claude-window-focus', 'claude-chat-navigation', 'claude-native-chat', 'claude-windows-native-chat', 'claude-linux-native-chat', 'claude-window-fit', 'claude-windows-fit', 'claude-windows-uia', 'claude-windows-fit-rejection', 'claude-storage-use', 'claude-native-storage', 'claude-private-storage-stage', 'claude-windows-profile-seal', 'claude-native-composer', 'claude-linux-mode-roles', 'claude-linux-classic-visibility', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}) or type(value.get('schemaVersion')) is not int or value['schemaVersion'] != 1:
+        if (mechanism != expected and mechanism not in {'codex-renderer-qualification', 'qualification-runner-failure', 'hermes-windows-catalog-readiness', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'zed-retry-visual', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-atspi-retry', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'codex-static-dialog-title', 'codex-linux-startup-dialog', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'codex-project-preflight', 'windows-process-absence', 'windows-post-stop-process', 'windows-process-baseline', 'windows-process-settlement', 'windows-owned-stop', 'windows-process-correlation', 'windows-owned-descendant-cleanup', 'windows-owned-cleanup-preflight', 'windows-owned-cleanup-preflight-progress', 'claude-owned-configuration', 'claude-restore', 'claude-model-discovery', 'claude-cli-prelaunch', 'claude-config-persist-owners', 'claude-window-stack', 'claude-window-focus', 'claude-chat-navigation', 'claude-native-chat', 'claude-windows-native-chat', 'claude-linux-native-chat', 'claude-window-fit', 'claude-windows-fit', 'claude-windows-uia', 'claude-windows-fit-rejection', 'claude-storage-use', 'claude-native-storage', 'claude-private-storage-stage', 'claude-windows-profile-seal', 'codex-windows-profile-prepare', 'claude-native-composer', 'claude-linux-mode-roles', 'claude-linux-classic-visibility', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}) or type(value.get('schemaVersion')) is not int or value['schemaVersion'] != 1:
             raise ValueError('semantic observation identity differs')
         record = {'schemaVersion': 1, 'mechanism': mechanism}
         if mechanism == 'codex-project-preflight':
@@ -1433,10 +1491,14 @@ def semantic_observations(directory, app):
                         or value['samePidAheadNormalLayerCount'] + value['samePidAheadOtherLayerCount'] != total):
                     raise ValueError('invalid Claude window stack counts')
             record.update({key: value[key] for key in fields - {'schemaVersion', 'mechanism'}})
+        elif mechanism == 'codex-windows-profile-prepare':
+            if app != 'chatgpt-desktop':
+                raise ValueError('invalid Codex profile application')
+            record.update(codex_windows_prepare(value))
         elif mechanism == 'claude-linux-native-chat':
             fields = {'schemaVersion','mechanism','diagnosticsOnly','stage','submittedTurns',
                       'inputVerifiedTurns','copiedResponses','retryAttempted','clipboardCleared'}
-            if (app != 'claude-desktop' or set(value) - {'failureBoundary','inputShape','embeddedTextObservation','ownedInputObservation','sendActionClass','sendActionObservation','emptyInputDrift','retryCandidateObservation'} != fields or value['diagnosticsOnly'] is not True
+            if (app != 'claude-desktop' or set(value) - {'failureBoundary','inputShape','embeddedTextObservation','ownedInputObservation','sendActionClass','sendActionObservation','emptyInputDrift','retryCandidateObservation','nativeTreeObservation'} != fields or value['diagnosticsOnly'] is not True
                     or type(value['stage']) is not str or value['stage'] not in {
                         'source','focus','paste','readback','send','input-not-empty','blocked',
                         'action-uncertain','deadline','clipboard-cleanup','sent','response-pending',
@@ -1446,6 +1508,10 @@ def semantic_observations(directory, app):
                     or not value['copiedResponses'] <= value['submittedTurns'] <= value['inputVerifiedTurns']
                     or value['retryAttempted'] is not False or type(value['clipboardCleared']) is not bool):
                 raise ValueError('invalid Claude Linux native Chat diagnostic')
+            if 'nativeTreeObservation' in value:
+                if value['stage'] not in {'blocked','deadline','clipboard-cleanup','action-uncertain'}:
+                    raise ValueError('unexpected Claude tree observation')
+                record['nativeTreeObservation'] = claude_native_tree(value['nativeTreeObservation'])
             if 'retryCandidateObservation' in value:
                 if value['stage'] != 'retry-diagnostic' or value['submittedTurns'] != 3 or value['copiedResponses'] != 2:
                     raise ValueError('unexpected Claude retry diagnostic')

@@ -100,6 +100,11 @@ pub(crate) fn record_preflight(value: &serde_json::Value) {
 }
 
 #[cfg(windows)]
+pub(crate) fn record_codex_prepare(value: &serde_json::Value) {
+    super::windows_observation::record_value(value, "codex-windows-profile-prepare");
+}
+
+#[cfg(windows)]
 pub(crate) fn record_profile_seal(value: &serde_json::Value) {
     super::windows_observation::record_value(value, "claude-windows-profile-seal");
 }

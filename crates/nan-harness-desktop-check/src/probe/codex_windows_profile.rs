@@ -16,29 +16,37 @@ struct PreparedCommand {
     cwd: Option<PathBuf>,
 }
 impl PreparedCommand {
-    // Reject redirects before creating any profile root.
     fn validate_profile(
         command: &tokio::process::Command,
         workspace: &Path,
         deadline: Instant,
+        observation: &mut PrepareObservation,
     ) -> Result<(), Reason> {
         let profile = workspace.join("profile");
         let required = [
             ("HOME", profile.join("home")),
             ("XDG_CONFIG_HOME", profile.join("config")),
             ("USERPROFILE", profile.join("home")),
-            ("LOCALAPPDATA", profile.join("home/AppData/Local")),
-            ("APPDATA", profile.join("home/AppData/Roaming")),
+            (
+                "LOCALAPPDATA",
+                profile.join("home").join("AppData").join("Local"),
+            ),
+            (
+                "APPDATA",
+                profile.join("home").join("AppData").join("Roaming"),
+            ),
             ("NAN_HARNESS_CONFIG_DIR", profile.join("nanh")),
-            ("CODEX_HOME", profile.join("home/.codex")),
+            ("CODEX_HOME", profile.join("home").join(".codex")),
             (
                 "CODEX_ELECTRON_USER_DATA_PATH",
                 profile.join("codex-desktop"),
             ),
         ];
+        observation.at("command", "arguments");
         let prepared = command.as_std();
         let arguments = prepared.get_args().collect::<Vec<_>>();
         if arguments.len() != 9
+            || arguments[0] != "chatgpt-desktop"
             || arguments[1] != "--provider-base-url"
             || arguments[3] != "--model"
             || arguments[5] != "--startup-timeout"
@@ -48,18 +56,22 @@ impl PreparedCommand {
         {
             return Err(Reason::IsolationUnavailable);
         }
-        if Instant::now() >= deadline
-            || prepared.get_current_dir() != Some(workspace)
-            || prepared.get_args().next() != Some(std::ffi::OsStr::new("chatgpt-desktop"))
-            || required.iter().any(|(key, path)| {
-                !prepared
-                    .get_envs()
-                    .any(|(k, v)| k == *key && v == Some(path.as_os_str()))
-            })
-        {
+        observation.cause = Some("cwd");
+        if prepared.get_current_dir() != Some(workspace) || !workspace.is_absolute() {
             return Err(Reason::IsolationUnavailable);
         }
-        Ok(())
+        observation.cause = Some("binding");
+        for (index, (key, path)) in required.iter().enumerate() {
+            observation.binding_index = Some(index);
+            if !prepared
+                .get_envs()
+                .any(|(k, v)| k == *key && v == Some(path.as_os_str()))
+            {
+                return Err(Reason::IsolationUnavailable);
+            }
+        }
+        observation.binding_index = None;
+        observation.check_deadline(deadline)
     }
     fn from(command: &tokio::process::Command) -> Self {
         let command = command.as_std();
@@ -75,6 +87,59 @@ impl PreparedCommand {
     }
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PrepareObservation {
+    schema_version: u8,
+    mechanism: &'static str,
+    diagnostics_only: bool,
+    stage: &'static str,
+    cause: Option<&'static str>,
+    binding_index: Option<usize>,
+    ancestor_count: usize,
+    owned_count: usize,
+    privacy: [Option<&'static str>; 11],
+    empty_roots: [Option<bool>; 2],
+    code_home_absent: Option<bool>,
+    completed: bool,
+}
+impl PrepareObservation {
+    fn new() -> Self {
+        Self {
+            schema_version: 1,
+            mechanism: "codex-windows-profile-prepare",
+            diagnostics_only: true,
+            stage: "policy",
+            cause: Some("policy"),
+            binding_index: None,
+            ancestor_count: 0,
+            owned_count: 0,
+            privacy: [None; 11],
+            empty_roots: [None; 2],
+            code_home_absent: None,
+            completed: false,
+        }
+    }
+    fn at(&mut self, stage: &'static str, cause: &'static str) {
+        self.stage = stage;
+        self.cause = Some(cause);
+    }
+    fn check_deadline(&mut self, deadline: Instant) -> Result<(), Reason> {
+        if Instant::now() >= deadline {
+            self.cause = Some("original-cutoff");
+            return Err(Reason::IsolationUnavailable);
+        }
+        Ok(())
+    }
+}
+impl Drop for PrepareObservation {
+    fn drop(&mut self) {
+        if let Ok(value) = serde_json::to_value(&*self) {
+            crate::process::windows_correlation::record_codex_prepare(&value);
+        }
+    }
+}
+
 pub(crate) struct FreshCodexWindowsProfile {
     directories: Vec<File>,
     private_start: usize,
@@ -85,14 +150,27 @@ fn ordinary(file: &File) -> bool {
     file.metadata()
         .is_ok_and(|m| m.is_dir() && m.file_attributes() & 0x400 == 0)
 }
+#[cfg(test)]
 fn retain(path: &Path) -> Result<File, Reason> {
+    retain_native(path).map_err(|_| Reason::IsolationUnavailable)
+}
+fn retain_native(path: &Path) -> Result<File, &'static str> {
     let file = std::fs::OpenOptions::new().read(true).access_mode(0x8002_0000)
         // Deny directory writes and DELETE sharing: the original path binding
         // and reparse metadata cannot be replaced while the renderer borrows it.
         .share_mode(1).custom_flags(0x0200_0000 | 0x0020_0000).open(path)
-        .map_err(|_| Reason::IsolationUnavailable)?;
-    if !ordinary(&file) {
-        return Err(Reason::IsolationUnavailable);
+        .map_err(|error| match error.raw_os_error() {
+            Some(2 | 3) => "directory-missing",
+            Some(5) => "directory-access",
+            Some(32) => "directory-sharing",
+            _ => "directory-open",
+        })?;
+    let metadata = file.metadata().map_err(|_| "directory-metadata")?;
+    if metadata.file_attributes() & 0x400 != 0 {
+        return Err("directory-reparse");
+    }
+    if !metadata.is_dir() {
+        return Err("directory-type");
     }
     Ok(file)
 }
@@ -107,6 +185,7 @@ impl FreshCodexWindowsProfile {
         {
             return Ok(None);
         }
+        let mut observation = PrepareObservation::new();
         if spec.session != crate::cli::SessionMode::GithubHosted
             || std::env::var("GITHUB_ACTIONS").as_deref() != Ok("true")
             || std::env::var("RUNNER_ENVIRONMENT").as_deref() != Ok("github-hosted")
@@ -114,19 +193,18 @@ impl FreshCodexWindowsProfile {
         {
             return Err(Reason::IsolationUnavailable);
         }
-        PreparedCommand::validate_profile(command, &spec.workspace, deadline)?;
-        let mut directories = Vec::new();
-        // Parent-first leases eliminate the pathname replacement gap while
-        // acquiring children. None of these handles can mutate vendor state.
-        let mut ancestors = spec.workspace.ancestors().collect::<Vec<_>>();
-        ancestors.reverse();
-        for path in ancestors {
-            if Instant::now() >= deadline {
-                return Err(Reason::IsolationUnavailable);
-            }
-            directories.push(retain(path)?);
-        }
+        Self::prepare_owned(spec, command, deadline, &mut observation).map(Some)
+    }
+    fn prepare_owned(
+        spec: &ProbeSpec,
+        command: &tokio::process::Command,
+        deadline: Instant,
+        observation: &mut PrepareObservation,
+    ) -> Result<Self, Reason> {
+        PreparedCommand::validate_profile(command, &spec.workspace, deadline, observation)?;
+        let mut directories = Self::retain_ancestors(&spec.workspace, deadline, observation)?;
         let private_start = directories.len() - 1;
+        observation.at("owned-acquisition", "directory-open");
         for suffix in [
             "profile",
             "profile/home",
@@ -139,36 +217,125 @@ impl FreshCodexWindowsProfile {
             "profile/home/AppData/Local",
             "profile/home/AppData/Roaming",
         ] {
-            if Instant::now() >= deadline {
+            observation.check_deadline(deadline)?;
+            directories.push(
+                retain_native(&spec.workspace.join(suffix)).map_err(|cause| {
+                    observation.cause = Some(cause);
+                    Reason::IsolationUnavailable
+                })?,
+            );
+            observation.owned_count += 1;
+        }
+        observation.at("privacy", "privacy");
+        for (index, file) in directories[private_start..].iter().enumerate() {
+            observation.check_deadline(deadline)?;
+            let privacy = nan_harness_private_fs::classify_owned_windows_dacl(
+                file,
+                nan_harness_private_fs::PrivatePathKind::Directory,
+            );
+            observation.privacy[index] = Some(match privacy {
+                nan_harness_private_fs::OwnedWindowsDacl::Protected => "protected",
+                nan_harness_private_fs::OwnedWindowsDacl::Inherited => "inherited",
+                nan_harness_private_fs::OwnedWindowsDacl::Unexpected => "unexpected",
+                nan_harness_private_fs::OwnedWindowsDacl::Unavailable => "unavailable",
+            });
+            if privacy != nan_harness_private_fs::OwnedWindowsDacl::Protected {
                 return Err(Reason::IsolationUnavailable);
             }
-            directories.push(retain(&spec.workspace.join(suffix))?);
         }
-        for suffix in [
-            "profile/codex-desktop",
-            "profile/nanh/chatgpt-desktop/profile",
-        ] {
-            let mut entries = std::fs::read_dir(spec.workspace.join(suffix))
-                .map_err(|_| Reason::IsolationUnavailable)?;
-            if entries.next().is_some() {
-                return Err(Reason::IsolationUnavailable);
-            }
-        }
-        if !matches!(std::fs::symlink_metadata(spec.workspace.join("profile/home/.codex")),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound)
-        {
-            return Err(Reason::IsolationUnavailable);
-        }
+        Self::check_initial_roots(&spec.workspace, deadline, observation)?;
         let profile = Self {
             directories,
             private_start,
             command: PreparedCommand::from(command),
             launched: false,
         };
+        observation.at("final-custody", "custody");
+        observation.check_deadline(deadline)?;
         if !profile.verifies_owned(deadline) {
             return Err(Reason::IsolationUnavailable);
         }
-        Ok(Some(profile))
+        observation.stage = "completed";
+        observation.cause = None;
+        observation.completed = true;
+        Ok(profile)
+    }
+    fn retain_ancestors(
+        workspace: &Path,
+        deadline: Instant,
+        observation: &mut PrepareObservation,
+    ) -> Result<Vec<File>, Reason> {
+        observation.at("ancestor-acquisition", "directory-open");
+        let mut ancestors = workspace.ancestors().filter(|path|
+            // A bare drive/verbatim prefix is not an object until RootDir follows it.
+            !path.as_os_str().is_empty() && !matches!(path.components().collect::<Vec<_>>().as_slice(),
+                [std::path::Component::Prefix(_)])).collect::<Vec<_>>();
+        ancestors.reverse();
+        if ancestors.is_empty() || ancestors.len() > 64 {
+            observation.cause = Some("ancestor-budget");
+            return Err(Reason::IsolationUnavailable);
+        }
+        let mut directories = Vec::new();
+        for path in ancestors {
+            observation.check_deadline(deadline)?;
+            directories.push(retain_native(path).map_err(|cause| {
+                observation.cause = Some(cause);
+                Reason::IsolationUnavailable
+            })?);
+            observation.ancestor_count += 1;
+        }
+        Ok(directories)
+    }
+    fn check_initial_roots(
+        workspace: &Path,
+        deadline: Instant,
+        observation: &mut PrepareObservation,
+    ) -> Result<(), Reason> {
+        observation.at("empty-roots", "directory-enumeration");
+        for (index, suffix) in [
+            "profile/codex-desktop",
+            "profile/nanh/chatgpt-desktop/profile",
+        ]
+        .iter()
+        .enumerate()
+        {
+            observation.check_deadline(deadline)?;
+            let mut entries = std::fs::read_dir(workspace.join(suffix))
+                .map_err(|_| Reason::IsolationUnavailable)?;
+            let empty = match entries.next() {
+                None => true,
+                Some(Ok(_)) => false,
+                Some(Err(_)) => return Err(Reason::IsolationUnavailable),
+            };
+            observation.empty_roots[index] = Some(empty);
+            if !empty {
+                observation.cause = Some("root-populated");
+                return Err(Reason::IsolationUnavailable);
+            }
+        }
+        observation.at("code-home", "code-home-metadata");
+        observation.check_deadline(deadline)?;
+        let absent = match std::fs::symlink_metadata(
+            workspace.join("profile").join("home").join(".codex"),
+        ) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => true,
+            Ok(_) => false,
+            Err(_) => return Err(Reason::IsolationUnavailable),
+        };
+        observation.code_home_absent = Some(absent);
+        if !absent {
+            observation.cause = Some("code-home-present");
+            return Err(Reason::IsolationUnavailable);
+        }
+        Ok(())
+    }
+    #[cfg(test)]
+    pub(super) fn prepare_fixture(
+        spec: &ProbeSpec,
+        command: &tokio::process::Command,
+        deadline: Instant,
+    ) -> Result<Self, Reason> {
+        Self::prepare_owned(spec, command, deadline, &mut PrepareObservation::new())
     }
     pub(crate) fn before_launch(
         &mut self,

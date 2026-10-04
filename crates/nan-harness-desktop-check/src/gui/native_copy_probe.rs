@@ -271,6 +271,7 @@ fn neutral_input(executable: &Path, mode: &str, prompt: &str) -> Result<(), Reas
         "NANH_ZED_XRECORD",
         "NANH_ZED_XI2_PAYLOAD",
         "NANH_ZED_CURSOR_HIT",
+        "NANH_ZED_RETRY_HIT_POLICY",
         "NANH_ZED_ENTER_POLICY",
         "NANH_ZED_RETRY_METHOD",
         "NANH_ZED_PANEL_ZOOM",
@@ -2133,6 +2134,11 @@ mod tests {
         } else {
             "unset"
         };
+        let hit_policy = if cfg!(target_os = "linux") {
+            "accessibility"
+        } else {
+            "unset"
+        };
         let enter_policy = if cfg!(target_os = "linux") {
             "owned-decoration-crossing"
         } else {
@@ -2144,6 +2150,7 @@ mod tests {
                 "[ \"${{NANH_ZED_XRECORD-unset}}\" = \"{expected}\" ] && \
                  [ \"${{NANH_ZED_CURSOR_HIT-unset}}\" = \"{expected}\" ] && \
                  [ \"${{NANH_ZED_XI2_PAYLOAD-unset}}\" = \"{expected}\" ] && \
+                 [ \"${{NANH_ZED_RETRY_HIT_POLICY-unset}}\" = \"{hit_policy}\" ] && \
                  [ \"${{NANH_ZED_ENTER_POLICY-unset}}\" = \"{enter_policy}\" ] && [ \"${{NAN_API_KEY-unset}}\" = unset ] && [ \"$1\" = select-all ]\n"
             ),
         )
@@ -2161,6 +2168,7 @@ mod tests {
             .env("NANH_ZED_XRECORD", "1")
             .env("NANH_ZED_XI2_PAYLOAD", "1")
             .env("NANH_ZED_CURSOR_HIT", "1")
+            .env("NANH_ZED_RETRY_HIT_POLICY", "accessibility")
             .env("NANH_ZED_ENTER_POLICY", "owned-decoration-crossing")
             .env("NAN_API_KEY", "synthetic-provider-key")
             .stdin(Stdio::null())

@@ -118,11 +118,12 @@ impl Gui {
         if self.kind != nan_harness_core::DesktopHarnessKind::Claude
             || !super::claude_windows_ready::policy()
             || std::env::var("NANH_CLAUDE_WINDOWS_NATIVE_CHAT").as_deref() != Ok("1")
-            || directory.canonicalize().ok().as_deref() != Some(directory)
             || !profile.verifies_owned(workspace, Instant::now() + Duration::from_secs(1))
         {
             return Err(Reason::IsolationUnavailable);
         }
+        let directory = super::qualification_directory::canonical_directory(directory)
+            .ok_or(Reason::IsolationUnavailable)?;
         Ok(ClaudeWindowsChatSession {
             gui: self,
             profile,

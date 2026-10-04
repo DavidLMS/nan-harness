@@ -414,7 +414,17 @@ class Controller:
         custody = getattr(self.adapter, 'profile_guard', None)
         if custody is not None and not custody():
             raise Rejected('policy')
-        result = getattr(self.adapter, method)(*args)
+        try:
+            result = getattr(self.adapter, method)(*args)
+        except Exception as error:
+            if method in ('owner','children'):
+                node=args[0] if args else None
+                null=(type(node) is tuple and len(node)==2
+                    and (not node[0] or node[1]=='/org/a11y/atspi/null'))
+                self.tree_diagnostic(method,'null-reference' if null else
+                    'deadline' if isinstance(error,TimeoutError) else 'query-unavailable',node)
+            raise
+
         if custody is not None and not custody():
             raise Rejected('policy')
         if self.clock() >= self.deadline:
@@ -425,8 +435,15 @@ class Controller:
         self.facts['failureBoundary'] = (error.boundary if isinstance(error, Rejected)
             and error.boundary is not None else self.boundary)
 
+    def tree_diagnostic(self, operation, reason, node, child_count=None, visited_count=None):
+        self.facts['nativeTreeObservation']=dict(operation=operation,reason=reason,
+            nodeScope='frame' if node==self.frame else 'editor' if node==self.editor else 'other',
+            foreignBus=type(node) is tuple and len(node)==2 and node[0]!=self.root['bus'],
+            childCount=child_count,visitedCount=visited_count)
+
     def owned(self, node):
         if self.query('owner', node) != self.root['pid']:
+            self.tree_diagnostic('owner','wrong-owner',node)
             raise Rejected('source-owner')
 
     def tree(self, start=None):
@@ -435,6 +452,7 @@ class Controller:
         while pending:
             node, depth = pending.pop()
             if node in seen:
+                self.tree_diagnostic('children','duplicate',node,visited_count=len(seen))
                 raise Rejected('tree-cycle')
             if depth > 32:
                 raise Rejected('tree-depth')
@@ -448,6 +466,8 @@ class Controller:
             nodes.append((node, identity))
             children = self.query('children', node)
             if type(children) is not list or len(children) > 1024 - len(seen):
+                self.tree_diagnostic('children','non-list' if type(children) is not list else 'limit',node,
+                    child_count=min(len(children),1025) if type(children) is list else None,visited_count=len(seen))
                 raise Rejected('tree-children')
             pending.extend((child, depth + 1) for child in children)
         return nodes
@@ -790,7 +810,7 @@ class Controller:
         self.adapter.key_guard = no_keys
         self.proof()
 
-    def next_history_scope(self, history):
+    def next_history_scope(self, history, include_nodes=False):
         # Read-only observable authority: exact owned prompts plus independently
         # copied nonces. Tree traversal order never establishes chronology.
         self.response_frame_proof()
@@ -833,11 +853,12 @@ class Controller:
                 else:
                     raise Rejected('response-row-attachment')
                 witness.append((node,identity,tuple(chain)))
-        scope = self.response_scope(history[-1][1])
+        scope = self.response_scope(history[-1][1], nodes)
         if scope is None:
             raise Rejected('response')
         self.response_frame_proof()
-        return tuple(witness),scope,(self.mode,self.chat)
+        result=(tuple(witness),scope,(self.mode,self.chat))
+        return (result,nodes) if include_nodes else result
 
     def restore_next_input(self, binding, records):
         # A distinct one-use capability. Ordinary restore retains its exact
@@ -857,8 +878,7 @@ class Controller:
             raise Rejected('policy')
         # Load the original frame without querying or adopting the old editor.
         self.restore(binding,response=True)
-        before = self.next_history_scope(history)
-        nodes = self.tree(self.frame)
+        before,nodes = self.next_history_scope(history,include_nodes=True)
         editors = [node for node,identity in nodes if identity[0] in (61,78,79)
             and 'Write your prompt to Claude' in identity[1:]]
         if len(editors) != 1:
@@ -928,9 +948,9 @@ class Controller:
         self.empty_class_dispatched=True
 
     def next_input_proof(self):
-        if self.next_history_scope(self.next_history) != self.next_witness:
+        fresh,nodes=self.next_history_scope(self.next_history,include_nodes=True)
+        if fresh != self.next_witness:
             raise Rejected('response')
-        nodes = self.tree(self.frame)
         if any(node != self.frame and identity[0] in (16,23,69) for node,identity in nodes):
             raise Rejected('frame')
         editors = [node for node,identity in nodes if identity[0] in (61,78,79)
@@ -951,8 +971,9 @@ class Controller:
             child = parent
         else:
             raise Rejected('tree')
-        if self.next_history_scope(self.next_history) != self.next_witness:
-            raise Rejected('response')
+        # One complete fresh snapshot proves absence/uniqueness; local reciprocal
+        # attachment and final frame custody bracket it. Focus/paste reprove afresh.
+        self.response_frame_proof()
 
     def retry_ready(self, prompt, records):
         # Passive candidate evidence only. Labels and common ancestry never grant Retry.
@@ -1041,8 +1062,9 @@ class Controller:
         self.facts['stage']='retry-diagnostic'
         return self.facts
 
-    def response_scope(self, marker):
-        nodes = self.tree(self.frame)
+    def response_scope(self, marker, nodes=None):
+        if nodes is None:
+            nodes = self.tree(self.frame)
         if any(node!=self.frame and identity[0] in (23,69) for node,identity in nodes):
             raise Rejected('frame')
         headings = [node for node,identity in nodes if identity[0] == 83

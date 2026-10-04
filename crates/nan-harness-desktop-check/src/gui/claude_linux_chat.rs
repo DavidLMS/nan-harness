@@ -90,6 +90,34 @@ enum EmptyInputField {
     FocusAttempted,
 }
 type EmptyInputDrift = std::collections::BTreeMap<EmptyInputField, bool>;
+fn native_tree_observation(facts: &Value) -> Option<Value> {
+    let value = facts.get("nativeTreeObservation")?;
+    if value.as_object()?.len() != 6
+        || !["owner", "children"].contains(&value["operation"].as_str()?)
+        || ![
+            "wrong-owner",
+            "query-unavailable",
+            "deadline",
+            "null-reference",
+            "non-list",
+            "limit",
+            "duplicate",
+        ]
+        .contains(&value["reason"].as_str()?)
+        || !["frame", "editor", "other"].contains(&value["nodeScope"].as_str()?)
+        || !value["foreignBus"].is_boolean()
+        || [("childCount", 1025), ("visitedCount", 1024)]
+            .iter()
+            .any(|(key, limit)| {
+                value.get(*key).is_none()
+                    || !value[*key].is_null() && value[*key].as_u64().is_none_or(|n| n > *limit)
+            })
+    {
+        return None;
+    }
+    Some(value.clone())
+}
+
 fn retry_candidate_observation(facts: &Value) -> Option<Value> {
     let value = facts.get("retryCandidateObservation")?;
     let fields = value.as_object()?;
@@ -407,6 +435,9 @@ fn valid_binding(fields: &serde_json::Map<String, Value>) -> bool {
 // packet. Validate them together so no field can widen input authority.
 fn validate_diagnostics(facts: &Value) -> Option<()> {
     let fields = facts.as_object()?;
+    if fields.contains_key("nativeTreeObservation") && native_tree_observation(facts).is_none() {
+        return None;
+    }
     if fields.contains_key("retryCandidateObservation")
         && (retry_candidate_observation(facts).is_none() || facts["stage"] != "retry-diagnostic")
     {
@@ -486,7 +517,7 @@ fn decode(bytes: &[u8]) -> Option<(Value, Option<Value>)> {
         return None;
     }
     let facts = value["facts"].as_object()?;
-    if !(11..=19).contains(&facts.len())
+    if !(11..=20).contains(&facts.len())
         || facts.keys().any(|key| {
             !FLAGS.contains(&key.as_str())
                 && ![
@@ -502,6 +533,7 @@ fn decode(bytes: &[u8]) -> Option<(Value, Option<Value>)> {
                     "sendActionObservation",
                     "emptyInputDrift",
                     "retryCandidateObservation",
+                    "nativeTreeObservation",
                 ]
                 .contains(&key.as_str())
         })
@@ -695,6 +727,7 @@ pub(crate) struct ClaudeLinuxChatSession<'a> {
     owned_input_observation: Option<OwnedInputObservation>,
     empty_input_drift: Option<EmptyInputDrift>,
     retry_candidate: Option<Value>,
+    native_tree: Option<Value>,
     submitted: u8,
     verified: u8,
     copied: u8,
@@ -736,6 +769,7 @@ impl Gui {
             owned_input_observation: None,
             empty_input_drift: None,
             retry_candidate: None,
+            native_tree: None,
             submitted: 0,
             verified: 0,
             copied: 0,
@@ -807,6 +841,7 @@ impl ClaudeLinuxChatSession<'_> {
         self.owned_input_observation = owned_input_observation(&facts);
         self.empty_input_drift = empty_input_drift(&facts);
         self.retry_candidate = retry_candidate_observation(&facts);
+        self.native_tree = native_tree_observation(&facts);
         facts["stage"]
             .as_str()
             .ok_or(Reason::ActionUnsupported)?
@@ -924,14 +959,26 @@ impl ClaudeLinuxChatSession<'_> {
         timeout: Duration,
         gate: &ProviderGate,
     ) -> Result<(), Reason> {
-        if !gate.failure_observed() || self.submitted != 3 || self.copied != 2 {
+        if self.submitted != 3 || self.copied != 2 {
             return Err(Reason::ActionUnsupported);
         }
         let prompt = self
             .pending_prompt
             .clone()
             .ok_or(Reason::ActionUnsupported)?;
-        self.operation("retry-ready", &prompt, Instant::now() + timeout)?;
+        let deadline = Instant::now() + timeout;
+        while !gate.failure_observed() {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err(Reason::Timeout);
+            }
+            std::thread::sleep(Duration::from_millis(100).min(remaining));
+        }
+        self.operation(
+            "retry-ready",
+            &prompt,
+            deadline.min(Instant::now() + Duration::from_secs(15)),
+        )?;
         // A passive candidate is not authority to repeat the failed turn.
         Err(Reason::ActionUnsupported)
     }
@@ -954,6 +1001,9 @@ impl ClaudeLinuxChatSession<'_> {
         let mut facts = json!({"schemaVersion":1,"mechanism":"claude-linux-native-chat","diagnosticsOnly":true,
             "stage":self.stage,"submittedTurns":self.submitted,"inputVerifiedTurns":self.verified,
             "copiedResponses":self.copied,"retryAttempted":false,"clipboardCleared":cleared});
+        if let Some(tree) = self.native_tree {
+            facts["nativeTreeObservation"] = tree;
+        }
         if let Some(boundary) = self.failure_boundary {
             facts["failureBoundary"] = json!(boundary);
         }
@@ -1319,5 +1369,22 @@ mod empty_drift_tests {
         let mut missing = drift;
         missing.as_object_mut().unwrap().remove("focusAttempted");
         assert!(empty_input_drift(&json!({"emptyInputDrift":missing})).is_none());
+    }
+}
+
+#[cfg(test)]
+mod native_tree_tests {
+    use super::native_tree_observation;
+    use serde_json::json;
+
+    #[test]
+    fn nullable_counts_cannot_be_replaced_with_private_fields() {
+        let tree = json!({"operation":"children","reason":"query-unavailable",
+            "nodeScope":"editor","foreignBus":false,"childCount":null,"visitedCount":null});
+        assert!(native_tree_observation(&json!({"nativeTreeObservation":tree})).is_some());
+        let mut changed = tree;
+        changed.as_object_mut().unwrap().remove("childCount");
+        changed["rawObjectPath"] = json!("PRIVATE");
+        assert!(native_tree_observation(&json!({"nativeTreeObservation":changed})).is_none());
     }
 }

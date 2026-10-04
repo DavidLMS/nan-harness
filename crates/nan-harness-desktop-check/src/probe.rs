@@ -3359,6 +3359,79 @@ mod tests {
         }
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn windows_codex_actual_prepared_command_admits_only_original_private_roots() {
+        let directory = tempfile::tempdir().unwrap();
+        let spec = ProbeSpec {
+            kind: DesktopHarnessKind::ChatGpt,
+            nan_harness: directory.path().join("synthetic-never-spawned"),
+            nan_harness_sha256: "a".repeat(64),
+            executable: directory.path().join("synthetic-app-never-spawned"),
+            workspace: directory.path().join("synthetic-workspace"),
+            model: "synthetic-model".into(),
+            live: false,
+            probe_index: None,
+            session: crate::cli::SessionMode::GithubHosted,
+            verification: crate::cli::VerificationPolicy::default(),
+            launch_wrapper: None,
+        };
+        let mut command = isolated_command(&spec, &spec.nan_harness).unwrap();
+        // The production launch_command adds these exact arguments after isolation.
+        command
+            .args([
+                "--provider-base-url",
+                "http://127.0.0.1:9/v1",
+                "--model",
+                "synthetic-model",
+                "--startup-timeout",
+                "120",
+                "--executable",
+            ])
+            .arg(&spec.executable);
+        let cutoff = Instant::now() + Duration::from_secs(5);
+        let mut profile = codex_windows_profile::FreshCodexWindowsProfile::prepare_fixture(
+            &spec, &command, cutoff,
+        )
+        .unwrap();
+        assert!(profile.verifies_owned(cutoff));
+        assert!(!profile.prepared_for_renderer(cutoff));
+        profile.before_launch(&command, cutoff).unwrap();
+        assert!(profile.prepared_for_renderer(cutoff));
+        assert!(profile.before_launch(&command, cutoff).is_err());
+        drop(profile);
+        command.env("CODEX_HOME", spec.workspace.join("foreign-home"));
+        assert!(
+            codex_windows_profile::FreshCodexWindowsProfile::prepare_fixture(
+                &spec, &command, cutoff
+            )
+            .is_err()
+        );
+        command.env(
+            "CODEX_HOME",
+            spec.workspace.join("profile").join("home").join(".codex"),
+        );
+        std::fs::write(
+            spec.workspace.join("profile/codex-desktop/synthetic-state"),
+            b"neutral",
+        )
+        .unwrap();
+        assert!(
+            codex_windows_profile::FreshCodexWindowsProfile::prepare_fixture(
+                &spec, &command, cutoff
+            )
+            .is_err()
+        );
+        assert!(
+            codex_windows_profile::FreshCodexWindowsProfile::prepare_fixture(
+                &spec,
+                &command,
+                Instant::now()
+            )
+            .is_err()
+        );
+    }
+
     #[test]
     fn hermes_launch_redirects_native_data_to_the_managed_profile_directory() {
         let directory = tempfile::tempdir().unwrap();

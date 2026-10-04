@@ -1,5 +1,5 @@
 const assert=require('node:assert/strict'),vm=require('node:vm');
-const {homeComposerScope,runTurn}=require('./codex-dom.cjs');
+const {homeComposerScope,runTurn,sampleEditor}=require('./codex-dom.cjs');
 function shape(change={}) {
  const node=attrs=>({isConnected:true,tagName:'DIV',getAttribute:k=>attrs[k]??null,
   getBoundingClientRect:()=>({width:100,height:20}),closest:()=>null});
@@ -21,7 +21,15 @@ assert.equal(shape(),true);
 for(const key of ['duplicate','foreign','modal','conversation','disabled','detached','wrongHome','overflow'])assert.equal(shape({[key]:true}),false,key);
 async function trial(change={}) {
  let text=change.draft?'PRIVATE existing draft':'',sent=false,fills=0,clicks=0,replaced=false,owned=true;
- const held={evaluate:async(fn,arg)=>fn.name==='sample'?(change.covered?{blocked:'foreign-overlay'}:{rect:[0,0,10,10],points:[{x:5,y:5}]}):fn({isConnected:!replaced,textContent:text},arg),dispose:async()=>{}};
+ const input={tagName:change.wrongTag?'BUTTON':'DIV',disabled:!!change.disabled,readOnly:!!change.readonly,classList:{contains:k=>k==='ProseMirror'},
+  getAttribute:k=>k==='contenteditable'?'true':null,closest:()=>change.inert?{}:null,parentElement:null,
+  get isConnected(){return !replaced;},get textContent(){return text;},
+  clientLeft:0,clientTop:0,clientWidth:100,clientHeight:40,
+  getBoundingClientRect:()=>({left:10,top:10,width:100,height:40}),contains:()=>false};
+ const document={querySelectorAll:()=>change.modal?[input]:[],elementFromPoint:()=>change.covered?{}:input};
+ input.ownerDocument=change.foreignDoc?{}:document;
+ const globals={document,innerWidth:800,innerHeight:600,getComputedStyle:()=>({display:change.hidden?'none':'block',visibility:'visible',pointerEvents:change.pointerDisabled?'none':'auto'}),input};
+ const held={evaluate:async(fn,arg)=>fn===sampleEditor?vm.runInNewContext(`(${fn})(input)`,globals):fn(input,arg),dispose:async()=>{}};
  const editor={count:async()=>change.duplicate?2:1,elementHandle:async()=>held,
   evaluate:async(fn,arg)=>arg===held?!change.replaced:fn({textContent:text},arg),
   fill:async prompt=>{fills++;text=change.readback?'wrong':prompt;if(change.ownerAfterFill)owned=false;}};
@@ -36,7 +44,7 @@ async function trial(change={}) {
 }
 (async()=>{
  const good=await trial();assert.equal(good.facts.responseVerified,true);assert.equal(good.fills,1);assert.equal(good.clicks,1);
- for(const key of ['draft','duplicate','replaced','covered']){const bad=await trial({[key]:true});assert.equal(bad.fills,0,key);assert.equal(bad.clicks,0,key);}
+ for(const key of ['draft','duplicate','replaced','covered','modal','disabled','readonly','foreignDoc','inert','hidden','pointerDisabled','wrongTag']){const bad=await trial({[key]:true});assert.equal(bad.fills,0,key);assert.equal(bad.clicks,0,key);}
  for(const key of ['readback','ownerAfterFill']){const bad=await trial({[key]:true});assert.equal(bad.fills,1,key);assert.equal(bad.clicks,0,key);}
  const lost=await trial({ownerAfterSend:true});assert.equal(lost.facts.responseVerified,false);assert.equal(lost.clicks,1);
  const mismatch=await trial({wrongMarker:true});assert.equal(mismatch.facts.responseVerified,false);assert.equal(mismatch.clicks,1);

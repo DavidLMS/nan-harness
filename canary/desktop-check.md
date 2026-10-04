@@ -32,6 +32,22 @@ exact pointer hit; cursor artwork is advisory. Claude Linux recovery remains
 unfinished, and its empty-input witness still rejects unexplained drift.
 None of these candidate changes establishes a new native pass by itself.
 
+The first joint campaign, [37219615237](https://github.com/DavidLMS/nan-harness/actions/runs/37219615237),
+ran commit `063445a7353f07bb85fc99d6132efb803ac3b88e`. All six cells retained
+passing application/global cleanup; none completed acceptance.
+
+| Cell | Observed boundary | Following correction |
+| --- | --- | --- |
+| Zed Linux | Response and tool pass; Retry still gated by cursor artwork | Forward the accessible-hit policy into the cleared helper environment |
+| Codex Linux | Public home ready in all three sessions; editor rejected before fill | Use a contenteditable hit test instead of a button-only callback |
+| Codex macOS | Role/Continue completed; next-screen wait expires | Admit the exact public home after Continue and observe other transition screens |
+| Codex Windows | Profile preparation rejects before launch | Match Windows path construction, skip drive prefixes, test the actual prepared command |
+| Claude Linux | First response copied; next-input tree query rejects | Share one fresh complete tree per proof and retain typed failure causes |
+| Claude Windows | Profile and bridge seal complete; chat-session admission rejects | Reuse validated Windows canonical directory handling |
+
+These corrections still require native verification. Claude Linux's passive
+Retry observation does not yet authorize a recovery action.
+
 
 The hidden launch-wrapper option is restricted to deterministic ChatGPT startup
 diagnostics. Only application launch is instrumented; help, version and restore

@@ -25,6 +25,32 @@ function turnObservation({prompt,marker}) {
   return {userCount:1,assistantCount:Math.min(4096,units.size),responseVerified:matches===1};
 }
 
+// Input hit testing has its own public contenteditable contract; button-only
+// onboarding controls cannot establish a ProseMirror editor's actionability.
+function sampleEditor(control) {
+  const blocked=reason=>({blocked:reason});
+  if(control.tagName!=='DIV'||!control.classList.contains('ProseMirror')
+      ||control.getAttribute('contenteditable')!=='true')return blocked('unsupported-control');
+  if(!control.isConnected||control.ownerDocument!==document||control.closest('[inert]'))return blocked('detached-or-inert');
+  if(control.disabled||control.readOnly||control.getAttribute('aria-disabled')==='true')return blocked('disabled');
+  const visible=e=>{const r=e.getBoundingClientRect(),s=getComputedStyle(e);
+    return r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden';};
+  if(!visible(control))return blocked('hidden');
+  if([...document.querySelectorAll('[role="dialog"],[aria-modal="true"],[role="alertdialog"],[role="menu"]')].some(visible))return blocked('foreign-overlay');
+  for(let e=control,depth=0;e;e=e.parentElement) {
+    if(++depth>64||getComputedStyle(e).pointerEvents==='none')return blocked('pointer-disabled');
+  }
+  const r=control.getBoundingClientRect(),points=[];
+  for(const fy of [0.25,0.5,0.75])for(const fx of [0.25,0.5,0.75]) {
+    const x=r.left+control.clientLeft+control.clientWidth*fx;
+    const y=r.top+control.clientTop+control.clientHeight*fy;
+    if(x<0||y<0||x>=innerWidth||y>=innerHeight)continue;
+    const front=document.elementFromPoint(x,y);
+    if(front===control||control.contains(front))points.push({x:x-r.left-control.clientLeft,y:y-r.top-control.clientTop});
+  }
+  return {rect:[r.left,r.top,r.width,r.height],points};
+}
+
 async function ordinaryClick(locator,guard,deadline,attempt,after=guard) {
   if(!await guard()||Date.now()>=deadline||await locator.count()!==1||!await locator.isEnabled())return false;
   const handle=await locator.elementHandle();if(!handle)return false;
@@ -101,9 +127,9 @@ async function runTurn(page,guard,request,deadline=Date.now()+request.timeoutMs)
         &&(!homeReady||await page.evaluate(homeComposerScope))
         &&await heldEditor.evaluate((e,text)=>e.isConnected&&e.textContent===text,filled?request.prompt:'');
       if(!await inputGuard(false))return stop('input-mismatch');
-      const firstInput=await heldEditor.evaluate(sample);
+      const firstInput=await heldEditor.evaluate(sampleEditor);
       if(firstInput.blocked)return stop('composer-unavailable');
-      const secondInput=await heldEditor.evaluate(sample);
+      const secondInput=await heldEditor.evaluate(sampleEditor);
       if(!candidate(firstInput,secondInput)||!await inputGuard(false))return stop('composer-unavailable');
       await editor.fill(request.prompt,{timeout:Math.max(1,Math.min(2000,deadline-Date.now()))});
       facts.inputReadback=await editor.evaluate((e,prompt)=>e.textContent===prompt,request.prompt);
@@ -153,6 +179,7 @@ exports.homeComposerScope=homeComposerScope;
 exports.turnObservation=turnObservation;
 exports.ordinaryClick=ordinaryClick;
 exports.runTurn=runTurn;
+exports.sampleEditor=sampleEditor;
 
 async function pageIdentity(page,deadline) {
   const bounded=async promise=>{

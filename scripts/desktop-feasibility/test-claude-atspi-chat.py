@@ -1261,4 +1261,45 @@ class RetryReadyDiagnosticsTests(unittest.TestCase):
         self.assertFalse(facts['retryCandidateObservation']['candidateEnabled'])
         self.assertFalse(facts['recoveryVerified']);self.assertEqual(adapter.send_count,0)
 
+class NativeTreeDiagnosticTests(unittest.TestCase):
+    def test_exact_failure_cause_never_retries_or_exports_data(self):
+        for kind in ('unavailable','deadline','non-list','limit','duplicate','wrong-owner','null'):
+            a,c,b=ResponseFrameRestoreTests.restored(self)
+            c.restore(b,response=True)
+            original=a.children
+            counts=[0]
+            if kind=='wrong-owner':a.owner=lambda node:8
+            elif kind=='null':
+                a.owner=lambda node:(_ for _ in ()).throw(ValueError('PRIVATE dbus error'))
+            else:
+                def children(node):
+                    if node!=c.frame:return original(node)
+                    counts[0]+=1
+                    if kind=='unavailable':raise ValueError('PRIVATE dbus error')
+                    if kind=='deadline':raise TimeoutError('PRIVATE dbus timeout')
+                    if kind=='non-list':return ()
+                    if kind=='limit':return [c.frame]*1025
+                    return [c.frame]
+                a.children=children
+            with self.assertRaises(Exception):
+                if kind=='null':c.owned(('r','/org/a11y/atspi/null'))
+                else:c.tree(c.frame)
+            diag=c.facts['nativeTreeObservation']
+            expected={'unavailable':'query-unavailable','null':'null-reference'}.get(kind,kind)
+            self.assertEqual(diag['reason'],expected)
+            self.assertLessEqual(counts[0],1)
+            self.assertNotIn('PRIVATE',str(diag))
+            self.assertEqual((a.paste_count,a.send_count),(0,0))
+    def test_next_input_proof_one_fresh_full_frame_walk(self):
+        a,c,b,h=CorrelatedNextInputTests.fixture(self)
+        c.restore_next_input(b,h)
+        original=c.tree;walks=[]
+        def tree(start=None):
+            walks.append(start);return original(start)
+        c.tree=tree;c.next_input_proof()
+        self.assertEqual(walks.count(c.frame),1)
+        a.extra_after_focus=True
+        with self.assertRaises(chat.Rejected):c.next_input_proof()
+        self.assertEqual((a.paste_count,a.send_count),(0,0))
+
 if __name__=='__main__':unittest.main()

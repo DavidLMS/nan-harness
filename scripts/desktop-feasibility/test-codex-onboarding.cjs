@@ -3,7 +3,7 @@ const fs=require('node:fs');
 const vm=require('node:vm');
 const source=fs.readFileSync(`${__dirname}/codex-onboarding.cjs`,'utf8');
 async function trial(options={}) {
- let inventoryOwnerLost=false;
+ let inventoryOwnerLost=false,homeReads=0;
  let now=0,checked=false,absent=false,roleClicks=0,continueClicks=0,taskClicks=0,samples=0,overlayReads=0,legendReads=0;
  const root={parentElement:null};
  const fieldset={parentElement:root};
@@ -90,13 +90,13 @@ async function trial(options={}) {
  }
  const mainFrame={};
  const extraPage={url:()=>options.foreignUrl??'about:blank',evaluate:async()=>{if(options.inventoryOwnerLoss)inventoryOwnerLost=true;if(options.inventoryDeadline)now=1201;return options.visibility??'hidden';}};
- const page={getByRole:(_role,options)=>new Locator(['Get Started','Skip'].includes(options.name)?'task':'login'),evaluate:async(fn,diagnostic)=>fn.name==='codingScope'?diagnostic?{ready:taskClicks===1&&!options.noCodingScope,observation:{status:'observed',composerCount:options.noCodingScope?0:1,conversationCount:options.noCodingScope?0:1,modalCount:0,roleRadioCount:0,exactAckLeafCount:0,exactGetStartedCount:0,exactSkipCount:0}}:taskClicks===1&&!options.noCodingScope:'visible',mainFrame:()=>options.overlayFrameChange&&overlayReads?{}:mainFrame,locator:s=>new Locator(s.startsWith('fieldset > legend')?'legend':'radios'),
+ const page={getByRole:(_role,options)=>new Locator(['Get Started','Skip'].includes(options.name)?'task':'login'),evaluate:async(fn,diagnostic)=>fn.name==='homeComposerScope'?(++homeReads,options.homeDeadline&&homeReads===1?(now=1201,true):options.directHome&&!options.homeLost&&!options.homeDuplicate&&!options.homeModal&&!(options.homeChanged&&homeReads>1)):fn.name==='codingScope'?diagnostic?{ready:taskClicks===1&&!options.noCodingScope,publicDOM:{navigation:{status:'observed'},editable:{status:'observed'},home:{status:'observed'}},observation:{status:'observed',composerCount:options.noCodingScope?0:1,conversationCount:options.noCodingScope?0:1,modalCount:0,roleRadioCount:0,exactAckLeafCount:0,exactGetStartedCount:0,exactSkipCount:0}}:taskClicks===1&&!options.noCodingScope:'visible',mainFrame:()=>options.overlayFrameChange&&overlayReads||options.homeFrameChanged&&homeReads?{}:mainFrame,locator:s=>new Locator(s.startsWith('fieldset > legend')?'legend':'radios'),
   url:()=>options.urlChange&&roleClicks>0?'app://codex/index.html?PRIVATE_ROUTE':'app://codex/index.html',
   context:()=>({browser:()=>({contexts:()=>[{pages:()=>options.foreignPage?[page,extraPage]:options.replacedPage?[{}]:[page]}]})})};
- const sandbox={exports:{},URL,require,process:{platform:options.platform??'win32',env:{GITHUB_ACTIONS:options.noHost?'false':'true',RUNNER_ENVIRONMENT:'github-hosted',RUNNER_OS:options.runnerOs??'Windows',NANH_CODEX_PROJECT_ARTIFACT_SHA256:options.skipPin?'ee7854145554718d7239d01ea37d44f6ba1e0ba4a93f47ac097d6e0f964da47c':undefined,NANH_CODEX_PUBLIC_ONBOARDING:options.noOptin?undefined:'engineering'}},Date:{now:()=>now},clearTimeout:()=>{},setTimeout:(f,ms)=>{if(ms<=100){now+=100;f();}}};
+ const sandbox={exports:{},URL,require:name=>name==='./codex-dom.cjs'?{directCDPPolicy:()=>!!options.directCDP,homeComposerScope:function homeComposerScope(){}}:require(name),process:{platform:options.platform??'win32',env:{GITHUB_ACTIONS:options.noHost?'false':'true',RUNNER_ENVIRONMENT:'github-hosted',RUNNER_OS:options.runnerOs??'Windows',NANH_CODEX_PROJECT_ARTIFACT_SHA256:options.skipPin?'ee7854145554718d7239d01ea37d44f6ba1e0ba4a93f47ac097d6e0f964da47c':undefined,NANH_CODEX_PUBLIC_ONBOARDING:options.noOptin?undefined:'engineering'}},Date:{now:()=>now},clearTimeout:()=>{},setTimeout:(f,ms)=>{if(ms<=100){now+=100;f();}}};
  vm.runInNewContext(source,sandbox);
  let guards=0,mainProofs=0,sealed=0;
- const guard=()=>{guards++;if(options.guardThrows)throw Error('PRIVATE');if(options.guardExhaustsBudget&&guards>=3||options.overlayBudgetExpired&&overlayReads>0)now=1201;return !inventoryOwnerLost&&!(options.overlayOwnerDuringProof&&legendReads>=3)&&!(options.overlayOwnerLoss&&overlayReads>0)&&!options.initialOwnerLoss&&!(options.ownerLossBeforeRole&&guards>=3)&&!(options.ownerLoss&&roleClicks>0)&&!(options.finalLoss&&guards>=2);};
+ const guard=()=>{guards++;if(options.guardThrows)throw Error('PRIVATE');if(options.guardExhaustsBudget&&guards>=3||options.overlayBudgetExpired&&overlayReads>0)now=1201;return !(options.homeOwnerLoss&&homeReads)&&!inventoryOwnerLost&&!(options.overlayOwnerDuringProof&&legendReads>=3)&&!(options.overlayOwnerLoss&&overlayReads>0)&&!options.initialOwnerLoss&&!(options.ownerLossBeforeRole&&guards>=3)&&!(options.ownerLoss&&roleClicks>0)&&!(options.finalLoss&&guards>=2);};
  const maximum=options.platform==='linux'||options.platform==='darwin'?60000:120000;
  const budget=options.expired?0:options.invalidDeadline?NaN:options.excessBudget?maximum+1:options.fullBudget?maximum:1200;
  let mainGuard=options.admitAux?async()=>{
@@ -113,7 +113,7 @@ async function trial(options={}) {
   mainGuard=require('./codex-main-guard.cjs').createHeldMainGuard(
     {...mainIdentity,page},page.context().browser(),options.differentGuardOwner?()=>true:guard,budget,()=> 'avatarOverlay',
     async()=>{mainProofs++;if(options.sampleOwnerLoss)inventoryOwnerLost=true;
-      return {...mainIdentity,scope:{focused:true,mainScope:true,counts:{}}};},
+      return {...mainIdentity,frame:options.homeFrameChanged&&homeReads?'changed':mainIdentity.frame,scope:{focused:true,mainScope:true,counts:{}}};},
     async()=>{},false,false,true,
     {sameCorrelationIdentity:(a,b)=>['url','target','frame','loader','frameUrl','fragment'].every(k=>a[k]===b[k]),
      settleFolderAuxiliary:async()=>false,now:()=>now});
@@ -122,11 +122,24 @@ async function trial(options={}) {
   mainGuard=async()=>{mainProofs++;return true;};
   mainGuard.includesNativeOwnership=true;
  }
- const facts=await sandbox.exports.run(page,options.noGuard?undefined:guard,budget,mainGuard);
+ const facts=await sandbox.exports.run(page,options.noGuard?undefined:guard,budget,mainGuard,undefined,undefined,!!options.directCDP);
  assert(!JSON.stringify(facts).includes('PRIVATE'));
  return {facts,roleClicks,continueClicks,taskClicks,mainProofs,legendReads,sealed,guards};
 }
 (async()=>{
+ for(const directCDP of [true,false]) {
+  const home=await trial({directCDP,directHome:true,noTaskScope:true,realMainGuard:true});
+  assert.equal(home.continueClicks,1);assert.equal(home.taskClicks,0);
+  assert.equal(home.facts.homeAfterContinueReady===true,directCDP);
+  assert.equal(home.facts.codingComposerReady,directCDP);
+  assert.equal(home.facts.taskScopeProved,false);assert.equal(home.facts.taskClickAttempted,false);
+  if(directCDP)assert.equal(home.facts.transitionReadinessObservation.status,'observed');
+ }
+ for(const negative of ['homeLost','homeDuplicate','homeModal','homeChanged','homeOwnerLoss','homeFrameChanged','homeDeadline']) {
+  const home=await trial({directCDP:true,directHome:true,noTaskScope:true,realMainGuard:true,[negative]:true});
+  assert.equal(home.facts.codingComposerReady,false);assert.equal(home.taskClicks,0);
+  assert.equal(home.facts.transitionPublicDOMObservation.home.status,'observed');
+ }
  const real=await trial({realMainGuard:true});
  assert(real.roleClicks>0);assert.equal(real.guards,real.mainProofs*2);
  const different=await trial({realMainGuard:true,differentGuardOwner:true,initialOwnerLoss:true});

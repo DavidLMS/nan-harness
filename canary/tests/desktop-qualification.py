@@ -2928,6 +2928,21 @@ class QualificationTests(unittest.TestCase):
                 q.public_onboarding({**setup, 'taskScopeProved':True, **changed}, 'chatgpt-desktop')
         coding = dict(status='observed',composerCount=1,conversationCount=0,modalCount=0,
                       roleRadioCount=0,exactAckLeafCount=0,exactGetStartedCount=0,exactSkipCount=0)
+        navigation = dict.fromkeys('codexButtonCount codexLinkCount codexMenuItemCount chatModeTriggerCount codexModeTriggerCount projectSelectorCount newChatCount projectsLinkCount'.split(), 0)
+        navigation.update(status='observed', uniqueCodexRole='none', uniqueCodexHitActionable=False)
+        editable = dict.fromkeys('codexHomeCount codexThreadCount codexOtherCount classicChatGPTCount genericInputCount genericBodyCount unboundCount editableCount sidebarNewChatCount'.split(), 0)
+        editable.update(status='observed', sidebarNewChatHitActionable=False, codexHomeCount=1, editableCount=1)
+        home = dict.fromkeys('homeComposerCount pendingTextareaCount pendingGroupCount proseMirrorEditableCount enabledSendCount disabledSendCount workspaceControlCount'.split(), 0)
+        home.update(status='observed', homeComposerCount=1, proseMirrorEditableCount=1)
+        transition = setup | dict(stage='coding-readiness', taskScopeProved=False, taskClickAttempted=False,
+            taskClickCompleted=False, codingComposerReady=True, homeAfterContinueReady=True,
+            transitionReadinessObservation=coding,
+            transitionPublicDOMObservation=dict(navigation=navigation, editable=editable, home=home))
+        self.assertEqual(q.public_onboarding(transition, 'chatgpt-desktop'), transition)
+        for changed in [{'taskClickCompleted':True}, {'roleScopeAbsent':False}, {'homeAfterContinueReady':1},
+                        {'transitionReadinessObservation':coding | {'rawText':'PRIVATE'}},
+                        {'transitionPublicDOMObservation':{'rawDOM':'PRIVATE'}}]:
+            with self.assertRaises(ValueError): q.public_onboarding(transition | changed, 'chatgpt-desktop')
         bound = {**setup,'stage':'coding-readiness','taskScopeProved':True,'taskClickAttempted':True,
                  'taskClickCompleted':True,'codingComposerReady':False,'codingReadinessObservation':coding}
         self.assertEqual(q.public_onboarding(bound,'chatgpt-desktop'),bound)
@@ -4069,6 +4084,29 @@ class CampaignDiagnosticTests(unittest.TestCase):
                 path.write_text(json.dumps(value | change))
                 with self.subTest(change=change), self.assertRaises(ValueError):
                     q.semantic_observations(root, app)
+
+    def test_native_tree_failure_is_closed_and_never_claims_a_submission(self):
+        tree = dict(operation='children', reason='query-unavailable', nodeScope='editor',
+                    foreignBus=False, childCount=None, visitedCount=None)
+        value = dict(schemaVersion=1, mechanism='claude-linux-native-chat', diagnosticsOnly=True,
+                     stage='blocked', submittedTurns=1, inputVerifiedTurns=1, copiedResponses=1,
+                     retryAttempted=False, clipboardCleared=True, nativeTreeObservation=tree)
+        self.check_receipt(value, 'claude-desktop', [
+            {'nativeTreeObservation': tree | {'rawObjectPath':'PRIVATE'}},
+            {'nativeTreeObservation': tree | {'reason':'PRIVATE'}},
+            {'nativeTreeObservation': tree | {'foreignBus':1}}, {'stage':'sent'}])
+
+    def test_windows_prepare_receipt_cannot_export_paths_or_fake_completion(self):
+        value = dict(schemaVersion=1, mechanism='codex-windows-profile-prepare', diagnosticsOnly=True,
+                     stage='completed', cause=None, bindingIndex=None, ancestorCount=5, ownedCount=10,
+                     privacy=['protected']*11, emptyRoots=[True,True], codeHomeAbsent=True, completed=True)
+        self.check_receipt(value, 'chatgpt-desktop', [
+            {'path':'PRIVATE'}, {'cause':'PRIVATE'}, {'ancestorCount':True},
+            {'privacy':['inherited']*11}, {'emptyRoots':[False,True]}, {'ownedCount':9},
+            {'bindingIndex':0}, {'stage':'command'}, {'codeHomeAbsent':False}])
+        failed = value | dict(stage='command', cause='binding', bindingIndex=2, ancestorCount=0,
+            ownedCount=0, privacy=[None]*11, emptyRoots=[None,None], codeHomeAbsent=None, completed=False)
+        self.check_receipt(failed, 'chatgpt-desktop', [{'bindingIndex':8}, {'completed':True}])
 
     def test_retry_candidate_is_passive_and_bound_to_the_failed_third_turn(self):
         candidate = dict(pendingUserCount=1, historyMatched=True, conversationHeadingCount=5,
