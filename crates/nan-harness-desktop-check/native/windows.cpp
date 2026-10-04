@@ -870,7 +870,9 @@ int fit_window(const std::string& request) {
         // An acknowledged resize may still be executing in the application's AX
         // server. Observe the same focused element and exact native window before
         // the sole position write; never replay either write after uncertainty.
-        const auto settle_deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
+        // Allow delayed AX publication of the acknowledged size. The parent
+        // still supervises this passive budget with the original launch cutoff.
+        const auto settle_deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(1500);
         AXError resized = CGSizeEqualToSize(before.bounds.size, target.size) ? kAXErrorSuccess
             : AXUIElementSetAttributeValue(before.focused, kAXSizeAttribute, size);
         CFRelease(size);
