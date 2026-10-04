@@ -756,15 +756,17 @@ def semantic_observations(directory, app):
             if 'failureAuthority' in value:
                 authority = value['failureAuthority']
                 counters = {'rejectedStream', 'rejectedHistory', 'rejectedContext'}
-                if (mechanism != 'claude-native-chat' or value['submittedTurns'] != 2
+                if (mechanism != 'claude-native-chat' or value['submittedTurns'] not in (2, 3)
                         or value['copiedResponses'] != 2 or value['retryAttempted']
                         or type(authority) is not dict
                         or set(authority) != counters | {'status', 'preparedTurns', 'learnedTurns'}
                         or type(authority['status']) is not str or authority['status'] not in {
-                            'context-unobserved', 'context-changed', 'prior-context-incomplete', 'policy'}
+                            'armed-unobserved', 'context-unobserved', 'context-changed', 'prior-context-incomplete', 'policy'}
                         or any(type(authority[key]) is not int or not 0 <= authority[key] <= 4096 for key in counters)
-                        or type(authority['preparedTurns']) is not int or not 0 <= authority['preparedTurns'] <= 2
+                        or type(authority['preparedTurns']) is not int or not 0 <= authority['preparedTurns'] <= 3
                         or type(authority['learnedTurns']) is not int or not 0 <= authority['learnedTurns'] <= authority['preparedTurns']
+                        or (authority['status'] == 'armed-unobserved' and (value['submittedTurns'] != 3 or authority['preparedTurns'] != 3 or authority['learnedTurns'] != 2 or type(value.get('providerObservation')) is not dict or value['providerObservation'].get('failureObserved') is not False))
+                        or (authority['status'] != 'armed-unobserved' and (value['submittedTurns'] != 2 or authority['preparedTurns'] > 2))
                         or authority['status'] == 'context-unobserved' and authority['learnedTurns'] != 0
                         or authority['status'] == 'prior-context-incomplete' and authority['learnedTurns'] >= 2):
                     raise ValueError('invalid Claude failure authority diagnostic')

@@ -421,6 +421,17 @@ impl ClaudeNativeChatSession<'_> {
         gate: &ProviderGate,
         outcome: Result<(), Reason>,
     ) -> Result<(), Reason> {
+        self.observe_provider(gate);
+        if self.facts.submitted_turns == 3
+            && self.facts.copied_responses == 2
+            && !self.facts.retry_attempted
+            && self
+                .submitted_failure
+                .as_ref()
+                .is_some_and(|turn| !gate.claude_failure_turn_observed(turn.epoch))
+        {
+            self.facts.failure_authority = Some(gate.claude_failure_authority_rejection());
+        }
         let cleanup = verified_clipboard_clear(|| clipboard::write(""), clipboard::read);
         self.facts.clipboard_cleared = cleanup.is_ok();
         if cleanup.is_err() {

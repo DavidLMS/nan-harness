@@ -3266,6 +3266,26 @@ class ClaudeFailureAuthorityTests(unittest.TestCase):
                 path.write_text(json.dumps({**value,'failureAuthority':{**authority,**extra}}))
                 with self.assertRaises(ValueError):q.semantic_observations(root,'claude-desktop')
 
+class ClaudeArmedAuthorityTests(unittest.TestCase):
+    def test_armed_negative_is_closed_and_never_claims_failure(self):
+        value=dict(schemaVersion=1,mechanism='claude-native-chat',diagnosticsOnly=True,
+                   stage='sent',submittedTurns=3,inputVerifiedTurns=3,copiedResponses=2,
+                   retryAttempted=False,clipboardCleared=True,
+                   providerObservation=dict(generationObserved=True,fixtureResponseVerified=True,failureObserved=False))
+        authority=dict(status='armed-unobserved',preparedTurns=3,learnedTurns=2,
+                       rejectedStream=1,rejectedHistory=1,rejectedContext=1)
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp)/'authority.json'
+            path.write_text(json.dumps({**value,'failureAuthority':authority}))
+            self.assertEqual(q.semantic_observations(tmp,'claude-desktop'),[{**value,'failureAuthority':authority}])
+            for extra in ({'preparedTurns':2},{'learnedTurns':3},{'rejectedStream':4097},{'context':'PRIVATE'}):
+                path.write_text(json.dumps({**value,'failureAuthority':{**authority,**extra}}))
+                with self.assertRaises(ValueError):q.semantic_observations(tmp,'claude-desktop')
+            for extra in ({'submittedTurns':2},{'retryAttempted':True},{'providerObservation':[]},
+                          {'providerObservation':{**value['providerObservation'],'failureObserved':True}}):
+                path.write_text(json.dumps({**value,**extra,'failureAuthority':authority}))
+                with self.assertRaises(ValueError):q.semantic_observations(tmp,'claude-desktop')
+
 class ClaudePersistOwnerTests(unittest.TestCase):
     def test_runner_forwarding_is_explicit_private_windows_only(self):
         with tempfile.TemporaryDirectory() as tmp:

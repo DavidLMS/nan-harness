@@ -7,6 +7,7 @@ use zeroize::Zeroizing;
 #[derive(Serialize, Debug, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum AuthorityRejection {
+    ArmedUnobserved,
     ContextUnobserved,
     ContextChanged,
     PriorContextIncomplete,
@@ -78,7 +79,9 @@ impl FailureTurnAuthority {
     }
     pub(super) fn rejection_observation(&self) -> FailureAuthorityObservation {
         FailureAuthorityObservation {
-            status: if self.contexts.iter().all(Option::is_none) {
+            status: if self.failure_armed && !self.observed {
+                AuthorityRejection::ArmedUnobserved
+            } else if self.contexts.iter().all(Option::is_none) {
                 AuthorityRejection::ContextUnobserved
             } else if self.context_ambiguous {
                 AuthorityRejection::ContextChanged
@@ -103,17 +106,7 @@ impl FailureTurnAuthority {
         }
         // Count only a request containing the exact current prepared user text.
         // Unrelated background/title traffic cannot alter these diagnostics.
-        let relevant = body
-            .get("messages")
-            .and_then(Value::as_array)
-            .is_some_and(|messages| {
-                messages.len() <= 512
-                    && messages.iter().any(|message| {
-                        message.get("role").and_then(Value::as_str) == Some("user")
-                            && message.get("content").and_then(exact_text)
-                                == self.prompts.last().map(|prompt| prompt.as_str())
-                    })
-            });
+        let relevant = current_user_candidate(body, &self.prompts);
         if !relevant {
             return;
         }
@@ -149,12 +142,22 @@ impl FailureTurnAuthority {
         }
     }
     pub(super) fn observe(&mut self, body: &Value) -> bool {
-        if !self.failure_armed
-            || self.observed
-            || self.context_ambiguous
-            || !matches_history(body, &self.prompts)
-            || main_context(body) != self.contexts[1]
-        {
+        if !self.failure_armed || self.observed || self.context_ambiguous {
+            return false;
+        }
+        if !current_user_candidate(body, &self.prompts) {
+            return false;
+        }
+        if body.get("stream") != Some(&Value::Bool(true)) {
+            self.rejected_stream = self.rejected_stream.saturating_add(1).min(4096);
+            return false;
+        }
+        if !matches_history(body, &self.prompts) {
+            self.rejected_history = self.rejected_history.saturating_add(1).min(4096);
+            return false;
+        }
+        if main_context(body) != self.contexts[1] {
+            self.rejected_context = self.rejected_context.saturating_add(1).min(4096);
             return false;
         }
         self.observed = true;
@@ -163,6 +166,22 @@ impl FailureTurnAuthority {
     pub(super) fn observed(&self, epoch: u64) -> bool {
         self.epoch == epoch && self.failure_armed && self.observed
     }
+}
+// Attribute rejection counts only to the bounded exact prepared user candidate.
+// Its presence is diagnostic relevance, never authority to inject an error.
+fn current_user_candidate(body: &Value, prompts: &[Zeroizing<String>]) -> bool {
+    let Some(prompt) = prompts.last() else {
+        return false;
+    };
+    body.get("messages")
+        .and_then(Value::as_array)
+        .is_some_and(|messages| {
+            messages.len() <= 512
+                && messages.iter().any(|message| {
+                    message.get("role").and_then(Value::as_str) == Some("user")
+                        && message.get("content").and_then(exact_text) == Some(prompt.as_str())
+                })
+        })
 }
 fn exact_text(value: &Value) -> Option<&str> {
     match value {
@@ -389,6 +408,38 @@ mod tests {
         assert!(!wire.contains("private"));
         assert!(!wire.contains("\"changed\""));
         assert!(authority.prepare("private three", true, false).is_err());
+    }
+
+    #[test]
+    fn armed_rejections_are_private_and_only_count_current_candidates() {
+        let mut authority = FailureTurnAuthority::default();
+        authority.prepare("first", false, false).unwrap();
+        authority.learn_context(&request(&["first"], "instructions"));
+        authority.prepare("second", false, false).unwrap();
+        authority.learn_context(&request(&["first", "second"], "instructions"));
+        let epoch = authority.prepare("third", true, false).unwrap().unwrap();
+        assert!(!authority.observe(&request(&["unrelated title"], "instructions")));
+        let valid = request(&["first", "second", "third"], "instructions");
+        let mut stream = valid.clone();
+        stream["stream"] = json!(false);
+        assert!(!authority.observe(&stream));
+        assert!(!authority.observe(&request(&["third"], "instructions")));
+        assert!(!authority.observe(&request(&["first", "second", "third"], "changed")));
+        let observation = authority.rejection_observation();
+        assert_eq!(observation.status, AuthorityRejection::ArmedUnobserved);
+        assert_eq!(
+            (
+                observation.rejected_stream,
+                observation.rejected_history,
+                observation.rejected_context
+            ),
+            (1, 1, 1)
+        );
+        let wire = serde_json::to_string(&observation).unwrap();
+        assert!(!wire.contains("third") && !wire.contains("instructions"));
+        assert!(!authority.observed(epoch));
+        assert!(authority.observe(&valid));
+        assert!(authority.observed(epoch));
     }
 
     #[test]
