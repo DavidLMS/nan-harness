@@ -182,6 +182,10 @@ fn embedded_text_observation(facts: &Value) -> Option<EmbeddedTextObservation> {
 
 #[derive(Clone, Copy, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "Independent native text observations preserve the closed flat wire contract"
+)]
 struct OwnedInputObservation {
     node_count: u8,
     resolved_node_count: u8,

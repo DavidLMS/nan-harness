@@ -149,6 +149,16 @@ an internal state machine. Their `expect` attributes include reasons and become
 unfulfilled if the lint no longer applies; the exceptions do not waive other
 quality requirements.
 
+`OwnedInputObservation` in
+`crates/nan-harness-desktop-check/src/gui/claude_linux_chat.rs` contains six
+boolean fields, above the `struct_excessive_bools` threshold of three. They
+report independent native text coverage, root topology, placeholder comparisons
+and known-prompt equality in a closed, flat diagnostic protocol. Keep these
+observations directly named; they grant no input capability, and explicit
+validation rejects contradictory facts. Reassess if this wire schema gains
+another boolean or starts encoding action states. The scoped `expect` preserves
+the external contract and does not waive privacy, validation or other gates.
+
 `run_node_native_plugins` in
 `crates/nan-harness-cli/src/commands/configuration/tests/plugin_syntax.rs` has
 102 lines, mostly a three-entry table of generated JavaScript fixtures. Keep
