@@ -43,6 +43,21 @@ fn frame(input: &mut impl Read) -> Result<Zeroizing<String>, FailureCategory> {
     }
     Err(FailureCategory::Output)
 }
+fn receipt(input: &mut impl Read) -> Result<Zeroizing<String>, FailureCategory> {
+    // A stage and optional closed diagnostic line must end at process EOF.
+    // Bound the whole receipt; the mode-specific parser rejects all other data.
+    let mut bytes = Zeroizing::new(Vec::new());
+    input
+        .take(257)
+        .read_to_end(&mut bytes)
+        .map_err(|_| FailureCategory::Output)?;
+    if bytes.len() > 256 {
+        return Err(FailureCategory::Output);
+    }
+    String::from_utf8(bytes.to_vec())
+        .map(Zeroizing::new)
+        .map_err(|_| FailureCategory::Output)
+}
 pub(in crate::native) fn run(
     executable: &Path,
     window: &Window,
@@ -85,13 +100,7 @@ pub(in crate::native) fn run(
         if sender.send(ready).is_err() || failed {
             return;
         }
-        let result = frame(&mut output).and_then(|frame| {
-            let mut trailing = [0];
-            match output.read(&mut trailing) {
-                Ok(0) => Ok(frame),
-                _ => Err(FailureCategory::Output),
-            }
-        });
+        let result = receipt(&mut output);
         let _ = sender.send(result);
     }));
     let receive = || {
@@ -118,7 +127,7 @@ pub(in crate::native) fn run(
         input.write_all(b"\n")
     }));
     let result = receive()?;
-    if windows_chat_turn::WindowsChatStage::parse(&result).is_none() {
+    if windows_chat_turn::WindowsChatReceipt::parse(&result, mode).is_none() {
         return Err(FailureCategory::Output);
     }
     loop {
@@ -163,27 +172,32 @@ mod tests {
             name: String::new(),
             layer: 0,
         };
-        let scripted = |suffix: &str, budget| {
+        let scripted = |suffix: &str, budget, mode| {
             std::fs::write(&executable,format!("#!/usr/bin/env python3\nimport sys\nprint('ready 1000',flush=True)\nwire=sys.stdin.buffer.read()\nassert wire.count(b'\\n')==1\nassert len(wire)<8192\nassert len(wire.split())==13\nassert int(wire.split()[7])<=16000\n{suffix}\n")).unwrap();
             std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
             run(
                 &executable,
                 &window,
-                "input-replace-owned",
-                ["prompt", "", "sentinel"],
+                mode,
+                ["prompt", "marker", "sentinel"],
                 Instant::now() + budget,
             )
         };
         assert_eq!(
-            scripted("print('turn sent',flush=True)", Duration::from_secs(2))
-                .unwrap()
-                .as_str(),
+            scripted(
+                "print('turn sent',flush=True)",
+                Duration::from_secs(2),
+                "input-replace-owned"
+            )
+            .unwrap()
+            .as_str(),
             "turn sent\n"
         );
         assert_eq!(
             scripted(
                 "print('turn sent\\nPRIVATE',flush=True)",
-                Duration::from_secs(2)
+                Duration::from_secs(2),
+                "input-replace-owned"
             )
             .unwrap_err(),
             FailureCategory::Output
@@ -191,10 +205,38 @@ mod tests {
         assert_eq!(
             scripted(
                 "import time; time.sleep(0.2); print('turn sent',flush=True)",
-                Duration::from_millis(80)
+                Duration::from_millis(80),
+                "input-replace-owned"
             )
             .unwrap_err(),
             FailureCategory::Timeout
         );
+        let diagnostic =
+            "print('turn scope-control-absent\\nfailure-scope 1 1 1 1 0 1 1 0',flush=True)";
+        for mode in ["retry-ready", "retry", "failure-details"] {
+            assert_eq!(
+                scripted(diagnostic, Duration::from_secs(2), mode)
+                    .unwrap()
+                    .as_str(),
+                "turn scope-control-absent\nfailure-scope 1 1 1 1 0 1 1 0\n"
+            );
+        }
+        for (suffix, mode) in [
+            (diagnostic, "input-replace-owned"),
+            (
+                "print('turn sent\\nfailure-scope 1 1 1 0 0 1 1 0',flush=True)",
+                "retry",
+            ),
+            (
+                "print('turn sent\\nfailure-scope 1 1 1 1 0 1 1 0\\nPRIVATE',flush=True)",
+                "retry",
+            ),
+            ("print('X'*257,flush=True)", "retry"),
+        ] {
+            assert_eq!(
+                scripted(suffix, Duration::from_secs(2), mode).unwrap_err(),
+                FailureCategory::Output
+            );
+        }
     }
 }

@@ -3006,3 +3006,36 @@ Run the grouped candidate with `app=all`, `platform=all`,
 keeps independent native jobs running after other failures, runs the integration
 gate, and aggregates all twelve cells against one source commit. Native success
 and the final integration gate remain unproven until that campaign completes.
+
+### Twelve-cell campaign 37232180513
+
+[The complete campaign](https://github.com/DavidLMS/nan-harness/actions/runs/37232180513)
+at `3a0e7281e36e1d5926da41bbc3a28daa05236ff3` produced all twelve
+qualification reports. The integration-quality job passed. Six native cells
+qualified, each in three independent sessions; the aggregate correctly remains
+incomplete. App and global cleanup passed in every cell.
+
+| Application | Linux x64 | macOS ARM64 | Windows x64 |
+| --- | --- | --- | --- |
+| Zed | Recovery fails | Passed | Initial clipboard acquisition / recovery selector fails |
+| Codex | Passed | Passed | Onboarding acquisition fails |
+| Claude | Second-turn accessibility queries fail | Passed | File Read fails; diagnostic transport rejects receipt |
+| Hermes | Passed | Two sessions pass; one recovery fails | Passed |
+
+The Codex Linux sandbox prerequisite and new-empty-turn Retry correlation now
+pass real tool and recovery acceptance. The same Retry correlation passes on
+macOS. Windows reaches folder trust, completing that action in one session,
+but never qualifies the initial conversation.
+
+Zed Linux records a completed prior turn in all three passive log baselines,
+then zero session/turn events after Retry. This calibrates the observer and
+narrows the unresolved boundary to activation or the path before native resume;
+it does not establish which of those failed. Claude Linux reports D-Bus
+`NoReply` from identity, owner and children queries after the first response.
+
+Claude Windows exposes a checker integration defect: the new optional
+`failure-scope` line is accepted by the receipt parser but rejected earlier by
+the single-line process transport. Its real Read tool also remains unsuccessful.
+Hermes macOS reports a detached retained Retry button after the owned onboarding
+dismissal in its failed session. Neither failure is accepted as a pass or hidden
+by a rerun. Correct and test the grouped candidate before another campaign.
