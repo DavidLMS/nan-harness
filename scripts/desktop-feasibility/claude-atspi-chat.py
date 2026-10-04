@@ -87,15 +87,13 @@ class Controller:
             pending.extend((child, depth + 1) for child in children)
         return nodes
 
-    def state(self, node, editable=False, active=False):
+    def state(self, node, editable=False, frame=False):
         self.owned(node)
         bits = self.query('state', node)
         if (type(bits) is not int or not 0 <= bits < 2**64 or bits & (1 << 6)
                 or not bits & (1 << 30) or not bits & (1 << 25)
                 or editable and not bits & (1 << 7)):
-            raise Rejected('input' if editable else 'frame' if active else 'state')
-        if active and not bits & (1 << 1):
-            raise Rejected('frame-active')
+            raise Rejected('input' if editable else 'frame' if frame else 'state')
         return bits
 
     def bind(self):
@@ -137,7 +135,7 @@ class Controller:
                 break
             self.state(node)
             if identity[0] == 23:  # Public AT-SPI Frame role.
-                self.state(node, active=True)
+                self.state(node, frame=True)
                 frames.append(node)
             node = self.query('parent', node)
         else:
@@ -161,7 +159,11 @@ class Controller:
             if self.query('identity',self.chat)!=(43,'Chat','') or self.query('attributes',self.chat).get('current')!='page':
                 raise Rejected()
         self.state(self.editor, editable=True)
-        self.state(self.frame, active=True)
+        # The exact retained native X11 foreground/client/clear-stack proof above
+        # supplies window activation authority. AT-SPI ACTIVE is not required:
+        # Chromium may export a visible Frame without that duplicate state.
+        # Its owned identity, visibility, attachment and exact client bounds remain required.
+        self.state(self.frame, frame=True)
         if (self.query('identity', self.editor), self.query('bounds', self.editor)) != self.sealed_editor:
             raise Rejected()
         if (self.query('identity', self.frame), self.query('bounds', self.frame)) != self.sealed_frame:

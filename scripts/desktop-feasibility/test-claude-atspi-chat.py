@@ -15,10 +15,15 @@ class Adapter:
         self.focus_count = self.paste_count = self.send_count = self.copy_count = 0
         self.cleared = False
         self.now = 0
+        self.frame_reads = 0
         self.nodes = ['root','frame','editor','mode','chat','send']
     def owner(self, node):
         return 8 if self.changes.get('foreign') else 7
     def identity(self, node):
+        if node == 'frame':
+            self.frame_reads += 1
+            if self.changes.get('changed_frame') and self.frame_reads >= 4:
+                return (23,'changed held frame','')
         return {'root':(23 if self.changes.get('wrong_root_role') else 75,'Claude',''),'frame':(69 if self.changes.get('window_role') else 23,'Claude',''),
                 'editor':(61,'Write your prompt to Claude',''),
                 'mode':(39,'Mode',''),'chat':(43,'Chat',''),'send':(43,'Start task','')}[node]
@@ -38,7 +43,7 @@ class Adapter:
         if node=='frame':return (0,0,800,600)
         return (0,0,900,50) if self.changes.get('outside') and node=='editor' else (10,10,100,40)
     def guard(self):
-        return not (self.changes.get('guard_after_paste') and self.paste_count)
+        return not self.changes.get('guard_before') and not (self.changes.get('guard_after_paste') and self.paste_count)
     def client_bounds(self):
         return (0,0,801,600) if self.changes.get('moved_client') else (0,0,800,600)
     def focused(self,node):
@@ -86,8 +91,28 @@ class ControllerTests(unittest.TestCase):
         facts=controller.submit('private exact prompt')
         self.assertTrue(adapter.cleared)
         return adapter,controller,facts
+    def test_native_frame_authority_does_not_require_duplicate_active_state(self):
+        adapter, controller, facts = self.run_case(inactive_frame=True)
+        self.assertTrue(facts['inputVerified'])
+        self.assertTrue(facts['sendForwarded'])
+        self.assertEqual(adapter.focus_count,1)
+        self.assertEqual(adapter.paste_count,1)
+        self.assertEqual(adapter.send_count,1)
+
+    def test_inactive_frame_still_requires_every_independent_proof(self):
+        for changed in [{'guard_before':True}, {'foreign':True}, {'window_role':True},
+                        {'hidden_frame':True}, {'moved_client':True}, {'outside':True},
+                        {'detached':True}, {'changed_frame':True}, {'wrong_root_role':True}]:
+            with self.subTest(changed=changed):
+                adapter, controller, facts = self.run_case(inactive_frame=True, **changed)
+                self.assertFalse(facts['inputVerified'])
+                self.assertFalse(facts['sendForwarded'])
+                self.assertEqual(adapter.focus_count,0)
+                self.assertEqual(adapter.paste_count,0)
+                self.assertEqual(adapter.send_count,0)
+
     def test_frame_rejections_are_precise_without_action(self):
-        for options, boundary in [({'inactive_frame':True},'frame-active'),
+        for options, boundary in [({'guard_before':True},'native-window'),
                                   ({'window_role':True},'frame-count'),
                                   ({'moved_client':True},'frame-client')]:
             adapter, controller, facts = self.run_case(**options)
