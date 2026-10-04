@@ -29,6 +29,15 @@ QUERY_BOUNDARIES = dict(owner='source-owner', identity='tree', children='tree', 
     copy_input_once='clipboard', clear_clipboard='clipboard', clipboard_sentinel='clipboard',
     clipboard_read='clipboard', actions='action', hit='action', invoke_once='action')
 
+def input_shape(value):
+    # Diagnostic only. These sets never grant replacement or submission authority.
+    if type(value) is not str or not 0 < len(value) <= 4096:
+        raise Rejected('input')
+    return dict(charCount=len(value),onlyLineBreaks=all(c in '\r\n' for c in value),
+                onlyWhitespace=value.isspace(),
+                onlyZeroWidthMarkers=all(c in '\u200b\u200c\u200d\u2060\ufeff' for c in value))
+
+
 class Rejected(Exception):
     def __init__(self, boundary=None):
         self.boundary = boundary if boundary in BOUNDARIES else None
@@ -232,7 +241,9 @@ class Controller:
             self.proof() if self.restored else self.bind()
             self.current_chat(self.tree())
             # This initial candidate has NO replacement authority for nonempty input.
-            if self.query('text', self.editor) != '':
+            initial = self.query('text', self.editor)
+            if initial != '':
+                self.facts['inputShape'] = input_shape(initial)
                 self.facts['stage'] = 'input-not-empty'
                 self.facts['failureBoundary'] = 'input'
                 return self.facts

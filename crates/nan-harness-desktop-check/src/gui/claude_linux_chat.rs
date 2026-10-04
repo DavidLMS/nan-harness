@@ -53,6 +53,26 @@ fn failure_boundary(facts: &Value) -> Option<FailureBoundary> {
     serde_json::from_value(facts.get("failureBoundary")?.clone()).ok()
 }
 
+#[derive(Clone, Copy, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct InputShape {
+    char_count: u16,
+    only_line_breaks: bool,
+    only_whitespace: bool,
+    only_zero_width_markers: bool,
+}
+impl InputShape {
+    fn valid(self) -> bool {
+        (1..=4096).contains(&self.char_count)
+            && (!self.only_line_breaks || self.only_whitespace)
+            && (!self.only_zero_width_markers || !self.only_whitespace && !self.only_line_breaks)
+    }
+}
+fn input_shape(facts: &Value) -> Option<InputShape> {
+    let shape: InputShape = serde_json::from_value(facts.get("inputShape")?.clone()).ok()?;
+    shape.valid().then_some(shape)
+}
+
 const FLAGS: [&str; 7] = [
     "inputVerified",
     "pasteAttempted",
@@ -113,7 +133,7 @@ fn decode(bytes: &[u8]) -> Option<(Value, Option<Value>)> {
         return None;
     }
     let facts = value["facts"].as_object()?;
-    if ![11, 12].contains(&facts.len())
+    if !(11..=13).contains(&facts.len())
         || facts.keys().any(|key| {
             !FLAGS.contains(&key.as_str())
                 && ![
@@ -122,6 +142,7 @@ fn decode(bytes: &[u8]) -> Option<(Value, Option<Value>)> {
                     "diagnosticsOnly",
                     "stage",
                     "failureBoundary",
+                    "inputShape",
                 ]
                 .contains(&key.as_str())
         })
@@ -151,6 +172,14 @@ fn decode(bytes: &[u8]) -> Option<(Value, Option<Value>)> {
         || value["facts"]["sendForwarded"] == true && value["facts"]["sendAttempted"] != true
         || value["facts"]["sendAttempted"] == true && value["facts"]["inputVerified"] != true
         || value["facts"]["responseVerified"] == true && value["facts"]["stage"] != "copied"
+    {
+        return None;
+    }
+    if facts.contains_key("inputShape")
+        && (input_shape(&value["facts"]).is_none()
+            || !["input-not-empty", "clipboard-cleanup"]
+                .contains(&value["facts"]["stage"].as_str()?)
+            || FLAGS.iter().any(|key| value["facts"][*key] != false))
     {
         return None;
     }
@@ -259,6 +288,7 @@ pub(crate) struct ClaudeLinuxChatSession<'a> {
     binding: Option<Value>,
     stage: String,
     failure_boundary: Option<FailureBoundary>,
+    input_shape: Option<InputShape>,
     submitted: u8,
     verified: u8,
     copied: u8,
@@ -288,6 +318,7 @@ impl Gui {
             binding: None,
             stage: "source".into(),
             failure_boundary: None,
+            input_shape: None,
             submitted: 0,
             verified: 0,
             copied: 0,
@@ -335,6 +366,7 @@ impl ClaudeLinuxChatSession<'_> {
         self.failure_boundary = Some(FailureBoundary::Transport);
         let (facts, binding) = supervise(&self.driver, payload, deadline)?;
         self.failure_boundary = failure_boundary(&facts);
+        self.input_shape = input_shape(&facts);
         self.stage = facts["stage"]
             .as_str()
             .ok_or(Reason::ActionUnsupported)?
@@ -442,6 +474,9 @@ impl ClaudeLinuxChatSession<'_> {
         if let Some(boundary) = self.failure_boundary {
             facts["failureBoundary"] = json!(boundary);
         }
+        if let Some(shape) = self.input_shape {
+            facts["inputShape"] = json!(shape);
+        }
         let recorded = open_private_new(&self.directory.join(format!(
             "claude-linux-native-chat-{}.json",
             self.gui.visual.pid()
@@ -452,5 +487,28 @@ impl ClaudeLinuxChatSession<'_> {
         }
         recorded.map_err(|_| Reason::IsolationUnavailable)?;
         outcome
+    }
+}
+
+#[cfg(test)]
+mod input_shape_tests {
+    use super::input_shape;
+    use serde_json::json;
+
+    #[test]
+    fn input_shape_is_closed_bounded_and_diagnostic_only() {
+        let valid = json!({"inputShape":{"charCount":1,"onlyLineBreaks":true,
+            "onlyWhitespace":true,"onlyZeroWidthMarkers":false}});
+        assert!(input_shape(&valid).is_some());
+        for shape in [
+            json!({"charCount":0,"onlyLineBreaks":false,"onlyWhitespace":false,"onlyZeroWidthMarkers":false}),
+            json!({"charCount":4097,"onlyLineBreaks":false,"onlyWhitespace":false,"onlyZeroWidthMarkers":false}),
+            json!({"charCount":true,"onlyLineBreaks":false,"onlyWhitespace":false,"onlyZeroWidthMarkers":false}),
+            json!({"charCount":1,"onlyLineBreaks":true,"onlyWhitespace":false,"onlyZeroWidthMarkers":false}),
+            json!({"charCount":1,"onlyLineBreaks":false,"onlyWhitespace":true,"onlyZeroWidthMarkers":true}),
+            json!({"charCount":1,"onlyLineBreaks":false,"onlyWhitespace":false,"onlyZeroWidthMarkers":false,"value":"PRIVATE"}),
+        ] {
+            assert!(input_shape(&json!({"inputShape":shape})).is_none());
+        }
     }
 }

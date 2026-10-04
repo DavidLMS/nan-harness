@@ -2539,6 +2539,24 @@ class QualificationTests(unittest.TestCase):
             path.write_text(json.dumps({**facts,'failureBoundary':'action','stage':'action-uncertain'}))
             with self.assertRaises(ValueError):q.semantic_observations(root,'chatgpt-desktop')
 
+    def test_linux_input_shape_is_closed_and_cannot_prove_a_sent_turn(self):
+        facts = dict(schemaVersion=1, mechanism='claude-linux-native-chat', diagnosticsOnly=True,
+                     stage='input-not-empty', submittedTurns=0, inputVerifiedTurns=0, copiedResponses=0,
+                     retryAttempted=False, clipboardCleared=True)
+        shape = dict(charCount=1, onlyLineBreaks=True, onlyWhitespace=True, onlyZeroWidthMarkers=False)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / 'shape.json'
+            path.write_text(json.dumps({**facts,'inputShape':shape}))
+            self.assertEqual(q.semantic_observations(root,'claude-desktop')[0]['inputShape'],shape)
+            for changed in ({**shape,'charCount':True}, {**shape,'charCount':0},
+                            {**shape,'charCount':4097}, {**shape,'onlyWhitespace':False},
+                            {**shape,'onlyZeroWidthMarkers':True}, {**shape,'value':'PRIVATE'}):
+                path.write_text(json.dumps({**facts,'inputShape':changed}))
+                with self.assertRaises(ValueError):q.semantic_observations(root,'claude-desktop')
+            path.write_text(json.dumps({**facts,'inputShape':shape,'stage':'sent'}))
+            with self.assertRaises(ValueError):q.semantic_observations(root,'claude-desktop')
+
     def test_codex_main_confirmation_preserves_failed_guard_and_privacy(self):
         value = dict(schemaVersion=1, mechanism='renderer-inventory', diagnosticsOnly=True,
                      app='chatgpt-desktop', endpointOwned=True, launcherOwned=True, attached=True,

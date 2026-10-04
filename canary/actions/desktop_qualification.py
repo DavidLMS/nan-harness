@@ -1017,7 +1017,7 @@ def semantic_observations(directory, app):
         elif mechanism == 'claude-linux-native-chat':
             fields = {'schemaVersion','mechanism','diagnosticsOnly','stage','submittedTurns',
                       'inputVerifiedTurns','copiedResponses','retryAttempted','clipboardCleared'}
-            if (app != 'claude-desktop' or set(value) - {'failureBoundary'} != fields or value['diagnosticsOnly'] is not True
+            if (app != 'claude-desktop' or set(value) - {'failureBoundary','inputShape'} != fields or value['diagnosticsOnly'] is not True
                     or type(value['stage']) is not str or value['stage'] not in {
                         'source','focus','paste','readback','send','input-not-empty','blocked',
                         'action-uncertain','deadline','clipboard-cleanup','sent','response-pending',
@@ -1036,6 +1036,17 @@ def semantic_observations(directory, app):
                                                  'input-not-empty','response-mismatch'}):
                     raise ValueError('invalid Claude Linux Chat failure boundary')
                 record['failureBoundary'] = boundary
+            if 'inputShape' in value:
+                shape = value['inputShape']
+                flags = {'onlyLineBreaks','onlyWhitespace','onlyZeroWidthMarkers'}
+                if (type(shape) is not dict or set(shape) != flags | {'charCount'}
+                        or type(shape['charCount']) is not int or not 1 <= shape['charCount'] <= 4096
+                        or any(type(shape[key]) is not bool for key in flags)
+                        or shape['onlyLineBreaks'] and not shape['onlyWhitespace']
+                        or shape['onlyZeroWidthMarkers'] and (shape['onlyWhitespace'] or shape['onlyLineBreaks'])
+                        or value['stage'] not in {'input-not-empty','blocked','deadline','clipboard-cleanup'}):
+                    raise ValueError('invalid Claude Linux input shape')
+                record['inputShape'] = shape
             record.update({key:value[key] for key in fields - {'schemaVersion','mechanism'}})
         elif mechanism == 'claude-config-persist-owners':
             fields = {'schemaVersion','mechanism','diagnosticsOnly','status','stage','destinationPresent',

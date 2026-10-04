@@ -75,6 +75,18 @@ class Adapter:
     def sleep(self,amount):self.now+=amount
 
 
+class InputShapeTests(unittest.TestCase):
+    def test_closed_shapes_and_private_mixed_content(self):
+        for value,expected in [ ('\n\r\n',(3,True,True,False)),
+                (' \t',(2,False,True,False)), ('\u200b\ufeff',(2,False,False,True)),
+                ('PRIVATE nonce\n',(14,False,False,False)), ('\n\u200b',(2,False,False,False)) ]:
+            shape=chat.input_shape(value)
+            self.assertEqual(tuple(shape.values()),expected)
+            self.assertEqual(set(shape),{'charCount','onlyLineBreaks','onlyWhitespace','onlyZeroWidthMarkers'})
+            self.assertNotIn(value,str(shape))
+        for value in ['',True,None,'x'*4097]:
+            with self.assertRaises(chat.Rejected):chat.input_shape(value)
+
 class ControllerTests(unittest.TestCase):
     def run_case(self, **options):
         adapter=Adapter(**options)
@@ -91,6 +103,15 @@ class ControllerTests(unittest.TestCase):
         facts=controller.submit('private exact prompt')
         self.assertTrue(adapter.cleared)
         return adapter,controller,facts
+    def test_nonempty_shape_is_same_read_and_never_authorizes_input(self):
+        for initial in ['\n',' \t','\u200b','PRIVATE nonce']:
+            adapter, controller, facts = self.run_case(initial=initial)
+            self.assertEqual(facts['stage'],'input-not-empty')
+            self.assertEqual(facts['inputShape'],chat.input_shape(initial))
+            self.assertEqual(adapter.focus_count,0)
+            self.assertEqual(adapter.paste_count,0)
+            self.assertEqual(adapter.send_count,0)
+
     def test_native_frame_authority_does_not_require_duplicate_active_state(self):
         adapter, controller, facts = self.run_case(inactive_frame=True)
         self.assertTrue(facts['inputVerified'])
