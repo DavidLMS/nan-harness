@@ -146,16 +146,20 @@ observations describe completed runs, rather than additional qualification:
 | --- | --- | --- | --- |
 | Zed | Response and file-tool steps pass; pointer and accessibility Retry acknowledgements do not produce provider recovery. | Three complete probes pass the expanded retry policy. | Three complete probes pass with direct native clipboard transport and all cleanup checks. |
 | Hermes | Three complete probes pass with renderer process ownership. | Three complete probes pass with private native userData and bounded cold-start waits. | Three complete probes pass after ordinary onboarding dismissal and fresh catalog readiness, including explicit UI Retry and cleanup. |
-| ChatGPT / Codex | All three sessions complete folder trust, Engineering, Continue, Skip and its ordinary confirmation; the coding composer and conversation remain absent. | All three sessions complete the single native activation and retain the source-known auxiliary; external overlap prevents focus acceptance until the original deadline. | All three sessions complete folder trust. Later role or Continue checks exhaust the deadline, or task acknowledgement remains absent. |
-| Claude | The owned editor and native window pass. Complete helper packets now decode; the single LF leaf has no exported BR/filler marker, so input remains blocked. | Three complete native probes pass input, response, file-tool, controlled failure recovery and cleanup. | Normal configuration persistence still fails with a sharing violation. The production environment path resolver and configuration lifecycle pass the preinstallation filesystem fixture. |
+| ChatGPT / Codex | All three sessions complete folder trust, Engineering, Continue, Skip and its ordinary confirmation; the coding composer and conversation remain absent. | Two sessions acknowledge activation but retain one elevated overlap outside the classified menu, status and Dock levels; another starts focused and later rejects an auxiliary page transition. | All three sessions complete folder trust, Engineering, Continue, Skip and its ordinary confirmation; the coding composer and conversation remain absent. |
+| Claude | The owned editor and native window pass. Complete helper packets now decode; the single LF leaf has no exported BR/filler marker, so input remains blocked. | Three complete native probes pass input, response, file-tool, controlled failure recovery and cleanup. | All three sessions fail at the selected safe Rust rename dispatch with a sharing violation. Source identity, private-file checks and destination preflight succeed; parent-lease reproduction is pending. |
 | Pen | Software GLES removes GPU startup failure; three fresh sessions show sign-in and no editor. No official account-free route found for the frozen release. | Two probes expose composer/Send; another exposes sign-in. Conversation adapter remains unimplemented. | Owned renderer loads sign-in and a dialog; conversation adapter remains unimplemented. |
 
-Current Codex evidence is Linux [37190228367](https://github.com/DavidLMS/nan-harness/actions/runs/37190228367),
-macOS [37189763645](https://github.com/DavidLMS/nan-harness/actions/runs/37189763645),
-and Windows [37189765479](https://github.com/DavidLMS/nan-harness/actions/runs/37189765479).
+Codex Linux completed onboarding in all three sessions in
+[37190228367](https://github.com/DavidLMS/nan-harness/actions/runs/37190228367).
+The later source-count run [37191551146](https://github.com/DavidLMS/nan-harness/actions/runs/37191551146)
+observes Codex as the current mode in two sessions; another rejects an ambiguous
+initial target. Current macOS evidence is
+[37192174385](https://github.com/DavidLMS/nan-harness/actions/runs/37192174385),
+and Windows [37191553330](https://github.com/DavidLMS/nan-harness/actions/runs/37191553330).
 Current Claude evidence is Linux [37189761871](https://github.com/DavidLMS/nan-harness/actions/runs/37189761871),
 macOS [37188000425](https://github.com/DavidLMS/nan-harness/actions/runs/37188000425),
-and Windows [37188073720](https://github.com/DavidLMS/nan-harness/actions/runs/37188073720).
+and Windows [37192264910](https://github.com/DavidLMS/nan-harness/actions/runs/37192264910).
 Both cleanup scopes pass and invalid closed diagnostic events are zero in these runs.
 Only the macOS Claude result adds a qualified cell; a passing exact-commit
 production matrix and the final repository gate remain required.
@@ -170,8 +174,9 @@ A Windows-only configuration persistence trial uses one safe Rust rename
 invocation with retained file identity and read-only private-DACL checks before
 and after it. Its preinstallation filesystem fixtures must pass before any
 application trial. The default persistence path remains unchanged. This tests
-an alternative to tempfile's attribute-setting path; it does not establish the
-cause of the observed sharing violation.
+an alternative to tempfile's attribute-setting path. The later closed failure
+record proves that this alternative reaches the rename invocation and still
+receives a sharing violation; it does not identify the conflicting handle.
 
 The completed evidence is available in runs
 [36975359718](https://github.com/DavidLMS/nan-harness/actions/runs/36975359718)
