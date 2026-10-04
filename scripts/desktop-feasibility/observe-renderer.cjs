@@ -144,13 +144,26 @@ function mainConfirmationFacts() {
   return {status:'unmeasured',identityUnchanged:null,mainScopeUnique:null,documentFocused:null,counts:null};
 }
 async function bindCorrelationMain(held,browser,guard,deadline,route,
-  identity=correlationIdentity,pause=ms=>new Promise(resolve=>setTimeout(resolve,ms)),diagnostic=null) {
+  identity=correlationIdentity,pause=ms=>new Promise(resolve=>setTimeout(resolve,ms)),diagnostic=null,settleGuard=null) {
   const stop=status=>{if(diagnostic)diagnostic.status=status;return null;};
   try {
     if(!held)return stop('initial-missing');
     if(Date.now()>=deadline)return stop('deadline');
     if(!guard())return stop('ownership-lost');
-    const fresh=await identity(held.page,deadline);
+    let fresh;
+    do {
+      if(settleGuard&&(!await settleGuard()||Date.now()>=deadline))return stop('guard-rejected');
+      fresh=await identity(held.page,deadline);
+      if(Date.now()>=deadline)return stop('deadline');
+      if(!guard())return stop('ownership-lost');
+      if(settleGuard&&!sameCorrelationIdentity(held,fresh))return stop('identity-changed');
+      if(settleGuard&&!fresh.scope.focused)return stop('document-unfocused');
+      if(settleGuard&&!await settleGuard())return stop('guard-rejected');
+      if(fresh.scope.mainScope||!settleGuard)break;
+      // Completed trust may still be hydrating the same source page. Only
+      // passive proof repeats; zero controls never authorize an action.
+      await pause(Math.min(100,Math.max(0,deadline-Date.now())));
+    } while(Date.now()<deadline);
     if(diagnostic) {
       diagnostic.identityUnchanged=sameCorrelationIdentity(held,fresh);
       diagnostic.mainScopeUnique=fresh.scope.mainScope;
@@ -209,7 +222,7 @@ async function observeMainAux(held,browser,guard,deadline,auxRoute,
 // Source confirmation and focused/inert proofs happen before any input.
 // Later source-known inert avatar pages never become selectable input targets.
 function heldMainGuard(held, browser, owner, deadline, route,
-  identity=correlationIdentity, pause=ms=>new Promise(resolve=>setTimeout(resolve,ms)),requireMainScope=false,allowInitialAppearance=false) {
+  identity=correlationIdentity, pause=ms=>new Promise(resolve=>setTimeout(resolve,ms)),requireMainScope=false,allowInitialAppearance=false,requireDocumentFocus=true) {
   let actionsStarted=false,appearanceRetried=false;
   let auxiliary=null, auxiliaryIdentity=null, failure='unmeasured', failureDetails=null;
   const reject=reason=>{failure=reason;return false;};
@@ -245,7 +258,7 @@ function heldMainGuard(held, browser, owner, deadline, route,
         const main=await identity(held.page,deadline);
         if(!valid())return false;
         if(!sameCorrelationIdentity(held,main))return reject('main-identity');
-        if(!main.scope.focused)return reject('main-focus');
+        if(requireDocumentFocus&&!main.scope.focused)return reject('main-focus');
         if((requireMainScope||allowInitialAppearance&&!actionsStarted)&&!main.scope.mainScope)return reject('main-scope');
         if(extra) {
           const aux=await identity(extra,deadline);
@@ -278,12 +291,37 @@ function heldMainGuard(held, browser, owner, deadline, route,
     appearanceRetried=true;
     return measure();
   };
+  prove.requireDocumentFocus=()=>{requireDocumentFocus=true;};
   prove.sealInitialActions=()=>{actionsStarted=true;};
   prove.failure=()=>failure;
   prove.failureDetails=()=>failure==='page-set'?failureDetails:null;
   const privateIdentity=value=>value&&Object.fromEntries(['url','target','frame','loader','frameUrl','fragment'].map(key=>[key,value[key]]));
   prove.binding=()=>({schemaVersion:1,main:privateIdentity(held),auxiliary:privateIdentity(auxiliaryIdentity)});
   return prove;
+}
+// One public page activation; it never substitutes for fresh focus/owner proof.
+async function focusCapturedMain(held,proof,deadline,identity=correlationIdentity,
+  same=sameCorrelationIdentity,pause=ms=>new Promise(resolve=>setTimeout(resolve,ms))) {
+  try {
+    if(!held||Date.now()>=deadline||!await proof())return false;
+    const before=await identity(held.page,deadline);
+    if(Date.now()>=deadline||!same(held,before)||!before.scope.mainScope||!await proof())return false;
+    if(!before.scope.focused) {
+      // Await the sole consumed operation. Parent watchdog owns cancellation;
+      // no detached timeout race may continue into downstream actions.
+      if(Date.now()>=deadline)return false;
+      await held.page.bringToFront();
+    }
+    proof.requireDocumentFocus();
+    for(let sample=0;sample<2;sample++) {
+      if(Date.now()>=deadline||!await proof())return false;
+      const fresh=await identity(held.page,deadline);
+      if(Date.now()>=deadline||!same(held,fresh)||!fresh.scope.mainScope
+        ||!fresh.scope.focused||!await proof())return false;
+      if(sample===0)await pause(Math.min(100,Math.max(0,deadline-Date.now())));
+    }
+    return true;
+  } catch{return false;}
 }
 function publishCodexBinding(output,owner,connection,guard) {
   const root=path.dirname(output),bindingPath=path.join(root,`main-binding-${owner}.private`);
@@ -488,6 +526,19 @@ async function run() {
       await new Promise(r => setTimeout(r, 250));
     }
     if (!ownership.ownedEndpoint(documentDeadline)) { facts.endpointOwned = false; facts.errorCategory = 'endpoint-unowned'; save(); return; }
+    let focusGuard;
+    if(trial&&process.platform==='darwin') {
+      focusGuard=heldMainGuard(initialMain,browser,ownerGuard,deadline,
+        require('./codex-onboarding.cjs').sourceRoute,correlationIdentity,
+        ms=>new Promise(resolve=>setTimeout(resolve,ms)),false,false,false);
+      if(!await focusCapturedMain(initialMain,focusGuard,deadline)) {
+        facts.initialMainConfirmation=mainConfirmationFacts();
+        await bindCorrelationMain(initialMain,browser,ownerGuard,deadline,
+          require('./codex-onboarding.cjs').sourceRoute,correlationIdentity,
+          ms=>new Promise(resolve=>setTimeout(resolve,ms)),facts.initialMainConfirmation);
+        facts.errorCategory='attachment-or-action-failed';save();return;
+      }
+    }
     if(linuxDialogPolicy(app,process.platform,process.env)) {
       recordLinuxDialog(await observeLinuxDialog(initialMain,browser,ownerGuard,deadline));
     }
@@ -508,7 +559,7 @@ async function run() {
       let folderTrust,trustGuard;
       if(trial&&request.ownedWorkspace!==undefined) {
         const folderAuthority=require('./codex-folder-trust.cjs').authority(request.ownedWorkspace);
-        trustGuard=heldMainGuard(initialMain,browser,ownerGuard,correlationDeadline,
+        trustGuard=focusGuard||heldMainGuard(initialMain,browser,ownerGuard,correlationDeadline,
           require('./codex-onboarding.cjs').sourceRoute,correlationIdentity,
           ms=>new Promise(resolve=>setTimeout(resolve,ms)),false,false);
         folderTrust=await require('./codex-folder-trust.cjs').run(page,trustGuard,
@@ -516,7 +567,8 @@ async function run() {
       }
       const heldMain=trial?await bindCorrelationMain(initialMain,browser,ownerGuard,correlationDeadline,
         require('./codex-onboarding.cjs').sourceRoute,correlationIdentity,
-        ms=>new Promise(resolve=>setTimeout(resolve,ms)),facts.initialMainConfirmation):null;
+        ms=>new Promise(resolve=>setTimeout(resolve,ms)),facts.initialMainConfirmation,
+        folderTrust?.status==='completed'?trustGuard:null):null;
       // Trust consumes initial admission; preserve its original auxiliary binding.
       // Fresh role binding above must still succeed before subsequent input.
       const mainGuard=folderTrust?.clickAttempted?(heldMain?trustGuard:undefined):trial&&heldMain?heldMainGuard(heldMain,browser,ownerGuard,correlationDeadline,
