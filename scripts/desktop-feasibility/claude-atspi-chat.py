@@ -39,6 +39,135 @@ def input_shape(value):
                 onlyObjectReplacement=all(c == '\ufffc' for c in value))
 
 
+def hypertext_query(adapter,method,target,*args):
+    """Typed AT-SPI D-Bus contract; never coerce missing/malformed values."""
+    text_interface='org.a11y.atspi.Text'
+    link_interface='org.a11y.atspi.Hyperlink'
+    hyper_interface='org.a11y.atspi.Hypertext'
+    def integer(value):
+        if not isinstance(value,int) or isinstance(value,(bool,adapter.dbus.Boolean)):
+            raise Rejected('input')
+        return int(value)
+    def reference(value):
+        if not isinstance(value,(tuple,list)) or len(value)!=2 or any(not isinstance(v,str) for v in value):
+            raise Rejected('input')
+        return tuple(str(v) for v in value)
+    def property_value(interface,name):
+        return adapter.call(target,'Get','org.freedesktop.DBus.Properties',interface,name)
+    if method in ['owner','state','children','parent']:
+        return getattr(adapter,method)(target)
+    if method=='count':
+        return integer(property_value(text_interface,'CharacterCount'))
+    if method=='text':
+        value=adapter.call(target,'GetText',text_interface,0,args[0])
+        if not isinstance(value,str):
+            raise Rejected('input')
+        return str(value)
+    if method=='nlinks':
+        return integer(adapter.call(target,'GetNLinks',hyper_interface))
+    if method=='link-index':
+        return integer(adapter.call(target,'GetLinkIndex',hyper_interface,args[0]))
+    if method=='link':
+        return reference(adapter.call(target,'GetLink',hyper_interface,args[0]))
+    if method=='object':
+        return reference(adapter.call(target,'GetObject',link_interface,0))
+    if method=='valid':
+        value=adapter.call(target,'IsValid',link_interface)
+        if not isinstance(value,(bool,adapter.dbus.Boolean)):
+            raise Rejected('input')
+        return bool(value)
+    names={'anchors':'NAnchors','start':'StartIndex','end':'EndIndex'}
+    if method not in names:
+        raise Rejected('input')
+    return integer(property_value(link_interface,names[method]))
+
+
+def flatten_hypertext(root, query, pid, budget):
+    """Resolve embedded Text objects; never treat unknown objects as empty."""
+    records, parents, children = [], {}, {}
+    def read(method,node,*args):
+        budget()
+        value=query(method,node,*args)
+        budget()
+        if len(records)>=2048:
+            raise Rejected('input')
+        records.append((method,node,args,value.copy() if type(value) is list else value))
+        return value
+    def endpoint(node):
+        if (type(node) is not tuple or len(node)!=2 or any(type(v) is not str or not v for v in node)
+                or node[0]!=root[0] or not node[1].startswith('/') or node[1]=='/org/a11y/atspi/null'):
+            raise Rejected('input')
+    pending=[(root,0)]
+    while pending:
+        node,depth=pending.pop()
+        endpoint(node)
+        if node in children or len(children)>=64 or depth>16 or read('owner',node)!=pid:
+            raise Rejected('input')
+        bits=read('state',node)
+        if type(bits) is not int or not 0<=bits<2**64 or bits&(1<<6):
+            raise Rejected('input')
+        descendants=read('children',node)
+        if type(descendants) is not list or len(descendants)>64-len(children):
+            raise Rejected('input')
+        children[node]=descendants
+        for child in descendants:
+            endpoint(child)
+            if child in parents or child==root or read('parent',child)!=node:
+                raise Rejected('input')
+            parents[child]=node
+            pending.append((child,depth+1))
+    resolved=set()
+    links_used=0
+    def text(node):
+        nonlocal links_used
+        if node in resolved:
+            raise Rejected('input')
+        resolved.add(node)
+        count=read('count',node)
+        if type(count) is not int or not 0<=count<=4096:
+            raise Rejected('input')
+        # CharacterCount zero is positive Text-interface proof, not a missing value.
+        value=read('text',node,count) if count else ''
+        if type(value) is not str or len(value)!=count or len(value.encode('utf8'))>4096:
+            raise Rejected('input')
+        offsets=[i for i,c in enumerate(value) if c=='\ufffc']
+        if not offsets:
+            return value
+        nlinks=read('nlinks',node)
+        if type(nlinks) is not int or nlinks!=len(offsets) or links_used+nlinks>64:
+            raise Rejected('input')
+        links_used+=nlinks
+        indices=set();pieces=[];last=0
+        for offset in offsets:
+            index=read('link-index',node,offset)
+            if type(index) is not int or not 0<=index<nlinks or index in indices:
+                raise Rejected('input')
+            indices.add(index)
+            link=read('link',node,index);endpoint(link)
+            if read('owner',link)!=pid or read('valid',link) is not True:
+                raise Rejected('input')
+            anchors,start,end=(read(method,link) for method in ['anchors','start','end'])
+            if (any(type(v) is not int for v in [anchors,start,end])
+                    or anchors!=1 or start!=offset or end!=offset+1):
+                raise Rejected('input')
+            child=read('object',link);endpoint(child)
+            if child not in children[node] or parents.get(child)!=node:
+                raise Rejected('input')
+            pieces.extend([value[last:offset],text(child)]);last=offset+1
+        pieces.append(value[last:]);result=''.join(pieces)
+        if len(result.encode('utf8'))>4096:
+            raise Rejected('input')
+        return result
+    result=text(root)
+    # Reprove the entire owned attachment/text/link mapping, including zero-length leaves.
+    for method,node,args,value in records:
+        budget()
+        if query(method,node,*args)!=value:
+            raise Rejected('input')
+        budget()
+    return result
+
+
 class Rejected(Exception):
     def __init__(self, boundary=None):
         self.boundary = boundary if boundary in BOUNDARIES else None
@@ -525,14 +654,16 @@ def native_adapter(request, deadline):
     def focus(node):
         return bool(adapter.state(node)&(1<<12))
     def text(node):
-        count = int(adapter.call(node,'Get','org.freedesktop.DBus.Properties',
-            'org.a11y.atspi.Text','CharacterCount'))
-        if not 0 <= count <= 4096:
-            raise Rejected()
-        value = str(adapter.call(node,'GetText','org.a11y.atspi.Text',0,count))
-        if len(value.encode()) > 4096:
-            raise Rejected()
-        return value
+        if not guarded():
+            raise Rejected('native-window')
+        def budget():
+            adapter.remaining()
+            if os.getppid()!=request['checkerPid']:
+                raise Rejected('source-owner')
+        result=flatten_hypertext(node,lambda method,target,*args:hypertext_query(adapter,method,target,*args),request['pid'],budget)
+        if not guarded():
+            raise Rejected('native-window')
+        return result
     def clipboard_write(value):
         run(['/usr/bin/xclip','-selection','clipboard'],value.encode())
     def key(value):

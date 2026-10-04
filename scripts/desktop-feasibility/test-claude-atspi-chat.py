@@ -94,6 +94,91 @@ class InputShapeTests(unittest.TestCase):
         for value in ['',True,None,'x'*4097]:
             with self.assertRaises(chat.Rejected):chat.input_shape(value)
 
+class HypertextWireTests(unittest.TestCase):
+    def test_exact_dbus_methods_properties_and_reference_signatures(self):
+        class Adapter:
+            dbus=type('Types',(),{'Boolean':bool})
+            def __init__(self):self.calls=[];self.value=None
+            def call(self,node,method,interface,*args):
+                self.calls.append((node,method,interface,args));return self.value
+        a=Adapter();node=('owned','/editor');props='org.freedesktop.DBus.Properties'
+        methods=[('count',(),1,'Get',props,('org.a11y.atspi.Text','CharacterCount')),
+            ('nlinks',(),1,'GetNLinks','org.a11y.atspi.Hypertext',()),
+            ('link-index',(2,),0,'GetLinkIndex','org.a11y.atspi.Hypertext',(2,)),
+            ('link',(0,),('owned','/link'),'GetLink','org.a11y.atspi.Hypertext',(0,)),
+            ('object',(),('owned','/paragraph'),'GetObject','org.a11y.atspi.Hyperlink',(0,)),
+            ('valid',(),True,'IsValid','org.a11y.atspi.Hyperlink',()),
+            ('anchors',(),1,'Get',props,('org.a11y.atspi.Hyperlink','NAnchors')),
+            ('start',(),2,'Get',props,('org.a11y.atspi.Hyperlink','StartIndex')),
+            ('end',(),3,'Get',props,('org.a11y.atspi.Hyperlink','EndIndex')),
+            ('text',(3,),'abc','GetText','org.a11y.atspi.Text',(0,3))]
+        for logical,args,value,method,interface,wire_args in methods:
+            a.value=value
+            self.assertEqual(chat.hypertext_query(a,logical,node,*args),value)
+            self.assertEqual(a.calls[-1],(node,method,interface,wire_args))
+        for logical,args,invalids in [('link',(0,),['/path',None,('owned',3),('owned',)]),
+                ('object',(),['/path',None]),('count',(),['0',True,None]),
+                ('valid',(),['false',0,None]),('text',(1,),[None,1,['x']])]:
+            for value in invalids:
+                a.value=value
+                with self.assertRaises(chat.Rejected):chat.hypertext_query(a,logical,node,*args)
+
+
+class HypertextTests(unittest.TestCase):
+    def fixture(self, value='\ufffc', child=''):
+        root,leaf,link=('owned','/editor'),('owned','/paragraph'),('owned','/link')
+        records={('owner',root):7,('owner',leaf):7,('owner',link):7,
+            ('state',root):0,('state',leaf):0,('children',root):[leaf],('children',leaf):[],
+            ('parent',leaf):root,('count',root):len(value),('text',root,len(value)):value,
+            ('count',leaf):len(child),('text',leaf,len(child)):child,('nlinks',root):1,
+            ('link-index',root,value.index('\ufffc')):0,('link',root,0):link,
+            ('valid',link):True,('anchors',link):1,('start',link):value.index('\ufffc'),
+            ('end',link):value.index('\ufffc')+1,('object',link):leaf}
+        return root,leaf,link,records
+
+    def test_owned_empty_and_exact_payload_are_resolved_without_trimming(self):
+        for value,child,expected in [('\ufffc','',''),('a\ufffc\n',' private \n','a private \n\n'),
+                ('😀\ufffc','nonce','😀nonce')]:
+            root,leaf,link,records=self.fixture(value,child)
+            query=lambda method,node,*args:records[(method,node,*args)]
+            self.assertEqual(chat.flatten_hypertext(root,query,7,lambda:None),expected)
+
+    def test_foreign_detached_cycle_missing_interface_and_changed_tree_fail(self):
+        for method,change in [('owner',8),('state',1<<6),('parent',('owned','/foreign')),
+                             ('count',-1)]:
+            root,leaf,link,records=self.fixture()
+            records[(method,leaf)]=change
+            with self.assertRaises(chat.Rejected):
+                chat.flatten_hypertext(root,lambda m,n,*a:records[(m,n,*a)],7,lambda:None)
+        root,leaf,link,records=self.fixture()
+        for key,change in [(('object',link),root),(('children',leaf),[root]),
+                (('anchors',link),True),(('valid',link),False),(('nlinks',root),2),
+                (('object',link),('foreign','/paragraph'))]:
+            altered={**records,key:change}
+            with self.assertRaises(chat.Rejected):
+                chat.flatten_hypertext(root,lambda m,n,*a:altered[(m,n,*a)],7,lambda:None)
+        missing=dict(records);missing.pop(('count',leaf))
+        with self.assertRaises(KeyError):
+            chat.flatten_hypertext(root,lambda m,n,*a:missing[(m,n,*a)],7,lambda:None)
+        reads={}
+        def changing(method,node,*args):
+            key=(method,node,*args);reads[key]=reads.get(key,0)+1
+            return 8 if key==('owner',leaf) and reads[key]>1 else records[key]
+        with self.assertRaises(chat.Rejected):chat.flatten_hypertext(root,changing,7,lambda:None)
+
+    def test_deadline_oversize_and_duplicate_embedded_mapping_fail_without_actions(self):
+        root,leaf,link,records=self.fixture(child='x'*4097)
+        with self.assertRaises(chat.Rejected):
+            chat.flatten_hypertext(root,lambda m,n,*a:records[(m,n,*a)],7,lambda:None)
+        def expired():raise TimeoutError()
+        with self.assertRaises(TimeoutError):
+            chat.flatten_hypertext(root,lambda m,n,*a:records[(m,n,*a)],7,expired)
+        root,leaf,link,records=self.fixture('\ufffc\ufffc')
+        records[('nlinks',root)]=2;records[('link-index',root,1)]=0
+        with self.assertRaises(chat.Rejected):
+            chat.flatten_hypertext(root,lambda m,n,*a:records[(m,n,*a)],7,lambda:None)
+
+
 class ControllerTests(unittest.TestCase):
     def run_case(self, **options):
         adapter=Adapter(**options)
