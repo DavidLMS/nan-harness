@@ -722,6 +722,36 @@ class CopyMultiActionTests(unittest.TestCase):
         self.assertEqual(adapter.copy_actions,0);self.assertFalse(facts['responseVerified'])
 
 class NativeAdapterWiringTests(unittest.TestCase):
+    def test_reserved_interval_only_clears_private_clipboard_under_original_custody(self):
+        import os
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        now=[100.0];calls=[]
+        adapter=SimpleNamespace()
+        scope=dict(GITHUB_ACTIONS='true',RUNNER_ENVIRONMENT='github-hosted',RUNNER_OS='Linux',
+            NANH_CLAUDE_LINUX_SOURCE_POLICY='official-2.9939.4',
+            NANH_CLAUDE_LINUX_NATIVE_CHAT='first-turn',NANH_DESKTOP_QUALIFICATION_MODE='startup-baseline')
+        request=dict(pid=7,checkerPid=9,nativeExecutable=str(Path(__file__).resolve()),deadline=110.5)
+        def run(argv,**kwargs):
+            calls.append((argv,kwargs));return SimpleNamespace(stdout=b'')
+        with patch.dict(os.environ,scope),patch.object(chat,'load_visibility',
+                return_value=SimpleNamespace(Adapter=lambda deadline:adapter)),patch('runpy.run_path',return_value={}),                patch.object(chat.time,'monotonic',side_effect=lambda:now[0]),patch('os.getppid',return_value=9),                patch('subprocess.run',side_effect=run):
+            native=chat.native_adapter(request,110,cleanup_deadline=110.5)
+            native.profile_guard=lambda:True
+            now[0]=110.1
+            with self.assertRaises(TimeoutError):native.clipboard_sentinel()
+            self.assertEqual(calls,[])
+            native.clear_clipboard()
+            self.assertEqual(calls[0][0],['/usr/bin/xclip','-selection','clipboard'])
+            self.assertEqual(calls[0][1]['input'],b'')
+            self.assertAlmostEqual(calls[0][1]['timeout'],.4)
+            native.profile_guard=lambda:False
+            with self.assertRaises(chat.Rejected):native.clear_clipboard()
+            self.assertEqual(len(calls),1)
+            native.profile_guard=lambda:True;now[0]=110.5
+            with self.assertRaises(TimeoutError):native.clear_clipboard()
+            self.assertEqual(len(calls),1)
+
     def test_real_adapter_wires_owned_hit_check_without_native_execution(self):
         import os
         from types import SimpleNamespace
