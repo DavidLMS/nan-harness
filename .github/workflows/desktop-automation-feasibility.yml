@@ -208,7 +208,9 @@ jobs:
         run: cargo build --locked -p nan-harness-desktop-check -p nan-harness-cli --features nan-harness-cli/desktop-qualification --bins
       - name: Verify bounded Linux Claude native Chat receipts without an application
         if: runner.os == 'Linux' && matrix.app == 'claude-desktop'
-        run: cargo test --locked -p nan-harness-desktop-check --lib gui::claude_linux_chat
+        run: |
+          cargo test --locked -p nan-harness-desktop-check --lib gui::claude_linux_chat
+          cargo test --locked -p nan-harness-desktop-check --lib probe::claude_linux_profile
       - name: Verify Windows Claude acquisition policy without an application
         if: runner.os == 'Windows' && matrix.app == 'claude-desktop'
         run: cargo test --locked -p nan-harness-desktop-check --lib gui::claude_windows

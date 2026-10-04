@@ -39,6 +39,8 @@ pub(super) struct SemanticScenario<'a> {
 
 pub(super) struct NativeInputAuthority<'a> {
     pub native_roots: Option<&'a super::NativeRoots>,
+    #[cfg(target_os = "linux")]
+    pub linux_profile: Option<&'a super::FreshClaudeLinuxProfile>,
     #[cfg(windows)]
     pub windows_profile: Option<&'a super::FreshClaudeWindowsProfile>,
 }
@@ -186,8 +188,14 @@ impl SemanticBackend {
 
         #[cfg(target_os = "linux")]
         if self.kind == DesktopHarnessKind::Claude && crate::gui::claude_linux_chat_policy() {
-            let mut ui =
-                SemanticUi::ClaudeLinux(Box::new(gui.claude_linux_chat_session(&self.directory)?));
+            let mut ui = SemanticUi::ClaudeLinux(Box::new(
+                gui.claude_linux_chat_session(
+                    &self.directory,
+                    authority
+                        .linux_profile
+                        .ok_or(Reason::IsolationUnavailable)?,
+                )?,
+            ));
             let outcome = complete_scenario(&mut ui, &scenario, &self.directory, result).await;
             return ui.finish(scenario.gate, outcome);
         }

@@ -118,6 +118,10 @@ mod windows_process_tests {
     }
 }
 
+#[cfg(target_os = "linux")]
+mod claude_linux_profile;
+#[cfg(target_os = "linux")]
+pub(crate) use claude_linux_profile::FreshClaudeLinuxProfile;
 mod claude_native_roots;
 pub(crate) use claude_native_roots::NativeRoots;
 mod claude_native_storage;
@@ -722,6 +726,10 @@ async fn scenario(
     outcome
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "keep exact prelaunch custody, launch and cleanup in one ordered lifecycle"
+)]
 async fn scenario_owned(
     spec: &ProbeSpec,
     result: &mut ProbeResult,
@@ -760,6 +768,12 @@ async fn scenario_owned(
     }
     #[cfg(windows)]
     let mut fresh_windows_profile = FreshClaudeWindowsProfile::prepare(
+        spec,
+        &prepared_launch,
+        Instant::now() + Duration::from_secs(1),
+    )?;
+    #[cfg(target_os = "linux")]
+    let fresh_linux_profile = FreshClaudeLinuxProfile::prepare(
         spec,
         &prepared_launch,
         Instant::now() + Duration::from_secs(1),
@@ -803,6 +817,8 @@ async fn scenario_owned(
                         result,
                         composer_observations,
                         native_roots,
+                        #[cfg(target_os = "linux")]
+                        fresh_linux_profile.as_ref(),
                         #[cfg(windows)]
                         fresh_windows_profile.as_mut(),
                     )
@@ -955,6 +971,7 @@ impl ConversationScenario<'_> {
         result: &mut ProbeResult,
         composer_observations: &mut Vec<ComposerFailure>,
         native_roots: Option<&NativeRoots>,
+        #[cfg(target_os = "linux")] linux_profile: Option<&FreshClaudeLinuxProfile>,
         #[cfg(windows)] mut profile: Option<&mut FreshClaudeWindowsProfile>,
     ) -> Result<(), Reason> {
         #[cfg(windows)]
@@ -972,6 +989,8 @@ impl ConversationScenario<'_> {
             composer_observations,
             semantic::NativeInputAuthority {
                 native_roots,
+                #[cfg(target_os = "linux")]
+                linux_profile,
                 #[cfg(windows)]
                 windows_profile: profile.as_deref(),
             },

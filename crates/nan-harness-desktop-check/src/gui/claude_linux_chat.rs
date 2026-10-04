@@ -325,6 +325,8 @@ fn supervise(
 
 pub(crate) struct ClaudeLinuxChatSession<'a> {
     gui: &'a Gui,
+    profile: &'a crate::probe::FreshClaudeLinuxProfile,
+    replacement_consumed: bool,
     directory: PathBuf,
     driver: PathBuf,
     binding: Option<Value>,
@@ -339,10 +341,11 @@ pub(crate) struct ClaudeLinuxChatSession<'a> {
     copy_in_flight: bool,
 }
 impl Gui {
-    pub(crate) fn claude_linux_chat_session(
-        &self,
+    pub(crate) fn claude_linux_chat_session<'a>(
+        &'a self,
         directory: &Path,
-    ) -> Result<ClaudeLinuxChatSession<'_>, Reason> {
+        profile: &'a crate::probe::FreshClaudeLinuxProfile,
+    ) -> Result<ClaudeLinuxChatSession<'a>, Reason> {
         let driver = std::env::var_os("FEASIBILITY_CLAUDE_CHAT_DRIVER")
             .map(PathBuf::from)
             .ok_or(Reason::IsolationUnavailable)?;
@@ -356,6 +359,8 @@ impl Gui {
         }
         Ok(ClaudeLinuxChatSession {
             gui: self,
+            profile,
+            replacement_consumed: false,
             directory: directory.to_owned(),
             driver,
             binding: None,
@@ -373,6 +378,9 @@ impl Gui {
 }
 impl ClaudeLinuxChatSession<'_> {
     fn operation(&mut self, mode: &str, value: &str, deadline: Instant) -> Result<Value, Reason> {
+        if !self.profile.verifies_owned(deadline) {
+            return Err(Reason::IsolationUnavailable);
+        }
         self.stage = "blocked".into();
         self.failure_boundary = Some(FailureBoundary::NativeWindow);
         if Instant::now() >= deadline
@@ -406,6 +414,7 @@ impl ClaudeLinuxChatSession<'_> {
         request["mode"] = json!(mode);
         request["value"] = json!(value);
         request["binding"] = json!(self.binding);
+        request["profileAuthority"] = self.profile.private_request(deadline)?;
         let payload = Zeroizing::new(request.to_string());
         self.failure_boundary = Some(FailureBoundary::Transport);
         let (facts, binding) = supervise(&self.driver, payload, deadline)?;
@@ -438,7 +447,13 @@ impl ClaudeLinuxChatSession<'_> {
             return Err(Reason::ActionUnsupported);
         }
         self.input_in_flight = true;
-        let facts = self.operation("input", prompt, Instant::now() + Duration::from_secs(15))?;
+        let mode = if self.submitted == 0 && !self.replacement_consumed {
+            self.replacement_consumed = true;
+            "input-first-owned"
+        } else {
+            "input"
+        };
+        let facts = self.operation(mode, prompt, Instant::now() + Duration::from_secs(15))?;
         if facts["inputVerified"] == true {
             self.verified += 1;
         }

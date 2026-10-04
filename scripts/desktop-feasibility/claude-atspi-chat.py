@@ -216,6 +216,55 @@ class Rejected(Exception):
         super().__init__()
 
 
+class ProfileCustody:
+    """Private retained directory identities; never exported as diagnostic facts."""
+    def __init__(self, records, deadline, clock=time.monotonic):
+        import os
+        from pathlib import Path
+        self.handles, self.records, self.deadline, self.clock = [], records, deadline, clock
+        try:
+            if type(records) is not list or len(records) != 7:
+                raise Rejected('policy')
+            workspace = records[0]['path']
+            expected = [workspace, workspace+'/profile', workspace+'/profile/home',
+                workspace+'/profile/config', workspace+'/profile/nanh',
+                workspace+'/profile/config/Claude', workspace+'/profile/config/Claude-3p']
+            for record, path in zip(records, expected):
+                if (type(record) is not dict or set(record) != {'path','device','inode','uid'}
+                    or record['path'] != path or not Path(path).is_absolute()
+                    or any(type(record[key]) is not int or record[key] < 0 for key in ('device','inode','uid'))
+                    or record['uid'] != os.getuid() or self.clock() >= deadline):
+                    raise Rejected('policy')
+                self.handles.append(os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW))
+            if not self.verify():
+                raise Rejected('policy')
+        except Exception:
+            self.close()
+            raise
+    def verify(self):
+        import os, stat
+        if self.clock() >= self.deadline or len(self.handles) != 7:
+            return False
+        try:
+            for record, handle in zip(self.records, self.handles):
+                if self.clock() >= self.deadline or os.path.realpath(record['path']) != record['path']:
+                    return False
+                current, held = os.lstat(record['path']), os.fstat(handle)
+                expected = (record['device'],record['inode'],record['uid'])
+                if (not stat.S_ISDIR(current.st_mode) or current.st_mode & 0o077
+                    or (current.st_dev,current.st_ino,current.st_uid) != expected
+                    or (held.st_dev,held.st_ino,held.st_uid) != expected):
+                    return False
+            return self.clock() < self.deadline
+        except OSError:
+            return False
+    def close(self):
+        import os
+        for handle in self.handles:
+            os.close(handle)
+        self.handles.clear()
+
+
 class Controller:
     def __init__(self, adapter, root, deadline, clock=time.monotonic, sleep=time.sleep):
         self.adapter, self.root, self.deadline = adapter, root, deadline
@@ -236,7 +285,12 @@ class Controller:
         self.boundary = QUERY_BOUNDARIES.get(method, 'request')
         if self.clock() >= self.deadline:
             raise TimeoutError()
+        custody = getattr(self.adapter, 'profile_guard', None)
+        if custody is not None and not custody():
+            raise Rejected('policy')
         result = getattr(self.adapter, method)(*args)
+        if custody is not None and not custody():
+            raise Rejected('policy')
         if self.clock() >= self.deadline:
             raise TimeoutError()
         return result
@@ -404,17 +458,28 @@ class Controller:
             raise Rejected()
         self.chat,self.mode=chat[0],modes[0]
 
-    def submit(self, prompt):
+    def submit(self, prompt, replace_owned=False):
         try:
             if self.focus_attempted or self.paste_attempted or self.send_attempted:
                 raise Rejected()
             if type(prompt) is not str or not prompt or len(prompt.encode()) > 4096:
                 raise Rejected()
             self.proof() if self.restored else self.bind()
-            self.current_chat(self.tree())
-            # This initial candidate has NO replacement authority for nonempty input.
+            nodes = self.tree()
+            self.current_chat(nodes)
+            if replace_owned:
+                if self.restored or getattr(self.adapter, 'profile_guard', None) is None:
+                    raise Rejected('policy')
+                # A fresh profile cannot contain prior source conversation turns.
+                if any(identity[0] == 83 and identity[1].startswith(('You said:', 'Claude responded:'))
+                       for _, identity in nodes):
+                    raise Rejected('policy')
+            # Ordinary input requires emptiness; only the first owned fresh-profile
+            # operation may replace a stable draft, with exact post-paste readback.
             initial = self.query('text', self.editor)
-            if initial != '':
+            if type(initial) is not str or len(initial.encode()) > 4096:
+                raise Rejected('input')
+            if initial != '' and not replace_owned:
                 self.facts['inputShape'] = input_shape(initial)
                 embedded=getattr(self.adapter,'embedded_text_observation',None)
                 if embedded is not None:
@@ -428,7 +493,7 @@ class Controller:
             if self.query('grab_focus', self.editor) is not True:
                 raise Rejected()
             self.settle_focus()
-            if self.query('text', self.editor) != '':
+            if self.query('text', self.editor) != initial:
                 raise Rejected()
             self.facts['stage'] = 'paste'
             self.proof(focused=True)
@@ -436,6 +501,9 @@ class Controller:
                 raise Rejected()
             self.paste_attempted = True
             self.facts['pasteAttempted'] = True
+            if replace_owned:
+                self.query('select_all_once')
+                self.proof(focused=True)
             self.query('paste_once', prompt)
             while True:
                 self.settle_focus()
@@ -444,7 +512,7 @@ class Controller:
                     raise Rejected()
                 if value == prompt:
                     break
-                if value and not prompt.startswith(value):
+                if value and not prompt.startswith(value) and not (replace_owned and value == initial):
                     raise Rejected()
                 self.sleep(min(.02, max(0, self.deadline - self.clock())))
             self.facts['stage'] = 'readback'
@@ -675,6 +743,9 @@ def native_adapter(request, deadline):
     except Exception:
         raise Rejected('transport') from None
     def run(argv, payload=None, output=False):
+        custody = getattr(adapter, 'profile_guard', None)
+        if custody is None or not custody():
+            raise Rejected('policy')
         remaining = deadline - time.monotonic()
         if remaining <= 0 or os.getppid() != request['checkerPid']:
             raise TimeoutError()
@@ -686,6 +757,9 @@ def native_adapter(request, deadline):
             raise Rejected()
         return result.stdout if output else None
     def guarded():
+        custody = getattr(adapter, 'profile_guard', None)
+        if custody is None or not custody():
+            return False
         text = run([request['nativeExecutable'],'--windows'],output=True).decode('ascii')
         if not snapshot_clear(text, request):
             return False
@@ -697,7 +771,7 @@ def native_adapter(request, deadline):
         if first != second or time.monotonic() >= deadline:
             return False
         adapter.client = (*first[0],*first[2])
-        return True
+        return custody()
     def focus(node):
         return bool(adapter.state(node)&(1<<12))
     def text(node):
@@ -760,6 +834,7 @@ def native_adapter(request, deadline):
     adapter.attributes = lambda node: dict(adapter.call(node,'GetAttributes'))
     adapter.grab_focus = lambda node: bool(adapter.call(node,'GrabFocus','org.a11y.atspi.Component'))
     adapter.paste_once = paste
+    adapter.select_all_once = lambda: key('ctrl+a')
     adapter.copy_input_once = readback
     def actions(node):
         count = int(adapter.call(node,'Get','org.freedesktop.DBus.Properties',
@@ -784,6 +859,7 @@ def main():
         sendForwarded=False,responseVerified=False,toolVerified=False,recoveryVerified=False)
     binding = None
     controller = None
+    custody = None
     boundary = 'request'
     try:
         raw = sys.stdin.buffer.read(32769)
@@ -791,8 +867,8 @@ def main():
             raise Rejected()
         request = json.loads(raw)
         required = {'pid','bus','path','checkerPid','window','bounds','name','nativeExecutable',
-            'deadline','mode','value','binding'}
-        if type(request) is not dict or set(request)!=required or request['mode'] not in ('input','copy'):
+            'deadline','mode','value','binding','profileAuthority'}
+        if type(request) is not dict or set(request)!=required or request['mode'] not in ('input','input-first-owned','copy'):
             raise Rejected()
         if type(request['value']) is not str or len(request['value'].encode())>4096:
             raise Rejected()
@@ -800,12 +876,14 @@ def main():
         if type(deadline) not in (float,int):
             raise Rejected()
         boundary = 'policy'
+        custody = ProfileCustody(request['profileAuthority'], deadline)
         adapter = native_adapter(request,deadline)
+        adapter.profile_guard = custody.verify
         controller = Controller(adapter,request,deadline)
         if request['binding'] is not None:
             controller.restore(request['binding'])
-        if request['mode']=='input':
-            facts = controller.submit(request['value'])
+        if request['mode'] in ('input','input-first-owned'):
+            facts = controller.submit(request['value'], request['mode']=='input-first-owned')
         else:
             if request['binding'] is None:
                 raise Rejected()
@@ -820,6 +898,8 @@ def main():
             controller.failure(error)
         else:
             facts['failureBoundary'] = error.boundary if isinstance(error, Rejected) and error.boundary else boundary
+    if custody is not None:
+        custody.close()
     # This is private supervisor stdout, not a qualification artifact.
     print(json.dumps(dict(facts=facts,binding=binding),separators=(',',':')))
 

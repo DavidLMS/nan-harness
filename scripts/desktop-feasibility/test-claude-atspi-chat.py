@@ -451,4 +451,71 @@ class MountReadinessTests(unittest.TestCase):
                 self.assertLessEqual(adapter.now, controller.deadline)
                 self.assertEqual((adapter.focus_count, adapter.paste_count, adapter.send_count), (0,0,0))
 
+class FreshProfileTests(unittest.TestCase):
+    def controller(self, adapter):
+        for name in ['owner','identity','children','parent','state','bounds','focused','text','grab_focus','attributes','actions','invoke_once']:
+            fn=getattr(adapter,name)
+            def wrap(node,*args,fn=fn,name=name):
+                result=fn('root' if node == ('r','root') else node,*args)
+                return ('r','root') if name=='parent' and result=='root' else result
+            setattr(adapter,name,wrap)
+        return chat.Controller(adapter,dict(pid=7,bus='r',path='root'),1,adapter.clock,adapter.sleep)
+
+    def test_private_retained_roots_replacement_permissions_and_expiry(self):
+        import os, tempfile
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary).resolve()
+            paths=[root,root/'profile',root/'profile/home',root/'profile/config',
+                root/'profile/nanh',root/'profile/config/Claude',root/'profile/config/Claude-3p']
+            records=[]
+            for path in paths:
+                path.mkdir(mode=0o700,exist_ok=True);path.chmod(0o700)
+                m=path.stat();records.append(dict(path=str(path),device=m.st_dev,inode=m.st_ino,uid=m.st_uid))
+            clock=[0];custody=chat.ProfileCustody(records,1,lambda:clock[0])
+            self.assertTrue(custody.verify())
+            old=paths[-1].with_name('retained-old');paths[-1].rename(old);paths[-1].mkdir(mode=0o700)
+            self.assertFalse(custody.verify())
+            paths[-1].rmdir();old.rename(paths[-1]);self.assertTrue(custody.verify())
+            paths[3].chmod(0o755);self.assertFalse(custody.verify());paths[3].chmod(0o700)
+            clock[0]=1;self.assertFalse(custody.verify());custody.close();self.assertEqual(custody.handles,[])
+            with self.assertRaises(chat.Rejected):chat.ProfileCustody(records,1,lambda:1)
+    def test_one_owned_replacement_exact_verification_and_no_replay(self):
+        adapter=Adapter(initial='\n');adapter.profile_guard=lambda:True
+        adapter.select_count=0
+        def select():adapter.select_count+=1
+        adapter.select_all_once=select
+        c=self.controller(adapter)
+        facts=c.submit('private-prompt',True)
+        self.assertTrue(facts['inputVerified']);self.assertTrue(facts['sendForwarded'])
+        self.assertEqual((adapter.select_count,adapter.paste_count,adapter.send_count),(1,1,1))
+        c.submit('second',True)
+        self.assertEqual((adapter.select_count,adapter.paste_count,adapter.send_count),(1,1,1))
+    def test_missing_authority_and_loss_after_selection_never_paste(self):
+        for missing in (True,False):
+            adapter=Adapter(initial='private disposable draft');adapter.select_count=0
+            if not missing:
+                adapter.profile_guard=lambda:adapter.select_count==0
+            def select():adapter.select_count+=1
+            adapter.select_all_once=select
+            c=self.controller(adapter)
+            c.submit('private-prompt',True)
+            self.assertEqual((adapter.paste_count,adapter.send_count),(0,0))
+    def test_owned_replacement_never_trims_prompt_lf(self):
+        adapter=Adapter(initial='\n');adapter.profile_guard=lambda:True;adapter.select_all_once=lambda:None
+        def paste(prompt):adapter.paste_count+=1;adapter.value=prompt+'\n'
+        adapter.paste_once=paste
+        c=self.controller(adapter)
+        facts=c.submit('private-prompt',True)
+        self.assertFalse(facts['inputVerified']);self.assertEqual(adapter.send_count,0)
+
+
+    def test_prior_source_turn_forbids_replacement_before_any_focus(self):
+        adapter=Adapter(initial='owned');adapter.profile_guard=lambda:True;adapter.select_all_once=lambda:None
+        children,identity=adapter.children,adapter.identity
+        adapter.children=lambda node:children(node)+(['prior'] if node=='frame' else [])
+        adapter.identity=lambda node:(83,'You said: prior private turn','') if node=='prior' else identity(node)
+        c=self.controller(adapter);c.submit('private-prompt',True)
+        self.assertEqual((adapter.focus_count,adapter.paste_count,adapter.send_count),(0,0,0))
+
+
 if __name__=='__main__':unittest.main()
