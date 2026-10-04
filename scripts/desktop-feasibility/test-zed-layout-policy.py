@@ -41,6 +41,23 @@ class Policy(unittest.TestCase):
         with self.assertRaises(ValueError):
             runner.qualification_environment('hermes-desktop', *args, source)
 
+    def test_owned_entry_policy_survives_qualification_environment(self):
+        source = {key: 'synthetic' for key in runner.ZED_HELPERS}
+        source.update(GITHUB_ACTIONS='true', RUNNER_ENVIRONMENT='github-hosted', RUNNER_OS='Linux',
+                      FEASIBILITY_ZED_INPUT_DRIVER_MODE='paste', FEASIBILITY_ZED_RESPONSE_METHOD='thread-export',
+                      NANH_ZED_CURSOR_HIT='1', NANH_ZED_XRECORD='1',
+                      NANH_ZED_ENTER_POLICY='owned-decoration-crossing')
+        args = (Path('/facts'), Path('/nanh'), '/zed')
+        self.assertEqual(runner.qualification_environment('zed-desktop', *args, source)['NANH_ZED_ENTER_POLICY'],
+                         'owned-decoration-crossing')
+        for changes in ({'RUNNER_OS':'macOS'}, {'RUNNER_OS':'Windows'}, {'GITHUB_ACTIONS':'false'},
+                        {'RUNNER_ENVIRONMENT':'self-hosted'}, {'NANH_ZED_ENTER_POLICY':'force'},
+                        {'NANH_ZED_CURSOR_HIT':None}, {'NANH_ZED_XRECORD':None}):
+            with self.assertRaises(ValueError):
+                runner.qualification_environment('zed-desktop', *args, {**source, **changes})
+        with self.assertRaises(ValueError):
+            runner.qualification_environment('hermes-desktop', *args, source)
+
     def test_native_retry_trial_is_explicit_and_hosted_linux_only(self):
         source = {key: 'synthetic' for key in runner.ZED_HELPERS}
         source.update(GITHUB_ACTIONS='true', RUNNER_ENVIRONMENT='github-hosted', RUNNER_OS='Linux',

@@ -131,6 +131,11 @@ def qualification_environment(app, facts, real_nanh, executable, inherited=None)
         raise ValueError('disposable hosted session required')
     if source.get('NANH_ZED_CURSOR_HIT') is not None and app != 'zed-desktop':
         raise ValueError('Zed cursor hit trial is unavailable')
+    enter_policy = source.get('NANH_ZED_ENTER_POLICY')
+    if enter_policy is not None and (app != 'zed-desktop' or source.get('RUNNER_OS') != 'Linux'
+            or enter_policy != 'owned-decoration-crossing' or source.get('NANH_ZED_CURSOR_HIT') != '1'
+            or source.get('NANH_ZED_XRECORD') != '1'):
+        raise ValueError('Zed owned cursor entry trial is unavailable')
     if source.get('NANH_CLAUDE_MAC_NATIVE_CHAT') is not None and app != 'claude-desktop':
         raise ValueError('Claude native Chat controller is unavailable')
     if source.get('NANH_CLAUDE_MAC_CHAT_NAVIGATION') is not None and app != 'claude-desktop':
@@ -212,6 +217,8 @@ def qualification_environment(app, facts, real_nanh, executable, inherited=None)
             if delivery != '1' or source.get('RUNNER_OS') != 'Linux':
                 raise ValueError('Zed delivery diagnostic is unavailable')
             environment['NANH_ZED_XRECORD'] = delivery
+        if enter_policy is not None:
+            environment['NANH_ZED_ENTER_POLICY'] = enter_policy
         if (environment.get('FEASIBILITY_ZED_INPUT_DRIVER_MODE') != 'paste'
                 or environment.get('FEASIBILITY_ZED_RESPONSE_METHOD') != 'thread-export'
                 or not all(environment.get(key) for key in ZED_HELPERS - {'NANH_ZED_ICON_TEMPLATES', 'FEASIBILITY_ZED_INPUT_SCRIPT'})):
