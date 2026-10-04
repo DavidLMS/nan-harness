@@ -283,6 +283,13 @@ jobs:
           unset NAN_API_KEY GH_TOKEN GITHUB_TOKEN
           python3 -c 'import os, sys; from pathlib import Path; sys.path.insert(0, "canary/actions"); from cell import ensure_private_directory; ensure_private_directory(Path(os.environ["FEASIBILITY_FACTS"]))'
           python3 canary/actions/desktop_diagnostics.py --source-sha "$GITHUB_SHA" --platform '${{ matrix.platform }}' --output "$RUNNER_TEMP/semantic-feasibility/installation-diagnostics.json" --timeout 2400 -- python3 canary/actions/desktop_install.py --manifest "$RUNNER_TEMP/semantic-feasibility/frozen.json" --artifacts "$RUNNER_TEMP/semantic-feasibility/artifacts" --platform '${{ matrix.platform }}' --architecture '${{ matrix.architecture }}' --model qwen3.6 --harnesses '${{ matrix.app }}'
+      - name: Verify synthetic Windows configuration lifecycle after installation
+        if: runner.os == 'Windows' && matrix.app == 'claude-desktop' && inputs.experiment == 'deterministic-full'
+        env:
+          RUST_TEST_THREADS: 1
+        # Distinguish installer/environment effects from the passing preinstall fixture.
+        # The child writer creates only its own temporary profile and launches no app.
+        run: cargo test --locked -p nan-harness-cli --features desktop-qualification --lib commands::claude_desktop::session::configuration_persist_tests::production_std_rename_lifecycle_under_precreation_leases_restores_documents -- --exact
       - name: Prepare private receipt after installation environment exports
         env:
           FEASIBILITY_FACTS: ${{ runner.temp }}/semantic-feasibility/facts
