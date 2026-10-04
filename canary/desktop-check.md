@@ -42,47 +42,55 @@ records Pen as excluded rather than accepted. No test account is authorized.
 Personal-machine isolation and live-provider behavior still require separate
 evidence.
 
-The latest Linux Claude trial, [37205703035](https://github.com/DavidLMS/nan-harness/actions/runs/37205703035)
-(`68207a0c`, official `2.9939.4`), sends and independently copies the first
-response in all three fresh sessions. The next input is rejected because the
-owned editor contains text. Closed diagnostics report 17 characters and five
-nodes; this does not establish an empty filler or a complete retained prompt.
-Both application and global cleanup pass. No replacement capability is admitted.
+The latest Linux Claude trial, [37208339146](https://github.com/DavidLMS/nan-harness/actions/runs/37208339146)
+(`d158cdb2`, official `2.9939.4`), sends and independently copies the first
+response in all three fresh sessions. The next input is rejected: its 17
+characters match neither a retained prompt nor an actual placeholder attribute.
+Only three of five owned nodes resolve through Hypertext links; no empty-input
+or replacement capability is admitted. Application and global cleanup pass.
+A passive descendant-shape diagnostic is running in
+[37209554032](https://github.com/DavidLMS/nan-harness/actions/runs/37209554032).
 
-The isolated Windows filesystem trial,
-[37205148502](https://github.com/DavidLMS/nan-harness/actions/runs/37205148502),
-proves that a retained directory handle sharing read and write permits child
-renames while still denying directory deletion. Configuration file handles
-continue to deny writes. `607479d6` adopts this directory sharing and corrects
-synthetic fixtures to distinguish source sharing violations from target access
-denials; a fresh complete native trial is running in
-[37206502009](https://github.com/DavidLMS/nan-harness/actions/runs/37206502009).
-The earlier 26 Windows test compilation errors are fixed; historical masked
-Cargo success is not acceptance evidence.
+The Windows source-sharing and configuration lifecycle fixtures all pass in
+[37207929495](https://github.com/DavidLMS/nan-harness/actions/runs/37207929495)
+(`5796b2b5`), before any vendor installation. The complete Claude Windows trial
+[37208094730](https://github.com/DavidLMS/nan-harness/actions/runs/37208094730)
+(`cdfe879c`) acquires and fits the first window, then rejects profile isolation.
+Its cleanup also fails: the first descendant-holder preflight reaches its
+cutoff; the second stops all five retained descendants but final accessibility
+absence is not established. A closed profile-seal stage diagnostic is running
+in [37209405410](https://github.com/DavidLMS/nan-harness/actions/runs/37209405410).
+Directory leases permit child renames and deny directory deletion; configuration
+file leases still deny writes. No rejected cleanup counts as acceptance.
 
-[Codex macOS 37203901056](https://github.com/DavidLMS/nan-harness/actions/runs/37203901056)
-observes a stable sole AXWebArea with matching URL, dimensions and native focus,
-but the retained point is occluded in all three sessions. A separate source-pinned
-trial retains the actual Engineering control and permits at most one position
-write to the owned window. It preserves identity and the original cutoff, then
-rechecks native hit testing and the same renderer document. Every observation
-still denies input authority and full window verification remains required.
-The trial is running in [37206860343](https://github.com/DavidLMS/nan-harness/actions/runs/37206860343).
-Linux Codex [37204667616](https://github.com/DavidLMS/nan-harness/actions/runs/37204667616)
-recognizes the sole persisted local project but does not yet correlate its ID
-with the selected project in the interface. A passive source context witness is
-implemented; it cannot grant Send before that correlation succeeds.
+[Codex macOS 37207737165](https://github.com/DavidLMS/nan-harness/actions/runs/37207737165)
+(`cf0abf98`) completes ordinary onboarding in one session whose main window
+was already focused. It reaches the initial home composer, whose managed
+profile/context proof is not yet integrated on macOS. Another session rejects
+source-point capture; the third rejects an auxiliary-page birth. Both cleanup
+checks pass. The bounded owned-window movement trial has not established a
+successful move; it grants no input authority.
 
-[Zed Linux 37206153428](https://github.com/DavidLMS/nan-harness/actions/runs/37206153428)
-verifies reply and file-tool use, but Retry remains blocked. Complete owned
-transient-dialog censuses before and after hover find no dialog in all three
-sessions. Two environment filters had prevented the new XI2 payload observer
-from running; both are corrected in `fd4985f9` and a runner policy fixture now
-checks forwarding. The actual observation is pending in
-[37206862349](https://github.com/DavidLMS/nan-harness/actions/runs/37206862349).
-Event delivery is advisory and does not prove GPUI consumed an event or
-authorize a click. Six cells remain open; the final same-commit production
-matrix and final repository gate are pending.
+Linux Codex [37208341472](https://github.com/DavidLMS/nan-harness/actions/runs/37208341472)
+(`d158cdb2`) reaches the home composer and attempts ordinary selection of the
+sole source-verified local project in two sessions. The retained guard rejects
+the transition before reopening the menu. Application and global cleanup pass;
+selection/context correlation and Send remain unproved. A closed transition
+stage diagnostic is running in
+[37209580327](https://github.com/DavidLMS/nan-harness/actions/runs/37209580327).
+Windows Codex's original-root custody and separate runtime source pins remain
+under development; Linux proof cannot be reused as Windows acceptance.
+
+[Zed Linux 37208343606](https://github.com/DavidLMS/nan-harness/actions/runs/37208343606)
+(`d158cdb2`) verifies response and real file-tool use but still blocks Retry.
+In all three sessions the passive XI2 observer matches all nine retained
+hover points, with neutral buttons and matching root translation. Complete
+owned transient-dialog censuses find zero dialogs before and after hover.
+The fixed public Adwaita cursor theme still produces Arrow rather than Hand.
+These observations prove delivery to the observer, not GPUI consumption or a
+rendered hit; they do not authorize a click. Both cleanup checks pass.
+Six cells remain open; the final same-commit production matrix and final
+repository gate are pending.
 
 Native Zed 1.18.1 qualification on 2026-09-08 passed three complete deterministic
 scenarios on both macOS architectures in run 34265009005, but subsequent input

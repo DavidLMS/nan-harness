@@ -324,7 +324,7 @@ def public_onboarding(setup, app):
                 or not menu.get('clickCompleted')):
             raise ValueError('invalid Codex ordinary project selection')
         stage_fields={'selectionStage'} if type(menu) is dict and 'selectionStage' in menu else set()
-        if stage_fields and (not present or menu['selectionStage'] not in
+        if stage_fields and (not present or type(menu['selectionStage']) is not str or menu['selectionStage'] not in
                 {'item-click','original-popup-close','closed-source','reopen-click','reopened-popup','completed'}
                 or (menu['selectionStage']=='completed')!=menu.get('selectionClickCompleted',False)):
             raise ValueError('invalid Codex project selection stage')

@@ -2826,6 +2826,14 @@ class QualificationTests(unittest.TestCase):
         selected_state={**state,'ordinarySelectionCompleted':True}
         selected_menu={**menu,'selectionClickAttempted':True,'selectionClickCompleted':True,'profileStateObservation':selected_state}
         self.assertEqual(q.public_onboarding({**setup,'workspaceMenuObservation':selected_menu},'chatgpt-desktop')['workspaceMenuObservation'],selected_menu)
+        staged=selected_menu|{'selectionStage':'completed'}
+        self.assertEqual(q.public_onboarding(setup|{'workspaceMenuObservation':staged},'chatgpt-desktop')['workspaceMenuObservation'],staged)
+        for stage in ['item-click','original-popup-close','closed-source','reopen-click','reopened-popup']:
+            pending=dict(status='blocked',diagnosticsOnly=True,clickAttempted=True,clickCompleted=True,
+                sendAuthorized=False,selectionClickAttempted=True,selectionStage=stage,reason='guard')
+            self.assertEqual(q.public_onboarding(setup|{'workspaceMenuObservation':pending},'chatgpt-desktop')['workspaceMenuObservation'],pending)
+        for changed in ({'selectionStage':[]},{'selectionStage':'PRIVATE'},{'selectionStage':'item-click'}):
+            with self.assertRaises(ValueError):q.public_onboarding(setup|{'workspaceMenuObservation':staged|changed},'chatgpt-desktop')
         for change in [{'selectionClickAttempted':False},{'selectionClickCompleted':False},
                        {'selectionClickAttempted':1},{'rawProjectId':'PRIVATE'},
                        {'profileStateObservation':state},
