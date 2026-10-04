@@ -72,8 +72,14 @@ function skipConfirmation(control, retained) {
   if(buttons.length!==2
       ||keep.length!==1||go.length!==1||go[0]!==control||control.disabled
       ||control.getAttribute('aria-disabled')==='true'||control.closest('[inert]'))return rejected('source-controls');
-  for(let e=control,depth=0;e;e=e.parentElement)
+  // The frozen modal disables outside pointer events on body. Its retained
+  // dialog restores them; prove this scope and the actual hit target below.
+  let reachedDialog=false;
+  for(let e=control,depth=0;e;e=e.parentElement) {
     if(++depth>64||getComputedStyle(e).pointerEvents==='none')return rejected('pointer-ancestry');
+    if(e===dialog){reachedDialog=true;break;}
+  }
+  if(!reachedDialog)return rejected('pointer-ancestry');
   const r=control.getBoundingClientRect(),points=[];
   for(const fy of [0.25,0.5,0.75])for(const fx of [0.25,0.5,0.75]) {
     const x=r.left+control.clientLeft+control.clientWidth*fx,y=r.top+control.clientTop+control.clientHeight*fy;

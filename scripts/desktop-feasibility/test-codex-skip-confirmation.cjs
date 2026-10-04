@@ -6,17 +6,22 @@ function fixture(options={}) {
   getBoundingClientRect:()=>({left:10,top:10,width:100,height:30}),getAttribute:k=>attrs[k]??null,closest:()=>null,contains:e=>false});
  const title=node('Skip setup?'),subtitle=node(options.subtitle??'You’ll go straight to ChatGPT');
  const keep=node('Keep setting up',{type:'submit'}),go=node(options.label??'Go to ChatGPT',{type:options.type??'button'});
- const form=node(''),dialog=node('',{role:'dialog'});dialog.querySelectorAll=()=>[form];
+ const form=node(''),dialog=node('',{role:'dialog'}),body=node('');dialog.parentElement=body;dialog.querySelectorAll=()=>[form];
  form.querySelectorAll=s=>s==='button'?[keep,go,...(options.duplicate?[node('Go to ChatGPT',{type:'button'})]:[])]:s==='h1,h2,h3,[role="heading"]'?[title]:[title,subtitle,keep,go];
  go.disabled=!!options.disabled; go.parentElement=form;form.parentElement=dialog;
  const retained={form,dialog:options.replaced?node(''):dialog,diagnostic:options.diagnostic};
  const context={document:{querySelectorAll:()=>options.multiple?[dialog,node('')]:[dialog],elementFromPoint:()=>options.covered?node(''):go},innerWidth:1000,innerHeight:1000,
-  getComputedStyle:e=>({display:options.hidden&&e===dialog?'none':'block',visibility:'visible',pointerEvents:'auto'})};
+  getComputedStyle:e=>({display:options.hidden&&e===dialog?'none':'block',visibility:'visible',pointerEvents:
+   options.outsidePointerDisabled&&e===body||options.dialogPointerDisabled&&e===dialog
+    ||options.controlPointerDisabled&&e===go?'none':'auto'})};
  return vm.runInNewContext(`(${source.slice(begin,end).trim()})(control,retained)`,{...context,control:go,retained});
 }
 assert.equal(fixture().points.length,9);
 for(const o of [{subtitle:'PRIVATE'},{label:'Skip'},{type:'submit'},{duplicate:true},{disabled:true},{replaced:true},{multiple:true},{hidden:true}])assert.equal(fixture(o),null);
 assert.equal(fixture({covered:true}).points.length,0);
+assert.equal(fixture({outsidePointerDisabled:true}).points.length,9);
+for(const o of [{dialogPointerDisabled:true},{controlPointerDisabled:true}])assert.equal(fixture(o),null);
+assert.equal(fixture({outsidePointerDisabled:true,covered:true}).points.length,0);
 assert(!JSON.stringify(fixture()).includes('PRIVATE'));
 console.log('PASS: source skip confirmation, duplicates, retained scope, overlays, actionability and privacy');
 
