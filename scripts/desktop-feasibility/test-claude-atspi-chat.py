@@ -729,17 +729,17 @@ class ResponseFrameRestoreTests(unittest.TestCase):
         return adapter,controller,binding
 
     def test_moved_or_remounted_editor_only_refreshes_response_scope(self):
-        for options in ({},{'replaced':True}):
+        for options in ({},{'replaced':True},{'absent':True},{'hidden':True},{'off_frame':True}):
             adapter,controller,binding=self.restored(**options)
             controller.restore(binding,response=True)
             facts=controller.copy_response('private-marker')
             self.assertTrue(facts['responseVerified']);self.assertEqual(adapter.copy_actions,1)
             self.assertEqual(adapter.paste_count,0);self.assertEqual(adapter.focus_count,0)
+            self.assertEqual(controller.binding(),dict(binding,editor=tuple(binding["editor"]),frame=tuple(binding["frame"])))
             with self.assertRaises(chat.Rejected):adapter.key_guard()
 
     def test_original_frame_and_source_negatives_never_copy(self):
-        for options in ({'duplicate':True},{'absent':True},{'foreign':True},{'hidden':True},
-                {'off_frame':True},{'moved_frame':True},{'detached':True},{'guard_loss':True}):
+        for options in ({'duplicate':True},{'foreign':True},{'moved_frame':True},{'detached':True},{'guard_loss':True}):
             adapter,controller,binding=self.restored(**options)
             with self.assertRaises(Exception):controller.restore(binding,response=True)
             self.assertEqual(adapter.copy_actions,0);self.assertEqual(adapter.paste_count,0)
@@ -752,5 +752,22 @@ class ResponseFrameRestoreTests(unittest.TestCase):
         adapter,controller,binding=self.restored()
         with self.assertRaises(chat.Rejected):controller.restore(binding)
         self.assertEqual(adapter.paste_count,0);self.assertEqual(adapter.copy_actions,0)
+
+    def test_response_capability_cannot_focus_or_submit(self):
+        adapter,controller,binding=self.restored(absent=True)
+        controller.restore(binding,response=True)
+        facts=controller.submit('private prompt',replace_owned=True)
+        self.assertEqual(facts['failureBoundary'],'policy')
+        self.assertFalse(facts['pasteAttempted']);self.assertFalse(facts['sendAttempted'])
+        self.assertEqual(adapter.focus_count,0);self.assertEqual(adapter.paste_count,0)
+
+    def test_response_rejects_nested_owned_frame_before_copy(self):
+        adapter,controller,binding=self.restored()
+        children=adapter.children;identity=adapter.identity;owner=adapter.owner
+        adapter.children=lambda node:children(node)+[('r','nested')] if node==('r','frame') else [] if node==('r','nested') else children(node)
+        adapter.identity=lambda node:(69,'PRIVATE','') if node==('r','nested') else identity(node)
+        adapter.owner=lambda node:7 if node==('r','nested') else owner(node)
+        with self.assertRaises(chat.Rejected):controller.restore(binding,response=True)
+        self.assertEqual(adapter.copy_actions,0);self.assertEqual(adapter.focus_count,0)
 
 if __name__=='__main__':unittest.main()

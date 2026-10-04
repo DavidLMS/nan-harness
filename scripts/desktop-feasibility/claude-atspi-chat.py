@@ -420,6 +420,9 @@ class Controller:
                 raise Rejected()
             if self.query('identity',self.chat)!=(43,'Chat','') or self.query('attributes',self.chat).get('current')!='page':
                 raise Rejected()
+        if getattr(self, "response_only", False):
+            self.response_frame_proof()
+            return True
         self.state(self.editor, editable=True)
         # The exact retained native X11 foreground/client/clear-stack proof above
         # supplies window activation authority. AT-SPI ACTIVE is not required:
@@ -487,6 +490,8 @@ class Controller:
 
     def submit(self, prompt, replace_owned=False):
         try:
+            if getattr(self, 'response_only', False):
+                raise Rejected('policy')
             if self.focus_attempted or self.paste_attempted or self.send_attempted:
                 raise Rejected()
             if type(prompt) is not str or not prompt or len(prompt.encode()) > 4096:
@@ -657,30 +662,23 @@ class Controller:
             raise Rejected('native-window')
 
     def restore_response_editor(self):
-        # Read-only discovery after Send may find a moved/remounted composer.
-        # It never selects another window or grants keyboard input authority.
+        # Copy uses the original frame, not a draft editor replaced by Send.
+        # This capability never refreshes the input binding or allows keys.
+        self.response_only = True
         self.response_frame_proof()
         nodes=self.tree(self.frame)
         if any(node!=self.frame and identity[0] in (23,69) for node,identity in nodes):
             raise Rejected('frame')
-        editors=[node for node,identity in nodes if identity[0] in (61,78,79)
-            and 'Write your prompt to Claude' in identity[1:]]
-        if len(editors)!=1:
-            raise Rejected('tree')
-        self.state(editors[0],editable=True)
-        current=(self.query('identity',editors[0]),self.query('bounds',editors[0]))
-        if not inside(current[1],self.sealed_frame[1]):
-            raise Rejected('frame-client')
-        self.response_frame_proof()
-        self.editor,self.sealed_editor=editors[0],current
         self.current_chat(nodes)
         def no_keys():
             raise Rejected('policy')
-        self.adapter.key_guard=no_keys
+        self.adapter.key_guard = no_keys
         self.proof()
 
     def response_scope(self, marker):
-        nodes = self.tree()
+        nodes = self.tree(self.frame)
+        if any(node!=self.frame and identity[0] in (23,69) for node,identity in nodes):
+            raise Rejected('frame')
         headings = [node for node,identity in nodes if identity[0] == 83
             and identity[1].startswith('Claude responded: ') and marker in identity[1]]
         if not headings:
@@ -719,7 +717,7 @@ class Controller:
             if self.copy_attempted:
                 raise Rejected()
             self.proof()
-            self.current_chat(self.tree())
+            self.current_chat(self.tree(self.frame))
             scope = self.response_scope(marker)
             if scope is None:
                 self.facts['stage'] = 'response-pending'
