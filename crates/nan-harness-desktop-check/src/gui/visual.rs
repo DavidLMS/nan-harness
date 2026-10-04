@@ -474,7 +474,10 @@ impl Visual {
                 .filter(|_| {
                     eligible_windows(DesktopHarnessKind::Claude, &snapshot.windows).count() == 1
                 })
-                .is_some_and(|window| snapshot.claude_focus_pending(window))
+                .is_some_and(|window| {
+                    snapshot.claude_focus_pending(window)
+                        || snapshot.claude_initial_geometry_pending(window)
+                })
             {
                 ownership()?;
                 settle.reset();
@@ -1926,9 +1929,10 @@ fn initial_geometry_pending(snapshot: &Snapshot, original: &Window) -> bool {
     current.id == original.id
         && current.pid == original.pid
         && current.name == original.name
-        && current.bounds != original.bounds
-        && (final_initial_candidate(snapshot, original).is_ok()
-            || snapshot.claude_focus_pending(current))
+        && (snapshot.claude_initial_geometry_pending(current)
+            || (current.bounds != original.bounds
+                && (final_initial_candidate(snapshot, original).is_ok()
+                    || snapshot.claude_focus_pending(current))))
 }
 
 #[cfg(target_os = "macos")]
@@ -2767,6 +2771,56 @@ mod tests {
         ] {
             let unsafe_snapshot = Snapshot::parse(text).unwrap();
             assert!(!initial_geometry_pending(&unsafe_snapshot, &original));
+        }
+    }
+
+    #[test]
+    fn initial_ax_geometry_disagreement_waits_only_with_safe_owned_candidate() {
+        let header = "FG 7 0\nDISPLAY 0 0 2000 2000\nWIN 99 7 1800 1800 10 10 436c61756465 3\nWIN 1 7 10 20 800 600 436c61756465 0\n";
+        let proof = "FOCUS proved 1\nFOCUS_WINDOW identity-changed 0\nFOCUS_WINDOW_AGREEMENT geometry-changed\n";
+        let snapshot = Snapshot::parse(&format!("{header}{proof}")).unwrap();
+        let original = snapshot.windows[1].clone();
+        let now = Instant::now();
+        let deadline = now + Duration::from_secs(45);
+        let decide = |state, time| {
+            initial_owned_focus(&original, deadline, || Some(state), || Ok(()), || time)
+        };
+        assert_eq!(decide(snapshot.clone(), now), Ok(InitialFocus::Pending));
+        assert_eq!(
+            snapshot.claude_focused_guard_failure(&original),
+            Err(GuardFailure::SameProcessWindow)
+        );
+        assert!(final_initial_candidate(&snapshot, &original).is_err());
+        assert!(decide(snapshot.clone(), deadline).is_err());
+        let ready =
+            Snapshot::parse(&format!("{header}FOCUS proved 1\nFOCUS_WINDOW proved 1\n")).unwrap();
+        assert_eq!(decide(ready, now), Ok(InitialFocus::Ready));
+        for change in 0..5 {
+            let mut unsafe_snapshot = snapshot.clone();
+            match change {
+                0 => unsafe_snapshot.windows[1].id = 2,
+                1 => unsafe_snapshot.windows[1].pid = 8,
+                2 => unsafe_snapshot.windows[1].name = "Other".into(),
+                3 => unsafe_snapshot.windows[0].bounds = original.bounds,
+                _ => unsafe_snapshot.windows.push(original.clone()),
+            }
+            assert_eq!(decide(unsafe_snapshot, now), Ok(InitialFocus::Rejected));
+        }
+        for invalid in [
+            format!("{}{proof}", header.replace("FG 7", "FG 8")),
+            format!(
+                "{header}{}",
+                proof.replace("geometry-changed", "window-element-changed")
+            ),
+            format!(
+                "{header}{}",
+                proof.replace("FOCUS proved 1", "FOCUS proved 2")
+            ),
+        ] {
+            assert_eq!(
+                decide(Snapshot::parse(&invalid).unwrap(), now),
+                Ok(InitialFocus::Rejected)
+            );
         }
     }
 

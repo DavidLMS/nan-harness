@@ -584,6 +584,38 @@ impl Snapshot {
             && self.claude_clear_stack(expected).is_ok()
     }
 
+    /// AX can observe a resize between its paired reads while CG still reports
+    /// the original bounds. Only initial acquisition may wait for agreement;
+    /// this observation cannot authorize input or relax an established binding.
+    #[cfg(any(test, target_os = "macos"))]
+    pub(crate) fn claude_initial_geometry_pending(&self, expected: &Window) -> bool {
+        let proofs = [
+            (&self.focus, self.focus_agreement),
+            (&self.window_focus, self.window_focus_agreement),
+        ];
+        proofs
+            .iter()
+            .any(|(_, agreement)| *agreement == Some(FocusAgreement::GeometryChanged))
+            && proofs.iter().all(|(proof, agreement)| {
+                proof.as_ref().is_some_and(|proof| {
+                    (proof.status == FocusStatus::Proved && proof.window == expected.id)
+                        || (proof.status == FocusStatus::IdentityChanged
+                            && *agreement == Some(FocusAgreement::GeometryChanged))
+                })
+            })
+            && self
+                .windows
+                .iter()
+                .filter(|window| window.id == expected.id && window.pid == expected.pid)
+                .count()
+                == 1
+            && matches!(
+                self.guard_failure(expected),
+                Ok(()) | Err(GuardFailure::SameProcessWindow)
+            )
+            && self.claude_clear_stack(expected).is_ok()
+    }
+
     #[cfg(any(test, target_os = "macos"))]
     fn claude_clear_stack(&self, expected: &Window) -> Result<(), GuardFailure> {
         let index = self
