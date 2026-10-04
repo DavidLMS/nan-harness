@@ -498,7 +498,12 @@ async fn complete_scenario(
         {
             matches!(ui, SemanticUi::ClaudeWindows(_)) && retained_read_fixture
         }
-        #[cfg(not(any(target_os = "macos", windows)))]
+        #[cfg(target_os = "linux")]
+        {
+            let _ = retained_read_fixture;
+            matches!(ui, SemanticUi::ClaudeLinux(_)) && owned_read_fixture_policy(fixture)
+        }
+        #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
         {
             let _ = retained_read_fixture;
             false
@@ -752,21 +757,11 @@ fn owned_read_fixture_count(requests: &[serde_json::Value]) -> Option<usize> {
     Some(count)
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn owned_read_fixture_policy(fixture: &Path) -> bool {
     use sha2::{Digest as _, Sha256};
-    let expected = "ecb56f97d549f3040908f1bb8f0bb32235f9b48d9572ea348098135fe7999fc0";
-    for (key, value) in [
-        ("GITHUB_ACTIONS", "true"),
-        ("RUNNER_ENVIRONMENT", "github-hosted"),
-        ("RUNNER_OS", "macOS"),
-        ("NANH_CLAUDE_MAC_PROFILE_POLICY", "native-known-folders"),
-        ("NANH_CLAUDE_MCP_FIXTURE", "read-only"),
-        ("NANH_CLAUDE_MCP_SOURCE_SHA256", expected),
-    ] {
-        if std::env::var(key).as_deref() != Ok(value) {
-            return false;
-        }
+    if !owned_read_fixture_environment(std::env::consts::OS, |key| std::env::var(key).ok()) {
+        return false;
     }
     let valid = || -> Option<()> {
         if !owned_read_fixture_workspace(fixture) {
@@ -799,7 +794,47 @@ fn owned_read_fixture_policy(fixture: &Path) -> bool {
     valid().is_some()
 }
 
-#[cfg(any(target_os = "macos", all(test, unix)))]
+#[cfg(any(target_os = "macos", target_os = "linux", all(test, unix)))]
+fn owned_read_fixture_environment(
+    platform: &str,
+    environment: impl Fn(&str) -> Option<String>,
+) -> bool {
+    let platform_policy = match platform {
+        "macos" => [
+            ("RUNNER_OS", "macOS"),
+            ("NANH_CLAUDE_MAC_PROFILE_POLICY", "native-known-folders"),
+            ("NANH_CLAUDE_MCP_FIXTURE", "read-only"),
+        ],
+        "linux" => [
+            ("RUNNER_OS", "Linux"),
+            ("NANH_CLAUDE_LINUX_CHAT_ONLY", "1"),
+            ("NANH_CLAUDE_LINUX_MCP_FIXTURE", "read-only"),
+        ],
+        _ => return false,
+    };
+    let foreign_policy = if platform == "linux" {
+        "NANH_CLAUDE_MCP_FIXTURE"
+    } else {
+        "NANH_CLAUDE_LINUX_MCP_FIXTURE"
+    };
+    environment(foreign_policy).is_none()
+        && environment("NANH_CLAUDE_WINDOWS_MCP_FIXTURE").is_none()
+        && (platform != "linux"
+            || environment("NANH_CLAUDE_LINUX_NATIVE_CHAT").as_deref() == Some("first-turn"))
+        && platform_policy
+            .into_iter()
+            .chain([
+                ("GITHUB_ACTIONS", "true"),
+                ("RUNNER_ENVIRONMENT", "github-hosted"),
+                (
+                    "NANH_CLAUDE_MCP_SOURCE_SHA256",
+                    "ecb56f97d549f3040908f1bb8f0bb32235f9b48d9572ea348098135fe7999fc0",
+                ),
+            ])
+            .all(|(key, expected)| environment(key).as_deref() == Some(expected))
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux", all(test, unix)))]
 fn owned_read_fixture_workspace(fixture: &Path) -> bool {
     use std::os::unix::fs::MetadataExt as _;
     let valid = || -> Option<()> {
@@ -834,6 +869,80 @@ fn owned_read_fixture_workspace(fixture: &Path) -> bool {
 mod owned_fixture_tests {
     use super::owned_read_fixture_count;
     use serde_json::json;
+    #[cfg(unix)]
+    #[test]
+    fn fixture_selection_policy_binds_the_native_platform_and_explicit_private_mode() {
+        use super::owned_read_fixture_environment;
+        use std::collections::BTreeMap;
+        for (platform, runner, policy, mode, mode_value) in [
+            (
+                "linux",
+                "Linux",
+                "NANH_CLAUDE_LINUX_MCP_FIXTURE",
+                "NANH_CLAUDE_LINUX_CHAT_ONLY",
+                "1",
+            ),
+            (
+                "macos",
+                "macOS",
+                "NANH_CLAUDE_MCP_FIXTURE",
+                "NANH_CLAUDE_MAC_PROFILE_POLICY",
+                "native-known-folders",
+            ),
+        ] {
+            let environment = BTreeMap::from([
+                ("GITHUB_ACTIONS", "true"),
+                ("RUNNER_ENVIRONMENT", "github-hosted"),
+                ("RUNNER_OS", runner),
+                (policy, "read-only"),
+                (mode, mode_value),
+                (
+                    "NANH_CLAUDE_MCP_SOURCE_SHA256",
+                    "ecb56f97d549f3040908f1bb8f0bb32235f9b48d9572ea348098135fe7999fc0",
+                ),
+            ]);
+            let mut environment = environment;
+            if platform == "linux" {
+                environment.insert("NANH_CLAUDE_LINUX_NATIVE_CHAT", "first-turn");
+            }
+            let admitted = |values: &BTreeMap<&str, &str>, target| {
+                owned_read_fixture_environment(target, |key| {
+                    values.get(key).map(|value| (*value).into())
+                })
+            };
+            assert!(admitted(&environment, platform));
+            for key in environment.keys() {
+                let mut missing = environment.clone();
+                missing.remove(key);
+                assert!(!admitted(&missing, platform), "missing {key}");
+                let mut changed = environment.clone();
+                changed.insert(key, "foreign");
+                assert!(!admitted(&changed, platform), "changed {key}");
+            }
+            for foreign in [
+                "NANH_CLAUDE_WINDOWS_MCP_FIXTURE",
+                if platform == "linux" {
+                    "NANH_CLAUDE_MCP_FIXTURE"
+                } else {
+                    "NANH_CLAUDE_LINUX_MCP_FIXTURE"
+                },
+            ] {
+                let mut mixed = environment.clone();
+                mixed.insert(foreign, "read-only");
+                assert!(!admitted(&mixed, platform));
+            }
+            assert!(!admitted(&environment, "windows"));
+            assert!(!admitted(
+                &environment,
+                if platform == "linux" {
+                    "macos"
+                } else {
+                    "linux"
+                }
+            ));
+        }
+    }
+
     #[cfg(unix)]
     #[test]
     fn fixture_binds_private_parent_independently_of_worker_current_directory() {
