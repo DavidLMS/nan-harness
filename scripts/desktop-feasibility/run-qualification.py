@@ -168,7 +168,7 @@ def qualification_environment(app, facts, real_nanh, executable, inherited=None)
             or source.get('NANH_CLAUDE_MCP_FIXTURE') is not None):
         raise ValueError('Claude Linux read fixture policy is unavailable')
     panel_layout = source.get('NANH_ZED_PANEL_LAYOUT')
-    if panel_layout is not None and (panel_layout != 'fixed-wide' or app != 'zed-desktop'
+    if panel_layout is not None and (panel_layout not in {'fixed-wide', 'fixed-wide-compact'} or app != 'zed-desktop'
             or source.get('RUNNER_OS') != 'Linux'
             or source.get('NANH_ZED_LAYOUT_POLICY') is not None or source.get('NANH_ZED_PANEL_ZOOM') is not None):
         raise ValueError('Zed panel layout trial is unavailable')
@@ -402,7 +402,10 @@ def run(args):
         if args.app != 'zed-desktop' or args.platform != 'linux':
             raise ValueError('Zed panel layout platform differs')
         validate_zed_panel_release(release, digest(Path(executable)))
-        environment['NANH_ZED_PANEL_LAYOUT'] = 'fixed-wide'
+        requested = os.environ['NANH_ZED_PANEL_LAYOUT']
+        if requested not in {'fixed-wide', 'fixed-wide-compact'}:
+            raise ValueError('Zed panel layout trial differs')
+        environment['NANH_ZED_PANEL_LAYOUT'] = requested
         environment['NANH_ZED_PANEL_SOURCE_POLICY'] = 'official-1.22.0'
 
     if (args.app == 'claude-desktop' and args.platform == 'linux'

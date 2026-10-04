@@ -1914,7 +1914,7 @@ fn zed_panel_layout_bytes(
     let Some(requested) = requested else {
         return Ok(settings.to_vec());
     };
-    if requested != "fixed-wide" || !allowed {
+    if !matches!(requested, "fixed-wide" | "fixed-wide-compact") || !allowed {
         return Err(Reason::IsolationUnavailable);
     }
     let mut document: Value =
@@ -1929,6 +1929,11 @@ fn zed_panel_layout_bytes(
             "limit_content_width": false
         }),
     );
+    if requested == "fixed-wide-compact" {
+        // AgentPanel's official AgentFont rem size scales the entire panel,
+        // including the error callout; buffer font and ordinary settings stay intact.
+        object.insert("agent_ui_font_size".to_owned(), serde_json::json!(12));
+    }
     serde_json::to_vec(&document).map_err(|_| Reason::IsolationUnavailable)
 }
 
@@ -2043,6 +2048,22 @@ mod zed_panel_layout_tests {
         assert_eq!(configured["agent"]["default_width"], 960);
         assert_eq!(configured["agent"]["flexible"], false);
         assert_eq!(configured["agent"]["limit_content_width"], false);
+        let original = br#"{"agent_ui_font_size":16,"agent_buffer_font_size":16,"theme":"One Dark","telemetry":{"metrics":false}}"#;
+        let wide: Value = serde_json::from_slice(
+            &zed_panel_layout_bytes(original, Some("fixed-wide"), true).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(wide["agent_ui_font_size"], 16);
+        let compact: Value = serde_json::from_slice(
+            &zed_panel_layout_bytes(original, Some("fixed-wide-compact"), true).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(compact["agent_ui_font_size"], 12);
+        assert_eq!(compact["agent_buffer_font_size"], 16);
+        assert_eq!(compact["theme"], "One Dark");
+        assert_eq!(compact["telemetry"], wide["telemetry"]);
+        assert_eq!(compact["agent"], wide["agent"]);
+        assert!(zed_panel_layout_bytes(original, Some("fixed-wide-compact"), false).is_err());
     }
 }
 
