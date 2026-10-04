@@ -3266,5 +3266,44 @@ class ClaudeFailureAuthorityTests(unittest.TestCase):
                 path.write_text(json.dumps({**value,'failureAuthority':{**authority,**extra}}))
                 with self.assertRaises(ValueError):q.semantic_observations(root,'claude-desktop')
 
+class ClaudePersistOwnerTests(unittest.TestCase):
+    def test_runner_forwarding_is_explicit_private_windows_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp).resolve();helper=root/'helper';helper.write_text('public fixture')
+            source=dict(GITHUB_ACTIONS='true',RUNNER_ENVIRONMENT='github-hosted',RUNNER_OS='Windows',
+                        NANH_DESKTOP_QUALIFICATION_MODE='startup-baseline',
+                        NANH_CLAUDE_WINDOWS_PROFILE_POLICY='private-env',NANH_CLAUDE_PRELAUNCH_DIAGNOSTICS='1',
+                        NANH_CLAUDE_PERSIST_OWNERS='1',FEASIBILITY_WINDOWS_PROOF_PYTHON=str(helper),
+                        FEASIBILITY_WINDOWS_PROOF_SCRIPT=str(helper))
+            with patch.object(runner,'validate_claude_windows_bundle'):
+                environment=runner.qualification_environment('claude-desktop',root,helper,str(helper),source)
+                self.assertEqual(environment['NANH_CLAUDE_PERSIST_OWNERS'],'1')
+                self.assertNotIn('NANH_CLAUDE_PERSIST_CUTOFF_MS',environment)
+                for changes in ({'NANH_CLAUDE_PERSIST_OWNERS':'other'},
+                                {'NANH_CLAUDE_PRELAUNCH_DIAGNOSTICS':'0'},
+                                {'NANH_CLAUDE_WINDOWS_PROFILE_POLICY':'other'},
+                                {'NANH_DESKTOP_QUALIFICATION_MODE':'renderer'}):
+                    with self.assertRaises(ValueError):runner.qualification_environment('claude-desktop',root,helper,str(helper),{**source,**changes})
+            with self.assertRaises(ValueError):runner.qualification_environment('zed-desktop',root,helper,str(helper),source)
+
+    def test_owner_counts_are_advisory_partition_and_payload_closed(self):
+        value=dict(schemaVersion=1,mechanism='claude-config-persist-owners',diagnosticsOnly=True,
+                   status='observed',stage='complete',destinationPresent=False,
+                   ownerCount=2,currentProcessCount=1,otherProcessCount=1)
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);path=root/'owners.json'
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(root,'claude-desktop'),[value])
+            for extra in ({'ownerCount':1},{'ownerCount':65},{'currentProcessCount':True},
+                          {'stage':'PRIVATE'},{'path':'PRIVATE'},{'pid':123},{'destinationPresent':None}):
+                path.write_text(json.dumps({**value,**extra}))
+                with self.assertRaises(ValueError):q.semantic_observations(root,'claude-desktop')
+            unavailable={**value,'status':'unavailable','stage':'query','destinationPresent':None,
+                         'ownerCount':None,'currentProcessCount':None,'otherProcessCount':None}
+            path.write_text(json.dumps(unavailable))
+            self.assertEqual(q.semantic_observations(root,'claude-desktop'),[unavailable])
+            path.write_text(json.dumps({**unavailable,'ownerCount':0}))
+            with self.assertRaises(ValueError):q.semantic_observations(root,'claude-desktop')
+
 if __name__ == '__main__':
     unittest.main()

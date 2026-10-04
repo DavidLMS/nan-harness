@@ -48,6 +48,8 @@ mod qualification_mcp;
 mod qualification_models;
 mod qualification_prelaunch;
 use qualification_prelaunch::{Stage as PrelaunchStage, observe as observe_prelaunch};
+#[cfg(all(feature = "desktop-qualification", any(windows, test)))]
+mod qualification_persist_owners;
 #[cfg(feature = "desktop-qualification")]
 mod qualification_restore;
 #[cfg(feature = "desktop-qualification")]

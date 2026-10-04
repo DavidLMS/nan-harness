@@ -362,9 +362,20 @@ fn atomic_write_inner(
             document,
         )?;
     }
+    let result = persist_configuration_file(temporary, path, document.is_some());
+    #[cfg(all(windows, feature = "desktop-qualification"))]
+    let result = result.inspect_err(|error| {
+        if error.error.raw_os_error() == Some(32)
+            && matches!(
+                document,
+                Some(qualification_prelaunch::ConfigurationDocument::NormalConfig)
+            )
+        {
+            super::qualification_persist_owners::observe(&error.file, path);
+        }
+    });
     qualification_prelaunch::observe_configuration_persist(
-        persist_configuration_file(temporary, path, document.is_some())
-            .map_err(|error| ClaudeDesktopError::Write(error.error)),
+        result.map_err(|error| ClaudeDesktopError::Write(error.error)),
         document,
     )?;
     Ok(())

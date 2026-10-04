@@ -220,7 +220,7 @@ impl ConfigurationDocument {
 }
 
 #[cfg(feature = "desktop-qualification")]
-fn facts_directory() -> Option<std::path::PathBuf> {
+pub(super) fn facts_directory() -> Option<std::path::PathBuf> {
     let directory = std::path::PathBuf::from(std::env::var_os("NANH_DESKTOP_QUALIFICATION_FACTS")?);
     let metadata = std::fs::symlink_metadata(&directory).ok()?;
     if metadata.file_type().is_symlink()
@@ -233,7 +233,7 @@ fn facts_directory() -> Option<std::path::PathBuf> {
 }
 
 #[cfg(feature = "desktop-qualification")]
-fn enabled() -> bool {
+pub(super) fn enabled() -> bool {
     enabled_values(cfg!(windows), |key| std::env::var(key).ok())
 }
 

@@ -135,6 +135,8 @@ def qualification_environment(app, facts, real_nanh, executable, inherited=None)
         raise ValueError('Claude native Chat controller is unavailable')
     if source.get('NANH_CLAUDE_MAC_CHAT_NAVIGATION') is not None and app != 'claude-desktop':
         raise ValueError('Claude native Chat navigation is unavailable')
+    if source.get('NANH_CLAUDE_PERSIST_OWNERS') is not None and app != 'claude-desktop':
+        raise ValueError('Claude persist owner diagnostic is unavailable')
     if source.get('NANH_CLAUDE_WINDOWS_CHAT_ONLY') is not None and app != 'claude-desktop':
         raise ValueError('Claude Windows Chat-only trial is unavailable')
     for key in ('NANH_CLAUDE_WINDOWS_FRESH_PROFILE', 'NANH_CLAUDE_WINDOWS_NATIVE_CHAT'):
@@ -291,6 +293,18 @@ def qualification_environment(app, facts, real_nanh, executable, inherited=None)
                     or mode != 'startup-baseline' or windows_profile != 'private-env'):
                 raise ValueError('Claude Windows Chat-only trial is unavailable')
             environment['NANH_CLAUDE_WINDOWS_CHAT_ONLY'] = windows_chat
+        persist_owners = source.get('NANH_CLAUDE_PERSIST_OWNERS')
+        if persist_owners is not None:
+            if (persist_owners != '1' or app != 'claude-desktop' or source.get('RUNNER_OS') != 'Windows'
+                    or mode != 'startup-baseline' or windows_profile != 'private-env'
+                    or source.get('NANH_CLAUDE_PRELAUNCH_DIAGNOSTICS') != '1'):
+                raise ValueError('Claude persist owner diagnostic is unavailable')
+            helper = Path(__file__).with_name('claude-persist-owners.py').resolve(strict=True)
+            python = Path(sys.executable).resolve(strict=True)
+            if digest(helper) != 'd01b96696abec4658b1ebf41ea9c5b316f2a0c03a9c44aabb4f67bd5065d2b33':
+                raise ValueError('Claude persist owner source differs')
+            environment.update(NANH_CLAUDE_PERSIST_OWNERS='1',NANH_CLAUDE_PERSIST_SCRIPT=str(helper),
+                               NANH_CLAUDE_PERSIST_PYTHON=str(python),NANH_CLAUDE_PERSIST_PYTHON_SHA256=digest(python))
         prelaunch = source.get('NANH_CLAUDE_PRELAUNCH_DIAGNOSTICS')
         if prelaunch is not None:
             if (prelaunch != '1' or app != 'claude-desktop' or source.get('RUNNER_OS') != 'Windows'

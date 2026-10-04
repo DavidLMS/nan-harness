@@ -121,6 +121,8 @@ mod windows_process_tests {
 mod claude_native_roots;
 pub(crate) use claude_native_roots::NativeRoots;
 mod claude_native_storage;
+#[cfg(any(windows, test))]
+mod claude_persist_owners;
 mod claude_storage;
 #[cfg(windows)]
 mod claude_windows_profile;
@@ -2202,6 +2204,8 @@ fn launch(
     spec: &ProbeSpec,
     command: Command,
 ) -> Result<ProbeProcess, (Reason, crate::diagnostics::LaunchFailure)> {
+    #[cfg(windows)]
+    let prelaunch_deadline = Instant::now() + Duration::from_secs(45);
     claude_storage::capture(spec, &command);
     claude_native_storage::capture(spec);
     #[cfg(windows)]
@@ -2211,6 +2215,12 @@ fn launch(
         && std::env::var("NANH_DESKTOP_QUALIFICATION_MODE").as_deref() == Ok("startup-baseline"))
     .then(|| binary_digest(&spec.executable).ok())
     .flatten();
+    #[cfg(windows)]
+    let command = {
+        let mut command = command;
+        claude_persist_owners::bind(spec, &mut command, prelaunch_deadline);
+        command
+    };
     let process = ProbeProcess::spawn(command).map_err(|_| {
         (
             Reason::UnsupportedVersion,
