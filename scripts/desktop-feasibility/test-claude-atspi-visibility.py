@@ -2,6 +2,7 @@
 import importlib.util
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 spec = importlib.util.spec_from_file_location('visibility', Path(__file__).with_name('claude-atspi-visibility.py'))
 v = importlib.util.module_from_spec(spec); spec.loader.exec_module(v)
 HELD = dict(pid=12, bus='private-bus', path='/private-target')
@@ -18,6 +19,27 @@ class Fixture:
     def parent(self,node): self.log('parent',node); return PARENT if node==TARGET else APP
     def role(self,node): self.log('role',node); return 75 if node==APP else 20
 class Tests(unittest.TestCase):
+    def test_explicit_wire_calls_have_no_implicit_proxy_or_introspection(self):
+        calls=[]
+        class Bus:
+            def get_object(self, *_args, **_kwargs):
+                raise AssertionError('implicit proxy query')
+            def call_blocking(self, *args, **kwargs):
+                calls.append((args,kwargs))
+                return 12 if args[3]=='GetConnectionUnixProcessID' else 'owned'
+        adapter=v.Adapter.__new__(v.Adapter);adapter.bus=Bus();adapter.deadline=5
+        with patch.object(v.time, 'monotonic', return_value=2):
+            self.assertEqual(adapter.owner(TARGET),12)
+            self.assertEqual(adapter.call(TARGET,'Get','org.freedesktop.DBus.Properties',
+                'org.a11y.atspi.Accessible','Name'),'owned')
+            adapter.call(TARGET,'GetAccessibleAtPoint','org.a11y.atspi.Component',3,4,0)
+        self.assertEqual([call[0][4] for call in calls],['s','ss','iiu'])
+        self.assertTrue(all(call[1]=={'timeout':3} for call in calls))
+        with patch.object(v.time, 'monotonic', return_value=5):
+            with self.assertRaises(TimeoutError):adapter.owner(TARGET)
+        self.assertEqual(len(calls),3)
+        with self.assertRaises(KeyError):adapter.call(TARGET,'Introspect')
+        self.assertEqual(len(calls),3)
     def run_fixture(self,f,deadline=5): return v.observe(HELD,f,deadline,lambda:f.now)
     def test_hidden_editor_and_ancestor_are_distinct_native_states(self):
         f=Fixture(); result=self.run_fixture(f)

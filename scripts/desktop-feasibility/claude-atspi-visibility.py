@@ -150,12 +150,31 @@ def inspect(root, adapter, deadline, clock=time.monotonic):
 
 
 class Adapter:
+    # Declared AT-SPI wire signatures avoid a second, implicitly timed
+    # Introspect call for every fresh proxy during retained-tree proofs.
+    SIGNATURES = {
+        ('org.a11y.atspi.Accessible', method): ''
+        for method in ('GetRole', 'GetChildren', 'GetState', 'GetAttributes')
+    } | {
+        ('org.freedesktop.DBus.Properties', 'Get'): 'ss',
+        ('org.a11y.atspi.Component', 'GetExtents'): 'u',
+        ('org.a11y.atspi.Component', 'GrabFocus'): '',
+        ('org.a11y.atspi.Component', 'GetAccessibleAtPoint'): 'iiu',
+        ('org.a11y.atspi.Text', 'GetText'): 'ii',
+        ('org.a11y.atspi.Hypertext', 'GetNLinks'): '',
+        ('org.a11y.atspi.Hypertext', 'GetLinkIndex'): 'i',
+        ('org.a11y.atspi.Hypertext', 'GetLink'): 'i',
+        ('org.a11y.atspi.Hyperlink', 'GetObject'): 'i',
+        ('org.a11y.atspi.Hyperlink', 'IsValid'): '',
+        ('org.a11y.atspi.Action', 'GetName'): 'i',
+        ('org.a11y.atspi.Action', 'DoAction'): 'i',
+    }
     def __init__(self, deadline):
         import dbus
         self.dbus, self.deadline = dbus, deadline
         session = dbus.SessionBus()
-        address = session.get_object('org.a11y.Bus', '/org/a11y/bus').GetAddress(
-            dbus_interface='org.a11y.Bus', timeout=self.remaining())
+        address = session.call_blocking('org.a11y.Bus', '/org/a11y/bus',
+            'org.a11y.Bus', 'GetAddress', '', (), timeout=self.remaining())
         self.bus = dbus.bus.BusConnection(str(address))
     def remaining(self):
         remaining = self.deadline - time.monotonic()
@@ -163,11 +182,13 @@ class Adapter:
             raise TimeoutError()
         return remaining
     def call(self, node, method, interface='org.a11y.atspi.Accessible', *args):
-        return getattr(self.bus.get_object(*node), method)(*args, dbus_interface=interface,
-                                                         timeout=self.remaining())
+        signature = self.SIGNATURES[(interface, method)]
+        return self.bus.call_blocking(*node, interface, method, signature, args,
+                                      timeout=self.remaining())
     def owner(self, node):
-        return int(self.bus.get_object('org.freedesktop.DBus', '/org/freedesktop/DBus').GetConnectionUnixProcessID(
-            node[0], dbus_interface='org.freedesktop.DBus', timeout=self.remaining()))
+        return int(self.bus.call_blocking('org.freedesktop.DBus', '/org/freedesktop/DBus',
+            'org.freedesktop.DBus', 'GetConnectionUnixProcessID', 's', (node[0],),
+            timeout=self.remaining()))
     def role(self, node):
         return int(self.call(node, 'GetRole'))
     def identity(self, node):
