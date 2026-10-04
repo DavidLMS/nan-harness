@@ -2470,6 +2470,27 @@ class QualificationTests(unittest.TestCase):
                 q.semantic_observations(root, 'claude-desktop')
             self.assertEqual(q.envelope('chatgpt-desktop', 'linux', 'x86_64', 'a' * 40)['qualification'], 'unqualified')
 
+    def test_codex_pending_native_stack_is_closed_advisory_only(self):
+        value=dict(schemaVersion=1,mechanism='renderer-inventory',diagnosticsOnly=True,
+                   app='chatgpt-desktop',endpointOwned=True,launcherOwned=True,attached=True,
+                   pageCount=1,textareaCount=0,editableCount=0,sendCount=0,retryCount=0,
+                   newThreadCount=0,loginCount=0,dialogCount=0,errorCategory=None)
+        stack=dict(sample='after',normalOverlapCount=0,elevatedOverlapCount=1,
+                   lowerOverlapCount=0,displayContained=True)
+        activation=dict(phase='polling',status='deadline',activationAttempted=True,
+                        guardFailure=None,nativePendingStack=stack)
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);path=root/'pending.json'
+            path.write_text(json.dumps({**value,'initialMainActivation':activation}))
+            self.assertEqual(q.semantic_observations(root,'chatgpt-desktop')[0]['initialMainActivation'],activation)
+            for changed in ({**stack,'normalOverlapCount':True},{**stack,'elevatedOverlapCount':0},
+                            {**stack,'normalOverlapCount':1024},{**stack,'displayContained':False},
+                            {**stack,'sample':'PRIVATE'},{**stack,'title':'PRIVATE'},None):
+                path.write_text(json.dumps({**value,'initialMainActivation':{**activation,'nativePendingStack':changed}}))
+                with self.assertRaises(ValueError):q.semantic_observations(root,'chatgpt-desktop')
+            path.write_text(json.dumps({**value,'initialMainActivation':{**activation,'activationAttempted':False}}))
+            with self.assertRaises(ValueError):q.semantic_observations(root,'chatgpt-desktop')
+
     def test_codex_activation_diagnostic_preserves_original_failure_and_privacy(self):
         value = dict(schemaVersion=1, mechanism='renderer-inventory', diagnosticsOnly=True,
                      app='chatgpt-desktop', endpointOwned=True, launcherOwned=True, attached=True,

@@ -97,3 +97,25 @@ for(const result of ['pending-external-stack\n','PRIVATE\n']) {
  } else {assert.throws(()=>native.verify());assert.equal(native.pending(),false);}
  assert.throws(()=>native.activate());assert.equal(calls.filter(x=>x==='activate').length,1);
 }
+
+for(const [line,accepted] of [
+ ['pending-external-stack after 0 1 0 1\n',true],
+ ['pending-external-stack before 1 0 0 1\n',true],
+ ['pending-external-stack after 0 0 0 1\n',false],
+ ['pending-external-stack after 1024 1 0 1\n',false],
+ ['pending-external-stack after 0 1 0 0\n',false],
+ ['pending-external-stack PRIVATE 0 1 0 1\n',false],
+ ['pending-external-stack after 0 1 0 1\nPRIVATE',false]]) {
+ let calls=[];
+ const native=controller(config,20,25,2000,(_helper,_args,options)=>{
+  const phase=options.input.split(' ')[0];calls.push(phase);
+  return phase==='prepare'?'42 100 10 20 600 400 500 0 1000000000\n':phase==='activate'?'activated\n':line;
+ },()=>1000);
+ native.prepare();native.activate();
+ if(accepted) {
+  assert.equal(native.verify(),false);assert.equal(native.pending(),true);
+  const stack=native.pendingStack();assert.equal(stack.displayContained,true);
+  assert.equal(stack.normalOverlapCount+stack.elevatedOverlapCount+stack.lowerOverlapCount,1);
+ } else {assert.throws(()=>native.verify());assert.equal(native.pendingStack(),null);}
+ assert.equal(calls.filter(v=>v==='activate').length,1);
+}

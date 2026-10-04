@@ -80,6 +80,8 @@ bool rect(CFDictionaryRef row,CGRect& result) {
 struct InventoryFailure {
     const char* reason="inventory-unavailable";
     unsigned candidates=0, executable_rejected=0, ancestry_rejected=0;
+    unsigned normal_overlap=0, elevated_overlap=0, lower_overlap=0;
+    bool display_contained=false;
 };
 bool inventory(const Request& r,Binding& result,bool select,InventoryFailure* failure=nullptr,bool activation_only=false,bool* externally_occluded=nullptr) {
     InventoryFailure observation;
@@ -132,6 +134,12 @@ bool inventory(const Request& r,Binding& result,bool select,InventoryFailure* fa
         const bool same_owner=number(row,kCGWindowOwnerPID)==result.pid;
         if(CGRectIntersectsRect(bounds,result.bounds)
             ||(same_owner&&number(row,kCGWindowLayer)==0)) {
+            if(CGRectIntersectsRect(bounds,result.bounds)) {
+                const auto level=number(row,kCGWindowLayer);
+                if(level==0)++observation.normal_overlap;
+                else if(level>0)++observation.elevated_overlap;
+                else ++observation.lower_overlap;
+            }
             overlapping_ahead=true;
             owned_overlap=owned_overlap||same_owner;
         }
@@ -141,6 +149,7 @@ bool inventory(const Request& r,Binding& result,bool select,InventoryFailure* fa
         auto id=[screen.deviceDescription[@"NSScreenNumber"] unsignedIntValue];
         contained=contained||CGRectContainsRect(CGDisplayBounds(id),result.bounds);
     }
+    observation.display_contained=contained;
     CFRelease(rows);
     bool timely=alive(r);
     bool admitted=codex_inventory_admitted(valid,candidates,held>=0,
@@ -223,6 +232,7 @@ int codex_activate_main() {
         // activation; it never reports success or authorizes input while occluded.
         bool first_occluded=false,second_occluded=false;
         if(!inventory(request,held,!request.action&&!request.verify,&failure,true,&first_occluded))return activation_rejected("cg-inventory-before",&failure);
+        const auto first_inventory=failure;
         const char* boundary="ax-main-before";
         AXUIElementRef first=main_window(request,held,&boundary);if(!first)return activation_rejected(boundary);
         Binding fresh=held;bool valid=inventory(request,fresh,false,&failure,true,&second_occluded);
@@ -238,7 +248,11 @@ int codex_activate_main() {
             // stable. Only an external overlap may settle passively; changes,
             // owned overlaps and query failures still reject before this point.
             if(first_occluded||second_occluded) {
-                CFRelease(first);std::cout<<"pending-external-stack\n";return 0;
+                const auto& stack=second_occluded?failure:first_inventory;
+                CFRelease(first);std::cout<<"pending-external-stack "
+                    <<(second_occluded?"after":"before")<<' '<<stack.normal_overlap<<' '
+                    <<stack.elevated_overlap<<' '<<stack.lower_overlap<<' '
+                    <<(stack.display_contained?1:0)<<'\n';return 0;
             }
             auto app=[NSRunningApplication runningApplicationWithProcessIdentifier:held.pid];
             AXUIElementRef application=AXUIElementCreateApplication(held.pid);CFTypeRef focused=nullptr;

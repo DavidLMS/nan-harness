@@ -1847,7 +1847,7 @@ def semantic_observations(directory, app):
             if 'initialMainActivation' in value:
                 activation = value['initialMainActivation']
                 if (app != 'chatgpt-desktop' or type(activation) is not dict
-                        or set(activation) - {'nativeBoundary','nativeInventoryFailure','nativeActivationFailure'} != {'phase', 'status', 'activationAttempted', 'guardFailure'}
+                        or set(activation) - {'nativeBoundary','nativeInventoryFailure','nativeActivationFailure','nativePendingStack'} != {'phase', 'status', 'activationAttempted', 'guardFailure'}
                         or type(activation['phase']) is not str or activation['phase'] not in {
                             'pre-proof', 'pre-identity', 'activation', 'polling', 'final-proof'}
                         or type(activation['status']) is not str or activation['status'] not in {
@@ -1882,6 +1882,16 @@ def semantic_observations(directory, app):
                             or any(type(inventory[k]) is not int or not 0 <= inventory[k] <= 1024 for k in counts)
                             or sum(inventory[k] for k in counts) > 1024):
                         raise ValueError('invalid Codex native inventory failure')
+                if 'nativePendingStack' in activation:
+                    stack=activation['nativePendingStack']
+                    counts={'normalOverlapCount','elevatedOverlapCount','lowerOverlapCount'}
+                    if (type(stack) is not dict or set(stack)!=counts|{'sample','displayContained'}
+                            or type(stack['sample']) is not str or stack['sample'] not in {'before','after'}
+                            or stack['displayContained'] is not True
+                            or any(type(stack[key]) is not int or not 0<=stack[key]<=1024 for key in counts)
+                            or not 1<=sum(stack[key] for key in counts)<=1024
+                            or activation['activationAttempted'] is not True):
+                        raise ValueError('invalid Codex pending native stack')
                 if 'nativeActivationFailure' in activation:
                     failure = activation['nativeActivationFailure']
                     boundaries = {'request','cg-inventory-before','ax-main-before','cg-inventory-after',
