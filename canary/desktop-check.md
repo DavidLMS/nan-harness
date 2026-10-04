@@ -42,36 +42,47 @@ records Pen as excluded rather than accepted. No test account is authorized.
 Personal-machine isolation and live-provider behavior still require separate
 evidence.
 
-The latest Linux Claude trial, [37200355002](https://github.com/DavidLMS/nan-harness/actions/runs/37200355002)
-(`08577d24`, official `2.9939.4`), sends and independently copies the first
-response in all three fresh sessions; the next input remains blocked. The
-AT-SPI Section/Grouping numeric roles are now used directly rather than ATK
-role values. Copy retains the original frame and grants no keyboard capability.
+The latest Linux Claude trial, [37205703035](https://github.com/DavidLMS/nan-harness/actions/runs/37205703035)
+(`68207a0c`, official `2.9939.4`), sends and independently copies the first
+response in all three fresh sessions. The next input is rejected because the
+owned editor contains text. Closed diagnostics report 17 characters and five
+nodes; this does not establish an empty filler or a complete retained prompt.
+Both application and global cleanup pass. No replacement capability is admitted.
 
-The isolated Windows compiler trial, [37201830685](https://github.com/DavidLMS/nan-harness/actions/runs/37201830685),
-never installs or runs a vendor application and identifies 26 denied
-`unused_qualifications` errors in the configuration test module. These are
-corrected in `b80298e7`. Earlier aggregate PowerShell steps could hide failures
-in the first Cargo invocations; each invocation now checks its exit code.
-The post-installation failure was therefore not evidence of a configuration
-writer or sharing violation. A fresh complete native result is still required.
+The isolated Windows filesystem trial,
+[37205148502](https://github.com/DavidLMS/nan-harness/actions/runs/37205148502),
+proves that a retained directory handle sharing read and write permits child
+renames while still denying directory deletion. Configuration file handles
+continue to deny writes. `607479d6` adopts this directory sharing and corrects
+synthetic fixtures to distinguish source sharing violations from target access
+denials; a fresh complete native trial is running in
+[37206502009](https://github.com/DavidLMS/nan-harness/actions/runs/37206502009).
+The earlier 26 Windows test compilation errors are fixed; historical masked
+Cargo success is not acceptance evidence.
 
-[Codex macOS 37200417070](https://github.com/DavidLMS/nan-harness/actions/runs/37200417070)
-observes no native AXWebArea in the retained window. The next fully admitted
-macOS trial enables Chromium renderer accessibility at launch. Its point
-mapping remains read-only and does not waive focus or native hit verification.
-Linux Codex now retains the effective managed `CODEX_HOME` before launch and
-compares a private stable state snapshot with the selected project's exact
-source check icon. This observation does not yet grant Send; effective host
-and initial controller context still need corroboration.
+[Codex macOS 37203901056](https://github.com/DavidLMS/nan-harness/actions/runs/37203901056)
+observes a stable sole AXWebArea with matching URL, dimensions and native focus,
+but the retained point is occluded in all three sessions. A separate source-pinned
+trial retains the actual Engineering control and permits at most one position
+write to the owned window. It preserves identity and the original cutoff, then
+rechecks native hit testing and the same renderer document. Every observation
+still denies input authority and full window verification remains required.
+The trial is running in [37206860343](https://github.com/DavidLMS/nan-harness/actions/runs/37206860343).
+Linux Codex [37204667616](https://github.com/DavidLMS/nan-harness/actions/runs/37204667616)
+recognizes the sole persisted local project but does not yet correlate its ID
+with the selected project in the interface. A passive source context witness is
+implemented; it cannot grant Send before that correlation succeeds.
 
-[Zed Linux 37200470498](https://github.com/DavidLMS/nan-harness/actions/runs/37200470498)
-verifies reply and file-tool use, but all sampled Retry points retain an arrow
-cursor. The recorder now freezes events already admitted before its original
-cutoff instead of discarding them when the cursor scan outlasts capture. Event
-headers are advisory; they do not prove GPUI consumed an event or authorize a
-click. The six open cells and the final same-commit production matrix remain
-pending.
+[Zed Linux 37206153428](https://github.com/DavidLMS/nan-harness/actions/runs/37206153428)
+verifies reply and file-tool use, but Retry remains blocked. Complete owned
+transient-dialog censuses before and after hover find no dialog in all three
+sessions. Two environment filters had prevented the new XI2 payload observer
+from running; both are corrected in `fd4985f9` and a runner policy fixture now
+checks forwarding. The actual observation is pending in
+[37206862349](https://github.com/DavidLMS/nan-harness/actions/runs/37206862349).
+Event delivery is advisory and does not prove GPUI consumed an event or
+authorize a click. Six cells remain open; the final same-commit production
+matrix and final repository gate are pending.
 
 Native Zed 1.18.1 qualification on 2026-09-08 passed three complete deterministic
 scenarios on both macOS architectures in run 34265009005, but subsequent input
