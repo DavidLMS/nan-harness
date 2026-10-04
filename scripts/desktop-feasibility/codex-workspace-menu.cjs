@@ -87,6 +87,8 @@ async function run(page,guard,ownerGuard,deadline,loan,workspace,selectionPolicy
           ||!(await held.evaluate(sample,{opened:true,menu})).matched||!await retainedGuard())return null;
         const selection=await page.evaluate(require('./codex-selected-project.cjs').sample,{menu,projectId:selected.projectId});
         if(selection.reason!=='selected-id'||selection.selectedItemCount!==0||selection.matchingItemCount!==1||!await retainedGuard())return null;
+        const toolbar=require('./codex-project-control-transition.cjs');
+        if(!await held.evaluate(toolbar.prepare)||!await retainedGuard())return null;
         facts.selectionClickAttempted=true;facts.selectionStage='item-click';
         await item.click({position:{x:a.rect[2]/2,y:a.rect[3]/2},timeout:Math.max(1,Math.min(2000,deadline-Date.now()))});
         facts.selectionStage='original-popup-close';
@@ -101,6 +103,23 @@ async function run(page,guard,ownerGuard,deadline,loan,workspace,selectionPolicy
           if(!custody()||!await alive()){facts.selectionFailure='deadline-or-owner';return null;}
           if(!await context.verifyRetainedDocument()){facts.selectionFailure=context.retainedDocumentFailure();return null;}
           if(state.matched){closed=true;break;}
+          // Only the consumed source projectless->selected control boundary
+          // can replace a trigger. Original document/home/editor survive.
+          const candidate=await held.evaluateHandle(toolbar.capture,{projectName:selected.projectName,originalMenu:menu});
+          try {
+            if(await candidate.evaluate(value=>value!==null)) {
+              if(!custody()||!await alive()||!await context.verifyRetainedDocument())return null;
+              const a=await candidate.evaluate(sample,{opened:false,menu:null});
+              const b=await candidate.evaluate(sample,{opened:false,menu:null});
+              if(!a.matched||!b.matched||JSON.stringify(a.rect)!==JSON.stringify(b.rect)
+                  ||!custody()||!await alive()||!await context.verifyRetainedDocument())return null;
+              const nextButton=(await candidate.getProperty('button')).asElement();if(!nextButton)return null;
+              const oldHeld=held,oldButton=button;held=candidate;button=nextButton;
+              await oldButton.dispose();await oldHeld.dispose();
+              if(!custody()||!await alive()||!await context.verifyRetainedDocument())return null;
+              closed=true;break;
+            }
+          } finally {if(candidate!==held)await candidate.dispose();}
           await new Promise(resolve=>setTimeout(resolve,Math.min(50,Math.max(0,closeCutoff-Date.now()))));
         }
         if(!closed){facts.selectionFailure='source-close-unproved';return null;}

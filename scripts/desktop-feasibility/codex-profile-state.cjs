@@ -129,7 +129,7 @@ async function observe(page,guard,deadline,loan,workspace,menu,endpoint=async()=
         const sealed=a.snapshotPair();
         if(!sealed||!stable(before.first.identity,sealed.second.identity)||before.first.digest!==sealed.second.digest
           ||!a.verify()||!await endpoint())return {...facts,reason:'state-changed'};
-        const transition=await selectionTransition(selected,()=>a.verify());
+        const transition=await selectionTransition({...selected,projectName:before.first.value['local-projects'][selected.projectId].name.trim()||selected.projectId},()=>a.verify());
         if(!transition||!transition.menu||transition.completed!==true||!a.verify()||!await endpoint())return {...facts,reason:'selection-transition'};
         menu=transition.menu;
         expected=a.snapshotPair();
