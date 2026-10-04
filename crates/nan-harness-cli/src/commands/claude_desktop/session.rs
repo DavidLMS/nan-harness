@@ -550,11 +550,20 @@ mod configuration_persist_tests {
         let result = (|| {
             let workspace = std::env::current_dir().map_err(ClaudeDesktopError::ReadConfig)?;
             let profile = workspace.join("profile");
-            let paths = DesktopPaths::new(
+            let expected = DesktopPaths::new(
                 &profile.join("home/AppData/Roaming/Claude"),
                 &profile.join("home/AppData/Local/Claude-3p"),
                 &profile.join("nanh"),
             );
+            // Exercise production environment resolution, not a fixture-only path constructor.
+            let paths = DesktopPaths::from_environment(DesktopPlatform::Windows)?;
+            if paths.documents() != expected.documents()
+                || paths.receipt != expected.receipt
+                || paths.backup_directory != expected.backup_directory
+                || paths.lock != expected.lock
+            {
+                return Err(ClaudeDesktopError::InvalidStatePath);
+            }
             if !qualification_prelaunch::enabled()
                 || super::super::qualification_config::observation_directory(&paths).is_none()
             {
