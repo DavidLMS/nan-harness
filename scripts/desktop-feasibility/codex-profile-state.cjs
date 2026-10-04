@@ -65,17 +65,29 @@ exports.authority=authority;
 // Exact frozen public source: src-C1dW0Du8.js/Rl+Bl and shared/eEt+JTt.
 // This stricter projection observes one ordinary local project; it does not
 // infer current renderer selection from the persisted SELECTED_PROJECT key.
+function projectFailure(value,workspace){
+  if(!value||typeof value!=='object'||Array.isArray(value)||typeof workspace!=='string')return 'container';
+  const projects=value['local-projects'];
+  if(!projects||typeof projects!=='object'||Array.isArray(projects))return 'projects-shape';
+  const ids=Object.keys(projects);if(ids.length!==1)return 'projects-count';
+  const id=ids[0];if(!id||id.startsWith('g-p-'))return 'project-namespace';
+  const p=projects[id];
+  if(!exactKeys(p,['id','name','rootPaths','createdAt','updatedAt']))return 'record-shape';
+  if(p.id!==id||typeof p.name!=='string')return 'record-identity';
+  if(!Number.isFinite(p.createdAt)||!Number.isFinite(p.updatedAt))return 'record-time';
+  if(!Array.isArray(p.rootPaths)||p.rootPaths.length!==1||p.rootPaths[0]!==workspace)return 'record-root';
+  const selected=value['selected-project'];
+  // main/ete initializes an absent stored selection from the first local project.
+  // This projection supplies only a candidate ID; the actual menu check is mandatory.
+  if(selected!=null&&(!exactKeys(selected,['type','projectId'])||selected.type!=='local'||selected.projectId!==id))return 'stored-selection';
+  return null;
+}
 function project(value,workspace){
-  if(!value||typeof value!=='object'||Array.isArray(value)||typeof workspace!=='string')return null;
-  const selected=value['selected-project'],projects=value['local-projects'];
-  if(!exactKeys(selected,['type','projectId'])||selected.type!=='local'||typeof selected.projectId!=='string'||!selected.projectId||selected.projectId.startsWith('g-p-')
-    ||!projects||typeof projects!=='object'||Array.isArray(projects)||Object.keys(projects).length!==1||!Object.hasOwn(projects,selected.projectId))return null;
-  const p=projects[selected.projectId];
-  if(!exactKeys(p,['id','name','rootPaths','createdAt','updatedAt'])||p.id!==selected.projectId||typeof p.name!=='string'
-    ||!Number.isFinite(p.createdAt)||!Number.isFinite(p.updatedAt)||!Array.isArray(p.rootPaths)||p.rootPaths.length!==1||p.rootPaths[0]!==workspace)return null;
-  return {projectId:selected.projectId,workspace};
+  if(projectFailure(value,workspace)!==null)return null;
+  return {projectId:Object.keys(value['local-projects'])[0],workspace};
 }
 exports.project=project;
+exports.projectFailure=projectFailure;
 async function observe(page,guard,deadline,loan,workspace,menu,endpoint=async()=>guard()===true){
   const facts={status:'blocked',diagnosticsOnly:true,statePairStable:false,ordinaryLocalProjectObserved:false,
     selectedIdCorrelated:false,sendAuthorized:false};
@@ -84,7 +96,7 @@ async function observe(page,guard,deadline,loan,workspace,menu,endpoint=async()=
   try{
     if(workspace!==loan.directories[0].path)return {...facts,reason:'workspace'};
     const before=a.snapshotPair();if(!before)return {...facts,reason:'state'};
-    const selected=project(before.first.value,workspace);if(!selected)return {...facts,reason:'project'};
+    const selected=project(before.first.value,workspace);if(!selected)return {...facts,reason:'project',projectFailure:projectFailure(before.first.value,workspace)};
     facts.ordinaryLocalProjectObserved=true;
     const sample=require('./codex-selected-project.cjs').sample;
     for(let i=0;i<2;i++){

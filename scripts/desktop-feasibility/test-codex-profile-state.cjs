@@ -34,24 +34,26 @@ test('same-inode mutation during read rejects snapshot',()=>{const f=fixture(),a
 test('atomic replacement between pair samples rejects',()=>{const f=fixture(),a=f.make();f.onRead=()=>{if(f.reads===2){const n=f.nodes.get(f.state);f.nodes.set(f.state,{metadata:{...n.metadata,ino:99n},bytes:n.bytes});}};assert.equal(a.snapshotPair(),null);a.close();});
 test('malformed UTF8 JSON and byte overflow reject without fallback',()=>{for(const bytes of [Buffer.from('{'),Buffer.from([0xff]),Buffer.alloc(1048577,32)]){const f=fixture(),a=f.make();f.setState(bytes);assert.equal(a.snapshotPair(),null);a.close();}});
 test('state values remain private and no input method exists',()=>{const f=fixture(),a=f.make();assert.deepEqual(Object.keys(a).sort(),['close','snapshotPair','verify']);a.close();});
-const {project}=require('./codex-profile-state.cjs');
+const {project,projectFailure}=require('./codex-profile-state.cjs');
 function projectFixture(){return {'selected-project':{type:'local',projectId:'fixture-id'},'local-projects':{'fixture-id':{id:'fixture-id',name:'same-basename',rootPaths:['/owned'],createdAt:1,updatedAt:2}}};}
 test('frozen ordinary sole local project projects private ID and exact root',()=>{assert.deepEqual(project(projectFixture(),'/owned'),{projectId:'fixture-id',workspace:'/owned'});});
+test('absent or null persisted selection supplies only a local candidate',()=>{for(const selected of [undefined,null]){const value=projectFixture();if(selected===undefined)delete value['selected-project'];else value['selected-project']=selected;assert.deepEqual(project(value,'/owned'),{projectId:'fixture-id',workspace:'/owned'});assert.equal(projectFailure(value,'/owned'),null);}});
+test('projection failures expose fixed tags without private values',()=>{for(const [mutate,tag] of [[v=>delete v['local-projects'],'projects-shape'],[v=>v['local-projects']={},'projects-count'],[v=>v['local-projects']['fixture-id'].name=42,'record-identity'],[v=>v['local-projects']['fixture-id'].rootPaths=['/other'],'record-root'],[v=>v['selected-project'].projectId='other','stored-selection']]){const value=projectFixture();mutate(value);assert.equal(projectFailure(value,'/owned'),tag);assert.equal(project(value,'/owned'),null);}});
 test('remote cloud missing root multiple roots backing and duplicate project deny',()=>{for(const mutate of [v=>v['selected-project'].type='remote',v=>v['selected-project'].projectId='g-p-fixture',v=>v['local-projects']['fixture-id'].rootPaths=[],v=>v['local-projects']['fixture-id'].rootPaths=['/owned','/other'],v=>v['local-projects']['fixture-id'].rootPaths=['/other'],v=>v['local-projects']['fixture-id'].chatGptBacking={},v=>v['local-projects']['other']={...v['local-projects']['fixture-id']}]){const v=projectFixture();mutate(v);assert.equal(project(v,'/owned'),null);}});
 
 console.log(total+' synthetic fixture groups passed');
 
 (async()=>{
   const observed={status:'observed',selectedIdCorrelated:true};
-  for(const mode of ['stable','changed-state','guard-lost','wrong-check']){
-    const f=fixture();f.setState(Buffer.from(JSON.stringify(projectFixture())));let samples=0;
+  for(const mode of ['stable','changed-state','guard-lost','wrong-check','absent-selection','absent-wrong-check']){
+    const f=fixture(),value=projectFixture();if(mode.startsWith('absent'))delete value['selected-project'];f.setState(Buffer.from(JSON.stringify(value)));let samples=0;
     const page={evaluate:async()=>{samples++;
       if(mode==='changed-state')f.nodes.get(f.state).metadata.mtimeNs++;
       if(mode==='guard-lost')f.guard=false;
-      return mode==='wrong-check'?{status:'blocked'}:observed;
+      return mode.endsWith('wrong-check')?{status:'blocked'}:observed;
     }};
     const result=await f.observe(page);
-    assert.equal(result.status,mode==='stable'?'observed':'blocked');
+    assert.equal(result.status,['stable','absent-selection'].includes(mode)?'observed':'blocked');
     assert.equal(result.sendAuthorized,false);assert.equal(f.fds.size,0);
     assert.equal(JSON.stringify(result).includes('fixture-id'),false);
     assert.equal(JSON.stringify(result).includes('/owned'),false);

@@ -241,10 +241,15 @@ def public_onboarding(setup, app):
             if state['status']=='observed':
                 if set(state)!=statebase or not all(state[k] for k in stateflags):
                     raise ValueError('inconsistent Codex selected project observation')
-            elif (set(state)!=statebase|{'reason'} or type(state['reason']) is not str
+            elif (set(state)!=statebase|{'reason'}|({'projectFailure'} if 'projectFailure' in state else set()) or type(state['reason']) is not str
                     or state['reason'] not in {'profile-custody','workspace','state','project','guard','selected-id','state-changed','deadline','query'}
                     or state['statePairStable'] or state['selectedIdCorrelated']):
                 raise ValueError('invalid Codex profile state boundary')
+            if 'projectFailure' in state and (state['status']!='blocked' or state.get('reason')!='project'
+                    or type(state['projectFailure']) is not str
+                    or state['projectFailure'] not in {'container','projects-shape','projects-count','project-namespace',
+                        'record-shape','record-identity','record-time','record-root','stored-selection'}):
+                raise ValueError('invalid Codex project projection boundary')
     if 'codingEditableObservation' in setup:
         observation = setup['codingEditableObservation']
         categories = {'codexHomeCount','codexThreadCount','codexOtherCount','classicChatGPTCount',
