@@ -10,6 +10,25 @@ import tempfile
 TEST = 'commands::claude_desktop::session::configuration_persist_tests::production_std_rename_lifecycle_under_precreation_leases_restores_documents'
 
 
+RUSTC_CODES = frozenset(('E0061','E0277','E0282','E0308','E0382','E0425','E0432',
+                         'E0433','E0455','E0463','E0502','E0514','E0599','E0603'))
+
+
+def compile_diagnostics(output):
+    # Only fixed compiler categories leave this bounded private output buffer.
+    # Cargo may force ANSI colors despite a non-terminal stderr destination.
+    plain = re.sub(rb'\x1b\[[0-9;]{0,32}m', b'', output)
+    codes = {code.decode('ascii') for code in
+             re.findall(rb'(?m)^error\[(E[0-9]{4})\]:', plain)}
+    known = sorted(codes & RUSTC_CODES)
+    other = bool(codes - RUSTC_CODES)
+    link = any(line.startswith(b'error: linking with ') and b' failed:' in line
+               or re.search(rb'\b(?:fatal )?error LNK[0-9]{4}:', line) is not None
+               for line in plain.splitlines())
+    category = 'rustc-code' if codes else 'link-stage' if link else 'no-code'
+    return dict(category=category, rustcCodes=known, otherRustcCode=other, linkStage=link)
+
+
 def classify(output, succeeded):
     started = any(line.startswith(('test ' + TEST + ' ...').encode()) for line in output.splitlines())
     if len(output) > 131072:
@@ -28,7 +47,10 @@ def classify(output, succeeded):
         category = 'fixture-failure'
     else:
         category = 'unclassified-failure'
-    return dict(fixtureStarted=started, category=category)
+    result = dict(fixtureStarted=started, category=category)
+    if category == 'compile-failure':
+        result['compileDiagnostics'] = compile_diagnostics(output)
+    return result
 
 
 def main():

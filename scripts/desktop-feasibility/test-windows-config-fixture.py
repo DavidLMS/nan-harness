@@ -23,6 +23,31 @@ class ClosedFixtureTests(unittest.TestCase):
         self.assertEqual(fixture.classify(start + b'PRIVATE ok', True)['category'], 'passed')
         self.assertEqual(fixture.classify(b'PRIVATE' * 20000, False)['category'], 'output-overflow')
 
+    def test_compiler_details_are_fixed_codes_or_closed_stage_without_payload(self):
+        suffix = b'\nerror: could not compile PRIVATE-COMPONENT due to errors\n'
+        for output, expected in (
+                (b'error[E0308]: PRIVATE-VALUE\nerror[E0425]: PRIVATE-PATH\n',
+                 dict(category='rustc-code',rustcCodes=['E0308','E0425'],otherRustcCode=False,linkStage=False)),
+                (b'error[E9999]: PRIVATE\nerror[E0308]: PRIVATE\nerror[E0308]: PRIVATE\n',
+                 dict(category='rustc-code',rustcCodes=['E0308'],otherRustcCode=True,linkStage=False)),
+                (b'\x1b[31merror[E0599]\x1b[0m: PRIVATE\n',
+                 dict(category='rustc-code',rustcCodes=['E0599'],otherRustcCode=False,linkStage=False)),
+                (b'error: linking with "PRIVATE-LINKER-PATH" failed: exit code: 1\n',
+                 dict(category='link-stage',rustcCodes=[],otherRustcCode=False,linkStage=True)),
+                (b'LINK : fatal error LNK1104: PRIVATE-FILE\n',
+                 dict(category='link-stage',rustcCodes=[],otherRustcCode=False,linkStage=True)),
+                (b'PRIVATE-PATH error[E0425]: quoted output\nerror[PRIVATE]: no public code\n',
+                 dict(category='no-code',rustcCodes=[],otherRustcCode=False,linkStage=False))):
+            result=fixture.classify(output+suffix,False)
+            self.assertEqual(result['compileDiagnostics'],expected)
+            self.assertFalse(result['fixtureStarted'])
+            self.assertNotIn('PRIVATE',json.dumps(result))
+            self.assertNotIn('E9999',json.dumps(result))
+        self.assertNotIn('compileDiagnostics',fixture.classify(b'PRIVATE',False))
+        self.assertNotIn('compileDiagnostics',fixture.classify(b'error[E0308]: PRIVATE'+suffix,True))
+        self.assertNotIn('compileDiagnostics',fixture.classify(b'PRIVATE'*20000,False))
+
+
 
 if __name__ == '__main__':
     unittest.main()
