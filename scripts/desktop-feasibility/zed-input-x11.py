@@ -725,6 +725,13 @@ def retry_click(payload):
                     lambda: pointer_child(request['window'], active), facts['cursorSelection'])
                 if not cursor_scope():
                     raise RetryHitFailure('identity-rejected')
+            if os.environ.get('NANH_ZED_XRECORD') == '1':
+                # GPUI can block parent input for an unmapped owned dialog.
+                # Capture before hover, while the original budget still permits
+                # the complete tree census; this never grants click authority.
+                dialog_module = runpy.run_path(str(Path(__file__).with_name('zed-transient-dialogs.py')))
+                facts['transientDialogsBeforeHover'] = dialog_module['capture'](
+                    active, request['pid'], cursor_scope, deadline)
             live_cursor = module['PointerShape'](request['pid'], cursor_scope, deadline)
             if os.environ.get('NANH_ZED_XRECORD') == '1':
                 record_module = runpy.run_path(str(Path(__file__).with_name('zed-xrecord-supervisor.py')))

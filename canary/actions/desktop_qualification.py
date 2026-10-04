@@ -1569,8 +1569,10 @@ def semantic_observations(directory, app):
                     raise ValueError('invalid Zed published ancestor observation')
                 record.update(centerWithinPublishedAncestors=within, ancestorBoundsStatus=state,
                               checkedAncestorCount=count)
-            if 'transientDialogs' in value:
-                dialogs = value['transientDialogs']
+            for field in ('transientDialogs', 'transientDialogsBeforeHover'):
+                if field not in value:
+                    continue
+                dialogs = value[field]
                 if (type(dialogs) is not dict or set(dialogs) != {
                         'state', 'ownedTransientDialogs', 'mappedOwnedTransientDialogs'}
                         or type(dialogs['state']) is not str or dialogs['state'] not in {
@@ -1583,8 +1585,8 @@ def semantic_observations(directory, app):
                         raise ValueError('invalid Zed transient dialog counts')
                 elif total is not None or mapped is not None:
                     raise ValueError('incomplete Zed transient dialog counts')
-                record['transientDialogs'] = dict(dialogs)
-            if (set(value) - modifier_fields - ancestor_fields - ancestor_stage_fields - {'cursorSelection', 'transientDialogs','entryCrossing'} not in (base, base | {'inputDelivery'}, base | coordinate_fields,
+                record[field] = dict(dialogs)
+            if (set(value) - modifier_fields - ancestor_fields - ancestor_stage_fields - {'cursorSelection', 'transientDialogs','transientDialogsBeforeHover','entryCrossing'} not in (base, base | {'inputDelivery'}, base | coordinate_fields,
                                   base | coordinate_fields | {'inputDelivery'}, base | coordinate_fields | authority_fields,
                                   base | coordinate_fields | authority_fields | {'inputDelivery'})
                     or present_modifiers and present_modifiers != modifier_fields
