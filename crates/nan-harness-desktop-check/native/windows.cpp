@@ -1178,24 +1178,29 @@ int owned_cleanup_holder() {
     CleanupHandle expected_file(CreateFileW(expected_path.c_str(), GENERIC_READ, FILE_SHARE_READ,
         nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr));
     if (expected_file.value == INVALID_HANDLE_VALUE) return unavailable();
+    std::cout << "progress file-open\n" << std::flush;
     stage = "file-hash";
     if (!pinned_digest(expected_file.value, digest)) return unavailable();
+    std::cout << "progress file-hash\n" << std::flush;
     stage = "file-identity";
     BY_HANDLE_FILE_INFORMATION expected{}; wchar_t canonical[32768] = {};
     const DWORD canonical_size = GetFinalPathNameByHandleW(expected_file.value, canonical, 32768, FILE_NAME_NORMALIZED);
     if (!GetFileInformationByHandle(expected_file.value, &expected) || canonical_size == 0 || canonical_size >= 32768
         || _wcsicmp(canonical, expected_path.c_str()) != 0 || expected.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) return unavailable();
+    std::cout << "progress file-identity\n" << std::flush;
     stage = "process-open";
     CleanupHandle owner(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE, checker));
     CleanupHandle root(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, launcher));
     std::uint64_t root_time = 0;
     if (!owner.value || !root.value || !held_creation(root.value, root_time)) return unavailable();
+    std::cout << "progress process-open\n" << std::flush;
     stage = "snapshot";
     std::vector<CorrelationEntry> rows, confirm;
     if (!correlation_snapshot(checker, rows) || !correlation_snapshot(checker, confirm)) return unavailable();
     stage = "inspector-parent";
     const auto self = std::find_if(rows.begin(), rows.end(), [](const auto& row) { return row.pid == GetCurrentProcessId(); });
     if (self == rows.end() || self->parent != checker) return unavailable();
+    std::cout << "progress snapshot\n" << std::flush;
     struct Target {
         CleanupHandle handle; std::uint64_t created; bool targeted = false;
         Target(HANDLE value, std::uint64_t time) : handle(value), created(time) {}
@@ -1215,10 +1220,12 @@ int owned_cleanup_holder() {
         std::uint64_t held_time = 0;
         if (!held_creation(handle, held_time) || held_time != created || !held_image(handle, expected, expected_path)) return unavailable();
     }
+    std::cout << "progress targets\n" << std::flush;
     stage = "owner-recheck";
     std::uint64_t final_root_time = 0;
     if (!held_creation(root.value, final_root_time) || final_root_time != root_time
         || WaitForSingleObject(owner.value, 0) != WAIT_TIMEOUT) return unavailable();
+    std::cout << "progress owner-recheck\n" << std::flush;
     std::cout << "ready " << targets.size() << ' ' << GetTickCount64() << '\n' << std::flush;
     if (!cleanup_line(request)) return 0; // EOF drops handles without terminating any target.
     std::istringstream trigger(request); std::string action; std::uint64_t cutoff = 0;

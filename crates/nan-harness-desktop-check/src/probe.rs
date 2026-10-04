@@ -2377,17 +2377,17 @@ async fn wait_for_stop(process: &mut ProbeProcess, limit: Duration) -> StopWaitD
 fn capture_stop_correlation(process: &mut ProbeProcess, gui: Option<&Gui>) -> Duration {
     let deadline = Instant::now() + Duration::from_secs(10);
     if let (Some(gui), Some(launcher)) = (gui, process.id()) {
-        let query_deadline = deadline.min(Instant::now() + Duration::from_secs(1));
-        // Retention is required for cleanup; advisory sampling uses only its
-        // remaining allowance rather than starving the holder's file proof.
+        // Original-handle retention is required before stop. It shares the
+        // original stop cutoff; its elapsed time reduces the launcher wait.
         process.cleanup_holder = process
             .cleanup_executable
             .as_ref()
             .zip(process.cleanup_executable_sha256.as_deref())
             .and_then(|(expected, digest)| {
-                gui.capture_owned_cleanup(launcher, expected, digest, query_deadline)
+                gui.capture_owned_cleanup(launcher, expected, digest, deadline)
             });
-        process.correlation_snapshot = gui.capture_process_correlation(launcher, query_deadline);
+        let advisory_deadline = deadline.min(Instant::now() + Duration::from_secs(1));
+        process.correlation_snapshot = gui.capture_process_correlation(launcher, advisory_deadline);
     } else if Gui::process_diagnostic_enabled(DesktopHarnessKind::Claude)
         && let Some(launcher) = process.id()
         && let Some((expected, digest)) = process
@@ -2399,13 +2399,8 @@ fn capture_stop_correlation(process: &mut ProbeProcess, gui: Option<&Gui>) -> Du
         // Failed window acquisition must not discard authority to retain owned
         // descendant handles before stopping the original launcher. The same
         // executable identity and native ancestry checks still apply.
-        process.cleanup_holder = Gui::capture_owned_cleanup_native(
-            &native,
-            launcher,
-            expected,
-            digest,
-            deadline.min(Instant::now() + Duration::from_secs(1)),
-        );
+        process.cleanup_holder =
+            Gui::capture_owned_cleanup_native(&native, launcher, expected, digest, deadline);
     }
     // The advisory query consumes the existing initial stop budget.
     deadline.saturating_duration_since(Instant::now())

@@ -20,6 +20,48 @@ pub(crate) struct Holder {
     received_anchor: Instant,
 }
 
+fn progress(line: &str, completed: usize) -> Option<usize> {
+    const STAGES: [&str; 7] = [
+        "file-open",
+        "file-hash",
+        "file-identity",
+        "process-open",
+        "snapshot",
+        "targets",
+        "owner-recheck",
+    ];
+    let mut words = line.split_whitespace();
+    if words.next()? != "progress"
+        || words.next()? != *STAGES.get(completed)?
+        || words.next().is_some()
+    {
+        return None;
+    }
+    Some(completed + 1)
+}
+fn progress_facts(completed: usize, outcome: &str) -> serde_json::Value {
+    const STAGES: [&str; 8] = [
+        "none",
+        "file-open",
+        "file-hash",
+        "file-identity",
+        "process-open",
+        "snapshot",
+        "targets",
+        "owner-recheck",
+    ];
+    serde_json::json!({"schemaVersion":1,"mechanism":"windows-owned-cleanup-preflight-progress",
+        "diagnosticsOnly":true,"completedStageCount":completed,"lastCompletedStage":STAGES[completed],"outcome":outcome})
+}
+fn record_progress(completed: usize, outcome: &str) {
+    #[cfg(windows)]
+    crate::process::windows_correlation::record_preflight_progress(&progress_facts(
+        completed, outcome,
+    ));
+    #[cfg(not(windows))]
+    let _ = progress_facts(completed, outcome);
+}
+
 pub(crate) fn ready(line: &str) -> Option<(usize, u64)> {
     let words = line.split_whitespace().collect::<Vec<_>>();
     if words.len() != 3 || words[0] != "ready" {
@@ -68,6 +110,43 @@ fn cutoff(anchor: u64, received: Instant, deadline: Instant) -> Option<u64> {
 }
 
 impl Holder {
+    // The bounded preflight handshake reports progress without granting target
+    // authority; only the existing ready receipt admits the retained handles.
+    fn receive_ready(&mut self, deadline: Instant) -> Result<(), FailureCategory> {
+        let mut completed = 0;
+        loop {
+            let line = match self.line(deadline) {
+                Ok(line) => line,
+                Err(error) => {
+                    record_progress(
+                        completed,
+                        if matches!(error, FailureCategory::Timeout) {
+                            "deadline"
+                        } else {
+                            "transport"
+                        },
+                    );
+                    return Err(error);
+                }
+            };
+            if line.starts_with("progress ") {
+                let Some(next) = progress(&line, completed) else {
+                    record_progress(completed, "protocol");
+                    return Err(FailureCategory::Output);
+                };
+                completed = next;
+                continue;
+            }
+            if let Err(error) = self.accept_ready(&line) {
+                record_progress(completed, "rejected");
+                return Err(error);
+            }
+            record_progress(completed, "ready");
+            break;
+        }
+        Ok(())
+    }
+
     pub(crate) fn start(
         executable: &Path,
         launcher: u32,
@@ -138,8 +217,8 @@ impl Holder {
         let (send, output) = mpsc::channel();
         let reader = std::thread::spawn(move || {
             let mut reader = BufReader::new(stdout);
-            // Two bounded protocol lines only. No raw helper output leaves RAM.
-            for _ in 0..2 {
+            // Seven fixed progress lines, ready and result; no raw output export.
+            for _ in 0..9 {
                 let mut line = String::new();
                 let result = reader.by_ref().take(129).read_line(&mut line);
                 if !matches!(result, Ok(1..=128)) || !line.ends_with('\n') {
@@ -167,8 +246,7 @@ impl Holder {
             std::process::id()
         )
         .map_err(|_| FailureCategory::Pipe)?;
-        let line = holder.line(deadline)?;
-        holder.accept_ready(&line)?;
+        holder.receive_ready(deadline)?;
         Ok(holder)
     }
 
@@ -271,6 +349,39 @@ pub(crate) fn result(line: &str, retained: usize) -> Option<serde_json::Value> {
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn progress_is_monotonic_bounded_and_closes_unknown_text() {
+        let stages = [
+            "file-open",
+            "file-hash",
+            "file-identity",
+            "process-open",
+            "snapshot",
+            "targets",
+            "owner-recheck",
+        ];
+        for (index, stage) in stages.iter().enumerate() {
+            assert_eq!(
+                progress(&format!("progress {stage}\n"), index),
+                Some(index + 1)
+            );
+            let facts = progress_facts(index + 1, "deadline");
+            assert_eq!(facts["completedStageCount"], index + 1);
+            assert_eq!(facts["lastCompletedStage"], *stage);
+            assert_eq!(facts.as_object().unwrap().len(), 6);
+        }
+        for line in [
+            "progress",
+            "progress secret",
+            "progress file-open extra",
+            "progress snapshot",
+        ] {
+            assert!(progress(line, 0).is_none());
+        }
+        assert!(progress("progress file-open", 1).is_none());
+        assert!(progress("progress owner-recheck", 7).is_none());
+    }
+
     use super::*;
     #[test]
     fn preflight_classifies_only_closed_complete_native_rejections() {
@@ -356,6 +467,45 @@ mod tests {
         assert_eq!(value["triggerAttempted"], false);
         assert!(Holder::start(&helper, 1, &expected, &"0".repeat(64), Instant::now()).is_err());
     }
+    #[cfg(not(windows))]
+    #[test]
+    fn progress_handshake_rejects_reordering_and_allows_one_cleanup_trigger() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let directory = tempfile::tempdir().unwrap();
+        let helper = directory.path().join("helper");
+        let expected = directory.path().join("Claude.exe");
+        std::fs::write(&expected, []).unwrap();
+        let stages = [
+            "file-open",
+            "file-hash",
+            "file-identity",
+            "process-open",
+            "snapshot",
+            "targets",
+            "owner-recheck",
+        ];
+        let valid = stages.map(|stage| format!("progress {stage}\n")).join("");
+        for (frames, accepted) in [
+            (valid, true),
+            ("progress snapshot\n".into(), false),
+            ("progress file-open\nprogress file-open\n".into(), false),
+            ("progress private-message\n".into(), false),
+        ] {
+            let script = format!(
+                "#!/bin/sh\nread request\nprintf '{frames}ready 0 100\\n'\nread trigger\nprintf 'result 0 0 0 0 0\\n'\n"
+            );
+            std::fs::write(&helper, script).unwrap();
+            std::fs::set_permissions(&helper, std::fs::Permissions::from_mode(0o700)).unwrap();
+            let deadline = Instant::now() + std::time::Duration::from_secs(2);
+            let holder = Holder::start(&helper, 1, &expected, &"0".repeat(64), deadline);
+            if accepted {
+                assert_eq!(holder.unwrap().cleanup(deadline)["status"], "completed");
+            } else {
+                assert!(holder.is_err());
+            }
+        }
+    }
+
     #[test]
     fn protocol_requires_complete_partition_and_never_exports_identity() {
         assert_eq!(ready("ready 5 100\n"), Some((5, 100)));

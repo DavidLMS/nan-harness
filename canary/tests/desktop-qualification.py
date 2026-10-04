@@ -4037,5 +4037,24 @@ class ClaudeWindowsProfileSealTests(unittest.TestCase):
                     path.write_text(json.dumps(good))
                     with self.assertRaises(ValueError):q.semantic_observations(root,'zed-desktop')
 
+class WindowsCleanupProgressTests(unittest.TestCase):
+    def test_closed_monotonic_stage_counts_never_export_identity(self):
+        stages=['none','file-open','file-hash','file-identity','process-open','snapshot','targets','owner-recheck']
+        with tempfile.TemporaryDirectory() as root:
+            path=Path(root)/'progress.json'
+            for count,stage in enumerate(stages):
+                for outcome in ['deadline','transport','protocol','rejected','ready']:
+                    good=dict(schemaVersion=1,mechanism='windows-owned-cleanup-preflight-progress',
+                        diagnosticsOnly=True,completedStageCount=count,lastCompletedStage=stage,outcome=outcome)
+                    path.write_text(json.dumps(good))
+                    self.assertEqual(q.semantic_observations(root,'claude-desktop'),[good])
+                    for change in [{'completedStageCount':True},{'completedStageCount':8},
+                        {'lastCompletedStage':stages[(count+1)%8]},{'outcome':[]},
+                        {'outcome':'PRIVATE'},{'rawPID':100},{'diagnosticsOnly':False}]:
+                        path.write_text(json.dumps(good|change))
+                        with self.assertRaises(ValueError):q.semantic_observations(root,'claude-desktop')
+                    path.write_text(json.dumps(good))
+                    with self.assertRaises(ValueError):q.semantic_observations(root,'zed-desktop')
+
 if __name__ == '__main__':
     unittest.main()
