@@ -178,7 +178,7 @@ fn execute(python: &Path, script: &Path, request: Vec<u8>, deadline: Instant) ->
         .unwrap_or_else(|| Reply::unavailable(Stage::Query))
 }
 #[cfg(windows)]
-fn observe_inner(temporary: &tempfile::NamedTempFile, destination: &Path) -> Reply {
+fn observe_inner(temporary: &Path, destination: &Path) -> Reply {
     let Some((epoch, deadline)) = std::env::var("NANH_CLAUDE_PERSIST_CUTOFF_MS")
         .ok()
         .and_then(|value| cutoff(&value, SystemTime::now(), Instant::now()))
@@ -207,7 +207,6 @@ fn observe_inner(temporary: &tempfile::NamedTempFile, destination: &Path) -> Rep
             .as_ref()
             != Some(&expected_parent)
         || temporary
-            .path()
             .parent()
             .and_then(|p| p.canonicalize().ok())
             .as_ref()
@@ -217,7 +216,7 @@ fn observe_inner(temporary: &tempfile::NamedTempFile, destination: &Path) -> Rep
         return Reply::unavailable(Stage::Scope);
     }
     let destination = expected_parent.join("claude_desktop_config.json");
-    let temporary_path = expected_parent.join(temporary.path().file_name().unwrap_or_default());
+    let temporary_path = expected_parent.join(temporary.file_name().unwrap_or_default());
     let paths = (
         std::env::var_os("NANH_CLAUDE_PERSIST_PYTHON"),
         std::env::var_os("NANH_CLAUDE_PERSIST_SCRIPT"),
@@ -248,6 +247,14 @@ fn observe_inner(temporary: &tempfile::NamedTempFile, destination: &Path) -> Rep
 }
 #[cfg(windows)]
 pub(super) fn observe(temporary: &tempfile::NamedTempFile, destination: &Path) {
+    observe_path(temporary.path(), destination);
+}
+#[cfg(windows)]
+pub(super) fn observe_retained_path(temporary: &tempfile::TempPath, destination: &Path) {
+    observe_path(temporary, destination);
+}
+#[cfg(windows)]
+fn observe_path(temporary: &Path, destination: &Path) {
     if std::env::var("NANH_CLAUDE_PERSIST_OWNERS").as_deref() != Ok("1")
         || !super::qualification_prelaunch::enabled()
     {

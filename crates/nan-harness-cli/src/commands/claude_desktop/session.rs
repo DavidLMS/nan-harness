@@ -362,14 +362,33 @@ fn atomic_write_inner(
             document,
         )?;
     }
-    persist_observed_configuration(temporary, path, document)
+    persist_written_configuration(temporary, path, document)
 }
 
-fn persist_observed_configuration(
+// The written file is durable and has its final private permissions here;
+// persistence and failure diagnostics share ownership of the same temporary.
+fn persist_written_configuration(
     temporary: tempfile::NamedTempFile,
     path: &Path,
     document: Option<qualification_prelaunch::ConfigurationDocument>,
 ) -> Result<(), ClaudeDesktopError> {
+    #[cfg(all(windows, feature = "desktop-qualification"))]
+    if matches!(
+        document,
+        Some(qualification_prelaunch::ConfigurationDocument::NormalConfig)
+    ) && qualification_prelaunch::enabled()
+    {
+        // Trial-only variation: close the fully written and synced file handle,
+        // retaining tempfile's original RAII path and atomic replacement contract.
+        let result = persist_closed_configuration(temporary.into_temp_path(), path)
+            .inspect_err(|error| {
+                if error.error.raw_os_error() == Some(32) {
+                    qualification_persist_owners::observe_retained_path(&error.path, path);
+                }
+            })
+            .map_err(|error| ClaudeDesktopError::Write(error.error));
+        return qualification_prelaunch::observe_configuration_persist(result, document);
+    }
     #[cfg(all(windows, feature = "desktop-qualification"))]
     let attributes_before = {
         use std::os::windows::fs::MetadataExt as _;
@@ -464,6 +483,33 @@ fn persist_windows_configuration(
     }
 }
 
+#[cfg(all(windows, any(feature = "desktop-qualification", test)))]
+fn persist_closed_configuration(
+    mut temporary: tempfile::TempPath,
+    path: &Path,
+) -> Result<(), tempfile::PathPersistError> {
+    use std::time::{Duration, Instant};
+    let deadline = Instant::now() + Duration::from_millis(250);
+    loop {
+        match temporary.persist(path) {
+            Ok(()) => return Ok(()),
+            Err(error) => {
+                if error.error.raw_os_error() != Some(32) || Instant::now() >= deadline {
+                    return Err(error);
+                }
+                std::thread::sleep(
+                    Duration::from_millis(5)
+                        .min(deadline.saturating_duration_since(Instant::now())),
+                );
+                if Instant::now() >= deadline {
+                    return Err(error);
+                }
+                temporary = error.path;
+            }
+        }
+    }
+}
+
 pub(super) fn reject_symlink(path: &Path) -> Result<(), ClaudeDesktopError> {
     match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.file_type().is_symlink() => Err(ClaudeDesktopError::UnsafeSymlink),
@@ -477,6 +523,68 @@ pub(super) fn reject_symlink(path: &Path) -> Result<(), ClaudeDesktopError> {
 mod configuration_persist_tests {
     use super::*;
     use std::os::windows::fs::OpenOptionsExt as _;
+    #[test]
+    fn closed_persist_preserves_private_file_and_cleans_failed_original_path() {
+        let temp = tempfile::tempdir().unwrap();
+        let destination = temp.path().join("config.json");
+        let mut temporary = tempfile::Builder::new()
+            .make_in(temp.path(), nan_harness_private_fs::open_private_new)
+            .unwrap();
+        temporary.write_all(b"replacement").unwrap();
+        temporary.as_file().sync_all().unwrap();
+        persist_closed_configuration(temporary.into_temp_path(), &destination).unwrap();
+        assert_eq!(fs::read(&destination).unwrap(), b"replacement");
+        // The same source file ACL survives MoveFileEx, independently checked by
+        // the private reader rather than inferred from a permission bit.
+        assert!(nan_harness_private_fs::open_private_read(&destination).is_ok());
+        let held = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(1)
+            .open(&destination)
+            .unwrap();
+        let mut temporary = tempfile::Builder::new()
+            .make_in(temp.path(), nan_harness_private_fs::open_private_new)
+            .unwrap();
+        temporary.write_all(b"must not replace").unwrap();
+        temporary.as_file().sync_all().unwrap();
+        let source = temporary.path().to_owned();
+        let error =
+            persist_closed_configuration(temporary.into_temp_path(), &destination).unwrap_err();
+        assert_eq!(error.error.raw_os_error(), Some(32));
+        let retained: &Path = error.path.as_ref();
+        assert_eq!(retained, source);
+        assert_eq!(fs::read(&destination).unwrap(), b"replacement");
+        assert_eq!(fs::read(&source).unwrap(), b"must not replace");
+        drop(error);
+        assert!(!source.exists());
+        drop(held);
+    }
+
+    #[test]
+    fn closed_persist_retries_original_path_after_target_releases() {
+        let temp = tempfile::tempdir().unwrap();
+        let destination = temp.path().join("config.json");
+        fs::write(&destination, b"original").unwrap();
+        let held = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(1)
+            .open(&destination)
+            .unwrap();
+        let mut temporary = tempfile::Builder::new()
+            .make_in(temp.path(), nan_harness_private_fs::open_private_new)
+            .unwrap();
+        temporary.write_all(b"replacement").unwrap();
+        temporary.as_file().sync_all().unwrap();
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(40));
+            drop(held);
+        });
+        let result = persist_closed_configuration(temporary.into_temp_path(), &destination);
+        release.join().unwrap();
+        assert!(result.is_ok());
+        assert_eq!(fs::read(destination).unwrap(), b"replacement");
+    }
+
     #[test]
     fn configuration_persist_with_retained_read_only_parent_and_canonical_paths() {
         let temp = tempfile::tempdir().unwrap();
