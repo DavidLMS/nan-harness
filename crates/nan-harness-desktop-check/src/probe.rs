@@ -119,6 +119,10 @@ mod windows_process_tests {
 }
 
 #[cfg(target_os = "linux")]
+mod codex_linux_profile;
+#[cfg(target_os = "linux")]
+pub(crate) use codex_linux_profile::FreshCodexLinuxProfile;
+#[cfg(target_os = "linux")]
 mod claude_linux_profile;
 #[cfg(target_os = "linux")]
 pub(crate) use claude_linux_profile::FreshClaudeLinuxProfile;
@@ -778,6 +782,16 @@ async fn scenario_owned(
         &prepared_launch,
         Instant::now() + Duration::from_secs(1),
     )?;
+    #[cfg(target_os = "linux")]
+    let mut fresh_codex_profile = FreshCodexLinuxProfile::prepare(
+        spec,
+        &prepared_launch,
+        Instant::now() + Duration::from_secs(1),
+    )?;
+    #[cfg(target_os = "linux")]
+    if let Some(profile) = fresh_codex_profile.as_mut() {
+        profile.before_launch(&prepared_launch, Instant::now() + Duration::from_secs(1))?;
+    }
     let mut process = launch(spec, prepared_launch).map_err(|(reason, failure)| {
         launch_observation.failure = Some(failure);
         reason
@@ -798,7 +812,14 @@ async fn scenario_owned(
     };
     let mut gui = None;
     let outcome = if conversation.uses_renderer() {
-        conversation.run_renderer(&mut process, result).await
+        conversation
+            .run_renderer(
+                &mut process,
+                result,
+                #[cfg(target_os = "linux")]
+                fresh_codex_profile.as_ref(),
+            )
+            .await
     } else {
         let acquired = acquire_native_gui(
             spec,
@@ -946,6 +967,7 @@ impl ConversationScenario<'_> {
         &self,
         process: &mut ProbeProcess,
         result: &mut ProbeResult,
+        #[cfg(target_os = "linux")] codex_profile: Option<&FreshCodexLinuxProfile>,
     ) -> Result<(), Reason> {
         self.semantic
             .ok_or(Reason::IsolationUnavailable)?
@@ -958,6 +980,8 @@ impl ConversationScenario<'_> {
                     marker: self.final_marker,
                 },
                 result,
+                #[cfg(target_os = "linux")]
+                codex_profile,
             )
             .await
     }
@@ -1770,6 +1794,24 @@ fn fresh_private_state_survives_ordinary_persistence_creation() {
     );
 }
 
+fn prepare_codex_profile(profile: &Path) -> Result<PathBuf, Reason> {
+    let user_data = profile.join("codex-desktop");
+    let state = profile.join("nanh");
+    let surface = state.join("chatgpt-desktop");
+    let managed = surface.join("profile");
+    let retained_profile = cfg!(target_os = "linux")
+        && std::env::var("NANH_CODEX_PUBLIC_ONBOARDING").as_deref() == Ok("engineering");
+    // The Linux trial retains and exclusively creates these roots before launch.
+    // Other launches prepare each private ancestor before the CLI writes state.
+    if !retained_profile {
+        for directory in [&user_data, &state, &surface, &managed] {
+            create_private_dir_all(directory).map_err(|_| Reason::IsolationUnavailable)?;
+        }
+    }
+    // Electron userData holds UI onboarding; CODEX_HOME redirects runtime state.
+    Ok(user_data)
+}
+
 fn isolated_command(spec: &ProbeSpec, program: &Path) -> Result<Command, Reason> {
     let profile = spec.workspace.join("profile");
     // Match the native Windows profile layout and verify known-folder lookup
@@ -1857,19 +1899,10 @@ fn isolated_command(spec: &ProbeSpec, program: &Path) -> Result<Command, Reason>
         .env_remove("CLAUDE_USER_DATA_DIR")
         .env_remove("CLAUDE_CDP_AUTH");
     if spec.kind == DesktopHarnessKind::ChatGpt {
-        let user_data = profile.join("codex-desktop");
-        let state = profile.join("nanh");
-        let surface = state.join("chatgpt-desktop");
-        let managed = surface.join("profile");
-        // Prepare every owned ancestor before the CLI creates state files.
-        // Its ordinary create_dir_all can otherwise leave intermediate Unix
-        // directories with the runner's default permissions.
-        for directory in [&user_data, &state, &surface, &managed] {
-            create_private_dir_all(directory).map_err(|_| Reason::IsolationUnavailable)?;
-        }
-        // Codex's supported Electron override also isolates UI onboarding and
-        // singleton state; CODEX_HOME alone redirects only runtime settings.
-        command.env("CODEX_ELECTRON_USER_DATA_PATH", user_data);
+        command.env(
+            "CODEX_ELECTRON_USER_DATA_PATH",
+            prepare_codex_profile(&profile)?,
+        );
     }
     if spec.kind == DesktopHarnessKind::Hermes {
         let user_data = hermes_user_data(&profile, &roaming);

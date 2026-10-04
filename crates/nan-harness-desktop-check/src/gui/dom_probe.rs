@@ -631,6 +631,8 @@ pub(crate) struct RendererSession<'a> {
     directory: &'a Path,
     owner: u32,
     readiness_deadline: Instant,
+    #[cfg(target_os = "linux")]
+    codex_profile: Option<&'a crate::probe::FreshCodexLinuxProfile>,
 }
 
 fn renderer_guard(
@@ -662,7 +664,17 @@ impl<'a> RendererSession<'a> {
             directory,
             owner,
             readiness_deadline: Instant::now() + Duration::from_secs(125),
+            #[cfg(target_os = "linux")]
+            codex_profile: None,
         })
+    }
+
+    #[cfg(target_os = "linux")]
+    pub(crate) fn bind_codex_profile(
+        &mut self,
+        profile: Option<&'a crate::probe::FreshCodexLinuxProfile>,
+    ) {
+        self.codex_profile = profile;
     }
 
     pub(crate) fn prepare_hermes_profile(&mut self, workspace: &Path) -> Result<(), Reason> {
@@ -733,6 +745,10 @@ impl<'a> RendererSession<'a> {
         if let Some(workspace) = workspace {
             request["ownedWorkspace"] = serde_json::json!(workspace);
         }
+        #[cfg(target_os = "linux")]
+        if let Some(profile) = self.codex_profile {
+            request["codexProfileLoan"] = profile.private_request(self.readiness_deadline)?;
+        }
         #[cfg(target_os = "macos")]
         if let (Some(executable), Some(native)) = (executable, native.as_ref()) {
             let ticks = nix::time::clock_gettime(nix::time::ClockId::CLOCK_MONOTONIC)
@@ -768,6 +784,13 @@ impl<'a> RendererSession<'a> {
         );
         std::fs::remove_file(request_path).map_err(|_| Reason::IsolationUnavailable)?;
         drop(native);
+        #[cfg(target_os = "linux")]
+        if self
+            .codex_profile
+            .is_some_and(|profile| !profile.verifies_owned(self.readiness_deadline))
+        {
+            return Err(Reason::IsolationUnavailable);
+        }
         outcome?;
         let mut bytes = Vec::new();
         open_private_read(&output_path)

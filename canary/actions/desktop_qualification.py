@@ -114,7 +114,7 @@ def codex_point_observation(value):
 
 
 def public_onboarding(setup, app):
-    shape = set(setup) - {'folderTrust', 'rejectedPageInventory', 'taskScopeProved', 'taskClickAttempted', 'taskClickCompleted', 'codingComposerReady', 'taskScopeObservation', 'taskControlKind', 'codingReadinessObservation', 'codingNavigationObservation', 'codingHomeObservation', 'codingEditableObservation', 'codingHomeStateObservation', 'taskSkipConfirmationAttempted', 'taskSkipConfirmationCompleted', 'taskSkipConfirmationProof', 'mainGuardFailure', 'pageSetFailure', 'foreignOverlayImportSetup', 'foreignOverlaySourceCounts', 'foreignOverlayActionability'} if type(setup) is dict else set()
+    shape = set(setup) - {'folderTrust', 'rejectedPageInventory', 'taskScopeProved', 'taskClickAttempted', 'taskClickCompleted', 'codingComposerReady', 'taskScopeObservation', 'taskControlKind', 'codingReadinessObservation', 'codingNavigationObservation', 'codingHomeObservation', 'codingEditableObservation', 'codingHomeStateObservation', 'workspaceMenuObservation', 'taskSkipConfirmationAttempted', 'taskSkipConfirmationCompleted', 'taskSkipConfirmationProof', 'mainGuardFailure', 'pageSetFailure', 'foreignOverlayImportSetup', 'foreignOverlaySourceCounts', 'foreignOverlayActionability'} if type(setup) is dict else set()
     booleans = {'conversationalScope', 'engineeringControl', 'roleClickAttempted',
                 'roleClickCompleted', 'engineeringChecked', 'continueControl',
                 'continueClickAttempted', 'continueClickCompleted', 'roleScopeAbsent'}
@@ -205,6 +205,39 @@ def public_onboarding(setup, app):
             raise ValueError('invalid Codex home state observation')
         if observation['status']=='observed' and observation['homeComposerCount']==0 and any(observation[key] for key in counts-{'homeComposerCount'}):
             raise ValueError('inconsistent Codex home state observation')
+    if 'workspaceMenuObservation' in setup:
+        menu=setup['workspaceMenuObservation']
+        fixed={'diagnosticsOnly':True,'sendAuthorized':False}
+        flags={'clickAttempted','clickCompleted'}
+        base=set(fixed)|flags|{'status'}
+        if (type(menu) is not dict or type(menu.get('status')) is not str
+                or menu['status'] not in {'observed','blocked'}
+                or any(menu.get(k) is not v for k,v in fixed.items())
+                or any(type(menu.get(k)) is not bool for k in flags)
+                or menu['clickCompleted'] and not menu['clickAttempted']
+                or setup.get('stage')!='coding-readiness' or setup.get('taskClickCompleted') is not True):
+            raise ValueError('invalid Codex workspace menu observation')
+        if menu['status']=='blocked':
+            if (set(menu)!=base|{'reason'} or type(menu['reason']) is not str
+                    or menu['reason'] not in {'guard','control','menu','deadline','action-uncertain','query'}):
+                raise ValueError('invalid Codex workspace menu boundary')
+        else:
+            state=menu.get('profileStateObservation')
+            stateflags={'statePairStable','ordinaryLocalProjectObserved','selectedIdCorrelated'}
+            statebase=stateflags|{'status','diagnosticsOnly','sendAuthorized'}
+            if (set(menu)!=base|{'profileStateObservation'} or not all(menu[k] for k in flags)
+                    or type(state) is not dict or type(state.get('status')) is not str
+                    or state['status'] not in {'observed','blocked'}
+                    or state.get('diagnosticsOnly') is not True or state.get('sendAuthorized') is not False
+                    or any(type(state.get(k)) is not bool for k in stateflags)):
+                raise ValueError('invalid Codex profile state observation')
+            if state['status']=='observed':
+                if set(state)!=statebase or not all(state[k] for k in stateflags):
+                    raise ValueError('inconsistent Codex selected project observation')
+            elif (set(state)!=statebase|{'reason'} or type(state['reason']) is not str
+                    or state['reason'] not in {'profile-custody','workspace','state','project','guard','selected-id','state-changed','deadline','query'}
+                    or state['statePairStable'] or state['selectedIdCorrelated']):
+                raise ValueError('invalid Codex profile state boundary')
     if 'codingEditableObservation' in setup:
         observation = setup['codingEditableObservation']
         categories = {'codexHomeCount','codexThreadCount','codexOtherCount','classicChatGPTCount',

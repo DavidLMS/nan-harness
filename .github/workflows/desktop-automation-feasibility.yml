@@ -237,6 +237,9 @@ jobs:
           echo "FEASIBILITY_WINDOWS_PROOF_PYTHON=$(python3 -c 'import sys; from pathlib import Path; print(Path(sys.executable).resolve(strict=True))')" >> "$GITHUB_ENV"
       - name: Build exact branch binaries
         run: cargo build --locked -p nan-harness-desktop-check -p nan-harness-cli --features nan-harness-cli/desktop-qualification --bins
+      - name: Verify retained Linux Codex profile custody without an application
+        if: runner.os == 'Linux' && matrix.app == 'chatgpt-desktop'
+        run: cargo test --locked -p nan-harness-desktop-check --lib probe::codex_linux_profile
       - name: Verify bounded Linux Claude native Chat receipts without an application
         if: runner.os == 'Linux' && matrix.app == 'claude-desktop'
         run: |
@@ -458,6 +461,9 @@ jobs:
         run: |
           set -euo pipefail
           unset NAN_API_KEY GH_TOKEN GITHUB_TOKEN
+          if [[ '${{ matrix.platform }}' == linux && '${{ matrix.app }}' == chatgpt-desktop ]]; then
+            umask 077
+          fi
           bash scripts/run-desktop-check-session.sh python3 scripts/desktop-feasibility/run-qualification.py --app '${{ matrix.app }}' --platform '${{ matrix.platform }}' --source-sha "$GITHUB_SHA" --checker "$FEASIBILITY_CHECKER" --real-nanh "$FEASIBILITY_REAL_NANH" --prepared "$RUNNER_TEMP/semantic-feasibility/prepared.json" --frozen "$RUNNER_TEMP/semantic-feasibility/frozen.json" --directory "$RUNNER_TEMP/semantic-feasibility"
       - name: Reduce full deterministic qualification
         if: always() && contains(fromJSON('["deterministic-full","startup-baseline"]'), inputs.experiment)

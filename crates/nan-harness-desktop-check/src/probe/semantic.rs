@@ -86,14 +86,23 @@ impl SemanticBackend {
         process: &mut crate::process::ProbeProcess,
         scenario: SemanticScenario<'_>,
         result: &mut ProbeResult,
+        #[cfg(target_os = "linux")] codex_profile: Option<&super::FreshCodexLinuxProfile>,
     ) -> Result<(), Reason> {
         if self.kind == DesktopHarnessKind::ChatGpt {
             {
                 let mut inventory = RendererSession::new(process, &self.directory)?;
+                #[cfg(target_os = "linux")]
+                inventory.bind_codex_profile(codex_profile);
                 #[cfg(target_os = "macos")]
                 inventory.inventory_with_native_activation(&self.workspace, &self.executable)?;
                 #[cfg(not(target_os = "macos"))]
                 inventory.inventory_with_workspace(&self.workspace)?;
+            }
+            #[cfg(target_os = "linux")]
+            if codex_profile.is_some() {
+                // The profile loan supports diagnostics only. Run-location,
+                // existing cwd and worktree exclusions do not yet authorize input.
+                return Err(Reason::ActionUnsupported);
             }
             let mut session = CodexDomSession::new(process, &self.directory)?;
             session.turn(

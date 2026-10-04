@@ -391,7 +391,7 @@ function candidate(a, b) {
   return a && b && !a.blocked && !b.blocked && JSON.stringify(a.rect) === JSON.stringify(b.rect)
     && a.points.find(p => b.points.some(q => p.x === q.x && p.y === q.y));
 }
-async function run(page, ownerGuard, deadline, rejected, mainGuard, folderTrust) {
+async function run(page, ownerGuard, deadline, rejected, mainGuard, folderTrust, profileLoan) {
   const maxWaitMs = deadline - Date.now();
   const originalUrl = page.url();
   const ownedEndpoint = async () => {
@@ -660,6 +660,15 @@ async function run(page, ownerGuard, deadline, rejected, mainGuard, folderTrust)
         facts.codingEditableObservation=coding.ancestry;
         facts.codingHomeStateObservation=coding.homeState;
       }
+      if(process.platform==='linux'&&skipAdmitted&&profileLoan
+          &&coding.observation.modalCount===0&&coding.homeState.status==='observed'
+          &&coding.homeState.homeComposerCount===1&&coding.homeState.proseMirrorEditableCount===1
+          &&coding.homeState.enabledSendCount===1&&coding.homeState.workspaceControlCount===1
+          &&coding.homeState.pendingTextareaCount===0&&coding.homeState.pendingGroupCount===0) {
+        facts.workspaceMenuObservation=await require('./codex-workspace-menu.cjs').run(page,
+          ownedEndpoint,ownerGuard,deadline,profileLoan,profileLoan.directories[0].path);
+        return stop('scope-remained');
+      }
       if(coding.ready===true) {facts.codingComposerReady=true;return facts;}
       if(skipAdmitted&&facts.taskControlKind==='skip-optional-capabilities'
           &&coding.observation.modalCount===1&&!confirmationConsumed) {
@@ -716,9 +725,9 @@ function sourceRoute(raw) {
       ['/global-dictation','globalDictation'],['/debug','debug']]).get(route)??'unknown';
   } catch { return 'unknown'; }
 }
-exports.run=async function(page, ownerGuard, deadline, mainGuard, folderTrust) {
+exports.run=async function(page, ownerGuard, deadline, mainGuard, folderTrust, profileLoan) {
   let rejectedPages, rejectedUrls;
-  const facts=await run(page,ownerGuard,deadline,pages=>{rejectedPages=pages;rejectedUrls=pages.map(p=>p.url());},mainGuard,folderTrust);
+  const facts=await run(page,ownerGuard,deadline,pages=>{rejectedPages=pages;rejectedUrls=pages.map(p=>p.url());},mainGuard,folderTrust,profileLoan);
   if(!rejectedPages)return facts;
   const unavailable=()=>{facts.rejectedPageInventory.source={status:'unavailable'};return facts;};
   const stable=()=>{

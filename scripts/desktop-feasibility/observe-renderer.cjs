@@ -587,10 +587,15 @@ async function run() {
       if (!targetReady) { facts.errorCategory = 'invalid-request'; save(); return; }
       const correlationDeadline=onboardingDeadline(trial,deadline,totalDeadline);
       if(trial)facts.initialMainConfirmation=mainConfirmationFacts();
+      const profileAuthority=request.codexProfileLoan===undefined?null:
+        require('./codex-profile-state.cjs').authority(request.codexProfileLoan,correlationDeadline,ownerGuard);
+      if(request.codexProfileLoan!==undefined&&(!profileAuthority||request.codexProfileLoan.directories[0].path!==request.ownedWorkspace)){profileAuthority?.close();facts.errorCategory='invalid-request';save();return;}
+      const onboardingOwnerGuard=profileAuthority?()=>ownerGuard()===true&&profileAuthority.verify():ownerGuard;
+      try {
       let folderTrust,trustGuard;
       if(trial&&request.ownedWorkspace!==undefined) {
         const folderAuthority=require('./codex-folder-trust.cjs').authority(request.ownedWorkspace);
-        trustGuard=focusGuard||heldMainGuard(initialMain,browser,ownerGuard,correlationDeadline,
+        trustGuard=(!profileAuthority&&focusGuard)||heldMainGuard(initialMain,browser,onboardingOwnerGuard,correlationDeadline,
           require('./codex-onboarding.cjs').sourceRoute,correlationIdentity,
           ms=>new Promise(resolve=>setTimeout(resolve,ms)),false,process.platform==='win32');
         folderTrust=await require('./codex-folder-trust.cjs').run(page,trustGuard,
@@ -598,28 +603,29 @@ async function run() {
         if(folderTrust.status==='completed'&&folderTrust.clickAttempted&&folderTrust.clickCompleted)
           trustGuard.allowPassiveFolderSettle();
       }
-      const heldMain=trial?await bindCorrelationMain(initialMain,browser,ownerGuard,correlationDeadline,
+      const heldMain=trial?await bindCorrelationMain(initialMain,browser,onboardingOwnerGuard,correlationDeadline,
         require('./codex-onboarding.cjs').sourceRoute,correlationIdentity,
         ms=>new Promise(resolve=>setTimeout(resolve,ms)),facts.initialMainConfirmation,
         folderTrust?.status==='completed'?trustGuard:null):null;
       trustGuard?.finishPassiveFolderSettle();
       // Trust consumes initial admission; preserve its original auxiliary binding.
       // Fresh role binding above must still succeed before subsequent input.
-      const mainGuard=folderTrust?.clickAttempted?(heldMain?trustGuard:undefined):trial&&heldMain?heldMainGuard(heldMain,browser,ownerGuard,correlationDeadline,
+      const mainGuard=folderTrust?.clickAttempted?(heldMain?trustGuard:undefined):trial&&heldMain?heldMainGuard(heldMain,browser,onboardingOwnerGuard,correlationDeadline,
         require('./codex-onboarding.cjs').sourceRoute,correlationIdentity,
         ms=>new Promise(resolve=>setTimeout(resolve,ms)),false,true):undefined;
       facts.publicOnboarding = await require('./codex-onboarding.cjs').run(page,
-        ownerGuard,
-        correlationDeadline,mainGuard,folderTrust);
+        onboardingOwnerGuard,
+        correlationDeadline,mainGuard,folderTrust,request.codexProfileLoan);
       const bindingVerified=!!mainGuard&&await mainGuard();
       const codingComposerReady=bindingVerified&&await page.evaluate(require('./codex-onboarding.cjs').codingScope);
       facts.codexSession={bindingVerified,codingComposerReady:!!codingComposerReady,auxiliaryInert:bindingVerified,
         pageCount:Math.min(32,browser.contexts().flatMap(context=>context.pages()).length)};
       if(bindingVerified)publishCodexBinding(output,request.ownerPid,connection,mainGuard);
       if(trial&&browser.contexts().flatMap(c=>c.pages()).length!==1) {
-        facts.mainAuxCorrelation=await observeMainAux(heldMain,browser,ownerGuard,correlationDeadline,
+        facts.mainAuxCorrelation=await observeMainAux(heldMain,browser,onboardingOwnerGuard,correlationDeadline,
           require('./codex-onboarding.cjs').sourceRoute);
       }
+      } finally {profileAuthority?.close();}
     }
     const counts = await page.evaluate(appName => {
       const visible = e => e.isConnected && e.getBoundingClientRect().width > 0

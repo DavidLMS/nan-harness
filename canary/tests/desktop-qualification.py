@@ -2788,6 +2788,28 @@ class QualificationTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 q.semantic_observations(root, 'hermes-desktop')
 
+    def test_codex_selected_project_receipts_never_authorize_send_or_export_identity(self):
+        setup=dict(schemaVersion=1,mechanism='codex-public-onboarding',diagnosticsOnly=True,
+            stage='coding-readiness',errorCategory=None,conversationalScope=True,
+            engineeringControl=True,roleClickAttempted=True,roleClickCompleted=True,
+            engineeringChecked=True,continueControl=True,continueClickAttempted=True,
+            continueClickCompleted=True,roleScopeAbsent=True,roleProofFailure='unmeasured',sessionProofFailure='unmeasured',
+            taskScopeProved=True,taskClickAttempted=True,taskClickCompleted=True)
+        state=dict(status='observed',diagnosticsOnly=True,statePairStable=True,
+            ordinaryLocalProjectObserved=True,selectedIdCorrelated=True,sendAuthorized=False)
+        menu=dict(status='observed',diagnosticsOnly=True,clickAttempted=True,clickCompleted=True,
+            sendAuthorized=False,profileStateObservation=state)
+        self.assertEqual(q.public_onboarding({**setup,'workspaceMenuObservation':menu},'chatgpt-desktop')['workspaceMenuObservation'],menu)
+        for change in ({'sendAuthorized':True},{'projectId':'PRIVATE'},{'status':[]},
+                       {'statePairStable':False},{'selectedIdCorrelated':1},{'reason':'PRIVATE'}):
+            with self.assertRaises(ValueError):
+                q.public_onboarding({**setup,'workspaceMenuObservation':{**menu,'profileStateObservation':{**state,**change}}},'chatgpt-desktop')
+        for change in ({'clickAttempted':False},{'sendAuthorized':True},{'path':'PRIVATE'},{'status':[]}):
+            with self.assertRaises(ValueError):
+                q.public_onboarding({**setup,'workspaceMenuObservation':{**menu,**change}},'chatgpt-desktop')
+        blocked={**state,'status':'blocked','statePairStable':False,'selectedIdCorrelated':False,'reason':'selected-id'}
+        self.assertEqual(q.public_onboarding({**setup,'workspaceMenuObservation':{**menu,'profileStateObservation':blocked}},'chatgpt-desktop')['workspaceMenuObservation']['profileStateObservation'],blocked)
+
     def test_public_onboarding_receipts_reject_private_and_untyped_data(self):
         setup = dict(schemaVersion=1, mechanism='codex-public-onboarding', diagnosticsOnly=True,
                      stage='stopped-after-role', errorCategory=None, conversationalScope=True,
