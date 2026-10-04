@@ -6,7 +6,7 @@ function observed(options={}) {
   const visible=e=>Object.assign(e,{isConnected:true,getBoundingClientRect:()=>({width:100,height:20})});
   const turn=visible({contains:()=>true,querySelectorAll:()=>options.thoughtOnly?[]:headings});
   const bubble=visible({innerText:options.wrongUser?'different':prompt});
-  const user=visible({querySelectorAll:()=>[bubble],closest:()=>options.noTurn?null:turn});
+  const user=visible({querySelectorAll:()=>[bubble],closest:selector=>selector==='[data-turn-key]'&&!options.noTurn?turn:null});
   const units=Array.from({length:options.duplicateAssistant?2:1},()=>visible({
     querySelector:()=>options.userInsideAssistant?user:null,
     querySelectorAll:()=>[visible({innerText:options.nonmatching?'prefix '+marker:marker,closest:()=>null})]}));
@@ -22,6 +22,22 @@ for(const options of [{thoughtOnly:true},{duplicateUser:true},{duplicateAssistan
   assert.equal(observed(options).responseVerified,false);
 }
 assert(!JSON.stringify(observed()).includes(marker));
+function semanticObserved(options={}) {
+ const show=e=>Object.assign(e,{isConnected:true,getBoundingClientRect:()=>({width:100,height:20})});
+ const conversation={contains:()=>true,querySelectorAll:()=>options.overflow?Array(4097).fill(userScope):[userScope,assistantScope]};
+ const userScope={getAttribute:()=>options.malformed?'': 'PRIVATE_KEY',closest:()=>conversation,querySelectorAll:()=>[]};
+ const assistantScope={getAttribute:()=>options.foreignKey?'OTHER':'PRIVATE_KEY',closest:()=>options.foreignConversation?{}:conversation,querySelectorAll:()=>headings};
+ const unit={closest:selector=>selector==='[data-content-search-turn-key]'?assistantScope:conversation,querySelector:()=>options.userUnit?user:null,
+  querySelectorAll:()=>[show({innerText:options.wrongNonce?'wrong':marker,closest:()=>null})]};
+ const headings=Array.from({length:options.duplicate?2:1},(_,index)=>({closest:selector=>selector==='[data-content-search-turn-key]'?assistantScope:index===0?unit:{...unit}}));
+ const user=show({querySelectorAll:()=>[show({innerText:prompt})],closest:selector=>selector==='[data-turn-key]'?{contains:()=>false,querySelectorAll:()=>[]}:selector==='[data-content-search-turn-key]'?userScope:conversation});
+ const document={querySelectorAll:()=>options.duplicateUser?[user,user]:[user]};
+ return vm.runInNewContext(`(${turnObservation})`,{document,getComputedStyle:()=>({display:'block',visibility:'visible'})})({prompt,marker});
+}
+assert.equal(semanticObserved().responseVerified,true,'shared semantic key across physical rows');
+for(const key of ['foreignKey','foreignConversation','malformed','overflow','userUnit','wrongNonce','duplicate','duplicateUser'])assert.equal(semanticObserved({[key]:true}).responseVerified,false,key);
+assert(!JSON.stringify(semanticObserved()).includes('PRIVATE_KEY'));
+
 const request={connectionPath:'private',ownerPid:9,prompt,expectedMarker:marker,timeoutMs:45000,
   action:'submit',purpose:'response',mainBindingPath:'private'};
 assert.equal(validRequest(request),true);

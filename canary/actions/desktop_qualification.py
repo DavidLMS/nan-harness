@@ -339,6 +339,31 @@ def public_mac_codex_home_state(value):
     return value
 
 
+def folder_trust_observation(trust):
+    if (type(trust) is not dict or set(trust) - {'rejectionStage','guardFailure'} != {'status', 'clickAttempted', 'clickCompleted'}
+            or type(trust['status']) is not str
+            or trust['status'] not in {'absent', 'blocked', 'completed', 'action-uncertain'}
+            or type(trust['clickAttempted']) is not bool or type(trust['clickCompleted']) is not bool
+            or trust['clickCompleted'] and not trust['clickAttempted']
+            or trust['status'] == 'absent' and (trust['clickAttempted'] or trust['clickCompleted'])
+            or trust['status'] == 'completed' and not (trust['clickAttempted'] and trust['clickCompleted'])
+            or trust['status'] == 'action-uncertain' and not (trust['clickAttempted'] and not trust['clickCompleted'])):
+        raise ValueError('invalid public onboarding folder trust diagnostic')
+    if 'rejectionStage' in trust:
+        stage = trust['rejectionStage']
+        if (type(stage) is not str or stage not in {
+                'authority', 'guard', 'deadline', 'dialog', 'form', 'title', 'path',
+                'controls', 'hit', 'identity', 'query'}
+                or trust['status'] not in {'blocked', 'action-uncertain'}):
+            raise ValueError('invalid folder trust rejection diagnostic')
+    if 'guardFailure' in trust:
+        failure = trust['guardFailure']
+        if (trust.get('rejectionStage') != 'guard' or type(failure) is not str or failure not in {
+                'deadline','native-ownership','page-set','main-identity','main-focus','main-scope',
+                'auxiliary-route','auxiliary-identity','auxiliary-focus','auxiliary-controls','query-failed','unmeasured'}):
+            raise ValueError('invalid folder trust guard failure')
+
+
 def public_onboarding(setup, app):
     shape = set(setup) - {'transitionPublicDOMObservation', 'transitionReadinessObservation', 'homeAfterContinueReady', 'folderTrust', 'rejectedPageInventory', 'taskScopeProved', 'taskClickAttempted', 'taskClickCompleted', 'codingComposerReady', 'taskScopeObservation', 'taskControlKind', 'codingReadinessObservation', 'codingNavigationObservation', 'codingPublicDOMObservation', 'codingHomeObservation', 'codingEditableObservation', 'codingHomeStateObservation', 'workspaceMenuObservation', 'macHomeStateObservation', 'taskSkipConfirmationAttempted', 'taskSkipConfirmationCompleted', 'taskSkipConfirmationProof', 'mainGuardFailure', 'pageSetFailure', 'foreignOverlayImportSetup', 'foreignOverlaySourceCounts', 'foreignOverlayActionability'} if type(setup) is dict else set()
     booleans = {'conversationalScope', 'engineeringControl', 'roleClickAttempted',
@@ -589,29 +614,7 @@ def public_onboarding(setup, app):
     if 'taskScopeObservation' in setup:
         task_scope_observation(setup['taskScopeObservation'])
     if 'folderTrust' in setup:
-        trust = setup['folderTrust']
-        if (type(trust) is not dict or set(trust) - {'rejectionStage','guardFailure'} != {'status', 'clickAttempted', 'clickCompleted'}
-                or type(trust['status']) is not str
-                or trust['status'] not in {'absent', 'blocked', 'completed', 'action-uncertain'}
-                or type(trust['clickAttempted']) is not bool or type(trust['clickCompleted']) is not bool
-                or trust['clickCompleted'] and not trust['clickAttempted']
-                or trust['status'] == 'absent' and (trust['clickAttempted'] or trust['clickCompleted'])
-                or trust['status'] == 'completed' and not (trust['clickAttempted'] and trust['clickCompleted'])
-                or trust['status'] == 'action-uncertain' and not (trust['clickAttempted'] and not trust['clickCompleted'])):
-            raise ValueError('invalid public onboarding folder trust diagnostic')
-        if 'rejectionStage' in trust:
-            stage = trust['rejectionStage']
-            if (type(stage) is not str or stage not in {
-                    'authority', 'guard', 'deadline', 'dialog', 'form', 'title', 'path',
-                    'controls', 'hit', 'identity', 'query'}
-                    or trust['status'] not in {'blocked', 'action-uncertain'}):
-                raise ValueError('invalid folder trust rejection diagnostic')
-        if 'guardFailure' in trust:
-            failure = trust['guardFailure']
-            if (trust.get('rejectionStage') != 'guard' or type(failure) is not str or failure not in {
-                    'deadline','native-ownership','page-set','main-identity','main-focus','main-scope',
-                    'auxiliary-route','auxiliary-identity','auxiliary-focus','auxiliary-controls','query-failed','unmeasured'}):
-                raise ValueError('invalid folder trust guard failure')
+        folder_trust_observation(setup['folderTrust'])
     if 'mainGuardFailure' in setup:
         failure = setup['mainGuardFailure']
         if (type(failure) is not str or failure not in {
@@ -2410,8 +2413,22 @@ def semantic_observations(directory, app):
             record.update({key: value[key] for key in fields - {'schemaVersion', 'mechanism'}})
         elif mechanism == 'renderer-inventory':
             fields = set('schemaVersion mechanism diagnosticsOnly app endpointOwned launcherOwned attached pageCount textareaCount editableCount sendCount retryCount newThreadCount loginCount dialogCount errorCategory'.split())
-            if set(value) - {'observerStage', 'documentState', 'startupScreen', 'landingCounts', 'onboardingCounts', 'publicOnboarding', 'mainAuxCorrelation', 'codexSession', 'initialMainBinding', 'initialMainConfirmation', 'initialMainActivation', 'sourceScreen', 'managedSignIn', 'sourceDialog', 'nativeOwnershipFailure', 'nativeListenerShape'} != fields or value['app'] != app or value['diagnosticsOnly'] is not True:
+            if set(value) - {'observerStage', 'documentState', 'startupScreen', 'landingCounts', 'onboardingCounts', 'publicOnboarding', 'mainAuxCorrelation', 'codexSession', 'initialMainBinding', 'initialMainConfirmation', 'initialMainActivation', 'sourceScreen', 'managedSignIn', 'sourceDialog', 'nativeOwnershipFailure', 'nativeListenerShape', 'sourceDialogPhase', 'folderTrustObservation'} != fields or value['app'] != app or value['diagnosticsOnly'] is not True:
                 raise ValueError('invalid renderer inventory identity')
+            if 'sourceDialogPhase' in value:
+                if app != 'chatgpt-desktop' or type(value['sourceDialogPhase']) is not str:
+                    raise ValueError('invalid source dialog progress')
+                enum(record, value, 'sourceDialogPhase', {'guard-before', 'identity-before',
+                     'hold-dialog', 'sample-first', 'sample-second', 'identity-after', 'guard-after', 'finished'})
+            if 'folderTrustObservation' in value:
+                trust = value['folderTrustObservation']
+                phases = {'initial', 'authority-before', 'guard', 'authority-after', 'sample-initial',
+                          'sample-result', 'sample-held', 'dispatch', 'post-dispatch', 'finished'}
+                if (app != 'chatgpt-desktop' or type(trust) is not dict
+                        or type(trust.get('phase')) is not str or trust['phase'] not in phases):
+                    raise ValueError('invalid folder trust progress')
+                folder_trust_observation({key: item for key, item in trust.items() if key != 'phase'})
+                record['folderTrustObservation'] = trust
             if 'observerStage' in value:
                 if type(value['observerStage']) is not str:
                     raise ValueError('invalid renderer checkpoint phase')
@@ -2850,7 +2867,7 @@ def semantic_observations(directory, app):
                 result = value['toolResult']
                 keys = {'selectedTool', 'resultPresent', 'resultCount', 'status',
                         'shape', 'toolErrorDetected', 'errorCategory'}
-                if value['stage'] != 'tool' or type(result) is not dict or not keys <= set(result) <= keys | {'errorEnvelope', 'execResult'}:
+                if value['stage'] != 'tool' or type(result) is not dict or not keys <= set(result) <= keys | {'errorEnvelope', 'execResult', 'failureHint'}:
                     raise ValueError('invalid tool result observation')
                 closed = {}
                 enum(closed, result, 'selectedTool', {'read', 'read-file', 'read-files', 'exec-command', 'fixture-read'})
@@ -2863,6 +2880,11 @@ def semantic_observations(directory, app):
                         raise ValueError('exec result requires owned exec tool result')
                     enum(closed, result, 'execResult', {'launch-failed', 'exited-zero',
                          'exited-nonzero', 'running', 'unknown', 'ambiguous'})
+                if 'failureHint' in result:
+                    if result['failureHint'] is None or not result['resultPresent'] or not (result['toolErrorDetected'] or result.get('execResult') in {'launch-failed', 'exited-nonzero', 'ambiguous'}):
+                        raise ValueError('failure hint requires owned failed tool result')
+                    enum(closed, result, 'failureHint', {'permission-denied', 'missing-file',
+                         'invalid-path', 'sandbox', 'missing-command', 'unsupported', 'unknown', 'ambiguous'})
                 if result['selectedTool'] == 'fixture-read' and app != 'claude-desktop':
                     raise ValueError('foreign owned fixture selection')
                 flag(closed, result, 'resultPresent')

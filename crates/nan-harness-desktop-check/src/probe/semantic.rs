@@ -448,6 +448,10 @@ impl SemanticUi<'_> {
     }
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "keep tool failure retention and independent recovery in the ordered scenario"
+)]
 async fn complete_scenario(
     ui: &mut SemanticUi<'_>,
     scenario: &SemanticScenario<'_>,
@@ -513,8 +517,15 @@ async fn complete_scenario(
         gate,
     )?;
     record_provider_oracle(directory, "tool", &tool, gate, Some(selected_tool))?;
-    verify_semantic_tool(&tool, gate, selected_tool, owned_fixture_scope)?;
-    result.steps.push(CheckStep::ToolVerified);
+    if !tool.completed() || !tool.recording_bounded() || !gate.fixture_response_verified() {
+        return Err(Reason::ToolMismatch);
+    }
+    // A completed UI/provider turn can still expose a failed file tool. Keep
+    // that failure, but collect independent recovery evidence in this session.
+    let tool_verification = verify_semantic_tool(&tool, gate, selected_tool, owned_fixture_scope);
+    if tool_verification.is_ok() {
+        result.steps.push(CheckStep::ToolVerified);
+    }
 
     gate.arm_fixture_response("NAN_CHECK_EXPECTED_FAILURE")
         .map_err(|()| Reason::ProviderFailed)?;
@@ -550,7 +561,7 @@ async fn complete_scenario(
         return Err(Reason::ResponseMismatch);
     }
     result.steps.push(CheckStep::ErrorRecovered);
-    Ok(())
+    tool_verification
 }
 
 fn verify_semantic_tool(

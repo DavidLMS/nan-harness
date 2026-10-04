@@ -102,7 +102,11 @@ async function main() {
   evaluate:async(fn,arg)=>{reads++;return vm.runInNewContext('('+fn.toString()+')',d.context)({...arg,held:arg.held.value});}};
  const held={page,target:'PRIVATE_TARGET',frame:'PRIVATE_FRAME',loader:'PRIVATE_LOADER',url:'app://-/index.html'};
  let current=held,ownerQueries=0,identityQueries=0;const opts={guard:async()=>{ownerQueries++;return owns;},identity:async()=>{identityQueries++;return current;},same:(a,b)=>['page','target','frame','loader','url'].every(k=>a[k]===b[k]),deadline:Date.now()+1000};
+ const phases=[];opts.progress=phase=>phases.push(phase);
  const good=await helper.observe(held,'darwin',opts);assert.equal(good.status,'matched');assert.equal(reads,2);assert.equal(ownerQueries,2);assert.equal(identityQueries,2);assert.ok(!JSON.stringify(good).includes('PRIVATE'));
+ assert.ok(phases.includes('sample-first')&&phases.includes('sample-second')&&phases.includes('guard-after'));
+ assert.equal(phases.at(-1),'finished');assert.ok(!JSON.stringify(phases).includes('PRIVATE'));
+ const stillGood=await helper.observe(held,'darwin',{...opts,progress:()=>{throw Error('PRIVATE');}});assert.equal(stillGood.status,'matched');
  const ordinaryEvaluate=page.evaluate;
  for(const cause of ['owner','loader']) {
   owns=true;current=held;reads=0;

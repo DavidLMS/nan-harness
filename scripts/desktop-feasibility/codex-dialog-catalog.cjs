@@ -91,33 +91,40 @@ function classifyTitle({held,entries}) {
  return {status:matches.length===1?'matched':matches.length?'ambiguous':'unknown',
   sourceShape,commandMenuShape,titleReferenceCount:1,matchCount:matches.length,sourceTitleEmpty:text.trim().length===0,sourceTitleIds:matches,rejectionStage:null,guardFailure:null};
 }
-async function observe(held,platform,{guard,identity,same,deadline}) {
+async function observe(held,platform,{guard,identity,same,deadline,progress=()=>{}}) {
  const result=facts(platform);let handle;
+ const checkpoint=phase=>{try {progress(phase);}catch {}};
  const prove=async final=>{
   if(Date.now()>=deadline){result.rejectionStage='deadline';return false;}
   if(!held||held.url!=='app://-/index.html'){result.rejectionStage='scope';result.guardFailure='held-document';return false;}
+  checkpoint(final?'identity-after':'guard-before');
   if(!final&&!await guard()){result.rejectionStage='scope';result.guardFailure=guard.lastFailure??null;return false;}
+  checkpoint(final?'identity-after':'identity-before');
   if(!same(held,await identity(held.page))){result.rejectionStage='changed';return false;}
   if(Date.now()>=deadline){result.rejectionStage='deadline';return false;}
+  checkpoint(final?'guard-after':'identity-before');
   if(final&&!await guard()){result.rejectionStage='scope';result.guardFailure=guard.lastFailure??null;return false;}
   if(Date.now()>=deadline){result.rejectionStage='deadline';return false;}
   return true;
  };
  try {
   if(!await prove())return result;
+  checkpoint('hold-dialog');
   handle=await held.page.evaluateHandle(holdDialog);
   const source=platform==='win32'?windowsCatalog:platform==='linux'?linuxCatalog:platform==='darwin'?macCatalog:catalog;
   const entries=Object.values(Object.fromEntries(source.entries.filter(e=>e.platform===(platform==='win32'?'windows':platform==='darwin'?'mac':'linux')).map(e=>[e.id,e])));
+  checkpoint('sample-first');
   const first=await held.page.evaluate(classifyTitle,{held:handle,entries});
   if(!first)return result;
   if(Date.now()>=deadline){result.rejectionStage='deadline';return result;}
   // Two passive retained-node samples form one transaction. Fresh ownership
   // and original CDP identity bracket it; no GUI action occurs inside.
+  checkpoint('sample-second');
   const second=await held.page.evaluate(classifyTitle,{held:handle,entries});
   if(!second||!await prove(true))return result;
   if(JSON.stringify(first)!==JSON.stringify(second)){result.rejectionStage='changed';return result;}
   Object.assign(result,second);
- } catch(_) {result.rejectionStage='query';} finally {if(handle)await handle.dispose().catch(()=>{});}
+ } catch(_) {result.rejectionStage='query';} finally {checkpoint('finished');if(handle)await handle.dispose().catch(()=>{});}
  return result;
 }
 module.exports={policy,facts,holdDialog,classifyTitle,observe,catalogSha256,pins};

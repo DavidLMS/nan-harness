@@ -13,8 +13,31 @@ function turnObservation({prompt,marker}) {
   if(users.length!==1)return {userCount:Math.min(4096,users.length),assistantCount:0,responseVerified:false};
   const turn=users[0].closest('[data-turn-key]');
   if(!turn)return {userCount:1,assistantCount:0,responseVerified:false};
-  const units=new Set([...turn.querySelectorAll('[data-conversation-role="assistant"]')]
-    .map(heading=>heading.closest('[data-content-search-unit-key]')).filter(unit=>unit&&turn.contains(unit)));
+  // Virtual transcript rows split one semantic turn into user/assistant blocks.
+  // Their public search key is shared; data-turn-key identifies layout rows.
+  const semantic=users[0].closest('[data-content-search-turn-key]');
+  let headings,semanticKey=null,heldConversation=null;
+  if(semantic) {
+    const key=semantic.getAttribute('data-content-search-turn-key');
+    const conversation=users[0].closest('[data-thread-find-target="conversation"]');
+    semanticKey=key;heldConversation=conversation;
+    if(typeof key!=='string'||key.length===0||key.length>512||!conversation
+        ||!conversation.contains(semantic))return {userCount:1,assistantCount:0,responseVerified:false};
+    const scopes=[...conversation.querySelectorAll('[data-content-search-turn-key]')];
+    if(scopes.length>4096)return {userCount:1,assistantCount:0,responseVerified:false};
+    headings=[];
+    for(const scope of scopes) {
+      if(scope.getAttribute('data-content-search-turn-key')!==key
+          ||scope.closest('[data-thread-find-target="conversation"]')!==conversation)continue;
+      for(const heading of scope.querySelectorAll('[data-conversation-role="assistant"]')) {
+        if(heading.closest('[data-content-search-turn-key]')===scope)headings.push(heading);
+        if(headings.length>4096)return {userCount:1,assistantCount:0,responseVerified:false};
+      }
+    }
+  } else headings=[...turn.querySelectorAll('[data-conversation-role="assistant"]')];
+  const units=new Set(headings.map(heading=>heading.closest('[data-content-search-unit-key]'))
+    .filter(unit=>unit&&(semantic?unit.closest('[data-thread-find-target="conversation"]')===heldConversation
+      &&unit.closest('[data-content-search-turn-key]')?.getAttribute('data-content-search-turn-key')===semanticKey:turn.contains(unit))));
   let matches=0;
   for(const unit of units) {
     if(unit.querySelector('[data-local-conversation-user-anchor],[data-user-message-bubble]'))continue;

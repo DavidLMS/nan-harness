@@ -172,6 +172,12 @@ one ordered preparation path. The hosted Zed receipt requires its private root
 before the child starts. Reassess if another preparation phase is added; this
 scoped exception does not waive tests or other quality gates.
 
+`complete_scenario` in `nan-harness-desktop-check/src/probe/semantic.rs` has
+101 lines. Keep the ordered UI/provider lifecycle and retained tool failure
+beside independent recovery collection, so recovery cannot accidentally erase
+the earlier acceptance failure. Reassess if another scenario phase is added;
+this scoped exception does not waive tests or other quality gates.
+
 `scenario_owned` in `nan-harness-desktop-check/src/probe.rs` has 103 lines.
 Keep preparation of the exact launch command, platform profile custody,
 conversation and cleanup in one ordered lifecycle so retained authority cannot

@@ -609,7 +609,8 @@ async function run() {
       // of role-onboarding controls hidden behind an active startup dialog.
       const soleGuard=passiveCatalogGuard(browser,page,ownerGuard);
       recordStaticDialog(await titleCatalog.observe(initialMain,process.platform,
-        {guard:soleGuard,identity:p=>correlationIdentity(p,deadline,false),same:sameCorrelationIdentity,deadline}));
+        {guard:soleGuard,identity:p=>correlationIdentity(p,deadline,false),same:sameCorrelationIdentity,deadline,
+          progress:phase=>{facts.sourceDialogPhase=phase;save();}}));
     }
     if (process.env.NANH_CODEX_PUBLIC_ONBOARDING !== undefined) {
       const targetReady = app === 'chatgpt-desktop'
@@ -635,7 +636,8 @@ async function run() {
           require('./codex-onboarding.cjs').sourceRoute,correlationIdentity,
           ms=>new Promise(resolve=>setTimeout(resolve,ms)),false,process.platform==='win32',!directCDP,directCDP);
         folderTrust=await require('./codex-folder-trust.cjs').run(page,trustGuard,
-          correlationDeadline,folderAuthority,()=>trustGuard.sealInitialActions());
+          correlationDeadline,folderAuthority,()=>trustGuard.sealInitialActions(),
+          receipt=>{facts.folderTrustObservation=receipt;save();});
         if(folderTrust.status==='completed'&&folderTrust.clickAttempted&&folderTrust.clickCompleted)
           trustGuard.allowPassiveFolderSettle();
       }

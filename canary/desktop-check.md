@@ -53,6 +53,18 @@ except for Claude Windows, whose later probes are withheld after cleanup fails.
 The pending grouped candidate captures only closed Zed PTY event IDs, retains
 Windows cleanup targets by proved ancestry and original handles, and reduces
 Claude Linux history scans during clipboard readback and passive Send inspection.
+The grouped candidate also associates Codex assistant blocks by their public
+semantic search key inside the same conversation: pinned source retains this
+key when one turn is split into separate virtual rows. Physical row identity
+alone excluded the recovered response. Exact user text and response nonce
+remain required. Incremental Windows onboarding receipts retain catalog and
+folder-trust phases before a timeout can hide the incomplete operation.
+
+Tool failures now carry closed advisory lexical hints (never raw error text).
+A completed, bounded tool turn with verified UI/provider response continues
+into the independent recovery scenario even when the file result fails. The
+original tool failure is retained; recovery cannot qualify a missing file read.
+
 These local changes are not native qualification. A classifier limit reached
 before Retry must remain a limit, never become an apparently empty successful
 observation. No additional campaign is needed merely to retrieve the existing

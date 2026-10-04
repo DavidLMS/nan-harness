@@ -91,13 +91,16 @@ function sample({workspace,spellings=[workspace],held}) {
   return {status:'proved',dialog,form,title:titles[0],item:items[0],spelling:items[0].textContent,button,
     left:rect.left,top:rect.top,width:rect.width,height:rect.height};
 }
-async function run(page,guard,deadline,authority,seal=()=>{}) {
+async function run(page,guard,deadline,authority,seal=()=>{},progress=()=>{}) {
   const receipt={status:'blocked',clickAttempted:false,clickCompleted:false};
-  let held;
-  const reject=stage=>{receipt.rejectionStage=stage;return false;};
+  let held,phase='initial';
+  const checkpoint=value=>{phase=value;try {progress({phase,...receipt});}catch {}};
+  const reject=stage=>{receipt.rejectionStage=stage;checkpoint(phase);return false;};
   const owned=async()=>{
     if(Date.now()>=deadline)return reject('deadline');
+    checkpoint('authority-before');
     if(await authority.verify()!==true)return reject('authority');
+    checkpoint('guard');
     if(await guard()!==true) {
       const failure=typeof guard.failure==='function'?guard.failure():null;
       if(['deadline','native-ownership','page-set','main-identity','main-focus','main-scope',
@@ -106,6 +109,7 @@ async function run(page,guard,deadline,authority,seal=()=>{}) {
       return reject('guard');
     }
     if(Date.now()>=deadline)return reject('deadline');
+    checkpoint('authority-after');
     if(await authority.verify()!==true)return reject('authority');
     return Date.now()<deadline||reject('deadline');
   };
@@ -117,7 +121,9 @@ async function run(page,guard,deadline,authority,seal=()=>{}) {
     if(!authority||typeof authority.workspace!=='string'||!authority.workspace
         ||typeof authority.verify!=='function'){reject('authority');return receipt;}
     if(!await owned())return receipt;
+    checkpoint('sample-initial');
     held=await page.evaluateHandle(sample,{workspace:authority.workspace,spellings:authority.spellings,held:null});
+    checkpoint('sample-result');
     const first=await held.evaluate(e=>({status:e.status,rejectionStage:e.rejectionStage}));
     if(first.status==='absent'){receipt.status='absent';return receipt;}
     if(!sampled(first)||!await owned())return receipt;
@@ -127,20 +133,22 @@ async function run(page,guard,deadline,authority,seal=()=>{}) {
     if(!sampled(current)||!await owned())return receipt;
     const button=await held.evaluateHandle(e=>e.button);
     try {
+      checkpoint('sample-held');
       const final=await page.evaluate(sample,{workspace:authority.workspace,spellings:authority.spellings,held});
       if(!sampled(final)||!await owned())return receipt;
       seal();
       receipt.clickAttempted=true;receipt.status='action-uncertain';
+      checkpoint('dispatch');
       await button.asElement().click({position:{x:final.width/2,y:final.height/2},
         timeout:Math.max(1,Math.min(2000,deadline-Date.now()))});
-      receipt.clickCompleted=true;
+      receipt.clickCompleted=true;receipt.status='blocked';checkpoint('post-dispatch');
       if(!await owned()){receipt.status='blocked';return receipt;}
       receipt.status='completed';return receipt;
     } finally {await button.dispose();}
   } catch {
     if(receipt.status==='completed')receipt.status='blocked';
     reject(Date.now()>=deadline?'deadline':'query');return receipt;
-  } finally {if(held)await held.dispose();authority?.close?.();}
+  } finally {checkpoint(receipt.status==='completed'||receipt.status==='absent'?'finished':phase);if(held)await held.dispose();authority?.close?.();}
 }
 exports.sample=sample;
 exports.run=run;

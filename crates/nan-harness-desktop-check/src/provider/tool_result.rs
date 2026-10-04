@@ -74,6 +74,75 @@ enum ExecResult {
     Ambiguous,
 }
 
+// Advisory lexical hints only: tool output is untrusted and grants no authority.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum FailureHint {
+    PermissionDenied,
+    MissingFile,
+    InvalidPath,
+    Sandbox,
+    MissingCommand,
+    Unsupported,
+    Unknown,
+    Ambiguous,
+}
+
+fn failure_hint(texts: &[&str]) -> FailureHint {
+    let mut found = FailureHint::Unknown;
+    for text in texts {
+        let normalized = text.to_ascii_lowercase();
+        for (hint, signals) in [
+            (
+                FailureHint::PermissionDenied,
+                &["permission denied", "access is denied", "eacces:", "eperm:"][..],
+            ),
+            (
+                FailureHint::MissingFile,
+                &[
+                    "no such file or directory",
+                    "file does not exist",
+                    "cannot find the file",
+                    "cannot find the path",
+                    "enoent:",
+                ][..],
+            ),
+            (
+                FailureHint::InvalidPath,
+                &[
+                    "invalid path",
+                    "path is not absolute",
+                    "invalid filename",
+                    "filename, directory name, or volume label syntax is incorrect",
+                ][..],
+            ),
+            (
+                FailureHint::Sandbox,
+                &["sandbox", "bwrap:", "landlock", "seccomp"][..],
+            ),
+            (
+                FailureHint::MissingCommand,
+                &[
+                    "command not found",
+                    "is not recognized as an internal or external command",
+                ][..],
+            ),
+            (
+                FailureHint::Unsupported,
+                &["not supported", "unsupported operation", "not implemented"][..],
+            ),
+        ] {
+            if signals.iter().any(|signal| normalized.contains(signal)) {
+                if found != FailureHint::Unknown && found != hint {
+                    return FailureHint::Ambiguous;
+                }
+                found = hint;
+            }
+        }
+    }
+    found
+}
+
 // Parse only the bounded source envelope, never output text or a substring.
 fn exec_result(text: &[&str]) -> ExecResult {
     let [text] = text else {
@@ -203,6 +272,8 @@ pub(crate) struct ToolResultObservation {
     error_envelope: Option<ErrorEnvelope>,
     #[serde(skip_serializing_if = "Option::is_none")]
     exec_result: Option<ExecResult>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    failure_hint: Option<FailureHint>,
 }
 
 impl ToolResultObservation {
@@ -217,6 +288,7 @@ impl ToolResultObservation {
             error_category: ErrorCategory::None,
             error_envelope: None,
             exec_result: None,
+            failure_hint: None,
         };
         let mut seen = Vec::new();
         let mut inspected = 0;
@@ -260,6 +332,20 @@ impl ToolResultObservation {
                         ExecResult::Ambiguous
                     } else {
                         exec_result(&text)
+                    });
+                }
+                if result.result_present && result.failure_hint.is_some() {
+                    result.failure_hint = Some(FailureHint::Ambiguous);
+                } else if error.is_some()
+                    || matches!(
+                        result.exec_result,
+                        Some(ExecResult::LaunchFailed | ExecResult::ExitedNonzero)
+                    )
+                {
+                    result.failure_hint = Some(if result.result_present {
+                        FailureHint::Ambiguous
+                    } else {
+                        failure_hint(&text)
                     });
                 }
                 seen.push((shape, text));
@@ -449,6 +535,37 @@ mod tests {
         let mut value = json!({"messages":[{"role":role,"tool_call_id":EXPECTED_CALL}]});
         value["messages"][0]["content"] = content;
         value
+    }
+
+    #[test]
+    fn failure_hints_are_closed_advisory_and_ambiguous_when_conflicting() {
+        assert_eq!(
+            failure_hint(&["cat: /PRIVATE: Permission denied"]),
+            FailureHint::PermissionDenied
+        );
+        assert_eq!(failure_hint(&["ENOENT: PRIVATE"]), FailureHint::MissingFile);
+        assert_eq!(
+            failure_hint(&["bwrap: PRIVATE: Permission denied"]),
+            FailureHint::Ambiguous
+        );
+        assert_eq!(
+            failure_hint(&["unclassified PRIVATE"]),
+            FailureHint::Unknown
+        );
+        assert_eq!(
+            failure_hint(&["invalid path PRIVATE"]),
+            FailureHint::InvalidPath
+        );
+        let requests = vec![serde_json::json!({"messages":[{
+            "role":"tool", "tool_call_id":EXPECTED_CALL,
+            "content":"Tool error: EACCES: PRIVATE"
+        }]})];
+        let observed = ToolResultObservation::collect(&requests, SelectedTool::Read);
+        assert_eq!(observed.failure_hint, Some(FailureHint::PermissionDenied));
+        assert_eq!(observed.error_category, ErrorCategory::Unknown);
+        let encoded = serde_json::to_string(&observed).unwrap();
+        assert!(!encoded.contains("PRIVATE"));
+        assert!(!encoded.contains("EACCES"));
     }
 
     #[test]

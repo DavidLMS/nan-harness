@@ -54,6 +54,26 @@ class RendererCheckpointTests(unittest.TestCase):
                 with self.assertRaises(ValueError):q.semantic_observations(tmp,'chatgpt-desktop')
 
 
+    def test_onboarding_progress_survives_before_later_inventory(self):
+        value=dict(schemaVersion=1,mechanism='renderer-inventory',diagnosticsOnly=True,
+            app='chatgpt-desktop',endpointOwned=True,launcherOwned=True,attached=True,
+            pageCount=1,textareaCount=0,editableCount=0,sendCount=0,retryCount=0,
+            newThreadCount=0,loginCount=0,dialogCount=0,errorCategory='unclassified',
+            observerStage='folder-trust',sourceDialogPhase='finished',
+            folderTrustObservation=dict(phase='guard',status='blocked',clickAttempted=False,
+                                        clickCompleted=False))
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp)/'facts.json'
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(tmp,'chatgpt-desktop'),[value])
+            for change in ({'sourceDialogPhase':'PRIVATE'}, {'sourceDialogPhase':None},
+                           {'folderTrustObservation':{**value['folderTrustObservation'],'phase':'PRIVATE'}},
+                           {'folderTrustObservation':{**value['folderTrustObservation'],'path':'PRIVATE'}},
+                           {'folderTrustObservation':{**value['folderTrustObservation'],'status':'completed'}}):
+                path.write_text(json.dumps({**value,**change}))
+                with self.assertRaises(ValueError):q.semantic_observations(tmp,'chatgpt-desktop')
+
+
 class CodexDriverFactsTests(unittest.TestCase):
     def test_closed_driver_facts_reject_private_payloads_and_unproved_retry(self):
         flags = 'endpointOwned targetVerified attached bindingVerified auxiliaryInert codingComposerReady uniqueComposer inputReadback inputSubmitted userTurnObserved responseVerified errorObserved retryControl retryAttempted retryCompleted providerResponseVerified'.split()
@@ -768,6 +788,27 @@ class QualificationTests(unittest.TestCase):
                 path.write_text(json.dumps({**oracle, 'toolResult': {**result, **change}}))
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'chatgpt-desktop')
+
+    def test_tool_failure_hint_is_closed_and_requires_failure(self):
+        oracle = dict(schemaVersion=1, mechanism='semantic-provider-oracle', stage='tool',
+                      toolCompleted=True, toolRecordingBounded=True, toolVerified=False,
+                      fixtureResponseVerified=True, failureObserved=False)
+        result = dict(selectedTool='exec-command', resultPresent=True, resultCount=1,
+                      status='complete', shape='string', toolErrorDetected=False,
+                      errorCategory='none', execResult='exited-nonzero')
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'provider.json'
+            for hint in ['permission-denied', 'missing-file', 'invalid-path', 'sandbox',
+                         'missing-command', 'unsupported', 'unknown', 'ambiguous']:
+                path.write_text(json.dumps({**oracle, 'toolResult': {**result, 'failureHint': hint}}))
+                public = q.semantic_observations(root, 'chatgpt-desktop')[0]
+                self.assertEqual(public['toolResult']['failureHint'], hint)
+                self.assertFalse(public['toolVerified'])
+            for change in [{'failureHint': 'PRIVATE'}, {'failureHint': None},
+                           {'failureHint': 'unknown', 'execResult': 'exited-zero'},
+                           {'failureHint': 'unknown', 'execResult': 'running'}]:
+                path.write_text(json.dumps({**oracle, 'toolResult': {**result, **change}}))
+                with self.assertRaises(ValueError):q.semantic_observations(root, 'chatgpt-desktop')
 
     def test_tool_error_envelope_is_optional_closed_and_noncertifying(self):
         oracle = dict(schemaVersion=1, mechanism='semantic-provider-oracle', stage='tool',
