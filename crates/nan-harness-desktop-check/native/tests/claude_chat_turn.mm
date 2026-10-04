@@ -285,6 +285,31 @@ int main() {
     details_tree.nodes.push_back(fixture(1,"AXButton","View details"));
     assert(failure_details_control(details_tree, details_request, &details_failure) == -1);
     assert(std::string(details_failure) == "scope-control-ambiguous");
+    Request row_request;
+    row_request.prompt = "fresh user";
+    Tree row_tree;
+    row_tree.nodes = {fixture(-1, "AXWindow", ""), fixture(0, "AXGroup", "Message 5"),
+        fixture(1, "AXHeading", "You said: fresh user"), fixture(1, "AXStaticText", "fresh user"),
+        fixture(0, "AXGroup", "Message 6"), fixture(4, "AXStaticText", "Server error"),
+        fixture(4, "AXButton", "Retry"), fixture(4, "AXButton", "View details"),
+        fixture(4, "AXHeading", "Claude responded: optional summary")};
+    RowShape rows{};
+    assert(observe_row_shape(row_tree, row_request, rows, [] { return true; }));
+    assert(rows[0] == 2 && rows[7] == 1 && rows[8] == 1 && rows[9] == 1 && rows[10] == 1 && rows[11] == 1);
+    assert(failure_details_control(row_tree, row_request) == -1); // Observation never broadens actions.
+    row_tree.nodes[4].label = "Message 8";
+    assert(observe_row_shape(row_tree, row_request, rows, [] { return true; }) && rows[10] == 0);
+    row_tree.nodes[4].label = "Message 6"; row_tree.nodes[4].parent = 1;
+    assert(observe_row_shape(row_tree, row_request, rows, [] { return true; }) && rows[9] == 0);
+    row_tree.nodes[4].parent = 0; row_tree.nodes[4].label = "Message 5";
+    assert(observe_row_shape(row_tree, row_request, rows, [] { return true; }) && rows[12] == 1 && rows[10] == 0);
+    row_tree.nodes[4].label = "Currently streaming message";
+    assert(observe_row_shape(row_tree, row_request, rows, [] { return true; }) && rows[1] == 1 && rows[10] == 0);
+    for (const char* label : {"Message 0", "Message 01", "Message 4097", "Message PRIVATE", "Message 5 extra"}) {
+        assert(source_row_position(label) == 0);
+    }
+    unsigned budget_checks = 0;
+    assert(!observe_row_shape(row_tree, row_request, rows, [&] { return ++budget_checks < 2; }));
     Tree response_scope;
     const char* response_failure = nullptr;
     assert(scoped_control(response_scope, request, false, &response_failure) == -1);

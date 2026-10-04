@@ -728,7 +728,7 @@ def semantic_observations(directory, app):
             fields = counts | flags | {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'stage'}
             stages = set('request window tree tree-query tree-duplicate tree-type tree-limit tree-pid tree-focus tree-window mode composer focus input-focus-guard input-focus-setting input-focused-identity input-replace-select-key input-prompt-before-guard input-prompt-clipboard input-prompt-after-guard input-paste-key input-readback-before-guard input-sentinel-clipboard input-sentinel-after-guard input-readback-select-key input-readback-select-guard input-readback-copy-key input-collapse-guard input-collapse-key input-mismatch input-initial-unavailable input-initial-nonempty input-clipboard-mismatch input-value-mismatch control scope scope-anchor-absent scope-heading-absent scope-assistant-heading-absent scope-marker-heading-absent scope-anchor-ambiguous scope-control-absent scope-control-ambiguous scope-heading-ambiguous scope-prompt-mismatch deadline action-uncertain response-mismatch sent copied retry-ready failure-details-opened retried completed deadline-window deadline-tree deadline-focus deadline-input deadline-input-paste deadline-input-readback deadline-press deadline-copy deadline-retry-ready deadline-retry'.split())
             phase_fields = {'actionPhase', 'transportFailure'}
-            if (app != 'claude-desktop' or set(value) - {'providerObservation', 'guardRejection'} not in (fields, fields | phase_fields) or value['diagnosticsOnly'] is not True
+            if (app != 'claude-desktop' or set(value) - {'providerObservation', 'guardRejection', 'rowShape'} not in (fields, fields | phase_fields) or value['diagnosticsOnly'] is not True
                     or type(value['stage']) is not str or value['stage'] not in stages
                     or any(type(value[key]) is not bool for key in flags)
                     or any(type(value[key]) is not int or not 0 <= value[key] <= 3 for key in counts)
@@ -762,6 +762,25 @@ def semantic_observations(directory, app):
                         or any(type(flag) is not bool for flag in observation.values())):
                     raise ValueError('invalid Claude provider observation')
                 record['providerObservation'] = observation
+            if 'rowShape' in value:
+                shape = value['rowShape']
+                count_keys = {'sourceRows', 'streamingRows', 'exactUserHeadings', 'exactPromptNodes',
+                              'serverErrorLabels', 'retryControls', 'detailsControls', 'userRows', 'errorRows',
+                              'sharedParentPairs', 'adjacentPairs', 'assistantHeadingsInErrorRows', 'duplicatePositions'}
+                if (mechanism != 'claude-native-chat' or type(shape) is not dict
+                        or set(shape) != {'sourceVersion', 'sourceSha256', 'navigationSourceSha256', 'phase', 'counts'}
+                        or shape['sourceVersion'] != '2.19675.0' or shape['phase'] != 'pre-disclosure'
+                        or shape['sourceSha256'] != '87e6b710a540352fcd4f9a1f0f6a8f9f9b6377ca676fd99c3e4d8bc87653dceb'
+                        or shape['navigationSourceSha256'] != '948270963cdf93cc411d95393157f5c7e2c06f18916d8c4ea1971828fb0c677c'
+                        or type(shape['counts']) is not dict or set(shape['counts']) != count_keys
+                        or any(type(count) is not int or not 0 <= count <= 1024 for count in shape['counts'].values())):
+                    raise ValueError('invalid passive Claude failure row shape')
+                row = shape['counts']
+                if (any(row[key] > row['sourceRows'] for key in ('streamingRows', 'userRows', 'errorRows', 'duplicatePositions'))
+                        or row['adjacentPairs'] > row['sharedParentPairs']
+                        or row['sharedParentPairs'] > row['userRows'] * row['errorRows']):
+                    raise ValueError('inconsistent passive Claude failure row shape')
+                record['rowShape'] = shape
             record.update({key: value[key] for key in fields - {'schemaVersion', 'mechanism'}})
         elif mechanism == 'windows-process-correlation':
             flags = {'sameLauncherSurvives', 'verifiedDescendantsPresent', 'unlinkedMatchesPresent'}

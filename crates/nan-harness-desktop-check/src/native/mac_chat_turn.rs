@@ -187,6 +187,107 @@ impl ChatTurnStage {
         }
     }
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct FailureRowCounts {
+    source_rows: u16,
+    streaming_rows: u16,
+    exact_user_headings: u16,
+    exact_prompt_nodes: u16,
+    server_error_labels: u16,
+    retry_controls: u16,
+    details_controls: u16,
+    user_rows: u16,
+    error_rows: u16,
+    shared_parent_pairs: u16,
+    adjacent_pairs: u16,
+    assistant_headings_in_error_rows: u16,
+    duplicate_positions: u16,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct FailureRowShape {
+    source_version: &'static str,
+    source_sha256: &'static str,
+    navigation_source_sha256: &'static str,
+    phase: &'static str,
+    counts: FailureRowCounts,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ChatTurnReceipt {
+    pub(crate) stage: ChatTurnStage,
+    pub(crate) row_shape: Option<FailureRowShape>,
+}
+impl ChatTurnReceipt {
+    pub(crate) fn parse(output: &str, mode: &str) -> Option<Self> {
+        if output.len() > 4096 {
+            return None;
+        }
+        let (first, remainder) = output.split_once('\n')?;
+        let stage = ChatTurnStage::parse(&format!("{first}\n"))?;
+        if remainder.is_empty() {
+            return Some(Self {
+                stage,
+                row_shape: None,
+            });
+        }
+        if mode != "failure-details" {
+            return None;
+        }
+        let row_line = remainder.strip_suffix('\n')?.strip_prefix("rows ")?;
+        let fields: Vec<_> = row_line.split(' ').collect();
+        if fields.len() != 13 {
+            return None;
+        }
+        let mut values = [0_u16; 13];
+        for (index, field) in fields.iter().enumerate() {
+            if field.is_empty()
+                || field.len() > 4
+                || !field.bytes().all(|value| value.is_ascii_digit())
+                || (field.len() > 1 && field.starts_with('0'))
+            {
+                return None;
+            }
+            values[index] = field.parse().ok()?;
+            if values[index] > 1024 {
+                return None;
+            }
+        }
+        if values[1] > values[0]
+            || values[7] > values[0]
+            || values[8] > values[0]
+            || values[10] > values[9]
+            || values[12] > values[0]
+            || u32::from(values[9]) > u32::from(values[7]) * u32::from(values[8])
+        {
+            return None;
+        }
+        Some(Self {
+            stage,
+            row_shape: Some(FailureRowShape {
+                source_version: "2.19675.0",
+                source_sha256: "87e6b710a540352fcd4f9a1f0f6a8f9f9b6377ca676fd99c3e4d8bc87653dceb",
+                navigation_source_sha256: "948270963cdf93cc411d95393157f5c7e2c06f18916d8c4ea1971828fb0c677c",
+                phase: "pre-disclosure",
+                counts: FailureRowCounts {
+                    source_rows: values[0],
+                    streaming_rows: values[1],
+                    exact_user_headings: values[2],
+                    exact_prompt_nodes: values[3],
+                    server_error_labels: values[4],
+                    retry_controls: values[5],
+                    details_controls: values[6],
+                    user_rows: values[7],
+                    error_rows: values[8],
+                    shared_parent_pairs: values[9],
+                    adjacent_pairs: values[10],
+                    assistant_headings_in_error_rows: values[11],
+                    duplicate_positions: values[12],
+                },
+            }),
+        })
+    }
+}
 fn hex(value: &str) -> Zeroizing<String> {
     if value.is_empty() {
         return Zeroizing::new("-".into());
@@ -244,6 +345,33 @@ pub(super) fn request(
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn failure_rows_are_closed_advisory_and_only_accepted_for_disclosure() {
+        let observed = "turn scope-heading-ambiguous\nrows 2 0 1 1 1 1 1 1 1 1 1 1 0\n";
+        let receipt = ChatTurnReceipt::parse(observed, "failure-details").unwrap();
+        assert_eq!(receipt.stage, ChatTurnStage::ScopeHeadingAmbiguous);
+        let shape = receipt.row_shape.unwrap();
+        assert_eq!(shape.counts.adjacent_pairs, 1);
+        assert!(!serde_json::to_string(&shape).unwrap().contains("PRIVATE"));
+        assert!(ChatTurnReceipt::parse(observed, "retry").is_none());
+        for invalid in [
+            observed.replace("rows 2", "rows 1025"),
+            observed.replace("rows 2", "rows 02"),
+            observed.replace("rows 2", "rows PRIVATE"),
+            format!("{observed}PRIVATE"),
+            observed.replace("1 1 1 0\n", "1 2 1 0\n"),
+        ] {
+            assert!(ChatTurnReceipt::parse(&invalid, "failure-details").is_none());
+        }
+        assert_eq!(
+            ChatTurnReceipt::parse("turn scope\n", "failure-details")
+                .unwrap()
+                .row_shape,
+            None
+        );
+        assert!(ChatTurnReceipt::parse("turn scope PRIVATE\n", "failure-details").is_none());
+    }
+
     use super::*;
 
     #[test]

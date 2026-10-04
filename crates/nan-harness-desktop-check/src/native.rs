@@ -25,9 +25,9 @@ pub(crate) use image::prepare_ocr_image;
 #[cfg(any(target_os = "macos", test))]
 pub(crate) use mac_chat::ChatPressStage;
 #[cfg(target_os = "macos")]
-pub(crate) use mac_chat_turn::ChatTurnStage;
-#[cfg(target_os = "macos")]
 pub(crate) use mac_chat_turn::{CHAT_TURN_MAX_MILLIS, ChatActionPhase, failure_label};
+#[cfg(target_os = "macos")]
+pub(crate) use mac_chat_turn::{ChatTurnReceipt, ChatTurnStage, FailureRowShape};
 pub(crate) use ocr::Page;
 pub(crate) use process::FailureCategory;
 #[cfg(windows)]
@@ -352,7 +352,7 @@ impl Native {
         mode: &str,
         values: [&str; 3],
         deadline: std::time::Instant,
-    ) -> Result<ChatTurnStage, FailureCategory> {
+    ) -> Result<ChatTurnReceipt, FailureCategory> {
         if !claude_focus_policy()
             || std::env::var("NANH_CLAUDE_MAC_NATIVE_CHAT").as_deref() != Ok("1")
         {
@@ -384,7 +384,7 @@ impl Native {
                 .ok_or(FailureCategory::InvalidInput)?;
         let output =
             process::run_claude_chat_turn_until(&self.executable, input.as_bytes(), deadline)?;
-        ChatTurnStage::parse(&output).ok_or(FailureCategory::Output)
+        ChatTurnReceipt::parse(&output, mode).ok_or(FailureCategory::Output)
     }
 
     #[cfg(target_os = "macos")]

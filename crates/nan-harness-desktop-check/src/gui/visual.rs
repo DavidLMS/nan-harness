@@ -703,7 +703,7 @@ impl Visual {
             Option<FailureCategory>,
             Option<GuardFailure>,
         ),
-    ) -> Result<crate::native::ChatTurnStage, Reason> {
+    ) -> Result<crate::native::ChatTurnReceipt, Reason> {
         use crate::native::ChatActionPhase as Phase;
         observe(Phase::BeforeGuard, None, None);
         self.claude_chat_guard_until(deadline, |transport, rejection| {

@@ -54,6 +54,8 @@ struct Facts {
     #[serde(skip_serializing_if = "Option::is_none")]
     guard_rejection: Option<GuardRejection>,
     provider_observation: Option<ProviderObservation>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    row_shape: Option<crate::native::FailureRowShape>,
     submitted_turns: u8,
     input_verified_turns: u8,
     copied_responses: u8,
@@ -71,6 +73,7 @@ impl Default for Facts {
             transport_failure: None,
             guard_rejection: None,
             provider_observation: None,
+            row_shape: None,
             submitted_turns: 0,
             input_verified_turns: 0,
             copied_responses: 0,
@@ -154,7 +157,7 @@ impl ClaudeNativeChatSession<'_> {
         self.facts.guard_rejection = None;
         let sentinel = Zeroizing::new(nonce()?);
         let facts = &mut self.facts;
-        let stage = self.gui.visual.claude_chat_turn(
+        let receipt = self.gui.visual.claude_chat_turn(
             mode,
             [&self.prompt, marker, &sentinel],
             deadline,
@@ -164,6 +167,7 @@ impl ClaudeNativeChatSession<'_> {
                 facts.guard_rejection = rejection.map(GuardRejection::from);
             },
         )?;
+        let stage = receipt.stage;
         self.facts.stage = stage;
         self.facts.action_phase = Some(ChatActionPhase::PostGuard);
         self.gui
@@ -174,6 +178,9 @@ impl ClaudeNativeChatSession<'_> {
             })?;
         if Instant::now() >= deadline {
             return Err(Reason::Timeout);
+        }
+        if let Some(shape) = receipt.row_shape {
+            self.facts.row_shape = Some(shape);
         }
         self.facts.action_phase = Some(ChatActionPhase::Completed);
         Ok(stage)

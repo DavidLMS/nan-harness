@@ -3030,5 +3030,31 @@ class CodexCommandMenuShapeTests(unittest.TestCase):
                 path.write_text(json.dumps({**rejected, 'commandMenuShape': None}))
                 self.assertIsNone(q.semantic_observations(root, 'chatgpt-desktop')[0]['commandMenuShape'])
 
+class ClaudeFailureRowShapeTests(unittest.TestCase):
+    def test_passive_counts_never_certify_retry_and_reject_private_payloads(self):
+        keys = 'sourceRows streamingRows exactUserHeadings exactPromptNodes serverErrorLabels retryControls detailsControls userRows errorRows sharedParentPairs adjacentPairs assistantHeadingsInErrorRows duplicatePositions'.split()
+        counts = dict(zip(keys, [2, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0]))
+        shape = dict(sourceVersion='2.19675.0', sourceSha256='87e6b710a540352fcd4f9a1f0f6a8f9f9b6377ca676fd99c3e4d8bc87653dceb',
+                     navigationSourceSha256='948270963cdf93cc411d95393157f5c7e2c06f18916d8c4ea1971828fb0c677c', phase='pre-disclosure', counts=counts)
+        value = dict(schemaVersion=1, mechanism='claude-native-chat', diagnosticsOnly=True,
+                     stage='scope-heading-ambiguous', submittedTurns=3, inputVerifiedTurns=3, copiedResponses=2,
+                     retryAttempted=False, clipboardCleared=True, rowShape=shape)
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'rows.json'
+            path.write_text(json.dumps(value))
+            observed = q.semantic_observations(root, 'claude-desktop')[0]
+            self.assertEqual(observed['rowShape'], shape)
+            self.assertFalse(observed['retryAttempted'])
+            for changed in ({**shape, 'label': 'PRIVATE'}, {**shape, 'sourceSha256': '0' * 64},
+                            {**shape, 'counts': {**counts, 'sourceRows': 1025}},
+                            {**shape, 'counts': {**counts, 'sourceRows': True}},
+                            {**shape, 'counts': {**counts, 'adjacentPairs': 2}},
+                            {**shape, 'counts': {**counts, 'userRows': 0}},
+                            {**shape, 'counts': {**counts, 'position': 5}}, None):
+                path.write_text(json.dumps({**value, 'rowShape': changed}))
+                with self.assertRaises(ValueError): q.semantic_observations(root, 'claude-desktop')
+            path.write_text(json.dumps({key: field for key, field in value.items() if key != 'rowShape'}))
+            self.assertNotIn('rowShape', q.semantic_observations(root, 'claude-desktop')[0])
+
 if __name__ == '__main__':
     unittest.main()
