@@ -1026,6 +1026,7 @@ impl NativeClipboardSession<'_> {
             let count = control_count(&retry)?;
             self.facts.retry_control_count = Some(count);
             if count == 1 {
+                self.facts.substage = "retry-visible-wait";
                 retry
                     .wait_visible(deadline.saturating_duration_since(Instant::now()).min(WAIT))
                     .map_err(map_error)?;
@@ -1033,6 +1034,7 @@ impl NativeClipboardSession<'_> {
                     self.retry_ready = true;
                     return Ok(());
                 }
+                self.facts.substage = "retry-element-capture";
                 let mut candidates = retry.elements().map_err(map_error)?;
                 if candidates.len() != 1 {
                     return Err(Reason::SelectorNotMatched);
@@ -1634,6 +1636,7 @@ impl NativeClipboardSession<'_> {
                 if Instant::now() >= deadline {
                     return Err(Reason::Timeout);
                 }
+                self.facts.substage = "retry-action-dispatch";
                 self.facts.retry_action_receipt = Some(self.press_retry(&button)?);
                 return self.gui.native_copy_guard(&mut self.facts, "retry-after");
             }
@@ -1646,6 +1649,7 @@ impl NativeClipboardSession<'_> {
                 }
                 self.gui
                     .native_copy_guard(&mut self.facts, "retry-before")?;
+                self.facts.substage = "retry-action-dispatch";
                 self.facts.retry_action_receipt = Some(self.press_retry(&button)?);
                 return self.gui.native_copy_guard(&mut self.facts, "retry-after");
             }
@@ -1673,6 +1677,7 @@ impl NativeClipboardSession<'_> {
             }
             self.gui
                 .native_copy_guard(&mut self.facts, "retry-before")?;
+            self.facts.substage = "retry-action-dispatch";
             self.facts.retry_action_receipt = Some(self.press_retry(&matches[0])?);
             return self.gui.native_copy_guard(&mut self.facts, "retry-after");
         }
@@ -1687,10 +1692,12 @@ impl NativeClipboardSession<'_> {
         }
         self.gui
             .native_copy_guard(&mut self.facts, "retry-before")?;
+        self.facts.substage = "retry-element-capture";
         let elements = retry.elements().map_err(map_error)?;
         if elements.len() != 1 {
             return Err(Reason::SelectorNotMatched);
         }
+        self.facts.substage = "retry-action-dispatch";
         self.facts.retry_action_receipt = Some(self.press_retry(&elements[0])?);
         self.gui.native_copy_guard(&mut self.facts, "retry-after")
     }
