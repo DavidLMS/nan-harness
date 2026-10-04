@@ -2005,6 +2005,34 @@
         "sha": "0703d0aa97450d6d21346e1c79c887a5bf9062cd0069e8251ec03748a33b6dd0",
         "value": "ChatGPT"
       }
+    },
+    {
+      "file": "project-folder-consent-dialog-19d1ad8a662e.js",
+      "id": "projectSetup.consent.title.one",
+      "platform": "mac",
+      "sha": "24a177c6511964b9e441762c156f374173628f7ed7342b4d55bd41141b2146ed",
+      "text": "Trust this folder?"
+    },
+    {
+      "file": "project-folder-consent-dialog-19d1ad8a662e.js",
+      "id": "projectSetup.consent.title.other",
+      "platform": "mac",
+      "sha": "24a177c6511964b9e441762c156f374173628f7ed7342b4d55bd41141b2146ed",
+      "text": "Trust these folders?"
+    },
+    {
+      "file": "project-folder-consent-dialog-19d1ad8a662e.js",
+      "id": "projectSetup.consent.untrustedTitle.one",
+      "platform": "mac",
+      "sha": "24a177c6511964b9e441762c156f374173628f7ed7342b4d55bd41141b2146ed",
+      "text": "This folder is marked untrusted"
+    },
+    {
+      "file": "project-folder-consent-dialog-19d1ad8a662e.js",
+      "id": "projectSetup.consent.untrustedTitle.other",
+      "platform": "mac",
+      "sha": "24a177c6511964b9e441762c156f374173628f7ed7342b4d55bd41141b2146ed",
+      "text": "These folders are marked untrusted"
     }
   ],
   "sourceVersion": "26.930.41038"

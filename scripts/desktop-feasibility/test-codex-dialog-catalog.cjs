@@ -30,7 +30,7 @@ async function main() {
  const linux=require('./codex-dialog-title-catalog-linux.json');
  assert.equal(linux.sourceVersion,'26.930.41038');
  assert.equal(require('node:crypto').createHash('sha256').update(require('node:fs').readFileSync(require.resolve('./codex-dialog-title-catalog-linux.json'))).digest('hex'),helper.facts('linux').catalogSha256);
- assert.equal(new Set(linux.entries.map(e=>e.id)).size,191);
+ assert.equal(new Set(linux.entries.map(e=>e.id)).size,195);
  const lf=fixture('Global search');
  assert.equal(lf.classify({held:lf.held,entries:Object.values(Object.fromEntries(linux.entries.map(e=>[e.id,e])))}).status,'matched');
  assert.equal(helper.facts('linux').sourceVersion,'26.930.41038');
@@ -39,7 +39,7 @@ async function main() {
  assert.equal(helper.policy('chatgpt-desktop','linux',linuxEnv),true);
  assert.equal(helper.policy('chatgpt-desktop','linux',{...linuxEnv,NANH_CODEX_PROJECT_ARTIFACT_SHA256:'e0174d8d0a5f4141145458c814f3c2d863dd67e942b868785a1f5dac9cba3e16'}),false);
  const mac=require('./codex-dialog-title-catalog-macos.json');
- assert.equal(new Set(mac.entries.map(e=>e.id)).size,191);
+ assert.equal(new Set(mac.entries.map(e=>e.id)).size,195);
  assert.equal(require('node:crypto').createHash('sha256').update(require('node:fs').readFileSync(require.resolve('./codex-dialog-title-catalog-macos.json'))).digest('hex'),helper.facts('darwin').catalogSha256);
  assert.equal(helper.facts('win32').sourceVersion,'26.930.31730');
  for(const [text,id]of [['Welcome to ChatGPT','workspaceOnboarding.dialogTitle'],['What kind of work do you do?','work.onboarding.role.new.question']]) {
@@ -124,7 +124,7 @@ async function main() {
  assert.equal(new Set(catalog.entries.map(e=>e.id)).size,63);
  for(const [text,id]of [['Global search','chatgpt.global_search.modal.title'],['Import from your browser','settings.browserUse.profileImport.title'],['Import unverified extensions?','settings.browserUse.profileImport.extensionsConfirmationTitle']]) {const added=fixture(text);assert.equal(added.classify({held:added.held,entries:added.entries}).sourceTitleIds[0],id);}
  const windowsCatalog=require('./codex-dialog-title-catalog-windows.json');
- assert.equal(new Set(windowsCatalog.entries.map(e=>e.id)).size,196);
+ assert.equal(new Set(windowsCatalog.entries.map(e=>e.id)).size,200);
  assert.ok(catalog.entries.filter(e=>e.platform==='windows').every(original=>windowsCatalog.entries.some(e=>original.id===e.id&&original.text===e.text)));
  d.title.textContent='Skip setup?';reads=0;
  page.evaluate=async(fn,arg)=>{reads++;return vm.runInNewContext('('+fn.toString()+')',d.context)({...arg,held:arg.held.value});};
@@ -181,4 +181,17 @@ for (const platform of ["linux", "macos", "windows"]) {
   f.title.textContent = `Update ${value} now?`;
   assert.equal(f.classify({held: f.held, entries}).status, "unknown");
  }
+}
+
+// Finite ICU folder-count forms never interpolate owned paths or authorize trust.
+for (const platform of ['linux','macos','windows']) {
+ const entries=require(`./codex-dialog-title-catalog-${platform}.json`).entries;
+ for (const [id,text] of [["projectSetup.consent.title.one", "Trust this folder?"], ["projectSetup.consent.title.other", "Trust these folders?"], ["projectSetup.consent.untrustedTitle.one", "This folder is marked untrusted"], ["projectSetup.consent.untrustedTitle.other", "These folders are marked untrusted"]]) {
+  const selected=entries.filter(e=>e.id===id);
+  assert.equal(selected.length,1); assert.equal(selected[0].text,text);
+  const f=fixture(text); const result=f.classify({held:f.held,entries});
+  assert.equal(result.matchCount,1); assert.deepEqual(Array.from(result.sourceTitleIds),[id]);
+ }
+ const wrong=fixture('Trust /private/owned-folder?');
+ assert.equal(wrong.classify({held:wrong.held,entries}).matchCount,0);
 }

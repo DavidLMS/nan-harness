@@ -1856,6 +1856,34 @@
         "sha": "c3c9a86a6d9c3a2a8cecaf0a6a22527c69f89949cb0d8958896bc86131e9c6c9",
         "value": "ChatGPT"
       }
+    },
+    {
+      "file": "project-folder-consent-dialog-57a55c89a67e.js",
+      "id": "projectSetup.consent.title.one",
+      "platform": "linux",
+      "sha": "5ab3b26d5c848e6349aa2ae403c8f4c8286a86310247b589d5627f28f2a7bbe0",
+      "text": "Trust this folder?"
+    },
+    {
+      "file": "project-folder-consent-dialog-57a55c89a67e.js",
+      "id": "projectSetup.consent.title.other",
+      "platform": "linux",
+      "sha": "5ab3b26d5c848e6349aa2ae403c8f4c8286a86310247b589d5627f28f2a7bbe0",
+      "text": "Trust these folders?"
+    },
+    {
+      "file": "project-folder-consent-dialog-57a55c89a67e.js",
+      "id": "projectSetup.consent.untrustedTitle.one",
+      "platform": "linux",
+      "sha": "5ab3b26d5c848e6349aa2ae403c8f4c8286a86310247b589d5627f28f2a7bbe0",
+      "text": "This folder is marked untrusted"
+    },
+    {
+      "file": "project-folder-consent-dialog-57a55c89a67e.js",
+      "id": "projectSetup.consent.untrustedTitle.other",
+      "platform": "linux",
+      "sha": "5ab3b26d5c848e6349aa2ae403c8f4c8286a86310247b589d5627f28f2a7bbe0",
+      "text": "These folders are marked untrusted"
     }
   ],
   "sourceVersion": "26.930.41038"
