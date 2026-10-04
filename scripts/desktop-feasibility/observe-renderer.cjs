@@ -20,8 +20,10 @@ function onboardingTrial(appName, platform, env) {
     && env.GITHUB_ACTIONS === 'true' && env.RUNNER_ENVIRONMENT === 'github-hosted'
     && env.RUNNER_OS === ({win32:'Windows',linux:'Linux',darwin:'macOS'}[platform]) && env.NANH_CODEX_PUBLIC_ONBOARDING === 'engineering';
 }
-function onboardingDeadline(trial, startupDeadline, totalDeadline, now) {
-  return trial ? Math.min(totalDeadline, now + 25000) : startupDeadline;
+function onboardingDeadline(trial, startupDeadline, totalDeadline) {
+  // Trust, binding and onboarding share the original clock; actions never
+  // allocate another 25 seconds or truncate unused trial time.
+  return trial ? totalDeadline : startupDeadline;
 }
 // This passive receipt never relaxes the page-count guard or sends input.
 function correlationFacts() {
@@ -594,7 +596,7 @@ async function run() {
     if (!ownership.ownedEndpoint(documentDeadline)) { facts.endpointOwned = false; facts.errorCategory = 'endpoint-unowned'; save(); return; }
     let focusGuard;
     if(trial&&process.platform==='darwin') {
-      focusGuard=heldMainGuard(initialMain,browser,ownerGuard,deadline,
+      focusGuard=heldMainGuard(initialMain,browser,ownerGuard,totalDeadline,
         require('./codex-onboarding.cjs').sourceRoute,correlationIdentity,
         ms=>new Promise(resolve=>setTimeout(resolve,ms)),false,false,false);
       facts.initialMainActivation={phase:'pre-proof',status:'unmeasured',activationAttempted:false,guardFailure:null};
@@ -622,7 +624,7 @@ async function run() {
       const targetReady = app === 'chatgpt-desktop'
         && await page.evaluate(() => location.protocol === 'app:' && document.readyState === 'complete');
       if (!targetReady) { facts.errorCategory = 'invalid-request'; save(); return; }
-      const correlationDeadline=onboardingDeadline(trial,deadline,totalDeadline,Date.now());
+      const correlationDeadline=onboardingDeadline(trial,deadline,totalDeadline);
       if(trial)facts.initialMainConfirmation=mainConfirmationFacts();
       let folderTrust,trustGuard;
       if(trial&&request.ownedWorkspace!==undefined) {

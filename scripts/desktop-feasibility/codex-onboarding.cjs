@@ -257,7 +257,7 @@ async function run(page, ownerGuard, deadline, rejected, mainGuard, folderTrust)
     roleScopeAbsent:false, taskScopeProved:false, taskClickAttempted:false, taskClickCompleted:false, codingComposerReady:false, roleProofFailure:'unmeasured', sessionProofFailure:'unmeasured'};
   const stop = category => { facts.errorCategory=category; return facts; };
   const sessionFailure = typeof ownerGuard !== 'function' ? 'guard-missing'
-    : !Number.isFinite(deadline) || !Number.isFinite(maxWaitMs) || maxWaitMs > 25000 ? 'deadline-invalid'
+    : !Number.isFinite(deadline) || !Number.isFinite(maxWaitMs) || maxWaitMs > 60000 ? 'deadline-invalid'
     : maxWaitMs < 1 ? 'deadline-expired'
     : !['win32','linux','darwin'].includes(process.platform) ? 'platform'
     : process.env.GITHUB_ACTIONS !== 'true' || process.env.RUNNER_ENVIRONMENT !== 'github-hosted'

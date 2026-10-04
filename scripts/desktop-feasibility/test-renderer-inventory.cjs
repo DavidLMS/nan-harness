@@ -15,10 +15,15 @@ for (const [app, platform, env] of [
   ['chatgpt-desktop', 'win32', {...hosted, RUNNER_ENVIRONMENT: 'self-hosted'}],
   ['chatgpt-desktop', 'win32', {...hosted, NANH_CODEX_PUBLIC_ONBOARDING: 'unknown'}],
 ]) assert.equal(timing.onboardingTrial(app, platform, env), false);
-// An exhausted startup clock cannot consume the public action budget, while
-// the original total observation deadline still limits late attachment.
+// Every setup stage keeps the original total deadline, including early Trust.
+// Repeated calls after actions cannot reset or add to the original allocation.
 assert.equal(timing.onboardingDeadline(true, 35000, 60000, 36000), 60000);
-assert.equal(timing.onboardingDeadline(true, 35000, 60000, 10000), 35000);
+assert.equal(timing.onboardingDeadline(true, 35000, 60000, 10000), 60000);
+for(const now of [0,10000,35000,59000,61000]) {
+  const deadline=timing.onboardingDeadline(true,35000,60000,now);
+  assert.equal(deadline,60000);
+  assert.equal(now<deadline,now<60000);
+}
 assert.equal(timing.onboardingDeadline(true, 35000, 60000, 61000), 60000);
 assert.equal(timing.onboardingDeadline(false, 25000, 25000, 26000), 25000);
 const start = source.indexOf('const counts = await page.evaluate(') + 'const counts = await page.evaluate('.length;
@@ -202,6 +207,21 @@ assert.equal(roleSourceScope({foreignFieldset:true}).mainScope,false);
     assert.equal(await settle(),failure==='none');
     if(failure==='none'){assert(settle.binding().auxiliary);assert.equal(await settle(),true);}
   }
+  // Startup focus acceptance stays capped at35s; its SAME held guard remains
+  // valid for Trust and role proofs until the original60s total, with no rebinding.
+  f=fixture();f.setPages([f.main]);
+  const shared=helper.heldMainGuard(f.held,f.browser,()=>true,60000,()=> 'avatarOverlay',
+    f.identity,async ms=>{clock+=ms;},false,false,false);
+  clock=34000;
+  assert.equal(await helper.focusCapturedMain(f.held,shared,35000,f.identity,undefined,
+    async ms=>{clock+=ms;}),true);
+  clock=40000;assert.equal(await shared(),true);
+  clock=60000;assert.equal(await shared(),false);assert.equal(shared.failure(),'deadline');
+  f=fixture();f.setPages([f.main]);clock=35000;let lateActivations=0;
+  f.main.bringToFront=async()=>{lateActivations++;};
+  const expiredStartup=helper.heldMainGuard(f.held,f.browser,()=>true,60000,()=> 'avatarOverlay',f.identity);
+  assert.equal(await helper.focusCapturedMain(f.held,expiredStartup,35000,f.identity),false);
+  assert.equal(lateActivations,0);
   // Activation diagnostics use the original proof/read/action sequence only.
   for(const scenario of ['focused','deadline','pre-reject','activation-error','focus-lost']) {
     f=fixture();f.setPages([f.main]);let focused=false,activations=0,proofs=0;

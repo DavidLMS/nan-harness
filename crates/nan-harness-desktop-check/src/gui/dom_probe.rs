@@ -848,14 +848,30 @@ impl<'a> RendererSession<'a> {
 }
 
 fn inventory_driver_limit() -> Duration {
-    let public_setup_trial = cfg!(windows)
-        && std::env::var("GITHUB_ACTIONS").as_deref() == Ok("true")
-        && std::env::var("RUNNER_ENVIRONMENT").as_deref() == Ok("github-hosted")
-        && std::env::var("RUNNER_OS").as_deref() == Ok("Windows")
-        && std::env::var("NANH_DESKTOP_RENDERER_APP").as_deref() == Ok("chatgpt-desktop")
-        && std::env::var("NANH_CODEX_PUBLIC_ONBOARDING").as_deref() == Ok("engineering");
-    // Trial: 35s startup + at most 25s public setup, with room for the initial
-    // native ownership query and driver teardown. The worker remains capped.
+    inventory_driver_limit_for(std::env::consts::OS, |key| std::env::var(key).ok())
+}
+
+fn inventory_driver_limit_for(
+    platform: &str,
+    environment: impl Fn(&str) -> Option<String>,
+) -> Duration {
+    let runner = match platform {
+        "windows" => "Windows",
+        "linux" => "Linux",
+        "macos" => "macOS",
+        _ => return Duration::from_secs(35),
+    };
+    let public_setup_trial = [
+        ("GITHUB_ACTIONS", "true"),
+        ("RUNNER_ENVIRONMENT", "github-hosted"),
+        ("RUNNER_OS", runner),
+        ("NANH_DESKTOP_RENDERER_APP", "chatgpt-desktop"),
+        ("NANH_CODEX_PUBLIC_ONBOARDING", "engineering"),
+    ]
+    .into_iter()
+    .all(|(key, expected)| environment(key).as_deref() == Some(expected));
+    // The original trial has a shared 60s renderer clock on all three platforms;
+    // the parent adds bounded initialization/teardown headroom. Ordinary stays 35s.
     Duration::from_secs(if public_setup_trial { 75 } else { 35 })
 }
 
@@ -1070,6 +1086,51 @@ fn run_driver(
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn public_inventory_budget_matches_each_hosted_platform_only() {
+        for (platform, runner) in [
+            ("windows", "Windows"),
+            ("linux", "Linux"),
+            ("macos", "macOS"),
+        ] {
+            let environment = std::collections::HashMap::from([
+                ("GITHUB_ACTIONS", "true"),
+                ("RUNNER_ENVIRONMENT", "github-hosted"),
+                ("RUNNER_OS", runner),
+                ("NANH_DESKTOP_RENDERER_APP", "chatgpt-desktop"),
+                ("NANH_CODEX_PUBLIC_ONBOARDING", "engineering"),
+            ]);
+            let read = |key: &str| environment.get(key).map(|value| (*value).to_owned());
+            assert_eq!(
+                inventory_driver_limit_for(platform, read),
+                Duration::from_secs(75)
+            );
+            assert_eq!(
+                inventory_driver_limit_for("freebsd", read),
+                Duration::from_secs(35)
+            );
+            for (key, value) in [
+                ("RUNNER_OS", "wrong"),
+                ("RUNNER_ENVIRONMENT", "self-hosted"),
+                ("NANH_DESKTOP_RENDERER_APP", "claude-desktop"),
+                ("NANH_CODEX_PUBLIC_ONBOARDING", "unknown"),
+            ] {
+                let mut changed = environment.clone();
+                changed.insert(key, value);
+                assert_eq!(
+                    inventory_driver_limit_for(platform, |name| changed
+                        .get(name)
+                        .map(|value| (*value).to_owned())),
+                    Duration::from_secs(35)
+                );
+            }
+        }
+        assert_eq!(
+            inventory_driver_limit_for("linux", |_| None),
+            Duration::from_secs(35)
+        );
+    }
+
     use super::*;
 
     #[test]
