@@ -223,7 +223,7 @@ async function observeMainAux(held,browser,guard,deadline,auxRoute,
 // Later source-known inert avatar pages never become selectable input targets.
 function heldMainGuard(held, browser, owner, deadline, route,
   identity=correlationIdentity, pause=ms=>new Promise(resolve=>setTimeout(resolve,ms)),requireMainScope=false,allowInitialAppearance=false,requireDocumentFocus=true) {
-  let actionsStarted=false,appearanceRetried=false;
+  let actionsStarted=false,appearanceRetried=false,folderSettleTicket=false,folderSettleGranted=false;
   let auxiliary=null, auxiliaryIdentity=null, failure='unmeasured', failureDetails=null;
   const reject=reason=>{failure=reason;return false;};
   const rejectPageSet=(reason,initial,current)=>{
@@ -283,14 +283,21 @@ function heldMainGuard(held, browser, owner, deadline, route,
   const prove=async()=>{
     if(await measure())return true;
     const changed=failureDetails;
-    if(!allowInitialAppearance||actionsStarted||appearanceRetried||auxiliary||failure!=='page-set'
+    if(!(allowInitialAppearance&&!actionsStarted||folderSettleTicket)||appearanceRetried||auxiliary||failure!=='page-set'
       ||!changed||changed.initialCount!==1||changed.currentCount!==2||!changed.heldPresent
       ||!['before-sample-changed','after-sample-changed'].includes(changed.reason))return false;
     // Discard the incomplete observation. A single fresh measurement must prove
-    // both immutable main and newly appearing source auxiliary twice before input.
-    appearanceRetried=true;
+    // both immutable main and newly appearing source auxiliary twice before subsequent input.
+    appearanceRetried=true;folderSettleTicket=false;
     return measure();
   };
+  // Caller grants this only after the one folder trust action completed. It
+  // authorizes one passive 1-to-2 measurement restart, never another input.
+  prove.allowPassiveFolderSettle=()=>{
+    if(!actionsStarted||folderSettleGranted||auxiliary||appearanceRetried)return false;
+    folderSettleGranted=true;folderSettleTicket=true;return true;
+  };
+  prove.finishPassiveFolderSettle=()=>{folderSettleTicket=false;};
   prove.requireDocumentFocus=()=>{requireDocumentFocus=true;};
   prove.sealInitialActions=()=>{actionsStarted=true;};
   prove.failure=()=>failure;
@@ -312,15 +319,21 @@ async function focusCapturedMain(held,proof,deadline,identity=correlationIdentit
       if(Date.now()>=deadline)return false;
       await held.page.bringToFront();
     }
-    proof.requireDocumentFocus();
-    for(let sample=0;sample<2;sample++) {
-      if(Date.now()>=deadline||!await proof())return false;
+    let focusedSamples=0;
+    while(Date.now()<deadline) {
+      // Focus may arrive asynchronously. Only passive reads repeat, while
+      // owner, source scope, held identities and inert auxiliary remain strict.
+      if(!await proof())return false;
       const fresh=await identity(held.page,deadline);
-      if(Date.now()>=deadline||!same(held,fresh)||!fresh.scope.mainScope
-        ||!fresh.scope.focused||!await proof())return false;
-      if(sample===0)await pause(Math.min(100,Math.max(0,deadline-Date.now())));
+      if(Date.now()>=deadline||!same(held,fresh)||!fresh.scope.mainScope||!await proof())return false;
+      focusedSamples=fresh.scope.focused?focusedSamples+1:0;
+      if(focusedSamples===2) {
+        proof.requireDocumentFocus();
+        return Date.now()<deadline&&await proof()&&Date.now()<deadline;
+      }
+      await pause(Math.min(100,Math.max(0,deadline-Date.now())));
     }
-    return true;
+    return false;
   } catch{return false;}
 }
 function publishCodexBinding(output,owner,connection,guard) {
@@ -564,11 +577,14 @@ async function run() {
           ms=>new Promise(resolve=>setTimeout(resolve,ms)),false,false);
         folderTrust=await require('./codex-folder-trust.cjs').run(page,trustGuard,
           correlationDeadline,folderAuthority,()=>trustGuard.sealInitialActions());
+        if(folderTrust.status==='completed'&&folderTrust.clickAttempted&&folderTrust.clickCompleted)
+          trustGuard.allowPassiveFolderSettle();
       }
       const heldMain=trial?await bindCorrelationMain(initialMain,browser,ownerGuard,correlationDeadline,
         require('./codex-onboarding.cjs').sourceRoute,correlationIdentity,
         ms=>new Promise(resolve=>setTimeout(resolve,ms)),facts.initialMainConfirmation,
         folderTrust?.status==='completed'?trustGuard:null):null;
+      trustGuard?.finishPassiveFolderSettle();
       // Trust consumes initial admission; preserve its original auxiliary binding.
       // Fresh role binding above must still succeed before subsequent input.
       const mainGuard=folderTrust?.clickAttempted?(heldMain?trustGuard:undefined):trial&&heldMain?heldMainGuard(heldMain,browser,ownerGuard,correlationDeadline,
