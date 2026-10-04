@@ -180,6 +180,11 @@ mod tests {
     fn fixture() -> (tempfile::TempDir, PathBuf, tokio::process::Command) {
         let temporary = tempfile::tempdir().unwrap();
         let workspace = temporary.path().canonicalize().unwrap();
+        nan_harness_private_fs::restrict_path(
+            &workspace,
+            nan_harness_private_fs::PrivatePathKind::Directory,
+        )
+        .unwrap();
         for suffix in [
             "",
             "profile",
