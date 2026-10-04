@@ -22,7 +22,7 @@ CodexMainIdentity private_identity(const Binding& value) {
     return {value.id,uint64_t(value.pid),value.seconds,value.micros,value.bounds.origin.x,
         value.bounds.origin.y,value.bounds.size.width,value.bounds.size.height};
 }
-struct Request { bool action=false, verify=false; pid_t caller=0, root=0, launcher=0; uint64_t cutoff=0; std::string executable; Binding held; };
+struct Request { bool action=false, verify=false, observe=false; double css_width=0,css_height=0,css_x=0,css_y=0; pid_t caller=0, root=0, launcher=0; uint64_t cutoff=0; std::string executable,document_url; Binding held; };
 bool alive(const Request& r) {
     timespec now{};
     return getppid()==r.caller && clock_gettime(CLOCK_MONOTONIC,&now)==0
@@ -286,6 +286,152 @@ AXUIElementRef main_window(const Request& r,const Binding& held,const char** bou
     for(auto value:{role,subrole,position,size})if(value)CFRelease(value);
     if(!valid){CFRelease(main);return nullptr;}return window;
 }
+
+// Read-only feasibility: geometry is private transport, never input authority.
+struct WebAreaObservation { unsigned count=0,nodes=0; AXUIElementRef element=nullptr;
+    CGRect bounds{}; bool url_matched=false; const char* reason="measured"; };
+bool visit_webareas(const Request& r,AXUIElementRef node,const Binding& held,
+    unsigned depth,WebAreaObservation& out) {
+    if(!alive(r)||depth>24||++out.nodes>512){out.reason="ax-limit-or-deadline";return false;}
+    pid_t pid=0;CFTypeRef role=nullptr;
+    if(AXUIElementGetPid(node,&pid)!=kAXErrorSuccess||pid!=held.pid
+        ||!attribute(r,node,kAXRoleAttribute,role)){out.reason="ax-query";return false;}
+    const bool web=CFEqual(role,CFSTR("AXWebArea"));CFRelease(role);
+    if(web) {
+        CFTypeRef hidden=nullptr,position=nullptr,size=nullptr;
+        bool visible=attribute(r,node,CFSTR("AXHidden"),hidden)
+            &&CFGetTypeID(hidden)==CFBooleanGetTypeID()&&!CFBooleanGetValue((CFBooleanRef)hidden);
+        if(hidden)CFRelease(hidden);
+        if(!visible){out.reason="ax-visibility-unavailable";return false;}
+        bool measured=attribute(r,node,kAXPositionAttribute,position)&&attribute(r,node,kAXSizeAttribute,size);
+        CGPoint origin{};CGSize dimensions{};
+        measured=measured&&CFGetTypeID(position)==AXValueGetTypeID()&&CFGetTypeID(size)==AXValueGetTypeID()
+            &&AXValueGetValue((AXValueRef)position,kAXValueTypeCGPoint,&origin)
+            &&AXValueGetValue((AXValueRef)size,kAXValueTypeCGSize,&dimensions);
+        if(position)CFRelease(position);if(size)CFRelease(size);
+        CGRect bounds=CGRectMake(origin.x,origin.y,dimensions.width,dimensions.height);
+        if(!measured||!geometry(bounds)||!CGRectContainsRect(held.bounds,bounds)) {
+            out.reason="ax-webarea-geometry";return false;
+        }
+        CFTypeRef url=nullptr;
+        CFStringRef expected=CFStringCreateWithBytes(kCFAllocatorDefault,
+            (const UInt8*)r.document_url.data(),r.document_url.size(),kCFStringEncodingUTF8,false);
+        bool matched=expected&&attribute(r,node,kAXURLAttribute,url)
+            &&((CFGetTypeID(url)==CFURLGetTypeID()&&CFEqual(CFURLGetString((CFURLRef)url),expected))
+                ||(CFGetTypeID(url)==CFStringGetTypeID()&&CFEqual(url,expected)));
+        if(url)CFRelease(url);if(expected)CFRelease(expected);
+        ++out.count;out.url_matched=matched;
+        if(out.count==1){out.element=(AXUIElementRef)CFRetain(node);out.bounds=bounds;}
+        if(out.count>1){out.reason="ax-webarea-ambiguous";return false;}
+    }
+    CFTypeRef children=nullptr;
+    if(AXUIElementSetMessagingTimeout(node,0.1f)!=kAXErrorSuccess){out.reason="ax-query";return false;}
+    const AXError error=AXUIElementCopyAttributeValue(node,kAXChildrenAttribute,&children);
+    if(error==kAXErrorNoValue||error==kAXErrorAttributeUnsupported)return alive(r);
+    if(error!=kAXErrorSuccess||!children||CFGetTypeID(children)!=CFArrayGetTypeID()) {
+        if(children)CFRelease(children);out.reason="ax-query";return false;
+    }
+    auto rows=(CFArrayRef)children;bool valid=CFArrayGetCount(rows)<=512;
+    for(CFIndex i=0;valid&&i<CFArrayGetCount(rows);++i) {
+        auto child=CFArrayGetValueAtIndex(rows,i);
+        valid=CFGetTypeID(child)==AXUIElementGetTypeID()
+            &&visit_webareas(r,(AXUIElementRef)child,held,depth+1,out);
+    }
+    CFRelease(children);if(!valid&&out.reason==std::string("measured"))out.reason="ax-query";
+    return valid&&alive(r);
+}
+bool native_point_clear(const Request& r,const Binding& held,CGPoint point) {
+    CFArrayRef rows=CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly,kCGNullWindowID);
+    if(!rows)return false;const CFIndex count=CFArrayGetCount(rows);bool valid=count<=1024,found=false;
+    for(CFIndex i=0;valid&&i<count;++i) {
+        auto row=(CFDictionaryRef)CFArrayGetValueAtIndex(rows,i);
+        if(uint64_t(number(row,kCGWindowNumber))==held.id){found=true;break;}
+        if(number(row,kCGWindowLayer)==CGWindowLevelForKey(kCGCursorWindowLevelKey))continue;
+        double alpha=0;auto value=CFDictionaryGetValue(row,kCGWindowAlpha);
+        valid=value&&CFGetTypeID(value)==CFNumberGetTypeID()
+            &&CFNumberGetValue((CFNumberRef)value,kCFNumberDoubleType,&alpha)&&std::isfinite(alpha);
+        if(!valid)break;if(alpha<=0)continue;
+        CGRect bounds{};valid=rect(row,bounds)&&!CGRectContainsPoint(bounds,point);
+    }
+    CFRelease(rows);return valid&&found&&alive(r);
+}
+int point_observe(const Request& r,const Binding& held,AXUIElementRef main) {
+    const char* reason="measured";WebAreaObservation first,second;
+    bool measured=visit_webareas(r,main,held,0,first);
+    if(!measured)reason=first.reason;
+    else if(first.count!=1)reason="ax-webarea-missing";
+    else if(!visit_webareas(r,main,held,0,second))reason=second.reason;
+    else if(second.count!=1||!CFEqual(first.element,second.element)
+        ||!CGRectEqualToRect(first.bounds,second.bounds))reason="ax-webarea-changed";
+    bool stable=std::string(reason)=="measured",url_matched=stable&&first.url_matched&&second.url_matched,focus=false,dimensions=false,clear=false,hit_owned=false;
+    if(stable) {
+        auto app=[NSRunningApplication runningApplicationWithProcessIdentifier:held.pid];
+        AXUIElementRef application=AXUIElementCreateApplication(held.pid);CFTypeRef focused=nullptr;
+        focus=app&&app.active&&!app.hidden
+            &&[[[NSWorkspace sharedWorkspace] frontmostApplication] processIdentifier]==held.pid
+            &&application&&attribute(r,application,kAXFocusedWindowAttribute,focused)
+            &&CFGetTypeID(focused)==AXUIElementGetTypeID()&&CFEqual(main,focused);
+        if(focused)CFRelease(focused);if(application)CFRelease(application);
+        dimensions=first.bounds.size.width==r.css_width&&first.bounds.size.height==r.css_height;
+        if(focus&&dimensions) {
+            CGPoint point=CGPointMake(first.bounds.origin.x+r.css_x,first.bounds.origin.y+r.css_y);
+            clear=native_point_clear(r,held,point);
+            AXUIElementRef system=AXUIElementCreateSystemWide(),hit=nullptr;
+            if(system&&AXUIElementSetMessagingTimeout(system,0.1f)==kAXErrorSuccess
+                &&AXUIElementCopyElementAtPosition(system,point.x,point.y,&hit)==kAXErrorSuccess&&hit) {
+                pid_t pid=0;CFTypeRef window=nullptr;
+                hit_owned=AXUIElementGetPid(hit,&pid)==kAXErrorSuccess&&pid==held.pid
+                    &&attribute(r,hit,kAXWindowAttribute,window)
+                    &&CFGetTypeID(window)==AXUIElementGetTypeID()&&CFEqual(window,main);
+                if(window)CFRelease(window);
+            }
+            if(hit)CFRelease(hit);if(system)CFRelease(system);
+        }
+        if(!focus)reason="native-focus-unavailable";
+        else if(!dimensions)reason="viewport-dimensions-mismatch";
+        else if(!clear)reason="native-point-not-clear";
+        else if(!hit_owned)reason="native-hit-window-unproved";
+        else reason=url_matched?"mapping-observed":"renderer-webarea-correlation-unproved";
+    }
+    if(stable) {
+        WebAreaObservation final_area;
+        const bool area_ok=visit_webareas(r,main,held,0,final_area)&&final_area.count==1
+            &&CFEqual(first.element,final_area.element)&&CGRectEqualToRect(first.bounds,final_area.bounds)
+            &&first.url_matched==final_area.url_matched;
+        second.count=final_area.count;
+        if(final_area.element)CFRelease(final_area.element);
+        if(!area_ok) {
+            reason="ax-webarea-changed";stable=false;focus=false;dimensions=false;
+            clear=false;hit_owned=false;url_matched=false;
+        } else {
+            auto app=[NSRunningApplication runningApplicationWithProcessIdentifier:held.pid];
+            AXUIElementRef application=AXUIElementCreateApplication(held.pid);CFTypeRef focused=nullptr;
+            const bool final_focus=app&&app.active&&!app.hidden
+                &&[[[NSWorkspace sharedWorkspace] frontmostApplication] processIdentifier]==held.pid
+                &&application&&attribute(r,application,kAXFocusedWindowAttribute,focused)
+                &&CFGetTypeID(focused)==AXUIElementGetTypeID()&&CFEqual(main,focused);
+            if(focused)CFRelease(focused);if(application)CFRelease(application);
+            if(focus&&!final_focus){focus=false;reason="native-focus-unavailable";}
+            if(clear&&!native_point_clear(r,held,CGPointMake(first.bounds.origin.x+r.css_x,
+                first.bounds.origin.y+r.css_y))){clear=false;reason="native-point-not-clear";}
+        }
+    }
+    // Recheck immutable identity after every read. No replacement/renewal/activation.
+    Binding fresh=held;InventoryFailure failure;
+    const bool inventory_ok=inventory(r,fresh,false,&failure,true);
+    AXUIElementRef current=inventory_ok?main_window(r,held):nullptr;
+    const bool held_stable=current&&CFEqual(main,current)&&alive(r);
+    if(current)CFRelease(current);if(!held_stable)reason="held-identity-or-deadline";
+    std::cout<<std::setprecision(17)<<"point-observation "<<reason<<' '
+        <<first.count<<' '<<second.count<<' '<<stable<<' '<<focus<<' '<<dimensions<<' '
+        <<clear<<' '<<hit_owned<<' '<<held_stable<<' '<<url_matched;
+    if(stable)std::cout<<' '<<first.bounds.origin.x<<' '<<first.bounds.origin.y<<' '
+        <<first.bounds.size.width<<' '<<first.bounds.size.height;
+    std::cout<<'\n';
+    if(first.element)CFRelease(first.element);if(second.element)CFRelease(second.element);
+    return std::cout?0:4;
+}
+
 bool parse(Request& r) {
     std::string line,phase,hex,extra;unsigned long caller=0,root=0,launcher=0,pid=0;
     char buffer[16385]{};
@@ -295,19 +441,32 @@ bool parse(Request& r) {
     if(!(input>>phase>>caller>>root>>launcher>>r.cutoff>>hex)||!r.cutoff
         ||caller<=1||root<=1||launcher<=1||caller>INT_MAX||root>INT_MAX||launcher>INT_MAX
         ||hex.empty()||hex.size()>PATH_MAX*2||hex.size()%2)return false;
-    r.caller=pid_t(caller);r.root=pid_t(root);r.launcher=pid_t(launcher);r.action=phase=="activate";r.verify=phase=="verify";
-    if(phase!="prepare"&&!r.action&&!r.verify)return false;
+    r.caller=pid_t(caller);r.root=pid_t(root);r.launcher=pid_t(launcher);r.action=phase=="activate";r.verify=phase=="verify";r.observe=phase=="point-observe";
+    if(phase!="prepare"&&!r.action&&!r.verify&&!r.observe)return false;
     for(size_t i=0;i<hex.size();i+=2) {
         auto digit=[](char c)->int{return c>='0'&&c<='9'?c-'0':c>='a'&&c<='f'?c-'a'+10:-1;};
         int a=digit(hex[i]),b=digit(hex[i+1]);if(a<0||b<0||!(a*16+b))return false;
         r.executable.push_back(char(a*16+b));
     }
     if(r.executable[0]!='/')return false;
-    if(r.action||r.verify) {
+    if(r.action||r.verify||r.observe) {
         if(!(input>>r.held.id>>pid>>r.held.bounds.origin.x>>r.held.bounds.origin.y
             >>r.held.bounds.size.width>>r.held.bounds.size.height>>r.held.seconds>>r.held.micros)
             ||!r.held.id||pid<=1||pid>INT_MAX||!r.held.seconds||!geometry(r.held.bounds))return false;
         r.held.pid=pid_t(pid);
+    }
+    if(r.observe&&(!(input>>r.css_width>>r.css_height>>r.css_x>>r.css_y)
+        ||!std::isfinite(r.css_width)||!std::isfinite(r.css_height)
+        ||!std::isfinite(r.css_x)||!std::isfinite(r.css_y)
+        ||r.css_width<1||r.css_height<1||r.css_width>16384||r.css_height>16384
+        ||r.css_x<=0||r.css_y<=0||r.css_x>=r.css_width||r.css_y>=r.css_height))return false;
+    if(r.observe) {
+        std::string urlhex;if(!(input>>urlhex)||urlhex.empty()||urlhex.size()>16384||urlhex.size()%2)return false;
+        for(size_t i=0;i<urlhex.size();i+=2) {
+            auto digit=[](char c)->int{return c>='0'&&c<='9'?c-'0':c>='a'&&c<='f'?c-'a'+10:-1;};
+            int a=digit(urlhex[i]),b=digit(urlhex[i+1]);if(a<0||b<0||!(a*16+b))return false;
+            r.document_url.push_back(char(a*16+b));
+        }
     }
     return !(input>>extra)&&alive(r);
 }
@@ -332,7 +491,7 @@ int codex_activate_main() {
         // Verification can observe a pending external stack transition after
         // activation; it never reports success or authorizes input while occluded.
         bool first_occluded=false,second_occluded=false;
-        if(!inventory(request,held,!request.action&&!request.verify,&failure,true,&first_occluded))return activation_rejected("cg-inventory-before",&failure);
+        if(!inventory(request,held,!request.action&&!request.verify&&!request.observe,&failure,true,&first_occluded))return activation_rejected("cg-inventory-before",&failure);
         const auto first_inventory=failure;
         const char* boundary="ax-main-before";
         AXUIElementRef first=main_window(request,held,&boundary);if(!first)return activation_rejected(boundary);
@@ -344,6 +503,7 @@ int codex_activate_main() {
         valid=valid&&second&&CFEqual(first,second)&&alive(request);
         if(second)CFRelease(second);
         if(!valid){CFRelease(first);return activation_rejected(boundary,inventory_valid?nullptr:&failure);}
+        if(request.observe){int result=point_observe(request,held,first);CFRelease(first);return result;}
         if(request.verify) {
             // Both inventories and AX main identities above are complete and
             // stable. Only an external overlap may settle passively; changes,

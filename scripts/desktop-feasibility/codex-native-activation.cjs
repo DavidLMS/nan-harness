@@ -26,11 +26,11 @@ function controller(config,owner,launcher,deadline,run=child.execFileSync,now=Da
   const boundaries=new Set(['request','cg-inventory-before','ax-main-before','cg-inventory-after','ax-main-after','identity','trust']);
   const actionBoundaries=new Set([...boundaries,'app-unavailable','app-unfocused','foreground-unfocused',
     'focused-window-query','focused-window-type','focused-window-identity','app-activate','raise','deadline']);
-  const execute=phase=>{
+  const execute=(phase,extra=[])=>{
     const remaining=deadline-now();
     if(remaining<=0)throw Error('native activation expired');
     const input=[phase,process.pid,owner,launcher,cutoff.toString(),Buffer.from(config.executable).toString('hex'),
-      ...(phase==='prepare'?[]:[held.tokens])].join(' ')+'\n';
+      ...(phase==='prepare'?[]:[held.tokens]),...extra].join(' ')+'\n';
     let output;
     try {
       output=run(config.helper,['--codex-activate-main'],{input,encoding:'utf8',timeout:remaining,
@@ -81,6 +81,16 @@ function controller(config,owner,launcher,deadline,run=child.execFileSync,now=Da
       if(!held||attempted)throw Error('native activation consumed');
       attempted=true;
       if(execute('activate')!=='activated\n')throw Error('native activation uncertain');
+    },
+    // Read-only sample cannot satisfy verify(), consume/replay activation or renew cutoff.
+    pointObserve(css,url) {
+      if(!held||!attempted)throw Error('native observation unavailable');
+      if(!Array.isArray(css)||css.length!==4||!css.every(Number.isFinite)
+        ||css[0]<1||css[1]<1||css[0]>16384||css[1]>16384
+        ||css[2]<=0||css[3]<=0||css[2]>=css[0]||css[3]>=css[1]
+        ||typeof url!=='string'||!url||Buffer.byteLength(url)>8192||url.includes('\0'))
+        throw Error('native observation rejected');
+      return execute('point-observe',[...css,Buffer.from(url).toString('hex')]);
     },
     verify() {
       if(!held||!attempted)return false;

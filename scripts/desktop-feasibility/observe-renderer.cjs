@@ -253,7 +253,7 @@ function heldMainGuard(held, browser, owner, deadline, route,
 }
 // One public page activation; it never substitutes for fresh focus/owner proof.
 async function focusCapturedMain(held,proof,deadline,identity=correlationIdentity,
-  same=sameCorrelationIdentity,pause=ms=>new Promise(resolve=>setTimeout(resolve,ms)),diagnostic=null,nativeActivation=null) {
+  same=sameCorrelationIdentity,pause=ms=>new Promise(resolve=>setTimeout(resolve,ms)),diagnostic=null,nativeActivation=null,observePoint=null) {
   const phase=value=>{if(diagnostic)diagnostic.phase=value;};
   const stop=status=>{if(diagnostic)diagnostic.status=status;return status==='focused';};
   const rejected=()=>stop(Date.now()>=deadline?'deadline':'rejected');
@@ -300,7 +300,7 @@ async function focusCapturedMain(held,proof,deadline,identity=correlationIdentit
       } else await held.page.bringToFront();
     }
     phase('polling');
-    let focusedSamples=0;
+    let focusedSamples=0,pointObserved=false;
     while(Date.now()<deadline) {
       if(!await proved())return rejected();
       const fresh=await identity(held.page,deadline);
@@ -309,6 +309,11 @@ async function focusCapturedMain(held,proof,deadline,identity=correlationIdentit
         if(typeof nativeActivation.pending!=='function'||nativeActivation.pending()!==true)return rejected();
         const pendingStack=typeof nativeActivation.pendingStack==='function'?nativeActivation.pendingStack():null;
         if(diagnostic&&pendingStack)diagnostic.nativePendingStack=pendingStack;
+        if(diagnostic&&observePoint&&!pointObserved) {
+          pointObserved=true;
+          diagnostic.nativePointObservation=await observePoint();
+          if(Date.now()>=deadline||!await proved())return rejected();
+        }
         focusedSamples=0;
         await pause(Math.min(100,Math.max(0,deadline-Date.now())));
         continue;
@@ -548,7 +553,16 @@ async function run() {
         request.nativeActivation,request.ownerPid,connection.launcherPid,deadline);
       facts.initialMainActivation={phase:'pre-proof',status:'unmeasured',activationAttempted:false,guardFailure:null};
       if(!await focusCapturedMain(initialMain,focusGuard,deadline,correlationIdentity,
-        sameCorrelationIdentity,ms=>new Promise(resolve=>setTimeout(resolve,ms)),facts.initialMainActivation,nativeActivation)) {
+        sameCorrelationIdentity,ms=>new Promise(resolve=>setTimeout(resolve,ms)),facts.initialMainActivation,nativeActivation,async()=>{
+          let session;
+          try {
+            if(Date.now()>=deadline||!ownerGuard())throw Error('expired');
+            session=await initialMain.page.context().newCDPSession(initialMain.page);
+            return await require('./codex-point-observation.cjs').observe({session,native:nativeActivation,
+              held:initialMain,deadline,owner:ownerGuard});
+          } catch {return {reason:'observation-unavailable',mappingObserved:false,inputAuthorized:false};}
+          finally {if(session)await session.detach().catch(()=>{});}
+        })) {
         facts.initialMainConfirmation=mainConfirmationFacts();
         await bindCorrelationMain(initialMain,browser,ownerGuard,deadline,
           require('./codex-onboarding.cjs').sourceRoute,correlationIdentity,

@@ -3832,5 +3832,21 @@ class CodexHomeStateTests(unittest.TestCase):
         overflow['status']='overflow'
         self.assertEqual(q.public_onboarding({**setup,'codingHomeStateObservation':overflow},'chatgpt-desktop')['codingHomeStateObservation'],overflow)
 
+class CodexPointObservationTests(unittest.TestCase):
+    def test_measurement_is_closed_and_cannot_authorize_input(self):
+        good=dict(reason='mapping-observed',mappingObserved=True,inputAuthorized=False,
+            firstWebAreaCount=1,secondWebAreaCount=1,webAreaStable=True,nativeFocused=True,
+            dimensionsMatched=True,nativePointClear=True,nativeHitWindowMatched=True,
+            heldIdentityStable=True,webAreaUrlMatched=True)
+        self.assertEqual(q.codex_point_observation(good),good)
+        blocked=dict(reason='observation-unavailable',mappingObserved=False,inputAuthorized=False)
+        self.assertEqual(q.codex_point_observation(blocked),blocked)
+        for changes in ({'reason':[]},{'reason':'PRIVATE'},{'inputAuthorized':True},
+                {'firstWebAreaCount':True},{'firstWebAreaCount':2},{'heldIdentityStable':False},
+                {'webAreaUrlMatched':False},{'nativePointClear':False},{'bounds':'PRIVATE'},
+                {'url':'PRIVATE'},{'mappingObserved':False}):
+            with self.assertRaises(ValueError):q.codex_point_observation({**good,**changes})
+        with self.assertRaises(ValueError):q.codex_point_observation({**blocked,'reason':'mapping-observed','mappingObserved':True})
+
 if __name__ == '__main__':
     unittest.main()

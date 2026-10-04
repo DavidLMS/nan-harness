@@ -29,5 +29,17 @@ const api=vm.runInNewContext(source.slice(begin,end)+';focusCapturedMain',{Date,
   assert.equal(result,scenario==='settled',scenario);assert.equal(activations,1,scenario);
   if(['query-failed','rejected','changed'].includes(scenario))assert.equal(verifications,1,scenario);
  }
+ {
+  let now=0,observations=0,activations=0;
+  const clockApi=vm.runInNewContext(source.slice(begin,end)+';focusCapturedMain',{Date:{now:()=>now},setTimeout});
+  const held={page:{},key:'held'},proof=async()=>true;
+  const identity=async()=>({key:'held',scope:{mainScope:true,focused:activations===1}});
+  const native={prepare(){},activate(){activations++;},verify:()=>false,pending:()=>true};
+  const diagnostic={};
+  const result=await clockApi(held,proof,500,identity,(a,b)=>a.key===b.key,async ms=>{now+=ms;},diagnostic,native,
+    async()=>{observations++;return {reason:'mapping-observed',mappingObserved:true,inputAuthorized:false};});
+  assert.equal(result,false);assert.equal(activations,1);assert.equal(observations,1);
+  assert.equal(diagnostic.status,'deadline');assert.equal(diagnostic.nativePointObservation.inputAuthorized,false);
+ }
  console.log('held page focus fixtures PASS');
 })().catch(e=>{console.error(e);process.exitCode=1});

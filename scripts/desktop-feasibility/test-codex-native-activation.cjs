@@ -141,3 +141,28 @@ for(const [line,accepted] of [
  } else {assert.throws(()=>native.verify());assert.equal(native.pendingStack(),null);}
  assert.equal(calls.filter(v=>v==='activate').length,1);
 }
+
+{
+ const calls=[];let pointCutoff;
+ const native=controller(config,20,25,2000,(_h,_a,options)=>{
+  const tokens=options.input.trimEnd().split(' '),phase=tokens[0];calls.push(phase);
+  if(phase==='prepare')return '42 100 10 20 600 400 500 0 1000000000\n';
+  if(phase==='activate')return 'activated\n';
+  if(phase==='point-observe') {
+   pointCutoff=tokens[4];assert(BigInt(pointCutoff)<=1998000000n);
+   assert.deepEqual(tokens.slice(-5),['600','400','300','200',Buffer.from('app://-/index.html').toString('hex')]);
+   return 'point-observation renderer-webarea-correlation-unproved 1 1 1 1 1 1 1 1 0 10 20 600 400\n';
+  }
+  assert.equal(tokens[4],pointCutoff);return 'pending-external-stack\n';
+ },()=>1000);
+ assert.throws(()=>native.pointObserve([600,400,300,200],'app://-/index.html'));
+ native.prepare();assert.throws(()=>native.pointObserve([600,400,300,200],'app://-/index.html'));
+ native.activate();native.pointObserve([600,400,300,200],'app://-/index.html');
+ assert.equal(native.verify(),false);assert.equal(native.pending(),true);
+ for(const [css,url] of [[[600,400,NaN,200],'app://-/index.html'],[[600,400,600,200],'app://-/index.html'],
+   [[600,400,300,200],'PRIVATE\0URL'],[[600,400,300,200],'x'.repeat(8193)]])
+   assert.throws(()=>native.pointObserve(css,url));
+ assert.throws(()=>native.activate());assert.equal(calls.filter(v=>v==='activate').length,1);
+ assert.equal(calls.filter(v=>v==='point-observe').length,1);
+}
+console.log('Read-only point phase preserves cutoff, failed full-stack verification and consumed activation');

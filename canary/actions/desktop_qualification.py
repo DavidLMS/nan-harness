@@ -84,6 +84,35 @@ def task_scope_observation(value):
     return value
 
 
+def codex_point_observation(value):
+    reasons={'measured','ax-limit-or-deadline','ax-query','ax-visibility-unavailable',
+        'ax-webarea-geometry','ax-webarea-ambiguous','ax-webarea-missing','ax-webarea-changed',
+        'native-focus-unavailable','viewport-dimensions-mismatch','native-point-not-clear',
+        'native-hit-window-unproved','renderer-webarea-correlation-unproved','mapping-observed',
+        'held-identity-or-deadline','cdp-identity-changed','cdp-child-frame-present',
+        'css-viewport-unavailable','css-viewport-invalid','css-viewport-transform-unproved',
+        'css-viewport-changed','cdp-held-identity-invalid','deadline-or-owner','deadline','observation-unavailable'}
+    base={'reason','mappingObserved','inputAuthorized'}
+    counts={'firstWebAreaCount','secondWebAreaCount'}
+    flags={'webAreaStable','nativeFocused','dimensionsMatched','nativePointClear',
+        'nativeHitWindowMatched','heldIdentityStable','webAreaUrlMatched'}
+    if (type(value) is not dict or set(value) not in (base,base|counts|flags)
+            or type(value.get('reason')) is not str or value['reason'] not in reasons
+            or type(value.get('mappingObserved')) is not bool or value.get('inputAuthorized') is not False
+            or value['mappingObserved']!=(value['reason']=='mapping-observed')):
+        raise ValueError('invalid Codex point observation')
+    if set(value)==base:
+        if value['mappingObserved']:
+            raise ValueError('incomplete Codex point observation')
+    elif (any(type(value[key]) is not bool for key in flags)
+            or any(type(value[key]) is not int or not 0<=value[key]<=2 for key in counts)
+            or value['webAreaStable'] and any(value[key]!=1 for key in counts)
+            or not value['webAreaStable'] and any(value[key] for key in flags-{'heldIdentityStable'})
+            or value['mappingObserved'] and not all(value[key] for key in flags)):
+        raise ValueError('inconsistent Codex point observation')
+    return value
+
+
 def public_onboarding(setup, app):
     shape = set(setup) - {'folderTrust', 'rejectedPageInventory', 'taskScopeProved', 'taskClickAttempted', 'taskClickCompleted', 'codingComposerReady', 'taskScopeObservation', 'taskControlKind', 'codingReadinessObservation', 'codingNavigationObservation', 'codingHomeObservation', 'codingEditableObservation', 'codingHomeStateObservation', 'taskSkipConfirmationAttempted', 'taskSkipConfirmationCompleted', 'taskSkipConfirmationProof', 'mainGuardFailure', 'pageSetFailure', 'foreignOverlayImportSetup', 'foreignOverlaySourceCounts', 'foreignOverlayActionability'} if type(setup) is dict else set()
     booleans = {'conversationalScope', 'engineeringControl', 'roleClickAttempted',
@@ -1989,7 +2018,7 @@ def semantic_observations(directory, app):
             if 'initialMainActivation' in value:
                 activation = value['initialMainActivation']
                 if (app != 'chatgpt-desktop' or type(activation) is not dict
-                        or set(activation) - {'nativeBoundary','nativeInventoryFailure','nativeActivationFailure','nativePendingStack'} != {'phase', 'status', 'activationAttempted', 'guardFailure'}
+                        or set(activation) - {'nativeBoundary','nativeInventoryFailure','nativeActivationFailure','nativePendingStack','nativePointObservation'} != {'phase', 'status', 'activationAttempted', 'guardFailure'}
                         or type(activation['phase']) is not str or activation['phase'] not in {
                             'pre-proof', 'pre-identity', 'activation', 'polling', 'final-proof'}
                         or type(activation['status']) is not str or activation['status'] not in {
@@ -2004,6 +2033,11 @@ def semantic_observations(directory, app):
                         or activation['status'] == 'focused' and (
                             activation['phase'] != 'final-proof' or activation['guardFailure'] is not None)):
                     raise ValueError('invalid Codex initial main activation')
+                if 'nativePointObservation' in activation:
+                    if (not activation['activationAttempted']
+                            or activation['phase'] not in {'polling','final-proof'}):
+                        raise ValueError('invalid Codex passive point phase')
+                    codex_point_observation(activation['nativePointObservation'])
                 if 'nativeBoundary' in activation:
                     boundary = activation['nativeBoundary']
                     if (type(boundary) is not str or boundary not in {
