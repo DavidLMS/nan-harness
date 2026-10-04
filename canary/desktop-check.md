@@ -18,22 +18,25 @@ Closed startup facts remain separate from the envelope; neither contains raw
 application output.
 
 The runner, report validation and lifecycle contracts have local automated
-tests. Five cells have passed three complete deterministic native probes:
+tests. Six cells have passed three complete deterministic native probes:
 Zed 1.22.0 on macOS ARM64 in [run 36976970895](https://github.com/DavidLMS/nan-harness/actions/runs/36976970895),
 Zed 1.22.0 on Windows x64 in [run 36996850316](https://github.com/DavidLMS/nan-harness/actions/runs/36996850316),
 and Hermes 0.17.6 on Linux x64 and macOS ARM64 in
 [run 36978761448](https://github.com/DavidLMS/nan-harness/actions/runs/36978761448),
 plus Hermes 0.17.6 on Windows x64 in
-[run 37031874268](https://github.com/DavidLMS/nan-harness/actions/runs/37031874268).
+[run 37031874268](https://github.com/DavidLMS/nan-harness/actions/runs/37031874268),
+and Claude 2.19675.0 on macOS ARM64 in
+[run 37188000425](https://github.com/DavidLMS/nan-harness/actions/runs/37188000425)
+(commit `acb62475ff0f630700a20511fff98270d9e97129`).
 All verify response, real file-tool use, controlled provider failure, UI Retry
 recovery and application, global and clipboard cleanup without OCR. Hermes
 observes Chromium 144.0.7559.236; Electron's separate version and Zed's runtime
-version remain unobserved. Exact commits and artifact hashes are recorded in
-each closed result. Five of the fifteen cells with official native distribution are qualified.
+version remain unobserved. Claude's bundled runtime version is also unobserved. Exact commits and artifact hashes are recorded in
+each closed result. Six of the fifteen cells with official native distribution are qualified.
 Codex and Claude also distribute official Linux beta packages; their Linux cells
 remain unqualified, rather than unsupported. Pen is deferred from the active
 workflow at the user's direction. The active scope contains twelve cells for
-Zed, Hermes, Codex and Claude, with five qualified and seven open. The full
+Zed, Hermes, Codex and Claude, with six qualified and six open. The full
 fifteen-cell inventory remains available, and scoped aggregation explicitly
 records Pen as excluded rather than accepted. No test account is authorized.
 Personal-machine isolation and live-provider behavior still require separate
@@ -121,7 +124,7 @@ The manual `desktop-check-qualification.yml` workflow evaluates the initial
 Linux x64, macOS ARM64 and Windows x64 matrix. A pending backend remains an
 explicit unqualified cell and prevents aggregate acceptance. Current qualified semantic
 adapters cover Zed on macOS ARM64 and Windows x64, and Hermes on Linux x64 and
-macOS ARM64 and Windows x64; additional application and platform adapters
+macOS ARM64 and Windows x64, plus Claude on macOS ARM64; additional application and platform adapters
 require their own native evidence.
 
 Until the qualification workflow is present on the default branch, use the
@@ -135,7 +138,7 @@ the full acceptance gate. Implemented adapters are accepted only when their
 full native result meets the gate; implementation and feasibility alone do not
 qualify a cell.
 
-Five of twelve active cells are qualified, leaving seven open; the three Pen
+Six of twelve active cells are qualified, leaving six open; the three Pen
 cells are deferred. All fifteen inventory cells have official distributions. The following
 observations describe completed runs, rather than additional qualification:
 
@@ -143,17 +146,19 @@ observations describe completed runs, rather than additional qualification:
 | --- | --- | --- | --- |
 | Zed | Response and file-tool steps pass; pointer and accessibility Retry acknowledgements do not produce provider recovery. | Three complete probes pass the expanded retry policy. | Three complete probes pass with direct native clipboard transport and all cleanup checks. |
 | Hermes | Three complete probes pass with renderer process ownership. | Three complete probes pass with private native userData and bounded cold-start waits. | Three complete probes pass after ordinary onboarding dismissal and fresh catalog readiness, including explicit UI Retry and cleanup. |
-| ChatGPT / Codex | Three guarded clicks accept only the private test folder; the subsequent page/auxiliary transition still blocks conversation entry. | Original page and role source are identified; native focus activation/readiness remains unstable before onboarding. | The folder-consent dialog is source-identified, but its guarded Trust proof blocks before any click. Main/auxiliary ownership and inertness succeed in some sessions. |
-| Claude | A source editor and visible ancestor chain are proven; a native conversation controller remains incomplete. | Two sessions verify input, response and real file-tool use; request-specific failure authority blocks before the third Send. | The CLI cannot atomically persist normal configuration because of a sharing violation. Cross-process writes with retained profile-directory handles pass before vendor installation. |
+| ChatGPT / Codex | Folder trust, role selection and Continue pass in two sessions; Skip opens a modal and coding readiness remains absent. | Two sessions complete folder trust, role selection and Continue; one stops at an external window overlap after activation. Optional task completion remains unqualified. | Two sessions stop at the folder trust guard; another completes trust, role selection and Continue but lacks Get Started. |
+| Claude | The owned editor and native window pass. Embedded accessible text resolves to a single LF and still blocks input until its meaning is proven. | Three complete native probes pass input, response, file-tool, controlled failure recovery and cleanup. | Normal configuration persistence still fails with a sharing violation. The production environment path resolver and configuration lifecycle pass the preinstallation filesystem fixture. |
 | Pen | Software GLES removes GPU startup failure; three fresh sessions show sign-in and no editor. No official account-free route found for the frozen release. | Two probes expose composer/Send; another exposes sign-in. Conversation adapter remains unimplemented. | Owned renderer loads sign-in and a dialog; conversation adapter remains unimplemented. |
 
-Current Codex evidence is [37173071111](https://github.com/DavidLMS/nan-harness/actions/runs/37173071111)
-and [37173859066](https://github.com/DavidLMS/nan-harness/actions/runs/37173859066).
-Current Claude evidence is Linux [37170788593](https://github.com/DavidLMS/nan-harness/actions/runs/37170788593),
-macOS [37173597014](https://github.com/DavidLMS/nan-harness/actions/runs/37173597014),
-and Windows [37173833091](https://github.com/DavidLMS/nan-harness/actions/runs/37173833091).
+Current Codex evidence is Linux [37187034192](https://github.com/DavidLMS/nan-harness/actions/runs/37187034192),
+macOS [37187721869](https://github.com/DavidLMS/nan-harness/actions/runs/37187721869),
+and Windows [37187035914](https://github.com/DavidLMS/nan-harness/actions/runs/37187035914).
+Current Claude evidence is Linux [37187614047](https://github.com/DavidLMS/nan-harness/actions/runs/37187614047),
+macOS [37188000425](https://github.com/DavidLMS/nan-harness/actions/runs/37188000425),
+and Windows [37188073720](https://github.com/DavidLMS/nan-harness/actions/runs/37188073720).
 Both cleanup scopes pass and invalid closed diagnostic events are zero in these runs.
-None adds a qualified cell.
+Only the macOS Claude result adds a qualified cell; a passing exact-commit
+production matrix and the final repository gate remain required.
 
 The completed evidence is available in runs
 [36975359718](https://github.com/DavidLMS/nan-harness/actions/runs/36975359718)
