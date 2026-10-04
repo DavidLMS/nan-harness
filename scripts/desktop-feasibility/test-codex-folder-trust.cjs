@@ -27,12 +27,13 @@ fixture({path:'/private/OTHER'});assert.equal(sample({workspace:'/private/owned/
 fixture({disabled:true});assert.equal(sample({workspace:'/private/owned/workspace',held:null}).rejectionStage,'controls');
 fixture();const proved=sample({workspace:'/private/owned/workspace',held:null});assert.equal(proved.status,'proved');
 fixture();assert.equal(sample({workspace:'/private/owned/workspace',held:proved}).rejectionStage,'identity');
-async function scenario({changed=false,guardLost=false,uncertain=false,expired=false}={}) {
+async function scenario({changed=false,guardLost=false,uncertain=false,expired=false,guardFailure=null}={}) {
  fixture();let clicks=0,proofs=0,disposed=0;
  const handle=value=>({evaluate:async fn=>fn(value),evaluateHandle:async fn=>handle(fn(value)),dispose:async()=>disposed++,asElement:()=>({click:async()=>{clicks++;if(uncertain)throw Error('private');}})});
  const page={evaluateHandle:async(fn,arg)=>handle(fn(arg)),evaluate:async(fn,arg)=>{
   if(changed)fixture();return fn({...arg,held:arg.held?await arg.held.evaluate(x=>x):null});}};
  const guard=async()=>{proofs++;return !guardLost||proofs<3;};
+ guard.failure=()=>guardFailure;
  const result=await run(page,guard,expired?Date.now()-1:Date.now()+2000,
   {workspace:'/private/owned/workspace',verify:async()=>true});
  return {result,clicks,disposed};
@@ -62,6 +63,10 @@ f.change();assert.equal(a.verify(),false);a.close();
 (async()=>{
  let r=await scenario();assert.equal(r.result.status,'completed');assert.equal(r.clicks,1);
  for(const [o,stage] of [[{changed:true},'identity'],[{guardLost:true},'guard'],[{expired:true},'deadline']]){r=await scenario(o);assert.equal(r.clicks,0);assert.equal(r.result.rejectionStage,stage);}
+ for(const failure of ['deadline','native-ownership','page-set','main-focus','query-failed','PRIVATE']) {
+  r=await scenario({guardLost:true,guardFailure:failure});assert.equal(r.clicks,0);
+  assert.equal(r.result.guardFailure,failure==='PRIVATE'?undefined:failure);
+ }
  r=await scenario({uncertain:true});assert.equal(r.clicks,1);assert.equal(r.result.status,'action-uncertain');assert.equal(r.result.rejectionStage,'query');
  assert.deepEqual(Object.keys(r.result).sort(),['clickAttempted','clickCompleted','rejectionStage','status']);
  console.log('folder trust source/identity/action fixtures PASS');

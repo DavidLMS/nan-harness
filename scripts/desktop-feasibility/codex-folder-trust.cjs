@@ -98,7 +98,13 @@ async function run(page,guard,deadline,authority,seal=()=>{}) {
   const owned=async()=>{
     if(Date.now()>=deadline)return reject('deadline');
     if(await authority.verify()!==true)return reject('authority');
-    if(await guard()!==true)return reject('guard');
+    if(await guard()!==true) {
+      const failure=typeof guard.failure==='function'?guard.failure():null;
+      if(['deadline','native-ownership','page-set','main-identity','main-focus','main-scope',
+        'auxiliary-route','auxiliary-identity','auxiliary-focus','auxiliary-controls','query-failed','unmeasured'].includes(failure))
+        receipt.guardFailure=failure;
+      return reject('guard');
+    }
     if(Date.now()>=deadline)return reject('deadline');
     if(await authority.verify()!==true)return reject('authority');
     return Date.now()<deadline||reject('deadline');

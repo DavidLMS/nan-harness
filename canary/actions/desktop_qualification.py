@@ -130,7 +130,7 @@ def public_onboarding(setup, app):
         task_scope_observation(setup['taskScopeObservation'])
     if 'folderTrust' in setup:
         trust = setup['folderTrust']
-        if (type(trust) is not dict or set(trust) - {'rejectionStage'} != {'status', 'clickAttempted', 'clickCompleted'}
+        if (type(trust) is not dict or set(trust) - {'rejectionStage','guardFailure'} != {'status', 'clickAttempted', 'clickCompleted'}
                 or type(trust['status']) is not str
                 or trust['status'] not in {'absent', 'blocked', 'completed', 'action-uncertain'}
                 or type(trust['clickAttempted']) is not bool or type(trust['clickCompleted']) is not bool
@@ -146,6 +146,12 @@ def public_onboarding(setup, app):
                     'controls', 'hit', 'identity', 'query'}
                     or trust['status'] not in {'blocked', 'action-uncertain'}):
                 raise ValueError('invalid folder trust rejection diagnostic')
+        if 'guardFailure' in trust:
+            failure = trust['guardFailure']
+            if (trust.get('rejectionStage') != 'guard' or type(failure) is not str or failure not in {
+                    'deadline','native-ownership','page-set','main-identity','main-focus','main-scope',
+                    'auxiliary-route','auxiliary-identity','auxiliary-focus','auxiliary-controls','query-failed','unmeasured'}):
+                raise ValueError('invalid folder trust guard failure')
     if 'mainGuardFailure' in setup:
         failure = setup['mainGuardFailure']
         if (type(failure) is not str or failure not in {

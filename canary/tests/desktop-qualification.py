@@ -3430,6 +3430,15 @@ class CodexFolderTrustTests(unittest.TestCase):
         for stage in ('authority','guard','deadline','dialog','form','title','path','controls','hit','identity','query'):
             receipt=dict(status='blocked',clickAttempted=False,clickCompleted=False,rejectionStage=stage)
             self.assertEqual(q.public_onboarding({**setup,'folderTrust':receipt},'chatgpt-desktop'),{**setup,'folderTrust':receipt})
+        receipt = dict(status='blocked',clickAttempted=False,clickCompleted=False,rejectionStage='guard')
+        for failure in ('deadline','native-ownership','page-set','main-identity','main-focus','main-scope',
+                        'auxiliary-route','auxiliary-identity','auxiliary-focus','auxiliary-controls','query-failed','unmeasured'):
+            measured = {**setup,'folderTrust':{**receipt,'guardFailure':failure}}
+            self.assertEqual(q.public_onboarding(measured,'chatgpt-desktop'), measured)
+        for changed in ({**receipt,'guardFailure':'PRIVATE'}, {**receipt,'guardFailure':True},
+                        {**receipt,'guardFailure':'main-focus','rejectionStage':'path'},
+                        {**receipt,'guardFailure':'main-focus','window':'PRIVATE'}):
+            with self.assertRaises(ValueError):q.public_onboarding({**setup,'folderTrust':changed},'chatgpt-desktop')
         for stage in ('PRIVATE', [], {}, None):
             receipt=dict(status='blocked',clickAttempted=False,clickCompleted=False,rejectionStage=stage)
             with self.assertRaises(ValueError):q.public_onboarding({**setup,'folderTrust':receipt},'chatgpt-desktop')
