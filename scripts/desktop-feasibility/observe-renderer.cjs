@@ -32,6 +32,16 @@ function onboardingDeadline(trial, startupDeadline, totalDeadline) {
 function onboardingBudget(trial, platform) {
   return trial ? platform==='win32'?120000:60000 : 25000;
 }
+function inventoryDeadlines(trial,platform,request,started) {
+  const ownTotal=started+onboardingBudget(trial,platform);
+  const provided=request.inventoryDeadlineUnixMs;
+  const preparedWindows=trial&&platform==='win32'&&request.codexProfileIsolation==='prepared-windows';
+  if(preparedWindows&&provided===undefined)throw new Error('inventory-cutoff-required');
+  if(provided!==undefined&&(!preparedWindows||!Number.isSafeInteger(provided)
+      ||provided<=started||provided>ownTotal))throw new Error('inventory-cutoff-invalid');
+  const total=provided===undefined?ownTotal:Math.min(ownTotal,provided);
+  return {total,startup:Math.min(started+(trial?35000:25000),total)};
+}
 // This passive receipt never relaxes the page-count guard or sends input.
 function correlationFacts() {
   return {schemaVersion:1,mechanism:'codex-main-aux-correlation',diagnosticsOnly:true,
@@ -153,9 +163,10 @@ function mainConfirmationFacts() {
   return {inputChannel:'native-focused',status:'unmeasured',identityUnchanged:null,mainScopeUnique:null,documentFocused:null,counts:null};
 }
 async function bindCorrelationMain(held,browser,guard,deadline,route,
-  identity=correlationIdentity,pause=ms=>new Promise(resolve=>setTimeout(resolve,ms)),diagnostic=null,settleGuard=null,requireDocumentFocus=true) {
+  identity=correlationIdentity,pause=ms=>new Promise(resolve=>setTimeout(resolve,ms)),diagnostic=null,settleGuard=null,requireDocumentFocus=true,progress=()=>{}) {
   if(diagnostic)diagnostic.inputChannel=requireDocumentFocus?'native-focused':'cdp-dom';
-  const stop=status=>{if(diagnostic)diagnostic.status=status;return null;};
+  const publish=()=>{try {progress();}catch {}};
+  const stop=status=>{if(diagnostic)diagnostic.status=status;publish();return null;};
   try {
     if(!held)return stop('initial-missing');
     if(Date.now()>=deadline)return stop('deadline');
@@ -164,6 +175,13 @@ async function bindCorrelationMain(held,browser,guard,deadline,route,
     do {
       if(settleGuard&&(!await settleGuard()||Date.now()>=deadline))return stop('guard-rejected');
       fresh=await identity(held.page,deadline);
+      if(diagnostic) {
+        diagnostic.identityUnchanged=sameCorrelationIdentity(held,fresh);
+        diagnostic.mainScopeUnique=fresh.scope.mainScope;
+        diagnostic.documentFocused=fresh.scope.focused;
+        diagnostic.counts=fresh.scope.counts;
+        publish();
+      }
       if(Date.now()>=deadline)return stop('deadline');
       if(!guard())return stop('ownership-lost');
       if(settleGuard&&!sameCorrelationIdentity(held,fresh))return stop('identity-changed');
@@ -191,6 +209,7 @@ async function bindCorrelationMain(held,browser,guard,deadline,route,
       true,!requireDocumentFocus,requireDocumentFocus,!requireDocumentFocus);
     if(!await proof())return stop(Date.now()>=deadline?'deadline':'guard-rejected');
     if(diagnostic)diagnostic.status='confirmed';
+    publish();
     return fresh;
   } catch{return stop(Date.now()>=deadline?'deadline':'query-failed');}
 }
@@ -510,8 +529,10 @@ async function run() {
   const directCDP=trial&&require('./codex-dom.cjs').directCDPPolicy()
     &&(process.platform==='win32'?request.codexProfileIsolation==='prepared-windows':request.codexProfileLoan!==undefined);
   const started = Date.now();
-  const deadline = started + (trial ? 35000 : 25000);
-  const totalDeadline = started + onboardingBudget(trial,process.platform);
+  let clocks;
+  try {clocks=inventoryDeadlines(trial,process.platform,request,started);}
+  catch {facts.errorCategory='invalid-request';save();return;}
+  const deadline=clocks.startup,totalDeadline=clocks.total;
   checkpoint('endpoint');
   const rootProof = require('./endpoint-ownership.cjs').proof(String(request.ownerPid), String(connection.port));
   facts.launcherOwned = rootProof.descendant(connection.launcherPid, deadline);
@@ -650,7 +671,7 @@ async function run() {
       const heldMain=trial?await bindCorrelationMain(initialMain,browser,onboardingOwnerGuard,correlationDeadline,
         require('./codex-onboarding.cjs').sourceRoute,correlationIdentity,
         ms=>new Promise(resolve=>setTimeout(resolve,ms)),facts.initialMainConfirmation,
-        folderTrust?.status==='completed'?trustGuard:null,!directCDP):null;
+        folderTrust?.status==='completed'?trustGuard:null,!directCDP,()=>save()):null;
       trustGuard?.finishPassiveFolderSettle();
       // Trust consumes initial admission; preserve its original auxiliary binding.
       // Fresh role binding above must still succeed before subsequent input.

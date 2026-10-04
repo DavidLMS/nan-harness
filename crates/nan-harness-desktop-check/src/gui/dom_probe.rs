@@ -766,6 +766,11 @@ impl<'a> RendererSession<'a> {
                 return Err(Reason::IsolationUnavailable);
             }
             request["codexProfileIsolation"] = serde_json::json!("prepared-windows");
+            request["inventoryDeadlineUnixMs"] = serde_json::json!(inventory_deadline_unix_ms(
+                self.readiness_deadline,
+                Instant::now(),
+                std::time::SystemTime::now(),
+            )?);
         }
         #[cfg(target_os = "macos")]
         if let (Some(executable), Some(native)) = (executable, native.as_ref()) {
@@ -1115,6 +1120,26 @@ impl Gui {
 
 // Profile preparation and ready observation retain one original watch;
 // the outer worker also governs all subsequent turns and cleanup.
+#[cfg(any(windows, test))]
+fn inventory_deadline_unix_ms(
+    deadline: Instant,
+    now: Instant,
+    wall_clock: std::time::SystemTime,
+) -> Result<u64, Reason> {
+    // Node startup consumes this budget too. Preserve five seconds for its
+    // closed receipt and exit before the parent's original custody cutoff.
+    let remaining = deadline
+        .saturating_duration_since(now)
+        .checked_sub(Duration::from_secs(5))
+        .filter(|remaining| !remaining.is_zero())
+        .ok_or(Reason::Timeout)?;
+    let cutoff = wall_clock
+        .checked_add(remaining)
+        .and_then(|cutoff| cutoff.duration_since(std::time::UNIX_EPOCH).ok())
+        .ok_or(Reason::IsolationUnavailable)?;
+    u64::try_from(cutoff.as_millis()).map_err(|_| Reason::IsolationUnavailable)
+}
+
 fn qualification_timing(windows_ready: bool, deadline: Instant) -> Result<(u32, Duration), Reason> {
     if !windows_ready {
         return Ok((45_000, Duration::from_secs(65)));
@@ -1180,6 +1205,28 @@ fn run_driver(
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn inventory_cutoff_reserves_exit_time_from_the_original_clock() {
+        let now = Instant::now();
+        let wall = std::time::UNIX_EPOCH + Duration::from_secs(1000);
+        let original = now + Duration::from_secs(125);
+        assert_eq!(
+            inventory_deadline_unix_ms(original, now, wall),
+            Ok(1_120_000)
+        );
+        let elapsed = Duration::from_secs(30);
+        assert_eq!(
+            inventory_deadline_unix_ms(original, now + elapsed, wall + elapsed),
+            Ok(1_120_000)
+        );
+        for seconds in [0, 4, 5] {
+            assert_eq!(
+                inventory_deadline_unix_ms(now + Duration::from_secs(seconds), now, wall),
+                Err(Reason::Timeout)
+            );
+        }
+    }
+
     #[test]
     fn public_inventory_budget_matches_each_hosted_platform_only() {
         for (platform, runner) in [

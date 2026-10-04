@@ -6,7 +6,7 @@ const source = fs.readFileSync(`${__dirname}/observe-renderer.cjs`, 'utf8');
 const timingStart = source.indexOf('function onboardingTrial(');
 const timingEnd = source.indexOf('async function run()', timingStart);
 const timing = vm.runInNewContext(`(() => { ${source.slice(timingStart, timingEnd)}
-  return {onboardingTrial, onboardingDeadline,onboardingBudget}; })()`);
+  return {onboardingTrial, onboardingDeadline,onboardingBudget,inventoryDeadlines}; })()`);
 const hosted = {GITHUB_ACTIONS: 'true', RUNNER_ENVIRONMENT: 'github-hosted',
   RUNNER_OS: 'Windows', NANH_CODEX_PUBLIC_ONBOARDING: 'engineering'};
 assert.equal(timing.onboardingTrial('chatgpt-desktop', 'win32', hosted), true);
@@ -15,6 +15,17 @@ for (const [app, platform, env] of [
   ['chatgpt-desktop', 'win32', {...hosted, RUNNER_ENVIRONMENT: 'self-hosted'}],
   ['chatgpt-desktop', 'win32', {...hosted, NANH_CODEX_PUBLIC_ONBOARDING: 'unknown'}],
 ]) assert.equal(timing.onboardingTrial(app, platform, env), false);
+const prepared={codexProfileIsolation:'prepared-windows',inventoryDeadlineUnixMs:100000};
+assert.equal(timing.inventoryDeadlines(true,'win32',prepared,1000).total,100000);
+assert.equal(timing.inventoryDeadlines(true,'win32',prepared,1000).startup,36000);
+assert.equal(timing.inventoryDeadlines(true,'win32',{...prepared,inventoryDeadlineUnixMs:2000},1000).startup,2000);
+for(const value of [undefined,1000,999,121001,Infinity,NaN,'100000',1000.5]) {
+ assert.throws(()=>timing.inventoryDeadlines(true,'win32',{...prepared,inventoryDeadlineUnixMs:value},1000));
+}
+assert.throws(()=>timing.inventoryDeadlines(true,'linux',prepared,1000));
+assert.throws(()=>timing.inventoryDeadlines(false,'win32',prepared,1000));
+assert.equal(timing.inventoryDeadlines(true,'linux',{},1000).total,61000);
+assert.equal(timing.inventoryDeadlines(true,'win32',{},1000).total,121000);
 // Every setup stage keeps the original total deadline, including early Trust.
 // Repeated calls after actions cannot reset or add to the original allocation.
 assert.equal(timing.onboardingDeadline(true, 35000, 60000, 36000), 60000);
@@ -114,6 +125,26 @@ assert.equal(roleSourceScope({foreignFieldset:true}).mainScope,false);
     return {main,aux,held,browser,identity,setAlter:fn=>{alter=fn;},setPages:p=>{current=p;},
       loseOwner:()=>{owned=false;},run:(heldOverride=held)=>helper.observeMainAux(heldOverride,browser,
         ()=>owned,1000,()=> 'avatarOverlay',identity,async ms=>{clock+=ms;})};
+  }
+  {
+    const sampled=fixture();sampled.setPages([sampled.main]);
+    sampled.setAlter(value=>{value.scope.mainScope=false;});
+    const diagnostic=helper.mainConfirmationFacts(),saved=[];
+    const result=await helper.bindCorrelationMain(sampled.held,sampled.browser,()=>true,300,
+      ()=> 'avatarOverlay',sampled.identity,async ms=>{clock+=ms;},diagnostic,async()=>true,false,
+      ()=>saved.push(JSON.parse(JSON.stringify(diagnostic))));
+    assert.equal(result,null);assert.equal(diagnostic.status,'deadline');
+    assert.ok(saved.some(value=>value.status==='unmeasured'&&value.mainScopeUnique===false
+      &&value.counts.roleRadios===11&&value.identityUnchanged===true));
+    assert.equal(saved.at(-1).status,'deadline');assert.ok(!JSON.stringify(saved).includes('private-'));
+    const lost=fixture();let owned=true;
+    lost.setAlter(()=>{owned=false;});
+    const rejected=helper.mainConfirmationFacts(),progress=[];
+    assert.equal(await helper.bindCorrelationMain(lost.held,lost.browser,()=>owned,1000,
+      ()=> 'avatarOverlay',lost.identity,async()=>{},rejected,null,true,
+      ()=>progress.push(JSON.parse(JSON.stringify(rejected)))),null);
+    assert.equal(progress.at(-1).status,'ownership-lost');
+    assert.equal(progress.at(-1).counts.roleRadios,11);
   }
   let f=fixture(),result=await f.run();
   assert.equal(result.status,'observed');assert.equal(result.stableSamples,2);

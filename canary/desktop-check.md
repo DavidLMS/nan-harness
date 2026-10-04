@@ -3053,3 +3053,11 @@ admission remain, as do local custody checks and complete history verification
 immediately before focus, paste and Send. A regression test changes history
 after admission and requires rejection before any focus or input. Native timing
 and second-turn completion remain unproven.
+
+Codex Windows now receives an absolute observer cutoff derived from the
+supervisor's original readiness clock, with five seconds reserved for the closed
+receipt and process exit. Node startup no longer starts an independent 120-second
+allowance that can outlive its parent. Passive role-binding samples save the
+existing scope/focus/count observations before another ownership check. The
+clock mismatch is established in source; its contribution to the campaign's
+onboarding failures still requires native evidence.
