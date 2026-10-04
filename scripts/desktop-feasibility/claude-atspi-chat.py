@@ -766,7 +766,15 @@ class Controller:
         editor = editors[0]
         self.state(editor,editable=True)
         sealed = (self.query('identity',editor),self.query('bounds',editor))
-        if not inside(sealed[1],self.sealed_frame[1]) or self.query('text',editor) != '':
+        if not inside(sealed[1],self.sealed_frame[1]):
+            raise Rejected('frame')
+        initial = self.query('text',editor)
+        if initial != '':
+            self.facts['stage'] = 'input-not-empty'
+            self.facts['inputShape'] = input_shape(initial)
+            embedded = getattr(self.adapter,'embedded_text_observation',None)
+            if embedded is not None:
+                self.facts['embeddedTextObservation'] = embedded
             raise Rejected('input')
         if self.next_history_scope(history) != before:
             raise Rejected('response')
