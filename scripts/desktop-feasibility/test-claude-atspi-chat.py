@@ -334,7 +334,7 @@ class ResponseAdapter(Adapter):
         super().__init__(**options);self.clipboard='old';self.copy_actions=0
     def identity(self,node):
         if node=='wrapper':return (80,'PRIVATE wrapper','')
-        if node=='row':return (39,'','')
+        if node=='row':return (80 if self.changes.get('row_wrapper') else 39,'','')
         if node=='heading':return (83,'Claude responded: private-marker','')
         if node in ('copy','copy2'):return (43,'Copy','')
         if node=='title':return (83,'private-marker','')
@@ -342,7 +342,7 @@ class ResponseAdapter(Adapter):
     def children(self,node):
         if node=='frame':return ['editor','mode','send','row']+(['title'] if self.changes.get('title') else [])
         if node=='wrapper':return ['heading']
-        if node=='row':return ['wrapper' if self.changes.get('wrapper') else 'heading','copy']+(['copy2'] if self.changes.get('duplicate_copy') else [])
+        if node=='row':return ['wrapper' if self.changes.get('wrapper') else 'heading']+([] if self.changes.get('absent_copy') else ['copy'])+(['copy2'] if self.changes.get('duplicate_copy') else [])
         return super().children(node)
     def parent(self,node):
         if node=='wrapper':return 'wrapper' if self.changes.get('wrapper_cycle') else 'frame' if self.changes.get('wrapper_global') else 'row'
@@ -399,6 +399,14 @@ class ResponseTests(unittest.TestCase):
                 dict(wrapper=True,duplicate_copy=True),dict(wrapper=True,global_copy=True)]:
             adapter,controller,facts=self.case(**options)
             self.assertFalse(facts['responseVerified']);self.assertEqual(adapter.copy_actions,0)
+    def test_response_row_failures_identify_closed_structural_causes(self):
+        for options,reason in [(dict(absent_copy=True),'response-row-copy-absent'),
+                (dict(duplicate_copy=True),'response-row-copy-ambiguous'),
+                (dict(row_wrapper=True),'response-row-role-limit'),
+                (dict(wrapper=True,global_copy=True),'response-row-attachment')]:
+            adapter,controller,facts=self.case(**options)
+            self.assertEqual(facts['failureBoundary'],reason)
+            self.assertEqual(adapter.copy_actions,0)
     def test_global_or_duplicate_or_mismatch_reject(self):
         for options in [dict(global_copy=True),dict(duplicate_copy=True),dict(wrong_copy=True)]:
             with self.subTest(options=options):

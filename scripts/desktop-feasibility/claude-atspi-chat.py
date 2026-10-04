@@ -21,7 +21,7 @@ def inside(rect, outer):
             and rect[1] + rect[3] <= outer[1] + outer[3])
 
 
-BOUNDARIES = frozenset(('request','policy','native-window','source-owner','tree','tree-cycle','tree-depth','tree-limit','tree-identity','tree-children','response-heading','response-row','state',
+BOUNDARIES = frozenset(('request','policy','native-window','source-owner','tree','tree-cycle','tree-depth','tree-limit','tree-identity','tree-children','response-heading','response-row','response-row-role-limit','response-row-copy-absent','response-row-copy-ambiguous','response-row-headings','response-row-attachment','state',
     'frame','frame-active','frame-count','frame-client','client','mode','focus','input','clipboard','action','action-count','action-name','action-hit','response','transport'))
 QUERY_BOUNDARIES = dict(owner='source-owner', identity='tree-identity', children='tree-children', parent='frame',
     state='state', bounds='frame', guard='native-window', client_bounds='client',
@@ -690,9 +690,12 @@ class Controller:
         if len(headings) != 1:
             raise Rejected('response-heading')
         heading, parent, seen = headings[0], self.query('parent',headings[0]), set()
+        row_failure = None
         for _ in range(6):
-            if parent in seen or parent == self.frame:
-                raise Rejected('response-row')
+            if parent in seen:
+                raise Rejected('response-row-attachment')
+            if parent == self.frame:
+                raise Rejected(row_failure or 'response-row-role-limit')
             seen.add(parent)
             self.owned(parent)
             identity = self.query('identity',parent)
@@ -720,14 +723,18 @@ class Controller:
                 copy, ancestors = copies[0], set()
                 for _ in range(6):
                     if copy in ancestors or copy == self.frame:
-                        raise Rejected('response-row')
+                        raise Rejected('response-row-attachment')
                     ancestors.add(copy);self.owned(copy)
                     if copy == parent:
                         return parent,heading,copies[0]
                     copy = self.query('parent',copy)
-                raise Rejected('response-row')
+                raise Rejected('response-row-attachment')
+            if row_failure is None:
+                row_failure = ('response-row-headings' if scopes != [heading]
+                    else 'response-row-copy-absent' if not copies
+                    else 'response-row-copy-ambiguous')
             parent = self.query('parent',parent)
-        raise Rejected('response-row')
+        raise Rejected(row_failure or 'response-row-role-limit')
 
     def copy_response(self, marker):
         try:
