@@ -419,6 +419,8 @@ struct Collection {
     }
 };
 }
+#include "windows_claude_chat_turn.inc"
+
 int windows_claude_uia_inventory() {
     const auto wire = uia_request_frame(std::cin);
     if (!wire) return 2;
@@ -478,4 +480,5 @@ int windows_claude_uia_inventory() {
 }
 #else
 int windows_claude_uia_inventory() {return 5;}
+int windows_claude_chat_turn() {return 5;}
 #endif

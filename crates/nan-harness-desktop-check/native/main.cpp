@@ -22,6 +22,7 @@ int claude_chat_press();
 int claude_chat_turn();
 int windows_claude_storage();
 int windows_claude_uia_inventory();
+int windows_claude_chat_turn();
 int process_presence(bool claude);
 int process_correlation(bool before);
 int owned_cleanup_holder();
@@ -53,6 +54,7 @@ int main(int argc, char** argv) {
     if (argc == 2 && std::string(argv[1]) == "--claude-chat-turn") return claude_chat_turn();
     if (argc == 2 && std::string(argv[1]) == "--claude-chat-press") return claude_chat_press();
     if (argc == 2 && std::string(argv[1]) == "--claude-known-folders") return claude_known_folders();
+    if (argc == 2 && std::string(argv[1]) == "--windows-claude-chat-turn") return windows_claude_chat_turn();
     if (argc == 2 && std::string(argv[1]) == "--windows-claude-uia-inventory") return windows_claude_uia_inventory();
     if (argc == 2 && std::string(argv[1]) == "--windows-claude-storage") return windows_claude_storage();
     if (argc == 2 && std::string(argv[1]) == "--claude-observation") return observe_claude();

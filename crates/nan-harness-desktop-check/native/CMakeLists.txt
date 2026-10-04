@@ -84,3 +84,14 @@ foreach(contract_target IN ITEMS nanh-process-correlation-test nanh-uia-request-
     target_compile_options(${contract_target} PRIVATE -UNDEBUG)
   endif()
 endforeach()
+
+add_executable(nanh-uia-chat-input-test tests/uia_chat_input.cpp)
+if(MSVC)
+  target_compile_options(nanh-uia-chat-input-test PRIVATE /UNDEBUG)
+else()
+  target_compile_options(nanh-uia-chat-input-test PRIVATE -UNDEBUG)
+endif()
+add_custom_target(nanh-uia-chat-input-contract ALL
+  COMMAND $<TARGET_FILE:nanh-uia-chat-input-test>
+  DEPENDS nanh-uia-chat-input-test
+  COMMENT "Verify private Windows Chat framing and passive readiness predicates")
