@@ -77,6 +77,26 @@ def classify_owners(owners, current, live_identity):
     return {'ownerCount': len(owners), 'currentProcessCount': own, 'otherProcessCount': len(owners) - own}
 
 
+def classify_delete_access(open_file, identity, close):
+    # Query-only handles never request delete-on-close or change file state.
+    baseline, error = open_file(0)
+    if baseline is None:
+        return 'missing' if error in (2, 3) else 'query-failed'
+    try:
+        expected = identity(baseline)
+        if expected is None:
+            return 'query-failed'
+        handle, error = open_file(0x10000)  # DELETE permits rename; does not perform it.
+        if handle is None:
+            return {32:'sharing-denied',5:'access-denied',2:'missing',3:'missing'}.get(error,'query-failed')
+        try:
+            return 'available' if identity(handle) == expected else 'query-failed'
+        finally:
+            close(handle)
+    finally:
+        close(baseline)
+
+
 def query(value):
     from ctypes import wintypes as w
     class FT(ctypes.Structure):
@@ -87,6 +107,14 @@ def query(value):
         _fields_ = [('process', Unique), ('app', w.WCHAR * 256), ('service', w.WCHAR * 64),
                     ('kind', ctypes.c_int), ('status', w.ULONG), ('session', w.DWORD), ('restartable', w.BOOL)]
     k = ctypes.WinDLL('kernel32', use_last_error=True)
+    class FileInfo(ctypes.Structure):
+        _fields_ = [('attributes',w.DWORD),('created',FT),('accessed',FT),('written',FT),
+                    ('volume',w.DWORD),('sizeHigh',w.DWORD),('sizeLow',w.DWORD),
+                    ('links',w.DWORD),('indexHigh',w.DWORD),('indexLow',w.DWORD)]
+    k.CreateFileW.argtypes = [w.LPCWSTR,w.DWORD,w.DWORD,ctypes.c_void_p,w.DWORD,w.DWORD,w.HANDLE]
+    k.CreateFileW.restype = w.HANDLE
+    k.GetFileInformationByHandle.argtypes = [w.HANDLE,ctypes.POINTER(FileInfo)]
+    k.GetFileInformationByHandle.restype = w.BOOL
     rm = ctypes.WinDLL('rstrtmgr', use_last_error=True)
     k.OpenProcess.argtypes = [w.DWORD, w.BOOL, w.DWORD]; k.OpenProcess.restype = w.HANDLE
     k.GetProcessTimes.argtypes = [w.HANDLE, ctypes.POINTER(FT), ctypes.POINTER(FT), ctypes.POINTER(FT), ctypes.POINTER(FT)]; k.GetProcessTimes.restype = w.BOOL
@@ -118,6 +146,14 @@ def query(value):
         if live(current[0]) != current[1]:
             raise ValueError('identity')
     temporary, destination, present, identities = owned_files(value)
+    def source_open(access):
+        handle = k.CreateFileW(str(temporary),access,7,None,3,0x00200000,None)
+        return (None,ctypes.get_last_error()) if handle == ctypes.c_void_p(-1).value else (handle,0)
+    def source_identity(handle):
+        info = FileInfo()
+        if not k.GetFileInformationByHandle(handle,ctypes.byref(info)) or info.attributes & (0x400|0x10):
+            return None
+        return (info.volume,info.indexHigh,info.indexLow,info.created.low,info.created.high)
     session, key = w.DWORD(), ctypes.create_unicode_buffer(33)
     guarded()
     if rm.RmStartSession(ctypes.byref(session), 0, key):
@@ -145,7 +181,12 @@ def query(value):
         if classify_owners(owners, current, live) != result:
             raise ValueError('identity')
         guarded()
-        return dict(status='observed', stage='complete', destinationPresent=present, **result)
+        source_delete = classify_delete_access(source_open,source_identity,k.CloseHandle)
+        guarded()
+        if owned_files(value)[2:] != (present,identities):
+            raise ValueError('scope')
+        return dict(status='observed', stage='complete', destinationPresent=present,
+                    sourceDeleteAccess=source_delete, **result)
     finally:
         rm.RmEndSession(session)
 

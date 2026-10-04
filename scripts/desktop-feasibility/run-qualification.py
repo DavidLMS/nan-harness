@@ -328,7 +328,7 @@ def qualification_environment(app, facts, real_nanh, executable, inherited=None)
                 raise ValueError('Claude persist owner diagnostic is unavailable')
             helper = Path(__file__).with_name('claude-persist-owners.py').resolve(strict=True)
             python = Path(sys.executable).resolve(strict=True)
-            if digest(helper) != 'd01b96696abec4658b1ebf41ea9c5b316f2a0c03a9c44aabb4f67bd5065d2b33':
+            if digest(helper) != 'c36a40af9911c12933acca7124424a1169f6f7d139bcd4bbb862a2c3c57e2703':
                 raise ValueError('Claude persist owner source differs')
             environment.update(NANH_CLAUDE_PERSIST_OWNERS='1',NANH_CLAUDE_PERSIST_SCRIPT=str(helper),
                                NANH_CLAUDE_PERSIST_PYTHON=str(python),NANH_CLAUDE_PERSIST_PYTHON_SHA256=digest(python))

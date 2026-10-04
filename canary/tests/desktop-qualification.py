@@ -3470,11 +3470,21 @@ class ClaudePersistOwnerTests(unittest.TestCase):
                           {'stage':'PRIVATE'},{'path':'PRIVATE'},{'pid':123},{'destinationPresent':None}):
                 path.write_text(json.dumps({**value,**extra}))
                 with self.assertRaises(ValueError):q.semantic_observations(root,'claude-desktop')
+            for category in ('available','sharing-denied','access-denied','missing','query-failed'):
+                observed={**value,'sourceDeleteAccess':category}
+                path.write_text(json.dumps(observed))
+                self.assertEqual(q.semantic_observations(root,'claude-desktop'),[observed])
+            for category in ('PRIVATE', [], None, True):
+                path.write_text(json.dumps({**value,'sourceDeleteAccess':category}))
+                with self.assertRaises(ValueError):q.semantic_observations(root,'claude-desktop')
             unavailable={**value,'status':'unavailable','stage':'query','destinationPresent':None,
                          'ownerCount':None,'currentProcessCount':None,'otherProcessCount':None}
             path.write_text(json.dumps(unavailable))
             self.assertEqual(q.semantic_observations(root,'claude-desktop'),[unavailable])
             path.write_text(json.dumps({**unavailable,'ownerCount':0}))
+            with self.assertRaises(ValueError):q.semantic_observations(root,'claude-desktop')
+
+            path.write_text(json.dumps({**unavailable,'sourceDeleteAccess':'available'}))
             with self.assertRaises(ValueError):q.semantic_observations(root,'claude-desktop')
 
 

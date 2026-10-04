@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 #[cfg(windows)]
-const SOURCE_HASH: &str = "d01b96696abec4658b1ebf41ea9c5b316f2a0c03a9c44aabb4f67bd5065d2b33";
+const SOURCE_HASH: &str = "c36a40af9911c12933acca7124424a1169f6f7d139bcd4bbb862a2c3c57e2703";
 #[derive(Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 enum Status {
@@ -28,11 +28,22 @@ enum Stage {
     Complete,
 }
 #[derive(Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum DeleteAccess {
+    Available,
+    SharingDenied,
+    AccessDenied,
+    Missing,
+    QueryFailed,
+}
+#[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Reply {
     status: Status,
     stage: Stage,
     destination_present: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    source_delete_access: Option<DeleteAccess>,
     owner_count: Option<u8>,
     current_process_count: Option<u8>,
     other_process_count: Option<u8>,
@@ -47,6 +58,7 @@ impl Reply {
             },
             stage,
             destination_present: None,
+            source_delete_access: None,
             owner_count: None,
             current_process_count: None,
             other_process_count: None,
@@ -62,6 +74,7 @@ impl Reply {
             self.stage != Stage::Complete
                 && (self.status == Status::Deadline) == (self.stage == Stage::Deadline)
                 && self.destination_present.is_none()
+                && self.source_delete_access.is_none()
                 && self.owner_count.is_none()
                 && self.current_process_count.is_none()
                 && self.other_process_count.is_none()
@@ -331,6 +344,22 @@ mod tests {
     fn protocol_rejects_private_data_and_incomplete_owner_claims() {
         let good = r#"{"status":"observed","stage":"complete","destinationPresent":false,"ownerCount":2,"currentProcessCount":1,"otherProcessCount":1}"#;
         assert!(serde_json::from_str::<Reply>(good).unwrap().valid());
+        for category in [
+            "available",
+            "sharing-denied",
+            "access-denied",
+            "missing",
+            "query-failed",
+        ] {
+            let extended = good.replace('}', &format!(",\"sourceDeleteAccess\":\"{category}\"}}"));
+            assert!(serde_json::from_str::<Reply>(&extended).unwrap().valid());
+        }
+        assert!(
+            serde_json::from_str::<Reply>(
+                &good.replace('}', ",\"sourceDeleteAccess\":\"PRIVATE\"}"),
+            )
+            .is_err()
+        );
         for bad in [
             good.replace("\"ownerCount\":2", "\"ownerCount\":1"),
             good.replace("\"ownerCount\":2", "\"ownerCount\":65"),

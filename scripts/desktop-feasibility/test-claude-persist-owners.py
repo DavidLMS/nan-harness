@@ -9,6 +9,17 @@ spec=importlib.util.spec_from_file_location('owners',Path(__file__).with_name('c
 owners=importlib.util.module_from_spec(spec);spec.loader.exec_module(owners)
 
 class OwnersTests(unittest.TestCase):
+    def test_delete_probe_preserves_identity_and_closes_all_query_handles(self):
+        for error, expected in [(32,'sharing-denied'),(5,'access-denied'),(2,'missing'),(3,'missing'),(87,'query-failed')]:
+            closed=[]
+            self.assertEqual(owners.classify_delete_access(lambda access:(None,error) if access else (1,0),lambda h:(11,22),closed.append),expected)
+            self.assertEqual(closed,[1])
+        for identities,expected in [({1:(11,22),2:(11,22)},'available'),({1:(11,22),2:(11,33)},'query-failed')]:
+            closed=[]
+            self.assertEqual(owners.classify_delete_access(lambda access:(2 if access else 1,0),identities.get,closed.append),expected)
+            self.assertEqual(closed,[2,1])
+        self.assertEqual(owners.classify_delete_access(lambda access:(None,2),lambda h:None,lambda h:None),'missing')
+
     def test_identity_counts_are_complete_and_creation_bound(self):
         self.assertEqual(owners.classify_owners([(1,11),(2,22)],(1,11),lambda p:{1:11,2:22}[p]),
                          dict(ownerCount=2,currentProcessCount=1,otherProcessCount=1))

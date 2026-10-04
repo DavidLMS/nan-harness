@@ -1052,11 +1052,16 @@ def semantic_observations(directory, app):
             fields = {'schemaVersion','mechanism','diagnosticsOnly','status','stage','destinationPresent',
                       'ownerCount','currentProcessCount','otherProcessCount'}
             counters = {'ownerCount','currentProcessCount','otherProcessCount'}
-            if (app != 'claude-desktop' or set(value) != fields or value['diagnosticsOnly'] is not True
+            if (app != 'claude-desktop' or set(value) - {'sourceDeleteAccess'} != fields or value['diagnosticsOnly'] is not True
                     or type(value['status']) is not str or value['status'] not in {'observed','unavailable','deadline'}
                     or type(value['stage']) is not str or value['stage'] not in {
                         'request','platform','scope','session','register','list','identity','deadline','query','complete'}):
                 raise ValueError('invalid Claude persist owner diagnostic')
+            if 'sourceDeleteAccess' in value:
+                if (value['status'] != 'observed' or type(value['sourceDeleteAccess']) is not str
+                        or value['sourceDeleteAccess'] not in {'available','sharing-denied','access-denied','missing','query-failed'}):
+                    raise ValueError('invalid Claude source delete diagnostic')
+                record['sourceDeleteAccess'] = value['sourceDeleteAccess']
             if value['status'] == 'observed':
                 if (value['stage'] != 'complete' or type(value['destinationPresent']) is not bool
                         or any(type(value[key]) is not int or not 0 <= value[key] <= 64 for key in counters)
