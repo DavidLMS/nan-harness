@@ -182,7 +182,9 @@ async function bindCorrelationMain(held,browser,guard,deadline,route,
     if(!fresh.scope.mainScope)return stop('source-scope');
     if(requireDocumentFocus&&!fresh.scope.focused)return stop('document-unfocused');
     if(!requireDocumentFocus&&fresh.scope.visibleDocument!==true)return stop('source-scope');
-    const proof=heldMainGuard(held,browser,guard,deadline,route,identity,pause,true,false,requireDocumentFocus,!requireDocumentFocus);
+    const retained=settleGuard&&require('./codex-main-guard.cjs').isHeldMainGuard(settleGuard,guard);
+    const proof=retained?settleGuard:heldMainGuard(held,browser,guard,deadline,route,identity,pause,
+      true,!requireDocumentFocus,requireDocumentFocus,!requireDocumentFocus);
     if(!await proof())return stop(Date.now()>=deadline?'deadline':'guard-rejected');
     if(diagnostic)diagnostic.status='confirmed';
     return fresh;

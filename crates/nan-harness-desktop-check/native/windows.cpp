@@ -1202,7 +1202,7 @@ int owned_cleanup_holder() {
     if (self == rows.end() || self->parent != checker) return unavailable();
     std::cout << "progress snapshot\n" << std::flush;
     struct Target {
-        CleanupHandle handle; std::uint64_t created; bool targeted = false;
+        CleanupHandle handle; std::uint64_t created; bool targeted = false; bool image_verified = false;
         Target(HANDLE value, std::uint64_t time) : handle(value), created(time) {}
     };
     std::vector<Target> targets;
@@ -1216,9 +1216,18 @@ int owned_cleanup_holder() {
         HANDLE handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE | SYNCHRONIZE, FALSE, row.pid);
         if (!handle) return unavailable();
         targets.emplace_back(handle, created);
-        stage = "target-identity";
         std::uint64_t held_time = 0;
-        if (!held_creation(handle, held_time) || held_time != created || !held_image(handle, expected, expected_path)) return unavailable();
+        const auto identity = retained_target_identity(
+            held_creation(handle, held_time) && held_time == created,
+            [&] {
+                const DWORD state = WaitForSingleObject(handle, 0);
+                return state == WAIT_OBJECT_0 ? RetainedProcessState::Exited
+                    : state == WAIT_TIMEOUT ? RetainedProcessState::Live : RetainedProcessState::Unavailable;
+            }, [&] { return held_image(handle, expected, expected_path); });
+        if (identity == RetainedTargetIdentity::CreationRejected) { stage = "target-creation"; return unavailable(); }
+        if (identity == RetainedTargetIdentity::StateRejected) { stage = "target-state"; return unavailable(); }
+        if (identity == RetainedTargetIdentity::ImageRejected) { stage = "target-image"; return unavailable(); }
+        targets.back().image_verified = identity == RetainedTargetIdentity::Live;
     }
     std::cout << "progress targets\n" << std::flush;
     stage = "owner-recheck";
@@ -1254,7 +1263,7 @@ int owned_cleanup_holder() {
         const DWORD state = WaitForSingleObject(target.handle.value, 0);
         if (state == WAIT_OBJECT_0) { ++already; continue; }
         std::uint64_t created = 0;
-        if (state != WAIT_TIMEOUT || !held_creation(target.handle.value, created) || created != target.created
+        if (state != WAIT_TIMEOUT || !target.image_verified || !held_creation(target.handle.value, created) || created != target.created
             || !held_image(target.handle.value, expected, expected_path)) { ++rejected; continue; }
         if (!terminate_verified_handle({GetTickCount64() < cutoff,
                 WaitForSingleObject(owner.value, 0) == WAIT_TIMEOUT, true, true},

@@ -5,7 +5,7 @@ const begin=source.indexOf('async function bindCorrelationMain('),end=source.ind
  for(const scenario of ['settled','legacy','expired','identity','focus','guard']) {
   let now=0,reads=0,proofs=0;
   const bind=vm.runInNewContext(source.slice(begin,end)+';bindCorrelationMain',{
-   Date:{now:()=>now},sameCorrelationIdentity:(a,b)=>a.id===b.id,heldMainGuard:()=>async()=>true});
+   require,Date:{now:()=>now},sameCorrelationIdentity:(a,b)=>a.id===b.id,heldMainGuard:()=>async()=>true});
   const held={id:1,page:{}},diagnostic={};
   const identity=async()=>{reads++;return {id:scenario==='identity'&&reads===2?2:1,scope:{mainScope:scenario!=='expired'&&reads>=3,focused:scenario!=='focus',counts:{}}}};
   const settle=async()=>{proofs++;return scenario!=='guard'||proofs<3};

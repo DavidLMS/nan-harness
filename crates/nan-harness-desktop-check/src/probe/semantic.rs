@@ -532,7 +532,10 @@ async fn complete_scenario(
     gate.arm_fixture_response(&recovered_marker)
         .map_err(|()| Reason::ProviderFailed)?;
     gate.fail_recoverable_scenario(false);
-    ui.retry(&recovered_marker, gate)?;
+    let recovery = ui.retry(&recovered_marker, gate);
+    // Preserve the provider side even when UI readback fails after dispatch.
+    record_provider_oracle(directory, "recovery", &tool, gate, None)?;
+    recovery?;
     if !gate.fixture_response_verified() || !recovered.recording_bounded() {
         return Err(Reason::ResponseMismatch);
     }
@@ -584,6 +587,7 @@ struct ProviderOracleFacts {
     tool: ToolOracleFacts,
     fixture_response_verified: bool,
     failure_observed: bool,
+    provider_generation_count: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     tool_result: Option<ToolResultObservation>,
 }
@@ -606,6 +610,7 @@ fn record_provider_oracle(
         },
         fixture_response_verified: gate.fixture_response_verified(),
         failure_observed: gate.failure_observed(),
+        provider_generation_count: gate.generation_count(),
         tool_result: selected_tool
             .map(|selected| ToolResultObservation::collect(&tool.chat_requests(), selected)),
     };

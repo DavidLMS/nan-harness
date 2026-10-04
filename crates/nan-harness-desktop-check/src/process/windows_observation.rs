@@ -54,6 +54,17 @@ impl StopObservation {
     }
 }
 
+#[cfg(any(windows, test))]
+fn observation_policy(prefix: &str, app: &str, mode: &str, profile: &str, input: &str) -> bool {
+    match app {
+        "claude-desktop" => mode == "startup-baseline" && profile == "private-env",
+        "chatgpt-desktop" => {
+            prefix == "codex-windows-profile-prepare" && mode == "renderer" && input == "cdp-dom"
+        }
+        _ => false,
+    }
+}
+
 #[cfg(windows)]
 pub(super) fn record_value(value: &serde_json::Value, prefix: &str) {
     use std::io::Write as _;
@@ -62,9 +73,13 @@ pub(super) fn record_value(value: &serde_json::Value, prefix: &str) {
     if std::env::var("GITHUB_ACTIONS").as_deref() != Ok("true")
         || std::env::var("RUNNER_ENVIRONMENT").as_deref() != Ok("github-hosted")
         || std::env::var("RUNNER_OS").as_deref() != Ok("Windows")
-        || std::env::var("NANH_DESKTOP_QUALIFICATION_MODE").as_deref() != Ok("startup-baseline")
-        || std::env::var("NANH_DESKTOP_RENDERER_APP").as_deref() != Ok("claude-desktop")
-        || std::env::var("NANH_CLAUDE_WINDOWS_PROFILE_POLICY").as_deref() != Ok("private-env")
+        || !observation_policy(
+            prefix,
+            &std::env::var("NANH_DESKTOP_RENDERER_APP").unwrap_or_default(),
+            &std::env::var("NANH_DESKTOP_QUALIFICATION_MODE").unwrap_or_default(),
+            &std::env::var("NANH_CLAUDE_WINDOWS_PROFILE_POLICY").unwrap_or_default(),
+            &std::env::var("NANH_CODEX_INPUT_CHANNEL").unwrap_or_default(),
+        )
     {
         return;
     }
@@ -81,9 +96,12 @@ pub(super) fn record_value(value: &serde_json::Value, prefix: &str) {
     // Windows canonicalization adds a verbatim prefix. Reject reparse
     // components first, then use the canonical directory for the write.
     let mut ancestor = PathBuf::new();
+    let mut rooted = false;
     for component in directory.components() {
         ancestor.push(component.as_os_str());
-        if !ancestor.is_absolute() {
+        // A verbatim drive prefix is absolute before its root separator.
+        rooted |= matches!(component, std::path::Component::RootDir);
+        if !rooted {
             continue;
         }
         let Ok(metadata) = std::fs::symlink_metadata(&ancestor) else {
@@ -120,6 +138,44 @@ pub(super) fn record_value(value: &serde_json::Value, prefix: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn codex_prepare_receipt_uses_its_actual_mode_without_admitting_other_events() {
+        let prefix = "codex-windows-profile-prepare";
+        assert!(observation_policy(
+            prefix,
+            "chatgpt-desktop",
+            "renderer",
+            "",
+            "cdp-dom"
+        ));
+        for (event, mode, input) in [
+            ("windows-owned-stop", "renderer", "cdp-dom"),
+            (prefix, "startup-baseline", "cdp-dom"),
+            (prefix, "renderer", "native"),
+        ] {
+            assert!(!observation_policy(
+                event,
+                "chatgpt-desktop",
+                mode,
+                "",
+                input
+            ));
+        }
+        assert!(observation_policy(
+            "windows-owned-stop",
+            "claude-desktop",
+            "startup-baseline",
+            "private-env",
+            ""
+        ));
+        assert!(!observation_policy(
+            "windows-owned-stop",
+            "claude-desktop",
+            "startup-baseline",
+            "",
+            ""
+        ));
+    }
     #[test]
     fn missing_wrapper_never_claims_termination_or_member_absence() {
         let mut observation = StopObservation::new();

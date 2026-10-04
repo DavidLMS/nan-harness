@@ -16,7 +16,7 @@ for(const [platform,request,accepted] of [
  assert.equal(result,accepted,platform+JSON.stringify(request));
 }
 const start=source.indexOf('function mainConfirmationFacts()'),end=source.indexOf('async function observeMainAux(',start);
-const bind=vm.runInNewContext(source.slice(start,end)+';bindCorrelationMain',{Date,
+const bind=vm.runInNewContext(source.slice(start,end)+';bindCorrelationMain',{Date,require,
  heldMainGuard:(held,browser,owner,deadline,route,identity,pause,scope,appearance,focus,visible)=>
  createHeldMainGuard(held,browser,owner,deadline,route,identity,pause,scope,appearance,focus,
  {sameCorrelationIdentity:(a,b)=>a.key===b.key,now:Date.now,requireVisibleDocument:visible}),
@@ -42,6 +42,20 @@ const bind=vm.runInNewContext(source.slice(start,end)+';bindCorrelationMain',{Da
    url=>url==='app://-/avatar'?'avatarOverlay':'unknown',identity,async()=>{},true,false,false,
    {sameCorrelationIdentity:(a,b)=>a.key===b.key,now:Date.now,requireVisibleDocument:true});
   assert.equal(await guard(),scenario==='inert',scenario);
+ }
+ {
+  const main={},aux={url:()=> 'app://-/avatar'},held={page:main,key:'main'};
+  let pages=[main],reads=0;
+  const browser={contexts:()=>[{pages:()=>pages}]},owner=()=>true;
+  const identity=async page=>{reads++;if(reads===1)pages=[main,aux];return {key:page===main?'main':'aux',scope:{
+   mainScope:page===main,visibleDocument:true,focused:false,
+   counts:{roleLegend:0,roleRadios:0,engineering:0,dialog:0,quickChatComposer:0,editable:0}}};};
+  assert(await bind(held,browser,owner,Date.now()+1000,()=> 'avatarOverlay',identity,async()=>{},null,null,false));
+  const existing=createHeldMainGuard(held,browser,owner,Date.now()+1000,()=> 'avatarOverlay',identity,async()=>{},false,false,false,
+   {sameCorrelationIdentity:(a,b)=>a.key===b.key,now:Date.now,requireVisibleDocument:true});
+  assert(await existing());assert(existing.binding().auxiliary);
+  assert(await bind(held,browser,owner,Date.now()+1000,()=> 'avatarOverlay',identity,async()=>{},null,existing,false));
+  assert(existing.binding().auxiliary);
  }
  const frame={url:'app://-/index.html',target:'main',frame:'frame',loader:'loader',frameUrl:'app://-/index.html',fragment:''};
  let visible=true;

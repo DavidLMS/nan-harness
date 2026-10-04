@@ -1137,6 +1137,59 @@ class EmptyClassCapabilityTests(unittest.TestCase):
         cap={};chat.flatten_hypertext(root,lambda m,n,*a:r[(m,n,*a)],7,lambda:None,inventory={},capability=cap)
         self.assertIsNone(cap['witness'])
 
+class FocusedEmptySealTests(unittest.TestCase):
+    def fixture(self, change=None):
+        a,c,b,h=EmptyClassCapabilityTests.fixture(self)
+        root=('r','editor2')
+        def witness(focused=False, extra=False):
+            records=(('state',root,(),1<<12 if focused else 0),
+                ('attributes',root,(),{'class':'ProseMirror ProseMirror-focused' if focused else 'ProseMirror'}),
+                ('text',root,(),a.value))
+            return (root,a.value,records+(('children',root,(),[]),) if extra else records)
+        a.empty_class_witness=witness();c.restore_next_input(b,h)
+        focus=a.grab_focus
+        def focused(node):
+            result=focus(node)
+            if change=='class-lost':a.empty_class_witness=None
+            elif change=='draft':a.value='new private draft';a.empty_class_witness=witness(True)
+            elif change=='attachment':a.empty_class_witness=witness(True,True)
+            elif change=='state':
+                current=witness(True)
+                a.empty_class_witness=(*current[:2],(('state',root,(),1<<8),*current[2][1:]))
+            else:a.empty_class_witness=witness(True)
+            return result
+        a.grab_focus=focused
+        if change=='late-attributes':
+            paste=a.paste_once
+            def late(prompt):
+                current=witness(True)
+                a.empty_class_witness=(*current[:2],(current[2][0],('attributes',root,(),{'class':'changed'}),current[2][2]))
+                paste(prompt)
+            a.paste_once=late
+        return a,c
+    def test_fresh_strict_focus_state_and_attributes_are_sealed_once(self):
+        a,c=self.fixture();facts=c.submit('owned next prompt')
+        self.assertTrue(facts['sendForwarded']);self.assertTrue(c.empty_focus_resealed)
+        self.assertFalse(c.empty_focus_transition)
+        self.assertEqual((a.focus_count,a.paste_count,a.send_count),(1,1,1))
+    def test_draft_attachment_source_state_and_late_attribute_changes_reject(self):
+        for change in ('class-lost','draft','attachment','state','late-attributes'):
+            with self.subTest(change=change):
+                a,c=self.fixture(change);facts=c.submit('owned next prompt')
+                self.assertFalse(facts['sendForwarded'])
+                self.assertEqual((a.paste_count,a.send_count),(0,0))
+    def test_a_second_different_focused_sample_cannot_be_adopted(self):
+        a,c=self.fixture();text=a.text;reads=[0]
+        def moving(node):
+            if a.focus:
+                reads[0]+=1
+                if reads[0]>1:
+                    current=a.empty_class_witness
+                    a.empty_class_witness=(*current[:2],(current[2][0],('attributes',current[0],(),{'class':'changed'}),current[2][2]))
+            return text(node)
+        a.text=moving;facts=c.submit('owned next prompt')
+        self.assertFalse(facts['sendForwarded']);self.assertEqual(a.paste_count,0)
+
 class EmptyInputDriftTests(unittest.TestCase):
     def test_focus_attributes_text_and_attachment_changes_are_distinguished(self):
         root=('owned','/editor');record=('state',root,(),0)
@@ -1260,6 +1313,83 @@ class RetryReadyDiagnosticsTests(unittest.TestCase):
         self.assertFalse(facts['retryCandidateObservation']['historyMatched'])
         self.assertFalse(facts['retryCandidateObservation']['candidateEnabled'])
         self.assertFalse(facts['recoveryVerified']);self.assertEqual(adapter.send_count,0)
+
+class RetryActionTests(unittest.TestCase):
+    case=RetryReadyDiagnosticsTests.case
+    def test_one_exact_failed_turn_retry_dispatch_and_no_send_increment(self):
+        for options in ({},{'label':True}):
+            adapter,c=self.case(**options)
+            facts=c.retry_ready('private-failed-prompt',[],activate=True)
+            self.assertEqual(facts['stage'],'retry-forwarded')
+            self.assertTrue(facts['retryAttempted']);self.assertTrue(facts['retryForwarded'])
+            self.assertFalse(facts['sendAttempted']);self.assertFalse(facts['sendForwarded'])
+            self.assertNotIn('retryCandidateObservation',facts)
+            self.assertEqual((adapter.send_count,adapter.paste_count,adapter.copy_actions),(1,0,0))
+            with self.assertRaises(chat.Rejected):c.retry_ready('private-failed-prompt',[],activate=True)
+            self.assertEqual(adapter.send_count,1)
+    def test_bad_scope_never_invokes(self):
+        for options in ({'absent':True},{'duplicate':True},{'disabled':True},
+                        {'unattached':True},{'changed':True}):
+            adapter,c=self.case(**options)
+            with self.assertRaises(chat.Rejected):c.retry_ready('private-failed-prompt',[],activate=True)
+            self.assertEqual(adapter.send_count,0)
+        adapter,c=self.case()
+        with self.assertRaises(chat.Rejected):c.retry_ready('private-failed-prompt',
+            [{'prompt':'missing-owned-prior','marker':'missing-marker'}],activate=True)
+        self.assertEqual(adapter.send_count,0)
+    def test_two_owned_prior_turns_retry_then_copy_exact_recovered_response(self):
+        adapter,c=self.case()
+        identity,children,parent=adapter.identity,adapter.children,adapter.parent
+        prior={('r','prior-user-0'):'You said: owned-prior-0',
+               ('r','prior-user-1'):'You said: owned-prior-1',
+               ('r','prior-response-0'):'Claude responded: owned-marker-0',
+               ('r','prior-response-1'):'Claude responded: owned-marker-1'}
+        recovered=[False]
+        adapter.identity=lambda node:(83,prior[node],'') if node in prior else identity(node)
+        def items(node):
+            if node in prior:return []
+            if node==('r','frame'):return children(node)+list(prior)
+            if node==('r','row') and recovered[0]:return [('r','heading'),('r','copy')]
+            return children(node)
+        adapter.children=items
+        adapter.parent=lambda node:('r','frame') if node in prior else parent(node)
+        invoke=adapter.invoke_once
+        def action(node,index):
+            if node==('r','retry'):
+                adapter.send_count+=1;recovered[0]=True;return True
+            return invoke(node,index)
+        adapter.invoke_once=action
+        records=[{'prompt':f'owned-prior-{index}','marker':f'owned-marker-{index}'} for index in range(2)]
+        facts=c.retry_ready('private-failed-prompt',records,activate=True)
+        self.assertEqual(facts['stage'],'retry-forwarded')
+        facts=c.copy_response('private-marker')
+        self.assertTrue(facts['responseVerified'])
+        self.assertEqual(facts['stage'],'copied')
+        self.assertEqual((adapter.send_count,adapter.copy_actions),(1,1))
+        self.assertEqual(adapter.clipboard,'private-marker')
+        self.assertNotIn('private-marker',str(facts))
+    def test_uncertain_action_is_consumed_and_closed(self):
+        adapter,c=self.case()
+        def uncertain(node,index):
+            adapter.send_count+=1
+            raise TimeoutError()
+        adapter.invoke_once=uncertain
+        facts=c.retry_ready('private-failed-prompt',[],activate=True)
+        self.assertEqual(facts['stage'],'action-uncertain')
+        self.assertTrue(facts['retryAttempted']);self.assertFalse(facts['retryForwarded'])
+        with self.assertRaises(chat.Rejected):c.retry_ready('private-failed-prompt',[],activate=True)
+        self.assertEqual(adapter.send_count,1)
+    def test_failed_prompt_and_action_are_reproved_before_dispatch(self):
+        adapter,c=self.case()
+        original=adapter.identity;reads=[0]
+        def changed(node):
+            if node==('r','user'):
+                reads[0]+=1
+                if reads[0]>4:return (83,'You said: foreign-prompt','')
+            return original(node)
+        adapter.identity=changed
+        with self.assertRaises(chat.Rejected):c.retry_ready('private-failed-prompt',[],activate=True)
+        self.assertEqual(adapter.send_count,0)
 
 class NativeTreeDiagnosticTests(unittest.TestCase):
     def test_exact_failure_cause_never_retries_or_exports_data(self):

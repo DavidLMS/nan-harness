@@ -14,6 +14,11 @@ pub(crate) enum WindowsChatStage {
     Completed,
     Window,
     Tree,
+    TreeQuery,
+    TreeLimit,
+    TreeDuplicate,
+    TreeType,
+    TreePid,
     Mode,
     Composer,
     Control,
@@ -44,15 +49,23 @@ pub(crate) enum WindowsChatStage {
     FailureDetailsOpened,
 }
 impl WindowsChatStage {
-    #[cfg(windows)]
+    #[cfg(any(windows, test))]
     pub(crate) fn passive_pending(self) -> bool {
-        matches!(self, Self::ScopeAnchorAbsent | Self::ScopeControlAbsent)
+        matches!(
+            self,
+            Self::ScopeAnchorAbsent | Self::ScopeControlAbsent | Self::TreeQuery
+        )
     }
 
     pub(super) fn parse(wire: &str) -> Option<Self> {
         Some(match wire {
             "turn window\n" => Self::Window,
             "turn tree\n" => Self::Tree,
+            "turn tree-query\n" => Self::TreeQuery,
+            "turn tree-limit\n" => Self::TreeLimit,
+            "turn tree-duplicate\n" => Self::TreeDuplicate,
+            "turn tree-type\n" => Self::TreeType,
+            "turn tree-pid\n" => Self::TreePid,
             "turn mode\n" => Self::Mode,
             "turn composer\n" => Self::Composer,
             "turn control\n" => Self::Control,
@@ -151,6 +164,22 @@ pub(super) fn request(
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn only_read_query_failures_can_wait_for_a_fresh_tree() {
+        use super::WindowsChatStage as S;
+        assert_eq!(S::parse("turn tree-query\n"), Some(S::TreeQuery));
+        assert!(S::TreeQuery.passive_pending());
+        for (wire, stage) in [
+            ("turn tree-limit\n", S::TreeLimit),
+            ("turn tree-duplicate\n", S::TreeDuplicate),
+            ("turn tree-type\n", S::TreeType),
+            ("turn tree-pid\n", S::TreePid),
+            ("turn action-uncertain\n", S::ActionUncertain),
+        ] {
+            assert_eq!(S::parse(wire), Some(stage));
+            assert!(!stage.passive_pending());
+        }
+    }
     use super::*;
     #[test]
     fn protocol_is_private_bounded_and_cannot_authorize_late_input() {

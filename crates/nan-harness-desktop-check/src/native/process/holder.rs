@@ -91,6 +91,9 @@ pub(crate) fn preflight(line: &str) -> Option<serde_json::Value> {
                 | "ancestry"
                 | "target-open"
                 | "target-identity"
+                | "target-creation"
+                | "target-state"
+                | "target-image"
                 | "owner-recheck"
         )
     {
@@ -397,6 +400,9 @@ mod tests {
             "ancestry",
             "target-open",
             "target-identity",
+            "target-creation",
+            "target-state",
+            "target-image",
             "owner-recheck",
         ] {
             let value = preflight(&format!("unavailable {stage}\n")).unwrap();

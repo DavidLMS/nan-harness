@@ -165,6 +165,24 @@ fn retry_candidate_observation(facts: &Value) -> Option<Value> {
     Some(value.clone())
 }
 
+fn retry_candidate_ready(facts: &Value) -> bool {
+    retry_candidate_observation(facts).is_some_and(|candidate| {
+        candidate["pendingUserCount"] == 1
+            && candidate["tryAgainCount"].as_u64().unwrap_or(0)
+                + candidate["retryCount"].as_u64().unwrap_or(0)
+                == 1
+            && [
+                "historyMatched",
+                "candidateEnabled",
+                "candidateActionUnique",
+                "candidateHitMatched",
+                "candidateUserAncestorMatched",
+            ]
+            .iter()
+            .all(|key| candidate[*key] == true)
+    })
+}
+
 fn empty_input_drift(facts: &Value) -> Option<EmptyInputDrift> {
     let value: EmptyInputDrift =
         serde_json::from_value(facts.get("emptyInputDrift")?.clone()).ok()?;
@@ -517,7 +535,7 @@ fn decode(bytes: &[u8]) -> Option<(Value, Option<Value>)> {
         return None;
     }
     let facts = value["facts"].as_object()?;
-    if !(11..=20).contains(&facts.len())
+    if !(11..=22).contains(&facts.len())
         || facts.keys().any(|key| {
             !FLAGS.contains(&key.as_str())
                 && ![
@@ -533,6 +551,8 @@ fn decode(bytes: &[u8]) -> Option<(Value, Option<Value>)> {
                     "sendActionObservation",
                     "emptyInputDrift",
                     "retryCandidateObservation",
+                    "retryAttempted",
+                    "retryForwarded",
                     "nativeTreeObservation",
                 ]
                 .contains(&key.as_str())
@@ -559,12 +579,27 @@ fn decode(bytes: &[u8]) -> Option<(Value, Option<Value>)> {
             "response-mismatch",
             "copied",
             "retry-diagnostic",
+            "retry-forwarded",
         ]
         .contains(&value["facts"]["stage"].as_str()?)
         || value["facts"]["sendForwarded"] == true && value["facts"]["sendAttempted"] != true
         || value["facts"]["sendAttempted"] == true && value["facts"]["inputVerified"] != true
         || value["facts"]["responseVerified"] == true && value["facts"]["stage"] != "copied"
     {
+        return None;
+    }
+    if facts.contains_key("retryAttempted") || facts.contains_key("retryForwarded") {
+        if !facts["retryAttempted"].is_boolean()
+            || !facts["retryForwarded"].is_boolean()
+            || facts["retryForwarded"] == true && facts["retryAttempted"] != true
+            || facts["retryForwarded"] == true
+                && facts["stage"] != "retry-forwarded"
+                && facts["stage"] != "action-uncertain"
+            || facts["stage"] == "retry-forwarded" && facts["retryForwarded"] != true
+        {
+            return None;
+        }
+    } else if facts["stage"] == "retry-forwarded" {
         return None;
     }
     validate_diagnostics(&value["facts"])?;
@@ -727,6 +762,9 @@ pub(crate) struct ClaudeLinuxChatSession<'a> {
     owned_input_observation: Option<OwnedInputObservation>,
     empty_input_drift: Option<EmptyInputDrift>,
     retry_candidate: Option<Value>,
+    retry_deadline: Option<Instant>,
+    retry_attempted: bool,
+    retry_dispatched: bool,
     native_tree: Option<Value>,
     submitted: u8,
     verified: u8,
@@ -769,6 +807,9 @@ impl Gui {
             owned_input_observation: None,
             empty_input_drift: None,
             retry_candidate: None,
+            retry_deadline: None,
+            retry_attempted: false,
+            retry_dispatched: false,
             native_tree: None,
             submitted: 0,
             verified: 0,
@@ -819,7 +860,7 @@ impl ClaudeLinuxChatSession<'_> {
         request["profileAuthority"] = self.profile.private_request(deadline)?;
         request["history"] = if matches!(
             mode,
-            "input-next-correlated" | "input-next-empty-class" | "retry-ready"
+            "input-next-correlated" | "input-next-empty-class" | "retry-ready" | "retry"
         ) {
             self.history.private_request()
         } else {
@@ -959,7 +1000,11 @@ impl ClaudeLinuxChatSession<'_> {
         timeout: Duration,
         gate: &ProviderGate,
     ) -> Result<(), Reason> {
-        if self.submitted != 3 || self.copied != 2 {
+        if self.submitted != 3
+            || self.copied != 2
+            || self.retry_dispatched
+            || self.retry_deadline.is_some()
+        {
             return Err(Reason::ActionUnsupported);
         }
         let prompt = self
@@ -967,6 +1012,7 @@ impl ClaudeLinuxChatSession<'_> {
             .clone()
             .ok_or(Reason::ActionUnsupported)?;
         let deadline = Instant::now() + timeout;
+        self.retry_deadline = Some(deadline);
         while !gate.failure_observed() {
             let remaining = deadline.saturating_duration_since(Instant::now());
             if remaining.is_zero() {
@@ -974,18 +1020,54 @@ impl ClaudeLinuxChatSession<'_> {
             }
             std::thread::sleep(Duration::from_millis(100).min(remaining));
         }
-        self.operation(
-            "retry-ready",
+        loop {
+            let facts = self.operation(
+                "retry-ready",
+                &prompt,
+                deadline.min(Instant::now() + Duration::from_secs(15)),
+            )?;
+            if retry_candidate_ready(&facts) {
+                return Ok(());
+            }
+            if Instant::now() >= deadline {
+                return Err(Reason::Timeout);
+            }
+            std::thread::sleep(
+                Duration::from_millis(100).min(deadline.saturating_duration_since(Instant::now())),
+            );
+        }
+    }
+    pub(crate) fn retry_once(&mut self) -> Result<(), Reason> {
+        let deadline = self.retry_deadline.ok_or(Reason::ActionUnsupported)?;
+        if self.retry_dispatched
+            || self.stage != "retry-diagnostic"
+            || !self.retry_candidate.as_ref().is_some_and(|candidate| {
+                retry_candidate_ready(&json!({"retryCandidateObservation":candidate}))
+            })
+            || self.submitted != 3
+            || self.copied != 2
+            || Instant::now() >= deadline
+        {
+            return Err(Reason::ActionUnsupported);
+        }
+        let prompt = self
+            .pending_prompt
+            .clone()
+            .ok_or(Reason::ActionUnsupported)?;
+        // Consumed before dispatch: uncertain transport/action never permits a fallback.
+        self.retry_dispatched = true;
+        self.retry_attempted = true;
+        let facts = self.operation(
+            "retry",
             &prompt,
             deadline.min(Instant::now() + Duration::from_secs(15)),
         )?;
-        // A passive candidate is not authority to repeat the failed turn.
-        Err(Reason::ActionUnsupported)
-    }
-    pub(crate) fn retry_once(&mut self) -> Result<(), Reason> {
-        self.stage = "recovery-scope-unimplemented".into();
-        self.failure_boundary = None;
-        Err(Reason::ActionUnsupported)
+        self.retry_attempted = facts["retryAttempted"] == true;
+        if facts["retryForwarded"] == true && self.stage == "retry-forwarded" {
+            Ok(())
+        } else {
+            Err(Reason::ActionUnsupported)
+        }
     }
     pub(crate) fn finish(
         mut self,
@@ -1000,7 +1082,7 @@ impl ClaudeLinuxChatSession<'_> {
         }
         let mut facts = json!({"schemaVersion":1,"mechanism":"claude-linux-native-chat","diagnosticsOnly":true,
             "stage":self.stage,"submittedTurns":self.submitted,"inputVerifiedTurns":self.verified,
-            "copiedResponses":self.copied,"retryAttempted":false,"clipboardCleared":cleared});
+            "copiedResponses":self.copied,"retryAttempted":self.retry_attempted,"clipboardCleared":cleared});
         if let Some(tree) = self.native_tree {
             facts["nativeTreeObservation"] = tree;
         }
@@ -1049,8 +1131,51 @@ impl ClaudeLinuxChatSession<'_> {
 
 #[cfg(test)]
 mod input_shape_tests {
-    use super::input_shape;
-    use serde_json::json;
+    use super::{decode, input_shape, retry_candidate_ready};
+    use serde_json::{Value, json};
+
+    #[test]
+    fn retry_requires_exact_failed_turn_and_preserves_uncertain_attempt_packets() {
+        let candidate = json!({"pendingUserCount":1,"historyMatched":true,
+            "conversationHeadingCount":6,"tryAgainCount":1,"retryCount":0,
+            "candidateLabel":"try-again","candidateEnabled":true,"candidateActionUnique":true,
+            "candidateHitMatched":true,"candidateUserAncestorMatched":true,"candidateRowHeadingCount":2});
+        let mut facts = json!({"schemaVersion":1,"mechanism":"claude-linux-native-chat",
+            "diagnosticsOnly":true,"stage":"retry-diagnostic","inputVerified":false,
+            "pasteAttempted":false,"sendAttempted":false,"sendForwarded":false,
+            "responseVerified":false,"toolVerified":false,"recoveryVerified":false,
+            "retryCandidateObservation":candidate});
+        assert!(retry_candidate_ready(&facts));
+        for key in [
+            "historyMatched",
+            "candidateEnabled",
+            "candidateActionUnique",
+            "candidateHitMatched",
+            "candidateUserAncestorMatched",
+        ] {
+            facts["retryCandidateObservation"][key] = json!(false);
+            assert!(!retry_candidate_ready(&facts));
+            facts["retryCandidateObservation"][key] = json!(true);
+        }
+        facts
+            .as_object_mut()
+            .unwrap()
+            .remove("retryCandidateObservation");
+        facts["retryAttempted"] = json!(true);
+        facts["retryForwarded"] = json!(false);
+        facts["stage"] = json!("action-uncertain");
+        let packet =
+            |facts: &Value| serde_json::to_vec(&json!({"facts":facts,"binding":null})).unwrap();
+        assert!(decode(&packet(&facts)).is_some());
+        facts["retryForwarded"] = json!(true);
+        facts["stage"] = json!("retry-forwarded");
+        assert!(decode(&packet(&facts)).is_some());
+        assert_eq!(facts["sendAttempted"], false);
+        facts["retryAttempted"] = json!(false);
+        assert!(decode(&packet(&facts)).is_none());
+        facts["retryAttempted"] = json!("private-value");
+        assert!(decode(&packet(&facts)).is_none());
+    }
 
     #[test]
     fn input_shape_is_closed_bounded_and_diagnostic_only() {

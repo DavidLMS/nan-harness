@@ -47,3 +47,22 @@ bool terminate_verified_handle(const CleanupProof& proof, Terminate terminate) {
     return proof.before_deadline && proof.owner_alive && proof.creation_matches
         && proof.image_matches && terminate();
 }
+
+// A signaled original process handle is terminal and cannot authorize an action.
+// Creation equality remains mandatory even when its image is no longer queryable.
+enum class RetainedProcessState { Live, Exited, Unavailable };
+enum class RetainedTargetIdentity { Live, Terminal, CreationRejected, StateRejected, ImageRejected };
+template<class State, class Image>
+RetainedTargetIdentity retained_target_identity(bool creation_matches, State state, Image image) {
+    if (!creation_matches) return RetainedTargetIdentity::CreationRejected;
+    const auto initial = state();
+    if (initial == RetainedProcessState::Exited) return RetainedTargetIdentity::Terminal;
+    if (initial != RetainedProcessState::Live) return RetainedTargetIdentity::StateRejected;
+    const bool image_matches = image();
+    // The image query may race ordinary renderer shutdown. Recheck only this
+    // retained handle; never look up another PID or extend the original cutoff.
+    const auto final = state();
+    if (final == RetainedProcessState::Exited) return RetainedTargetIdentity::Terminal;
+    if (final != RetainedProcessState::Live) return RetainedTargetIdentity::StateRejected;
+    return image_matches ? RetainedTargetIdentity::Live : RetainedTargetIdentity::ImageRejected;
+}

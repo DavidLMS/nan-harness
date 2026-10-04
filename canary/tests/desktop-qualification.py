@@ -54,6 +54,16 @@ class CodexDriverFactsTests(unittest.TestCase):
                 path.write_text(json.dumps({**value, **changes}))
                 with self.assertRaises(ValueError):
                     q.semantic_observations(tmp, 'chatgpt-desktop')
+            for failure in ('request-json', 'request-policy', 'connection-read',
+                            'binding-read', 'connection-schema', 'binding-schema'):
+                receipt = {**value, 'errorCategory': 'invalid-request', 'preAttachFailure': failure}
+                path.write_text(json.dumps(receipt))
+                self.assertEqual(q.semantic_observations(tmp, 'chatgpt-desktop'), [receipt])
+                for change in ({'preAttachFailure': 'PRIVATE'}, {'attached': True},
+                               {'errorCategory': None}):
+                    path.write_text(json.dumps({**receipt, **change}))
+                    with self.assertRaises(ValueError):
+                        q.semantic_observations(tmp, 'chatgpt-desktop')
             path.write_text(json.dumps(value))
             with self.assertRaises(ValueError):
                 q.semantic_observations(tmp, 'claude-desktop')
@@ -647,6 +657,21 @@ class QualificationTests(unittest.TestCase):
             self.assertEqual(q.semantic_observations(root, 'claude-desktop')[0]['chatCapability']['status'],'unavailable')
             path.write_text(json.dumps({**valid,'currentMode':{**mode,'status':'missing'}}))
             with self.assertRaises(ValueError): q.semantic_observations(root, 'claude-desktop')
+
+    def test_recovery_provider_receipt_survives_failed_ui_readback(self):
+        oracle = dict(schemaVersion=1, mechanism='semantic-provider-oracle', stage='recovery',
+                      toolCompleted=True, toolRecordingBounded=True, toolVerified=True,
+                      fixtureResponseVerified=False, failureObserved=True, providerGenerationCount=4)
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'provider.json'
+            path.write_text(json.dumps(oracle))
+            observed = q.semantic_observations(root, 'zed-desktop')[0]
+            self.assertEqual(observed['providerGenerationCount'], 4)
+            self.assertFalse(observed['fixtureResponseVerified'])
+            for invalid in (True, -1, 100001, 'PRIVATE'):
+                path.write_text(json.dumps({**oracle, 'providerGenerationCount': invalid}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'zed-desktop')
 
     def test_tool_result_diagnostics_are_closed_and_do_not_certify_file_read(self):
         oracle = dict(schemaVersion=1, mechanism='semantic-provider-oracle', stage='tool',
@@ -2140,7 +2165,7 @@ class QualificationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             path = root / 'failure.json'
-            for stage in 'request path file-open file-hash file-identity process-open snapshot inspector-parent ancestry target-open target-identity owner-recheck deadline transport'.split():
+            for stage in 'request path file-open file-hash file-identity process-open snapshot inspector-parent ancestry target-open target-identity target-creation target-state target-image owner-recheck deadline transport'.split():
                 item = {**value, 'stage': stage}
                 path.write_text(json.dumps(item))
                 self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [item])
@@ -4107,6 +4132,16 @@ class CampaignDiagnosticTests(unittest.TestCase):
         failed = value | dict(stage='command', cause='binding', bindingIndex=2, ancestorCount=0,
             ownedCount=0, privacy=[None]*11, emptyRoots=[None,None], codeHomeAbsent=None, completed=False)
         self.check_receipt(failed, 'chatgpt-desktop', [{'bindingIndex':8}, {'completed':True}])
+
+    def test_linux_retry_receipt_requires_original_failed_turn_and_action(self):
+        value = dict(schemaVersion=1, mechanism='claude-linux-native-chat', diagnosticsOnly=True,
+                     stage='retry-forwarded', submittedTurns=3, inputVerifiedTurns=3,
+                     copiedResponses=2, retryAttempted=True, clipboardCleared=True)
+        self.check_receipt(value, 'claude-desktop', [
+            {'submittedTurns':2}, {'copiedResponses':1}, {'retryAttempted':False},
+            {'retryAttempted':1}, {'rawLabel':'PRIVATE'}])
+        self.check_receipt(value | dict(stage='copied', copiedResponses=3), 'claude-desktop', [
+            {'retryAttempted':False}, {'submittedTurns':2}])
 
     def test_retry_candidate_is_passive_and_bound_to_the_failed_third_turn(self):
         candidate = dict(pendingUserCount=1, historyMatched=True, conversationHeadingCount=5,

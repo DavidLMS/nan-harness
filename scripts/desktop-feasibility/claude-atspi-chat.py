@@ -401,6 +401,7 @@ class Controller:
         self.boundary = 'request'
         self.restored = False
         self.copy_attempted = False
+        self.retry_attempted = False
         self.focus_attempted = self.paste_attempted = self.send_attempted = False
         self.facts = dict(schemaVersion=1, mechanism='claude-linux-native-chat', diagnosticsOnly=True,
             stage='source', inputVerified=False, pasteAttempted=False,
@@ -651,9 +652,16 @@ class Controller:
             self.facts['stage'] = 'focus'
             self.proof()
             self.focus_attempted = True
+            self.empty_focus_transition=getattr(self,'empty_class_witness',None) is not None
+            self.empty_focus_resealed=False
             if self.query('grab_focus', self.editor) is not True:
                 raise Rejected()
             self.settle_focus()
+            # Seal the current strict empty model after focus, then freeze it for paste.
+            if self.empty_focus_transition:
+                self.proof(focused=True)
+                self.empty_class_proof()
+            self.empty_focus_transition=False
             if self.query('text', self.editor) != initial:
                 raise Rejected()
             self.facts['stage'] = 'paste'
@@ -932,6 +940,26 @@ class Controller:
         current=getattr(self.adapter,'empty_class_witness',None)
         if current!=self.empty_class_witness:
             original=self.empty_class_witness
+            if (getattr(self,'empty_focus_transition',False)
+                    and not getattr(self,'empty_focus_resealed',False)
+                    and type(original) is tuple and len(original)==3
+                    and type(current) is tuple and len(current)==3):
+                drift=empty_input_drift(original,current,True)
+                # A freshly generated witness still proves the exact source-empty
+                # model. Only focus state/attributes may change during this one seal.
+                stable=all(drift[key] for key in ('rootSame','textSame','recordKeysSame',
+                    'textRecordsSame','otherValuesSame'))
+                focus_state=drift['stateSame'] or drift['focusOnlyStateChange']
+                if (stable and focus_state and current[0]==self.editor
+                        and self.query('focused',self.editor)):
+                    self.next_input_proof()
+                    self.query('text',self.editor)
+                    if (getattr(self.adapter,'empty_class_witness',None)==current
+                            and self.query('focused',self.editor)):
+                        self.empty_class_witness=current
+                        self.empty_focus_resealed=True
+                        return
+
             self.facts['emptyInputDrift']=empty_input_drift(original,current,self.focus_attempted)
             state_only=(type(current) is tuple and type(original) is tuple
                 and len(current)==len(original)==3 and current[:2]==original[:2]
@@ -975,8 +1003,8 @@ class Controller:
         # attachment and final frame custody bracket it. Focus/paste reprove afresh.
         self.response_frame_proof()
 
-    def retry_ready(self, prompt, records):
-        # Passive candidate evidence only. Labels and common ancestry never grant Retry.
+    def retry_ready(self, prompt, records, activate=False):
+        # Correlate the failed owned prompt and completed history before any action.
         if (not self.response_only or type(prompt) is not str or not prompt
                 or len(prompt.encode())>4096 or type(records) is not list
                 or len(records)>2 or getattr(self.adapter,'profile_guard',None) is None):
@@ -1060,6 +1088,34 @@ class Controller:
             raise Rejected('response-row-attachment')
         self.facts['retryCandidateObservation']=first[0]
         self.facts['stage']='retry-diagnostic'
+        if not activate:
+            return self.facts
+        if self.retry_attempted:
+            raise Rejected('action')
+        observation=first[0]
+        if (observation['pendingUserCount']!=1 or not observation['historyMatched']
+                or observation['tryAgainCount']+observation['retryCount']!=1
+                or not all(observation[key] for key in ('candidateEnabled',
+                    'candidateActionUnique','candidateHitMatched','candidateUserAncestorMatched'))):
+            raise Rejected('response-row-attachment')
+        # Retain the exact candidate, then repeat the complete owned-turn proof.
+        # A fresh name lookup never substitutes another action target.
+        node,item,bounds,actions,chain,user_chain=first[2]
+        selected=unique_activation_index(actions)
+        if observe()!=first:
+            raise Rejected('response-row-attachment')
+        self.response_frame_proof()
+        self.facts.pop('retryCandidateObservation',None)
+        self.retry_attempted=True
+        self.facts.update(retryAttempted=True,retryForwarded=False,stage='action-uncertain')
+        try:
+            if self.query('invoke_once',node,selected) is not True:
+                raise Rejected('action')
+            self.facts['retryForwarded']=True
+            self.response_frame_proof()
+            self.facts['stage']='retry-forwarded'
+        except Exception as error:
+            self.failure(error)
         return self.facts
 
     def response_scope(self, marker, nodes=None):
@@ -1406,7 +1462,7 @@ def main():
         request = json.loads(raw)
         required = {'pid','bus','path','checkerPid','window','bounds','name','nativeExecutable',
             'deadline','mode','value','binding','profileAuthority','history'}
-        if type(request) is not dict or set(request)!=required or request['mode'] not in ('input','input-first-owned','input-next-correlated','input-next-empty-class','copy','retry-ready'):
+        if type(request) is not dict or set(request)!=required or request['mode'] not in ('input','input-first-owned','input-next-correlated','input-next-empty-class','copy','retry-ready','retry'):
             raise Rejected()
         if type(request['value']) is not str or len(request['value'].encode())>4096:
             raise Rejected()
@@ -1425,16 +1481,16 @@ def main():
             controller.empty_class_opt_in=request['mode']=='input-next-empty-class'
             controller.restore_next_input(request['binding'],request['history'])
         else:
-            if request['mode']!='retry-ready' and request['history'] != []:
+            if request['mode'] not in ('retry-ready','retry') and request['history'] != []:
                 raise Rejected('policy')
             if request['binding'] is not None:
-                controller.restore(request['binding'], response=request['mode'] in ('copy','retry-ready'))
+                controller.restore(request['binding'], response=request['mode'] in ('copy','retry-ready','retry'))
         if request['mode'] in ('input','input-first-owned','input-next-correlated','input-next-empty-class'):
             facts = controller.submit(request['value'], request['mode']=='input-first-owned')
-        elif request['mode']=='retry-ready':
+        elif request['mode'] in ('retry-ready','retry'):
             if request['binding'] is None:
                 raise Rejected('policy')
-            facts=controller.retry_ready(request['value'],request['history'])
+            facts=controller.retry_ready(request['value'],request['history'],activate=request['mode']=='retry')
         else:
             if request['binding'] is None:
                 raise Rejected()

@@ -4,7 +4,39 @@
 #endif
 #include <cassert>
 #include <map>
+static void retained_identity_contract() {
+    using State = RetainedProcessState;
+    using Identity = RetainedTargetIdentity;
+    unsigned images = 0, observations = 0;
+    auto check = [&](bool creation, State first, State last, bool image) {
+        images = 0; observations = 0;
+        return retained_target_identity(creation,
+            [&] { return observations++ == 0 ? first : last; },
+            [&] { ++images; return image; });
+    };
+    assert(check(false, State::Exited, State::Exited, true) == Identity::CreationRejected);
+    assert(images == 0 && observations == 0);
+    assert(check(true, State::Exited, State::Exited, false) == Identity::Terminal);
+    assert(images == 0 && observations == 1);
+    assert(check(true, State::Unavailable, State::Exited, true) == Identity::StateRejected);
+    assert(images == 0);
+    assert(check(true, State::Live, State::Exited, false) == Identity::Terminal);
+    assert(images == 1 && observations == 2);
+    assert(check(true, State::Live, State::Exited, true) == Identity::Terminal);
+    assert(check(true, State::Live, State::Live, false) == Identity::ImageRejected);
+    assert(check(true, State::Live, State::Unavailable, true) == Identity::StateRejected);
+    assert(check(true, State::Live, State::Live, true) == Identity::Live);
+    // Terminal admission never supplies the live image proof required to act.
+    unsigned terminations = 0;
+    for (auto identity : {Identity::Terminal, Identity::CreationRejected,
+        Identity::StateRejected, Identity::ImageRejected}) {
+        assert(!terminate_verified_handle({true,true,true,identity == Identity::Live},
+            [&] { ++terminations; return true; }));
+    }
+    assert(terminations == 0);
+}
 int main() {
+    retained_identity_contract();
     std::vector<CorrelationEntry> rows{{1,0,false},{2,1,false},{3,2,true}};
     std::map<std::uint32_t,std::uint64_t> times{{1,10},{2,20},{3,30}};
     auto query = [&](std::uint32_t pid, std::uint64_t& time) {

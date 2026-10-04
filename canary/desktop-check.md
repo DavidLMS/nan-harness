@@ -28,25 +28,32 @@ explicit channel; original process, profile, listener, document identity,
 visibility, and DOM actionability remain required. Provider response, file
 read, controlled failure, UI recovery, and cleanup remain acceptance criteria.
 Zed Linux's candidate Retry action uses the enabled accessible control and
-exact pointer hit; cursor artwork is advisory. Claude Linux recovery remains
-unfinished, and its empty-input witness still rejects unexplained drift.
+exact pointer hit; cursor artwork is advisory. Claude Linux's candidate performs one ordinary accessible Retry action after
+matching the failed turn; its empty-input witness still rejects unexplained drift.
 None of these candidate changes establishes a new native pass by itself.
 
-The first joint campaign, [37219615237](https://github.com/DavidLMS/nan-harness/actions/runs/37219615237),
-ran commit `063445a7353f07bb85fc99d6132efb803ac3b88e`. All six cells retained
-passing application/global cleanup; none completed acceptance.
+The second joint campaign, [37220987856](https://github.com/DavidLMS/nan-harness/actions/runs/37220987856),
+ran commit `e9bebe4cde8463a22cee312be3ba3d919531f8cb`. All six jobs completed;
+none completed acceptance. Five cells retained passing application/global
+cleanup. Claude Windows stopped after its first probe because cleanup failed.
 
-| Cell | Observed boundary | Following correction |
+| Cell | Latest observed boundary | Next required evidence |
 | --- | --- | --- |
-| Zed Linux | Response and tool pass; Retry still gated by cursor artwork | Forward the accessible-hit policy into the cleared helper environment |
-| Codex Linux | Public home ready in all three sessions; editor rejected before fill | Use a contenteditable hit test instead of a button-only callback |
-| Codex macOS | Role/Continue completed; next-screen wait expires | Admit the exact public home after Continue and observe other transition screens |
-| Codex Windows | Profile preparation rejects before launch | Match Windows path construction, skip drive prefixes, test the actual prepared command |
-| Claude Linux | First response copied; next-input tree query rejects | Share one fresh complete tree per proof and retain typed failure causes |
-| Claude Windows | Profile and bridge seal complete; chat-session admission rejects | Reuse validated Windows canonical directory handling |
+| Zed Linux | Response and tool pass; Retry pointer dispatched; recovered response absent | Provider request/response observation after Retry, including failed UI readback |
+| Codex Linux | First response verified in two sessions; next composer rejected | Reuse the thread composer for the tool and recovery turns |
+| Codex macOS | One session reaches the prepared home; preattach request rejected | Exact private-input rejection cause and stable onboarding transitions |
+| Codex Windows | Profile preparation rejects before launch; receipt suppressed | Admit the Codex renderer diagnostic route and identify the actual preparation boundary |
+| Claude Linux | First response copied; focused empty-editor witness changes | Verify the strict witness captured after focus and the implemented UI Retry |
+| Claude Windows | First input submitted and provider response verified; native tree and cleanup fail | Copy the response and verify cleanup of original live/exited descendants |
 
-These corrections still require native verification. Claude Linux's passive
-Retry observation does not yet authorize a recovery action.
+The next candidate preserves recovery provider facts on failed UI readback,
+repairs the Codex Windows observation route, and seals Claude Linux's empty
+input after its explicit focus transition. The candidate also implements Claude
+Linux Retry and accepts actionable Codex editors whose CSS overrides a parent
+pointer-event setting. The Windows cleanup candidate
+recognizes already-exited retained handles without authorizing termination.
+These corrections still require native verification; local fixtures do not
+establish a new cell pass.
 
 
 The hidden launch-wrapper option is restricted to deterministic ChatGPT startup
@@ -83,7 +90,7 @@ records Pen as excluded rather than accepted. No test account is authorized.
 Personal-machine isolation and live-provider behavior still require separate
 evidence.
 
-The latest Linux Claude trial, [37208339146](https://github.com/DavidLMS/nan-harness/actions/runs/37208339146)
+An earlier Linux Claude trial, [37208339146](https://github.com/DavidLMS/nan-harness/actions/runs/37208339146)
 (`d158cdb2`, official `2.9939.4`), sends and independently copies the first
 response in all three fresh sessions. The next input is rejected: its 17
 characters match neither a retained prompt nor an actual placeholder attribute.

@@ -1502,11 +1502,15 @@ def semantic_observations(directory, app):
                     or type(value['stage']) is not str or value['stage'] not in {
                         'source','focus','paste','readback','send','input-not-empty','blocked',
                         'action-uncertain','deadline','clipboard-cleanup','sent','response-pending',
-                        'response-mismatch','copied','recovery-scope-unimplemented','retry-diagnostic'}
+                        'response-mismatch','copied','recovery-scope-unimplemented','retry-diagnostic','retry-forwarded'}
                     or any(type(value[key]) is not int or not 0 <= value[key] <= 3
                            for key in ('submittedTurns','inputVerifiedTurns','copiedResponses'))
                     or not value['copiedResponses'] <= value['submittedTurns'] <= value['inputVerifiedTurns']
-                    or value['retryAttempted'] is not False or type(value['clipboardCleared']) is not bool):
+                    or type(value['retryAttempted']) is not bool or type(value['clipboardCleared']) is not bool
+                    or value['retryAttempted'] and (value['submittedTurns'] != 3 or value['copiedResponses'] < 2)
+                    or value['copiedResponses'] == 3 and not value['retryAttempted']
+                    or value['stage'] == 'retry-forwarded' and not value['retryAttempted']
+                    or value['stage'] == 'retry-diagnostic' and value['retryAttempted']):
                 raise ValueError('invalid Claude Linux native Chat diagnostic')
             if 'nativeTreeObservation' in value:
                 if value['stage'] not in {'blocked','deadline','clipboard-cleanup','action-uncertain'}:
@@ -1821,7 +1825,7 @@ def semantic_observations(directory, app):
             record.update({k:value[k] for k in ['diagnosticsOnly','completedStageCount','lastCompletedStage','outcome']})
         elif mechanism == 'windows-owned-cleanup-preflight':
             fields = set('schemaVersion mechanism diagnosticsOnly stage'.split())
-            stages = set('request path file-open file-hash file-identity process-open snapshot inspector-parent ancestry target-open target-identity owner-recheck deadline transport'.split())
+            stages = set('request path file-open file-hash file-identity process-open snapshot inspector-parent ancestry target-open target-identity target-creation target-state target-image owner-recheck deadline transport'.split())
             if (set(value) != fields or app != 'claude-desktop' or value['diagnosticsOnly'] is not True
                     or type(value['stage']) is not str or value['stage'] not in stages):
                 raise ValueError('invalid Windows owned cleanup preflight')
@@ -2243,7 +2247,7 @@ def semantic_observations(directory, app):
             flags = set('endpointOwned targetVerified attached bindingVerified auxiliaryInert codingComposerReady uniqueComposer inputReadback inputSubmitted userTurnObserved responseVerified errorObserved retryControl retryAttempted retryCompleted providerResponseVerified'.split())
             fields = flags | set('schemaVersion mechanism diagnosticsOnly assistantTurnCount providerGenerationCount errorCategory'.split())
             errors = {None, 'ownership-lost', 'composer-unavailable', 'stale-turn', 'input-mismatch', 'action-uncertain', 'retry-unavailable', 'response-timeout', 'query-failed', 'invalid-request'}
-            if (app != 'chatgpt-desktop' or set(value) != fields or value['diagnosticsOnly'] is not True
+            if (app != 'chatgpt-desktop' or set(value) - {'preAttachFailure'} != fields or value['diagnosticsOnly'] is not True
                     or any(type(value[key]) is not bool for key in flags)
                     or type(value['assistantTurnCount']) is not int or not 0 <= value['assistantTurnCount'] <= 4096
                     or value['providerGenerationCount'] is not None and (type(value['providerGenerationCount']) is not int or not 0 <= value['providerGenerationCount'] <= 4096)
@@ -2252,6 +2256,11 @@ def semantic_observations(directory, app):
                     or value['retryCompleted'] and not value['retryAttempted']):
                 raise ValueError('invalid Codex renderer qualification')
             record.update({key: value[key] for key in fields - {'schemaVersion', 'mechanism'}})
+            if 'preAttachFailure' in value:
+                if value['errorCategory'] != 'invalid-request' or value['attached']:
+                    raise ValueError('unexpected Codex preattach failure')
+                enum(record, value, 'preAttachFailure', {'request-json', 'request-policy',
+                     'connection-read', 'binding-read', 'connection-schema', 'binding-schema'})
         elif mechanism == 'codex-linux-startup-dialog':
             hashes = dict(completeSourceSha256='16b6c59e36aa19da0c4ec1560b6cedec43fabffeca2601710cb6f25f22c593cc',
                           onboardingSourceSha256='b8dff84333a6cfb62341d43642087ba8d72dd31225ed2b3b8e29ad7da31372c6',
@@ -2796,7 +2805,12 @@ def semantic_observations(directory, app):
                     raise ValueError('invalid policy config identity')
                 record[key] = value[key]
         elif mechanism == 'semantic-provider-oracle':
-            enum(record, value, 'stage', {'tool', 'failure'})
+            enum(record, value, 'stage', {'tool', 'failure', 'recovery'})
+            if 'providerGenerationCount' in value:
+                count = value['providerGenerationCount']
+                if type(count) is not int or not 0 <= count <= 100000:
+                    raise ValueError('invalid provider generation count')
+                record['providerGenerationCount'] = count
             for key in ('toolCompleted', 'toolRecordingBounded', 'toolVerified',
                         'fixtureResponseVerified', 'failureObserved'):
                 flag(record, value, key)

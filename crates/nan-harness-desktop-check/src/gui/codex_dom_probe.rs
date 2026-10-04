@@ -38,6 +38,17 @@ enum DriverError {
     InvalidRequest,
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum PreAttachFailure {
+    RequestJson,
+    RequestPolicy,
+    ConnectionRead,
+    BindingRead,
+    ConnectionSchema,
+    BindingSchema,
+}
+
 /// Closed evidence flags keep the wire format boolean without treating missing
 /// evidence as a successful state.
 #[derive(Clone, Copy, Default, Deserialize, Serialize)]
@@ -93,6 +104,8 @@ struct Facts {
     retry_attempted: Evidence,
     retry_completed: Evidence,
     error_category: Option<DriverError>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pre_attach_failure: Option<PreAttachFailure>,
     #[serde(default)]
     provider_response_verified: Evidence,
     #[serde(default)]
@@ -112,6 +125,7 @@ impl Facts {
             && self.coding_composer_ready.confirmed()
             && self.assistant_turn_count <= 4096
             && self.error_category.is_none()
+            && self.pre_attach_failure.is_none()
     }
 
     fn ui_verified(&self, turn: DomTurn<'_>) -> bool {
@@ -468,6 +482,28 @@ mod tests {
         assert!(facts.ui_verified(retry));
         facts.binding_verified = false.into();
         assert!(!facts.ui_verified(retry));
+        for failure in [
+            "request-json",
+            "request-policy",
+            "connection-read",
+            "binding-read",
+            "connection-schema",
+            "binding-schema",
+        ] {
+            let mut receipt = value.clone();
+            receipt["errorCategory"] = "invalid-request".into();
+            receipt["attached"] = false.into();
+            receipt["preAttachFailure"] = failure.into();
+            let decoded: Facts = serde_json::from_value(receipt).unwrap();
+            assert!(!decoded.ui_verified(response));
+            assert_eq!(
+                serde_json::to_value(decoded).unwrap()["preAttachFailure"],
+                failure
+            );
+        }
+        let mut unknown = value.clone();
+        unknown["preAttachFailure"] = "private path".into();
+        assert!(serde_json::from_value::<Facts>(unknown).is_err());
         let mut malformed = value;
         malformed["rawResponse"] = "private".into();
         assert!(serde_json::from_value::<Facts>(malformed).is_err());

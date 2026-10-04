@@ -325,8 +325,18 @@ int windows_claude_chat_turn() {
     if(FAILED(CoCreateInstance(CLSID_CUIAutomation8,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&automation)))
         || FAILED(automation->put_ConnectionTimeout(100)) || FAILED(automation->put_TransactionTimeout(100))
         || FAILED(automation.As(&c.automation)) || FAILED(automation->get_RawViewWalker(&c.walker)))return emit("tree");
-    if(FAILED(automation->ElementFromHandle(c.request.window,&turn.root)) || !turn.root
-        || !c.append(turn.root.Get(),0))return emit("tree");
+    if(FAILED(automation->ElementFromHandle(c.request.window,&turn.root)) || !turn.root)
+        return emit("tree-query");
+    if(!c.append(turn.root.Get(),0)) {
+        const std::string failure=c.stage;
+        if(failure=="query" || failure=="root-process-query" || failure=="descendant-process-query")
+            return emit("tree-query");
+        if(failure=="limit")return emit("tree-limit");
+        if(failure=="duplicate")return emit("tree-duplicate");
+        if(failure=="heading-property")return emit("tree-type");
+        if(failure=="deadline")return emit("deadline");
+        return emit("tree-pid");
+    }
     c.observe_mode(turn.root.Get());c.observe_capability(turn.root.Get());
     if(std::string(c.mode_status)!="chat")return emit("mode");
     if(turn.mode!="input-replace-owned")return emit(turn.action());

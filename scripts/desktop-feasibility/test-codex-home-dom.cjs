@@ -28,7 +28,8 @@ async function trial(change={}) {
   getBoundingClientRect:()=>({left:10,top:10,width:100,height:40}),contains:()=>false};
  const document={querySelectorAll:()=>change.modal?[input]:[],elementFromPoint:()=>change.covered?{}:input};
  input.ownerDocument=change.foreignDoc?{}:document;
- const globals={document,innerWidth:800,innerHeight:600,getComputedStyle:()=>({display:change.hidden?'none':'block',visibility:'visible',pointerEvents:change.pointerDisabled?'none':'auto'}),input};
+ if(change.ancestorPointerDisabled)input.parentElement={isConnected:true,ownerDocument:document,parentElement:null};
+ const globals={document,innerWidth:800,innerHeight:600,getComputedStyle:e=>({display:change.hidden?'none':'block',visibility:'visible',pointerEvents:change.pointerDisabled||change.ancestorPointerDisabled&&e!==input?'none':'auto'}),input};
  const held={evaluate:async(fn,arg)=>fn===sampleEditor?vm.runInNewContext(`(${fn})(input)`,globals):fn(input,arg),dispose:async()=>{}};
  const editor={count:async()=>change.duplicate?2:1,elementHandle:async()=>held,
   evaluate:async(fn,arg)=>arg===held?!change.replaced:fn({textContent:text},arg),
@@ -43,6 +44,7 @@ async function trial(change={}) {
  return {facts,fills,clicks};
 }
 (async()=>{
+ const inherited=await trial({ancestorPointerDisabled:true});assert.equal(inherited.facts.responseVerified,true);
  const good=await trial();assert.equal(good.facts.responseVerified,true);assert.equal(good.fills,1);assert.equal(good.clicks,1);
  for(const key of ['draft','duplicate','replaced','covered','modal','disabled','readonly','foreignDoc','inert','hidden','pointerDisabled','wrongTag']){const bad=await trial({[key]:true});assert.equal(bad.fills,0,key);assert.equal(bad.clicks,0,key);}
  for(const key of ['readback','ownerAfterFill']){const bad=await trial({[key]:true});assert.equal(bad.fills,1,key);assert.equal(bad.clicks,0,key);}

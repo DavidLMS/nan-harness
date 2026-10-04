@@ -37,8 +37,12 @@ function sampleEditor(control) {
     return r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden';};
   if(!visible(control))return blocked('hidden');
   if([...document.querySelectorAll('[role="dialog"],[aria-modal="true"],[role="alertdialog"],[role="menu"]')].some(visible))return blocked('foreign-overlay');
+  if(getComputedStyle(control).pointerEvents==='none')return blocked('pointer-disabled');
   for(let e=control,depth=0;e;e=e.parentElement) {
-    if(++depth>64||getComputedStyle(e).pointerEvents==='none')return blocked('pointer-disabled');
+    // An ancestor can disable its own hit area while a child explicitly opts in.
+    // The editor's computed property and elementFromPoint prove its actual hit.
+    if(++depth>64)return blocked('ancestor-limit');
+    if(!e.isConnected||e.ownerDocument!==document)return blocked('detached-or-inert');
   }
   const r=control.getBoundingClientRect(),points=[];
   for(const fy of [0.25,0.5,0.75])for(const fx of [0.25,0.5,0.75]) {
@@ -268,22 +272,28 @@ async function main() {
     codingComposerReady:false,uniqueComposer:false,inputReadback:false,inputSubmitted:false,
     userTurnObserved:false,assistantTurnCount:0,responseVerified:false,errorObserved:false,
     retryControl:false,retryAttempted:false,retryCompleted:false,errorCategory:'invalid-request'};
+  let preAttachFailure='request-json';
   try {
     const request=JSON.parse(fs.readFileSync(process.argv[3],'utf8'));
+    preAttachFailure='request-policy';
     if(process.argv[2]!=='--qualify'||!validRequest(request)
       ||process.env.GITHUB_ACTIONS!=='true'||process.env.RUNNER_ENVIRONMENT!=='github-hosted'
       ||process.env.NANH_DESKTOP_RENDERER_APP!=='chatgpt-desktop')throw Error('policy');
     const root=path.dirname(process.argv[3]);
+    preAttachFailure='connection-read';
     const connection=readPrivate(fs,path,request.connectionPath,root,`connection-${request.ownerPid}.json`);
+    preAttachFailure='binding-read';
     const binding=readPrivate(fs,path,request.mainBindingPath,root,`main-binding-${request.ownerPid}.private`);
+    preAttachFailure='connection-schema';
     if(!connection||Object.keys(connection).length!==3||connection.schemaVersion!==1
       ||!Number.isSafeInteger(connection.port)||connection.port<1025||connection.port>65535
-      ||!Number.isSafeInteger(connection.launcherPid)||connection.launcherPid<2
-      ||!validBinding(binding,request,connection))throw Error('binding');
+      ||!Number.isSafeInteger(connection.launcherPid)||connection.launcherPid<2)throw Error('connection');
+    preAttachFailure='binding-schema';
+    if(!validBinding(binding,request,connection))throw Error('binding');
+    facts.errorCategory='ownership-lost';
     const rootProof=require('./endpoint-ownership.cjs').proof(String(request.ownerPid),String(connection.port));
     const endpoint=require('./endpoint-ownership.cjs').proof(String(connection.launcherPid),String(connection.port));
     const owner=()=>rootProof.descendant(connection.launcherPid)&&endpoint.ownedEndpoint();
-    facts.errorCategory='ownership-lost';
     if(!owner())throw Error('owner');
     const {chromium}=require('../../.github/web-check/node_modules/playwright');
     const deadline=Date.now()+request.timeoutMs;
@@ -292,7 +302,10 @@ async function main() {
     const page=await bindRecordedMain(browser,binding,owner,deadline,pageIdentity,directCDP);
     if(!page)throw Error('main');
     facts=await runTurn(page,async until=>await bindRecordedMain(browser,binding,owner,until,pageIdentity,directCDP)===page,request,deadline);
-  } catch {if(facts.errorCategory===null)facts.errorCategory='query-failed';}
+  } catch {
+    if(facts.errorCategory==='invalid-request')facts.preAttachFailure=preAttachFailure;
+    if(facts.errorCategory===null)facts.errorCategory='query-failed';
+  }
   finally {if(browser)await browser.close().catch(()=>{});}
   fs.writeFileSync(output,JSON.stringify(facts)+'\n',{mode:0o600,flag:'wx'});
   process.exitCode=facts.errorCategory===null?0:1;
@@ -301,4 +314,5 @@ exports.bindRecordedMain=bindRecordedMain;
 exports.sameIdentity=sameIdentity;
 exports.validBinding=validBinding;
 exports.validRequest=validRequest;
+exports.readPrivate=readPrivate;
 if(require.main===module)main().catch(()=>{process.exitCode=1;});
