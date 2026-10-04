@@ -3248,6 +3248,26 @@ class ClaudeConfigurationIoFailureTests(unittest.TestCase):
             path.write_text(json.dumps(value))
             self.assertNotIn('configurationIoFailure', q.semantic_observations(root, 'claude-desktop')[0])
 
+class ClaudePersistAttributeTests(unittest.TestCase):
+    def test_same_file_flags_are_advisory_nullable_and_payload_closed(self):
+        value=dict(schemaVersion=1,mechanism='claude-cli-prelaunch',diagnosticsOnly=True,
+                   phase='prelaunch',stage='configuration',status='failed',configurationSubstage='persist',
+                   configurationDocument='normal-config',configurationIoFailure='sharing-violation')
+        flags=dict(temporaryBefore=False,temporaryAfter=True,readonlyBefore=False,readonlyAfter=False)
+        with tempfile.TemporaryDirectory() as root:
+            path=Path(root)/'claude-cli-prelaunch.json'
+            for attributes in (flags,dict.fromkeys(flags,None)):
+                path.write_text(json.dumps({**value,'configurationFileAttributes':attributes}))
+                self.assertEqual(q.semantic_observations(root,'claude-desktop')[0]['configurationFileAttributes'],attributes)
+            for attributes in ([],{**flags,'temporaryBefore':1},{**flags,'path':'PRIVATE'},
+                               {**flags,'temporaryBefore':None}):
+                path.write_text(json.dumps({**value,'configurationFileAttributes':attributes}))
+                with self.assertRaises(ValueError):q.semantic_observations(root,'claude-desktop')
+            for change in ({'configurationIoFailure':'other'},{'configurationDocument':'profile'},
+                           {'configurationSubstage':'temporary-write'}):
+                path.write_text(json.dumps({**value,**change,'configurationFileAttributes':flags}))
+                with self.assertRaises(ValueError):q.semantic_observations(root,'claude-desktop')
+
 class ClaudeLinuxVisibilityTests(unittest.TestCase):
     def test_closed_passive_states_and_failure_privacy(self):
         value = dict(schemaVersion=1, mechanism='claude-linux-classic-visibility', diagnosticsOnly=True,

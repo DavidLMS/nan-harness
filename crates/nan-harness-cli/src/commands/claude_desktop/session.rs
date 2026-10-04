@@ -362,7 +362,43 @@ fn atomic_write_inner(
             document,
         )?;
     }
+    persist_observed_configuration(temporary, path, document)
+}
+
+fn persist_observed_configuration(
+    temporary: tempfile::NamedTempFile,
+    path: &Path,
+    document: Option<qualification_prelaunch::ConfigurationDocument>,
+) -> Result<(), ClaudeDesktopError> {
+    #[cfg(all(windows, feature = "desktop-qualification"))]
+    let attributes_before = {
+        use std::os::windows::fs::MetadataExt as _;
+        (qualification_prelaunch::enabled()
+            && matches!(
+                document,
+                Some(qualification_prelaunch::ConfigurationDocument::NormalConfig)
+            ))
+        .then(|| {
+            temporary
+                .as_file()
+                .metadata()
+                .ok()
+                .map(|metadata| metadata.file_attributes())
+        })
+        .flatten()
+    };
     let result = persist_configuration_file(temporary, path, document.is_some());
+    #[cfg(all(windows, feature = "desktop-qualification"))]
+    let attributes = {
+        use std::os::windows::fs::MetadataExt as _;
+        let after = result
+            .as_ref()
+            .err()
+            .filter(|error| attributes_before.is_some() && error.error.raw_os_error() == Some(32))
+            .and_then(|error| error.file.as_file().metadata().ok())
+            .map(|metadata| metadata.file_attributes());
+        qualification_prelaunch::persist_attributes(attributes_before, after)
+    };
     #[cfg(all(windows, feature = "desktop-qualification"))]
     let result = result.inspect_err(|error| {
         if error.error.raw_os_error() == Some(32)
@@ -374,10 +410,14 @@ fn atomic_write_inner(
             qualification_persist_owners::observe(&error.file, path);
         }
     });
-    qualification_prelaunch::observe_configuration_persist(
-        result.map_err(|error| ClaudeDesktopError::Write(error.error)),
-        document,
-    )?;
+    let result = result.map_err(|error| ClaudeDesktopError::Write(error.error));
+    #[cfg(all(windows, feature = "desktop-qualification"))]
+    let result = qualification_prelaunch::observe_configuration_persist_attributes(
+        result, document, attributes,
+    );
+    #[cfg(not(all(windows, feature = "desktop-qualification")))]
+    let result = qualification_prelaunch::observe_configuration_persist(result, document);
+    result?;
     Ok(())
 }
 

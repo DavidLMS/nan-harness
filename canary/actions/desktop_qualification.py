@@ -1028,7 +1028,7 @@ def semantic_observations(directory, app):
             record.update({key:value[key] for key in fields - {'schemaVersion','mechanism'}})
         elif mechanism == 'claude-cli-prelaunch':
             fields = {'schemaVersion', 'mechanism', 'phase', 'stage', 'status', 'diagnosticsOnly'}
-            optional = {'configurationSubstage', 'configurationDocument', 'configurationIoFailure'}
+            optional = {'configurationSubstage', 'configurationDocument', 'configurationIoFailure', 'configurationFileAttributes'}
             if (not fields <= set(value) or set(value) - fields - optional or app != 'claude-desktop' or path.name != 'claude-cli-prelaunch.json'
                     or value['diagnosticsOnly'] is not True or value['phase'] != 'prelaunch'
                     or value['status'] != 'failed' or type(value['stage']) is not str or value['stage'] not in {
@@ -1061,6 +1061,18 @@ def semantic_observations(directory, app):
                             'invalid-name', 'path-not-found', 'already-exists', 'invalid-input', 'other'}):
                     raise ValueError('invalid Claude configuration I/O failure')
                 record['configurationIoFailure'] = failure
+            if 'configurationFileAttributes' in value:
+                attributes = value['configurationFileAttributes']
+                keys = {'temporaryBefore', 'temporaryAfter', 'readonlyBefore', 'readonlyAfter'}
+                if (value.get('configurationDocument') != 'normal-config'
+                        or value.get('configurationSubstage') != 'persist'
+                        or value.get('configurationIoFailure') != 'sharing-violation'
+                        or type(attributes) is not dict or set(attributes) != keys
+                        or any(attributes[key] is not None and type(attributes[key]) is not bool for key in keys)
+                        or (attributes['temporaryBefore'] is None) != (attributes['readonlyBefore'] is None)
+                        or (attributes['temporaryAfter'] is None) != (attributes['readonlyAfter'] is None)):
+                    raise ValueError('invalid Claude persist file attributes')
+                record['configurationFileAttributes'] = attributes
             record.update(diagnosticsOnly=True, phase=value['phase'], stage=value['stage'], status=value['status'])
         elif mechanism == 'claude-linux-classic-visibility':
             observation = {'visible', 'showing', 'boundsPositive', 'checkedAncestorCount', 'hiddenAncestorCount'}

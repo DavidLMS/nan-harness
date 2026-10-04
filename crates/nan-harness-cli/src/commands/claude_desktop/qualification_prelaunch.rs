@@ -63,7 +63,7 @@ pub(super) fn observe_configuration<T, E>(
     document: Option<ConfigurationDocument>,
 ) -> Result<T, E> {
     if result.is_err() {
-        emit_at(Stage::Configuration, Some((substage, document)), None);
+        emit_at(Stage::Configuration, Some((substage, document)), None, None);
     }
     result
 }
@@ -120,9 +120,43 @@ pub(super) fn observe_configuration_persist<T>(
             Stage::Configuration,
             Some((ConfigurationSubstage::Persist, Some(document))),
             failure,
+            None,
         );
     }
     result
+}
+
+#[cfg(any(windows, test))]
+pub(super) fn persist_attributes(before: Option<u32>, after: Option<u32>) -> [Option<bool>; 4] {
+    [
+        before.map(|bits| bits & 0x100 != 0),
+        after.map(|bits| bits & 0x100 != 0),
+        before.map(|bits| bits & 1 != 0),
+        after.map(|bits| bits & 1 != 0),
+    ]
+}
+#[cfg(any(windows, test))]
+pub(super) fn observe_configuration_persist_attributes<T>(
+    result: Result<T, super::ClaudeDesktopError>,
+    document: Option<ConfigurationDocument>,
+    attributes: [Option<bool>; 4],
+) -> Result<T, super::ClaudeDesktopError> {
+    if let (Err(super::ClaudeDesktopError::Write(error)), Some(ConfigurationDocument::NormalConfig)) =
+        (&result, document)
+        && error.raw_os_error() == Some(32)
+    {
+        // Same retained temporary File, sampled once before the first persist and
+        // after its final failure. No path reopen, mutation or extra persist attempt.
+        emit_at(
+            Stage::Configuration,
+            Some((ConfigurationSubstage::Persist, document)),
+            Some(ConfigurationIoFailure::SharingViolation),
+            Some(attributes),
+        );
+        result
+    } else {
+        observe_configuration_persist(result, document)
+    }
 }
 
 pub(super) fn observe<T, E>(result: Result<T, E>, stage: Stage) -> Result<T, E> {
@@ -133,13 +167,14 @@ pub(super) fn observe<T, E>(result: Result<T, E>, stage: Stage) -> Result<T, E> 
 }
 
 fn emit(stage: Stage) {
-    emit_at(stage, None, None);
+    emit_at(stage, None, None, None);
 }
 
 fn emit_at(
     stage: Stage,
     configuration: Option<(ConfigurationSubstage, Option<ConfigurationDocument>)>,
     io_failure: Option<ConfigurationIoFailure>,
+    file_attributes: Option<[Option<bool>; 4]>,
 ) {
     #[cfg(feature = "desktop-qualification")]
     if enabled() {
@@ -169,12 +204,24 @@ fn emit_at(
         if let Some(failure) = io_failure {
             record["configurationIoFailure"] = serde_json::json!(failure.as_str());
         }
+        if let Some(
+            [
+                temporary_before,
+                temporary_after,
+                readonly_before,
+                readonly_after,
+            ],
+        ) = file_attributes
+        {
+            record["configurationFileAttributes"] = serde_json::json!({"temporaryBefore":temporary_before,
+                "temporaryAfter":temporary_after,"readonlyBefore":readonly_before,"readonlyAfter":readonly_after});
+        }
         if let Some(directory) = facts_directory() {
             write_record(&directory, &record);
         }
     }
     #[cfg(not(feature = "desktop-qualification"))]
-    let _ = (stage, configuration, io_failure);
+    let _ = (stage, configuration, io_failure, file_attributes);
 }
 
 #[cfg(feature = "desktop-qualification")]
@@ -255,6 +302,34 @@ fn enabled_values(windows: bool, value: impl Fn(&str) -> Option<String>) -> bool
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn retained_file_attributes_preserve_unknown_and_separate_bits() {
+        assert_eq!(persist_attributes(None, None), [None; 4]);
+        assert_eq!(
+            persist_attributes(Some(0x80), Some(0x101)),
+            [Some(false), Some(true), Some(false), Some(true)]
+        );
+        assert_eq!(
+            persist_attributes(Some(0x100), None),
+            [Some(true), None, Some(false), None]
+        );
+        let result = observe_configuration_persist_attributes::<()>(
+            Err(super::super::ClaudeDesktopError::Write(
+                std::io::Error::from_raw_os_error(32),
+            )),
+            None,
+            [Some(false); 4],
+        );
+        let Err(super::super::ClaudeDesktopError::Write(error)) = result else {
+            panic!("original error")
+        };
+        assert_eq!(error.raw_os_error(), Some(32));
+        assert_eq!(
+            observe_configuration_persist_attributes::<u8>(Ok(7), None, [None; 4]).unwrap(),
+            7
+        );
+    }
+
     #[test]
     fn windows_persist_error_classification_is_closed_and_preserves_original_error() {
         for (code, expected) in [
