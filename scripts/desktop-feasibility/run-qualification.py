@@ -513,6 +513,8 @@ def main():
             'official frozen application is unavailable': 'frozen-app-unavailable',
             'qualification report is absent': 'report-absent',
             'Codex project trial requires the inspected official release': 'codex-project-release-mismatch',
+            'Claude persist owner diagnostic is unavailable': 'claude-persist-policy-invalid',
+            'Claude persist owner source differs': 'claude-persist-source-mismatch',
             **{category: category for category in (
                 'claude-windows-executable-invalid', 'claude-windows-bootstrap-invalid',
                 'claude-windows-bootstrap-mismatch', 'claude-windows-release-mismatch',
