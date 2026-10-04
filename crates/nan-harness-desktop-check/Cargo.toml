@@ -44,5 +44,5 @@ process-wrap = { version = "=10.0.0", default-features = false, features = ["tok
 [lints]
 workspace = true
 
-[target.'cfg(target_os = "macos")'.dependencies]
+[target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
 nix = { workspace = true, features = ["time"] }
