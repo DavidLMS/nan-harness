@@ -137,6 +137,11 @@ def qualification_environment(app, facts, real_nanh, executable, inherited=None)
         raise ValueError('Claude native Chat navigation is unavailable')
     if source.get('NANH_CLAUDE_WINDOWS_CHAT_ONLY') is not None and app != 'claude-desktop':
         raise ValueError('Claude Windows Chat-only trial is unavailable')
+    for key in ('NANH_CLAUDE_WINDOWS_FRESH_PROFILE', 'NANH_CLAUDE_WINDOWS_NATIVE_CHAT'):
+        if source.get(key) is not None and app != 'claude-desktop':
+            raise ValueError('Claude Windows native trial is unavailable')
+    if source.get('NANH_CLAUDE_WINDOWS_SOURCE_POLICY') is not None:
+        raise ValueError('Claude Windows source policy must be derived')
     layout = source.get('NANH_ZED_LAYOUT_POLICY')
     if layout is not None and (app != 'zed-desktop' or source.get('RUNNER_OS') != 'Linux' or layout != 'zoom-before-send'):
         raise ValueError('Zed layout trial is unavailable')
@@ -219,6 +224,18 @@ def qualification_environment(app, facts, real_nanh, executable, inherited=None)
             # without admitting Claude's packaged renderer to CDP.
             mode = 'startup-baseline'
             environment['NANH_CLAUDE_MAC_NATIVE_CHAT'] = native_chat
+
+        windows_native = source.get('NANH_CLAUDE_WINDOWS_NATIVE_CHAT')
+        windows_fresh = source.get('NANH_CLAUDE_WINDOWS_FRESH_PROFILE')
+        if windows_native is not None or windows_fresh is not None:
+            if (windows_native != '1' or windows_fresh != '1' or app != 'claude-desktop'
+                    or source.get('RUNNER_OS') != 'Windows'
+                    or source.get('NANH_CLAUDE_WINDOWS_PROFILE_POLICY') != 'private-env'
+                    or source.get('NANH_CLAUDE_WINDOWS_CHAT_ONLY') != '1'):
+                raise ValueError('Claude Windows native trial is unavailable')
+            mode = 'startup-baseline'
+            environment.update(NANH_CLAUDE_WINDOWS_NATIVE_CHAT='1',
+                               NANH_CLAUDE_WINDOWS_FRESH_PROFILE='1')
 
         onboarding = source.get('NANH_CODEX_PUBLIC_ONBOARDING')
         if onboarding is not None:
@@ -336,6 +353,9 @@ def run(args):
         raise ValueError('report destination already exists')
     environment = qualification_environment(args.app, facts, args.real_nanh, executable)
     release = manifest['apps'][0]
+    if environment.get('NANH_CLAUDE_WINDOWS_FRESH_PROFILE') == '1':
+        # Frozen release, prepared executable and bootstrap have all been checked.
+        environment['NANH_CLAUDE_WINDOWS_SOURCE_POLICY'] = 'official-2.19675.0-97910a066871'
     if os.environ.get('NANH_ZED_PANEL_LAYOUT') is not None:
         if args.app != 'zed-desktop' or args.platform != 'linux':
             raise ValueError('Zed panel layout platform differs')

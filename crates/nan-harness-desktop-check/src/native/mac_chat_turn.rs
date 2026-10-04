@@ -94,6 +94,7 @@ pub(crate) enum ChatTurnStage {
     Sent,
     Copied,
     RetryReady,
+    FailureDetailsOpened,
     Retried,
     #[cfg(target_os = "macos")]
     Completed,
@@ -180,6 +181,7 @@ impl ChatTurnStage {
             "turn sent\n" => Some(Self::Sent),
             "turn copied\n" => Some(Self::Copied),
             "turn retry-ready\n" => Some(Self::RetryReady),
+            "turn failure-details-opened\n" => Some(Self::FailureDetailsOpened),
             "turn retried\n" => Some(Self::Retried),
             _ => None,
         }
@@ -214,7 +216,7 @@ pub(super) fn request(
 ) -> Option<Zeroizing<String>> {
     if !matches!(
         mode,
-        "input" | "input-replace-owned" | "copy" | "retry-ready" | "retry"
+        "input" | "input-replace-owned" | "copy" | "retry-ready" | "retry" | "failure-details"
     ) || values
         .iter()
         .any(|value| value.len() > 1024 || value.contains('\0'))
@@ -243,6 +245,18 @@ pub(super) fn request(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn disclosure_receipt_does_not_authorize_retry_or_accept_payloads() {
+        let stage = ChatTurnStage::parse("turn failure-details-opened\n").unwrap();
+        assert_eq!(stage, ChatTurnStage::FailureDetailsOpened);
+        assert!(!stage.passive_pending());
+        assert_eq!(
+            serde_json::to_value(stage).unwrap(),
+            "failure-details-opened"
+        );
+        assert!(ChatTurnStage::parse("turn failure-details-opened PRIVATE\n").is_none());
+    }
 
     #[test]
     fn deadline_phases_are_terminal_closed_and_legacy_deadline_remains_valid() {

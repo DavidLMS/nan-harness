@@ -4,7 +4,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_library(TESSERACT_LIBRARY NAMES tesseract tesseract55 PATHS "${NAN_OCR_PREFIX}/lib" NO_DEFAULT_PATH REQUIRED)
 find_library(LEPTONICA_LIBRARY NAMES leptonica leptonica-1.87.0 PATHS "${NAN_OCR_PREFIX}/lib" NO_DEFAULT_PATH REQUIRED)
-add_executable(nanh-desktop-native main.cpp windows.cpp clipboard.cpp claude_chat_turn.cpp windows_uia_inventory.cpp)
+add_executable(nanh-desktop-native main.cpp windows.cpp clipboard.cpp claude_chat_turn.cpp windows_uia_inventory.cpp claude_policy.cpp)
 target_include_directories(nanh-desktop-native PRIVATE "${NAN_OCR_PREFIX}/include")
 target_link_libraries(nanh-desktop-native PRIVATE "${TESSERACT_LIBRARY}" "${LEPTONICA_LIBRARY}")
 if(APPLE)
@@ -20,7 +20,7 @@ if(APPLE)
     DEPENDS nanh-claude-chat-turn-test
     COMMENT "Verify retained composer focus and source-bound chat selection")
 elseif(WIN32)
-  target_link_libraries(nanh-desktop-native PRIVATE user32 dwmapi shell32 ole32 oleaut32 uiautomationcore uuid bcrypt)
+  target_link_libraries(nanh-desktop-native PRIVATE user32 dwmapi shell32 ole32 oleaut32 uiautomationcore uuid bcrypt advapi32)
 else()
   find_package(X11 REQUIRED)
   find_package(Threads REQUIRED)
@@ -95,3 +95,14 @@ add_custom_target(nanh-uia-chat-input-contract ALL
   COMMAND $<TARGET_FILE:nanh-uia-chat-input-test>
   DEPENDS nanh-uia-chat-input-test
   COMMENT "Verify private Windows Chat framing and passive readiness predicates")
+
+add_executable(nanh-uia-chat-scope-test tests/uia_chat_scope.cpp)
+if(MSVC)
+  target_compile_options(nanh-uia-chat-scope-test PRIVATE /UNDEBUG)
+else()
+  target_compile_options(nanh-uia-chat-scope-test PRIVATE -UNDEBUG)
+endif()
+add_custom_target(nanh-uia-chat-scope-contract ALL
+  COMMAND $<TARGET_FILE:nanh-uia-chat-scope-test>
+  DEPENDS nanh-uia-chat-scope-test
+)

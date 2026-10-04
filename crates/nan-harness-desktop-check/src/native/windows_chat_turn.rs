@@ -1,0 +1,238 @@
+//! Private single-line protocol for the owned Windows first-turn experiment.
+use super::Window;
+use std::fmt::Write as _;
+use std::time::Duration;
+use zeroize::Zeroizing;
+
+pub(crate) const MAX_MILLIS: u32 = 15_000;
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum WindowsChatStage {
+    #[cfg(windows)]
+    Request,
+    #[cfg(windows)]
+    Completed,
+    Window,
+    Tree,
+    Mode,
+    Composer,
+    Control,
+    Deadline,
+    Sent,
+    ActionUncertain,
+    InputFocusSetting,
+    InputFocusedIdentity,
+    InputReplaceSelectKey,
+    InputPromptClipboard,
+    InputPasteKey,
+    InputValueMismatch,
+    InputSentinelClipboard,
+    InputReadbackSelectKey,
+    InputReadbackCopyKey,
+    InputClipboardMismatch,
+    Scope,
+    ScopeAnchorAbsent,
+    ScopeAnchorAmbiguous,
+    ScopeControlAbsent,
+    ScopeControlAmbiguous,
+    ScopeHeadingAmbiguous,
+    ScopePromptMismatch,
+    ResponseMismatch,
+    Copied,
+    RetryReady,
+    Retried,
+    FailureDetailsOpened,
+}
+impl WindowsChatStage {
+    #[cfg(windows)]
+    pub(crate) fn passive_pending(self) -> bool {
+        matches!(self, Self::ScopeAnchorAbsent | Self::ScopeControlAbsent)
+    }
+
+    pub(super) fn parse(wire: &str) -> Option<Self> {
+        Some(match wire {
+            "turn window\n" => Self::Window,
+            "turn tree\n" => Self::Tree,
+            "turn mode\n" => Self::Mode,
+            "turn composer\n" => Self::Composer,
+            "turn control\n" => Self::Control,
+            "turn deadline\n" => Self::Deadline,
+            "turn sent\n" => Self::Sent,
+            "turn action-uncertain\n" => Self::ActionUncertain,
+            "turn input-focus-setting\n" => Self::InputFocusSetting,
+            "turn input-focused-identity\n" => Self::InputFocusedIdentity,
+            "turn input-replace-select-key\n" => Self::InputReplaceSelectKey,
+            "turn input-prompt-clipboard\n" => Self::InputPromptClipboard,
+            "turn input-paste-key\n" => Self::InputPasteKey,
+            "turn input-value-mismatch\n" => Self::InputValueMismatch,
+            "turn input-sentinel-clipboard\n" => Self::InputSentinelClipboard,
+            "turn input-readback-select-key\n" => Self::InputReadbackSelectKey,
+            "turn input-readback-copy-key\n" => Self::InputReadbackCopyKey,
+            "turn input-clipboard-mismatch\n" => Self::InputClipboardMismatch,
+            "turn scope\n" => Self::Scope,
+            "turn scope-anchor-absent\n" => Self::ScopeAnchorAbsent,
+            "turn scope-anchor-ambiguous\n" => Self::ScopeAnchorAmbiguous,
+            "turn scope-control-absent\n" => Self::ScopeControlAbsent,
+            "turn scope-control-ambiguous\n" => Self::ScopeControlAmbiguous,
+            "turn scope-heading-ambiguous\n" => Self::ScopeHeadingAmbiguous,
+            "turn scope-prompt-mismatch\n" => Self::ScopePromptMismatch,
+            "turn response-mismatch\n" => Self::ResponseMismatch,
+            "turn copied\n" => Self::Copied,
+            "turn retry-ready\n" => Self::RetryReady,
+            "turn retried\n" => Self::Retried,
+            "turn failure-details-opened\n" => Self::FailureDetailsOpened,
+            _ => return None,
+        })
+    }
+}
+pub(super) fn ready(wire: &str) -> Option<u64> {
+    let value = wire.strip_prefix("ready ")?.strip_suffix('\n')?;
+    if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    value.parse().ok().filter(|value| *value > 0)
+}
+pub(super) fn request(
+    window: &Window,
+    mode: &str,
+    values: [&str; 3],
+    native_anchor: u64,
+    remaining: Duration,
+    checker: u32,
+) -> Option<Zeroizing<String>> {
+    let [prompt, marker, sentinel] = values;
+    let millis = u32::try_from(remaining.as_millis())
+        .unwrap_or(MAX_MILLIS)
+        .min(MAX_MILLIS);
+    let cutoff = native_anchor.checked_add(u64::from(millis.checked_sub(50)?))?;
+    if millis <= 50
+        || window.id == 0
+        || window.pid == 0
+        || checker == 0
+        || window.bounds.width == 0
+        || window.bounds.height == 0
+        || !matches!(
+            mode,
+            "input-replace-owned" | "copy" | "retry-ready" | "retry" | "failure-details"
+        )
+        || (mode != "input-replace-owned" && marker.is_empty())
+        || marker.len() > 1024
+        || marker.contains('\0')
+        || prompt.is_empty()
+        || sentinel.is_empty()
+        || prompt == sentinel
+        || prompt.len() > 1024
+        || sentinel.len() > 1024
+        || prompt.contains('\0')
+        || sentinel.contains('\0')
+    {
+        return None;
+    }
+    let right = i32::try_from(i64::from(window.bounds.x) + i64::from(window.bounds.width)).ok()?;
+    let bottom =
+        i32::try_from(i64::from(window.bounds.y) + i64::from(window.bounds.height)).ok()?;
+    let mut wire = Zeroizing::new(format!(
+        "{} {} {} {} {right} {bottom} {millis} {cutoff} {checker}",
+        window.id, window.pid, window.bounds.x, window.bounds.y
+    ));
+    wire.push(' ');
+    wire.push_str(mode);
+    for value in [prompt, marker, sentinel] {
+        wire.push(' ');
+        if value.is_empty() {
+            wire.push('-');
+            continue;
+        }
+        for byte in value.bytes() {
+            write!(wire, "{byte:02x}").ok()?;
+        }
+    }
+    Some(wire)
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn protocol_is_private_bounded_and_cannot_authorize_late_input() {
+        let window = Window {
+            id: 1,
+            pid: 2,
+            bounds: xa11y::Rect {
+                x: 10,
+                y: 20,
+                width: 300,
+                height: 400,
+            },
+            name: "private".into(),
+            layer: 0,
+        };
+        let wire = request(
+            &window,
+            "input-replace-owned",
+            ["PRIVATE\nprompt", "", "SENTINEL"],
+            1000,
+            Duration::from_millis(100),
+            3,
+        )
+        .unwrap();
+        assert!(!wire.contains("PRIVATE"));
+        assert!(!wire.contains('\n'));
+        assert_eq!(wire.split(' ').nth(7), Some("1050"));
+        assert!(
+            request(
+                &window,
+                "input-replace-owned",
+                ["prompt", "", "sentinel"],
+                1000,
+                Duration::from_millis(50),
+                3
+            )
+            .is_none()
+        );
+        assert!(
+            request(
+                &window,
+                "input-replace-owned",
+                ["prompt", "", "sentinel"],
+                u64::MAX,
+                Duration::from_secs(1),
+                3
+            )
+            .is_none()
+        );
+        assert!(
+            request(
+                &window,
+                "input-replace-owned",
+                ["prompt", "", "prompt"],
+                1000,
+                Duration::from_secs(1),
+                3
+            )
+            .is_none()
+        );
+        for wire in ["ready 0\n", "ready 1\nPRIVATE", "ready -1\n", "ready 1\r\n"] {
+            assert!(ready(wire).is_none());
+        }
+        assert_eq!(ready("ready 1000\n"), Some(1000));
+        for wire in ["turn sent\nPRIVATE", "turn PRIVATE\n", "turn sent"] {
+            assert!(WindowsChatStage::parse(wire).is_none());
+        }
+        assert_eq!(
+            WindowsChatStage::parse("turn sent\n"),
+            Some(WindowsChatStage::Sent)
+        );
+        assert_eq!(
+            WindowsChatStage::parse("turn failure-details-opened\n"),
+            Some(WindowsChatStage::FailureDetailsOpened)
+        );
+        assert!(WindowsChatStage::parse("turn failure-details-opened PRIVATE\n").is_none());
+        // Anchor captured before parent receipt gives a conservative cutoff.
+        let deadline = std::time::Instant::now();
+        assert!(
+            deadline
+                .saturating_duration_since(std::time::Instant::now())
+                .is_zero()
+        );
+    }
+}

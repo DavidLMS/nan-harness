@@ -10,12 +10,16 @@ struct ChatInput {
     ProcessHandle checker;
     DWORD checker_pid{};
     std::uint64_t cutoff{}, checker_creation{};
-    std::wstring prompt,sentinel;
+    std::wstring prompt,sentinel,marker,prior;
+    std::string mode;
+    const wchar_t* send_name=L"Start task";
     UiaChatCapability original;
     const char* stage="request";
     ~ChatInput() {
         if(!prompt.empty())SecureZeroMemory(prompt.data(),prompt.size()*sizeof(wchar_t));
         if(!sentinel.empty())SecureZeroMemory(sentinel.data(),sentinel.size()*sizeof(wchar_t));
+        if(!marker.empty())SecureZeroMemory(marker.data(),marker.size()*sizeof(wchar_t));
+        if(!prior.empty())SecureZeroMemory(prior.data(),prior.size()*sizeof(wchar_t));
     }
     bool time_left() const { return collection.within() && GetTickCount64()<cutoff; }
     bool within() const {
@@ -27,8 +31,7 @@ struct ChatInput {
         ComPtr<IUIAutomationElement> current;BOOL same=FALSE;
         return SUCCEEDED(collection.automation->ElementFromHandle(collection.request.window,&current))
             && current && SUCCEEDED(collection.automation->CompareElements(root.Get(),current.Get(),&same))
-            && same && collection.mode_attached(editor.Get(),root.Get())
-            && collection.mode_attached(send.Get(),root.Get()) && within();
+            && same && within();
     }
     bool unique_source(IUIAutomationElement* retained,int type,const wchar_t* name) {
         if(!within())return false;
@@ -49,12 +52,14 @@ struct ChatInput {
             && same && collection.mode_attached(fresh.Get(),root.Get()) && within();
     }
     bool target(bool submitting=false) {
-        if(!owned() || !unique_source(editor.Get(),UIA_EditControlTypeId,L"Write your prompt to Claude")
-            || !unique_source(send.Get(),UIA_ButtonControlTypeId,L"Start task"))return false;
+        if(!owned() || !collection.mode_attached(editor.Get(),root.Get())
+            || !collection.mode_attached(send.Get(),root.Get())
+            || !unique_source(editor.Get(),UIA_EditControlTypeId,L"Write your prompt to Claude")
+            || !unique_source(send.Get(),UIA_ButtonControlTypeId,send_name))return false;
         std::array<long,4> editor_bounds{},send_bounds{};bool editor_enabled=false,send_enabled=false;
         if(!collection.source_control(editor.Get(),UIA_EditControlTypeId,L"Write your prompt to Claude",editor_bounds,editor_enabled)
             || !editor_enabled || editor_bounds!=original.editor_bounds
-            || !collection.source_control(send.Get(),UIA_ButtonControlTypeId,L"Start task",send_bounds,send_enabled)
+            || !collection.source_control(send.Get(),UIA_ButtonControlTypeId,send_name,send_bounds,send_enabled)
             || send_bounds!=original.start_bounds || (submitting&&!send_enabled))return false;
         BOOL read_only=TRUE,password=TRUE;
         if(FAILED(value->get_CurrentIsReadOnly(&read_only)) || read_only
@@ -108,7 +113,7 @@ struct ChatInput {
         }
         DestroyWindow(owner);return success && owned();
     }
-    std::optional<bool> clipboard_matches() {
+    std::optional<bool> clipboard_matches(const std::wstring& expected) {
         if(!owned() || !OpenClipboard(nullptr))return std::nullopt;
         bool matched=false,valid=false;
         HANDLE memory=GetClipboardData(CF_UNICODETEXT);
@@ -119,7 +124,7 @@ struct ChatInput {
                 const auto capacity=bytes/sizeof(wchar_t);std::size_t length=0;
                 while(length<capacity && text[length])++length;
                 valid=length<capacity;
-                matched=valid && length==prompt.size() && std::equal(prompt.begin(),prompt.end(),text);
+                matched=valid && length==expected.size() && std::equal(expected.begin(),expected.end(),text);
                 GlobalUnlock(memory);
             }
         }
@@ -135,9 +140,83 @@ struct ChatInput {
         if(SUCCEEDED(result) && length<=1024 && text)observed.assign(text,length);
         if(text){SecureZeroMemory(text,length*sizeof(wchar_t));SysFreeString(text);}
         const bool exact=focus()==UiaChatInputValue::Ready;
-        const auto state=uia_chat_input_value(observed,prompt,SUCCEEDED(result)&&length<=1024,exact);
+        const auto state=uia_chat_input_value(observed,prompt,prior,SUCCEEDED(result)&&length<=1024,exact);
         if(!observed.empty())SecureZeroMemory(observed.data(),observed.size()*sizeof(wchar_t));
         return state;
+    }
+    bool action_control(IUIAutomationElement* button,const wchar_t* name,
+                        const std::array<long,4>& original_bounds) {
+        if(!owned() || !collection.mode_attached(button,root.Get()))return false;
+        std::array<long,4> bounds{};bool enabled=false;
+        return collection.source_control(button,UIA_ButtonControlTypeId,name,bounds,enabled)
+            && enabled && bounds==original_bounds && owned();
+    }
+    bool fresh_scope(const UiaChatScope& original_scope,IUIAutomationElement* control,
+                     const wchar_t* name,const std::array<long,4>& bounds) {
+        if(!action_control(control,name,bounds))return false;
+        Collection fresh;fresh.request=collection.request;fresh.deadline=collection.deadline;
+        fresh.collect_chat=true;fresh.automation=collection.automation;fresh.walker=collection.walker;
+        fresh.root_process.value=OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION|SYNCHRONIZE,FALSE,fresh.request.pid);
+        if(!live_creation(fresh.root_process.value,fresh.root_creation)
+            || fresh.root_creation!=collection.root_creation)return false;
+        ComPtr<IUIAutomationElement> current;BOOL same=FALSE;
+        if(FAILED(fresh.automation->ElementFromHandle(fresh.request.window,&current)) || !current
+            || FAILED(fresh.automation->CompareElements(root.Get(),current.Get(),&same)) || !same
+            || !fresh.guard() || !fresh.append(current.Get(),0))return false;
+        fresh.observe_mode(current.Get());
+        const auto scope=mode=="failure-details"?uia_chat_failure_details(fresh.chat_nodes,prompt)
+            :uia_chat_scope(fresh.chat_nodes,prompt,marker,mode!="copy");
+        if(std::string(fresh.mode_status)!="chat" || scope.control<0)return false;
+        for(const auto pair:{std::pair<int,int>{original_scope.control,scope.control},
+                            {original_scope.anchor,scope.anchor},{original_scope.ancestor,scope.ancestor}}) {
+            BOOL equal=FALSE;
+            if(pair.first<0 || pair.second<0
+                || FAILED(fresh.automation->CompareElements(collection.held[pair.first].Get(),fresh.held[pair.second].Get(),&equal))
+                || !equal)return false;
+        }
+        if(mode=="failure-details") {
+            BOOL equal=FALSE;
+            if(original_scope.retry<0 || scope.retry<0 || original_scope.user_heading<0 || scope.user_heading<0
+                || FAILED(fresh.automation->CompareElements(collection.held[original_scope.user_heading].Get(),
+                    fresh.held[scope.user_heading].Get(),&equal)) || !equal)return false;
+            equal=FALSE;
+            std::array<long,4> retry_bounds{};bool retry_enabled=false;
+            if(FAILED(fresh.automation->CompareElements(collection.held[original_scope.retry].Get(),
+                fresh.held[scope.retry].Get(),&equal)) || !equal
+                || !fresh.source_control(fresh.held[scope.retry].Get(),UIA_ButtonControlTypeId,L"Retry",retry_bounds,retry_enabled)
+                || !retry_enabled)return false;
+        }
+        return fresh.guard() && action_control(control,name,bounds) && within();
+    }
+    const char* action() {
+        if(marker.empty() || (mode!="copy" && marker!=L"NAN_CHECK_EXPECTED_FAILURE"))return "scope";
+        const auto scope=mode=="failure-details"?uia_chat_failure_details(collection.chat_nodes,prompt)
+            :uia_chat_scope(collection.chat_nodes,prompt,marker,mode!="copy");
+        if(scope.control<0)return scope.failure;
+        const wchar_t* name=mode=="copy"?L"Copy":mode=="failure-details"?L"View details":L"Retry";
+        const auto control=collection.held[scope.control];
+        std::array<long,4> bounds{};bool enabled=false;
+        if(!collection.source_control(control.Get(),UIA_ButtonControlTypeId,name,bounds,enabled)
+            || !enabled || !fresh_scope(scope,control.Get(),name,bounds))return "control";
+        if(mode=="retry-ready")return "retry-ready";
+        if(mode=="copy" && !clipboard_write(sentinel))return "response-mismatch";
+        ComPtr<IUIAutomationInvokePattern> action;
+        if(FAILED(control->GetCurrentPatternAs(UIA_InvokePatternId,IID_PPV_ARGS(&action))) || !action
+            || !fresh_scope(scope,control.Get(),name,bounds) || !within())return "control";
+        // The parent seals Copy/Retry before this request. This process invokes
+        // exactly once and never retries an uncertain HRESULT or postcondition.
+        const HRESULT delivered=action->Invoke();
+        if(FAILED(delivered) || !within() || !owned())return "action-uncertain";
+        if(mode=="retry")return "retried";
+        if(mode=="failure-details")return "failure-details-opened";
+        while(within()) {
+            if(!owned())return "action-uncertain";
+            const auto copied=clipboard_matches(marker);
+            if(!copied)return "response-mismatch";
+            if(*copied)return "copied";
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        }
+        return "response-mismatch";
     }
     const char* input() {
         if(!target())return "control";
@@ -145,6 +224,13 @@ struct ChatInput {
         if(!wait_focus())return "input-focused-identity";
         if(!key('A'))return "input-replace-select-key";
         if(!clipboard_write(prompt))return "input-prompt-clipboard";
+        if(focus()!=UiaChatInputValue::Ready)return "input-focused-identity";
+        BSTR previous=nullptr;
+        const HRESULT previous_result=value->get_CurrentValue(&previous);
+        const unsigned previous_size=previous?SysStringLen(previous):0;
+        if(SUCCEEDED(previous_result) && previous_size<=1024 && previous)prior.assign(previous,previous_size);
+        if(previous){SecureZeroMemory(previous,previous_size*sizeof(wchar_t));SysFreeString(previous);}
+        if(FAILED(previous_result) || previous_size>1024 || focus()!=UiaChatInputValue::Ready)return "input-value-mismatch";
         if(!key('V'))return "input-paste-key";
         if(!uia_chat_settle([&]{return pasted();},[&]{return within();},
             []{std::this_thread::sleep_for(std::chrono::milliseconds(20));}))return "input-value-mismatch";
@@ -154,12 +240,12 @@ struct ChatInput {
         // Clipboard copy may settle, but neither Copy nor any key is repeated.
         while(within()) {
             if(focus()!=UiaChatInputValue::Ready)return "input-focused-identity";
-            const auto copied=clipboard_matches();
+            const auto copied=clipboard_matches(prompt);
             if(!copied)return "input-clipboard-mismatch";
             if(*copied)break;
             std::this_thread::sleep_for(std::chrono::milliseconds(20));
         }
-        if(!within() || clipboard_matches()!=true || pasted()!=UiaChatInputValue::Ready)return "input-clipboard-mismatch";
+        if(!within() || clipboard_matches(prompt)!=true || pasted()!=UiaChatInputValue::Ready)return "input-clipboard-mismatch";
         if(!wait_focus() || !target(true))return "control";
         BOOL enabled=FALSE;
         if(FAILED(send->get_CurrentIsEnabled(&enabled)) || !enabled || !owned() || !within())return "control";
@@ -196,20 +282,24 @@ int windows_claude_chat_turn() {
     if(!std::cout)return 4;
     auto wire=uia_chat_frame(std::cin);
     if(!wire)return 2;
-    ChatInput turn;auto& c=turn.collection;
-    std::uint64_t id=0;unsigned budget=0;std::string prompt_hex,sentinel_hex,extra;
+    ChatInput turn;auto& c=turn.collection;c.collect_chat=true;
+    std::uint64_t id=0;unsigned budget=0;std::string prompt_hex,sentinel_hex,marker_hex,extra;
     std::istringstream parser(*wire);
     const bool parsed=static_cast<bool>(parser>>id>>c.request.pid>>c.request.bounds.left
         >>c.request.bounds.top>>c.request.bounds.right>>c.request.bounds.bottom
-        >>budget>>turn.cutoff>>turn.checker_pid>>prompt_hex>>sentinel_hex);
+        >>budget>>turn.cutoff>>turn.checker_pid>>turn.mode>>prompt_hex>>marker_hex>>sentinel_hex);
     if(!parsed || parser>>extra || !id || id>UINTPTR_MAX || !c.request.pid || !turn.checker_pid
+        || (turn.mode!="input-replace-owned" && turn.mode!="copy" && turn.mode!="retry-ready" && turn.mode!="retry" && turn.mode!="failure-details")
         || budget<=50 || budget>15000 || turn.cutoff<=started || turn.cutoff-started>15000)return 2;
     auto prompt=uia_chat_hex(prompt_hex),sentinel=uia_chat_hex(sentinel_hex);
+    auto marker=marker_hex=="-"?std::optional<std::string>(""):uia_chat_hex(marker_hex);
     SecureZeroMemory(wire->data(),wire->size());SecureZeroMemory(prompt_hex.data(),prompt_hex.size());
-    SecureZeroMemory(sentinel_hex.data(),sentinel_hex.size());
-    if(!prompt || !sentinel)return 2;
-    const bool valid=chat_utf8(*prompt,turn.prompt) && chat_utf8(*sentinel,turn.sentinel);
+    SecureZeroMemory(sentinel_hex.data(),sentinel_hex.size());SecureZeroMemory(marker_hex.data(),marker_hex.size());
+    if(!prompt || !sentinel || !marker)return 2;
+    const bool valid=chat_utf8(*prompt,turn.prompt) && chat_utf8(*sentinel,turn.sentinel)
+        && (marker->empty() || chat_utf8(*marker,turn.marker));
     SecureZeroMemory(prompt->data(),prompt->size());SecureZeroMemory(sentinel->data(),sentinel->size());
+    if(!marker->empty())SecureZeroMemory(marker->data(),marker->size());
     if(!valid || turn.prompt==turn.sentinel)return 2;
     c.request.window=reinterpret_cast<HWND>(static_cast<std::uintptr_t>(id));
     c.deadline=Clock::now()+std::chrono::milliseconds(budget);
@@ -227,7 +317,7 @@ int windows_claude_chat_turn() {
         ~ComCleanup() {
             turn.invoke.Reset();turn.value.Reset();turn.send.Reset();turn.editor.Reset();turn.root.Reset();
             auto& c=turn.collection;c.initial_mode.identities.clear();c.initial_mode.groups.clear();
-            c.classic_controls.clear();c.start_controls.clear();c.held.clear();c.walker.Reset();c.automation.Reset();
+            c.classic_controls.clear();c.start_controls.clear();c.send_controls.clear();c.held.clear();c.walker.Reset();c.automation.Reset();
             CoUninitialize();
         }
     } cleanup{turn};
@@ -239,11 +329,19 @@ int windows_claude_chat_turn() {
         || !c.append(turn.root.Get(),0))return emit("tree");
     c.observe_mode(turn.root.Get());c.observe_capability(turn.root.Get());
     if(std::string(c.mode_status)!="chat")return emit("mode");
-    if(std::string(c.capability_status)!="observed" || c.classic_controls.size()!=1 || c.start_controls.size()!=1
-        || !c.capability.value_pattern || c.capability.read_only!=false || c.capability.password
-        || !c.capability.keyboard_focusable || !c.capability.invoke_pattern)return emit("composer");
-    turn.editor=c.classic_controls.front();turn.send=c.start_controls.front();turn.original=c.capability;
+    if(turn.mode!="input-replace-owned")return emit(turn.action());
+    if(c.classic_controls.size()!=1 || c.start_controls.size()+c.send_controls.size()!=1)return emit("composer");
+    turn.editor=c.classic_controls.front();
+    turn.send=c.start_controls.empty()?c.send_controls.front():c.start_controls.front();
+    turn.send_name=c.start_controls.empty()?L"Send message":L"Start task";
+    if(!c.source_control(turn.editor.Get(),UIA_EditControlTypeId,L"Write your prompt to Claude",turn.original.editor_bounds,turn.original.editor_enabled)
+        || !turn.original.editor_enabled
+        || !c.source_control(turn.send.Get(),UIA_ButtonControlTypeId,turn.send_name,turn.original.start_bounds,turn.original.start_enabled))return emit("control");
+    BOOL read_only=TRUE,password=TRUE,focusable=FALSE;
     if(FAILED(turn.editor->GetCurrentPatternAs(UIA_ValuePatternId,IID_PPV_ARGS(&turn.value))) || !turn.value
-        || FAILED(turn.send->GetCurrentPatternAs(UIA_InvokePatternId,IID_PPV_ARGS(&turn.invoke))) || !turn.invoke)return emit("control");
+        || FAILED(turn.send->GetCurrentPatternAs(UIA_InvokePatternId,IID_PPV_ARGS(&turn.invoke))) || !turn.invoke
+        || FAILED(turn.value->get_CurrentIsReadOnly(&read_only)) || read_only
+        || FAILED(turn.editor->get_CurrentIsPassword(&password)) || password
+        || FAILED(turn.editor->get_CurrentIsKeyboardFocusable(&focusable)) || !focusable)return emit("control");
     return emit(turn.input());
 }

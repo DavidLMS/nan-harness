@@ -719,6 +719,49 @@ impl Visual {
             })
     }
 
+    #[cfg(windows)]
+    pub(super) fn claude_windows_chat_turn_until(
+        &self,
+        mode: &str,
+        values: [&str; 3],
+        deadline: Instant,
+        mut observe: impl FnMut(&'static str, Option<FailureCategory>, Option<GuardFailure>),
+    ) -> Result<crate::native::WindowsChatStage, Reason> {
+        let expected = self.window.borrow().clone();
+        let guard = |phase,
+                     observe: &mut dyn FnMut(
+            &'static str,
+            Option<FailureCategory>,
+            Option<GuardFailure>,
+        )| {
+            let snapshot = self.native.windows_until(deadline).map_err(|failure| {
+                observe(phase, Some(failure), None);
+                failure.reason()
+            })?;
+            snapshot.guard_failure(&expected).map_err(|failure| {
+                observe(phase, None, Some(failure));
+                failure.reason()
+            })
+        };
+        guard("before-guard", &mut observe)?;
+        if Instant::now() >= deadline {
+            return Err(Reason::Timeout);
+        }
+        observe("transport", None, None);
+        let result = self
+            .native
+            .claude_windows_chat_turn(&expected, mode, values, deadline)
+            .map_err(|failure| {
+                observe("transport", Some(failure), None);
+                failure.reason()
+            })?;
+        guard("post-guard", &mut observe)?;
+        if Instant::now() >= deadline {
+            return Err(Reason::Timeout);
+        }
+        Ok(result)
+    }
+
     pub(super) fn pid(&self) -> u32 {
         self.window.borrow().pid
     }

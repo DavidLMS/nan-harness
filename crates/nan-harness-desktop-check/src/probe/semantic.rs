@@ -4,6 +4,8 @@ use super::{OwnedReadFixtureSelection, ProbeSpec, select_semantic_read_tool, sem
 use crate::cli::{SessionMode, VerificationPolicy};
 #[cfg(target_os = "macos")]
 use crate::gui::ClaudeNativeChatSession;
+#[cfg(windows)]
+use crate::gui::ClaudeWindowsChatSession;
 use crate::gui::{
     CodexDomSession, ComposerFailure, DomAction, DomPurpose, DomTurn, Gui, NativeClipboardSession,
     RendererSession,
@@ -28,6 +30,12 @@ pub(super) struct SemanticScenario<'a> {
     pub gate: &'a ProviderGate,
     pub fixture: &'a Path,
     pub marker: &'a str,
+}
+
+pub(super) struct NativeInputAuthority<'a> {
+    pub native_roots: Option<&'a super::NativeRoots>,
+    #[cfg(windows)]
+    pub windows_profile: Option<&'a super::FreshClaudeWindowsProfile>,
 }
 
 impl SemanticBackend {
@@ -125,17 +133,37 @@ impl SemanticBackend {
         scenario: SemanticScenario<'_>,
         result: &mut ProbeResult,
         composer_observations: &mut Vec<ComposerFailure>,
-        native_roots: Option<&super::NativeRoots>,
+        authority: NativeInputAuthority<'_>,
     ) -> Result<(), Reason> {
         #[cfg(not(target_os = "macos"))]
-        let _ = native_roots;
+        let _ = authority.native_roots;
         #[cfg(target_os = "macos")]
         if self.kind == DesktopHarnessKind::Claude
             && std::env::var("NANH_CLAUDE_MAC_NATIVE_CHAT").as_deref() == Ok("1")
         {
-            let roots = native_roots.ok_or(Reason::IsolationUnavailable)?;
+            let roots = authority.native_roots.ok_or(Reason::IsolationUnavailable)?;
             let mut ui =
                 SemanticUi::Claude(gui.claude_native_chat_session(&self.directory, roots)?);
+            let outcome = complete_scenario(&mut ui, &scenario, &self.directory, result).await;
+            return ui.finish(scenario.gate, outcome);
+        }
+
+        #[cfg(windows)]
+        if self.kind == DesktopHarnessKind::Claude
+            && std::env::var("NANH_CLAUDE_WINDOWS_NATIVE_CHAT").as_deref() == Ok("1")
+        {
+            let profile = authority
+                .windows_profile
+                .ok_or(Reason::IsolationUnavailable)?;
+            let workspace = scenario
+                .fixture
+                .parent()
+                .ok_or(Reason::IsolationUnavailable)?;
+            let mut ui = SemanticUi::ClaudeWindows(gui.claude_windows_chat_session(
+                &self.directory,
+                profile,
+                workspace,
+            )?);
             let outcome = complete_scenario(&mut ui, &scenario, &self.directory, result).await;
             return ui.finish(scenario.gate, outcome);
         }
@@ -162,6 +190,8 @@ enum SemanticUi<'a> {
     Zed(Box<NativeClipboardSession<'a>>),
     #[cfg(target_os = "macos")]
     Claude(ClaudeNativeChatSession<'a>),
+    #[cfg(windows)]
+    ClaudeWindows(ClaudeWindowsChatSession<'a>),
     Renderer(RendererSession<'a>),
     Codex(CodexDomSession<'a>),
 }
@@ -175,6 +205,11 @@ impl SemanticUi<'_> {
             ),
             #[cfg(target_os = "macos")]
             Self::Claude(_) => (
+                InputMode::NativeClipboardAndKeyboard,
+                ResponseVerification::NativeAssistantClipboard,
+            ),
+            #[cfg(windows)]
+            Self::ClaudeWindows(_) => (
                 InputMode::NativeClipboardAndKeyboard,
                 ResponseVerification::NativeAssistantClipboard,
             ),
@@ -202,6 +237,16 @@ impl SemanticUi<'_> {
             }
             #[cfg(target_os = "macos")]
             Self::Claude(session) => {
+                session.new_turn(prompt)?;
+                match purpose {
+                    DomPurpose::Response => {
+                        session.wait_response(marker, Duration::from_secs(30), gate)
+                    }
+                    DomPurpose::Failure => session.wait_retry(Duration::from_secs(30), gate),
+                }
+            }
+            #[cfg(windows)]
+            Self::ClaudeWindows(session) => {
                 session.new_turn(prompt)?;
                 match purpose {
                     DomPurpose::Response => {
@@ -244,6 +289,11 @@ impl SemanticUi<'_> {
                 gate.fail_recoverable_scenario(true);
                 503
             }
+            #[cfg(windows)]
+            Self::ClaudeWindows(_) => {
+                gate.fail_recoverable_scenario(true);
+                503
+            }
             Self::Renderer(_) | Self::Codex(_) => {
                 gate.fail_recoverable_scenario(true);
                 503
@@ -268,6 +318,11 @@ impl SemanticUi<'_> {
             }
             #[cfg(target_os = "macos")]
             Self::Claude(session) => {
+                session.retry_once()?;
+                session.wait_response(marker, Duration::from_secs(30), gate)
+            }
+            #[cfg(windows)]
+            Self::ClaudeWindows(session) => {
                 session.retry_once()?;
                 session.wait_response(marker, Duration::from_secs(30), gate)
             }
@@ -297,6 +352,8 @@ impl SemanticUi<'_> {
             Self::Zed(session) => session.finish(gate, outcome),
             #[cfg(target_os = "macos")]
             Self::Claude(session) => session.finish(gate, outcome),
+            #[cfg(windows)]
+            Self::ClaudeWindows(session) => session.finish(gate, outcome),
             Self::Renderer(_) | Self::Codex(_) => outcome,
         }
     }

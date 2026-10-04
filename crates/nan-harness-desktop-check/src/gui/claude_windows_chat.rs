@@ -1,7 +1,7 @@
 //! Source-bound native Chat conversation input and assistant-only clipboard readback.
 use super::{Gui, clipboard};
-use crate::native::{CHAT_TURN_MAX_MILLIS, ChatActionPhase, failure_label};
-use crate::native::{ChatTurnStage, GuardFailure};
+use crate::native::WINDOWS_CHAT_MAX_MILLIS;
+use crate::native::{GuardFailure, WindowsChatStage};
 use crate::provider::ProviderGate;
 use crate::report::Reason;
 use nan_harness_private_fs::open_private_new;
@@ -48,8 +48,8 @@ struct Facts {
     schema_version: u8,
     mechanism: &'static str,
     diagnostics_only: bool,
-    stage: ChatTurnStage,
-    action_phase: Option<ChatActionPhase>,
+    stage: WindowsChatStage,
+    action_phase: Option<&'static str>,
     transport_failure: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     guard_rejection: Option<GuardRejection>,
@@ -64,9 +64,9 @@ impl Default for Facts {
     fn default() -> Self {
         Self {
             schema_version: 1,
-            mechanism: "claude-native-chat",
+            mechanism: "claude-windows-native-chat",
             diagnostics_only: true,
-            stage: ChatTurnStage::Request,
+            stage: WindowsChatStage::Request,
             action_phase: None,
             transport_failure: None,
             guard_rejection: None,
@@ -79,9 +79,10 @@ impl Default for Facts {
         }
     }
 }
-pub(crate) struct ClaudeNativeChatSession<'a> {
+pub(crate) struct ClaudeWindowsChatSession<'a> {
     gui: &'a Gui,
-    native_roots: &'a crate::probe::NativeRoots,
+    profile: &'a crate::probe::FreshClaudeWindowsProfile,
+    workspace: &'a Path,
     destination: PathBuf,
     prompt: Zeroizing<String>,
     retry_ready: bool,
@@ -108,22 +109,24 @@ fn verified_clipboard_clear(
     }
 }
 impl Gui {
-    pub(crate) fn claude_native_chat_session<'a>(
+    pub(crate) fn claude_windows_chat_session<'a>(
         &'a self,
         directory: &Path,
-        native_roots: &'a crate::probe::NativeRoots,
-    ) -> Result<ClaudeNativeChatSession<'a>, Reason> {
+        profile: &'a crate::probe::FreshClaudeWindowsProfile,
+        workspace: &'a Path,
+    ) -> Result<ClaudeWindowsChatSession<'a>, Reason> {
         if self.kind != nan_harness_core::DesktopHarnessKind::Claude
-            || !crate::native::claude_focus_policy()
-            || std::env::var("NANH_CLAUDE_MAC_NATIVE_CHAT").as_deref() != Ok("1")
+            || !super::claude_windows_ready::policy()
+            || std::env::var("NANH_CLAUDE_WINDOWS_NATIVE_CHAT").as_deref() != Ok("1")
             || directory.canonicalize().ok().as_deref() != Some(directory)
-            || !native_roots.verifies_created_roots()
+            || !profile.verifies_owned(workspace, Instant::now() + Duration::from_secs(1))
         {
             return Err(Reason::IsolationUnavailable);
         }
-        Ok(ClaudeNativeChatSession {
+        Ok(ClaudeWindowsChatSession {
             gui: self,
-            native_roots,
+            profile,
+            workspace,
             destination: directory.join(format!("claude-native-chat-{}.json", nonce()?)),
             prompt: Zeroizing::new(String::new()),
             retry_ready: false,
@@ -132,7 +135,7 @@ impl Gui {
         })
     }
 }
-impl ClaudeNativeChatSession<'_> {
+impl ClaudeWindowsChatSession<'_> {
     fn observe_provider(&mut self, gate: &ProviderGate) {
         self.facts.provider_observation = Some(ProviderObservation {
             generation_observed: gate.generation_count() > 0,
@@ -145,72 +148,82 @@ impl ClaudeNativeChatSession<'_> {
         mode: &str,
         marker: &str,
         deadline: Instant,
-    ) -> Result<ChatTurnStage, Reason> {
+    ) -> Result<WindowsChatStage, Reason> {
         if Instant::now() >= deadline {
             return Err(Reason::Timeout);
         }
-        self.facts.action_phase = Some(ChatActionPhase::BeforeGuard);
+        self.facts.action_phase = Some("before-guard");
         self.facts.transport_failure = None;
         self.facts.guard_rejection = None;
         let sentinel = Zeroizing::new(nonce()?);
+        if !self.profile.verifies_owned(self.workspace, deadline) {
+            return Err(Reason::IsolationUnavailable);
+        }
+        self.facts.action_phase = Some("transport");
         let facts = &mut self.facts;
-        let stage = self.gui.visual.claude_chat_turn(
+        let result = self.gui.visual.claude_windows_chat_turn_until(
             mode,
             [&self.prompt, marker, &sentinel],
             deadline,
             |phase, failure, rejection| {
                 facts.action_phase = Some(phase);
-                facts.transport_failure = failure.map(failure_label);
+                facts.transport_failure = failure.map(|value| match value {
+                    crate::native::FailureCategory::InvalidInput => "invalid-input",
+                    crate::native::FailureCategory::Spawn => "spawn",
+                    crate::native::FailureCategory::Pipe => "pipe",
+                    crate::native::FailureCategory::Output => "output",
+                    crate::native::FailureCategory::Timeout => "timeout",
+                    crate::native::FailureCategory::NonzeroExit => "nonzero-exit",
+                    crate::native::FailureCategory::WindowChanged => "window-changed",
+                    crate::native::FailureCategory::WindowQueryRejected => "window-query-rejected",
+                    crate::native::FailureCategory::SessionUnavailable => "session-unavailable",
+                });
                 facts.guard_rejection = rejection.map(GuardRejection::from);
             },
-        )?;
+        );
+        let stage = match result {
+            Ok(stage) => stage,
+            Err(reason) => {
+                self.facts.stage = WindowsChatStage::ActionUncertain;
+                return Err(reason);
+            }
+        };
         self.facts.stage = stage;
-        self.facts.action_phase = Some(ChatActionPhase::PostGuard);
-        self.gui
-            .visual
-            .claude_chat_guard_until(deadline, |failure, rejection| {
-                self.facts.transport_failure = failure.map(failure_label);
-                self.facts.guard_rejection = rejection.map(GuardRejection::from);
-            })?;
+        self.facts.action_phase = Some("post-guard");
+        if !self.profile.verifies_owned(self.workspace, deadline) {
+            return Err(Reason::IsolationUnavailable);
+        }
         if Instant::now() >= deadline {
             return Err(Reason::Timeout);
         }
-        self.facts.action_phase = Some(ChatActionPhase::Completed);
+        self.facts.action_phase = Some("completed");
         Ok(stage)
     }
     pub(crate) fn new_turn(&mut self, prompt: &str) -> Result<(), Reason> {
-        // Only roots created after proving both native directories absent can
+        // Only the exclusive prelaunch private Windows root token can
         // authorize replacing a draft. Keep their original identity and privacy.
-        if !self.native_roots.verifies_created_roots() {
-            return Err(Reason::IsolationUnavailable);
-        }
         if prompt.is_empty() || prompt.len() > 1024 || self.facts.submitted_turns >= 3 {
             return Err(Reason::InputMismatch);
         }
         self.retry_ready = false;
-        self.failure_details_attempted = false;
         self.prompt = Zeroizing::new(prompt.to_owned());
         let result = self.action(
             "input-replace-owned",
             "",
-            Instant::now() + Duration::from_millis(u64::from(CHAT_TURN_MAX_MILLIS)),
+            Instant::now() + Duration::from_millis(u64::from(WINDOWS_CHAT_MAX_MILLIS)),
         );
         match result {
-            Ok(ChatTurnStage::Sent) => {
+            Ok(WindowsChatStage::Sent) => {
                 self.facts.input_verified_turns += 1;
                 self.facts.submitted_turns += 1;
                 Ok(())
             }
-            Ok(
-                ChatTurnStage::InputMismatch
-                | ChatTurnStage::InputInitialUnavailable
-                | ChatTurnStage::InputInitialNonempty
-                | ChatTurnStage::InputClipboardMismatch
-                | ChatTurnStage::InputValueMismatch,
-            ) => Err(Reason::InputMismatch),
+            Ok(WindowsChatStage::InputClipboardMismatch | WindowsChatStage::InputValueMismatch) => {
+                Err(Reason::InputMismatch)
+            }
             Ok(_) => Err(Reason::ActionUnsupported),
             Err(reason) => {
-                self.facts.stage = ChatTurnStage::ActionUncertain;
+                self.facts.stage = WindowsChatStage::ActionUncertain;
                 Err(reason)
             }
         }
@@ -225,9 +238,9 @@ impl ClaudeNativeChatSession<'_> {
         loop {
             self.observe_provider(gate);
             let until = deadline
-                .min(Instant::now() + Duration::from_millis(u64::from(CHAT_TURN_MAX_MILLIS)));
+                .min(Instant::now() + Duration::from_millis(u64::from(WINDOWS_CHAT_MAX_MILLIS)));
             match self.action("copy", marker, until)? {
-                ChatTurnStage::Copied => {
+                WindowsChatStage::Copied => {
                     // The helper already checked exact clipboard bytes; independently
                     // read them through the existing private clipboard transport.
                     if clipboard::read()?.as_str() != marker {
@@ -237,7 +250,7 @@ impl ClaudeNativeChatSession<'_> {
                     return Ok(());
                 }
                 stage if stage.passive_pending() => {}
-                ChatTurnStage::ResponseMismatch => return Err(Reason::ResponseMismatch),
+                WindowsChatStage::ResponseMismatch => return Err(Reason::ResponseMismatch),
                 _ => return Err(Reason::ActionUnsupported),
             }
             if Instant::now() >= deadline {
@@ -259,29 +272,31 @@ impl ClaudeNativeChatSession<'_> {
             match self.action(
                 "retry-ready",
                 "NAN_CHECK_EXPECTED_FAILURE",
-                deadline
-                    .min(Instant::now() + Duration::from_millis(u64::from(CHAT_TURN_MAX_MILLIS))),
+                deadline.min(
+                    Instant::now() + Duration::from_millis(u64::from(WINDOWS_CHAT_MAX_MILLIS)),
+                ),
             )? {
-                ChatTurnStage::RetryReady => {
+                WindowsChatStage::RetryReady => {
                     self.retry_ready = true;
                     return Ok(());
                 }
-                ChatTurnStage::ScopeAnchorAbsent
+                WindowsChatStage::ScopeAnchorAbsent
                     if gate.failure_observed() && !self.failure_details_attempted =>
                 {
-                    // Consume the disclosure before dispatch. An uncertain action
-                    // cannot be replayed, and Retry still requires the raw marker.
+                    // Consume the only disclosure before entering an uncertain Invoke.
                     self.failure_details_attempted = true;
                     if self.action(
                         "failure-details",
                         "NAN_CHECK_EXPECTED_FAILURE",
                         deadline.min(
-                            Instant::now() + Duration::from_millis(u64::from(CHAT_TURN_MAX_MILLIS)),
+                            Instant::now()
+                                + Duration::from_millis(u64::from(WINDOWS_CHAT_MAX_MILLIS)),
                         ),
-                    )? != ChatTurnStage::FailureDetailsOpened
+                    )? != WindowsChatStage::FailureDetailsOpened
                     {
                         return Err(Reason::ActionUnsupported);
                     }
+                    // Disclosure never authorizes Retry; retain the raw marker proof.
                 }
                 stage if stage.passive_pending() => {}
                 _ => return Err(Reason::ActionUnsupported),
@@ -301,20 +316,20 @@ impl ClaudeNativeChatSession<'_> {
         match self.action(
             "retry",
             "NAN_CHECK_EXPECTED_FAILURE",
-            Instant::now() + Duration::from_millis(u64::from(CHAT_TURN_MAX_MILLIS)),
+            Instant::now() + Duration::from_millis(u64::from(WINDOWS_CHAT_MAX_MILLIS)),
         ) {
-            Ok(ChatTurnStage::Retried) => {
+            Ok(WindowsChatStage::Retried) => {
                 self.facts.retry_attempted = true;
                 Ok(())
             }
-            Ok(ChatTurnStage::ActionUncertain) => {
+            Ok(WindowsChatStage::ActionUncertain) => {
                 self.facts.retry_attempted = true;
                 Err(Reason::ActionUnsupported)
             }
             Ok(_) => Err(Reason::ActionUnsupported),
             Err(reason) => {
                 self.facts.retry_attempted = true;
-                self.facts.stage = ChatTurnStage::ActionUncertain;
+                self.facts.stage = WindowsChatStage::ActionUncertain;
                 Err(reason)
             }
         }
@@ -327,7 +342,7 @@ impl ClaudeNativeChatSession<'_> {
         let cleanup = verified_clipboard_clear(|| clipboard::write(""), clipboard::read);
         self.facts.clipboard_cleared = cleanup.is_ok();
         if cleanup.is_err() {
-            self.facts.stage = ChatTurnStage::ActionUncertain;
+            self.facts.stage = WindowsChatStage::ActionUncertain;
         }
         let outcome = outcome.and_then(|()| {
             if gate.fixture_response_verified() {
@@ -337,7 +352,7 @@ impl ClaudeNativeChatSession<'_> {
             }
         });
         if outcome.is_ok() && cleanup.is_ok() {
-            self.facts.stage = ChatTurnStage::Completed;
+            self.facts.stage = WindowsChatStage::Completed;
         }
         let bytes = serde_json::to_vec(&self.facts).map_err(|_| Reason::IsolationUnavailable)?;
         let recorded = open_private_new(&self.destination)
@@ -347,55 +362,36 @@ impl ClaudeNativeChatSession<'_> {
         outcome
     }
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
-    fn guard_rejections_keep_transport_failure_distinct() {
-        let mut facts = Facts::default();
-        assert!(
-            serde_json::to_value(&facts)
-                .unwrap()
-                .get("guardRejection")
-                .is_none()
-        );
-        for (failure, label) in [
-            (GuardFailure::IdentityMissing, "identity-missing"),
-            (GuardFailure::BoundsChanged, "bounds-changed"),
-            (GuardFailure::ForegroundChanged, "foreground-changed"),
-            (GuardFailure::SameProcessWindow, "same-process-window"),
-            (GuardFailure::OffDisplay, "off-display"),
-            (GuardFailure::Occluded, "occluded"),
-        ] {
-            facts.action_phase = Some(ChatActionPhase::PostGuard);
-            facts.guard_rejection = Some(failure.into());
-            let value = serde_json::to_value(&facts).unwrap();
-            assert_eq!(value["guardRejection"], label);
-            assert!(value["transportFailure"].is_null());
-        }
+    fn closed_receipt_excludes_private_payloads() {
+        let facts = Facts::default();
+        let value = serde_json::to_value(facts).unwrap();
+        assert_eq!(value["mechanism"], "claude-windows-native-chat");
+        assert_eq!(value["submittedTurns"], 0);
+        assert_eq!(value["copiedResponses"], 0);
+        assert!(value.get("prompt").is_none());
+        assert!(value.get("workspace").is_none());
+        assert!(value.get("guardRejection").is_none());
     }
 
     #[test]
-    fn clipboard_cleanup_is_observed_even_on_driver_failure() {
-        assert!(verified_clipboard_clear(|| Ok(()), || Ok(Zeroizing::new(String::new()))).is_ok());
+    fn clipboard_cleanup_requires_observed_empty_value() {
         assert_eq!(
-            verified_clipboard_clear(|| Ok(()), || Ok(Zeroizing::new("stale".into()))),
+            verified_clipboard_clear(|| Ok(()), || Ok(Zeroizing::new("PRIVATE".into()))),
             Err(Reason::CleanupFailed)
         );
         assert_eq!(
             verified_clipboard_clear(
-                || Err(Reason::ActionUnsupported),
-                || panic!("failed clear must not certify cleanup")
+                || Err(Reason::CleanupFailed),
+                || panic!("read after failed clear")
             ),
-            Err(Reason::ActionUnsupported)
+            Err(Reason::CleanupFailed)
         );
-    }
-    #[test]
-    fn partial_receipts_never_imply_a_complete_conversation() {
-        let value = serde_json::to_value(Facts::default()).unwrap();
-        assert_eq!(value["stage"], "request");
-        assert_eq!(value["submittedTurns"], 0);
-        assert_eq!(value["clipboardCleared"], false);
-        assert_eq!(value["diagnosticsOnly"], true);
+        assert!(verified_clipboard_clear(|| Ok(()), || Ok(Zeroizing::new(String::new()))).is_ok());
     }
 }

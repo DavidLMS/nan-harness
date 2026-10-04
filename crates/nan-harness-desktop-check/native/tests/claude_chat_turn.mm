@@ -227,6 +227,41 @@ int main() {
     tree.nodes.push_back(fixture(3, "AXStaticText", "NAN_CHECK_EXPECTED_FAILURE"));
     assert(scoped_control(tree, request, true, &scope_failure) == -1);
     assert(std::string(scope_failure) == "scope-anchor-ambiguous");
+    Request details_request;
+    details_request.prompt = "fresh user";
+    details_request.bounds = CGRectMake(0, 0, 800, 600);
+    Tree details_tree;
+    details_tree.nodes = {fixture(-1, "AXWindow", ""), fixture(0, "AXGroup", ""),
+        fixture(1, "AXStaticText", "Server error"), fixture(1, "AXStaticText", "fresh user"),
+        fixture(1, "AXButton", "Retry"), fixture(1, "AXButton", "View details"),
+        fixture(1, "AXHeading", "You said: fresh user")};
+    for (auto& node : details_tree.nodes) { node.enabled = true; node.bounds = CGRectMake(20, 20, 30, 30); }
+    assert(scoped_control(details_tree, details_request, true) == -1);
+    assert(failure_details_control(details_tree, details_request) == 5);
+    details_tree.nodes[3].label = "different user";
+    assert(failure_details_control(details_tree, details_request) == -1);
+    details_tree.nodes[3].label = "fresh user";
+    details_tree.nodes[3].parent = 0;
+    assert(failure_details_control(details_tree, details_request) == -1);
+    details_tree.nodes[3].parent = 1;
+    for (const char* label : {"Server error", "Retry", "View details", "fresh user"}) {
+        details_tree.nodes.push_back(fixture(1, label == std::string("Retry") || label == std::string("View details") ? "AXButton" : "AXStaticText", label));
+        assert(failure_details_control(details_tree, details_request) == -1);
+        details_tree.nodes.pop_back();
+    }
+    details_tree.nodes[5].enabled = false;
+    assert(failure_details_control(details_tree, details_request) == -1);
+    details_tree.nodes[5].enabled = true;
+    details_tree.nodes[6].label = "You said: different user";
+    assert(failure_details_control(details_tree, details_request) == -1);
+    details_tree.nodes[6].label = "You said: fresh user";
+    for (const char* role : {"AXWebArea", "AXScrollArea", "AXWindow"}) {
+        details_tree.nodes[1].role = role;
+        assert(failure_details_control(details_tree, details_request) == -1);
+    }
+    details_tree.nodes[1].role = "AXGroup";
+    details_tree.nodes.push_back(fixture(1, "AXHeading", "Claude responded: previous turn"));
+    assert(failure_details_control(details_tree, details_request) == -1);
     Tree response_scope;
     const char* response_failure = nullptr;
     assert(scoped_control(response_scope, request, false, &response_failure) == -1);

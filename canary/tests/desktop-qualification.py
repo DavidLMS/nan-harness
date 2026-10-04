@@ -468,7 +468,7 @@ class QualificationTests(unittest.TestCase):
         cells = q.matrix()['include']
         self.assertEqual(len(cells), 15)
         self.assertEqual(len({(c['app'], c['platform'], c['architecture']) for c in cells}), 15)
-        self.assertEqual(sum(c['backend'] != 'renderer-inventory' for c in cells), 10)
+        self.assertEqual(sum(c['backend'] != 'renderer-inventory' for c in cells), 11)
         self.assertEqual({(c['platform'], c['architecture']) for c in cells},
                          {('linux', 'x86_64'), ('macos', 'aarch64'), ('windows', 'x86_64')})
         with self.assertRaises(ValueError):
@@ -2076,7 +2076,7 @@ class QualificationTests(unittest.TestCase):
         stages = ['input-focus-guard', 'input-focus-setting', 'input-focused-identity', 'input-replace-select-key', 'input-prompt-before-guard', 'input-prompt-clipboard', 'input-prompt-after-guard', 'input-paste-key', 'input-readback-before-guard', 'input-sentinel-clipboard', 'input-sentinel-after-guard', 'input-readback-select-key', 'input-readback-select-guard', 'input-readback-copy-key', 'input-collapse-guard', 'input-collapse-key']
         with tempfile.TemporaryDirectory() as root:
             path = Path(root) / 'facts.json'
-            for stage in stages + ['focus']:
+            for stage in stages + ['focus', 'failure-details-opened']:
                 path.write_text(json.dumps({**facts, 'stage': stage}))
                 value = q.semantic_observations(root, 'claude-desktop')[0]
                 self.assertEqual(value['stage'], stage)
@@ -2092,6 +2092,24 @@ class QualificationTests(unittest.TestCase):
             path.write_text(json.dumps({**facts, 'stage': stages[0]}))
             with self.assertRaises(ValueError):
                 q.semantic_observations(root, 'zed-desktop')
+
+    def test_windows_native_chat_receipt_is_advisory_and_payload_closed(self):
+        value = dict(schemaVersion=1, mechanism='claude-windows-native-chat', diagnosticsOnly=True,
+                     stage='completed', submittedTurns=3, inputVerifiedTurns=3, copiedResponses=3,
+                     retryAttempted=True, clipboardCleared=True)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'chat.json'
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(tmp, 'claude-desktop'), [value])
+            self.assertEqual(q.envelope('claude-desktop', 'windows', 'x86_64', 'a' * 40)['qualification'], 'unqualified')
+            for change in ({'stage': 'PRIVATE'}, {'prompt': 'PRIVATE'}, {'submittedTurns': 4},
+                           {'inputVerifiedTurns': 2}, {'retryAttempted': 1}, {'clipboardCleared': False, 'detail': 'PRIVATE'}):
+                path.write_text(json.dumps({**value, **change}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(tmp, 'claude-desktop')
+            path.write_text(json.dumps(value))
+            with self.assertRaises(ValueError):
+                q.semantic_observations(tmp, 'zed-desktop')
 
     def test_claude_native_chat_guard_rejection_is_separate_and_closed(self):
         value = dict(schemaVersion=1, mechanism='claude-native-chat', diagnosticsOnly=True,

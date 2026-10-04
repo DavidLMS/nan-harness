@@ -6,6 +6,8 @@ mod claude_chat_navigation;
 #[cfg(target_os = "macos")]
 mod claude_native_chat;
 mod claude_native_probe;
+#[cfg(windows)]
+mod claude_windows_chat;
 #[cfg(any(windows, test))]
 mod claude_windows_fit;
 #[cfg(any(windows, test))]
@@ -23,6 +25,8 @@ mod zed_zoom_probe;
 
 #[cfg(target_os = "macos")]
 pub(crate) use claude_native_chat::ClaudeNativeChatSession;
+#[cfg(windows)]
+pub(crate) use claude_windows_chat::ClaudeWindowsChatSession;
 pub(crate) use codex_dom_probe::CodexDomSession;
 pub(crate) use dom_probe::{DomAction, DomPurpose, DomTurn, RendererSession};
 pub(crate) use native_copy_probe::NativeClipboardSession;

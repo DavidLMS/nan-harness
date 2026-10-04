@@ -324,11 +324,15 @@ jobs:
         if: runner.os == 'Linux' && matrix.app == 'claude-desktop' && inputs.experiment == 'startup-baseline'
         run: echo 'NANH_CLAUDE_LINUX_CHAT_ONLY=1' >> "$GITHUB_ENV"
       - name: Enable Claude Windows private-profile observations
-        if: runner.os == 'Windows' && matrix.app == 'claude-desktop' && inputs.experiment == 'startup-baseline'
+        if: runner.os == 'Windows' && matrix.app == 'claude-desktop' && contains(fromJSON('["startup-baseline","deterministic-full"]'), inputs.experiment)
         shell: bash
         run: |
           echo 'NANH_CLAUDE_WINDOWS_PROFILE_POLICY=private-env' >> "$GITHUB_ENV"
           echo 'NANH_CLAUDE_WINDOWS_CHAT_ONLY=1' >> "$GITHUB_ENV"
+          if [ '${{ inputs.experiment }}' = 'deterministic-full' ]; then
+            echo 'NANH_CLAUDE_WINDOWS_FRESH_PROFILE=1' >> "$GITHUB_ENV"
+            echo 'NANH_CLAUDE_WINDOWS_NATIVE_CHAT=1' >> "$GITHUB_ENV"
+          fi
       - name: Run full deterministic semantic qualification
         env:
           NANH_DESKTOP_QUALIFICATION_MODE: ${{ inputs.experiment == 'startup-baseline' && 'startup-baseline' || 'renderer' }}

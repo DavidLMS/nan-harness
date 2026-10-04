@@ -122,6 +122,10 @@ mod claude_native_roots;
 pub(crate) use claude_native_roots::NativeRoots;
 mod claude_native_storage;
 mod claude_storage;
+#[cfg(windows)]
+mod claude_windows_profile;
+#[cfg(windows)]
+pub(crate) use claude_windows_profile::FreshClaudeWindowsProfile;
 mod hermes_policy;
 pub(crate) mod hermes_readiness;
 mod semantic;
@@ -745,7 +749,20 @@ async fn scenario_owned(
         gate.expect_fixture_response(&final_marker)
             .map_err(|()| Reason::IsolationUnavailable)?;
     }
-    let mut process = launch(spec, &gate).map_err(|(reason, failure)| {
+    let prepared_launch = launch_command(spec, &gate).inspect_err(|_| {
+        launch_observation.failure = Some(crate::diagnostics::LaunchFailure::LaunchSetup);
+    })?;
+    #[cfg(not(windows))]
+    if std::env::var_os("NANH_CLAUDE_WINDOWS_FRESH_PROFILE").is_some() {
+        return Err(Reason::IsolationUnavailable);
+    }
+    #[cfg(windows)]
+    let mut fresh_windows_profile = FreshClaudeWindowsProfile::prepare(
+        spec,
+        &prepared_launch,
+        Instant::now() + Duration::from_secs(1),
+    )?;
+    let mut process = launch(spec, prepared_launch).map_err(|(reason, failure)| {
         launch_observation.failure = Some(failure);
         reason
     })?;
@@ -762,55 +779,40 @@ async fn scenario_owned(
         final_marker: &final_marker,
         experiment: experiment.as_ref(),
         semantic: semantic.as_ref(),
-        native_roots,
     };
     let mut gui = None;
     let outcome = if conversation.uses_renderer() {
         conversation.run_renderer(&mut process, result).await
     } else {
-        let acquired = Gui::wait(spec.kind, &mut process);
-        capture_failed_acquisition(acquired.is_err(), &mut process, spec, launch_observation);
-        // Retain the acquired native transport even when pre-input readiness
-        // fails: owned cleanup must not depend on permission to send input.
-        let acquired = acquired.map(|native_gui| gui.insert(native_gui));
-        #[cfg(any(target_os = "macos", windows))]
-        let acquired = acquired.and_then(|native_gui| {
-            native_gui.finish_initial_ready(&mut process)?;
-            Ok(native_gui)
-        });
+        let acquired = acquire_native_gui(
+            spec,
+            &mut process,
+            &mut gui,
+            launch_observation,
+            gui_acquisition,
+        );
         match acquired {
             Ok(native_gui) => {
                 result.steps.push(CheckStep::Launched);
                 conversation
-                    .run(native_gui, process.id(), result, composer_observations)
+                    .run_acquired(
+                        native_gui,
+                        process.id(),
+                        result,
+                        composer_observations,
+                        native_roots,
+                        #[cfg(windows)]
+                        fresh_windows_profile.as_mut(),
+                    )
                     .await
             }
-            Err((
-                reason,
-                acquisition_stage,
-                error_category,
-                foreground_relation,
-                candidate_facts,
-            )) => {
-                *gui_acquisition = Some(crate::diagnostics::GuiAcquisitionDiagnostic {
-                    stage: acquisition_stage,
-                    error_category,
-                    reason,
-                    foreground_relation,
-                    candidate_facts,
-                });
-                Err(reason)
-            }
+            Err(reason) => Err(reason),
         }
     };
-    if matches!(outcome, Err(Reason::WindowChanged | Reason::FocusChanged))
-        && cfg!(target_os = "macos")
-        && spec.kind == DesktopHarnessKind::Claude
-        && std::env::var("NANH_CLAUDE_MAC_PROFILE_POLICY").as_deref() == Ok("native-known-folders")
-        && std::env::var("NANH_DESKTOP_QUALIFICATION_MODE").as_deref() == Ok("startup-baseline")
-    {
-        capture_failed_acquisition(true, &mut process, spec, launch_observation);
-    }
+    capture_native_focus_failure(outcome, &mut process, spec, launch_observation);
+    // Release configuration locks before the existing receipt restoration.
+    #[cfg(windows)]
+    drop(fresh_windows_profile);
     finish_scenario(
         spec,
         &mut process,
@@ -821,6 +823,54 @@ async fn scenario_owned(
         diagnostic,
     )
     .await
+}
+
+// Retain the transport for owned cleanup even when readiness denies input.
+fn acquire_native_gui<'a>(
+    spec: &ProbeSpec,
+    process: &mut ProbeProcess,
+    gui: &'a mut Option<Gui>,
+    launch_observation: &mut LaunchObservation,
+    gui_acquisition: &mut Option<crate::diagnostics::GuiAcquisitionDiagnostic>,
+) -> Result<&'a mut Gui, Reason> {
+    let acquired = Gui::wait(spec.kind, process);
+    capture_failed_acquisition(acquired.is_err(), process, spec, launch_observation);
+    // Retain the acquired native transport even when pre-input readiness
+    // fails: owned cleanup must not depend on permission to send input.
+    let acquired = acquired.map(|native_gui| gui.insert(native_gui));
+    #[cfg(any(target_os = "macos", windows))]
+    let acquired = acquired.and_then(|native_gui| {
+        native_gui.finish_initial_ready(process)?;
+        Ok(native_gui)
+    });
+    acquired.map_err(
+        |(reason, stage, error_category, foreground_relation, candidate_facts)| {
+            *gui_acquisition = Some(crate::diagnostics::GuiAcquisitionDiagnostic {
+                stage,
+                error_category,
+                reason,
+                foreground_relation,
+                candidate_facts,
+            });
+            reason
+        },
+    )
+}
+
+fn capture_native_focus_failure(
+    outcome: Result<(), Reason>,
+    process: &mut ProbeProcess,
+    spec: &ProbeSpec,
+    launch_observation: &mut LaunchObservation,
+) {
+    if matches!(outcome, Err(Reason::WindowChanged | Reason::FocusChanged))
+        && cfg!(target_os = "macos")
+        && spec.kind == DesktopHarnessKind::Claude
+        && std::env::var("NANH_CLAUDE_MAC_PROFILE_POLICY").as_deref() == Ok("native-known-folders")
+        && std::env::var("NANH_DESKTOP_QUALIFICATION_MODE").as_deref() == Ok("startup-baseline")
+    {
+        capture_failed_acquisition(true, process, spec, launch_observation);
+    }
 }
 
 async fn prepare_scenario(spec: &ProbeSpec) -> Result<(), Reason> {
@@ -859,7 +909,6 @@ fn prepare_read_fixture(spec: &ProbeSpec, marker: &str) -> Result<PathBuf, Reaso
 // Keep conversation adapters separate from process acquisition and restoration.
 struct ConversationScenario<'a> {
     spec: &'a ProbeSpec,
-    native_roots: Option<&'a NativeRoots>,
     inventory: &'a ScriptedProvider,
     gate: &'a ProviderGate,
     fixture: &'a Path,
@@ -895,12 +944,46 @@ impl ConversationScenario<'_> {
             .await
     }
 
+    // Seal the source-defined profile only after native readiness, then lend
+    // authority to the conversation while the configuration handles stay held.
+    async fn run_acquired(
+        &self,
+        gui: &Gui,
+        owner: Option<u32>,
+        result: &mut ProbeResult,
+        composer_observations: &mut Vec<ComposerFailure>,
+        native_roots: Option<&NativeRoots>,
+        #[cfg(windows)] mut profile: Option<&mut FreshClaudeWindowsProfile>,
+    ) -> Result<(), Reason> {
+        #[cfg(windows)]
+        if let Some(profile) = profile.as_deref_mut() {
+            profile.seal_configuration(
+                &self.gate.base_url,
+                self.gate.session_token(),
+                Instant::now() + Duration::from_secs(1),
+            )?;
+        }
+        self.run(
+            gui,
+            owner,
+            result,
+            composer_observations,
+            semantic::NativeInputAuthority {
+                native_roots,
+                #[cfg(windows)]
+                windows_profile: profile.as_deref(),
+            },
+        )
+        .await
+    }
+
     async fn run(
         &self,
         gui: &Gui,
         owner: Option<u32>,
         result: &mut ProbeResult,
         composer_observations: &mut Vec<ComposerFailure>,
+        authority: semantic::NativeInputAuthority<'_>,
     ) -> Result<(), Reason> {
         if let Some(experiment) = self.experiment {
             // Partial hosted experiments cannot become compatibility evidence.
@@ -928,7 +1011,7 @@ impl ConversationScenario<'_> {
                     },
                     result,
                     composer_observations,
-                    self.native_roots,
+                    authority,
                 )
                 .await;
         }
@@ -2117,10 +2200,8 @@ fn launch_command(spec: &ProbeSpec, gate: &ProviderGate) -> Result<Command, Reas
 
 fn launch(
     spec: &ProbeSpec,
-    gate: &ProviderGate,
+    command: Command,
 ) -> Result<ProbeProcess, (Reason, crate::diagnostics::LaunchFailure)> {
-    let command = launch_command(spec, gate)
-        .map_err(|reason| (reason, crate::diagnostics::LaunchFailure::LaunchSetup))?;
     claude_storage::capture(spec, &command);
     claude_native_storage::capture(spec);
     #[cfg(windows)]

@@ -62,6 +62,30 @@ class Policy(unittest.TestCase):
                     with self.assertRaises(ValueError): invoke({**source, **change})
                 with self.assertRaises(ValueError): invoke(source, 'chatgpt-desktop')
 
+    def test_native_chat_requires_paired_fresh_profile_and_derives_source_authority(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            helper = root / 'helper'
+            helper.write_text('synthetic')
+            source = dict(GITHUB_ACTIONS='true', RUNNER_ENVIRONMENT='github-hosted', RUNNER_OS='Windows',
+                          NANH_DESKTOP_QUALIFICATION_MODE='renderer',
+                          NANH_CLAUDE_WINDOWS_PROFILE_POLICY='private-env', NANH_CLAUDE_WINDOWS_CHAT_ONLY='1',
+                          NANH_CLAUDE_WINDOWS_NATIVE_CHAT='1', NANH_CLAUDE_WINDOWS_FRESH_PROFILE='1',
+                          FEASIBILITY_WINDOWS_PROOF_PYTHON=str(helper), FEASIBILITY_WINDOWS_PROOF_SCRIPT=str(helper))
+            with patch.object(runner, 'validate_claude_windows_bundle'):
+                def invoke(values=source, app='claude-desktop'):
+                    return runner.qualification_environment(app, root, helper, root / 'app/Claude.exe', values)
+                result = invoke()
+                self.assertEqual(result['NANH_DESKTOP_QUALIFICATION_MODE'], 'startup-baseline')
+                self.assertEqual(result['NANH_CLAUDE_WINDOWS_FRESH_PROFILE'], '1')
+                self.assertNotIn('NANH_CLAUDE_WINDOWS_SOURCE_POLICY', result)
+                for change in ({'RUNNER_OS': 'macOS'}, {'NANH_CLAUDE_WINDOWS_FRESH_PROFILE': None},
+                               {'NANH_CLAUDE_WINDOWS_NATIVE_CHAT': None}, {'NANH_CLAUDE_WINDOWS_CHAT_ONLY': None},
+                               {'NANH_CLAUDE_WINDOWS_PROFILE_POLICY': None},
+                               {'NANH_CLAUDE_WINDOWS_SOURCE_POLICY': 'official-2.19675.0-97910a066871'}):
+                    with self.assertRaises(ValueError): invoke({**source, **change})
+                with self.assertRaises(ValueError): invoke(source, 'chatgpt-desktop')
+
     def test_bounded_asar_reader_binds_the_bootstrap_and_rejects_truncation(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()

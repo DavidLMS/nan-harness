@@ -12,10 +12,10 @@ inline UiaChatInputValue uia_chat_focus_state(bool retained_valid,bool query_val
     return same_focus?UiaChatInputValue::Ready:UiaChatInputValue::Pending;
 }
 inline UiaChatInputValue uia_chat_input_value(const std::wstring& observed,
-        const std::wstring& expected, bool valid, bool exact_focus) {
+        const std::wstring& expected, const std::wstring& prior, bool valid, bool exact_focus) {
     if (!valid || !exact_focus || observed.size()>1024) return UiaChatInputValue::Rejected;
     if (observed==expected) return UiaChatInputValue::Ready;
-    return expected.compare(0,observed.size(),observed)==0
+    return observed==prior || expected.compare(0,observed.size(),observed)==0
         ? UiaChatInputValue::Pending : UiaChatInputValue::Rejected;
 }
 template<class Query, class Within, class Pause>

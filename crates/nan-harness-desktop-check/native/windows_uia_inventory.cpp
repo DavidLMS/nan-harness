@@ -1,4 +1,5 @@
 #include "uia_request_frame.hpp"
+#include "uia_chat_scope.hpp"
 #include "uia_current_mode.hpp"
 #include "uia_chat_capability.hpp"
 #include "uia_attachment.hpp"
@@ -48,6 +49,11 @@ struct Collection {
     ComPtr<IUIAutomationTreeWalker> walker;
     std::vector<ComPtr<IUIAutomationElement>> held;
     unsigned classic{}, modern{}, sends{}, starts{}, headings{}, copies{}, nodes{};
+    bool collect_chat=false;
+    std::size_t chat_text_units=0;
+    std::vector<UiaChatScopeNode> chat_nodes;
+    std::vector<ComPtr<IUIAutomationElement>> send_controls;
+    ~Collection() { for(auto& node:chat_nodes)if(!node.label.empty())SecureZeroMemory(node.label.data(),node.label.size()*sizeof(wchar_t)); }
     const char* stage = "query";
     ProcessHandle root_process;
     std::uint64_t root_creation{};
@@ -359,7 +365,7 @@ struct Collection {
         }
         return unavailable;
     }
-    bool append(IUIAutomationElement* element,unsigned depth, bool in_mode = false) {
+    bool append(IUIAutomationElement* element,unsigned depth, bool in_mode = false,int parent=-1) {
         if(!within()) {stage="deadline";return false;}
         if(depth>32 || ++nodes>1024) {stage="limit";return false;}
         for(const auto& prior:held) {
@@ -397,20 +403,35 @@ struct Collection {
         if(type==UIA_ButtonControlTypeId && !offscreen) {
             sends+=text==L"Send message";starts+=text==L"Start task";copies+=text==L"Copy";
             if(text==L"Start task") start_controls.emplace_back(element);
+            if(collect_chat && text==L"Send message")send_controls.emplace_back(element);
         }
+        bool is_heading=false;
         if(type==UIA_TextControlTypeId) {
             VARIANT heading;VariantInit(&heading);
             HRESULT result=element->GetCurrentPropertyValue(UIA_HeadingLevelPropertyId,&heading);
             bool valid=SUCCEEDED(result) && heading.vt==VT_I4;
-            if(valid && heading.lVal>=HeadingLevel1 && heading.lVal<=HeadingLevel9 && text.rfind(L"Claude responded:",0)==0) ++headings;
+            is_heading=valid && heading.lVal>=HeadingLevel1 && heading.lVal<=HeadingLevel9;
+            if(is_heading && text.rfind(L"Claude responded:",0)==0) ++headings;
             VariantClear(&heading);
             if(!valid) {stage="heading-property";return false;}
+        }
+        const int index=static_cast<int>(held.size());
+        if(collect_chat) {
+            chat_text_units+=text.size();
+            if(chat_text_units>65536){stage="limit";return false;}
+            const auto chat_role=is_heading?UiaChatRole::Heading
+                :type==UIA_ButtonControlTypeId?UiaChatRole::Button
+                :type==UIA_TextControlTypeId?UiaChatRole::Text
+                :type==UIA_GroupControlTypeId?UiaChatRole::Group
+                :(type==UIA_DocumentControlTypeId || type==UIA_WindowControlTypeId || type==UIA_PaneControlTypeId)?UiaChatRole::Boundary
+                :UiaChatRole::Other;
+            chat_nodes.push_back({chat_role,text,parent});
         }
         ComPtr<IUIAutomationElement> retained=element;held.push_back(retained);
         ComPtr<IUIAutomationElement> child;
         if(FAILED(walker->GetFirstChildElement(element,&child))) return false;
         while(child) {
-            if(!append(child.Get(),depth+1,in_mode)) return false;
+            if(!append(child.Get(),depth+1,in_mode,index)) return false;
             ComPtr<IUIAutomationElement> next;
             if(FAILED(walker->GetNextSiblingElement(child.Get(),&next))) return false;
             child=next;

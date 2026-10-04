@@ -1,4 +1,7 @@
 #[cfg(any(windows, test))]
+pub(super) mod windows_chat;
+
+#[cfg(any(windows, test))]
 pub(crate) mod holder;
 
 use crate::report::Reason;

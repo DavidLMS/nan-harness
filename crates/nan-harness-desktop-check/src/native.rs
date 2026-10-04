@@ -13,7 +13,11 @@ mod ocr;
 mod process;
 mod window;
 #[cfg(any(windows, test))]
+mod windows_chat_turn;
+#[cfg(any(windows, test))]
 mod windows_uia;
+#[cfg(windows)]
+pub(crate) use windows_chat_turn::{MAX_MILLIS as WINDOWS_CHAT_MAX_MILLIS, WindowsChatStage};
 
 #[cfg(target_os = "macos")]
 pub(crate) use crate::diagnostics::ClaudeIdentityObservation;
@@ -248,6 +252,20 @@ impl Native {
     }
 
     #[cfg(windows)]
+    pub(crate) fn claude_policy_absent(&self, deadline: std::time::Instant) -> bool {
+        process::run_once_until(
+            &self.executable,
+            std::ffi::OsStr::new("--claude-policy-absence"),
+            None,
+            &[],
+            Some(deadline),
+        )
+        .is_ok_and(|output| {
+            output.as_str() == "not-found\n" && std::time::Instant::now() < deadline
+        })
+    }
+
+    #[cfg(windows)]
     pub(crate) fn executable(&self) -> &Path {
         &self.executable
     }
@@ -417,6 +435,26 @@ impl Native {
         deadline: std::time::Instant,
     ) -> Result<OwnedCleanupHolder, FailureCategory> {
         process::holder::Holder::start(&self.executable, launcher, expected, digest, deadline)
+    }
+
+    #[cfg(windows)]
+    pub(crate) fn claude_windows_chat_turn(
+        &self,
+        window: &Window,
+        mode: &str,
+        values: [&str; 3],
+        deadline: std::time::Instant,
+    ) -> Result<WindowsChatStage, FailureCategory> {
+        if std::env::var("GITHUB_ACTIONS").as_deref() != Ok("true")
+            || std::env::var("RUNNER_ENVIRONMENT").as_deref() != Ok("github-hosted")
+            || std::env::var("RUNNER_OS").as_deref() != Ok("Windows")
+            || std::env::var("NANH_CLAUDE_WINDOWS_PROFILE_POLICY").as_deref() != Ok("private-env")
+            || std::env::var("NANH_CLAUDE_WINDOWS_NATIVE_CHAT").as_deref() != Ok("1")
+        {
+            return Err(FailureCategory::InvalidInput);
+        }
+        let output = process::windows_chat::run(&self.executable, window, mode, values, deadline)?;
+        WindowsChatStage::parse(&output).ok_or(FailureCategory::Output)
     }
 
     #[cfg(windows)]
