@@ -247,7 +247,7 @@ fn validate_diagnostics(facts: &Value) -> Option<()> {
     if fields.contains_key("sendActionClass")
         && (!facts["inputVerified"].as_bool()?
             || !["click", "press", "none", "multiple", "other"]
-                .contains(facts["sendActionClass"].as_str()?))
+                .contains(&facts["sendActionClass"].as_str()?))
     {
         return None;
     }
@@ -261,7 +261,7 @@ fn validate_diagnostics(facts: &Value) -> Option<()> {
     }
     if fields.contains_key("inputShape")
         && (input_shape(facts).is_none()
-            || !["input-not-empty", "clipboard-cleanup"].contains(facts["stage"].as_str()?)
+            || !["input-not-empty", "clipboard-cleanup"].contains(&facts["stage"].as_str()?)
             || FLAGS.iter().any(|key| facts[*key] != false))
     {
         return None;
@@ -276,7 +276,7 @@ fn validate_diagnostics(facts: &Value) -> Option<()> {
                 "input-not-empty",
                 "response-mismatch",
             ]
-            .contains(facts["stage"].as_str()?))
+            .contains(&facts["stage"].as_str()?))
     {
         return None;
     }
