@@ -1689,7 +1689,7 @@ class QualificationTests(unittest.TestCase):
             base = dict(schemaVersion=1, mechanism='zed-pointer-observation', diagnosticsOnly=True,
                 pointerTarget='unavailable', pointerChild='unavailable',
                 **dict.fromkeys('maximizedHorizontal maximizedVertical enabled sensitive showing visible defunct retryContains'.split(), None))
-            for field in ('transientDialogs', 'transientDialogsBeforeHover'):
+            for field in ('transientDialogs', 'transientDialogsBeforeHover', 'transientDialogsBeforeDispatch'):
                 for state in ('complete','unavailable','query-failed','identity-rejected','deadline','limit'):
                     dialogs = dict(state=state, ownedTransientDialogs=2 if state=='complete' else None,
                                    mappedOwnedTransientDialogs=1 if state=='complete' else None)

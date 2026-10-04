@@ -1996,7 +1996,7 @@ def semantic_observations(directory, app):
                     raise ValueError('invalid Zed published ancestor observation')
                 record.update(centerWithinPublishedAncestors=within, ancestorBoundsStatus=state,
                               checkedAncestorCount=count)
-            for field in ('transientDialogs', 'transientDialogsBeforeHover'):
+            for field in ('transientDialogs', 'transientDialogsBeforeHover', 'transientDialogsBeforeDispatch'):
                 if field not in value:
                     continue
                 dialogs = value[field]
@@ -2015,7 +2015,7 @@ def semantic_observations(directory, app):
                 record[field] = dict(dialogs)
             if 'xi2Motion' in value:
                 record['xi2Motion']=zed_xi2_motion(value['xi2Motion'])
-            if (set(value) - modifier_fields - ancestor_fields - ancestor_stage_fields - {'cursorSelection', 'transientDialogs','transientDialogsBeforeHover','entryCrossing','xi2Motion','retryHitPolicy'} not in (base, base | {'inputDelivery'}, base | coordinate_fields,
+            if (set(value) - modifier_fields - ancestor_fields - ancestor_stage_fields - {'cursorSelection', 'transientDialogs','transientDialogsBeforeHover','transientDialogsBeforeDispatch','entryCrossing','xi2Motion','retryHitPolicy'} not in (base, base | {'inputDelivery'}, base | coordinate_fields,
                                   base | coordinate_fields | {'inputDelivery'}, base | coordinate_fields | authority_fields,
                                   base | coordinate_fields | authority_fields | {'inputDelivery'})
                     or present_modifiers and present_modifiers != modifier_fields

@@ -39,6 +39,29 @@ class Tests(unittest.TestCase):
         self.assertEqual(result, {'state':'complete','ownedTransientDialogs':2,
                                   'mappedOwnedTransientDialogs':1})
         self.assertNotIn('20',json.dumps(result))
+    def test_dialog_appearing_after_hover_is_visible_before_dispatch(self):
+        tree = Tree()
+        tree.parents = {}
+        before = self.collect(tree)
+        # A newly registered, still-unmapped owned dialog is input-blocking in
+        # the pinned GPUI branch even though the earlier hover census was zero.
+        tree.parents = {12:10}
+        dispatch = self.collect(tree)
+        self.assertEqual(before['ownedTransientDialogs'], 0)
+        self.assertEqual(dispatch, dict(state='complete', ownedTransientDialogs=1,
+                                      mappedOwnedTransientDialogs=0))
+        self.assertEqual(before['ownedTransientDialogs'], 0)
+
+    def test_dispatch_owner_or_cutoff_loss_never_claims_empty_census(self):
+        tree = Tree()
+        tree.parents = {}
+        for guard, clock, expected in ((lambda:False, lambda:0, 'identity-rejected'),
+                                       (lambda:True, lambda:10, 'deadline')):
+            dispatch = self.collect(tree, guard, clock)
+            self.assertEqual(dispatch['state'], expected)
+            self.assertIsNone(dispatch['ownedTransientDialogs'])
+            self.assertIsNone(dispatch['mappedOwnedTransientDialogs'])
+
     def test_no_dialog_is_measured_zero_not_unknown(self):
         tree = Tree()
         tree.parents = {}

@@ -357,6 +357,15 @@ class Transport(unittest.TestCase):
             bus=':1.2', path='/org/a11y/atspi/accessible/3')).encode()
         clock, observations, clicks = [0], [], []
         def readonly_sampler(path):
+            if Path(path).name == 'zed-transient-dialogs.py':
+                def capture(client, pid, guard, deadline):
+                    self.assertEqual((client, pid), (40, 20))
+                    self.assertLess(clock[0], deadline)
+                    self.assertTrue(guard())
+                    self.assertEqual(clicks, [])
+                    return dict(state='complete', ownedTransientDialogs=0,
+                                mappedOwnedTransientDialogs=0)
+                return dict(capture=capture)
             self.assertEqual(Path(path).name, 'zed-atspi-observe.py')
             unknown = dict(centerWithinPublishedAncestors=None,
                 ancestorBoundsStatus='unavailable', checkedAncestorCount=0)
@@ -384,8 +393,10 @@ class Transport(unittest.TestCase):
                 pointer_child=lambda *args:'client',
                 publish_observation=lambda facts:observations.append(facts)):
             self.assertEqual(self.call('retry-click', request),0)
-            self.assertEqual(spawn.call_count, 1)
+            self.assertEqual(spawn.call_count, 2)
         self.assertEqual(len(clicks),1)
+        self.assertEqual(observations[0]['transientDialogsBeforeDispatch'],
+            dict(state='complete', ownedTransientDialogs=0, mappedOwnedTransientDialogs=0))
         self.assertEqual(observations[0]['inputDelivery'], dict(status='unavailable',
             stage='budget-insufficient',pressCount=None,releaseCount=None,orderedPair=None))
 

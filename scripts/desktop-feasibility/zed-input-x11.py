@@ -920,6 +920,23 @@ def retry_click(payload):
                 facts['cursorSelection'].update(status='no-hit', failureReason='cursor-unstable',
                                                exactPointerMatched=False, accessibleHitVerified=False)
                 return 18
+        if (os.environ.get('NANH_ZED_XRECORD') == '1'
+                and sys.platform == 'linux'
+                and os.environ.get('GITHUB_ACTIONS') == 'true'
+                and os.environ.get('RUNNER_ENVIRONMENT') == 'github-hosted'
+                and os.environ.get('RUNNER_OS') == 'Linux'):
+            # Reuse the complete mapped/unmapped census at the actual dispatch
+            # boundary. X properties do not expose GPUI's private child set,
+            # so this receipt remains advisory and never grants actionability.
+            import runpy
+            dialog_module = runpy.run_path(str(Path(__file__).with_name('zed-transient-dialogs.py')))
+            facts['transientDialogsBeforeDispatch'] = dialog_module['capture'](
+                active, request['pid'], record_scope, deadline)
+            # The passive walk can consume time or observe an owner transition;
+            # retain the original click guard and cutoff after it completes.
+            if (time.monotonic() >= deadline or not record_scope()
+                    or independent_client_snapshot(active) != second_geometry):
+                return 18
         # One ordinary activation, never another press after an uncertain receipt.
         run(['click', '--clearmodifiers', '1'])
         if observer is not None:
