@@ -93,13 +93,14 @@ function classifyTitle({held,entries}) {
 }
 async function observe(held,platform,{guard,identity,same,deadline}) {
  const result=facts(platform);let handle;
- const prove=async()=>{
+ const prove=async final=>{
   if(Date.now()>=deadline){result.rejectionStage='deadline';return false;}
   if(!held||held.url!=='app://-/index.html'){result.rejectionStage='scope';result.guardFailure='held-document';return false;}
-  if(!await guard()){result.rejectionStage='scope';result.guardFailure=guard.lastFailure??null;return false;}
+  if(!final&&!await guard()){result.rejectionStage='scope';result.guardFailure=guard.lastFailure??null;return false;}
   if(!same(held,await identity(held.page))){result.rejectionStage='changed';return false;}
   if(Date.now()>=deadline){result.rejectionStage='deadline';return false;}
-  if(!await guard()){result.rejectionStage='scope';result.guardFailure=guard.lastFailure??null;return false;}
+  if(final&&!await guard()){result.rejectionStage='scope';result.guardFailure=guard.lastFailure??null;return false;}
+  if(Date.now()>=deadline){result.rejectionStage='deadline';return false;}
   return true;
  };
  try {
@@ -107,11 +108,13 @@ async function observe(held,platform,{guard,identity,same,deadline}) {
   handle=await held.page.evaluateHandle(holdDialog);
   const source=platform==='win32'?windowsCatalog:platform==='linux'?linuxCatalog:platform==='darwin'?macCatalog:catalog;
   const entries=Object.values(Object.fromEntries(source.entries.filter(e=>e.platform===(platform==='win32'?'windows':platform==='darwin'?'mac':'linux')).map(e=>[e.id,e])));
-  if(!await prove())return result;
   const first=await held.page.evaluate(classifyTitle,{held:handle,entries});
-  if(!first||!await prove())return result;
+  if(!first)return result;
+  if(Date.now()>=deadline){result.rejectionStage='deadline';return result;}
+  // Two passive retained-node samples form one transaction. Fresh ownership
+  // and original CDP identity bracket it; no GUI action occurs inside.
   const second=await held.page.evaluate(classifyTitle,{held:handle,entries});
-  if(!second||!await prove())return result;
+  if(!second||!await prove(true))return result;
   if(JSON.stringify(first)!==JSON.stringify(second)){result.rejectionStage='changed';return result;}
   Object.assign(result,second);
  } catch(_) {result.rejectionStage='query';} finally {if(handle)await handle.dispose().catch(()=>{});}

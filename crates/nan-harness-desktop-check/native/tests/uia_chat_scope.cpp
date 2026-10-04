@@ -1,5 +1,7 @@
 #include "../uia_chat_scope.hpp"
 #include <cassert>
+#include <map>
+#include "../uia_attachment.hpp"
 static void container_projection_contract() {
     using R = UiaChatRole;
     assert(!uia_chat_retains_label(R::Group));
@@ -23,8 +25,34 @@ static void container_projection_contract() {
     append(R::Text,L"owned-prompt",2);
     assert(uia_chat_scope(nodes,L"owned-prompt",L"NAN_CHECK_EXPECTED_FAILURE",true).control == 4);
 }
+static void control_view_scope_contract() {
+    using R=UiaChatRole;
+    // Neutral provider fixture: forty raw layout wrappers aren't controls.
+    // The semantic Group and source Text/Button controls keep their identities.
+    std::map<int,int> raw;
+    for(int index=1;index<=40;++index)raw[index]=index-1;
+    raw[100]=40;raw[101]=100;raw[102]=100;
+    std::map<int,int> controls{{100,0},{101,100},{102,100}};
+    auto attached=[&](const std::map<int,int>& parents,int leaf,bool foreign) {
+        return uia_attached_to_root(leaf,0,[&](int node)->std::optional<int> {
+            auto found=parents.find(node);if(found==parents.end())return std::nullopt;
+            return found->second;
+        },[](int a,int b)->std::optional<bool>{return a==b;},
+        [&](int node){return !(foreign&&node==100);},[]{return true;});
+    };
+    assert(!attached(raw,102,false)); // Existing depth bound remains effective.
+    assert(attached(controls,102,false));assert(!attached(controls,102,true));
+    std::vector<UiaChatScopeNode> nodes{{R::Boundary,L"",-1},{R::Group,L"",0},
+        {R::Heading,L"Claude responded: retained-marker",1},{R::Button,L"Copy",1}};
+    assert(uia_chat_scope(nodes,L"owned-prompt",L"retained-marker",false).control==3);
+    nodes.push_back({R::Button,L"Copy",1});
+    assert(uia_chat_scope(nodes,L"owned-prompt",L"retained-marker",false).control<0);
+    nodes.pop_back();nodes[2].parent=0;
+    assert(uia_chat_scope(nodes,L"owned-prompt",L"retained-marker",false).control<0);
+}
 int main() {
     container_projection_contract();
+    control_view_scope_contract();
     using R=UiaChatRole;
     std::vector<UiaChatScopeNode> nodes={{R::Other,L"",-1},{R::Other,L"",0},
         {R::Other,L"private prompt",1},{R::Button,L"Copy",1},

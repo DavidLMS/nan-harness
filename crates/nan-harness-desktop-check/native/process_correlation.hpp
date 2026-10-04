@@ -1,5 +1,6 @@
 #pragma once
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <vector>
 
@@ -70,9 +71,8 @@ RetainedTargetIdentity retained_target_identity(bool creation_matches, State sta
 struct RetainedImageIdentity {
     std::uint32_t volume, index_high, index_low, size_high, size_low, write_high, write_low;
 };
-inline const char* retained_image_mismatch(bool canonical_matches,
+inline const char* retained_image_mismatch(
     const RetainedImageIdentity& expected, const RetainedImageIdentity& actual) {
-    if (!canonical_matches) return "target-image-path";
     if (actual.volume != expected.volume) return "target-image-volume";
     if (actual.index_high != expected.index_high || actual.index_low != expected.index_low)
         return "target-image-file-id";
@@ -81,4 +81,14 @@ inline const char* retained_image_mismatch(bool canonical_matches,
     if (actual.write_high != expected.write_high || actual.write_low != expected.write_low)
         return "target-image-write-time";
     return nullptr;
+}
+
+// The original hashed executable remains open, so its identity cannot be reused.
+// Win32 aliases are lookup names; these kernel identities bind the opened object.
+struct OriginalImageFile {
+    std::uint64_t volume;
+    std::array<unsigned char,16> id;
+};
+inline bool same_original_image_file(const OriginalImageFile& original, const OriginalImageFile& candidate) {
+    return original.volume == candidate.volume && original.id == candidate.id;
 }

@@ -103,6 +103,7 @@ pub(crate) fn preflight(line: &str) -> Option<serde_json::Value> {
                 | "target-image-path"
                 | "target-image-volume"
                 | "target-image-file-id"
+                | "target-image-file-id-query"
                 | "target-image-size"
                 | "target-image-write-time"
                 | "owner-recheck"
@@ -423,6 +424,7 @@ mod tests {
             "target-image-path",
             "target-image-volume",
             "target-image-file-id",
+            "target-image-file-id-query",
             "target-image-size",
             "target-image-write-time",
             "owner-recheck",

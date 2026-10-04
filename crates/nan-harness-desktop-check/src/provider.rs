@@ -72,6 +72,7 @@ struct GateState {
     live: bool,
     generations: AtomicUsize,
     expected_failure: AtomicBool,
+    expected_overload: AtomicBool,
     failure_observed: AtomicBool,
     #[cfg(any(target_os = "macos", test))]
     failure_turn: Mutex<FailureTurnAuthority>,
@@ -116,6 +117,7 @@ impl ProviderGate {
             live,
             generations: AtomicUsize::new(0),
             expected_failure: AtomicBool::new(false),
+            expected_overload: AtomicBool::new(false),
             failure_observed: AtomicBool::new(false),
             #[cfg(any(target_os = "macos", test))]
             failure_turn: Mutex::new(FailureTurnAuthority::default()),
@@ -207,6 +209,7 @@ impl ProviderGate {
     }
 
     pub(crate) fn fail_next_scenario(&self, enabled: bool) {
+        self.state.expected_overload.store(false, Ordering::SeqCst);
         self.state
             .expected_failure_status
             .store(400, Ordering::SeqCst);
@@ -214,6 +217,17 @@ impl ProviderGate {
     }
 
     pub(crate) fn fail_recoverable_scenario(&self, enabled: bool) {
+        self.set_recoverable_failure(enabled, false);
+    }
+
+    pub(crate) fn fail_overloaded_scenario(&self, enabled: bool) {
+        self.set_recoverable_failure(enabled, true);
+    }
+
+    fn set_recoverable_failure(&self, enabled: bool, overloaded: bool) {
+        self.state
+            .expected_overload
+            .store(overloaded, Ordering::SeqCst);
         self.state
             .expected_failure_status
             .store(503, Ordering::SeqCst);
@@ -362,7 +376,18 @@ async fn chat(State(state): State<Arc<GateState>>, Json(mut body): Json<Value>) 
         state.failure_observed.store(true, Ordering::SeqCst);
         let status = StatusCode::from_u16(state.expected_failure_status.load(Ordering::SeqCst))
             .unwrap_or(StatusCode::BAD_REQUEST);
-        let mut response = closed_error(status, "NAN_CHECK_EXPECTED_FAILURE");
+        // Codex's capacity Retry requires the typed overload code. A generic
+        // upstream 503 is translated into a different error by the bridge.
+        let mut response = if state.expected_overload.load(Ordering::SeqCst) {
+            (
+                status,
+                Json(json!({"error": {"type": "desktop_check",
+                "code": "server_is_overloaded", "message": "NAN_CHECK_EXPECTED_FAILURE"}})),
+            )
+                .into_response()
+        } else {
+            closed_error(status, "NAN_CHECK_EXPECTED_FAILURE")
+        };
         if status == StatusCode::SERVICE_UNAVAILABLE {
             response.headers_mut().insert(
                 "x-should-retry",
@@ -888,6 +913,45 @@ mod tests {
         assert!(gate.failure_observed());
         assert_eq!(gate.generation_count(), 0);
         assert!(!gate.fixture_response_verified());
+        gate.fail_recoverable_scenario(false);
+        assert_eq!(request().send().await.unwrap().status(), StatusCode::OK);
+        assert_eq!(gate.generation_count(), 1);
+        assert!(gate.fixture_response_verified());
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn capacity_failure_has_typed_code_and_does_not_leak_into_other_scenarios() {
+        let (url, server) = upstream(StatusCode::OK, "application/json", final_json()).await;
+        let gate = ProviderGate::start(&url, Zeroizing::new("private-key".into()), false, "marker")
+            .await
+            .unwrap();
+        gate.arm_fixture_response("NAN_CHECK_FINAL:marker").unwrap();
+        let request = || {
+            reqwest::Client::new()
+                .post(format!("{}/chat/completions", gate.base_url))
+                .bearer_auth(gate.session_token())
+                .json(&json!({"messages":[]}))
+        };
+        gate.fail_overloaded_scenario(true);
+        let failure = request().send().await.unwrap();
+        assert_eq!(failure.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(failure.headers()["x-should-retry"], "false");
+        let body = failure.json::<Value>().await.unwrap();
+        assert_eq!(body["error"]["code"], "server_is_overloaded");
+        assert_eq!(body["error"]["message"], "NAN_CHECK_EXPECTED_FAILURE");
+        assert!(gate.failure_observed());
+        assert_eq!(gate.generation_count(), 0);
+        assert!(!gate.fixture_response_verified());
+        gate.fail_recoverable_scenario(true);
+        let generic = request()
+            .send()
+            .await
+            .unwrap()
+            .json::<Value>()
+            .await
+            .unwrap();
+        assert!(generic["error"].get("code").is_none());
         gate.fail_recoverable_scenario(false);
         assert_eq!(request().send().await.unwrap().status(), StatusCode::OK);
         assert_eq!(gate.generation_count(), 1);

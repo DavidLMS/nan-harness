@@ -63,6 +63,133 @@ enum ErrorEnvelope {
     MixedFragments,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum ExecResult {
+    LaunchFailed,
+    ExitedZero,
+    ExitedNonzero,
+    Running,
+    Unknown,
+    Ambiguous,
+}
+
+// Parse only the bounded source envelope, never output text or a substring.
+fn exec_result(text: &[&str]) -> ExecResult {
+    let [text] = text else {
+        return ExecResult::Unknown;
+    };
+    if text.len() > MAX_TEXT_BYTES {
+        return ExecResult::Unknown;
+    }
+    let text = text.strip_prefix("Tool error: ").unwrap_or(text);
+    if text.starts_with("Failed to create unified exec process: ") {
+        return ExecResult::LaunchFailed;
+    }
+    let mut lines = text.lines().peekable();
+    if !exec_prefix(&mut lines) {
+        return ExecResult::Unknown;
+    }
+    if !lines
+        .next()
+        .and_then(|line| line.strip_prefix("Wall time: "))
+        .and_then(|value| value.strip_suffix(" seconds"))
+        .is_some_and(wall_time_decimal)
+    {
+        return ExecResult::Unknown;
+    }
+    let state = match lines.next() {
+        Some(line) if line.starts_with("Process exited with code ") => {
+            match line
+                .strip_prefix("Process exited with code ")
+                .and_then(|value| value.parse::<i32>().ok())
+            {
+                Some(0) => ExecResult::ExitedZero,
+                Some(_) => ExecResult::ExitedNonzero,
+                None => return ExecResult::Unknown,
+            }
+        }
+        Some(line) if line.starts_with("Process running with session ID ") => {
+            if !line
+                .strip_prefix("Process running with session ID ")
+                .is_some_and(unsigned_decimal)
+            {
+                return ExecResult::Unknown;
+            }
+            ExecResult::Running
+        }
+        _ => return ExecResult::Unknown,
+    };
+    if lines
+        .peek()
+        .is_some_and(|line| line.starts_with("Original token count: "))
+        && !lines
+            .next()
+            .and_then(|line| line.strip_prefix("Original token count: "))
+            .is_some_and(unsigned_decimal)
+    {
+        return ExecResult::Unknown;
+    }
+    if lines.next() != Some("Output:") {
+        return ExecResult::Unknown;
+    }
+    state
+}
+
+fn exec_prefix(lines: &mut std::iter::Peekable<std::str::Lines<'_>>) -> bool {
+    if lines
+        .peek()
+        .is_some_and(|line| line.starts_with("Warning: truncated output (original token count: "))
+    {
+        let Some(line) = lines.next() else {
+            return false;
+        };
+        if !line
+            .strip_prefix("Warning: truncated output (original token count: ")
+            .and_then(|value| value.strip_suffix(')'))
+            .is_some_and(unsigned_decimal)
+        {
+            return false;
+        }
+    }
+    if lines
+        .peek()
+        .is_some_and(|line| line.starts_with("Total output lines: "))
+        && (!lines
+            .next()
+            .and_then(|line| line.strip_prefix("Total output lines: "))
+            .is_some_and(unsigned_decimal)
+            || lines.next() != Some(""))
+    {
+        return false;
+    }
+    if lines
+        .peek()
+        .is_some_and(|line| line.starts_with("Chunk ID: "))
+        && !lines
+            .next()
+            .and_then(|line| line.strip_prefix("Chunk ID: "))
+            .is_some_and(|value| {
+                !value.is_empty() && value.len() <= 128 && !value.chars().any(char::is_whitespace)
+            })
+    {
+        return false;
+    }
+    true
+}
+
+fn wall_time_decimal(value: &str) -> bool {
+    let value = value.strip_prefix('-').unwrap_or(value);
+    let mut parts = value.split('.');
+    parts.next().is_some_and(unsigned_decimal)
+        && parts.next().is_none_or(unsigned_decimal)
+        && parts.next().is_none()
+}
+
+fn unsigned_decimal(value: &str) -> bool {
+    !value.is_empty() && value.len() <= 20 && value.bytes().all(|byte| byte.is_ascii_digit())
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ToolResultObservation {
@@ -74,6 +201,8 @@ pub(crate) struct ToolResultObservation {
     tool_error_detected: bool,
     error_category: ErrorCategory,
     error_envelope: Option<ErrorEnvelope>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    exec_result: Option<ExecResult>,
 }
 
 impl ToolResultObservation {
@@ -87,6 +216,7 @@ impl ToolResultObservation {
             tool_error_detected: false,
             error_category: ErrorCategory::None,
             error_envelope: None,
+            exec_result: None,
         };
         let mut seen = Vec::new();
         let mut inspected = 0;
@@ -125,6 +255,13 @@ impl ToolResultObservation {
                     return result;
                 }
                 let envelope = error.map(|_| observed_error_envelope(shape, &text, selected_tool));
+                if matches!(selected_tool, SelectedTool::ExecCommand) {
+                    result.exec_result = Some(if result.result_present {
+                        ExecResult::Ambiguous
+                    } else {
+                        exec_result(&text)
+                    });
+                }
                 seen.push((shape, text));
                 result.result_present = true;
                 result.result_count += 1;
@@ -567,6 +704,79 @@ mod tests {
             SelectedTool::Read,
         );
         assert_eq!(facts.error_category, ErrorCategory::Unknown);
+    }
+
+    #[test]
+    fn exec_envelopes_are_closed_and_never_inspect_output_for_status() {
+        for (text, expected) in [
+            (
+                "Wall time: 0.1 seconds\nProcess exited with code 0\nOutput:\nprivate",
+                ExecResult::ExitedZero,
+            ),
+            (
+                "Chunk ID: private\nWall time: 1 seconds\nProcess exited with code -1\nOriginal token count: 3\nOutput:\nprivate",
+                ExecResult::ExitedNonzero,
+            ),
+            (
+                "Wall time: 0 seconds\nProcess running with session ID 123\nOutput:\nprivate",
+                ExecResult::Running,
+            ),
+            (
+                "Failed to create unified exec process: private",
+                ExecResult::LaunchFailed,
+            ),
+            (
+                "Tool error: Failed to create unified exec process: private",
+                ExecResult::LaunchFailed,
+            ),
+            (
+                "private\nProcess exited with code 0\nOutput:",
+                ExecResult::Unknown,
+            ),
+            (
+                "Wall time: NaN seconds\nProcess exited with code 0\nOutput:",
+                ExecResult::Unknown,
+            ),
+            (
+                "Wall time: 1 seconds\nProcess exited with code 0",
+                ExecResult::Unknown,
+            ),
+            (
+                "Wall time: 1 seconds\nProcess exited with code 0\nProcess running with session ID 1\nOutput:",
+                ExecResult::Unknown,
+            ),
+        ] {
+            assert_eq!(exec_result(&[text]), expected);
+        }
+        assert_eq!(
+            exec_result(&["marker", "Process exited with code 0"]),
+            ExecResult::Unknown
+        );
+        assert_eq!(
+            exec_result(&[&"x".repeat(MAX_TEXT_BYTES + 1)]),
+            ExecResult::Unknown
+        );
+    }
+
+    #[test]
+    fn exec_observation_deduplicates_identical_results_but_rejects_distinct_results() {
+        let output = "Wall time: 1 seconds\nProcess exited with code 0\nOutput:\nPRIVATE";
+        let one = request("tool", json!(output));
+        let facts =
+            ToolResultObservation::collect(&[one.clone(), one.clone()], SelectedTool::ExecCommand);
+        assert_eq!(facts.exec_result, Some(ExecResult::ExitedZero));
+        assert_eq!(facts.result_count, 1);
+        assert!(!serde_json::to_string(&facts).unwrap().contains("PRIVATE"));
+        let different = request(
+            "tool",
+            json!("Failed to create unified exec process: PRIVATE"),
+        );
+        let facts = ToolResultObservation::collect(&[one, different], SelectedTool::ExecCommand);
+        assert_eq!(facts.exec_result, Some(ExecResult::Ambiguous));
+        assert_eq!(
+            ToolResultObservation::collect(&[], SelectedTool::Read).exec_result,
+            None
+        );
     }
 
     #[test]

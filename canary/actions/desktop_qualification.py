@@ -1830,7 +1830,7 @@ def semantic_observations(directory, app):
         elif mechanism == 'windows-owned-cleanup-preflight':
             fields = set('schemaVersion mechanism diagnosticsOnly stage'.split())
             stages = set('request path file-open file-hash file-identity process-open snapshot inspector-parent ancestry target-open target-identity target-creation target-state target-image owner-recheck deadline transport'.split())
-            stages.update('target-image-' + part for part in 'query sharing access open canonical metadata path volume file-id size write-time'.split())
+            stages.update('target-image-' + part for part in 'query sharing access open canonical metadata path volume file-id file-id-query size write-time'.split())
             if (set(value) != fields or app != 'claude-desktop' or value['diagnosticsOnly'] is not True
                     or type(value['stage']) is not str or value['stage'] not in stages):
                 raise ValueError('invalid Windows owned cleanup preflight')
@@ -2850,7 +2850,7 @@ def semantic_observations(directory, app):
                 result = value['toolResult']
                 keys = {'selectedTool', 'resultPresent', 'resultCount', 'status',
                         'shape', 'toolErrorDetected', 'errorCategory'}
-                if value['stage'] != 'tool' or type(result) is not dict or set(result) not in (keys, keys | {'errorEnvelope'}):
+                if value['stage'] != 'tool' or type(result) is not dict or not keys <= set(result) <= keys | {'errorEnvelope', 'execResult'}:
                     raise ValueError('invalid tool result observation')
                 closed = {}
                 enum(closed, result, 'selectedTool', {'read', 'read-file', 'read-files', 'exec-command', 'fixture-read'})
@@ -2858,6 +2858,11 @@ def semantic_observations(directory, app):
                 enum(closed, result, 'shape', {'absent', 'string', 'text-array', 'mixed', 'unsupported'})
                 enum(closed, result, 'errorCategory', {'none', 'file-not-found', 'file-too-large',
                                                      'read-budget', 'directory', 'unknown'})
+                if 'execResult' in result:
+                    if result['selectedTool'] != 'exec-command' or not result['resultPresent'] or result['execResult'] is None:
+                        raise ValueError('exec result requires owned exec tool result')
+                    enum(closed, result, 'execResult', {'launch-failed', 'exited-zero',
+                         'exited-nonzero', 'running', 'unknown', 'ambiguous'})
                 if result['selectedTool'] == 'fixture-read' and app != 'claude-desktop':
                     raise ValueError('foreign owned fixture selection')
                 flag(closed, result, 'resultPresent')

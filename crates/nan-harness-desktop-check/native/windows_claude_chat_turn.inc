@@ -337,10 +337,13 @@ int windows_claude_chat_turn() {
             CoUninitialize();
         }
     } cleanup{turn};
+    // Chat scopes use UIA's semantic control tree. RawView includes layout-only
+    // wrappers; ControlView keeps source rows/actions without raising depth limits.
+    // Fresh scope, attachment and mode proofs reuse this same retained walker.
     ComPtr<IUIAutomation2> automation;
     if(FAILED(CoCreateInstance(CLSID_CUIAutomation8,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&automation)))
         || FAILED(automation->put_ConnectionTimeout(100)) || FAILED(automation->put_TransactionTimeout(100))
-        || FAILED(automation.As(&c.automation)) || FAILED(automation->get_RawViewWalker(&c.walker)))return emit("tree");
+        || FAILED(automation.As(&c.automation)) || FAILED(automation->get_ControlViewWalker(&c.walker)))return emit("tree");
     if(FAILED(automation->ElementFromHandle(c.request.window,&turn.root)) || !turn.root)
         return emit("tree-query");
     if(!c.append(turn.root.Get(),0)) {

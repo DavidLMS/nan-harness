@@ -101,8 +101,15 @@ async function main() {
  const page={evaluateHandle:async fn=>({value:vm.runInNewContext('('+fn.toString()+')',d.context)(),dispose:async()=>{}}),
   evaluate:async(fn,arg)=>{reads++;return vm.runInNewContext('('+fn.toString()+')',d.context)({...arg,held:arg.held.value});}};
  const held={page,target:'PRIVATE_TARGET',frame:'PRIVATE_FRAME',loader:'PRIVATE_LOADER',url:'app://-/index.html'};
- let current=held;const opts={guard:async()=>owns,identity:async()=>current,same:(a,b)=>['page','target','frame','loader','url'].every(k=>a[k]===b[k]),deadline:Date.now()+1000};
- const good=await helper.observe(held,'darwin',opts);assert.equal(good.status,'matched');assert.equal(reads,2);assert.ok(!JSON.stringify(good).includes('PRIVATE'));
+ let current=held,ownerQueries=0,identityQueries=0;const opts={guard:async()=>{ownerQueries++;return owns;},identity:async()=>{identityQueries++;return current;},same:(a,b)=>['page','target','frame','loader','url'].every(k=>a[k]===b[k]),deadline:Date.now()+1000};
+ const good=await helper.observe(held,'darwin',opts);assert.equal(good.status,'matched');assert.equal(reads,2);assert.equal(ownerQueries,2);assert.equal(identityQueries,2);assert.ok(!JSON.stringify(good).includes('PRIVATE'));
+ const ordinaryEvaluate=page.evaluate;
+ for(const cause of ['owner','loader']) {
+  owns=true;current=held;reads=0;
+  page.evaluate=async(fn,arg)=>{const result=await ordinaryEvaluate(fn,arg);if(reads===1){if(cause==='owner')owns=false;else current={...held,loader:'changed'};}return result;};
+  const rejected=await helper.observe(held,'darwin',opts);assert.equal(rejected.status,'guard-rejected');assert.equal(rejected.matchCount,null);assert.deepEqual(rejected.sourceTitleIds,[]);assert.equal(reads,2);
+ }
+ owns=true;current=held;page.evaluate=ordinaryEvaluate;
  for(const key of ['target','frame','loader','url','page']) {
   current={...held,[key]:'changed'};reads=0;assert.equal((await helper.observe(held,'darwin',opts)).status,'guard-rejected');assert.equal(reads,0);
  }

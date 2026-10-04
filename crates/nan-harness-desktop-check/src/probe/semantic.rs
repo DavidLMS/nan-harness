@@ -366,8 +366,12 @@ impl SemanticUi<'_> {
                 gate.fail_recoverable_scenario(true);
                 503
             }
-            Self::Renderer(_) | Self::Codex(_) => {
+            Self::Renderer(_) => {
                 gate.fail_recoverable_scenario(true);
+                503
+            }
+            Self::Codex(_) => {
+                gate.fail_overloaded_scenario(true);
                 503
             }
         };

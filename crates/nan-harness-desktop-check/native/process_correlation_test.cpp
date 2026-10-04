@@ -38,8 +38,7 @@ static void retained_identity_contract() {
 }
 static void retained_image_contract() {
     const RetainedImageIdentity expected{1,2,3,4,5,6,7};
-    assert(retained_image_mismatch(true, expected, expected) == nullptr);
-    assert(std::string(retained_image_mismatch(false, expected, expected)) == "target-image-path");
+    assert(retained_image_mismatch( expected, expected) == nullptr);
     struct Field { std::uint32_t RetainedImageIdentity::*member; const char* reason; };
     for (const auto field : {Field{&RetainedImageIdentity::volume,"target-image-volume"},
         Field{&RetainedImageIdentity::index_high,"target-image-file-id"},
@@ -49,17 +48,38 @@ static void retained_image_contract() {
         Field{&RetainedImageIdentity::write_high,"target-image-write-time"},
         Field{&RetainedImageIdentity::write_low,"target-image-write-time"}}) {
         auto changed = expected; ++(changed.*field.member);
-        assert(std::string(retained_image_mismatch(true, expected, changed)) == field.reason);
+        assert(std::string(retained_image_mismatch( expected, changed)) == field.reason);
         unsigned terminations = 0;
         assert(!terminate_verified_handle({true,true,true,
-            retained_image_mismatch(true,expected,changed)==nullptr},
+            retained_image_mismatch(expected,changed)==nullptr},
             [&] { ++terminations; return true; }));
         assert(terminations == 0);
     }
 }
+static void original_image_alias_contract() {
+    OriginalImageFile original{0x100000001ULL,{}};original.id[0]=7;original.id[15]=19;
+    // Two lookup names may refer to the same retained object, never a copy.
+    std::map<std::string,OriginalImageFile> files{{"pinned-original",original},{"same-object-alias",original}};
+    auto copied=original;copied.id[15]=20;files["byte-identical-copy"]=copied;
+    assert(same_original_image_file(files.at("pinned-original"),files.at("same-object-alias")));
+    assert(!same_original_image_file(original,files.at("byte-identical-copy")));
+    for(unsigned byte=0;byte<16;++byte) {
+        auto changed=original;changed.id[byte]^=1;
+        assert(!same_original_image_file(original,changed));
+    }
+    auto other_volume=original;other_volume.volume=1;
+    assert(!same_original_image_file(original,other_volume));
+    unsigned terminations=0;
+    // Matching object identity cannot waive original process ownership/creation.
+    for(auto proof : {CleanupProof{true,false,true,true},CleanupProof{true,true,false,true},
+        CleanupProof{true,true,true,same_original_image_file(original,copied)}})
+        assert(!terminate_verified_handle(proof,[&]{++terminations;return true;}));
+    assert(terminations==0);
+}
 int main() {
     retained_identity_contract();
     retained_image_contract();
+    original_image_alias_contract();
     std::vector<CorrelationEntry> rows{{1,0,false},{2,1,false},{3,2,true}};
     std::map<std::uint32_t,std::uint64_t> times{{1,10},{2,20},{3,30}};
     auto query = [&](std::uint32_t pid, std::uint64_t& time) {

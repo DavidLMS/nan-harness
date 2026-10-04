@@ -976,6 +976,9 @@ int activate_window(const std::string& request) {
     }
 }
 #elif defined(_WIN32)
+#ifndef _WIN32_WINNT
+#define _WIN32_WINNT 0x0602
+#endif
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <tlhelp32.h>
@@ -1097,8 +1100,13 @@ static bool held_creation(HANDLE process, std::uint64_t& time) {
     time = (static_cast<std::uint64_t>(created.dwHighDateTime) << 32) | created.dwLowDateTime;
     return time != 0;
 }
+static OriginalImageFile image_file_identity(const FILE_ID_INFO& info) {
+    OriginalImageFile result{info.VolumeSerialNumber,{}};
+    std::copy(std::begin(info.FileId.Identifier),std::end(info.FileId.Identifier),result.id.begin());
+    return result;
+}
 static const char* held_image_failure(HANDLE process, const BY_HANDLE_FILE_INFORMATION& expected,
-    const std::wstring& expected_path) {
+    const FILE_ID_INFO& original_file) {
     wchar_t path[32768] = {}; DWORD size = 32768;
     if (!QueryFullProcessImageNameW(process, 0, path, &size) || size == 0 || size >= 32768)
         return "target-image-query";
@@ -1110,19 +1118,22 @@ static const char* held_image_failure(HANDLE process, const BY_HANDLE_FILE_INFOR
             : error == ERROR_ACCESS_DENIED ? "target-image-access" : "target-image-open";
     }
     BY_HANDLE_FILE_INFORMATION actual{};
-    wchar_t canonical[32768] = {};
-    const DWORD length = GetFinalPathNameByHandleW(file.value, canonical, 32768, FILE_NAME_NORMALIZED);
-    if (length == 0 || length >= 32768) return "target-image-canonical";
+    FILE_ID_INFO candidate{};
+    if (!GetFileInformationByHandleEx(file.value,FileIdInfo,&candidate,sizeof(candidate)))
+        return "target-image-file-id-query";
+    if (!same_original_image_file(image_file_identity(original_file),image_file_identity(candidate)))
+        return original_file.VolumeSerialNumber != candidate.VolumeSerialNumber
+            ? "target-image-volume" : "target-image-file-id";
     if (!GetFileInformationByHandle(file.value, &actual)) return "target-image-metadata";
     const auto identity = [](const BY_HANDLE_FILE_INFORMATION& info) {
         return RetainedImageIdentity{info.dwVolumeSerialNumber,info.nFileIndexHigh,info.nFileIndexLow,
             info.nFileSizeHigh,info.nFileSizeLow,info.ftLastWriteTime.dwHighDateTime,info.ftLastWriteTime.dwLowDateTime};
     };
-    return retained_image_mismatch(_wcsicmp(canonical, expected_path.c_str()) == 0, identity(expected), identity(actual));
+    return retained_image_mismatch(identity(expected), identity(actual));
 }
 static bool held_image(HANDLE process, const BY_HANDLE_FILE_INFORMATION& expected,
-    const std::wstring& expected_path) {
-    return held_image_failure(process, expected, expected_path) == nullptr;
+    const FILE_ID_INFO& original_file) {
+    return held_image_failure(process, expected, original_file) == nullptr;
 }
 static bool pinned_digest(HANDLE file, const std::string& expected) {
     if (expected.size() != 64 || expected.find_first_not_of("0123456789abcdef") != std::string::npos) return false;
@@ -1192,9 +1203,10 @@ int owned_cleanup_holder() {
     if (!pinned_digest(expected_file.value, digest)) return unavailable();
     std::cout << "progress file-hash\n" << std::flush;
     stage = "file-identity";
-    BY_HANDLE_FILE_INFORMATION expected{}; wchar_t canonical[32768] = {};
+    BY_HANDLE_FILE_INFORMATION expected{}; FILE_ID_INFO original_file{}; wchar_t canonical[32768] = {};
     const DWORD canonical_size = GetFinalPathNameByHandleW(expected_file.value, canonical, 32768, FILE_NAME_NORMALIZED);
-    if (!GetFileInformationByHandle(expected_file.value, &expected) || canonical_size == 0 || canonical_size >= 32768
+    if (!GetFileInformationByHandleEx(expected_file.value,FileIdInfo,&original_file,sizeof(original_file))
+        || !GetFileInformationByHandle(expected_file.value, &expected) || canonical_size == 0 || canonical_size >= 32768
         || _wcsicmp(canonical, expected_path.c_str()) != 0 || expected.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) return unavailable();
     std::cout << "progress file-identity\n" << std::flush;
     stage = "process-open";
@@ -1233,7 +1245,7 @@ int owned_cleanup_holder() {
                 const DWORD state = WaitForSingleObject(handle, 0);
                 return state == WAIT_OBJECT_0 ? RetainedProcessState::Exited
                     : state == WAIT_TIMEOUT ? RetainedProcessState::Live : RetainedProcessState::Unavailable;
-            }, [&] { image_failure = held_image_failure(handle, expected, expected_path); return image_failure == nullptr; });
+            }, [&] { image_failure = held_image_failure(handle, expected, original_file); return image_failure == nullptr; });
         if (identity == RetainedTargetIdentity::CreationRejected) { stage = "target-creation"; return unavailable(); }
         if (identity == RetainedTargetIdentity::StateRejected) { stage = "target-state"; return unavailable(); }
         if (identity == RetainedTargetIdentity::ImageRejected) { stage = image_failure ? image_failure : "target-image"; return unavailable(); }
@@ -1274,7 +1286,7 @@ int owned_cleanup_holder() {
         if (state == WAIT_OBJECT_0) { ++already; continue; }
         std::uint64_t created = 0;
         if (state != WAIT_TIMEOUT || !target.image_verified || !held_creation(target.handle.value, created) || created != target.created
-            || !held_image(target.handle.value, expected, expected_path)) { ++rejected; continue; }
+            || !held_image(target.handle.value, expected, original_file)) { ++rejected; continue; }
         if (!terminate_verified_handle({GetTickCount64() < cutoff,
                 WaitForSingleObject(owner.value, 0) == WAIT_TIMEOUT, true, true},
             [&] { return TerminateProcess(target.handle.value, 1) != FALSE; })) { ++rejected; continue; }

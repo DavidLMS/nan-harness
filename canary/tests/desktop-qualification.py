@@ -736,6 +736,29 @@ class QualificationTests(unittest.TestCase):
             path.write_text(json.dumps(oracle))
             self.assertNotIn('toolResult', q.semantic_observations(root, 'claude-desktop')[0])
 
+    def test_exec_result_is_optional_closed_and_noncertifying(self):
+        oracle = dict(schemaVersion=1, mechanism='semantic-provider-oracle', stage='tool',
+                      toolCompleted=True, toolRecordingBounded=True, toolVerified=False,
+                      fixtureResponseVerified=True, failureObserved=False)
+        result = dict(selectedTool='exec-command', resultPresent=True, resultCount=1,
+                      status='complete', shape='string', toolErrorDetected=False,
+                      errorCategory='none')
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / 'semantic.json'
+            for state in ['launch-failed', 'exited-zero', 'exited-nonzero', 'running', 'unknown', 'ambiguous']:
+                path.write_text(json.dumps({**oracle, 'toolResult': {**result, 'execResult': state}}))
+                public = q.semantic_observations(root, 'chatgpt-desktop')[0]
+                self.assertEqual(public['toolResult']['execResult'], state)
+                self.assertFalse(public['toolVerified'])
+            for change in [{'execResult': 'PRIVATE'}, {'execResult': None},
+                           {'execResult': 'running', 'selectedTool': 'read'},
+                           {'execResult': 'unknown', 'resultPresent': False, 'resultCount': 0, 'shape': 'absent'},
+                           {'execResult': 'exited-zero', 'exitCode': 0}]:
+                path.write_text(json.dumps({**oracle, 'toolResult': {**result, **change}}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'chatgpt-desktop')
+
     def test_tool_error_envelope_is_optional_closed_and_noncertifying(self):
         oracle = dict(schemaVersion=1, mechanism='semantic-provider-oracle', stage='tool',
                       toolCompleted=True, toolRecordingBounded=True, toolVerified=False,
@@ -2228,7 +2251,7 @@ class QualificationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             path = root / 'failure.json'
-            for stage in 'request path file-open file-hash file-identity process-open snapshot inspector-parent ancestry target-open target-identity target-creation target-state target-image owner-recheck deadline transport target-image-query target-image-sharing target-image-access target-image-open target-image-canonical target-image-metadata target-image-path target-image-volume target-image-file-id target-image-size target-image-write-time'.split():
+            for stage in 'request path file-open file-hash file-identity process-open snapshot inspector-parent ancestry target-open target-identity target-creation target-state target-image owner-recheck deadline transport target-image-query target-image-sharing target-image-access target-image-open target-image-canonical target-image-metadata target-image-path target-image-volume target-image-file-id target-image-file-id-query target-image-size target-image-write-time'.split():
                 item = {**value, 'stage': stage}
                 path.write_text(json.dumps(item))
                 self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [item])

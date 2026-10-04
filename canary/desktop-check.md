@@ -36,71 +36,56 @@ exact pointer hit; cursor artwork is advisory. Claude Linux's candidate performs
 matching the failed turn; its empty-input witness still rejects unexplained drift.
 None of these candidate changes establishes a new native pass by itself.
 
-The latest completed joint campaign, [37224645407](https://github.com/DavidLMS/nan-harness/actions/runs/37224645407),
-ran commit `0cb28aa69f9ca8feff7e1284490d5fe11efc8349`. All six jobs completed;
-none completed acceptance. All six compile on their native runners; the Linux
-preinstall lint blocker is resolved. Application/global cleanup pass in every
-cell. Claude Windows stops after a first clipboard failure and a second
-foreground rejection; its third probe is not run.
+The latest completed joint campaign, [37226254344](https://github.com/DavidLMS/nan-harness/actions/runs/37226254344),
+ran commit `2392f0c2c950bb036db9430a6f23cba9496e9bc3`. All six jobs compiled and
+completed, but none completed full acceptance. Application/global cleanup pass
+except for Claude Windows, whose later probes are withheld after cleanup fails.
 
 | Cell | Latest observed boundary | Next required evidence |
 | --- | --- | --- |
-| Zed Linux | Response/tool pass; Retry dispatched; provider count stays 5 in all three sessions even at explicit scale 1 | Distinguish missing button activation from a callback that fails before a new provider request |
-| Codex Linux | First response passes in all three sessions; next input reads back exactly but Send rejects before submission | Correct button actionability for child pointer-events overrides and wait for the exact Send control |
-| Codex macOS | All three sessions reach the optional task phase with one Skip, no acknowledgement and no composer | Admit the pinned optional Skip footer after its acknowledgement disappears |
-| Codex Windows | Profile preparation completes; endpoint ownership succeeds dozens of times per session; final renderer receipt absent | Preserve the observer's last completed phase and resolve its remaining onboarding boundary |
-| Claude Linux | First response passes in all three sessions; next-turn preparation fails at differing query boundaries | Remove duplicated pre-input traversal and preserve deadline failures distinctly from ownership failures |
-| Claude Windows | First probe stops before paste at clipboard write; second loses foreground; cleanup now passes | Bounded nonmutating clipboard acquisition and exact remaining acquisition/guard failure |
+| Zed Linux | Response/tool pass; Retry count after activation is 1, 0, 0; provider generation count stays five | Establish why UI recovery does not reach native Resume/provider generation |
+| Codex Linux | First and tool-turn DOM responses pass in all three sessions, but exec-command output lacks the required fixture marker | Identify the actual tool process outcome and obtain a real file read |
+| Codex macOS | Onboarding, first response and real file-tool acceptance pass in all three sessions; expected failure does not expose Retry | Inject the source-supported typed capacity error through the real bridge and verify UI recovery |
+| Codex Windows | All three sessions attach to an owned endpoint and captured main document; observer stops in source-dialog | Complete source-dialog identification within the original budget |
+| Claude Linux | First response passes in all three sessions; next-turn queries fail at children/owner/children | Native validation of reduced ownership queries and accurate deadline classification |
+| Claude Windows | First input readback/submission and provider response pass; native copying fails at tree-depth; cleanup fails at target-image-path | Native response copy through ControlView and original-file identity cleanup |
 
-The current candidate repairs the Codex Send sampler's inherited-pointer veto
-and recognizes the source-pinned Mac optional Skip footer without requiring a
-role acknowledgement that the task phase can replace. Get Started retains its
-acknowledgement requirement. Claude Windows retries only unsuccessful
-OpenClipboard acquisition within the original cutoff; clipboard mutation and
-input actions are never repeated. Closed stages distinguish acquisition,
-allocation, mutation, guard and deadline failures. Claude Linux reuses its
-next-turn frame/tree/history validation instead of traversing the complete tree
-once more through response-only restoration; pre-submit timeout classification
-is retained. A small synthetic next-input fixture still performs over 2,000
-adapter queries during submit, so repeated full-tree proofs remain a performance
-concern, not a proven native timeout cause. These changes need native evidence.
+The Codex Send and Mac optional Skip corrections now have native evidence for
+those transitions. They do not establish recovery. Windows renderer checkpoints
+also retain the exact incomplete phase when the observer is interrupted.
 
-The next joint candidate also seals renderer inventory checkpoints before each
-slow setup phase. An interrupted observer leaves a closed incomplete receipt;
-only the completed inventory may clear its error category. Zed records the
-passive Retry control count after its single activation, alongside the existing
-provider count. Neither diagnostic can independently qualify recovery.
+Zed's final failed-thread exports contain one User and no Resume or Agent
+entries. The Retry control disappearing in two probes supports a UI transition,
+not proof that the native retry callback completed. Pointer delivery and the
+passive control count cannot independently qualify recovery.
 
-A subsequent Linux optimization validates each unique D-Bus connection owner
-before and after a tree traversal, instead of once per node. Node identities
-and child lists remain freshly queried; well-known aliases remain checked per
-node and no ownership result survives a traversal. The neutral 101-node fixture
-reduces owner queries from 101 to two and rejects foreign or lost owners.
-This follows the [D-Bus unique-name contract](https://dbus.freedesktop.org/doc/dbus-specification.html#message-bus-names)
-and still requires hosted execution evidence.
+The next candidate groups these changes before another hosted campaign:
 
-The subsequent campaign [37226254344](https://github.com/DavidLMS/nan-harness/actions/runs/37226254344)
-tests `2392f0c2c950bb036db9430a6f23cba9496e9bc3`, without that ownership-query
-optimization. Four completed cells provide these additional findings; the two
-remaining Codex results are not yet incorporated here:
-
-- Zed Linux's Retry count immediately after activation is 1, 0, 0 across the
-  three probes, while provider generation counts remain five. Final exports
-  contain no Resume or agent entries. Disappearance supports a UI transition,
-  not proof that the native retry callback completed. Response/tool and cleanup
-  pass; recovery remains unqualified.
-- Codex Windows retains an attached, owned endpoint and captured main document
-  in all three probes. Each observer stops in `source-dialog`, before the final
-  source-dialog receipt. Both cleanup checks pass.
-- Claude Linux again verifies the first response in all three probes; next-turn
-  queries fail at children/owner/children. Generic transport exceptions still
-  obscure whether the shared cutoff expired. The next candidate classifies an
-  exception at that cutoff as a deadline without retrying the operation.
-- Claude Windows passes prompt readback and submission and the provider verifies
-  the expected first response. Native response copying fails at `tree-depth`.
-  Cleanup rejects `target-image-path` after its snapshot; six verified
-  descendants remain. Later probes are correctly withheld after cleanup fails.
-
+- Codex's mock capacity error retains HTTP 503 and adds the exact nested code
+  `server_is_overloaded`. The real bridge preserves that typed error; the
+  generic fixture previously became a different upstream error. Other apps
+  retain their existing failure envelopes. Recovery still requires a new
+  provider result and the exact response in the UI.
+- Codex's passive source-dialog sample is bracketed by fresh ownership and
+  original-document checks, reducing ownership queries from eight to two.
+  No input occurs in that sample, and ownership/document changes still reject.
+- Codex's file-tool observation distinguishes the bounded exec envelope's
+  launch failure, completed exit, running session and unknown/ambiguous shape.
+  No output, session identifier or exit code is published. An exit-zero result
+  alone cannot replace the required fixture marker.
+- Claude Linux validates each unique D-Bus connection owner before and after
+  each fresh tree traversal, rather than once per node. Well-known aliases
+  remain checked per node and no ownership result survives a traversal. The
+  neutral 101-node fixture reduces owner queries from 101 to two and rejects
+  foreign or lost owners, following the [D-Bus unique-name contract](https://dbus.freedesktop.org/doc/dbus-specification.html#message-bus-names).
+  Transport exceptions at the original cutoff are classified as deadline
+  failures without retrying the operation.
+- Claude Windows uses UI Automation ControlView for Chat traversal, preserving
+  exact semantic controls, row ancestry, uniqueness and the existing bounds.
+  Cleanup compares each target to the original pinned executable using full
+  volume/file identity and retained metadata. This permits alternate names for
+  that same file, not different files or foreign processes. The failed run
+  establishes a path mismatch, not its cause; hosted verification is pending.
 
 The hidden launch-wrapper option is restricted to deterministic ChatGPT startup
 diagnostics. Only application launch is instrumented; help, version and restore
