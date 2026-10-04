@@ -1510,12 +1510,27 @@ def semantic_observations(directory, app):
                 elif total is not None or mapped is not None:
                     raise ValueError('incomplete Zed transient dialog counts')
                 record['transientDialogs'] = dict(dialogs)
-            if (set(value) - modifier_fields - ancestor_fields - ancestor_stage_fields - {'cursorSelection', 'transientDialogs'} not in (base, base | {'inputDelivery'}, base | coordinate_fields,
+            if (set(value) - modifier_fields - ancestor_fields - ancestor_stage_fields - {'cursorSelection', 'transientDialogs','entryCrossing'} not in (base, base | {'inputDelivery'}, base | coordinate_fields,
                                   base | coordinate_fields | {'inputDelivery'}, base | coordinate_fields | authority_fields,
                                   base | coordinate_fields | authority_fields | {'inputDelivery'})
                     or present_modifiers and present_modifiers != modifier_fields
                     or app != 'zed-desktop' or value['diagnosticsOnly'] is not True):
                 raise ValueError('invalid Zed pointer observation identity')
+            if 'entryCrossing' in value:
+                entry=value['entryCrossing']
+                stages={'preflight','observer','frame-measurement','candidate',
+                    'decoration-before','decoration-dispatch','decoration-after','decoration-complete',
+                    'client-before','client-dispatch','client-after','client-complete'}
+                reasons={'observer-unavailable','frame-relationship','frame-geometry','decoration-unavailable',
+                    'off-display','point-ownership','pointer-state','identity-changed','deadline',
+                    'query-unavailable','motion-uncertain'}
+                if (type(entry) is not dict or set(entry)!={'stage','failureReason'}
+                        or type(entry['stage']) is not str or entry['stage'] not in stages
+                        or entry['failureReason'] is not None and (type(entry['failureReason']) is not str
+                            or entry['failureReason'] not in reasons)
+                        or entry['stage'].endswith('-complete') and entry['failureReason'] is not None):
+                    raise ValueError('invalid Zed entry-crossing diagnostic')
+                record['entryCrossing']=dict(entry)
             if 'cursorSelection' in value:
                 selection = value['cursorSelection']
                 fields = {'status', 'sampledPoints', 'exactPointerMatched', 'accessibleHitVerified'}

@@ -200,15 +200,18 @@ def pointer_child(frame, active, facts=None):
 def decoration_crossing_point(frame, client, held_frame):
     if (len(frame)!=5 or len(client)!=5 or client[4]!=held_frame
             or frame[3]!=client[3] or frame[4]!=frame[3] or held_frame==frame[3]):
-        raise RetryHitFailure('identity-rejected')
+        raise EntryCrossingFailure('frame-relationship')
     (fx,fy),_,(fw,fh),_,_=frame
-    (cx,cy),(px,py),(cw,ch),_,_=client
-    if (min(fw,fh,cw,ch)<=0 or (px,py)!=(cx-fx,cy-fy)
-            or cx<fx or cy<fy+2 or cx+cw>fx+fw or cy+ch>fy+fh):
-        raise RetryHitFailure('identity-rejected')
+    (cx,cy),_,(cw,ch),_,_=client
+    # XTranslateCoordinates gives the inner origin; XGetGeometry x/y denotes
+    # the outer border corner. Relative x/y equality is therefore not authority.
+    if min(fw,fh,cw,ch)<=0 or cx<fx or cx+cw>fx+fw or cy+ch>fy+fh:
+        raise EntryCrossingFailure('frame-geometry')
+    if cy<=fy:
+        raise EntryCrossingFailure('decoration-unavailable')
     point=(cx+cw//2,fy+(cy-fy)//2)
     if not -32768<=point[0]<=32767 or not -32768<=point[1]<=32767:
-        raise RetryHitFailure('identity-rejected')
+        raise EntryCrossingFailure('off-display')
     return point
 
 
@@ -229,40 +232,45 @@ def crossing_point_hit(root, frame, point):
         ctypes.POINTER(ctypes.c_uint),ctypes.POINTER(ctypes.c_uint)]
     xlib.XGetGeometry.restype=ctypes.c_int
     display=xlib.XOpenDisplay(None)
-    if not display:raise RetryHitFailure('identity-rejected')
+    if not display:raise EntryCrossingFailure('query-unavailable')
     try:
         geometry_root=ctypes.c_ulong();gx,gy=ctypes.c_int(),ctypes.c_int()
         width,height,border,depth=(ctypes.c_uint() for _ in range(4))
         if (not xlib.XGetGeometry(display,root,ctypes.byref(geometry_root),ctypes.byref(gx),ctypes.byref(gy),
                 ctypes.byref(width),ctypes.byref(height),ctypes.byref(border),ctypes.byref(depth))
-                or geometry_root.value!=root
-                or not 0<=point[0]<width.value or not 0<=point[1]<height.value):
-            raise RetryHitFailure('pointer-child')
+                or geometry_root.value!=root):
+            raise EntryCrossingFailure('query-unavailable')
+        if not 0<=point[0]<width.value or not 0<=point[1]<height.value:
+            raise EntryCrossingFailure('off-display')
         x,y=ctypes.c_int(),ctypes.c_int();top,child=ctypes.c_ulong(),ctypes.c_ulong()
         if (not xlib.XTranslateCoordinates(display,root,root,*point,ctypes.byref(x),ctypes.byref(y),ctypes.byref(top))
                 or top.value!=frame
                 or not xlib.XTranslateCoordinates(display,root,frame,*point,ctypes.byref(x),ctypes.byref(y),ctypes.byref(child))):
-            raise RetryHitFailure('pointer-child')
+            raise EntryCrossingFailure('point-ownership')
         actual_root,actual_child=ctypes.c_ulong(),ctypes.c_ulong()
         rx,ry,wx,wy=(ctypes.c_int() for _ in range(4));mask=ctypes.c_uint()
         if (not xlib.XQueryPointer(display,frame,ctypes.byref(actual_root),ctypes.byref(actual_child),
                 ctypes.byref(rx),ctypes.byref(ry),ctypes.byref(wx),ctypes.byref(wy),ctypes.byref(mask))
                 or actual_root.value!=root or mask.value!=0):
-            raise RetryHitFailure('identity-rejected')
+            raise EntryCrossingFailure('pointer-state')
         return child.value,(rx.value,ry.value),actual_child.value
     finally:
         xlib.XCloseDisplay(display)
 
 
-def guarded_crossing_motion(point,move,prove,deadline,now=None):
+def guarded_crossing_motion(point,move,prove,deadline,now=None,observation=None,phase='client'):
     if now is None:now=time.monotonic
-    if now()>=deadline:raise RetryHitFailure('deadline')
+    def stage(suffix):
+        if observation is not None:observation['stage']=phase+'-'+suffix
+        if now()>=deadline:raise EntryCrossingFailure('deadline')
+    stage('before')
     prove(point,False)
-    if now()>=deadline:raise RetryHitFailure('deadline')
+    stage('dispatch')
     move(point)
-    if now()>=deadline:raise RetryHitFailure('deadline')
+    stage('after')
     prove(point,True)
-    if now()>=deadline:raise RetryHitFailure('deadline')
+    if now()>=deadline:raise EntryCrossingFailure('deadline')
+    if observation is not None:observation['stage']=phase+'-complete'
 
 
 def publish_observation(facts):
@@ -444,6 +452,12 @@ def guarded_retry_proof(point, scope, hit, observation, deadline):
         raise
 
 
+class EntryCrossingFailure(RetryHitFailure):
+    def __init__(self,reason):
+        super().__init__('deadline' if reason=='deadline' else 'identity-rejected')
+        self.reason=reason
+
+
 def sampled_cursor_match(matches, observation):
     if observation is not None:
         observation['cursorChecks'] += 1
@@ -609,6 +623,8 @@ def retry_click(payload):
                 or os.environ.get('NANH_ZED_CURSOR_HIT')!='1'
                 or os.environ.get('NANH_ZED_XRECORD')!='1'):
             return 18
+        if crossing is not None:
+            facts['entryCrossing']=dict(stage='preflight',failureReason=None)
         deadline = time.monotonic() + 4
         def run(args, query=False):
             remaining = deadline - time.monotonic()
@@ -700,26 +716,31 @@ def retry_click(payload):
 
             move=lambda candidate:run(['mousemove','--',str(candidate[0]),str(candidate[1])])
             if crossing is not None:
+                entry=facts['entryCrossing'];entry['stage']='observer'
                 if observer is None or observer.stage!='armed' or observer.result is not None:
-                    raise RetryHitFailure('identity-rejected')
+                    raise EntryCrossingFailure('observer-unavailable')
+                entry['stage']='frame-measurement'
                 frame_geometry=independent_client_snapshot(request['window'])
+                entry['stage']='candidate'
                 decoration=decoration_crossing_point(frame_geometry,second_geometry,request['window'])
                 def crossing_proof(candidate,after,decoration=False):
                     if (not cursor_scope()
                             or independent_client_snapshot(request['window'])!=frame_geometry):
-                        raise RetryHitFailure('identity-rejected')
+                        raise EntryCrossingFailure('identity-changed')
                     child,position,actual_child=crossing_point_hit(
                         second_geometry[3],request['window'],candidate)
                     expected=0 if decoration else active
                     if child!=expected or after and (position!=candidate or actual_child!=expected):
-                        raise RetryHitFailure('pointer-child')
+                        raise EntryCrossingFailure('point-ownership')
                     if (not cursor_scope()
                             or independent_client_snapshot(request['window'])!=frame_geometry):
-                        raise RetryHitFailure('identity-rejected')
+                        raise EntryCrossingFailure('identity-changed')
                 guarded_crossing_motion(decoration,move,
-                    lambda candidate,after:crossing_proof(candidate,after,True),deadline)
+                    lambda candidate,after:crossing_proof(candidate,after,True),deadline,
+                    observation=entry,phase='decoration')
                 ordinary_move=move
-                move=lambda candidate:guarded_crossing_motion(candidate,ordinary_move,crossing_proof,deadline)
+                move=lambda candidate:guarded_crossing_motion(candidate,ordinary_move,crossing_proof,deadline,
+                    observation=entry)
 
             def select():
                 return select_live_retry_point(held_bounds,
@@ -815,7 +836,13 @@ def retry_click(payload):
         if observer is not None:
             facts['inputDelivery'] = observer.finish()
         return 0
-    except (ValueError, TypeError, OSError, subprocess.SubprocessError, ImportError):
+    except (ValueError, TypeError, OSError, subprocess.SubprocessError, ImportError) as error:
+        entry=facts.get('entryCrossing')
+        if entry is not None and not entry['stage'].endswith('-complete'):
+            entry['failureReason']=(error.reason if isinstance(error,EntryCrossingFailure)
+                else 'motion-uncertain' if entry['stage'].endswith('-dispatch')
+                else 'deadline' if isinstance(error,subprocess.TimeoutExpired)
+                else 'query-unavailable')
         # A blocked GPUI parent forces Arrow and ignores all input, even if its
         # owned transient Dialog is unmapped. Observe only; never dismiss it.
         if (facts.get('cursorSelection', {}).get('status') == 'no-hit'

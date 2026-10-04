@@ -1933,6 +1933,26 @@ class QualificationTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'zed-desktop')
 
+    def test_entry_crossing_diagnostic_is_optional_closed_and_never_input_authority(self):
+        value=dict(schemaVersion=1,mechanism='zed-pointer-observation',diagnosticsOnly=True,
+            maximizedHorizontal=None,maximizedVertical=None,enabled=None,sensitive=None,
+            showing=None,visible=None,defunct=None,retryContains=None,
+            pointerTarget='unavailable',pointerChild='unavailable')
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);path=root/'entry.json'
+            entry=dict(stage='candidate',failureReason='decoration-unavailable')
+            path.write_text(json.dumps({**value,'entryCrossing':entry}))
+            self.assertEqual(q.semantic_observations(root,'zed-desktop')[0]['entryCrossing'],entry)
+            path.write_text(json.dumps(value))
+            self.assertNotIn('entryCrossing',q.semantic_observations(root,'zed-desktop')[0])
+            for change in ({'stage':'PRIVATE'},{'failureReason':[]},{'failureReason':True},
+                           {'rawGeometry':'PRIVATE'},{'stage':'client-complete'},
+                           {'failureReason':'PRIVATE'}):
+                path.write_text(json.dumps({**value,'entryCrossing':{**entry,**change}}))
+                with self.assertRaises(ValueError):q.semantic_observations(root,'zed-desktop')
+            path.write_text(json.dumps({**value,'entryCrossing':dict(stage='client-complete',failureReason=None)}))
+            self.assertIsNone(q.semantic_observations(root,'zed-desktop')[0]['entryCrossing']['failureReason'])
+
     def test_input_delivery_is_advisory_closed_and_distinguishes_unmeasured(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

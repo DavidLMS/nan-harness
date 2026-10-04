@@ -38,9 +38,13 @@ class Transport(unittest.TestCase):
         frame=((0,0),(0,0),(1280,1024),1,1)
         client=((1,20),(1,20),(1278,1003),1,40)
         self.assertEqual(module['decoration_crossing_point'](frame,client,40),(640,10))
+        # Border outer geometry may differ from the translated inner origin.
+        self.assertEqual(module['decoration_crossing_point'](frame,
+            ((1,20),(0,19),(1278,1003),1,40),40),(640,10))
+        self.assertEqual(module['decoration_crossing_point'](frame,
+            ((1,1),(0,0),(1278,1023),1,40),40),(640,0))
         for changed in (((1,0),(1,0),(1278,1024),1,40),
                         ((1,20),(1,20),(1278,1003),1,41),
-                        ((1,20),(2,20),(1278,1003),1,40),
                         ((1,20),(1,20),(1280,1003),1,40)):
             with self.assertRaises(ValueError):
                 module['decoration_crossing_point'](frame,changed,40)
@@ -92,6 +96,18 @@ class Transport(unittest.TestCase):
         def uncertain(point):events.append(('move',point));clock[0]=4
         with self.assertRaises(ValueError):motion((640,10),uncertain,prove,4,now=lambda:clock[0])
         self.assertEqual([event for event in events if event[0]=='move'],[('move',(640,10))])
+
+    def test_crossing_failure_receipt_uses_only_closed_stage_and_reason(self):
+        frame=((0,0),(0,0),(1280,1024),1,1)
+        with self.assertRaises(module['EntryCrossingFailure']) as failure:
+            module['decoration_crossing_point'](frame,((1,0),(0,0),(1278,1024),1,40),40)
+        self.assertEqual(failure.exception.reason,'decoration-unavailable')
+        receipt=dict(stage='candidate',failureReason=None);events=[]
+        with self.assertRaises(module['EntryCrossingFailure']) as failure:
+            module['guarded_crossing_motion']((640,0),lambda point:events.append(point),
+                lambda *args:None,1,now=lambda:1,observation=receipt,phase='decoration')
+        self.assertEqual(receipt['stage'],'decoration-before')
+        self.assertEqual(failure.exception.reason,'deadline');self.assertEqual(events,[])
 
     def test_crossing_opt_in_rejects_unowned_policy_before_any_transport(self):
         request=json.dumps(dict(pid=20,window=40,x=100,y=200,bus=':1.2',
