@@ -20,7 +20,11 @@ Use `desktop-automation-feasibility.yml` with `app=all`,
 for the six unresolved cells: Zed Linux, all three Codex platforms, and Claude
 Linux/Windows. Jobs continue independently after failures and retain closed
 qualification JSON. Each cell runs three fresh sessions. After corrections,
-`platform=all` provides the final twelve-cell campaign on one commit.
+`platform=all` provides the final twelve-cell campaign on one commit. Its
+aggregation job publishes `deterministic-qualification-matrix`, excludes Pen
+explicitly, and fails if any active cell is missing, duplicated, from another
+commit, or unqualified. The six-cell diagnostic campaign does not claim this
+final matrix result.
 
 The current candidate uses scoped CDP DOM actions for Codex, including the
 home composer. Native window focus is not an admission requirement for this

@@ -37,6 +37,31 @@ class DiagnosticWorkflowTests(unittest.TestCase):
             if selection == 'open-cells':
                 self.assertEqual(pairs, expected)
 
+    def test_final_matrix_job_preserves_incomplete_evidence_without_passing(self):
+        sys.path.insert(0, str(ROOT / 'canary/actions'))
+        import desktop_qualification as qualification
+        workflow = (ROOT / '.github/workflows/desktop-automation-feasibility.yml').read_text()
+        job = workflow.split('  qualification-matrix:\n', 1)[1].split('  integration-quality:', 1)[0]
+        for condition in ("inputs.app == 'all'", "inputs.platform == 'all'",
+                          "inputs.experiment == 'deterministic-full'", 'needs: [select, native]'):
+            self.assertIn(condition, job)
+        script = textwrap.dedent(job.split('        run: |\n', 1)[1].split('      - uses:', 1)[0])
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for index, cell in enumerate(qualification.matrix(['pen-desktop'])['include']):
+                target = root / 'qualification-cells' / str(index)
+                target.mkdir(parents=True)
+                (target / 'qualification.json').write_text(json.dumps(qualification.envelope(
+                    cell['app'], cell['platform'], cell['architecture'], 'a' * 40)))
+            result = subprocess.run(['bash', '-eu', '-c', script], cwd=ROOT,
+                env={**os.environ, 'RUNNER_TEMP':directory, 'GITHUB_SHA':'a' * 40},
+                capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            matrix = json.loads((root / 'qualification-matrix.json').read_text())
+            self.assertEqual(matrix['qualification'], 'incomplete')
+            self.assertEqual(matrix['excludedApps'], ['pen-desktop'])
+            self.assertEqual(len(matrix['cells']), 12)
+
     @staticmethod
     def scoped_block(text, start, end=None):
         block = text.split(start, 1)[1]
