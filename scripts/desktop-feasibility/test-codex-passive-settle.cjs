@@ -1,14 +1,18 @@
 'use strict';
 const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
 const source=fs.readFileSync(__dirname+'/observe-renderer.cjs','utf8');
-const start=source.indexOf('function heldMainGuard('),end=source.indexOf('function publishCodexBinding(',start);
+const guardFactory=require('./codex-main-guard.cjs');
+const start=source.indexOf('async function settleFolderAuxiliary('),end=source.indexOf('function publishCodexBinding(',start);
 function fixture(options={}) {
  let now=0,pages=[],reads=0,activations=0,mainReads=0;
  const page={url:()=> 'app://-/index.html',bringToFront:async()=>{activations++;}};
  const aux={url:()=>options.foreign?'app://-/foreign':'app://-/avatar-overlay'};
  pages=[page];
  const api=vm.runInNewContext(source.slice(start,end)+';({heldMainGuard,focusCapturedMain})',{
-  Date:{now:()=>now},setTimeout,sameCorrelationIdentity:(a,b)=>a.key===b.key});
+  Date:{now:()=>now},setTimeout,require:name=>{
+   if(name!=='./codex-main-guard.cjs')throw Error('unexpected fixture dependency');
+   return guardFactory;
+  },sameCorrelationIdentity:(a,b)=>a.key===b.key});
  const held={page,key:'main'};
  const browser={contexts:()=>[{pages:()=>pages}]};
  const identity=async p=>{
