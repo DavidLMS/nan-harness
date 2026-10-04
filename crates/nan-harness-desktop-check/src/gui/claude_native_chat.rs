@@ -377,7 +377,7 @@ impl ClaudeNativeChatSession<'_> {
                         None => return Err(Reason::ActionUnsupported),
                     }
                 }
-                stage if stage.passive_pending() => {}
+                stage if stage.passive_retry_pending() => {}
                 _ => return Err(Reason::ActionUnsupported),
             }
             if Instant::now() >= deadline {
