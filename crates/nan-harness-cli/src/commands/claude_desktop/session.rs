@@ -927,8 +927,10 @@ mod configuration_persist_tests {
         if std::env::var("NANH_CONFIGURATION_LIFECYCLE_WORKER").as_deref() != Ok("1") {
             return;
         }
+        let mut stage = 0_u8;
         let result = (|| {
             // Match the canonical workspace spelling injected by the parent.
+            stage = 0;
             let workspace = std::env::current_dir()
                 .and_then(|directory| directory.canonicalize())
                 .map_err(ClaudeDesktopError::ReadConfig)?;
@@ -939,7 +941,9 @@ mod configuration_persist_tests {
                 &profile.join("nanh"),
             );
             // Exercise production environment resolution, not a fixture-only path constructor.
+            stage = 1;
             let paths = DesktopPaths::from_environment(DesktopPlatform::Windows)?;
+            stage = 2;
             if paths.documents() != expected.documents()
                 || paths.receipt != expected.receipt
                 || paths.backup_directory != expected.backup_directory
@@ -947,21 +951,29 @@ mod configuration_persist_tests {
             {
                 return Err(ClaudeDesktopError::InvalidStatePath);
             }
+            stage = 3;
             if !qualification_prelaunch::enabled()
                 || qualification_config::observation_directory(&paths).is_none()
             {
                 return Err(ClaudeDesktopError::InvalidStatePath);
             }
+            stage = 4;
             if std::env::var("NANH_CONFIGURATION_STD_RENAME_WORKER").as_deref() == Ok("1")
                 && !std_rename_policy_requested()?
             {
                 return Err(ClaudeDesktopError::InvalidStatePath);
             }
+            stage = 5;
             let _lock = SessionLock::acquire(&paths.lock)?;
+            stage = 6;
             ensure_no_pending_recovery(&paths)?;
+            stage = 7;
             let receipt = Receipt::capture(&paths)?;
+            stage = 8;
             receipt.write(&paths.receipt)?;
+            stage = 9;
             apply_gateway(&paths, "http://127.0.0.1:9", "synthetic-token")?;
+            stage = 10;
             let normal = read_json_object(paths.documents()[0])?;
             let managed = read_json_object(paths.documents()[3])?;
             if normal.get("deploymentMode").and_then(Value::as_str) != Some("3p")
@@ -969,11 +981,14 @@ mod configuration_persist_tests {
             {
                 return Err(ClaudeDesktopError::InvalidStatePath);
             }
+            stage = 11;
             for document in paths.documents() {
                 nan_harness_private_fs::open_private_read(document)
                     .map_err(ClaudeDesktopError::ReadConfig)?;
             }
+            stage = 12;
             restore_receipt(&paths)?;
+            stage = 13;
             if paths.documents().into_iter().any(Path::exists) {
                 return Err(ClaudeDesktopError::InvalidStatePath);
             }
@@ -984,7 +999,20 @@ mod configuration_persist_tests {
             Ok(()) => 0,
             Err(ClaudeDesktopError::Write(error)) if error.raw_os_error() == Some(5) => 5,
             Err(ClaudeDesktopError::Write(error)) if error.raw_os_error() == Some(32) => 32,
-            Err(_) => 33,
+            Err(error) => {
+                let category = match error {
+                    ClaudeDesktopError::InvalidStatePath => 1,
+                    ClaudeDesktopError::ReadConfig(_) => 2,
+                    ClaudeDesktopError::Lock(_) | ClaudeDesktopError::ConcurrentSession => 3,
+                    ClaudeDesktopError::Permissions(_) | ClaudeDesktopError::CreateDirectory(_) => {
+                        4
+                    }
+                    ClaudeDesktopError::Write(_) | ClaudeDesktopError::Restore(_) => 5,
+                    ClaudeDesktopError::ParseConfig(_) | ClaudeDesktopError::ConfigRoot => 6,
+                    _ => 7,
+                };
+                64 + i32::from(stage) * 8 + category
+            }
         });
     }
 
@@ -1182,7 +1210,7 @@ mod configuration_persist_tests {
             .unwrap_or_else(std::env::temp_dir);
         for (source_policy, expected) in [
             ("official-2.19675.0-97910a066871", 0),
-            ("unadmitted-synthetic-policy", 33),
+            ("unadmitted-synthetic-policy", 97),
         ] {
             let temporary = tempfile::tempdir_in(&base).unwrap();
             let workspace = temporary.path().canonicalize().unwrap();

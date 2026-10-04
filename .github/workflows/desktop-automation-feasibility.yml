@@ -113,6 +113,8 @@ jobs:
         run: cargo test --locked -p nan-harness-cli --features desktop-qualification --lib --no-run
       - name: Distinguish Windows source and destination persistence primitives without an application
         run: cargo test --locked -p nan-harness-cli --features desktop-qualification --lib commands::claude_desktop::session::configuration_persist_tests::configuration_persist_primitive_stage_diagnostics -- --exact --nocapture --test-threads=1
+      - name: Verify closed Windows lifecycle fixtures without an application
+        run: cargo test --locked -p nan-harness-cli --features desktop-qualification --lib commands::claude_desktop::session::configuration_persist_tests -- --test-threads=1
       - name: Observe exact synthetic compiler fixture before any vendor metadata or installation
         if: always()
         env:
