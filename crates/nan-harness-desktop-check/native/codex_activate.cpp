@@ -65,7 +65,7 @@ bool executable(const Request& r,pid_t pid,bool* ancestry_rejected=nullptr) {
 }
 struct OccluderOwner {
     pid_t pid=0; CodexOccluderKind kind=CodexOccluderKind::Unobserved;
-    unsigned windows=0; std::vector<ProcessIdentity> chain;
+    unsigned windows=0, other_public=3; std::vector<ProcessIdentity> chain;
 };
 bool stable_occluder(const Request& r,const OccluderOwner& owner) {
     if(owner.chain.empty())return false;
@@ -83,6 +83,7 @@ OccluderOwner occluder_owner(const Request& r,pid_t pid) {
     const int length=proc_pidpath(pid,path,sizeof(path));
     if(length<=0||unsigned(length)>=sizeof(path)||path[length]!='\0'
         ||!realpath(path,resolved))return result;
+    result.other_public=codex_other_public_executable(resolved);
     result.chain.push_back(original);
     // Exact public system paths need only stable process identity. Other owners
     // require a complete stable ancestry chain; query failure is not "other".
@@ -128,6 +129,7 @@ struct InventoryFailure {
     bool display_contained=false, workarea_measured=false, workarea_contained=false;
     unsigned workarea_overlap=0;
     std::array<unsigned,9> occluder_kinds{};
+    std::array<unsigned,3> other_public_executables{};
 };
 // Diagnostic coordinate conversion only; full-display admission is unchanged.
 bool workarea(const Request& r,CGRect held,CGRect& usable) {
@@ -240,6 +242,8 @@ bool inventory(const Request& r,Binding& result,bool select,InventoryFailure* fa
     for(const auto& owner:owners) {
         const auto kind=stable_occluder(r,owner)?owner.kind:CodexOccluderKind::Unobserved;
         observation.occluder_kinds[unsigned(kind)]+=owner.windows;
+        if(kind==CodexOccluderKind::Other&&owner.other_public<3)
+            observation.other_public_executables[owner.other_public]+=owner.windows;
     }
     bool contained=false;
     for(NSScreen* screen in NSScreen.screens) {
@@ -354,6 +358,7 @@ int codex_activate_main() {
                     <<(stack.workarea_measured?1:0)<<' '<<(stack.workarea_contained?1:0)<<' '
                     <<stack.workarea_overlap;
                 for(const auto value:stack.occluder_kinds)std::cout<<' '<<value;
+                for(const auto value:stack.other_public_executables)std::cout<<' '<<value;
                 std::cout<<'\n';return 0;
             }
             auto app=[NSRunningApplication runningApplicationWithProcessIdentifier:held.pid];

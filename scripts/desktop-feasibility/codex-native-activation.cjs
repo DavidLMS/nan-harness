@@ -87,15 +87,18 @@ function controller(config,owner,launcher,deadline,run=child.execFileSync,now=Da
       verificationPending=false;
       const result=execute('verify');
       if(result==='pending-external-stack\n'){verificationPending=true;return false;}
-      const pending=/^pending-external-stack (before|after) ([0-9]+) ([0-9]+) ([0-9]+) 1(?: ([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+)(?: ([01]) ([01]) ([0-9]+)(?: ([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+))?)?)?\n$/.exec(result);
+      const pending=/^pending-external-stack (before|after) ([0-9]+) ([0-9]+) ([0-9]+) 1(?: ([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+)(?: ([01]) ([01]) ([0-9]+)(?: ([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+)(?: ([0-9]+) ([0-9]+) ([0-9]+))?)?)?)?\n$/.exec(result);
       if(pending) {
         const counts=pending.slice(2,5).map(Number),total=counts.reduce((a,b)=>a+b,0);
         const levels=pending[5]===undefined?null:pending.slice(5,9).map(Number);
+        const publicOther=pending[21]===undefined?null:pending.slice(21,24).map(Number);
         const kinds=pending[12]===undefined?null:pending.slice(12,21).map(Number);
         const area=pending[9]===undefined?null:pending.slice(9,12).map(Number);
         if(counts.every(v=>Number.isSafeInteger(v)&&v>=0&&v<=1024)&&total>0&&total<=1024
             &&(!levels||levels.every(v=>Number.isSafeInteger(v)&&v>=0&&v<=1024)
               &&levels.reduce((a,b)=>a+b,0)===counts[1])
+            &&(!publicOther||publicOther.every(v=>Number.isSafeInteger(v)&&v>=0&&v<=1024)
+              &&publicOther.reduce((a,b)=>a+b,0)<=kinds[7])
             &&(!kinds||kinds.every(v=>Number.isSafeInteger(v)&&v>=0&&v<=1024)
               &&kinds.reduce((a,b)=>a+b,0)===total)
             &&(!area||Number.isSafeInteger(area[2])&&area[2]>=0&&area[2]<=total
@@ -111,6 +114,8 @@ function controller(config,owner,launcher,deadline,run=child.execFileSync,now=Da
           if(kinds)nativePendingStack.occluderKinds=Object.fromEntries([
             'controlCenter','notificationCenter','systemUIServer','dock','windowServer',
             'launcherOwned','checkerOwned','other','unobserved'].map((key,i)=>[key,kinds[i]]));
+          if(publicOther)nativePendingStack.otherPublicExecutables={coreServicesUIAgent:publicOther[0],
+            textInputMenuAgent:publicOther[1],securityAgent:publicOther[2]};
           verificationPending=true;return false;
         }
       }

@@ -2511,6 +2511,21 @@ class QualificationTests(unittest.TestCase):
             measured={**activation,'nativePendingStack':{**stack,'occluderKinds':kinds}}
             path.write_text(json.dumps({**value,'initialMainActivation':measured}))
             self.assertEqual(q.semantic_observations(root,'chatgpt-desktop')[0]['initialMainActivation'],measured)
+            public_other=dict(coreServicesUIAgent=1,textInputMenuAgent=0,securityAgent=0)
+            other={**kinds,'unobserved':0,'other':1}
+            classified={**activation,'nativePendingStack':{**stack,'occluderKinds':other,
+                'otherPublicExecutables':public_other}}
+            path.write_text(json.dumps({**value,'initialMainActivation':classified}))
+            self.assertEqual(q.semantic_observations(root,'chatgpt-desktop')[0]['initialMainActivation'],classified)
+            for change in ({'securityAgent':1},{'coreServicesUIAgent':True},
+                           {'textInputMenuAgent':1025},{'path':'PRIVATE'},{'pid':1}):
+                bad={**classified,'nativePendingStack':{**classified['nativePendingStack'],
+                    'otherPublicExecutables':{**public_other,**change}}}
+                path.write_text(json.dumps({**value,'initialMainActivation':bad}))
+                with self.assertRaises(ValueError):q.semantic_observations(root,'chatgpt-desktop')
+            unbound={**activation,'nativePendingStack':{**stack,'otherPublicExecutables':public_other}}
+            path.write_text(json.dumps({**value,'initialMainActivation':unbound}))
+            with self.assertRaises(ValueError):q.semantic_observations(root,'chatgpt-desktop')
             for change in ({'controlCenter':1},{'unobserved':True},{'other':1025},
                            {'unobserved':None},{'pid':1},{'path':'PRIVATE'}):
                 bad={**activation,'nativePendingStack':{**stack,'occluderKinds':{**kinds,**change}}}

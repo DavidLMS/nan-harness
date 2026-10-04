@@ -2011,7 +2011,7 @@ def semantic_observations(directory, app):
                 if 'nativePendingStack' in activation:
                     stack=activation['nativePendingStack']
                     counts={'normalOverlapCount','elevatedOverlapCount','lowerOverlapCount'}
-                    if (type(stack) is not dict or set(stack)-{'elevatedLevels','workArea','occluderKinds'}!=counts|{'sample','displayContained'}
+                    if (type(stack) is not dict or set(stack)-{'elevatedLevels','workArea','occluderKinds','otherPublicExecutables'}!=counts|{'sample','displayContained'}
                             or type(stack['sample']) is not str or stack['sample'] not in {'before','after'}
                             or stack['displayContained'] is not True
                             or any(type(stack[key]) is not int or not 0<=stack[key]<=1024 for key in counts)
@@ -2033,6 +2033,14 @@ def semantic_observations(directory, app):
                                 or any(type(kinds[key]) is not int or not 0<=kinds[key]<=1024 for key in keys)
                                 or sum(kinds.values())!=sum(stack[key] for key in counts)):
                             raise ValueError('invalid Codex occluder process categories')
+                    if 'otherPublicExecutables' in stack:
+                        public_other=stack['otherPublicExecutables']
+                        keys={'coreServicesUIAgent','textInputMenuAgent','securityAgent'}
+                        if ('occluderKinds' not in stack or type(public_other) is not dict
+                                or set(public_other)!=keys
+                                or any(type(public_other[key]) is not int or not 0<=public_other[key]<=1024 for key in keys)
+                                or sum(public_other.values())>stack['occluderKinds']['other']):
+                            raise ValueError('invalid Codex public executable subpartition')
                     if 'workArea' in stack:
                         area=stack['workArea']
                         if (type(area) is not dict or set(area)!={'measured','windowContained','overlapIntersectionCount'}

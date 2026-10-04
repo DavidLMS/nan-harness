@@ -20,3 +20,12 @@ inline CodexOccluderKind codex_occluder_kind(std::string_view path,bool stable,
     if(checker_owned)return CodexOccluderKind::CheckerOwned;
     return CodexOccluderKind::Other;
 }
+// Optional subpartition only: these paths remain in legacy Other.
+inline unsigned codex_other_public_executable(std::string_view path) {
+    constexpr std::array<std::string_view,3> paths={
+        "/System/Library/CoreServices/CoreServicesUIAgent.app/Contents/MacOS/CoreServicesUIAgent",
+        "/System/Library/CoreServices/TextInputMenuAgent.app/Contents/MacOS/TextInputMenuAgent",
+        "/System/Library/Frameworks/Security.framework/Versions/A/MachServices/SecurityAgent.bundle/Contents/MacOS/SecurityAgent"};
+    for(unsigned i=0;i<paths.size();++i)if(path==paths[i])return i;
+    return unsigned(paths.size());
+}

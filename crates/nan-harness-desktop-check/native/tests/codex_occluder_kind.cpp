@@ -12,5 +12,10 @@ int main() {
     assert(codex_occluder_kind("/private/app",true,true,false,true)==K::CheckerOwned);
     assert(codex_occluder_kind("/private/app",true,false,true,true)==K::Unobserved);
     assert(codex_occluder_kind("/private/app",false,true,false,false)==K::Unobserved);
+    assert(codex_other_public_executable("/System/Library/CoreServices/CoreServicesUIAgent.app/Contents/MacOS/CoreServicesUIAgent")==0);
+    assert(codex_other_public_executable("/System/Library/CoreServices/TextInputMenuAgent.app/Contents/MacOS/TextInputMenuAgent")==1);
+    assert(codex_other_public_executable("/System/Library/Frameworks/Security.framework/Versions/A/MachServices/SecurityAgent.bundle/Contents/MacOS/SecurityAgent")==2);
+    assert(codex_other_public_executable("/private/SecurityAgent")==3);
+    assert(codex_other_public_executable("/System/Library/CoreServices/CoreServicesUIAgent.app/Contents/MacOS/CoreServicesUIAgent.fake")==3);
     assert(codex_occluder_kind("/private/app",true,true,true,false)==K::Other);
 }
