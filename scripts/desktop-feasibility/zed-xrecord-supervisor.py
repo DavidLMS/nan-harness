@@ -20,7 +20,7 @@ def unobserved(status, stage=None):
     return result
 
 def validate(value):
-    if type(value) is not dict or set(value) not in ({'status', 'pressCount', 'releaseCount', 'orderedPair'}, {'status', 'pressCount', 'releaseCount', 'orderedPair', 'stage'}) or value['status'] not in STATUSES:
+    if type(value) is not dict or set(value)-{'crossingHeaders'} not in ({'status', 'pressCount', 'releaseCount', 'orderedPair'}, {'status', 'pressCount', 'releaseCount', 'orderedPair', 'stage'}) or value['status'] not in STATUSES:
         raise ValueError('closed record rejected')
     if 'stage' in value and (type(value['stage']) is not str or value['stage'] not in STAGES):
         raise ValueError('closed record rejected')
@@ -31,6 +31,14 @@ def validate(value):
             raise ValueError('closed record rejected')
     elif any((value[k] is not None for k in ['pressCount', 'releaseCount', 'orderedPair'])):
         raise ValueError('closed record rejected')
+    if 'crossingHeaders' in value:
+        headers=value['crossingHeaders']
+        keys={'ownedNormalEnterCount','ownedNonNormalEnterCount','ownedNormalLeaveCount','ownedMotionCount'}
+        if (value['status'] != 'complete' or type(headers) is not dict or set(headers)!=keys|{'status'}
+            or type(headers['status']) is not str or headers['status'] not in {'observed','unavailable'}
+            or headers['status']=='observed' and any(type(headers[k]) is not int or not 0<=headers[k]<=64 for k in keys)
+            or headers['status']=='unavailable' and any(headers[k] is not None for k in keys)):
+            raise ValueError('closed record rejected')
     return value
 
 def unique(pairs):
@@ -63,7 +71,7 @@ class Observer:
         command = worker or [sys.executable, '-s', str(Path(__file__).resolve()), 'worker']
         try:
             self.child = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=env, close_fds=True)
-            self.child.stdin.write(json.dumps({'pid': pid, 'window': window}).encode() + b'\n')
+            self.child.stdin.write(json.dumps({'pid': pid, 'window': window, 'cutoff':self.end}).encode() + b'\n')
             self.child.stdin.flush()
             ready = self._line()
             if ready == {'stage': 'armed'}:
@@ -171,7 +179,10 @@ def worker():
     stage = 'request'
     try:
         request = json.loads(sys.stdin.buffer.readline(257), object_pairs_hook=unique)
-        if type(request) is not dict or set(request) != {'pid', 'window'} or type(request['pid']) is not int or (not 1 < request['pid'] <= 2147483647) or (type(request['window']) is not int) or (not 0 < request['window'] <= 4294967295):
+        if type(request) is not dict or set(request) != {'pid', 'window', 'cutoff'} or type(request['pid']) is not int or (not 1 < request['pid'] <= 2147483647) or (type(request['window']) is not int) or (not 0 < request['window'] <= 4294967295):
+            raise ValueError()
+        cutoff=request['cutoff']
+        if type(cutoff) not in (int,float) or not time.monotonic()<cutoff<=time.monotonic()+3:
             raise ValueError()
         import runpy
         native = runpy.run_path(str(Path(__file__).with_name('zed-xrecord.py')))
@@ -184,10 +195,20 @@ def worker():
             return
         stage = 'armed'
         print(json.dumps({'stage': 'armed'}), flush=True)
-        if sys.stdin.buffer.readline(16) != b'finish\n':
-            raise ValueError()
+        # Consume the existing server stream during hover, not a fresh delay
+        # after it. Parent cutoff and kill/reap remain authoritative.
+        while True:
+            remaining=cutoff-time.monotonic()
+            if remaining<=0:
+                raise TimeoutError()
+            ready, _, _=select.select([sys.stdin.buffer], [], [], min(.02,remaining))
+            recorder.pump()
+            if ready:
+                if sys.stdin.buffer.readline(16)!=b'finish\n':
+                    raise ValueError()
+                break
         stage = 'observation'
-        result = {'status': 'complete', 'stage': stage, **recorder.observe(0.5)}
+        result = {'status': 'complete', 'stage': stage, **recorder.snapshot()}
         print(json.dumps(validate(result)), flush=True)
     except Exception:
         print(json.dumps(unobserved('query-failed', stage)), flush=True)

@@ -1556,7 +1556,7 @@ def semantic_observations(directory, app):
                           'record-version', 'xres-version', 'xinput-extension', 'client-query',
                           'client-identity', 'context', 'enable', 'identity-recheck',
                           'armed', 'observation', 'cleanup'}
-                if (type(delivery) is not dict or set(delivery) not in (fields, fields | {'stage'})
+                if (type(delivery) is not dict or set(delivery)-{'crossingHeaders'} not in (fields, fields | {'stage'})
                         or type(delivery['status']) is not str or delivery['status'] not in statuses):
                     raise ValueError('invalid Zed input delivery observation')
                 if 'stage' in delivery and (type(delivery['stage']) is not str or delivery['stage'] not in stages):
@@ -1569,6 +1569,15 @@ def semantic_observations(directory, app):
                         raise ValueError('invalid Zed input delivery counts')
                 elif any(delivery[key] is not None for key in fields - {'status'}):
                     raise ValueError('unmeasured Zed input delivery contains counts')
+
+                if 'crossingHeaders' in delivery:
+                    headers=delivery['crossingHeaders']
+                    keys={'ownedNormalEnterCount','ownedNonNormalEnterCount','ownedNormalLeaveCount','ownedMotionCount'}
+                    if (delivery['status']!='complete' or type(headers) is not dict or set(headers)!=keys|{'status'}
+                            or type(headers['status']) is not str or headers['status'] not in {'observed','unavailable'}
+                            or headers['status']=='observed' and any(type(headers[key]) is not int or not 0<=headers[key]<=64 for key in keys)
+                            or headers['status']=='unavailable' and any(headers[key] is not None for key in keys)):
+                        raise ValueError('invalid Zed crossing-header observation')
                 record['inputDelivery'] = dict(delivery)
         elif mechanism == 'zed-atspi-retry':
             fields = set('schemaVersion mechanism diagnosticsOnly method stage actionAttempted forwarded'.split())

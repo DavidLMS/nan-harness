@@ -21,6 +21,8 @@ class Counts:
         self.device = self.pressed_at = None
         self.ordered = False
         self.invalid = False
+        self.crossings = dict(ownedNormalEnterCount=0, ownedNonNormalEnterCount=0,
+                              ownedNormalLeaveCount=0, ownedMotionCount=0)
 
     def accept(self, category, swapped, base, data):
         if category != 0:
@@ -31,6 +33,29 @@ class Counts:
             return
         order = '<' if sys.byteorder == 'little' else '>'
         kind, opcode, _, length, event, device, stamp, detail, _, window, _ = struct.unpack(order + 'BBHIHHIIIII', data)
+        if kind == 35 and opcode == self.opcode and event in (6, 7, 8):
+            # XRecord supplies only the real first32 bytes; never infer coordinates,
+            # axes, masks or whether GPUI consumed this delivered header.
+            if window != self.window:
+                return
+            if event == 6:
+                if length < 12 or length > 1024 or device <= 1:
+                    self.invalid = True
+                    return
+                key = 'ownedMotionCount'
+            else:
+                _, _, _, _, _, _, _, source, mode, crossing_detail, _, _, _ = struct.unpack(
+                    order + 'BBHIHHIHBBIII', data)
+                if length < 10 or length > 1024 or device <= 1 or source <= 1 or mode > 5 or crossing_detail > 7:
+                    self.invalid = True
+                    return
+                key = ('ownedNormalEnterCount' if mode == 0 else 'ownedNonNormalEnterCount') if event == 7 else (
+                    'ownedNormalLeaveCount' if mode == 0 else None)
+            if key:
+                self.crossings[key] += 1
+                if self.crossings[key] > 64:
+                    self.invalid = True
+            return
         if kind != 35 or opcode != self.opcode or event not in (4, 5):
             return
         if length < 12 or length > 1024 or device <= 1:
@@ -50,7 +75,9 @@ class Counts:
                 self.invalid = True
 
     def closed(self):
-        return {'pressCount': self.press, 'releaseCount': self.release, 'orderedPair': self.ordered and (not self.invalid)}
+        return {'pressCount': self.press, 'releaseCount': self.release, 'orderedPair': self.ordered and (not self.invalid),
+                'crossingHeaders': {'status':'unavailable' if self.invalid else 'observed',
+                    **{key:None if self.invalid else value for key,value in self.crossings.items()}}}
 
 class R8(C.Structure):
     _fields_ = [('first', C.c_ubyte), ('last', C.c_ubyte)]
@@ -187,6 +214,18 @@ class NativeRecorder:
             self.counts.accept(event.category, bool(event.swapped), event.base, data)
         finally:
             self.record.XRecordFreeData(pointer)
+
+    def pump(self):
+        ready, _, _ = select.select([self.x.XConnectionNumber(self.data)], [], [], 0)
+        if ready:
+            self.record.XRecordProcessReplies(self.data)
+
+    def snapshot(self):
+        self.pump()
+        self.stage = 'observation'
+        if self._identity() != self.counts.base:
+            raise Unavailable(self.stage)
+        return self.counts.closed()
 
     def observe(self, seconds=0.5):
         if not 0 < seconds <= 1:

@@ -121,5 +121,16 @@ else:
         self.assertEqual(observer.finish(), m.unobserved('identity-failed', 'armed'))
         self.assertIsNone(observer.child)
 
+class HeaderContracts(unittest.TestCase):
+    def test_optional_header_partition_and_privacy(self):
+        h=dict(status='observed',ownedNormalEnterCount=0,ownedNonNormalEnterCount=0,
+               ownedNormalLeaveCount=0,ownedMotionCount=9)
+        value=dict(status='complete',pressCount=0,releaseCount=0,orderedPair=False,crossingHeaders=h)
+        self.assertEqual(m.validate(value),value)
+        for change in ({'ownedMotionCount':True},{'ownedMotionCount':65},{'rawWindow':'PRIVATE'},
+                       {'status':[]},{'ownedNormalEnterCount':None}):
+            with self.assertRaises(ValueError):m.validate({**value,'crossingHeaders':{**h,**change}})
+        with self.assertRaises(ValueError):m.validate({**value,'status':'timeout'})
+
 if __name__ == '__main__':
     unittest.main()

@@ -10,7 +10,34 @@ Counts, NativeRecorder, Unavailable = (module[name] for name in ('Counts', 'Nati
 def event(kind=4, window=90, stamp=100, device=2):
     return struct.pack(('<' if sys.byteorder == 'little' else '>') + 'BBHIHHIIIII', 35, 131, 0, 12, kind, device, stamp, 1, 1, window, 0)
 
+def crossing(kind=7, window=90, mode=0, detail=2, source=3, length=10):
+    return struct.pack(('<' if sys.byteorder == 'little' else '>') + 'BBHIHHIHBBIII',
+        35,131,0,length,kind,2,100,source,mode,detail,1,window,0)
+
 class Tests(unittest.TestCase):
+
+    def test_header_only_owned_crossings_and_motion_preserve_normal_inferior(self):
+        c=Counts(90,131,123)
+        for packet in (crossing(detail=2),crossing(mode=4),crossing(kind=8),event(kind=6),crossing(window=91)):
+            c.accept(0,False,123,packet)
+        self.assertEqual(c.closed()['crossingHeaders'],dict(status='observed',ownedNormalEnterCount=1,
+            ownedNonNormalEnterCount=1,ownedNormalLeaveCount=1,ownedMotionCount=1))
+        self.assertFalse(c.closed()['orderedPair'])
+        self.assertNotIn('90',json.dumps(c.closed()))
+        absent=Counts(90,131,123).closed()['crossingHeaders']
+        self.assertEqual(absent['ownedNormalEnterCount'],0)  # absence is no consumption proof
+        self.assertNotIn('focused',absent)
+
+    def test_invalid_or_truncated_crossing_headers_never_emit_invented_fields(self):
+        for packet in (crossing()[:-1],crossing()+b'PRIVATE',crossing(mode=6),crossing(detail=8),
+                       crossing(source=0),crossing(length=9)):
+            c=Counts(90,131,123);c.accept(0,False,123,packet)
+            result=c.closed()['crossingHeaders']
+            self.assertEqual(result['status'],'unavailable')
+            self.assertTrue(all(v is None for k,v in result.items() if k!='status'))
+        c=Counts(90,131,123)
+        for _ in range(65):c.accept(0,False,123,crossing())
+        self.assertEqual(c.closed()['crossingHeaders']['status'],'unavailable')
 
     def test_constructor_failures_retain_closed_boundary_and_close_displays(self):
         for failure in ['library', 'display', 'record-version', 'xres-version',
@@ -54,7 +81,7 @@ class Tests(unittest.TestCase):
         c = Counts(90, 131, 123)
         c.accept(0, False, 123, event())
         c.accept(0, False, 123, event(5, stamp=110))
-        self.assertEqual(c.closed(), {'pressCount': 1, 'releaseCount': 1, 'orderedPair': True})
+        self.assertEqual({k:c.closed()[k] for k in ('pressCount','releaseCount','orderedPair')}, {'pressCount': 1, 'releaseCount': 1, 'orderedPair': True})
 
     def test_foreign_window_cannot_certify_pair(self):
         c = Counts(90, 131, 123)

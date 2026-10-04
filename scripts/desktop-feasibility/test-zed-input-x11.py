@@ -194,6 +194,45 @@ class Transport(unittest.TestCase):
         with patch('subprocess.run', side_effect=subprocess.TimeoutExpired('fixed-helper', 2)):
             self.assertEqual(self.call('submit'), 3)
 
+    def test_hover_failure_records_before_motion_and_cleans_without_click(self):
+        events=[]
+        class Observer:
+            def __init__(self,*args,**kwargs):
+                events.append('armed');self.result={'status':'unavailable'}
+            def finish(self):events.append('finish');return self.result
+            def close(self):events.append('close')
+        class Cursor:
+            def __init__(self,*args):pass
+            def matches(self,*args):return False
+            def close(self):events.append('cursor-close')
+        def sampler(path):
+            name=Path(path).name
+            if name=='zed-xrecord-supervisor.py':return {'Observer':Observer}
+            if name=='zed-cursor-hit.py':return {'PointerShape':Cursor}
+            if name=='zed-atspi-observe.py':return dict(ancestor_result=lambda:{},compare_ancestors=lambda *args:{})
+            return dict(capture=lambda *args:{})
+        def execute(args,**kwargs):
+            if args[1]=='click':events.append('click')
+            output=(b'X=0\nY=0\nSCREEN=0\nWINDOW=40\nWIDTH=1280\nHEIGHT=800'
+                    if args[1]=='getwindowgeometry' else b'40' if args[1]=='getactivewindow' else b'20')
+            return subprocess.CompletedProcess(args,0,stdout=output)
+        def hover(select,*args):
+            events.append('hover')
+            raise ValueError('closed synthetic failure')
+        request=json.dumps(dict(pid=20,window=40,x=100,y=200,bus=':1.2',
+            path='/org/a11y/atspi/accessible/3')).encode()
+        with patch.dict(os.environ,{'NANH_ZED_XRECORD':'1','NANH_ZED_CURSOR_HIT':'1',
+                'GITHUB_ACTIONS':'true','RUNNER_ENVIRONMENT':'github-hosted','RUNNER_OS':'Linux'}), \
+             patch.object(sys,'platform','linux'),patch('subprocess.run',side_effect=execute), \
+             patch('runpy.run_path',side_effect=sampler), \
+             patch.dict(module['main'].__globals__,owned_frame=lambda *args:True,
+                maximized_observation=lambda *args:None,
+                independent_client_snapshot=lambda *args:((0,0),(0,0),(1280,800)),
+                normalized_retry_point=lambda *args,**kwargs:(100,200),
+                select_with_ancestor_diagnostic=hover,publish_observation=lambda *args:None):
+            self.assertNotEqual(self.call('retry-click',request),0)
+        self.assertEqual(events,['armed','hover','finish','cursor-close','close'])
+
     def test_recording_budget_exhaustion_is_closed_without_suppressing_one_click(self):
         request = json.dumps(dict(pid=20, window=40, x=100, y=200,
             bus=':1.2', path='/org/a11y/atspi/accessible/3')).encode()

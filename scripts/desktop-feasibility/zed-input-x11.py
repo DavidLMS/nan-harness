@@ -523,6 +523,7 @@ def select_with_ancestor_diagnostic(select, observe, compare, scope, facts, dead
 
 def retry_click(payload):
     facts = pointer_observation()
+    observer = None
     try:
         request = json.loads(payload)
         if (type(request) is not dict or set(request) != {'pid', 'window', 'x', 'y', 'bus', 'path'}
@@ -614,6 +615,13 @@ def retry_click(payload):
                 if not cursor_scope():
                     raise RetryHitFailure('identity-rejected')
             live_cursor = module['PointerShape'](request['pid'], cursor_scope, deadline)
+            if os.environ.get('NANH_ZED_XRECORD') == '1':
+                record_module = runpy.run_path(str(Path(__file__).with_name('zed-xrecord-supervisor.py')))
+                remaining = deadline-time.monotonic()
+                if remaining > 1:
+                    observer = record_module['Observer'](request['pid'], active, cursor_scope,
+                        budget=min(3,remaining))
+
             def select():
                 return select_live_retry_point(held_bounds,
                     lambda candidate: run(['mousemove', '--', str(candidate[0]), str(candidate[1])]),
@@ -659,7 +667,6 @@ def retry_click(payload):
             if run(['getmouselocation', '--shell'], 'position') != (px, py, pointer_window):
                 return 14
             facts.update(ancestor_module['compare_ancestors'](ancestor_before, ancestor_after))
-        observer = None
         if (os.environ.get('NANH_ZED_XRECORD') == '1'
                 and sys.platform == 'linux'
                 and os.environ.get('GITHUB_ACTIONS') == 'true'
@@ -680,7 +687,7 @@ def retry_click(payload):
             remaining = deadline - time.monotonic()
             facts['inputDelivery'] = dict(status='unavailable', stage='budget-insufficient', pressCount=None,
                                           releaseCount=None, orderedPair=None)
-            if remaining > 1:
+            if remaining > 1 and observer is None:
                 module = runpy.run_path(str(Path(__file__).with_name('zed-xrecord-supervisor.py')))
                 observer = module['Observer'](request['pid'], active, record_scope,
                                               budget=min(3, remaining - .5))
@@ -737,6 +744,8 @@ def retry_click(payload):
                 pass
         return locals().get("stage", 2)
     finally:
+        if observer is not None:
+            facts['inputDelivery'] = observer.finish()
         live_cursor = locals().get('live_cursor')
         if live_cursor is not None:
             live_cursor.close()

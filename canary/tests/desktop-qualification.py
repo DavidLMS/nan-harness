@@ -1950,6 +1950,14 @@ class QualificationTests(unittest.TestCase):
                                        'record-version', 'xres-version', 'xinput-extension', 'client-query',
                                        'client-identity', 'context', 'enable', 'identity-recheck',
                                        'armed', 'observation', 'cleanup'))
+            headers=dict(status='observed',ownedNormalEnterCount=0,ownedNonNormalEnterCount=0,
+                         ownedNormalLeaveCount=0,ownedMotionCount=9)
+            valid.append({**valid[1],'crossingHeaders':headers})
+            for change in ({'ownedMotionCount':65},{'ownedNormalEnterCount':True},
+                           {'rawEvent':'PRIVATE'},{'status':[]},{'ownedNormalLeaveCount':None}):
+                bad={**valid[1],'crossingHeaders':{**headers,**change}}
+                path.write_text(json.dumps({**value,'inputDelivery':bad}))
+                with self.assertRaises(ValueError):q.semantic_observations(root,'zed-desktop')
             for delivery in valid:
                 path.write_text(json.dumps({**value, 'inputDelivery': delivery}))
                 observed = q.semantic_observations(root, 'zed-desktop')[0]
