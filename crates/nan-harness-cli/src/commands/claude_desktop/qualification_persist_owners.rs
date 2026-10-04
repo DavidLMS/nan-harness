@@ -92,7 +92,7 @@ fn regular(path: &Path) -> bool {
 }
 #[cfg(windows)]
 fn held_public(path: &Path, expected: &str, max: u64) -> Option<std::fs::File> {
-    use sha2::{Digest as _, Sha256};
+    use super::session::sha256;
     use std::io::Read as _;
     use std::os::windows::fs::OpenOptionsExt as _;
     if !regular(path) {
@@ -108,8 +108,7 @@ fn held_public(path: &Path, expected: &str, max: u64) -> Option<std::fs::File> {
     }
     let mut bytes = Vec::new();
     file.by_ref().take(max + 1).read_to_end(&mut bytes).ok()?;
-    (bytes.len() as u64 <= max && format!("{:x}", Sha256::digest(&bytes)) == expected)
-        .then_some(file)
+    (bytes.len() as u64 <= max && sha256(&bytes) == expected).then_some(file)
 }
 #[cfg(windows)]
 fn execute(python: &Path, script: &Path, request: Vec<u8>, deadline: Instant) -> Reply {
@@ -133,7 +132,7 @@ fn execute(python: &Path, script: &Path, request: Vec<u8>, deadline: Instant) ->
         let _ = child.wait();
         return Reply::unavailable(Stage::Query);
     };
-    let Some(mut output) = child.stdout.take() else {
+    let Some(output) = child.stdout.take() else {
         let _ = child.kill();
         let _ = child.wait();
         return Reply::unavailable(Stage::Query);

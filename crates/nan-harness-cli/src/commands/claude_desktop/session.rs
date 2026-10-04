@@ -371,7 +371,7 @@ fn atomic_write_inner(
                 Some(qualification_prelaunch::ConfigurationDocument::NormalConfig)
             )
         {
-            super::qualification_persist_owners::observe(&error.file, path);
+            qualification_persist_owners::observe(&error.file, path);
         }
     });
     qualification_prelaunch::observe_configuration_persist(
