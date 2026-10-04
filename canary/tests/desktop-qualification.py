@@ -3705,6 +3705,24 @@ class ClaudeLinuxNativeChatTests(unittest.TestCase):
                 path.write_text(json.dumps({**value,**extra}))
                 with self.assertRaises(ValueError):q.semantic_observations(root,'claude-desktop')
 
+    def test_multi_action_observation_is_closed_and_cardinality_bound(self):
+        action=dict(actionCount=3,activationMatchCount=1,selectedIndex=1,activationClass='press')
+        value=dict(schemaVersion=1,mechanism='claude-linux-native-chat',diagnosticsOnly=True,
+            stage='sent',submittedTurns=1,inputVerifiedTurns=1,copiedResponses=0,retryAttempted=False,
+            clipboardCleared=True,sendActionClass='multiple',sendActionObservation=action)
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);path=root/'chat.json';path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(root,'claude-desktop')[0]['sendActionObservation'],action)
+            for change in ({'actionCount':True},{'actionCount':9},{'activationMatchCount':2},
+                    {'selectedIndex':3},{'selectedIndex':True},{'activationClass':'PRIVATE'},
+                    {'name':'PRIVATE'},{'actionCount':None}):
+                path.write_text(json.dumps({**value,'sendActionObservation':{**action,**change}}))
+                with self.assertRaises(ValueError):q.semantic_observations(root,'claude-desktop')
+            for action in (dict(actionCount=2,activationMatchCount=0,selectedIndex=None,activationClass='none'),
+                           dict(actionCount=2,activationMatchCount=2,selectedIndex=None,activationClass='ambiguous')):
+                path.write_text(json.dumps({**value,'stage':'blocked','submittedTurns':0,'sendActionObservation':action}))
+                self.assertEqual(q.semantic_observations(root,'claude-desktop')[0]['sendActionObservation'],action)
+
     def test_native_opt_in_only_accepts_owned_linux_trial(self):
         source=dict(GITHUB_ACTIONS='true',RUNNER_ENVIRONMENT='github-hosted',RUNNER_OS='Linux',
                     NANH_CLAUDE_LINUX_NATIVE_CHAT='first-turn',NANH_CLAUDE_LINUX_CHAT_ONLY='1')

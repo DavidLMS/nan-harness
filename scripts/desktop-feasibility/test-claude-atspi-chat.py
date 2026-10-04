@@ -594,4 +594,77 @@ class ActionProtocolTests(unittest.TestCase):
             self.assertFalse(facts['sendAttempted'])
         finally:Adapter.actions=original
 
+class MultiActionTests(unittest.TestCase):
+    def test_unique_activation_at_advertised_index_and_uncertainty(self):
+        original_actions=Adapter.actions;original_invoke=Adapter.invoke_once
+        try:
+            for names in (['press','focus','scrollToMakeVisible'],['focus','click','showContextMenu']):
+                invoked=[]
+                Adapter.actions=lambda self,node: names
+                def invoke(self,node,index):invoked.append(index);return original_invoke(self,node,index)
+                Adapter.invoke_once=invoke
+                adapter,controller,facts=ControllerTests.run_case(self)
+                self.assertTrue(facts['sendForwarded']);self.assertEqual(adapter.send_count,1)
+                index=names.index('press' if 'press' in names else 'click')
+                self.assertEqual(invoked,[index]);self.assertEqual(facts['sendActionClass'],'multiple')
+                self.assertEqual(facts['sendActionObservation']['selectedIndex'],index)
+                adapter,controller,facts=ControllerTests.run_case(self,invoke_error=True)
+                self.assertEqual(adapter.send_count,1);self.assertFalse(facts['sendForwarded'])
+        finally:Adapter.actions=original_actions;Adapter.invoke_once=original_invoke
+
+    def test_ambiguous_absent_and_drifting_full_list_no_action(self):
+        original=Adapter.actions
+        try:
+            for first,second in [(['click','press'],None),(['press','press'],None),
+                    (['focus'],None),(['press','focus'],['press','scrollToMakeVisible'])]:
+                calls=[]
+                def actions(self,node):calls.append(node);return second if second and len(calls)>1 else first
+                Adapter.actions=actions
+                adapter,controller,facts=ControllerTests.run_case(self)
+                self.assertEqual(adapter.send_count,0);self.assertFalse(facts['sendAttempted'])
+                self.assertEqual(facts['failureBoundary'],'action-name')
+        finally:Adapter.actions=original
+
+class CopyMultiActionTests(unittest.TestCase):
+    case=ResponseTests.case
+    def test_copy_unique_activation_and_no_replay(self):
+        original_actions=ResponseAdapter.actions;original_invoke=ResponseAdapter.invoke_once
+        try:
+            for names in (['press','focus'],['focus','click','showContextMenu']):
+                invoked=[]
+                ResponseAdapter.actions=lambda self,node:names
+                def invoke(self,node,index):
+                    invoked.append(index);return original_invoke(self,node,index)
+                ResponseAdapter.invoke_once=invoke
+                adapter,controller,facts=self.case()
+                self.assertTrue(facts['responseVerified']);self.assertEqual(adapter.copy_actions,1)
+                self.assertEqual(invoked,[names.index('press' if 'press' in names else 'click')])
+            def uncertain(self,node,index):self.copy_actions+=1;raise TimeoutError()
+            ResponseAdapter.invoke_once=uncertain
+            adapter,controller,facts=self.case()
+            self.assertEqual(adapter.copy_actions,1);self.assertFalse(facts['responseVerified'])
+        finally:ResponseAdapter.actions=original_actions;ResponseAdapter.invoke_once=original_invoke
+
+    def test_copy_full_list_drift_or_ambiguity_has_zero_actions(self):
+        original=ResponseAdapter.actions
+        try:
+            for first,third in [(['click','press'],None),(['press','press'],None),(['focus'],None),
+                    (['press','focus'],['press','showContextMenu'])]:
+                calls=[]
+                def actions(self,node):calls.append(node);return third if third and len(calls)>=3 else first
+                ResponseAdapter.actions=actions
+                adapter,controller,facts=self.case()
+                self.assertEqual(adapter.copy_actions,0);self.assertFalse(facts['responseVerified'])
+        finally:ResponseAdapter.actions=original
+
+    def test_copy_disabled_or_covered_has_zero_actions(self):
+        original=ResponseAdapter.state
+        try:
+            ResponseAdapter.state=lambda self,node: original(self,node)&~(1<<8) if node=='copy' else original(self,node)
+            adapter,controller,facts=self.case()
+            self.assertEqual(adapter.copy_actions,0);self.assertFalse(facts['responseVerified'])
+        finally:ResponseAdapter.state=original
+        adapter,controller,facts=self.case(foreign_hit=True)
+        self.assertEqual(adapter.copy_actions,0);self.assertFalse(facts['responseVerified'])
+
 if __name__=='__main__':unittest.main()

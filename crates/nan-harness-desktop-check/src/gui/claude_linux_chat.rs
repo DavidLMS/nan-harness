@@ -65,6 +65,45 @@ fn send_action_class(facts: &Value) -> Option<SendActionClass> {
     serde_json::from_value(facts.get("sendActionClass")?.clone()).ok()
 }
 
+#[derive(Clone, Copy, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum ActivationClass {
+    Click,
+    Press,
+    None,
+    Ambiguous,
+}
+#[derive(Clone, Copy, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SendActionObservation {
+    action_count: u8,
+    activation_match_count: u8,
+    selected_index: Option<u8>,
+    activation_class: ActivationClass,
+}
+fn send_action_observation(facts: &Value) -> Option<SendActionObservation> {
+    let fields = facts.get("sendActionObservation")?;
+    if fields.as_object()?.len() != 4 {
+        return None;
+    }
+    let value: SendActionObservation = serde_json::from_value(fields.clone()).ok()?;
+    let valid = value.action_count <= 8
+        && value.activation_match_count <= value.action_count
+        && match (
+            value.activation_match_count,
+            value.selected_index,
+            value.activation_class,
+        ) {
+            (0, None, ActivationClass::None) => true,
+            (1, Some(index), ActivationClass::Click | ActivationClass::Press) => {
+                index < value.action_count
+            }
+            (2..=8, None, ActivationClass::Ambiguous) => true,
+            _ => false,
+        };
+    valid.then_some(value)
+}
+
 fn failure_boundary(facts: &Value) -> Option<FailureBoundary> {
     serde_json::from_value(facts.get("failureBoundary")?.clone()).ok()
 }
@@ -182,7 +221,7 @@ fn decode(bytes: &[u8]) -> Option<(Value, Option<Value>)> {
         return None;
     }
     let facts = value["facts"].as_object()?;
-    if !(11..=15).contains(&facts.len())
+    if !(11..=16).contains(&facts.len())
         || facts.keys().any(|key| {
             !FLAGS.contains(&key.as_str())
                 && ![
@@ -194,6 +233,7 @@ fn decode(bytes: &[u8]) -> Option<(Value, Option<Value>)> {
                     "inputShape",
                     "embeddedTextObservation",
                     "sendActionClass",
+                    "sendActionObservation",
                 ]
                 .contains(&key.as_str())
         })
@@ -223,6 +263,13 @@ fn decode(bytes: &[u8]) -> Option<(Value, Option<Value>)> {
         || value["facts"]["sendForwarded"] == true && value["facts"]["sendAttempted"] != true
         || value["facts"]["sendAttempted"] == true && value["facts"]["inputVerified"] != true
         || value["facts"]["responseVerified"] == true && value["facts"]["stage"] != "copied"
+    {
+        return None;
+    }
+    if facts.contains_key("sendActionObservation")
+        && (send_action_observation(&value["facts"]).is_none()
+            || value["facts"]["inputVerified"] != true
+            || !facts.contains_key("sendActionClass"))
     {
         return None;
     }
@@ -357,6 +404,7 @@ pub(crate) struct ClaudeLinuxChatSession<'a> {
     stage: String,
     failure_boundary: Option<FailureBoundary>,
     send_action_class: Option<SendActionClass>,
+    send_action_observation: Option<SendActionObservation>,
     input_shape: Option<InputShape>,
     embedded_text_observation: Option<EmbeddedTextObservation>,
     submitted: u8,
@@ -392,6 +440,7 @@ impl Gui {
             stage: "source".into(),
             failure_boundary: None,
             send_action_class: None,
+            send_action_observation: None,
             input_shape: None,
             embedded_text_observation: None,
             submitted: 0,
@@ -446,6 +495,7 @@ impl ClaudeLinuxChatSession<'_> {
         let (facts, binding) = supervise(&self.driver, payload, deadline)?;
         self.failure_boundary = failure_boundary(&facts);
         self.send_action_class = send_action_class(&facts);
+        self.send_action_observation = send_action_observation(&facts);
         self.input_shape = input_shape(&facts);
         self.embedded_text_observation = embedded_text_observation(&facts);
         self.stage = facts["stage"]
@@ -561,6 +611,9 @@ impl ClaudeLinuxChatSession<'_> {
         if let Some(boundary) = self.failure_boundary {
             facts["failureBoundary"] = json!(boundary);
         }
+        if let Some(observation) = self.send_action_observation {
+            facts["sendActionObservation"] = json!(observation);
+        }
         if let Some(class) = self.send_action_class {
             facts["sendActionClass"] = json!(class);
         }
@@ -648,6 +701,27 @@ mod embedded_text_tests {
 mod helper_packet_tests {
     use super::decode;
     use serde_json::json;
+    #[test]
+    fn multi_action_packet_checks_exact_cardinality_and_private_fields() {
+        let packet = json!({"facts":{"schemaVersion":1,"mechanism":"claude-linux-native-chat",
+            "diagnosticsOnly":true,"stage":"sent","inputVerified":true,"pasteAttempted":true,
+            "sendAttempted":true,"sendForwarded":true,"responseVerified":false,"toolVerified":false,
+            "recoveryVerified":false,"sendActionClass":"multiple","sendActionObservation":{
+                "actionCount":3,"activationMatchCount":1,"selectedIndex":1,"activationClass":"press"}},"binding":null});
+        assert!(decode(&serde_json::to_vec(&packet).unwrap()).is_some());
+        for (key, value) in [
+            ("actionCount", json!(true)),
+            ("actionCount", json!(9)),
+            ("activationMatchCount", json!(2)),
+            ("selectedIndex", json!(3)),
+            ("activationClass", json!("PRIVATE")),
+            ("text", json!("PRIVATE")),
+        ] {
+            let mut changed = packet.clone();
+            changed["facts"]["sendActionObservation"][key] = value;
+            assert!(decode(&serde_json::to_vec(&changed).unwrap()).is_none());
+        }
+    }
     #[test]
     fn send_action_packet_is_closed_and_requires_verified_input() {
         let packet = json!({"facts":{"schemaVersion":1,"mechanism":"claude-linux-native-chat",

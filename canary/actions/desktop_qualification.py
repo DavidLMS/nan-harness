@@ -1119,7 +1119,7 @@ def semantic_observations(directory, app):
         elif mechanism == 'claude-linux-native-chat':
             fields = {'schemaVersion','mechanism','diagnosticsOnly','stage','submittedTurns',
                       'inputVerifiedTurns','copiedResponses','retryAttempted','clipboardCleared'}
-            if (app != 'claude-desktop' or set(value) - {'failureBoundary','inputShape','embeddedTextObservation','sendActionClass'} != fields or value['diagnosticsOnly'] is not True
+            if (app != 'claude-desktop' or set(value) - {'failureBoundary','inputShape','embeddedTextObservation','sendActionClass','sendActionObservation'} != fields or value['diagnosticsOnly'] is not True
                     or type(value['stage']) is not str or value['stage'] not in {
                         'source','focus','paste','readback','send','input-not-empty','blocked',
                         'action-uncertain','deadline','clipboard-cleanup','sent','response-pending',
@@ -1129,6 +1129,20 @@ def semantic_observations(directory, app):
                     or not value['copiedResponses'] <= value['submittedTurns'] <= value['inputVerifiedTurns']
                     or value['retryAttempted'] is not False or type(value['clipboardCleared']) is not bool):
                 raise ValueError('invalid Claude Linux native Chat diagnostic')
+            if 'sendActionObservation' in value:
+                action=value['sendActionObservation']
+                if (type(action) is not dict or set(action) != {'actionCount','activationMatchCount','selectedIndex','activationClass'}
+                        or type(action['actionCount']) is not int or not 0 <= action['actionCount'] <= 8
+                        or type(action['activationMatchCount']) is not int or not 0 <= action['activationMatchCount'] <= action['actionCount']
+                        or type(action['activationClass']) is not str or value['inputVerifiedTurns'] < 1
+                        or 'sendActionClass' not in value):
+                    raise ValueError('invalid Claude Linux Send action observation')
+                matches=action['activationMatchCount'];index=action['selectedIndex'];kind=action['activationClass']
+                if not (matches == 0 and index is None and kind == 'none'
+                        or matches == 1 and type(index) is int and 0 <= index < action['actionCount'] and kind in {'click','press'}
+                        or matches > 1 and index is None and kind == 'ambiguous'):
+                    raise ValueError('inconsistent Claude Linux Send action observation')
+                record['sendActionObservation']=action
             if 'sendActionClass' in value:
                 if (type(value['sendActionClass']) is not str
                         or value['sendActionClass'] not in {'click','press','none','multiple','other'}

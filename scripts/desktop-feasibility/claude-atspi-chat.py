@@ -51,6 +51,11 @@ def action_names(adapter, node):
     return names
 
 
+def unique_activation_index(actions):
+    matches=[index for index,name in enumerate(actions) if name in ('click','press')]
+    return matches[0] if len(matches)==1 else None
+
+
 def input_shape(value):
     # Diagnostic only. These sets never grant replacement or submission authority.
     if type(value) is not str or not 0 < len(value) <= 4096:
@@ -566,7 +571,12 @@ class Controller:
                 self.facts['sendActionClass'] = ('click' if actions == ['click'] else
                     'press' if actions == ['press'] else 'none' if not actions else
                     'multiple' if len(actions) > 1 else 'other')
-                if actions not in (['click'], ['press']):
+                matches=[index for index,name in enumerate(actions) if name in ('click','press')]
+                selected_index=unique_activation_index(actions)
+                self.facts['sendActionObservation']=dict(actionCount=len(actions),activationMatchCount=len(matches),
+                    selectedIndex=selected_index,activationClass=actions[selected_index] if selected_index is not None
+                    else 'none' if not matches else 'ambiguous')
+                if selected_index is None:
                     raise Rejected('action-name')
                 if sealed_actions is not None and actions != sealed_actions:
                     raise Rejected('action-name')
@@ -576,7 +586,7 @@ class Controller:
             self.facts['stage'] = 'send'
             self.send_attempted = True
             self.facts['sendAttempted'] = True
-            if self.query('invoke_once', self.send, 0) is not True:
+            if self.query('invoke_once', self.send, selected_index) is not True:
                 raise Rejected()
             self.facts['sendForwarded'] = True
             self.proof()
@@ -663,6 +673,8 @@ class Controller:
                 return self.facts
             row,heading,button = scope
             sealed = (self.query('identity',button),self.query('bounds',button))
+            sealed_actions = None
+            selected_index = None
             for _ in range(2):
                 self.proof()
                 if self.response_scope(marker) != scope:
@@ -673,20 +685,27 @@ class Controller:
                     raise Rejected()
                 if (self.query('identity',button),self.query('bounds',button)) != sealed:
                     raise Rejected()
-                if not inside(sealed[1],self.sealed_frame[1]) or self.query('actions',button) != ['click']:
+                if not inside(sealed[1],self.sealed_frame[1]):
                     raise Rejected()
+                actions=self.query('actions',button)
+                selected_index=unique_activation_index(actions)
+                if selected_index is None or sealed_actions is not None and actions != sealed_actions:
+                    raise Rejected('action-name')
+                sealed_actions=actions
                 if not self.query('hit',button,self.frame):
                     raise Rejected()
             self.query('clipboard_sentinel')
             self.proof()
             if (self.response_scope(marker) != scope
                     or (self.query('identity',button),self.query('bounds',button)) != sealed
-                    or self.query('actions',button) != ['click']
+                    or self.query('actions',button) != sealed_actions
                     or not self.query('hit',button,self.frame)):
                 raise Rejected()
-            self.state(button)
+            bits=self.state(button)
+            if not bits & (1<<8) or not bits & (1<<24):
+                raise Rejected('state')
             self.copy_attempted = True
-            if self.query('invoke_once',button,0) is not True:
+            if self.query('invoke_once',button,selected_index) is not True:
                 raise Rejected()
             self.proof()
             value = self.query('clipboard_read')
