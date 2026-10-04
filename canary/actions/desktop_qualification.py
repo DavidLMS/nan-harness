@@ -55,7 +55,7 @@ def claude_native_tree(value):
 
 def codex_windows_prepare(value):
     fields = set('schemaVersion mechanism diagnosticsOnly stage cause bindingIndex ancestorCount ownedCount privacy emptyRoots codeHomeAbsent completed'.split())
-    stages = set('policy command ancestor-acquisition owned-acquisition privacy empty-roots code-home final-custody completed'.split())
+    stages = set('policy command ancestor-acquisition owned-acquisition privacy empty-roots code-home final-custody completed retained-custody'.split())
     causes = set('policy arguments cwd binding original-cutoff ancestor-budget directory-missing directory-access directory-sharing directory-open directory-metadata directory-reparse directory-type privacy directory-enumeration root-populated code-home-metadata code-home-present custody'.split())
     if (type(value) is not dict or set(value) != fields or type(value['schemaVersion']) is not int
             or value['schemaVersion'] != 1 or value['mechanism'] != 'codex-windows-profile-prepare'

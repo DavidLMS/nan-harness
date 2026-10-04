@@ -55,6 +55,24 @@ class ClaudeQueryTimingTests(unittest.TestCase):
                     q.semantic_observations(tmp, 'claude-desktop')
 
 
+class CodexRetainedCustodyTests(unittest.TestCase):
+    def test_rejected_custody_preserves_closed_privacy_and_deadline_causes(self):
+        value = dict(schemaVersion=1, mechanism='codex-windows-profile-prepare', diagnosticsOnly=True,
+                     stage='retained-custody', cause='privacy', bindingIndex=None,
+                     ancestorCount=6, ownedCount=10, privacy=['protected', 'inherited']+[None]*9,
+                     emptyRoots=[None, None], codeHomeAbsent=None, completed=False)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'facts.json'
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(tmp, 'chatgpt-desktop'), [value])
+            deadline = {**value, 'cause':'original-cutoff', 'privacy':[None]*11}
+            path.write_text(json.dumps(deadline))
+            self.assertEqual(q.semantic_observations(tmp, 'chatgpt-desktop'), [deadline])
+            for change in ({'privacy':['PRIVATE']+[None]*10}, {'path':'PRIVATE'}, {'completed':True}):
+                path.write_text(json.dumps({**value, **change}))
+                with self.assertRaises(ValueError):q.semantic_observations(tmp, 'chatgpt-desktop')
+
+
 class RendererCheckpointTests(unittest.TestCase):
     def test_partial_phase_is_closed_and_cannot_claim_completed_inventory(self):
         value=dict(schemaVersion=1,mechanism='renderer-inventory',diagnosticsOnly=True,

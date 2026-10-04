@@ -355,17 +355,51 @@ impl FreshCodexWindowsProfile {
         use nan_harness_private_fs::{
             OwnedWindowsDacl, PrivatePathKind, classify_owned_windows_dacl,
         };
-        self.directories.len() == self.private_start + 11
-            && self
+        // Record only a rejected borrow, so repeated successful custody checks
+        // do not flood the facts directory or change the original deadline.
+        let reject = |cause, privacy| {
+            let mut observation = PrepareObservation::new();
+            observation.at("retained-custody", cause);
+            observation.ancestor_count = self.private_start.saturating_add(1).min(64);
+            observation.owned_count = self
                 .directories
-                .iter()
-                .all(|file| Instant::now() < deadline && ordinary(file))
-            && self.directories[self.private_start..].iter().all(|file| {
-                Instant::now() < deadline
-                    && classify_owned_windows_dacl(file, PrivatePathKind::Directory)
-                        == OwnedWindowsDacl::Protected
-            })
-            && Instant::now() < deadline
+                .len()
+                .saturating_sub(self.private_start.saturating_add(1))
+                .min(10);
+            observation.privacy = privacy;
+            false
+        };
+        let mut privacy = [None; 11];
+        if self.directories.len() != self.private_start + 11 {
+            return reject("custody", privacy);
+        }
+        for file in &self.directories {
+            if Instant::now() >= deadline {
+                return reject("original-cutoff", privacy);
+            }
+            if !ordinary(file) {
+                return reject("directory-metadata", privacy);
+            }
+        }
+        for (index, file) in self.directories[self.private_start..].iter().enumerate() {
+            if Instant::now() >= deadline {
+                return reject("original-cutoff", privacy);
+            }
+            let classification = classify_owned_windows_dacl(file, PrivatePathKind::Directory);
+            privacy[index] = Some(match classification {
+                OwnedWindowsDacl::Protected => "protected",
+                OwnedWindowsDacl::Inherited => "inherited",
+                OwnedWindowsDacl::Unexpected => "unexpected",
+                OwnedWindowsDacl::Unavailable => "unavailable",
+            });
+            if classification != OwnedWindowsDacl::Protected {
+                return reject("privacy", privacy);
+            }
+        }
+        if Instant::now() >= deadline {
+            return reject("original-cutoff", privacy);
+        }
+        true
     }
     pub(crate) fn prepared_for_renderer(&self, deadline: Instant) -> bool {
         self.launched && self.verifies_owned(deadline)
