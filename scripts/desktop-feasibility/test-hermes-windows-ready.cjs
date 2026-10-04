@@ -29,7 +29,8 @@ async function trial(scenario) {
    if(scenario==='onboarding-owner-loss')owner=false;
  }};
  const choice={count:async()=>scenario==='onboarding-missing-choice'?0:scenario==='onboarding-duplicate-choice'?2:1,
-   isEnabled:async()=>scenario!=='onboarding-disabled',elementHandle:async()=>choiceHandle,evaluate:async()=>true};
+   isVisible:async()=>scenario!=='onboarding-pending-visible' || clock>=300,
+   isEnabled:async()=>scenario!=='onboarding-disabled' && (scenario!=='onboarding-pending-enabled' || clock>=300),elementHandle:async()=>choiceHandle,evaluate:async()=>true};
  const cover={count:async()=>onboardingPresent?(scenario==='onboarding-duplicate-cover'?2:1):0,
    isVisible:async()=>onboardingPresent,getByRole:()=>choice,elementHandle:async()=>heldCover,
    evaluate:async()=>scenario!=='onboarding-replaced'};
@@ -160,6 +161,11 @@ for(const element of [modelElement([text('Qwen3.6 27B'),meta]),modelElement([tex
  const skipped=await trial('onboarding-success');
  assert.equal(skipped.facts.stage,'ready');assert.equal(skipped.facts.onboardingSkipped,true);
  assert.equal(skipped.skipClicks,1);assert.equal(skipped.pillClicks,1);assert.equal(skipped.refreshClicks,1);
+ for(const scenario of ['onboarding-pending-enabled','onboarding-pending-visible']) {
+   const result=await trial(scenario);
+   assert.equal(result.facts.stage,'ready',scenario);
+   assert.equal(result.skipClicks,1);assert.equal(result.pillClicks,1);assert.equal(result.refreshClicks,1);
+ }
  for(const scenario of ['onboarding-missing-choice','onboarding-duplicate-choice','onboarding-duplicate-cover','onboarding-disabled','onboarding-replaced']) {
    const result=await trial(scenario);assert.equal(result.skipClicks,0,scenario);
    assert.equal(result.pillClicks,0);assert.equal(result.refreshClicks,0);assert.equal(result.facts.onboardingSkipped,false);

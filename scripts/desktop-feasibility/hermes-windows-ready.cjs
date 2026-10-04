@@ -202,8 +202,16 @@ exports.run = async function run(page, session, ownedEndpoint, deadline, expecte
       const cover=page.locator('[data-glass-opaque][class~="z-(--z-onboarding)"]');
       const choice=cover.getByRole('button',{name:"I'll choose a provider later",exact:true});
       const settleDeadline=Math.min(deadline,Date.now()+5000);
-      while (guard() && Date.now()<settleDeadline && await choice.count()===0) await delay(100);
-      if (!guard() || await cover.count()!==1 || !await cover.isVisible()
+      let choiceReady=false;
+      while (guard() && Date.now()<settleDeadline) {
+        const covers=await cover.count(), choices=await choice.count();
+        if (covers!==1 || choices>1) throw new Error('onboarding');
+        if (choices===1 && await cover.isVisible() && await choice.isVisible() && await choice.isEnabled()) {
+          choiceReady=true; break;
+        }
+        await delay(Math.min(100,Math.max(0,settleDeadline-Date.now())));
+      }
+      if (!choiceReady || !guard() || Date.now()>=settleDeadline || await cover.count()!==1 || !await cover.isVisible()
           || await choice.count()!==1 || !await choice.isEnabled()) throw new Error('onboarding');
       const heldCover=await cover.elementHandle();
       try {
