@@ -1,3 +1,4 @@
+const {isHeldMainGuard}=require('./codex-main-guard.cjs');
 // Public UI only. This module never reads accounts or changes application stores.
 const TOKENS = ['relative', 'flex', 'h-full', 'min-h-0', 'w-full', 'flex-col',
   'bg-transparent', 'tracking-normal', 'text-default', 'select-text'];
@@ -233,10 +234,11 @@ async function run(page, ownerGuard, deadline, rejected, mainGuard, folderTrust)
     const fail = reason => { facts.roleProofFailure=reason; return false; };
     try {
       if (Date.now() >= deadline) return fail('deadline-expired');
-      if (typeof ownerGuard !== 'function' || ownerGuard() !== true) return fail('ownership-lost');
+      if (typeof ownerGuard !== 'function'
+          || !isHeldMainGuard(mainGuard,ownerGuard) && ownerGuard() !== true) return fail('ownership-lost');
       if (Date.now() >= deadline) return fail('deadline-expired');
-      // Read renderer identity after the synchronous native proof, which can
-      // block while a page or route changes. Never reuse its earlier snapshot.
+      // The factory-issued retained guard below brackets its complete source sample
+      // with fresh ownership. Every other callback still needs the direct proof.
       const browser = page.context().browser();
       const pages = browser?.contexts().flatMap(context => context.pages());
       if (!pages) return fail('query-failed');

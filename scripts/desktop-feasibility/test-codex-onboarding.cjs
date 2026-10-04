@@ -93,12 +93,12 @@ async function trial(options={}) {
  const page={getByRole:(_role,options)=>new Locator(['Get Started','Skip'].includes(options.name)?'task':'login'),evaluate:async fn=>fn.name==='codingScope'?taskClicks===1&&!options.noCodingScope:'visible',mainFrame:()=>options.overlayFrameChange&&overlayReads?{}:mainFrame,locator:s=>new Locator(s.startsWith('fieldset > legend')?'legend':'radios'),
   url:()=>options.urlChange&&roleClicks>0?'app://codex/index.html?PRIVATE_ROUTE':'app://codex/index.html',
   context:()=>({browser:()=>({contexts:()=>[{pages:()=>options.foreignPage?[page,extraPage]:options.replacedPage?[{}]:[page]}]})})};
- const sandbox={exports:{},URL,process:{platform:options.platform??'win32',env:{GITHUB_ACTIONS:options.noHost?'false':'true',RUNNER_ENVIRONMENT:'github-hosted',RUNNER_OS:options.runnerOs??'Windows',NANH_CODEX_PROJECT_ARTIFACT_SHA256:options.skipPin?'ee7854145554718d7239d01ea37d44f6ba1e0ba4a93f47ac097d6e0f964da47c':undefined,NANH_CODEX_PUBLIC_ONBOARDING:options.noOptin?undefined:'engineering'}},Date:{now:()=>now},clearTimeout:()=>{},setTimeout:(f,ms)=>{if(ms<=100){now+=100;f();}}};
+ const sandbox={exports:{},URL,require,process:{platform:options.platform??'win32',env:{GITHUB_ACTIONS:options.noHost?'false':'true',RUNNER_ENVIRONMENT:'github-hosted',RUNNER_OS:options.runnerOs??'Windows',NANH_CODEX_PROJECT_ARTIFACT_SHA256:options.skipPin?'ee7854145554718d7239d01ea37d44f6ba1e0ba4a93f47ac097d6e0f964da47c':undefined,NANH_CODEX_PUBLIC_ONBOARDING:options.noOptin?undefined:'engineering'}},Date:{now:()=>now},clearTimeout:()=>{},setTimeout:(f,ms)=>{if(ms<=100){now+=100;f();}}};
  vm.runInNewContext(source,sandbox);
  let guards=0,mainProofs=0,sealed=0;
  const guard=()=>{guards++;if(options.guardThrows)throw Error('PRIVATE');if(options.guardExhaustsBudget&&guards>=3||options.overlayBudgetExpired&&overlayReads>0)now=1201;return !inventoryOwnerLost&&!(options.overlayOwnerDuringProof&&legendReads>=3)&&!(options.overlayOwnerLoss&&overlayReads>0)&&!options.initialOwnerLoss&&!(options.ownerLossBeforeRole&&guards>=3)&&!(options.ownerLoss&&roleClicks>0)&&!(options.finalLoss&&guards>=2);};
  const budget=options.expired?0:options.invalidDeadline?NaN:options.excessBudget?60001:options.fullBudget?60000:1200;
- const mainGuard=options.admitAux?async()=>{
+ let mainGuard=options.admitAux?async()=>{
   mainProofs++;
   if(options.auxDeadlineAfterProof||options.auxDeadlineFailedProof)now=1201;
   return !options.auxGuardFailure&&!options.auxDeadlineFailedProof
@@ -107,11 +107,38 @@ async function trial(options={}) {
  if(mainGuard)mainGuard.sealInitialActions=()=>{sealed++;};
  if(mainGuard)mainGuard.failureDetails=()=>options.pageSetDetails;
  if(mainGuard)mainGuard.failure=()=>options.auxDeadlineFailedProof?'deadline':options.auxGuardFailure??'native-ownership';
+ if(options.realMainGuard) {
+  const mainIdentity={url:page.url(),target:'main',frame:'frame',loader:'loader',frameUrl:page.url(),fragment:''};
+  mainGuard=require('./codex-main-guard.cjs').createHeldMainGuard(
+    {...mainIdentity,page},page.context().browser(),options.differentGuardOwner?()=>true:guard,budget,()=> 'avatarOverlay',
+    async()=>{mainProofs++;if(options.sampleOwnerLoss)inventoryOwnerLost=true;
+      return {...mainIdentity,scope:{focused:true,mainScope:true,counts:{}}};},
+    async()=>{},false,false,true,
+    {sameCorrelationIdentity:(a,b)=>['url','target','frame','loader','frameUrl','fragment'].every(k=>a[k]===b[k]),
+     settleFolderAuxiliary:async()=>false,now:()=>now});
+ }
+ if(options.forgedMainGuard) {
+  mainGuard=async()=>{mainProofs++;return true;};
+  mainGuard.includesNativeOwnership=true;
+ }
  const facts=await sandbox.exports.run(page,options.noGuard?undefined:guard,budget,mainGuard);
  assert(!JSON.stringify(facts).includes('PRIVATE'));
- return {facts,roleClicks,continueClicks,taskClicks,mainProofs,legendReads,sealed};
+ return {facts,roleClicks,continueClicks,taskClicks,mainProofs,legendReads,sealed,guards};
 }
 (async()=>{
+ const real=await trial({realMainGuard:true});
+ assert(real.roleClicks>0);assert.equal(real.guards,real.mainProofs*2);
+ const different=await trial({realMainGuard:true,differentGuardOwner:true,initialOwnerLoss:true});
+ assert.equal(different.roleClicks,0);assert.equal(different.mainProofs,0);assert.equal(different.guards,1);
+ const lost=await trial({realMainGuard:true,sampleOwnerLoss:true});
+ assert.equal(lost.roleClicks,0);assert.equal(lost.continueClicks,0);
+ assert.equal(lost.guards,2);assert.equal(lost.mainProofs,1);
+ for(const forgedMainGuard of [false,true]) {
+  const forged=await trial({forgedMainGuard,admitAux:!forgedMainGuard,initialOwnerLoss:true});
+  assert.equal(forged.roleClicks,0);assert.equal(forged.continueClicks,0);
+  assert.equal(forged.mainProofs,0);
+ }
+
  const sealedAttempt=await trial({admitAux:true,uncertain:'role'});
  assert.equal(sealedAttempt.sealed,1);
  assert.equal(sealedAttempt.roleClicks,1);

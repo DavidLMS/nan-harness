@@ -94,7 +94,7 @@ assert.equal(roleSourceScope({foreignFieldset:true}).mainScope,false);
   let clock=0;
   const helper=vm.runInNewContext(`(() => { ${source.slice(timingStart,timingEnd)}
     return {observeMainAux,correlationScope,correlationIdentity,captureCorrelationMain,bindCorrelationMain,heldMainGuard,initialMainFacts,initialMainRoute,mainConfirmationFacts,focusCapturedMain}; })()`,
-    {Date:{now:()=>clock},setTimeout,clearTimeout,URL});
+    {Date:{now:()=>clock},setTimeout,clearTimeout,URL,require});
   const empty={roleLegend:0,roleRadios:0,engineering:0,dialog:0,quickChatComposer:0,editable:0};
   function fixture() {
     clock=0;
