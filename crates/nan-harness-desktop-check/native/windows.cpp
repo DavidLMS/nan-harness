@@ -538,8 +538,13 @@ bool mac_fit_rectangle(CGRect before, CGRect visible, CGFloat primary_top, CGRec
         && std::isfinite(target.size.width) && std::isfinite(target.size.height)
         && target.size.width >= 300 && target.size.height >= 200;
 }
+// A resize acknowledgement must preserve the original origin and exact target size.
+bool mac_fit_resize_ack(CGRect before, CGRect target, CGRect observed) {
+    return CGPointEqualToPoint(before.origin, observed.origin)
+        && CGSizeEqualToSize(target.size, observed.size);
+}
 // Fit only the independently focused original standard window. Never activates it.
-static bool fit_mac_proof(std::uint64_t id, pid_t pid, AxFocus& focus, bool require_off_display) {
+static bool fit_mac_proof(std::uint64_t id, pid_t pid, AxFocus& focus, bool require_off_display, bool require_containment = true) {
     if ([[[NSWorkspace sharedWorkspace] frontmostApplication] processIdentifier] != pid) return false;
     auto application = [NSRunningApplication runningApplicationWithProcessIdentifier:pid];
     if (!application || !application.active || application.hidden || !application.finishedLaunching) return false;
@@ -570,7 +575,7 @@ static bool fit_mac_proof(std::uint64_t id, pid_t pid, AxFocus& focus, bool requ
         auto display = static_cast<CGDirectDisplayID>([screen.deviceDescription[@"NSScreenNumber"] unsignedIntValue]);
         contained = contained || CGRectContainsRect(CGDisplayBounds(display), focus.bounds);
     }
-    return safe && found && (require_off_display ? !contained : contained);
+    return safe && found && (!require_containment || (require_off_display ? !contained : contained));
 }
 // Shared owned-window proof for the separately scoped native Chat controller.
 bool claude_owned_mac_window(std::uint64_t id, pid_t pid, CGRect bounds) {
@@ -862,15 +867,44 @@ int fit_window(const std::string& request) {
         AXValueRef size = AXValueCreate(kAXValueTypeCGSize, &target.size);
         AXValueRef position = AXValueCreate(kAXValueTypeCGPoint, &target.origin);
         if (!size || !position) { if (size) CFRelease(size); if (position) CFRelease(position); return mac_fit_rejected("allocation"); }
-        AXError resized = AXUIElementSetAttributeValue(before.focused, kAXSizeAttribute, size);
-        AXError moved = resized == kAXErrorSuccess ? AXUIElementSetAttributeValue(before.focused, kAXPositionAttribute, position) : resized;
-        CFRelease(size); CFRelease(position);
-        if (resized != kAXErrorSuccess) return mac_fit_rejected("size");
+        // An acknowledged resize may still be executing in the application's AX
+        // server. Observe the same focused element and exact native window before
+        // the sole position write; never replay either write after uncertainty.
+        const auto settle_deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
+        AXError resized = CGSizeEqualToSize(before.bounds.size, target.size) ? kAXErrorSuccess
+            : AXUIElementSetAttributeValue(before.focused, kAXSizeAttribute, size);
+        CFRelease(size);
+        if (resized != kAXErrorSuccess) { CFRelease(position); return mac_fit_rejected("size"); }
+        bool acknowledged = false;
+        do {
+            AxFocus after_size;
+            if (fit_mac_proof(id, static_cast<pid_t>(pid), after_size, false, false)
+                && CFEqual(before.focused, after_size.focused)
+                && mac_fit_resize_ack(before.bounds, target, after_size.bounds)) {
+                acknowledged = true;
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        } while (std::chrono::steady_clock::now() < settle_deadline);
+        Boolean still_settable = false;
+        if (!acknowledged || std::chrono::steady_clock::now() >= settle_deadline
+            || AXUIElementIsAttributeSettable(before.focused, kAXPositionAttribute, &still_settable) != kAXErrorSuccess
+            || !still_settable) { CFRelease(position); return mac_fit_rejected("identity-recheck"); }
+        AxFocus before_move;
+        if (std::chrono::steady_clock::now() >= settle_deadline
+            || !fit_mac_proof(id, static_cast<pid_t>(pid), before_move, false, false)
+            || !CFEqual(before.focused, before_move.focused)
+            || !mac_fit_resize_ack(before.bounds, target, before_move.bounds)
+            || std::chrono::steady_clock::now() >= settle_deadline) {
+            CFRelease(position);
+            return mac_fit_rejected("identity-recheck");
+        }
+        AXError moved = AXUIElementSetAttributeValue(before.focused, kAXPositionAttribute, position);
+        CFRelease(position);
         if (moved != kAXErrorSuccess) {
             std::cout << "fit-rejected position " << fit_ax_error(moved) << '\n';
             return std::cout ? 5 : 4;
         }
-        const auto settle_deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
         do {
             AxFocus after;
             if (fit_mac_proof(id, static_cast<pid_t>(pid), after, false)) return 0;
