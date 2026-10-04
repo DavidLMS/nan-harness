@@ -10,7 +10,10 @@ function captureSource({scope,group}){
  if(radios.length!==1||radios[0].disabled||radios[0].labels?.length!==1)return null;
  const radio=radios[0],label=radio.labels[0];if(!fieldset.contains(label)||label.innerText.trim()!=='Engineering'||!visible(label))return null;
  if([...root.querySelectorAll('button')].some(e=>visible(e)&&/^(Log in|Sign in|Continue with Google|Continue with Apple)$/.test(e.innerText.trim())))return null;
- return {root,fieldset,radio,label,scope,group};
+ const overlays=[...document.querySelectorAll('[role="dialog"],[role="alertdialog"],[role="menu"],[aria-modal="true"]')].filter(visible);
+ if(overlays.length>1)return null;const dialog=overlays[0]??null;
+ if(dialog&&(dialog.getAttribute('role')!=='dialog'||!dialog.contains(fieldset)||!dialog.contains(label)))return null;
+ return {root,fieldset,radio,label,scope,group,dialog};
 }
 function sampleSource(){
  const visible=e=>{const r=e.getBoundingClientRect(),s=getComputedStyle(e);return e.isConnected&&r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden'&&!e.closest('[inert]')};
@@ -21,8 +24,12 @@ function sampleSource(){
  const roots=[...document.querySelectorAll(this.scope)].filter(visible),legends=[...document.querySelectorAll('fieldset > legend')].filter(e=>visible(e)&&e.textContent.trim()==='Select the kind of work you do');
  const radios=[...this.fieldset.querySelectorAll(this.group+'[value="engineering"]')];
  if(roots.length!==1||roots[0]!==this.root||legends.length!==1||legends[0].parentElement!==this.fieldset||radios.length!==1||radios[0]!==this.radio)return null;
- if([...document.querySelectorAll('[role="dialog"],[role="alertdialog"],[role="menu"],[aria-modal="true"]')].some(visible))return null;
- for(let e=this.label,n=0;e;e=e.parentElement)if(++n>64||getComputedStyle(e).pointerEvents==='none')return null;
+ const overlays=[...document.querySelectorAll('[role="dialog"],[role="alertdialog"],[role="menu"],[aria-modal="true"]')].filter(visible);
+ if(overlays.length!==(this.dialog?1:0)||this.dialog&&(overlays[0]!==this.dialog||!visible(this.dialog)
+   ||this.dialog.getAttribute('role')!=='dialog'||!this.dialog.contains(this.fieldset)||!this.dialog.contains(this.label)))return null;
+ // The frozen role form may occupy its own modal. Its effective hit target
+ // and pointer ancestry inside that retained modal remain mandatory.
+ for(let e=this.label,n=0;e;e=e.parentElement){if(++n>64||getComputedStyle(e).pointerEvents==='none')return null;if(e===this.dialog)break;}
  const r=this.label.getBoundingClientRect(),x=r.left+r.width/2,y=r.top+r.height/2;
  if(![r.left,r.top,r.width,r.height,x,y,innerWidth,innerHeight].every(Number.isFinite)||r.width<=0||r.height<=0||x<=0||y<=0||x>=innerWidth||y>=innerHeight||!this.label.contains(document.elementFromPoint(x,y)))return null;
  return {rect:[r.left,r.top,r.width,r.height],css:[innerWidth,innerHeight,x,y]};

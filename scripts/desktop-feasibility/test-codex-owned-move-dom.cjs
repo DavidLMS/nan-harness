@@ -1,7 +1,7 @@
 const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
 const root={},fieldset={},radio={},label={},legend={},leaf={};const r={left:100,top:100,width:100,height:40};
-let duplicate=false,disabled=false,replacement=false;
-const document={querySelectorAll(s){if(s==='fieldset > legend')return duplicate?[legend,legend]:[legend];if(s==='div.frozen')return [root];return []},elementFromPoint:()=>leaf};
+let duplicate=false,disabled=false,replacement=false,overlays=[];
+const document={querySelectorAll(s){if(s==='fieldset > legend')return duplicate?[legend,legend]:[legend];if(s==='div.frozen')return [root];return overlays},elementFromPoint:()=>leaf};
 for(const e of [root,fieldset,label,legend])Object.assign(e,{isConnected:true,ownerDocument:document,getBoundingClientRect:()=>r,closest:()=>null,getAttribute:()=>null});
 Object.assign(root,{contains:e=>[fieldset,radio,label].includes(e),querySelectorAll:()=>[]});
 Object.assign(fieldset,{closest:s=>s==='div.frozen'?root:null,contains:e=>[label,radio].includes(e),querySelectorAll:()=>replacement?[{}]:[radio]});
@@ -12,4 +12,9 @@ const context={module:{exports:{}},exports:{},process:{env:{}},require:key=>key=
 vm.runInNewContext(fs.readFileSync(require.resolve('./codex-owned-move.cjs'),'utf8'),context);
 const {captureSource,sampleSource}=context.module.exports;const held=captureSource({scope:'div.frozen',group:'input'});assert(held);assert(sampleSource.call(held));
 replacement=true;assert.equal(sampleSource.call(held),null);replacement=false;disabled=true;assert.equal(captureSource({scope:'div.frozen',group:'input'}),null);disabled=false;duplicate=true;assert.equal(captureSource({scope:'div.frozen',group:'input'}),null);
-console.log('4 actual source-callback retained identity, disabled and ambiguity cases passed');
+duplicate=false;
+const dialog={isConnected:true,getBoundingClientRect:()=>r,closest:()=>null,getAttribute:key=>key==='role'?'dialog':null,contains:e=>[fieldset,label].includes(e)};
+overlays=[dialog];const modal=captureSource({scope:'div.frozen',group:'input'});assert(modal);assert(sampleSource.call(modal));
+overlays=[{...dialog}];assert.equal(sampleSource.call(modal),null);
+overlays=[dialog,dialog];assert.equal(captureSource({scope:'div.frozen',group:'input'}),null);
+console.log('7 actual source-callback retained identity, disabled and ambiguity cases passed');
