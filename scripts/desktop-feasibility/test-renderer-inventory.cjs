@@ -223,6 +223,20 @@ assert.equal(roleSourceScope({foreignFieldset:true}).mainScope,false);
     if(scenario==='focused')assert.equal(proofs,7);
     assert(!JSON.stringify(facts).includes('PRIVATE'));
   }
+  // Initial source readiness is passive and never substitutes for identity.
+  for(const scenario of ['ready','identity-change','never-ready']) {
+    f=fixture();f.setPages([f.main]);let ready=false,activations=0;
+    f.main.bringToFront=async()=>{activations++;};
+    f.setAlter(r=>{r.scope.mainScope=ready;r.scope.focused=true;
+      if(ready&&scenario==='identity-change')r.loader='replaced';});
+    const proof=async()=>true;proof.requireDocumentFocus=()=>{};
+    const diagnostic={};
+    assert.equal(await helper.focusCapturedMain(f.held,proof,1000,f.identity,undefined,
+      async ms=>{clock+=ms;ready=scenario!=='never-ready';},diagnostic),scenario==='ready');
+    assert.equal(activations,0);
+    assert.equal(diagnostic.status,scenario==='ready'?'focused':scenario==='never-ready'?'deadline':'rejected');
+    clock=0;
+  }
   // The auxiliary capability retains immutable identities across real actions;
   // the main role may transition while the auxiliary must remain inert.
   f=fixture();let owner=true;

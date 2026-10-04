@@ -353,8 +353,17 @@ async function focusCapturedMain(held,proof,deadline,identity=correlationIdentit
     phase('pre-proof');
     if(!held||Date.now()>=deadline||!await proved())return rejected();
     phase('pre-identity');
-    const before=await identity(held.page,deadline);
-    if(Date.now()>=deadline||!same(held,before)||!before.scope.mainScope||!await proved())return rejected();
+    let before;
+    while(Date.now()<deadline) {
+      before=await identity(held.page,deadline);
+      if(Date.now()>=deadline||!same(held,before)||!await proved())return rejected();
+      if(before.scope.mainScope)break;
+      // Source controls may mount after DOM readiness. This is passive only;
+      // the original document and all ownership/auxiliary proofs stay held.
+      await pause(Math.min(100,Math.max(0,deadline-Date.now())));
+      if(Date.now()>=deadline||!await proved())return rejected();
+    }
+    if(!before?.scope.mainScope)return rejected();
     if(!before.scope.focused) {
       // This is the same one consumed activation; no diagnostic retries it.
       phase('activation');
