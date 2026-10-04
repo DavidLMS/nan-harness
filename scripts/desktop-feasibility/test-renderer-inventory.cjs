@@ -185,6 +185,23 @@ assert.equal(roleSourceScope({foreignFieldset:true}).mainScope,false);
       assert.equal(await guard(),true);
     }
   }
+  // A completed Trust grants only passive settlement of one retained blank auxiliary.
+  for(const failure of ['none','replacement','foreign-route','main-focus','main-identity','controls','deadline','no-ticket']) {
+    f=fixture();f.setPages([f.main]);let url='about:blank';f.aux.url=()=>url;
+    const route=value=>value.includes('avatar-overlay')?'avatarOverlay':'unknown';
+    const settle=helper.heldMainGuard(f.held,f.browser,()=>true,1000,route,f.identity,
+      async ms=>{clock+=ms;url=failure==='foreign-route'?'https://foreign.invalid':'app://-/index.html?initialRoute=%2Favatar-overlay';
+        if(failure==='replacement')f.setPages([f.main,{url:()=>url}]);
+        if(failure==='deadline')clock=1001;});
+    assert.equal(await settle(),true);settle.sealInitialActions();
+    if(failure!=='no-ticket')assert.equal(settle.allowPassiveFolderSettle(),true);
+    f.setPages([f.main,f.aux]);
+    f.setAlter(r=>{if(r.page===f.main&&failure==='main-focus')r.scope.focused=false;
+      if(r.page===f.main&&failure==='main-identity')r.loader='replaced';
+      if(r.page===f.aux&&failure==='controls')r.scope.counts.editable=1;});
+    assert.equal(await settle(),failure==='none');
+    if(failure==='none'){assert(settle.binding().auxiliary);assert.equal(await settle(),true);}
+  }
   // The auxiliary capability retains immutable identities across real actions;
   // the main role may transition while the auxiliary must remain inert.
   f=fixture();let owner=true;

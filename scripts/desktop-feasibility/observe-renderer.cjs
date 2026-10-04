@@ -218,6 +218,24 @@ async function observeMainAux(held,browser,guard,deadline,auxRoute,
     return stop('observed');
   } catch{return stop(Date.now()>=deadline?'deadline':'query-failed');}
 }
+// A completed trust action can precede the source auxiliary's first loader.
+// A blank page is only a pending observation, never an input capability.
+async function settleFolderAuxiliary(held,extra,pages,valid,deadline,route,identity,pause) {
+  while(Date.now()<deadline) {
+    if(!valid())return false;
+    const before=pages();
+    if(before.length!==2||!before.includes(held.page)||!before.includes(extra))return false;
+    const main=await identity(held.page,deadline);
+    if(!valid()||!sameCorrelationIdentity(held,main)||!main.scope.mainScope||!main.scope.focused)return false;
+    const after=pages();
+    if(after.length!==2||!after.includes(held.page)||!after.includes(extra))return false;
+    const url=extra.url();
+    if(route(url)==='avatarOverlay')return valid();
+    if(url!==''&&url!=='about:blank')return false;
+    await pause(Math.min(100,Math.max(0,deadline-Date.now())));
+  }
+  return false;
+}
 // Identity is captured while the official primary route is the sole page.
 // Source confirmation and focused/inert proofs happen before any input.
 // Later source-known inert avatar pages never become selectable input targets.
@@ -282,6 +300,15 @@ function heldMainGuard(held, browser, owner, deadline, route,
   };
   const prove=async()=>{
     if(await measure())return true;
+    if(folderSettleTicket&&!appearanceRetried&&!auxiliary&&failure==='auxiliary-route') {
+      const current=pages(),extra=current.find(page=>page!==held.page);
+      if(current.length!==2||!current.includes(held.page)||!extra
+        ||!['','about:blank'].includes(extra.url()))return false;
+      appearanceRetried=true;folderSettleTicket=false;
+      if(!await settleFolderAuxiliary(held,extra,pages,valid,deadline,route,identity,pause))return false;
+      // Establish two NEW inert auxiliary proofs only after the committed route.
+      return measure();
+    }
     const changed=failureDetails;
     if(!(allowInitialAppearance&&!actionsStarted||folderSettleTicket)||appearanceRetried||auxiliary||failure!=='page-set'
       ||!changed||changed.initialCount!==1||changed.currentCount!==2||!changed.heldPresent
