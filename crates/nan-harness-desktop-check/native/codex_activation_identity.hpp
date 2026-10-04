@@ -18,9 +18,10 @@ inline bool same_codex_main(const CodexMainIdentity& held,const CodexMainIdentit
 }
 
 inline bool codex_inventory_admitted(bool complete,unsigned candidates,bool held_present,
-    bool other_owned_normal,bool overlapping_ahead,bool fully_displayed) {
+    bool other_owned_normal,bool overlapping_ahead,bool fully_displayed,
+    bool activation_only=false,bool owned_overlap=false) {
     return complete&&candidates==1&&held_present&&!other_owned_normal
-        &&!overlapping_ahead&&fully_displayed;
+        &&!owned_overlap&&(activation_only||!overlapping_ahead)&&fully_displayed;
 }
 
 // Preserve the first failed inventory observation unless the caller cutoff expired.

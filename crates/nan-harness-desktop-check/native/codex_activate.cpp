@@ -81,13 +81,13 @@ struct InventoryFailure {
     const char* reason="inventory-unavailable";
     unsigned candidates=0, executable_rejected=0, ancestry_rejected=0;
 };
-bool inventory(const Request& r,Binding& result,bool select,InventoryFailure* failure=nullptr) {
+bool inventory(const Request& r,Binding& result,bool select,InventoryFailure* failure=nullptr,bool activation_only=false) {
     InventoryFailure observation;
     if(!alive(r)){observation.reason="deadline";if(failure)*failure=observation;return false;}
     auto rows=CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly|kCGWindowListExcludeDesktopElements,kCGNullWindowID);
     if(!rows){if(failure)*failure=observation;return false;}
     CFIndex count=CFArrayGetCount(rows), held=-1;unsigned candidates=0;
-    bool valid=count<=1024, other_owned_normal=false, overlapping_ahead=false;
+    bool valid=count<=1024, other_owned_normal=false, overlapping_ahead=false, owned_overlap=false;
     observation.reason=valid?"metadata":"limit";
     for(CFIndex i=0;valid&&i<count;++i) {
         auto row=(CFDictionaryRef)CFArrayGetValueAtIndex(rows,i);
@@ -129,8 +129,12 @@ bool inventory(const Request& r,Binding& result,bool select,InventoryFailure* fa
         if(value&&CFGetTypeID(value)==CFNumberGetTypeID())CFNumberGetValue((CFNumberRef)value,kCFNumberDoubleType,&alpha);
         if(alpha<=0)continue;
         CGRect bounds{};if(!rect(row,bounds)){observation.reason="geometry";valid=false;break;}
+        const bool same_owner=number(row,kCGWindowOwnerPID)==result.pid;
         if(CGRectIntersectsRect(bounds,result.bounds)
-            ||(number(row,kCGWindowOwnerPID)==result.pid&&number(row,kCGWindowLayer)==0))overlapping_ahead=true;
+            ||(same_owner&&number(row,kCGWindowLayer)==0)) {
+            overlapping_ahead=true;
+            owned_overlap=owned_overlap||same_owner;
+        }
     }
     bool contained=false;
     for(NSScreen* screen in NSScreen.screens) {
@@ -140,7 +144,7 @@ bool inventory(const Request& r,Binding& result,bool select,InventoryFailure* fa
     CFRelease(rows);
     bool timely=alive(r);
     bool admitted=codex_inventory_admitted(valid,candidates,held>=0,
-        other_owned_normal,overlapping_ahead,contained)&&timely;
+        other_owned_normal,overlapping_ahead,contained,activation_only,owned_overlap)&&timely;
     observation.reason=codex_inventory_failure_reason(observation.reason,valid,
         other_owned_normal,overlapping_ahead,contained,timely);
     if(failure)*failure=observation;
@@ -213,10 +217,13 @@ int codex_activate_main() {
         Request request;if(!parse(request))return activation_rejected("request");
         Binding held=request.held;
         InventoryFailure failure;
-        if(!inventory(request,held,!request.action&&!request.verify,&failure))return activation_rejected("cg-inventory-before",&failure);
+        // Bringing our sole owned window forward may start behind another app.
+        // Only activation admits that external occlusion; verification and every
+        // subsequent input still require the original complete clear-stack proof.
+        if(!inventory(request,held,!request.action&&!request.verify,&failure,!request.verify))return activation_rejected("cg-inventory-before",&failure);
         const char* boundary="ax-main-before";
         AXUIElementRef first=main_window(request,held,&boundary);if(!first)return activation_rejected(boundary);
-        Binding fresh=held;bool valid=inventory(request,fresh,false,&failure);
+        Binding fresh=held;bool valid=inventory(request,fresh,false,&failure,!request.verify);
         bool inventory_valid=valid;
         boundary=valid?"ax-main-after":"cg-inventory-after";
         AXUIElementRef second=valid?main_window(request,held,&boundary):nullptr;
@@ -245,7 +252,7 @@ int codex_activate_main() {
         if(!app||!alive(request)||![app activateWithOptions:NSApplicationActivateIgnoringOtherApps]){CFRelease(first);return 5;}
         // The first activation is consumed. Any later failure is terminal.
         Binding final=held;
-        AXUIElementRef current=inventory(request,final,false)?main_window(request,held):nullptr;
+        AXUIElementRef current=inventory(request,final,false,nullptr,true)?main_window(request,held):nullptr;
         bool unchanged=current&&CFEqual(first,current)&&alive(request);
         if(current)CFRelease(current);
         if(!unchanged){CFRelease(first);return 5;}

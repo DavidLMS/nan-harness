@@ -28,4 +28,14 @@ int main() {
     assert(std::strcmp(codex_inventory_failure_reason("identity",true,true,true,false,true),"other-owned-normal")==0);
     assert(std::strcmp(codex_inventory_failure_reason("identity",true,false,true,false,true),"overlapping-ahead")==0);
     assert(std::strcmp(codex_inventory_failure_reason("identity",true,false,false,false,true),"off-display")==0);
+    // Activation raises a retained native window rather than clicking through
+    // an external occluder. Owned overlays and all verification stay blocking.
+    assert(codex_inventory_admitted(true,1,true,false,true,true,true,false));
+    assert(!codex_inventory_admitted(true,1,true,false,true,true,false,false));
+    assert(!codex_inventory_admitted(true,1,true,false,true,true,true,true));
+    assert(!codex_inventory_admitted(true,1,true,true,true,true,true,false));
+    assert(!codex_inventory_admitted(true,2,true,false,true,true,true,false));
+    assert(!codex_inventory_admitted(true,1,true,false,true,false,true,false));
+    assert(!codex_inventory_admitted(false,1,true,false,true,true,true,false));
+
 }
