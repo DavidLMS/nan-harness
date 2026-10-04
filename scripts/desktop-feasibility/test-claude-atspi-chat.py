@@ -742,8 +742,9 @@ class NativeAdapterWiringTests(unittest.TestCase):
             with patch.dict(os.environ,scope),patch.object(chat,'load_visibility',
                     return_value=SimpleNamespace(Adapter=lambda deadline:adapter)),\
                     patch('runpy.run_path',return_value={}):
-                native=chat.native_adapter(dict(pid=7,nativeExecutable=str(Path(__file__).resolve())),
-                    chat.time.monotonic()+10)
+                deadline=chat.time.monotonic()+10
+                native=chat.native_adapter(dict(pid=7,nativeExecutable=str(Path(__file__).resolve()),deadline=deadline),
+                    deadline)
             self.assertEqual(native.hit(button,frame),expected)
             self.assertEqual(calls,[(frame,'GetAccessibleAtPoint','org.a11y.atspi.Component',(25,40,0))])
 
@@ -1118,7 +1119,7 @@ class MainPacketTests(unittest.TestCase):
             def close(self):pass
         request=dict(pid=7,bus='r',path='root',checkerPid=1,window=1,
             bounds=[0,0,800,600],name='synthetic',nativeExecutable='/synthetic',
-            deadline=100,mode=mode,value='owned next prompt',binding=b,
+            deadline=chat.time.monotonic()+10,mode=mode,value='owned next prompt',binding=b,
             profileAuthority={},history=h)
         out=io.StringIO()
         with patch.object(sys,'stdin',type('Input',(),{'buffer':io.BytesIO(json.dumps(request).encode())})()),patch.object(sys,'stdout',out),patch.object(chat,'ProfileCustody',Custody),patch.object(chat,'native_adapter',return_value=a),patch.object(chat,'Controller',return_value=c):
