@@ -122,11 +122,23 @@ async function trial(options={}) {
   mainGuard=async()=>{mainProofs++;return true;};
   mainGuard.includesNativeOwnership=true;
  }
- const facts=await sandbox.exports.run(page,options.noGuard?undefined:guard,budget,mainGuard,undefined,undefined,!!options.directCDP);
+ const progress=[];
+ const facts=await sandbox.exports.run(page,options.noGuard?undefined:guard,budget,mainGuard,undefined,undefined,!!options.directCDP,
+   receipt=>{progress.push(JSON.parse(JSON.stringify(receipt)));if(options.progressThrows)throw Error('PRIVATE');});
  assert(!JSON.stringify(facts).includes('PRIVATE'));
- return {facts,roleClicks,continueClicks,taskClicks,mainProofs,legendReads,sealed,guards};
+ return {facts,roleClicks,continueClicks,taskClicks,mainProofs,legendReads,sealed,guards,progress};
 }
 (async()=>{
+ const observed=await trial({});
+ assert(observed.progress.some(value=>value.roleClickAttempted&&!value.roleClickCompleted));
+ assert(observed.progress.some(value=>value.roleClickCompleted));
+ assert(!JSON.stringify(observed.progress).includes('PRIVATE'));
+ const brokenObserver=await trial({progressThrows:true});
+ assert.equal(JSON.stringify(brokenObserver.facts),JSON.stringify(observed.facts));
+ assert.equal(brokenObserver.roleClicks,observed.roleClicks);
+ const denied=await trial({initialOwnerLoss:true});
+ assert.equal(denied.roleClicks,0);
+ assert(denied.progress.some(value=>value.roleProofFailure==='ownership-lost'));
  for(const directCDP of [true,false]) {
   const home=await trial({directCDP,directHome:true,noTaskScope:true,realMainGuard:true});
   assert.equal(home.continueClicks,1);assert.equal(home.taskClicks,0);

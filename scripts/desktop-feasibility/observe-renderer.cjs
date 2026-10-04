@@ -681,7 +681,8 @@ async function run() {
       checkpoint('onboarding');
       facts.publicOnboarding = await require('./codex-onboarding.cjs').run(page,
         onboardingOwnerGuard,
-        correlationDeadline,mainGuard,folderTrust,request.codexProfileLoan,directCDP);
+        correlationDeadline,mainGuard,folderTrust,request.codexProfileLoan,directCDP,
+        receipt=>{facts.publicOnboarding=receipt;save();});
       const bindingVerified=!!mainGuard&&await mainGuard();
       const codingComposerReady=bindingVerified&&(await page.evaluate(require('./codex-onboarding.cjs').codingScope)
         ||directCDP&&await page.evaluate(require('./codex-dom.cjs').homeComposerScope));

@@ -397,11 +397,12 @@ function candidate(a, b) {
   return a && b && !a.blocked && !b.blocked && JSON.stringify(a.rect) === JSON.stringify(b.rect)
     && a.points.find(p => b.points.some(q => p.x === q.x && p.y === q.y));
 }
-async function run(page, ownerGuard, deadline, rejected, mainGuard, folderTrust, profileLoan, directCDP=false) {
+async function run(page, ownerGuard, deadline, rejected, mainGuard, folderTrust, profileLoan, directCDP=false, progress=()=>{}) {
   const maxWaitMs = deadline - Date.now();
   const originalUrl = page.url();
   const ownedEndpoint = async () => {
     const fail = reason => { facts.roleProofFailure=reason; return false; };
+    checkpoint();
     try {
       if (Date.now() >= deadline) return fail('deadline-expired');
       if (typeof ownerGuard !== 'function'
@@ -449,13 +450,16 @@ async function run(page, ownerGuard, deadline, rejected, mainGuard, folderTrust,
       if (page.url() !== originalUrl) return fail('url-changed');
       return true;
     } catch { return fail('query-failed'); }
+    finally { checkpoint(); }
   };
   const facts = {schemaVersion:1, mechanism:'codex-public-onboarding', diagnosticsOnly:true,
     stage:'session', errorCategory:null, conversationalScope:false, engineeringControl:false,
     roleClickAttempted:false, roleClickCompleted:false, engineeringChecked:false,
     continueControl:false, continueClickAttempted:false, continueClickCompleted:false,
     roleScopeAbsent:false, taskScopeProved:false, taskClickAttempted:false, taskClickCompleted:false, codingComposerReady:false, roleProofFailure:'unmeasured', sessionProofFailure:'unmeasured'};
-  const stop = category => { facts.errorCategory=category; return facts; };
+  const checkpoint=()=>{try {progress({...facts});}catch { /* Observation cannot admit input. */ }};
+  const stop = category => { facts.errorCategory=category; checkpoint(); return facts; };
+  checkpoint();
   const sessionFailure = typeof ownerGuard !== 'function' ? 'guard-missing'
     : !Number.isFinite(deadline) || !Number.isFinite(maxWaitMs) || maxWaitMs > (process.platform==='win32'?120000:60000) ? 'deadline-invalid'
     : maxWaitMs < 1 ? 'deadline-expired'
@@ -576,8 +580,10 @@ async function run(page, ownerGuard, deadline, rejected, mainGuard, folderTrust,
       if(before==='roleClickAttempted'&&typeof mainGuard?.sealInitialActions==='function')
         mainGuard.sealInitialActions();
       facts[before]=true;
+      checkpoint();
       await handle.click({position:point,timeout:Math.max(1,Math.min(2000,deadline-Date.now()))});
       facts[after]=true;
+      checkpoint();
       if (!await ownedEndpoint()) return false;
       if (Date.now() >= deadline) { facts.roleProofFailure='deadline-expired'; return false; }
       return true;
@@ -768,9 +774,9 @@ function sourceRoute(raw) {
       ['/global-dictation','globalDictation'],['/debug','debug']]).get(route)??'unknown';
   } catch { return 'unknown'; }
 }
-exports.run=async function(page, ownerGuard, deadline, mainGuard, folderTrust, profileLoan, directCDP=false) {
+exports.run=async function(page, ownerGuard, deadline, mainGuard, folderTrust, profileLoan, directCDP=false, progress=()=>{}) {
   let rejectedPages, rejectedUrls;
-  const facts=await run(page,ownerGuard,deadline,pages=>{rejectedPages=pages;rejectedUrls=pages.map(p=>p.url());},mainGuard,folderTrust,profileLoan,directCDP);
+  const facts=await run(page,ownerGuard,deadline,pages=>{rejectedPages=pages;rejectedUrls=pages.map(p=>p.url());},mainGuard,folderTrust,profileLoan,directCDP,progress);
   if(!rejectedPages)return facts;
   const unavailable=()=>{facts.rejectedPageInventory.source={status:'unavailable'};return facts;};
   const stable=()=>{
