@@ -122,7 +122,35 @@ def hypertext_query(adapter,method,target,*args):
     return integer(property_value(link_interface,names[method]))
 
 
-def flatten_hypertext(root, query, pid, budget, observation=None):
+def input_text_inventory(root, children, resolved, links_used, read, result):
+    """Private read-only counters; no text/attributes/nodes escape this query."""
+    roles = {node:read('role',node) for node in children}
+    attributes = {node:read('attributes',node) for node in children}
+    if any(type(role) is not int or not 0 <= role <= 255 for role in roles.values()):
+        raise Rejected('input')
+    if any(type(attrs) is not dict or len(attrs)>64
+        or any(type(k) is not str or type(v) is not str or len(k)>128 or len(v)>1024
+               for k,v in attrs.items())
+        or sum(len(k.encode())+len(v.encode()) for k,v in attrs.items())>4096
+        for attrs in attributes.values()):
+        raise Rejected('input')
+    paragraphs = [node for node,role in roles.items() if role == 73]
+    placeholders = {attrs[key] for attrs in attributes.values()
+        for key in ('placeholder','placeholder-text','data-placeholder')
+        if key in attrs and attrs[key]}
+    root_text = read('text',root,read('count',root))
+    return dict(nodeCount=len(children),resolvedNodeCount=len(resolved),
+        paragraphCount=len(paragraphs),rootChildCount=len(children[root]),
+        textLeafCount=sum(not children[n] and roles[n] in (29,61,116) for n in children),
+        otherRoleCount=sum(role not in (29,61,73,78,79,116) for role in roles.values()),
+        objectLinkCount=links_used,completeTextCoverage=resolved==set(children),
+        rootSingleParagraph=(len(children[root])==1 and children[root][0] in paragraphs),
+        rootOnlyObjects=bool(root_text) and all(c=='\ufffc' for c in root_text),
+        placeholderAttributeMatch=result in placeholders,
+        placeholderAttributeLfMatch=any(result==value+'\n' for value in placeholders))
+
+
+def flatten_hypertext(root, query, pid, budget, observation=None, inventory=None):
     """Resolve embedded Text objects; never treat unknown objects as empty."""
     records, parents, children = [], {}, {}
     def read(method,node,*args):
@@ -229,6 +257,8 @@ def flatten_hypertext(root, query, pid, budget, observation=None):
                 shape['brLfLeafCount']+=1
                 if attributes.get('class','').split()==['ProseMirror-trailingBreak']:
                     shape['exactFillerLfLeafCount']+=1
+    detail = (input_text_inventory(root,children,resolved,links_used,read,result)
+              if inventory is not None else None)
     # Reprove the entire owned attachment/text/link mapping, including zero-length leaves.
     for method,node,args,value in records:
         budget()
@@ -237,6 +267,8 @@ def flatten_hypertext(root, query, pid, budget, observation=None):
         budget()
     if shape is not None:
         observation.update(shape)
+    if detail is not None:
+        inventory.update(detail)
     return result
 
 
@@ -626,6 +658,7 @@ class Controller:
                 self.facts['stage'] = 'clipboard-cleanup'
             if self.facts['stage']!='input-not-empty':
                 self.facts.pop('embeddedTextObservation',None)
+                self.facts.pop('ownedInputObservation',None)
         return self.facts
 
 
@@ -769,7 +802,22 @@ class Controller:
         if not inside(sealed[1],self.sealed_frame[1]):
             raise Rejected('frame')
         initial = self.query('text',editor)
+        inventory = getattr(self.adapter,'input_text_inventory',None)
         if initial != '':
+            if self.next_history_scope(history) != before:
+                raise Rejected('response')
+            self.state(editor,editable=True)
+            if (self.query('identity',editor),self.query('bounds',editor)) != sealed:
+                raise Rejected('input')
+            if (self.query('text',editor) != initial
+                    or getattr(self.adapter,'input_text_inventory',None) != inventory):
+                raise Rejected('input')
+            if self.next_history_scope(history) != before:
+                raise Rejected('response')
+            if inventory is not None:
+                self.facts['ownedInputObservation'] = dict(inventory,
+                    knownPromptMatchCount=sum(initial==prompt for prompt,_ in history),
+                    latestPromptMatches=initial==history[-1][0])
             self.facts['stage'] = 'input-not-empty'
             self.facts['inputShape'] = input_shape(initial)
             embedded = getattr(self.adapter,'embedded_text_observation',None)
@@ -1042,8 +1090,12 @@ def native_adapter(request, deadline):
             if os.getppid()!=request['checkerPid']:
                 raise Rejected('source-owner')
         observation={}
+        inventory={}
         adapter.embedded_text_observation=None
-        result=flatten_hypertext(node,lambda method,target,*args:hypertext_query(adapter,method,target,*args),request['pid'],budget,observation)
+        adapter.input_text_inventory=None
+        result=flatten_hypertext(node,lambda method,target,*args:hypertext_query(adapter,method,target,*args),request['pid'],budget,observation,
+            inventory if request['mode']=='input-next-correlated' else None)
+        adapter.input_text_inventory=inventory or None
         adapter.embedded_text_observation=observation or None
         if not guarded():
             raise Rejected('native-window')

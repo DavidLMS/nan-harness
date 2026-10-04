@@ -1324,7 +1324,7 @@ def semantic_observations(directory, app):
         elif mechanism == 'claude-linux-native-chat':
             fields = {'schemaVersion','mechanism','diagnosticsOnly','stage','submittedTurns',
                       'inputVerifiedTurns','copiedResponses','retryAttempted','clipboardCleared'}
-            if (app != 'claude-desktop' or set(value) - {'failureBoundary','inputShape','embeddedTextObservation','sendActionClass','sendActionObservation'} != fields or value['diagnosticsOnly'] is not True
+            if (app != 'claude-desktop' or set(value) - {'failureBoundary','inputShape','embeddedTextObservation','ownedInputObservation','sendActionClass','sendActionObservation'} != fields or value['diagnosticsOnly'] is not True
                     or type(value['stage']) is not str or value['stage'] not in {
                         'source','focus','paste','readback','send','input-not-empty','blocked',
                         'action-uncertain','deadline','clipboard-cleanup','sent','response-pending',
@@ -1389,6 +1389,28 @@ def semantic_observations(directory, app):
                         or value['retryAttempted'] is not False):
                     raise ValueError('invalid Claude Linux embedded text observation')
                 record['embeddedTextObservation'] = shape
+            if 'ownedInputObservation' in value:
+                shape = value['ownedInputObservation']
+                counts = set('nodeCount resolvedNodeCount paragraphCount rootChildCount textLeafCount otherRoleCount objectLinkCount knownPromptMatchCount'.split())
+                flags = set('completeTextCoverage rootSingleParagraph rootOnlyObjects placeholderAttributeMatch placeholderAttributeLfMatch latestPromptMatches'.split())
+                if (type(shape) is not dict or set(shape) != counts | flags
+                        or any(type(shape[k]) is not int or not 0 <= shape[k] <= 64 for k in counts)
+                        or any(type(shape[k]) is not bool for k in flags)
+                        or shape['nodeCount'] == 0 or shape['resolvedNodeCount'] == 0
+                        or any(shape[k] > shape['nodeCount'] for k in counts - {'knownPromptMatchCount'})
+                        or shape['objectLinkCount'] >= shape['nodeCount']
+                        or shape['completeTextCoverage'] is not (shape['resolvedNodeCount'] == shape['nodeCount'])
+                        or (shape['rootSingleParagraph'] and (shape['rootChildCount'] != 1 or shape['paragraphCount'] == 0))
+                        or (shape['rootOnlyObjects'] and shape['objectLinkCount'] == 0)
+                        or shape['knownPromptMatchCount'] > 1
+                        or (shape['latestPromptMatches'] and shape['knownPromptMatchCount'] != 1)
+                        or value['stage'] != 'input-not-empty' or 'embeddedTextObservation' not in value
+                        or shape['nodeCount'] != value['embeddedTextObservation']['nodeCount']
+                        or shape['paragraphCount'] != value['embeddedTextObservation']['paragraphCount']
+                        or value['submittedTurns'] != value['inputVerifiedTurns'] or value['submittedTurns'] != value['copiedResponses']
+                        or not 1 <= value['submittedTurns'] <= 2 or value['retryAttempted'] is not False):
+                    raise ValueError('invalid Claude Linux owned input observation')
+                record['ownedInputObservation'] = shape
             record.update({key:value[key] for key in fields - {'schemaVersion','mechanism'}})
         elif mechanism == 'claude-config-persist-owners':
             fields = {'schemaVersion','mechanism','diagnosticsOnly','status','stage','destinationPresent',

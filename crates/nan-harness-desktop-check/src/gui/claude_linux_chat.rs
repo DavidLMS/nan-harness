@@ -180,6 +180,48 @@ fn embedded_text_observation(facts: &Value) -> Option<EmbeddedTextObservation> {
         .then_some(shape)
 }
 
+#[derive(Clone, Copy, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct OwnedInputObservation {
+    node_count: u8,
+    resolved_node_count: u8,
+    paragraph_count: u8,
+    root_child_count: u8,
+    text_leaf_count: u8,
+    other_role_count: u8,
+    object_link_count: u8,
+    complete_text_coverage: bool,
+    root_single_paragraph: bool,
+    root_only_objects: bool,
+    placeholder_attribute_match: bool,
+    placeholder_attribute_lf_match: bool,
+    known_prompt_match_count: u8,
+    latest_prompt_matches: bool,
+}
+fn owned_input_observation(facts: &Value) -> Option<OwnedInputObservation> {
+    let shape: OwnedInputObservation =
+        serde_json::from_value(facts.get("ownedInputObservation")?.clone()).ok()?;
+    ((1..=64).contains(&shape.node_count)
+        && [
+            shape.resolved_node_count,
+            shape.paragraph_count,
+            shape.root_child_count,
+            shape.text_leaf_count,
+            shape.other_role_count,
+        ]
+        .into_iter()
+        .all(|n| n <= shape.node_count)
+        && shape.resolved_node_count > 0
+        && shape.object_link_count < shape.node_count
+        && shape.complete_text_coverage == (shape.resolved_node_count == shape.node_count)
+        && (!shape.root_single_paragraph
+            || shape.root_child_count == 1 && shape.paragraph_count > 0)
+        && (!shape.root_only_objects || shape.object_link_count > 0)
+        && shape.known_prompt_match_count <= 1
+        && (!shape.latest_prompt_matches || shape.known_prompt_match_count == 1))
+        .then_some(shape)
+}
+
 const FLAGS: [&str; 7] = [
     "inputVerified",
     "pasteAttempted",
@@ -251,6 +293,18 @@ fn validate_diagnostics(facts: &Value) -> Option<()> {
     {
         return None;
     }
+    if fields.contains_key("ownedInputObservation")
+        && (owned_input_observation(facts).is_none()
+            || facts["stage"] != "input-not-empty"
+            || !fields.contains_key("embeddedTextObservation")
+            || facts["ownedInputObservation"]["nodeCount"]
+                != facts["embeddedTextObservation"]["nodeCount"]
+            || facts["ownedInputObservation"]["paragraphCount"]
+                != facts["embeddedTextObservation"]["paragraphCount"]
+            || FLAGS.iter().any(|key| facts[*key] != false))
+    {
+        return None;
+    }
     if fields.contains_key("embeddedTextObservation")
         && (embedded_text_observation(facts).is_none()
             || facts["stage"] != "input-not-empty"
@@ -290,7 +344,7 @@ fn decode(bytes: &[u8]) -> Option<(Value, Option<Value>)> {
         return None;
     }
     let facts = value["facts"].as_object()?;
-    if !(11..=16).contains(&facts.len())
+    if !(11..=17).contains(&facts.len())
         || facts.keys().any(|key| {
             !FLAGS.contains(&key.as_str())
                 && ![
@@ -301,6 +355,7 @@ fn decode(bytes: &[u8]) -> Option<(Value, Option<Value>)> {
                     "failureBoundary",
                     "inputShape",
                     "embeddedTextObservation",
+                    "ownedInputObservation",
                     "sendActionClass",
                     "sendActionObservation",
                 ]
@@ -474,6 +529,7 @@ pub(crate) struct ClaudeLinuxChatSession<'a> {
     send_action_observation: Option<SendActionObservation>,
     input_shape: Option<InputShape>,
     embedded_text_observation: Option<EmbeddedTextObservation>,
+    owned_input_observation: Option<OwnedInputObservation>,
     submitted: u8,
     verified: u8,
     copied: u8,
@@ -512,6 +568,7 @@ impl Gui {
             send_action_observation: None,
             input_shape: None,
             embedded_text_observation: None,
+            owned_input_observation: None,
             submitted: 0,
             verified: 0,
             copied: 0,
@@ -572,6 +629,7 @@ impl ClaudeLinuxChatSession<'_> {
         self.send_action_observation = send_action_observation(&facts);
         self.input_shape = input_shape(&facts);
         self.embedded_text_observation = embedded_text_observation(&facts);
+        self.owned_input_observation = owned_input_observation(&facts);
         facts["stage"]
             .as_str()
             .ok_or(Reason::ActionUnsupported)?
@@ -728,6 +786,11 @@ impl ClaudeLinuxChatSession<'_> {
             && let Some(shape) = self.embedded_text_observation
         {
             facts["embeddedTextObservation"] = json!(shape);
+        }
+        if self.stage == "input-not-empty"
+            && let Some(shape) = self.owned_input_observation
+        {
+            facts["ownedInputObservation"] = json!(shape);
         }
         let recorded = open_private_new(&self.directory.join(format!(
             "claude-linux-native-chat-{}.json",
@@ -952,5 +1015,36 @@ mod turn_history_tests {
                 )
                 .is_err()
         );
+    }
+}
+
+#[cfg(test)]
+mod owned_input_tests {
+    use super::owned_input_observation;
+    use serde_json::json;
+    #[test]
+    fn diagnostic_relation_and_coverage_are_closed_without_authority() {
+        let valid = json!({"nodeCount":5,"resolvedNodeCount":2,"paragraphCount":1,
+            "rootChildCount":1,"textLeafCount":3,"otherRoleCount":0,"objectLinkCount":1,
+            "completeTextCoverage":false,"rootSingleParagraph":true,"rootOnlyObjects":true,
+            "placeholderAttributeMatch":false,"placeholderAttributeLfMatch":false,
+            "knownPromptMatchCount":0,"latestPromptMatches":false});
+        assert!(owned_input_observation(&json!({"ownedInputObservation":valid})).is_some());
+        for (key, value) in [
+            ("nodeCount", json!(0)),
+            ("nodeCount", json!(true)),
+            ("resolvedNodeCount", json!(0)),
+            ("resolvedNodeCount", json!(6)),
+            ("completeTextCoverage", json!(true)),
+            ("rootChildCount", json!(2)),
+            ("objectLinkCount", json!(5)),
+            ("knownPromptMatchCount", json!(2)),
+            ("latestPromptMatches", json!(true)),
+            ("rawValue", json!("private")),
+        ] {
+            let mut changed = valid.clone();
+            changed[key] = value;
+            assert!(owned_input_observation(&json!({"ownedInputObservation":changed})).is_none());
+        }
     }
 }

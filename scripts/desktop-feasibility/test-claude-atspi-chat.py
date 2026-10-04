@@ -941,4 +941,59 @@ class CorrelatedNextInputTests(unittest.TestCase):
             with self.assertRaises(chat.Rejected):c.restore_next_input(b,h)
             self.assertEqual((a.focus_count,a.paste_count,a.send_count),(0,0,0))
 
+class OwnedInputInventoryTests(unittest.TestCase):
+    fixture=HypertextTests.fixture
+    def test_complete_private_coverage_and_placeholder_comparison(self):
+        root,leaf,link,records=self.fixture(child='source cue\n')
+        records.update({('role',root):61,('role',leaf):73,
+            ('attributes',root):{'tag':'div'},
+            ('attributes',leaf):{'tag':'p','data-placeholder':'source cue'}})
+        inventory={}
+        value=chat.flatten_hypertext(root,lambda m,n,*a:records[(m,n,*a)],7,lambda:None,inventory=inventory)
+        self.assertEqual(value,'source cue\n')
+        self.assertTrue(inventory['completeTextCoverage']);self.assertTrue(inventory['rootSingleParagraph'])
+        self.assertTrue(inventory['placeholderAttributeLfMatch']);self.assertFalse(inventory['placeholderAttributeMatch'])
+        self.assertEqual((inventory['nodeCount'],inventory['resolvedNodeCount'],inventory['objectLinkCount']),(2,2,1))
+        self.assertNotIn('source cue',str(inventory))
+
+    def test_owned_unresolved_descendants_are_reported_without_emptiness_claim(self):
+        root,p,link,r=self.fixture(child='source cue')
+        extra=('owned','/unmapped')
+        r.update({('children',p):[extra],('owner',extra):7,('state',extra):0,
+            ('children',extra):[],('parent',extra):p,('role',root):61,('role',p):73,
+            ('role',extra):116,('attributes',root):{},('attributes',p):{},('attributes',extra):{}})
+        inventory={}
+        chat.flatten_hypertext(root,lambda m,n,*a:r[(m,n,*a)],7,lambda:None,inventory=inventory)
+        self.assertFalse(inventory['completeTextCoverage'])
+        self.assertEqual((inventory['nodeCount'],inventory['resolvedNodeCount']),(3,2))
+
+    def test_moving_placeholder_is_rejected_before_inventory_emission(self):
+        root,leaf,link,r=self.fixture(child='cue')
+        r.update({('role',root):61,('role',leaf):73,('attributes',root):{},('attributes',leaf):{'data-placeholder':'cue'}})
+        reads=0
+        def query(method,node,*args):
+            nonlocal reads
+            if method=='attributes' and node==leaf:
+                reads+=1
+                if reads>1:return {'data-placeholder':'changed'}
+            return r[(method,node,*args)]
+        inventory={}
+        with self.assertRaises(chat.Rejected):chat.flatten_hypertext(root,query,7,lambda:None,inventory=inventory)
+        self.assertEqual(inventory,{})
+
+    def test_exact_known_prompt_relation_is_passive_not_replacement_authority(self):
+        for exact in (True,False):
+            a,c,b,h=CorrelatedNextInputTests.fixture(self)
+            a.value=h[-1]['prompt'] if exact else 'unknown draft'
+            a.input_text_inventory={'nodeCount':1,'resolvedNodeCount':1,'paragraphCount':0,
+                'rootChildCount':0,'textLeafCount':1,'otherRoleCount':0,'objectLinkCount':0,
+                'completeTextCoverage':True,'rootSingleParagraph':False,'rootOnlyObjects':False,
+                'placeholderAttributeMatch':False,'placeholderAttributeLfMatch':False}
+            with self.assertRaises(chat.Rejected):c.restore_next_input(b,h)
+            result=c.facts['ownedInputObservation']
+            self.assertEqual(result['latestPromptMatches'],exact)
+            self.assertEqual(result['knownPromptMatchCount'],int(exact))
+            self.assertEqual((a.focus_count,a.paste_count,a.send_count),(0,0,0))
+            self.assertNotIn(a.value,str(result))
+
 if __name__=='__main__':unittest.main()

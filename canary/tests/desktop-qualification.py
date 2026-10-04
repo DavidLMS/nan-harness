@@ -3954,5 +3954,38 @@ class OwnedMoveFacts(unittest.TestCase):
         self.assertEqual(q.codex_owned_move(denied), denied)
 
 
+class ClaudeLinuxOwnedInputTests(unittest.TestCase):
+    def test_owned_text_diagnostic_is_closed_and_cannot_certify_submission(self):
+        shape=dict(nodeCount=5,resolvedNodeCount=2,paragraphCount=1,rootChildCount=1,
+            textLeafCount=3,otherRoleCount=0,objectLinkCount=1,completeTextCoverage=False,
+            rootSingleParagraph=True,rootOnlyObjects=True,placeholderAttributeMatch=False,
+            placeholderAttributeLfMatch=False,knownPromptMatchCount=0,latestPromptMatches=False)
+        facts=dict(schemaVersion=1,mechanism='claude-linux-native-chat',diagnosticsOnly=True,
+            stage='input-not-empty',submittedTurns=1,inputVerifiedTurns=1,copiedResponses=1,
+            retryAttempted=False,clipboardCleared=True,
+            inputShape=dict(charCount=17,onlyLineBreaks=False,onlyWhitespace=False,
+                onlyZeroWidthMarkers=False,onlyObjectReplacement=False),
+            embeddedTextObservation=dict(nodeCount=5,paragraphCount=1,literalLfLeafCount=1,
+                brLfLeafCount=0,exactFillerLfLeafCount=0),ownedInputObservation=shape)
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);path=root/'closed.json'
+            for relation in (shape,{**shape,'knownPromptMatchCount':1,'latestPromptMatches':True}):
+                path.write_text(json.dumps({**facts,'ownedInputObservation':relation}))
+                observed=q.semantic_observations(root,'claude-desktop')[0]
+                self.assertEqual(observed['ownedInputObservation'],relation)
+                self.assertEqual(observed['stage'],'input-not-empty')
+            for changed in ({**shape,'rawValue':'PRIVATE'},{**shape,'nodeCount':True},
+                {**shape,'resolvedNodeCount':0},{**shape,'resolvedNodeCount':6},
+                {**shape,'completeTextCoverage':True},{**shape,'objectLinkCount':5},
+                {**shape,'latestPromptMatches':True},{**shape,'knownPromptMatchCount':2},
+                {**shape,'paragraphCount':0}):
+                path.write_text(json.dumps({**facts,'ownedInputObservation':changed}))
+                with self.assertRaises(ValueError):q.semantic_observations(root,'claude-desktop')
+            for changed in ({**facts,'stage':'sent'},{**facts,'retryAttempted':True},
+                {**facts,'submittedTurns':0,'inputVerifiedTurns':0,'copiedResponses':0},
+                {key:value for key,value in facts.items() if key!='embeddedTextObservation'}):
+                path.write_text(json.dumps(changed))
+                with self.assertRaises(ValueError):q.semantic_observations(root,'claude-desktop')
+
 if __name__ == '__main__':
     unittest.main()
