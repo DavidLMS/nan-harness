@@ -258,7 +258,7 @@ mod tests {
             max_value: None,
             stable_id: Some("private-root".into()),
             pid: Some(12),
-            raw: Default::default(),
+            raw: std::collections::HashMap::default(),
             handle: 0,
         };
         root.raw

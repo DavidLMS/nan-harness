@@ -240,6 +240,7 @@ enum SemanticUi<'a> {
 }
 
 impl SemanticUi<'_> {
+    #[cfg(target_os = "macos")]
     fn failure_prompt(&self) -> Result<String, Reason> {
         match self {
             #[cfg(target_os = "macos")]
@@ -507,7 +508,10 @@ async fn complete_scenario(
     gate.arm_fixture_response("NAN_CHECK_EXPECTED_FAILURE")
         .map_err(|()| Reason::ProviderFailed)?;
     ui.inject_failure(gate, directory)?;
+    #[cfg(target_os = "macos")]
     let failure_prompt = ui.failure_prompt()?;
+    #[cfg(not(target_os = "macos"))]
+    let failure_prompt = "Check the expected provider failure".to_owned();
     let failure = ui.turn(
         &failure_prompt,
         "NAN_CHECK_EXPECTED_FAILURE",

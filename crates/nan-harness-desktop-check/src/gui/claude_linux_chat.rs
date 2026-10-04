@@ -106,11 +106,10 @@ fn send_action_observation(facts: &Value) -> Option<SendActionObservation> {
             value.selected_index,
             value.activation_class,
         ) {
-            (0, None, ActivationClass::None) => true,
+            (0, None, ActivationClass::None) | (2..=8, None, ActivationClass::Ambiguous) => true,
             (1, Some(index), ActivationClass::Click | ActivationClass::Press) => {
                 index < value.action_count
             }
-            (2..=8, None, ActivationClass::Ambiguous) => true,
             _ => false,
         };
     valid.then_some(value)
@@ -141,11 +140,14 @@ fn optional_shape_flag<'de, D: serde::Deserializer<'de>>(
 }
 impl InputShape {
     fn valid(self) -> bool {
-        (1..=4096).contains(&self.char_count)
-            && (!self.only_line_breaks || self.only_whitespace)
-            && (!self.only_zero_width_markers || !self.only_whitespace && !self.only_line_breaks)
-            && (self.only_object_replacement != Some(true)
-                || !self.only_whitespace && !self.only_line_breaks && !self.only_zero_width_markers)
+        if !(1..=4096).contains(&self.char_count) || self.only_line_breaks && !self.only_whitespace
+        {
+            return false;
+        }
+        if self.only_object_replacement == Some(true) {
+            return !self.only_whitespace && !self.only_zero_width_markers;
+        }
+        !self.only_zero_width_markers || !self.only_whitespace
     }
 }
 fn input_shape(facts: &Value) -> Option<InputShape> {
@@ -156,20 +158,25 @@ fn input_shape(facts: &Value) -> Option<InputShape> {
 #[derive(Clone, Copy, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct EmbeddedTextObservation {
-    node_count: u8,
-    paragraph_count: u8,
-    literal_lf_leaf_count: u8,
-    br_lf_leaf_count: u8,
-    exact_filler_lf_leaf_count: u8,
+    #[serde(rename = "nodeCount")]
+    nodes: u8,
+    #[serde(rename = "paragraphCount")]
+    paragraphs: u8,
+    #[serde(rename = "literalLfLeafCount")]
+    literal_lf_leaves: u8,
+    #[serde(rename = "brLfLeafCount")]
+    br_lf_leaves: u8,
+    #[serde(rename = "exactFillerLfLeafCount")]
+    exact_filler_lf_leaves: u8,
 }
 fn embedded_text_observation(facts: &Value) -> Option<EmbeddedTextObservation> {
     let shape: EmbeddedTextObservation =
         serde_json::from_value(facts.get("embeddedTextObservation")?.clone()).ok()?;
-    ((1..=64).contains(&shape.node_count)
-        && shape.paragraph_count <= shape.node_count
-        && shape.literal_lf_leaf_count <= shape.node_count
-        && shape.br_lf_leaf_count <= shape.literal_lf_leaf_count
-        && shape.exact_filler_lf_leaf_count <= shape.br_lf_leaf_count)
+    ((1..=64).contains(&shape.nodes)
+        && shape.paragraphs <= shape.nodes
+        && shape.literal_lf_leaves <= shape.nodes
+        && shape.br_lf_leaves <= shape.literal_lf_leaves
+        && shape.exact_filler_lf_leaves <= shape.br_lf_leaves)
         .then_some(shape)
 }
 
@@ -226,6 +233,56 @@ fn valid_binding(fields: &serde_json::Map<String, Value>) -> bool {
     true
 }
 
+// Optional diagnostics have narrower stage/attempt contracts than the base
+// packet. Validate them together so no field can widen input authority.
+fn validate_diagnostics(facts: &Value) -> Option<()> {
+    let fields = facts.as_object()?;
+    if fields.contains_key("sendActionObservation")
+        && (send_action_observation(facts).is_none()
+            || facts["inputVerified"] != true
+            || !fields.contains_key("sendActionClass"))
+    {
+        return None;
+    }
+    if fields.contains_key("sendActionClass")
+        && (!facts["inputVerified"].as_bool()?
+            || !["click", "press", "none", "multiple", "other"]
+                .contains(facts["sendActionClass"].as_str()?))
+    {
+        return None;
+    }
+    if fields.contains_key("embeddedTextObservation")
+        && (embedded_text_observation(facts).is_none()
+            || facts["stage"] != "input-not-empty"
+            || !fields.contains_key("inputShape")
+            || FLAGS.iter().any(|key| facts[*key] != false))
+    {
+        return None;
+    }
+    if fields.contains_key("inputShape")
+        && (input_shape(facts).is_none()
+            || !["input-not-empty", "clipboard-cleanup"].contains(facts["stage"].as_str()?)
+            || FLAGS.iter().any(|key| facts[*key] != false))
+    {
+        return None;
+    }
+    if fields.contains_key("failureBoundary")
+        && (failure_boundary(facts).is_none()
+            || ![
+                "blocked",
+                "action-uncertain",
+                "deadline",
+                "clipboard-cleanup",
+                "input-not-empty",
+                "response-mismatch",
+            ]
+            .contains(facts["stage"].as_str()?))
+    {
+        return None;
+    }
+    Some(())
+}
+
 fn decode(bytes: &[u8]) -> Option<(Value, Option<Value>)> {
     let value: Value = serde_json::from_slice(bytes).ok()?;
     let object = value.as_object()?;
@@ -278,50 +335,7 @@ fn decode(bytes: &[u8]) -> Option<(Value, Option<Value>)> {
     {
         return None;
     }
-    if facts.contains_key("sendActionObservation")
-        && (send_action_observation(&value["facts"]).is_none()
-            || value["facts"]["inputVerified"] != true
-            || !facts.contains_key("sendActionClass"))
-    {
-        return None;
-    }
-    if facts.contains_key("sendActionClass")
-        && (!value["facts"]["inputVerified"].as_bool()?
-            || !["click", "press", "none", "multiple", "other"]
-                .contains(&value["facts"]["sendActionClass"].as_str()?))
-    {
-        return None;
-    }
-    if facts.contains_key("embeddedTextObservation")
-        && (embedded_text_observation(&value["facts"]).is_none()
-            || value["facts"]["stage"] != "input-not-empty"
-            || !facts.contains_key("inputShape")
-            || FLAGS.iter().any(|key| value["facts"][*key] != false))
-    {
-        return None;
-    }
-    if facts.contains_key("inputShape")
-        && (input_shape(&value["facts"]).is_none()
-            || !["input-not-empty", "clipboard-cleanup"]
-                .contains(&value["facts"]["stage"].as_str()?)
-            || FLAGS.iter().any(|key| value["facts"][*key] != false))
-    {
-        return None;
-    }
-    if facts.contains_key("failureBoundary")
-        && (failure_boundary(&value["facts"]).is_none()
-            || ![
-                "blocked",
-                "action-uncertain",
-                "deadline",
-                "clipboard-cleanup",
-                "input-not-empty",
-                "response-mismatch",
-            ]
-            .contains(&value["facts"]["stage"].as_str()?))
-    {
-        return None;
-    }
+    validate_diagnostics(&value["facts"])?;
     let binding = match &value["binding"] {
         Value::Null => None,
         Value::Object(fields) if valid_binding(fields) => Some(value["binding"].clone()),
@@ -558,10 +572,10 @@ impl ClaudeLinuxChatSession<'_> {
         self.send_action_observation = send_action_observation(&facts);
         self.input_shape = input_shape(&facts);
         self.embedded_text_observation = embedded_text_observation(&facts);
-        self.stage = facts["stage"]
+        facts["stage"]
             .as_str()
             .ok_or(Reason::ActionUnsupported)?
-            .to_owned();
+            .clone_into(&mut self.stage);
         if !self.gui.visual.linux_passive_composer_guard_until(deadline) {
             self.stage = "blocked".into();
             self.failure_boundary = Some(FailureBoundary::NativeWindow);
@@ -680,6 +694,8 @@ impl ClaudeLinuxChatSession<'_> {
         Err(Reason::ActionUnsupported)
     }
     pub(crate) fn retry_once(&mut self) -> Result<(), Reason> {
+        self.stage = "recovery-scope-unimplemented".into();
+        self.failure_boundary = None;
         Err(Reason::ActionUnsupported)
     }
     pub(crate) fn finish(
@@ -708,10 +724,10 @@ impl ClaudeLinuxChatSession<'_> {
         if let Some(shape) = self.input_shape {
             facts["inputShape"] = json!(shape);
         }
-        if self.stage == "input-not-empty" {
-            if let Some(shape) = self.embedded_text_observation {
-                facts["embeddedTextObservation"] = json!(shape);
-            }
+        if self.stage == "input-not-empty"
+            && let Some(shape) = self.embedded_text_observation
+        {
+            facts["embeddedTextObservation"] = json!(shape);
         }
         let recorded = open_private_new(&self.directory.join(format!(
             "claude-linux-native-chat-{}.json",
