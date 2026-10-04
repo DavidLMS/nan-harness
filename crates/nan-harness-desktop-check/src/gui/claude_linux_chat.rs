@@ -744,6 +744,20 @@ impl TurnHistory {
     }
 }
 
+// Dispatch consumes the sole recovery attempt, including an uncertain transport.
+enum RetryState {
+    NotStarted,
+    Waiting(Instant),
+    DispatchUncertain,
+    RejectedBeforeAction,
+    Forwarded,
+}
+impl RetryState {
+    fn attempted(&self) -> bool {
+        matches!(self, Self::DispatchUncertain | Self::Forwarded)
+    }
+}
+
 pub(crate) struct ClaudeLinuxChatSession<'a> {
     gui: &'a Gui,
     profile: &'a crate::probe::FreshClaudeLinuxProfile,
@@ -762,9 +776,7 @@ pub(crate) struct ClaudeLinuxChatSession<'a> {
     owned_input_observation: Option<OwnedInputObservation>,
     empty_input_drift: Option<EmptyInputDrift>,
     retry_candidate: Option<Value>,
-    retry_deadline: Option<Instant>,
-    retry_attempted: bool,
-    retry_dispatched: bool,
+    retry: RetryState,
     native_tree: Option<Value>,
     submitted: u8,
     verified: u8,
@@ -807,9 +819,7 @@ impl Gui {
             owned_input_observation: None,
             empty_input_drift: None,
             retry_candidate: None,
-            retry_deadline: None,
-            retry_attempted: false,
-            retry_dispatched: false,
+            retry: RetryState::NotStarted,
             native_tree: None,
             submitted: 0,
             verified: 0,
@@ -1000,10 +1010,7 @@ impl ClaudeLinuxChatSession<'_> {
         timeout: Duration,
         gate: &ProviderGate,
     ) -> Result<(), Reason> {
-        if self.submitted != 3
-            || self.copied != 2
-            || self.retry_dispatched
-            || self.retry_deadline.is_some()
+        if self.submitted != 3 || self.copied != 2 || !matches!(self.retry, RetryState::NotStarted)
         {
             return Err(Reason::ActionUnsupported);
         }
@@ -1012,7 +1019,7 @@ impl ClaudeLinuxChatSession<'_> {
             .clone()
             .ok_or(Reason::ActionUnsupported)?;
         let deadline = Instant::now() + timeout;
-        self.retry_deadline = Some(deadline);
+        self.retry = RetryState::Waiting(deadline);
         while !gate.failure_observed() {
             let remaining = deadline.saturating_duration_since(Instant::now());
             if remaining.is_zero() {
@@ -1038,9 +1045,10 @@ impl ClaudeLinuxChatSession<'_> {
         }
     }
     pub(crate) fn retry_once(&mut self) -> Result<(), Reason> {
-        let deadline = self.retry_deadline.ok_or(Reason::ActionUnsupported)?;
-        if self.retry_dispatched
-            || self.stage != "retry-diagnostic"
+        let RetryState::Waiting(deadline) = self.retry else {
+            return Err(Reason::ActionUnsupported);
+        };
+        if self.stage != "retry-diagnostic"
             || !self.retry_candidate.as_ref().is_some_and(|candidate| {
                 retry_candidate_ready(&json!({"retryCandidateObservation":candidate}))
             })
@@ -1055,14 +1063,19 @@ impl ClaudeLinuxChatSession<'_> {
             .clone()
             .ok_or(Reason::ActionUnsupported)?;
         // Consumed before dispatch: uncertain transport/action never permits a fallback.
-        self.retry_dispatched = true;
-        self.retry_attempted = true;
+        self.retry = RetryState::DispatchUncertain;
         let facts = self.operation(
             "retry",
             &prompt,
             deadline.min(Instant::now() + Duration::from_secs(15)),
         )?;
-        self.retry_attempted = facts["retryAttempted"] == true;
+        self.retry = if facts["retryAttempted"] != true {
+            RetryState::RejectedBeforeAction
+        } else if facts["retryForwarded"] == true {
+            RetryState::Forwarded
+        } else {
+            RetryState::DispatchUncertain
+        };
         if facts["retryForwarded"] == true && self.stage == "retry-forwarded" {
             Ok(())
         } else {
@@ -1082,7 +1095,7 @@ impl ClaudeLinuxChatSession<'_> {
         }
         let mut facts = json!({"schemaVersion":1,"mechanism":"claude-linux-native-chat","diagnosticsOnly":true,
             "stage":self.stage,"submittedTurns":self.submitted,"inputVerifiedTurns":self.verified,
-            "copiedResponses":self.copied,"retryAttempted":self.retry_attempted,"clipboardCleared":cleared});
+            "copiedResponses":self.copied,"retryAttempted":self.retry.attempted(),"clipboardCleared":cleared});
         if let Some(tree) = self.native_tree {
             facts["nativeTreeObservation"] = tree;
         }
