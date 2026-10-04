@@ -53,9 +53,11 @@ class Ownership(unittest.TestCase):
                 return (pid, 1) if pid in self.tree else None
         prove = module['prove_bridge']
         self.assertEqual(prove(43210, 40, 20, Native([(40, True)])), 'true')
-        for listener in ([], [(20, True)], [(41, True)], [(40, False)], [(40, True), (41, True)]):
-            self.assertEqual(prove(43210, 40, 20, Native(listener)), 'listener-unavailable')
-        self.assertEqual(prove(43210, 40, 20, Native([(40, True)], [(41, True)])), 'listener-unavailable')
+        for listener, reason in (([], 'listener-missing'), ([(20, True)], 'listener-owner-mismatch'),
+                                 ([(41, True)], 'listener-owner-mismatch'), ([(40, False)], 'listener-nonloopback'),
+                                 ([(40, True), (41, True)], 'listener-ambiguous')):
+            self.assertEqual(prove(43210, 40, 20, Native(listener)), reason)
+        self.assertEqual(prove(43210, 40, 20, Native([(40, True)], [(41, True)])), 'listener-changed')
         self.assertNotEqual(prove(43210, 40, 20, Native([(40, True)], parents={40: 10,10: 1,20:10})), 'true')
 
     @unittest.skipUnless(sys.platform == 'win32', 'requires native Windows metadata')
@@ -68,6 +70,7 @@ class Ownership(unittest.TestCase):
             listener.listen(1)
             port = str(listener.getsockname()[1])
             self.assertEqual(main(['endpoint', port, pid]), 'true')
+            self.assertEqual(main(['bridge', port, pid, pid]), 'true')
 
 
 if __name__ == '__main__':

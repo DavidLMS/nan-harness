@@ -163,10 +163,19 @@ pub(crate) struct CodexDomSession<'a> {
     directory: &'a Path,
     owner: u32,
     reservation: TurnReservation,
+    #[cfg(any(target_os = "linux", target_os = "macos", windows))]
+    profile: Option<&'a crate::probe::FreshCodexProfile>,
+    profile_deadline: Instant,
 }
 
 impl<'a> CodexDomSession<'a> {
-    pub(crate) fn new(process: &'a mut ProbeProcess, directory: &'a Path) -> Result<Self, Reason> {
+    pub(crate) fn new(
+        process: &'a mut ProbeProcess,
+        directory: &'a Path,
+        #[cfg(any(target_os = "linux", target_os = "macos", windows))] profile: Option<
+            &'a crate::probe::FreshCodexProfile,
+        >,
+    ) -> Result<Self, Reason> {
         if std::env::var("GITHUB_ACTIONS").as_deref() != Ok("true")
             || std::env::var("RUNNER_ENVIRONMENT").as_deref() != Ok("github-hosted")
             || std::env::var("NANH_DESKTOP_RENDERER_APP").as_deref() != Ok("chatgpt-desktop")
@@ -180,12 +189,25 @@ impl<'a> CodexDomSession<'a> {
             directory,
             owner,
             reservation: TurnReservation::default(),
+            #[cfg(any(target_os = "linux", target_os = "macos", windows))]
+            profile,
+            profile_deadline: Instant::now() + Duration::from_secs(50),
         };
         session.guard()?;
         Ok(session)
     }
 
     fn guard(&mut self) -> Result<(), Reason> {
+        if Instant::now() >= self.profile_deadline {
+            return Err(Reason::Timeout);
+        }
+        #[cfg(any(target_os = "linux", target_os = "macos", windows))]
+        if self
+            .profile
+            .is_some_and(|profile| !profile.verifies_owned(self.profile_deadline))
+        {
+            return Err(Reason::IsolationUnavailable);
+        }
         if self.process.id() != Some(self.owner) {
             return Err(Reason::IsolationUnavailable);
         }
@@ -205,6 +227,7 @@ impl<'a> CodexDomSession<'a> {
         turn: DomTurn<'_>,
         provider: &ProviderGate,
     ) -> Result<(), Reason> {
+        self.profile_deadline = Instant::now() + Duration::from_secs(50);
         self.guard()?;
         self.reservation.reserve(turn)?;
         execute_turn(self.directory, self.owner, turn, provider, || self.guard())
@@ -363,7 +386,7 @@ fn run_driver(
     let deadline = Instant::now() + Duration::from_secs(50);
     let result = loop {
         match child.try_wait() {
-            Ok(Some(_)) => break Ok(()),
+            Ok(Some(_)) => break guard(),
             Err(_) => break Err(Reason::ActionUnsupported),
             Ok(None) => {}
         }

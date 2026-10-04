@@ -141,6 +141,10 @@ def qualification_environment(app, facts, real_nanh, executable, inherited=None)
             or xi2 != '1' or source.get('NANH_ZED_CURSOR_HIT') != '1'
             or source.get('NANH_ZED_XRECORD') != '1'):
         raise ValueError('Zed passive XI2 payload diagnostic is unavailable')
+    hit_policy=source.get('NANH_ZED_RETRY_HIT_POLICY')
+    if hit_policy is not None and (app!='zed-desktop' or source.get('RUNNER_OS')!='Linux'
+            or source.get('NANH_ZED_CURSOR_HIT')!='1' or hit_policy!='accessibility'):
+        raise ValueError('Zed accessible target policy is unavailable')
     cursor_theme = source.get('NANH_ZED_CURSOR_THEME')
     if cursor_theme is not None and (app != 'zed-desktop' or source.get('RUNNER_OS') != 'Linux'
             or cursor_theme != 'adwaita-24' or source.get('NANH_ZED_CURSOR_HIT') != '1'):
@@ -227,6 +231,8 @@ def qualification_environment(app, facts, real_nanh, executable, inherited=None)
             if cursor != '1' or source.get('RUNNER_OS') != 'Linux':
                 raise ValueError('Zed cursor hit trial is unavailable')
             environment['NANH_ZED_CURSOR_HIT'] = cursor
+            if hit_policy is not None:
+                environment['NANH_ZED_RETRY_HIT_POLICY']=hit_policy
         if cursor_theme is not None:
             # Frozen x11rb 0.13.2 loads theme and size once before cursor caching.
             # Use an installed public theme in the disposable hosted trial only.
@@ -298,6 +304,13 @@ def qualification_environment(app, facts, real_nanh, executable, inherited=None)
                     or source.get('RUNNER_OS') not in {'Windows', 'Linux', 'macOS'} or mode != 'renderer'):
                 raise ValueError('public onboarding diagnostic is unavailable')
             environment['NANH_CODEX_PUBLIC_ONBOARDING'] = onboarding
+        input_channel = source.get('NANH_CODEX_INPUT_CHANNEL')
+        if input_channel is not None:
+            if (input_channel != 'cdp-dom' or app != 'chatgpt-desktop'
+                    or source.get('RUNNER_OS') not in {'Windows', 'Linux', 'macOS'}
+                    or mode != 'renderer' or onboarding != 'engineering'):
+                raise ValueError('Codex DOM input channel is unavailable')
+            environment['NANH_CODEX_INPUT_CHANNEL'] = input_channel
         project_policy = source.get('NANH_CODEX_PROJECT_POLICY')
         if project_policy is not None:
             if (project_policy != 'open-project' or app != 'chatgpt-desktop'

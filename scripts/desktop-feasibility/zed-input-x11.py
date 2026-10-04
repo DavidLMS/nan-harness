@@ -504,6 +504,23 @@ def guarded_pointer_sample(point, position, child, observation):
     observation['pointerChildMatches'] = observation.get('pointerChildMatches', 0) + 1
 
 
+def select_accessible_retry_point(bounds, move, prove, pointer_proof, deadline, now=time.monotonic):
+    """One retained accessible target; cursor appearance is not actionability."""
+    point=interior_points(bounds)[0]
+    def checked():
+        if now()>=deadline:
+            raise RetryHitFailure('deadline')
+        prove(point)
+        if now()>=deadline:
+            raise RetryHitFailure('deadline')
+    checked()
+    move(point)
+    checked()
+    pointer_proof(point)
+    checked()
+    return point
+
+
 def select_live_retry_point(bounds, move, prove, matches, deadline, pause=time.sleep, observation=None, pointer_proof=None):
     # Hover only until one stable public hand cursor and held accessible hit
     # agree. Never replay an activation or select a point after the click.
@@ -635,6 +652,14 @@ def retry_click(payload):
                 or not 1 < request['pid'] <= 2147483647 or not 0 < request['window'] <= 4294967295
                 or any(not -32768 <= request[key] <= 32767 for key in ('x', 'y'))):
             return 2
+        hit_policy=os.environ.get('NANH_ZED_RETRY_HIT_POLICY')
+        accessible_policy=hit_policy=='accessibility'
+        if hit_policy is not None:
+            if (not accessible_policy or os.environ.get('NANH_ZED_CURSOR_HIT')!='1'
+                    or sys.platform!='linux' or os.environ.get('GITHUB_ACTIONS')!='true'
+                    or os.environ.get('RUNNER_ENVIRONMENT')!='github-hosted'):
+                return 18
+            facts['retryHitPolicy']=hit_policy
         crossing=os.environ.get('NANH_ZED_ENTER_POLICY')
         if crossing is not None and (crossing!='owned-decoration-crossing'
                 or sys.platform!='linux' or os.environ.get('GITHUB_ACTIONS')!='true'
@@ -713,9 +738,15 @@ def retry_click(payload):
             def cursor_scope():
                 return (owned_foreground() == (0, active)
                         and independent_client_snapshot(active) == second_geometry)
+            def exact_accessible_hit(candidate):
+                current={}
+                bounds=normalized_retry_point(request,active,geometry,current,
+                    return_bounds=True,hit_point=candidate)
+                return (bounds==held_bounds and current.get('enabled') is True
+                    and current.get('sensitive') is True and current.get('defunct') is False)
             def prove_hit(candidate):
                 return guarded_retry_proof(candidate, cursor_scope,
-                    lambda point: normalized_retry_point(request, active, geometry,
+                    exact_accessible_hit if accessible_policy else lambda point: normalized_retry_point(request, active, geometry,
                         return_bounds=True, hit_point=point) == held_bounds,
                     facts['cursorSelection'], deadline)
             def prove_pointer(candidate):
@@ -794,6 +825,13 @@ def retry_click(payload):
                     observation=entry)
 
             def select():
+                if accessible_policy:
+                    for key in ('pointerChecks','pointerPositionMatches','pointerChildMatches'):
+                        facts['cursorSelection'].setdefault(key,0)
+                    selected=select_accessible_retry_point(held_bounds,move,prove_hit,prove_pointer,deadline)
+                    facts['cursorSelection'].update(status='accessible-hit',sampledPoints=1,
+                        accessibleHitVerified=True,exactPointerMatched=False,failureReason=None)
+                    return selected
                 return select_live_retry_point(held_bounds,
                     move,
                     prove_hit, live_cursor.matches, deadline, observation=facts['cursorSelection'],
@@ -878,7 +916,7 @@ def retry_click(payload):
                 facts['cursorSelection'].update(status='identity-rejected', failureReason='identity-rejected',
                                                exactPointerMatched=False, accessibleHitVerified=False)
                 return 18
-            if not sampled_cursor_match(live_cursor.matches, facts['cursorSelection']):
+            if not accessible_policy and not sampled_cursor_match(live_cursor.matches, facts['cursorSelection']):
                 facts['cursorSelection'].update(status='no-hit', failureReason='cursor-unstable',
                                                exactPointerMatched=False, accessibleHitVerified=False)
                 return 18

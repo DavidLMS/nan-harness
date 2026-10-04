@@ -312,6 +312,30 @@ def flatten_hypertext(root, query, pid, budget, observation=None, inventory=None
     return result
 
 
+def empty_input_drift(original, current, focused):
+    present=type(current) is tuple and len(current)==3
+    facts=dict(witnessPresent=present,rootSame=False,textSame=False,recordKeysSame=False,
+        stateSame=False,attributesSame=False,textRecordsSame=False,otherValuesSame=False,
+        focusOnlyStateChange=False,focusAttempted=focused)
+    if not present:
+        return facts
+    facts['rootSame']=current[0]==original[0]
+    facts['textSame']=current[1]==original[1]
+    old,new=original[2],current[2]
+    facts['recordKeysSame']=len(old)==len(new) and all(a[:3]==b[:3] for a,b in zip(old,new))
+    if not facts['recordKeysSame']:
+        return facts
+    changes={a[0] for a,b in zip(old,new) if a[3]!=b[3]}
+    facts['stateSame']='state' not in changes
+    facts['attributesSame']='attributes' not in changes
+    facts['textRecordsSame']=not changes.intersection({'count','text'})
+    facts['otherValuesSame']=not changes.difference({'state','attributes','count','text'})
+    facts['focusOnlyStateChange']='state' in changes and all(
+        a[0]!='state' or a[3]==b[3] or (type(a[3]) is int and type(b[3]) is int
+            and a[3]^b[3]==1<<12) for a,b in zip(old,new))
+    return facts
+
+
 class Rejected(Exception):
     def __init__(self, boundary=None):
         self.boundary = boundary if boundary in BOUNDARIES else None
@@ -888,6 +912,7 @@ class Controller:
         current=getattr(self.adapter,'empty_class_witness',None)
         if current!=self.empty_class_witness:
             original=self.empty_class_witness
+            self.facts['emptyInputDrift']=empty_input_drift(original,current,self.focus_attempted)
             state_only=(type(current) is tuple and type(original) is tuple
                 and len(current)==len(original)==3 and current[:2]==original[:2]
                 and len(current[2])==len(original[2])
@@ -928,6 +953,93 @@ class Controller:
             raise Rejected('tree')
         if self.next_history_scope(self.next_history) != self.next_witness:
             raise Rejected('response')
+
+    def retry_ready(self, prompt, records):
+        # Passive candidate evidence only. Labels and common ancestry never grant Retry.
+        if (not self.response_only or type(prompt) is not str or not prompt
+                or len(prompt.encode())>4096 or type(records) is not list
+                or len(records)>2 or getattr(self.adapter,'profile_guard',None) is None):
+            raise Rejected('policy')
+        history=[]
+        for record in records:
+            if (type(record) is not dict or set(record)!={'prompt','marker'}
+                    or any(type(record[k]) is not str or not record[k]
+                        or len(record[k].encode())>4096 for k in ('prompt','marker'))):
+                raise Rejected('policy')
+            history.append((record['prompt'],record['marker']))
+        if (len({p for p,_ in history})!=len(history)
+                or len({m for _,m in history})!=len(history) or prompt in {p for p,_ in history}):
+            raise Rejected('policy')
+        def attachment(node):
+            chain=[];seen=set()
+            for _ in range(32):
+                if node in seen:
+                    raise Rejected('response-row-attachment')
+                seen.add(node);self.owned(node)
+                if node==self.frame:
+                    return tuple(chain)
+                parent=self.query('parent',node);self.owned(parent)
+                if node not in self.query('children',parent):
+                    raise Rejected('response-row-attachment')
+                chain.append((node,parent,self.query('identity',parent)))
+                node=parent
+            raise Rejected('response-row-attachment')
+        def observe():
+            self.response_frame_proof()
+            nodes=self.tree(self.frame);self.current_chat(nodes)
+            if any(node!=self.frame and item[0] in (16,23,69) for node,item in nodes):
+                raise Rejected('frame')
+            headings=[(node,item) for node,item in nodes if item[0]==83
+                and item[1].startswith(('You said:','Claude responded:'))]
+            users=[node for node,item in headings if item[1]=='You said: '+prompt]
+            candidates=[(node,item) for node,item in nodes
+                if item[0]==43 and item[1] in ('Try again','Retry')]
+            if len(headings)>32 or len(candidates)>32 or len(users)>32:
+                raise Rejected('tree-limit')
+            matched=set();history_matched=True
+            for old,marker in history:
+                pair=[[(node,item) for node,item in headings if item[1]=='You said: '+old],
+                    [(node,item) for node,item in headings if item[1].startswith('Claude responded: ')
+                        and marker in item[1]]]
+                if any(len(items)!=1 for items in pair):
+                    history_matched=False;continue
+                for items in pair:
+                    node=items[0][0]
+                    if node in matched:history_matched=False
+                    matched.add(node);self.state(node);attachment(node)
+            user_chain=attachment(users[0]) if len(users)==1 else ()
+            label='none' if not candidates else 'ambiguous'
+            enabled=action=hit=attached=False;row_headings=0;sealed=None
+            if len(candidates)==1:
+                node,item=candidates[0];label='try-again' if item[1]=='Try again' else 'retry'
+                self.state(node);bits=self.query('state',node)
+                bounds=self.query('bounds',node);actions=self.query('actions',node)
+                enabled=bool(bits&(1<<8) and bits&(1<<24))
+                action=unique_activation_index(actions) is not None
+                hit=inside(bounds,self.sealed_frame[1]) and self.query('hit',node,self.frame)
+                chain=attachment(node)
+                user_parents={parent for _,parent,_ in user_chain}
+                for _,parent,identity in chain[:6]:
+                    if parent==self.frame:break
+                    if parent in user_parents and identity[0] in RESPONSE_CONTAINER_ROLES:
+                        row=self.tree(parent)
+                        row_headings=sum(identity[0]==83 for _,identity in row)
+                        if row_headings>32:raise Rejected('tree-limit')
+                        attached=True;break
+                sealed=(node,item,bounds,tuple(actions),chain,user_chain)
+            observation=dict(pendingUserCount=len(users),historyMatched=history_matched,
+                conversationHeadingCount=len(headings),tryAgainCount=sum(item[1]=='Try again' for _,item in candidates),
+                retryCount=sum(item[1]=='Retry' for _,item in candidates),candidateLabel=label,
+                candidateEnabled=enabled,candidateActionUnique=action,candidateHitMatched=bool(hit),
+                candidateUserAncestorMatched=attached,candidateRowHeadingCount=row_headings)
+            self.response_frame_proof()
+            return observation,tuple(nodes),sealed
+        first=observe();second=observe()
+        if first!=second:
+            raise Rejected('response-row-attachment')
+        self.facts['retryCandidateObservation']=first[0]
+        self.facts['stage']='retry-diagnostic'
+        return self.facts
 
     def response_scope(self, marker):
         nodes = self.tree(self.frame)
@@ -1272,7 +1384,7 @@ def main():
         request = json.loads(raw)
         required = {'pid','bus','path','checkerPid','window','bounds','name','nativeExecutable',
             'deadline','mode','value','binding','profileAuthority','history'}
-        if type(request) is not dict or set(request)!=required or request['mode'] not in ('input','input-first-owned','input-next-correlated','input-next-empty-class','copy'):
+        if type(request) is not dict or set(request)!=required or request['mode'] not in ('input','input-first-owned','input-next-correlated','input-next-empty-class','copy','retry-ready'):
             raise Rejected()
         if type(request['value']) is not str or len(request['value'].encode())>4096:
             raise Rejected()
@@ -1291,12 +1403,16 @@ def main():
             controller.empty_class_opt_in=request['mode']=='input-next-empty-class'
             controller.restore_next_input(request['binding'],request['history'])
         else:
-            if request['history'] != []:
+            if request['mode']!='retry-ready' and request['history'] != []:
                 raise Rejected('policy')
             if request['binding'] is not None:
-                controller.restore(request['binding'], response=request['mode']=='copy')
+                controller.restore(request['binding'], response=request['mode'] in ('copy','retry-ready'))
         if request['mode'] in ('input','input-first-owned','input-next-correlated','input-next-empty-class'):
             facts = controller.submit(request['value'], request['mode']=='input-first-owned')
+        elif request['mode']=='retry-ready':
+            if request['binding'] is None:
+                raise Rejected('policy')
+            facts=controller.retry_ready(request['value'],request['history'])
         else:
             if request['binding'] is None:
                 raise Rejected()

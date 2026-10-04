@@ -11,7 +11,7 @@ on:
         description: Native target; pilots keeps the previously qualified pair
         type: choice
         default: pilots
-        options: [pilots, expansion, remaining, all, macos, linux, windows]
+        options: [pilots, expansion, remaining, open-cells, all, macos, linux, windows]
       quality_only:
         description: Verify integration without repeating native measurements
         type: boolean
@@ -63,6 +63,10 @@ jobs:
                    and (os.environ['SELECTED_EXPERIMENT'] != 'startup-baseline' or c['backend'] in {'renderer-inventory', 'native-assistant-clipboard'})
                    and (platform == 'pilots' and (c['app'], c['platform']) in
                         {('zed-desktop', 'macos'), ('hermes-desktop', 'linux')}
+                        or platform == 'open-cells' and (c['app'], c['platform']) in
+                        {('zed-desktop', 'linux'), ('chatgpt-desktop', 'linux'),
+                         ('chatgpt-desktop', 'macos'), ('chatgpt-desktop', 'windows'),
+                         ('claude-desktop', 'linux'), ('claude-desktop', 'windows')}
                         or platform == 'all' or platform == c['platform']
                         or platform == 'remaining' and c['app'] in {'chatgpt-desktop', 'claude-desktop', 'pen-desktop'}
                         or platform == 'expansion' and (c['app'], c['platform']) not in
@@ -247,6 +251,11 @@ jobs:
       - name: Verify retained Linux Codex profile custody without an application
         if: runner.os == 'Linux' && matrix.app == 'chatgpt-desktop'
         run: cargo test --locked -p nan-harness-desktop-check --lib probe::codex_linux_profile
+      - name: Verify retained Windows Codex profile custody without an application
+        if: runner.os == 'Windows' && matrix.app == 'chatgpt-desktop'
+        run: |
+          cargo clippy --locked -p nan-harness-desktop-check --all-features --all-targets -- -D warnings
+          cargo test --locked -p nan-harness-desktop-check --lib probe::codex_windows_profile
       - name: Verify retained macOS Codex profile custody without an application
         if: runner.os == 'macOS' && matrix.app == 'chatgpt-desktop'
         run: |
@@ -422,7 +431,9 @@ jobs:
       - name: Enable public Codex work-preferences diagnostic
         if: matrix.app == 'chatgpt-desktop' && inputs.experiment == 'deterministic-full'
         shell: bash
-        run: echo 'NANH_CODEX_PUBLIC_ONBOARDING=engineering' >> "$GITHUB_ENV"
+        run: |
+          echo 'NANH_CODEX_PUBLIC_ONBOARDING=engineering' >> "$GITHUB_ENV"
+          echo 'NANH_CODEX_INPUT_CHANNEL=cdp-dom' >> "$GITHUB_ENV"
       - name: Enable inspected native Codex project entry
         if: matrix.app == 'chatgpt-desktop' && inputs.experiment == 'deterministic-full'
         shell: bash
@@ -436,6 +447,7 @@ jobs:
         shell: bash
         run: |
           echo 'NANH_ZED_CURSOR_HIT=1' >> "$GITHUB_ENV"
+          echo 'NANH_ZED_RETRY_HIT_POLICY=accessibility' >> "$GITHUB_ENV"
           echo 'NANH_ZED_XRECORD=1' >> "$GITHUB_ENV"
           echo 'NANH_ZED_XI2_PAYLOAD=1' >> "$GITHUB_ENV"
           test -r /usr/share/icons/Adwaita/cursors/hand2

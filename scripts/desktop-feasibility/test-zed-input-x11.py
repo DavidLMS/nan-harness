@@ -17,6 +17,31 @@ native_snapshot = module['independent_client_snapshot']
 native_package = module['coordinate_package']
 
 
+class AccessiblePointTests(unittest.TestCase):
+    def test_exact_accessible_point_needs_three_proofs_and_one_owned_motion(self):
+        events=[]
+        selected=module['select_accessible_retry_point']((10,20,40,20),
+            lambda point:events.append('move'),lambda point:events.append('proof'),
+            lambda point:events.append('pointer'),10,now=lambda:0)
+        self.assertEqual(selected,(30,30))
+        self.assertEqual(events,['proof','move','proof','pointer','proof'])
+    def test_rejected_scope_or_expired_cutoff_never_moves(self):
+        for expired in (False,True):
+            moves=[]
+            def reject(point):raise ValueError('synthetic changed target')
+            with self.assertRaises(ValueError):
+                module['select_accessible_retry_point']((10,20,40,20),moves.append,
+                    reject,lambda point:None,10,now=lambda:10 if expired else 0)
+            self.assertEqual(moves,[])
+    def test_uncertain_motion_is_never_repeated(self):
+        moves=[]
+        def move(point):moves.append(point);raise OSError('synthetic uncertain motion')
+        with self.assertRaises(OSError):
+            module['select_accessible_retry_point']((10,20,40,20),move,
+                lambda point:None,lambda point:None,10,now=lambda:0)
+        self.assertEqual(len(moves),1)
+
+
 class Transport(unittest.TestCase):
     def setUp(self):
         replacement = patch.dict(module['main'].__globals__,

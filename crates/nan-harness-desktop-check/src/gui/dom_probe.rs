@@ -631,7 +631,7 @@ pub(crate) struct RendererSession<'a> {
     directory: &'a Path,
     owner: u32,
     readiness_deadline: Instant,
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[cfg(any(target_os = "linux", target_os = "macos", windows))]
     codex_profile: Option<&'a crate::probe::FreshCodexProfile>,
 }
 
@@ -664,12 +664,12 @@ impl<'a> RendererSession<'a> {
             directory,
             owner,
             readiness_deadline: Instant::now() + Duration::from_secs(125),
-            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            #[cfg(any(target_os = "linux", target_os = "macos", windows))]
             codex_profile: None,
         })
     }
 
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[cfg(any(target_os = "linux", target_os = "macos", windows))]
     pub(crate) fn bind_codex_profile(
         &mut self,
         profile: Option<&'a crate::probe::FreshCodexProfile>,
@@ -677,10 +677,20 @@ impl<'a> RendererSession<'a> {
         self.codex_profile = profile;
     }
 
+    // A renderer operation borrows both the original process and profile custody.
+    fn guard(&mut self) -> Result<(), Reason> {
+        #[cfg(any(target_os = "linux", target_os = "macos", windows))]
+        if self
+            .codex_profile
+            .is_some_and(|profile| !profile.verifies_owned(self.readiness_deadline))
+        {
+            return Err(Reason::IsolationUnavailable);
+        }
+        renderer_guard(self.process, self.owner)
+    }
+
     pub(crate) fn prepare_hermes_profile(&mut self, workspace: &Path) -> Result<(), Reason> {
-        crate::probe::hermes_readiness::prepare(workspace, self.readiness_deadline, || {
-            renderer_guard(self.process, self.owner)
-        })
+        crate::probe::hermes_readiness::prepare(workspace, self.readiness_deadline, || self.guard())
     }
 
     pub(crate) fn inventory(&mut self) -> Result<(), Reason> {
@@ -729,7 +739,7 @@ impl<'a> RendererSession<'a> {
     ) -> Result<(), Reason> {
         let directory = self.directory;
         let owner = self.owner;
-        renderer_guard(self.process, owner)?;
+        self.guard()?;
         let driver = std::env::var_os("NANH_DESKTOP_RENDERER_DRIVER")
             .map(std::path::PathBuf::from)
             .ok_or(Reason::IsolationUnavailable)?;
@@ -745,9 +755,17 @@ impl<'a> RendererSession<'a> {
         if let Some(workspace) = workspace {
             request["ownedWorkspace"] = serde_json::json!(workspace);
         }
-        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        #[cfg(any(target_os = "linux", target_os = "macos", windows))]
+        #[cfg(not(windows))]
         if let Some(profile) = self.codex_profile {
             request["codexProfileLoan"] = profile.private_request(self.readiness_deadline)?;
+        }
+        #[cfg(windows)]
+        if let Some(profile) = self.codex_profile {
+            if !profile.prepared_for_renderer(self.readiness_deadline) {
+                return Err(Reason::IsolationUnavailable);
+            }
+            request["codexProfileIsolation"] = serde_json::json!("prepared-windows");
         }
         #[cfg(target_os = "macos")]
         if let (Some(executable), Some(native)) = (executable, native.as_ref()) {
@@ -780,17 +798,11 @@ impl<'a> RendererSession<'a> {
             &output_path,
             false,
             inventory_driver_limit(),
-            || renderer_guard(self.process, owner),
+            || self.guard(),
         );
         std::fs::remove_file(request_path).map_err(|_| Reason::IsolationUnavailable)?;
         drop(native);
-        #[cfg(any(target_os = "linux", target_os = "macos"))]
-        if self
-            .codex_profile
-            .is_some_and(|profile| !profile.verifies_owned(self.readiness_deadline))
-        {
-            return Err(Reason::IsolationUnavailable);
-        }
+        self.guard()?;
         outcome?;
         let mut bytes = Vec::new();
         open_private_read(&output_path)
@@ -825,7 +837,7 @@ impl<'a> RendererSession<'a> {
         turn: DomTurn<'_>,
         provider: &ProviderGate,
     ) -> Result<(), Reason> {
-        renderer_guard(self.process, self.owner)?;
+        self.guard()?;
         let directory = self.directory;
         let owner = self.owner;
         let driver = std::env::var_os("FEASIBILITY_HERMES_DOM_DRIVER")
@@ -867,7 +879,7 @@ impl<'a> RendererSession<'a> {
             &output_path,
             true,
             process_limit,
-            || renderer_guard(self.process, owner),
+            || self.guard(),
         );
         std::fs::remove_file(&request_path).map_err(|_| Reason::IsolationUnavailable)?;
         // Failed actions still retain independent provider evidence. This is

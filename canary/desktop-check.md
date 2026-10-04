@@ -8,6 +8,31 @@ a separate risk that must be controlled before personal-machine rollout. See the
 
 ## Qualification status
 
+### Joint campaign (current branch)
+
+Pen is deferred. The active acceptance matrix contains twelve cells: Zed,
+Codex, Claude and Hermes on Linux x64, macOS ARM64 and Windows x64. The six
+historical passes below are evidence from different commits, not a final
+same-commit qualification.
+
+Use `desktop-automation-feasibility.yml` with `app=all`,
+`platform=open-cells`, `experiment=deterministic-full`, and `native_only=true`
+for the six unresolved cells: Zed Linux, all three Codex platforms, and Claude
+Linux/Windows. Jobs continue independently after failures and retain closed
+qualification JSON. Each cell runs three fresh sessions. After corrections,
+`platform=all` provides the final twelve-cell campaign on one commit.
+
+The current candidate uses scoped CDP DOM actions for Codex, including the
+home composer. Native window focus is not an admission requirement for this
+explicit channel; original process, profile, listener, document identity,
+visibility, and DOM actionability remain required. Provider response, file
+read, controlled failure, UI recovery, and cleanup remain acceptance criteria.
+Zed Linux's candidate Retry action uses the enabled accessible control and
+exact pointer hit; cursor artwork is advisory. Claude Linux recovery remains
+unfinished, and its empty-input witness still rejects unexplained drift.
+None of these candidate changes establishes a new native pass by itself.
+
+
 The hidden launch-wrapper option is restricted to deterministic ChatGPT startup
 diagnostics. Only application launch is instrumented; help, version and restore
 still use the tested nanh directly. Wrapped runs save a private diagnostic
@@ -32,7 +57,7 @@ All verify response, real file-tool use, controlled provider failure, UI Retry
 recovery and application, global and clipboard cleanup without OCR. Hermes
 observes Chromium 144.0.7559.236; Electron's separate version and Zed's runtime
 version remain unobserved. Claude's bundled runtime version is also unobserved. Exact commits and artifact hashes are recorded in
-each closed result. Six of the fifteen cells with official native distribution are qualified.
+each closed result. Six of the twelve active cells have historical qualification evidence; Pen is excluded from the current campaign.
 Codex and Claude also distribute official Linux beta packages; their Linux cells
 remain unqualified, rather than unsupported. Pen is deferred from the active
 workflow at the user's direction. The active scope contains twelve cells for

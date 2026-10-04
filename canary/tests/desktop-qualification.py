@@ -196,6 +196,17 @@ class RunnerTests(unittest.TestCase):
                           NANH_CODEX_PUBLIC_ONBOARDING='engineering')
             env = runner.qualification_environment('chatgpt-desktop', root, helper, str(helper), source)
             self.assertEqual(env['NANH_CODEX_PUBLIC_ONBOARDING'], 'engineering')
+            scoped = source | {'NANH_CODEX_INPUT_CHANNEL': 'cdp-dom'}
+            for platform in ('Linux', 'macOS', 'Windows'):
+                selected = runner.qualification_environment('chatgpt-desktop', root, helper,
+                    str(helper), scoped | {'RUNNER_OS': platform})
+                self.assertEqual(selected['NANH_CODEX_INPUT_CHANNEL'], 'cdp-dom')
+            for change in [{'NANH_CODEX_INPUT_CHANNEL': 'native'},
+                           {'NANH_CODEX_PUBLIC_ONBOARDING': None},
+                           {'RUNNER_ENVIRONMENT': 'self-hosted'}]:
+                with self.assertRaises(ValueError):
+                    runner.qualification_environment('chatgpt-desktop', root, helper,
+                        str(helper), scoped | change)
             linux = runner.qualification_environment('chatgpt-desktop', root, helper, str(helper), {**source, 'RUNNER_OS': 'Linux'})
             self.assertEqual(linux['NANH_CODEX_PUBLIC_ONBOARDING'], 'engineering')
             for changed, app in (({'NANH_CODEX_PUBLIC_ONBOARDING': 'PRIVATE'}, 'chatgpt-desktop'),
@@ -812,6 +823,12 @@ class QualificationTests(unittest.TestCase):
                      mainDocumentFocused=True, auxDocumentFocused=False,
                      main={**counts, 'roleLegend': 1, 'roleRadios': 11, 'engineering': 1, 'dialog': 1}, aux=counts)
         self.assertEqual(q.main_aux_correlation(value, 'chatgpt-desktop'), value)
+        scoped = value | {'inputChannel': 'cdp-dom', 'mainDocumentFocused': False}
+        self.assertEqual(q.main_aux_correlation(scoped, 'chatgpt-desktop'), scoped)
+        for changes in [{'inputChannel': 'native-focused'}, {'inputChannel': {}},
+                        {'auxDocumentFocused': True}, {'heldMainUnchanged': False}]:
+            with self.assertRaises(ValueError):
+                q.main_aux_correlation(scoped | changes, 'chatgpt-desktop')
         for dialogs in (0, 2):
             separate = {**value, 'main': {**value['main'], 'dialog': dialogs}}
             self.assertEqual(q.main_aux_correlation(separate, 'chatgpt-desktop'), separate)
@@ -2734,12 +2751,15 @@ class QualificationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             path = root / 'main.json'
-            for item in (facts, {**facts, 'status': 'document-unfocused', 'documentFocused': False},
+            for item in (facts, facts | {'inputChannel': 'cdp-dom', 'documentFocused': False},
+                         {**facts, 'status': 'document-unfocused', 'documentFocused': False},
                          dict(status='initial-missing', identityUnchanged=None, mainScopeUnique=None,
                               documentFocused=None, counts=None)):
                 path.write_text(json.dumps({**value, 'initialMainConfirmation': item}))
                 self.assertEqual(q.semantic_observations(root, 'chatgpt-desktop')[0]['initialMainConfirmation'], item)
-            for changed in ({**facts, 'status': 'PRIVATE'}, {**facts, 'targetId': 'PRIVATE'},
+            for changed in (facts | {'inputChannel': 'native-focused', 'documentFocused': False},
+                            facts | {'inputChannel': {}},
+                            {**facts, 'status': 'PRIVATE'}, {**facts, 'targetId': 'PRIVATE'},
                             {**facts, 'identityUnchanged': False}, {**facts, 'documentFocused': 1},
                             {**facts, 'counts': {**counts, 'roleRadios': True}},
                             {**facts, 'counts': {**counts, 'roleRadios': 4097}},
@@ -4038,6 +4058,76 @@ class ClaudeLinuxTransportCauseTests(unittest.TestCase):
                 for changed in [{'stage':'sent'},{'failureBoundary':[]},{'failureBoundary':'PRIVATE'},{'rawStderr':'PRIVATE'}]:
                     path.write_text(json.dumps(receipt|changed))
                     with self.assertRaises(ValueError):q.semantic_observations(root,'claude-desktop')
+
+class CampaignDiagnosticTests(unittest.TestCase):
+    def check_receipt(self, value, app, rejected):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'facts.json'
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(root, app), [value])
+            for change in rejected:
+                path.write_text(json.dumps(value | change))
+                with self.subTest(change=change), self.assertRaises(ValueError):
+                    q.semantic_observations(root, app)
+
+    def test_retry_candidate_is_passive_and_bound_to_the_failed_third_turn(self):
+        candidate = dict(pendingUserCount=1, historyMatched=True, conversationHeadingCount=5,
+                         tryAgainCount=1, retryCount=0, candidateLabel='try-again',
+                         candidateEnabled=True, candidateActionUnique=True, candidateHitMatched=True,
+                         candidateUserAncestorMatched=True, candidateRowHeadingCount=2)
+        value = dict(schemaVersion=1, mechanism='claude-linux-native-chat', diagnosticsOnly=True,
+                     stage='retry-diagnostic', submittedTurns=3, inputVerifiedTurns=3, copiedResponses=2,
+                     retryAttempted=False, clipboardCleared=True, retryCandidateObservation=candidate)
+        self.check_receipt(value, 'claude-desktop', [
+            {'retryCandidateObservation': candidate | {'rawLabel': 'PRIVATE'}},
+            {'retryCandidateObservation': candidate | {'tryAgainCount': 2}},
+            {'retryCandidateObservation': candidate | {'pendingUserCount': 0}},
+            {'retryCandidateObservation': candidate | {'candidateHitMatched': 1}},
+            {'retryAttempted': True}, {'submittedTurns': 2}, {'stage': 'copied'}])
+
+    def test_empty_input_drift_is_closed_and_cannot_admit_a_turn(self):
+        drift = dict(witnessPresent=True, rootSame=True, textSame=True, recordKeysSame=True,
+                     stateSame=False, attributesSame=True, textRecordsSame=True,
+                     otherValuesSame=True, focusOnlyStateChange=True, focusAttempted=True)
+        value = dict(schemaVersion=1, mechanism='claude-linux-native-chat', diagnosticsOnly=True,
+                     stage='blocked', submittedTurns=1, inputVerifiedTurns=1, copiedResponses=1,
+                     retryAttempted=False, clipboardCleared=True,
+                     failureBoundary='input-empty-witness', emptyInputDrift=drift)
+        self.check_receipt(value, 'claude-desktop', [
+            {'emptyInputDrift': drift | {'rawText': 'PRIVATE'}},
+            {'emptyInputDrift': drift | {'stateSame': True}},
+            {'emptyInputDrift': drift | {'focusAttempted': 1}},
+            {'emptyInputDrift': drift | {'witnessPresent': False}},
+            {'failureBoundary': 'transport-deadline'}, {'stage': 'sent'}])
+
+    def test_accessible_retry_does_not_claim_a_cursor_match(self):
+        selection = dict(status='accessible-hit', sampledPoints=1, exactPointerMatched=False,
+                         accessibleHitVerified=True, guardBeforeVerified=1, guardAfterVerified=1,
+                         accessibleChecks=1, accessibleExactMatches=1, cursorChecks=0,
+                         cursorExactMatches=0, failureReason=None)
+        value = dict(schemaVersion=1, mechanism='zed-pointer-observation', diagnosticsOnly=True,
+                     maximizedHorizontal=True, maximizedVertical=True, enabled=True, sensitive=True,
+                     showing=True, visible=True, defunct=False, retryContains=True,
+                     pointerTarget='client', pointerChild='client', retryHitPolicy='accessibility',
+                     cursorSelection=selection)
+        self.check_receipt(value, 'zed-desktop', [
+            {'retryHitPolicy': 'PRIVATE'},
+            {'cursorSelection': selection | {'exactPointerMatched': True}},
+            {'cursorSelection': selection | {'accessibleHitVerified': False}},
+            {'cursorSelection': selection | {'failureReason': 'cursor-unmatched'}}])
+
+    def test_bridge_receipt_preserves_the_actual_failure_boundary(self):
+        bridge = dict(stage='endpoint-owner', failure='endpoint-rejected', privacy='protected',
+                      endpointReason='listener-owner-mismatch')
+        value = dict(schemaVersion=1, mechanism='claude-windows-profile-seal', diagnosticsOnly=True,
+                     stage='bridge-authority', documentIndex=None, completed=False,
+                     rootPrivacy='protected', libraryPrivacy=None, documentPrivacy=[None]*3,
+                     configurationFailure=None, bridgeAuthority=bridge)
+        self.check_receipt(value, 'claude-desktop', [
+            {'bridgeAuthority': bridge | {'token': 'PRIVATE'}},
+            {'bridgeAuthority': bridge | {'endpointReason': 'PRIVATE'}},
+            {'bridgeAuthority': bridge | {'stage': 'completed'}},
+            {'bridgeAuthority': bridge | {'privacy': True}}])
 
 class ClaudeWindowsProfileSealTests(unittest.TestCase):
     def test_closed_stage_receipts_and_document_indices(self):

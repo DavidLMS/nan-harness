@@ -34,13 +34,33 @@ HASH = re.compile(r'[0-9a-f]{64}\Z')
 VERSION = re.compile(r'[0-9]+(?:\.[0-9]+){2}(?:[-+][A-Za-z0-9.-]+)?\Z')
 
 
+def claude_retry_candidate(value):
+    counts = set('pendingUserCount conversationHeadingCount tryAgainCount retryCount candidateRowHeadingCount'.split())
+    flags = set('historyMatched candidateEnabled candidateActionUnique candidateHitMatched candidateUserAncestorMatched'.split())
+    if (type(value) is not dict or set(value) != counts | flags | {'candidateLabel'}
+            or any(type(value[k]) is not int or not 0 <= value[k] <= 32 for k in counts)
+            or any(type(value[k]) is not bool for k in flags)):
+        raise ValueError('invalid Claude retry candidate')
+    pair = (value['tryAgainCount'], value['retryCount'])
+    total = sum(pair)
+    label = {(0, 0): 'none', (1, 0): 'try-again', (0, 1): 'retry'}.get(pair, 'ambiguous')
+    if (total > 32 or value['candidateLabel'] != label
+            or total != 1 and (any(value[k] for k in flags - {'historyMatched'})
+                              or value['candidateRowHeadingCount'] != 0)
+            or value['candidateUserAncestorMatched'] and value['pendingUserCount'] != 1):
+        raise ValueError('inconsistent Claude retry candidate')
+    return value
+
+
 def main_aux_correlation(value, app):
     flags = set('heldMainUnchanged auxRouteMatched mainScopeUnique auxMainControlsAbsent auxComposerAbsent guarded'.split())
     focus = {'mainDocumentFocused', 'auxDocumentFocused'}
     fields = flags | focus | set('schemaVersion mechanism diagnosticsOnly status totalPages stableSamples main aux'.split())
     statuses = {'observed', 'initial-main-unavailable', 'page-count', 'source-scope',
                 'identity-changed', 'ownership-lost', 'query-failed', 'deadline'}
-    if (app != 'chatgpt-desktop' or type(value) is not dict or set(value) != fields
+    if (app != 'chatgpt-desktop' or type(value) is not dict or set(value) - {'inputChannel'} != fields
+            or type(value.get('inputChannel', 'native-focused')) is not str
+            or value.get('inputChannel', 'native-focused') not in {'native-focused', 'cdp-dom'}
             or type(value['schemaVersion']) is not int or value['schemaVersion'] != 1
             or value['mechanism'] != 'codex-main-aux-correlation' or value['diagnosticsOnly'] is not True
             or type(value['status']) is not str or value['status'] not in statuses
@@ -63,7 +83,9 @@ def main_aux_correlation(value, app):
             or value['auxComposerAbsent'] and (aux is None or aux['quickChatComposer'] != 0 or aux['editable'] != 0)):
         raise ValueError('inconsistent Codex main auxiliary counts')
     if value['status'] == 'observed' and not (value['totalPages'] == 2 and value['stableSamples'] == 2
-            and all(value[key] for key in flags) and value['mainDocumentFocused'] is True
+            and all(value[key] for key in flags)
+            and (value['mainDocumentFocused'] is True or value.get('inputChannel') == 'cdp-dom'
+                 and value['mainDocumentFocused'] is False)
             and value['auxDocumentFocused'] is False and value['main'] is not None and value['aux'] is not None):
         raise ValueError('unproved Codex main auxiliary correlation')
     return value
@@ -81,6 +103,38 @@ def task_scope_observation(value):
     available = sum(value[key] is not None for key in counts)
     if available not in {0, 3} or not value['heldScopeVisible'] and available:
         raise ValueError('inconsistent held task scope diagnostic')
+    return value
+
+
+def codex_public_dom(value):
+    categories=set('codexHomeCount codexThreadCount codexOtherCount classicChatGPTCount genericInputCount genericBodyCount unboundCount'.split())
+    shapes={
+        'navigation':(set('codexButtonCount codexLinkCount codexMenuItemCount chatModeTriggerCount codexModeTriggerCount projectSelectorCount newChatCount projectsLinkCount'.split()),{'uniqueCodexRole','uniqueCodexHitActionable'}),
+        'editable':(categories|{'editableCount','sidebarNewChatCount'},{'sidebarNewChatHitActionable'}),
+        'home':(set('homeComposerCount pendingTextareaCount pendingGroupCount proseMirrorEditableCount enabledSendCount disabledSendCount workspaceControlCount'.split()),set())}
+    if type(value) is not dict or set(value)!=set(shapes):
+        raise ValueError('invalid Codex public DOM shape')
+    for key,(counts,other) in shapes.items():
+        row=value[key]
+        if type(row) is not dict or set(row)!=counts|other|{'status'} or row['status'] not in ('observed','overflow'):
+            raise ValueError('invalid Codex public DOM row')
+        if row['status']=='overflow':
+            if any(row[k] is not None for k in counts|other):
+                raise ValueError('invalid Codex public DOM overflow')
+            continue
+        if any(type(row[k]) is not int or not 0<=row[k]<=32 for k in counts):
+            raise ValueError('invalid Codex public DOM counts')
+        if key=='navigation':
+            roles={'button':'codexButtonCount','link':'codexLinkCount','menuitem':'codexMenuItemCount'}
+            total=sum(row[k] for k in roles.values())
+            role=row['uniqueCodexRole'];hit=row['uniqueCodexHitActionable']
+            if (type(role) is not str or role not in {*roles,'none'} or type(hit) is not bool
+                    or (total==1)!=(role!='none') or total==1 and row[roles[role]]!=1 or hit and total!=1):
+                raise ValueError('invalid Codex public navigation identity')
+        if key=='editable' and (sum(row[k] for k in categories)!=row['editableCount']
+                or type(row['sidebarNewChatHitActionable']) is not bool
+                or row['sidebarNewChatHitActionable'] and row['sidebarNewChatCount']!=1):
+            raise ValueError('invalid Codex public editable partition')
     return value
 
 
@@ -247,7 +301,7 @@ def public_mac_codex_home_state(value):
 
 
 def public_onboarding(setup, app):
-    shape = set(setup) - {'folderTrust', 'rejectedPageInventory', 'taskScopeProved', 'taskClickAttempted', 'taskClickCompleted', 'codingComposerReady', 'taskScopeObservation', 'taskControlKind', 'codingReadinessObservation', 'codingNavigationObservation', 'codingHomeObservation', 'codingEditableObservation', 'codingHomeStateObservation', 'workspaceMenuObservation', 'macHomeStateObservation', 'taskSkipConfirmationAttempted', 'taskSkipConfirmationCompleted', 'taskSkipConfirmationProof', 'mainGuardFailure', 'pageSetFailure', 'foreignOverlayImportSetup', 'foreignOverlaySourceCounts', 'foreignOverlayActionability'} if type(setup) is dict else set()
+    shape = set(setup) - {'folderTrust', 'rejectedPageInventory', 'taskScopeProved', 'taskClickAttempted', 'taskClickCompleted', 'codingComposerReady', 'taskScopeObservation', 'taskControlKind', 'codingReadinessObservation', 'codingNavigationObservation', 'codingPublicDOMObservation', 'codingHomeObservation', 'codingEditableObservation', 'codingHomeStateObservation', 'workspaceMenuObservation', 'macHomeStateObservation', 'taskSkipConfirmationAttempted', 'taskSkipConfirmationCompleted', 'taskSkipConfirmationProof', 'mainGuardFailure', 'pageSetFailure', 'foreignOverlayImportSetup', 'foreignOverlaySourceCounts', 'foreignOverlayActionability'} if type(setup) is dict else set()
     booleans = {'conversationalScope', 'engineeringControl', 'roleClickAttempted',
                 'roleClickCompleted', 'engineeringChecked', 'continueControl',
                 'continueClickAttempted', 'continueClickCompleted', 'roleScopeAbsent'}
@@ -303,6 +357,10 @@ def public_onboarding(setup, app):
                 or coding['status'] == 'observed' and any(type(coding[key]) is not int or not 0 <= coding[key] <= 32 for key in keys)
                 or coding['status'] == 'overflow' and any(coding[key] is not None for key in keys)):
             raise ValueError('invalid Codex coding readiness observation')
+    if 'codingPublicDOMObservation' in setup:
+        if setup.get('taskClickCompleted') is not True or setup['stage']!='coding-readiness':
+            raise ValueError('invalid Codex public DOM phase')
+        codex_public_dom(setup['codingPublicDOMObservation'])
     if 'codingHomeObservation' in setup:
         home = setup['codingHomeObservation']
         counts = {'homeRootCount','localHomeComposerCount','homeEditableCount',
@@ -1378,16 +1436,29 @@ def semantic_observations(directory, app):
         elif mechanism == 'claude-linux-native-chat':
             fields = {'schemaVersion','mechanism','diagnosticsOnly','stage','submittedTurns',
                       'inputVerifiedTurns','copiedResponses','retryAttempted','clipboardCleared'}
-            if (app != 'claude-desktop' or set(value) - {'failureBoundary','inputShape','embeddedTextObservation','ownedInputObservation','sendActionClass','sendActionObservation'} != fields or value['diagnosticsOnly'] is not True
+            if (app != 'claude-desktop' or set(value) - {'failureBoundary','inputShape','embeddedTextObservation','ownedInputObservation','sendActionClass','sendActionObservation','emptyInputDrift','retryCandidateObservation'} != fields or value['diagnosticsOnly'] is not True
                     or type(value['stage']) is not str or value['stage'] not in {
                         'source','focus','paste','readback','send','input-not-empty','blocked',
                         'action-uncertain','deadline','clipboard-cleanup','sent','response-pending',
-                        'response-mismatch','copied','recovery-scope-unimplemented'}
+                        'response-mismatch','copied','recovery-scope-unimplemented','retry-diagnostic'}
                     or any(type(value[key]) is not int or not 0 <= value[key] <= 3
                            for key in ('submittedTurns','inputVerifiedTurns','copiedResponses'))
                     or not value['copiedResponses'] <= value['submittedTurns'] <= value['inputVerifiedTurns']
                     or value['retryAttempted'] is not False or type(value['clipboardCleared']) is not bool):
                 raise ValueError('invalid Claude Linux native Chat diagnostic')
+            if 'retryCandidateObservation' in value:
+                if value['stage'] != 'retry-diagnostic' or value['submittedTurns'] != 3 or value['copiedResponses'] != 2:
+                    raise ValueError('unexpected Claude retry diagnostic')
+                record['retryCandidateObservation'] = claude_retry_candidate(value['retryCandidateObservation'])
+            if 'emptyInputDrift' in value:
+                drift=value['emptyInputDrift']
+                keys=set('witnessPresent rootSame textSame recordKeysSame stateSame attributesSame textRecordsSame otherValuesSame focusOnlyStateChange focusAttempted'.split())
+                if (type(drift) is not dict or set(drift)!=keys or any(type(v) is not bool for v in drift.values())
+                        or value.get('failureBoundary') not in {'input-empty-state','input-empty-witness'}
+                        or drift['focusOnlyStateChange'] and (drift['stateSame'] or not drift['recordKeysSame'])
+                        or not drift['witnessPresent'] and any(drift[k] for k in keys-{'focusAttempted','witnessPresent'})):
+                    raise ValueError('invalid Claude empty input drift')
+                record['emptyInputDrift']=drift
             if 'sendActionObservation' in value:
                 action=value['sendActionObservation']
                 if (type(action) is not dict or set(action) != {'actionCount','activationMatchCount','selectedIndex','activationClass'}
@@ -1613,7 +1684,7 @@ def semantic_observations(directory, app):
                 'configuration-values','final-custody','deadline','completed'}
             fields=set('schemaVersion mechanism diagnosticsOnly stage documentIndex completed'.split())
             privacy_fields={'rootPrivacy','libraryPrivacy','documentPrivacy'}
-            if (app!='claude-desktop' or set(value) not in (fields,fields|privacy_fields,fields|privacy_fields|{'configurationFailure'})
+            if (app!='claude-desktop' or set(value) not in (fields,fields|privacy_fields,fields|privacy_fields|{'configurationFailure'},fields|privacy_fields|{'configurationFailure','bridgeAuthority'})
                     or value['diagnosticsOnly'] is not True or type(value['stage']) is not str or value['stage'] not in stages
                     or type(value['completed']) is not bool or value['completed']!=(value['stage']=='completed')
                     or value['stage'] in document_stages and (type(value['documentIndex']) is not int or not 0<=value['documentIndex']<=2)
@@ -1632,6 +1703,20 @@ def semantic_observations(directory, app):
                             for i in range(value['documentIndex']+1,3))):
                     raise ValueError('invalid Claude Windows immutable privacy observation')
                 record.update({k:value[k] for k in privacy_fields})
+            if 'bridgeAuthority' in value:
+                bridge=value['bridgeAuthority']
+                enums={
+                    'stage':set('root-custody receipt-metadata receipt-open receipt-lock receipt-privacy receipt-json receipt-schema receipt-values endpoint-owner final-custody completed'.split()),
+                    'failure':set('original-cutoff root-custody receipt-missing receipt-metadata receipt-open receipt-sharing receipt-lock receipt-privacy receipt-json receipt-schema schema-version process-identity token-format url-parse url-policy url-port proof-environment proof-input proof-spawn proof-wait proof-exit proof-output endpoint-rejected'.split()),
+                    'privacy':{'protected','inherited','unexpected','unavailable'},
+                    'endpointReason':set('owned listener-missing listener-ambiguous listener-nonloopback listener-owner-mismatch listener-changed process-budget process-unavailable parent-unavailable parent-reused session-mismatch ancestry-cycle ancestry-limit query-failed'.split())}
+                if (type(bridge) is not dict or set(bridge)!=set(enums)
+                        or any(v is not None and (type(v) is not str or v not in enums[k]) for k,v in bridge.items())
+                        or bridge['stage'] is None and any(v is not None for v in bridge.values())
+                        or bridge['stage']=='completed' and (bridge['failure'] is not None or bridge['privacy']!='protected' or bridge['endpointReason']!='owned')
+                        or value['completed'] and bridge['stage']!='completed'):
+                    raise ValueError('invalid Claude bridge authority diagnostic')
+                record['bridgeAuthority']=bridge
             if 'configurationFailure' in value:
                 failure=value['configurationFailure']
                 failures={'document-count','deployment-mode','applied-profile','provider','base-url',
@@ -1838,7 +1923,7 @@ def semantic_observations(directory, app):
                 record[field] = dict(dialogs)
             if 'xi2Motion' in value:
                 record['xi2Motion']=zed_xi2_motion(value['xi2Motion'])
-            if (set(value) - modifier_fields - ancestor_fields - ancestor_stage_fields - {'cursorSelection', 'transientDialogs','transientDialogsBeforeHover','entryCrossing','xi2Motion'} not in (base, base | {'inputDelivery'}, base | coordinate_fields,
+            if (set(value) - modifier_fields - ancestor_fields - ancestor_stage_fields - {'cursorSelection', 'transientDialogs','transientDialogsBeforeHover','entryCrossing','xi2Motion','retryHitPolicy'} not in (base, base | {'inputDelivery'}, base | coordinate_fields,
                                   base | coordinate_fields | {'inputDelivery'}, base | coordinate_fields | authority_fields,
                                   base | coordinate_fields | authority_fields | {'inputDelivery'})
                     or present_modifiers and present_modifiers != modifier_fields
@@ -1860,6 +1945,10 @@ def semantic_observations(directory, app):
                         or entry['stage'].endswith('-complete') and entry['failureReason'] is not None):
                     raise ValueError('invalid Zed entry-crossing diagnostic')
                 record['entryCrossing']=dict(entry)
+            if 'retryHitPolicy' in value:
+                if value['retryHitPolicy']!='accessibility':
+                    raise ValueError('invalid Zed accessible target policy')
+                record['retryHitPolicy']=value['retryHitPolicy']
             if 'cursorSelection' in value:
                 selection = value['cursorSelection']
                 fields = {'status', 'sampledPoints', 'exactPointerMatched', 'accessibleHitVerified'}
@@ -1873,13 +1962,17 @@ def semantic_observations(directory, app):
                     # The click boundary repeats the cursor and AX proof once.
                     counts = {key: 46 if key.startswith('cursor') else 56 for key in counts}
                 if (type(selection) is not dict or set(selection) not in (fields, extended, classified, extended | pointer_fields, classified | pointer_fields)
-                        or type(selection['status']) is not str or selection['status'] not in {'matched', 'unavailable', 'no-hit', 'deadline', 'identity-rejected'}
+                        or type(selection['status']) is not str or selection['status'] not in {'matched', 'accessible-hit', 'unavailable', 'no-hit', 'deadline', 'identity-rejected'}
                         or type(selection['sampledPoints']) is not int or not 0 <= selection['sampledPoints'] <= 9
                         or any(type(selection[key]) is not bool for key in ('exactPointerMatched', 'accessibleHitVerified'))
                         or (selection['status'] == 'matched') != (selection['exactPointerMatched'] and selection['accessibleHitVerified'])
                         or selection['status'] == 'matched' and selection['sampledPoints'] == 0
-                        or selection['status'] != 'matched' and (selection['exactPointerMatched'] or selection['accessibleHitVerified'])):
+                        or selection['status'] not in {'matched','accessible-hit'} and (selection['exactPointerMatched'] or selection['accessibleHitVerified'])):
                     raise ValueError('invalid Zed cursor selection')
+                if selection['status']=='accessible-hit' and (value.get('retryHitPolicy')!='accessibility'
+                        or selection['accessibleHitVerified'] is not True or selection['exactPointerMatched'] is not False
+                        or selection.get('failureReason') is not None):
+                    raise ValueError('invalid Zed accessible target proof')
                 if set(selection) in (extended, classified, extended | pointer_fields, classified | pointer_fields):
                     reason = selection['failureReason']
                     if (any(type(selection[key]) is not int or not 0 <= selection[key] <= limit
@@ -2325,7 +2418,7 @@ def semantic_observations(directory, app):
             if 'initialMainActivation' in value:
                 activation = value['initialMainActivation']
                 if (app != 'chatgpt-desktop' or type(activation) is not dict
-                        or set(activation) - {'nativeBoundary','nativeInventoryFailure','nativeActivationFailure','nativePendingStack','nativePointObservation','nativeOwnedMove'} != {'phase', 'status', 'activationAttempted', 'guardFailure'}
+                        or set(activation) - {'nativeBoundary','nativeInventoryFailure','nativeActivationFailure','nativePendingStack','nativePointObservation','nativeOwnedMove','focusSamples'} != {'phase', 'status', 'activationAttempted', 'guardFailure'}
                         or type(activation['phase']) is not str or activation['phase'] not in {
                             'pre-proof', 'pre-identity', 'activation', 'polling', 'final-proof'}
                         or type(activation['status']) is not str or activation['status'] not in {
@@ -2340,6 +2433,13 @@ def semantic_observations(directory, app):
                         or activation['status'] == 'focused' and (
                             activation['phase'] != 'final-proof' or activation['guardFailure'] is not None)):
                     raise ValueError('invalid Codex initial main activation')
+                if 'focusSamples' in activation:
+                    samples=activation['focusSamples']
+                    if (type(samples) is not dict or set(samples)!={'beforePrepare','afterPrepare','afterActivation'}
+                            or any(type(v) is not str or v not in {'unmeasured','focused','unfocused'} for v in samples.values())
+                            or samples['afterPrepare']!='unmeasured' and samples['beforePrepare']=='unmeasured'
+                            or samples['afterActivation']!='unmeasured' and (not activation['activationAttempted'] or samples['afterPrepare']=='unmeasured')):
+                        raise ValueError('invalid Codex focus phase samples')
                 if 'nativePointObservation' in activation:
                     if (not activation['activationAttempted']
                             or activation['phase'] not in {'polling','final-proof'}):
@@ -2446,7 +2546,9 @@ def semantic_observations(directory, app):
                 flags = {'identityUnchanged', 'mainScopeUnique', 'documentFocused'}
                 count_keys = set('roleLegend roleRadios engineering dialog quickChatComposer editable'.split())
                 if (app != 'chatgpt-desktop' or type(confirmation) is not dict
-                        or set(confirmation) != flags | {'status', 'counts'}
+                        or set(confirmation) - {'inputChannel'} != flags | {'status', 'counts'}
+                        or type(confirmation.get('inputChannel', 'native-focused')) is not str
+                        or confirmation.get('inputChannel', 'native-focused') not in {'native-focused', 'cdp-dom'}
                         or any(confirmation[key] is not None and type(confirmation[key]) is not bool for key in flags)
                         or type(confirmation['status']) is not str or confirmation['status'] not in {
                             'unmeasured', 'initial-missing', 'deadline', 'ownership-lost', 'identity-changed',
@@ -2454,7 +2556,9 @@ def semantic_observations(directory, app):
                         or confirmation['counts'] is not None and (type(confirmation['counts']) is not dict
                             or set(confirmation['counts']) != count_keys
                             or any(type(count) is not int or not 0 <= count <= 4096 for count in confirmation['counts'].values()))
-                        or confirmation['status'] == 'confirmed' and (not all(confirmation[key] is True for key in flags)
+                        or confirmation['status'] == 'confirmed' and (not all(confirmation[key] is True for key in {'identityUnchanged', 'mainScopeUnique'})
+                            or not (confirmation['documentFocused'] is True
+                                            or confirmation.get('inputChannel') == 'cdp-dom' and confirmation['documentFocused'] is False)
                             or confirmation['counts'] is None
                             or any(confirmation['counts'][key] != count for key, count in
                                 {'roleLegend': 1, 'roleRadios': 11, 'engineering': 1}.items()))):
@@ -2465,7 +2569,9 @@ def semantic_observations(directory, app):
             if 'codexSession' in value:
                 session = value['codexSession']
                 flags = {'bindingVerified', 'codingComposerReady', 'auxiliaryInert'}
-                if (app != 'chatgpt-desktop' or type(session) is not dict or set(session) != flags | {'pageCount'}
+                if (app != 'chatgpt-desktop' or type(session) is not dict or set(session) - {'inputChannel'} != flags | {'pageCount'}
+                        or type(session.get('inputChannel', 'native-focused')) is not str
+                        or session.get('inputChannel', 'native-focused') not in {'native-focused', 'cdp-dom'}
                         or any(type(session[key]) is not bool for key in flags)
                         or type(session['pageCount']) is not int or not 0 <= session['pageCount'] <= 32
                         or session['codingComposerReady'] and not (session['bindingVerified'] and session['auxiliaryInert'])):

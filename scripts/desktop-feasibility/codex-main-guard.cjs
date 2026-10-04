@@ -3,7 +3,7 @@
 const guards=new WeakSet(),owners=new WeakMap();
 function createHeldMainGuard(held, browser, owner, deadline, route,
   identity,pause,requireMainScope,allowInitialAppearance,requireDocumentFocus,
-  {sameCorrelationIdentity,settleFolderAuxiliary,now}) {
+  {sameCorrelationIdentity,settleFolderAuxiliary,now,requireVisibleDocument=false}) {
   let actionsStarted=false,appearanceRetried=false,folderSettleTicket=false,folderSettleGranted=false;
   let activationSettleTicket=false,activationSettleGranted=false,mainScopeProved=false;
   let auxiliary=null, auxiliaryIdentity=null, failure='unmeasured', failureDetails=null;
@@ -42,6 +42,7 @@ function createHeldMainGuard(held, browser, owner, deadline, route,
         if(!timely())return false;
         if(!sameCorrelationIdentity(held,main))return reject('main-identity');
         if(requireDocumentFocus&&!main.scope.focused)return reject('main-focus');
+        if(requireVisibleDocument&&main.scope.visibleDocument!==true)return reject('main-scope');
         if((requireMainScope||(allowInitialAppearance&&!actionsStarted)||activationSettleTicket)&&!main.scope.mainScope)return reject('main-scope');
         if(extra) {
           const aux=await identity(extra,deadline);
@@ -71,7 +72,7 @@ function createHeldMainGuard(held, browser, owner, deadline, route,
       if(current.length!==2||!current.includes(held.page)||!extra
         ||!['','about:blank'].includes(extra.url()))return false;
       appearanceRetried=true;folderSettleTicket=false;
-      if(!await settleFolderAuxiliary(held,extra,pages,valid,deadline,route,identity,pause))return false;
+      if(!await settleFolderAuxiliary(held,extra,pages,valid,deadline,route,identity,pause,!requireVisibleDocument))return false;
       // Establish two NEW inert auxiliary proofs only after the committed route.
       return measure();
     }

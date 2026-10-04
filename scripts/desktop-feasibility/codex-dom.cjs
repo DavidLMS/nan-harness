@@ -25,7 +25,7 @@ function turnObservation({prompt,marker}) {
   return {userCount:1,assistantCount:Math.min(4096,units.size),responseVerified:matches===1};
 }
 
-async function ordinaryClick(locator,guard,deadline,attempt) {
+async function ordinaryClick(locator,guard,deadline,attempt,after=guard) {
   if(!await guard()||Date.now()>=deadline||await locator.count()!==1||!await locator.isEnabled())return false;
   const handle=await locator.elementHandle();if(!handle)return false;
   try {
@@ -36,10 +36,33 @@ async function ordinaryClick(locator,guard,deadline,attempt) {
     if(!await guard()||Date.now()>=deadline)return false;
     const final=await handle.evaluate(sample);
     if(!candidate(first,final)||!final.points.some(p=>p.x===point.x&&p.y===point.y))return false;
+    if(!await guard()||Date.now()>=deadline)return false;
     attempt();
     await handle.click({position:point,timeout:Math.max(1,Math.min(2000,deadline-Date.now()))});
-    return await guard()&&Date.now()<deadline;
+    return await after()&&Date.now()<deadline;
   } finally {await handle.dispose();}
+}
+
+function directCDPPolicy(platform=process.platform,env=process.env) {
+  return ['linux','darwin','win32'].includes(platform)&&env.GITHUB_ACTIONS==='true'
+    &&env.RUNNER_ENVIRONMENT==='github-hosted'&&env.RUNNER_OS===({linux:'Linux',darwin:'macOS',win32:'Windows'}[platform])
+    &&env.NANH_DESKTOP_RENDERER_APP==='chatgpt-desktop'&&env.NANH_CODEX_INPUT_CHANNEL==='cdp-dom';
+}
+
+function homeComposerScope() {
+  const visible=e=>{const r=e.getBoundingClientRect(),s=getComputedStyle(e);
+    return e.isConnected&&r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden'&&!e.closest('[inert]');};
+  const nodes=[...document.querySelectorAll('*')];
+  if(nodes.length>4096)return false;
+  const live=nodes.filter(visible);
+  const homes=live.filter(e=>e.getAttribute('data-codex-composer-root')!==null
+    &&e.getAttribute('data-composer-placement')==='home');
+  const editors=live.filter(e=>e.getAttribute('contenteditable')==='true'||e.tagName==='TEXTAREA');
+  return homes.length===1&&editors.length===1&&homes[0].contains(editors[0])
+    &&editors[0].classList?.contains('ProseMirror')&&editors[0].getAttribute('contenteditable')==='true'
+    &&editors[0].getAttribute('aria-disabled')!=='true'&&!editors[0].disabled&&!editors[0].readOnly
+    &&!live.some(e=>['dialog','alertdialog','menu'].includes(e.getAttribute('role'))
+      ||e.getAttribute('aria-modal')==='true'||e.getAttribute('data-thread-find-target')==='conversation');
 }
 
 async function runTurn(page,guard,request,deadline=Date.now()+request.timeoutMs) {
@@ -56,22 +79,39 @@ async function runTurn(page,guard,request,deadline=Date.now()+request.timeoutMs)
   };
   try {
     if(!await owned())return stop('ownership-lost');
-    facts.codingComposerReady=await page.evaluate(codingScope);
+    const threadReady=await page.evaluate(codingScope);
+    const homeReady=!threadReady&&request.action!=='retry'&&await page.evaluate(homeComposerScope);
+    facts.codingComposerReady=threadReady||homeReady;
     if(!await owned())return stop('ownership-lost');
     if(!facts.codingComposerReady)return stop('composer-unavailable');
     if(request.action==='ready')return facts;
-    const editor=page.locator('[data-thread-find-composer] .ProseMirror[contenteditable="true"]:visible');
+    const composerSelector=homeReady?'[data-codex-composer-root][data-composer-placement="home"]':'[data-thread-find-composer]';
+    const editor=page.locator(composerSelector+' .ProseMirror[contenteditable="true"]:visible');
     facts.uniqueComposer=await editor.count()===1;
     if(!facts.uniqueComposer)return stop('composer-unavailable');
     if(request.action==='submit') {
       const stale=await page.evaluate(turnObservation,{prompt:request.prompt,marker:request.expectedMarker});
       if(stale.userCount!==0||stale.responseVerified)return stop('stale-turn');
       if(!await owned())return stop('ownership-lost');
+      const heldEditor=await editor.elementHandle();
+      if(!heldEditor)return stop('composer-unavailable');
+      try {
+      const inputGuard=async filled=>await owned()&&await editor.count()===1
+        &&await editor.evaluate((e,held)=>e===held,heldEditor)
+        &&(!homeReady||await page.evaluate(homeComposerScope))
+        &&await heldEditor.evaluate((e,text)=>e.isConnected&&e.textContent===text,filled?request.prompt:'');
+      if(!await inputGuard(false))return stop('input-mismatch');
+      const firstInput=await heldEditor.evaluate(sample);
+      if(firstInput.blocked)return stop('composer-unavailable');
+      const secondInput=await heldEditor.evaluate(sample);
+      if(!candidate(firstInput,secondInput)||!await inputGuard(false))return stop('composer-unavailable');
       await editor.fill(request.prompt,{timeout:Math.max(1,Math.min(2000,deadline-Date.now()))});
       facts.inputReadback=await editor.evaluate((e,prompt)=>e.textContent===prompt,request.prompt);
       if(!facts.inputReadback)return stop('input-mismatch');
-      const send=page.locator('[data-thread-find-composer]').getByRole('button',{name:'Send',exact:true});
-      if(!await ordinaryClick(send,owned,deadline,()=>{facts.inputSubmitted=true;}))return stop('action-uncertain');
+      if(!await inputGuard(true))return stop('ownership-lost');
+      const send=page.locator(composerSelector).getByRole('button',{name:'Send',exact:true});
+      if(!await ordinaryClick(send,()=>inputGuard(true),deadline,()=>{facts.inputSubmitted=true;},owned))return stop('action-uncertain');
+      } finally {await heldEditor.dispose();}
     } else {
       const current=await page.evaluate(turnObservation,{prompt:request.prompt,marker:request.expectedMarker});
       if(current.userCount!==1||current.responseVerified)return stop('stale-turn');
@@ -108,6 +148,8 @@ async function runTurn(page,guard,request,deadline=Date.now()+request.timeoutMs)
   } catch {return stop(facts.inputSubmitted||facts.retryAttempted?'action-uncertain':'query-failed');}
 }
 
+exports.directCDPPolicy=directCDPPolicy;
+exports.homeComposerScope=homeComposerScope;
 exports.turnObservation=turnObservation;
 exports.ordinaryClick=ordinaryClick;
 exports.runTurn=runTurn;
@@ -140,7 +182,7 @@ function auxiliaryScope() {
   const controls=[...document.querySelectorAll('textarea,[contenteditable="true"],input:not([type="hidden"]),[role="dialog"],[aria-modal="true"],[role="alertdialog"],[role="menu"]')].filter(visible);
   return !document.hasFocus()&&controls.length===0;
 }
-async function bindRecordedMain(browser,binding,owner,deadline,identity=pageIdentity) {
+async function bindRecordedMain(browser,binding,owner,deadline,identity=pageIdentity,directCDP=false) {
   if(Date.now()>=deadline||!owner())return null;
   const pages=browser.contexts().flatMap(context=>context.pages());
   if(pages.length!==1+(binding.auxiliary?1:0))return null;
@@ -155,7 +197,7 @@ async function bindRecordedMain(browser,binding,owner,deadline,identity=pageIden
     if(!sameIdentity(binding.auxiliary,aux)||sourceRoute(aux.url)!=='avatarOverlay'
       ||!await auxiliary.evaluate(auxiliaryScope))return null;
   }
-  if(!await main.evaluate(()=>document.hasFocus()&&document.visibilityState==='visible'))return null;
+  if(!await main.evaluate(scoped=>document.visibilityState==='visible'&&(scoped||document.hasFocus()),directCDP))return null;
   const after=browser.contexts().flatMap(context=>context.pages());
   if(Date.now()>=deadline||!owner()||after.length!==pages.length||!after.every(page=>pages.includes(page)))return null;
   return main;
@@ -219,9 +261,10 @@ async function main() {
     const {chromium}=require('../../.github/web-check/node_modules/playwright');
     const deadline=Date.now()+request.timeoutMs;
     browser=await chromium.connectOverCDP(`http://127.0.0.1:${connection.port}`,{timeout:2000,noDefaults:true});
-    const page=await bindRecordedMain(browser,binding,owner,deadline);
+    const directCDP=directCDPPolicy();
+    const page=await bindRecordedMain(browser,binding,owner,deadline,pageIdentity,directCDP);
     if(!page)throw Error('main');
-    facts=await runTurn(page,async until=>await bindRecordedMain(browser,binding,owner,until)===page,request,deadline);
+    facts=await runTurn(page,async until=>await bindRecordedMain(browser,binding,owner,until,pageIdentity,directCDP)===page,request,deadline);
   } catch {if(facts.errorCategory===null)facts.errorCategory='query-failed';}
   finally {if(browser)await browser.close().catch(()=>{});}
   fs.writeFileSync(output,JSON.stringify(facts)+'\n',{mode:0o600,flag:'wx'});

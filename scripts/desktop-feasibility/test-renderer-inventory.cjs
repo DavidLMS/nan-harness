@@ -141,7 +141,8 @@ assert.equal(roleSourceScope({foreignFieldset:true}).mainScope,false);
     assert.equal(await helper.bindCorrelationMain(f.held,f.browser,()=>true,1000,
       ()=> 'avatarOverlay',f.identity,async()=>{},facts),null);
     assert.equal(facts.status,status);
-    assert.deepEqual(Object.keys(facts).sort(),['counts','documentFocused','identityUnchanged','mainScopeUnique','status']);
+    assert.equal(facts.inputChannel,'native-focused');
+    assert.deepEqual(Object.keys(facts).sort(),['counts','documentFocused','identityUnchanged','inputChannel','mainScopeUnique','status']);
     assert.equal(JSON.stringify(facts).includes('app://'),false);
   }
   f=fixture();f.setAlter((r,n)=>{if(n===2)r.scope.mainScope=false;});

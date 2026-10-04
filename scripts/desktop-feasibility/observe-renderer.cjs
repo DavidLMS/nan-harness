@@ -58,7 +58,7 @@ function correlationScope() {
   return {counts:{roleLegend:cap(legends),roleRadios:cap(radios),engineering:cap(engineering),
       dialog:cap(dialogs),quickChatComposer:cap(all('textarea[data-avatar-overlay-composition-autofocus]')),
       editable:cap(all('textarea,[contenteditable="true"],input:not([type="radio"]):not([type="checkbox"]):not([type="hidden"])'))},
-    mainScope,focused:document.hasFocus()};
+    mainScope,visibleDocument:document.visibilityState==='visible',focused:document.hasFocus()};
 }
 async function correlationIdentity(page, deadline, includeScope=true, diagnostic=null) {
   let session;
@@ -146,10 +146,11 @@ async function captureCorrelationMain(page,browser,guard,deadline,identity=corre
   } catch{return stop('query-failed');}
 }
 function mainConfirmationFacts() {
-  return {status:'unmeasured',identityUnchanged:null,mainScopeUnique:null,documentFocused:null,counts:null};
+  return {inputChannel:'native-focused',status:'unmeasured',identityUnchanged:null,mainScopeUnique:null,documentFocused:null,counts:null};
 }
 async function bindCorrelationMain(held,browser,guard,deadline,route,
-  identity=correlationIdentity,pause=ms=>new Promise(resolve=>setTimeout(resolve,ms)),diagnostic=null,settleGuard=null) {
+  identity=correlationIdentity,pause=ms=>new Promise(resolve=>setTimeout(resolve,ms)),diagnostic=null,settleGuard=null,requireDocumentFocus=true) {
+  if(diagnostic)diagnostic.inputChannel=requireDocumentFocus?'native-focused':'cdp-dom';
   const stop=status=>{if(diagnostic)diagnostic.status=status;return null;};
   try {
     if(!held)return stop('initial-missing');
@@ -162,7 +163,7 @@ async function bindCorrelationMain(held,browser,guard,deadline,route,
       if(Date.now()>=deadline)return stop('deadline');
       if(!guard())return stop('ownership-lost');
       if(settleGuard&&!sameCorrelationIdentity(held,fresh))return stop('identity-changed');
-      if(settleGuard&&!fresh.scope.focused)return stop('document-unfocused');
+      if(settleGuard&&requireDocumentFocus&&!fresh.scope.focused)return stop('document-unfocused');
       if(settleGuard&&!await settleGuard())return stop('guard-rejected');
       if(fresh.scope.mainScope||!settleGuard)break;
       // Completed trust may still be hydrating the same source page. Only
@@ -179,16 +180,18 @@ async function bindCorrelationMain(held,browser,guard,deadline,route,
     if(!guard())return stop('ownership-lost');
     if(!sameCorrelationIdentity(held,fresh))return stop('identity-changed');
     if(!fresh.scope.mainScope)return stop('source-scope');
-    if(!fresh.scope.focused)return stop('document-unfocused');
-    const proof=heldMainGuard(held,browser,guard,deadline,route,identity,pause,true);
+    if(requireDocumentFocus&&!fresh.scope.focused)return stop('document-unfocused');
+    if(!requireDocumentFocus&&fresh.scope.visibleDocument!==true)return stop('source-scope');
+    const proof=heldMainGuard(held,browser,guard,deadline,route,identity,pause,true,false,requireDocumentFocus,!requireDocumentFocus);
     if(!await proof())return stop(Date.now()>=deadline?'deadline':'guard-rejected');
     if(diagnostic)diagnostic.status='confirmed';
     return fresh;
   } catch{return stop(Date.now()>=deadline?'deadline':'query-failed');}
 }
 async function observeMainAux(held,browser,guard,deadline,auxRoute,
-  identity=correlationIdentity,pause=ms=>new Promise(r=>setTimeout(r,ms))) {
+  identity=correlationIdentity,pause=ms=>new Promise(r=>setTimeout(r,ms)),requireDocumentFocus=true) {
   const facts=correlationFacts();
+  facts.inputChannel=requireDocumentFocus?'native-focused':'cdp-dom';
   const pages=()=>browser.contexts().flatMap(c=>c.pages());
   const stop=status=>{facts.status=status;return facts;};
   try {
@@ -216,7 +219,7 @@ async function observeMainAux(held,browser,guard,deadline,auxRoute,
       facts.auxMainControlsAbsent=['roleLegend','roleRadios','engineering','dialog'].every(k=>facts.aux[k]===0);
       facts.auxComposerAbsent=facts.aux.quickChatComposer===0&&facts.aux.editable===0;
       if(!facts.mainScopeUnique||!facts.auxMainControlsAbsent||!facts.auxComposerAbsent
-        ||!facts.mainDocumentFocused||facts.auxDocumentFocused)return stop('source-scope');
+        ||(requireDocumentFocus&&!facts.mainDocumentFocused)||(!requireDocumentFocus&&main.scope.visibleDocument!==true)||facts.auxDocumentFocused)return stop('source-scope');
       facts.guarded=true;facts.stableSamples++;
       if(sample===0)await pause(Math.min(100,Math.max(0,deadline-Date.now())));
     }
@@ -225,13 +228,13 @@ async function observeMainAux(held,browser,guard,deadline,auxRoute,
 }
 // A completed trust action can precede the source auxiliary's first loader.
 // A blank page is only a pending observation, never an input capability.
-async function settleFolderAuxiliary(held,extra,pages,valid,deadline,route,identity,pause) {
+async function settleFolderAuxiliary(held,extra,pages,valid,deadline,route,identity,pause,requireDocumentFocus=true) {
   while(Date.now()<deadline) {
     if(!valid())return false;
     const before=pages();
     if(before.length!==2||!before.includes(held.page)||!before.includes(extra))return false;
     const main=await identity(held.page,deadline);
-    if(!valid()||!sameCorrelationIdentity(held,main)||!main.scope.mainScope||!main.scope.focused)return false;
+    if(!valid()||!sameCorrelationIdentity(held,main)||!main.scope.mainScope||(requireDocumentFocus?!main.scope.focused:main.scope.visibleDocument!==true))return false;
     const after=pages();
     if(after.length!==2||!after.includes(held.page)||!after.includes(extra))return false;
     const url=extra.url();
@@ -246,15 +249,21 @@ async function settleFolderAuxiliary(held,extra,pages,valid,deadline,route,ident
 // Later source-known inert avatar pages never become selectable input targets.
 function heldMainGuard(held, browser, owner, deadline, route,
   identity=correlationIdentity,pause=ms=>new Promise(resolve=>setTimeout(resolve,ms)),
-  requireMainScope=false,allowInitialAppearance=false,requireDocumentFocus=true) {
+  requireMainScope=false,allowInitialAppearance=false,requireDocumentFocus=true,scopedDOM=false) {
   return require('./codex-main-guard.cjs').createHeldMainGuard(held,browser,owner,deadline,route,
     identity,pause,requireMainScope,allowInitialAppearance,requireDocumentFocus,
-    {sameCorrelationIdentity,settleFolderAuxiliary,now:()=>Date.now()});
+    {sameCorrelationIdentity,settleFolderAuxiliary,now:()=>Date.now(),requireVisibleDocument:scopedDOM});
 }
 // One public page activation; it never substitutes for fresh focus/owner proof.
 async function focusCapturedMain(held,proof,deadline,identity=correlationIdentity,
   same=sameCorrelationIdentity,pause=ms=>new Promise(resolve=>setTimeout(resolve,ms)),diagnostic=null,nativeActivation=null,observePoint=null) {
   const phase=value=>{if(diagnostic)diagnostic.phase=value;};
+  const focusSample=(key,value)=>{
+    if(diagnostic) {
+      diagnostic.focusSamples??={beforePrepare:'unmeasured',afterPrepare:'unmeasured',afterActivation:'unmeasured'};
+      diagnostic.focusSamples[key]=value?'focused':'unfocused';
+    }
+  };
   const stop=status=>{if(diagnostic)diagnostic.status=status;return status==='focused';};
   const rejected=()=>stop(Date.now()>=deadline?'deadline':'rejected');
   const proved=async()=>{
@@ -282,6 +291,7 @@ async function focusCapturedMain(held,proof,deadline,identity=correlationIdentit
       if(Date.now()>=deadline||!await proved())return rejected();
     }
     if(!before?.scope.mainScope)return rejected();
+    focusSample('beforePrepare',before.scope.focused);
     let nativeActivated=false;
     if(!before.scope.focused) {
       if(nativeActivation) {
@@ -289,6 +299,7 @@ async function focusCapturedMain(held,proof,deadline,identity=correlationIdentit
         proof.allowPassiveActivationSettle?.();
         const second=await identity(held.page,deadline);
         if(Date.now()>=deadline||!same(held,second)||!second.scope.mainScope||!await proved())return rejected();
+        focusSample('afterPrepare',second.scope.focused);
       }
       // This is the same one consumed activation; no diagnostic retries it.
       phase('activation');
@@ -305,6 +316,7 @@ async function focusCapturedMain(held,proof,deadline,identity=correlationIdentit
       if(!await proved())return rejected();
       const fresh=await identity(held.page,deadline);
       if(Date.now()>=deadline||!same(held,fresh)||!fresh.scope.mainScope||!await proved())return rejected();
+      if(nativeActivated)focusSample('afterActivation',fresh.scope.focused);
       if(nativeActivated&&!nativeActivation.verify()) {
         if(typeof nativeActivation.pending!=='function'||nativeActivation.pending()!==true)return rejected();
         const pendingStack=typeof nativeActivation.pendingStack==='function'?nativeActivation.pendingStack():null;
@@ -488,6 +500,8 @@ async function run() {
     facts.errorCategory = 'invalid-request'; save(); return;
   }
   const trial = onboardingTrial(app, process.platform, process.env);
+  const directCDP=trial&&require('./codex-dom.cjs').directCDPPolicy()
+    &&(process.platform==='win32'?request.codexProfileIsolation==='prepared-windows':request.codexProfileLoan!==undefined);
   const started = Date.now();
   const deadline = started + (trial ? 35000 : 25000);
   const totalDeadline = started + onboardingBudget(trial,process.platform);
@@ -545,7 +559,7 @@ async function run() {
     }
     if (!ownership.ownedEndpoint(documentDeadline)) { facts.endpointOwned = false; facts.errorCategory = 'endpoint-unowned'; save(); return; }
     let focusGuard;
-    if(trial&&process.platform==='darwin') {
+    if(trial&&process.platform==='darwin'&&!directCDP) {
       focusGuard=heldMainGuard(initialMain,browser,ownerGuard,totalDeadline,
         require('./codex-onboarding.cjs').sourceRoute,correlationIdentity,
         ms=>new Promise(resolve=>setTimeout(resolve,ms)),false,false,false);
@@ -607,7 +621,7 @@ async function run() {
         const folderAuthority=require('./codex-folder-trust.cjs').authority(request.ownedWorkspace);
         trustGuard=(!profileAuthority&&focusGuard)||heldMainGuard(initialMain,browser,onboardingOwnerGuard,correlationDeadline,
           require('./codex-onboarding.cjs').sourceRoute,correlationIdentity,
-          ms=>new Promise(resolve=>setTimeout(resolve,ms)),false,process.platform==='win32');
+          ms=>new Promise(resolve=>setTimeout(resolve,ms)),false,process.platform==='win32',!directCDP,directCDP);
         folderTrust=await require('./codex-folder-trust.cjs').run(page,trustGuard,
           correlationDeadline,folderAuthority,()=>trustGuard.sealInitialActions());
         if(folderTrust.status==='completed'&&folderTrust.clickAttempted&&folderTrust.clickCompleted)
@@ -616,24 +630,25 @@ async function run() {
       const heldMain=trial?await bindCorrelationMain(initialMain,browser,onboardingOwnerGuard,correlationDeadline,
         require('./codex-onboarding.cjs').sourceRoute,correlationIdentity,
         ms=>new Promise(resolve=>setTimeout(resolve,ms)),facts.initialMainConfirmation,
-        folderTrust?.status==='completed'?trustGuard:null):null;
+        folderTrust?.status==='completed'?trustGuard:null,!directCDP):null;
       trustGuard?.finishPassiveFolderSettle();
       // Trust consumes initial admission; preserve its original auxiliary binding.
       // Fresh role binding above must still succeed before subsequent input.
       const mainGuard=folderTrust?.clickAttempted?(heldMain?trustGuard:undefined):trial&&heldMain?heldMainGuard(heldMain,browser,onboardingOwnerGuard,correlationDeadline,
         require('./codex-onboarding.cjs').sourceRoute,correlationIdentity,
-        ms=>new Promise(resolve=>setTimeout(resolve,ms)),false,true):undefined;
+        ms=>new Promise(resolve=>setTimeout(resolve,ms)),false,true,!directCDP,directCDP):undefined;
       facts.publicOnboarding = await require('./codex-onboarding.cjs').run(page,
         onboardingOwnerGuard,
-        correlationDeadline,mainGuard,folderTrust,request.codexProfileLoan);
+        correlationDeadline,mainGuard,folderTrust,request.codexProfileLoan,directCDP);
       const bindingVerified=!!mainGuard&&await mainGuard();
-      const codingComposerReady=bindingVerified&&await page.evaluate(require('./codex-onboarding.cjs').codingScope);
-      facts.codexSession={bindingVerified,codingComposerReady:!!codingComposerReady,auxiliaryInert:bindingVerified,
+      const codingComposerReady=bindingVerified&&(await page.evaluate(require('./codex-onboarding.cjs').codingScope)
+        ||directCDP&&await page.evaluate(require('./codex-dom.cjs').homeComposerScope));
+      facts.codexSession={inputChannel:directCDP?'cdp-dom':'native-focused',bindingVerified,codingComposerReady:!!codingComposerReady,auxiliaryInert:bindingVerified,
         pageCount:Math.min(32,browser.contexts().flatMap(context=>context.pages()).length)};
       if(bindingVerified)publishCodexBinding(output,request.ownerPid,connection,mainGuard);
       if(trial&&browser.contexts().flatMap(c=>c.pages()).length!==1) {
         facts.mainAuxCorrelation=await observeMainAux(heldMain,browser,onboardingOwnerGuard,correlationDeadline,
-          require('./codex-onboarding.cjs').sourceRoute);
+          require('./codex-onboarding.cjs').sourceRoute,correlationIdentity,ms=>new Promise(resolve=>setTimeout(resolve,ms)),!directCDP);
       }
       } finally {profileAuthority?.close();}
     }

@@ -28,8 +28,59 @@ enum SealStage {
     Completed,
 }
 
+#[derive(Clone, Copy, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum BridgeStage {
+    RootCustody,
+    ReceiptMetadata,
+    ReceiptOpen,
+    ReceiptLock,
+    ReceiptPrivacy,
+    ReceiptJson,
+    ReceiptSchema,
+    ReceiptValues,
+    EndpointOwner,
+    FinalCustody,
+    Completed,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum BridgeFailure {
+    OriginalCutoff,
+    RootCustody,
+    ReceiptMissing,
+    ReceiptMetadata,
+    ReceiptOpen,
+    ReceiptSharing,
+    ReceiptLock,
+    ReceiptPrivacy,
+    ReceiptJson,
+    ReceiptSchema,
+    SchemaVersion,
+    ProcessIdentity,
+    TokenFormat,
+    UrlParse,
+    UrlPolicy,
+    UrlPort,
+    ProofEnvironment,
+    ProofInput,
+    ProofSpawn,
+    ProofWait,
+    ProofExit,
+    ProofOutput,
+    EndpointRejected,
+}
+#[derive(Default)]
+struct BridgeObservation {
+    stage: Option<BridgeStage>,
+    failure: Option<BridgeFailure>,
+    privacy: Option<nan_harness_private_fs::OwnedWindowsDacl>,
+    endpoint_reason: Option<&'static str>,
+}
+
 struct SealObservation {
     stage: SealStage,
+    bridge: BridgeObservation,
     document_index: Option<usize>,
     configuration_failure: Option<&'static str>,
     root_privacy: Option<nan_harness_private_fs::OwnedWindowsDacl>,
@@ -40,6 +91,7 @@ impl SealObservation {
     fn new() -> Self {
         Self {
             stage: SealStage::InitialCustody,
+            bridge: BridgeObservation::default(),
             document_index: None,
             configuration_failure: None,
             root_privacy: None,
@@ -54,7 +106,9 @@ impl SealObservation {
             "rootPrivacy":self.root_privacy.map(privacy_label),
             "libraryPrivacy":self.library_privacy.map(privacy_label),
             "documentPrivacy":self.document_privacy.map(|p|p.map(privacy_label)),
-            "configurationFailure":self.configuration_failure
+            "configurationFailure":self.configuration_failure,
+            "bridgeAuthority":{"stage":self.bridge.stage,"failure":self.bridge.failure,
+                "privacy":self.bridge.privacy.map(privacy_label),"endpointReason":self.bridge.endpoint_reason}
         }));
     }
 }
@@ -73,39 +127,52 @@ impl Drop for BridgeReceipt {
     }
 }
 impl BridgeReceipt {
-    fn port(&self) -> Option<u16> {
-        let url = url::Url::parse(&self.base_url).ok()?;
-        (self.schema_version == 1
-            && self.process_id > 1
-            && self.token.len() == 64
-            && self
+    fn validated_port(&self) -> Result<u16, BridgeFailure> {
+        if self.schema_version != 1 {
+            return Err(BridgeFailure::SchemaVersion);
+        }
+        if self.process_id <= 1 {
+            return Err(BridgeFailure::ProcessIdentity);
+        }
+        if self.token.len() != 64
+            || !self
                 .token
                 .bytes()
                 .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-            && url.scheme() == "http"
-            && url.host_str() == Some("127.0.0.1")
-            && url.username().is_empty()
-            && url.password().is_none()
-            && url.path() == "/"
-            && url.query().is_none()
-            && url.fragment().is_none())
-        .then(|| url.port())
-        .flatten()
-        .filter(|p| *p > 1)
+        {
+            return Err(BridgeFailure::TokenFormat);
+        }
+        let url = url::Url::parse(&self.base_url).map_err(|_| BridgeFailure::UrlParse)?;
+        if url.scheme() != "http"
+            || url.host_str() != Some("127.0.0.1")
+            || !url.username().is_empty()
+            || url.password().is_some()
+            || url.path() != "/"
+            || url.query().is_some()
+            || url.fragment().is_some()
+        {
+            return Err(BridgeFailure::UrlPolicy);
+        }
+        url.port().filter(|p| *p > 1).ok_or(BridgeFailure::UrlPort)
     }
 }
 
-fn bridge_process_owned(port: u16, bridge: u32, launcher: u32, deadline: Instant) -> bool {
+fn bridge_process_owned(
+    port: u16,
+    bridge: u32,
+    launcher: u32,
+    deadline: Instant,
+) -> Result<&'static str, BridgeFailure> {
     use std::io::Read as _;
     use std::os::windows::process::CommandExt as _;
     use std::process::{Command, Stdio};
     let Some(python) = std::env::var_os("FEASIBILITY_WINDOWS_PROOF_PYTHON").map(PathBuf::from)
     else {
-        return false;
+        return Err(BridgeFailure::ProofEnvironment);
     };
     let Some(script) = std::env::var_os("FEASIBILITY_WINDOWS_PROOF_SCRIPT").map(PathBuf::from)
     else {
-        return false;
+        return Err(BridgeFailure::ProofEnvironment);
     };
     if [python.as_path(), script.as_path()]
         .iter()
@@ -113,7 +180,11 @@ fn bridge_process_owned(port: u16, bridge: u32, launcher: u32, deadline: Instant
         || launcher <= 1
         || Instant::now() >= deadline
     {
-        return false;
+        return Err(if Instant::now() >= deadline {
+            BridgeFailure::OriginalCutoff
+        } else {
+            BridgeFailure::ProofInput
+        });
     }
     let mut command = Command::new(python);
     command
@@ -133,26 +204,64 @@ fn bridge_process_owned(port: u16, bridge: u32, launcher: u32, deadline: Instant
         command.env("SystemRoot", root);
     }
     let Ok(mut child) = command.spawn() else {
-        return false;
+        return Err(BridgeFailure::ProofSpawn);
     };
     loop {
         match child.try_wait() {
             Ok(Some(status)) if status.success() && Instant::now() < deadline => break,
+            Ok(Some(_)) => {
+                return Err(if Instant::now() >= deadline {
+                    BridgeFailure::OriginalCutoff
+                } else {
+                    BridgeFailure::ProofExit
+                });
+            }
             Ok(None) if Instant::now() < deadline => {
                 std::thread::sleep(std::time::Duration::from_millis(5))
             }
             _ => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return false;
+                return Err(if Instant::now() >= deadline {
+                    BridgeFailure::OriginalCutoff
+                } else {
+                    BridgeFailure::ProofWait
+                });
             }
         }
     }
     let Some(output) = child.stdout.take() else {
-        return false;
+        return Err(BridgeFailure::ProofOutput);
     };
     let mut bytes = Vec::new();
-    output.take(64).read_to_end(&mut bytes).is_ok() && bytes == b"true" && Instant::now() < deadline
+    output
+        .take(65)
+        .read_to_end(&mut bytes)
+        .map_err(|_| BridgeFailure::ProofOutput)?;
+    if Instant::now() >= deadline {
+        return Err(BridgeFailure::OriginalCutoff);
+    }
+    endpoint_reason(&bytes).ok_or(BridgeFailure::ProofOutput)
+}
+
+fn endpoint_reason(bytes: &[u8]) -> Option<&'static str> {
+    Some(match bytes {
+        b"true" => "owned",
+        b"listener-missing" => "listener-missing",
+        b"listener-ambiguous" => "listener-ambiguous",
+        b"listener-nonloopback" => "listener-nonloopback",
+        b"listener-owner-mismatch" => "listener-owner-mismatch",
+        b"listener-changed" => "listener-changed",
+        b"process-budget" => "process-budget",
+        b"process-unavailable" => "process-unavailable",
+        b"parent-unavailable" => "parent-unavailable",
+        b"parent-reused" => "parent-reused",
+        b"session-mismatch" => "session-mismatch",
+        b"ancestry-cycle" => "ancestry-cycle",
+        b"ancestry-limit" => "ancestry-limit",
+        b"query-failed" => "query-failed",
+        _ => return None,
+    })
 }
 
 pub(crate) struct FreshClaudeWindowsProfile {
@@ -416,7 +525,12 @@ impl FreshClaudeWindowsProfile {
         let result = (|| {
             self.check_initial_seal_custody(deadline, &mut observation)?;
             observation.stage = SealStage::BridgeAuthority;
-            let (receipt_file, receipt) = self.seal_bridge_authority(launcher, deadline)?;
+            let (receipt_file, receipt) = self
+                .seal_bridge_authority(launcher, deadline, &mut observation.bridge)
+                .map_err(|failure| {
+                    observation.bridge.failure = Some(failure);
+                    Reason::IsolationUnavailable
+                })?;
             let library = self.hold_configuration_library(&mut observation)?;
             let mut documents = Vec::new();
             for (index, path) in [
@@ -447,48 +561,101 @@ impl FreshClaudeWindowsProfile {
         observation.record(result.is_ok());
         result
     }
+    fn check_bridge_root(&self, deadline: Instant) -> Result<(), BridgeFailure> {
+        if Instant::now() >= deadline {
+            return Err(BridgeFailure::OriginalCutoff);
+        }
+        if !owned_root_custody(&self.directories, self.root_directory_index) {
+            return Err(BridgeFailure::RootCustody);
+        }
+        if Instant::now() >= deadline {
+            return Err(BridgeFailure::OriginalCutoff);
+        }
+        Ok(())
+    }
     fn seal_bridge_authority(
         &self,
         launcher: u32,
         deadline: Instant,
-    ) -> Result<(File, BridgeReceipt), Reason> {
+        observation: &mut BridgeObservation,
+    ) -> Result<(File, BridgeReceipt), BridgeFailure> {
         use std::os::windows::fs::{MetadataExt as _, OpenOptionsExt as _};
+        observation.stage = Some(BridgeStage::RootCustody);
+        self.check_bridge_root(deadline)?;
         let path = self.root.join(".nanh-bridge.private");
-        if !regular(&path, false) || !self.private_ancestors() || Instant::now() >= deadline {
-            return Err(Reason::IsolationUnavailable);
+        observation.stage = Some(BridgeStage::ReceiptMetadata);
+        let metadata = std::fs::symlink_metadata(&path).map_err(|error| {
+            if error.kind() == std::io::ErrorKind::NotFound {
+                BridgeFailure::ReceiptMissing
+            } else {
+                BridgeFailure::ReceiptMetadata
+            }
+        })?;
+        if !metadata.is_file() || metadata.file_attributes() & 0x400 != 0 {
+            return Err(BridgeFailure::ReceiptMetadata);
         }
+        self.check_bridge_root(deadline)?;
+        observation.stage = Some(BridgeStage::ReceiptOpen);
         let mut file = std::fs::OpenOptions::new()
             .read(true)
             .access_mode(0x8002_0000)
             .share_mode(1)
             .custom_flags(0x0020_0000)
             .open(path)
-            .map_err(|_| Reason::IsolationUnavailable)?;
-        let private = || {
-            file.metadata()
-                .is_ok_and(|m| m.is_file() && m.file_attributes() & 0x400 == 0)
-                && nan_harness_private_fs::classify_owned_windows_dacl(
-                    &file,
-                    nan_harness_private_fs::PrivatePathKind::File,
-                ) == nan_harness_private_fs::OwnedWindowsDacl::Protected
-        };
-        if !private() {
-            return Err(Reason::IsolationUnavailable);
-        }
-        let value = document(&mut file).ok_or(Reason::IsolationUnavailable)?;
-        let receipt: BridgeReceipt =
-            serde_json::from_value(value).map_err(|_| Reason::IsolationUnavailable)?;
-        let port = receipt.port().ok_or(Reason::IsolationUnavailable)?;
-        if !bridge_process_owned(port, receipt.process_id, launcher, deadline)
-            || !self.private_ancestors()
-            || Instant::now() >= deadline
-            || nan_harness_private_fs::classify_owned_windows_dacl(
-                &file,
-                nan_harness_private_fs::PrivatePathKind::File,
-            ) != nan_harness_private_fs::OwnedWindowsDacl::Protected
+            .map_err(|error| {
+                if error.raw_os_error() == Some(32) {
+                    BridgeFailure::ReceiptSharing
+                } else {
+                    BridgeFailure::ReceiptOpen
+                }
+            })?;
+        observation.stage = Some(BridgeStage::ReceiptLock);
+        if !file
+            .metadata()
+            .is_ok_and(|m| m.is_file() && m.file_attributes() & 0x400 == 0)
         {
-            return Err(Reason::IsolationUnavailable);
+            return Err(BridgeFailure::ReceiptLock);
         }
+        observation.stage = Some(BridgeStage::ReceiptPrivacy);
+        observation.privacy = Some(nan_harness_private_fs::classify_owned_windows_dacl(
+            &file,
+            nan_harness_private_fs::PrivatePathKind::File,
+        ));
+        if observation.privacy != Some(nan_harness_private_fs::OwnedWindowsDacl::Protected) {
+            return Err(BridgeFailure::ReceiptPrivacy);
+        }
+        self.check_bridge_root(deadline)?;
+        observation.stage = Some(BridgeStage::ReceiptJson);
+        let value = document(&mut file).ok_or(BridgeFailure::ReceiptJson)?;
+        observation.stage = Some(BridgeStage::ReceiptSchema);
+        let receipt: BridgeReceipt =
+            serde_json::from_value(value).map_err(|_| BridgeFailure::ReceiptSchema)?;
+        observation.stage = Some(BridgeStage::ReceiptValues);
+        let port = receipt.validated_port()?;
+        self.check_bridge_root(deadline)?;
+        observation.stage = Some(BridgeStage::EndpointOwner);
+        let reason = bridge_process_owned(port, receipt.process_id, launcher, deadline)?;
+        observation.endpoint_reason = Some(reason);
+        if reason != "owned" {
+            return Err(BridgeFailure::EndpointRejected);
+        }
+        observation.stage = Some(BridgeStage::FinalCustody);
+        self.check_bridge_root(deadline)?;
+        observation.privacy = Some(nan_harness_private_fs::classify_owned_windows_dacl(
+            &file,
+            nan_harness_private_fs::PrivatePathKind::File,
+        ));
+        if observation.privacy != Some(nan_harness_private_fs::OwnedWindowsDacl::Protected) {
+            return Err(BridgeFailure::ReceiptPrivacy);
+        }
+        if !file
+            .metadata()
+            .is_ok_and(|m| m.is_file() && m.file_attributes() & 0x400 == 0)
+        {
+            return Err(BridgeFailure::ReceiptLock);
+        }
+        self.check_bridge_root(deadline)?;
+        observation.stage = Some(BridgeStage::Completed);
         Ok((file, receipt))
     }
     fn check_initial_seal_custody(
@@ -673,17 +840,23 @@ impl FreshClaudeWindowsProfile {
     }
 }
 
+fn owned_root_custody(directories: &[File], root_directory_index: usize) -> bool {
+    directories.iter().all(retained_directory_regular)
+        && directories.get(root_directory_index).is_some_and(|f| {
+            nan_harness_private_fs::classify_owned_windows_dacl(
+                f,
+                nan_harness_private_fs::PrivatePathKind::Directory,
+            ) == nan_harness_private_fs::OwnedWindowsDacl::Protected
+        })
+}
+
 fn owned_directory_custody(
     directories: &[File],
     root_directory_index: usize,
     library_directory_index: Option<usize>,
 ) -> bool {
     use nan_harness_private_fs::{OwnedWindowsDacl as Dacl, PrivatePathKind};
-    directories.iter().all(retained_directory_regular)
-        && directories.get(root_directory_index).is_some_and(|f| {
-            nan_harness_private_fs::classify_owned_windows_dacl(f, PrivatePathKind::Directory)
-                == Dacl::Protected
-        })
+    owned_root_custody(directories, root_directory_index)
         && library_directory_index
             .and_then(|i| directories.get(i))
             .is_some_and(|f| {
@@ -705,7 +878,7 @@ mod tests {
         let valid = serde_json::json!({"schemaVersion":1,"processId":40,
             "baseUrl":"http://127.0.0.1:43210","token":"a".repeat(64)});
         let receipt: BridgeReceipt = serde_json::from_value(valid.clone()).unwrap();
-        assert_eq!(receipt.port(), Some(43210));
+        assert_eq!(receipt.validated_port(), Ok(43210));
         for base in [
             "http://localhost:43210",
             "https://127.0.0.1:43210",
@@ -719,7 +892,8 @@ mod tests {
             assert_eq!(
                 serde_json::from_value::<BridgeReceipt>(value)
                     .unwrap()
-                    .port(),
+                    .validated_port()
+                    .ok(),
                 None
             );
         }
@@ -729,7 +903,8 @@ mod tests {
             assert_eq!(
                 serde_json::from_value::<BridgeReceipt>(value)
                     .unwrap()
-                    .port(),
+                    .validated_port()
+                    .ok(),
                 None
             );
         }
@@ -738,12 +913,76 @@ mod tests {
         assert_eq!(
             serde_json::from_value::<BridgeReceipt>(value)
                 .unwrap()
-                .port(),
+                .validated_port()
+                .ok(),
             None
         );
         let mut value = valid;
         value["unknown"] = serde_json::json!(true);
         assert!(serde_json::from_value::<BridgeReceipt>(value).is_err());
+    }
+
+    #[test]
+    fn bridge_values_and_diagnostics_distinguish_failures_without_private_values() {
+        let valid = serde_json::json!({"schemaVersion":1,"processId":40,"baseUrl":"http://127.0.0.1:43210","token":"a".repeat(64)});
+        for (key, value, expected) in [
+            (
+                "schemaVersion",
+                serde_json::json!(2),
+                BridgeFailure::SchemaVersion,
+            ),
+            (
+                "processId",
+                serde_json::json!(1),
+                BridgeFailure::ProcessIdentity,
+            ),
+            (
+                "token",
+                serde_json::json!("private-invalid-token"),
+                BridgeFailure::TokenFormat,
+            ),
+            (
+                "baseUrl",
+                serde_json::json!("private-invalid-url"),
+                BridgeFailure::UrlParse,
+            ),
+            (
+                "baseUrl",
+                serde_json::json!("http://remote.invalid:43210"),
+                BridgeFailure::UrlPolicy,
+            ),
+            (
+                "baseUrl",
+                serde_json::json!("http://127.0.0.1"),
+                BridgeFailure::UrlPort,
+            ),
+        ] {
+            let mut value_set = valid.clone();
+            value_set[key] = value;
+            assert_eq!(
+                serde_json::from_value::<BridgeReceipt>(value_set)
+                    .unwrap()
+                    .validated_port(),
+                Err(expected)
+            );
+            let diagnostic = serde_json::to_string(&expected).unwrap();
+            assert!(!diagnostic.contains("127.0.0.1"));
+            assert!(!diagnostic.contains("private-invalid"));
+        }
+        assert_eq!(endpoint_reason(b"true"), Some("owned"));
+        assert_eq!(
+            endpoint_reason(b"listener-owner-mismatch"),
+            Some("listener-owner-mismatch")
+        );
+        for unknown in [
+            b"true\n".as_slice(),
+            b"unknown private native message",
+            b"http://127.0.0.1:43210",
+        ] {
+            assert_eq!(endpoint_reason(unknown), None);
+        }
+        let receipt: BridgeReceipt = serde_json::from_value(valid).unwrap();
+        assert_eq!(receipt.validated_port(), Ok(43210));
     }
 
     #[test]
@@ -760,6 +999,11 @@ mod tests {
             lock_directory(&library).unwrap(),
         ];
         assert!(owned_directory_custody(&directories, 0, Some(1)));
+        // Bridge admission precedes the library loan. Its original-root proof
+        // must pass while the later complete configuration proof still fails.
+        assert!(owned_root_custody(&directories[..1], 0));
+        assert!(!owned_directory_custody(&directories[..1], 0, None));
+        assert!(!owned_root_custody(&directories[..1], 1));
         assert!(!owned_directory_custody(&directories, 0, None));
         let mut retained = Vec::new();
         for path in [

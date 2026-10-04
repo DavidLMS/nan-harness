@@ -41,5 +41,19 @@ const api=vm.runInNewContext(source.slice(begin,end)+';focusCapturedMain',{Date,
   assert.equal(result,false);assert.equal(activations,1);assert.equal(observations,1);
   assert.equal(diagnostic.status,'deadline');assert.equal(diagnostic.nativePointObservation.inputAuthorized,false);
  }
+ for(const scenario of ['focused-after-prepare','changed-after-prepare']) {
+  let reads=0,activations=0;
+  const held={page:{},key:'held'},proof=async()=>true,diagnostic={};
+  proof.requireDocumentFocus=()=>{};
+  const native={prepare(){},activate(){activations++;throw Error('closed');},verify:()=>true};
+  const identity=async()=>({key:scenario==='changed-after-prepare'&&++reads===2?'changed':'held',
+    scope:{mainScope:true,focused:scenario==='focused-after-prepare'?++reads>=2:false}});
+  assert.equal(await api(held,proof,Date.now()+1000,identity,(a,b)=>a.key===b.key,
+    async()=>{},diagnostic,native),false);
+  assert.equal(diagnostic.focusSamples.beforePrepare,'unfocused');
+  assert.equal(diagnostic.focusSamples.afterPrepare,scenario==='focused-after-prepare'?'focused':'unmeasured');
+  assert.equal(diagnostic.focusSamples.afterActivation,'unmeasured');
+  assert.equal(activations,scenario==='focused-after-prepare'?1:0);
+ }
  console.log('held page focus fixtures PASS');
 })().catch(e=>{console.error(e);process.exitCode=1});

@@ -75,6 +75,74 @@ enum FailureBoundary {
     TransportDecode,
     TransportDeadline,
 }
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum EmptyInputField {
+    WitnessPresent,
+    RootSame,
+    TextSame,
+    RecordKeysSame,
+    StateSame,
+    AttributesSame,
+    TextRecordsSame,
+    OtherValuesSame,
+    FocusOnlyStateChange,
+    FocusAttempted,
+}
+type EmptyInputDrift = std::collections::BTreeMap<EmptyInputField, bool>;
+fn retry_candidate_observation(facts: &Value) -> Option<Value> {
+    let value = facts.get("retryCandidateObservation")?;
+    let fields = value.as_object()?;
+    let counts = [
+        "pendingUserCount",
+        "conversationHeadingCount",
+        "tryAgainCount",
+        "retryCount",
+        "candidateRowHeadingCount",
+    ];
+    let flags = [
+        "historyMatched",
+        "candidateEnabled",
+        "candidateActionUnique",
+        "candidateHitMatched",
+        "candidateUserAncestorMatched",
+    ];
+    if fields.len() != 11
+        || counts
+            .iter()
+            .any(|key| value[*key].as_u64().is_none_or(|n| n > 32))
+        || flags.iter().any(|key| !value[*key].is_boolean())
+    {
+        return None;
+    }
+    let total = value["tryAgainCount"].as_u64()? + value["retryCount"].as_u64()?;
+    let label = match (
+        value["tryAgainCount"].as_u64()?,
+        value["retryCount"].as_u64()?,
+    ) {
+        (0, 0) => "none",
+        (1, 0) => "try-again",
+        (0, 1) => "retry",
+        _ => "ambiguous",
+    };
+    if total > 32
+        || value["candidateLabel"] != label
+        || total != 1
+            && (flags[1..].iter().any(|key| value[*key] != false)
+                || value["candidateRowHeadingCount"] != 0)
+        || value["candidateUserAncestorMatched"] == true && value["pendingUserCount"] != 1
+    {
+        return None;
+    }
+    Some(value.clone())
+}
+
+fn empty_input_drift(facts: &Value) -> Option<EmptyInputDrift> {
+    let value: EmptyInputDrift =
+        serde_json::from_value(facts.get("emptyInputDrift")?.clone()).ok()?;
+    (value.len() == 10).then_some(value)
+}
+
 #[derive(Clone, Copy, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 enum SendActionClass {
@@ -339,6 +407,20 @@ fn valid_binding(fields: &serde_json::Map<String, Value>) -> bool {
 // packet. Validate them together so no field can widen input authority.
 fn validate_diagnostics(facts: &Value) -> Option<()> {
     let fields = facts.as_object()?;
+    if fields.contains_key("retryCandidateObservation")
+        && (retry_candidate_observation(facts).is_none() || facts["stage"] != "retry-diagnostic")
+    {
+        return None;
+    }
+    if fields.contains_key("emptyInputDrift")
+        && (empty_input_drift(facts).is_none()
+            || !matches!(
+                facts["failureBoundary"].as_str(),
+                Some("input-empty-state" | "input-empty-witness")
+            ))
+    {
+        return None;
+    }
     if fields.contains_key("sendActionObservation")
         && (send_action_observation(facts).is_none()
             || facts["inputVerified"] != true
@@ -404,7 +486,7 @@ fn decode(bytes: &[u8]) -> Option<(Value, Option<Value>)> {
         return None;
     }
     let facts = value["facts"].as_object()?;
-    if !(11..=17).contains(&facts.len())
+    if !(11..=19).contains(&facts.len())
         || facts.keys().any(|key| {
             !FLAGS.contains(&key.as_str())
                 && ![
@@ -418,6 +500,8 @@ fn decode(bytes: &[u8]) -> Option<(Value, Option<Value>)> {
                     "ownedInputObservation",
                     "sendActionClass",
                     "sendActionObservation",
+                    "emptyInputDrift",
+                    "retryCandidateObservation",
                 ]
                 .contains(&key.as_str())
         })
@@ -442,6 +526,7 @@ fn decode(bytes: &[u8]) -> Option<(Value, Option<Value>)> {
             "response-pending",
             "response-mismatch",
             "copied",
+            "retry-diagnostic",
         ]
         .contains(&value["facts"]["stage"].as_str()?)
         || value["facts"]["sendForwarded"] == true && value["facts"]["sendAttempted"] != true
@@ -608,6 +693,8 @@ pub(crate) struct ClaudeLinuxChatSession<'a> {
     input_shape: Option<InputShape>,
     embedded_text_observation: Option<EmbeddedTextObservation>,
     owned_input_observation: Option<OwnedInputObservation>,
+    empty_input_drift: Option<EmptyInputDrift>,
+    retry_candidate: Option<Value>,
     submitted: u8,
     verified: u8,
     copied: u8,
@@ -647,6 +734,8 @@ impl Gui {
             input_shape: None,
             embedded_text_observation: None,
             owned_input_observation: None,
+            empty_input_drift: None,
+            retry_candidate: None,
             submitted: 0,
             verified: 0,
             copied: 0,
@@ -694,7 +783,10 @@ impl ClaudeLinuxChatSession<'_> {
         request["value"] = json!(value);
         request["binding"] = json!(self.binding);
         request["profileAuthority"] = self.profile.private_request(deadline)?;
-        request["history"] = if matches!(mode, "input-next-correlated" | "input-next-empty-class") {
+        request["history"] = if matches!(
+            mode,
+            "input-next-correlated" | "input-next-empty-class" | "retry-ready"
+        ) {
             self.history.private_request()
         } else {
             json!([])
@@ -713,6 +805,8 @@ impl ClaudeLinuxChatSession<'_> {
         self.input_shape = input_shape(&facts);
         self.embedded_text_observation = embedded_text_observation(&facts);
         self.owned_input_observation = owned_input_observation(&facts);
+        self.empty_input_drift = empty_input_drift(&facts);
+        self.retry_candidate = retry_candidate_observation(&facts);
         facts["stage"]
             .as_str()
             .ok_or(Reason::ActionUnsupported)?
@@ -827,11 +921,18 @@ impl ClaudeLinuxChatSession<'_> {
     }
     pub(crate) fn wait_retry(
         &mut self,
-        _timeout: Duration,
-        _gate: &ProviderGate,
+        timeout: Duration,
+        gate: &ProviderGate,
     ) -> Result<(), Reason> {
-        self.stage = "recovery-scope-unimplemented".into();
-        self.failure_boundary = None;
+        if !gate.failure_observed() || self.submitted != 3 || self.copied != 2 {
+            return Err(Reason::ActionUnsupported);
+        }
+        let prompt = self
+            .pending_prompt
+            .clone()
+            .ok_or(Reason::ActionUnsupported)?;
+        self.operation("retry-ready", &prompt, Instant::now() + timeout)?;
+        // A passive candidate is not authority to repeat the failed turn.
         Err(Reason::ActionUnsupported)
     }
     pub(crate) fn retry_once(&mut self) -> Result<(), Reason> {
@@ -855,6 +956,14 @@ impl ClaudeLinuxChatSession<'_> {
             "copiedResponses":self.copied,"retryAttempted":false,"clipboardCleared":cleared});
         if let Some(boundary) = self.failure_boundary {
             facts["failureBoundary"] = json!(boundary);
+        }
+        if self.stage == "retry-diagnostic"
+            && let Some(candidate) = self.retry_candidate
+        {
+            facts["retryCandidateObservation"] = candidate;
+        }
+        if let Some(drift) = self.empty_input_drift {
+            facts["emptyInputDrift"] = json!(drift);
         }
         if let Some(observation) = self.send_action_observation {
             facts["sendActionObservation"] = json!(observation);
@@ -1187,5 +1296,28 @@ mod transport_cause_tests {
             );
             assert_eq!(serde_json::to_value(cause).unwrap(), expected);
         }
+    }
+}
+
+#[cfg(test)]
+mod empty_drift_tests {
+    use super::empty_input_drift;
+    use serde_json::json;
+
+    #[test]
+    fn empty_witness_diagnostics_reject_private_or_incomplete_packets() {
+        let drift = json!({"witnessPresent":true,"rootSame":true,"textSame":true,
+            "recordKeysSame":true,"stateSame":false,"attributesSame":true,
+            "textRecordsSame":true,"otherValuesSame":true,"focusOnlyStateChange":true,
+            "focusAttempted":true});
+        assert!(empty_input_drift(&json!({"emptyInputDrift":drift})).is_some());
+        for (key, value) in [("rawText", json!("PRIVATE")), ("rootSame", json!(1))] {
+            let mut changed = drift.clone();
+            changed[key] = value;
+            assert!(empty_input_drift(&json!({"emptyInputDrift":changed})).is_none());
+        }
+        let mut missing = drift;
+        missing.as_object_mut().unwrap().remove("focusAttempted");
+        assert!(empty_input_drift(&json!({"emptyInputDrift":missing})).is_none());
     }
 }

@@ -1137,6 +1137,24 @@ class EmptyClassCapabilityTests(unittest.TestCase):
         cap={};chat.flatten_hypertext(root,lambda m,n,*a:r[(m,n,*a)],7,lambda:None,inventory={},capability=cap)
         self.assertIsNone(cap['witness'])
 
+class EmptyInputDriftTests(unittest.TestCase):
+    def test_focus_attributes_text_and_attachment_changes_are_distinguished(self):
+        root=('owned','/editor');record=('state',root,(),0)
+        original=(root,'synthetic', (record, ('attributes',root,(),{'class':'empty'}),('text',root,(1,),'x')))
+        changed=(root,'synthetic', (('state',root,(),1<<12),*original[2][1:]))
+        drift=chat.empty_input_drift(original,changed,True)
+        self.assertTrue(drift['focusOnlyStateChange']);self.assertTrue(drift['recordKeysSame'])
+        self.assertFalse(drift['stateSame']);self.assertTrue(drift['attributesSame'])
+        changed=(root,'synthetic',(record,('attributes',root,(),{'class':'different'}),original[2][2]))
+        self.assertFalse(chat.empty_input_drift(original,changed,False)['attributesSame'])
+        changed=(root,'synthetic',(record,original[2][1],('text',root,(1,),'y')))
+        self.assertFalse(chat.empty_input_drift(original,changed,False)['textRecordsSame'])
+        self.assertFalse(chat.empty_input_drift(original,(root,'synthetic',()),False)['recordKeysSame'])
+        missing=chat.empty_input_drift(original,None,False)
+        self.assertFalse(any(missing.values()))
+        self.assertNotIn('synthetic',str(drift));self.assertNotIn('/editor',str(drift))
+
+
 class MainPacketTests(unittest.TestCase):
     def packet(self, mode='input-next-empty-class', change=False):
         import io,json,sys
@@ -1165,5 +1183,82 @@ class MainPacketTests(unittest.TestCase):
     def test_invalid_mode_main_emits_request_rejection_packet(self):
         p=self.packet(mode='unrecognized');self.assertEqual(p['facts']['stage'],'blocked')
         self.assertEqual(p['facts']['failureBoundary'],'request');self.assertIsNone(p['binding'])
+
+class RetryReadyDiagnosticsTests(unittest.TestCase):
+    def case(self, **options):
+        adapter,c,binding=ResponseFrameRestoreTests.restored(self)
+        adapter.profile_guard=lambda:not options.get('profile_loss')
+        identity,children,parent=adapter.identity,adapter.children,adapter.parent
+        def new_identity(node):
+            if node==('r','user'):return (83,'You said: private-failed-prompt','')
+            if node in (('r','retry'),('r','retry2')):
+                return (43,'Retry' if options.get('label') else 'Try again','')
+            return identity(node)
+        def new_children(node):
+            if node==('r','row'):
+                return [('r','user')]+([] if options.get('absent') else [('r','retry')])+([('r','retry2')] if options.get('duplicate') else [])
+            return children(node)
+        def new_parent(node):
+            if node in (('r','user'),('r','retry'),('r','retry2')):
+                return ('r','frame') if options.get('unattached') and node!=('r','user') else ('r','row')
+            return parent(node)
+        adapter.identity=new_identity;adapter.children=new_children;adapter.parent=new_parent
+        c.restore(binding,response=True)
+        if options.get('changed'):
+            original=adapter.bounds
+            count=[0]
+            def moved(node):
+                if node==('r','retry'):
+                    count[0]+=1
+                    return (10+count[0],10,100,40)
+                return original(node)
+            adapter.bounds=moved
+        if options.get('disabled'):
+            state=adapter.state
+            adapter.state=lambda node:state(node)&~(1<<8) if node==('r','retry') else state(node)
+        return adapter,c
+    def test_main_mode_emits_passive_packet(self):
+        import io,json,sys
+        from unittest.mock import patch
+        adapter,c=self.case();binding=c.binding()
+        controller=chat.Controller(adapter,dict(pid=7,bus='r',path='root'),1,adapter.clock,adapter.sleep)
+        class Custody:
+            def __init__(self,*args):pass
+            def verify(self):return True
+            def close(self):pass
+        request=dict(pid=7,bus='r',path='root',checkerPid=1,window=1,bounds=[0,0,800,600],
+            name='synthetic',nativeExecutable='/synthetic',deadline=chat.time.monotonic()+10,
+            mode='retry-ready',value='private-failed-prompt',binding=binding,profileAuthority={},history=[])
+        out=io.StringIO()
+        with patch.object(sys,'stdin',type('Input',(),{'buffer':io.BytesIO(json.dumps(request).encode())})()),patch.object(sys,'stdout',out),patch.object(chat,'ProfileCustody',Custody),patch.object(chat,'native_adapter',return_value=adapter),patch.object(chat,'Controller',return_value=controller):
+            chat.main()
+        packet=json.loads(out.getvalue())
+        self.assertEqual(packet['facts']['stage'],'retry-diagnostic')
+        self.assertFalse(packet['facts']['sendAttempted'])
+        self.assertFalse(packet['facts']['recoveryVerified'])
+        self.assertEqual(set(packet),{'facts','binding'})
+        self.assertEqual(len(packet['binding']),6)
+        self.assertEqual(adapter.send_count,0)
+    def test_readonly_complete_candidate(self):
+        for options,label in [({},'try-again'),({'label':True},'retry'),({'absent':True},'none'),({'duplicate':True},'ambiguous')]:
+            adapter,c=self.case(**options)
+            facts=c.retry_ready('private-failed-prompt',[])
+            self.assertEqual(facts['retryCandidateObservation']['candidateLabel'],label)
+            self.assertEqual((adapter.send_count,adapter.paste_count,adapter.focus_count,adapter.copy_actions),(0,0,0,0))
+            self.assertNotIn('private',str(facts))
+            with self.assertRaises(chat.Rejected):adapter.key_guard()
+    def test_changed_detached_and_profile_reject_without_action(self):
+        for options in ({'changed':True},{'unattached':True}):
+            adapter,c=self.case(**options)
+            with self.assertRaises(chat.Rejected):c.retry_ready('private-failed-prompt',[])
+            self.assertEqual(adapter.send_count,0)
+        adapter,c=self.case();adapter.profile_guard=lambda:False
+        with self.assertRaises(chat.Rejected):c.retry_ready('private-failed-prompt',[])
+    def test_missing_history_and_disabled_are_diagnostics_not_permission(self):
+        adapter,c=self.case(disabled=True)
+        facts=c.retry_ready('private-failed-prompt',[{'prompt':'prior','marker':'prior-nonce'}])
+        self.assertFalse(facts['retryCandidateObservation']['historyMatched'])
+        self.assertFalse(facts['retryCandidateObservation']['candidateEnabled'])
+        self.assertFalse(facts['recoveryVerified']);self.assertEqual(adapter.send_count,0)
 
 if __name__=='__main__':unittest.main()

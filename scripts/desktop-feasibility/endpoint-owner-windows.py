@@ -149,14 +149,20 @@ def prove(mode, value, owner, native):
 
 def prove_bridge(port, bridge, launcher, native):
     listeners = native.listeners(port)
-    if listeners != [(bridge, True)]:
-        return 'listener-unavailable'
+    if not listeners:
+        return 'listener-missing'
+    if len(listeners) != 1:
+        return 'listener-ambiguous'
+    if listeners[0][1] is not True:
+        return 'listener-nonloopback'
+    if listeners[0][0] != bridge:
+        return 'listener-owner-mismatch'
     parents = native.parents()
     if parents is None:
         return 'process-budget'
     verdict = ancestry(bridge, launcher, parents, native.identity)
     if verdict == 'true' and native.listeners(port) != listeners:
-        return 'listener-unavailable'
+        return 'listener-changed'
     return verdict
 
 

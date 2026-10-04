@@ -262,7 +262,11 @@ function codingScope(diagnostic=false) {
     composerSourceSha256:'7198ee078e78a748d03c3cc96f5c041d056584d762728fd0be23e695bc394da0',
     ...Object.fromEntries(Object.keys(homeStateCounts).map(k=>[k,homeStateComplete?homeStateCounts[k]:null]))};
   const complete=Object.values(counts).every(n=>Number.isInteger(n)&&n>=0&&n<=32);
-  return {ready,navigation,home,ancestry,homeState,observation:{status:complete?'observed':'overflow',
+  // Public DOM counters carry no platform source pins and never admit input.
+  const publicShape=value=>Object.fromEntries(Object.entries(value).filter(([key])=>
+    key==='status'||key.endsWith('Count')||key.endsWith('HitActionable')||key==='uniqueCodexRole'));
+  const publicDOM={navigation:publicShape(navigation),editable:publicShape(ancestry),home:publicShape(homeState)};
+  return {ready,navigation,home,ancestry,homeState,publicDOM,observation:{status:complete?'observed':'overflow',
     ...Object.fromEntries(Object.keys(counts).map(k=>[k,complete?counts[k]:null]))}};
 }
 
@@ -391,7 +395,7 @@ function candidate(a, b) {
   return a && b && !a.blocked && !b.blocked && JSON.stringify(a.rect) === JSON.stringify(b.rect)
     && a.points.find(p => b.points.some(q => p.x === q.x && p.y === q.y));
 }
-async function run(page, ownerGuard, deadline, rejected, mainGuard, folderTrust, profileLoan) {
+async function run(page, ownerGuard, deadline, rejected, mainGuard, folderTrust, profileLoan, directCDP=false) {
   const maxWaitMs = deadline - Date.now();
   const originalUrl = page.url();
   const ownedEndpoint = async () => {
@@ -653,12 +657,22 @@ async function run(page, ownerGuard, deadline, rejected, mainGuard, folderTrust,
     while(Date.now()<deadline) {
       if(!await ownedEndpoint())return stop('ownership-lost');
       const coding=await page.evaluate(codingScope,true);
+      if(process.platform==='win32') {
+        // Recheck the original held owner/document after this passive DOM read.
+        if(!await ownedEndpoint()||Date.now()>=deadline)return stop('ownership-lost');
+        facts.codingPublicDOMObservation=coding.publicDOM;
+      }
       facts.codingReadinessObservation=coding.observation;
       if(process.platform==='linux'&&skipAdmitted) {
         facts.codingNavigationObservation=coding.navigation;
         facts.codingHomeObservation=coding.home;
         facts.codingEditableObservation=coding.ancestry;
         facts.codingHomeStateObservation=coding.homeState;
+      }
+      if(directCDP&&require('./codex-dom.cjs').directCDPPolicy()
+          &&await page.evaluate(require('./codex-dom.cjs').homeComposerScope)) {
+        if(!await ownedEndpoint()||Date.now()>=deadline)return stop('ownership-lost');
+        facts.codingComposerReady=true;return facts;
       }
       if(process.platform==='darwin'&&skipAdmitted&&profileLoan
           &&coding.observation.modalCount===0&&coding.homeState.status==='observed'
@@ -735,9 +749,9 @@ function sourceRoute(raw) {
       ['/global-dictation','globalDictation'],['/debug','debug']]).get(route)??'unknown';
   } catch { return 'unknown'; }
 }
-exports.run=async function(page, ownerGuard, deadline, mainGuard, folderTrust, profileLoan) {
+exports.run=async function(page, ownerGuard, deadline, mainGuard, folderTrust, profileLoan, directCDP=false) {
   let rejectedPages, rejectedUrls;
-  const facts=await run(page,ownerGuard,deadline,pages=>{rejectedPages=pages;rejectedUrls=pages.map(p=>p.url());},mainGuard,folderTrust,profileLoan);
+  const facts=await run(page,ownerGuard,deadline,pages=>{rejectedPages=pages;rejectedUrls=pages.map(p=>p.url());},mainGuard,folderTrust,profileLoan,directCDP);
   if(!rejectedPages)return facts;
   const unavailable=()=>{facts.rejectedPageInventory.source={status:'unavailable'};return facts;};
   const stable=()=>{

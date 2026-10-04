@@ -118,6 +118,10 @@ mod windows_process_tests {
     }
 }
 
+#[cfg(windows)]
+mod codex_windows_profile;
+#[cfg(windows)]
+pub(crate) use codex_windows_profile::FreshCodexWindowsProfile as FreshCodexProfile;
 #[cfg(target_os = "linux")]
 mod codex_linux_profile;
 #[cfg(target_os = "linux")]
@@ -786,13 +790,13 @@ async fn scenario_owned(
         &prepared_launch,
         Instant::now() + Duration::from_secs(1),
     )?;
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[cfg(any(target_os = "linux", target_os = "macos", windows))]
     let mut fresh_codex_profile = FreshCodexProfile::prepare(
         spec,
         &prepared_launch,
         Instant::now() + Duration::from_secs(1),
     )?;
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[cfg(any(target_os = "linux", target_os = "macos", windows))]
     if let Some(profile) = fresh_codex_profile.as_mut() {
         profile.before_launch(&prepared_launch, Instant::now() + Duration::from_secs(1))?;
     }
@@ -820,7 +824,7 @@ async fn scenario_owned(
             .run_renderer(
                 &mut process,
                 result,
-                #[cfg(any(target_os = "linux", target_os = "macos"))]
+                #[cfg(any(target_os = "linux", target_os = "macos", windows))]
                 fresh_codex_profile.as_ref(),
             )
             .await
@@ -971,7 +975,7 @@ impl ConversationScenario<'_> {
         &self,
         process: &mut ProbeProcess,
         result: &mut ProbeResult,
-        #[cfg(any(target_os = "linux", target_os = "macos"))] codex_profile: Option<
+        #[cfg(any(target_os = "linux", target_os = "macos", windows))] codex_profile: Option<
             &FreshCodexProfile,
         >,
     ) -> Result<(), Reason> {
@@ -986,7 +990,7 @@ impl ConversationScenario<'_> {
                     marker: self.final_marker,
                 },
                 result,
-                #[cfg(any(target_os = "linux", target_os = "macos"))]
+                #[cfg(any(target_os = "linux", target_os = "macos", windows))]
                 codex_profile,
             )
             .await

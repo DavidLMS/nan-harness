@@ -66,9 +66,9 @@ for(const change of [{timeoutMs:45001},{action:'unknown'},{prompt:'arbitrary'},
   guards=0;
   const losing=async()=>++guards<4;
   assert.equal(await ordinaryClick(locator,losing,Date.now()+1000,()=>{attempts++;}),false);
-  assert.equal(clicks,2);assert.equal(attempts,2);assert.equal(disposed,2);
+  assert.equal(clicks,1);assert.equal(attempts,1);assert.equal(disposed,2);
   const intercept={...locator,elementHandle:async()=>({...handle,evaluate:async()=>({blocked:'foreign-overlay'})})};
   assert.equal(await ordinaryClick(intercept,guard,Date.now()+1000,()=>{attempts++;}),false);
-  assert.equal(clicks,2);
+  assert.equal(clicks,1);
   console.log('PASS: Codex source-bound turn oracle, immutable binding and single ordinary action');
 })().catch(error=>{console.error(error);process.exitCode=1;});

@@ -115,3 +115,15 @@ const homeStateOverflow=read({nodeOverflow:true}).homeState;
 assert.equal(homeStateOverflow.status,'overflow');
 for(const [key,value] of Object.entries(homeStateOverflow))if(key.endsWith('Count'))assert.equal(value,null);
 console.log('PASS: pending textarea and live home source counters remain advisory');
+
+for(const options of [{liveHome:true},{pendingHome:true},{nodeOverflow:true},{ancestryMarker:{'data-composer-input':''}}]) {
+ const result=read(options);
+ for(const [key,prior] of [['navigation',result.navigation],['editable',result.ancestry],['home',result.homeState]]) {
+  const diagnostic=result.publicDOM[key];
+  assert.equal(diagnostic.status,prior.status);
+  for(const [field,value] of Object.entries(diagnostic))assert.equal(value,prior[field]);
+  assert(!Object.keys(diagnostic).some(field=>field.includes('Source')||field.startsWith('source')));
+ }
+ assert(!JSON.stringify(result.publicDOM).includes('PRIVATE'));
+}
+console.log('PASS: platform-neutral public DOM counters preserve bounds and disclose no source pins or text');
