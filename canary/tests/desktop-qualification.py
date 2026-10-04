@@ -3448,6 +3448,27 @@ class ClaudePersistAttributeTests(unittest.TestCase):
                 with self.assertRaises(ValueError):q.semantic_observations(root,'claude-desktop')
 
 class ClaudeLinuxVisibilityTests(unittest.TestCase):
+    def test_std_rename_boundaries_are_closed_and_failure_only(self):
+        base=dict(schemaVersion=1,mechanism='claude-cli-prelaunch',phase='prelaunch',stage='configuration',
+                  status='failed',diagnosticsOnly=True,configurationSubstage='persist',
+                  configurationDocument='normal-config',configurationIoFailure='sharing-violation')
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp); path=root/'claude-cli-prelaunch.json'
+            for boundary in ('original-source','bridge-reader','retained-reader','destination-preflight',
+                             'rename-dispatch','destination-identity','private-postcheck','deadline'):
+                value={**base,'stdRenameSelected':True,'stdRenameBoundary':boundary}
+                path.write_text(json.dumps(value))
+                self.assertEqual(q.semantic_observations(root,'claude-desktop')[0],value)
+            path.write_text(json.dumps({**base,'stdRenameSelected':False}))
+            self.assertFalse(q.semantic_observations(root,'claude-desktop')[0]['stdRenameSelected'])
+            for change in ({'stdRenameSelected':True},{'stdRenameSelected':[]},
+                           {'stdRenameSelected':True,'stdRenameBoundary':'PRIVATE'},
+                           {'stdRenameSelected':False,'stdRenameBoundary':'rename-dispatch'},
+                           {'stdRenameSelected':True,'stdRenameBoundary':[]},
+                           {'stdRenameSelected':True,'stdRenameBoundary':'rename-dispatch','rawPath':'PRIVATE'}):
+                path.write_text(json.dumps({**base,**change}))
+                with self.assertRaises(ValueError):q.semantic_observations(root,'claude-desktop')
+
     def test_closed_passive_states_and_failure_privacy(self):
         value = dict(schemaVersion=1, mechanism='claude-linux-classic-visibility', diagnosticsOnly=True,
                      status='complete', stage='complete', visible=False, showing=False, boundsPositive=True,

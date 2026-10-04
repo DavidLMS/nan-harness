@@ -1147,7 +1147,7 @@ def semantic_observations(directory, app):
             record.update({key:value[key] for key in fields - {'schemaVersion','mechanism'}})
         elif mechanism == 'claude-cli-prelaunch':
             fields = {'schemaVersion', 'mechanism', 'phase', 'stage', 'status', 'diagnosticsOnly'}
-            optional = {'configurationSubstage', 'configurationDocument', 'configurationIoFailure', 'configurationFileAttributes'}
+            optional = {'configurationSubstage', 'configurationDocument', 'configurationIoFailure', 'configurationFileAttributes', 'stdRenameSelected', 'stdRenameBoundary'}
             if (not fields <= set(value) or set(value) - fields - optional or app != 'claude-desktop' or path.name != 'claude-cli-prelaunch.json'
                     or value['diagnosticsOnly'] is not True or value['phase'] != 'prelaunch'
                     or value['status'] != 'failed' or type(value['stage']) is not str or value['stage'] not in {
@@ -1180,6 +1180,18 @@ def semantic_observations(directory, app):
                             'invalid-name', 'path-not-found', 'already-exists', 'invalid-input', 'other'}):
                     raise ValueError('invalid Claude configuration I/O failure')
                 record['configurationIoFailure'] = failure
+            if 'stdRenameSelected' in value or 'stdRenameBoundary' in value:
+                selected=value.get('stdRenameSelected')
+                boundary=value.get('stdRenameBoundary')
+                boundaries={'original-source','bridge-reader','retained-reader','destination-preflight',
+                            'rename-dispatch','destination-identity','private-postcheck','deadline'}
+                if (type(selected) is not bool or value.get('configurationDocument')!='normal-config'
+                        or value.get('configurationSubstage')!='persist' or 'configurationIoFailure' not in value
+                        or selected and (type(boundary) is not str or boundary not in boundaries)
+                        or not selected and 'stdRenameBoundary' in value):
+                    raise ValueError('invalid Claude std rename boundary')
+                record['stdRenameSelected']=selected
+                if selected: record['stdRenameBoundary']=boundary
             if 'configurationFileAttributes' in value:
                 attributes = value['configurationFileAttributes']
                 keys = {'temporaryBefore', 'temporaryAfter', 'readonlyBefore', 'readonlyAfter'}

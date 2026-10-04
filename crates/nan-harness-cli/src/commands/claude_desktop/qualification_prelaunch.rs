@@ -105,6 +105,59 @@ impl ConfigurationIoFailure {
     }
 }
 
+#[cfg(windows)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum StdRenameBoundary {
+    OriginalSource,
+    BridgeReader,
+    RetainedReader,
+    DestinationPreflight,
+    RenameDispatch,
+    DestinationIdentity,
+    PrivatePostcheck,
+    Deadline,
+}
+#[cfg(windows)]
+impl StdRenameBoundary {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::OriginalSource => "original-source",
+            Self::BridgeReader => "bridge-reader",
+            Self::RetainedReader => "retained-reader",
+            Self::DestinationPreflight => "destination-preflight",
+            Self::RenameDispatch => "rename-dispatch",
+            Self::DestinationIdentity => "destination-identity",
+            Self::PrivatePostcheck => "private-postcheck",
+            Self::Deadline => "deadline",
+        }
+    }
+}
+#[cfg(windows)]
+pub(super) fn observe_configuration_rename<T>(
+    result: Result<T, super::ClaudeDesktopError>,
+    boundary: Option<StdRenameBoundary>,
+) -> Result<T, super::ClaudeDesktopError> {
+    #[cfg(feature = "desktop-qualification")]
+    if let Err(super::ClaudeDesktopError::Write(error)) = &result
+        && enabled()
+    {
+        let mut record = serde_json::json!({"schemaVersion":1,"mechanism":"claude-cli-prelaunch",
+            "phase":"prelaunch","stage":"configuration","status":"failed","diagnosticsOnly":true,
+            "configurationSubstage":"persist","configurationDocument":"normal-config",
+            "configurationIoFailure":ConfigurationIoFailure::from_error(error).as_str(),
+            "stdRenameSelected":boundary.is_some()});
+        if let Some(boundary) = boundary {
+            record["stdRenameBoundary"] = serde_json::json!(boundary.as_str());
+        }
+        if let Some(directory) = facts_directory() {
+            write_record(&directory, &record);
+        }
+    }
+    #[cfg(not(feature = "desktop-qualification"))]
+    let _ = boundary;
+    result
+}
+
 pub(super) fn observe_configuration_persist<T>(
     result: Result<T, super::ClaudeDesktopError>,
     document: Option<ConfigurationDocument>,

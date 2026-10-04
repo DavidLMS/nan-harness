@@ -378,10 +378,12 @@ fn persist_written_configuration(
         Some(qualification_prelaunch::ConfigurationDocument::NormalConfig)
     ) && std_rename_policy_requested()?
     {
+        let mut boundary = qualification_prelaunch::StdRenameBoundary::OriginalSource;
         let result = rename_written_configuration_once(
             temporary,
             path,
             qualification_persist_owners::configuration_retry_deadline(),
+            &mut boundary,
         )
         .inspect_err(|error| {
             if error.error.raw_os_error() == Some(32) {
@@ -389,7 +391,7 @@ fn persist_written_configuration(
             }
         })
         .map_err(|error| ClaudeDesktopError::Write(error.error));
-        return qualification_prelaunch::observe_configuration_persist(result, document);
+        return qualification_prelaunch::observe_configuration_rename(result, Some(boundary));
     }
     #[cfg(all(windows, feature = "desktop-qualification"))]
     if matches!(
@@ -410,7 +412,7 @@ fn persist_written_configuration(
             }
         })
         .map_err(|error| ClaudeDesktopError::Write(error.error));
-        return qualification_prelaunch::observe_configuration_persist(result, document);
+        return qualification_prelaunch::observe_configuration_rename(result, None);
     }
     #[cfg(all(windows, feature = "desktop-qualification"))]
     let attributes_before = {
@@ -551,15 +553,19 @@ fn rename_written_configuration_once(
     temporary: tempfile::NamedTempFile,
     path: &Path,
     deadline: std::time::Instant,
+    boundary: &mut qualification_prelaunch::StdRenameBoundary,
 ) -> Result<(), tempfile::PathPersistError> {
+    use qualification_prelaunch::StdRenameBoundary as Boundary;
     use std::os::windows::fs::MetadataExt as _;
     use std::time::Instant;
     let (written, mut temporary) = temporary.into_parts();
     let result = (|| {
         let fail = |kind| std::io::Error::from(kind);
         if Instant::now() >= deadline {
+            *boundary = Boundary::Deadline;
             return Err(fail(ErrorKind::TimedOut));
         }
+        *boundary = Boundary::OriginalSource;
         let original = same_file::Handle::from_file(written)?;
         let metadata = original.as_file().metadata()?;
         if !metadata.is_file() || metadata.file_attributes() & (0x1 | 0x100 | 0x400) != 0 {
@@ -568,37 +574,45 @@ fn rename_written_configuration_once(
         nan_harness_private_fs::verify_private_file(original.as_file())?;
         // This initial reader shares WRITE while the actual written handle exists.
         // It retains its proven file identity across closing that written handle.
+        *boundary = Boundary::BridgeReader;
         let bridge = retained_rename_source(&temporary, 7)?;
         if bridge != original {
             return Err(fail(ErrorKind::InvalidInput));
         }
         drop(original);
         // The final read authority allows DELETE/rename, but denies content writes.
+        *boundary = Boundary::RetainedReader;
         let held = retained_rename_source(&temporary, 5)?;
         if held != bridge {
             return Err(fail(ErrorKind::InvalidInput));
         }
         drop(bridge);
+        *boundary = Boundary::DestinationPreflight;
         match fs::symlink_metadata(path) {
             Err(error) if error.kind() == ErrorKind::NotFound => (),
             Err(error) => return Err(error),
             Ok(_) => return Err(fail(ErrorKind::AlreadyExists)),
         }
         if Instant::now() >= deadline {
+            *boundary = Boundary::Deadline;
             return Err(fail(ErrorKind::TimedOut));
         }
         // One safe Rust dispatch, no retry/fallback added by this caller. The std
         // Windows implementation itself may use its ACCESS_DENIED fallback.
+        *boundary = Boundary::RenameDispatch;
         fs::rename(&temporary, path)?;
+        *boundary = Boundary::DestinationIdentity;
         let destination = retained_rename_source(path, 5)?;
         if destination != held {
             return Err(fail(ErrorKind::InvalidInput));
         }
+        *boundary = Boundary::PrivatePostcheck;
         let after = destination.as_file().metadata()?;
         if !after.is_file() || after.file_attributes() & (0x1 | 0x100 | 0x400) != 0 {
             return Err(fail(ErrorKind::InvalidInput));
         }
         if Instant::now() >= deadline {
+            *boundary = Boundary::Deadline;
             return Err(fail(ErrorKind::TimedOut));
         }
         // keep() would call SetFileAttributes again on Windows. Disarm only after
@@ -881,6 +895,7 @@ mod configuration_persist_tests {
             source,
             &destination,
             Instant::now() + Duration::from_secs(2),
+            &mut qualification_prelaunch::StdRenameBoundary::OriginalSource,
         )
         .unwrap();
         let actual = retained_rename_source(&destination, 5).unwrap();
@@ -897,13 +912,19 @@ mod configuration_persist_tests {
         second.flush().unwrap();
         second.as_file().sync_all().unwrap();
         let historical = second.path().to_owned();
+        let mut boundary = qualification_prelaunch::StdRenameBoundary::OriginalSource;
         let error = rename_written_configuration_once(
             second,
             &destination,
             Instant::now() + Duration::from_secs(2),
+            &mut boundary,
         )
         .unwrap_err();
         assert_eq!(error.error.kind(), ErrorKind::AlreadyExists);
+        assert_eq!(
+            boundary,
+            qualification_prelaunch::StdRenameBoundary::DestinationPreflight
+        );
         assert_eq!(fs::read(&destination).unwrap(), b"synthetic-private");
         assert_eq!(fs::read(&historical).unwrap(), b"new-payload");
         drop(error);
@@ -933,6 +954,7 @@ mod configuration_persist_tests {
             source,
             &destination,
             Instant::now() + Duration::from_secs(2),
+            &mut qualification_prelaunch::StdRenameBoundary::OriginalSource,
         )
         .unwrap_err();
         assert_eq!(error.error.raw_os_error(), Some(32));
@@ -961,8 +983,13 @@ mod configuration_persist_tests {
             .unwrap();
         let historical = source.path().to_owned();
         let destination = directory.path().join("new.json");
-        let error =
-            rename_written_configuration_once(source, &destination, Instant::now()).unwrap_err();
+        let error = rename_written_configuration_once(
+            source,
+            &destination,
+            Instant::now(),
+            &mut qualification_prelaunch::StdRenameBoundary::OriginalSource,
+        )
+        .unwrap_err();
         assert_eq!(error.error.kind(), ErrorKind::TimedOut);
         assert!(!destination.exists());
         assert!(historical.exists());
