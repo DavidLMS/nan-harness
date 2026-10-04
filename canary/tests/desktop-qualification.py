@@ -4031,7 +4031,8 @@ class ClaudeLinuxTransportCauseTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             path=Path(root)/'transport.json'
             for cause in ['transport-spawn','transport-io','transport-wait','transport-status',
-                'transport-size','transport-decode','transport-deadline']:
+                'transport-size','transport-decode','transport-deadline','input-mapping-state',
+                'input-mapping-changed','input-empty-state','input-empty-witness']:
                 receipt=good|{'failureBoundary':cause};path.write_text(json.dumps(receipt))
                 self.assertEqual(q.semantic_observations(root,'claude-desktop'),[receipt])
                 for changed in [{'stage':'sent'},{'failureBoundary':[]},{'failureBoundary':'PRIVATE'},{'rawStderr':'PRIVATE'}]:

@@ -25,7 +25,7 @@ def inside(rect, outer):
 RESPONSE_CONTAINER_ROLES = frozenset((39, 85, 99))
 
 BOUNDARIES = frozenset(('request','policy','native-window','source-owner','tree','tree-cycle','tree-depth','tree-limit','tree-identity','tree-children','response-heading','response-row','response-row-role-limit','response-row-copy-absent','response-row-copy-ambiguous','response-row-headings','response-row-attachment','state',
-    'frame','frame-active','frame-count','frame-client','client','mode','focus','input','clipboard','action','action-count','action-name','action-hit','response','transport'))
+    'frame','frame-active','frame-count','frame-client','client','mode','focus','input','input-mapping-state','input-mapping-changed','input-empty-state','input-empty-witness','clipboard','action','action-count','action-name','action-hit','response','transport'))
 QUERY_BOUNDARIES = dict(owner='source-owner', identity='tree-identity', children='tree-children', parent='frame',
     state='state', bounds='frame', guard='native-window', client_bounds='client',
     attributes='mode', focused='focus', grab_focus='focus', text='input', paste_once='input',
@@ -301,7 +301,7 @@ def flatten_hypertext(root, query, pid, budget, observation=None, inventory=None
     for method,node,args,value in records:
         budget()
         if query(method,node,*args)!=value:
-            raise Rejected('input')
+            raise Rejected('input-mapping-state' if method=='state' else 'input-mapping-changed')
         budget()
     if shape is not None:
         observation.update(shape)
@@ -885,8 +885,15 @@ class Controller:
         if self.empty_class_witness is None or self.empty_class_dispatched:
             return
         self.query('text',self.editor)
-        if getattr(self.adapter,'empty_class_witness',None)!=self.empty_class_witness:
-            raise Rejected('input')
+        current=getattr(self.adapter,'empty_class_witness',None)
+        if current!=self.empty_class_witness:
+            original=self.empty_class_witness
+            state_only=(type(current) is tuple and type(original) is tuple
+                and len(current)==len(original)==3 and current[:2]==original[:2]
+                and len(current[2])==len(original[2])
+                and all(a==b or a[:3]==b[:3] and a[0]=='state'
+                    for a,b in zip(current[2],original[2])))
+            raise Rejected('input-empty-state' if state_only else 'input-empty-witness')
 
     def before_empty_class_paste(self):
         if self.empty_class_witness is None or self.empty_class_dispatched:

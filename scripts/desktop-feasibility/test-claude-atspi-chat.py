@@ -1052,6 +1052,22 @@ class EmptyClassCapabilityTests(unittest.TestCase):
         a.grab_focus=changed
         f=c.submit('owned next prompt')
         self.assertFalse(f['sendForwarded']);self.assertEqual(a.paste_count,0)
+        self.assertEqual(f['failureBoundary'],'input-empty-witness')
+    def test_state_only_drift_is_identified_without_admitting_paste(self):
+        a,c,b,h=self.fixture()
+        a.empty_class_witness=('editor','private-text',(('state','editor',(),0),
+            ('text','editor',(),'private-text')))
+        c.restore_next_input(b,h)
+        focus=a.grab_focus
+        def changed(node):
+            result=focus(node)
+            a.empty_class_witness=('editor','private-text',(('state','editor',(),1<<12),
+                ('text','editor',(),'private-text')))
+            return result
+        a.grab_focus=changed
+        f=c.submit('owned next prompt')
+        self.assertEqual(f['failureBoundary'],'input-empty-state')
+        self.assertEqual(a.paste_count,0);self.assertEqual(a.send_count,0)
     def test_capability_is_not_ordinary_restore_permission(self):
         a,c,b,h=self.fixture();c.empty_class_opt_in=False
         with self.assertRaises(chat.Rejected):c.restore_next_input(b,h)
