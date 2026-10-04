@@ -3,6 +3,7 @@
 #include <vector>
 #include <optional>
 #include <cstddef>
+#include <algorithm>
 
 enum class UiaChatRole { Other, Heading, Button, Text, Group, Boundary };
 // Containers retain topology, not duplicated aggregate names. Source action,
@@ -104,5 +105,44 @@ inline UiaChatScope uia_chat_failure_details(const std::vector<UiaChatScopeNode>
         ancestor=next;
     }
     if(std::string(result.failure)=="scope")result.failure="scope-prompt-mismatch";
+    return result;
+}
+
+// Closed passive counts from the already bounded, owned ControlView collection.
+// Group counts describe source shape; they never admit a disclosure or Retry.
+struct UiaChatFailureCounts {
+    unsigned server_errors=0,user_headings=0,prompt_texts=0,retries=0,details=0,
+        prompt_groups=0,group_retries=0,group_details=0;
+};
+inline UiaChatFailureCounts uia_chat_failure_counts(const std::vector<UiaChatScopeNode>& nodes,
+                                                   const std::wstring& prompt) {
+    UiaChatFailureCounts result;
+    if(nodes.size()>1024 || prompt.empty())return result;
+    for(const auto& node:nodes) {
+        result.server_errors+=node.role==UiaChatRole::Text && node.label==L"Server error";
+        result.user_headings+=node.role==UiaChatRole::Heading && node.label==L"You said: "+prompt;
+        result.prompt_texts+=node.role==UiaChatRole::Text && node.label==prompt;
+        result.retries+=node.role==UiaChatRole::Button && node.label==L"Retry";
+        result.details+=node.role==UiaChatRole::Button && node.label==L"View details";
+    }
+    for(std::size_t group=0;group<nodes.size();++group) {
+        if(nodes[group].role!=UiaChatRole::Group)continue;
+        unsigned headings=0,users=0,prompts=0,retries=0,details=0;
+        for(std::size_t index=0;index<nodes.size();++index) {
+            if(!uia_chat_descendant(nodes,index,static_cast<int>(group)))continue;
+            const auto& node=nodes[index];
+            headings+=node.role==UiaChatRole::Heading;
+            users+=node.role==UiaChatRole::Heading && node.label==L"You said: "+prompt;
+            prompts+=node.role==UiaChatRole::Text && node.label==prompt;
+            retries+=node.role==UiaChatRole::Button && node.label==L"Retry";
+            details+=node.role==UiaChatRole::Button && node.label==L"View details";
+        }
+        if(headings==1 && users==1 && prompts==1) {
+            ++result.prompt_groups;
+            // Maxima avoid double counting controls across nested groups.
+            result.group_retries=std::max(result.group_retries,retries);
+            result.group_details=std::max(result.group_details,details);
+        }
+    }
     return result;
 }

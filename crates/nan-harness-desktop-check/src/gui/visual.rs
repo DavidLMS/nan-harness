@@ -726,7 +726,7 @@ impl Visual {
         values: [&str; 3],
         deadline: Instant,
         mut observe: impl FnMut(&'static str, Option<FailureCategory>, Option<GuardFailure>),
-    ) -> Result<crate::native::WindowsChatStage, Reason> {
+    ) -> Result<crate::native::WindowsChatReceipt, Reason> {
         let expected = self.window.borrow().clone();
         let guard = |phase,
                      observe: &mut dyn FnMut(

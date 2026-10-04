@@ -50,7 +50,29 @@ static void control_view_scope_contract() {
     nodes.pop_back();nodes[2].parent=0;
     assert(uia_chat_scope(nodes,L"owned-prompt",L"retained-marker",false).control<0);
 }
+static void failure_counts_contract() {
+    using R=UiaChatRole;
+    std::vector<UiaChatScopeNode> nodes{{R::Boundary,L"",-1},{R::Group,L"",0},
+        {R::Heading,L"You said: PRIVATE",1},{R::Text,L"PRIVATE",1},
+        {R::Text,L"Server error",1},{R::Button,L"Retry",1}};
+    auto counts=uia_chat_failure_counts(nodes,L"PRIVATE");
+    assert(counts.server_errors==1 && counts.user_headings==1 && counts.prompt_texts==1);
+    assert(counts.retries==1 && counts.details==0 && counts.prompt_groups==1);
+    assert(counts.group_retries==1 && counts.group_details==0);
+    assert(uia_chat_failure_details(nodes,L"PRIVATE").control<0); // Observation does not waive details.
+    nodes.push_back({R::Button,L"View details",1});
+    counts=uia_chat_failure_counts(nodes,L"PRIVATE");
+    assert(counts.details==1 && counts.group_details==1);
+    nodes.back().parent=0;counts=uia_chat_failure_counts(nodes,L"PRIVATE");
+    assert(counts.details==1 && counts.group_details==0); // Foreign row control.
+    nodes.push_back({R::Heading,L"Claude responded: previous",1});
+    counts=uia_chat_failure_counts(nodes,L"PRIVATE");
+    assert(counts.prompt_groups==0 && counts.group_retries==0);
+    counts=uia_chat_failure_counts(nodes,L"other");
+    assert(counts.user_headings==0 && counts.prompt_texts==0 && counts.prompt_groups==0);
+}
 int main() {
+    failure_counts_contract();
     container_projection_contract();
     control_view_scope_contract();
     using R=UiaChatRole;

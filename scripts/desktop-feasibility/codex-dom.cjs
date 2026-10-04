@@ -48,6 +48,55 @@ function turnObservation({prompt,marker}) {
   return {userCount:1,assistantCount:Math.min(4096,units.size),responseVerified:matches===1};
 }
 
+// Capacity Retry starts a new empty turn. Retain its preceding user and
+// conversation plus pre-existing source unit IDs before consuming that action.
+function holdRetryContinuation({prompt}) {
+  const users=[...document.querySelectorAll('[data-local-conversation-user-anchor]')]
+    .filter(e=>e.isConnected&&e.querySelectorAll('[data-user-message-bubble]').length===1
+      &&e.querySelector('[data-user-message-bubble]').innerText.trim()===prompt);
+  if(users.length!==1)return null;
+  const user=users[0],conversation=user.closest('[data-thread-find-target="conversation"]');
+  if(!conversation||conversation.querySelectorAll('*').length>4096)return null;
+  const unitKeys=[...conversation.querySelectorAll('[data-content-search-unit-key]')]
+    .map(e=>e.getAttribute('data-content-search-unit-key'));
+  if(unitKeys.some(key=>typeof key!=='string'||key.length===0||key.length>512)
+      ||new Set(unitKeys).size!==unitKeys.length)return null;
+  const laterUsers=[...conversation.querySelectorAll('[data-local-conversation-user-anchor]')]
+    .some(e=>e!==user&&(user.compareDocumentPosition(e)&5)!==0);
+  if(laterUsers)return null;
+  return {document,user,conversation,unitKeys};
+}
+function retryContinuationObservation({held,prompt,marker}) {
+  const empty={userCount:0,assistantCount:0,responseVerified:false};
+  if(!held||held.document!==document||!held.user.isConnected||!held.conversation.isConnected
+      ||held.user.closest('[data-thread-find-target="conversation"]')!==held.conversation)return empty;
+  const users=[...document.querySelectorAll('[data-local-conversation-user-anchor]')].filter(e=>
+    e.querySelectorAll('[data-user-message-bubble]').length===1&&e.querySelector('[data-user-message-bubble]').innerText.trim()===prompt);
+  if(users.length!==1||users[0]!==held.user||held.conversation.querySelectorAll('*').length>4096)return empty;
+  if([...held.conversation.querySelectorAll('[data-local-conversation-user-anchor]')]
+      .some(e=>e!==held.user&&(held.user.compareDocumentPosition(e)&5)!==0))return empty;
+  const units=new Set([...held.conversation.querySelectorAll('[data-conversation-role="assistant"]')]
+    .map(e=>e.closest('[data-content-search-unit-key]')).filter(Boolean));
+  let matches=0,count=0;
+  const visible=e=>{const r=e.getBoundingClientRect(),style=getComputedStyle(e);
+    return e.isConnected&&r.width>0&&r.height>0&&style.display!=='none'&&style.visibility!=='hidden';};
+  const keys=new Set;
+  for(const unit of units) {
+    const key=unit.getAttribute('data-content-search-unit-key');
+    if(typeof key!=='string'||key.length===0||key.length>512||keys.has(key))return empty;
+    keys.add(key);
+    if(held.unitKeys.includes(key)||unit.closest('[data-thread-find-target="conversation"]')!==held.conversation
+        ||unit.querySelector('[data-local-conversation-user-anchor],[data-user-message-bubble]'))continue;
+    const order=held.user.compareDocumentPosition(unit);
+    if((order&1)!==0||(order&4)===0)continue;
+    count++;
+    const paragraphs=[...unit.querySelectorAll('p')].filter(visible)
+      .filter(e=>!e.closest('[data-markdown-copy="exclude"]'));
+    if(paragraphs.length===1&&paragraphs[0].innerText.trim()===marker)matches++;
+  }
+  return {userCount:1,assistantCount:count,responseVerified:matches===1};
+}
+
 // Input hit testing has its own public contenteditable contract; button-only
 // onboarding controls cannot establish a ProseMirror editor's actionability.
 function sampleEditor(control,kind='editor') {
@@ -124,7 +173,7 @@ async function runTurn(page,guard,request,deadline=Date.now()+request.timeoutMs)
     codingComposerReady:false,uniqueComposer:false,inputReadback:false,inputSubmitted:false,
     userTurnObserved:false,assistantTurnCount:0,responseVerified:false,errorObserved:false,
     retryControl:false,retryAttempted:false,retryCompleted:false,errorCategory:null};
-  let admissionFailure=null,readinessObservation=null;
+  let admissionFailure=null,readinessObservation=null,retryWitness=null;
   const stop=category=>{
     facts.errorCategory=category;
     if(category==='composer-unavailable') {
@@ -213,12 +262,14 @@ async function runTurn(page,guard,request,deadline=Date.now()+request.timeoutMs)
       const retry=turn.getByRole('button',{name:/^Retry(?: in [1-9][0-9]*s)?$/,exact:true});
       facts.retryControl=await retry.count()===1&&await retry.isEnabled();
       if(!facts.retryControl)return stop('retry-unavailable');
-      if(!await ordinaryClick(retry,owned,deadline,()=>{facts.retryAttempted=true;}))return stop('action-uncertain');
+      retryWitness=await page.evaluateHandle(holdRetryContinuation,{prompt:request.prompt});
+      const retryOwned=async()=>await owned()&&(await page.evaluate(retryContinuationObservation,{held:retryWitness,prompt:request.prompt,marker:request.expectedMarker})).userCount===1;
+      if(!await ordinaryClick(retry,retryOwned,deadline,()=>{facts.retryAttempted=true;}))return stop('action-uncertain');
       facts.retryCompleted=true;
     }
     while(Date.now()<deadline) {
       if(!await owned())return stop('ownership-lost');
-      const current=await page.evaluate(turnObservation,{prompt:request.prompt,marker:request.expectedMarker});
+      const current=await page.evaluate(retryWitness?retryContinuationObservation:turnObservation,{...(retryWitness?{held:retryWitness}:{}),prompt:request.prompt,marker:request.expectedMarker});
       if(!await owned())return stop('ownership-lost');
       facts.userTurnObserved=current.userCount===1;facts.assistantTurnCount=current.assistantCount;
       if(current.responseVerified) {facts.responseVerified=true;return facts;}
@@ -236,11 +287,14 @@ async function runTurn(page,guard,request,deadline=Date.now()+request.timeoutMs)
     }
     return stop('response-timeout');
   } catch {return stop(facts.inputSubmitted||facts.retryAttempted?'action-uncertain':'query-failed');}
+  finally {if(retryWitness)await retryWitness.dispose().catch(()=>{});}
 }
 
 exports.directCDPPolicy=directCDPPolicy;
 exports.homeComposerScope=homeComposerScope;
 exports.turnObservation=turnObservation;
+exports.holdRetryContinuation=holdRetryContinuation;
+exports.retryContinuationObservation=retryContinuationObservation;
 exports.ordinaryClick=ordinaryClick;
 exports.runTurn=runTurn;
 exports.sampleEditor=sampleEditor;

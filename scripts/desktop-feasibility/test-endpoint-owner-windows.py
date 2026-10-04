@@ -60,6 +60,42 @@ class Ownership(unittest.TestCase):
         self.assertEqual(prove(43210, 40, 20, Native([(40, True)], [(41, True)])), 'listener-changed')
         self.assertNotEqual(prove(43210, 40, 20, Native([(40, True)], parents={40: 10,10: 1,20:10})), 'true')
 
+    def test_session_batches_both_fresh_chains_without_caching(self):
+        class Native:
+            def __init__(self, tree=None, final=None, changed=None):
+                self.tree = {40: 30, 30: 20, 20: 10} if tree is None else tree
+                self.final = [(40, True)] if final is None else final
+                self.changed = changed
+                self.snapshots = 0
+                self.listener_queries = 0
+                self.identity_queries = []
+            def listeners(self, _port):
+                self.listener_queries += 1
+                return [(40, True)] if self.listener_queries == 1 else self.final
+            def parents(self):
+                self.snapshots += 1
+                return self.tree
+            def identity(self, pid):
+                self.identity_queries.append(pid)
+                if pid not in self.tree:
+                    return None
+                if self.changed == pid and self.identity_queries.count(pid) > 1:
+                    return (pid + 100, 1)
+                return (pid, 1)
+        prove = module['prove_session']
+        native = Native()
+        self.assertEqual(prove(43210, 30, 20, native), 'true')
+        self.assertEqual(native.snapshots, 1)
+        self.assertEqual(native.listener_queries, 2)
+        self.assertGreater(native.identity_queries.count(30), 2)
+        self.assertGreater(native.identity_queries.count(20), 2)
+        # A valid endpoint descendant cannot waive the launcher's checker chain.
+        self.assertNotEqual(prove(43210, 30, 20, Native({40: 30, 30: 10, 20: 10, 10: 1})), 'true')
+        self.assertNotEqual(prove(43210, 30, 20, Native({40: 10, 30: 20, 20: 10, 10: 1})), 'true')
+        self.assertEqual(prove(43210, 30, 20, Native(final=[(41, True)])), 'listener-unavailable')
+        for pid in (30, 20):
+            self.assertNotEqual(prove(43210, 30, 20, Native(changed=pid)), 'true')
+
     @unittest.skipUnless(sys.platform == 'win32', 'requires native Windows metadata')
     def test_native_snapshot_and_listener_belong_to_this_test_process(self):
         main = module['main']
@@ -71,6 +107,7 @@ class Ownership(unittest.TestCase):
             port = str(listener.getsockname()[1])
             self.assertEqual(main(['endpoint', port, pid]), 'true')
             self.assertEqual(main(['bridge', port, pid, pid]), 'true')
+            self.assertEqual(main(['session', port, pid, pid]), 'true')
 
 
 if __name__ == '__main__':

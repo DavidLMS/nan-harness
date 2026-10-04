@@ -423,12 +423,24 @@ class Controller:
             # The original clock, not the transport's exception class, decides
             # whether this operation exhausted the shared work budget.
             expired = isinstance(error, TimeoutError) or self.clock() >= self.deadline
-            if method in ('owner','children'):
+            if method in ('owner','children','identity'):
                 node=args[0] if args else None
                 null=(type(node) is tuple and len(node)==2
                     and (not node[0] or node[1]=='/org/a11y/atspi/null'))
                 self.tree_diagnostic(method,'null-reference' if null else
                     'deadline' if expired else 'query-unavailable',node)
+                names = {'org.freedesktop.DBus.Error.' + name: label for name, label in (
+                    ('NameHasNoOwner','name-unowned'), ('ServiceUnknown','service-unknown'),
+                    ('UnknownObject','object-unknown'), ('UnknownInterface','interface-unknown'),
+                    ('UnknownMethod','method-unknown'), ('NoReply','no-reply'),
+                    ('Timeout','timeout'), ('Disconnected','disconnected'), ('Failed','failed'))}
+                getter = getattr(error, 'get_dbus_name', None)
+                try:
+                    name = getter() if callable(getter) else None
+                except Exception:
+                    name = None
+                self.facts['nativeTreeObservation']['transportReason'] = (
+                    'timeout' if expired else names.get(name, 'other') if type(name) is str else 'other')
             if expired:
                 raise TimeoutError() from None
             raise

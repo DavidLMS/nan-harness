@@ -37,14 +37,19 @@ VERSION = re.compile(r'[0-9]+(?:\.[0-9]+){2}(?:[-+][A-Za-z0-9.-]+)?\Z')
 
 def claude_native_tree(value):
     fields = {'operation','reason','nodeScope','foreignBus','childCount','visitedCount'}
-    choices = {'operation': {'owner','children'}, 'reason': {'wrong-owner','query-unavailable','deadline','null-reference','non-list','limit','duplicate'},
+    choices = {'operation': {'owner','children','identity'}, 'reason': {'wrong-owner','query-unavailable','deadline','null-reference','non-list','limit','duplicate'},
                'nodeScope': {'frame','editor','other'}}
-    if (type(value) is not dict or set(value) != fields
+    if (type(value) is not dict or set(value) - {'transportReason'} != fields
             or any(type(value[k]) is not str or value[k] not in choices[k] for k in choices)
             or type(value['foreignBus']) is not bool
             or any(value[k] is not None and (type(value[k]) is not int or not 0 <= value[k] <= n)
                    for k,n in [('childCount',1025),('visitedCount',1024)])):
         raise ValueError('invalid Claude native tree observation')
+    if 'transportReason' in value and (value['reason'] not in {'query-unavailable','deadline','null-reference'}
+            or type(value['transportReason']) is not str or value['transportReason'] not in {
+                'name-unowned','service-unknown','object-unknown','interface-unknown','method-unknown',
+                'no-reply','timeout','disconnected','failed','other'}):
+        raise ValueError('invalid Claude native transport observation')
     return value
 
 
@@ -1252,7 +1257,7 @@ def semantic_observations(directory, app):
             stages.update('tree-depth tree-nodes tree-name-limit tree-text-limit tree-window-limit tree-process-limit'.split())
             stages.update('clipboard-owner clipboard-allocation clipboard-lock clipboard-empty clipboard-set clipboard-close clipboard-guard-before clipboard-guard-after clipboard-deadline-before clipboard-deadline-after clipboard-open-deadline'.split())
             phase_fields = {'actionPhase', 'transportFailure'}
-            if (app != 'claude-desktop' or set(value) - {'providerObservation', 'guardRejection', 'rowShape', 'scopeShape', 'failureAuthority'} not in (fields, fields | phase_fields) or value['diagnosticsOnly'] is not True
+            if (app != 'claude-desktop' or set(value) - {'providerObservation', 'guardRejection', 'rowShape', 'scopeShape', 'failureAuthority', 'failureScopeCounts'} not in (fields, fields | phase_fields) or value['diagnosticsOnly'] is not True
                     or type(value['stage']) is not str or value['stage'] not in stages
                     or any(type(value[key]) is not bool for key in flags)
                     or any(type(value[key]) is not int or not 0 <= value[key] <= 3 for key in counts)
@@ -1287,6 +1292,15 @@ def semantic_observations(directory, app):
                         or failure is not None and phase not in {'before-guard', 'transport', 'post-guard'}):
                     raise ValueError('invalid Claude action transport diagnostic')
                 record.update(actionPhase=phase, transportFailure=failure)
+            if 'failureScopeCounts' in value:
+                counts = value['failureScopeCounts']
+                names = set('serverErrorCount failedUserHeadingCount failedPromptTextCount retryButtonCount detailsButtonCount exactPromptGroupCount groupRetryButtonCount groupDetailsButtonCount'.split())
+                if (mechanism != 'claude-windows-native-chat' or type(counts) is not dict or set(counts) != names
+                        or any(type(item) is not int or not 0 <= item <= 1024 for item in counts.values())
+                        or counts['groupRetryButtonCount'] > counts['retryButtonCount']
+                        or counts['groupDetailsButtonCount'] > counts['detailsButtonCount']):
+                    raise ValueError('invalid Windows failure scope counts')
+                record['failureScopeCounts'] = counts.copy()
             if 'guardRejection' in value:
                 rejection = value['guardRejection']
                 if (type(rejection) is not str or rejection not in {
@@ -2967,9 +2981,17 @@ def semantic_observations(directory, app):
             enum(record, value, 'retryInventoryStatus', {'complete', 'budget-exceeded', 'query-error'})
             if 'retryLogObservation' in value:
                 log = value['retryLogObservation']
-                counters = {'sessionFound', 'sessionMissing', 'resumeMessages', 'ordinarySend',
-                            'turnStarted', 'turnCompleted', 'turnFailed', 'turnCancelled'}
-                if (app != 'zed-desktop' or type(log) is not dict or set(log) != counters | {'status'}
+                counters = {'sessionFound', 'sessionMissing', 'turnStarted', 'turnCompleted', 'turnFailed', 'turnCancelled'}
+                if type(log) is dict and 'priorTurnObserved' in log:
+                    counters |= {'messageTotals'}
+                    fields = counters | {'status', 'priorTurnObserved'}
+                    if type(log['priorTurnObserved']) is not bool:
+                        raise ValueError('invalid passive Zed baseline observation')
+                else:
+                    # Historical receipts used line numbers absent from native logs.
+                    counters |= {'resumeMessages', 'ordinarySend'}
+                    fields = counters | {'status'}
+                if (app != 'zed-desktop' or type(log) is not dict or set(log) != fields
                         or type(log['status']) is not str or log['status'] not in {'complete', 'missing', 'rotated', 'truncated', 'unavailable', 'limit'}
                         or any(type(log[key]) is not int or not 0 <= log[key] <= 255 for key in counters)
                         or (log['status'] != 'complete' and any(log[key] for key in counters))):

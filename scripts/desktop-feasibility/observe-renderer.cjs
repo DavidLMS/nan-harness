@@ -548,6 +548,11 @@ async function run() {
       };
       let proof=rootProof;
       try {
+        if(process.platform==='win32'&&trial) {
+          proof=ownership;
+          if(!proof.ownedSession(request.ownerPid,totalDeadline)){record(proof);return false;}
+          return true;
+        }
         if(!proof.descendant(connection.launcherPid,totalDeadline)){record(proof);return false;}
         proof=ownership;
         if(!proof.ownedEndpoint(totalDeadline)){record(proof);return false;}

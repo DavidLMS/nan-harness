@@ -4,6 +4,82 @@ use std::fmt::Write as _;
 use std::time::Duration;
 use zeroize::Zeroizing;
 
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct FailureScopeCounts {
+    #[serde(rename = "serverErrorCount")]
+    server_errors: u16,
+    #[serde(rename = "failedUserHeadingCount")]
+    failed_user_headings: u16,
+    #[serde(rename = "failedPromptTextCount")]
+    failed_prompt_texts: u16,
+    #[serde(rename = "retryButtonCount")]
+    retry_buttons: u16,
+    #[serde(rename = "detailsButtonCount")]
+    details_buttons: u16,
+    #[serde(rename = "exactPromptGroupCount")]
+    exact_prompt_groups: u16,
+    #[serde(rename = "groupRetryButtonCount")]
+    group_retry_buttons: u16,
+    #[serde(rename = "groupDetailsButtonCount")]
+    group_details_buttons: u16,
+}
+
+pub(crate) struct WindowsChatReceipt {
+    pub stage: WindowsChatStage,
+    pub failure_scope: Option<FailureScopeCounts>,
+}
+impl WindowsChatReceipt {
+    pub(crate) fn parse(output: &str, mode: &str) -> Option<Self> {
+        let (first, rest) = output.split_once('\n')?;
+        let stage = WindowsChatStage::parse(&format!("{first}\n"))?;
+        let failure_scope = if rest.is_empty() {
+            None
+        } else {
+            if !["retry-ready", "retry", "failure-details"].contains(&mode) {
+                return None;
+            }
+            let line = rest.strip_prefix("failure-scope ")?.strip_suffix('\n')?;
+            let counts: Vec<u16> = line
+                .split(' ')
+                .map(|word| {
+                    if word.is_empty() || !word.bytes().all(|byte| byte.is_ascii_digit()) {
+                        return None;
+                    }
+                    word.parse::<u16>().ok().filter(|count| *count <= 1024)
+                })
+                .collect::<Option<_>>()?;
+            let [
+                server_errors,
+                failed_user_headings,
+                failed_prompt_texts,
+                retry_buttons,
+                details_buttons,
+                exact_prompt_groups,
+                group_retry_buttons,
+                group_details_buttons,
+            ]: [u16; 8] = counts.try_into().ok()?;
+            if group_retry_buttons > retry_buttons || group_details_buttons > details_buttons {
+                return None;
+            }
+            Some(FailureScopeCounts {
+                server_errors,
+                failed_user_headings,
+                failed_prompt_texts,
+                retry_buttons,
+                details_buttons,
+                exact_prompt_groups,
+                group_retry_buttons,
+                group_details_buttons,
+            })
+        };
+        Some(Self {
+            stage,
+            failure_scope,
+        })
+    }
+}
+
 pub(crate) const MAX_MILLIS: u32 = 15_000;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -319,5 +395,33 @@ mod tests {
                 .saturating_duration_since(std::time::Instant::now())
                 .is_zero()
         );
+    }
+}
+
+#[cfg(test)]
+mod receipt_tests {
+    use super::{WindowsChatReceipt, WindowsChatStage};
+    #[test]
+    fn optional_failure_counts_cannot_override_stage_or_export_payloads() {
+        let wire = "turn scope-control-absent\nfailure-scope 1 1 1 1 0 1 1 0\n";
+        let receipt = WindowsChatReceipt::parse(wire, "retry-ready").unwrap();
+        assert_eq!(receipt.stage, WindowsChatStage::ScopeControlAbsent);
+        assert_eq!(receipt.failure_scope.unwrap().details_buttons, 0);
+        assert!(WindowsChatReceipt::parse(wire, "input").is_none());
+        assert!(WindowsChatReceipt::parse("turn copied\n", "copy").is_some());
+        for tail in [
+            "PRIVATE\n",
+            "failure-scope 1 1 1 1 0 1 1 0\nPRIVATE",
+            "failure-scope 1025 1 1 1 0 1 1 0\n",
+            "failure-scope 1 1 1 0 0 1 1 0\n",
+        ] {
+            assert!(
+                WindowsChatReceipt::parse(
+                    &format!("turn scope-control-absent\n{tail}"),
+                    "retry-ready"
+                )
+                .is_none()
+            );
+        }
     }
 }

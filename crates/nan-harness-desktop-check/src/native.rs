@@ -17,7 +17,9 @@ mod windows_chat_turn;
 #[cfg(any(windows, test))]
 mod windows_uia;
 #[cfg(windows)]
-pub(crate) use windows_chat_turn::{MAX_MILLIS as WINDOWS_CHAT_MAX_MILLIS, WindowsChatStage};
+pub(crate) use windows_chat_turn::{
+    FailureScopeCounts, MAX_MILLIS as WINDOWS_CHAT_MAX_MILLIS, WindowsChatReceipt, WindowsChatStage,
+};
 
 #[cfg(target_os = "macos")]
 pub(crate) use crate::diagnostics::ClaudeIdentityObservation;
@@ -445,7 +447,7 @@ impl Native {
         mode: &str,
         values: [&str; 3],
         deadline: std::time::Instant,
-    ) -> Result<WindowsChatStage, FailureCategory> {
+    ) -> Result<WindowsChatReceipt, FailureCategory> {
         if std::env::var("GITHUB_ACTIONS").as_deref() != Ok("true")
             || std::env::var("RUNNER_ENVIRONMENT").as_deref() != Ok("github-hosted")
             || std::env::var("RUNNER_OS").as_deref() != Ok("Windows")
@@ -455,7 +457,7 @@ impl Native {
             return Err(FailureCategory::InvalidInput);
         }
         let output = process::windows_chat::run(&self.executable, window, mode, values, deadline)?;
-        WindowsChatStage::parse(&output).ok_or(FailureCategory::Output)
+        WindowsChatReceipt::parse(&output, mode).ok_or(FailureCategory::Output)
     }
 
     #[cfg(windows)]

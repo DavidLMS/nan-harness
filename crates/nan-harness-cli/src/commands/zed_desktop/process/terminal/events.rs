@@ -118,35 +118,31 @@ fn classify(bytes: &[u8]) -> Option<&'static [u8]> {
     }
     let signatures = [
         (
-            "DEBUG [agent:2267] Found session for: ",
+            "DEBUG [agent] Found session for: ",
             b"session-found\n".as_slice(),
         ),
         (
-            "ERROR [agent:2264] Session not found in run_turn: ",
+            "ERROR [agent] Session not found in run_turn: ",
             b"session-missing\n".as_slice(),
         ),
         (
-            "DEBUG [agent::thread:2546] Total messages in thread: ",
-            b"resume-messages\n".as_slice(),
+            "DEBUG [agent::thread] Total messages in thread: ",
+            b"message-totals\n".as_slice(),
         ),
         (
-            "DEBUG [agent::thread:2583] Total messages in thread: ",
-            b"ordinary-send\n".as_slice(),
-        ),
-        (
-            "DEBUG [agent::thread:2737] Starting agent turn execution",
+            "DEBUG [agent::thread] Starting agent turn execution",
             b"turn-started\n".as_slice(),
         ),
         (
-            "DEBUG [agent::thread:2755] Turn execution completed",
+            "DEBUG [agent::thread] Turn execution completed",
             b"turn-completed\n".as_slice(),
         ),
         (
-            "ERROR [agent::thread:2759] Turn execution failed: ",
+            "ERROR [agent::thread] Turn execution failed: ",
             b"turn-failed\n".as_slice(),
         ),
         (
-            "DEBUG [agent::thread:2747] Turn was cancelled, skipping cleanup",
+            "DEBUG [agent::thread] Turn was cancelled, skipping cleanup",
             b"turn-cancelled\n".as_slice(),
         ),
     ];
@@ -174,13 +170,17 @@ mod tests {
         let path = directory.path().join("events");
         let mut events = sink(&path);
         events.consume(b"\x1b[");
-        events
-            .consume(b"32m2026-10-04T12:00:00+00:00 DEBUG [agent:2267] Found session for: PRIVATE");
+        events.consume(b"32m2026-10-04T12:00:00+00:00 DEBUG [agent] Found session for: PRIVATE");
         assert!(std::fs::read(&path).unwrap().is_empty());
         events.consume(b"\x1b[0m\r\nunknown PRIVATE\r\n");
         assert_eq!(std::fs::read(&path).unwrap(), b"session-found\n");
-        events.consume(b"notstamp DEBUG [agent:2267] Found session for: PRIVATE\n");
+        events.consume(b"notstamp DEBUG [agent] Found session for: PRIVATE\n");
         assert_eq!(std::fs::read(&path).unwrap(), b"session-found\n");
+    }
+    #[test]
+    fn source_logger_omits_module_line_and_shared_message_total_is_one_event() {
+        assert_eq!(classify(b"2026-10-04T12:00:00+00:00 DEBUG [agent::thread] Total messages in thread: PRIVATE"),Some(b"message-totals\n".as_slice()));
+        assert_eq!(classify(b"2026-10-04T12:00:00+00:00 DEBUG [agent::thread:2546] Total messages in thread: PRIVATE"),None);
     }
     #[test]
     fn bounded_record_limit_is_closed_and_does_not_stop_drain() {

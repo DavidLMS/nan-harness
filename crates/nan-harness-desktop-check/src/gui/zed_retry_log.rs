@@ -15,6 +15,7 @@ const NO_FOLLOW: i32 = 0x100 | 0x4; // O_NOFOLLOW | O_NONBLOCK
 #[serde(rename_all = "camelCase")]
 pub(super) struct Receipt {
     status: &'static str,
+    prior_turn_observed: bool,
     #[serde(flatten)]
     counts: Counts,
 }
@@ -23,8 +24,7 @@ pub(super) struct Receipt {
 struct Counts {
     session_found: u8,
     session_missing: u8,
-    resume_messages: u8,
-    ordinary_send: u8,
+    message_totals: u8,
     turn_started: u8,
     turn_completed: u8,
     turn_failed: u8,
@@ -35,11 +35,10 @@ impl Counts {
         match index {
             0 => &mut self.session_found,
             1 => &mut self.session_missing,
-            2 => &mut self.resume_messages,
-            3 => &mut self.ordinary_send,
-            4 => &mut self.turn_started,
-            5 => &mut self.turn_completed,
-            6 => &mut self.turn_failed,
+            2 => &mut self.message_totals,
+            3 => &mut self.turn_started,
+            4 => &mut self.turn_completed,
+            5 => &mut self.turn_failed,
             _ => &mut self.turn_cancelled,
         }
     }
@@ -48,6 +47,7 @@ impl Receipt {
     fn failed(status: &'static str) -> Self {
         Self {
             status,
+            prior_turn_observed: false,
             counts: Counts::default(),
         }
     }
@@ -58,6 +58,7 @@ pub(super) struct Capture {
     path: PathBuf,
     identity: (u64, u64),
     offset: u64,
+    prior_turn_observed: bool,
 }
 impl Capture {
     pub(super) fn begin(path: &Path) -> Result<Self, Receipt> {
@@ -95,11 +96,15 @@ impl Capture {
         if previous.status != "complete" {
             return Err(previous);
         }
+        let prior_turn_observed = previous.counts.session_found > 0
+            && previous.counts.turn_started > 0
+            && previous.counts.turn_completed > 0;
         Ok(Self {
             file,
             path: path.to_owned(),
             identity: (meta.dev(), meta.ino()),
             offset: meta.len(),
+            prior_turn_observed,
         })
     }
     pub(super) fn finish(mut self) -> Receipt {
@@ -142,7 +147,9 @@ impl Capture {
         if held.len() < end || current.len() < end {
             return Receipt::failed("truncated");
         }
-        classify(&bytes)
+        let mut receipt = classify(&bytes);
+        receipt.prior_turn_observed = self.prior_turn_observed;
+        receipt
     }
 }
 
@@ -157,8 +164,7 @@ fn classify(bytes: &[u8]) -> Receipt {
     let events = [
         "session-found",
         "session-missing",
-        "resume-messages",
-        "ordinary-send",
+        "message-totals",
         "turn-started",
         "turn-completed",
         "turn-failed",
@@ -186,9 +192,9 @@ mod tests {
     use std::io::Write as _;
     #[test]
     fn closed_events_only_and_limits_are_distinguished() {
-        let receipt = classify(b"session-found\nresume-messages\n");
+        let receipt = classify(b"session-found\nmessage-totals\n");
         assert_eq!(receipt.counts.session_found, 1);
-        assert_eq!(receipt.counts.resume_messages, 1);
+        assert_eq!(receipt.counts.message_totals, 1);
         assert_eq!(classify(b"PRIVATE\n").status, "unavailable");
         assert_eq!(classify(b"limit\n").status, "limit");
         assert_eq!(classify(b"unfinished").status, "truncated");
@@ -201,26 +207,55 @@ mod tests {
         assert_eq!(Capture::begin(&path).err().unwrap().status, "limit");
     }
     #[test]
+    fn baseline_requires_a_completed_known_turn_and_never_counts_it_in_interval() {
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().join("events");
+        for (prefix, expected) in [
+            (b"".as_slice(), false),
+            (b"session-found\nturn-started\n".as_slice(), false),
+            (
+                b"session-found\nturn-started\nturn-completed\n".as_slice(),
+                true,
+            ),
+        ] {
+            std::fs::write(&path, prefix).unwrap();
+            let capture = Capture::begin(&path).unwrap_or_else(|_| panic!("fixture open"));
+            OpenOptions::new()
+                .append(true)
+                .open(&path)
+                .unwrap()
+                .write_all(b"message-totals\n")
+                .unwrap();
+            let receipt = capture.finish();
+            assert_eq!(receipt.status, "complete");
+            assert_eq!(receipt.prior_turn_observed, expected);
+            assert_eq!(receipt.counts.session_found, 0);
+            assert_eq!(receipt.counts.message_totals, 1);
+        }
+    }
+    #[test]
     fn original_file_interval_excludes_old_records_and_rejects_replacement() {
         let temporary = tempfile::tempdir().unwrap();
         let dir = temporary.path();
         let path = dir.join("Zed.log");
         std::fs::write(&path, b"session-found\n").unwrap();
         let capture = Capture::begin(&path).unwrap_or_else(|_| panic!("fixture open"));
-        assert_eq!(capture.finish().counts, Counts::default());
+        let receipt = capture.finish();
+        assert_eq!(receipt.counts, Counts::default());
+        assert!(!receipt.prior_turn_observed);
         let capture = Capture::begin(&path).unwrap_or_else(|_| panic!("fixture open"));
         OpenOptions::new()
             .append(true)
             .open(&path)
             .unwrap()
-            .write_all(b"resume-messages\n")
+            .write_all(b"message-totals\n")
             .unwrap();
-        assert_eq!(capture.finish().counts.resume_messages, 1);
+        assert_eq!(capture.finish().counts.message_totals, 1);
         let capture = Capture::begin(&path).unwrap_or_else(|_| panic!("fixture open"));
         std::fs::rename(&path, dir.join("old")).unwrap();
         std::fs::write(&path, b"").unwrap();
         assert_eq!(capture.finish().status, "rotated");
-        std::fs::write(&path, b"session-found\nresume-messages\n").unwrap();
+        std::fs::write(&path, b"session-found\nmessage-totals\n").unwrap();
         let capture = Capture::begin(&path).unwrap_or_else(|_| panic!("fixture open"));
         std::fs::write(&path, b"").unwrap();
         assert_eq!(capture.finish().status, "truncated");

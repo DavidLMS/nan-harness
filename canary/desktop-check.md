@@ -2975,3 +2975,34 @@ shared-9-mvoGrP5v.js SHA256 0e9e6ba098b3f72b8c2883dea74cbc67835b26862d2e89e5e6ef
 cd9350303-DEt9YaG0.js SHA256 622887bb47c413ea73e0b606678fe9760baeb4287c79d604b2ca5f971492a16d
 cf07a5c93-YV5wvunt.js SHA256 940d4b603ef691b327eaf32ff4f7e62145fd3fdbedd496afae95268cce91fa59
 c121d00d7-DNoZTY8y.js SHA256 1d5fc2aa282f32f7866bcde710c320194b76e8cdfb7394d47859ffbc8257f8ef
+
+### Grouped twelve-cell qualification candidate
+
+[Campaign 37230585560](https://github.com/DavidLMS/nan-harness/actions/runs/37230585560)
+tested the six unresolved cells at `9546169c3f738e2c5fe405abc2d125ec90003f4b`.
+All native builds succeeded; none of the six cells qualified. Earlier passes
+for Hermes on all three platforms, Zed macOS/Windows and Claude macOS do not
+establish a complete matrix on this commit.
+
+The next candidate groups the following corrections and closed observations:
+
+| Cell | Observed boundary | Candidate change |
+| --- | --- | --- |
+| Zed Linux | Response and real file tool pass; recovery does not | Match actual module-only log tags and calibrate passive events against a completed prior turn before interpreting Retry counts |
+| Codex Linux | Real command fails with sandbox hint; recovery response is not correlated | Install scoped distribution bubblewrap/AppArmor prerequisites and verify namespaces before launch; correlate the new empty Retry turn |
+| Codex macOS | Recovery reports ownership loss or uncertain action | Retain the original ownership checks and bind the new Retry turn to the retained failed user and conversation |
+| Codex Windows | Source dialog/folder trust ownership guards exhaust acquisition | Prove launcher and listener ancestry in one fresh native transaction with identity and listener rechecks |
+| Claude Linux | Second-turn tree identity/owner query fails | Record the fixed D-Bus error category and operation without exporting native messages or references |
+| Claude Windows | Real Read fails; failure control scope is absent | Record separate total and prompt-scoped Retry/details counts from the already collected owned tree |
+
+Codex capacity Retry starts a new empty turn in the pinned renderer. Recovery
+therefore requires a new assistant source unit after the retained failed user,
+the same document and conversation, no intervening user, and the exact recovery
+nonce. Ordinary response verification and provider verification remain required;
+diagnostic observations never grant action authority or qualify a failed tool.
+
+Run the grouped candidate with `app=all`, `platform=all`,
+`experiment=deterministic-full`, and `native_only=false`. This excludes Pen,
+keeps independent native jobs running after other failures, runs the integration
+gate, and aggregates all twelve cells against one source commit. Native success
+and the final integration gate remain unproven until that campaign completes.

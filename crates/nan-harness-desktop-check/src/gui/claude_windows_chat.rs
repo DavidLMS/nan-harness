@@ -54,6 +54,8 @@ struct Facts {
     #[serde(skip_serializing_if = "Option::is_none")]
     guard_rejection: Option<GuardRejection>,
     provider_observation: Option<ProviderObservation>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    failure_scope_counts: Option<crate::native::FailureScopeCounts>,
     submitted_turns: u8,
     input_verified_turns: u8,
     copied_responses: u8,
@@ -71,6 +73,7 @@ impl Default for Facts {
             transport_failure: None,
             guard_rejection: None,
             provider_observation: None,
+            failure_scope_counts: None,
             submitted_turns: 0,
             input_verified_turns: 0,
             copied_responses: 0,
@@ -183,7 +186,12 @@ impl ClaudeWindowsChatSession<'_> {
             },
         );
         let stage = match result {
-            Ok(stage) => stage,
+            Ok(receipt) => {
+                if let Some(counts) = receipt.failure_scope {
+                    self.facts.failure_scope_counts = Some(counts);
+                }
+                receipt.stage
+            }
             Err(reason) => {
                 self.facts.stage = WindowsChatStage::ActionUncertain;
                 return Err(reason);

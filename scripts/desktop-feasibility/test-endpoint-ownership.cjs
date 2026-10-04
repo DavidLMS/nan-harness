@@ -226,7 +226,7 @@ for(const [component,reason,throwing] of [
     descendant(_pid,deadline){assert.equal(deadline,123456);calls.push(part);if(component===part&&throwing)throw Error('PRIVATE');return component!==part;},
     ownedEndpoint(deadline){assert.equal(deadline,123456);calls.push(part);if(component===part&&throwing)throw Error('PRIVATE');return component!==part;}});
   const guard=vm.runInNewContext(`(()=>{${renderer.slice(guardStart,guardEnd)}return ownerGuard;})()`,
-    {facts,totalDeadline:123456,connection:{launcherPid:40},rootProof:native('root'),ownership:native('listener')});
+    {process:{platform:'darwin'},facts,totalDeadline:123456,connection:{launcherPid:40},rootProof:native('root'),ownership:native('listener')});
   if(throwing)assert.throws(guard);else assert.equal(guard(),false);
   assert.equal(calls.length,component==='root'?1:2);
   assert.equal(facts.nativeOwnershipFailure,reason==='PRIVATE unknown'?undefined:reason);
@@ -316,3 +316,31 @@ console.log('Windows original caller deadline: clipped, invalid, expired and lat
   assert.equal(receipts.at(-1).categoryCounts.owned, 0);
   assert.equal(receipts.at(-1).categoryCounts['transport-timeout'], 1);
 }
+
+// Windows renderer preserves both claims in one fresh native transaction.
+{
+ const facts={},calls=[];
+ const ownerGuard=vm.runInNewContext(`(()=>{${renderer.slice(guardStart,guardEnd)}return ownerGuard;})()`,
+  {process:{platform:'win32'},trial:true,facts,totalDeadline:123456,request:{ownerPid:20},connection:{launcherPid:30},
+   rootProof:{descendant(){throw Error('duplicate native call');}},
+   ownership:{ownedSession(checker,deadline){calls.push([checker,deadline]);return true;}}});
+ assert.equal(ownerGuard(),true);assert.deepEqual(calls,[[20,123456]]);
+ assert.equal(ownerGuard(),true);assert.equal(calls.length,2,'No retained verdict cache');
+}
+{
+ let calls=0,clock=1000,result='true',late=false;
+ const sandbox={exports:{},__dirname:'/owned',Date:{now:()=>clock},process:{platform:'win32',
+  env:{GITHUB_ACTIONS:'true',RUNNER_ENVIRONMENT:'github-hosted',FEASIBILITY_WINDOWS_PROOF_PYTHON:'C:\\Python\\python.exe'}},
+  require(name){if(name==='node:fs')return {};assert.equal(name,'node:child_process');return {
+   execFileSync(program,args,options){calls++;assert.equal(program,'C:\\Python\\python.exe');
+    assert.deepEqual(Array.from(args),['/owned/endpoint-owner-windows.py','session','43210','30','20']);
+    assert.ok(options.timeout<=500);if(late)clock=1500;return result;}};}};
+ vm.runInNewContext(source,sandbox);
+ const proof=sandbox.exports.proof('30',43210);
+ assert.equal(proof.ownedSession(20,1500),true);assert.equal(calls,1);
+ result='parent-reused';assert.equal(proof.ownedSession(20,1500),false);assert.equal(calls,2);
+ clock=1500;assert.equal(proof.ownedSession(20,1500),false);assert.equal(calls,2);
+ clock=1000;assert.equal(proof.ownedSession(1,1500),false);assert.equal(calls,2);
+ result='true';late=true;assert.equal(proof.ownedSession(20,1500),false);assert.equal(calls,3);
+}
+console.log('Windows session: one native transaction, both original claims, fresh deadline and no cache passed');

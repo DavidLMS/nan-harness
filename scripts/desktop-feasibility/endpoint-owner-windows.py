@@ -147,6 +147,31 @@ def prove(mode, value, owner, native):
     return verdict
 
 
+def prove_session(port, launcher, checker, native):
+    """One fresh transaction proves both original process and listener claims."""
+    listeners = native.listeners(port)
+    if len(listeners) != 1 or listeners[0][1] is not True:
+        return 'listener-unavailable'
+    parents = native.parents()
+    if parents is None:
+        return 'process-budget'
+    original_launcher = native.identity(launcher)
+    original_checker = native.identity(checker)
+    if original_launcher is None or original_checker is None:
+        return 'process-unavailable'
+    for candidate, owner in ((launcher, checker), (listeners[0][0], launcher)):
+        verdict = ancestry(candidate, owner, parents, native.identity)
+        if verdict != 'true':
+            return verdict
+    # No cached identity substitutes for these fresh end-of-transaction reads.
+    if (native.identity(launcher) != original_launcher
+            or native.identity(checker) != original_checker):
+        return 'parent-reused'
+    if native.listeners(port) != listeners:
+        return 'listener-unavailable'
+    return 'true'
+
+
 def prove_bridge(port, bridge, launcher, native):
     listeners = native.listeners(port)
     if not listeners:
@@ -167,14 +192,15 @@ def prove_bridge(port, bridge, launcher, native):
 
 
 def main(arguments):
-    if sys.platform == 'win32' and len(arguments) == 4 and arguments[0] == 'bridge':
+    if sys.platform == 'win32' and len(arguments) == 4 and arguments[0] in ('bridge', 'session'):
         if not all(v.isascii() and v.isdecimal() for v in arguments[1:]):
             return 'query-failed'
         port, bridge, launcher = map(int, arguments[1:])
         if not 1 < port <= 65535 or not all(1 < p <= 2147483647 for p in (bridge, launcher)):
             return 'query-failed'
         try:
-            return prove_bridge(port, bridge, launcher, Native())
+            proof = prove_bridge if arguments[0] == 'bridge' else prove_session
+            return proof(port, bridge, launcher, Native())
         except (OSError, ValueError, OverflowError):
             return 'query-failed'
     if (sys.platform != 'win32' or len(arguments) != 3

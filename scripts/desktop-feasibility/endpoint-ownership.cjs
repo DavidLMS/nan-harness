@@ -62,6 +62,29 @@ let unixFailure='unmeasured';
 let listenerShape = null;
 function failureDetails() { return unixFailure === 'listener-shape' ? listenerShape : null; }
 function failure() { return unixFailure; }
+function ownedSession(checker, callerDeadline) {
+  // Only the hosted native helper supports the combined transaction. Other
+  // surfaces retain their ordinary two independently fresh proofs.
+  if (process.platform !== 'win32') return false;
+  if (!Number.isSafeInteger(checker) || checker <= 1 || checker > 2147483647
+      || !Number.isSafeInteger(Number(owner)) || Number(owner) <= 1
+      || Number(owner) > 2147483647 || !Number.isSafeInteger(Number(port))
+      || Number(port) <= 1 || Number(port) > 65535) return false;
+  try {
+    const deadline = proofDeadline(callerDeadline),remaining=deadline-Date.now();
+    const python = process.env?.FEASIBILITY_WINDOWS_PROOF_PYTHON;
+    if (remaining <= 0) {saveWindowsProof('transport-timeout');return false;}
+    if (process.env?.GITHUB_ACTIONS !== 'true' || process.env?.RUNNER_ENVIRONMENT !== 'github-hosted'
+        || typeof python !== 'string' || !/^[A-Za-z]:[\\/]/.test(python)) return false;
+    const result = require('node:child_process').execFileSync(python,
+      [`${__dirname}/endpoint-owner-windows.py`, 'session', String(port), String(owner), String(checker)],
+      {encoding:'utf8',timeout:Math.min(8000,remaining),maxBuffer:4096,windowsHide:true,
+        stdio:['ignore','pipe','ignore']});
+    if (Date.now() >= deadline) {saveWindowsProof('transport-timeout');return false;}
+    saveWindowsProof(result==='true'?'owned':Object.hasOwn(windowsProofCategoryCounts,result)?result:'unclassified');
+    return result === 'true';
+  } catch(error) {saveWindowsProof(error?.code==='ETIMEDOUT'?'transport-timeout':'transport-failed');return false;}
+}
 function proofDeadline(callerDeadline) {
   const now = Date.now();
   if (callerDeadline !== undefined && !Number.isSafeInteger(callerDeadline)) {
@@ -194,5 +217,5 @@ function ownedEndpoint(callerDeadline) {
   return false;
   } catch(error) {unixFailure='listener-query';throw error;}
 }
-return { ownedEndpoint, descendant, parentPid, windowsProof, failure, failureDetails };
+return { ownedEndpoint, ownedSession, descendant, parentPid, windowsProof, failure, failureDetails };
 };

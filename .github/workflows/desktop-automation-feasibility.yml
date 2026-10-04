@@ -189,6 +189,19 @@ jobs:
           apt_options=(-o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
           sudo apt-get "${apt_options[@]}" update
           sudo apt-get "${apt_options[@]}" install --no-install-recommends -y cmake xvfb openbox x11-utils xclip xdotool zstd dbus-x11 python3-dbus at-spi2-core libx11-dev libxres1 libxtst6 libcairo2 libxkbcommon-dev libxkbcommon-x11-dev libegl1 libvulkan1 mesa-vulkan-drivers libgtk-3-0 libnss3 libasound2t64 libgbm1 libsecret-1-0 libnotify4 adwaita-icon-theme
+      - name: Prepare Codex Linux command sandbox prerequisites
+        if: runner.os == 'Linux' && matrix.app == 'chatgpt-desktop'
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Official Ubuntu 24.04 prerequisite; preserve the host userns restriction.
+          # https://developers.openai.com/codex/concepts/sandboxing#prerequisites
+          apt_options=(-o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
+          sudo apt-get "${apt_options[@]}" install --no-install-recommends -y bubblewrap apparmor-profiles apparmor-utils
+          sudo install -m 0644 /usr/share/apparmor/extra-profiles/bwrap-userns-restrict /etc/apparmor.d/bwrap-userns-restrict
+          sudo apparmor_parser -r /etc/apparmor.d/bwrap-userns-restrict
+          timeout 15 /usr/bin/bwrap --unshare-user --unshare-pid --unshare-net --ro-bind / / --proc /proc --dev /dev /usr/bin/true
       - name: Prepare exact-source Linux Zed panel diagnostics
         if: runner.os == 'Linux' && matrix.app == 'zed-desktop' && inputs.experiment == 'deterministic-full'
         timeout-minutes: 10

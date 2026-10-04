@@ -1455,6 +1455,23 @@ class RetryActionTests(unittest.TestCase):
         self.assertEqual(adapter.send_count,0)
 
 class NativeTreeDiagnosticTests(unittest.TestCase):
+    def test_dbus_error_names_are_closed_without_exposing_messages_or_nodes(self):
+        for method in ('owner','children','identity'):
+            for name, expected in [('org.freedesktop.DBus.Error.UnknownObject','object-unknown'),
+                                   ('org.freedesktop.DBus.Error.NameHasNoOwner','name-unowned'),
+                                   ('PRIVATE','other')]:
+                a,c,b=ResponseFrameRestoreTests.restored(self)
+                class TransportError(Exception):
+                    def get_dbus_name(self):return name
+                def unavailable(node):raise TransportError('PRIVATE payload')
+                setattr(a,method,unavailable)
+                with self.assertRaises(TransportError):c.query(method,('r','PRIVATE'))
+                diagnostic=c.facts['nativeTreeObservation']
+                self.assertEqual(diagnostic['transportReason'],expected)
+                self.assertEqual(diagnostic['operation'],method)
+                self.assertNotIn('PRIVATE',str(diagnostic))
+                self.assertEqual((a.paste_count,a.send_count),(0,0))
+
     def test_transport_exception_at_cutoff_is_deadline_without_retry(self):
         for method in ('owner', 'children', 'identity'):
             a,c,b=ResponseFrameRestoreTests.restored(self)

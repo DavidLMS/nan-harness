@@ -664,6 +664,14 @@ class QualificationTests(unittest.TestCase):
                 path.write_text(json.dumps({**native, 'retryLogObservation': bad}))
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'zed-desktop')
+            current = {key: item for key, item in receipt.items() if key not in {'resumeMessages', 'ordinarySend'}}
+            current.update(messageTotals=1, priorTurnObserved=True)
+            path.write_text(json.dumps({**native, 'retryLogObservation': current}))
+            self.assertEqual(q.semantic_observations(root, 'zed-desktop')[0]['retryLogObservation'], current)
+            for bad in ({**current, 'priorTurnObserved': 1}, {**current, 'resumeMessages': 1},
+                        {**current, 'messageTotals': True}, {**current, 'raw': 'PRIVATE'}):
+                path.write_text(json.dumps({**native, 'retryLogObservation': bad}))
+                with self.assertRaises(ValueError):q.semantic_observations(root, 'zed-desktop')
             path.write_text(json.dumps(native))
             self.assertNotIn('PRIVATE', str(public))
             with self.assertRaises(ValueError):
@@ -2392,6 +2400,24 @@ class QualificationTests(unittest.TestCase):
             path.write_text(json.dumps(value))
             with self.assertRaises(ValueError):
                 q.semantic_observations(tmp, 'zed-desktop')
+
+    def test_windows_failure_scope_counts_are_closed_without_qualifying_retry(self):
+        counts = dict(serverErrorCount=1, failedUserHeadingCount=1, failedPromptTextCount=1,
+                      retryButtonCount=1, detailsButtonCount=0, exactPromptGroupCount=1,
+                      groupRetryButtonCount=1, groupDetailsButtonCount=0)
+        value = dict(schemaVersion=1, mechanism='claude-windows-native-chat', diagnosticsOnly=True,
+                     stage='scope-control-absent', submittedTurns=3, inputVerifiedTurns=3, copiedResponses=2,
+                     retryAttempted=False, clipboardCleared=True, failureScopeCounts=counts)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp)/'chat.json'
+            path.write_text(json.dumps(value))
+            public = q.semantic_observations(tmp, 'claude-desktop')[0]
+            self.assertEqual(public['failureScopeCounts'], counts)
+            self.assertFalse(public['retryAttempted'])
+            for change in ({'raw':'PRIVATE'}, {'retryButtonCount':True},
+                           {'detailsButtonCount':1025}, {'groupDetailsButtonCount':1}):
+                path.write_text(json.dumps({**value, 'failureScopeCounts':{**counts,**change}}))
+                with self.assertRaises(ValueError):q.semantic_observations(tmp,'claude-desktop')
 
     def test_claude_native_chat_guard_rejection_is_separate_and_closed(self):
         value = dict(schemaVersion=1, mechanism='claude-native-chat', diagnosticsOnly=True,
@@ -4258,6 +4284,17 @@ class CampaignDiagnosticTests(unittest.TestCase):
             {'nativeTreeObservation': tree | {'rawObjectPath':'PRIVATE'}},
             {'nativeTreeObservation': tree | {'reason':'PRIVATE'}},
             {'nativeTreeObservation': tree | {'foreignBus':1}}, {'stage':'sent'}])
+
+    def test_native_transport_reason_preserves_only_closed_error_names(self):
+        tree = dict(operation='identity', reason='query-unavailable', nodeScope='other',
+                    foreignBus=False, childCount=None, visitedCount=None, transportReason='object-unknown')
+        value = dict(schemaVersion=1, mechanism='claude-linux-native-chat', diagnosticsOnly=True,
+                     stage='blocked', submittedTurns=1, inputVerifiedTurns=1, copiedResponses=1,
+                     retryAttempted=False, clipboardCleared=True, nativeTreeObservation=tree)
+        self.check_receipt(value, 'claude-desktop', [
+            {'nativeTreeObservation': tree | {'transportReason':'PRIVATE'}},
+            {'nativeTreeObservation': tree | {'transportReason':None}},
+            {'nativeTreeObservation': tree | {'reason':'wrong-owner'}}])
 
     def test_windows_prepare_receipt_cannot_export_paths_or_fake_completion(self):
         value = dict(schemaVersion=1, mechanism='codex-windows-profile-prepare', diagnosticsOnly=True,

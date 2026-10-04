@@ -322,9 +322,17 @@ int windows_claude_chat_turn() {
     c.root_process.value=OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION|SYNCHRONIZE,FALSE,c.request.pid);
     turn.checker.value=OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION|SYNCHRONIZE,FALSE,turn.checker_pid);
     live_creation(c.root_process.value,c.root_creation);live_creation(turn.checker.value,turn.checker_creation);
+    std::optional<UiaChatFailureCounts> failure_counts;
     const auto emit=[&](const char* stage) {
         if(std::string(stage)!="action-uncertain" && !turn.time_left())stage="deadline";
-        std::cout<<"turn "<<stage<<'\n';return std::cout?0:4;
+        std::cout<<"turn "<<stage<<'\n';
+        if(failure_counts) {
+            const auto& counts=*failure_counts;
+            std::cout<<"failure-scope "<<counts.server_errors<<' '<<counts.user_headings<<' '
+                <<counts.prompt_texts<<' '<<counts.retries<<' '<<counts.details<<' '
+                <<counts.prompt_groups<<' '<<counts.group_retries<<' '<<counts.group_details<<'\n';
+        }
+        return std::cout?0:4;
     };
     if(!chat_parent(turn.checker_pid) || !turn.within() || !c.guard())return emit("window");
     if(FAILED(CoInitializeEx(nullptr,COINIT_MULTITHREADED)))return emit("tree");
@@ -364,6 +372,8 @@ int windows_claude_chat_turn() {
     }
     c.observe_mode(turn.root.Get());c.observe_capability(turn.root.Get());
     if(std::string(c.mode_status)!="chat")return emit("mode");
+    if(turn.mode=="retry-ready" || turn.mode=="retry" || turn.mode=="failure-details")
+        failure_counts=uia_chat_failure_counts(c.chat_nodes,turn.prompt);
     if(turn.mode!="input-replace-owned")return emit(turn.action());
     if(c.classic_controls.size()!=1 || c.start_controls.size()+c.send_controls.size()!=1)return emit("composer");
     turn.editor=c.classic_controls.front();

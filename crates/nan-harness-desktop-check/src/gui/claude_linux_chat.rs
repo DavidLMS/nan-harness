@@ -92,8 +92,8 @@ enum EmptyInputField {
 type EmptyInputDrift = std::collections::BTreeMap<EmptyInputField, bool>;
 fn native_tree_observation(facts: &Value) -> Option<Value> {
     let value = facts.get("nativeTreeObservation")?;
-    if value.as_object()?.len() != 6
-        || !["owner", "children"].contains(&value["operation"].as_str()?)
+    if value.as_object()?.len() != 6 + usize::from(value.get("transportReason").is_some())
+        || !["owner", "children", "identity"].contains(&value["operation"].as_str()?)
         || ![
             "wrong-owner",
             "query-unavailable",
@@ -112,6 +112,25 @@ fn native_tree_observation(facts: &Value) -> Option<Value> {
                 value.get(*key).is_none()
                     || !value[*key].is_null() && value[*key].as_u64().is_none_or(|n| n > *limit)
             })
+    {
+        return None;
+    }
+    if let Some(transport) = value.get("transportReason")
+        && (!["query-unavailable", "deadline", "null-reference"]
+            .contains(&value["reason"].as_str()?)
+            || ![
+                "name-unowned",
+                "service-unknown",
+                "object-unknown",
+                "interface-unknown",
+                "method-unknown",
+                "no-reply",
+                "timeout",
+                "disconnected",
+                "failed",
+                "other",
+            ]
+            .contains(&transport.as_str()?))
     {
         return None;
     }
@@ -1526,6 +1545,14 @@ mod native_tree_tests {
         let tree = json!({"operation":"children","reason":"query-unavailable",
             "nodeScope":"editor","foreignBus":false,"childCount":null,"visitedCount":null});
         assert!(native_tree_observation(&json!({"nativeTreeObservation":tree})).is_some());
+        let mut transport = tree.clone();
+        transport["operation"] = json!("identity");
+        transport["transportReason"] = json!("object-unknown");
+        assert!(native_tree_observation(&json!({"nativeTreeObservation":transport})).is_some());
+        for invalid in [json!("PRIVATE"), json!(true), json!(null)] {
+            transport["transportReason"] = invalid;
+            assert!(native_tree_observation(&json!({"nativeTreeObservation":transport})).is_none());
+        }
         let mut changed = tree;
         changed.as_object_mut().unwrap().remove("childCount");
         changed["rawObjectPath"] = json!("PRIVATE");
