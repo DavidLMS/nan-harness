@@ -23,6 +23,10 @@ pub(crate) struct FailureScopeCounts {
     group_retry_buttons: u16,
     #[serde(rename = "groupDetailsButtonCount")]
     group_details_buttons: u16,
+    #[serde(rename = "retryLabelCount")]
+    retry_labels: u16,
+    #[serde(rename = "detailsLabelCount")]
+    details_labels: u16,
 }
 
 pub(crate) struct WindowsChatReceipt {
@@ -58,8 +62,14 @@ impl WindowsChatReceipt {
                 exact_prompt_groups,
                 group_retry_buttons,
                 group_details_buttons,
-            ]: [u16; 8] = counts.try_into().ok()?;
-            if group_retry_buttons > retry_buttons || group_details_buttons > details_buttons {
+                retry_labels,
+                details_labels,
+            ]: [u16; 10] = counts.try_into().ok()?;
+            if group_retry_buttons > retry_buttons
+                || group_details_buttons > details_buttons
+                || retry_buttons > retry_labels
+                || details_buttons > details_labels
+            {
                 return None;
             }
             Some(FailureScopeCounts {
@@ -71,6 +81,8 @@ impl WindowsChatReceipt {
                 exact_prompt_groups,
                 group_retry_buttons,
                 group_details_buttons,
+                retry_labels,
+                details_labels,
             })
         };
         Some(Self {
@@ -403,7 +415,7 @@ mod receipt_tests {
     use super::{WindowsChatReceipt, WindowsChatStage};
     #[test]
     fn optional_failure_counts_cannot_override_stage_or_export_payloads() {
-        let wire = "turn scope-control-absent\nfailure-scope 1 1 1 1 0 1 1 0\n";
+        let wire = "turn scope-control-absent\nfailure-scope 1 1 1 1 0 1 1 0 1 0\n";
         let receipt = WindowsChatReceipt::parse(wire, "retry-ready").unwrap();
         assert_eq!(receipt.stage, WindowsChatStage::ScopeControlAbsent);
         assert_eq!(receipt.failure_scope.unwrap().details_buttons, 0);
@@ -411,9 +423,10 @@ mod receipt_tests {
         assert!(WindowsChatReceipt::parse("turn copied\n", "copy").is_some());
         for tail in [
             "PRIVATE\n",
-            "failure-scope 1 1 1 1 0 1 1 0\nPRIVATE",
-            "failure-scope 1025 1 1 1 0 1 1 0\n",
-            "failure-scope 1 1 1 0 0 1 1 0\n",
+            "failure-scope 1 1 1 1 0 1 1 0 0 0\n",
+            "failure-scope 1 1 1 1 0 1 1 0 1 0\nPRIVATE",
+            "failure-scope 1025 1 1 1 0 1 1 0 1 0\n",
+            "failure-scope 1 1 1 0 0 1 1 0 1 0\n",
         ] {
             assert!(
                 WindowsChatReceipt::parse(

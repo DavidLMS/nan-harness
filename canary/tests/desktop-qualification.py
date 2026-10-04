@@ -478,6 +478,22 @@ class QualificationTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     q.semantic_observations(Path(root), 'hermes-desktop')
 
+    def test_hermes_response_shape_distinguishes_wrong_turn_without_text(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'backend.json'
+            shape = dict(exactUserCount=1, markerAssistantCount=1, boundMarkerAssistantCount=0)
+            value = dict(schemaVersion=1, mechanism='hermes-backend-failure', diagnosticsOnly=True,
+                         category='unclassified', assistantTurnCount=3, responseShape=shape)
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(Path(root), 'hermes-desktop'), [value])
+            for changed in ({**shape, 'text': 'PRIVATE'}, {**shape, 'exactUserCount': True},
+                            {**shape, 'boundMarkerAssistantCount': 2},
+                            {**shape, 'markerAssistantCount': 4},
+                            {**shape, 'exactUserCount': 4097}):
+                path.write_text(json.dumps({**value, 'responseShape': changed}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(Path(root), 'hermes-desktop')
+
     def test_baseline_is_diagnostic_and_cannot_claim_renderer_instrumentation(self):
         with tempfile.TemporaryDirectory() as root:
             path = Path(root) / 'baseline.json'
@@ -2493,6 +2509,12 @@ class QualificationTests(unittest.TestCase):
             public = q.semantic_observations(tmp, 'claude-desktop')[0]
             self.assertEqual(public['failureScopeCounts'], counts)
             self.assertFalse(public['retryAttempted'])
+            labels = {**counts, 'retryLabelCount':2, 'detailsLabelCount':1}
+            path.write_text(json.dumps({**value, 'failureScopeCounts':labels}))
+            self.assertEqual(q.semantic_observations(tmp, 'claude-desktop')[0]['failureScopeCounts'], labels)
+            for change in ({'retryLabelCount':0}, {'detailsLabelCount':True}, {'text':'PRIVATE'}):
+                path.write_text(json.dumps({**value, 'failureScopeCounts':{**labels, **change}}))
+                with self.assertRaises(ValueError):q.semantic_observations(tmp,'claude-desktop')
             for change in ({'raw':'PRIVATE'}, {'retryButtonCount':True},
                            {'detailsButtonCount':1025}, {'groupDetailsButtonCount':1}):
                 path.write_text(json.dumps({**value, 'failureScopeCounts':{**counts,**change}}))

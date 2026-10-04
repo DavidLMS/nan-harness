@@ -552,45 +552,15 @@ async function driveDom() {
       }
       // A submission may disable or replace the editor. Read a single snapshot
       // instead of waiting on a now-missing editable locator after submission.
-      const observation = await page.evaluate(({ prompt, marker, bindTurn }) => {
-        const visible = e => { const r = e.getBoundingClientRect();
-          const style = getComputedStyle(e); return r.width > 0 && r.height > 0 &&
-            style.visibility !== 'hidden' && style.display !== 'none'; };
-        const editors = [...document.querySelectorAll('[data-slot="composer-root"] [role="textbox"]')].filter(visible);
-        const users = [...document.querySelectorAll('[data-role="user"]')].filter(visible);
-        const assistants = [...document.querySelectorAll('[data-role="assistant"]')].filter(visible);
-        return {
-          inputCleared: editors.length === 1 && (editors[0].value ?? editors[0].textContent).trim() === '',
-          userTurnObserved: users.filter(e => e.innerText.trim() === prompt).length === 1,
-          assistantTurnCount: Math.min(4096, assistants.length),
-          backendFailure: (() => {
-            const text = assistants.map(e => e.innerText).join('\n');
-            const categories = [
-              ['python-import-failure', /ModuleNotFoundError|ImportError|No module named/],
-              ['provider-unconfigured', /No inference provider configured|no provider configured|missing API key/i],
-              ['backend-unavailable', /backend.*(?:unavailable|failed to start|not running)|gateway.*(?:not running|unavailable)/i],
-              ['invalid-model', /model.*(?:not found|not configured|invalid)/i],
-              ['permission-denied', /PermissionError|permission denied|EACCES/],
-              ['connection-failed', /ConnectionError|connection refused|failed to connect/i],
-            ].filter(([, pattern]) => pattern.test(text)).map(([category]) => category);
-            return categories.length === 1 ? categories[0] : categories.length > 1 ? 'multiple' : 'unclassified';
-          })(),
-          responseVerified: assistants.filter(e => e.innerText.includes(marker) && (!bindTurn || (() => {
-            const pair = e.closest('[data-slot="aui_turn-pair"]');
-            if (!pair || !pair.closest('[data-slot="aui_message-group"]')
-              || users.filter(user => user.innerText.trim() === prompt).length !== 1) return false;
-            const pairUsers = [...pair.querySelectorAll('[data-role="user"]')];
-            return pairUsers.length === 1 && pairUsers[0].innerText.trim() === prompt
-              && pairUsers[0].closest('[data-slot="aui_turn-pair"]') === pair;
-          })())).length === 1,
-        };
-      }, { prompt: request.prompt, marker: request.expectedMarker, bindTurn: qualify });
+      const observation = await page.evaluate(require('./hermes-response-observation.cjs').observe,
+        { prompt: request.prompt, marker: request.expectedMarker, bindTurn: qualify });
       facts.inputCleared ||= observation.inputCleared;
       facts.userTurnObserved ||= observation.userTurnObserved;
       facts.assistantTurnCount = observation.assistantTurnCount;
       if (qualify && facts.userTurnObserved && observation.backendFailure) {
         const failure = { schemaVersion: 1, mechanism: 'hermes-backend-failure', diagnosticsOnly: true,
-          category: observation.backendFailure, assistantTurnCount: facts.assistantTurnCount };
+          category: observation.backendFailure, assistantTurnCount: facts.assistantTurnCount,
+          responseShape: observation.responseShape };
         fs.writeFileSync(`${output}.backend.tmp`, JSON.stringify(failure) + '\n', { mode: 0o600 });
         fs.renameSync(`${output}.backend.tmp`, `${output}.backend.json`);
       }

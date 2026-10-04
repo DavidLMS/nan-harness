@@ -16,15 +16,16 @@ SYNTHETIC_WORKFLOW = (ROOT / ".github/workflows/desktop-check-chatgpt-wave29-syn
 
 
 class DiagnosticWorkflowTests(unittest.TestCase):
-    def test_joint_campaign_selects_six_open_and_twelve_final_cells(self):
+    def test_joint_campaign_selects_seven_open_and_twelve_final_cells(self):
         workflow = (ROOT / '.github/workflows/desktop-automation-feasibility.yml').read_text()
         script = textwrap.dedent(workflow.split("          import json, os, sys\n", 1)[1]
                                  .split("          PYTHON", 1)[0])
         script = 'import json, os, sys\n' + script
-        expected = {('zed-desktop', 'linux'), ('chatgpt-desktop', 'linux'),
-                    ('chatgpt-desktop', 'macos'), ('chatgpt-desktop', 'windows'),
-                    ('claude-desktop', 'linux'), ('claude-desktop', 'windows')}
-        for selection, count in [('open-cells', 6), ('all', 12)]:
+        expected = {('zed-desktop', 'linux'), ('zed-desktop', 'windows'),
+                    ('chatgpt-desktop', 'linux'), ('chatgpt-desktop', 'windows'),
+                    ('claude-desktop', 'linux'), ('claude-desktop', 'windows'),
+                    ('hermes-desktop', 'macos')}
+        for selection, count in [('open-cells', 7), ('all', 12)]:
             result = subprocess.run([sys.executable, '-c', script], cwd=ROOT,
                 env={**os.environ, 'SELECTED_APP': 'all', 'SELECTED_PLATFORM': selection,
                      'SELECTED_EXPERIMENT': 'deterministic-full'}, capture_output=True, text=True)

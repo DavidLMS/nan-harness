@@ -65,6 +65,11 @@ static void failure_counts_contract() {
     assert(counts.details==1 && counts.group_details==1);
     nodes.back().parent=0;counts=uia_chat_failure_counts(nodes,L"PRIVATE");
     assert(counts.details==1 && counts.group_details==0); // Foreign row control.
+    nodes[5].role=R::Text;
+    counts=uia_chat_failure_counts(nodes,L"PRIVATE");
+    assert(counts.retry_labels==1 && counts.retries==0 && counts.group_retries==0);
+    assert(counts.details_labels==1);
+    assert(uia_chat_failure_details(nodes,L"PRIVATE").control<0);
     nodes.push_back({R::Heading,L"Claude responded: previous",1});
     counts=uia_chat_failure_counts(nodes,L"PRIVATE");
     assert(counts.prompt_groups==0 && counts.group_retries==0);

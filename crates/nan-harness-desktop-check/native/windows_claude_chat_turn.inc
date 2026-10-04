@@ -330,7 +330,8 @@ int windows_claude_chat_turn() {
             const auto& counts=*failure_counts;
             std::cout<<"failure-scope "<<counts.server_errors<<' '<<counts.user_headings<<' '
                 <<counts.prompt_texts<<' '<<counts.retries<<' '<<counts.details<<' '
-                <<counts.prompt_groups<<' '<<counts.group_retries<<' '<<counts.group_details<<'\n';
+                <<counts.prompt_groups<<' '<<counts.group_retries<<' '<<counts.group_details<<' '
+                <<counts.retry_labels<<' '<<counts.details_labels<<'\n';
         }
         return std::cout?0:4;
     };

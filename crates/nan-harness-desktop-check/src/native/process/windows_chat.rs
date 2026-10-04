@@ -212,23 +212,23 @@ mod tests {
             FailureCategory::Timeout
         );
         let diagnostic =
-            "print('turn scope-control-absent\\nfailure-scope 1 1 1 1 0 1 1 0',flush=True)";
+            "print('turn scope-control-absent\\nfailure-scope 1 1 1 1 0 1 1 0 1 0',flush=True)";
         for mode in ["retry-ready", "retry", "failure-details"] {
             assert_eq!(
                 scripted(diagnostic, Duration::from_secs(2), mode)
                     .unwrap()
                     .as_str(),
-                "turn scope-control-absent\nfailure-scope 1 1 1 1 0 1 1 0\n"
+                "turn scope-control-absent\nfailure-scope 1 1 1 1 0 1 1 0 1 0\n"
             );
         }
         for (suffix, mode) in [
             (diagnostic, "input-replace-owned"),
             (
-                "print('turn sent\\nfailure-scope 1 1 1 0 0 1 1 0',flush=True)",
+                "print('turn sent\\nfailure-scope 1 1 1 0 0 1 1 0 1 0',flush=True)",
                 "retry",
             ),
             (
-                "print('turn sent\\nfailure-scope 1 1 1 1 0 1 1 0\\nPRIVATE',flush=True)",
+                "print('turn sent\\nfailure-scope 1 1 1 1 0 1 1 0 1 0\\nPRIVATE',flush=True)",
                 "retry",
             ),
             ("print('X'*257,flush=True)", "retry"),

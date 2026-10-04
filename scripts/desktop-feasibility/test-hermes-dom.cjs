@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const ownershipSource = fs.readFileSync(`${__dirname}/endpoint-ownership.cjs`, 'utf8');
 const ownershipFunctions = ownershipSource.slice(ownershipSource.indexOf('function saveWindowsProof('), ownershipSource.indexOf('return { ownedEndpoint'));
-const source = fs.readFileSync(`${__dirname}/observe-hermes.cjs`, 'utf8').replace("const { ownedEndpoint, descendant, parentPid, windowsProof } = require('./endpoint-ownership.cjs').proof(owner, port);", ownershipFunctions).replace('await driveDom(); process.exit(', 'await driveDom(); return process.exit(');
+const source = fs.readFileSync(`${__dirname}/observe-hermes.cjs`, 'utf8').replace("const { ownedEndpoint, descendant, parentPid, windowsProof } = require('./endpoint-ownership.cjs').proof(owner, port);", ownershipFunctions).replace("require('./hermes-response-observation.cjs').observe", '(' + require('./hermes-response-observation.cjs').observe.toString() + ')').replace('await driveDom(); process.exit(', 'await driveDom(); return process.exit(');
 async function trial(overrides, connectionOverrides = {}, scenario = null, qualify = false) {
   const output = new Map();
   const request = { connectionPath: '/connection', ownerPid: 20, prompt: 'Check this connection',
@@ -293,7 +293,7 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
   const facts = JSON.parse(output.get('/output'));
   if (qualify) {
     assert(!output.get('/output').includes(request.expectedMarker));
-    return { facts, submits, fills, clicks, keys, centers, frames, focuses, escapes, skips, retryHandles, auxiliary: output.get('/output.front.json') };
+    return { facts, submits, fills, clicks, keys, centers, frames, focuses, escapes, skips, retryHandles, auxiliary: output.get('/output.front.json'), backend: output.get('/output.backend.json') };
   }
   assert.equal(facts.inputSubmitted, ['happy', 'delayed', 'missing-editor', 'transient-context', 'keyboard'].includes(scenario));
   assert.equal(facts.responseVerified, ['happy', 'delayed', 'missing-editor', 'transient-context', 'keyboard'].includes(scenario));
@@ -512,6 +512,8 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
   assert.equal(foreignResponse.submits, 1);
   assert.equal(foreignResponse.facts.userTurnObserved, true);
   assert.equal(foreignResponse.facts.responseVerified, false);
+  assert.deepEqual(JSON.parse(foreignResponse.backend).responseShape,
+    { exactUserCount: 1, markerAssistantCount: 1, boundMarkerAssistantCount: 0 });
   assert.equal(foreignResponse.facts.errorCategory, 'response-timeout');
   const invalid = await trial({ ...phase, action: 'retry' }, {}, null, true);
   assert.equal(invalid.facts.errorCategory, 'invalid-request');

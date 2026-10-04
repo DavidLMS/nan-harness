@@ -1315,11 +1315,15 @@ def semantic_observations(directory, app):
             if 'failureScopeCounts' in value:
                 counts = value['failureScopeCounts']
                 names = set('serverErrorCount failedUserHeadingCount failedPromptTextCount retryButtonCount detailsButtonCount exactPromptGroupCount groupRetryButtonCount groupDetailsButtonCount'.split())
-                if (mechanism != 'claude-windows-native-chat' or type(counts) is not dict or set(counts) != names
+                label_names = {'retryLabelCount', 'detailsLabelCount'}
+                if (mechanism != 'claude-windows-native-chat' or type(counts) is not dict or set(counts) not in (names, names | label_names)
                         or any(type(item) is not int or not 0 <= item <= 1024 for item in counts.values())
                         or counts['groupRetryButtonCount'] > counts['retryButtonCount']
                         or counts['groupDetailsButtonCount'] > counts['detailsButtonCount']):
                     raise ValueError('invalid Windows failure scope counts')
+                if label_names <= set(counts) and (counts['retryButtonCount'] > counts['retryLabelCount']
+                        or counts['detailsButtonCount'] > counts['detailsLabelCount']):
+                    raise ValueError('invalid Windows failure label counts')
                 record['failureScopeCounts'] = counts.copy()
             if 'guardRejection' in value:
                 rejection = value['guardRejection']
@@ -2252,12 +2256,21 @@ def semantic_observations(directory, app):
                 raise ValueError('invalid Hermes policy preparation stage')
             record.update(diagnosticsOnly=True, stage=value['stage'])
         elif mechanism == 'hermes-backend-failure':
-            if set(value) != set('schemaVersion mechanism diagnosticsOnly category assistantTurnCount'.split()) or app != 'hermes-desktop' or value['diagnosticsOnly'] is not True:
+            if set(value) - {'responseShape'} != set('schemaVersion mechanism diagnosticsOnly category assistantTurnCount'.split()) or app != 'hermes-desktop' or value['diagnosticsOnly'] is not True:
                 raise ValueError('invalid Hermes backend failure identity')
             allowed = {'python-import-failure', 'provider-unconfigured', 'backend-unavailable', 'invalid-model', 'permission-denied', 'connection-failed', 'multiple', 'unclassified'}
             if type(value['category']) is not str or value['category'] not in allowed or type(value['assistantTurnCount']) is not int or not 0 <= value['assistantTurnCount'] <= 4096:
                 raise ValueError('invalid Hermes backend failure facts')
             record.update(diagnosticsOnly=True, category=value['category'], assistantTurnCount=value['assistantTurnCount'])
+            if 'responseShape' in value:
+                shape = value['responseShape']
+                keys = {'exactUserCount', 'markerAssistantCount', 'boundMarkerAssistantCount'}
+                if (type(shape) is not dict or set(shape) != keys
+                        or any(type(shape[key]) is not int or not 0 <= shape[key] <= 4096 for key in keys)
+                        or shape['boundMarkerAssistantCount'] > shape['markerAssistantCount']
+                        or shape['markerAssistantCount'] > value['assistantTurnCount']):
+                    raise ValueError('invalid Hermes response shape')
+                record['responseShape'] = shape
         elif mechanism == 'renderer-startup-baseline':
             if set(value) - {'accessibilityInventory'} != set('schemaVersion mechanism diagnosticsOnly windowAcquired rendererInstrumented'.split()) or value['diagnosticsOnly'] is not True or value['windowAcquired'] is not True or value['rendererInstrumented'] is not False:
                 raise ValueError('invalid renderer startup baseline')

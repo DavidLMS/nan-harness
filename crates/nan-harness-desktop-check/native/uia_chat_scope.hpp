@@ -112,7 +112,7 @@ inline UiaChatScope uia_chat_failure_details(const std::vector<UiaChatScopeNode>
 // Group counts describe source shape; they never admit a disclosure or Retry.
 struct UiaChatFailureCounts {
     unsigned server_errors=0,user_headings=0,prompt_texts=0,retries=0,details=0,
-        prompt_groups=0,group_retries=0,group_details=0;
+        prompt_groups=0,group_retries=0,group_details=0,retry_labels=0,details_labels=0;
 };
 inline UiaChatFailureCounts uia_chat_failure_counts(const std::vector<UiaChatScopeNode>& nodes,
                                                    const std::wstring& prompt) {
@@ -122,6 +122,8 @@ inline UiaChatFailureCounts uia_chat_failure_counts(const std::vector<UiaChatSco
         result.server_errors+=node.role==UiaChatRole::Text && node.label==L"Server error";
         result.user_headings+=node.role==UiaChatRole::Heading && node.label==L"You said: "+prompt;
         result.prompt_texts+=node.role==UiaChatRole::Text && node.label==prompt;
+        result.retry_labels+=node.label==L"Retry";
+        result.details_labels+=node.label==L"View details";
         result.retries+=node.role==UiaChatRole::Button && node.label==L"Retry";
         result.details+=node.role==UiaChatRole::Button && node.label==L"View details";
     }
