@@ -12,6 +12,9 @@ pub(super) fn parse(output: &str) -> Option<&'static str> {
         "fit-rejected rectangle\n" => Some("rectangle"),
         "fit-rejected settable\n" => Some("settable"),
         "fit-rejected identity-recheck\n" => Some("identity-recheck"),
+        "fit-rejected pre-resize-identity\n" => Some("pre-resize-identity"),
+        "fit-rejected resize-acknowledgement\n" => Some("resize-acknowledgement"),
+        "fit-rejected pre-position-identity\n" => Some("pre-position-identity"),
         "fit-rejected allocation\n" => Some("allocation"),
         "fit-rejected size\n" => Some("size"),
         "fit-rejected position\n" => Some("position"),
@@ -98,6 +101,14 @@ mod tests {
     #[test]
     fn rejected_fit_and_malformed_output_never_prove_completion() {
         assert_eq!(parse(""), Some("completed"));
+        for stage in [
+            "pre-resize-identity",
+            "resize-acknowledgement",
+            "pre-position-identity",
+        ] {
+            assert_eq!(parse(&format!("fit-rejected {stage}\n")), Some(stage));
+            assert_eq!(parse(&format!("fit-rejected {stage}\nextra")), None);
+        }
         assert_eq!(parse("fit-rejected size\n"), Some("size"));
         assert_eq!(parse("fit-rejected postcondition\n"), Some("postcondition"));
         for output in [

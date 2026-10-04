@@ -863,7 +863,7 @@ int fit_window(const std::string& request) {
             || !position_settable || !size_settable) return mac_fit_rejected("settable");
         AxFocus final_before;
         if (!fit_mac_proof(id, static_cast<pid_t>(pid), final_before, true)
-            || !CFEqual(before.focused, final_before.focused) || !CGRectEqualToRect(before.bounds, final_before.bounds)) return mac_fit_rejected("identity-recheck");
+            || !CFEqual(before.focused, final_before.focused) || !CGRectEqualToRect(before.bounds, final_before.bounds)) return mac_fit_rejected("pre-resize-identity");
         AXValueRef size = AXValueCreate(kAXValueTypeCGSize, &target.size);
         AXValueRef position = AXValueCreate(kAXValueTypeCGPoint, &target.origin);
         if (!size || !position) { if (size) CFRelease(size); if (position) CFRelease(position); return mac_fit_rejected("allocation"); }
@@ -905,7 +905,7 @@ int fit_window(const std::string& request) {
         Boolean still_settable = false;
         if (!acknowledged || std::chrono::steady_clock::now() >= settle_deadline
             || AXUIElementIsAttributeSettable(before.focused, kAXPositionAttribute, &still_settable) != kAXErrorSuccess
-            || !still_settable) { CFRelease(position); return mac_fit_rejected("identity-recheck"); }
+            || !still_settable) { CFRelease(position); return mac_fit_rejected("resize-acknowledgement"); }
         AxFocus before_move;
         if (std::chrono::steady_clock::now() >= settle_deadline
             || !fit_mac_proof(id, static_cast<pid_t>(pid), before_move, false, false)
@@ -913,7 +913,7 @@ int fit_window(const std::string& request) {
             || !mac_fit_resize_ack(before.bounds, target, before_move.bounds)
             || std::chrono::steady_clock::now() >= settle_deadline) {
             CFRelease(position);
-            return mac_fit_rejected("identity-recheck");
+            return mac_fit_rejected("pre-position-identity");
         }
         AXError moved = AXUIElementSetAttributeValue(before.focused, kAXPositionAttribute, position);
         CFRelease(position);

@@ -1777,6 +1777,10 @@ class QualificationTests(unittest.TestCase):
             root = Path(tmp)
             value = dict(schemaVersion=1, mechanism='claude-window-fit', diagnosticsOnly=True, stage='postcondition')
             path = root / 'window-fit.json'
+            for stage in ('pre-resize-identity', 'resize-acknowledgement', 'pre-position-identity'):
+                measured = {**value, 'stage': stage}
+                path.write_text(json.dumps(measured))
+                self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [measured])
             for error in ('cannot-complete','attribute-unsupported','illegal-argument',
                           'invalid-element','api-disabled','failure','other'):
                 measured = {**value, 'stage':'position', 'positionError':error}

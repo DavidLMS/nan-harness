@@ -934,7 +934,8 @@ def semantic_observations(directory, app):
         elif mechanism == 'claude-window-fit':
             fields = set('schemaVersion mechanism diagnosticsOnly stage'.split())
             stages = {'completed', 'request', 'initial-proof', 'screen', 'rectangle', 'settable',
-                      'identity-recheck', 'allocation', 'size', 'position', 'postcondition',
+                      'identity-recheck', 'pre-resize-identity', 'resize-acknowledgement',
+                      'pre-position-identity', 'allocation', 'size', 'position', 'postcondition',
                       'transport', 'invalid-output'}
             if (set(value) - {'positionError'} != fields or app != 'claude-desktop' or value['diagnosticsOnly'] is not True
                     or type(value['stage']) is not str or value['stage'] not in stages):
