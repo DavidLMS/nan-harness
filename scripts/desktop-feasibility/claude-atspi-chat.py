@@ -21,8 +21,18 @@ def inside(rect, outer):
             and rect[1] + rect[3] <= outer[1] + outer[3])
 
 
+BOUNDARIES = frozenset(('request','policy','native-window','source-owner','tree','state',
+    'frame','client','mode','focus','input','clipboard','action','response','transport'))
+QUERY_BOUNDARIES = dict(owner='source-owner', identity='tree', children='tree', parent='frame',
+    state='state', bounds='frame', guard='native-window', client_bounds='client',
+    attributes='mode', focused='focus', grab_focus='focus', text='input', paste_once='input',
+    copy_input_once='clipboard', clear_clipboard='clipboard', clipboard_sentinel='clipboard',
+    clipboard_read='clipboard', actions='action', hit='action', invoke_once='action')
+
 class Rejected(Exception):
-    pass
+    def __init__(self, boundary=None):
+        self.boundary = boundary if boundary in BOUNDARIES else None
+        super().__init__()
 
 
 class Controller:
@@ -32,6 +42,7 @@ class Controller:
         self.editor = self.frame = self.send = None
         self.chat = self.mode = None
         self.sealed_editor = self.sealed_frame = None
+        self.boundary = 'request'
         self.restored = False
         self.copy_attempted = False
         self.focus_attempted = self.paste_attempted = self.send_attempted = False
@@ -41,6 +52,7 @@ class Controller:
             toolVerified=False, recoveryVerified=False)
 
     def query(self, method, *args):
+        self.boundary = QUERY_BOUNDARIES.get(method, 'request')
         if self.clock() >= self.deadline:
             raise TimeoutError()
         result = getattr(self.adapter, method)(*args)
@@ -48,9 +60,13 @@ class Controller:
             raise TimeoutError()
         return result
 
+    def failure(self, error):
+        self.facts['failureBoundary'] = (error.boundary if isinstance(error, Rejected)
+            and error.boundary is not None else self.boundary)
+
     def owned(self, node):
         if self.query('owner', node) != self.root['pid']:
-            raise Rejected()
+            raise Rejected('source-owner')
 
     def tree(self):
         root = (self.root['bus'], self.root['path'])
@@ -85,7 +101,7 @@ class Controller:
         editors = [node for node, identity in nodes if identity[0] in (61, 78, 79)
                    and 'Write your prompt to Claude' in identity[1:]]
         if len(editors) != 1:
-            raise Rejected()
+            raise Rejected('tree')
         self.editor = editors[0]
         self.adapter.key_guard = lambda: self.proof(focused=True)
         self.state(self.editor, editable=True)
@@ -107,14 +123,14 @@ class Controller:
         else:
             raise Rejected()
         if len(frames) != 1:
-            raise Rejected()
+            raise Rejected('frame')
         self.frame = frames[0]
         self.sealed_frame = (self.query('identity', self.frame), self.query('bounds', self.frame))
         self.proof()
 
     def proof(self, focused=False, pending=False):
         if not self.query('guard'):
-            raise Rejected()
+            raise Rejected('native-window')
         if self.chat is not None:
             self.owned(self.chat)
             self.owned(self.mode)
@@ -132,7 +148,7 @@ class Controller:
             raise Rejected()
         client = self.query('client_bounds')
         if self.sealed_frame[1] != client or not inside(self.sealed_editor[1], client):
-            raise Rejected()
+            raise Rejected('client')
         # Revalidate attachment, not merely a detached retained node with same PID.
         node, seen = self.editor, set()
         for _ in range(32):
@@ -148,7 +164,7 @@ class Controller:
             raise Rejected()
         focused_now = not focused or self.query('focused', self.editor)
         if not self.query('guard'):
-            raise Rejected()
+            raise Rejected('native-window')
         if not focused_now:
             if pending:
                 return False
@@ -166,11 +182,11 @@ class Controller:
         modes = [node for node, identity in nodes if identity[0] in (39, 97)
                  and 'Mode' in identity[1:]]
         if len(modes) != 1:
-            raise Rejected()
+            raise Rejected('mode')
         chat = [node for node in self.query('children', modes[0])
                 if self.query('identity', node) == (43, 'Chat', '')]
         if len(chat) != 1 or self.query('attributes', chat[0]).get('current') != 'page':
-            raise Rejected()
+            raise Rejected('mode')
         self.state(chat[0])
         node,seen=chat[0],set()
         for _ in range(32):
@@ -196,6 +212,7 @@ class Controller:
             # This initial candidate has NO replacement authority for nonempty input.
             if self.query('text', self.editor) != '':
                 self.facts['stage'] = 'input-not-empty'
+                self.facts['failureBoundary'] = 'input'
                 return self.facts
             self.facts['stage'] = 'focus'
             self.proof()
@@ -257,14 +274,17 @@ class Controller:
             self.proof()
             # Assistant Copy is a separate operation; no response is claimed by Send.
             self.facts['stage'] = 'sent'
-        except TimeoutError:
+        except TimeoutError as error:
+            self.failure(error)
             self.facts['stage'] = 'deadline'
-        except Exception:
+        except Exception as error:
+            self.failure(error)
             self.facts['stage'] = 'action-uncertain' if self.send_attempted else 'blocked'
         finally:
             try:
                 self.adapter.clear_clipboard()
             except Exception:
+                self.facts['failureBoundary'] = 'clipboard'
                 self.facts['stage'] = 'clipboard-cleanup'
         return self.facts
 
@@ -362,12 +382,15 @@ class Controller:
             value = self.query('clipboard_read')
             if value != marker:
                 self.facts['stage'] = 'response-mismatch'
+                self.facts['failureBoundary'] = 'clipboard'
                 return self.facts
             self.facts['responseVerified'] = True
             self.facts['stage'] = 'copied'
-        except TimeoutError:
+        except TimeoutError as error:
+            self.failure(error)
             self.facts['stage'] = 'deadline'
-        except Exception:
+        except Exception as error:
+            self.failure(error)
             self.facts['stage'] = 'action-uncertain' if self.copy_attempted else 'blocked'
         return self.facts
 
@@ -423,15 +446,24 @@ def native_adapter(request, deadline):
         NANH_CLAUDE_LINUX_SOURCE_POLICY='official-2.9939.4',
         NANH_CLAUDE_LINUX_NATIVE_CHAT='first-turn', NANH_DESKTOP_QUALIFICATION_MODE='startup-baseline')
     if any(os.environ.get(key) != value for key,value in scope.items()):
-        raise Rejected()
+        raise Rejected('policy')
     executable = Path(request['nativeExecutable'])
     if not executable.is_absolute() or executable.is_symlink() or not executable.is_file():
-        raise Rejected()
+        raise Rejected('policy')
     if not time.monotonic() < deadline <= time.monotonic() + 15:
         raise Rejected()
-    visibility = load_visibility()
-    adapter = visibility.Adapter(deadline)
-    driver = runpy.run_path(str(Path(__file__).with_name('zed-input-x11.py')))
+    try:
+        visibility = load_visibility()
+    except Exception:
+        raise Rejected('transport') from None
+    try:
+        adapter = visibility.Adapter(deadline)
+    except Exception:
+        raise Rejected('source-owner') from None
+    try:
+        driver = runpy.run_path(str(Path(__file__).with_name('zed-input-x11.py')))
+    except Exception:
+        raise Rejected('transport') from None
     def run(argv, payload=None, output=False):
         remaining = deadline - time.monotonic()
         if remaining <= 0 or os.getppid() != request['checkerPid']:
@@ -536,6 +568,8 @@ def main():
         stage='blocked',inputVerified=False,pasteAttempted=False,sendAttempted=False,
         sendForwarded=False,responseVerified=False,toolVerified=False,recoveryVerified=False)
     binding = None
+    controller = None
+    boundary = 'request'
     try:
         raw = sys.stdin.buffer.read(32769)
         if len(raw)>32768:
@@ -550,6 +584,7 @@ def main():
         deadline = request['deadline']
         if type(deadline) not in (float,int):
             raise Rejected()
+        boundary = 'policy'
         adapter = native_adapter(request,deadline)
         controller = Controller(adapter,request,deadline)
         if request['binding'] is not None:
@@ -562,8 +597,14 @@ def main():
             facts = controller.copy_response(request['value'])
         if controller.editor is not None and controller.frame is not None:
             binding = controller.binding()
-    except Exception:
-        pass
+    except Exception as error:
+        if controller is not None:
+            facts = controller.facts
+            if facts['stage'] == 'source':
+                facts['stage'] = 'blocked'
+            controller.failure(error)
+        else:
+            facts['failureBoundary'] = error.boundary if isinstance(error, Rejected) and error.boundary else boundary
     # This is private supervisor stdout, not a qualification artifact.
     print(json.dumps(dict(facts=facts,binding=binding),separators=(',',':')))
 

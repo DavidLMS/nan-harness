@@ -5,6 +5,7 @@ use crate::report::Reason;
 use nan_harness_core::DesktopHarnessKind;
 use nan_harness_private_fs::open_private_new;
 use num_traits::ToPrimitive as _;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::io::{Read as _, Write as _};
 use std::path::{Path, PathBuf};
@@ -24,6 +25,29 @@ pub(crate) fn policy() -> bool {
     ]
     .into_iter()
     .all(|(key, value)| std::env::var(key).as_deref() == Ok(value))
+}
+
+#[derive(Clone, Copy, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum FailureBoundary {
+    Request,
+    Policy,
+    NativeWindow,
+    SourceOwner,
+    Tree,
+    State,
+    Frame,
+    Client,
+    Mode,
+    Focus,
+    Input,
+    Clipboard,
+    Action,
+    Response,
+    Transport,
+}
+fn failure_boundary(facts: &Value) -> Option<FailureBoundary> {
+    serde_json::from_value(facts.get("failureBoundary")?.clone()).ok()
 }
 
 const FLAGS: [&str; 7] = [
@@ -86,11 +110,17 @@ fn decode(bytes: &[u8]) -> Option<(Value, Option<Value>)> {
         return None;
     }
     let facts = value["facts"].as_object()?;
-    if facts.len() != 11
+    if ![11, 12].contains(&facts.len())
         || facts.keys().any(|key| {
             !FLAGS.contains(&key.as_str())
-                && !["schemaVersion", "mechanism", "diagnosticsOnly", "stage"]
-                    .contains(&key.as_str())
+                && ![
+                    "schemaVersion",
+                    "mechanism",
+                    "diagnosticsOnly",
+                    "stage",
+                    "failureBoundary",
+                ]
+                .contains(&key.as_str())
         })
         || value["facts"]["schemaVersion"] != 1
         || value["facts"]["diagnosticsOnly"] != true
@@ -118,6 +148,20 @@ fn decode(bytes: &[u8]) -> Option<(Value, Option<Value>)> {
         || value["facts"]["sendForwarded"] == true && value["facts"]["sendAttempted"] != true
         || value["facts"]["sendAttempted"] == true && value["facts"]["inputVerified"] != true
         || value["facts"]["responseVerified"] == true && value["facts"]["stage"] != "copied"
+    {
+        return None;
+    }
+    if facts.contains_key("failureBoundary")
+        && (failure_boundary(&value["facts"]).is_none()
+            || ![
+                "blocked",
+                "action-uncertain",
+                "deadline",
+                "clipboard-cleanup",
+                "input-not-empty",
+                "response-mismatch",
+            ]
+            .contains(&value["facts"]["stage"].as_str()?))
     {
         return None;
     }
@@ -211,6 +255,7 @@ pub(crate) struct ClaudeLinuxChatSession<'a> {
     driver: PathBuf,
     binding: Option<Value>,
     stage: String,
+    failure_boundary: Option<FailureBoundary>,
     submitted: u8,
     verified: u8,
     copied: u8,
@@ -239,6 +284,7 @@ impl Gui {
             driver,
             binding: None,
             stage: "source".into(),
+            failure_boundary: None,
             submitted: 0,
             verified: 0,
             copied: 0,
@@ -249,11 +295,14 @@ impl Gui {
 }
 impl ClaudeLinuxChatSession<'_> {
     fn operation(&mut self, mode: &str, value: &str, deadline: Instant) -> Result<Value, Reason> {
+        self.stage = "blocked".into();
+        self.failure_boundary = Some(FailureBoundary::NativeWindow);
         if Instant::now() >= deadline
             || !self.gui.visual.linux_passive_composer_guard_until(deadline)
         {
             return Err(Reason::FocusChanged);
         }
+        self.failure_boundary = Some(FailureBoundary::SourceOwner);
         let data = &self.gui.app.as_ref().ok_or(Reason::ActionUnsupported)?.data;
         if data.role != Role::Application || data.pid != Some(self.gui.visual.pid()) {
             return Err(Reason::FocusChanged);
@@ -280,12 +329,16 @@ impl ClaudeLinuxChatSession<'_> {
         request["value"] = json!(value);
         request["binding"] = json!(self.binding);
         let payload = Zeroizing::new(request.to_string());
+        self.failure_boundary = Some(FailureBoundary::Transport);
         let (facts, binding) = supervise(&self.driver, payload, deadline)?;
+        self.failure_boundary = failure_boundary(&facts);
         self.stage = facts["stage"]
             .as_str()
             .ok_or(Reason::ActionUnsupported)?
             .to_owned();
         if !self.gui.visual.linux_passive_composer_guard_until(deadline) {
+            self.stage = "blocked".into();
+            self.failure_boundary = Some(FailureBoundary::NativeWindow);
             return Err(Reason::FocusChanged);
         }
         if Instant::now() >= deadline {
@@ -363,21 +416,29 @@ impl ClaudeLinuxChatSession<'_> {
         _gate: &ProviderGate,
     ) -> Result<(), Reason> {
         self.stage = "recovery-scope-unimplemented".into();
+        self.failure_boundary = None;
         Err(Reason::ActionUnsupported)
     }
     pub(crate) fn retry_once(&mut self) -> Result<(), Reason> {
         Err(Reason::ActionUnsupported)
     }
     pub(crate) fn finish(
-        self,
+        mut self,
         _gate: &ProviderGate,
         outcome: Result<(), Reason>,
     ) -> Result<(), Reason> {
         let cleared =
             clipboard::write("").is_ok() && clipboard::read().is_ok_and(|value| value.is_empty());
-        let facts = json!({"schemaVersion":1,"mechanism":"claude-linux-native-chat","diagnosticsOnly":true,
+        if !cleared {
+            self.stage = "clipboard-cleanup".into();
+            self.failure_boundary = Some(FailureBoundary::Clipboard);
+        }
+        let mut facts = json!({"schemaVersion":1,"mechanism":"claude-linux-native-chat","diagnosticsOnly":true,
             "stage":self.stage,"submittedTurns":self.submitted,"inputVerifiedTurns":self.verified,
             "copiedResponses":self.copied,"retryAttempted":false,"clipboardCleared":cleared});
+        if let Some(boundary) = self.failure_boundary {
+            facts["failureBoundary"] = json!(boundary);
+        }
         let recorded = open_private_new(&self.directory.join(format!(
             "claude-linux-native-chat-{}.json",
             self.gui.visual.pid()

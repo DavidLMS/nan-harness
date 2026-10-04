@@ -987,7 +987,7 @@ def semantic_observations(directory, app):
         elif mechanism == 'claude-linux-native-chat':
             fields = {'schemaVersion','mechanism','diagnosticsOnly','stage','submittedTurns',
                       'inputVerifiedTurns','copiedResponses','retryAttempted','clipboardCleared'}
-            if (app != 'claude-desktop' or set(value) != fields or value['diagnosticsOnly'] is not True
+            if (app != 'claude-desktop' or set(value) - {'failureBoundary'} != fields or value['diagnosticsOnly'] is not True
                     or type(value['stage']) is not str or value['stage'] not in {
                         'source','focus','paste','readback','send','input-not-empty','blocked',
                         'action-uncertain','deadline','clipboard-cleanup','sent','response-pending',
@@ -997,6 +997,15 @@ def semantic_observations(directory, app):
                     or not value['copiedResponses'] <= value['submittedTurns'] <= value['inputVerifiedTurns']
                     or value['retryAttempted'] is not False or type(value['clipboardCleared']) is not bool):
                 raise ValueError('invalid Claude Linux native Chat diagnostic')
+            if 'failureBoundary' in value:
+                boundary = value['failureBoundary']
+                if (type(boundary) is not str or boundary not in {
+                        'request','policy','native-window','source-owner','tree','state','frame','client',
+                        'mode','focus','input','clipboard','action','response','transport'}
+                        or value['stage'] not in {'blocked','action-uncertain','deadline','clipboard-cleanup',
+                                                 'input-not-empty','response-mismatch'}):
+                    raise ValueError('invalid Claude Linux Chat failure boundary')
+                record['failureBoundary'] = boundary
             record.update({key:value[key] for key in fields - {'schemaVersion','mechanism'}})
         elif mechanism == 'claude-config-persist-owners':
             fields = {'schemaVersion','mechanism','diagnosticsOnly','status','stage','destinationPresent',

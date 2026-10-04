@@ -2481,6 +2481,32 @@ class QualificationTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 q.semantic_observations(root, 'claude-desktop')
 
+    def test_linux_chat_failure_boundary_is_closed_and_advisory(self):
+        facts = dict(schemaVersion=1, mechanism='claude-linux-native-chat', diagnosticsOnly=True,
+                     stage='blocked', submittedTurns=0, inputVerifiedTurns=0, copiedResponses=0,
+                     retryAttempted=False, clipboardCleared=True)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / 'boundary.json'
+            for boundary in ('request','policy','native-window','source-owner','tree','state','frame','client',
+                             'mode','focus','input','clipboard','action','response','transport'):
+                path.write_text(json.dumps({**facts,'failureBoundary':boundary}))
+                record = q.semantic_observations(root,'claude-desktop')[0]
+                self.assertEqual(record['failureBoundary'],boundary)
+                self.assertEqual(record['submittedTurns'],0)
+            path.write_text(json.dumps(facts))
+            self.assertNotIn('failureBoundary',q.semantic_observations(root,'claude-desktop')[0])
+            for changed in ({**facts,'failureBoundary':'PRIVATE'}, {**facts,'failureBoundary':None},
+                            {**facts,'failureBoundary':True}, {**facts,'failureBoundary':{'path':'PRIVATE'}},
+                            {**facts,'failureBoundary':'input','rawError':'PRIVATE'},
+                            {**facts,'failureBoundary':'input','stage':'copied'},
+                            {**facts,'failureBoundary':'input','stage':'sent'},
+                            {**facts,'failureBoundary':'input','stage':'recovery-scope-unimplemented'}):
+                path.write_text(json.dumps(changed))
+                with self.assertRaises(ValueError):q.semantic_observations(root,'claude-desktop')
+            path.write_text(json.dumps({**facts,'failureBoundary':'action','stage':'action-uncertain'}))
+            with self.assertRaises(ValueError):q.semantic_observations(root,'chatgpt-desktop')
+
     def test_codex_main_confirmation_preserves_failed_guard_and_privacy(self):
         value = dict(schemaVersion=1, mechanism='renderer-inventory', diagnosticsOnly=True,
                      app='chatgpt-desktop', endpointOwned=True, launcherOwned=True, attached=True,

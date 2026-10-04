@@ -170,4 +170,33 @@ class ResponseTests(unittest.TestCase):
             with self.subTest(options=options):
                 a,c,f=self.case(**options);self.assertFalse(f['responseVerified']);self.assertLessEqual(a.copy_actions,1)
 
+class BoundaryTests(unittest.TestCase):
+    run_case = ControllerTests.run_case
+    def test_same_failed_query_boundary_without_extra_actions(self):
+        for options,boundary in [({'foreign':True},'source-owner'),({'duplicate':True},'tree'),
+                ({'moved_client':True},'client'),({'wrong_mode':True},'mode'),
+                ({'initial':'unknown owned text'},'input'),({'guard_after_paste':True},'native-window'),
+                ({'invoke_error':True},'action')]:
+            with self.subTest(options=options):
+                adapter,controller,facts=self.run_case(**options)
+                self.assertEqual(facts['failureBoundary'],boundary)
+                self.assertLessEqual(adapter.send_count,1)
+                self.assertFalse(facts['sendForwarded'])
+                self.assertNotIn('unknown owned text',str(facts))
+        adapter,controller,facts=self.run_case()
+        self.assertNotIn('failureBoundary',facts)
+    def test_request_rejection_is_closed_and_action_free(self):
+        import io,json
+        from contextlib import redirect_stdout
+        from unittest.mock import patch
+        class Input:
+            buffer=io.BytesIO(b'{"PRIVATE":"value"}')
+        out=io.StringIO()
+        with patch('sys.stdin',Input()),redirect_stdout(out):
+            chat.main()
+        facts=json.loads(out.getvalue())['facts']
+        self.assertEqual(facts['failureBoundary'],'request')
+        self.assertNotIn('PRIVATE',out.getvalue())
+        self.assertFalse(facts['sendAttempted'])
+
 if __name__=='__main__':unittest.main()
