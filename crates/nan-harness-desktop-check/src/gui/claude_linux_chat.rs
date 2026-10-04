@@ -166,7 +166,7 @@ fn decode(bytes: &[u8]) -> Option<(Value, Option<Value>)> {
         return None;
     }
     let facts = value["facts"].as_object()?;
-    if !(11..=13).contains(&facts.len())
+    if !(11..=14).contains(&facts.len())
         || facts.keys().any(|key| {
             !FLAGS.contains(&key.as_str())
                 && ![
@@ -596,5 +596,43 @@ mod embedded_text_tests {
             );
         }
         assert!(embedded_text_observation(&json!({"embeddedTextObservation":null})).is_none());
+    }
+}
+
+#[cfg(test)]
+mod helper_packet_tests {
+    use super::decode;
+    use serde_json::json;
+    #[test]
+    fn full_nonempty_helper_packet_accepts_all_reproved_optional_diagnostics() {
+        let packet = json!({"facts":{
+            "schemaVersion":1,"mechanism":"claude-linux-native-chat","diagnosticsOnly":true,
+            "stage":"input-not-empty","failureBoundary":"input",
+            "inputVerified":false,"pasteAttempted":false,"sendAttempted":false,
+            "sendForwarded":false,"responseVerified":false,"toolVerified":false,"recoveryVerified":false,
+            "inputShape":{"charCount":1,"onlyLineBreaks":true,"onlyWhitespace":true,
+                "onlyZeroWidthMarkers":false,"onlyObjectReplacement":false},
+            "embeddedTextObservation":{"nodeCount":3,"paragraphCount":1,"literalLfLeafCount":1,
+                "brLfLeafCount":1,"exactFillerLfLeafCount":1}},
+            "binding":{"editor":["synthetic-owned","/editor"],"frame":["synthetic-owned","/frame"],
+                "editorIdentity":[61,"synthetic-composer",""],"frameIdentity":[69,"synthetic-frame",""],
+                "editorBounds":[10,10,100,30],"frameBounds":[0,0,300,200]}});
+        let bytes = serde_json::to_vec(&packet).unwrap();
+        let (facts, binding) = decode(&bytes).expect("valid complete diagnostic packet rejected");
+        assert_eq!(facts, packet["facts"]);
+        assert_eq!(binding.as_ref(), Some(&packet["binding"]));
+        for (key, value) in [
+            ("PRIVATE", json!("payload")),
+            ("sendAttempted", json!(true)),
+            ("embeddedTextObservation", json!(null)),
+            ("inputShape", json!({"text":"PRIVATE"})),
+        ] {
+            let mut changed = packet.clone();
+            changed["facts"][key] = value;
+            assert!(decode(&serde_json::to_vec(&changed).unwrap()).is_none());
+        }
+        let mut changed = packet.clone();
+        changed["binding"]["editorBounds"] = json!([10, 10, 0, 30]);
+        assert!(decode(&serde_json::to_vec(&changed).unwrap()).is_none());
     }
 }
