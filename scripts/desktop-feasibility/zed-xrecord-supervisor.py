@@ -98,9 +98,10 @@ class Observer:
     def _line(self):
         while b'\n' not in self.pending:
             remaining = self.end - time.monotonic()
-            if remaining <= 0:
-                raise TimeoutError()
-            ready, _, _ = select.select([self.child.stdout], [], [], remaining)
+            # The worker may have emitted its bounded final receipt at its
+            # original cutoff. Consume already-ready bytes without waiting or
+            # extending recording; absence still times out immediately.
+            ready, _, _ = select.select([self.child.stdout], [], [], max(0, remaining))
             if not ready:
                 raise TimeoutError()
             chunk = os.read(self.child.stdout.fileno(), 257)
@@ -118,8 +119,12 @@ class Observer:
                 if not self._owned():
                     self.result = unobserved('identity-failed', self.stage)
                 else:
-                    self.child.stdin.write(b'finish\n')
-                    self.child.stdin.flush()
+                    if time.monotonic() < self.end and self.child.poll() is None:
+                        try:
+                            self.child.stdin.write(b'finish\n')
+                            self.child.stdin.flush()
+                        except BrokenPipeError:
+                            pass  # A spontaneous cutoff receipt may already be queued.
                     self.result = validate(self._line())
                     if not self._owned():
                         self.result = unobserved('identity-failed', self.stage)

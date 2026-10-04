@@ -20,6 +20,19 @@ class Tests(unittest.TestCase):
         self.assertTrue(o.finish()['orderedPair'])
         self.assertIsNotNone(child.poll())
 
+    def test_cutoff_receipt_is_consumed_without_renewing_observation(self):
+        receipt={'status':'complete','pressCount':0,'releaseCount':0,'orderedPair':False,
+            'crossingHeaders':{'status':'observed','ownedNormalEnterCount':1,
+                'ownedNonNormalEnterCount':0,'ownedNormalLeaveCount':1,'ownedMotionCount':1}}
+        code='import sys;sys.stdin.readline();print(\'{"stage":"armed"}\',flush=True);print('+repr(json.dumps(receipt))+',flush=True)'
+        observer=m.Observer(10,20,lambda:True,self.fake(code),budget=0.2)
+        child=observer.child;child.wait(timeout=0.2)
+        original_end=observer.end;observer.end=time.monotonic()-0.01
+        expired_end=observer.end
+        self.assertEqual(observer.finish(),receipt)
+        self.assertEqual(observer.end,expired_end);self.assertLess(observer.end,original_end)
+        self.assertIsNone(observer.child)
+
     def test_missing_extension_is_unobserved_not_zero_delivery(self):
         o = m.Observer(10, 20, lambda: True, self.fake('print(\'{"status":"unavailable","pressCount":null,"releaseCount":null,"orderedPair":null}\',flush=True)'))
         self.assertEqual(o.finish(), m.unobserved('unavailable'))
