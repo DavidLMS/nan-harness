@@ -19,6 +19,11 @@ class Tests(unittest.TestCase):
    with patch.dict(q.os.environ,{'NANH_ZED_PANEL_LAYOUT':'fixed-wide-compact'},clear=True),patch.object(q.sys,'platform','linux'),patch.object(q,'envelope'),patch.object(q,'cell',return_value={'backend':'native'}),patch.object(q,'read_frozen_manifest',return_value={'apps':[release]}),patch.object(q,'bounded_json',return_value=prepared),patch.object(q,'digest',side_effect=lambda p:sha if Path(p)==exe else 'fixed'),patch.object(q,'ensure_private_directory'),patch.object(q,'qualification_environment',return_value=env),patch.object(q,'execute_with_diagnostics',side_effect=execute) as dispatch:
     with self.assertRaises(ReachedExecution):q.run(args)
     self.assertEqual(dispatch.call_count,1)
+    with patch.dict(q.os.environ,{'NANH_ZED_PANEL_LAYOUT':'fixed-wide','NANH_ZED_SCREEN_POLICY':'height-1536'},clear=True):
+     def tall_execute(*values):
+      self.assertEqual(values[-1]['NANH_ZED_SCREEN_POLICY'],'height-1536');self.assertEqual(values[-1]['NANH_ZED_PANEL_LAYOUT'],'fixed-wide');raise ReachedExecution()
+     with patch.object(q,'execute_with_diagnostics',side_effect=tall_execute):
+      with self.assertRaises(ReachedExecution):q.run(args)
     release['version']='1.23.0'
     with self.assertRaisesRegex(ValueError,'source differs'):q.run(args)
     self.assertEqual(dispatch.call_count,1)
@@ -31,6 +36,14 @@ class Tests(unittest.TestCase):
   for change in [{'RUNNER_OS':'Windows'},{'NANH_ZED_PANEL_LAYOUT':'arbitrary'},{'NANH_ZED_LAYOUT_POLICY':'zoom-before-send'},{'NANH_ZED_PANEL_ZOOM':'observe'}]:
    with self.subTest(change=change),self.assertRaises(ValueError):q.qualification_environment('zed-desktop',Path('/facts'),Path('/nanh'),Path('/zed'),{**source,**change})
   with self.assertRaises(ValueError):q.qualification_environment('claude-desktop',Path('/facts'),Path('/nanh'),Path('/zed'),source)
+ def test_screen_policy_requires_fixed_wide_source_scope(self):
+  source={'GITHUB_ACTIONS':'true','RUNNER_ENVIRONMENT':'github-hosted','RUNNER_OS':'Linux','NANH_ZED_PANEL_LAYOUT':'fixed-wide','NANH_ZED_SCREEN_POLICY':'height-1536','FEASIBILITY_ZED_MAXIMIZED':'1'}
+  source.update({key:'/synthetic/helper' for key in q.ZED_HELPERS})
+  source.update(FEASIBILITY_ZED_INPUT_DRIVER_MODE='paste',FEASIBILITY_ZED_RESPONSE_METHOD='thread-export')
+  result=q.qualification_environment('zed-desktop',Path('/facts'),Path('/nanh'),Path('/zed'),source)
+  self.assertNotIn('NANH_ZED_SCREEN_POLICY',result)
+  for change in [{'NANH_ZED_SCREEN_POLICY':''},{'NANH_ZED_SCREEN_POLICY':'height-2048'},{'NANH_ZED_PANEL_LAYOUT':'fixed-wide-compact'},{'FEASIBILITY_ZED_MAXIMIZED':'0'},{'RUNNER_OS':'Windows'}]:
+   with self.subTest(change=change),self.assertRaises(ValueError):q.qualification_environment('zed-desktop',Path('/facts'),Path('/nanh'),Path('/zed'),{**source,**change})
  def test_claude_release_guards_run_before_prepared_lookup(self):
   for platform,flag in [('macos','NANH_CLAUDE_MAC_PROFILE_POLICY'),('windows','NANH_CLAUDE_WINDOWS_PROFILE_POLICY')]:
    args=SimpleNamespace(app='claude-desktop',platform=platform,source_sha='a'*40,frozen=Path('/synthetic'))

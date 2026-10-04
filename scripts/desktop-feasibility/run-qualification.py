@@ -172,6 +172,11 @@ def qualification_environment(app, facts, real_nanh, executable, inherited=None)
             or source.get('RUNNER_OS') != 'Linux'
             or source.get('NANH_ZED_LAYOUT_POLICY') is not None or source.get('NANH_ZED_PANEL_ZOOM') is not None):
         raise ValueError('Zed panel layout trial is unavailable')
+    screen_policy = source.get('NANH_ZED_SCREEN_POLICY')
+    if screen_policy is not None and (screen_policy != 'height-1536' or app != 'zed-desktop'
+            or source.get('RUNNER_OS') != 'Linux' or panel_layout != 'fixed-wide'
+            or source.get('FEASIBILITY_ZED_MAXIMIZED') != '1'):
+        raise ValueError('Zed screen trial is unavailable')
     environment = {key: value for key, value in source.items() if key in SESSION_ENV}
     if source.get('RUNNER_OS') == 'Windows':
         for key in WINDOWS_PROOF:
@@ -407,6 +412,13 @@ def run(args):
             raise ValueError('Zed panel layout trial differs')
         environment['NANH_ZED_PANEL_LAYOUT'] = requested
         environment['NANH_ZED_PANEL_SOURCE_POLICY'] = 'official-1.22.0'
+    if os.environ.get('NANH_ZED_SCREEN_POLICY') is not None:
+        if (os.environ['NANH_ZED_SCREEN_POLICY'] != 'height-1536'
+                or environment.get('NANH_ZED_PANEL_LAYOUT') != 'fixed-wide'
+                or environment.get('NANH_ZED_PANEL_SOURCE_POLICY') != 'official-1.22.0'):
+            raise ValueError('Zed screen source differs')
+        environment['NANH_ZED_SCREEN_POLICY'] = 'height-1536'
+
 
     if (args.app == 'claude-desktop' and args.platform == 'linux'
             and release.get('version') == '2.9939.4'
