@@ -859,6 +859,19 @@ impl Visual {
         reason
     }
 
+    #[cfg(target_os = "linux")]
+    pub(super) fn linux_passive_composer_guard_until(&self, deadline: Instant) -> bool {
+        if Instant::now() >= deadline {
+            return false;
+        }
+        let expected = self.window.borrow().clone();
+        self.native
+            .windows_until(deadline.min(Instant::now() + Duration::from_secs(15)))
+            .is_ok_and(|snapshot| {
+                Instant::now() < deadline && scoped_composer_guard(&snapshot, &expected).is_ok()
+            })
+    }
+
     pub(super) fn guard_composer(&self) -> Result<(), (Reason, ComposerErrorCategory)> {
         let expected = self.window.borrow().clone();
         let snapshot = self

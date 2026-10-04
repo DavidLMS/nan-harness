@@ -374,6 +374,8 @@ def run(args):
             and release.get('digest') == 'sha256:3cfddb23bf2911e05e27b4ed3856b8e795df94643b2c35b59deb317cf995bca0'
             and environment.get('NANH_DESKTOP_QUALIFICATION_MODE') == 'startup-baseline'):
         environment['NANH_CLAUDE_LINUX_SOURCE_POLICY'] = 'official-2.9939.4'
+        environment['FEASIBILITY_CLAUDE_VISIBILITY_DRIVER'] = str(
+            Path(__file__).with_name('claude-atspi-visibility.py').resolve(strict=True))
     if os.environ.get('NANH_CLAUDE_LINUX_CHAT_ONLY') is not None:
         if environment.get('NANH_CLAUDE_LINUX_SOURCE_POLICY') != 'official-2.9939.4':
             raise ValueError('Claude Linux Chat-only source differs')

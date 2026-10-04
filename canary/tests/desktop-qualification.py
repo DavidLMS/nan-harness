@@ -3159,5 +3159,25 @@ class ClaudeFailureScopeShapeTests(unittest.TestCase):
             path.write_text(json.dumps({key: val for key, val in value.items() if key != 'scopeShape'}))
             self.assertNotIn('scopeShape', q.semantic_observations(root, 'claude-desktop')[0])
 
+class ClaudeLinuxVisibilityTests(unittest.TestCase):
+    def test_closed_passive_states_and_failure_privacy(self):
+        value = dict(schemaVersion=1, mechanism='claude-linux-classic-visibility', diagnosticsOnly=True,
+                     status='complete', stage='complete', visible=False, showing=False, boundsPositive=True,
+                     checkedAncestorCount=2, hiddenAncestorCount=1)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'facts.json'
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(tmp, 'claude-desktop')[0], value)
+            for change in ({'hiddenAncestorCount': 3}, {'checkedAncestorCount': True}, {'visible': None},
+                           {'status': 'unavailable'}, {'bus': 'PRIVATE'}, {'stage': 'PRIVATE'}):
+                path.write_text(json.dumps({**value, **change}))
+                with self.assertRaises(ValueError): q.semantic_observations(tmp, 'claude-desktop')
+            for status, stage in [('unavailable','deadline'), ('changed','identity'), ('limit','parent')]:
+                failed = {**value, 'status':status, 'stage':stage,
+                          **dict.fromkeys(('visible','showing','boundsPositive','checkedAncestorCount','hiddenAncestorCount'))}
+                path.write_text(json.dumps(failed))
+                self.assertEqual(q.semantic_observations(tmp, 'claude-desktop')[0], failed)
+                with self.assertRaises(ValueError): q.semantic_observations(tmp, 'chatgpt-desktop')
+
 if __name__ == '__main__':
     unittest.main()

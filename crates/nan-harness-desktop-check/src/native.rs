@@ -312,7 +312,7 @@ impl Native {
         Snapshot::parse(&output).map_err(|_| FailureCategory::Pipe)
     }
 
-    #[cfg(any(windows, test))]
+    #[cfg(any(windows, target_os = "linux", test))]
     pub(crate) fn windows_until(
         &self,
         deadline: std::time::Instant,

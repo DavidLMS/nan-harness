@@ -3,6 +3,8 @@
 mod accessibility_probe;
 #[cfg(any(target_os = "macos", test))]
 mod claude_chat_navigation;
+#[cfg(target_os = "linux")]
+mod claude_linux_visibility;
 #[cfg(target_os = "macos")]
 mod claude_native_chat;
 mod claude_native_probe;
@@ -240,7 +242,11 @@ fn initial_claude_policy() -> bool {
     {
         claude_windows_ready::policy()
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
+    {
+        claude_linux_visibility::policy()
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
     {
         crate::native::claude_focus_policy()
     }
@@ -251,7 +257,7 @@ pub(crate) struct Gui {
     app_error: Option<Reason>,
     kind: DesktopHarnessKind,
     visual: visual::Visual,
-    #[cfg(any(target_os = "macos", windows))]
+    #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
     initial_deadline: Cell<Option<Instant>>,
     #[cfg(windows)]
     initial_observation_deadline: Option<Instant>,
@@ -562,7 +568,7 @@ impl Gui {
             app_error,
             kind,
             visual,
-            #[cfg(any(target_os = "macos", windows))]
+            #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
             initial_deadline: Cell::new(deadline),
             #[cfg(windows)]
             initial_observation_deadline: deadline,

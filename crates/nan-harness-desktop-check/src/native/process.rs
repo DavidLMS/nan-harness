@@ -114,7 +114,7 @@ pub(super) fn run_focus_until(
     run_once_until(executable, argument, None, &[], Some(deadline))
 }
 
-#[cfg(any(windows, test))]
+#[cfg(any(windows, target_os = "linux", test))]
 pub(super) fn run_windows_until(
     executable: &Path,
     deadline: Instant,

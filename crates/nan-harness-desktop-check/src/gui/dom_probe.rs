@@ -870,6 +870,8 @@ impl Gui {
             if let Some(counts) = composer_inventory {
                 super::claude_native_probe::record(directory, owner, &counts);
             }
+            #[cfg(target_os = "linux")]
+            self.record_linux_classic_visibility(directory, owner);
             self.observe_hosted_startup(composer_observations)?;
             #[cfg(windows)]
             self.record_claude_windows_uia(directory);
