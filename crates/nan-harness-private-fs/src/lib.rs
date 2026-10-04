@@ -2,7 +2,7 @@
 
 use std::fs::{self, File};
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 #[cfg(unix)]
 mod unix;
@@ -68,8 +68,16 @@ pub fn create_private_dir(path: &Path) -> io::Result<()> {
 /// later failure may remain.
 pub fn create_private_dir_all(path: &Path) -> io::Result<()> {
     let mut current = PathBuf::new();
-    for component in path.components() {
+    let mut components = path.components().peekable();
+    while let Some(component) = components.next() {
         current.push(component.as_os_str());
+        // A Windows verbatim drive/UNC prefix is not a filesystem object until
+        // its root separator is appended. Never query or create a partial root.
+        if matches!(component, Component::Prefix(_))
+            && matches!(components.peek(), Some(Component::RootDir))
+        {
+            continue;
+        }
         process_directory_component(&current)?;
     }
     Ok(())

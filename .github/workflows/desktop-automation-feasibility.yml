@@ -248,6 +248,9 @@ jobs:
         run: |
           cargo test --locked -p nan-harness-desktop-check --lib gui::claude_linux_chat
           cargo test --locked -p nan-harness-desktop-check --lib probe::claude_linux_profile
+      - name: Verify private Windows verbatim directory creation before installation
+        if: runner.os == 'Windows' && matrix.app == 'claude-desktop'
+        run: cargo test --locked -p nan-harness-private-fs --test private_fs windows_private_verbatim_directory_tree
       - name: Verify Windows Claude acquisition policy without an application
         if: runner.os == 'Windows' && matrix.app == 'claude-desktop'
         run: cargo test --locked -p nan-harness-desktop-check --lib gui::claude_windows

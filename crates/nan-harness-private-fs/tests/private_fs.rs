@@ -437,3 +437,34 @@ fn windows_missing_path_fails_loudly() {
     restrict_path(&path, PrivatePathKind::File)
         .expect_err("missing path must not be reported as hardened");
 }
+
+#[cfg(windows)]
+#[test]
+fn windows_private_verbatim_directory_tree_preserves_existing_ancestor() {
+    let directory = tempdir().expect("temporary directory");
+    let workspace = directory
+        .path()
+        .canonicalize()
+        .expect("canonical workspace");
+    assert!(workspace.as_os_str().to_string_lossy().starts_with(r"\\?\"));
+    let existing = workspace.join("existing");
+    fs::create_dir(&existing).expect("existing ancestor");
+    fs::write(existing.join("preserved.txt"), b"owned original").unwrap();
+    let nested = existing.join("profile/home/AppData/Local/Claude-3p");
+    create_private_dir_all(&nested).expect("complete verbatim private directory tree");
+    create_private_dir_all(&nested).expect("existing private tree remains usable");
+    assert_eq!(
+        fs::read(existing.join("preserved.txt")).unwrap(),
+        b"owned original"
+    );
+    for child in [
+        "profile",
+        "profile/home",
+        "profile/home/AppData",
+        "profile/home/AppData/Local",
+        "profile/home/AppData/Local/Claude-3p",
+    ] {
+        nan_harness_test_support::windows_acl::assert_private_directory(&existing.join(child))
+            .expect("every new descendant has a private DACL");
+    }
+}
