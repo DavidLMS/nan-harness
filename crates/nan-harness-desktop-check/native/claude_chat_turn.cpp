@@ -399,13 +399,17 @@ static PastedValue pasted_value_state(const std::string& value, const std::strin
     return prompt.compare(0,value.size(),value)==0 ? PastedValue::Pending : PastedValue::Rejected;
 }
 static PastedValue pasted_composer_value(const Request& request, const Node& control, const std::string& initial) {
-    if (focused_composer(request,control)!=ComposerFocus::Focused) return PastedValue::Rejected;
+    const auto before=focused_composer(request,control);
+    if (before==ComposerFocus::Rejected) return PastedValue::Rejected;
+    if (before==ComposerFocus::PendingIdentity) return PastedValue::Pending;
     auto value=attribute(control.element,kAXValueAttribute);
     PrivateInputValue observed;
     const bool valid=private_input_value(value,observed.value);
     if (value) CFRelease(value);
-    const bool focused=focused_composer(request,control)==ComposerFocus::Focused;
-    return pasted_value_state(observed.value,request.prompt,valid && !ax_query_failed,focused,initial);
+    const auto after=focused_composer(request,control);
+    if (!valid || ax_query_failed || after==ComposerFocus::Rejected) return PastedValue::Rejected;
+    if (after==ComposerFocus::PendingIdentity) return PastedValue::Pending;
+    return pasted_value_state(observed.value,request.prompt,true,true,initial);
 }
 template<class Query, class Within, class Pause>
 static bool settle_pasted_value(Query query, Within within_deadline, Pause pause) {
