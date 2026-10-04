@@ -146,19 +146,32 @@ observations describe completed runs, rather than additional qualification:
 | --- | --- | --- | --- |
 | Zed | Response and file-tool steps pass; pointer and accessibility Retry acknowledgements do not produce provider recovery. | Three complete probes pass the expanded retry policy. | Three complete probes pass with direct native clipboard transport and all cleanup checks. |
 | Hermes | Three complete probes pass with renderer process ownership. | Three complete probes pass with private native userData and bounded cold-start waits. | Three complete probes pass after ordinary onboarding dismissal and fresh catalog readiness, including explicit UI Retry and cleanup. |
-| ChatGPT / Codex | Folder trust, role selection and Continue pass in two sessions; Skip opens a modal and coding readiness remains absent. | Two sessions complete folder trust, role selection and Continue; one stops at an external window overlap after activation. Optional task completion remains unqualified. | Two sessions stop at the folder trust guard; another completes trust, role selection and Continue but lacks Get Started. |
-| Claude | The owned editor and native window pass. Embedded accessible text resolves to a single LF and still blocks input until its meaning is proven. | Three complete native probes pass input, response, file-tool, controlled failure recovery and cleanup. | Normal configuration persistence still fails with a sharing violation. The production environment path resolver and configuration lifecycle pass the preinstallation filesystem fixture. |
+| ChatGPT / Codex | All three sessions complete folder trust, Engineering, Continue, Skip and its ordinary confirmation; the coding composer and conversation remain absent. | All three sessions complete the single native activation and retain the source-known auxiliary; external overlap prevents focus acceptance until the original deadline. | All three sessions complete folder trust. Later role or Continue checks exhaust the deadline, or task acknowledgement remains absent. |
+| Claude | The owned editor and native window pass. Complete helper packets now decode; the single LF leaf has no exported BR/filler marker, so input remains blocked. | Three complete native probes pass input, response, file-tool, controlled failure recovery and cleanup. | Normal configuration persistence still fails with a sharing violation. The production environment path resolver and configuration lifecycle pass the preinstallation filesystem fixture. |
 | Pen | Software GLES removes GPU startup failure; three fresh sessions show sign-in and no editor. No official account-free route found for the frozen release. | Two probes expose composer/Send; another exposes sign-in. Conversation adapter remains unimplemented. | Owned renderer loads sign-in and a dialog; conversation adapter remains unimplemented. |
 
-Current Codex evidence is Linux [37187034192](https://github.com/DavidLMS/nan-harness/actions/runs/37187034192),
-macOS [37187721869](https://github.com/DavidLMS/nan-harness/actions/runs/37187721869),
-and Windows [37187035914](https://github.com/DavidLMS/nan-harness/actions/runs/37187035914).
-Current Claude evidence is Linux [37187614047](https://github.com/DavidLMS/nan-harness/actions/runs/37187614047),
+Current Codex evidence is Linux [37190228367](https://github.com/DavidLMS/nan-harness/actions/runs/37190228367),
+macOS [37189763645](https://github.com/DavidLMS/nan-harness/actions/runs/37189763645),
+and Windows [37189765479](https://github.com/DavidLMS/nan-harness/actions/runs/37189765479).
+Current Claude evidence is Linux [37189761871](https://github.com/DavidLMS/nan-harness/actions/runs/37189761871),
 macOS [37188000425](https://github.com/DavidLMS/nan-harness/actions/runs/37188000425),
 and Windows [37188073720](https://github.com/DavidLMS/nan-harness/actions/runs/37188073720).
 Both cleanup scopes pass and invalid closed diagnostic events are zero in these runs.
 Only the macOS Claude result adds a qualified cell; a passing exact-commit
 production matrix and the final repository gate remain required.
+
+The neutral Linux XI2 fixture in [37190616585](https://github.com/DavidLMS/nan-harness/actions/runs/37190616585)
+creates only its own synthetic window and installs no vendor application. Warp
+and XTEST each deliver three owned motion events with the X/Y valuator mask
+required by GPUI. This refutes the proposed missing-motion-mask explanation for
+Zed Retry; it does not qualify Zed or change its pointer transport.
+
+A Windows-only configuration persistence trial uses one safe Rust rename
+invocation with retained file identity and read-only private-DACL checks before
+and after it. Its preinstallation filesystem fixtures must pass before any
+application trial. The default persistence path remains unchanged. This tests
+an alternative to tempfile's attribute-setting path; it does not establish the
+cause of the observed sharing violation.
 
 The completed evidence is available in runs
 [36975359718](https://github.com/DavidLMS/nan-harness/actions/runs/36975359718)
