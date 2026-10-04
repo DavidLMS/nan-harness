@@ -450,6 +450,7 @@ class Controller:
     def tree(self, start=None):
         root = start if start is not None else (self.root['bus'], self.root['path'])
         pending, seen, nodes = [(root, 0)], set(), []
+        unique_owners = {}
         while pending:
             node, depth = pending.pop()
             if node in seen:
@@ -460,7 +461,16 @@ class Controller:
             if len(seen) >= 1024:
                 raise Rejected('tree-limit')
             seen.add(node)
-            self.owned(node)
+            # A D-Bus unique name belongs to one connection for the bus lifetime.
+            # Validate each such connection at both ends of this traversal, while
+            # every node's identity and children remain fresh. Never cache aliases
+            # or carry ownership observations into a subsequent traversal.
+            unique = node[0] if (type(node) is tuple and len(node) == 2
+                and type(node[0]) is str and node[0].startswith(':')) else None
+            if unique is None or unique not in unique_owners:
+                self.owned(node)
+                if unique is not None:
+                    unique_owners[unique] = node
             identity = self.query('identity', node)
             if type(identity) is not tuple or len(identity) != 3:
                 raise Rejected('tree-identity')
@@ -471,6 +481,8 @@ class Controller:
                     child_count=min(len(children),1025) if type(children) is list else None,visited_count=len(seen))
                 raise Rejected('tree-children')
             pending.extend((child, depth + 1) for child in children)
+        for node in unique_owners.values():
+            self.owned(node)
         return nodes
 
     def state(self, node, editable=False, frame=False):

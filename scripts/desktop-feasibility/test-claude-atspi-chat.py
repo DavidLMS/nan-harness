@@ -1208,6 +1208,37 @@ class EmptyInputDriftTests(unittest.TestCase):
         self.assertNotIn('synthetic',str(drift));self.assertNotIn('/editor',str(drift))
 
 
+class TreeConnectionOwnershipTests(unittest.TestCase):
+    def fixture(self, bus=':1.42', foreign=False, expires=False):
+        from types import SimpleNamespace
+        calls=[]
+        root=(bus,'/root')
+        children=[(bus,f'/node{i}') for i in range(100)]
+        if foreign:children.append((':1.43','/foreign'))
+        def owner(node):
+            calls.append(node)
+            if node[0]==':1.43' or expires and len(calls)>1:return 8
+            return 7
+        adapter=SimpleNamespace(owner=owner,identity=lambda n:(39,'',''),
+            children=lambda n:children if n==root else [])
+        c=chat.Controller(adapter,dict(pid=7,bus=bus,path='/root'),10,clock=lambda:0)
+        return c,calls
+    def test_large_single_connection_tree_revalidates_owner_at_both_ends(self):
+        c,calls=self.fixture()
+        self.assertEqual(len(c.tree()),101)
+        self.assertEqual(calls,[(':1.42','/root')]*2)
+        c.tree()
+        self.assertEqual(len(calls),4)
+    def test_foreign_connection_or_owner_loss_rejects_snapshot(self):
+        for options in ({'foreign':True},{'expires':True}):
+            c,_=self.fixture(**options)
+            with self.assertRaises(chat.Rejected):c.tree()
+    def test_well_known_names_never_share_owner_observations(self):
+        c,calls=self.fixture(bus='org.example.Editor')
+        self.assertEqual(len(c.tree()),101)
+        self.assertEqual(len(calls),101)
+
+
 class MainPacketTests(unittest.TestCase):
     def packet(self, mode='input-next-empty-class', change=False, restore_timeout=False):
         import io,json,sys

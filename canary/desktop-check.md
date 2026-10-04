@@ -71,6 +71,14 @@ only the completed inventory may clear its error category. Zed records the
 passive Retry control count after its single activation, alongside the existing
 provider count. Neither diagnostic can independently qualify recovery.
 
+A subsequent Linux optimization validates each unique D-Bus connection owner
+before and after a tree traversal, instead of once per node. Node identities
+and child lists remain freshly queried; well-known aliases remain checked per
+node and no ownership result survives a traversal. The neutral 101-node fixture
+reduces owner queries from 101 to two and rejects foreign or lost owners.
+This follows the [D-Bus unique-name contract](https://dbus.freedesktop.org/doc/dbus-specification.html#message-bus-names)
+and still requires hosted execution evidence.
+
 
 The hidden launch-wrapper option is restricted to deterministic ChatGPT startup
 diagnostics. Only application launch is instrumented; help, version and restore
