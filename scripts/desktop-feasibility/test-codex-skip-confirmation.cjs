@@ -19,3 +19,17 @@ for(const o of [{subtitle:'PRIVATE'},{label:'Skip'},{type:'submit'},{duplicate:t
 assert.equal(fixture({covered:true}).points.length,0);
 assert(!JSON.stringify(fixture()).includes('PRIVATE'));
 console.log('PASS: source skip confirmation, duplicates, retained scope, overlays, actionability and privacy');
+
+// Execute the actual release gate, not a duplicate admission implementation.
+const policyStart=source.indexOf('const skipAdmitted='),policyEnd=source.indexOf(';',policyStart)+1;
+function admitted(platform,digest) {
+ return vm.runInNewContext(`(()=>{${source.slice(policyStart,policyEnd)}return skipAdmitted;})()`,
+  {process:{platform,env:{NANH_CODEX_PROJECT_ARTIFACT_SHA256:digest}}});
+}
+const macPin='f6cf4d2e9b69aeefa33adda4bcd1a2d306357f5253a1ac6049700870c28dd0c7';
+assert.equal(admitted('darwin',macPin),true);
+for(const [platform,digest] of [['linux',macPin],['win32',macPin],['darwin',undefined],['darwin',macPin+'0'],['darwin',macPin.toUpperCase()]])
+ assert.equal(admitted(platform,digest),false);
+assert.equal(admitted('linux','ee7854145554718d7239d01ea37d44f6ba1e0ba4a93f47ac097d6e0f964da47c'),true);
+assert.equal(admitted('win32','f7b0266d6c00d4743da01d62bc82488f7ec5560c642501758119cb9885f67c87'),true);
+console.log('PASS: exact platform-bound macOS Skip release, other release admission preserved');
