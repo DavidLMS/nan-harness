@@ -50,14 +50,15 @@ function sample(control, optionalSkip=false) {
 
 // Frozen Qf/$d plain skip confirmation. Credit variants are deliberately unproved.
 function skipConfirmation(control, retained) {
+  const rejected=reason=>retained?.diagnostic?{rejection:reason}:null;
   const visible=e=>{const r=e.getBoundingClientRect(),s=getComputedStyle(e);
     return e.isConnected&&r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden';};
   const overlays=[...document.querySelectorAll('[role="dialog"],[role="alertdialog"],[role="menu"],[aria-modal="true"]')].filter(visible);
-  if(overlays.length!==1)return null;
+  if(overlays.length!==1)return rejected('overlay-count');
   const dialog=overlays[0],forms=[...dialog.querySelectorAll('form.select-none')].filter(visible);
-  if(dialog.getAttribute('role')!=='dialog'||forms.length!==1)return null;
+  if(dialog.getAttribute('role')!=='dialog'||forms.length!==1)return rejected('form');
   const form=forms[0];
-  if(retained&&(retained.form!==form||retained.dialog!==dialog))return null;
+  if(retained&&(retained.form!==form||retained.dialog!==dialog))return rejected('retained-identity');
   const leaf=text=>[...form.querySelectorAll('*')].filter(e=>e.textContent?.trim()===text
     &&![...e.children].some(c=>c.textContent?.trim()===text)&&visible(e));
   const titles=[...form.querySelectorAll('h1,h2,h3,[role="heading"]')].filter(e=>e.isConnected
@@ -66,11 +67,13 @@ function skipConfirmation(control, retained) {
   const buttons=[...form.querySelectorAll('button')].filter(visible);
   const keep=buttons.filter(e=>e.textContent?.trim()==='Keep setting up'&&e.getAttribute('type')==='submit');
   const go=buttons.filter(e=>e.textContent?.trim()==='Go to ChatGPT'&&e.getAttribute('type')==='button');
-  if(titles.length!==1||leaf('You’ll go straight to ChatGPT').length!==1||buttons.length!==2
+  if(titles.length!==1)return rejected('heading');
+  if(leaf('You’ll go straight to ChatGPT').length!==1)return rejected('subtitle');
+  if(buttons.length!==2
       ||keep.length!==1||go.length!==1||go[0]!==control||control.disabled
-      ||control.getAttribute('aria-disabled')==='true'||control.closest('[inert]'))return null;
+      ||control.getAttribute('aria-disabled')==='true'||control.closest('[inert]'))return rejected('source-controls');
   for(let e=control,depth=0;e;e=e.parentElement)
-    if(++depth>64||getComputedStyle(e).pointerEvents==='none')return null;
+    if(++depth>64||getComputedStyle(e).pointerEvents==='none')return rejected('pointer-ancestry');
   const r=control.getBoundingClientRect(),points=[];
   for(const fy of [0.25,0.5,0.75])for(const fx of [0.25,0.5,0.75]) {
     const x=r.left+control.clientLeft+control.clientWidth*fx,y=r.top+control.clientTop+control.clientHeight*fy;
@@ -546,16 +549,22 @@ async function run(page, ownerGuard, deadline, rejected, mainGuard, folderTrust)
             if(!held||!await ownedEndpoint()||Date.now()>=deadline)return stop('action-blocked');
             const form=await held.evaluateHandle(e=>e.closest('form'));
             const dialog=await held.evaluateHandle(e=>e.closest('[role="dialog"]'));
-            const retained={form,dialog};
+            const retained={form,dialog,diagnostic:true};
             try {
             const first=await held.evaluate(skipConfirmation,retained);
-            if(!first)return stop('action-blocked');
+            facts.taskSkipConfirmationProof=first?.rejection??'matched';
+            if(!first||first.rejection)return stop('action-blocked');
             await wait(Math.min(100,Math.max(0,deadline-Date.now())));
             if(!await ownedEndpoint()||Date.now()>=deadline
                 ||!await confirmation.evaluate((e,h)=>e===h,held))return stop('action-blocked');
-            const second=await held.evaluate(skipConfirmation,retained),point=candidate(first,second);
+            const second=await held.evaluate(skipConfirmation,retained);
+            facts.taskSkipConfirmationProof=second?.rejection??'matched';
+            if(!second||second.rejection)return stop('action-blocked');
+            const point=candidate(first,second);
             if(!point||!await ownedEndpoint()||Date.now()>=deadline)return stop('action-blocked');
             const final=await held.evaluate(skipConfirmation,retained);
+            facts.taskSkipConfirmationProof=final?.rejection??'matched';
+            if(!final||final.rejection)return stop('action-blocked');
             if(!candidate(first,final)||!final.points.some(p=>p.x===point.x&&p.y===point.y)
                 ||!await ownedEndpoint()||Date.now()>=deadline)return stop('action-blocked');
             confirmationConsumed=true;

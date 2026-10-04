@@ -85,7 +85,7 @@ def task_scope_observation(value):
 
 
 def public_onboarding(setup, app):
-    shape = set(setup) - {'folderTrust', 'rejectedPageInventory', 'taskScopeProved', 'taskClickAttempted', 'taskClickCompleted', 'codingComposerReady', 'taskScopeObservation', 'taskControlKind', 'codingReadinessObservation', 'taskSkipConfirmationAttempted', 'taskSkipConfirmationCompleted', 'mainGuardFailure', 'pageSetFailure', 'foreignOverlayImportSetup', 'foreignOverlaySourceCounts', 'foreignOverlayActionability'} if type(setup) is dict else set()
+    shape = set(setup) - {'folderTrust', 'rejectedPageInventory', 'taskScopeProved', 'taskClickAttempted', 'taskClickCompleted', 'codingComposerReady', 'taskScopeObservation', 'taskControlKind', 'codingReadinessObservation', 'taskSkipConfirmationAttempted', 'taskSkipConfirmationCompleted', 'taskSkipConfirmationProof', 'mainGuardFailure', 'pageSetFailure', 'foreignOverlayImportSetup', 'foreignOverlaySourceCounts', 'foreignOverlayActionability'} if type(setup) is dict else set()
     booleans = {'conversationalScope', 'engineeringControl', 'roleClickAttempted',
                 'roleClickCompleted', 'engineeringChecked', 'continueControl',
                 'continueClickAttempted', 'continueClickCompleted', 'roleScopeAbsent'}
@@ -115,6 +115,13 @@ def public_onboarding(setup, app):
                 or setup.get('taskScopeProved') is not True
                 or setup['roleScopeAbsent'] is not True):
             raise ValueError('invalid onboarding task control kind')
+    if 'taskSkipConfirmationProof' in setup:
+        proof = setup['taskSkipConfirmationProof']
+        if (type(proof) is not str or proof not in {'overlay-count','form','retained-identity',
+                'source-controls','pointer-ancestry','heading','subtitle','matched'}
+                or setup.get('taskControlKind') != 'skip-optional-capabilities'
+                or setup.get('taskClickCompleted') is not True or setup['stage'] != 'coding-readiness'):
+            raise ValueError('invalid Codex skip confirmation proof')
     confirmation = {'taskSkipConfirmationAttempted','taskSkipConfirmationCompleted'}
     if confirmation & set(setup):
         if (not confirmation <= set(setup) or any(type(setup[key]) is not bool for key in confirmation)

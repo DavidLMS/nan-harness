@@ -9,7 +9,7 @@ function fixture(options={}) {
  const form=node(''),dialog=node('',{role:'dialog'});dialog.querySelectorAll=()=>[form];
  form.querySelectorAll=s=>s==='button'?[keep,go,...(options.duplicate?[node('Go to ChatGPT',{type:'button'})]:[])]:s==='h1,h2,h3,[role="heading"]'?[title]:[title,subtitle,keep,go];
  go.disabled=!!options.disabled; go.parentElement=form;form.parentElement=dialog;
- const retained={form,dialog:options.replaced?node(''):dialog};
+ const retained={form,dialog:options.replaced?node(''):dialog,diagnostic:options.diagnostic};
  const context={document:{querySelectorAll:()=>options.multiple?[dialog,node('')]:[dialog],elementFromPoint:()=>options.covered?node(''):go},innerWidth:1000,innerHeight:1000,
   getComputedStyle:e=>({display:options.hidden&&e===dialog?'none':'block',visibility:'visible',pointerEvents:'auto'})};
  return vm.runInNewContext(`(${source.slice(begin,end).trim()})(control,retained)`,{...context,control:go,retained});
@@ -33,3 +33,7 @@ for(const [platform,digest] of [['linux',macPin],['win32',macPin],['darwin',unde
 assert.equal(admitted('linux','ee7854145554718d7239d01ea37d44f6ba1e0ba4a93f47ac097d6e0f964da47c'),true);
 assert.equal(admitted('win32','f7b0266d6c00d4743da01d62bc82488f7ec5560c642501758119cb9885f67c87'),true);
 console.log('PASS: exact platform-bound macOS Skip release, other release admission preserved');
+
+assert.equal(fixture({subtitle:'PRIVATE',diagnostic:true}).rejection,'subtitle');
+assert.equal(fixture({replaced:true,diagnostic:true}).rejection,'retained-identity');
+assert.equal(fixture({multiple:true,diagnostic:true}).rejection,'overlay-count');

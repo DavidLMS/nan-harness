@@ -3441,6 +3441,11 @@ class CodexFolderTrustTests(unittest.TestCase):
                         'roleClickAttempted':True,'roleClickCompleted':True,
                         'taskSkipConfirmationAttempted':True,'taskSkipConfirmationCompleted':completed}
             self.assertEqual(q.public_onboarding(measured,'chatgpt-desktop'),measured)
+            for proof in ('overlay-count','form','retained-identity','source-controls','pointer-ancestry','heading','subtitle','matched'):
+                observed = {**measured,'taskSkipConfirmationProof':proof}
+                self.assertEqual(q.public_onboarding(observed,'chatgpt-desktop'),observed)
+            for proof in ('PRIVATE',True,None):
+                with self.assertRaises(ValueError):q.public_onboarding({**measured,'taskSkipConfirmationProof':proof},'chatgpt-desktop')
             for invalid in ({**measured,'taskSkipConfirmationAttempted':False},
                             {**measured,'taskSkipConfirmationCompleted':1},
                             {**measured,'taskControlKind':'get-started'},
