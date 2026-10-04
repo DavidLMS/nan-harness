@@ -6,12 +6,22 @@ function read(options={},diagnostic=true) {
    closest:()=>null,getAttribute:()=>null,...extra});
  const composer=node('',{getAttribute:()=>options.disabled?'true':null});
  const ack='Engineering—got it. I can map an unfamiliar codebase, plan and build features, trace bugs across logs and tests, and run checks to verify behavior.';
+ const homeRoot=node('',{getAttribute:k=>k==='data-testid'?'chatgpt-work-home-page':null,
+   contains:e=>e!==homeRoot});
+ const localHome=node('',{getAttribute:k=>k==='data-codex-composer-root'?'':k==='data-composer-placement'?'home':null,
+   contains:e=>e===homeEditor});
+ const homeEditor=node('PRIVATE owned draft',{getAttribute:k=>k==='contenteditable'?'true':null,
+   classList:{contains:k=>k==='ProseMirror'&&!options.nonProseMirror}});
+ const workspace=node('PRIVATE project name',{tagName:'BUTTON',getAttribute:k=>k==='data-composer-navigation-target'?'workspace-project':null});
+ const sourceNodes=options.sourceHome?[homeRoot,localHome,homeEditor,workspace]:[];
+ if(options.hiddenHome)homeRoot.isConnected=false;
+ if(options.detachedHome)localHome.getAttribute=k=>k==='data-codex-composer-root'?'':k==='data-composer-placement'?'thread':null;
  const selectors={
   '[data-thread-find-composer] .ProseMirror[contenteditable="true"]':options.noComposer?[]:[composer],
   '[data-thread-find-target="conversation"]':options.noConversation?[]:[node()],
   '[role="dialog"],[role="alertdialog"],[role="menu"],[aria-modal="true"]':options.modal?[node()]:[],
   'input[name="conversational-onboarding-inline-role"]':options.roles?Array.from({length:options.roles},()=>node()):[],
-  '*':options.ack?[node(ack)]:[node('PRIVATE user content')],
+  '*':[...(options.ack?[node(ack)]:[node('PRIVATE user content')]),...sourceNodes],
   'button':[node('PRIVATE button'),...(options.skip?[node('Skip')]:[]),...(options.start?[node('Get Started')]:[])]};
  return vm.runInNewContext(`(()=>{${source.slice(start,end)}return codingScope(${diagnostic});})()`,{
   document:{querySelectorAll:s=>selectors[s]},getComputedStyle:()=>({display:'block',visibility:'visible'})});
@@ -28,3 +38,16 @@ const overflow=read({roles:33});assert.equal(overflow.observation.status,'overfl
 for(const [key,value] of Object.entries(overflow.observation))if(key!=='status')assert.equal(value,null);
 assert.equal(overflow.ready,true); // Advisory counters never change established admission.
 console.log('PASS: coding readiness source counts, unchanged admission, overflow and privacy');
+
+const codingHome=read({sourceHome:true,noComposer:true,noConversation:true});
+assert.equal(codingHome.ready,false);
+assert.deepEqual(JSON.parse(JSON.stringify(codingHome.home)),{
+ status:'observed',sourcePlatform:'linux',sourceVersion:'26.930.41038',
+ composerSourceSha256:'7198ee078e78a748d03c3cc96f5c041d056584d762728fd0be23e695bc394da0',
+ pageSourceSha256:'9c9d0d9247226d43edeb4606a539b518e3be06fb65aa37bd014984fbe3998ba9',
+ homeRootCount:1,localHomeComposerCount:1,homeEditableCount:1,homeProseMirrorCount:1,workspaceControlCount:1});
+assert.equal(read({sourceHome:true,nonProseMirror:true}).home.homeProseMirrorCount,0);
+assert.equal(read({sourceHome:true,hiddenHome:true}).home.localHomeComposerCount,0);
+assert.equal(read({sourceHome:true,detachedHome:true}).home.homeEditableCount,0);
+assert(!JSON.stringify(codingHome).includes('PRIVATE'));
+console.log('PASS: exact Work home source counts do not admit input or expose draft/project data');

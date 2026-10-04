@@ -185,8 +185,25 @@ function codingScope(diagnostic=false) {
     ...Object.fromEntries(Object.keys(navigationCounts).map(k=>[k,navigationComplete?navigationCounts[k]:null])),
     uniqueCodexRole:navigationComplete?(unique?role(unique):'none'):null,
     uniqueCodexHitActionable:navigationComplete?hit:null};
+  // Frozen Linux Work-home local composer; counters are advisory only.
+  const homeNodes=nodes.length<=4096?nodes:[];
+  const homeRoots=homeNodes.filter(e=>visible(e)&&e.getAttribute('data-testid')==='chatgpt-work-home-page');
+  const localHomes=homeRoots.length<=32?homeNodes.filter(e=>visible(e)&&e.getAttribute('data-codex-composer-root')!==null
+    &&e.getAttribute('data-composer-placement')==='home'&&homeRoots.some(root=>root.contains(e))):[];
+  const homeEditors=localHomes.length<=32?homeNodes.filter(e=>visible(e)&&e.getAttribute('contenteditable')==='true'
+    &&localHomes.some(root=>root.contains(e))):[];
+  const homeCounts={homeRootCount:homeRoots.length,localHomeComposerCount:localHomes.length,
+    homeEditableCount:homeEditors.length,
+    homeProseMirrorCount:homeEditors.filter(e=>e.classList?.contains('ProseMirror')).length,
+    workspaceControlCount:controls.filter(e=>e.getAttribute('data-composer-navigation-target')==='workspace-project'
+      &&homeRoots.some(root=>root.contains(e))).length};
+  const homeComplete=nodes.length<=4096&&Object.values(homeCounts).every(n=>n<=32);
+  const home={status:homeComplete?'observed':'overflow',sourcePlatform:'linux',sourceVersion:'26.930.41038',
+    composerSourceSha256:'7198ee078e78a748d03c3cc96f5c041d056584d762728fd0be23e695bc394da0',
+    pageSourceSha256:'9c9d0d9247226d43edeb4606a539b518e3be06fb65aa37bd014984fbe3998ba9',
+    ...Object.fromEntries(Object.keys(homeCounts).map(k=>[k,homeComplete?homeCounts[k]:null]))};
   const complete=Object.values(counts).every(n=>Number.isInteger(n)&&n>=0&&n<=32);
-  return {ready,navigation,observation:{status:complete?'observed':'overflow',
+  return {ready,navigation,home,observation:{status:complete?'observed':'overflow',
     ...Object.fromEntries(Object.keys(counts).map(k=>[k,complete?counts[k]:null]))}};
 }
 
@@ -578,7 +595,10 @@ async function run(page, ownerGuard, deadline, rejected, mainGuard, folderTrust)
       if(!await ownedEndpoint())return stop('ownership-lost');
       const coding=await page.evaluate(codingScope,true);
       facts.codingReadinessObservation=coding.observation;
-      if(process.platform==='linux'&&skipAdmitted)facts.codingNavigationObservation=coding.navigation;
+      if(process.platform==='linux'&&skipAdmitted) {
+        facts.codingNavigationObservation=coding.navigation;
+        facts.codingHomeObservation=coding.home;
+      }
       if(coding.ready===true) {facts.codingComposerReady=true;return facts;}
       if(skipAdmitted&&facts.taskControlKind==='skip-optional-capabilities'
           &&coding.observation.modalCount===1&&!confirmationConsumed) {

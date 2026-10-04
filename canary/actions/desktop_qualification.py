@@ -85,7 +85,7 @@ def task_scope_observation(value):
 
 
 def public_onboarding(setup, app):
-    shape = set(setup) - {'folderTrust', 'rejectedPageInventory', 'taskScopeProved', 'taskClickAttempted', 'taskClickCompleted', 'codingComposerReady', 'taskScopeObservation', 'taskControlKind', 'codingReadinessObservation', 'codingNavigationObservation', 'taskSkipConfirmationAttempted', 'taskSkipConfirmationCompleted', 'taskSkipConfirmationProof', 'mainGuardFailure', 'pageSetFailure', 'foreignOverlayImportSetup', 'foreignOverlaySourceCounts', 'foreignOverlayActionability'} if type(setup) is dict else set()
+    shape = set(setup) - {'folderTrust', 'rejectedPageInventory', 'taskScopeProved', 'taskClickAttempted', 'taskClickCompleted', 'codingComposerReady', 'taskScopeObservation', 'taskControlKind', 'codingReadinessObservation', 'codingNavigationObservation', 'codingHomeObservation', 'taskSkipConfirmationAttempted', 'taskSkipConfirmationCompleted', 'taskSkipConfirmationProof', 'mainGuardFailure', 'pageSetFailure', 'foreignOverlayImportSetup', 'foreignOverlaySourceCounts', 'foreignOverlayActionability'} if type(setup) is dict else set()
     booleans = {'conversationalScope', 'engineeringControl', 'roleClickAttempted',
                 'roleClickCompleted', 'engineeringChecked', 'continueControl',
                 'continueClickAttempted', 'continueClickCompleted', 'roleScopeAbsent'}
@@ -141,6 +141,25 @@ def public_onboarding(setup, app):
                 or coding['status'] == 'observed' and any(type(coding[key]) is not int or not 0 <= coding[key] <= 32 for key in keys)
                 or coding['status'] == 'overflow' and any(coding[key] is not None for key in keys)):
             raise ValueError('invalid Codex coding readiness observation')
+    if 'codingHomeObservation' in setup:
+        home = setup['codingHomeObservation']
+        counts = {'homeRootCount','localHomeComposerCount','homeEditableCount',
+                  'homeProseMirrorCount','workspaceControlCount'}
+        fixed = {'sourcePlatform':'linux','sourceVersion':'26.930.41038',
+                 'composerSourceSha256':'7198ee078e78a748d03c3cc96f5c041d056584d762728fd0be23e695bc394da0',
+                 'pageSourceSha256':'9c9d0d9247226d43edeb4606a539b518e3be06fb65aa37bd014984fbe3998ba9'}
+        if (type(home) is not dict or set(home) != counts | set(fixed) | {'status'}
+                or any(home.get(key) != value for key,value in fixed.items())
+                or type(home.get('status')) is not str or home['status'] not in {'observed','overflow'}
+                or setup.get('taskScopeProved') is not True or setup.get('taskClickCompleted') is not True
+                or setup['stage'] != 'coding-readiness'
+                or home['status'] == 'observed' and any(type(home[key]) is not int or not 0 <= home[key] <= 32 for key in counts)
+                or home['status'] == 'overflow' and any(home[key] is not None for key in counts)):
+            raise ValueError('invalid Codex coding home observation')
+        if home['status'] == 'observed' and (home['homeProseMirrorCount'] > home['homeEditableCount']
+                or home['homeRootCount'] == 0 and any(home[key] for key in counts - {'homeRootCount'})
+                or home['localHomeComposerCount'] == 0 and home['homeEditableCount'] != 0):
+            raise ValueError('inconsistent Codex coding home observation')
     if 'codingNavigationObservation' in setup:
         nav = setup['codingNavigationObservation']
         count_keys = {'codexButtonCount','codexLinkCount','codexMenuItemCount','chatModeTriggerCount',

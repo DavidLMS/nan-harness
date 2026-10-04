@@ -2755,6 +2755,22 @@ class QualificationTests(unittest.TestCase):
                        {'codexLinkCount':1},{'rawName':'PRIVATE'},{'uniqueCodexRole':[]}):
             with self.assertRaises(ValueError):
                 q.public_onboarding({**observed,'codingNavigationObservation':{**navigation,**change}},'chatgpt-desktop')
+        home = dict(status='observed',sourcePlatform='linux',sourceVersion='26.930.41038',
+            composerSourceSha256='7198ee078e78a748d03c3cc96f5c041d056584d762728fd0be23e695bc394da0',
+            pageSourceSha256='9c9d0d9247226d43edeb4606a539b518e3be06fb65aa37bd014984fbe3998ba9',
+            homeRootCount=1,localHomeComposerCount=1,homeEditableCount=1,homeProseMirrorCount=1,workspaceControlCount=1)
+        home_bound={**bound,'codingHomeObservation':home}
+        self.assertEqual(q.public_onboarding(home_bound,'chatgpt-desktop'),home_bound)
+        for change in ({'sourcePlatform':'windows'},{'sourceVersion':'PRIVATE'},
+                       {'composerSourceSha256':'PRIVATE'},{'pageSourceSha256':'PRIVATE'},
+                       {'homeRootCount':False},{'homeEditableCount':33},{'rawPath':'PRIVATE'},
+                       {'homeProseMirrorCount':2},{'homeRootCount':0},{'localHomeComposerCount':0},
+                       {'homeEditableCount':None},{'status':'overflow'}):
+            with self.assertRaises(ValueError):
+                q.public_onboarding({**home_bound,'codingHomeObservation':{**home,**change}},'chatgpt-desktop')
+        overflow_home={**home,'status':'overflow',**dict.fromkeys(['homeRootCount','localHomeComposerCount',
+            'homeEditableCount','homeProseMirrorCount','workspaceControlCount'])}
+        self.assertEqual(q.public_onboarding({**bound,'codingHomeObservation':overflow_home},'chatgpt-desktop')['codingHomeObservation'],overflow_home)
         for changed in ({'taskClickCompleted':False}, {'taskScopeProved':False}, {'stage':'task-action'}):
             with self.assertRaises(ValueError):q.public_onboarding({**bound,**changed},'chatgpt-desktop')
         task = dict(heldScopeConnected=True, heldScopeVisible=True,
