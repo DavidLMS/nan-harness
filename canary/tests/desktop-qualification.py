@@ -3159,6 +3159,27 @@ class ClaudeFailureScopeShapeTests(unittest.TestCase):
             path.write_text(json.dumps({key: val for key, val in value.items() if key != 'scopeShape'}))
             self.assertNotIn('scopeShape', q.semantic_observations(root, 'claude-desktop')[0])
 
+class ClaudeConfigurationIoFailureTests(unittest.TestCase):
+    def test_persist_io_failure_is_optional_typed_and_never_exports_error(self):
+        value = dict(schemaVersion=1, mechanism='claude-cli-prelaunch', diagnosticsOnly=True,
+                     phase='prelaunch', stage='configuration', status='failed',
+                     configurationSubstage='persist', configurationDocument='normal-config')
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'claude-cli-prelaunch.json'
+            for category in ('sharing-violation', 'access-denied', 'invalid-name', 'path-not-found',
+                             'already-exists', 'invalid-input', 'other'):
+                path.write_text(json.dumps({**value, 'configurationIoFailure': category}))
+                self.assertEqual(q.semantic_observations(root, 'claude-desktop')[0]['configurationIoFailure'], category)
+            for changes in ({'configurationIoFailure': 'PRIVATE'}, {'configurationIoFailure': 32},
+                            {'configurationIoFailure': []}, {'configurationIoFailure': None},
+                            {'configurationIoFailure': 'other', 'error': 'PRIVATE'},
+                            {'configurationIoFailure': 'other', 'configurationSubstage': 'temporary-create'},
+                            {'configurationIoFailure': 'other', 'stage': 'snapshot'}):
+                path.write_text(json.dumps({**value, **changes}))
+                with self.assertRaises(ValueError): q.semantic_observations(root, 'claude-desktop')
+            path.write_text(json.dumps(value))
+            self.assertNotIn('configurationIoFailure', q.semantic_observations(root, 'claude-desktop')[0])
+
 class ClaudeLinuxVisibilityTests(unittest.TestCase):
     def test_closed_passive_states_and_failure_privacy(self):
         value = dict(schemaVersion=1, mechanism='claude-linux-classic-visibility', diagnosticsOnly=True,

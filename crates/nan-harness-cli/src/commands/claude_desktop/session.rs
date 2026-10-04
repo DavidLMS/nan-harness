@@ -362,11 +362,10 @@ fn atomic_write_inner(
             document,
         )?;
     }
-    observe(
+    qualification_prelaunch::observe_configuration_persist(
         temporary
             .persist(path)
             .map_err(|error| ClaudeDesktopError::Write(error.error)),
-        Substage::Persist,
         document,
     )?;
     Ok(())
@@ -378,5 +377,53 @@ pub(super) fn reject_symlink(path: &Path) -> Result<(), ClaudeDesktopError> {
         Ok(_) => Ok(()),
         Err(error) if error.kind() == ErrorKind::NotFound => Ok(()),
         Err(error) => Err(ClaudeDesktopError::ReadConfig(error)),
+    }
+}
+
+#[cfg(all(test, windows))]
+mod configuration_persist_tests {
+    use super::*;
+    use std::os::windows::fs::OpenOptionsExt as _;
+    #[test]
+    fn configuration_persist_with_retained_read_only_parent_and_canonical_paths() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let parent = root
+            .join("profile")
+            .join("home")
+            .join("AppData")
+            .join("Roaming")
+            .join("Claude");
+        nan_harness_private_fs::create_private_dir_all(&parent).unwrap();
+        let mut retained = Vec::new();
+        let mut ancestor = parent.as_path();
+        while ancestor.starts_with(&root) {
+            retained.push(
+                std::fs::OpenOptions::new()
+                    .read(true)
+                    .share_mode(1)
+                    .custom_flags(0x0200_0000 | 0x0020_0000)
+                    .open(ancestor)
+                    .unwrap(),
+            );
+            let Some(next) = ancestor.parent() else { break };
+            ancestor = next;
+        }
+        let path = parent.join("claude_desktop_config.json");
+        let result = atomic_write_configuration(
+            &path,
+            b"{\"deploymentMode\":\"3p\"}\n",
+            None,
+            qualification_prelaunch::ConfigurationDocument::NormalConfig,
+        );
+        if let Err(ClaudeDesktopError::Write(error)) = &result {
+            panic!(
+                "closed persistence category: {:?}",
+                qualification_prelaunch::ConfigurationIoFailure::from_error(error)
+            );
+        }
+        assert!(result.is_ok(), "non-write configuration failure");
+        assert_eq!(fs::read(&path).unwrap(), b"{\"deploymentMode\":\"3p\"}\n");
+        drop(retained);
     }
 }

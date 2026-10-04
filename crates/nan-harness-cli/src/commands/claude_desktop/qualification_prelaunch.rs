@@ -63,7 +63,64 @@ pub(super) fn observe_configuration<T, E>(
     document: Option<ConfigurationDocument>,
 ) -> Result<T, E> {
     if result.is_err() {
-        emit_at(Stage::Configuration, Some((substage, document)));
+        emit_at(Stage::Configuration, Some((substage, document)), None);
+    }
+    result
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ConfigurationIoFailure {
+    SharingViolation,
+    AccessDenied,
+    InvalidName,
+    PathNotFound,
+    AlreadyExists,
+    InvalidInput,
+    Other,
+}
+impl ConfigurationIoFailure {
+    pub(super) fn from_error(error: &std::io::Error) -> Self {
+        match error.raw_os_error() {
+            Some(32) => Self::SharingViolation,
+            Some(5) => Self::AccessDenied,
+            Some(123) => Self::InvalidName,
+            Some(3) => Self::PathNotFound,
+            Some(80 | 183) => Self::AlreadyExists,
+            Some(87) => Self::InvalidInput,
+            _ if error.kind() == std::io::ErrorKind::InvalidInput => Self::InvalidInput,
+            _ => Self::Other,
+        }
+    }
+    #[cfg(feature = "desktop-qualification")]
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::SharingViolation => "sharing-violation",
+            Self::AccessDenied => "access-denied",
+            Self::InvalidName => "invalid-name",
+            Self::PathNotFound => "path-not-found",
+            Self::AlreadyExists => "already-exists",
+            Self::InvalidInput => "invalid-input",
+            Self::Other => "other",
+        }
+    }
+}
+
+pub(super) fn observe_configuration_persist<T>(
+    result: Result<T, super::ClaudeDesktopError>,
+    document: Option<ConfigurationDocument>,
+) -> Result<T, super::ClaudeDesktopError> {
+    if let (Err(error), Some(document)) = (&result, document) {
+        let failure = match error {
+            super::ClaudeDesktopError::Write(error) => {
+                Some(ConfigurationIoFailure::from_error(error))
+            }
+            _ => None,
+        };
+        emit_at(
+            Stage::Configuration,
+            Some((ConfigurationSubstage::Persist, Some(document))),
+            failure,
+        );
     }
     result
 }
@@ -76,12 +133,13 @@ pub(super) fn observe<T, E>(result: Result<T, E>, stage: Stage) -> Result<T, E> 
 }
 
 fn emit(stage: Stage) {
-    emit_at(stage, None);
+    emit_at(stage, None, None);
 }
 
 fn emit_at(
     stage: Stage,
     configuration: Option<(ConfigurationSubstage, Option<ConfigurationDocument>)>,
+    io_failure: Option<ConfigurationIoFailure>,
 ) {
     #[cfg(feature = "desktop-qualification")]
     if enabled() {
@@ -108,12 +166,15 @@ fn emit_at(
                 record["configurationDocument"] = serde_json::json!(document.as_str());
             }
         }
+        if let Some(failure) = io_failure {
+            record["configurationIoFailure"] = serde_json::json!(failure.as_str());
+        }
         if let Some(directory) = facts_directory() {
             write_record(&directory, &record);
         }
     }
     #[cfg(not(feature = "desktop-qualification"))]
-    let _ = (stage, configuration);
+    let _ = (stage, configuration, io_failure);
 }
 
 #[cfg(feature = "desktop-qualification")]
@@ -194,6 +255,37 @@ fn enabled_values(windows: bool, value: impl Fn(&str) -> Option<String>) -> bool
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn windows_persist_error_classification_is_closed_and_preserves_original_error() {
+        for (code, expected) in [
+            (32, ConfigurationIoFailure::SharingViolation),
+            (5, ConfigurationIoFailure::AccessDenied),
+            (123, ConfigurationIoFailure::InvalidName),
+            (3, ConfigurationIoFailure::PathNotFound),
+            (80, ConfigurationIoFailure::AlreadyExists),
+            (183, ConfigurationIoFailure::AlreadyExists),
+            (87, ConfigurationIoFailure::InvalidInput),
+            (987_654, ConfigurationIoFailure::Other),
+        ] {
+            let error = std::io::Error::from_raw_os_error(code);
+            assert_eq!(ConfigurationIoFailure::from_error(&error), expected);
+            let result = observe_configuration_persist::<()>(
+                Err(super::super::ClaudeDesktopError::Write(error)),
+                None,
+            );
+            let Err(super::super::ClaudeDesktopError::Write(error)) = result else {
+                panic!("original write error")
+            };
+            assert_eq!(error.raw_os_error(), Some(code));
+        }
+        let error = std::io::Error::other("PRIVATE_SENTINEL");
+        assert_eq!(
+            ConfigurationIoFailure::from_error(&error),
+            ConfigurationIoFailure::Other
+        );
+        assert_eq!(observe_configuration_persist::<u8>(Ok(7), None).unwrap(), 7);
+    }
+
     #[test]
     fn boundary_preserves_original_error_and_success_values() {
         assert_eq!(

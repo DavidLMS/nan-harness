@@ -950,7 +950,7 @@ def semantic_observations(directory, app):
             record.update({key: value[key] for key in fields - {'schemaVersion', 'mechanism'}})
         elif mechanism == 'claude-cli-prelaunch':
             fields = {'schemaVersion', 'mechanism', 'phase', 'stage', 'status', 'diagnosticsOnly'}
-            optional = {'configurationSubstage', 'configurationDocument'}
+            optional = {'configurationSubstage', 'configurationDocument', 'configurationIoFailure'}
             if (not fields <= set(value) or set(value) - fields - optional or app != 'claude-desktop' or path.name != 'claude-cli-prelaunch.json'
                     or value['diagnosticsOnly'] is not True or value['phase'] != 'prelaunch'
                     or value['status'] != 'failed' or type(value['stage']) is not str or value['stage'] not in {
@@ -976,6 +976,13 @@ def semantic_observations(directory, app):
                     record['configurationDocument'] = value['configurationDocument']
             elif 'configurationDocument' in value:
                 raise ValueError('invalid Claude configuration boundary')
+            if 'configurationIoFailure' in value:
+                failure = value['configurationIoFailure']
+                if (value['stage'] != 'configuration' or value.get('configurationSubstage') != 'persist'
+                        or type(failure) is not str or failure not in {'sharing-violation', 'access-denied',
+                            'invalid-name', 'path-not-found', 'already-exists', 'invalid-input', 'other'}):
+                    raise ValueError('invalid Claude configuration I/O failure')
+                record['configurationIoFailure'] = failure
             record.update(diagnosticsOnly=True, phase=value['phase'], stage=value['stage'], status=value['status'])
         elif mechanism == 'claude-linux-classic-visibility':
             observation = {'visible', 'showing', 'boundsPositive', 'checkedAncestorCount', 'hiddenAncestorCount'}

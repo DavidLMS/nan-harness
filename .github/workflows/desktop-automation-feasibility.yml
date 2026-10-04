@@ -187,6 +187,7 @@ jobs:
           RUST_TEST_THREADS: 1
         run: |
           cargo test --locked -p nan-harness-cli --features desktop-qualification --lib commands::claude_desktop::qualification_config::tests::windows_binding
+          cargo test --locked -p nan-harness-cli --features desktop-qualification --lib commands::claude_desktop::session::configuration_persist_tests
           cargo test --locked -p nan-harness-desktop-check --lib probe::claude_windows_profile::tests
           cargo test --locked -p nan-harness-desktop-check --lib native::windows_chat_turn::tests
       - name: Verify bounded Windows UIA receipt protocol without an application
