@@ -878,9 +878,25 @@ int fit_window(const std::string& request) {
         bool acknowledged = false;
         do {
             AxFocus after_size;
-            if (fit_mac_proof(id, static_cast<pid_t>(pid), after_size, false, false)
+            const bool same_resized_window = fit_mac_proof(id, static_cast<pid_t>(pid), after_size, false, false)
                 && CFEqual(before.focused, after_size.focused)
-                && mac_fit_resize_ack(before.bounds, target, after_size.bounds)) {
+                && CGSizeEqualToSize(target.size, after_size.bounds.size);
+            // macOS can reposition the same window while resizing it. If the
+            // original fit postcondition already holds twice, no move is needed.
+            if (same_resized_window) {
+                AxFocus contained, stable;
+                if (fit_mac_proof(id, static_cast<pid_t>(pid), contained, false)
+                    && CFEqual(before.focused, contained.focused)
+                    && CGRectEqualToRect(after_size.bounds, contained.bounds)
+                    && fit_mac_proof(id, static_cast<pid_t>(pid), stable, false)
+                    && CFEqual(before.focused, stable.focused)
+                    && CGRectEqualToRect(contained.bounds, stable.bounds)
+                    && std::chrono::steady_clock::now() < settle_deadline) {
+                    CFRelease(position);
+                    return 0;
+                }
+            }
+            if (same_resized_window && mac_fit_resize_ack(before.bounds, target, after_size.bounds)) {
                 acknowledged = true;
                 break;
             }
