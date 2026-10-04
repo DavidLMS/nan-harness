@@ -237,6 +237,9 @@ jobs:
           echo "FEASIBILITY_WINDOWS_PROOF_PYTHON=$(python3 -c 'import sys; from pathlib import Path; print(Path(sys.executable).resolve(strict=True))')" >> "$GITHUB_ENV"
       - name: Build exact branch binaries
         run: cargo build --locked -p nan-harness-desktop-check -p nan-harness-cli --features nan-harness-cli/desktop-qualification --bins
+      - name: Verify Linux owned desktop adapter lints before installation
+        if: runner.os == 'Linux' && contains(fromJSON('["chatgpt-desktop","claude-desktop"]'), matrix.app)
+        run: cargo clippy --locked -p nan-harness-desktop-check --all-features --all-targets -- -D warnings
       - name: Verify retained Linux Codex profile custody without an application
         if: runner.os == 'Linux' && matrix.app == 'chatgpt-desktop'
         run: cargo test --locked -p nan-harness-desktop-check --lib probe::codex_linux_profile

@@ -406,10 +406,51 @@ fn supervise(
     })
 }
 
+struct KnownTurn {
+    prompt: Zeroizing<String>,
+    marker: Zeroizing<String>,
+}
+#[derive(Default)]
+struct TurnHistory {
+    // Only previous turns needed for the second/third input; never public facts.
+    turns: Vec<KnownTurn>,
+}
+impl TurnHistory {
+    fn record(&mut self, prompt: Zeroizing<String>, marker: &str) -> Result<(), Reason> {
+        if self.turns.len() >= 2
+            || prompt.is_empty()
+            || prompt.len() > 4096
+            || marker.is_empty()
+            || marker.len() > 4096
+            || self.turns.iter().any(|turn| {
+                turn.prompt.as_str() == prompt.as_str() || turn.marker.as_str() == marker
+            })
+        {
+            return Err(Reason::ActionUnsupported);
+        }
+        self.turns.push(KnownTurn {
+            prompt,
+            marker: Zeroizing::new(marker.to_owned()),
+        });
+        Ok(())
+    }
+    fn private_request(&self) -> Value {
+        json!(
+            self.turns
+                .iter()
+                .map(|turn| json!({"prompt":turn.prompt.as_str(),
+            "marker":turn.marker.as_str()}))
+                .collect::<Vec<_>>()
+        )
+    }
+}
+
 pub(crate) struct ClaudeLinuxChatSession<'a> {
     gui: &'a Gui,
     profile: &'a crate::probe::FreshClaudeLinuxProfile,
     replacement_consumed: bool,
+    history: TurnHistory,
+    pending_prompt: Option<Zeroizing<String>>,
     directory: PathBuf,
     driver: PathBuf,
     binding: Option<Value>,
@@ -446,6 +487,8 @@ impl Gui {
             gui: self,
             profile,
             replacement_consumed: false,
+            history: TurnHistory::default(),
+            pending_prompt: None,
             directory: directory.to_owned(),
             driver,
             binding: None,
@@ -502,6 +545,11 @@ impl ClaudeLinuxChatSession<'_> {
         request["value"] = json!(value);
         request["binding"] = json!(self.binding);
         request["profileAuthority"] = self.profile.private_request(deadline)?;
+        request["history"] = if mode == "input-next-correlated" {
+            self.history.private_request()
+        } else {
+            json!([])
+        };
         let payload = Zeroizing::new(request.to_string());
         self.failure_boundary = Some(FailureBoundary::Transport);
         let (facts, binding) = supervise(&self.driver, payload, deadline)?;
@@ -532,6 +580,18 @@ impl ClaudeLinuxChatSession<'_> {
             || self.copy_in_flight
             || self.copied != self.submitted
             || self.submitted >= 3
+            || self.history.turns.len() != usize::from(self.copied)
+            || self.pending_prompt.is_some()
+        {
+            return Err(Reason::ActionUnsupported);
+        }
+        if prompt.is_empty()
+            || prompt.len() > 4096
+            || self
+                .history
+                .turns
+                .iter()
+                .any(|turn| turn.prompt.as_str() == prompt)
         {
             return Err(Reason::ActionUnsupported);
         }
@@ -539,8 +599,10 @@ impl ClaudeLinuxChatSession<'_> {
         let mode = if self.submitted == 0 && !self.replacement_consumed {
             self.replacement_consumed = true;
             "input-first-owned"
+        } else if self.submitted > 0 {
+            "input-next-correlated"
         } else {
-            "input"
+            return Err(Reason::ActionUnsupported);
         };
         let facts = self.operation(mode, prompt, Instant::now() + Duration::from_secs(15))?;
         if facts["inputVerified"] == true {
@@ -553,6 +615,7 @@ impl ClaudeLinuxChatSession<'_> {
                 Reason::ActionUnsupported
             });
         }
+        self.pending_prompt = Some(Zeroizing::new(prompt.to_owned()));
         self.submitted += 1;
         self.input_in_flight = false;
         Ok(())
@@ -563,7 +626,13 @@ impl ClaudeLinuxChatSession<'_> {
         timeout: Duration,
         gate: &ProviderGate,
     ) -> Result<(), Reason> {
-        if self.copy_in_flight || self.input_in_flight || self.copied >= self.submitted {
+        if self.copy_in_flight
+            || self.input_in_flight
+            || self.copied >= self.submitted
+            || self.pending_prompt.is_none()
+            || marker.is_empty()
+            || marker.len() > 4096
+        {
             return Err(Reason::ActionUnsupported);
         }
         let deadline = Instant::now() + timeout;
@@ -577,6 +646,13 @@ impl ClaudeLinuxChatSession<'_> {
             if facts["responseVerified"] == true {
                 if clipboard::read()?.as_str() != marker || !gate.fixture_response_verified() {
                     return Err(Reason::ResponseMismatch);
+                }
+                let prompt = self
+                    .pending_prompt
+                    .take()
+                    .ok_or(Reason::ActionUnsupported)?;
+                if self.copied < 2 {
+                    self.history.record(prompt, marker)?;
                 }
                 self.copied += 1;
                 self.copy_in_flight = false;
@@ -811,5 +887,54 @@ mod helper_packet_tests {
         let mut changed = packet.clone();
         changed["binding"]["editorBounds"] = json!([10, 10, 0, 30]);
         assert!(decode(&serde_json::to_vec(&changed).unwrap()).is_none());
+    }
+}
+
+#[cfg(test)]
+mod turn_history_tests {
+    use super::TurnHistory;
+    use zeroize::Zeroizing;
+    #[test]
+    fn history_is_private_bounded_and_rejects_duplicate_pairs() {
+        let mut history = TurnHistory::default();
+        history
+            .record(
+                Zeroizing::new("owned prompt one".into()),
+                "copied nonce one",
+            )
+            .unwrap();
+        assert!(
+            history
+                .record(Zeroizing::new("owned prompt one".into()), "different nonce")
+                .is_err()
+        );
+        assert!(
+            history
+                .record(
+                    Zeroizing::new("different prompt".into()),
+                    "copied nonce one"
+                )
+                .is_err()
+        );
+        assert!(
+            history
+                .record(Zeroizing::new(String::new()), "copied nonce two")
+                .is_err()
+        );
+        history
+            .record(
+                Zeroizing::new("owned prompt two".into()),
+                "copied nonce two",
+            )
+            .unwrap();
+        assert_eq!(history.private_request().as_array().unwrap().len(), 2);
+        assert!(
+            history
+                .record(
+                    Zeroizing::new("owned prompt three".into()),
+                    "copied nonce three"
+                )
+                .is_err()
+        );
     }
 }

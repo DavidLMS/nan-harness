@@ -430,6 +430,11 @@ class Controller:
         if getattr(self, "response_only", False):
             self.response_frame_proof()
             return True
+        if getattr(self,'next_input',False):
+            if self.next_consumed and focused:
+                raise Rejected('policy')
+            if not self.next_consumed:
+                self.next_input_proof()
         self.state(self.editor, editable=True)
         # The exact retained native X11 foreground/client/clear-stack proof above
         # supplies window activation authority. AT-SPI ACTIVE is not required:
@@ -595,6 +600,9 @@ class Controller:
                 sealed_actions = actions
                 if not self.query('hit', self.send, self.frame):
                     raise Rejected('action-hit')
+            self.proof(focused=True)
+            if getattr(self,'next_input',False):
+                self.next_consumed = True
             self.facts['stage'] = 'send'
             self.send_attempted = True
             self.facts['sendAttempted'] = True
@@ -681,6 +689,121 @@ class Controller:
             raise Rejected('policy')
         self.adapter.key_guard = no_keys
         self.proof()
+
+    def next_history_scope(self, history):
+        # Read-only observable authority: exact owned prompts plus independently
+        # copied nonces. Tree traversal order never establishes chronology.
+        self.response_frame_proof()
+        nodes = self.tree(self.frame)
+        if any(node != self.frame and identity[0] in (16,23,69) for node,identity in nodes):
+            raise Rejected('frame')
+        self.current_chat(nodes)
+        headings = [(node,identity) for node,identity in nodes if identity[0] == 83
+            and identity[1].startswith(('You said:', 'Claude responded:'))]
+        if len(headings) != 2*len(history):
+            raise Rejected('response-heading')
+        matched = set()
+        witness = []
+        for prompt,marker in history:
+            users = [(node,identity) for node,identity in headings
+                if identity[1] == 'You said: '+prompt]
+            assistants = [(node,identity) for node,identity in headings
+                if identity[1].startswith('Claude responded: ') and marker in identity[1]]
+            if len(users) != 1 or len(assistants) != 1:
+                raise Rejected('response-heading')
+            for node,identity in users+assistants:
+                if node in matched:
+                    raise Rejected('response-heading')
+                matched.add(node)
+                self.state(node)
+                chain = []
+                child,seen = node,set()
+                for _ in range(32):
+                    if child in seen:
+                        raise Rejected('response-row-attachment')
+                    seen.add(child);self.owned(child)
+                    if child == self.frame:
+                        break
+                    parent = self.query('parent',child)
+                    self.owned(parent)
+                    if child not in self.query('children',parent):
+                        raise Rejected('response-row-attachment')
+                    chain.append((child,parent,self.query('identity',parent)))
+                    child = parent
+                else:
+                    raise Rejected('response-row-attachment')
+                witness.append((node,identity,tuple(chain)))
+        scope = self.response_scope(history[-1][1])
+        if scope is None:
+            raise Rejected('response')
+        self.response_frame_proof()
+        return tuple(witness),scope,(self.mode,self.chat)
+
+    def restore_next_input(self, binding, records):
+        # A distinct one-use capability. Ordinary restore retains its exact
+        # editor/bounds contract; Copy remains frame-only and rejects keys.
+        if (getattr(self,'next_input',False) or self.restored
+                or getattr(self.adapter,'profile_guard',None) is None
+                or type(records) is not list or not 1 <= len(records) <= 2):
+            raise Rejected('policy')
+        history = []
+        for record in records:
+            if (type(record) is not dict or set(record) != {'prompt','marker'}
+                    or any(type(record[k]) is not str or not record[k]
+                        or len(record[k].encode()) > 4096 for k in ('prompt','marker'))):
+                raise Rejected('policy')
+            history.append((record['prompt'],record['marker']))
+        if len({p for p,_ in history}) != len(history) or len({m for _,m in history}) != len(history):
+            raise Rejected('policy')
+        # Load the original frame without querying or adopting the old editor.
+        self.restore(binding,response=True)
+        before = self.next_history_scope(history)
+        nodes = self.tree(self.frame)
+        editors = [node for node,identity in nodes if identity[0] in (61,78,79)
+            and 'Write your prompt to Claude' in identity[1:]]
+        if len(editors) != 1:
+            raise Rejected('tree')
+        editor = editors[0]
+        self.state(editor,editable=True)
+        sealed = (self.query('identity',editor),self.query('bounds',editor))
+        if not inside(sealed[1],self.sealed_frame[1]) or self.query('text',editor) != '':
+            raise Rejected('input')
+        if self.next_history_scope(history) != before:
+            raise Rejected('response')
+        self.editor,self.sealed_editor = editor,sealed
+        self.next_history,self.next_witness = history,before
+        self.next_input = True
+        self.next_consumed = False
+        self.response_only = False
+        self.adapter.key_guard = lambda: self.proof(focused=True)
+        self.proof()
+
+    def next_input_proof(self):
+        if self.next_history_scope(self.next_history) != self.next_witness:
+            raise Rejected('response')
+        nodes = self.tree(self.frame)
+        if any(node != self.frame and identity[0] in (16,23,69) for node,identity in nodes):
+            raise Rejected('frame')
+        editors = [node for node,identity in nodes if identity[0] in (61,78,79)
+            and 'Write your prompt to Claude' in identity[1:]]
+        if editors != [self.editor]:
+            raise Rejected('tree')
+        child,seen = self.editor,set()
+        for _ in range(32):
+            if child in seen:
+                raise Rejected('tree')
+            seen.add(child);self.owned(child);self.state(child)
+            if child == self.frame:
+                break
+            parent = self.query('parent',child)
+            self.owned(parent)
+            if child not in self.query('children',parent):
+                raise Rejected('tree')
+            child = parent
+        else:
+            raise Rejected('tree')
+        if self.next_history_scope(self.next_history) != self.next_witness:
+            raise Rejected('response')
 
     def response_scope(self, marker):
         nodes = self.tree(self.frame)
@@ -991,8 +1114,8 @@ def main():
             raise Rejected()
         request = json.loads(raw)
         required = {'pid','bus','path','checkerPid','window','bounds','name','nativeExecutable',
-            'deadline','mode','value','binding','profileAuthority'}
-        if type(request) is not dict or set(request)!=required or request['mode'] not in ('input','input-first-owned','copy'):
+            'deadline','mode','value','binding','profileAuthority','history'}
+        if type(request) is not dict or set(request)!=required or request['mode'] not in ('input','input-first-owned','input-next-correlated','copy'):
             raise Rejected()
         if type(request['value']) is not str or len(request['value'].encode())>4096:
             raise Rejected()
@@ -1004,9 +1127,16 @@ def main():
         adapter = native_adapter(request,deadline)
         adapter.profile_guard = custody.verify
         controller = Controller(adapter,request,deadline)
-        if request['binding'] is not None:
-            controller.restore(request['binding'], response=request['mode']=='copy')
-        if request['mode'] in ('input','input-first-owned'):
+        if request['mode']=='input-next-correlated':
+            if request['binding'] is None:
+                raise Rejected('policy')
+            controller.restore_next_input(request['binding'],request['history'])
+        else:
+            if request['history'] != []:
+                raise Rejected('policy')
+            if request['binding'] is not None:
+                controller.restore(request['binding'], response=request['mode']=='copy')
+        if request['mode'] in ('input','input-first-owned','input-next-correlated'):
             facts = controller.submit(request['value'], request['mode']=='input-first-owned')
         else:
             if request['binding'] is None:

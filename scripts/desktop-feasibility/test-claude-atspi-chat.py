@@ -815,4 +815,130 @@ class ResponseFrameRestoreTests(unittest.TestCase):
         with self.assertRaises(chat.Rejected):controller.restore(binding,response=True)
         self.assertEqual(adapter.copy_actions,0);self.assertEqual(adapter.focus_count,0)
 
+class CorrelatedNextInputTests(unittest.TestCase):
+    def fixture(self, **options):
+        adapter,controller,binding=ResponseFrameRestoreTests.restored(self,replaced=True,
+            **{k:v for k,v in options.items() if k in ('moved_frame','wrong_mode','guard_loss')})
+        adapter.profile_guard=lambda:not options.get('profile_loss')
+        extra={
+            'userrow':(39,'',''), 'userheading':(83,'You said: owned prior prompt',''),
+            'unknown':(83,'You said: unrelated private turn',''),
+            'editor3':(61,'Write your prompt to Claude',''),
+            'dialog':(16,'private dialog','')}
+        if options.get('wrong_user'):extra['userheading']=(83,'You said: wrong private prompt','')
+        for method in ('owner','identity','children','parent','state','bounds'):
+            original=getattr(adapter,method)
+            def call(node,*args,method=method,original=original):
+                name=node[1] if isinstance(node,tuple) else node
+                if name in extra:
+                    if method=='owner':return 8 if options.get('foreign_user') and name=='userheading' else 7
+                    if method=='identity':return extra[name]
+                    if method=='children':return [('r','userheading')] if name=='userrow' else []
+                    if method=='parent':return ('r','userrow') if name=='userheading' else ('r','frame')
+                    if method=='state':return (1<<30)|(1<<25)|(1<<7)|(1<<8)|(1<<24)
+                    if method=='bounds':return (15,20,100,30)
+                value=original(node,*args)
+                if method=='children' and name=='frame':
+                    value=value+([] if options.get('missing_user') else [('r','userrow')])
+                    if options.get('extra_heading') or getattr(adapter,'extra_after_focus',False):value+=[('r','unknown')]
+                    if options.get('duplicate_editor'):value+=[('r','editor3')]
+                    if options.get('dialog'):value+=[('r','dialog')]
+                if method=='identity' and name=='heading' and options.get('wrong_nonce'):return (83,'Claude responded: wrong nonce','')
+                return value
+            setattr(adapter,method,call)
+        if options.get('wrong_mode'):
+            attributes=adapter.attributes
+            adapter.attributes=lambda node:{'current':'false'} if node==('r','chat') else attributes(node)
+        if options.get('nonempty'):adapter.value='unknown private draft'
+        if options.get('literal_filler'):adapter.value='\n'
+        history=[dict(prompt='owned prior prompt',marker='private-marker')]
+        return adapter,controller,binding,history
+
+    def test_unique_new_empty_editor_can_submit_under_exact_history(self):
+        a,c,b,h=self.fixture();c.restore_next_input(b,h)
+        self.assertEqual(c.editor,('r','editor2'))
+        self.assertEqual(c.frame,('r','frame'))
+        self.assertEqual((a.focus_count,a.paste_count,a.copy_actions),(0,0,0))
+        facts=c.submit('owned next prompt')
+        self.assertTrue(facts['sendForwarded'])
+        self.assertEqual((a.focus_count,a.paste_count,a.send_count),(1,1,1))
+        self.assertNotIn('owned prior prompt',str(facts));self.assertNotIn('private-marker',str(facts))
+        with self.assertRaises(chat.Rejected):a.key_guard()
+        c.submit('replayed prompt')
+        self.assertEqual(a.send_count,1)
+        with self.assertRaises(chat.Rejected):c.restore_next_input(b,h)
+
+    def test_two_prior_pairs_are_complete_without_tree_order_chronology(self):
+        a,c,b,h=self.fixture()
+        extra={'userrow2':(39,'',''),'userheading2':(83,'You said: second owned prompt',''),
+            'row2':(85,'',''),'heading2':(83,'Claude responded: second-marker',''),
+            'copy2':(43,'Copy','')}
+        edges={'userrow2':['userheading2'],'row2':['heading2','copy2']}
+        parents={'userheading2':'userrow2','heading2':'row2','copy2':'row2'}
+        for method in ('owner','identity','children','parent','state','bounds'):
+            original=getattr(a,method)
+            def call(node,*args,method=method,original=original):
+                name=node[1] if isinstance(node,tuple) else node
+                if name in extra:
+                    if method=='owner':return 7
+                    if method=='identity':return extra[name]
+                    if method=='children':return [('r',n) for n in edges.get(name,[])]
+                    if method=='parent':return ('r',parents.get(name,'frame'))
+                    if method=='state':return (1<<30)|(1<<25)|(1<<7)|(1<<8)|(1<<24)
+                    if method=='bounds':return (15,20,100,30)
+                value=original(node,*args)
+                # Deliberately place assistant before user in exported traversal.
+                if method=='children' and name=='frame':value=[('r','row2')]+value+[('r','userrow2')]
+                return value
+            setattr(a,method,call)
+        h.append(dict(prompt='second owned prompt',marker='second-marker'))
+        c.restore_next_input(b,h)
+        self.assertTrue(c.submit('third owned prompt')['sendForwarded'])
+        self.assertEqual(a.send_count,1)
+
+    def test_history_and_rebind_negatives_are_action_free(self):
+        for options in [dict(missing_user=True),dict(wrong_user=True),dict(wrong_nonce=True),
+                dict(extra_heading=True),dict(duplicate_editor=True),dict(dialog=True),
+                dict(foreign_user=True),dict(moved_frame=True),dict(wrong_mode=True),
+                dict(profile_loss=True),dict(guard_loss=True),dict(nonempty=True),dict(literal_filler=True)]:
+            with self.subTest(options=options):
+                a,c,b,h=self.fixture(**options)
+                with self.assertRaises(Exception):c.restore_next_input(b,h)
+                self.assertEqual((a.focus_count,a.paste_count,a.send_count,a.copy_actions),(0,0,0,0))
+
+    def test_readonly_history_scan_does_not_grant_input_or_copy(self):
+        a,c,b,h=self.fixture();c.restore(b,response=True)
+        witness=c.next_history_scope([(h[0]['prompt'],h[0]['marker'])])
+        self.assertEqual(len(witness[0]),2)
+        with self.assertRaises(chat.Rejected):a.key_guard()
+        self.assertFalse(c.submit('ungranted next prompt')['sendAttempted'])
+        self.assertEqual((a.focus_count,a.paste_count,a.send_count,a.copy_actions),(0,0,0,0))
+
+    def test_lost_history_between_focus_and_paste_cannot_input(self):
+        a,c,b,h=self.fixture();c.restore_next_input(b,h)
+        def focus(node):a.focus_count+=1;a.focus=True;a.extra_after_focus=True;return True
+        a.grab_focus=focus
+        facts=c.submit('owned next prompt')
+        self.assertEqual(facts['failureBoundary'],'response-heading')
+        self.assertEqual((a.paste_count,a.send_count),(0,0))
+
+    def test_lost_pair_after_readback_prevents_send(self):
+        a,c,b,h=self.fixture();c.restore_next_input(b,h)
+        readback=a.copy_input_once
+        def changed(node):
+            value=readback(node);a.extra_after_focus=True;return value
+        a.copy_input_once=changed
+        facts=c.submit('owned next prompt')
+        self.assertEqual(facts['failureBoundary'],'response-heading')
+        self.assertEqual((a.paste_count,a.send_count),(1,0))
+        self.assertFalse(facts['sendAttempted'])
+
+    def test_missing_duplicate_overflow_or_malformed_capability_rejects(self):
+        for h in [[],[dict(prompt='x',marker='m')]*2,[dict(prompt='x',marker='m')]*3,
+                [dict(prompt='',marker='m')],[dict(prompt='x',marker='m',extra='private')],
+                [dict(prompt='x'*4097,marker='m')]]:
+            a,c,b,_=self.fixture()
+            with self.assertRaises(chat.Rejected):c.restore_next_input(b,h)
+            self.assertEqual((a.focus_count,a.paste_count,a.send_count),(0,0,0))
+
 if __name__=='__main__':unittest.main()
