@@ -363,12 +363,54 @@ fn atomic_write_inner(
         )?;
     }
     qualification_prelaunch::observe_configuration_persist(
-        temporary
-            .persist(path)
+        persist_configuration_file(temporary, path, document.is_some())
             .map_err(|error| ClaudeDesktopError::Write(error.error)),
         document,
     )?;
     Ok(())
+}
+
+// Windows may temporarily deny replacement while another handle lacks delete
+// sharing. Retry only that exact error, retaining this already-written file.
+fn persist_configuration_file(
+    temporary: tempfile::NamedTempFile,
+    path: &Path,
+    configuration: bool,
+) -> Result<File, tempfile::PersistError> {
+    #[cfg(windows)]
+    if configuration {
+        return persist_windows_configuration(temporary, path);
+    }
+    #[cfg(not(windows))]
+    let _ = configuration;
+    temporary.persist(path)
+}
+
+#[cfg(windows)]
+fn persist_windows_configuration(
+    mut temporary: tempfile::NamedTempFile,
+    path: &Path,
+) -> Result<File, tempfile::PersistError> {
+    use std::time::{Duration, Instant};
+    let deadline = Instant::now() + Duration::from_millis(250);
+    loop {
+        match temporary.persist(path) {
+            Ok(file) => return Ok(file),
+            Err(error) => {
+                if error.error.raw_os_error() != Some(32) || Instant::now() >= deadline {
+                    return Err(error);
+                }
+                std::thread::sleep(
+                    Duration::from_millis(5)
+                        .min(deadline.saturating_duration_since(Instant::now())),
+                );
+                if Instant::now() >= deadline {
+                    return Err(error);
+                }
+                temporary = error.file;
+            }
+        }
+    }
 }
 
 pub(super) fn reject_symlink(path: &Path) -> Result<(), ClaudeDesktopError> {
@@ -395,19 +437,28 @@ mod configuration_persist_tests {
             .join("Roaming")
             .join("Claude");
         nan_harness_private_fs::create_private_dir_all(&parent).unwrap();
+        let local = root
+            .join("profile")
+            .join("home")
+            .join("AppData")
+            .join("Local");
+        let third_party = local.join("Claude-3p");
+        nan_harness_private_fs::create_private_dir_all(&third_party).unwrap();
+        let roaming = parent.parent().unwrap();
         let mut retained = Vec::new();
-        let mut ancestor = parent.as_path();
-        while ancestor.starts_with(&root) {
+        // Match FreshClaudeWindowsProfile::prepare, including volume root.
+        for directory in local
+            .ancestors()
+            .chain([roaming, parent.as_path(), third_party.as_path()])
+        {
             retained.push(
                 std::fs::OpenOptions::new()
                     .read(true)
                     .share_mode(1)
                     .custom_flags(0x0200_0000 | 0x0020_0000)
-                    .open(ancestor)
+                    .open(directory)
                     .unwrap(),
             );
-            let Some(next) = ancestor.parent() else { break };
-            ancestor = next;
         }
         let path = parent.join("claude_desktop_config.json");
         let result = atomic_write_configuration(
@@ -425,5 +476,96 @@ mod configuration_persist_tests {
         assert!(result.is_ok(), "non-write configuration failure");
         assert_eq!(fs::read(&path).unwrap(), b"{\"deploymentMode\":\"3p\"}\n");
         drop(retained);
+    }
+    #[test]
+    fn configuration_persist_retries_same_file_after_target_handle_release() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("config.json");
+        fs::write(&path, b"original").unwrap();
+        let held = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(1)
+            .open(&path)
+            .unwrap();
+        let mut temporary = tempfile::Builder::new()
+            .prefix(".nan-")
+            .make_in(temp.path(), nan_harness_private_fs::open_private_new)
+            .unwrap();
+        temporary.write_all(b"replacement").unwrap();
+        temporary.flush().unwrap();
+        let initial = temporary.persist(&path).unwrap_err();
+        assert_eq!(initial.error.raw_os_error(), Some(32));
+        assert_eq!(fs::read(&path).unwrap(), b"original");
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(40));
+            drop(held);
+        });
+        let result = persist_windows_configuration(initial.file, &path);
+        release.join().unwrap();
+        assert!(result.is_ok());
+        assert_eq!(fs::read(path).unwrap(), b"replacement");
+    }
+
+    #[test]
+    fn configuration_persist_permanent_sharing_failure_preserves_original() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("config.json");
+        fs::write(&path, b"original").unwrap();
+        let held = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(1)
+            .open(&path)
+            .unwrap();
+        let started = std::time::Instant::now();
+        let result = atomic_write_configuration(
+            &path,
+            b"replacement",
+            None,
+            qualification_prelaunch::ConfigurationDocument::NormalConfig,
+        );
+        assert!(
+            matches!(result, Err(ClaudeDesktopError::Write(error)) if error.raw_os_error()==Some(32))
+        );
+        assert!(started.elapsed() < std::time::Duration::from_secs(2));
+        assert_eq!(fs::read(&path).unwrap(), b"original");
+        drop(held);
+        assert_eq!(fs::read_dir(temp.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn configuration_persist_unrelated_failure_preserves_destination() {
+        let temp = tempfile::tempdir().unwrap();
+        let destination = temp.path().join("directory");
+        fs::create_dir(&destination).unwrap();
+        let original = fs::read_dir(temp.path()).unwrap().count();
+        assert!(
+            atomic_write_configuration(
+                &destination,
+                b"replacement",
+                None,
+                qualification_prelaunch::ConfigurationDocument::NormalConfig
+            )
+            .is_err()
+        );
+        assert_eq!(fs::read_dir(temp.path()).unwrap().count(), original);
+        assert!(destination.is_dir());
+    }
+    #[test]
+    fn ordinary_persist_does_not_retry_sharing_failure() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("config.json");
+        fs::write(&path, b"original").unwrap();
+        let held = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(1)
+            .open(&path)
+            .unwrap();
+        let mut temporary = tempfile::NamedTempFile::new_in(temp.path()).unwrap();
+        temporary.write_all(b"replacement").unwrap();
+        let error = persist_configuration_file(temporary, &path, false).unwrap_err();
+        assert_eq!(error.error.raw_os_error(), Some(32));
+        assert_eq!(fs::read(&path).unwrap(), b"original");
+        drop(error);
+        drop(held);
     }
 }
