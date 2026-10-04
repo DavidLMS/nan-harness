@@ -21,6 +21,9 @@ def inside(rect, outer):
             and rect[1] + rect[3] <= outer[1] + outer[3])
 
 
+# AT-SPI roles differ from ATK: section=85, grouping=99, comment=97.
+RESPONSE_CONTAINER_ROLES = frozenset((39, 85, 99))
+
 BOUNDARIES = frozenset(('request','policy','native-window','source-owner','tree','tree-cycle','tree-depth','tree-limit','tree-identity','tree-children','response-heading','response-row','response-row-role-limit','response-row-copy-absent','response-row-copy-ambiguous','response-row-headings','response-row-attachment','state',
     'frame','frame-active','frame-count','frame-client','client','mode','focus','input','clipboard','action','action-count','action-name','action-hit','response','transport'))
 QUERY_BOUNDARIES = dict(owner='source-owner', identity='tree-identity', children='tree-children', parent='frame',
@@ -470,7 +473,7 @@ class Controller:
             self.sleep(min(.02, remaining))
 
     def current_chat(self, nodes):
-        modes = [node for node, identity in nodes if identity[0] in (39, 97)
+        modes = [node for node, identity in nodes if identity[0] in RESPONSE_CONTAINER_ROLES
                  and 'Mode' in identity[1:]]
         if len(modes) != 1:
             raise Rejected('mode')
@@ -699,9 +702,9 @@ class Controller:
             seen.add(parent)
             self.owned(parent)
             identity = self.query('identity',parent)
-            if identity[0] not in (39,97):
+            if identity[0] not in RESPONSE_CONTAINER_ROLES:
                 # Wrappers do not grant row authority. Continue only along the
-                # owned, bounded chain to a panel/section with the exact heading.
+                # owned, bounded chain to a panel/section/grouping with the exact heading.
                 parent = self.query('parent',parent)
                 continue
             pending, subtree = [parent], []

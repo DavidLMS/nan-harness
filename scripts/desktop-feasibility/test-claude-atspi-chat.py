@@ -334,7 +334,7 @@ class ResponseAdapter(Adapter):
         super().__init__(**options);self.clipboard='old';self.copy_actions=0
     def identity(self,node):
         if node=='wrapper':return (80,'PRIVATE wrapper','')
-        if node=='row':return (80 if self.changes.get('row_wrapper') else 39,'','')
+        if node=='row':return (97 if self.changes.get('row_wrapper') else self.changes.get('row_role',39),'','')
         if node=='heading':return (83,'Claude responded: private-marker','')
         if node in ('copy','copy2'):return (43,'Copy','')
         if node=='title':return (83,'private-marker','')
@@ -407,6 +407,12 @@ class ResponseTests(unittest.TestCase):
             adapter,controller,facts=self.case(**options)
             self.assertEqual(facts['failureBoundary'],reason)
             self.assertEqual(adapter.copy_actions,0)
+    def test_atspi_section_and_grouping_are_response_containers(self):
+        for role in (39,85,99):
+            adapter,controller,facts=self.case(row_role=role)
+            self.assertTrue(facts['responseVerified']);self.assertEqual(adapter.copy_actions,1)
+        adapter,controller,facts=self.case(row_role=97)
+        self.assertFalse(facts['responseVerified']);self.assertEqual(adapter.copy_actions,0)
     def test_global_or_duplicate_or_mismatch_reject(self):
         for options in [dict(global_copy=True),dict(duplicate_copy=True),dict(wrong_copy=True)]:
             with self.subTest(options=options):
