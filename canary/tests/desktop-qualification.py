@@ -4062,6 +4062,23 @@ class ClaudeWindowsProfileSealTests(unittest.TestCase):
                     with self.assertRaises(ValueError):q.semantic_observations(root,'zed-desktop')
 
 class ClaudeWindowsImmutablePrivacyTests(unittest.TestCase):
+    def test_configuration_mismatch_is_closed_and_never_success(self):
+        good=dict(schemaVersion=1,mechanism='claude-windows-profile-seal',diagnosticsOnly=True,
+            stage='configuration-values',documentIndex=None,completed=False,rootPrivacy='protected',
+            libraryPrivacy='inherited',documentPrivacy=['inherited','protected','protected'])
+        reasons=['document-count','deployment-mode','applied-profile','provider','base-url',
+            'authentication-key','authentication-scheme','hybrid-pointer','profile-entries',
+            'deployment-chooser','chat-only','alternate-configuration']
+        with tempfile.TemporaryDirectory() as root:
+            path=Path(root)/'seal.json'
+            for reason in reasons:
+                value=good|{'configurationFailure':reason};path.write_text(json.dumps(value))
+                self.assertEqual(q.semantic_observations(root,'claude-desktop'),[value])
+            for changed in [good|{'configurationFailure':'PRIVATE'},good|{'configurationFailure':{}},
+                    good|{'configurationFailure':None},good|{'configurationFailure':'provider',
+                        'stage':'completed','completed':True}]:
+                path.write_text(json.dumps(changed))
+                with self.assertRaises(ValueError):q.semantic_observations(root,'claude-desktop')
     def test_exact_closed_descriptors_and_partial_failures(self):
         good=dict(schemaVersion=1,mechanism='claude-windows-profile-seal',diagnosticsOnly=True,
             stage='completed',documentIndex=None,completed=True,rootPrivacy='protected',

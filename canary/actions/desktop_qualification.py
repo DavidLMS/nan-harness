@@ -1581,7 +1581,7 @@ def semantic_observations(directory, app):
                 'configuration-values','final-custody','deadline','completed'}
             fields=set('schemaVersion mechanism diagnosticsOnly stage documentIndex completed'.split())
             privacy_fields={'rootPrivacy','libraryPrivacy','documentPrivacy'}
-            if (app!='claude-desktop' or set(value) not in (fields,fields|privacy_fields)
+            if (app!='claude-desktop' or set(value) not in (fields,fields|privacy_fields,fields|privacy_fields|{'configurationFailure'})
                     or value['diagnosticsOnly'] is not True or type(value['stage']) is not str or value['stage'] not in stages
                     or type(value['completed']) is not bool or value['completed']!=(value['stage']=='completed')
                     or value['stage'] in document_stages and (type(value['documentIndex']) is not int or not 0<=value['documentIndex']<=2)
@@ -1600,6 +1600,17 @@ def semantic_observations(directory, app):
                             for i in range(value['documentIndex']+1,3))):
                     raise ValueError('invalid Claude Windows immutable privacy observation')
                 record.update({k:value[k] for k in privacy_fields})
+            if 'configurationFailure' in value:
+                failure=value['configurationFailure']
+                failures={'document-count','deployment-mode','applied-profile','provider','base-url',
+                    'authentication-key','authentication-scheme','hybrid-pointer','profile-entries',
+                    'deployment-chooser','chat-only','alternate-configuration'}
+                if failure is not None and (type(failure) is not str or failure not in failures
+                        or value['stage']!='configuration-values' or value['completed']):
+                    raise ValueError('invalid Claude Windows configuration failure')
+                if value['stage']=='configuration-values' and failure is None:
+                    raise ValueError('missing Claude Windows configuration failure')
+                record['configurationFailure']=failure
             record.update({key:value[key] for key in ['diagnosticsOnly','stage','documentIndex','completed']})
         elif mechanism == 'claude-private-storage-stage':
             fields = set('schemaVersion mechanism diagnosticsOnly phase stage'.split())

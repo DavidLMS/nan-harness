@@ -30,6 +30,7 @@ enum SealStage {
 struct SealObservation {
     stage: SealStage,
     document_index: Option<usize>,
+    configuration_failure: Option<&'static str>,
     root_privacy: Option<nan_harness_private_fs::OwnedWindowsDacl>,
     library_privacy: Option<nan_harness_private_fs::OwnedWindowsDacl>,
     document_privacy: [Option<nan_harness_private_fs::OwnedWindowsDacl>; 3],
@@ -39,6 +40,7 @@ impl SealObservation {
         Self {
             stage: SealStage::InitialCustody,
             document_index: None,
+            configuration_failure: None,
             root_privacy: None,
             library_privacy: None,
             document_privacy: [None; 3],
@@ -50,7 +52,8 @@ impl SealObservation {
             "stage":self.stage,"documentIndex":self.document_index,"completed":completed,
             "rootPrivacy":self.root_privacy.map(privacy_label),
             "libraryPrivacy":self.library_privacy.map(privacy_label),
-            "documentPrivacy":self.document_privacy.map(|p|p.map(privacy_label))
+            "documentPrivacy":self.document_privacy.map(|p|p.map(privacy_label)),
+            "configurationFailure":self.configuration_failure
         }));
     }
 }
@@ -126,49 +129,79 @@ fn document(file: &mut File) -> Option<serde_json::Value> {
         .then(|| serde_json::from_slice(&bytes).ok())
         .flatten()
 }
-fn configured(values: &[serde_json::Value], base: &str, token: &str) -> bool {
+fn configuration_failure(
+    values: &[serde_json::Value],
+    base: &str,
+    token: &str,
+) -> Option<&'static str> {
     use serde_json::Value;
-    values.len() == 3
-        && values[0].get("deploymentMode").and_then(Value::as_str) == Some("3p")
-        && values[1].get("appliedId").and_then(Value::as_str) == Some(PROFILE_ID)
-        && values[1].get("hybridPointer").is_none()
-        && values[1]
-            .get("entries")
-            .and_then(Value::as_array)
-            .is_some_and(|entries| {
-                entries.len() == 1
-                    && entries[0].get("id").and_then(Value::as_str) == Some(PROFILE_ID)
-            })
-        && values[2].get("inferenceProvider").and_then(Value::as_str) == Some("gateway")
-        && values[2]
-            .get("inferenceGatewayBaseUrl")
-            .and_then(Value::as_str)
-            == Some(base)
-        && values[2]
-            .get("inferenceGatewayApiKey")
-            .and_then(Value::as_str)
-            == Some(token)
-        && values[2]
-            .get("inferenceGatewayAuthScheme")
-            .and_then(Value::as_str)
-            == Some("bearer")
-        && values[2]
-            .get("disableDeploymentModeChooser")
-            .and_then(Value::as_bool)
-            == Some(true)
-        && values[2].get("coworkTabEnabled").and_then(Value::as_bool) == Some(false)
-        && [
-            "bootstrapUrl",
-            "bootstrapEnabled",
-            "bootstrap",
-            "selfHosted",
-            "selfHostedUrl",
-            "selfHostedToken",
-            "inference",
-            "authentication",
-        ]
-        .iter()
-        .all(|key| values[2].get(key).is_none())
+    if values.len() != 3 {
+        return Some("document-count");
+    }
+    for (value, key, expected, failure) in [
+        (&values[0], "deploymentMode", "3p", "deployment-mode"),
+        (&values[1], "appliedId", PROFILE_ID, "applied-profile"),
+        (&values[2], "inferenceProvider", "gateway", "provider"),
+        (&values[2], "inferenceGatewayBaseUrl", base, "base-url"),
+        (
+            &values[2],
+            "inferenceGatewayApiKey",
+            token,
+            "authentication-key",
+        ),
+        (
+            &values[2],
+            "inferenceGatewayAuthScheme",
+            "bearer",
+            "authentication-scheme",
+        ),
+    ] {
+        if value.get(key).and_then(Value::as_str) != Some(expected) {
+            return Some(failure);
+        }
+    }
+    if values[1].get("hybridPointer").is_some() {
+        return Some("hybrid-pointer");
+    }
+    if !values[1]
+        .get("entries")
+        .and_then(Value::as_array)
+        .is_some_and(|entries| {
+            entries.len() == 1 && entries[0].get("id").and_then(Value::as_str) == Some(PROFILE_ID)
+        })
+    {
+        return Some("profile-entries");
+    }
+    if values[2]
+        .get("disableDeploymentModeChooser")
+        .and_then(Value::as_bool)
+        != Some(true)
+    {
+        return Some("deployment-chooser");
+    }
+    if values[2].get("coworkTabEnabled").and_then(Value::as_bool) != Some(false) {
+        return Some("chat-only");
+    }
+    if [
+        "bootstrapUrl",
+        "bootstrapEnabled",
+        "bootstrap",
+        "selfHosted",
+        "selfHostedUrl",
+        "selfHostedToken",
+        "inference",
+        "authentication",
+    ]
+    .iter()
+    .any(|key| values[2].get(key).is_some())
+    {
+        return Some("alternate-configuration");
+    }
+    None
+}
+#[cfg(test)]
+fn configured(values: &[serde_json::Value], base: &str, token: &str) -> bool {
+    configuration_failure(values, base, token).is_none()
 }
 // The CLI validates both source-defined roots before writing CHAT_ONLY config.
 // Neither root may contain prior state; the token owns both exclusive creations.
@@ -432,7 +465,8 @@ impl FreshClaudeWindowsProfile {
         let (files, values): (Vec<_>, Vec<_>) = documents.into_iter().unzip();
         observation.document_index = None;
         observation.stage = SealStage::ConfigurationValues;
-        if !configured(&values, base, token) {
+        observation.configuration_failure = configuration_failure(&values, base, token);
+        if observation.configuration_failure.is_some() {
             return Err(Reason::IsolationUnavailable);
         }
         observation.stage = SealStage::FinalCustody;
@@ -575,6 +609,43 @@ mod tests {
             serde_json::json!({"appliedId":PROFILE_ID,"entries":[{"id":PROFILE_ID}]}),
             serde_json::json!({"inferenceProvider":"gateway","inferenceGatewayBaseUrl":"http://127.0.0.1:1","inferenceGatewayApiKey":"private-synthetic-sentinel","inferenceGatewayAuthScheme":"bearer","disableDeploymentModeChooser":true,"coworkTabEnabled":false}),
         ]
+    }
+    #[test]
+    fn changed_configuration_reports_only_closed_failure_labels() {
+        let base = "http://127.0.0.1:1";
+        let token = "private-synthetic-sentinel";
+        assert_eq!(configuration_failure(&valid(), base, token), None);
+        for (index, key, reason) in [
+            (0, "deploymentMode", "deployment-mode"),
+            (1, "appliedId", "applied-profile"),
+            (2, "inferenceProvider", "provider"),
+            (2, "inferenceGatewayBaseUrl", "base-url"),
+            (2, "inferenceGatewayApiKey", "authentication-key"),
+            (2, "inferenceGatewayAuthScheme", "authentication-scheme"),
+            (1, "entries", "profile-entries"),
+            (2, "disableDeploymentModeChooser", "deployment-chooser"),
+            (2, "coworkTabEnabled", "chat-only"),
+        ] {
+            let mut values = valid();
+            values[index][key] = serde_json::json!("private-invalid-value");
+            assert_eq!(configuration_failure(&values, base, token), Some(reason));
+        }
+        let mut values = valid();
+        values[1]["hybridPointer"] = serde_json::Value::Null;
+        assert_eq!(
+            configuration_failure(&values, base, token),
+            Some("hybrid-pointer")
+        );
+        values = valid();
+        values[2]["bootstrap"] = serde_json::json!({"private": "value"});
+        assert_eq!(
+            configuration_failure(&values, base, token),
+            Some("alternate-configuration")
+        );
+        assert_eq!(
+            configuration_failure(&[], base, token),
+            Some("document-count")
+        );
     }
     #[test]
     fn retained_directory_allows_child_rename_without_delete_sharing() {
