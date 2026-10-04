@@ -56,6 +56,16 @@ def hypertext_query(adapter,method,target,*args):
         return adapter.call(target,'Get','org.freedesktop.DBus.Properties',interface,name)
     if method in ['owner','state','children','parent']:
         return getattr(adapter,method)(target)
+    if method=='role':
+        return integer(adapter.call(target,'GetRole'))
+    if method=='attributes':
+        value=adapter.call(target,'GetAttributes')
+        if (not isinstance(value,dict) or len(value)>64
+                or any(not isinstance(k,str) or not isinstance(v,str) or len(k)>128 or len(v)>1024
+                       for k,v in value.items())
+                or sum(len(k.encode('utf8'))+len(v.encode('utf8')) for k,v in value.items())>4096):
+            raise Rejected('input')
+        return {str(k):str(v) for k,v in value.items()}
     if method=='count':
         return integer(property_value(text_interface,'CharacterCount'))
     if method=='text':
@@ -82,7 +92,7 @@ def hypertext_query(adapter,method,target,*args):
     return integer(property_value(link_interface,names[method]))
 
 
-def flatten_hypertext(root, query, pid, budget):
+def flatten_hypertext(root, query, pid, budget, observation=None):
     """Resolve embedded Text objects; never treat unknown objects as empty."""
     records, parents, children = [], {}, {}
     def read(method,node,*args):
@@ -91,7 +101,7 @@ def flatten_hypertext(root, query, pid, budget):
         budget()
         if len(records)>=2048:
             raise Rejected('input')
-        records.append((method,node,args,value.copy() if type(value) is list else value))
+        records.append((method,node,args,value.copy() if type(value) in (list,dict) else value))
         return value
     def endpoint(node):
         if (type(node) is not tuple or len(node)!=2 or any(type(v) is not str or not v for v in node)
@@ -159,12 +169,44 @@ def flatten_hypertext(root, query, pid, budget):
             raise Rejected('input')
         return result
     result=text(root)
+    shape=None
+    if observation is not None and result:
+        shape=dict(nodeCount=len(children),paragraphCount=0,literalLfLeafCount=0,
+                   brLfLeafCount=0,exactFillerLfLeafCount=0)
+        for node,descendants in children.items():
+            role=read('role',node)
+            attributes=read('attributes',node)
+            if (type(role) is not int or not 0<=role<=255 or type(attributes) is not dict
+                    or len(attributes)>64 or any(type(k) is not str or type(v) is not str
+                        or len(k)>128 or len(v)>1024 for k,v in attributes.items())
+                    or sum(len(k.encode('utf8'))+len(v.encode('utf8')) for k,v in attributes.items())>4096):
+                raise Rejected('input')
+            shape['paragraphCount']+=int(role==73)
+            # Chromium exposes line breaks as static text. Other leaf roles are
+            # still owned/reproved, but cannot establish a literal LF text leaf.
+            if descendants or role not in (29,61,116):
+                continue
+            count=read('count',node)
+            if type(count) is not int or not 0<=count<=4096:
+                raise Rejected('input')
+            value=read('text',node,count) if count else ''
+            if type(value) is not str or len(value)!=count or len(value.encode('utf8'))>4096:
+                raise Rejected('input')
+            if value!='\n':
+                continue
+            shape['literalLfLeafCount']+=1
+            if attributes.get('tag')=='br':
+                shape['brLfLeafCount']+=1
+                if attributes.get('class','').split()==['ProseMirror-trailingBreak']:
+                    shape['exactFillerLfLeafCount']+=1
     # Reprove the entire owned attachment/text/link mapping, including zero-length leaves.
     for method,node,args,value in records:
         budget()
         if query(method,node,*args)!=value:
             raise Rejected('input')
         budget()
+    if shape is not None:
+        observation.update(shape)
     return result
 
 
@@ -374,6 +416,9 @@ class Controller:
             initial = self.query('text', self.editor)
             if initial != '':
                 self.facts['inputShape'] = input_shape(initial)
+                embedded=getattr(self.adapter,'embedded_text_observation',None)
+                if embedded is not None:
+                    self.facts['embeddedTextObservation']=embedded
                 self.facts['stage'] = 'input-not-empty'
                 self.facts['failureBoundary'] = 'input'
                 return self.facts
@@ -449,6 +494,8 @@ class Controller:
             except Exception:
                 self.facts['failureBoundary'] = 'clipboard'
                 self.facts['stage'] = 'clipboard-cleanup'
+            if self.facts['stage']!='input-not-empty':
+                self.facts.pop('embeddedTextObservation',None)
         return self.facts
 
 
@@ -660,7 +707,10 @@ def native_adapter(request, deadline):
             adapter.remaining()
             if os.getppid()!=request['checkerPid']:
                 raise Rejected('source-owner')
-        result=flatten_hypertext(node,lambda method,target,*args:hypertext_query(adapter,method,target,*args),request['pid'],budget)
+        observation={}
+        adapter.embedded_text_observation=None
+        result=flatten_hypertext(node,lambda method,target,*args:hypertext_query(adapter,method,target,*args),request['pid'],budget,observation)
+        adapter.embedded_text_observation=observation or None
         if not guarded():
             raise Rejected('native-window')
         return result

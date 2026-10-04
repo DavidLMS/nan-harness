@@ -124,6 +124,22 @@ class HypertextWireTests(unittest.TestCase):
                 with self.assertRaises(chat.Rejected):chat.hypertext_query(a,logical,node,*args)
 
 
+class EmbeddedAttributeWireTests(unittest.TestCase):
+    def test_attributes_preserve_bounded_private_values_without_coercion(self):
+        class Dbus:
+            Boolean=bool
+        class Adapter:
+            dbus=Dbus
+            def call(self,*args):return self.value
+        adapter=Adapter();node=('owned','/leaf')
+        adapter.value={'tag':'br','class':'ProseMirror-trailingBreak'}
+        self.assertEqual(chat.hypertext_query(adapter,'attributes',node),adapter.value)
+        for value in [None,[],{'tag':None},{'tag':True},{'tag':'x'*1025},
+                      {str(i):'x' for i in range(65)},{str(i):'x'*1024 for i in range(5)}]:
+            adapter.value=value
+            with self.assertRaises(chat.Rejected):chat.hypertext_query(adapter,'attributes',node)
+
+
 class HypertextTests(unittest.TestCase):
     def fixture(self, value='\ufffc', child=''):
         root,leaf,link=('owned','/editor'),('owned','/paragraph'),('owned','/link')
@@ -142,6 +158,42 @@ class HypertextTests(unittest.TestCase):
             root,leaf,link,records=self.fixture(value,child)
             query=lambda method,node,*args:records[(method,node,*args)]
             self.assertEqual(chat.flatten_hypertext(root,query,7,lambda:None),expected)
+
+    def test_embedded_lf_shape_is_advisory_and_retains_literal_content(self):
+        root,paragraph,link,records=self.fixture(child='\n')
+        leaf=('owned','/break')
+        records.update({('children',paragraph):[leaf],('parent',leaf):paragraph,
+            ('owner',leaf):7,('state',leaf):0,('children',leaf):[],
+            ('count',leaf):1,('text',leaf,1):'\n',
+            ('role',root):61,('role',paragraph):73,('role',leaf):116,
+            ('attributes',root):{'tag':'div'},('attributes',paragraph):{'tag':'p'},
+            ('attributes',leaf):{'tag':'br','class':'ProseMirror-trailingBreak'}})
+        for attributes,expected in [({'tag':'br','class':'ProseMirror-trailingBreak'},1),
+                ({'tag':'br','class':'ProseMirror-trailingBreak extra'},0),
+                ({'tag':'span','class':'ProseMirror-trailingBreak'},0),
+                ({'tag':'br','class':'ProseMirror-trailingBreak ProseMirror-trailingBreak'},0)]:
+            records[('attributes',leaf)]=attributes
+            observation={}
+            result=chat.flatten_hypertext(root,lambda m,n,*a:records[(m,n,*a)],7,lambda:None,observation)
+            self.assertEqual(result,'\n')
+            self.assertEqual(observation,dict(nodeCount=3,paragraphCount=1,literalLfLeafCount=1,
+                brLfLeafCount=int(attributes['tag']=='br'),exactFillerLfLeafCount=expected))
+        records[('attributes',leaf)]={'tag':'br','class':'ProseMirror-trailingBreak'}
+        reads=0
+        def changing(method,node,*args):
+            nonlocal reads
+            value=records[(method,node,*args)]
+            if method=='attributes' and node==leaf:
+                reads+=1
+                if reads>1:return {'tag':'br','class':'changed'}
+            return value
+        observation={}
+        with self.assertRaises(chat.Rejected):chat.flatten_hypertext(root,changing,7,lambda:None,observation)
+        self.assertEqual(observation,{})
+        for invalid in ({'tag':None},{'tag':'br','class':'x'*1025}):
+            records[('attributes',leaf)]=invalid
+            with self.assertRaises(chat.Rejected):
+                chat.flatten_hypertext(root,lambda m,n,*a:records[(m,n,*a)],7,lambda:None,{})
 
     def test_foreign_detached_cycle_missing_interface_and_changed_tree_fail(self):
         for method,change in [('owner',8),('state',1<<6),('parent',('owned','/foreign')),

@@ -86,6 +86,26 @@ fn input_shape(facts: &Value) -> Option<InputShape> {
     shape.valid().then_some(shape)
 }
 
+#[derive(Clone, Copy, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct EmbeddedTextObservation {
+    node_count: u8,
+    paragraph_count: u8,
+    literal_lf_leaf_count: u8,
+    br_lf_leaf_count: u8,
+    exact_filler_lf_leaf_count: u8,
+}
+fn embedded_text_observation(facts: &Value) -> Option<EmbeddedTextObservation> {
+    let shape: EmbeddedTextObservation =
+        serde_json::from_value(facts.get("embeddedTextObservation")?.clone()).ok()?;
+    ((1..=64).contains(&shape.node_count)
+        && shape.paragraph_count <= shape.node_count
+        && shape.literal_lf_leaf_count <= shape.node_count
+        && shape.br_lf_leaf_count <= shape.literal_lf_leaf_count
+        && shape.exact_filler_lf_leaf_count <= shape.br_lf_leaf_count)
+        .then_some(shape)
+}
+
 const FLAGS: [&str; 7] = [
     "inputVerified",
     "pasteAttempted",
@@ -156,6 +176,7 @@ fn decode(bytes: &[u8]) -> Option<(Value, Option<Value>)> {
                     "stage",
                     "failureBoundary",
                     "inputShape",
+                    "embeddedTextObservation",
                 ]
                 .contains(&key.as_str())
         })
@@ -185,6 +206,14 @@ fn decode(bytes: &[u8]) -> Option<(Value, Option<Value>)> {
         || value["facts"]["sendForwarded"] == true && value["facts"]["sendAttempted"] != true
         || value["facts"]["sendAttempted"] == true && value["facts"]["inputVerified"] != true
         || value["facts"]["responseVerified"] == true && value["facts"]["stage"] != "copied"
+    {
+        return None;
+    }
+    if facts.contains_key("embeddedTextObservation")
+        && (embedded_text_observation(&value["facts"]).is_none()
+            || value["facts"]["stage"] != "input-not-empty"
+            || !facts.contains_key("inputShape")
+            || FLAGS.iter().any(|key| value["facts"][*key] != false))
     {
         return None;
     }
@@ -302,6 +331,7 @@ pub(crate) struct ClaudeLinuxChatSession<'a> {
     stage: String,
     failure_boundary: Option<FailureBoundary>,
     input_shape: Option<InputShape>,
+    embedded_text_observation: Option<EmbeddedTextObservation>,
     submitted: u8,
     verified: u8,
     copied: u8,
@@ -332,6 +362,7 @@ impl Gui {
             stage: "source".into(),
             failure_boundary: None,
             input_shape: None,
+            embedded_text_observation: None,
             submitted: 0,
             verified: 0,
             copied: 0,
@@ -380,6 +411,7 @@ impl ClaudeLinuxChatSession<'_> {
         let (facts, binding) = supervise(&self.driver, payload, deadline)?;
         self.failure_boundary = failure_boundary(&facts);
         self.input_shape = input_shape(&facts);
+        self.embedded_text_observation = embedded_text_observation(&facts);
         self.stage = facts["stage"]
             .as_str()
             .ok_or(Reason::ActionUnsupported)?
@@ -490,6 +522,11 @@ impl ClaudeLinuxChatSession<'_> {
         if let Some(shape) = self.input_shape {
             facts["inputShape"] = json!(shape);
         }
+        if self.stage == "input-not-empty" {
+            if let Some(shape) = self.embedded_text_observation {
+                facts["embeddedTextObservation"] = json!(shape);
+            }
+        }
         let recorded = open_private_new(&self.directory.join(format!(
             "claude-linux-native-chat-{}.json",
             self.gui.visual.pid()
@@ -531,5 +568,33 @@ mod input_shape_tests {
         ] {
             assert!(input_shape(&json!({"inputShape":shape})).is_none());
         }
+    }
+}
+
+#[cfg(test)]
+mod embedded_text_tests {
+    use super::embedded_text_observation;
+    use serde_json::json;
+    #[test]
+    fn rejects_unknown_private_fields_and_inconsistent_leaf_counts() {
+        let valid = json!({"nodeCount":3,"paragraphCount":1,"literalLfLeafCount":1,
+            "brLfLeafCount":1,"exactFillerLfLeafCount":1});
+        assert!(embedded_text_observation(&json!({"embeddedTextObservation":valid})).is_some());
+        for (key, value) in [
+            ("nodeCount", json!(0)),
+            ("nodeCount", json!(65)),
+            ("nodeCount", json!(true)),
+            ("paragraphCount", json!(4)),
+            ("brLfLeafCount", json!(2)),
+            ("exactFillerLfLeafCount", json!(2)),
+            ("attributes", json!("PRIVATE")),
+        ] {
+            let mut changed = valid.clone();
+            changed[key] = value;
+            assert!(
+                embedded_text_observation(&json!({"embeddedTextObservation":changed})).is_none()
+            );
+        }
+        assert!(embedded_text_observation(&json!({"embeddedTextObservation":null})).is_none());
     }
 }

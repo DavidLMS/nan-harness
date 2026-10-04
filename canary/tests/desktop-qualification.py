@@ -2581,6 +2581,26 @@ class QualificationTests(unittest.TestCase):
             path.write_text(json.dumps({**facts,'inputShape':shape,'stage':'sent'}))
             with self.assertRaises(ValueError):q.semantic_observations(root,'claude-desktop')
 
+    def test_linux_embedded_text_observation_remains_closed_and_blocked(self):
+        facts = dict(schemaVersion=1,mechanism='claude-linux-native-chat',diagnosticsOnly=True,
+                     stage='input-not-empty',submittedTurns=0,inputVerifiedTurns=0,copiedResponses=0,
+                     retryAttempted=False,clipboardCleared=True,
+                     inputShape=dict(charCount=1,onlyLineBreaks=True,onlyWhitespace=True,onlyZeroWidthMarkers=False))
+        shape=dict(nodeCount=3,paragraphCount=1,literalLfLeafCount=1,brLfLeafCount=1,exactFillerLfLeafCount=1)
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);path=root/'shape.json'
+            path.write_text(json.dumps({**facts,'embeddedTextObservation':shape}))
+            self.assertEqual(q.semantic_observations(root,'claude-desktop')[0]['embeddedTextObservation'],shape)
+            for changed in ({**shape,'nodeCount':0},{**shape,'nodeCount':65},{**shape,'nodeCount':True},
+                            {**shape,'paragraphCount':4},{**shape,'brLfLeafCount':2},
+                            {**shape,'exactFillerLfLeafCount':2},{**shape,'attributes':'PRIVATE'},None):
+                path.write_text(json.dumps({**facts,'embeddedTextObservation':changed}))
+                with self.assertRaises(ValueError):q.semantic_observations(root,'claude-desktop')
+            for changed in ({**facts,'stage':'sent'},{**facts,'submittedTurns':1},
+                            {key:value for key,value in facts.items() if key!='inputShape'}):
+                path.write_text(json.dumps({**changed,'embeddedTextObservation':shape}))
+                with self.assertRaises(ValueError):q.semantic_observations(root,'claude-desktop')
+
     def test_codex_main_confirmation_preserves_failed_guard_and_privacy(self):
         value = dict(schemaVersion=1, mechanism='renderer-inventory', diagnosticsOnly=True,
                      app='chatgpt-desktop', endpointOwned=True, launcherOwned=True, attached=True,

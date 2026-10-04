@@ -1043,7 +1043,7 @@ def semantic_observations(directory, app):
         elif mechanism == 'claude-linux-native-chat':
             fields = {'schemaVersion','mechanism','diagnosticsOnly','stage','submittedTurns',
                       'inputVerifiedTurns','copiedResponses','retryAttempted','clipboardCleared'}
-            if (app != 'claude-desktop' or set(value) - {'failureBoundary','inputShape'} != fields or value['diagnosticsOnly'] is not True
+            if (app != 'claude-desktop' or set(value) - {'failureBoundary','inputShape','embeddedTextObservation'} != fields or value['diagnosticsOnly'] is not True
                     or type(value['stage']) is not str or value['stage'] not in {
                         'source','focus','paste','readback','send','input-not-empty','blocked',
                         'action-uncertain','deadline','clipboard-cleanup','sent','response-pending',
@@ -1075,6 +1075,18 @@ def semantic_observations(directory, app):
                         or value['stage'] not in {'input-not-empty','blocked','deadline','clipboard-cleanup'}):
                     raise ValueError('invalid Claude Linux input shape')
                 record['inputShape'] = shape
+            if 'embeddedTextObservation' in value:
+                shape = value['embeddedTextObservation']
+                keys = {'nodeCount','paragraphCount','literalLfLeafCount','brLfLeafCount','exactFillerLfLeafCount'}
+                if (type(shape) is not dict or set(shape) != keys
+                        or any(type(shape[key]) is not int or not 0 <= shape[key] <= 64 for key in keys)
+                        or shape['nodeCount'] == 0 or shape['paragraphCount'] > shape['nodeCount']
+                        or not shape['exactFillerLfLeafCount'] <= shape['brLfLeafCount'] <= shape['literalLfLeafCount'] <= shape['nodeCount']
+                        or value['stage'] != 'input-not-empty' or 'inputShape' not in value
+                        or any(value[key] != 0 for key in ('submittedTurns','inputVerifiedTurns','copiedResponses'))
+                        or value['retryAttempted'] is not False):
+                    raise ValueError('invalid Claude Linux embedded text observation')
+                record['embeddedTextObservation'] = shape
             record.update({key:value[key] for key in fields - {'schemaVersion','mechanism'}})
         elif mechanism == 'claude-config-persist-owners':
             fields = {'schemaVersion','mechanism','diagnosticsOnly','status','stage','destinationPresent',
