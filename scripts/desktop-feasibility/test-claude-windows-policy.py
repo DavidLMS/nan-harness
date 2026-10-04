@@ -79,6 +79,13 @@ class Policy(unittest.TestCase):
                 self.assertEqual(result['NANH_DESKTOP_QUALIFICATION_MODE'], 'startup-baseline')
                 self.assertEqual(result['NANH_CLAUDE_WINDOWS_FRESH_PROFILE'], '1')
                 self.assertNotIn('NANH_CLAUDE_WINDOWS_SOURCE_POLICY', result)
+                trial = {**source, 'NANH_CLAUDE_WINDOWS_PERSIST_POLICY': 'std-rename'}
+                self.assertEqual(invoke(trial)['NANH_CLAUDE_WINDOWS_PERSIST_POLICY'], 'std-rename')
+                for change in ({'RUNNER_OS': 'macOS'}, {'NANH_CLAUDE_WINDOWS_FRESH_PROFILE': None},
+                               {'NANH_CLAUDE_WINDOWS_CHAT_ONLY': None},
+                               {'NANH_CLAUDE_WINDOWS_PERSIST_POLICY': 'unknown'}):
+                    with self.assertRaises(ValueError): invoke({**trial, **change})
+                with self.assertRaises(ValueError): invoke(trial, 'chatgpt-desktop')
                 for change in ({'RUNNER_OS': 'macOS'}, {'NANH_CLAUDE_WINDOWS_FRESH_PROFILE': None},
                                {'NANH_CLAUDE_WINDOWS_NATIVE_CHAT': None}, {'NANH_CLAUDE_WINDOWS_CHAT_ONLY': None},
                                {'NANH_CLAUDE_WINDOWS_PROFILE_POLICY': None},

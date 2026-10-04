@@ -376,6 +376,25 @@ fn persist_written_configuration(
     if matches!(
         document,
         Some(qualification_prelaunch::ConfigurationDocument::NormalConfig)
+    ) && std_rename_policy_requested()?
+    {
+        let result = rename_written_configuration_once(
+            temporary,
+            path,
+            qualification_persist_owners::configuration_retry_deadline(),
+        )
+        .inspect_err(|error| {
+            if error.error.raw_os_error() == Some(32) {
+                qualification_persist_owners::observe_retained_path(&error.path, path);
+            }
+        })
+        .map_err(|error| ClaudeDesktopError::Write(error.error));
+        return qualification_prelaunch::observe_configuration_persist(result, document);
+    }
+    #[cfg(all(windows, feature = "desktop-qualification"))]
+    if matches!(
+        document,
+        Some(qualification_prelaunch::ConfigurationDocument::NormalConfig)
     ) && qualification_prelaunch::enabled()
     {
         // Trial-only variation: close the fully written and synced file handle,
@@ -485,6 +504,112 @@ fn persist_windows_configuration(
             }
         }
     }
+}
+
+#[cfg(all(windows, feature = "desktop-qualification"))]
+fn std_rename_policy_requested() -> Result<bool, ClaudeDesktopError> {
+    let policy = std::env::var("NANH_CLAUDE_WINDOWS_PERSIST_POLICY")
+        .map(Some)
+        .or_else(|error| match error {
+            std::env::VarError::NotPresent => Ok(None),
+            std::env::VarError::NotUnicode(_) => Err(ClaudeDesktopError::InvalidStatePath),
+        })?;
+    let scope = qualification_prelaunch::enabled()
+        && std::env::var("NANH_CLAUDE_WINDOWS_CHAT_ONLY").as_deref() == Ok("1")
+        && std::env::var("NANH_CLAUDE_WINDOWS_SOURCE_POLICY").as_deref()
+            == Ok("official-2.19675.0-97910a066871");
+    std_rename_requested(policy.as_deref(), scope)
+}
+
+#[cfg(all(windows, any(feature = "desktop-qualification", test)))]
+fn std_rename_requested(
+    value: Option<&str>,
+    owned_scope: bool,
+) -> Result<bool, ClaudeDesktopError> {
+    match value {
+        None => Ok(false),
+        Some("std-rename") if owned_scope => Ok(true),
+        _ => Err(ClaudeDesktopError::InvalidStatePath),
+    }
+}
+
+#[cfg(all(windows, any(feature = "desktop-qualification", test)))]
+fn retained_rename_source(path: &Path, share: u32) -> std::io::Result<same_file::Handle> {
+    use std::os::windows::fs::OpenOptionsExt as _;
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .access_mode(0x8002_0000)
+        .share_mode(share)
+        .custom_flags(0x0020_0000)
+        .open(path)?;
+    nan_harness_private_fs::verify_private_file(&file)?;
+    same_file::Handle::from_file(file)
+}
+
+#[cfg(all(windows, any(feature = "desktop-qualification", test)))]
+fn rename_written_configuration_once(
+    temporary: tempfile::NamedTempFile,
+    path: &Path,
+    deadline: std::time::Instant,
+) -> Result<(), tempfile::PathPersistError> {
+    use std::os::windows::fs::MetadataExt as _;
+    use std::time::Instant;
+    let (written, mut temporary) = temporary.into_parts();
+    let result = (|| {
+        let fail = |kind| std::io::Error::from(kind);
+        if Instant::now() >= deadline {
+            return Err(fail(ErrorKind::TimedOut));
+        }
+        let original = same_file::Handle::from_file(written)?;
+        let metadata = original.as_file().metadata()?;
+        if !metadata.is_file() || metadata.file_attributes() & (0x1 | 0x100 | 0x400) != 0 {
+            return Err(fail(ErrorKind::InvalidInput));
+        }
+        nan_harness_private_fs::verify_private_file(original.as_file())?;
+        // This initial reader shares WRITE while the actual written handle exists.
+        // It retains its proven file identity across closing that written handle.
+        let bridge = retained_rename_source(&temporary, 7)?;
+        if bridge != original {
+            return Err(fail(ErrorKind::InvalidInput));
+        }
+        drop(original);
+        // The final read authority allows DELETE/rename, but denies content writes.
+        let held = retained_rename_source(&temporary, 5)?;
+        if held != bridge {
+            return Err(fail(ErrorKind::InvalidInput));
+        }
+        drop(bridge);
+        match fs::symlink_metadata(path) {
+            Err(error) if error.kind() == ErrorKind::NotFound => (),
+            Err(error) => return Err(error),
+            Ok(_) => return Err(fail(ErrorKind::AlreadyExists)),
+        }
+        if Instant::now() >= deadline {
+            return Err(fail(ErrorKind::TimedOut));
+        }
+        // One safe Rust dispatch, no retry/fallback added by this caller. The std
+        // Windows implementation itself may use its ACCESS_DENIED fallback.
+        fs::rename(&temporary, path)?;
+        let destination = retained_rename_source(path, 5)?;
+        if destination != held {
+            return Err(fail(ErrorKind::InvalidInput));
+        }
+        let after = destination.as_file().metadata()?;
+        if !after.is_file() || after.file_attributes() & (0x1 | 0x100 | 0x400) != 0 {
+            return Err(fail(ErrorKind::InvalidInput));
+        }
+        if Instant::now() >= deadline {
+            return Err(fail(ErrorKind::TimedOut));
+        }
+        // keep() would call SetFileAttributes again on Windows. Disarm only after
+        // exact source-object and read-only private-DACL postconditions succeed.
+        temporary.disable_cleanup(true);
+        Ok(())
+    })();
+    result.map_err(|error| tempfile::PathPersistError {
+        error,
+        path: temporary,
+    })
 }
 
 #[cfg(all(windows, test))]
@@ -732,6 +857,117 @@ mod configuration_persist_tests {
             1
         );
         drop(directories);
+    }
+
+    #[test]
+    fn std_rename_trial_preserves_original_private_object_and_failed_destination() {
+        use std::time::{Duration, Instant};
+        let directory = tempfile::tempdir().unwrap();
+        let source = TempFileBuilder::new()
+            .prefix(".nan-")
+            .make_in(directory.path(), open_private_new)
+            .unwrap();
+        let mut source = source;
+        source.write_all(b"synthetic-private").unwrap();
+        source.flush().unwrap();
+        source.as_file().sync_all().unwrap();
+        let original = same_file::Handle::from_file(source.as_file().try_clone().unwrap()).unwrap();
+        let destination = directory.path().join("configuration.json");
+        // The test's original handle must close its WRITE access just like the writer.
+        let expected = retained_rename_source(source.path(), 7).unwrap();
+        assert!(expected == original);
+        drop(original);
+        rename_written_configuration_once(
+            source,
+            &destination,
+            Instant::now() + Duration::from_secs(2),
+        )
+        .unwrap();
+        let actual = retained_rename_source(&destination, 5).unwrap();
+        assert!(actual == expected);
+        nan_harness_private_fs::verify_private_file(actual.as_file()).unwrap();
+        assert_eq!(fs::read(&destination).unwrap(), b"synthetic-private");
+        drop(actual);
+        drop(expected);
+        let mut second = TempFileBuilder::new()
+            .prefix(".nan-")
+            .make_in(directory.path(), open_private_new)
+            .unwrap();
+        second.write_all(b"new-payload").unwrap();
+        second.flush().unwrap();
+        second.as_file().sync_all().unwrap();
+        let historical = second.path().to_owned();
+        let error = rename_written_configuration_once(
+            second,
+            &destination,
+            Instant::now() + Duration::from_secs(2),
+        )
+        .unwrap_err();
+        assert_eq!(error.error.kind(), ErrorKind::AlreadyExists);
+        assert_eq!(fs::read(&destination).unwrap(), b"synthetic-private");
+        assert_eq!(fs::read(&historical).unwrap(), b"new-payload");
+        drop(error);
+        assert!(!historical.exists());
+    }
+    #[test]
+    fn std_rename_trial_failed_dispatch_retains_exact_source_without_fallback() {
+        use std::time::{Duration, Instant};
+        let directory = tempfile::tempdir().unwrap();
+        let mut source = TempFileBuilder::new()
+            .prefix(".nan-")
+            .make_in(directory.path(), open_private_new)
+            .unwrap();
+        source.write_all(b"retained-private").unwrap();
+        source.flush().unwrap();
+        source.as_file().sync_all().unwrap();
+        let historical = source.path().to_owned();
+        // Permit the existing writer, but forbid DELETE on this exact source.
+        let blocker = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(3)
+            .open(&historical)
+            .unwrap();
+        let expected = same_file::Handle::from_file(blocker.try_clone().unwrap()).unwrap();
+        let destination = directory.path().join("absent.json");
+        let error = rename_written_configuration_once(
+            source,
+            &destination,
+            Instant::now() + Duration::from_secs(2),
+        )
+        .unwrap_err();
+        assert_eq!(error.error.raw_os_error(), Some(32));
+        assert!(!destination.exists());
+        let retained = retained_rename_source(&historical, 5).unwrap();
+        assert!(retained == expected);
+        assert_eq!(fs::read(&historical).unwrap(), b"retained-private");
+        nan_harness_private_fs::verify_private_file(retained.as_file()).unwrap();
+        drop(retained);
+        drop(expected);
+        drop(blocker);
+        drop(error);
+        assert!(!historical.exists());
+    }
+
+    #[test]
+    fn std_rename_trial_rejects_unscoped_flags_and_expired_dispatch() {
+        use std::time::Instant;
+        assert!(!std_rename_requested(None, false).unwrap());
+        assert!(std_rename_requested(Some("std-rename"), true).unwrap());
+        assert!(std_rename_requested(Some("std-rename"), false).is_err());
+        assert!(std_rename_requested(Some("other"), true).is_err());
+        let directory = tempfile::tempdir().unwrap();
+        let source = TempFileBuilder::new()
+            .make_in(directory.path(), open_private_new)
+            .unwrap();
+        let historical = source.path().to_owned();
+        let destination = directory.path().join("new.json");
+        let error =
+            rename_written_configuration_once(source, &destination, Instant::now()).unwrap_err();
+        assert_eq!(error.error.kind(), ErrorKind::TimedOut);
+        assert!(!destination.exists());
+        assert!(historical.exists());
+        drop(error);
+        assert!(!historical.exists());
     }
 
     #[test]

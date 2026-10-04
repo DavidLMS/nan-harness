@@ -352,6 +352,7 @@ jobs:
           echo 'NANH_CLAUDE_PERSIST_OWNERS=1' >> "$GITHUB_ENV"
           if [ '${{ inputs.experiment }}' = 'deterministic-full' ]; then
             echo 'NANH_CLAUDE_WINDOWS_FRESH_PROFILE=1' >> "$GITHUB_ENV"
+            echo 'NANH_CLAUDE_WINDOWS_PERSIST_POLICY=std-rename' >> "$GITHUB_ENV"
             echo 'NANH_CLAUDE_WINDOWS_NATIVE_CHAT=1' >> "$GITHUB_ENV"
           fi
       - name: Run full deterministic semantic qualification

@@ -18,7 +18,7 @@ path = "src/bin/nanh.rs"
 
 [features]
 # Disposable hosted desktop qualification only; omitted from released builds.
-desktop-qualification = ["nan-harness-runtime/desktop-qualification"]
+desktop-qualification = ["nan-harness-runtime/desktop-qualification", "dep:same-file"]
 
 [dependencies]
 base64.workspace = true
@@ -57,6 +57,12 @@ tokio = { workspace = true, features = ["test-util"] }
 
 [target.'cfg(unix)'.dependencies]
 nix = { workspace = true, features = ["fs", "term"] }
+
+[target.'cfg(windows)'.dependencies]
+same-file = { version = "1.0.6", optional = true }
+
+[target.'cfg(windows)'.dev-dependencies]
+same-file = "1.0.6"
 
 [lints]
 workspace = true

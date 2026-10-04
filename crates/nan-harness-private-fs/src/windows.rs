@@ -268,7 +268,7 @@ fn verify_descriptor(descriptor: &SecurityDescriptor, kind: PrivatePathKind) -> 
     verify_required_principals(saw_user, saw_system)
 }
 
-fn verify_handle<H: AsRawHandle>(handle: &H, kind: PrivatePathKind) -> io::Result<()> {
+pub(super) fn verify_handle<H: AsRawHandle>(handle: &H, kind: PrivatePathKind) -> io::Result<()> {
     let descriptor = wrappers::GetSecurityInfo(
         handle,
         SeObjectType::SE_FILE_OBJECT,

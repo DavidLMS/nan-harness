@@ -139,6 +139,11 @@ def qualification_environment(app, facts, real_nanh, executable, inherited=None)
         raise ValueError('Claude persist owner diagnostic is unavailable')
     if source.get('NANH_CLAUDE_WINDOWS_CHAT_ONLY') is not None and app != 'claude-desktop':
         raise ValueError('Claude Windows Chat-only trial is unavailable')
+    persist_policy = source.get('NANH_CLAUDE_WINDOWS_PERSIST_POLICY')
+    if persist_policy is not None and (app != 'claude-desktop' or source.get('RUNNER_OS') != 'Windows'
+            or persist_policy != 'std-rename' or source.get('NANH_CLAUDE_WINDOWS_FRESH_PROFILE') != '1'
+            or source.get('NANH_CLAUDE_WINDOWS_CHAT_ONLY') != '1'):
+        raise ValueError('Claude Windows persistence trial is unavailable')
     for key in ('NANH_CLAUDE_WINDOWS_FRESH_PROFILE', 'NANH_CLAUDE_WINDOWS_NATIVE_CHAT'):
         if source.get(key) is not None and app != 'claude-desktop':
             raise ValueError('Claude Windows native trial is unavailable')
@@ -320,6 +325,8 @@ def qualification_environment(app, facts, real_nanh, executable, inherited=None)
                     or mode != 'startup-baseline' or windows_profile != 'private-env'):
                 raise ValueError('Claude Windows Chat-only trial is unavailable')
             environment['NANH_CLAUDE_WINDOWS_CHAT_ONLY'] = windows_chat
+            if persist_policy is not None:
+                environment['NANH_CLAUDE_WINDOWS_PERSIST_POLICY'] = persist_policy
         persist_owners = source.get('NANH_CLAUDE_PERSIST_OWNERS')
         if persist_owners is not None:
             if (persist_owners != '1' or app != 'claude-desktop' or source.get('RUNNER_OS') != 'Windows'

@@ -183,6 +183,15 @@ pub fn open_private_read(path: &Path) -> io::Result<(File, PrivateFileReadStatus
     }
 }
 
+/// Verify the private Windows file DACL on an already retained handle without repair.
+///
+/// # Errors
+/// Returns the existing private-DACL inspection or verification error.
+#[cfg(windows)]
+pub fn verify_private_file(file: &File) -> io::Result<()> {
+    windows::verify_handle(file, PrivatePathKind::File)
+}
+
 fn finish_private_read(
     mut file: File,
     already_private: bool,
