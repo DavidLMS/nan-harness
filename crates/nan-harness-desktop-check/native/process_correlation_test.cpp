@@ -4,6 +4,7 @@
 #endif
 #include <cassert>
 #include <map>
+#include <string>
 static void retained_identity_contract() {
     using State = RetainedProcessState;
     using Identity = RetainedTargetIdentity;
@@ -35,8 +36,30 @@ static void retained_identity_contract() {
     }
     assert(terminations == 0);
 }
+static void retained_image_contract() {
+    const RetainedImageIdentity expected{1,2,3,4,5,6,7};
+    assert(retained_image_mismatch(true, expected, expected) == nullptr);
+    assert(std::string(retained_image_mismatch(false, expected, expected)) == "target-image-path");
+    struct Field { std::uint32_t RetainedImageIdentity::*member; const char* reason; };
+    for (const auto field : {Field{&RetainedImageIdentity::volume,"target-image-volume"},
+        Field{&RetainedImageIdentity::index_high,"target-image-file-id"},
+        Field{&RetainedImageIdentity::index_low,"target-image-file-id"},
+        Field{&RetainedImageIdentity::size_high,"target-image-size"},
+        Field{&RetainedImageIdentity::size_low,"target-image-size"},
+        Field{&RetainedImageIdentity::write_high,"target-image-write-time"},
+        Field{&RetainedImageIdentity::write_low,"target-image-write-time"}}) {
+        auto changed = expected; ++(changed.*field.member);
+        assert(std::string(retained_image_mismatch(true, expected, changed)) == field.reason);
+        unsigned terminations = 0;
+        assert(!terminate_verified_handle({true,true,true,
+            retained_image_mismatch(true,expected,changed)==nullptr},
+            [&] { ++terminations; return true; }));
+        assert(terminations == 0);
+    }
+}
 int main() {
     retained_identity_contract();
+    retained_image_contract();
     std::vector<CorrelationEntry> rows{{1,0,false},{2,1,false},{3,2,true}};
     std::map<std::uint32_t,std::uint64_t> times{{1,10},{2,20},{3,30}};
     auto query = [&](std::uint32_t pid, std::uint64_t& time) {

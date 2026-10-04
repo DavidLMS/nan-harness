@@ -156,9 +156,9 @@ fn retain(path: &Path) -> Result<File, Reason> {
 }
 fn retain_native(path: &Path) -> Result<File, &'static str> {
     let file = std::fs::OpenOptions::new().read(true).access_mode(0x8002_0000)
-        // Deny directory writes and DELETE sharing: the original path binding
-        // and reparse metadata cannot be replaced while the renderer borrows it.
-        .share_mode(1).custom_flags(0x0200_0000 | 0x0020_0000).open(path)
+        // Child configuration files must support atomic replacement. Deny DELETE
+        // sharing on the directory itself; recheck reparse metadata on every borrow.
+        .share_mode(3).custom_flags(0x0200_0000 | 0x0020_0000).open(path)
         .map_err(|error| match error.raw_os_error() {
             Some(2 | 3) => "directory-missing",
             Some(5) => "directory-access",
@@ -395,10 +395,16 @@ mod tests {
                 .share_mode(7)
                 .custom_flags(0x0200_0000)
                 .open(&root)
-                .is_err()
+                .is_ok()
         );
-        // Creating ordinary child files does not require mutable directory handles.
-        std::fs::write(root.join("synthetic-child"), b"neutral").unwrap();
+        let pending = root.join("synthetic-child.tmp");
+        let config = root.join("synthetic-child");
+        std::fs::write(&config, b"previous").unwrap();
+        std::fs::write(&pending, b"neutral").unwrap();
+        std::fs::rename(&pending, &config).unwrap();
+        assert_eq!(std::fs::read(&config).unwrap(), b"neutral");
+        assert!(ordinary(&held));
+        assert!(std::fs::rename(&root, temp.path().join("replacement")).is_err());
         let command = tokio::process::Command::new("synthetic-never-spawned");
         let profile = FreshCodexWindowsProfile {
             directories: vec![held],

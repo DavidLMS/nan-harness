@@ -77,9 +77,11 @@ function createHeldMainGuard(held, browser, owner, deadline, route,
       return measure();
     }
     const changed=failureDetails;
-    if(!(allowInitialAppearance&&!actionsStarted||folderSettleTicket||activationSettleTicket)||appearanceRetried||auxiliary||failure!=='page-set'
+    if(!(requireVisibleDocument||allowInitialAppearance&&!actionsStarted||folderSettleTicket||activationSettleTicket)||appearanceRetried||auxiliary||failure!=='page-set'
       ||!changed||changed.initialCount!==1||changed.currentCount!==2||!changed.heldPresent
       ||!['before-sample-changed','after-sample-changed'].includes(changed.reason))return false;
+    // Scoped CDP input retains its original target when the inert avatar appears
+    // after an earlier onboarding action. No OS key/input target is selected.
     // Discard the incomplete observation. A single fresh measurement must prove
     // both immutable main and newly appearing source auxiliary twice before subsequent input.
     appearanceRetried=true;folderSettleTicket=false;

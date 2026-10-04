@@ -5,6 +5,11 @@
 #include <cstddef>
 
 enum class UiaChatRole { Other, Heading, Button, Text, Group, Boundary };
+// Containers retain topology, not duplicated aggregate names. Source action,
+// heading and error text labels remain available to the exact turn scope.
+inline bool uia_chat_retains_label(UiaChatRole role) {
+    return role != UiaChatRole::Group && role != UiaChatRole::Boundary;
+}
 struct UiaChatScopeNode { UiaChatRole role{}; std::wstring label; int parent=-1; };
 struct UiaChatScope { int control=-1,anchor=-1,ancestor=-1,user_heading=-1,retry=-1; const char* failure="scope"; };
 inline bool uia_chat_descendant(const std::vector<UiaChatScopeNode>& nodes,std::size_t child,int ancestor) {

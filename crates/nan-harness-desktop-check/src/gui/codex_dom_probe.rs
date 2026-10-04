@@ -49,6 +49,37 @@ enum PreAttachFailure {
     BindingSchema,
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum ComposerAdmissionFailure {
+    ScopeNotReady,
+    NonuniqueEditor,
+    MissingEditor,
+    UnsupportedControl,
+    DetachedOrInert,
+    Disabled,
+    Hidden,
+    ForeignOverlay,
+    PointerDisabled,
+    AncestorLimit,
+    HitUnavailable,
+    SampleChanged,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ComposerReadinessObservation {
+    overflow: Evidence,
+    home_composer_count: Option<u8>,
+    pending_textarea_count: Option<u8>,
+    prose_mirror_editable_count: Option<u8>,
+    workspace_control_count: Option<u8>,
+    editable_count: Option<u8>,
+    codex_thread_count: Option<u8>,
+    #[serde(rename = "classicChatGPTCount")]
+    classic_chat_gpt_count: Option<u8>,
+}
+
 /// Closed evidence flags keep the wire format boolean without treating missing
 /// evidence as a successful state.
 #[derive(Clone, Copy, Default, Deserialize, Serialize)]
@@ -106,6 +137,10 @@ struct Facts {
     error_category: Option<DriverError>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pre_attach_failure: Option<PreAttachFailure>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    composer_admission_failure: Option<ComposerAdmissionFailure>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    composer_readiness_observation: Option<ComposerReadinessObservation>,
     #[serde(default)]
     provider_response_verified: Evidence,
     #[serde(default)]
@@ -126,6 +161,8 @@ impl Facts {
             && self.assistant_turn_count <= 4096
             && self.error_category.is_none()
             && self.pre_attach_failure.is_none()
+            && self.composer_admission_failure.is_none()
+            && self.composer_readiness_observation.is_none()
     }
 
     fn ui_verified(&self, turn: DomTurn<'_>) -> bool {
@@ -501,6 +538,23 @@ mod tests {
                 failure
             );
         }
+        let mut receipt = value.clone();
+        receipt["errorCategory"] = "composer-unavailable".into();
+        receipt["composerAdmissionFailure"] = "scope-not-ready".into();
+        receipt["composerReadinessObservation"] = serde_json::json!({
+            "overflow":false,"homeComposerCount":0,"pendingTextareaCount":0,
+            "proseMirrorEditableCount":0,"workspaceControlCount":0,"editableCount":1,
+            "codexThreadCount":0,"classicChatGPTCount":1
+        });
+        let decoded: Facts = serde_json::from_value(receipt.clone()).unwrap();
+        assert!(!decoded.ui_verified(response));
+        let encoded = serde_json::to_value(decoded).unwrap();
+        assert_eq!(
+            encoded["composerReadinessObservation"],
+            receipt["composerReadinessObservation"]
+        );
+        receipt["composerReadinessObservation"]["rawText"] = "private".into();
+        assert!(serde_json::from_value::<Facts>(receipt).is_err());
         let mut unknown = value.clone();
         unknown["preAttachFailure"] = "private path".into();
         assert!(serde_json::from_value::<Facts>(unknown).is_err());

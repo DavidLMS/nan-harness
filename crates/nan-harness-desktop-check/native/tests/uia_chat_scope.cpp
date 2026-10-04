@@ -1,6 +1,30 @@
 #include "../uia_chat_scope.hpp"
 #include <cassert>
+static void container_projection_contract() {
+    using R = UiaChatRole;
+    assert(!uia_chat_retains_label(R::Group));
+    assert(!uia_chat_retains_label(R::Boundary));
+    for (auto role : {R::Other,R::Text,R::Heading,R::Button}) assert(uia_chat_retains_label(role));
+    std::vector<UiaChatScopeNode> nodes;
+    std::size_t units = 0;
+    auto append = [&](R role, const std::wstring& label, int parent) {
+        const auto retained = uia_chat_retains_label(role) ? label : L"";
+        units += retained.size(); nodes.push_back({role,retained,parent});
+    };
+    // Repeated container accessible names are private metadata, not independent
+    // response text. Keeping topology prevents a name budget or false anchor.
+    const std::wstring aggregate = L"Claude responded: marker" + std::wstring(32768,L'x');
+    append(R::Boundary,aggregate,-1);append(R::Group,aggregate,0);append(R::Group,aggregate,1);
+    append(R::Heading,L"Claude responded: marker",2);append(R::Button,L"Copy",2);
+    assert(units < 65536);
+    assert(nodes.size() == 5 && nodes[2].parent == 1);
+    assert(uia_chat_scope(nodes,L"owned-prompt",L"marker",false).control == 4);
+    nodes[3] = {R::Other,L"NAN_CHECK_EXPECTED_FAILURE",2};nodes[4].label=L"Retry";
+    append(R::Text,L"owned-prompt",2);
+    assert(uia_chat_scope(nodes,L"owned-prompt",L"NAN_CHECK_EXPECTED_FAILURE",true).control == 4);
+}
 int main() {
+    container_projection_contract();
     using R=UiaChatRole;
     std::vector<UiaChatScopeNode> nodes={{R::Other,L"",-1},{R::Other,L"",0},
         {R::Other,L"private prompt",1},{R::Button,L"Copy",1},

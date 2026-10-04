@@ -1097,23 +1097,32 @@ static bool held_creation(HANDLE process, std::uint64_t& time) {
     time = (static_cast<std::uint64_t>(created.dwHighDateTime) << 32) | created.dwLowDateTime;
     return time != 0;
 }
-static bool held_image(HANDLE process, const BY_HANDLE_FILE_INFORMATION& expected,
+static const char* held_image_failure(HANDLE process, const BY_HANDLE_FILE_INFORMATION& expected,
     const std::wstring& expected_path) {
     wchar_t path[32768] = {}; DWORD size = 32768;
-    if (!QueryFullProcessImageNameW(process, 0, path, &size) || size == 0 || size >= 32768) return false;
+    if (!QueryFullProcessImageNameW(process, 0, path, &size) || size == 0 || size >= 32768)
+        return "target-image-query";
     CleanupHandle file(CreateFileW(path, FILE_READ_ATTRIBUTES, FILE_SHARE_READ,
         nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr));
-    if (file.value == INVALID_HANDLE_VALUE) return false;
+    if (file.value == INVALID_HANDLE_VALUE) {
+        const auto error = GetLastError();
+        return error == ERROR_SHARING_VIOLATION ? "target-image-sharing"
+            : error == ERROR_ACCESS_DENIED ? "target-image-access" : "target-image-open";
+    }
     BY_HANDLE_FILE_INFORMATION actual{};
     wchar_t canonical[32768] = {};
     const DWORD length = GetFinalPathNameByHandleW(file.value, canonical, 32768, FILE_NAME_NORMALIZED);
-    return length > 0 && length < 32768 && _wcsicmp(canonical, expected_path.c_str()) == 0
-        && GetFileInformationByHandle(file.value, &actual)
-        && actual.dwVolumeSerialNumber == expected.dwVolumeSerialNumber
-        && actual.nFileIndexHigh == expected.nFileIndexHigh && actual.nFileIndexLow == expected.nFileIndexLow
-        && actual.nFileSizeHigh == expected.nFileSizeHigh && actual.nFileSizeLow == expected.nFileSizeLow
-        && actual.ftLastWriteTime.dwHighDateTime == expected.ftLastWriteTime.dwHighDateTime
-        && actual.ftLastWriteTime.dwLowDateTime == expected.ftLastWriteTime.dwLowDateTime;
+    if (length == 0 || length >= 32768) return "target-image-canonical";
+    if (!GetFileInformationByHandle(file.value, &actual)) return "target-image-metadata";
+    const auto identity = [](const BY_HANDLE_FILE_INFORMATION& info) {
+        return RetainedImageIdentity{info.dwVolumeSerialNumber,info.nFileIndexHigh,info.nFileIndexLow,
+            info.nFileSizeHigh,info.nFileSizeLow,info.ftLastWriteTime.dwHighDateTime,info.ftLastWriteTime.dwLowDateTime};
+    };
+    return retained_image_mismatch(_wcsicmp(canonical, expected_path.c_str()) == 0, identity(expected), identity(actual));
+}
+static bool held_image(HANDLE process, const BY_HANDLE_FILE_INFORMATION& expected,
+    const std::wstring& expected_path) {
+    return held_image_failure(process, expected, expected_path) == nullptr;
 }
 static bool pinned_digest(HANDLE file, const std::string& expected) {
     if (expected.size() != 64 || expected.find_first_not_of("0123456789abcdef") != std::string::npos) return false;
@@ -1217,16 +1226,17 @@ int owned_cleanup_holder() {
         if (!handle) return unavailable();
         targets.emplace_back(handle, created);
         std::uint64_t held_time = 0;
+        const char* image_failure = nullptr;
         const auto identity = retained_target_identity(
             held_creation(handle, held_time) && held_time == created,
             [&] {
                 const DWORD state = WaitForSingleObject(handle, 0);
                 return state == WAIT_OBJECT_0 ? RetainedProcessState::Exited
                     : state == WAIT_TIMEOUT ? RetainedProcessState::Live : RetainedProcessState::Unavailable;
-            }, [&] { return held_image(handle, expected, expected_path); });
+            }, [&] { image_failure = held_image_failure(handle, expected, expected_path); return image_failure == nullptr; });
         if (identity == RetainedTargetIdentity::CreationRejected) { stage = "target-creation"; return unavailable(); }
         if (identity == RetainedTargetIdentity::StateRejected) { stage = "target-state"; return unavailable(); }
-        if (identity == RetainedTargetIdentity::ImageRejected) { stage = "target-image"; return unavailable(); }
+        if (identity == RetainedTargetIdentity::ImageRejected) { stage = image_failure ? image_failure : "target-image"; return unavailable(); }
         targets.back().image_verified = identity == RetainedTargetIdentity::Live;
     }
     std::cout << "progress targets\n" << std::flush;

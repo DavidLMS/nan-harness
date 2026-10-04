@@ -1931,6 +1931,14 @@ fn isolated_command(spec: &ProbeSpec, program: &Path) -> Result<Command, Reason>
             // Stateless mode keeps probe databases in memory and omits that
             // socket; process/window ownership guards still exclude other apps.
             command.env("ZED_STATELESS", "1");
+            if spec.session == crate::cli::SessionMode::GithubHosted
+                && spec.verification == crate::cli::VerificationPolicy::SemanticOnly
+            {
+                // The hosted Xvfb screen must use one physical pixel per GPUI
+                // logical pixel. Zed 1.22.0 otherwise derives this from Xft/RandR,
+                // independently of the accessibility coordinates used for Retry.
+                command.env("GPUI_X11_SCALE_FACTOR", "1");
+            }
         }
     }
     Ok(command)

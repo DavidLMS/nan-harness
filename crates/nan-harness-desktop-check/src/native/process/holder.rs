@@ -94,6 +94,17 @@ pub(crate) fn preflight(line: &str) -> Option<serde_json::Value> {
                 | "target-creation"
                 | "target-state"
                 | "target-image"
+                | "target-image-query"
+                | "target-image-sharing"
+                | "target-image-access"
+                | "target-image-open"
+                | "target-image-canonical"
+                | "target-image-metadata"
+                | "target-image-path"
+                | "target-image-volume"
+                | "target-image-file-id"
+                | "target-image-size"
+                | "target-image-write-time"
                 | "owner-recheck"
         )
     {
@@ -403,6 +414,17 @@ mod tests {
             "target-creation",
             "target-state",
             "target-image",
+            "target-image-query",
+            "target-image-sharing",
+            "target-image-access",
+            "target-image-open",
+            "target-image-canonical",
+            "target-image-metadata",
+            "target-image-path",
+            "target-image-volume",
+            "target-image-file-id",
+            "target-image-size",
+            "target-image-write-time",
             "owner-recheck",
         ] {
             let value = preflight(&format!("unavailable {stage}\n")).unwrap();

@@ -8,7 +8,7 @@ const COUNT_KEYS: [&str; 7] = [
     "assistantHeadingCount",
     "copyControlCount",
 ];
-const FAILURES: [&str; 29] = [
+const FAILURES: [&str; 35] = [
     "query",
     "deadline",
     "identity",
@@ -17,6 +17,12 @@ const FAILURES: [&str; 29] = [
     "visibility",
     "display",
     "limit",
+    "limit-depth",
+    "limit-nodes",
+    "limit-name",
+    "limit-text",
+    "limit-windows",
+    "limit-processes",
     "occlusion",
     "duplicate",
     "element-identity",

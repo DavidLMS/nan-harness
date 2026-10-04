@@ -300,7 +300,7 @@ struct Collection {
         unsigned count=0;
         for (HWND above=GetWindow(request.window,GW_HWNDPREV);above;above=GetWindow(above,GW_HWNDPREV)) {
             if (!within()) {stage="deadline";return false;}
-            if (++count>1024) {stage="limit";return false;}
+            if (++count>1024) {stage="limit-windows";return false;}
             if (!IsWindowVisible(above) || IsIconic(above)) continue;
             DWORD c=0,pid=0;RECT front{},intersection{};
             if (FAILED(DwmGetWindowAttribute(above,DWMWA_CLOAKED,&c,sizeof(c)))) {stage="query";return false;}
@@ -337,7 +337,7 @@ struct Collection {
                     && current == prior.identity.creation && guard() ? nullptr : unavailable;
             }
         }
-        if (retained_children.size() >= 64) {stage="limit";return "limit";}
+        if (retained_children.size() >= 64) {stage="limit-processes";return "limit-processes";}
         auto process = std::make_unique<ProcessHandle>(
             OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE, child));
         std::uint64_t child_creation = 0;
@@ -367,7 +367,8 @@ struct Collection {
     }
     bool append(IUIAutomationElement* element,unsigned depth, bool in_mode = false,int parent=-1) {
         if(!within()) {stage="deadline";return false;}
-        if(depth>32 || ++nodes>1024) {stage="limit";return false;}
+        if(depth>32) {stage="limit-depth";return false;}
+        if(++nodes>1024) {stage="limit-nodes";return false;}
         for(const auto& prior:held) {
             BOOL same=FALSE;
             if(FAILED(automation->CompareElements(prior.Get(),element,&same))) return false;
@@ -386,7 +387,7 @@ struct Collection {
         std::wstring text;
         if(name) {
             unsigned length=SysStringLen(name);
-            if(length>65536) {SecureZeroMemory(name,length*sizeof(wchar_t));SysFreeString(name);stage="limit";return false;}
+            if(length>65536) {SecureZeroMemory(name,length*sizeof(wchar_t));SysFreeString(name);stage="limit-name";return false;}
             text.assign(name,length);SecureZeroMemory(name,length*sizeof(wchar_t));SysFreeString(name);
         }
         struct Wipe {std::wstring& text;~Wipe(){if(!text.empty())SecureZeroMemory(text.data(),text.size()*sizeof(wchar_t));}} wipe{text};
@@ -417,15 +418,16 @@ struct Collection {
         }
         const int index=static_cast<int>(held.size());
         if(collect_chat) {
-            chat_text_units+=text.size();
-            if(chat_text_units>65536){stage="limit";return false;}
             const auto chat_role=is_heading?UiaChatRole::Heading
                 :type==UIA_ButtonControlTypeId?UiaChatRole::Button
                 :type==UIA_TextControlTypeId?UiaChatRole::Text
                 :type==UIA_GroupControlTypeId?UiaChatRole::Group
                 :(type==UIA_DocumentControlTypeId || type==UIA_WindowControlTypeId || type==UIA_PaneControlTypeId)?UiaChatRole::Boundary
                 :UiaChatRole::Other;
-            chat_nodes.push_back({chat_role,text,parent});
+            const bool retain_label=uia_chat_retains_label(chat_role);
+            chat_text_units+=retain_label?text.size():0;
+            if(chat_text_units>65536){stage="limit-text";return false;}
+            chat_nodes.push_back({chat_role,retain_label?text:L"",parent});
         }
         ComPtr<IUIAutomationElement> retained=element;held.push_back(retained);
         ComPtr<IUIAutomationElement> child;

@@ -36,28 +36,31 @@ exact pointer hit; cursor artwork is advisory. Claude Linux's candidate performs
 matching the failed turn; its empty-input witness still rejects unexplained drift.
 None of these candidate changes establishes a new native pass by itself.
 
-The second joint campaign, [37220987856](https://github.com/DavidLMS/nan-harness/actions/runs/37220987856),
-ran commit `e9bebe4cde8463a22cee312be3ba3d919531f8cb`. All six jobs completed;
-none completed acceptance. Five cells retained passing application/global
-cleanup. Claude Windows stopped after its first probe because cleanup failed.
+The latest joint campaign, [37222871713](https://github.com/DavidLMS/nan-harness/actions/runs/37222871713),
+ran commit `05d6db398cac5f6be5f310c87b8c4dec124404ad`. All six jobs completed;
+none completed acceptance. Codex and Claude Linux stopped at a preinstall lint
+failure, repaired in `71588ac8`; those jobs provide no new application evidence.
+Claude Windows stopped after its first probe because cleanup failed.
 
 | Cell | Latest observed boundary | Next required evidence |
 | --- | --- | --- |
-| Zed Linux | Response and tool pass; Retry pointer dispatched; recovered response absent | Provider request/response observation after Retry, including failed UI readback |
-| Codex Linux | First response verified in two sessions; next composer rejected | Reuse the thread composer for the tool and recovery turns |
-| Codex macOS | One session reaches the prepared home; preattach request rejected | Exact private-input rejection cause and stable onboarding transitions |
-| Codex Windows | Profile preparation rejects before launch; receipt suppressed | Admit the Codex renderer diagnostic route and identify the actual preparation boundary |
-| Claude Linux | First response copied; focused empty-editor witness changes | Verify the strict witness captured after focus and the implemented UI Retry |
-| Claude Windows | First input submitted and provider response verified; native tree and cleanup fail | Copy the response and verify cleanup of original live/exited descendants |
+| Zed Linux | Response/tool pass; Retry dispatched; provider generation count remains 5 before and after Retry in all sessions | A real recovery request and response with explicit GPUI X11 scale 1 |
+| Codex Linux | Latest campaign stops before installation; earlier first responses passed | Full native run after the preinstall lint correction |
+| Codex macOS | Attached DOM receipt rejects initial composer readiness before sampling the editor | Bounded readiness and stable original-target correlation across late inert avatar appearance |
+| Codex Windows | Profile preparation completes in all sessions; later launcher/endpoint correlation fails | Verify atomic child-file replacement under directory leases, then correlate the surviving application process |
+| Claude Linux | Latest campaign stops before installation; earlier first responses passed | Focus-sealed empty-input witness, subsequent turns, and ordinary accessible Retry |
+| Claude Windows | First provider response verified; tree limit and live-target image verification fail | Read the response without duplicated container labels and identify exact remaining tree/image failure |
 
-The next candidate preserves recovery provider facts on failed UI readback,
-repairs the Codex Windows observation route, and seals Claude Linux's empty
-input after its explicit focus transition. The candidate also implements Claude
-Linux Retry and accepts actionable Codex editors whose CSS overrides a parent
-pointer-event setting. The Windows cleanup candidate
-recognizes already-exited retained handles without authorizing termination.
-These corrections still require native verification; local fixtures do not
-establish a new cell pass.
+The grouped candidate permits atomic child-file replacement inside the retained
+Codex Windows profile while preserving the directory's DELETE-sharing denial.
+Claude Windows retains all tree nodes and identities, but omits unused aggregate
+container labels from chat text budgets. Closed subcauses distinguish depth,
+node, label and text limits, and process-image query/open/identity failures.
+Codex waits passively for its public composer within the original deadline;
+closed counts distinguish missing coding UI from editor actionability failure.
+Zed's hosted Linux semantic command sets the upstream-supported
+`GPUI_X11_SCALE_FACTOR=1`, removing Xft/RandR scale inference from the next trial.
+These are candidates, not proven causes or additional native passes.
 
 
 The hidden launch-wrapper option is restricted to deterministic ChatGPT startup

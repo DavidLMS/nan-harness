@@ -1165,6 +1165,7 @@ def semantic_observations(directory, app):
             fields = counts | {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'phase', 'status',
                                'nativeGuardVerified', 'treeComplete'}
             statuses = set('observed query deadline identity foreground bounds visibility display limit occlusion duplicate element-identity root-process-query root-process-mismatch root-process-zero root-process-invalid descendant-process-query descendant-process-mismatch descendant-process-zero descendant-process-invalid owned-descendant-process foreign-descendant-process descendant-correlation-unavailable heading-property com root-replaced transport protocol policy directory'.split())
+            statuses.update('limit-depth limit-nodes limit-name limit-text limit-windows limit-processes'.split())
             observed = value.get('status') == 'observed'
             if (app != 'claude-desktop' or set(value) - {'currentMode', 'chatCapability'} != fields or value['diagnosticsOnly'] is not True
                     or value['phase'] != 'post-ready' or type(value['status']) is not str or value['status'] not in statuses
@@ -1245,6 +1246,7 @@ def semantic_observations(directory, app):
             flags = {'retryAttempted', 'clipboardCleared'}
             fields = counts | flags | {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'stage'}
             stages = set('request window tree tree-query tree-duplicate tree-type tree-limit tree-pid tree-focus tree-window mode composer focus input-focus-guard input-focus-setting input-focused-identity input-replace-select-key input-prompt-before-guard input-prompt-clipboard input-prompt-after-guard input-paste-key input-readback-before-guard input-sentinel-clipboard input-sentinel-after-guard input-readback-select-key input-readback-select-guard input-readback-copy-key input-collapse-guard input-collapse-key input-mismatch input-initial-unavailable input-initial-nonempty input-clipboard-mismatch input-value-mismatch control scope scope-anchor-absent scope-heading-absent scope-assistant-heading-absent scope-marker-heading-absent scope-anchor-ambiguous scope-control-absent scope-control-ambiguous scope-heading-ambiguous scope-prompt-mismatch deadline action-uncertain response-mismatch sent copied retry-ready failure-details-ready failure-details-opened retried completed deadline-window deadline-tree deadline-focus deadline-input deadline-input-paste deadline-input-readback deadline-press deadline-copy deadline-retry-ready deadline-retry'.split())
+            stages.update('tree-depth tree-nodes tree-name-limit tree-text-limit tree-window-limit tree-process-limit'.split())
             phase_fields = {'actionPhase', 'transportFailure'}
             if (app != 'claude-desktop' or set(value) - {'providerObservation', 'guardRejection', 'rowShape', 'scopeShape', 'failureAuthority'} not in (fields, fields | phase_fields) or value['diagnosticsOnly'] is not True
                     or type(value['stage']) is not str or value['stage'] not in stages
@@ -1827,6 +1829,7 @@ def semantic_observations(directory, app):
         elif mechanism == 'windows-owned-cleanup-preflight':
             fields = set('schemaVersion mechanism diagnosticsOnly stage'.split())
             stages = set('request path file-open file-hash file-identity process-open snapshot inspector-parent ancestry target-open target-identity target-creation target-state target-image owner-recheck deadline transport'.split())
+            stages.update('target-image-' + part for part in 'query sharing access open canonical metadata path volume file-id size write-time'.split())
             if (set(value) != fields or app != 'claude-desktop' or value['diagnosticsOnly'] is not True
                     or type(value['stage']) is not str or value['stage'] not in stages):
                 raise ValueError('invalid Windows owned cleanup preflight')
@@ -2248,7 +2251,7 @@ def semantic_observations(directory, app):
             flags = set('endpointOwned targetVerified attached bindingVerified auxiliaryInert codingComposerReady uniqueComposer inputReadback inputSubmitted userTurnObserved responseVerified errorObserved retryControl retryAttempted retryCompleted providerResponseVerified'.split())
             fields = flags | set('schemaVersion mechanism diagnosticsOnly assistantTurnCount providerGenerationCount errorCategory'.split())
             errors = {None, 'ownership-lost', 'composer-unavailable', 'stale-turn', 'input-mismatch', 'action-uncertain', 'retry-unavailable', 'response-timeout', 'query-failed', 'invalid-request'}
-            if (app != 'chatgpt-desktop' or set(value) - {'preAttachFailure'} != fields or value['diagnosticsOnly'] is not True
+            if (app != 'chatgpt-desktop' or set(value) - {'preAttachFailure', 'composerAdmissionFailure', 'composerReadinessObservation'} != fields or value['diagnosticsOnly'] is not True
                     or any(type(value[key]) is not bool for key in flags)
                     or type(value['assistantTurnCount']) is not int or not 0 <= value['assistantTurnCount'] <= 4096
                     or value['providerGenerationCount'] is not None and (type(value['providerGenerationCount']) is not int or not 0 <= value['providerGenerationCount'] <= 4096)
@@ -2262,6 +2265,26 @@ def semantic_observations(directory, app):
                     raise ValueError('unexpected Codex preattach failure')
                 enum(record, value, 'preAttachFailure', {'request-json', 'request-policy',
                      'connection-read', 'binding-read', 'connection-schema', 'binding-schema'})
+            if 'composerAdmissionFailure' in value:
+                if value['errorCategory'] != 'composer-unavailable':
+                    raise ValueError('unexpected Codex composer admission failure')
+                enum(record, value, 'composerAdmissionFailure', {
+                    'scope-not-ready', 'nonunique-editor', 'missing-editor', 'unsupported-control',
+                    'detached-or-inert', 'disabled', 'hidden', 'foreign-overlay', 'pointer-disabled',
+                    'ancestor-limit', 'hit-unavailable', 'sample-changed'})
+            if 'composerReadinessObservation' in value:
+                if value['errorCategory'] != 'composer-unavailable' or 'composerAdmissionFailure' not in value:
+                    raise ValueError('unexpected Codex composer readiness observation')
+                observed = value['composerReadinessObservation']
+                counts = {'homeComposerCount', 'pendingTextareaCount', 'proseMirrorEditableCount',
+                          'workspaceControlCount', 'editableCount', 'codexThreadCount', 'classicChatGPTCount'}
+                if (type(observed) is not dict or set(observed) != counts | {'overflow'}
+                        or type(observed['overflow']) is not bool
+                        or any(observed[key] is not None and (type(observed[key]) is not int
+                               or not 0 <= observed[key] <= 32) for key in counts)
+                        or observed['overflow'] != any(observed[key] is None for key in counts)):
+                    raise ValueError('invalid Codex composer readiness counts')
+                record['composerReadinessObservation'] = observed
         elif mechanism == 'codex-linux-startup-dialog':
             hashes = dict(completeSourceSha256='16b6c59e36aa19da0c4ec1560b6cedec43fabffeca2601710cb6f25f22c593cc',
                           onboardingSourceSha256='b8dff84333a6cfb62341d43642087ba8d72dd31225ed2b3b8e29ad7da31372c6',

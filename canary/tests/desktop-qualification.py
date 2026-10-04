@@ -64,6 +64,20 @@ class CodexDriverFactsTests(unittest.TestCase):
                     path.write_text(json.dumps({**receipt, **change}))
                     with self.assertRaises(ValueError):
                         q.semantic_observations(tmp, 'chatgpt-desktop')
+            observed = dict(overflow=False, homeComposerCount=0, pendingTextareaCount=0,
+                            proseMirrorEditableCount=0, workspaceControlCount=0, editableCount=1,
+                            codexThreadCount=0, classicChatGPTCount=1)
+            receipt = {**value, 'composerAdmissionFailure': 'scope-not-ready',
+                       'composerReadinessObservation': observed}
+            path.write_text(json.dumps(receipt))
+            self.assertEqual(q.semantic_observations(tmp, 'chatgpt-desktop'), [receipt])
+            for change in ({'composerAdmissionFailure': 'PRIVATE'}, {'errorCategory': None},
+                           {'composerReadinessObservation': {**observed, 'rawText': 'PRIVATE'}},
+                           {'composerReadinessObservation': {**observed, 'editableCount': 33}},
+                           {'composerReadinessObservation': {**observed, 'editableCount': None}}):
+                path.write_text(json.dumps({**receipt, **change}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(tmp, 'chatgpt-desktop')
             path.write_text(json.dumps(value))
             with self.assertRaises(ValueError):
                 q.semantic_observations(tmp, 'claude-desktop')
@@ -2175,13 +2189,28 @@ class QualificationTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'zed-desktop')
 
+    def test_windows_tree_limits_remain_nonaccepting_and_closed(self):
+        value = dict(schemaVersion=1, mechanism='claude-windows-native-chat', diagnosticsOnly=True,
+                     stage='tree-depth', submittedTurns=1, inputVerifiedTurns=1, copiedResponses=0,
+                     retryAttempted=False, clipboardCleared=True)
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'tree.json'
+            for stage in 'tree-depth tree-nodes tree-name-limit tree-text-limit tree-window-limit tree-process-limit'.split():
+                path.write_text(json.dumps({**value, 'stage':stage}))
+                receipt = q.semantic_observations(root, 'claude-desktop')[0]
+                self.assertEqual(receipt['stage'], stage)
+                self.assertEqual(receipt['copiedResponses'], 0)
+            path.write_text(json.dumps({**value, 'rawName':'PRIVATE'}))
+            with self.assertRaises(ValueError):
+                q.semantic_observations(root, 'claude-desktop')
+
     def test_windows_cleanup_preflight_failure_is_closed_and_not_acceptance(self):
         value = dict(schemaVersion=1, mechanism='windows-owned-cleanup-preflight',
                      diagnosticsOnly=True, stage='deadline')
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             path = root / 'failure.json'
-            for stage in 'request path file-open file-hash file-identity process-open snapshot inspector-parent ancestry target-open target-identity target-creation target-state target-image owner-recheck deadline transport'.split():
+            for stage in 'request path file-open file-hash file-identity process-open snapshot inspector-parent ancestry target-open target-identity target-creation target-state target-image owner-recheck deadline transport target-image-query target-image-sharing target-image-access target-image-open target-image-canonical target-image-metadata target-image-path target-image-volume target-image-file-id target-image-size target-image-write-time'.split():
                 item = {**value, 'stage': stage}
                 path.write_text(json.dumps(item))
                 self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [item])

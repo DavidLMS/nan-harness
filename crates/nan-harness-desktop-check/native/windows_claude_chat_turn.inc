@@ -332,6 +332,12 @@ int windows_claude_chat_turn() {
         if(failure=="query" || failure=="root-process-query" || failure=="descendant-process-query")
             return emit("tree-query");
         if(failure=="limit")return emit("tree-limit");
+        if(failure=="limit-depth")return emit("tree-depth");
+        if(failure=="limit-nodes")return emit("tree-nodes");
+        if(failure=="limit-name")return emit("tree-name-limit");
+        if(failure=="limit-text")return emit("tree-text-limit");
+        if(failure=="limit-windows")return emit("tree-window-limit");
+        if(failure=="limit-processes")return emit("tree-process-limit");
         if(failure=="duplicate")return emit("tree-duplicate");
         if(failure=="heading-property")return emit("tree-type");
         if(failure=="deadline")return emit("deadline");

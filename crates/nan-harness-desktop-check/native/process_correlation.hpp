@@ -66,3 +66,19 @@ RetainedTargetIdentity retained_target_identity(bool creation_matches, State sta
     if (final != RetainedProcessState::Live) return RetainedTargetIdentity::StateRejected;
     return image_matches ? RetainedTargetIdentity::Live : RetainedTargetIdentity::ImageRejected;
 }
+
+struct RetainedImageIdentity {
+    std::uint32_t volume, index_high, index_low, size_high, size_low, write_high, write_low;
+};
+inline const char* retained_image_mismatch(bool canonical_matches,
+    const RetainedImageIdentity& expected, const RetainedImageIdentity& actual) {
+    if (!canonical_matches) return "target-image-path";
+    if (actual.volume != expected.volume) return "target-image-volume";
+    if (actual.index_high != expected.index_high || actual.index_low != expected.index_low)
+        return "target-image-file-id";
+    if (actual.size_high != expected.size_high || actual.size_low != expected.size_low)
+        return "target-image-size";
+    if (actual.write_high != expected.write_high || actual.write_low != expected.write_low)
+        return "target-image-write-time";
+    return nullptr;
+}

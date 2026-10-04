@@ -101,7 +101,15 @@ async function runTurn(page,guard,request,deadline=Date.now()+request.timeoutMs)
     codingComposerReady:false,uniqueComposer:false,inputReadback:false,inputSubmitted:false,
     userTurnObserved:false,assistantTurnCount:0,responseVerified:false,errorObserved:false,
     retryControl:false,retryAttempted:false,retryCompleted:false,errorCategory:null};
-  const stop=category=>{facts.errorCategory=category;return facts;};
+  let admissionFailure=null,readinessObservation=null;
+  const stop=category=>{
+    facts.errorCategory=category;
+    if(category==='composer-unavailable') {
+      if(admissionFailure)facts.composerAdmissionFailure=admissionFailure;
+      if(readinessObservation)facts.composerReadinessObservation=readinessObservation;
+    }
+    return facts;
+  };
   const owned=async()=>{
     if(Date.now()>=deadline||!await guard(deadline))return false;
     facts.endpointOwned=true;facts.targetVerified=true;facts.bindingVerified=true;facts.auxiliaryInert=true;
@@ -109,22 +117,38 @@ async function runTurn(page,guard,request,deadline=Date.now()+request.timeoutMs)
   };
   try {
     if(!await owned())return stop('ownership-lost');
-    const threadReady=await page.evaluate(codingScope);
-    const homeReady=!threadReady&&request.action!=='retry'&&await page.evaluate(homeComposerScope);
-    facts.codingComposerReady=threadReady||homeReady;
-    if(!await owned())return stop('ownership-lost');
+    let threadReady=false,homeReady=false;
+    while(Date.now()<deadline) {
+      threadReady=await page.evaluate(codingScope);
+      homeReady=!threadReady&&request.action!=='retry'&&await page.evaluate(homeComposerScope);
+      if(!await owned())return stop('ownership-lost');
+      facts.codingComposerReady=threadReady||homeReady;
+      if(facts.codingComposerReady)break;
+      admissionFailure='scope-not-ready';
+      const observed=await page.evaluate(codingScope,true);
+      if(!await owned())return stop('ownership-lost');
+      const publicDOM=observed?.publicDOM;
+      if(publicDOM)readinessObservation={overflow:publicDOM.home.status!=='observed'||publicDOM.editable.status!=='observed',
+        homeComposerCount:publicDOM.home.homeComposerCount,pendingTextareaCount:publicDOM.home.pendingTextareaCount,
+        proseMirrorEditableCount:publicDOM.home.proseMirrorEditableCount,workspaceControlCount:publicDOM.home.workspaceControlCount,
+        editableCount:publicDOM.editable.editableCount,codexThreadCount:publicDOM.editable.codexThreadCount,
+        classicChatGPTCount:publicDOM.editable.classicChatGPTCount};
+      await pause(Math.min(100,Math.max(0,deadline-Date.now())));
+      if(Date.now()<deadline&&!await owned())return stop('ownership-lost');
+    }
     if(!facts.codingComposerReady)return stop('composer-unavailable');
+    admissionFailure=null;
     if(request.action==='ready')return facts;
     const composerSelector=homeReady?'[data-codex-composer-root][data-composer-placement="home"]':'[data-thread-find-composer]';
     const editor=page.locator(composerSelector+' .ProseMirror[contenteditable="true"]:visible');
     facts.uniqueComposer=await editor.count()===1;
-    if(!facts.uniqueComposer)return stop('composer-unavailable');
+    if(!facts.uniqueComposer){admissionFailure='nonunique-editor';return stop('composer-unavailable');}
     if(request.action==='submit') {
       const stale=await page.evaluate(turnObservation,{prompt:request.prompt,marker:request.expectedMarker});
       if(stale.userCount!==0||stale.responseVerified)return stop('stale-turn');
       if(!await owned())return stop('ownership-lost');
       const heldEditor=await editor.elementHandle();
-      if(!heldEditor)return stop('composer-unavailable');
+      if(!heldEditor){admissionFailure='missing-editor';return stop('composer-unavailable');}
       try {
       const inputGuard=async filled=>await owned()&&await editor.count()===1
         &&await editor.evaluate((e,held)=>e===held,heldEditor)
@@ -132,9 +156,13 @@ async function runTurn(page,guard,request,deadline=Date.now()+request.timeoutMs)
         &&await heldEditor.evaluate((e,text)=>e.isConnected&&e.textContent===text,filled?request.prompt:'');
       if(!await inputGuard(false))return stop('input-mismatch');
       const firstInput=await heldEditor.evaluate(sampleEditor);
-      if(firstInput.blocked)return stop('composer-unavailable');
+      if(firstInput.blocked){admissionFailure=firstInput.blocked;return stop('composer-unavailable');}
+      if(firstInput.points.length===0){admissionFailure='hit-unavailable';return stop('composer-unavailable');}
       const secondInput=await heldEditor.evaluate(sampleEditor);
-      if(!candidate(firstInput,secondInput)||!await inputGuard(false))return stop('composer-unavailable');
+      if(secondInput.blocked){admissionFailure=secondInput.blocked;return stop('composer-unavailable');}
+      if(secondInput.points.length===0){admissionFailure='hit-unavailable';return stop('composer-unavailable');}
+      if(!candidate(firstInput,secondInput)){admissionFailure='sample-changed';return stop('composer-unavailable');}
+      if(!await inputGuard(false))return stop('ownership-lost');
       await editor.fill(request.prompt,{timeout:Math.max(1,Math.min(2000,deadline-Date.now()))});
       facts.inputReadback=await editor.evaluate((e,prompt)=>e.textContent===prompt,request.prompt);
       if(!facts.inputReadback)return stop('input-mismatch');

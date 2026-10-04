@@ -57,6 +57,20 @@ const bind=vm.runInNewContext(source.slice(start,end)+';bindCorrelationMain',{Da
   assert(await bind(held,browser,owner,Date.now()+1000,()=> 'avatarOverlay',identity,async()=>{},null,existing,false));
   assert(existing.binding().auxiliary);
  }
+ for(const scenario of ['scoped','legacy','foreign','controls']) {
+  const main={},aux={url:()=>scenario==='foreign'?'app://-/foreign':'app://-/avatar'},held={page:main,key:'main'};
+  let pages=[main],appear=false;
+  const browser={contexts:()=>[{pages:()=>pages}]};
+  const identity=async page=>{if(appear&&page===main){pages=[main,aux];appear=false;}return {key:page===main?'main':'aux',scope:{mainScope:page===main,visibleDocument:true,focused:true,
+   counts:{roleLegend:0,roleRadios:0,engineering:0,dialog:0,quickChatComposer:0,editable:page===aux&&scenario==='controls'?1:0}}};};
+  // An inert auxiliary must be unfocused even when the original document is focused.
+  const sampled=async page=>{const value=await identity(page);if(page===aux)value.scope.focused=false;return value;};
+  const guard=createHeldMainGuard(held,browser,()=>true,Date.now()+1000,url=>url==='app://-/avatar'?'avatarOverlay':'unknown',sampled,async()=>{},false,false,true,
+   {sameCorrelationIdentity:(a,b)=>a.key===b.key,now:Date.now,requireVisibleDocument:scenario!=='legacy'});
+  assert(await guard());guard.sealInitialActions();appear=true;
+  assert.equal(await guard(),['scoped'].includes(scenario),scenario);
+  if(scenario==='scoped')assert(guard.binding().auxiliary);
+ }
  const frame={url:'app://-/index.html',target:'main',frame:'frame',loader:'loader',frameUrl:'app://-/index.html',fragment:''};
  let visible=true;
  const main={evaluate:async(fn,arg)=>vm.runInNewContext(`(${fn})(${arg})`,{document:{visibilityState:visible?'visible':'hidden',hasFocus:()=>false}})};
