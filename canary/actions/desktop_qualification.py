@@ -84,6 +84,22 @@ def task_scope_observation(value):
     return value
 
 
+def zed_xi2_motion(value):
+    counts={'targetPointCount','ownedMotionCount','motionWithXYCount','retainedPointMatchedCount'}
+    flags={'noPressedButtons','eventRootTranslationMatched'}
+    if (type(value) is not dict or set(value)!=counts|flags|{'state','observerOnly','inputAuthorized'}
+            or value.get('observerOnly') is not True or value.get('inputAuthorized') is not False
+            or type(value.get('state')) is not str
+            or value['state'] not in {'complete','unavailable','query-failed','identity-rejected','deadline','limit'}
+            or any(type(value[k]) is not int for k in counts)
+            or not 1<=value['targetPointCount']<=9
+            or not 0<=value['motionWithXYCount']<=value['ownedMotionCount']<=128
+            or not 0<=value['retainedPointMatchedCount']<=min(value['targetPointCount'],value['motionWithXYCount'])
+            or any(type(value[k]) is not bool if value['ownedMotionCount'] else value[k] is not None for k in flags)):
+        raise ValueError('invalid advisory Zed XI2 payload observation')
+    return value
+
+
 def codex_prewarm_context(value):
     base={'verified','reason','inputAuthorized'}
     fixed={'sourcePinned','newHomeController','localContext','retainedProject','retainedRoot'}
@@ -1611,7 +1627,9 @@ def semantic_observations(directory, app):
                 elif total is not None or mapped is not None:
                     raise ValueError('incomplete Zed transient dialog counts')
                 record[field] = dict(dialogs)
-            if (set(value) - modifier_fields - ancestor_fields - ancestor_stage_fields - {'cursorSelection', 'transientDialogs','transientDialogsBeforeHover','entryCrossing'} not in (base, base | {'inputDelivery'}, base | coordinate_fields,
+            if 'xi2Motion' in value:
+                record['xi2Motion']=zed_xi2_motion(value['xi2Motion'])
+            if (set(value) - modifier_fields - ancestor_fields - ancestor_stage_fields - {'cursorSelection', 'transientDialogs','transientDialogsBeforeHover','entryCrossing','xi2Motion'} not in (base, base | {'inputDelivery'}, base | coordinate_fields,
                                   base | coordinate_fields | {'inputDelivery'}, base | coordinate_fields | authority_fields,
                                   base | coordinate_fields | authority_fields | {'inputDelivery'})
                     or present_modifiers and present_modifiers != modifier_fields

@@ -422,6 +422,7 @@ jobs:
         run: |
           echo 'NANH_ZED_CURSOR_HIT=1' >> "$GITHUB_ENV"
           echo 'NANH_ZED_XRECORD=1' >> "$GITHUB_ENV"
+          echo 'NANH_ZED_XI2_PAYLOAD=1' >> "$GITHUB_ENV"
           echo 'NANH_ZED_ENTER_POLICY=owned-decoration-crossing' >> "$GITHUB_ENV"
           echo 'NANH_ZED_PANEL_LAYOUT=fixed-wide' >> "$GITHUB_ENV"
           echo 'NANH_ZED_SCREEN_POLICY=height-1536' >> "$GITHUB_ENV"

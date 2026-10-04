@@ -1535,6 +1535,21 @@ class QualificationTests(unittest.TestCase):
                     with self.assertRaises(ValueError):
                         q.semantic_observations(root,'zed-desktop')
 
+    def test_xi2_payload_receipt_is_advisory_bounded_and_closed(self):
+        value=dict(state='complete',targetPointCount=9,ownedMotionCount=12,motionWithXYCount=10,
+            retainedPointMatchedCount=9,noPressedButtons=True,eventRootTranslationMatched=True,
+            observerOnly=True,inputAuthorized=False)
+        self.assertEqual(q.zed_xi2_motion(value),value)
+        for state in ['complete','unavailable','query-failed','identity-rejected','deadline','limit']:
+            empty={**value,'state':state,'ownedMotionCount':0,'motionWithXYCount':0,
+                'retainedPointMatchedCount':0,'noPressedButtons':None,'eventRootTranslationMatched':None}
+            self.assertEqual(q.zed_xi2_motion(empty),empty)
+        for change in [{'targetPointCount':10},{'ownedMotionCount':129},{'motionWithXYCount':13},
+                       {'retainedPointMatchedCount':10},{'noPressedButtons':None},{'observerOnly':False},
+                       {'inputAuthorized':True},{'state':'PRIVATE'},{'rootCoordinates':[1,2]},
+                       {'deviceId':42},{'flags':1},{'ownedMotionCount':True}]:
+            with self.assertRaises(ValueError):q.zed_xi2_motion({**value,**change})
+
     def test_pointer_observation_never_accepts_private_native_details(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

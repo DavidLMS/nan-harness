@@ -625,6 +625,7 @@ def select_with_ancestor_diagnostic(select, observe, compare, scope, facts, dead
 def retry_click(payload):
     facts = pointer_observation()
     observer = None
+    xi_motion = None
     try:
         request = json.loads(payload)
         if (type(request) is not dict or set(request) != {'pid', 'window', 'x', 'y', 'bus', 'path'}
@@ -720,6 +721,8 @@ def retry_click(payload):
             def prove_pointer(candidate):
                 if not cursor_scope():
                     raise RetryHitFailure('identity-rejected')
+                if xi_motion is not None:
+                    xi_motion.poll()
                 guarded_pointer_sample(candidate,
                     lambda: run(['getmouselocation', '--shell'], 'position'),
                     lambda: pointer_child(request['window'], active), facts['cursorSelection'])
@@ -733,6 +736,11 @@ def retry_click(payload):
                 facts['transientDialogsBeforeHover'] = dialog_module['capture'](
                     active, request['pid'], cursor_scope, deadline)
             live_cursor = module['PointerShape'](request['pid'], cursor_scope, deadline)
+            if (os.environ.get('NANH_ZED_XI2_PAYLOAD') == '1'
+                    and os.environ.get('NANH_ZED_XRECORD') == '1'):
+                motion_module = runpy.run_path(str(Path(__file__).with_name('zed-xi2-motion.py')))
+                xi_motion = motion_module['Observer'](active, request['pid'], second_geometry[3],
+                    second_geometry[0], interior_points(held_bounds), cursor_scope, deadline)
             if os.environ.get('NANH_ZED_XRECORD') == '1':
                 record_module = runpy.run_path(str(Path(__file__).with_name('zed-xrecord-supervisor.py')))
                 remaining = deadline-time.monotonic()
@@ -913,6 +921,9 @@ def retry_click(payload):
                 pass
         return locals().get("stage", 2)
     finally:
+        if xi_motion is not None:
+            facts['xi2Motion'] = xi_motion.result()
+            xi_motion.close()
         if observer is not None:
             facts['inputDelivery'] = observer.finish()
         live_cursor = locals().get('live_cursor')
