@@ -1575,6 +1575,23 @@ class QualificationTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'zed-desktop')
 
+    def test_claude_prelaunch_is_fixed_file_closed_and_diagnostic_only(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'claude-cli-prelaunch.json'
+            value = dict(schemaVersion=1, mechanism='claude-cli-prelaunch', diagnosticsOnly=True,
+                         phase='prelaunch', stage='configuration', status='failed')
+            path.write_text(json.dumps(value))
+            records = q.semantic_observations(directory, 'claude-desktop')
+            self.assertEqual(records[0]['stage'], 'configuration')
+            for patch in ({'stage':'PRIVATE'}, {'stage':True}, {'stage':[]}, {'path':'PRIVATE'},
+                          {'status':'success'}, {'diagnosticsOnly':False}):
+                path.write_text(json.dumps({**value, **patch}))
+                with self.assertRaises(ValueError): q.semantic_observations(directory, 'claude-desktop')
+            path.write_text(json.dumps(value))
+            with self.assertRaises(ValueError): q.semantic_observations(directory, 'zed-desktop')
+            path.rename(Path(directory) / 'wrong.json')
+            with self.assertRaises(ValueError): q.semantic_observations(directory, 'claude-desktop')
+
     def test_claude_model_discovery_is_positive_only_and_payload_free(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

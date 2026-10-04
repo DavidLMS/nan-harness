@@ -9,6 +9,28 @@ pub(super) fn prepare_session_lock(
     SessionLock::acquire(&paths.lock)
 }
 
+// Keep launch exclusivity through policy checks and the entire managed session.
+pub(super) fn prepare_managed_session(
+    paths: &DesktopPaths,
+    process: &impl DesktopProcess,
+) -> Result<SessionLock, ClaudeDesktopError> {
+    let lock = observe_prelaunch(
+        prepare_session_lock(paths, process),
+        PrelaunchStage::SessionLock,
+    )?;
+    observe_prelaunch(
+        ensure_no_pending_recovery(paths),
+        PrelaunchStage::PendingRecovery,
+    )?;
+    if observe_prelaunch(process.is_running(), PrelaunchStage::ProcessQuery)? {
+        return observe_prelaunch(
+            Err(ClaudeDesktopError::AlreadyRunning),
+            PrelaunchStage::ProcessPresent,
+        );
+    }
+    Ok(lock)
+}
+
 pub(super) fn ensure_no_pending_recovery(paths: &DesktopPaths) -> Result<(), ClaudeDesktopError> {
     reject_symlink(&paths.receipt)?;
     reject_symlink(&paths.backup_directory)?;

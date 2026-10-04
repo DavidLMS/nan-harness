@@ -46,6 +46,8 @@ mod qualification_linux;
 mod qualification_mcp;
 #[cfg(feature = "desktop-qualification")]
 mod qualification_models;
+mod qualification_prelaunch;
+use qualification_prelaunch::{Stage as PrelaunchStage, observe as observe_prelaunch};
 #[cfg(feature = "desktop-qualification")]
 mod qualification_restore;
 #[cfg(feature = "desktop-qualification")]
@@ -96,39 +98,48 @@ pub(crate) async fn run(
         compatibility.evidence,
         DesktopCompatibilityEvidence::Unavailable
     );
-    let manager = PersistenceManager::from_environment()?;
+    let manager = observe_prelaunch(
+        PersistenceManager::from_environment(),
+        PrelaunchStage::Persistence,
+    )?;
     let remembered_model = if arguments.model.is_none() {
-        manager
-            .last_desktop_selection(DesktopHarnessKind::Claude)?
-            .map(|selection| selection.model)
+        observe_prelaunch(
+            manager.last_desktop_selection(DesktopHarnessKind::Claude),
+            PrelaunchStage::RememberedModel,
+        )?
+        .map(|selection| selection.model)
     } else {
         None
     };
     let requested_model = arguments.model.as_deref().or(remembered_model.as_deref());
     let platform = DesktopPlatform::current()?;
-    let paths = DesktopPaths::from_environment(platform)?;
+    let paths = observe_prelaunch(
+        DesktopPaths::from_environment(platform),
+        PrelaunchStage::Paths,
+    )?;
     let process = SystemDesktopProcess::new(platform, arguments.executable.clone());
     if arguments.restore {
         return restore_command(&paths, &process);
     }
-    let _lock = prepare_session_lock(&paths, &process)?;
-    ensure_no_pending_recovery(&paths)?;
-    if process.is_running()? {
-        return Err(ClaudeDesktopError::AlreadyRunning.into());
-    }
-    let mut config =
-        credentials::resolve_or_onboard(arguments.provider_base_url.clone(), interactive).await?;
+    let _lock = prepare_managed_session(&paths, &process)?;
+    let mut config = observe_prelaunch(
+        credentials::resolve_or_onboard(arguments.provider_base_url.clone(), interactive).await,
+        PrelaunchStage::Credentials,
+    )?;
     let discovered_models = config.model_catalog.take();
-    let bridge = start_claude_desktop_bridge_with_budget(
-        &config.config,
-        discovered_models,
-        requested_model,
-        arguments.show_auto,
-        !arguments.search.no_search,
-        arguments.session_max_tokens,
-    )
-    .await
-    .map_err(ClaudeDesktopError::from)?;
+    let bridge = observe_prelaunch(
+        start_claude_desktop_bridge_with_budget(
+            &config.config,
+            discovered_models,
+            requested_model,
+            arguments.show_auto,
+            !arguments.search.no_search,
+            arguments.session_max_tokens,
+        )
+        .await
+        .map_err(ClaudeDesktopError::from),
+        PrelaunchStage::Bridge,
+    )?;
     let selected_model = bridge.selected_model().to_owned();
     let result = run_ready_session(&paths, &process, &bridge, arguments.show_auto).await;
     let shutdown = bridge.shutdown_with_usage().await;

@@ -291,6 +291,12 @@ def qualification_environment(app, facts, real_nanh, executable, inherited=None)
                     or mode != 'startup-baseline' or windows_profile != 'private-env'):
                 raise ValueError('Claude Windows Chat-only trial is unavailable')
             environment['NANH_CLAUDE_WINDOWS_CHAT_ONLY'] = windows_chat
+        prelaunch = source.get('NANH_CLAUDE_PRELAUNCH_DIAGNOSTICS')
+        if prelaunch is not None:
+            if (prelaunch != '1' or app != 'claude-desktop' or source.get('RUNNER_OS') != 'Windows'
+                    or mode != 'startup-baseline' or windows_profile != 'private-env'):
+                raise ValueError('Claude prelaunch diagnostics are unavailable')
+            environment['NANH_CLAUDE_PRELAUNCH_DIAGNOSTICS'] = prelaunch
         if app == 'chatgpt-desktop':
             environment['FEASIBILITY_CODEX_DOM_DRIVER'] = str(Path(__file__).with_name('codex-dom.cjs').resolve())
         policy = source.get('NANH_DESKTOP_QUALIFICATION_NAMESPACE_POLICY', 'default')

@@ -106,12 +106,21 @@ pub(super) async fn run_ready_session(
     bridge: &RunningClaudeDesktopBridge,
     show_auto: bool,
 ) -> Result<i32, ClaudeDesktopError> {
-    let receipt = Receipt::capture(paths)?;
-    if let Err(error) = receipt.write(&paths.receipt) {
+    let receipt = qualification_prelaunch::observe(
+        Receipt::capture(paths),
+        qualification_prelaunch::Stage::Snapshot,
+    )?;
+    if let Err(error) = qualification_prelaunch::observe(
+        receipt.write(&paths.receipt),
+        qualification_prelaunch::Stage::ReceiptWrite,
+    ) {
         Receipt::remove_backups(paths);
         return Err(error);
     }
-    let apply = bridge.with_session_token(|token| apply_gateway(paths, bridge.base_url(), token));
+    let apply = qualification_prelaunch::observe(
+        bridge.with_session_token(|token| apply_gateway(paths, bridge.base_url(), token)),
+        qualification_prelaunch::Stage::Configuration,
+    );
     if let Err(error) = apply {
         return restore_after(paths, Err(error));
     }
@@ -125,7 +134,10 @@ pub(super) async fn run_ready_session(
     #[cfg(feature = "desktop-qualification")]
     let models = qualification_models::Observation::start(paths, bridge);
     let activities = show_auto.then(|| bridge.subscribe_activities());
-    if let Err(error) = process.launch() {
+    if let Err(error) = qualification_prelaunch::observe(
+        process.launch(),
+        qualification_prelaunch::Stage::VendorLaunch,
+    ) {
         #[cfg(feature = "desktop-qualification")]
         if let Some(storage) = &storage {
             storage.record();
