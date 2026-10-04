@@ -25,10 +25,14 @@ function create({page,alive,deadline,pwProof,makeWitness=require('./codex-send-c
   if(Object.values(value).some(v=>typeof v!=='string')||!value.target||!value.frame||!value.loader||page.url()!==value.url+value.fragment)throw Error('identity-changed');return value;
  };
  const same=(a,b)=>['target','frame','loader','url','fragment'].every(k=>a[k]===b[k]);
- const verify=async held=>{
-  await fresh();if(!same(identity,await current())||!await bounded(pwProof(held))||!await alive())throw Error('identity-changed');
+ const verifyDocument=async()=>{
+  await fresh();if(!same(identity,await current()))throw Error('identity-changed');
   const proof=await send('Runtime.callFunctionOn',{objectId:heldDOM.objectId,functionDeclaration:connected.toString(),returnByValue:true,silent:true});
   if(proof.result?.value!==true)throw Error('editor-changed');return true;
+ };
+ const verify=async held=>{
+  await verifyDocument();if(!await bounded(pwProof(held))||!await alive())throw Error('identity-changed');
+  return verifyDocument();
  };
  const failure=error=>blocked(['deadline-or-owner','identity-changed','editor-unavailable','editor-changed'].includes(error.message)?error.message:'runtime-unavailable');
  return {
@@ -44,6 +48,11 @@ function create({page,alive,deadline,pwProof,makeWitness=require('./codex-send-c
     if(row?.length!==1||row[0].get||!row[0].value?.objectId)throw Error('editor-unavailable');editor=row[0].value;
     await verify(held);return {verified:true,reason:'verified',inputAuthorized:false};
    }catch(error){return failure(error);}
+  },
+  // Read-only document/retained-node proof during the one popup-close transition.
+  // The complete PW source proof remains mandatory before subsequent input.
+  async verifyRetainedDocument(){
+   try{if(!editor)return false;return await verifyDocument();}catch{return false;}
   },
   async verifyHeld(held){
    try{if(!editor)return false;return await verify(held);}catch{return false;}

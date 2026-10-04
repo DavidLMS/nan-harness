@@ -92,7 +92,16 @@ async function run(page,guard,ownerGuard,deadline,loan,workspace,selectionPolicy
         facts.selectionStage='original-popup-close';
         if(!custody()||!await alive())return null;
         // No popup substitute: the original popup must close in this document.
-        if(!(await held.evaluate(sample,{opened:false,menu:null})).matched||!custody()||!await alive())return null;
+        const closeCutoff=Math.min(deadline,Date.now()+2000);
+        let closed=false;
+        while(Date.now()<closeCutoff){
+          if(!custody()||!await alive()||!await context.verifyRetainedDocument())return null;
+          const state=await held.evaluate(sample,{opened:false,menu:null});
+          if(!custody()||!await alive()||!await context.verifyRetainedDocument())return null;
+          if(state.matched){closed=true;break;}
+          await new Promise(resolve=>setTimeout(resolve,Math.min(50,Math.max(0,closeCutoff-Date.now()))));
+        }
+        if(!closed)return null;
         await menu.dispose();menu=null;
         facts.selectionStage='closed-source';
         const closedA=await held.evaluate(sample,{opened:false,menu:null}),closedB=await held.evaluate(sample,{opened:false,menu:null});
