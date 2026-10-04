@@ -54,8 +54,13 @@ leaves remain retained in the witness. `340bdcfe` introduces a separate
 source-proved empty-model capability: all text/link/attachment records and
 prior copied prompt/response history must remain unchanged through final paste
 proof. It never clears text before paste and still requires exact prompt
-readback before Send. The actual test is running in
-[37211315141](https://github.com/DavidLMS/nan-harness/actions/runs/37211315141).
+readback before Send. In
+[37211315141](https://github.com/DavidLMS/nan-harness/actions/runs/37211315141),
+all three sessions reject the next helper transport after the first copied
+response; both cleanup checks pass. `5fff78e4` distinguishes bounded transport
+spawn, I/O, wait, status, size, decode and deadline failures without exposing
+helper output. Its initial Linux trials stopped at a preinstall lint;
+`1624e242` corrects that lint before fresh native trials.
 
 The Windows source-sharing and configuration lifecycle fixtures all pass in
 [37207929495](https://github.com/DavidLMS/nan-harness/actions/runs/37207929495)
@@ -68,8 +73,11 @@ absence is not established. [37209405410](https://github.com/DavidLMS/nan-harnes
 (`f1b20acc`) passes both cleanup checks and locates the isolation rejection at
 the first configuration file's privacy check. The repairing reader changed its
 DACL before rejecting; this does not establish the original descriptor shape.
-A nonmutating protected-or-exact-inherited classifier under the retained
-original private root is being integrated. General credential policy stays
+`6b346820` adds a nonmutating protected-or-exact-inherited classifier under
+the retained original private root. Its synthetic Windows fixtures pass in
+[37213103824](https://github.com/DavidLMS/nan-harness/actions/runs/37213103824),
+but application installation fails before native acquisition; this supplies
+no new application acceptance. General credential policy stays
 protected. `fb7eb4ea` also prioritizes original descendant retention within
 the same existing ten-second stop budget and reports closed preflight progress.
 Directory leases permit child renames and deny directory deletion; configuration
@@ -81,7 +89,12 @@ was already focused. It reaches the initial home composer, whose managed
 profile/context proof is not yet integrated on macOS. Another session rejects
 source-point capture; the third rejects an auxiliary-page birth. Both cleanup
 checks pass. The bounded owned-window movement trial has not established a
-successful move; it grants no input authority.
+successful move; it grants no input authority. `ddbe5dea` integrates original
+eight-root macOS profile custody and a fixed, descriptor-relative read-only
+state transport. Four Rust custody cases, nine synthetic filesystem cases
+and the real helper transport on synthetic files pass locally. Separate macOS
+renderer source pins and context correlation remain necessary; profile custody
+does not authorize Send.
 
 Linux Codex [37208341472](https://github.com/DavidLMS/nan-harness/actions/runs/37208341472)
 (`d158cdb2`) reaches the home composer and attempts ordinary selection of the
@@ -92,8 +105,13 @@ selection/context correlation and Send remain unproved. [37210102136](https://gi
 checking original popup closure. `c0ceddd3` passively awaits that one closure
 within the original cutoff, rechecking the original CDP document and retained
 editor before and after every sample; full source proof is mandatory before
-reopening. Its actual test is running in
-[37211386151](https://github.com/DavidLMS/nan-harness/actions/runs/37211386151).
+reopening. In
+[37211386151](https://github.com/DavidLMS/nan-harness/actions/runs/37211386151),
+all three sessions still reject at original popup closure and pass cleanup.
+`02911969` admits only the frozen source-declared projectless-to-selected
+trigger replacement after one consumed item action. Original document, home
+and editor must survive; one new-trigger reopen and the actual selected menu
+check remain mandatory. Synthetic cases pass; native acceptance is pending.
 Windows Codex's original-root custody and separate runtime source pins remain
 under development; Linux proof cannot be reused as Windows acceptance.
 
