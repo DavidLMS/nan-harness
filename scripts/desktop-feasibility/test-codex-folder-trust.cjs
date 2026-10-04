@@ -37,6 +37,28 @@ async function scenario({changed=false,guardLost=false,uncertain=false,expired=f
   {workspace:'/private/owned/workspace',verify:async()=>true});
  return {result,clicks,disposed};
 }
+const authority=require('./codex-folder-trust.cjs').authority;
+function filesystem({symlink=false,changed=false,windows=false,aliasChanged=false}={}) {
+ let mutable=false,closed=0;
+ const stat=()=>({dev:1n,ino:mutable&&changed?3n:2n,birthtimeNs:1n,uid:BigInt(process.getuid()),mode:0o700n,
+  isDirectory:()=>true,isSymbolicLink:()=>symlink});
+ const io={lstatSync:p=>aliasChanged&&mutable&&p.includes('/')?{...stat(),ino:4n}:stat(),fstatSync:stat,openSync:()=>9,closeSync:()=>closed++,
+  realpathSync:{native:p=>windows?p.replace(/^\\\\\?\\/,'').replaceAll('/','\\'):p}};
+ return {io,change:()=>{mutable=true;},closed:()=>closed};
+}
+let f=filesystem();let a=authority('/private/owned/workspace',f.io,'darwin');assert.equal(a.verify(),true);a.close();assert.equal(f.closed(),1);
+f=filesystem({symlink:true});a=authority('/private/owned/workspace',f.io,'darwin');assert.equal(a.verify(),false);
+f=filesystem({changed:true});a=authority('/private/owned/workspace',f.io,'darwin');f.change();assert.equal(a.verify(),false);a.close();
+f=filesystem({windows:true});a=authority('\\\\?\\C:\\private\\owned\\workspace',f.io,'win32');assert.equal(a.workspace,'C:\\private\\owned\\workspace');assert.equal(a.verify(),true);a.close();
+assert.equal(authority('\\\\server\\share',f.io,'win32').verify(),false);
+
+f=filesystem({windows:true,aliasChanged:true});
+a=authority('\\\\?\\C:\\private\\owned\\workspace',f.io,'win32');
+assert.deepEqual(a.spellings,['C:\\private\\owned\\workspace','\\\\?\\C:\\private\\owned\\workspace','C:/private/owned/workspace']);
+for(const spelling of a.spellings){fixture({path:spelling});assert.equal(sample({workspace:a.workspace,spellings:a.spellings,held:null}).status,'proved');}
+for(const spelling of ['C:/private/other','C:/PRIVATE/owned/workspace','C:/private/owned/../workspace']){fixture({path:spelling});assert.equal(sample({workspace:a.workspace,spellings:a.spellings,held:null}).rejectionStage,'path');}
+f.change();assert.equal(a.verify(),false);a.close();
+
 (async()=>{
  let r=await scenario();assert.equal(r.result.status,'completed');assert.equal(r.clicks,1);
  for(const [o,stage] of [[{changed:true},'identity'],[{guardLost:true},'guard'],[{expired:true},'deadline']]){r=await scenario(o);assert.equal(r.clicks,0);assert.equal(r.result.rejectionStage,stage);}
@@ -48,17 +70,3 @@ async function scenario({changed=false,guardLost=false,uncertain=false,expired=f
  const result=await run({},async()=>true,Date.now()+1000,{workspace:'',verify:()=>false});
  assert.equal(result.rejectionStage,'authority');assert.equal(result.clickAttempted,false);
 })().catch(e=>{console.error(e);process.exitCode=1;});
-const authority=require('./codex-folder-trust.cjs').authority;
-function filesystem({symlink=false,changed=false}={}) {
- let mutable=false,closed=0;
- const stat=()=>({dev:1n,ino:mutable&&changed?3n:2n,birthtimeNs:1n,uid:BigInt(process.getuid()),mode:0o700n,
-  isDirectory:()=>true,isSymbolicLink:()=>symlink});
- const io={lstatSync:stat,fstatSync:stat,openSync:()=>9,closeSync:()=>closed++,
-  realpathSync:{native:p=>p}};
- return {io,change:()=>{mutable=true;},closed:()=>closed};
-}
-let f=filesystem();let a=authority('/private/owned/workspace',f.io,'darwin');assert.equal(a.verify(),true);a.close();assert.equal(f.closed(),1);
-f=filesystem({symlink:true});a=authority('/private/owned/workspace',f.io,'darwin');assert.equal(a.verify(),false);
-f=filesystem({changed:true});a=authority('/private/owned/workspace',f.io,'darwin');f.change();assert.equal(a.verify(),false);a.close();
-f=filesystem();a=authority('\\\\?\\C:\\private\\owned\\workspace',f.io,'win32');assert.equal(a.workspace,'C:\\private\\owned\\workspace');assert.equal(a.verify(),true);a.close();
-assert.equal(authority('\\\\server\\share',f.io,'win32').verify(),false);

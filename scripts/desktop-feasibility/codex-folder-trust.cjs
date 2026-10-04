@@ -4,7 +4,7 @@ const path=require('node:path');
 function authority(ownedWorkspace, io=fs, platform=process.platform) {
   let fd;
   const paths=platform==='win32'?path.win32:path.posix;
-  const invalid={workspace:'',verify:()=>false,close:()=>{}};
+  const invalid={workspace:'',spellings:[],verify:()=>false,close:()=>{}};
   try {
     if(typeof ownedWorkspace!=='string'||ownedWorkspace.includes('\0'))return invalid;
     const workspace=platform==='win32'&&/^\\\\\?\\[A-Za-z]:\\/.test(ownedWorkspace)
@@ -21,12 +21,24 @@ function authority(ownedWorkspace, io=fs, platform=process.platform) {
     const normal=value=>platform==='win32'&&/^\\\\\?\\[A-Za-z]:\\/.test(value)?value.slice(4):value;
     if(normal(canonical)!==workspace)return invalid;
     const own=io.lstatSync(workspace,{bigint:true});
+    // The CLI opens its canonical Windows path with a verbatim prefix. Only
+    // finite full-path spellings proved to name this retained directory may
+    // match the source dialog; displayed paths never establish ownership.
+    const spellings=[...new Set(platform==='win32'
+      ?[workspace,ownedWorkspace,workspace.replaceAll('\\','/')]:[workspace])];
+    const spellingOwned=value=>{
+      const stat=io.lstatSync(value,{bigint:true});
+      const canonical=normal(io.realpathSync.native(value));
+      return stat.isDirectory()&&!stat.isSymbolicLink()&&stat.dev===own.dev
+        &&stat.ino===own.ino&&stat.birthtimeNs===own.birthtimeNs&&canonical===workspace;
+    };
+    if(!spellings.every(spellingOwned))return invalid;
     if(platform!=='win32'&&(own.uid!==BigInt(process.getuid())||(own.mode&0o077n)!==0n))return invalid;
     try {fd=io.openSync(workspace,fs.constants.O_RDONLY|(fs.constants.O_NOFOLLOW||0));}
     catch(error){if(platform!=='win32'||!['EPERM','EACCES','EISDIR'].includes(error.code))return invalid;}
-    return {workspace,verify:()=>{
+    return {workspace,spellings,verify:()=>{
       try {
-        if(normal(io.realpathSync.native(workspace))!==workspace)return false;
+        if(!spellings.every(spellingOwned))return false;
         for(const held of ancestors){const current=io.lstatSync(held.path,{bigint:true});
           if(!current.isDirectory()||current.isSymbolicLink()||current.dev!==held.dev
             ||current.ino!==held.ino||current.birthtimeNs!==held.birth)return false;}
@@ -40,7 +52,7 @@ function authority(ownedWorkspace, io=fs, platform=process.platform) {
 
 // Pinned project-folder-consent-dialog components: Linux 5ab3b26d..., Mac
 // 24a177c6..., Windows 3fbae19f.... Authority is private caller-owned state.
-function sample({workspace,held}) {
+function sample({workspace,spellings=[workspace],held}) {
   const visible=e=>{const r=e.getBoundingClientRect(),s=getComputedStyle(e);return e.isConnected&&r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden';};
   const dialogs=[...document.querySelectorAll('[role="dialog"],[role="alertdialog"],[aria-modal="true"],[role="menu"]')].filter(visible);
   if(dialogs.length===0)return {status:'absent'};
@@ -63,7 +75,7 @@ function sample({workspace,held}) {
       ||dialog.getAttribute('aria-labelledby')!==titles[0].id)
     return {status:'blocked',rejectionStage:'title'};
   if(lists.length!==1||items.length!==1||items[0].tagName!=='LI'
-      ||!items[0].classList.contains('break-all')||!visible(items[0])||items[0].textContent!==workspace)
+      ||!items[0].classList.contains('break-all')||!visible(items[0])||!spellings.includes(items[0].textContent))
     return {status:'blocked',rejectionStage:'path'};
   if(buttons.length!==2||trust.length!==1||cancel.length!==1||trust[0].disabled
       ||trust[0].getAttribute('aria-disabled')==='true'
@@ -74,9 +86,9 @@ function sample({workspace,held}) {
   const x=rect.left+rect.width/2,y=rect.top+rect.height/2,hit=document.elementFromPoint(x,y);
   if(!hit||!button.contains(hit))return {status:'blocked',rejectionStage:'hit'};
   if(held&&(held.dialog!==dialog||held.form!==form||held.title!==titles[0]
-      ||held.item!==items[0]||held.button!==button||held.left!==rect.left||held.top!==rect.top
+      ||held.item!==items[0]||held.spelling!==items[0].textContent||held.button!==button||held.left!==rect.left||held.top!==rect.top
       ||held.width!==rect.width||held.height!==rect.height))return {status:'blocked',rejectionStage:'identity'};
-  return {status:'proved',dialog,form,title:titles[0],item:items[0],button,
+  return {status:'proved',dialog,form,title:titles[0],item:items[0],spelling:items[0].textContent,button,
     left:rect.left,top:rect.top,width:rect.width,height:rect.height};
 }
 async function run(page,guard,deadline,authority,seal=()=>{}) {
@@ -99,17 +111,17 @@ async function run(page,guard,deadline,authority,seal=()=>{}) {
     if(!authority||typeof authority.workspace!=='string'||!authority.workspace
         ||typeof authority.verify!=='function'){reject('authority');return receipt;}
     if(!await owned())return receipt;
-    held=await page.evaluateHandle(sample,{workspace:authority.workspace,held:null});
+    held=await page.evaluateHandle(sample,{workspace:authority.workspace,spellings:authority.spellings,held:null});
     const first=await held.evaluate(e=>({status:e.status,rejectionStage:e.rejectionStage}));
     if(first.status==='absent'){receipt.status='absent';return receipt;}
     if(!sampled(first)||!await owned())return receipt;
     await new Promise(resolve=>setTimeout(resolve,Math.min(100,Math.max(0,deadline-Date.now()))));
     if(!await owned())return receipt;
-    const current=await page.evaluate(sample,{workspace:authority.workspace,held});
+    const current=await page.evaluate(sample,{workspace:authority.workspace,spellings:authority.spellings,held});
     if(!sampled(current)||!await owned())return receipt;
     const button=await held.evaluateHandle(e=>e.button);
     try {
-      const final=await page.evaluate(sample,{workspace:authority.workspace,held});
+      const final=await page.evaluate(sample,{workspace:authority.workspace,spellings:authority.spellings,held});
       if(!sampled(final)||!await owned())return receipt;
       seal();
       receipt.clickAttempted=true;receipt.status='action-uncertain';
