@@ -32,6 +32,20 @@ test('popup requires exact control linkage and no foreign overlay',()=>{const f=
   const expired=await sandbox.exports.run(page,async()=>true,()=>true,Date.now()-1,{},'/private');
   assert.equal(queries,0);assert.equal(expired.clickAttempted,false);
   assert.equal(JSON.stringify(denied).includes('/private'),false);
+  let owner=true,clicks=0,closed=0;
+  const button={click:async()=>{clicks++;},dispose:async()=>{}};
+  const held={evaluate:async()=>({matched:true,rect:[20,30,40,20]}),
+    getProperty:async()=>({asElement:()=>button}),dispose:async()=>{}};
+  sandbox.require=name=>{
+    assert.equal(name,'./codex-context-session.cjs');
+    return {create:()=>({prepare:async()=>{owner=false;return {verified:false,reason:'deadline-or-owner',inputAuthorized:false};},
+      close:async()=>{closed++;}})};
+  };
+  const revoked=await sandbox.exports.run({evaluateHandle:async()=>held},async()=>true,
+    ()=>owner,Date.now()+1000,{},'/private');
+  assert.equal(revoked.reason,'guard');assert.equal(clicks,0);assert.equal(closed,1);
+  assert.equal(revoked.clickAttempted,false);
   console.log('PASS expired or revoked endpoint cannot query or dispatch');
-  console.log((groups+1)+' workspace-menu fixture groups passed');
+  console.log('PASS context preparation cannot retain input after owner loss');
+  console.log((groups+2)+' workspace-menu fixture groups passed');
 })().catch(e=>{console.error(e);process.exitCode=1;});

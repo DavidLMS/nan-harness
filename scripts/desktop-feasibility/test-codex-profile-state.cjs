@@ -21,7 +21,7 @@ function fixture(){
     readSync:(fd,buffer,start,len)=>{reads++;if(api.onRead)api.onRead();const h=fds.get(fd),data=h.node.bytes;const n=Math.min(len,data.length-h.offset);data.copy(buffer,start,h.offset,h.offset+n);h.offset+=n;return n;}};
   const sandbox={exports:{},require:name=>name==='node:fs'?fake:require(name),Buffer,TextDecoder,Date:{now:()=>now},process:{platform:'linux',getuid:()=>123}};
   vm.runInNewContext(source,sandbox);const api={loan,nodes,fds,root,state,setState,get opens(){return opens;},get reads(){return reads;},set now(v){now=v;},set guard(v){guard=v;}};
-  api.make=()=>sandbox.exports.authority(loan,200,()=>guard);api.observe=page=>sandbox.exports.observe(page,()=>guard,200,loan,"/owned",{});return api;
+  api.make=()=>sandbox.exports.authority(loan,200,()=>guard);api.observe=(page,context)=>sandbox.exports.observe(page,()=>guard,200,loan,"/owned",{},async()=>guard,context);return api;
 }
 let total=0;
 function test(name,run){run();total++;console.log('PASS '+name);}
@@ -60,4 +60,17 @@ console.log(total+' synthetic fixture groups passed');
     if(mode==='stable')assert.equal(samples,2);
   }
   console.log('PASS paired private state brackets passive selected-check samples; mutation guard and wrong-check deny');
+  for(const mode of ['stable','changed-state','guard-lost']){
+    const f=fixture();f.setState(Buffer.from(JSON.stringify(projectFixture())));let contexts=0;
+    const result=await f.observe({evaluate:async()=>observed},async selected=>{
+      contexts++;assert.equal(selected.projectId,'fixture-id');assert.equal(selected.workspace,'/owned');
+      if(mode==='changed-state')f.nodes.get(f.state).metadata.mtimeNs++;
+      if(mode==='guard-lost')f.guard=false;
+      return {verified:false,reason:'scope-unavailable',inputAuthorized:false};
+    });
+    assert.equal(contexts,1);assert.equal(result.status,mode==='stable'?'observed':'blocked');
+    assert.equal('prewarmContext' in result,mode==='stable');assert.equal(result.sendAuthorized,false);
+    assert.equal(f.fds.size,0);assert(!JSON.stringify(result).includes('fixture-id'));
+  }
+  console.log('PASS private context observation is bracketed by final unchanged state and custody');
 })().catch(e=>{console.error(e);process.exitCode=1;});

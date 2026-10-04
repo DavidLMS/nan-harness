@@ -84,6 +84,29 @@ def task_scope_observation(value):
     return value
 
 
+def codex_prewarm_context(value):
+    base={'verified','reason','inputAuthorized'}
+    fixed={'sourcePinned','newHomeController','localContext','retainedProject','retainedRoot'}
+    selection={'prewarmResolvedSelection','noPriorReservation'}
+    failures={'deadline-or-owner','runtime-unavailable','descriptor-unavailable','source-mismatch',
+        'scope-unavailable','root-mismatch','project-mismatch','mode-mismatch','existing-workspace',
+        'remote-override','controller-mismatch','host-or-cwd-mismatch','context-override','follow-up',
+        'prepare-override','reservation-mismatch','reservation-unavailable','reservation-pending',
+        'render-changed','identity-changed','editor-unavailable','editor-changed'}
+    if (type(value) is not dict or type(value.get('verified')) is not bool
+            or value.get('inputAuthorized') is not False or type(value.get('reason')) is not str):
+        raise ValueError('invalid Codex passive context observation')
+    if value['verified']:
+        if (set(value)!=base|fixed|selection or value['reason']!='verified'
+                or any(value[k] is not True for k in fixed)
+                or any(type(value[k]) is not bool for k in selection)
+                or value['prewarmResolvedSelection']==value['noPriorReservation']):
+            raise ValueError('inconsistent Codex passive context proof')
+    elif set(value)!=base or value['reason'] not in failures:
+        raise ValueError('invalid Codex passive context boundary')
+    return value
+
+
 def codex_point_observation(value):
     reasons={'measured','ax-limit-or-deadline','ax-query','ax-visibility-unavailable',
         'ax-webarea-geometry','ax-webarea-ambiguous','ax-webarea-missing','ax-webarea-changed',
@@ -239,7 +262,7 @@ def public_onboarding(setup, app):
                     or any(type(state.get(k)) is not bool for k in stateflags)):
                 raise ValueError('invalid Codex profile state observation')
             if state['status']=='observed':
-                if set(state)!=statebase or not all(state[k] for k in stateflags):
+                if set(state)!=statebase|({'prewarmContext'} if 'prewarmContext' in state else set()) or not all(state[k] for k in stateflags):
                     raise ValueError('inconsistent Codex selected project observation')
             elif (set(state)!=statebase|{'reason'}|({'projectFailure'} if 'projectFailure' in state else set()) or type(state['reason']) is not str
                     or state['reason'] not in {'profile-custody','workspace','state','project','guard','selected-id','state-changed','deadline','query'}
@@ -250,6 +273,8 @@ def public_onboarding(setup, app):
                     or state['projectFailure'] not in {'container','projects-shape','projects-count','project-namespace',
                         'record-shape','record-identity','record-time','record-root','stored-selection'}):
                 raise ValueError('invalid Codex project projection boundary')
+            if 'prewarmContext' in state:
+                codex_prewarm_context(state['prewarmContext'])
     if 'codingEditableObservation' in setup:
         observation = setup['codingEditableObservation']
         categories = {'codexHomeCount','codexThreadCount','codexOtherCount','classicChatGPTCount',

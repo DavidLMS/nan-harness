@@ -2800,6 +2800,24 @@ class QualificationTests(unittest.TestCase):
             ordinaryLocalProjectObserved=True,selectedIdCorrelated=True,sendAuthorized=False)
         menu=dict(status='observed',diagnosticsOnly=True,clickAttempted=True,clickCompleted=True,
             sendAuthorized=False,profileStateObservation=state)
+        context=dict(verified=True,reason='verified',sourcePinned=True,newHomeController=True,
+            localContext=True,retainedProject=True,retainedRoot=True,prewarmResolvedSelection=False,
+            noPriorReservation=True,inputAuthorized=False)
+        context_state={**state,'prewarmContext':context}
+        self.assertEqual(q.public_onboarding({**setup,'workspaceMenuObservation':{**menu,'profileStateObservation':context_state}},'chatgpt-desktop')['workspaceMenuObservation']['profileStateObservation'],context_state)
+        for change in ({'inputAuthorized':True},{'sourcePinned':False},{'reason':'PRIVATE'},
+                       {'projectId':'PRIVATE'},{'noPriorReservation':False},{'prewarmResolvedSelection':1}):
+            with self.assertRaises(ValueError):
+                q.codex_prewarm_context({**context,**change})
+        self.assertEqual(q.codex_prewarm_context({**context,'prewarmResolvedSelection':True,'noPriorReservation':False})['verified'],True)
+        for reason in ['deadline-or-owner','runtime-unavailable','descriptor-unavailable','source-mismatch',
+                       'scope-unavailable','root-mismatch','project-mismatch','mode-mismatch','existing-workspace',
+                       'remote-override','controller-mismatch','host-or-cwd-mismatch','context-override','follow-up',
+                       'prepare-override','reservation-mismatch','reservation-unavailable','reservation-pending',
+                       'render-changed','identity-changed','editor-unavailable','editor-changed']:
+            failed=dict(verified=False,reason=reason,inputAuthorized=False)
+            self.assertEqual(q.codex_prewarm_context(failed),failed)
+            with self.assertRaises(ValueError):q.codex_prewarm_context({**failed,'raw':'PRIVATE'})
         self.assertEqual(q.public_onboarding({**setup,'workspaceMenuObservation':menu},'chatgpt-desktop')['workspaceMenuObservation'],menu)
         for change in ({'sendAuthorized':True},{'projectId':'PRIVATE'},{'status':[]},
                        {'statePairStable':False},{'selectedIdCorrelated':1},{'reason':'PRIVATE'}):

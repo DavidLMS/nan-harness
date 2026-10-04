@@ -42,7 +42,7 @@ function sample(held,{opened,menu}) {
 async function run(page,guard,ownerGuard,deadline,loan,workspace) {
   const facts={status:'blocked',diagnosticsOnly:true,clickAttempted:false,clickCompleted:false,sendAuthorized:false};
   const alive=async()=>Date.now()<deadline&&ownerGuard()===true&&await guard()===true&&Date.now()<deadline;
-  let held,button,menu;
+  let held,button,menu,context,prepared;
   try {
     if(!await alive())return {...facts,reason:'guard'};
     held=await page.evaluateHandle(capture);
@@ -55,6 +55,12 @@ async function run(page,guard,ownerGuard,deadline,loan,workspace) {
     if(!button)return {...facts,reason:'control'};
     const final=await held.evaluate(sample,{opened:false,menu:null});
     if(!final.matched||JSON.stringify(first.rect)!==JSON.stringify(final.rect)||!await alive())return {...facts,reason:'control'};
+    context=require('./codex-context-session.cjs').create({page,alive,deadline,
+      pwProof:async()=>!!held&&await alive()&&(await held.evaluate(sample,{opened:!!menu,menu:menu??null})).matched===true&&await alive()});
+    prepared=await context.prepare(held);
+    if(!await alive())return {...facts,reason:'guard'};
+    const afterPreparation=await held.evaluate(sample,{opened:false,menu:null});
+    if(!afterPreparation.matched||JSON.stringify(first.rect)!==JSON.stringify(afterPreparation.rect)||!await alive())return {...facts,reason:'control'};
     facts.clickAttempted=true;
     await button.click({position:{x:first.rect[2]/2,y:first.rect[3]/2},timeout:Math.max(1,Math.min(2000,deadline-Date.now()))});
     facts.clickCompleted=true;
@@ -63,10 +69,10 @@ async function run(page,guard,ownerGuard,deadline,loan,workspace) {
     if(await menus.count()!==1)return {...facts,reason:'menu'};
     menu=await menus.elementHandle();
     if(!menu||!await alive()||!(await held.evaluate(sample,{opened:true,menu})).matched||!await alive())return {...facts,reason:'menu'};
-    const observation=await require('./codex-profile-state.cjs').observe(page,ownerGuard,deadline,loan,workspace,menu,alive);
+    const observation=await require('./codex-profile-state.cjs').observe(page,ownerGuard,deadline,loan,workspace,menu,alive,async selected=>prepared.verified?context.observe(held,selected.projectId,selected.workspace):prepared);
     if(!await alive()||!(await held.evaluate(sample,{opened:true,menu})).matched||!await alive())return {...facts,reason:'guard'};
     return {...facts,status:'observed',profileStateObservation:observation};
   } catch {return {...facts,reason:Date.now()>=deadline?'deadline':facts.clickAttempted?'action-uncertain':'query'};}
-  finally {for(const handle of [menu,button,held])if(handle)try{await handle.dispose();}catch{}}
+  finally {if(context)await context.close();for(const handle of [menu,button,held])if(handle)try{await handle.dispose();}catch{}}
 }
 exports.capture=capture;exports.sample=sample;exports.run=run;

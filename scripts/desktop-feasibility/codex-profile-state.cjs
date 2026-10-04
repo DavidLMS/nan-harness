@@ -88,7 +88,7 @@ function project(value,workspace){
 }
 exports.project=project;
 exports.projectFailure=projectFailure;
-async function observe(page,guard,deadline,loan,workspace,menu,endpoint=async()=>guard()===true){
+async function observe(page,guard,deadline,loan,workspace,menu,endpoint=async()=>guard()===true,contextObservation=null){
   const facts={status:'blocked',diagnosticsOnly:true,statePairStable:false,ordinaryLocalProjectObserved:false,
     selectedIdCorrelated:false,sendAuthorized:false};
   const a=authority(loan,deadline,guard);
@@ -107,7 +107,12 @@ async function observe(page,guard,deadline,loan,workspace,menu,endpoint=async()=
     }
     const after=a.snapshotPair();
     if(!after||!stable(before.first.identity,after.second.identity)||before.first.digest!==after.second.digest||!a.verify()||!await endpoint())return {...facts,reason:'state-changed'};
-    return {...facts,status:'observed',statePairStable:true,selectedIdCorrelated:true};
+    const prewarmContext=contextObservation?await contextObservation(selected):undefined;
+    if(contextObservation){
+      const final=a.snapshotPair();
+      if(!final||!stable(before.first.identity,final.second.identity)||before.first.digest!==final.second.digest||!a.verify()||!await endpoint())return {...facts,reason:'state-changed'};
+    }
+    return {...facts,status:'observed',statePairStable:true,selectedIdCorrelated:true,...(prewarmContext?{prewarmContext}:{})};
   }catch{return {...facts,reason:Date.now()>=deadline?'deadline':'query'};}
   finally{a.close();}
 }
