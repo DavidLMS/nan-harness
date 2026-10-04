@@ -3,6 +3,10 @@ import json
 import io
 from pathlib import Path
 import unittest
+from unittest.mock import patch
+import tempfile
+from types import SimpleNamespace
+from pathlib import PosixPath
 
 spec = importlib.util.spec_from_file_location('fixture', Path(__file__).with_name('windows-config-fixture.py'))
 fixture = importlib.util.module_from_spec(spec)
@@ -66,7 +70,7 @@ class ClosedFixtureTests(unittest.TestCase):
         )
         for output, signal in cases:
             result = fixture.compile_diagnostics(output)
-            self.assertEqual(result['noCodeSignals'], [signal])
+            self.assertEqual(result['noCodeSignals'], sorted([signal]+(['windows-access'] if b'(os error 5)' in output else [])))
             self.assertEqual(result['category'], 'no-code')
             self.assertNotIn('PRIVATE', json.dumps(result))
             self.assertEqual(fixture.compile_diagnostics(b'PRIVATE '+output)['noCodeSignals'], [])
@@ -140,6 +144,53 @@ class ClosedFixtureTests(unittest.TestCase):
         for output in [b'PRIVATE'*22000,b'PRIVATE\n'*20000]:
             self.assertEqual(fixture.classify(fixture.read_private_output(io.BytesIO(output)),False)['category'],
                 'output-overflow')
+
+
+    def test_fixed_noncoded_lint_syntax_tool_and_file_categories_are_private(self):
+        cases=(('unnecessary qualification','unused-qualification'),
+          ('lifetime parameter `PRIVATE` never used','unused-lifetime'),
+          ('unused import: `PRIVATE`','unused-import'),('variable does not need to be mutable','unused-mutability'),
+          ('usage of an `unsafe` block','unsafe-lint'),('unexpected `cfg` condition value: `PRIVATE`','unexpected-cfg'),
+          ('unknown lint: `PRIVATE`','unknown-lint'),('mismatched closing delimiter: `PRIVATE`','syntax-delimiter'),
+          ('unknown character escape: PRIVATE','syntax-token'),('expected `PRIVATE`, found `PRIVATE`','syntax-expected-token'),
+          ('cannot find macro `PRIVATE` in this scope','macro-unavailable'),
+          ('cannot find attribute `PRIVATE` in this scope','attribute-unavailable'),
+          ('invalid format string: PRIVATE','format-string'),('Unrecognized option: PRIVATE','compiler-option'),
+          ('unknown `--json` option `PRIVATE`','compiler-option'),('Error loading target specification: PRIVATE','compiler-target'),
+          ('failed to parse JSON: PRIVATE','compiler-json'),
+          ('PRIVATE: There is not enough space on the disk. (os error 112)','disk-space'),
+          ('PRIVATE: sharing violation (os error 32)','windows-sharing'),
+          ('PRIVATE: The system cannot find the file specified. (os error 2)','process-file-unavailable'))
+        for message,category in cases:
+            record={'reason':'compiler-message','message':{'message':message,'level':'error','code':None,
+              'children':[],'rendered':'PRIVATE','spans':[{'file_name':'PRIVATE'}]}}
+            result=fixture.classify(json.dumps(record).encode(),False)
+            self.assertEqual(result['compileDiagnostics']['noCodeSignals'],[category])
+            self.assertFalse(result['compileDiagnostics']['structured']['otherErrorMessage'])
+            self.assertNotIn('PRIVATE',json.dumps(result))
+            self.assertEqual(fixture.compile_diagnostics(('PRIVATE error: '+message).encode())['noCodeSignals'],[])
+        unknown={'reason':'compiler-message','message':{'message':'PRIVATE unknown error','level':'error','code':None,'children':[]}}
+        self.assertTrue(fixture.compile_diagnostics(json.dumps(unknown).encode())['structured']['otherErrorMessage'])
+
+    def test_before_and_after_phases_keep_distinct_closed_files(self):
+        def run(command,**kwargs):
+            self.assertIn('--message-format=json',command)
+            kwargs['stdout'].write(('test '+fixture.TEST+' ... ok\n').encode())
+            return SimpleNamespace(returncode=0)
+        with tempfile.TemporaryDirectory() as directory:
+            for phase,flag,name in [('before-installation','0','configuration-fixture-driver-before-installation.json'),
+              ('after-installation','1','configuration-fixture-driver.json')]:
+                env=dict(GITHUB_ACTIONS='true',RUNNER_ENVIRONMENT='github-hosted',RUNNER_OS='Windows',
+                  NANH_CONFIGURATION_POSTINSTALL_OBSERVATION=flag,NANH_CONFIGURATION_FIXTURE_PHASE=phase,
+                  GITHUB_SHA='a'*40,RUNNER_TEMP=directory,NAN_API_KEY='PRIVATE')
+                with patch.dict(fixture.os.environ,env,clear=True),patch.object(fixture.os,'name','nt'),\
+                  patch.object(fixture,'Path',PosixPath),patch.object(fixture.tempfile,'TemporaryFile',io.BytesIO),\
+                  patch.object(fixture.subprocess,'run',run):
+                    self.assertEqual(fixture.main(),0)
+                facts=json.loads((PosixPath(directory)/name).read_text())
+                self.assertEqual(facts['phase'],phase)
+                self.assertEqual(facts['category'],'passed')
+                self.assertNotIn('PRIVATE',json.dumps(facts))
 
 if __name__ == '__main__':
     unittest.main()

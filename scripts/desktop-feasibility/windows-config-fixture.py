@@ -16,6 +16,31 @@ RUSTC_CODES = frozenset(('E0061','E0277','E0282','E0308','E0382','E0425','E0432'
 
 # These are anchored tool signatures, never extracted diagnostic payloads.
 NO_CODE_SIGNATURES = (
+    ('unused-qualification', rb'^error: unnecessary qualification(?:$|:)'),
+    ('unused-lifetime', rb"^error: lifetime parameter [^\r\n]+ never used$"),
+    ('unused-import', rb'^error: unused import(?:s)?: '),
+    ('unused-variable', rb'^error: unused variable: '),
+    ('unused-mutability', rb'^error: variable does not need to be mutable$'),
+    ('dead-code', rb'^error: (?:function|struct|enum|trait|type alias|constant|static|method|field) [^\r\n]+ is never (?:used|constructed|read)$'),
+    ('unsafe-lint', rb'^error: (?:usage of an `unsafe` block|declaration of an `unsafe` (?:function|trait)|implementation of an `unsafe` trait)$'),
+    ('unexpected-cfg', rb'^error: unexpected `cfg` condition (?:name|value): '),
+    ('unknown-lint', rb'^error: unknown lint: '),
+    ('syntax-delimiter', rb'^error: (?:mismatched closing delimiter|unexpected closing delimiter|this file contains an unclosed delimiter)(?:$|:)'),
+    ('syntax-token', rb'^error: (?:unknown start of token|unknown character escape)(?:$|:)'),
+    ('syntax-literal', rb'^error: unterminated (?:double quote string|raw string|byte string|character) literal'),
+    ('syntax-expected-token', rb'^error: expected [^\r\n]+, found '),
+    ('macro-unavailable', rb'^error: cannot find macro [^\r\n]+ in this scope$'),
+    ('attribute-unavailable', rb'^error: cannot find attribute [^\r\n]+ in this scope$'),
+    ('format-string', rb'^error: invalid format string: '),
+    ('compiler-option', rb'^error: (?:Unrecognized option: |unknown unstable option: |unknown `--json` option |unknown JSON print request)'),
+    ('compiler-target', rb'^error: Error loading target specification: '),
+    ('compiler-input', rb'^error: (?:multiple input filenames provided|no input filename given)(?:$| )'),
+    ('compiler-json', rb'^error: (?:failed to parse JSON|could not parse JSON|invalid JSON)(?:$|:| )'),
+    ('working-directory', rb"^error: (?:couldn't|could not|failed to) (?:get|access) (?:the )?current directory"),
+    ('disk-space', rb'^error: [^\r\n]*(?:There is not enough space on the disk\. \(os error 112\)|No space left on device \(os error 28\))$'),
+    ('windows-sharing', rb'^error: [^\r\n]*\(os error 32\)$'),
+    ('windows-access', rb'^error: [^\r\n]*\(os error 5\)$'),
+    ('process-file-unavailable', rb'^error: [^\r\n]*(?:The system cannot find the file specified\. \(os error 2\)|No such file or directory \(os error 2\))$'),
     ('build-script', rb"^error: failed to run custom build command for "),
     ('environment-variable', rb'^error: environment variable [^\r\n]+ not defined at compile time'),
     ('read-file', rb"^error: (?:couldn't|could not|failed to) read "),
@@ -147,8 +172,11 @@ def read_private_output(private):
 
 
 def main():
+    phase = os.environ.get('NANH_CONFIGURATION_FIXTURE_PHASE', 'after-installation')
+    if phase not in {'before-installation', 'after-installation'}:
+        raise ValueError('fixture phase rejected')
     expected = dict(GITHUB_ACTIONS='true', RUNNER_ENVIRONMENT='github-hosted', RUNNER_OS='Windows',
-                    NANH_CONFIGURATION_POSTINSTALL_OBSERVATION='1')
+                    NANH_CONFIGURATION_POSTINSTALL_OBSERVATION='1' if phase == 'after-installation' else '0')
     if any(os.environ.get(key) != value for key, value in expected.items()) or os.name != 'nt':
         raise ValueError('hosted Windows synthetic fixture required')
     source = os.environ['GITHUB_SHA']
@@ -171,8 +199,9 @@ def main():
         except OSError:
             observation = dict(fixtureStarted=False, category='driver-spawn-failure')
     facts = dict(schemaVersion=1, mechanism='windows-configuration-fixture-driver', diagnosticsOnly=True,
-                 sourceSha=source, phase='after-installation', **observation)
-    with (Path(os.environ['RUNNER_TEMP']) / 'configuration-fixture-driver.json').open('x') as output:
+                 sourceSha=source, phase=phase, **observation)
+    with (Path(os.environ['RUNNER_TEMP']) / ('configuration-fixture-driver.json' if phase == 'after-installation'
+            else 'configuration-fixture-driver-before-installation.json')).open('x') as output:
         json.dump(facts, output)
     return 0 if observation['category']=='passed' else 1
 

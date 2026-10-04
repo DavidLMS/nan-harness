@@ -24,7 +24,7 @@ on:
         description: Observation mechanism to evaluate
         type: choice
         default: native-copy-dom
-        options: [native-copy-dom, strict-semantic, deterministic-full, startup-baseline, x11-motion-fixture]
+        options: [native-copy-dom, strict-semantic, deterministic-full, startup-baseline, x11-motion-fixture, preinstall-only]
 permissions:
   contents: read
 concurrency:
@@ -54,6 +54,8 @@ jobs:
           from desktop_qualification import matrix
           selected = os.environ['SELECTED_APP']
           platform = os.environ['SELECTED_PLATFORM']
+          if os.environ['SELECTED_EXPERIMENT'] == 'preinstall-only' and (selected, platform) != ('claude-desktop', 'windows'):
+              raise SystemExit('The preinstall compiler fixture requires Claude Windows selection')
           if os.environ['SELECTED_EXPERIMENT'] == 'x11-motion-fixture' and (selected, platform) != ('zed-desktop', 'linux'):
               raise SystemExit('The neutral motion fixture requires Zed Linux selection')
           cells = [c for c in matrix(['pen-desktop'] if os.environ['SELECTED_APP'] == 'all' else [])['include'] if c['backend'] != 'pending'
@@ -95,8 +97,34 @@ jobs:
           path: ${{ runner.temp }}/motion-fixture.json
           retention-days: 7
 
+  windows-preinstall-fixture:
+    needs: select
+    if: inputs.experiment == 'preinstall-only'
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          cache-on-failure: true
+      - name: Observe exact synthetic compiler fixture before any vendor metadata or installation
+        env:
+          RUST_TEST_THREADS: 1
+          NANH_CONFIGURATION_POSTINSTALL_OBSERVATION: '0'
+          NANH_CONFIGURATION_FIXTURE_PHASE: before-installation
+        run: python scripts/desktop-feasibility/windows-config-fixture.py
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: deterministic-qualification-windows-preinstall-fixture
+          path: ${{ runner.temp }}/configuration-fixture-driver-before-installation.json
+          if-no-files-found: ignore
+          retention-days: 7
+
   native:
-    if: inputs.experiment != 'x11-motion-fixture'
+    if: inputs.experiment != 'x11-motion-fixture' && inputs.experiment != 'preinstall-only'
     needs: select
     strategy:
       fail-fast: false
@@ -220,9 +248,13 @@ jobs:
           RUST_TEST_THREADS: 1
         run: |
           cargo test --locked -p nan-harness-cli --features desktop-qualification --lib commands::claude_desktop::qualification_config::tests::windows_binding
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo test --locked -p nan-harness-cli --features desktop-qualification --lib commands::claude_desktop::session::configuration_persist_tests
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo test --locked -p nan-harness-desktop-check --lib probe::claude_windows_profile::tests
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo test --locked -p nan-harness-desktop-check --lib native::windows_chat_turn::tests
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Verify bounded Windows UIA receipt protocol without an application
         if: runner.os == 'Windows' && matrix.app == 'claude-desktop'
         run: cargo test --locked -p nan-harness-desktop-check --lib native::windows_uia
@@ -257,6 +289,20 @@ jobs:
         run: |
           rustc --edition 2024 scripts/desktop-feasibility/nanh-shim.rs -o "$RUNNER_TEMP/nanh-hermes-launcher.exe"
           echo "FEASIBILITY_HERMES_LAUNCHER=$RUNNER_TEMP/nanh-hermes-launcher.exe" >> "$GITHUB_ENV"
+      - name: Observe synthetic Windows configuration lifecycle before vendor installation
+        if: always() && runner.os == 'Windows' && matrix.app == 'claude-desktop' && inputs.experiment == 'deterministic-full'
+        env:
+          RUST_TEST_THREADS: 1
+          NANH_CONFIGURATION_POSTINSTALL_OBSERVATION: '0'
+          NANH_CONFIGURATION_FIXTURE_PHASE: before-installation
+        run: python scripts/desktop-feasibility/windows-config-fixture.py
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always() && runner.os == 'Windows' && matrix.app == 'claude-desktop' && inputs.experiment == 'deterministic-full'
+        with:
+          name: deterministic-qualification-windows-preinstall-fixture
+          path: ${{ runner.temp }}/configuration-fixture-driver-before-installation.json
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Freeze authenticated public official metadata
         env:
           GH_TOKEN: ${{ github.token }}
