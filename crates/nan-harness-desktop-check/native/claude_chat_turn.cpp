@@ -478,6 +478,9 @@ static const char* input(const Request& request, const Tree& tree) {
     if (enabled_send < 0) return "control";
     return press(request, fresh.nodes[enabled_send], "sent");
 }
+// Modern $q recovery calls onRetryLastTurn through Bw without a label override.
+// The pinned action builder defaults that ordinary button to "Try again".
+constexpr const char* MODERN_RETRY_LABEL = "Try again";
 static int scoped_control(const Tree& tree, const Request& request, bool retry, const char** failure = nullptr) {
     auto reject = [failure](const char* stage) { if (failure) *failure = stage; return -1; };
     std::vector<int> anchors;
@@ -504,9 +507,9 @@ static int scoped_control(const Tree& tree, const Request& request, bool retry, 
     for (unsigned depth = 0; ancestor >= 0 && depth < 6; ++depth, ancestor = tree.nodes[ancestor].parent) {
         unsigned controls = 0;
         for (std::size_t i = 0; i < tree.nodes.size(); ++i)
-            if (descendant(tree, i, ancestor) && tree.nodes[i].role == "AXButton" && tree.nodes[i].label == (retry ? "Retry" : "Copy")) ++controls;
+            if (descendant(tree, i, ancestor) && tree.nodes[i].role == "AXButton" && tree.nodes[i].label == (retry ? MODERN_RETRY_LABEL : "Copy")) ++controls;
         if (controls > 1) ambiguous_control = true;
-        int control = unique(tree, "AXButton", retry ? "Retry" : "Copy", ancestor);
+        int control = unique(tree, "AXButton", retry ? MODERN_RETRY_LABEL : "Copy", ancestor);
         if (control < 0) continue;
         unsigned heading_count = 0;
         for (std::size_t i = 0; i < tree.nodes.size(); ++i) if (descendant(tree, i, ancestor) && tree.nodes[i].role == "AXHeading") ++heading_count;
@@ -555,7 +558,7 @@ static bool observe_row_shape(const Tree& tree, const Request& request, RowShape
         counts[2] += node.role == "AXHeading" && node.label == "You said: " + request.prompt;
         counts[3] += node.label == request.prompt;
         counts[4] += node.role == "AXStaticText" && node.label == "Server error";
-        counts[5] += node.role == "AXButton" && node.label == "Retry";
+        counts[5] += node.role == "AXButton" && node.label == MODERN_RETRY_LABEL;
         counts[6] += node.role == "AXButton" && node.label == "View details";
     }
     for (std::size_t i = 0; i < tree.nodes.size(); ++i) {
@@ -572,7 +575,7 @@ static bool observe_row_shape(const Tree& tree, const Request& request, RowShape
         owner.headings += node.role == "AXHeading";
         owner.assistant += node.role == "AXHeading" && node.label.rfind("Claude responded:", 0) == 0;
         owner.server += node.role == "AXStaticText" && node.label == "Server error";
-        owner.retry += node.role == "AXButton" && node.label == "Retry";
+        owner.retry += node.role == "AXButton" && node.label == MODERN_RETRY_LABEL;
         owner.details += node.role == "AXButton" && node.label == "View details";
     }
     std::vector<int> users, errors;
@@ -622,10 +625,10 @@ static int failure_details_control(const Tree& tree, const Request& request, con
             headings += tree.nodes[i].role == "AXHeading";
             user_headings += tree.nodes[i].role == "AXHeading"
                 && tree.nodes[i].label == "You said: " + request.prompt;
-            retries += tree.nodes[i].role == "AXButton" && tree.nodes[i].label == "Retry";
+            retries += tree.nodes[i].role == "AXButton" && tree.nodes[i].label == MODERN_RETRY_LABEL;
             details_count += tree.nodes[i].role == "AXButton" && tree.nodes[i].label == "View details";
         }
-        int retry = unique(tree, "AXButton", "Retry", ancestor);
+        int retry = unique(tree, "AXButton", MODERN_RETRY_LABEL, ancestor);
         int details = unique(tree, "AXButton", "View details", ancestor);
         if (prompts == 1 && headings == 1 && user_headings == 1 && retry >= 0 && details >= 0
             && target(tree.nodes[retry], request) && target(tree.nodes[details], request)) return details;

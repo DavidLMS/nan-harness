@@ -2678,3 +2678,18 @@ The exact pinned source places the Retry callout outside the conversation
 scroller and clips its horizontal content. A wider panel is a layout trial,
 not proof of the preceding click failure. It adds no zoom activation or Retry
 replay and preserves the existing response/tool/Resume oracle.
+
+The source-bound Claude macOS recovery selector uses the modern error card's
+ordinary **Try again** button. In the frozen 2.19675.0 renderer,
+`cd5a31703-DiwdunLT.js` (`87e6b710a540352fcd4f9a1f0f6a8f9f9b6377ca676fd99c3e4d8bc87653dceb`)
+passes `onRetryLastTurn` from `Uqe` through `$q` to the `Bw` action builder,
+without a retry-label override. That builder is export `a` / function `on`
+in `c3e34355f-BCwspPRT.js`
+(`99571dee5d72e9985b0fec05f14aefc98b68bc379569b9739ca4f62f86a4d513`),
+and defaults to the fixed English message `FazwRldA7z`, **Try again**.
+The selector does not admit a generic **Retry** as an alternative. The
+existing failed-prompt, failure-marker, unique-control, native ownership and
+single-attempt requirements remain in force. Advisory row-shape retry counts
+now count this exact source control; absent row anchors remain unresolved.
+A classic composer label alone does not prove which transcript/error renderer
+is active, and this correction does not establish successful recovery.

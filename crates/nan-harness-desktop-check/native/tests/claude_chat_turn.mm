@@ -174,7 +174,7 @@ int main() {
         auto plan = node_property_plan(role, "Chat");
         assert(!plan.control_metadata && !plan.current_token);
     }
-    for (const char* name : {"Copy", "Retry", "Start task", "Send message"}) {
+    for (const char* name : {"Copy", "Try again", "Start task", "Send message"}) {
         auto plan = node_property_plan("AXButton", name);
         assert(plan.control_metadata && !plan.current_token);
     }
@@ -202,10 +202,13 @@ int main() {
     tree.nodes[4].label = "fresh assistant";
     assert(scoped_control(tree, request, false) == -1);
     tree.nodes[4] = fixture(3, "AXStaticText", "NAN_CHECK_EXPECTED_FAILURE");
-    tree.nodes[5].label = "Retry";
+    tree.nodes[5].label = "Try again";
     assert(scoped_control(tree, request, true) == -1);
     tree.nodes.push_back(fixture(3, "AXStaticText", "fresh user"));
     assert(scoped_control(tree, request, true) == 5);
+    tree.nodes[5].label = "Retry"; // A generic legacy Retry is not this source callback.
+    assert(scoped_control(tree, request, true) == -1);
+    tree.nodes[5].label = "Try again";
     tree.nodes.push_back(fixture(3, "AXStaticText", "fresh user"));
     assert(scoped_control(tree, request, true) == -1);
     const char* scope_failure = nullptr;
@@ -215,7 +218,7 @@ int main() {
     tree.nodes[5].label = "unrelated";
     assert(scoped_control(tree, request, true, &scope_failure) == -1);
     assert(std::string(scope_failure) == "scope-control-absent");
-    tree.nodes[5].label = "Retry";
+    tree.nodes[5].label = "Try again";
     tree.nodes.push_back(fixture(3, "AXHeading", "other heading"));
     tree.nodes.push_back(fixture(3, "AXHeading", "second heading"));
     assert(scoped_control(tree, request, true, &scope_failure) == -1);
@@ -233,19 +236,25 @@ int main() {
     Tree details_tree;
     details_tree.nodes = {fixture(-1, "AXWindow", ""), fixture(0, "AXGroup", ""),
         fixture(1, "AXStaticText", "Server error"), fixture(1, "AXStaticText", "fresh user"),
-        fixture(1, "AXButton", "Retry"), fixture(1, "AXButton", "View details"),
+        fixture(1, "AXButton", "Try again"), fixture(1, "AXButton", "View details"),
         fixture(1, "AXHeading", "You said: fresh user")};
     for (auto& node : details_tree.nodes) { node.enabled = true; node.bounds = CGRectMake(20, 20, 30, 30); }
     assert(scoped_control(details_tree, details_request, true) == -1);
     assert(failure_details_control(details_tree, details_request) == 5);
+    details_tree.nodes[4].label = "Retry";
+    assert(failure_details_control(details_tree, details_request) == -1);
+    details_tree.nodes[4].label = "Try again";
+    details_tree.nodes.push_back(fixture(1, "AXButton", "Try again"));
+    assert(failure_details_control(details_tree, details_request) == -1);
+    details_tree.nodes.pop_back();
     details_tree.nodes[3].label = "different user";
     assert(failure_details_control(details_tree, details_request) == -1);
     details_tree.nodes[3].label = "fresh user";
     details_tree.nodes[3].parent = 0;
     assert(failure_details_control(details_tree, details_request) == -1);
     details_tree.nodes[3].parent = 1;
-    for (const char* label : {"Server error", "Retry", "View details", "fresh user"}) {
-        details_tree.nodes.push_back(fixture(1, label == std::string("Retry") || label == std::string("View details") ? "AXButton" : "AXStaticText", label));
+    for (const char* label : {"Server error", "Try again", "View details", "fresh user"}) {
+        details_tree.nodes.push_back(fixture(1, label == std::string("Try again") || label == std::string("View details") ? "AXButton" : "AXStaticText", label));
         assert(failure_details_control(details_tree, details_request) == -1);
         details_tree.nodes.pop_back();
     }
@@ -291,7 +300,7 @@ int main() {
     row_tree.nodes = {fixture(-1, "AXWindow", ""), fixture(0, "AXGroup", "Message 5"),
         fixture(1, "AXHeading", "You said: fresh user"), fixture(1, "AXStaticText", "fresh user"),
         fixture(0, "AXGroup", "Message 6"), fixture(4, "AXStaticText", "Server error"),
-        fixture(4, "AXButton", "Retry"), fixture(4, "AXButton", "View details"),
+        fixture(4, "AXButton", "Try again"), fixture(4, "AXButton", "View details"),
         fixture(4, "AXHeading", "Claude responded: optional summary")};
     RowShape rows{};
     assert(observe_row_shape(row_tree, row_request, rows, [] { return true; }));
