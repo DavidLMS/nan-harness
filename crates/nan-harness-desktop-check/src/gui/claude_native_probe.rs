@@ -153,6 +153,33 @@ fn same_mode_identity(held: &xa11y::Element, fresh: &xa11y::Element, pid: Option
         && std::sync::Arc::ptr_eq(held.provider(), fresh.provider())
 }
 
+fn classic_role_shape(mut query: impl FnMut(&str) -> Option<usize>) -> serde_json::Value {
+    let mut counts = serde_json::Map::new();
+    let mut valid = true;
+    for (key, role, editable) in [
+        ("textArea", "text_area", false),
+        ("textField", "text_field", false),
+        ("editableTextArea", "text_area", true),
+        ("editableTextField", "text_field", true),
+    ] {
+        let state = if editable { "[editable=\"true\"]" } else { "" };
+        let selector = format!(
+            "{role}{state}[name=\"Write your prompt to Claude\"], {role}{state}[description=\"Write your prompt to Claude\"]"
+        );
+        let count = query(&selector).filter(|value| *value <= 4096);
+        valid &= count.is_some();
+        counts.insert(key.into(), count.into());
+    }
+    valid &= counts["editableTextArea"].as_u64() <= counts["textArea"].as_u64()
+        && counts["editableTextField"].as_u64() <= counts["textField"].as_u64();
+    if !valid {
+        for value in counts.values_mut() {
+            *value = serde_json::Value::Null;
+        }
+    }
+    serde_json::json!({"status":if valid {"observed"} else {"unavailable"},"counts":counts})
+}
+
 fn counts(mut query: impl FnMut(&str) -> Option<usize>) -> serde_json::Value {
     let mut count = |selector: &str| query(selector).filter(|value| *value <= 4096);
     let labelled = |role: &str, label: &str, editable: bool| {
@@ -331,6 +358,7 @@ impl Gui {
         };
         let mut inventory = counts(query);
         if linux {
+            inventory["classicRoleShape"] = classic_role_shape(query);
             inventory["linuxModeRoles"] = linux_mode_counts(query);
             inventory["linuxModeRoles"]["roleShape"] = self.linux_mode_shape();
         }
@@ -362,6 +390,9 @@ pub(super) fn record(directory: &Path, owner: u32, source_count: &serde_json::Va
             let _ = file.write_all(value.to_string().as_bytes());
         }
     }
+    let classic_shape = source_count
+        .as_object_mut()
+        .and_then(|value| value.remove("classicRoleShape"));
     // Frozen official Mac ZIP and Windows MSIX 2.19675.0 contain byte-identical
     // renderer chunks; the enclosing trial binds platform artifact/app digests.
     let mut value = serde_json::json!({"schemaVersion":1,"mechanism":"claude-native-composer",
@@ -372,6 +403,9 @@ pub(super) fn record(directory: &Path, owner: u32, source_count: &serde_json::Va
         "modeSourceSha256":"0d16680f19e10d03bc11e7797d842d01159da37b5ab410cad9b7307f7eeef3aa",
         "sourceCount":source_count});
     if cfg!(target_os = "linux") {
+        if let Some(shape) = classic_shape {
+            value["classicRoleShape"] = shape;
+        }
         value["sourceVersion"] = "2.9939.4".into();
         value["classicSourceSha256"] =
             "26f823bafc90cff4a749bfad6916ee69e4c3189f18b54a4e958ca387939c1181".into();
@@ -602,5 +636,38 @@ mod tests {
         });
         assert_eq!(failed["status"], "query-failed");
         assert!(failed["sourceCount"]["chatButtonVisible"].is_null());
+    }
+}
+
+#[cfg(test)]
+mod classic_role_shape_tests {
+    use super::classic_role_shape;
+    #[test]
+    fn hidden_and_disabled_exact_source_editors_are_measured_without_authority() {
+        let observed = classic_role_shape(|selector| {
+            assert!(selector.contains("Write your prompt to Claude"));
+            assert!(!selector.contains("visible="));
+            Some(if selector.contains("editable=") {
+                0
+            } else {
+                usize::from(selector.starts_with("text_area"))
+            })
+        });
+        assert_eq!(observed["status"], "observed");
+        assert_eq!(observed["counts"]["textArea"], 1);
+        assert_eq!(observed["counts"]["editableTextArea"], 0);
+        for failure in [None, Some(4097)] {
+            let unavailable = classic_role_shape(|_| failure);
+            assert_eq!(unavailable["status"], "unavailable");
+            assert!(
+                unavailable["counts"]
+                    .as_object()
+                    .unwrap()
+                    .values()
+                    .all(serde_json::Value::is_null)
+            );
+        }
+        let inconsistent = classic_role_shape(|s| Some(usize::from(s.contains("editable="))));
+        assert_eq!(inconsistent["status"], "unavailable");
     }
 }

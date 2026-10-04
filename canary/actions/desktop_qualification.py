@@ -1046,6 +1046,8 @@ def semantic_observations(directory, app):
                               sendSourceSha256='d076b2f208fc5e572d0f3cd39aba35c6bacbe100a82db569851a0ce2317fa05c',
                               modernSourceSha256='5d1afc949ac69080ef6fe15491137ca0c3d2056991a9581537cba2bcc3724287')
             fields = set(hashes) | set('schemaVersion mechanism diagnosticsOnly sourceVersion sourceCount'.split())
+            if 'classicRoleShape' in value:
+                fields.add('classicRoleShape')
             mode_hash = value.get('modeSourceSha256')
             if 'modeSourceSha256' in value:
                 if mode_hash != expected_mode:
@@ -1063,6 +1065,22 @@ def semantic_observations(directory, app):
             record.update(diagnosticsOnly=True, sourceVersion=value['sourceVersion'], sourceCount=dict(counts), **hashes)
             if 'modeSourceSha256' in value:
                 record['modeSourceSha256'] = mode_hash
+            if 'classicRoleShape' in value:
+                shape = value['classicRoleShape']
+                role_keys = {'textArea', 'textField', 'editableTextArea', 'editableTextField'}
+                if (expected_version != '2.9939.4' or type(shape) is not dict
+                        or set(shape) != {'status', 'counts'} or type(shape['status']) is not str or shape['status'] not in {'observed', 'unavailable'}
+                        or type(shape['counts']) is not dict or set(shape['counts']) != role_keys):
+                    raise ValueError('invalid Claude classic role shape')
+                roles = shape['counts']
+                if shape['status'] == 'unavailable':
+                    if any(item is not None for item in roles.values()):
+                        raise ValueError('partial Claude classic role shape')
+                elif (any(type(item) is not int or not 0 <= item <= 4096 for item in roles.values())
+                      or roles['editableTextArea'] > roles['textArea']
+                      or roles['editableTextField'] > roles['textField']):
+                    raise ValueError('inconsistent Claude classic role shape')
+                record['classicRoleShape'] = {'status': shape['status'], 'counts': dict(roles)}
         elif mechanism == 'claude-storage-use':
             fields = set('schemaVersion mechanism diagnosticsOnly freshBefore observationValid before after'.split())
             storage = set('claudeLocalState claudePreferences thirdPartyLocalState thirdPartyPreferences'.split())

@@ -3073,5 +3073,36 @@ class ClaudeFailureRowShapeTests(unittest.TestCase):
             path.write_text(json.dumps({key: field for key, field in value.items() if key != 'rowShape'}))
             self.assertNotIn('rowShape', q.semantic_observations(root, 'claude-desktop')[0])
 
+class ClaudeClassicRoleShapeTests(unittest.TestCase):
+    def test_hidden_disabled_source_editor_is_advisory_and_privacy_closed(self):
+        counts = dict(classicEditable=0, classicVisible=0, modernMessageEditable=0,
+                      sendMessageVisible=0, sendMessageEnabled=0, startTaskVisible=0)
+        shape = dict(status='observed', counts=dict(textArea=1, textField=0, editableTextArea=0, editableTextField=0))
+        value = dict(schemaVersion=1, mechanism='claude-native-composer', diagnosticsOnly=True,
+                     sourceVersion='2.9939.4', sourceCount=counts, classicRoleShape=shape,
+                     classicSourceSha256='26f823bafc90cff4a749bfad6916ee69e4c3189f18b54a4e958ca387939c1181',
+                     sendSourceSha256='d076b2f208fc5e572d0f3cd39aba35c6bacbe100a82db569851a0ce2317fa05c',
+                     modernSourceSha256='5d1afc949ac69080ef6fe15491137ca0c3d2056991a9581537cba2bcc3724287')
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'facts.json'
+            path.write_text(json.dumps(value))
+            observed = q.semantic_observations(root, 'claude-desktop')[0]
+            self.assertEqual(observed['classicRoleShape'], shape)
+            self.assertEqual(observed['sourceCount']['classicEditable'], 0)
+            unavailable = dict(status='unavailable', counts={key: None for key in shape['counts']})
+            path.write_text(json.dumps({**value, 'classicRoleShape': unavailable}))
+            self.assertEqual(q.semantic_observations(root, 'claude-desktop')[0]['classicRoleShape'], unavailable)
+            for invalid in [None, {**shape, 'label': 'PRIVATE'},
+                            dict(status='unavailable', counts=shape['counts']),
+                            dict(status='observed', counts={**shape['counts'], 'textArea': True}),
+                            dict(status='observed', counts={**shape['counts'], 'textArea': 4097}),
+                            dict(status='observed', counts={**shape['counts'], 'editableTextArea': 2})]:
+                path.write_text(json.dumps({**value, 'classicRoleShape': invalid}))
+                with self.assertRaises(ValueError): q.semantic_observations(root, 'claude-desktop')
+            legacy = dict(value); del legacy['classicRoleShape']
+            path.write_text(json.dumps(legacy))
+            self.assertNotIn('classicRoleShape', q.semantic_observations(root, 'claude-desktop')[0])
+
+
 if __name__ == '__main__':
     unittest.main()
