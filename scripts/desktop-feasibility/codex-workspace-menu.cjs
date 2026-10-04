@@ -1,6 +1,6 @@
 'use strict';
-// Open only the frozen source's ordinary workspace selector. Observe, never
-// select an item or grant Send; IDs and profile paths remain private.
+// Use the frozen ordinary workspace selector; selection is a bounded opt-in
+// transition. This observation never grants Send; project IDs remain private.
 function capture() {
   const visible=e=>{const r=e.getBoundingClientRect(),s=getComputedStyle(e);return e.isConnected&&r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden'&&!e.closest('[inert]');};
   const homes=[...document.querySelectorAll('[data-codex-composer-root][data-composer-placement="home"]')].filter(visible);
@@ -87,22 +87,26 @@ async function run(page,guard,ownerGuard,deadline,loan,workspace,selectionPolicy
           ||!(await held.evaluate(sample,{opened:true,menu})).matched||!await retainedGuard())return null;
         const selection=await page.evaluate(require('./codex-selected-project.cjs').sample,{menu,projectId:selected.projectId});
         if(selection.reason!=='selected-id'||selection.selectedItemCount!==0||selection.matchingItemCount!==1||!await retainedGuard())return null;
-        facts.selectionClickAttempted=true;
+        facts.selectionClickAttempted=true;facts.selectionStage='item-click';
         await item.click({position:{x:a.rect[2]/2,y:a.rect[3]/2},timeout:Math.max(1,Math.min(2000,deadline-Date.now()))});
+        facts.selectionStage='original-popup-close';
         if(!custody()||!await alive())return null;
         // No popup substitute: the original popup must close in this document.
         if(!(await held.evaluate(sample,{opened:false,menu:null})).matched||!custody()||!await alive())return null;
         await menu.dispose();menu=null;
+        facts.selectionStage='closed-source';
         const closedA=await held.evaluate(sample,{opened:false,menu:null}),closedB=await held.evaluate(sample,{opened:false,menu:null});
         if(!closedA.matched||!closedB.matched||JSON.stringify(closedA.rect)!==JSON.stringify(closedB.rect)||!await retainedGuard())return null;
         const final=await held.evaluate(sample,{opened:false,menu:null});
         if(!final.matched||JSON.stringify(closedA.rect)!==JSON.stringify(final.rect)||!await retainedGuard())return null;
+        facts.selectionStage='reopen-click';
         await button.click({position:{x:final.rect[2]/2,y:final.rect[3]/2},timeout:Math.max(1,Math.min(2000,deadline-Date.now()))});
         if(!custody()||!await alive())return null;
+        facts.selectionStage='reopened-popup';
         const reopened=page.locator('[cmdk-root]:visible');if(await reopened.count()!==1)return null;
         menu=await reopened.elementHandle();
         if(!menu||!custody()||!await alive()||!(await held.evaluate(sample,{opened:true,menu})).matched||!await retainedGuard())return null;
-        facts.selectionClickCompleted=true;
+        facts.selectionClickCompleted=true;facts.selectionStage='completed';
         return {completed:true,menu};
       }finally{for(const h of [item,retained])if(h)try{await h.dispose();}catch{}}
     }:null;
