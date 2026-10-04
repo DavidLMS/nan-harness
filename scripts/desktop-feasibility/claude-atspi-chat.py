@@ -93,7 +93,7 @@ class Controller:
         if (type(bits) is not int or not 0 <= bits < 2**64 or bits & (1 << 6)
                 or not bits & (1 << 30) or not bits & (1 << 25)
                 or editable and not bits & (1 << 7) or active and not bits & (1 << 1)):
-            raise Rejected()
+            raise Rejected('input' if editable else 'frame' if active else 'state')
         return bits
 
     def bind(self):
@@ -126,13 +126,17 @@ class Controller:
                 raise Rejected()
             seen.add(node)
             self.owned(node)
-            self.state(node)
             identity = self.query('identity', node)
+            if node == (self.root['bus'], self.root['path']):
+                # Application is the held ownership root, not a drawn component.
+                # VISIBLE/SHOWING apply to the editor and its visual ancestors.
+                if identity[0] != 75:
+                    raise Rejected('source-owner')
+                break
+            self.state(node)
             if identity[0] == 23:  # Public AT-SPI Frame role.
                 self.state(node, active=True)
                 frames.append(node)
-            if node == (self.root['bus'], self.root['path']):
-                break
             node = self.query('parent', node)
         else:
             raise Rejected()

@@ -19,7 +19,7 @@ class Adapter:
     def owner(self, node):
         return 8 if self.changes.get('foreign') else 7
     def identity(self, node):
-        return {'root':(75,'Claude',''),'frame':(23,'Claude',''),
+        return {'root':(23 if self.changes.get('wrong_root_role') else 75,'Claude',''),'frame':(23,'Claude',''),
                 'editor':(61,'Write your prompt to Claude',''),
                 'mode':(39,'Mode',''),'chat':(43,'Chat',''),'send':(43,'Start task','')}[node]
     def children(self, node):
@@ -29,6 +29,8 @@ class Adapter:
     def parent(self, node):
         return {'editor':'root' if self.changes.get('detached') else 'frame','frame':'root','send':'frame','chat':'mode','mode':'frame'}[node]
     def state(self, node):
+        if node == 'root':return 0
+        if node == 'frame' and self.changes.get('hidden_frame'):return 0
         bits = (1<<30)|(1<<25)|(1<<1)|(1<<7)|(1<<8)|(1<<24)
         return bits & ~(1<<8) if node == 'send' and self.changes.get('disabled') else bits
     def bounds(self,node):
@@ -93,7 +95,7 @@ class ControllerTests(unittest.TestCase):
         controller.submit('another prompt')
         self.assertEqual((adapter.focus_count,adapter.paste_count,adapter.send_count),(1,1,1))
     def test_rejections_do_not_send(self):
-        for options in [{'foreign':True},{'duplicate':True},{'detached':True},{'outside':True},
+        for options in [{'foreign':True},{'wrong_root_role':True},{'hidden_frame':True},{'duplicate':True},{'detached':True},{'outside':True},
                         {'moved_client':True},{'wrong_mode':True},{'initial':'owned unknown'},
                         {'disabled':True},{'foreign_hit':True},{'duplicate_action':True},{'wrong_value':True},
                         {'clipboard_mismatch':True},{'guard_after_paste':True}]:
