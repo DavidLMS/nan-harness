@@ -521,35 +521,50 @@ static int scoped_control(const Tree& tree, const Request& request, bool retry, 
 }
 // The source server-error card keeps raw details collapsed. This selector only
 // authorizes its disclosure inside one failed-user turn; Retry stays marker-bound.
-static int failure_details_control(const Tree& tree, const Request& request) {
+static int failure_details_control(const Tree& tree, const Request& request, const char** failure = nullptr) {
+    const auto reject = [&](const char* stage) { if (failure) *failure = stage; return -1; };
+    unsigned anchors = 0;
+    for (std::size_t i = 0; i < tree.nodes.size(); ++i) if (descendant(tree, i, 0)
+        && tree.nodes[i].role == "AXStaticText" && tree.nodes[i].label == "Server error") ++anchors;
+    if (anchors != 1) return reject(anchors ? "scope-anchor-ambiguous" : "scope-anchor-absent");
+    if (request.prompt.empty()) return reject("scope-prompt-mismatch");
     int anchor = unique(tree, "AXStaticText", "Server error");
-    if (anchor < 0 || request.prompt.empty()) return -1;
+    bool heading_ambiguous = false, prompt_mismatch = false, control_ambiguous = false;
     int ancestor = tree.nodes[anchor].parent;
     for (unsigned depth = 0; ancestor > 0 && depth < 6; ++depth, ancestor = tree.nodes[ancestor].parent) {
         const auto& scope = tree.nodes[ancestor];
         if (scope.role == "AXWindow" || scope.role == "AXWebArea" || scope.role == "AXScrollArea") break;
         if (scope.role != "AXGroup") continue;
-        unsigned prompts = 0, headings = 0, user_headings = 0;
+        unsigned prompts = 0, headings = 0, user_headings = 0, retries = 0, details_count = 0;
         for (std::size_t i = 0; i < tree.nodes.size(); ++i) if (descendant(tree, i, ancestor)) {
             prompts += tree.nodes[i].label == request.prompt;
             headings += tree.nodes[i].role == "AXHeading";
             user_headings += tree.nodes[i].role == "AXHeading"
                 && tree.nodes[i].label == "You said: " + request.prompt;
+            retries += tree.nodes[i].role == "AXButton" && tree.nodes[i].label == "Retry";
+            details_count += tree.nodes[i].role == "AXButton" && tree.nodes[i].label == "View details";
         }
         int retry = unique(tree, "AXButton", "Retry", ancestor);
         int details = unique(tree, "AXButton", "View details", ancestor);
         if (prompts == 1 && headings == 1 && user_headings == 1 && retry >= 0 && details >= 0
             && target(tree.nodes[retry], request) && target(tree.nodes[details], request)) return details;
+        heading_ambiguous |= headings > 1;
+        prompt_mismatch |= prompts != 1 || user_headings != 1;
+        control_ambiguous |= retries > 1 || details_count > 1;
     }
-    return -1;
+    return reject(heading_ambiguous ? "scope-heading-ambiguous" : control_ambiguous ? "scope-control-ambiguous"
+        : prompt_mismatch ? "scope-prompt-mismatch" : "scope-control-absent");
 }
 static const char* open_failure_details(const Request& request, const Tree& tree) {
-    int index = failure_details_control(tree, request);
-    if (index < 0 || !chat(tree) || !owned(request)) return "scope";
+    const char* failure = "scope";
+    int index = failure_details_control(tree, request, &failure);
+    if (index < 0) return failure;
+    if (!chat(tree) || !owned(request)) return "scope";
     Tree fresh;
     if (!fresh.collect(request)) return fresh.failure ? fresh.failure : "tree-query";
-    int current = failure_details_control(fresh, request);
-    if (current < 0 || !chat(fresh) || !retained(fresh, tree.nodes[index])
+    int current = failure_details_control(fresh, request, &failure);
+    if (current < 0) return failure;
+    if (!chat(fresh) || !retained(fresh, tree.nodes[index])
         || !CFEqual(fresh.nodes[current].element, tree.nodes[index].element) || !owned(request)) return "control";
     request.deadline_phase = "deadline-press";
     if (AXUIElementPerformAction(fresh.nodes[current].element, kAXPressAction) != kAXErrorSuccess) return "action-uncertain";

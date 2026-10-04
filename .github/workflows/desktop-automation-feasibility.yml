@@ -181,6 +181,13 @@ jobs:
       - name: Verify Windows Claude acquisition policy without an application
         if: runner.os == 'Windows' && matrix.app == 'claude-desktop'
         run: cargo test --locked -p nan-harness-desktop-check --lib gui::claude_windows
+      - name: Verify exclusive Windows Claude profile and private Chat protocol
+        if: runner.os == 'Windows' && matrix.app == 'claude-desktop'
+        env:
+          RUST_TEST_THREADS: 1
+        run: |
+          cargo test --locked -p nan-harness-desktop-check --lib probe::claude_windows_profile::tests
+          cargo test --locked -p nan-harness-desktop-check --lib native::windows_chat_turn::tests
       - name: Verify bounded Windows UIA receipt protocol without an application
         if: runner.os == 'Windows' && matrix.app == 'claude-desktop'
         run: cargo test --locked -p nan-harness-desktop-check --lib native::windows_uia

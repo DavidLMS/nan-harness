@@ -40,4 +40,12 @@ int main() {
     assert(uia_chat_failure_details(failed,L"private failed prompt").control<0);
     failed.pop_back();failed.push_back({R::Text,L"Server error",1});
     assert(uia_chat_failure_details(failed,L"private failed prompt").control<0);
+
+    failed.pop_back();
+    failed.push_back({R::Heading,L"Claude responded: previous",1});
+    assert(std::string(uia_chat_failure_details(failed,L"private failed prompt").failure)=="scope-heading-ambiguous");
+    failed.pop_back();failed[6].label=L"Other control";
+    assert(std::string(uia_chat_failure_details(failed,L"private failed prompt").failure)=="scope-control-absent");
+    failed[6].label=L"View details";failed[2].label=L"You said: other";
+    assert(std::string(uia_chat_failure_details(failed,L"private failed prompt").failure)=="scope-prompt-mismatch");
 }

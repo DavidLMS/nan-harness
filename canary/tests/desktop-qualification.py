@@ -2886,7 +2886,7 @@ class CodexStaticDialogTitleTests(unittest.TestCase):
                      sourceVersion='26.930.31730', platform='windows',
                      artifactSha256='f7b0266d6c00d4743da01d62bc82488f7ec5560c642501758119cb9885f67c87',
                      wrapperSourceSha256='5e3a36d643393af861d2009584f64289f2247928e793f1985fe12cfec803a40b',
-                     catalogSha256='33c7d300500d793461b578c82b09b2cc748fe5f4ef99dd44e1e1151e857d63df',
+                     catalogSha256='1ebf78271cbe1bd9560031a91c7a6f4a77e5ca846daeaa2656f15e3a9cbb9ff7',
                      status='guard-rejected', titleReferenceCount=None, matchCount=None,
                      sourceTitleIds=[], sourceTitleEmpty=None, rejectionStage='title-tag')
         with tempfile.TemporaryDirectory() as root:
@@ -2911,7 +2911,7 @@ class CodexStaticDialogTitleTests(unittest.TestCase):
                      sourceVersion='26.930.41038', platform='linux',
                      artifactSha256='ee7854145554718d7239d01ea37d44f6ba1e0ba4a93f47ac097d6e0f964da47c',
                      wrapperSourceSha256='c3c9a86a6d9c3a2a8cecaf0a6a22527c69f89949cb0d8958896bc86131e9c6c9',
-                     catalogSha256='d7957a729c576bb921b963ef550e756d975148b96971a0564c79e3daf41c6c37',
+                     catalogSha256='0c8fb2493949bf96e04215ac748f3002e2685c26ebcd685f60abb71e80eabda2',
                      status='matched', titleReferenceCount=1, matchCount=1,
                      sourceTitleIds=['chatgpt.global_search.modal.title'])
         with tempfile.TemporaryDirectory() as root:
@@ -2935,7 +2935,7 @@ class CodexStaticDialogTitleTests(unittest.TestCase):
                      sourceVersion='26.930.41038', platform='macos',
                      artifactSha256='f6cf4d2e9b69aeefa33adda4bcd1a2d306357f5253a1ac6049700870c28dd0c7',
                      wrapperSourceSha256='0703d0aa97450d6d21346e1c79c887a5bf9062cd0069e8251ec03748a33b6dd0',
-                     catalogSha256='858a67a053e8082f48c699afd2a9000f17d40ae3007c6a75895b1c894378d688',
+                     catalogSha256='10314acea6cf4f759b5867adc2dd21ab1a9ac99881bd22730e3e6acbce11bcd0',
                      status='matched', titleReferenceCount=1, matchCount=1,
                      sourceTitleIds=['electron.onboarding.conversationalOnboarding.skipDialog.title'])
         with tempfile.TemporaryDirectory() as root:
@@ -2945,7 +2945,7 @@ class CodexStaticDialogTitleTests(unittest.TestCase):
             windows = {**value, 'platform': 'windows', 'sourceVersion': '26.930.31730',
                        'artifactSha256': 'f7b0266d6c00d4743da01d62bc82488f7ec5560c642501758119cb9885f67c87',
                        'wrapperSourceSha256': '5e3a36d643393af861d2009584f64289f2247928e793f1985fe12cfec803a40b',
-                       'catalogSha256': '33c7d300500d793461b578c82b09b2cc748fe5f4ef99dd44e1e1151e857d63df'}
+                       'catalogSha256': '1ebf78271cbe1bd9560031a91c7a6f4a77e5ca846daeaa2656f15e3a9cbb9ff7'}
             path.write_text(json.dumps(windows))
             self.assertEqual(q.semantic_observations(root, 'chatgpt-desktop')[0]['platform'], 'windows')
             for key in ('artifactSha256', 'wrapperSourceSha256', 'catalogSha256'):
@@ -2997,6 +2997,38 @@ class CodexStaticDialogTitleTests(unittest.TestCase):
                 with self.assertRaises(ValueError): q.semantic_observations(root, 'chatgpt-desktop')
             path.write_text(json.dumps(value))
             with self.assertRaises(ValueError): q.semantic_observations(root, 'claude-desktop')
+
+class CodexCommandMenuShapeTests(unittest.TestCase):
+    def test_only_closed_counts_and_exact_platform_catalog_can_be_recorded(self):
+        pins = {'windows': ('26.930.31730', 'f7b0266d6c00d4743da01d62bc82488f7ec5560c642501758119cb9885f67c87', '5e3a36d643393af861d2009584f64289f2247928e793f1985fe12cfec803a40b', '1ebf78271cbe1bd9560031a91c7a6f4a77e5ca846daeaa2656f15e3a9cbb9ff7'), 'linux': ('26.930.41038', 'ee7854145554718d7239d01ea37d44f6ba1e0ba4a93f47ac097d6e0f964da47c', 'c3c9a86a6d9c3a2a8cecaf0a6a22527c69f89949cb0d8958896bc86131e9c6c9', '0c8fb2493949bf96e04215ac748f3002e2685c26ebcd685f60abb71e80eabda2'), 'macos': ('26.930.41038', 'f6cf4d2e9b69aeefa33adda4bcd1a2d306357f5253a1ac6049700870c28dd0c7', '0703d0aa97450d6d21346e1c79c887a5bf9062cd0069e8251ec03748a33b6dd0', '10314acea6cf4f759b5867adc2dd21ab1a9ac99881bd22730e3e6acbce11bcd0')}
+        for platform, (version, artifact, wrapper, catalog) in pins.items():
+            value = dict(schemaVersion=1, mechanism='codex-static-dialog-title', diagnosticsOnly=True,
+                         sourceVersion=version, platform=platform, artifactSha256=artifact,
+                         wrapperSourceSha256=wrapper, catalogSha256=catalog, status='matched',
+                         titleReferenceCount=1, matchCount=1, sourceTitleIds=['codex.commandMenu.title'],
+                         commandMenuShape=dict(dialogMarkerCount=1, globalScopeCount=1,
+                                               rootCount=1, inputCount=1, listCount=1))
+            with tempfile.TemporaryDirectory() as root:
+                path = Path(root) / 'title.json'
+                path.write_text(json.dumps(value))
+                self.assertEqual(q.semantic_observations(root, 'chatgpt-desktop')[0]['commandMenuShape'], value['commandMenuShape'])
+                # A source-shaped control is advisory even when its title is unknown.
+                unknown = {**value, 'status': 'unknown', 'matchCount': 0, 'sourceTitleIds': []}
+                path.write_text(json.dumps(unknown))
+                self.assertEqual(q.semantic_observations(root, 'chatgpt-desktop')[0]['status'], 'unknown')
+                for shape in ({**value['commandMenuShape'], 'label': 'PRIVATE'},
+                              {**value['commandMenuShape'], 'inputCount': True},
+                              {**value['commandMenuShape'], 'rootCount': 4097},
+                              {**value['commandMenuShape'], 'globalScopeCount': 2},
+                              {**value['commandMenuShape'], 'listCount': -1}):
+                    path.write_text(json.dumps({**value, 'commandMenuShape': shape}))
+                    with self.assertRaises(ValueError): q.semantic_observations(root, 'chatgpt-desktop')
+                rejected = {**value, 'status': 'guard-rejected', 'titleReferenceCount': None,
+                            'matchCount': None, 'sourceTitleIds': []}
+                path.write_text(json.dumps(rejected))
+                with self.assertRaises(ValueError): q.semantic_observations(root, 'chatgpt-desktop')
+                path.write_text(json.dumps({**rejected, 'commandMenuShape': None}))
+                self.assertIsNone(q.semantic_observations(root, 'chatgpt-desktop')[0]['commandMenuShape'])
 
 if __name__ == '__main__':
     unittest.main()

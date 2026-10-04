@@ -1878,6 +1878,13 @@
       "sha": "7c3d5e9f763af57b7cf68da640049d49a8b2a260fcf2996a8cc9d4cec531aab2",
       "text": "Disable automatic worktree deletion?",
       "wrapperSha256": "5e3a36d643393af861d2009584f64289f2247928e793f1985fe12cfec803a40b"
+    },
+    {
+      "file": "command-menu-dialog-82915bbcace6.js",
+      "id": "codex.commandMenu.title",
+      "platform": "windows",
+      "sha": "eca1e012235d19b3c7aed16f9f41476c04fbe31a8a1f6babebdd47aaa927f666",
+      "text": "Command menu"
     }
   ],
   "sourceVersion": "26.930.31730"

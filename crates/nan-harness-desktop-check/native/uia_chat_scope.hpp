@@ -88,11 +88,16 @@ inline UiaChatScope uia_chat_failure_details(const std::vector<UiaChatScopeNode>
             if(users==1 && headings==1 && prompts==1 && retries==1 && details==1) {
                 result.control=control;result.ancestor=ancestor;result.user_heading=user;result.retry=retry;return result;
             }
-            if(users>1 || headings>1 || prompts>1 || retries>1 || details>1){result.failure="scope-control-ambiguous";return result;}
+            if(users>1 || headings>1 || prompts>1 || retries>1 || details>1){
+                result.failure=headings>1?"scope-heading-ambiguous":prompts>1?"scope-prompt-mismatch":"scope-control-ambiguous";
+                return result;
+            }
+            if(users==1 && headings==1 && prompts==1 && (retries==0 || details==0))result.failure="scope-control-absent";
         }
         const int next=nodes[ancestor].parent;
         if(next>=ancestor)return result;
         ancestor=next;
     }
-    result.failure="scope-prompt-mismatch";return result;
+    if(std::string(result.failure)=="scope")result.failure="scope-prompt-mismatch";
+    return result;
 }

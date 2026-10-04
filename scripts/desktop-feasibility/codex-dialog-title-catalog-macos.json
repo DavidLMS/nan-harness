@@ -1972,6 +1972,13 @@
       "sha": "41d36ed1970d72d4c9f5d9b9b17c055d09eb7b24f9517d2585b3828968bb9f67",
       "text": "Disable automatic worktree deletion?",
       "wrapperSha256": "0703d0aa97450d6d21346e1c79c887a5bf9062cd0069e8251ec03748a33b6dd0"
+    },
+    {
+      "file": "command-menu-dialog-d13f9084dffc.js",
+      "id": "codex.commandMenu.title",
+      "platform": "mac",
+      "sha": "6a94ba724f490cf0af6ff8bda8ed5198e1902be8eedd92557e632fd6ea5dd1c7",
+      "text": "Command menu"
     }
   ],
   "sourceVersion": "26.930.41038"

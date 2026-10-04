@@ -106,6 +106,23 @@ fn configured(values: &[serde_json::Value], base: &str, token: &str) -> bool {
         .iter()
         .all(|key| values[2].get(key).is_none())
 }
+// The CLI validates both source-defined roots before writing CHAT_ONLY config.
+// Neither root may contain prior state; the token owns both exclusive creations.
+fn create_fresh_roots(roots: &[PathBuf; 2]) -> Result<(), Reason> {
+    for root in roots {
+        if root
+            .try_exists()
+            .map_err(|_| Reason::IsolationUnavailable)?
+        {
+            return Err(Reason::IsolationUnavailable);
+        }
+    }
+    for root in roots {
+        nan_harness_private_fs::create_private_dir(root)
+            .map_err(|_| Reason::IsolationUnavailable)?;
+    }
+    Ok(())
+}
 impl FreshClaudeWindowsProfile {
     pub(crate) fn prepare(
         spec: &ProbeSpec,
@@ -160,6 +177,7 @@ impl FreshClaudeWindowsProfile {
             return Err(Reason::IsolationUnavailable);
         }
         let root = local.join("Claude-3p");
+        let normal_root = roaming.join("Claude");
         let mut directories = Vec::new();
         for parent in root
             .parent()
@@ -175,9 +193,10 @@ impl FreshClaudeWindowsProfile {
         if !native.claude_policy_absent(deadline) {
             return Err(Reason::IsolationUnavailable);
         }
-        // Exclusive creation rejects prior app state and migration destinations.
-        nan_harness_private_fs::create_private_dir(&root)
-            .map_err(|_| Reason::IsolationUnavailable)?;
+        directories.push(lock_directory(&roaming).map_err(|_| Reason::IsolationUnavailable)?);
+        // CHAT_ONLY observes both roots before apply_gateway writes their docs.
+        create_fresh_roots(&[normal_root.clone(), root.clone()])?;
+        directories.push(lock_directory(&normal_root).map_err(|_| Reason::IsolationUnavailable)?);
         directories.push(lock_directory(&root).map_err(|_| Reason::IsolationUnavailable)?);
         if Instant::now() >= deadline {
             return Err(Reason::BudgetExceeded);
@@ -315,6 +334,22 @@ mod tests {
         assert!(document(&mut File::open(&path).unwrap()).is_none());
         std::fs::write(&path, vec![b' '; MAX_CONFIG as usize + 1]).unwrap();
         assert!(document(&mut File::open(&path).unwrap()).is_none());
+    }
+    #[test]
+    fn fresh_roots_exist_before_cli_scope_validation_and_never_adopt_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let roots = [dir.path().join("Claude"), dir.path().join("Claude-3p")];
+        create_fresh_roots(&roots).unwrap();
+        assert!(roots.iter().all(|root| root.canonicalize().is_ok()));
+        std::fs::write(roots[0].join("sentinel"), b"existing").unwrap();
+        assert!(create_fresh_roots(&roots).is_err());
+        assert_eq!(
+            std::fs::read(roots[0].join("sentinel")).unwrap(),
+            b"existing"
+        );
+        let other = [roots[0].clone(), dir.path().join("new-third-party")];
+        assert!(create_fresh_roots(&other).is_err());
+        assert!(!other[1].exists());
     }
     #[test]
     fn fresh_root_never_adopts_existing_state() {

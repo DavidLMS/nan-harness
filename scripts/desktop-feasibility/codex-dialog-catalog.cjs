@@ -1,11 +1,11 @@
 // Passive exact public DialogTitle literals; never an input or dismissal policy.
 const macCatalog=require('./codex-dialog-title-catalog-macos.json');
-const macCatalogSha256='858a67a053e8082f48c699afd2a9000f17d40ae3007c6a75895b1c894378d688';
+const macCatalogSha256='10314acea6cf4f759b5867adc2dd21ab1a9ac99881bd22730e3e6acbce11bcd0';
 const linuxCatalog=require('./codex-dialog-title-catalog-linux.json');
-const linuxCatalogSha256='d7957a729c576bb921b963ef550e756d975148b96971a0564c79e3daf41c6c37';
+const linuxCatalogSha256='0c8fb2493949bf96e04215ac748f3002e2685c26ebcd685f60abb71e80eabda2';
 const catalog=require('./codex-dialog-title-catalog.json');
 const windowsCatalog=require('./codex-dialog-title-catalog-windows.json');
-const windowsCatalogSha256='33c7d300500d793461b578c82b09b2cc748fe5f4ef99dd44e1e1151e857d63df';
+const windowsCatalogSha256='1ebf78271cbe1bd9560031a91c7a6f4a77e5ca846daeaa2656f15e3a9cbb9ff7';
 const pins={
  win32:{artifact:'f7b0266d6c00d4743da01d62bc82488f7ec5560c642501758119cb9885f67c87',wrapper:'5e3a36d643393af861d2009584f64289f2247928e793f1985fe12cfec803a40b',runner:'Windows'},
  linux:{artifact:'ee7854145554718d7239d01ea37d44f6ba1e0ba4a93f47ac097d6e0f964da47c',wrapper:'c3c9a86a6d9c3a2a8cecaf0a6a22527c69f89949cb0d8958896bc86131e9c6c9',runner:'Linux'},
@@ -25,7 +25,7 @@ function facts(platform) {
  return {schemaVersion:1,mechanism:'codex-static-dialog-title',diagnosticsOnly:true,
   sourceVersion:platform==='linux'?linuxCatalog.sourceVersion:platform==='darwin'?macCatalog.sourceVersion:catalog.sourceVersion,platform:platform==='win32'?'windows':platform==='darwin'?'macos':'linux',
   artifactSha256:pin.artifact,wrapperSourceSha256:pin.wrapper,catalogSha256:platform==='win32'?windowsCatalogSha256:platform==='linux'?linuxCatalogSha256:platform==='darwin'?macCatalogSha256:catalogSha256,
-  status:'guard-rejected',sourceShape:null,rejectionStage:'unmeasured',guardFailure:null,titleReferenceCount:null,matchCount:null,sourceTitleEmpty:null,sourceTitleIds:[]};
+  status:'guard-rejected',sourceShape:null,commandMenuShape:null,rejectionStage:'unmeasured',guardFailure:null,titleReferenceCount:null,matchCount:null,sourceTitleEmpty:null,sourceTitleIds:[]};
 }
 // Standalone callbacks: no closure references, app text or DOM IDs leave the page.
 function holdDialog() {
@@ -81,9 +81,15 @@ function classifyTitle({held,entries}) {
   buttons.filter(e=>e.textContent?.trim()==='Get Started')];
  const sourceShape=lists.some(e=>e.length>4096)?null:Object.fromEntries(
   ['pageRoleLegend','dialogRoleLegend','pageRoleRadios','dialogRoleRadios','pageEngineering','dialogEngineering','dialogContinue','dialogGetStarted'].map((key,i)=>[key,lists[i].length]));
+ const commandLists=['[cmdk-root]','input[cmdk-input][role="combobox"]','[cmdk-list][role="listbox"]']
+  .map(selector=>[...held.dialog.querySelectorAll(selector)]);
+ const commandMenuShape=commandLists.some(list=>list.length>4096)?null:{
+  dialogMarkerCount:held.dialog.getAttribute('cmdk-dialog')!==null?1:0,
+  globalScopeCount:held.dialog.classList?.contains('global-command-menu-dialog')?1:0,
+  rootCount:commandLists[0].length,inputCount:commandLists[1].length,listCount:commandLists[2].length};
  const matches=[...new Set(entries.filter(e=>e.text===text.trim()).map(e=>e.id))].sort();
  return {status:matches.length===1?'matched':matches.length?'ambiguous':'unknown',
-  sourceShape,titleReferenceCount:1,matchCount:matches.length,sourceTitleEmpty:text.trim().length===0,sourceTitleIds:matches,rejectionStage:null,guardFailure:null};
+  sourceShape,commandMenuShape,titleReferenceCount:1,matchCount:matches.length,sourceTitleEmpty:text.trim().length===0,sourceTitleIds:matches,rejectionStage:null,guardFailure:null};
 }
 async function observe(held,platform,{guard,identity,same,deadline}) {
  const result=facts(platform);let handle;
