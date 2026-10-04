@@ -280,7 +280,7 @@ def public_onboarding(setup, app):
             if state['status']=='observed':
                 if set(state)!=statebase|({'prewarmContext'} if 'prewarmContext' in state else set()) or not all(state[k] for k in stateflags):
                     raise ValueError('inconsistent Codex selected project observation')
-            elif (set(state)!=statebase|{'reason'}|({'projectFailure'} if 'projectFailure' in state else set()) or type(state['reason']) is not str
+            elif (set(state)!=statebase|{'reason'}|({'projectFailure'} if 'projectFailure' in state else set())|({'selectedProjectObservation'} if 'selectedProjectObservation' in state else set()) or type(state['reason']) is not str
                     or state['reason'] not in {'profile-custody','workspace','state','project','guard','selected-id','state-changed','deadline','query'}
                     or state['statePairStable'] or state['selectedIdCorrelated']):
                 raise ValueError('invalid Codex profile state boundary')
@@ -291,6 +291,19 @@ def public_onboarding(setup, app):
                 raise ValueError('invalid Codex project projection boundary')
             if 'prewarmContext' in state:
                 codex_prewarm_context(state['prewarmContext'])
+            if 'selectedProjectObservation' in state:
+                selected=state['selectedProjectObservation']
+                if (state['status']!='blocked' or state.get('reason')!='selected-id'
+                        or state['ordinaryLocalProjectObserved'] is not True or type(selected) is not dict
+                        or type(selected.get('reason')) is not str or selected['reason'] not in {'menu','list','limit','selected-id'}):
+                    raise ValueError('invalid Codex selected project boundary')
+                if selected['reason']=='selected-id':
+                    if (set(selected)!={'reason','selectedItemCount','matchingItemCount'}
+                            or any(type(selected[k]) is not int or not 0<=selected[k]<=32
+                                for k in ('selectedItemCount','matchingItemCount'))):
+                        raise ValueError('invalid Codex selected project counts')
+                elif set(selected)!={'reason'}:
+                    raise ValueError('invalid Codex selected project shape')
     if 'codingEditableObservation' in setup:
         observation = setup['codingEditableObservation']
         categories = {'codexHomeCount','codexThreadCount','codexOtherCount','classicChatGPTCount',

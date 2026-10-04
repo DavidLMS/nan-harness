@@ -50,7 +50,7 @@ console.log(total+' synthetic fixture groups passed');
     const page={evaluate:async()=>{samples++;
       if(mode==='changed-state')f.nodes.get(f.state).metadata.mtimeNs++;
       if(mode==='guard-lost')f.guard=false;
-      return mode.endsWith('wrong-check')?{status:'blocked'}:observed;
+      return mode.endsWith('wrong-check')?{status:'blocked',reason:'selected-id',selectedItemCount:0,matchingItemCount:1}:observed;
     }};
     const result=await f.observe(page);
     assert.equal(result.status,['stable','absent-selection'].includes(mode)?'observed':'blocked');

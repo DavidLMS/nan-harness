@@ -103,7 +103,12 @@ async function observe(page,guard,deadline,loan,workspace,menu,endpoint=async()=
       if(!a.verify()||!await endpoint())return {...facts,reason:'guard'};
       const result=await page.evaluate(sample,{menu,projectId:selected.projectId});
       if(!a.verify()||!await endpoint())return {...facts,reason:'guard'};
-      if(result.status!=='observed'||result.selectedIdCorrelated!==true)return {...facts,reason:'selected-id'};
+      if(result.status!=='observed'||result.selectedIdCorrelated!==true){
+        const selectedProjectObservation={reason:result.reason};
+        if(result.reason==='selected-id')Object.assign(selectedProjectObservation,
+          {selectedItemCount:result.selectedItemCount,matchingItemCount:result.matchingItemCount});
+        return {...facts,reason:'selected-id',selectedProjectObservation};
+      }
     }
     const after=a.snapshotPair();
     if(!after||!stable(before.first.identity,after.second.identity)||before.first.digest!==after.second.digest||!a.verify()||!await endpoint())return {...facts,reason:'state-changed'};

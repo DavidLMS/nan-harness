@@ -2848,6 +2848,14 @@ class QualificationTests(unittest.TestCase):
                 q.public_onboarding({**setup,'workspaceMenuObservation':{**menu,**change}},'chatgpt-desktop')
         blocked={**state,'status':'blocked','statePairStable':False,'selectedIdCorrelated':False,'reason':'selected-id'}
         self.assertEqual(q.public_onboarding({**setup,'workspaceMenuObservation':{**menu,'profileStateObservation':blocked}},'chatgpt-desktop')['workspaceMenuObservation']['profileStateObservation'],blocked)
+        for reason in ['menu','list','limit','selected-id']:
+            selected={'reason':reason}
+            if reason=='selected-id':selected.update(selectedItemCount=0,matchingItemCount=1)
+            value={**blocked,'selectedProjectObservation':selected}
+            self.assertEqual(q.public_onboarding({**setup,'workspaceMenuObservation':{**menu,'profileStateObservation':value}},'chatgpt-desktop')['workspaceMenuObservation']['profileStateObservation'],value)
+            for change in ({'reason':'PRIVATE'},{'projectId':'PRIVATE'},{'selectedItemCount':True},{'matchingItemCount':33}):
+                with self.assertRaises(ValueError):
+                    q.public_onboarding({**setup,'workspaceMenuObservation':{**menu,'profileStateObservation':{**value,'selectedProjectObservation':{**selected,**change}}}},'chatgpt-desktop')
         for tag in ['container','projects-shape','projects-count','project-namespace','record-shape',
                     'record-identity','record-time','record-root','stored-selection']:
             value={**blocked,'reason':'project','projectFailure':tag}
