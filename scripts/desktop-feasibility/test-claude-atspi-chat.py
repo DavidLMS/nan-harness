@@ -667,4 +667,30 @@ class CopyMultiActionTests(unittest.TestCase):
         adapter,controller,facts=self.case(foreign_hit=True)
         self.assertEqual(adapter.copy_actions,0);self.assertFalse(facts['responseVerified'])
 
+class NativeAdapterWiringTests(unittest.TestCase):
+    def test_real_adapter_wires_owned_hit_check_without_native_execution(self):
+        import os
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        button=(':1.7','/button');child=(':1.7','/child');frame=(':1.7','/frame')
+        for found,foreign,expected in ((button,False,True),(child,False,True),
+                                      (child,True,False),(frame,False,False)):
+            calls=[]
+            adapter=SimpleNamespace(dbus=SimpleNamespace(UInt32=int),
+                bounds=lambda node:(10,20,30,40),owner=lambda node:8 if foreign else 7,
+                parent=lambda node:button if node==child else node)
+            def call(node,method,interface,*args):
+                calls.append((node,method,interface,args));return found
+            adapter.call=call
+            scope=dict(GITHUB_ACTIONS='true',RUNNER_ENVIRONMENT='github-hosted',RUNNER_OS='Linux',
+                NANH_CLAUDE_LINUX_SOURCE_POLICY='official-2.9939.4',
+                NANH_CLAUDE_LINUX_NATIVE_CHAT='first-turn',NANH_DESKTOP_QUALIFICATION_MODE='startup-baseline')
+            with patch.dict(os.environ,scope),patch.object(chat,'load_visibility',
+                    return_value=SimpleNamespace(Adapter=lambda deadline:adapter)),\
+                    patch('runpy.run_path',return_value={}):
+                native=chat.native_adapter(dict(pid=7,nativeExecutable=str(Path(__file__).resolve())),
+                    chat.time.monotonic()+10)
+            self.assertEqual(native.hit(button,frame),expected)
+            self.assertEqual(calls,[(frame,'GetAccessibleAtPoint','org.a11y.atspi.Component',(25,40,0))])
+
 if __name__=='__main__':unittest.main()

@@ -888,6 +888,7 @@ def native_adapter(request, deadline):
     adapter.select_all_once = lambda: key('ctrl+a')
     adapter.copy_input_once = readback
     adapter.actions = lambda node: action_names(adapter, node)
+    adapter.hit = hit
     adapter.invoke_once = lambda node,index: bool(adapter.call(node,'DoAction','org.a11y.atspi.Action',index))
     import secrets
     adapter.clipboard_sentinel = lambda: clipboard_write(secrets.token_hex(16))
