@@ -558,8 +558,13 @@ async function run() {
           try {
             if(Date.now()>=deadline||!ownerGuard())throw Error('expired');
             session=await initialMain.page.context().newCDPSession(initialMain.page);
-            return await require('./codex-point-observation.cjs').observe({session,native:nativeActivation,
+            const observation=await require('./codex-point-observation.cjs').observe({session,native:nativeActivation,
               held:initialMain,deadline,owner:ownerGuard});
+            if(observation.reason==='point-occluded'&&process.env.NANH_CODEX_OWNED_MOVE==='source-point') {
+              facts.initialMainActivation.nativeOwnedMove=await require('./codex-owned-move.cjs').run({
+                session,native:nativeActivation,held:initialMain,deadline,owner:ownerGuard});
+            }
+            return observation;
           } catch {return {reason:'observation-unavailable',mappingObserved:false,inputAuthorized:false};}
           finally {if(session)await session.detach().catch(()=>{});}
         })) {

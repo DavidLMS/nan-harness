@@ -3933,5 +3933,26 @@ class CodexPointObservationTests(unittest.TestCase):
             with self.assertRaises(ValueError):q.codex_point_observation({**good,**changes})
         with self.assertRaises(ValueError):q.codex_point_observation({**blocked,'reason':'mapping-observed','mappingObserved':True})
 
+class OwnedMoveFacts(unittest.TestCase):
+    def test_closed_source_point_move_receipt_and_contradictions(self):
+        native = dict(reason='moved-point-observed', candidateCount=1, inputAuthorized=False,
+                      planMeasured=True, fullWorkareaBoundsBlocker=False, candidateFound=True,
+                      moveAttempted=True, writeAcknowledged=True, sameIdentityTranslated=True,
+                      nativePointClear=True, nativeHitWindowMatched=True, mappingStable=True,
+                      nativeFocused=True)
+        good = dict(reason='moved-source-point-observed', sourcePointRetained=True,
+                    rendererReproved=True, postMappingObserved=True, inputAuthorized=False, native=native)
+        self.assertEqual(q.codex_owned_move(good), good)
+        for change in [{'inputAuthorized':True}, {'rawPath':'PRIVATE'}, {'sourcePointRetained':False},
+                       {'rendererReproved':False}, {'native':None},
+                       {'native':native|{'candidateCount':10}}, {'native':native|{'rawPID':100}},
+                       {'native':native|{'nativeFocused':False}}, {'native':native|{'reason':'unknown'}}]:
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                q.codex_owned_move(good|change)
+        denied = dict(reason='source-policy-rejected', sourcePointRetained=False,
+                      rendererReproved=False, postMappingObserved=False, inputAuthorized=False)
+        self.assertEqual(q.codex_owned_move(denied), denied)
+
+
 if __name__ == '__main__':
     unittest.main()

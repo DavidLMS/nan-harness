@@ -136,6 +136,11 @@ def qualification_environment(app, facts, real_nanh, executable, inherited=None)
             or enter_policy != 'owned-decoration-crossing' or source.get('NANH_ZED_CURSOR_HIT') != '1'
             or source.get('NANH_ZED_XRECORD') != '1'):
         raise ValueError('Zed owned cursor entry trial is unavailable')
+    xi2 = source.get('NANH_ZED_XI2_PAYLOAD')
+    if xi2 is not None and (app != 'zed-desktop' or source.get('RUNNER_OS') != 'Linux'
+            or xi2 != '1' or source.get('NANH_ZED_CURSOR_HIT') != '1'
+            or source.get('NANH_ZED_XRECORD') != '1'):
+        raise ValueError('Zed passive XI2 payload diagnostic is unavailable')
     if source.get('NANH_CLAUDE_MAC_NATIVE_CHAT') is not None and app != 'claude-desktop':
         raise ValueError('Claude native Chat controller is unavailable')
     if source.get('NANH_CLAUDE_MAC_CHAT_NAVIGATION') is not None and app != 'claude-desktop':
@@ -163,6 +168,12 @@ def qualification_environment(app, facts, real_nanh, executable, inherited=None)
     zoom = source.get('NANH_ZED_PANEL_ZOOM')
     if zoom is not None and (app != 'zed-desktop' or source.get('RUNNER_OS') != 'Linux' or zoom != 'observe'):
         raise ValueError('Zed panel zoom diagnostic is unavailable')
+    if source.get('NANH_CODEX_OWNED_MOVE') is not None and (
+            source.get('NANH_CODEX_OWNED_MOVE') != 'source-point' or app != 'chatgpt-desktop'
+            or source.get('RUNNER_OS') != 'macOS'
+            or source.get('NANH_CODEX_PROJECT_POLICY') != 'open-project'
+            or source.get('NANH_CODEX_PUBLIC_ONBOARDING') != 'engineering'):
+        raise ValueError('Codex owned move source policy is unavailable')
     if source.get('NANH_CODEX_PROJECT_POLICY') is not None and app != 'chatgpt-desktop':
         raise ValueError('Codex native project policy is unavailable')
     if source.get('NANH_CLAUDE_LINUX_NATIVE_CHAT') is not None and (app != 'claude-desktop' or source.get('RUNNER_OS') != 'Linux' or source.get('NANH_CLAUDE_LINUX_NATIVE_CHAT') != 'first-turn'):
@@ -217,6 +228,8 @@ def qualification_environment(app, facts, real_nanh, executable, inherited=None)
             if delivery != '1' or source.get('RUNNER_OS') != 'Linux':
                 raise ValueError('Zed delivery diagnostic is unavailable')
             environment['NANH_ZED_XRECORD'] = delivery
+        if xi2 is not None:
+            environment['NANH_ZED_XI2_PAYLOAD'] = xi2
         if enter_policy is not None:
             environment['NANH_ZED_ENTER_POLICY'] = enter_policy
         if (environment.get('FEASIBILITY_ZED_INPUT_DRIVER_MODE') != 'paste'
@@ -282,6 +295,15 @@ def qualification_environment(app, facts, real_nanh, executable, inherited=None)
                     or onboarding != 'engineering'):
                 raise ValueError('Codex native project policy is unavailable')
             environment['NANH_CODEX_PROJECT_POLICY'] = project_policy
+        owned_move = source.get('NANH_CODEX_OWNED_MOVE')
+        if owned_move is not None:
+            if (owned_move != 'source-point' or app != 'chatgpt-desktop'
+                    or source.get('RUNNER_OS') != 'macOS' or mode != 'renderer'
+                    or project_policy != 'open-project' or onboarding != 'engineering'):
+                raise ValueError('Codex owned move source policy is unavailable')
+            # Existing open-project gate below validates frozen release/executable
+            # and derives artifact identity; caller-supplied identity is not copied.
+            environment['NANH_CODEX_OWNED_MOVE'] = owned_move
         profile_policy = source.get('NANH_CLAUDE_MAC_PROFILE_POLICY')
         if profile_policy is not None:
             if (profile_policy not in {'electron-user-data-dir', 'native-known-folders'} or app != 'claude-desktop'

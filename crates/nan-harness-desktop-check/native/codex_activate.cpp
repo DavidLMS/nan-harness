@@ -4,10 +4,12 @@
 #include <string>
 #include <cstdint>
 #include <cmath>
+#include <cstdlib>
 #include <iomanip>
 #include "codex_activation_identity.hpp"
 #include "codex_occluder_kind.hpp"
 #include "codex_point_stack.hpp"
+#include "codex_move_plan.hpp"
 #if defined(__APPLE__)
 #import <AppKit/AppKit.h>
 #include <ApplicationServices/ApplicationServices.h>
@@ -23,7 +25,7 @@ CodexMainIdentity private_identity(const Binding& value) {
     return {value.id,uint64_t(value.pid),value.seconds,value.micros,value.bounds.origin.x,
         value.bounds.origin.y,value.bounds.size.width,value.bounds.size.height};
 }
-struct Request { bool action=false, verify=false, observe=false; double css_width=0,css_height=0,css_x=0,css_y=0; pid_t caller=0, root=0, launcher=0; uint64_t cutoff=0; std::string executable,document_url; Binding held; };
+struct Request { bool action=false, verify=false, observe=false,move=false; double css_width=0,css_height=0,css_x=0,css_y=0; pid_t caller=0, root=0, launcher=0; uint64_t cutoff=0; std::string executable,document_url; Binding held; };
 bool alive(const Request& r) {
     timespec now{};
     return getppid()==r.caller && clock_gettime(CLOCK_MONOTONIC,&now)==0
@@ -464,6 +466,128 @@ int point_observe(const Request& r,const Binding& held,AXUIElementRef main) {
     return std::cout?0:4;
 }
 
+struct OwnedMoveFacts {
+    const char* reason="plan-unavailable";unsigned candidates=0;
+    bool measured=false,full=false,candidate=false,attempted=false,ack=false,
+        translated=false,clear=false,hit=false,mapping=false,focused=false;
+};
+bool move_focus(const Request& r,const Binding& held,AXUIElementRef main) {
+    auto app=[NSRunningApplication runningApplicationWithProcessIdentifier:held.pid];
+    AXUIElementRef application=AXUIElementCreateApplication(held.pid);CFTypeRef focused=nullptr;
+    const bool valid=app&&app.active&&!app.hidden
+        &&[[[NSWorkspace sharedWorkspace] frontmostApplication] processIdentifier]==held.pid
+        &&application&&attribute(r,application,kAXFocusedWindowAttribute,focused)
+        &&CFGetTypeID(focused)==AXUIElementGetTypeID()&&CFEqual(main,focused)&&alive(r);
+    if(focused)CFRelease(focused);if(application)CFRelease(application);return valid;
+}
+struct MoveSnapshot {std::vector<MoveRow> rows;std::vector<double> identities;CGRect work{};MovePlan plan;};
+bool move_snapshot(const Request& r,const Binding& held,MovePoint offset,MoveSnapshot& out) {
+    if(!workarea(r,held.bounds,out.work))return false;
+    CFArrayRef rows=CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly|kCGWindowListExcludeDesktopElements,kCGNullWindowID);
+    bool valid=rows&&CFArrayGetCount(rows)>0&&CFArrayGetCount(rows)<=1024;
+    for(CFIndex i=0;valid&&i<CFArrayGetCount(rows);++i) {
+        auto value=CFArrayGetValueAtIndex(rows,i);
+        if(CFGetTypeID(value)!=CFDictionaryGetTypeID()){valid=false;break;}
+        auto row=(CFDictionaryRef)value;CGRect bounds{};
+        auto integer=[row](CFStringRef key,int64_t& n){auto v=CFDictionaryGetValue(row,key);return v&&CFGetTypeID(v)==CFNumberGetTypeID()&&CFNumberGetValue((CFNumberRef)v,kCFNumberSInt64Type,&n);};
+        int64_t id=0,pid=0,layer=0;double alpha=0;auto opacity=CFDictionaryGetValue(row,kCGWindowAlpha);
+        valid=integer(kCGWindowNumber,id)&&id>0&&integer(kCGWindowOwnerPID,pid)&&pid>1&&integer(kCGWindowLayer,layer)
+            &&rect(row,bounds)&&opacity&&CFGetTypeID(opacity)==CFNumberGetTypeID()
+            &&CFNumberGetValue((CFNumberRef)opacity,kCFNumberDoubleType,&alpha)&&std::isfinite(alpha)&&alpha>=0&&alpha<=1;
+        if(!valid)break;
+        const bool own=uint64_t(id)==held.id;
+        if(own&&(pid!=held.pid||layer!=0||!CGRectEqualToRect(bounds,held.bounds))){valid=false;break;}
+        out.rows.push_back({true,own,layer==CGWindowLevelForKey(kCGCursorWindowLevelKey),alpha<=0,
+            {bounds.origin.x,bounds.origin.y,bounds.size.width,bounds.size.height}});
+        for(double v:{double(id),double(pid),double(layer),alpha,bounds.origin.x,bounds.origin.y,bounds.size.width,bounds.size.height})out.identities.push_back(v);
+    }
+    if(rows)CFRelease(rows);if(!valid||!alive(r))return false;
+    out.plan=codex_move_plan({held.bounds.origin.x,held.bounds.origin.y,held.bounds.size.width,held.bounds.size.height},
+        {out.work.origin.x,out.work.origin.y,out.work.size.width,out.work.size.height},{offset},out.rows);
+    return out.plan.measured&&alive(r);
+}
+int owned_move(const Request& r,const Binding& held,AXUIElementRef main) {
+    OwnedMoveFacts f;Binding moved=held;WebAreaObservation a,b;MoveSnapshot first,second;
+    auto emit=[&](){
+        if(!alive(r))f.reason="deadline";
+        std::cout<<std::setprecision(17)<<"owned-move "<<f.reason<<' '<<f.candidates<<' '
+            <<f.measured<<' '<<f.full<<' '<<f.candidate<<' '<<f.attempted<<' '<<f.ack<<' '
+            <<f.translated<<' '<<f.clear<<' '<<f.hit<<' '<<f.mapping<<' '<<f.focused;
+        if(std::string(f.reason)=="moved-point-observed")std::cout<<' '<<moved.id<<' '<<moved.pid<<' '
+            <<moved.bounds.origin.x<<' '<<moved.bounds.origin.y<<' '<<moved.bounds.size.width<<' '
+            <<moved.bounds.size.height<<' '<<moved.seconds<<' '<<moved.micros;
+        std::cout<<'\n';if(a.element)CFRelease(a.element);if(b.element)CFRelease(b.element);return std::cout?0:4;
+    };
+    // Explicit source-point move is separate from observation/activation. The
+    // trusted caller's fixed policy has validated the frozen source action.
+    if(!move_focus(r,held,main)||!visit_webareas(r,main,held,0,a)||a.count!=1||!a.url_matched
+        ||a.bounds.size.width!=r.css_width||a.bounds.size.height!=r.css_height){f.reason="source-point-unavailable";return emit();}
+    const MovePoint offset{a.bounds.origin.x-held.bounds.origin.x+r.css_x,a.bounds.origin.y-held.bounds.origin.y+r.css_y};
+    if(!move_snapshot(r,held,offset,first))return emit();
+    f.measured=true;f.full=first.plan.full_workarea_bounds_blocker;f.candidate=first.plan.candidate;f.candidates=first.plan.candidates_checked;
+    if(f.full){f.reason="full-workarea-bounds-blocker";return emit();}
+    if(!f.candidate){f.reason="no-clear-candidate";return emit();}
+    Boolean settable=false;
+    if(!alive(r)||AXUIElementIsAttributeSettable(main,kAXPositionAttribute,&settable)!=kAXErrorSuccess||!settable){f.reason="position-not-settable";return emit();}
+    Binding before=held;InventoryFailure failure;AXUIElementRef current=nullptr;
+    bool valid=inventory(r,before,false,&failure,true)&&(current=main_window(r,held))&&CFEqual(main,current)
+        &&move_focus(r,held,main)&&visit_webareas(r,main,held,0,b)&&b.count==1&&b.url_matched
+        &&CFEqual(a.element,b.element)&&CGRectEqualToRect(a.bounds,b.bounds)&&move_snapshot(r,held,offset,second)
+        &&CGRectEqualToRect(first.work,second.work)&&first.identities==second.identities
+        &&second.plan.candidate&&first.plan.origin.x==second.plan.origin.x&&first.plan.origin.y==second.plan.origin.y&&alive(r);
+    if(current)CFRelease(current);
+    if(!valid){f.reason="pre-move-identity";return emit();}
+    moved.bounds.origin=CGPointMake(first.plan.origin.x,first.plan.origin.y);
+    AXValueRef position=AXValueCreate(kAXValueTypeCGPoint,&moved.bounds.origin);
+    if(!position){f.reason="position-not-settable";return emit();}
+    // Exactly one write. Any uncertain receipt ends the operation; never retry.
+    f.attempted=true;const AXError written=AXUIElementSetAttributeValue(main,kAXPositionAttribute,position);CFRelease(position);
+    f.ack=written==kAXErrorSuccess;if(!f.ack||!alive(r)){f.reason="write-uncertain";return emit();}
+    // Exact same identity with an explicitly expected translation, never prepare.
+    Binding after=moved;current=nullptr;
+    // Passive settle accepts only the original unchanged frame while awaiting
+    // the exact requested frame. No unexpected intermediate/replacement frame,
+    // new binding, second write or clock extension is permitted.
+    for(unsigned sample=0;sample<16&&alive(r);++sample) {
+        after=moved;
+        f.translated=inventory(r,after,false,&failure,true)&&(current=main_window(r,moved))&&CFEqual(main,current)&&alive(r);
+        if(current){CFRelease(current);current=nullptr;}
+        if(f.translated)break;
+        Binding unchanged=held;
+        const bool pending=inventory(r,unchanged,false,&failure,true)&&(current=main_window(r,held))
+            &&CFEqual(main,current)&&move_focus(r,held,main)&&alive(r);
+        if(current){CFRelease(current);current=nullptr;}
+        if(!pending)break;
+        if(sample<15&&alive(r))usleep(1000);
+    }
+    CGRect post_work{};
+    f.translated=f.translated&&workarea(r,moved.bounds,post_work)&&CGRectEqualToRect(first.work,post_work)&&CGRectContainsRect(post_work,moved.bounds);
+    if(!f.translated){f.reason="transition-unproved";return emit();}
+    WebAreaObservation area;
+    f.mapping=visit_webareas(r,main,moved,0,area)&&area.count==1&&area.url_matched&&CFEqual(a.element,area.element)
+        &&area.bounds.size.width==a.bounds.size.width&&area.bounds.size.height==a.bounds.size.height
+        &&area.bounds.origin.x-a.bounds.origin.x==moved.bounds.origin.x-held.bounds.origin.x
+        &&area.bounds.origin.y-a.bounds.origin.y==moved.bounds.origin.y-held.bounds.origin.y;
+    if(area.element)CFRelease(area.element);
+    if(!f.mapping){f.reason="post-mapping-changed";return emit();}
+    f.focused=move_focus(r,moved,main);if(!f.focused){f.reason="post-focus-unproved";return emit();}
+    const CGPoint point=CGPointMake(moved.bounds.origin.x+offset.x,moved.bounds.origin.y+offset.y);const char* why=nullptr;
+    f.clear=native_point_clear(r,moved,point,&why);if(!f.clear){f.reason="post-point-occluded";return emit();}
+    f.hit=native_hit_window(r,moved,main,point);if(!f.hit){f.reason="post-hit-unproved";return emit();}
+    after=moved;current=nullptr;
+    WebAreaObservation final_area;CGRect final_work{};
+    const bool final=inventory(r,after,false,&failure,true)&&(current=main_window(r,moved))&&CFEqual(main,current)
+        &&move_focus(r,moved,main)&&workarea(r,moved.bounds,final_work)&&CGRectEqualToRect(first.work,final_work)&&CGRectContainsRect(final_work,moved.bounds)
+        &&visit_webareas(r,main,moved,0,final_area)&&final_area.count==1&&final_area.url_matched&&CFEqual(a.element,final_area.element)
+        &&final_area.bounds.size.width==a.bounds.size.width&&final_area.bounds.size.height==a.bounds.size.height
+        &&final_area.bounds.origin.x-a.bounds.origin.x==moved.bounds.origin.x-held.bounds.origin.x
+        &&final_area.bounds.origin.y-a.bounds.origin.y==moved.bounds.origin.y-held.bounds.origin.y
+        &&native_point_clear(r,moved,point,&why)&&native_hit_window(r,moved,main,point)&&alive(r);
+    if(current)CFRelease(current);
+    if(final_area.element)CFRelease(final_area.element);
+    f.reason=final?"moved-point-observed":"transition-unproved";return emit();
+}
+
 bool parse(Request& r) {
     std::string line,phase,hex,extra;unsigned long caller=0,root=0,launcher=0,pid=0;
     char buffer[16385]{};
@@ -473,26 +597,33 @@ bool parse(Request& r) {
     if(!(input>>phase>>caller>>root>>launcher>>r.cutoff>>hex)||!r.cutoff
         ||caller<=1||root<=1||launcher<=1||caller>INT_MAX||root>INT_MAX||launcher>INT_MAX
         ||hex.empty()||hex.size()>PATH_MAX*2||hex.size()%2)return false;
-    r.caller=pid_t(caller);r.root=pid_t(root);r.launcher=pid_t(launcher);r.action=phase=="activate";r.verify=phase=="verify";r.observe=phase=="point-observe";
-    if(phase!="prepare"&&!r.action&&!r.verify&&!r.observe)return false;
+    r.caller=pid_t(caller);r.root=pid_t(root);r.launcher=pid_t(launcher);r.action=phase=="activate";r.verify=phase=="verify";r.observe=phase=="point-observe";r.move=phase=="move-owned";
+    if(phase!="prepare"&&!r.action&&!r.verify&&!r.observe&&!r.move)return false;
+    if(r.move) {
+        const auto env=[](const char* key,const char* expected){const char* value=std::getenv(key);return value&&std::string(value)==expected;};
+        if(!env("GITHUB_ACTIONS","true")||!env("RUNNER_ENVIRONMENT","github-hosted")||!env("RUNNER_OS","macOS")
+            ||!env("NANH_CODEX_OWNED_MOVE","source-point")||!env("NANH_CODEX_PUBLIC_ONBOARDING","engineering")
+            ||!env("NANH_CODEX_PROJECT_POLICY","open-project")
+            ||!env("NANH_CODEX_PROJECT_ARTIFACT_SHA256","f6cf4d2e9b69aeefa33adda4bcd1a2d306357f5253a1ac6049700870c28dd0c7"))return false;
+    }
     for(size_t i=0;i<hex.size();i+=2) {
         auto digit=[](char c)->int{return c>='0'&&c<='9'?c-'0':c>='a'&&c<='f'?c-'a'+10:-1;};
         int a=digit(hex[i]),b=digit(hex[i+1]);if(a<0||b<0||!(a*16+b))return false;
         r.executable.push_back(char(a*16+b));
     }
     if(r.executable[0]!='/')return false;
-    if(r.action||r.verify||r.observe) {
+    if(r.action||r.verify||r.observe||r.move) {
         if(!(input>>r.held.id>>pid>>r.held.bounds.origin.x>>r.held.bounds.origin.y
             >>r.held.bounds.size.width>>r.held.bounds.size.height>>r.held.seconds>>r.held.micros)
             ||!r.held.id||pid<=1||pid>INT_MAX||!r.held.seconds||!geometry(r.held.bounds))return false;
         r.held.pid=pid_t(pid);
     }
-    if(r.observe&&(!(input>>r.css_width>>r.css_height>>r.css_x>>r.css_y)
+    if((r.observe||r.move)&&(!(input>>r.css_width>>r.css_height>>r.css_x>>r.css_y)
         ||!std::isfinite(r.css_width)||!std::isfinite(r.css_height)
         ||!std::isfinite(r.css_x)||!std::isfinite(r.css_y)
         ||r.css_width<1||r.css_height<1||r.css_width>16384||r.css_height>16384
         ||r.css_x<=0||r.css_y<=0||r.css_x>=r.css_width||r.css_y>=r.css_height))return false;
-    if(r.observe) {
+    if(r.observe||r.move) {
         std::string urlhex;if(!(input>>urlhex)||urlhex.empty()||urlhex.size()>16384||urlhex.size()%2)return false;
         for(size_t i=0;i<urlhex.size();i+=2) {
             auto digit=[](char c)->int{return c>='0'&&c<='9'?c-'0':c>='a'&&c<='f'?c-'a'+10:-1;};
@@ -523,7 +654,7 @@ int codex_activate_main() {
         // Verification can observe a pending external stack transition after
         // activation; it never reports success or authorizes input while occluded.
         bool first_occluded=false,second_occluded=false;
-        if(!inventory(request,held,!request.action&&!request.verify&&!request.observe,&failure,true,&first_occluded))return activation_rejected("cg-inventory-before",&failure);
+        if(!inventory(request,held,!request.action&&!request.verify&&!request.observe&&!request.move,&failure,true,&first_occluded))return activation_rejected("cg-inventory-before",&failure);
         const auto first_inventory=failure;
         const char* boundary="ax-main-before";
         AXUIElementRef first=main_window(request,held,&boundary);if(!first)return activation_rejected(boundary);
@@ -535,6 +666,7 @@ int codex_activate_main() {
         valid=valid&&second&&CFEqual(first,second)&&alive(request);
         if(second)CFRelease(second);
         if(!valid){CFRelease(first);return activation_rejected(boundary,inventory_valid?nullptr:&failure);}
+        if(request.move){int result=owned_move(request,held,first);CFRelease(first);return result;}
         if(request.observe){int result=point_observe(request,held,first);CFRelease(first);return result;}
         if(request.verify) {
             // Both inventories and AX main identities above are complete and

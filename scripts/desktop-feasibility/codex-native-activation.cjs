@@ -22,6 +22,7 @@ function controller(config,owner,launcher,deadline,run=child.execFileSync,now=Da
     if(typeof file!=='string'||!path.isAbsolute(file)||fs.realpathSync(file)!==file
       ||!fs.lstatSync(file).isFile()||fs.lstatSync(file).isSymbolicLink())throw Error('native activation rejected');
   }
+  let moveConsumed=false;
   let held=null,cutoff=BigInt(config.cutoffNanos),attempted=false,nativeBoundary=null,nativeInventoryFailure=null,nativeActivationFailure=null,verificationPending=false,nativePendingStack=null;
   const boundaries=new Set(['request','cg-inventory-before','ax-main-before','cg-inventory-after','ax-main-after','identity','trust']);
   const actionBoundaries=new Set([...boundaries,'app-unavailable','app-unfocused','foreground-unfocused',
@@ -52,7 +53,7 @@ function controller(config,owner,launcher,deadline,run=child.execFileSync,now=Da
               if(phase==='prepare'){nativeBoundary=match[1];nativeInventoryFailure=inventory;}
             }
           }
-          if(accepted&&phase!=='prepare') {
+          if(accepted&&phase!=='prepare'&&phase!=='move-owned') {
             nativeActivationFailure={phase:phase==='activate'?'activation':'verification',boundary:match[1]};
             if(inventory)nativeActivationFailure.inventory=inventory;
           }
@@ -91,6 +92,22 @@ function controller(config,owner,launcher,deadline,run=child.execFileSync,now=Da
         ||typeof url!=='string'||!url||Buffer.byteLength(url)>8192||url.includes('\0'))
         throw Error('native observation rejected');
       return execute('point-observe',[...css,Buffer.from(url).toString('hex')]);
+    },
+    // Separate one-write move experiment; center observation never grants it.
+    moveOwned(css,url,sourceKind) {
+      if(!held||!attempted||moveConsumed||sourceKind!=='onboarding-engineering'
+        ||process.platform!=='darwin'||process.env.GITHUB_ACTIONS!=='true'||process.env.RUNNER_ENVIRONMENT!=='github-hosted'
+        ||process.env.RUNNER_OS!=='macOS'||process.env.NANH_CODEX_OWNED_MOVE!=='source-point'
+        ||process.env.NANH_CODEX_PUBLIC_ONBOARDING!=='engineering'||process.env.NANH_CODEX_PROJECT_POLICY!=='open-project'
+        ||process.env.NANH_CODEX_PROJECT_ARTIFACT_SHA256!=='f6cf4d2e9b69aeefa33adda4bcd1a2d306357f5253a1ac6049700870c28dd0c7'
+        ||!Array.isArray(css)||css.length!==4||!css.every(Number.isFinite)
+        ||css[0]<1||css[1]<1||css[0]>16384||css[1]>16384||css[2]<=0||css[3]<=0||css[2]>=css[0]||css[3]>=css[1]
+        ||typeof url!=='string'||!url||Buffer.byteLength(url)>8192||url.includes('\0'))throw Error('owned move rejected');
+      moveConsumed=true;
+      const receipt=require('./codex-owned-move-wire.cjs').parseMove(execute('move-owned',[...css,Buffer.from(url).toString('hex')]),held.tokens);
+      // This typed transition changes geometry only; original clock/cutoff remain.
+      if(receipt.tokens)held={tokens:receipt.tokens,clock:held.clock};
+      return receipt.facts;
     },
     verify() {
       if(!held||!attempted)return false;

@@ -123,6 +123,67 @@ def codex_prewarm_context(value):
     return value
 
 
+def codex_owned_move(value):
+    bits = {'sourcePointRetained', 'rendererReproved', 'postMappingObserved'}
+    reasons = {'source-policy-rejected', 'source-point-unavailable', 'deadline-or-owner',
+               'renderer-changed', 'native-move-rejected', 'move-unavailable-or-uncertain',
+               'post-mapping-unproved', 'moved-source-point-observed'}
+    base = bits | {'reason', 'inputAuthorized'}
+    if (type(value) is not dict or set(value) not in (base, base | {'native'})
+            or type(value.get('reason')) is not str or value['reason'] not in reasons
+            or value.get('inputAuthorized') is not False
+            or any(type(value[k]) is not bool for k in bits)):
+        raise ValueError('invalid Codex owned move observation')
+    native = value.get('native')
+    if 'native' in value:
+        native_bits = {'planMeasured', 'fullWorkareaBoundsBlocker', 'candidateFound',
+                       'moveAttempted', 'writeAcknowledged', 'sameIdentityTranslated',
+                       'nativePointClear', 'nativeHitWindowMatched', 'mappingStable', 'nativeFocused'}
+        native_reasons = {'plan-unavailable', 'full-workarea-bounds-blocker', 'no-clear-candidate',
+                         'position-not-settable', 'pre-move-identity', 'write-uncertain',
+                         'transition-unproved', 'post-point-occluded', 'post-hit-unproved',
+                         'post-mapping-changed', 'post-focus-unproved', 'source-point-unavailable',
+                         'deadline', 'moved-point-observed'}
+        if (type(native) is not dict
+                or set(native) != native_bits | {'reason', 'candidateCount', 'inputAuthorized'}
+                or type(native.get('reason')) is not str or native['reason'] not in native_reasons
+                or native.get('inputAuthorized') is not False
+                or any(type(native[k]) is not bool for k in native_bits)
+                or type(native['candidateCount']) is not int or not 0 <= native['candidateCount'] <= 9
+                or not value['sourcePointRetained']):
+            raise ValueError('invalid Codex native move facts')
+        if (not native['planMeasured'] and (native['candidateCount'] or any(
+                    native[k] for k in native_bits - {'planMeasured'}))
+                or native['fullWorkareaBoundsBlocker'] and (native['candidateFound']
+                    or native['candidateCount'] or native['moveAttempted'])
+                or native['candidateFound'] and (not native['planMeasured'] or native['candidateCount'] < 1)
+                or native['moveAttempted'] and not native['candidateFound']
+                or native['writeAcknowledged'] and not native['moveAttempted']
+                or native['sameIdentityTranslated'] and not native['writeAcknowledged']
+                or native['mappingStable'] and not native['sameIdentityTranslated']
+                or native['nativePointClear'] and not (native['mappingStable'] and native['nativeFocused'])
+                or native['nativeHitWindowMatched'] and not native['nativePointClear']
+                or native['reason'] == 'moved-point-observed' and (native['fullWorkareaBoundsBlocker']
+                    or not all(native[k] for k in native_bits - {'fullWorkareaBoundsBlocker'}))
+                or native['reason'] == 'full-workarea-bounds-blocker' and not native['fullWorkareaBoundsBlocker']
+                or native['reason'] == 'no-clear-candidate' and (not native['planMeasured']
+                    or native['candidateFound'] or native['fullWorkareaBoundsBlocker'])
+                or native['reason'] == 'write-uncertain' and (not native['moveAttempted'] or native['writeAcknowledged'])):
+            raise ValueError('inconsistent Codex native move facts')
+    moved = native is not None and native['reason'] == 'moved-point-observed'
+    if (value['rendererReproved'] and not value['sourcePointRetained']
+            or value['postMappingObserved'] != (value['reason'] == 'moved-source-point-observed')
+            or value['postMappingObserved'] and not (value['rendererReproved'] and moved)
+            or value['reason'] == 'source-policy-rejected' and (
+                any(value[k] for k in bits) or 'native' in value)
+            or value['reason'] == 'post-mapping-unproved' and not (
+                value['sourcePointRetained'] and value['rendererReproved'] and moved)
+            or value['reason'] == 'native-move-rejected' and (
+                native is None or moved or not value['rendererReproved'])):
+        raise ValueError('inconsistent Codex owned move observation')
+    return value
+
+
 def codex_point_observation(value):
     reasons={'measured','ax-limit-or-deadline','ax-query','ax-visibility-unavailable',
         'ax-webarea-geometry','ax-webarea-ambiguous','ax-webarea-missing','ax-webarea-changed',
@@ -2130,7 +2191,7 @@ def semantic_observations(directory, app):
             if 'initialMainActivation' in value:
                 activation = value['initialMainActivation']
                 if (app != 'chatgpt-desktop' or type(activation) is not dict
-                        or set(activation) - {'nativeBoundary','nativeInventoryFailure','nativeActivationFailure','nativePendingStack','nativePointObservation'} != {'phase', 'status', 'activationAttempted', 'guardFailure'}
+                        or set(activation) - {'nativeBoundary','nativeInventoryFailure','nativeActivationFailure','nativePendingStack','nativePointObservation','nativeOwnedMove'} != {'phase', 'status', 'activationAttempted', 'guardFailure'}
                         or type(activation['phase']) is not str or activation['phase'] not in {
                             'pre-proof', 'pre-identity', 'activation', 'polling', 'final-proof'}
                         or type(activation['status']) is not str or activation['status'] not in {
@@ -2150,6 +2211,12 @@ def semantic_observations(directory, app):
                             or activation['phase'] not in {'polling','final-proof'}):
                         raise ValueError('invalid Codex passive point phase')
                     codex_point_observation(activation['nativePointObservation'])
+                if 'nativeOwnedMove' in activation:
+                    if (activation.get('nativePointObservation', {}).get('reason') != 'point-occluded'
+                            or not activation['activationAttempted']
+                            or activation['phase'] not in {'polling', 'final-proof'}):
+                        raise ValueError('invalid Codex owned move phase')
+                    codex_owned_move(activation['nativeOwnedMove'])
                 if 'nativeBoundary' in activation:
                     boundary = activation['nativeBoundary']
                     if (type(boundary) is not str or boundary not in {
