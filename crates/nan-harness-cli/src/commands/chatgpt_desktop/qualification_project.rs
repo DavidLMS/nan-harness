@@ -265,6 +265,10 @@ pub(super) fn apply(
             return Err(error);
         }
     };
+    // Chromium does not expose the web subtree on macOS until accessibility
+    // is enabled. Scope this launch flag to the fully admitted owned trial.
+    #[cfg(target_os = "macos")]
+    command.arg("--force-renderer-accessibility");
     command
         .arg("--open-project")
         .arg(cwd)
