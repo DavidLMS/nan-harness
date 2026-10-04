@@ -660,6 +660,16 @@ async function run(page, ownerGuard, deadline, rejected, mainGuard, folderTrust,
         facts.codingEditableObservation=coding.ancestry;
         facts.codingHomeStateObservation=coding.homeState;
       }
+      if(process.platform==='darwin'&&skipAdmitted&&profileLoan
+          &&coding.observation.modalCount===0&&coding.homeState.status==='observed'
+          &&coding.homeState.homeComposerCount===1&&coding.homeState.proseMirrorEditableCount===1
+          &&coding.homeState.workspaceControlCount===1&&coding.homeState.pendingTextareaCount===0
+          &&coding.homeState.pendingGroupCount===0) {
+        facts.macHomeStateObservation=await require('./codex-macos-home-state.cjs').observe({
+          page,alive:ownedEndpoint,ownerGuard,deadline,loan:profileLoan,
+          workspace:profileLoan.directories[0].path,openMenu:true});
+        return stop('scope-remained');
+      }
       if(process.platform==='linux'&&skipAdmitted&&profileLoan
           &&coding.observation.modalCount===0&&coding.homeState.status==='observed'
           &&coding.homeState.homeComposerCount===1&&coding.homeState.proseMirrorEditableCount===1

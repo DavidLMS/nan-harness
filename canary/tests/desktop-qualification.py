@@ -4061,6 +4061,22 @@ class ClaudeWindowsProfileSealTests(unittest.TestCase):
                     path.write_text(json.dumps(good))
                     with self.assertRaises(ValueError):q.semantic_observations(root,'zed-desktop')
 
+class MacCodexHomeStateTests(unittest.TestCase):
+    def test_passive_state_and_menu_never_admit_input(self):
+        value=dict(status='observed',reason='menu-correlated',diagnosticsOnly=True,
+            inputAuthorized=False,sendAuthorized=False,homeRetained=True,stateQueried=True,
+            statePairStable=True,ordinaryLocalProjectObserved=True,selectedIdCorrelated=True,
+            menuClickAttempted=True,menuClickCompleted=True)
+        self.assertEqual(q.public_mac_codex_home_state(value),value)
+        for change in [dict(inputAuthorized=True),dict(sendAuthorized=True),dict(rawText='PRIVATE'),
+                dict(stateQueried=1),dict(homeRetained=False),dict(menuClickAttempted=False),
+                dict(selectedIdCorrelated=False),dict(reason='unknown'),dict(statePairStable=False)]:
+            with self.subTest(change=change),self.assertRaises(ValueError):
+                q.public_mac_codex_home_state(value|change)
+        passive=value|dict(reason='state-observed',selectedIdCorrelated=False,
+            menuClickAttempted=False,menuClickCompleted=False)
+        self.assertEqual(q.public_mac_codex_home_state(passive),passive)
+
 class ClaudeWindowsImmutablePrivacyTests(unittest.TestCase):
     def test_configuration_mismatch_is_closed_and_never_success(self):
         good=dict(schemaVersion=1,mechanism='claude-windows-profile-seal',diagnosticsOnly=True,

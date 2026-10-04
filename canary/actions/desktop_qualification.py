@@ -220,8 +220,34 @@ def codex_point_observation(value):
     return value
 
 
+def public_mac_codex_home_state(value):
+    flags={'homeRetained','stateQueried','statePairStable','ordinaryLocalProjectObserved',
+           'selectedIdCorrelated','menuClickAttempted','menuClickCompleted'}
+    fixed={'diagnosticsOnly':True,'inputAuthorized':False,'sendAuthorized':False}
+    reasons={'custody','home','document','state','project','control','menu','selected-id',
+             'state-changed','deadline','query','menu-correlated','state-observed'}
+    if (type(value) is not dict or set(value)!=flags|set(fixed)|{'status','reason'}
+            or any(type(value[key]) is not bool for key in flags)
+            or any(type(value[key]) is not bool or value[key]!=expected for key,expected in fixed.items())
+            or type(value['status']) is not str or type(value['reason']) is not str
+            or value['status'] not in {'blocked','observed'} or value['reason'] not in reasons):
+        raise ValueError('invalid Mac Codex home state')
+    if (value['menuClickCompleted'] and not value['menuClickAttempted']
+            or value['stateQueried'] and not value['homeRetained']
+            or value['statePairStable'] and not value['stateQueried']
+            or value['selectedIdCorrelated'] and not value['menuClickCompleted']
+            or value['status']=='observed' and (not value['homeRetained'] or not value['statePairStable']
+                or not value['ordinaryLocalProjectObserved']
+                or value['reason']!='menu-correlated' and value['reason']!='state-observed'
+                or (value['reason']=='menu-correlated')!=value['selectedIdCorrelated'])
+            or value['reason']=='state-observed' and value['menuClickAttempted']
+            or value['status']=='blocked' and value['reason'] in {'menu-correlated','state-observed'}):
+        raise ValueError('inconsistent Mac Codex home state')
+    return value
+
+
 def public_onboarding(setup, app):
-    shape = set(setup) - {'folderTrust', 'rejectedPageInventory', 'taskScopeProved', 'taskClickAttempted', 'taskClickCompleted', 'codingComposerReady', 'taskScopeObservation', 'taskControlKind', 'codingReadinessObservation', 'codingNavigationObservation', 'codingHomeObservation', 'codingEditableObservation', 'codingHomeStateObservation', 'workspaceMenuObservation', 'taskSkipConfirmationAttempted', 'taskSkipConfirmationCompleted', 'taskSkipConfirmationProof', 'mainGuardFailure', 'pageSetFailure', 'foreignOverlayImportSetup', 'foreignOverlaySourceCounts', 'foreignOverlayActionability'} if type(setup) is dict else set()
+    shape = set(setup) - {'folderTrust', 'rejectedPageInventory', 'taskScopeProved', 'taskClickAttempted', 'taskClickCompleted', 'codingComposerReady', 'taskScopeObservation', 'taskControlKind', 'codingReadinessObservation', 'codingNavigationObservation', 'codingHomeObservation', 'codingEditableObservation', 'codingHomeStateObservation', 'workspaceMenuObservation', 'macHomeStateObservation', 'taskSkipConfirmationAttempted', 'taskSkipConfirmationCompleted', 'taskSkipConfirmationProof', 'mainGuardFailure', 'pageSetFailure', 'foreignOverlayImportSetup', 'foreignOverlaySourceCounts', 'foreignOverlayActionability'} if type(setup) is dict else set()
     booleans = {'conversationalScope', 'engineeringControl', 'roleClickAttempted',
                 'roleClickCompleted', 'engineeringChecked', 'continueControl',
                 'continueClickAttempted', 'continueClickCompleted', 'roleScopeAbsent'}
@@ -312,6 +338,12 @@ def public_onboarding(setup, app):
             raise ValueError('invalid Codex home state observation')
         if observation['status']=='observed' and observation['homeComposerCount']==0 and any(observation[key] for key in counts-{'homeComposerCount'}):
             raise ValueError('inconsistent Codex home state observation')
+    if 'macHomeStateObservation' in setup:
+        observation=setup['macHomeStateObservation']
+        public_mac_codex_home_state(observation)
+        if (app!='chatgpt-desktop' or setup.get('taskScopeProved') is not True
+                or setup.get('taskClickCompleted') is not True or setup['stage']!='coding-readiness'):
+            raise ValueError('invalid Mac Codex home state context')
     if 'workspaceMenuObservation' in setup:
         menu=setup['workspaceMenuObservation']
         fixed={'diagnosticsOnly':True,'sendAuthorized':False}
