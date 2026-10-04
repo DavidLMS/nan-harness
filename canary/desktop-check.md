@@ -216,6 +216,17 @@ uniqueness, owned bounds and native guards; no uncertain activation receives a
 second attempt. This transport is described in
 [xdotool's upstream manual](https://github.com/jordansissel/xdotool/blob/main/xdotool.pod).
 
+The hosted Codex macOS onboarding trial activates one retained native main
+window instead of calling renderer `bringToFront`. Admission requires a unique
+visible standard main window of the exact installed executable, fresh process
+ancestry and creation identity, unchanged native geometry, an unobstructed
+window stack, and two matching accessibility main-window observations. The
+activation and exact retained-window raise are consumed once; uncertainty is
+terminal. Two fresh native and renderer document-focus proofs are required
+before onboarding. Native and renderer association relies on these independent
+uniqueness proofs; it does not claim a direct renderer-target/window-ID mapping.
+The private native cutoff is clipped to the original startup deadline.
+
 `--verification semantic-only` requires a disposable GitHub-hosted deterministic
 session and a supported adapter. It never falls back to OCR. Renderer input
 requires a live owned launch root, fresh loopback-listener ancestry and one owned
