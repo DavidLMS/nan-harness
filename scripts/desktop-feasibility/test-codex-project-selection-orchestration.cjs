@@ -49,27 +49,28 @@ async function fixture(kind='normal'){
  const page={url:()=> 'app://original',context:()=>({newCDPSession:async()=>session}),
   async evaluateHandle(fn,args){return new Handle(evaluate(fn,undefined,args&&{...args,menu:args.menu?.value??args.menu,originalMenu:args.originalMenu?.value??args.originalMenu}),args?'choice-loan':'pw-loan')},
   locator(){return {count:async()=>opened?1:0,elementHandle:async()=>new Handle(currentMenu)}},
-  async evaluate(){selectionObservations++;if(kind==='selection-race'&&selectionObservations===2)return {status:'observed',selectedIdCorrelated:true};return selected?{status:'observed',selectedIdCorrelated:true}:{status:'blocked',reason:'selected-id',selectedItemCount:0,matchingItemCount:1}}};
+  async evaluate(){selectionObservations++;if(kind==='state-menu-rewrite'&&clock>=500)stateRewritten=true;if(kind==='selection-race'&&selectionObservations===2)return {status:'observed',selectedIdCorrelated:true};return selected?{status:'observed',selectedIdCorrelated:true}:{status:'blocked',reason:'selected-id',selectedItemCount:0,matchingItemCount:1}}};
  const exports={};
- const mockedContext={create(options){const original=options.pwProof;const loan=contextModule.create({...options,now:()=>clock,pwProof:async held=>{proofPhases.push(opened?(reopened?'new':'old'):'closed');return original(held)},makeWitness:()=>({observe:async()=>{witnesses++;return {verified:true,inputAuthorized:false}}})});const prepare=loan.prepare;loan.prepare=async held=>{const r=await prepare(held);if(kind==='owner-after-prepare')owner=false;return r};return loan}};
- let snapshots=0;
+ const mockedContext={create(options){const original=options.pwProof;const loan=contextModule.create({...options,now:()=>clock,pwProof:async held=>{proofPhases.push(opened?(reopened?'new':'old'):'closed');return original(held)},makeWitness:()=>({observe:async()=>{witnesses++;if(kind==='state-context-rewrite'&&witnesses===1)stateRewritten=true;if(kind==='state-context-record-change'&&witnesses===1){stateRewritten=true;selectedState['local-projects']['private-ID'].updatedAt=2;}return {verified:true,inputAuthorized:false}}})});const prepare=loan.prepare;loan.prepare=async held=>{const r=await prepare(held);if(kind==='owner-after-prepare')owner=false;return r};return loan}};
+ let snapshots=0,stateRewritten=false;
+ const stateFixture=kind.startsWith('state-');const cutoff=stateFixture?2000:1000;
  const project={id:'private-ID',name:'Owned',rootPaths:['/owned'],createdAt:1,updatedAt:1};
  const initialState={'local-projects':{'private-ID':project}};
  const selectedState={'local-projects':{'private-ID':{...project}},'selected-project':{type:'local',projectId:'private-ID'}};
  if(kind==='changed-project-record')selectedState['local-projects']['private-ID'].updatedAt=2;
  if(kind==='wrong-stored-selection')selectedState['selected-project'].projectId='other';
  const identity={dev:1,ino:2,uid:3,size:4,mtimeNs:5,ctimeNs:6,mode:7,nlink:1};
- const fixtureAuthority={verify:()=>owner&&clock<1000,close(){calls.push('profile-close')},snapshotPair(){snapshots++;
+ const fixtureAuthority={verify:()=>owner&&clock<cutoff,close(){calls.push('profile-close')},snapshotPair(){snapshots++;
    const value=selected?selectedState:initialState;
-   const row={value,identity,digest:kind==='baseline-drift'&&snapshots===2?'changed-before-input':selected?'selected':'initial'};
+   const row={value,identity:stateRewritten?{...identity,ino:9}:identity,digest:kind==='baseline-drift'&&snapshots===2?'changed-before-input':selected?(stateRewritten?'selected-after-write':'selected'):'initial'};
    return {first:row,second:row};}};
  const profile={};let profileSource=fs.readFileSync(path.join(base,'codex-profile-state.cjs'),'utf8');
  const begin=profileSource.indexOf('function authority('),end=profileSource.indexOf('exports.authority=authority;');
  profileSource=profileSource.slice(0,begin)+'function authority(){return fixtureAuthority;}\n'+profileSource.slice(end);
- vm.runInNewContext(profileSource,{exports:profile,fixtureAuthority,Date:{now:()=>clock},require:n=>n==='./codex-selected-project.cjs'?{sample(){}}:require(n),process,Buffer,TextDecoder});
+ vm.runInNewContext(profileSource,{exports:profile,fixtureAuthority,Date:{now:()=>clock},require:n=>n==='./codex-selected-project.cjs'?{sample(){}}:n==='./codex-selected-state-settling.cjs'?{settle:options=>require(path.join(base,n)).settle({...options,wait:async ms=>{clock+=ms}})}:require(n),process:{...process,platform:kind==='non-linux'?'darwin':'linux'},Buffer,TextDecoder});
 
  vm.runInNewContext(fs.readFileSync(path.join(base,'codex-workspace-menu.cjs'),'utf8'),{exports,Date:{now:()=>clock},setTimeout:(callback,delay)=>{clock+=delay;return setTimeout(callback,0)},require:n=>n==='./codex-context-session.cjs'?mockedContext:n==='./codex-profile-state.cjs'?profile:n==='./codex-project-choice.cjs'?choice:require(path.join(base,n))});
- const result=await exports.run(page,async()=>owner,()=>owner,1000,{directories:[{path:'/owned'}]},'/owned',{frozenLinuxTrial:true});
+ const result=await exports.run(page,async()=>owner,()=>owner,cutoff,{directories:[{path:'/owned'}]},'/owned',{frozenLinuxTrial:true});
  assert.equal(detached,1,kind+' detached');assert.equal(released,1,kind+' released');assert(disposed.includes('pw-loan'));assert(disposed.includes('button'));assert.equal(result.sendAuthorized,false);assert(!JSON.stringify(result).includes('private-ID'));assert(!JSON.stringify(result).includes('/owned'));assert(handles.every(h=>h.closed),kind+' every acquired PW handle disposed');
  assert(buttonClicks<=2&&itemClicks<=1,kind+' no retry');
  return {result,buttonClicks,itemClicks,witnesses,proofPhases,disposed};
@@ -84,5 +85,11 @@ async function fixture(kind='normal'){
   if(['choice-property-delay','initial-button-uncertain','baseline-drift','selection-race'].includes(kind))assert.equal(r.itemClicks,0,kind);
   if(['owner-after-selection','loader-after-selection','editor-after-selection','selection-uncertain','popup-stays-open'].includes(kind))assert.equal(r.buttonClicks,1,kind+' no reopen');
  }
- console.log('18 workspace/profile/CDP popup, deadline, uncertainty and cleanup cases passed');
+ for(const kind of ['state-menu-rewrite','state-context-rewrite']){
+  const r=await fixture(kind);assert.equal(r.result.profileStateObservation.status,'observed',kind);
+  assert.equal(r.itemClicks,1);assert.equal(r.buttonClicks,2);assert.equal(r.witnesses,kind==='state-context-rewrite'?2:1);
+ }
+ const semantic=await fixture('state-context-record-change');assert.equal(semantic.result.profileStateObservation.status,'blocked');assert.equal(semantic.itemClicks,1);assert.equal(semantic.buttonClicks,2);assert.equal(semantic.witnesses,1);assert.equal('prewarmContext' in semantic.result.profileStateObservation,false);
+ const platform=await fixture('non-linux');assert.equal(platform.result.profileStateObservation.status,'blocked');assert.equal(platform.itemClicks,0);assert.equal(platform.witnesses,0);
+ console.log('22 workspace/profile/CDP cases PASS; late inode rewrite repeats only passive proofs, changed original record rejects');
 })().catch(e=>{console.error(e);process.exitCode=1});

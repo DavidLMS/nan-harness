@@ -120,8 +120,19 @@ async function observe(page,guard,deadline,loan,workspace,menu,endpoint=async()=
     facts.ordinaryLocalProjectObserved=true;
     const originalRecord=JSON.stringify(before.first.value['local-projects'][selected.projectId]);
     let expected=before,transitioned=false;
+    const selectedState=value=>{
+      const p=project(value,workspace);
+      return !!p&&p.projectId===selected.projectId
+        &&JSON.stringify(value['local-projects'][selected.projectId])===originalRecord
+        &&exactKeys(value['selected-project'],['type','projectId'])
+        &&value['selected-project'].type==='local'&&value['selected-project'].projectId===selected.projectId;
+    };
+    const settle=baseline=>require('./codex-selected-state-settling.cjs').settle({
+      read:()=>a.snapshotPair(),prove:async()=>a.verify()&&await endpoint()&&a.verify(),
+      valid:selectedState,baseline,deadline,now:()=>Date.now()});
     const sample=require('./codex-selected-project.cjs').sample;
     if(selectionTransition){
+      if(process.platform!=='linux')return {...facts,reason:'selection-state'};
       if(!a.verify()||!await endpoint())return {...facts,reason:'guard'};
       const initial=await page.evaluate(sample,{menu,projectId:selected.projectId});
       if(!a.verify()||!await endpoint())return {...facts,reason:'guard'};
@@ -132,34 +143,46 @@ async function observe(page,guard,deadline,loan,workspace,menu,endpoint=async()=
         const transition=await selectionTransition({...selected,projectName:before.first.value['local-projects'][selected.projectId].name.trim()||selected.projectId},()=>a.verify());
         if(!transition||!transition.menu||transition.completed!==true||!a.verify()||!await endpoint())return {...facts,reason:'selection-transition'};
         menu=transition.menu;
-        expected=a.snapshotPair();
-        if(!expected||!a.verify()||!await endpoint())return {...facts,reason:'state-changed'};
-        const value=expected.first.value,p=project(value,workspace);
-        if(!p||p.projectId!==selected.projectId||JSON.stringify(value['local-projects'][selected.projectId])!==originalRecord
-          ||!exactKeys(value['selected-project'],['type','projectId'])||value['selected-project'].type!=='local'
-          ||value['selected-project'].projectId!==selected.projectId)return {...facts,reason:'selection-state'};
-        transitioned=true;
+        // Only this Linux source-declared, already-consumed selection permits
+        // passive state inode replacement; every replacement must keep the
+        // original sole canonical record and the exact selected ID.
+        const settled=await settle(before);
+        if(!settled.pair)return {...facts,reason:settled.reason};
+        expected=settled.pair;transitioned=true;
       }
     }
-    for(let i=0;i<2;i++){
-      if(!a.verify()||!await endpoint())return {...facts,reason:'guard'};
-      const result=await page.evaluate(sample,{menu,projectId:selected.projectId});
-      if(!a.verify()||!await endpoint())return {...facts,reason:'guard'};
-      if(result.status!=='observed'||result.selectedIdCorrelated!==true){
-        const selectedProjectObservation={reason:result.reason};
-        if(result.reason==='selected-id')Object.assign(selectedProjectObservation,
-          {selectedItemCount:result.selectedItemCount,matchingItemCount:result.matchingItemCount});
-        return {...facts,reason:'selected-id',selectedProjectObservation};
+    while(Date.now()<deadline){
+      for(let i=0;i<2;i++){
+        if(!a.verify()||!await endpoint())return {...facts,reason:'guard'};
+        const result=await page.evaluate(sample,{menu,projectId:selected.projectId});
+        if(!a.verify()||!await endpoint())return {...facts,reason:'guard'};
+        if(result.status!=='observed'||result.selectedIdCorrelated!==true){
+          const selectedProjectObservation={reason:result.reason};
+          if(result.reason==='selected-id')Object.assign(selectedProjectObservation,
+            {selectedItemCount:result.selectedItemCount,matchingItemCount:result.matchingItemCount});
+          return {...facts,reason:'selected-id',selectedProjectObservation};
+        }
       }
+      const after=a.snapshotPair();
+      if(!a.verify()||!await endpoint())return {...facts,reason:'guard'};
+      if(!after||!stable(expected.first.identity,after.second.identity)||expected.first.digest!==after.second.digest){
+        if(!transitioned||!after||!selectedState(after.first.value)||!selectedState(after.second.value))return {...facts,reason:'state-changed'};
+        const settled=await settle(null);if(!settled.pair)return {...facts,reason:settled.reason};
+        expected=settled.pair;continue;
+      }
+      const prewarmContext=contextObservation?await contextObservation(selected):undefined;
+      if(contextObservation){
+        const final=a.snapshotPair();
+        if(!a.verify()||!await endpoint())return {...facts,reason:'guard'};
+        if(!final||!stable(expected.first.identity,final.second.identity)||expected.first.digest!==final.second.digest){
+          if(!transitioned||!final||!selectedState(final.first.value)||!selectedState(final.second.value))return {...facts,reason:'state-changed'};
+          const settled=await settle(null);if(!settled.pair)return {...facts,reason:settled.reason};
+          expected=settled.pair;continue;
+        }
+      }
+      return {...facts,status:'observed',statePairStable:true,selectedIdCorrelated:true,...(transitioned?{ordinarySelectionCompleted:true}:{}),...(prewarmContext?{prewarmContext}:{})};
     }
-    const after=a.snapshotPair();
-    if(!after||!stable(expected.first.identity,after.second.identity)||expected.first.digest!==after.second.digest||!a.verify()||!await endpoint())return {...facts,reason:'state-changed'};
-    const prewarmContext=contextObservation?await contextObservation(selected):undefined;
-    if(contextObservation){
-      const final=a.snapshotPair();
-      if(!final||!stable(expected.first.identity,final.second.identity)||expected.first.digest!==final.second.digest||!a.verify()||!await endpoint())return {...facts,reason:'state-changed'};
-    }
-    return {...facts,status:'observed',statePairStable:true,selectedIdCorrelated:true,...(transitioned?{ordinarySelectionCompleted:true}:{}),...(prewarmContext?{prewarmContext}:{})};
+    return {...facts,reason:'deadline'};
   }catch{return {...facts,reason:Date.now()>=deadline?'deadline':'query'};}
   finally{a.close();}
 }

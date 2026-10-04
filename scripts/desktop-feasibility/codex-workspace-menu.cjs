@@ -140,7 +140,8 @@ async function run(page,guard,ownerGuard,deadline,loan,workspace,selectionPolicy
         return {completed:true,menu};
       }finally{for(const h of [item,retained])if(h)try{await h.dispose();}catch{}}
     }:null;
-    const observation=await require('./codex-profile-state.cjs').observe(page,ownerGuard,deadline,loan,workspace,menu,alive,async selected=>prepared.verified?context.observe(held,selected.projectId,selected.workspace):prepared,transition);
+    const profileGuard=async()=>await alive()&&await context.verifyHeld(held)&&await alive();
+    const observation=await require('./codex-profile-state.cjs').observe(page,ownerGuard,deadline,loan,workspace,menu,profileGuard,async selected=>prepared.verified?context.observe(held,selected.projectId,selected.workspace):prepared,transition);
     if(!await alive()||!(await held.evaluate(sample,{opened:true,menu})).matched||!await alive())return {...facts,reason:'guard'};
     return {...facts,status:'observed',profileStateObservation:observation};
   } catch {return {...facts,reason:Date.now()>=deadline?'deadline':facts.clickAttempted?'action-uncertain':'query'};}
