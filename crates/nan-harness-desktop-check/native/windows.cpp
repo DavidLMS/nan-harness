@@ -1100,41 +1100,6 @@ static bool held_creation(HANDLE process, std::uint64_t& time) {
     time = (static_cast<std::uint64_t>(created.dwHighDateTime) << 32) | created.dwLowDateTime;
     return time != 0;
 }
-static OriginalImageFile image_file_identity(const FILE_ID_INFO& info) {
-    OriginalImageFile result{info.VolumeSerialNumber,{}};
-    std::copy(std::begin(info.FileId.Identifier),std::end(info.FileId.Identifier),result.id.begin());
-    return result;
-}
-static const char* held_image_failure(HANDLE process, const BY_HANDLE_FILE_INFORMATION& expected,
-    const FILE_ID_INFO& original_file) {
-    wchar_t path[32768] = {}; DWORD size = 32768;
-    if (!QueryFullProcessImageNameW(process, 0, path, &size) || size == 0 || size >= 32768)
-        return "target-image-query";
-    CleanupHandle file(CreateFileW(path, FILE_READ_ATTRIBUTES, FILE_SHARE_READ,
-        nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr));
-    if (file.value == INVALID_HANDLE_VALUE) {
-        const auto error = GetLastError();
-        return error == ERROR_SHARING_VIOLATION ? "target-image-sharing"
-            : error == ERROR_ACCESS_DENIED ? "target-image-access" : "target-image-open";
-    }
-    BY_HANDLE_FILE_INFORMATION actual{};
-    FILE_ID_INFO candidate{};
-    if (!GetFileInformationByHandleEx(file.value,FileIdInfo,&candidate,sizeof(candidate)))
-        return "target-image-file-id-query";
-    if (!same_original_image_file(image_file_identity(original_file),image_file_identity(candidate)))
-        return original_file.VolumeSerialNumber != candidate.VolumeSerialNumber
-            ? "target-image-volume" : "target-image-file-id";
-    if (!GetFileInformationByHandle(file.value, &actual)) return "target-image-metadata";
-    const auto identity = [](const BY_HANDLE_FILE_INFORMATION& info) {
-        return RetainedImageIdentity{info.dwVolumeSerialNumber,info.nFileIndexHigh,info.nFileIndexLow,
-            info.nFileSizeHigh,info.nFileSizeLow,info.ftLastWriteTime.dwHighDateTime,info.ftLastWriteTime.dwLowDateTime};
-    };
-    return retained_image_mismatch(identity(expected), identity(actual));
-}
-static bool held_image(HANDLE process, const BY_HANDLE_FILE_INFORMATION& expected,
-    const FILE_ID_INFO& original_file) {
-    return held_image_failure(process, expected, original_file) == nullptr;
-}
 static bool pinned_digest(HANDLE file, const std::string& expected) {
     if (expected.size() != 64 || expected.find_first_not_of("0123456789abcdef") != std::string::npos) return false;
     LARGE_INTEGER length{};
@@ -1222,8 +1187,11 @@ int owned_cleanup_holder() {
     const auto self = std::find_if(rows.begin(), rows.end(), [](const auto& row) { return row.pid == GetCurrentProcessId(); });
     if (self == rows.end() || self->parent != checker) return unavailable();
     std::cout << "progress snapshot\n" << std::flush;
+    // Installed-file pin validates the launch contract. Each target is owned by
+    // stable ancestry and an original process handle, not executable equality:
+    // legitimate launch descendants may run distinct helper files.
     struct Target {
-        CleanupHandle handle; std::uint64_t created; bool targeted = false; bool image_verified = false;
+        CleanupHandle handle; std::uint64_t created; bool targeted = false; bool ancestry_verified = false;
         Target(HANDLE value, std::uint64_t time) : handle(value), created(time) {}
     };
     std::vector<Target> targets;
@@ -1238,18 +1206,16 @@ int owned_cleanup_holder() {
         if (!handle) return unavailable();
         targets.emplace_back(handle, created);
         std::uint64_t held_time = 0;
-        const char* image_failure = nullptr;
         const auto identity = retained_target_identity(
-            held_creation(handle, held_time) && held_time == created,
+            held_creation(handle, held_time) && held_time == created, true,
             [&] {
                 const DWORD state = WaitForSingleObject(handle, 0);
                 return state == WAIT_OBJECT_0 ? RetainedProcessState::Exited
                     : state == WAIT_TIMEOUT ? RetainedProcessState::Live : RetainedProcessState::Unavailable;
-            }, [&] { image_failure = held_image_failure(handle, expected, original_file); return image_failure == nullptr; });
+            });
         if (identity == RetainedTargetIdentity::CreationRejected) { stage = "target-creation"; return unavailable(); }
         if (identity == RetainedTargetIdentity::StateRejected) { stage = "target-state"; return unavailable(); }
-        if (identity == RetainedTargetIdentity::ImageRejected) { stage = image_failure ? image_failure : "target-image"; return unavailable(); }
-        targets.back().image_verified = identity == RetainedTargetIdentity::Live;
+        targets.back().ancestry_verified = identity == RetainedTargetIdentity::Live;
     }
     std::cout << "progress targets\n" << std::flush;
     stage = "owner-recheck";
@@ -1270,25 +1236,18 @@ int owned_cleanup_holder() {
     if (!correlation_snapshot(checker, post)) {
         return unavailable();
     }
-    for (const auto& row : post) {
-        if (!row.matching) continue;
-        std::uint64_t created = 0;
-        const auto retained = std::find_if(targets.begin(), targets.end(), [&](const auto& target) {
-            return GetProcessId(target.handle.value) == row.pid;
-        });
-        if (retained == targets.end() || !correlation_time(row.pid, created) || created != retained->created) {
-            return unavailable();
-        }
-    }
+    std::vector<RetainedProcessBinding> retained;
+    for (const auto& target : targets)
+        retained.push_back({GetProcessId(target.handle.value),target.created});
+    if (!matches_retained_inventory(post,retained,correlation_time)) return unavailable();
     for (auto& target : targets) {
         if (GetTickCount64() >= cutoff || WaitForSingleObject(owner.value, 0) != WAIT_TIMEOUT) { ++rejected; continue; }
         const DWORD state = WaitForSingleObject(target.handle.value, 0);
         if (state == WAIT_OBJECT_0) { ++already; continue; }
         std::uint64_t created = 0;
-        if (state != WAIT_TIMEOUT || !target.image_verified || !held_creation(target.handle.value, created) || created != target.created
-            || !held_image(target.handle.value, expected, original_file)) { ++rejected; continue; }
+        if (state != WAIT_TIMEOUT || !target.ancestry_verified || !held_creation(target.handle.value, created) || created != target.created) { ++rejected; continue; }
         if (!terminate_verified_handle({GetTickCount64() < cutoff,
-                WaitForSingleObject(owner.value, 0) == WAIT_TIMEOUT, true, true},
+                WaitForSingleObject(owner.value, 0) == WAIT_TIMEOUT, true, target.ancestry_verified},
             [&] { return TerminateProcess(target.handle.value, 1) != FALSE; })) { ++rejected; continue; }
         target.targeted = true; ++targeted;
     }

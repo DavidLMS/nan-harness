@@ -78,15 +78,22 @@ impl Capture {
         if !meta.is_file() {
             return Err(Receipt::failed("unavailable"));
         }
-        if meta.len() > 0 {
-            let mut last = [0_u8];
-            file.seek(SeekFrom::Start(meta.len() - 1))
-                .map_err(|_| Receipt::failed("unavailable"))?;
-            file.read_exact(&mut last)
-                .map_err(|_| Receipt::failed("unavailable"))?;
-            if last != *b"\n" {
-                return Err(Receipt::failed("truncated"));
-            }
+        if meta.len() > LIMIT {
+            return Err(Receipt::failed("limit"));
+        }
+        // A stopped classifier stays stopped: an earlier limit must not become
+        // an apparently complete, empty interval when Retry begins later.
+        let mut baseline = zeroize::Zeroizing::new(Vec::new());
+        (&mut file)
+            .take(meta.len())
+            .read_to_end(&mut baseline)
+            .map_err(|_| Receipt::failed("unavailable"))?;
+        if baseline.len() as u64 != meta.len() {
+            return Err(Receipt::failed("truncated"));
+        }
+        let previous = classify(&baseline);
+        if previous.status != "complete" {
+            return Err(previous);
         }
         Ok(Self {
             file,
@@ -147,42 +154,28 @@ fn classify(bytes: &[u8]) -> Receipt {
         return Receipt::failed("unavailable");
     };
     let mut receipt = Receipt::failed("complete");
-    let signatures = [
-        ("DEBUG [agent:2267] ", "Found session for: "),
-        ("ERROR [agent:2264] ", "Session not found in run_turn: "),
-        ("DEBUG [agent::thread:2546] ", "Total messages in thread: "),
-        ("DEBUG [agent::thread:2583] ", "Total messages in thread: "),
-        (
-            "DEBUG [agent::thread:2737] ",
-            "Starting agent turn execution",
-        ),
-        ("DEBUG [agent::thread:2755] ", "Turn execution completed"),
-        ("ERROR [agent::thread:2759] ", "Turn execution failed: "),
-        (
-            "DEBUG [agent::thread:2747] ",
-            "Turn was cancelled, skipping cleanup",
-        ),
+    let events = [
+        "session-found",
+        "session-missing",
+        "resume-messages",
+        "ordinary-send",
+        "turn-started",
+        "turn-completed",
+        "turn-failed",
+        "turn-cancelled",
     ];
     for line in text.lines() {
-        // Timestamp framing is checked, but logs remain untrusted diagnostic data.
-        let Some((stamp, rest)) = line.split_once(' ') else {
-            continue;
+        if line == "limit" {
+            return Receipt::failed("limit");
+        }
+        let Some(index) = events.iter().position(|event| *event == line) else {
+            return Receipt::failed("unavailable");
         };
-        if stamp.len() != 25 || stamp.as_bytes().get(10).is_none_or(|c| *c != b'T') {
-            continue;
-        }
-        for (index, (tag, prefix)) in signatures.iter().enumerate() {
-            if rest
-                .strip_prefix(tag)
-                .is_some_and(|message| message.starts_with(prefix))
-            {
-                let slot = receipt.counts.counter(index);
-                let Some(count) = slot.checked_add(1) else {
-                    return Receipt::failed("limit");
-                };
-                *slot = count;
-            }
-        }
+        let slot = receipt.counts.counter(index);
+        let Some(count) = slot.checked_add(1) else {
+            return Receipt::failed("limit");
+        };
+        *slot = count;
     }
     receipt
 }
@@ -192,32 +185,42 @@ mod tests {
     use super::*;
     use std::io::Write as _;
     #[test]
-    fn counters_discard_private_payload_and_unknown_lines() {
-        let receipt = classify(b"2026-10-04T12:00:00+00:00 DEBUG [agent:2267] Found session for: PRIVATE\nspoof DEBUG [agent::thread:2546] Total messages in thread: 7\n2026-10-04T12:00:00+00:00 DEBUG [agent::thread:2546] Total messages in thread: 7\n");
+    fn closed_events_only_and_limits_are_distinguished() {
+        let receipt = classify(b"session-found\nresume-messages\n");
         assert_eq!(receipt.counts.session_found, 1);
         assert_eq!(receipt.counts.resume_messages, 1);
-        assert!(!serde_json::to_string(&receipt).unwrap().contains("PRIVATE"));
+        assert_eq!(classify(b"PRIVATE\n").status, "unavailable");
+        assert_eq!(classify(b"limit\n").status, "limit");
         assert_eq!(classify(b"unfinished").status, "truncated");
-        // Fully framed injected records cannot be authenticated; never input authority.
-        assert_eq!(classify(b"2026-10-04T12:00:00+00:00 DEBUG [agent::thread:2583] Total messages in thread: 9\n").counts.ordinary_send, 1);
+    }
+    #[test]
+    fn limit_before_retry_cannot_be_reported_as_empty_success() {
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().join("events");
+        std::fs::write(&path, b"session-found\nlimit\n").unwrap();
+        assert_eq!(Capture::begin(&path).err().unwrap().status, "limit");
     }
     #[test]
     fn original_file_interval_excludes_old_records_and_rejects_replacement() {
         let temporary = tempfile::tempdir().unwrap();
         let dir = temporary.path();
         let path = dir.join("Zed.log");
-        std::fs::write(&path, b"old private contents\n").unwrap();
+        std::fs::write(&path, b"session-found\n").unwrap();
         let capture = Capture::begin(&path).unwrap_or_else(|_| panic!("fixture open"));
         assert_eq!(capture.finish().counts, Counts::default());
         let capture = Capture::begin(&path).unwrap_or_else(|_| panic!("fixture open"));
-        OpenOptions::new().append(true).open(&path).unwrap()
-            .write_all(b"2026-10-04T12:00:00+00:00 DEBUG [agent::thread:2546] Total messages in thread: 8\n").unwrap();
+        OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap()
+            .write_all(b"resume-messages\n")
+            .unwrap();
         assert_eq!(capture.finish().counts.resume_messages, 1);
         let capture = Capture::begin(&path).unwrap_or_else(|_| panic!("fixture open"));
         std::fs::rename(&path, dir.join("old")).unwrap();
         std::fs::write(&path, b"").unwrap();
         assert_eq!(capture.finish().status, "rotated");
-        std::fs::write(&path, b"long contents\n").unwrap();
+        std::fs::write(&path, b"session-found\nresume-messages\n").unwrap();
         let capture = Capture::begin(&path).unwrap_or_else(|_| panic!("fixture open"));
         std::fs::write(&path, b"").unwrap();
         assert_eq!(capture.finish().status, "truncated");

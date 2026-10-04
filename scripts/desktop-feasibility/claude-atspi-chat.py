@@ -402,6 +402,7 @@ class Controller:
         self.restored = False
         self.copy_attempted = False
         self.retry_attempted = False
+        self.readback_active = False
         self.focus_attempted = self.paste_attempted = self.send_attempted = False
         self.facts = dict(schemaVersion=1, mechanism='claude-linux-native-chat', diagnosticsOnly=True,
             stage='source', inputVerified=False, pasteAttempted=False,
@@ -550,7 +551,7 @@ class Controller:
         self.sealed_frame = (self.query('identity', self.frame), self.query('bounds', self.frame))
         self.proof()
 
-    def proof(self, focused=False, pending=False):
+    def proof(self, focused=False, pending=False, full_history=True):
         if not self.query('guard'):
             raise Rejected('native-window')
         if self.chat is not None:
@@ -569,7 +570,8 @@ class Controller:
             if self.next_consumed and focused:
                 raise Rejected('policy')
             if not self.next_consumed:
-                self.next_input_proof()
+                if full_history:
+                    self.next_input_proof()
                 self.empty_class_proof()
         self.state(self.editor, editable=True)
         # The exact retained native X11 foreground/client/clear-stack proof above
@@ -706,8 +708,14 @@ class Controller:
                 self.sleep(min(.02, max(0, self.deadline - self.clock())))
             self.facts['stage'] = 'readback'
             self.settle_focus()
-            if self.query('copy_input_once', self.editor) != prompt:
-                raise Rejected()
+            # Clipboard selection/copy retains per-key editor and native-window proofs.
+            # Full conversation checks bracket it and run again before Send.
+            self.readback_active = True
+            try:
+                if self.query('copy_input_once', self.editor) != prompt:
+                    raise Rejected()
+            finally:
+                self.readback_active = False
             self.proof(focused=True)
             self.facts['inputVerified'] = True
             nodes = self.tree()
@@ -720,7 +728,7 @@ class Controller:
             sealed = (self.query('identity', self.send), self.query('bounds', self.send))
             sealed_actions = None
             for _ in range(2):
-                self.proof(focused=True)
+                self.proof(focused=True, full_history=False)
                 self.state(self.send)
                 bits = self.query('state', self.send)
                 if not bits & (1 << 8) or not bits & (1 << 24):
@@ -955,7 +963,8 @@ class Controller:
         self.next_input = True
         self.next_consumed = False
         self.response_only = False
-        self.adapter.key_guard = lambda: self.proof(focused=True)
+        self.adapter.key_guard = lambda: self.proof(
+            focused=True, full_history=not self.readback_active)
         self.proof()
 
     def empty_class_proof(self):

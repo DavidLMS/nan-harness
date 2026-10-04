@@ -1821,6 +1821,10 @@ fn prepare_codex_profile(profile: &Path) -> Result<PathBuf, Reason> {
     Ok(user_data)
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "keep isolated launch environment and profile custody together"
+)]
 fn isolated_command(spec: &ProbeSpec, program: &Path) -> Result<Command, Reason> {
     let profile = spec.workspace.join("profile");
     // Match the native Windows profile layout and verify known-folder lookup
@@ -1920,6 +1924,7 @@ fn isolated_command(spec: &ProbeSpec, program: &Path) -> Result<Command, Reason>
         command.env("HERMES_DESKTOP_USER_DATA_DIR", user_data);
     }
     if spec.kind == DesktopHarnessKind::Zed {
+        create_private_dir_all(&profile.join("zed")).map_err(|_| Reason::IsolationUnavailable)?;
         command
             .arg("--user-data-dir")
             .arg(profile.join("zed"))
@@ -1938,6 +1943,7 @@ fn isolated_command(spec: &ProbeSpec, program: &Path) -> Result<Command, Reason>
                 // independently of the accessibility coordinates used for Retry.
                 command.env("GPUI_X11_SCALE_FACTOR", "1");
                 command.env("ZED_LOG", "agent=debug");
+                command.env("NANH_ZED_RETRY_EVENTS", "hosted-semantic");
             }
         }
     }

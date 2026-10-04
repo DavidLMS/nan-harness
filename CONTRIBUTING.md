@@ -166,6 +166,12 @@ each plugin's import stubs and invocation beside the shared lifecycle assertions
 so the test remains reviewable as one contract. Reassess if another plugin or
 independent behavior is added; the scoped `expect` does not waive test coverage.
 
+`isolated_command` in `nan-harness-desktop-check/src/probe.rs` has 102 lines.
+Keep the launch environment, private profile creation and platform custody in
+one ordered preparation path. The hosted Zed receipt requires its private root
+before the child starts. Reassess if another preparation phase is added; this
+scoped exception does not waive tests or other quality gates.
+
 `scenario_owned` in `nan-harness-desktop-check/src/probe.rs` has 103 lines.
 Keep preparation of the exact launch command, platform profile custody,
 conversation and cleanup in one ordered lifecycle so retained authority cannot

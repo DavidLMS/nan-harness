@@ -8,78 +8,45 @@
 static void retained_identity_contract() {
     using State = RetainedProcessState;
     using Identity = RetainedTargetIdentity;
-    unsigned images = 0, observations = 0;
-    auto check = [&](bool creation, State first, State last, bool image) {
-        images = 0; observations = 0;
-        return retained_target_identity(creation,
-            [&] { return observations++ == 0 ? first : last; },
-            [&] { ++images; return image; });
+    unsigned observations = 0;
+    auto check = [&](bool creation, bool ancestry, State state) {
+        observations = 0;
+        return retained_target_identity(creation, ancestry, [&] { ++observations; return state; });
     };
-    assert(check(false, State::Exited, State::Exited, true) == Identity::CreationRejected);
-    assert(images == 0 && observations == 0);
-    assert(check(true, State::Exited, State::Exited, false) == Identity::Terminal);
-    assert(images == 0 && observations == 1);
-    assert(check(true, State::Unavailable, State::Exited, true) == Identity::StateRejected);
-    assert(images == 0);
-    assert(check(true, State::Live, State::Exited, false) == Identity::Terminal);
-    assert(images == 1 && observations == 2);
-    assert(check(true, State::Live, State::Exited, true) == Identity::Terminal);
-    assert(check(true, State::Live, State::Live, false) == Identity::ImageRejected);
-    assert(check(true, State::Live, State::Unavailable, true) == Identity::StateRejected);
-    assert(check(true, State::Live, State::Live, true) == Identity::Live);
-    // Terminal admission never supplies the live image proof required to act.
+    assert(check(false, true, State::Live) == Identity::CreationRejected);
+    assert(observations == 0);
+    assert(check(true, false, State::Live) == Identity::AncestryRejected);
+    assert(observations == 0);
+    assert(check(true, true, State::Exited) == Identity::Terminal);
+    assert(check(true, true, State::Unavailable) == Identity::StateRejected);
+    assert(check(true, true, State::Live) == Identity::Live);
     unsigned terminations = 0;
     for (auto identity : {Identity::Terminal, Identity::CreationRejected,
-        Identity::StateRejected, Identity::ImageRejected}) {
+        Identity::AncestryRejected, Identity::StateRejected}) {
         assert(!terminate_verified_handle({true,true,true,identity == Identity::Live},
             [&] { ++terminations; return true; }));
     }
     assert(terminations == 0);
 }
-static void retained_image_contract() {
-    const RetainedImageIdentity expected{1,2,3,4,5,6,7};
-    assert(retained_image_mismatch( expected, expected) == nullptr);
-    struct Field { std::uint32_t RetainedImageIdentity::*member; const char* reason; };
-    for (const auto field : {Field{&RetainedImageIdentity::volume,"target-image-volume"},
-        Field{&RetainedImageIdentity::index_high,"target-image-file-id"},
-        Field{&RetainedImageIdentity::index_low,"target-image-file-id"},
-        Field{&RetainedImageIdentity::size_high,"target-image-size"},
-        Field{&RetainedImageIdentity::size_low,"target-image-size"},
-        Field{&RetainedImageIdentity::write_high,"target-image-write-time"},
-        Field{&RetainedImageIdentity::write_low,"target-image-write-time"}}) {
-        auto changed = expected; ++(changed.*field.member);
-        assert(std::string(retained_image_mismatch( expected, changed)) == field.reason);
-        unsigned terminations = 0;
-        assert(!terminate_verified_handle({true,true,true,
-            retained_image_mismatch(expected,changed)==nullptr},
-            [&] { ++terminations; return true; }));
-        assert(terminations == 0);
+static void owned_helper_contract() {
+    // Executable labels are not cleanup authority. Only the original retained
+    // handle with birth and pre-stop ancestry proof reaches the action callback.
+    struct Held { unsigned handle; std::uint64_t birth; const char* image; };
+    const Held original{73,30,"installed-app"}, helper{74,31,"different-helper"};
+    unsigned acted = 0;
+    for (const auto& target : {original, helper}) {
+        const auto identity = retained_target_identity(target.birth > 0, true,
+            [] { return RetainedProcessState::Live; });
+        assert(identity == RetainedTargetIdentity::Live);
+        assert(terminate_verified_handle({true,true,true,true},[&] { acted = target.handle; return true; }));
+        assert(acted == target.handle);
     }
-}
-static void original_image_alias_contract() {
-    OriginalImageFile original{0x100000001ULL,{}};original.id[0]=7;original.id[15]=19;
-    // Two lookup names may refer to the same retained object, never a copy.
-    std::map<std::string,OriginalImageFile> files{{"pinned-original",original},{"same-object-alias",original}};
-    auto copied=original;copied.id[15]=20;files["byte-identical-copy"]=copied;
-    assert(same_original_image_file(files.at("pinned-original"),files.at("same-object-alias")));
-    assert(!same_original_image_file(original,files.at("byte-identical-copy")));
-    for(unsigned byte=0;byte<16;++byte) {
-        auto changed=original;changed.id[byte]^=1;
-        assert(!same_original_image_file(original,changed));
-    }
-    auto other_volume=original;other_volume.volume=1;
-    assert(!same_original_image_file(original,other_volume));
-    unsigned terminations=0;
-    // Matching object identity cannot waive original process ownership/creation.
-    for(auto proof : {CleanupProof{true,false,true,true},CleanupProof{true,true,false,true},
-        CleanupProof{true,true,true,same_original_image_file(original,copied)}})
-        assert(!terminate_verified_handle(proof,[&]{++terminations;return true;}));
-    assert(terminations==0);
+    assert(retained_target_identity(false,true,[]{return RetainedProcessState::Live;}) == RetainedTargetIdentity::CreationRejected);
+    assert(retained_target_identity(true,false,[]{return RetainedProcessState::Live;}) == RetainedTargetIdentity::AncestryRejected);
 }
 int main() {
     retained_identity_contract();
-    retained_image_contract();
-    original_image_alias_contract();
+    owned_helper_contract();
     std::vector<CorrelationEntry> rows{{1,0,false},{2,1,false},{3,2,true}};
     std::map<std::uint32_t,std::uint64_t> times{{1,10},{2,20},{3,30}};
     auto query = [&](std::uint32_t pid, std::uint64_t& time) {
@@ -94,6 +61,15 @@ int main() {
     times[1]=11; assert(!historical_descendant(rows,rows,3,1,10,30,query));
     times[1]=10; times[3]=31; assert(!historical_descendant(rows,rows,3,1,10,30,query));
     times[3]=30;
+    const std::vector<RetainedProcessBinding> held{{3,30}};
+    assert(matches_retained_inventory(rows,held,query));
+    auto new_process=rows;new_process.push_back({4,2,true});times[4]=31;
+    assert(!matches_retained_inventory(new_process,held,query));
+    times[3]=31;assert(!matches_retained_inventory(rows,held,query));
+    times.erase(3);assert(!matches_retained_inventory(rows,held,query));
+    times[3]=30;
+    auto foreign=rows;foreign[2].parent=4;
+    assert(!historical_descendant(foreign,foreign,3,1,10,30,query));
     auto missing=rows; missing.erase(missing.begin()+1);
     assert(!historical_descendant(missing,missing,3,1,10,30,query));
     std::vector<CorrelationEntry> deep;

@@ -39,56 +39,41 @@ struct CleanupProof {
     bool before_deadline;
     bool owner_alive;
     bool creation_matches;
-    bool image_matches;
+    bool ancestry_verified;
 };
 // Only a retained handle can be passed to the callback. No PID lookup belongs
 // in this decision, and an uncertain proof never invokes termination.
 template<class Terminate>
 bool terminate_verified_handle(const CleanupProof& proof, Terminate terminate) {
     return proof.before_deadline && proof.owner_alive && proof.creation_matches
-        && proof.image_matches && terminate();
+        && proof.ancestry_verified && terminate();
 }
 
-// A signaled original process handle is terminal and cannot authorize an action.
-// Creation equality remains mandatory even when its image is no longer queryable.
+// A signaled original handle is terminal and can never authorize termination.
+// Original creation and proved pre-stop ancestry are mandatory, independently
+// of the executable used by this already retained descendant.
 enum class RetainedProcessState { Live, Exited, Unavailable };
-enum class RetainedTargetIdentity { Live, Terminal, CreationRejected, StateRejected, ImageRejected };
-template<class State, class Image>
-RetainedTargetIdentity retained_target_identity(bool creation_matches, State state, Image image) {
+enum class RetainedTargetIdentity { Live, Terminal, CreationRejected, AncestryRejected, StateRejected };
+template<class State>
+RetainedTargetIdentity retained_target_identity(bool creation_matches, bool ancestry_verified, State state) {
     if (!creation_matches) return RetainedTargetIdentity::CreationRejected;
-    const auto initial = state();
-    if (initial == RetainedProcessState::Exited) return RetainedTargetIdentity::Terminal;
-    if (initial != RetainedProcessState::Live) return RetainedTargetIdentity::StateRejected;
-    const bool image_matches = image();
-    // The image query may race ordinary renderer shutdown. Recheck only this
-    // retained handle; never look up another PID or extend the original cutoff.
-    const auto final = state();
-    if (final == RetainedProcessState::Exited) return RetainedTargetIdentity::Terminal;
-    if (final != RetainedProcessState::Live) return RetainedTargetIdentity::StateRejected;
-    return image_matches ? RetainedTargetIdentity::Live : RetainedTargetIdentity::ImageRejected;
+    if (!ancestry_verified) return RetainedTargetIdentity::AncestryRejected;
+    const auto current = state();
+    if (current == RetainedProcessState::Exited) return RetainedTargetIdentity::Terminal;
+    return current == RetainedProcessState::Live ? RetainedTargetIdentity::Live : RetainedTargetIdentity::StateRejected;
 }
 
-struct RetainedImageIdentity {
-    std::uint32_t volume, index_high, index_low, size_high, size_low, write_high, write_low;
-};
-inline const char* retained_image_mismatch(
-    const RetainedImageIdentity& expected, const RetainedImageIdentity& actual) {
-    if (actual.volume != expected.volume) return "target-image-volume";
-    if (actual.index_high != expected.index_high || actual.index_low != expected.index_low)
-        return "target-image-file-id";
-    if (actual.size_high != expected.size_high || actual.size_low != expected.size_low)
-        return "target-image-size";
-    if (actual.write_high != expected.write_high || actual.write_low != expected.write_low)
-        return "target-image-write-time";
-    return nullptr;
-}
-
-// The original hashed executable remains open, so its identity cannot be reused.
-// Win32 aliases are lookup names; these kernel identities bind the opened object.
-struct OriginalImageFile {
-    std::uint64_t volume;
-    std::array<unsigned char,16> id;
-};
-inline bool same_original_image_file(const OriginalImageFile& original, const OriginalImageFile& candidate) {
-    return original.volume == candidate.volume && original.id == candidate.id;
+struct RetainedProcessBinding { std::uint32_t pid; std::uint64_t created; };
+// Inventory may reject new processes, but cannot add any termination target.
+template<class Query>
+bool matches_retained_inventory(const std::vector<CorrelationEntry>& rows,
+    const std::vector<RetainedProcessBinding>& retained, Query query) {
+    for (const auto& row : rows) {
+        if (!row.matching) continue;
+        const auto original = std::find_if(retained.begin(), retained.end(),
+            [&](const auto& target) { return target.pid == row.pid; });
+        std::uint64_t created = 0;
+        if (original == retained.end() || !query(row.pid, created) || created != original->created) return false;
+    }
+    return true;
 }

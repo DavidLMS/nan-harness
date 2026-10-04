@@ -973,6 +973,26 @@ class CorrelatedNextInputTests(unittest.TestCase):
         self.assertEqual((a.paste_count,a.send_count),(1,0))
         self.assertFalse(facts['sendAttempted'])
 
+    def test_readback_keys_keep_native_guard_and_recheck_history_before_send(self):
+        for lose_window in (False, True):
+            with self.subTest(lose_window=lose_window):
+                a,c,b,h=self.fixture();c.restore_next_input(b,h)
+                readback=a.copy_input_once
+                def changed(node):
+                    value=readback(node)
+                    for index in range(6):
+                        if index==2:
+                            a.extra_after_focus=True
+                            if lose_window:a.guard=lambda:False
+                        a.key_guard()
+                    return value
+                a.copy_input_once=changed
+                facts=c.submit('owned next prompt')
+                self.assertEqual(facts['failureBoundary'],
+                    'native-window' if lose_window else 'response-heading')
+                self.assertEqual((a.paste_count,a.send_count),(1,0))
+                self.assertFalse(c.readback_active)
+
     def test_missing_duplicate_overflow_or_malformed_capability_rejects(self):
         for h in [[],[dict(prompt='x',marker='m')]*2,[dict(prompt='x',marker='m')]*3,
                 [dict(prompt='',marker='m')],[dict(prompt='x',marker='m',extra='private')],

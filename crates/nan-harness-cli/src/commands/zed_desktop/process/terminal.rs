@@ -7,6 +7,8 @@ use tokio::io::unix::AsyncFd;
 use tokio::process::Command;
 use tokio::task::JoinHandle;
 
+mod events;
+
 pub(super) struct OutputDrain(JoinHandle<()>);
 
 impl Drop for OutputDrain {
@@ -26,6 +28,7 @@ fn prepare_redirected(command: &mut Command) -> io::Result<OutputDrain> {
     // Zed reloads the login-shell environment when stdout is not a terminal.
     // That can replace our launch-scoped NAN_API_KEY. Keep the native process
     // on a private terminal even when the launcher is run by a GUI or CI.
+    let mut events = events::Events::prepare(command);
     let terminal = openpty(None, None)?;
     for descriptor in [&terminal.master, &terminal.slave] {
         fcntl(descriptor, FcntlArg::F_SETFD(FdFlag::FD_CLOEXEC))?;
@@ -41,7 +44,11 @@ fn prepare_redirected(command: &mut Command) -> io::Result<OutputDrain> {
         while let Ok(mut ready) = reader.readable().await {
             if let Ok(Ok(0) | Err(_)) = ready.try_io(|reader| {
                 let mut file = reader.get_ref();
-                file.read(&mut buffer)
+                let count = file.read(&mut buffer)?;
+                if let Some(events) = &mut events {
+                    events.consume(&buffer[..count]);
+                }
+                Ok::<usize, io::Error>(count)
             }) {
                 break;
             }
@@ -60,7 +67,7 @@ mod tests {
         command
             .args([
                 "-c",
-                "test -t 1 || exit 2; test \"$NAN_API_KEY\" = synthetic-session || exit 3; dd if=/dev/zero bs=65536 count=8 2>/dev/null",
+                "test -t 1 || exit 2; test \"$NAN_API_KEY\" = synthetic-session || exit 3; dd if=/dev/zero bs=65536 count=9 2>/dev/null",
             ])
             .env("NAN_API_KEY", "synthetic-session")
             .stdin(Stdio::null());

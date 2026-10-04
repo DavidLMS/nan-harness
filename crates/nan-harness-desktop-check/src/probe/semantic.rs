@@ -217,8 +217,7 @@ impl SemanticBackend {
                     self.workspace
                         .join("profile")
                         .join("zed")
-                        .join("logs")
-                        .join("Zed.log")
+                        .join("nanh-retry-events.private")
                 }),
             )?)),
             DesktopHarnessKind::Hermes => return Err(Reason::IsolationUnavailable),

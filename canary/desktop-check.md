@@ -36,19 +36,27 @@ exact pointer hit; cursor artwork is advisory. Claude Linux's candidate performs
 matching the failed turn; its empty-input witness still rejects unexplained drift.
 None of these candidate changes establishes a new native pass by itself.
 
-The latest completed joint campaign, [37226254344](https://github.com/DavidLMS/nan-harness/actions/runs/37226254344),
-ran commit `2392f0c2c950bb036db9430a6f23cba9496e9bc3`. All six jobs compiled and
+The latest completed joint campaign, [37228562433](https://github.com/DavidLMS/nan-harness/actions/runs/37228562433),
+ran commit `ff59502c0326f3b08c103766f4eafd16da30b65f`. All six jobs compiled and
 completed, but none completed full acceptance. Application/global cleanup pass
 except for Claude Windows, whose later probes are withheld after cleanup fails.
 
 | Cell | Latest observed boundary | Next required evidence |
 | --- | --- | --- |
-| Zed Linux | Response/tool pass; Retry count after activation is 1, 0, 0; provider generation count stays five | Establish why UI recovery does not reach native Resume/provider generation |
-| Codex Linux | First and tool-turn DOM responses pass in all three sessions, but exec-command output lacks the required fixture marker | Identify the actual tool process outcome and obtain a real file read |
-| Codex macOS | Onboarding, first response and real file-tool acceptance pass in all three sessions; expected failure does not expose Retry | Inject the source-supported typed capacity error through the real bridge and verify UI recovery |
-| Codex Windows | All three sessions attach to an owned endpoint and captured main document; observer stops in source-dialog | Complete source-dialog identification within the original budget |
-| Claude Linux | First response passes in all three sessions; next-turn queries fail at children/owner/children | Native validation of reduced ownership queries and accurate deadline classification |
-| Claude Windows | First input readback/submission and provider response pass; native copying fails at tree-depth; cleanup fails at target-image-path | Native response copy through ControlView and original-file identity cleanup |
+| Zed Linux | Response/tool pass; no new provider generation after Retry; file log observation is missing in all three sessions | Read closed events from the existing private PTY, where Zed actually writes its logs, to distinguish callback, Resume and provider boundaries |
+| Codex Linux | Two sessions pass first response but exec-command exits nonzero; one session fails before input | Classify the file-read failure and stabilize initial admission without weakening ownership |
+| Codex macOS | First response and real tool pass in all three sessions; Retry completes and provider recovery response is verified, but DOM response verification times out | Establish the recovered assistant turn's public DOM association |
+| Codex Windows | Owned endpoint/main document retained; one observer reaches folder-trust and two stop in source-dialog | Identify the exact incomplete onboarding operation within the original budget |
+| Claude Linux | First response passes in all three sessions; two verify second input, then fail tree-identity/children; third reaches deadline | Validate reduced redundant history scans while keeping full checks around readback and before Send |
+| Claude Windows | First and second input/readback/response copying pass; Read returns a plain unclassified error; cleanup rejects target-image-file-id | Classify the Read failure and validate cleanup of original owned descendant handles, including distinct helper executables |
+
+The pending grouped candidate captures only closed Zed PTY event IDs, retains
+Windows cleanup targets by proved ancestry and original handles, and reduces
+Claude Linux history scans during clipboard readback and passive Send inspection.
+These local changes are not native qualification. A classifier limit reached
+before Retry must remain a limit, never become an apparently empty successful
+observation. No additional campaign is needed merely to retrieve the existing
+closed qualification artifacts.
 
 The Codex Send and Mac optional Skip corrections now have native evidence for
 those transitions. They do not establish recovery. Windows renderer checkpoints
