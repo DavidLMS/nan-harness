@@ -634,6 +634,16 @@ class QualificationTests(unittest.TestCase):
                 path.write_text(json.dumps({**native, field: invalid}))
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'zed-desktop')
+            receipt = dict(status='complete', sessionFound=1, sessionMissing=0, resumeMessages=1, ordinarySend=0, turnStarted=1, turnCompleted=0, turnFailed=1, turnCancelled=0)
+            path.write_text(json.dumps({**native, 'retryLogObservation': receipt}))
+            self.assertEqual(q.semantic_observations(root, 'zed-desktop')[0]['retryLogObservation'], receipt)
+            for bad in ({**receipt, 'raw': 'PRIVATE'}, {**receipt, 'status': 'rotated'},
+                        {**receipt, 'sessionFound': True},
+                        {**receipt, 'sessionFound': 256},
+                        {**receipt, 'status': 'PRIVATE'}):
+                path.write_text(json.dumps({**native, 'retryLogObservation': bad}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'zed-desktop')
             path.write_text(json.dumps(native))
             self.assertNotIn('PRIVATE', str(public))
             with self.assertRaises(ValueError):

@@ -25,6 +25,8 @@ mod process_absence;
 mod qualification_directory;
 mod stability;
 mod visual;
+#[cfg(unix)]
+mod zed_retry_log;
 mod zed_zoom_probe;
 
 #[cfg(target_os = "linux")]

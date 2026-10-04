@@ -211,9 +211,16 @@ impl SemanticBackend {
         }
 
         let mut ui = match self.kind {
-            DesktopHarnessKind::Zed => {
-                SemanticUi::Zed(Box::new(gui.native_clipboard_session(&self.directory)?))
-            }
+            DesktopHarnessKind::Zed => SemanticUi::Zed(Box::new(gui.native_clipboard_session(
+                &self.directory,
+                cfg!(target_os = "linux").then(|| {
+                    self.workspace
+                        .join("profile")
+                        .join("zed")
+                        .join("logs")
+                        .join("Zed.log")
+                }),
+            )?)),
             DesktopHarnessKind::Hermes => return Err(Reason::IsolationUnavailable),
             DesktopHarnessKind::Claude | DesktopHarnessKind::ChatGpt | DesktopHarnessKind::Pen => {
                 return gui.inventory_renderer(

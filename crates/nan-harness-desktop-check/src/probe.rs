@@ -1872,6 +1872,10 @@ fn isolated_command(spec: &ProbeSpec, program: &Path) -> Result<Command, Reason>
         .env_remove("NAN_API_KEY")
         .env_remove("OPENAI_API_KEY")
         .env_remove("ANTHROPIC_API_KEY")
+        // Claude only accepts its signed environment override. The trial uses
+        // the native Electron argument, never inherited vendor authorization.
+        .env_remove("CLAUDE_USER_DATA_DIR")
+        .env_remove("CLAUDE_CDP_AUTH")
         .env_remove("CODEX_API_KEY")
         .env_remove("GH_TOKEN")
         .env_remove("GITHUB_TOKEN")
@@ -1902,11 +1906,6 @@ fn isolated_command(spec: &ProbeSpec, program: &Path) -> Result<Command, Reason>
     // signalling an unrelated application in the runner's process group.
     #[cfg(unix)]
     command.process_group(0);
-    // Claude only accepts its signed environment override. This trial uses the
-    // native Electron argument, never inherited vendor authorization tokens.
-    command
-        .env_remove("CLAUDE_USER_DATA_DIR")
-        .env_remove("CLAUDE_CDP_AUTH");
     if spec.kind == DesktopHarnessKind::ChatGpt {
         command.env(
             "CODEX_ELECTRON_USER_DATA_PATH",
@@ -1938,6 +1937,7 @@ fn isolated_command(spec: &ProbeSpec, program: &Path) -> Result<Command, Reason>
                 // logical pixel. Zed 1.22.0 otherwise derives this from Xft/RandR,
                 // independently of the accessibility coordinates used for Retry.
                 command.env("GPUI_X11_SCALE_FACTOR", "1");
+                command.env("ZED_LOG", "agent=debug");
             }
         }
     }

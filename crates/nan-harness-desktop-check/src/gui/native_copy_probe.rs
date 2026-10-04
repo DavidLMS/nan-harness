@@ -41,6 +41,9 @@ struct ActivationFacts {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Facts {
+    #[cfg(unix)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    retry_log_observation: Option<super::zed_retry_log::Receipt>,
     schema_version: u8,
     mechanism: &'static str,
     navigation: &'static str,
@@ -507,6 +510,8 @@ fn retry_press_receipt(result: Result<(), xa11y::Error>) -> Result<&'static str,
 
 fn native_copy_facts() -> Facts {
     Facts {
+        #[cfg(unix)]
+        retry_log_observation: None,
         schema_version: 1,
         mechanism: "zed-native-copy",
         navigation: "private-keymap-new-thread",
@@ -777,6 +782,10 @@ fn validate_layout_policy(
 }
 
 pub(crate) struct NativeClipboardSession<'a> {
+    #[cfg(unix)]
+    retry_log_path: Option<PathBuf>,
+    #[cfg(unix)]
+    retry_log_capture: Option<super::zed_retry_log::Capture>,
     gui: &'a Gui,
     directory: &'a Path,
     facts: Facts,
@@ -942,8 +951,14 @@ impl NativeClipboardSession<'_> {
         {
             return Err(Reason::ResponseMismatch);
         }
-        self.gui
-            .native_export_response(&mut self.facts, marker, timeout)
+        let result = self
+            .gui
+            .native_export_response(&mut self.facts, marker, timeout);
+        #[cfg(unix)]
+        if let Some(capture) = self.retry_log_capture.take() {
+            self.facts.retry_log_observation = Some(capture.finish());
+        }
+        result
     }
 
     pub(crate) fn wait_retry(&mut self, timeout: Duration) -> Result<(), Reason> {
@@ -1483,7 +1498,20 @@ impl NativeClipboardSession<'_> {
     }
 
     pub(crate) fn retry_once(&mut self) -> Result<(), Reason> {
+        #[cfg(unix)]
+        if let Some(path) = &self.retry_log_path {
+            match super::zed_retry_log::Capture::begin(path) {
+                Ok(capture) => self.retry_log_capture = Some(capture),
+                Err(receipt) => self.facts.retry_log_observation = Some(receipt),
+            }
+        }
         let result = self.dispatch_retry_once();
+        #[cfg(unix)]
+        if result.is_err()
+            && let Some(capture) = self.retry_log_capture.take()
+        {
+            self.facts.retry_log_observation = Some(capture.finish());
+        }
         if cfg!(target_os = "linux") && result.is_ok() {
             // Retry clears the error callout before requesting another generation.
             // This passive count distinguishes visible UI state from X11 delivery;
@@ -1632,6 +1660,7 @@ impl Gui {
     pub(crate) fn native_clipboard_session<'a>(
         &'a self,
         directory: &'a Path,
+        retry_log_path: Option<PathBuf>,
     ) -> Result<NativeClipboardSession<'a>, Reason> {
         if !cfg!(any(target_os = "macos", target_os = "linux", windows))
             || self.kind != nan_harness_core::DesktopHarnessKind::Zed
@@ -1648,7 +1677,13 @@ impl Gui {
             finish_native_copy(directory, facts, None, Err(reason))?;
             return Err(reason);
         }
+        #[cfg(not(unix))]
+        let _ = retry_log_path;
         Ok(NativeClipboardSession {
+            #[cfg(unix)]
+            retry_log_path,
+            #[cfg(unix)]
+            retry_log_capture: None,
             gui: self,
             directory,
             facts,

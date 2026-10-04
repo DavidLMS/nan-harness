@@ -2943,6 +2943,17 @@ def semantic_observations(directory, app):
             enum(record, value, 'retryActionReceipt', {'acknowledged', 'completion-unknown', 'native-pointer-dispatched', 'native-atspi-forwarded'})
             enum(record, value, 'retrySelector', {'retry-name-or-description', 'retry-tooltip', 'retry-label'})
             enum(record, value, 'retryInventoryStatus', {'complete', 'budget-exceeded', 'query-error'})
+            if 'retryLogObservation' in value:
+                log = value['retryLogObservation']
+                counters = {'sessionFound', 'sessionMissing', 'resumeMessages', 'ordinarySend',
+                            'turnStarted', 'turnCompleted', 'turnFailed', 'turnCancelled'}
+                if (app != 'zed-desktop' or type(log) is not dict or set(log) != counters | {'status'}
+                        or type(log['status']) is not str or log['status'] not in {'complete', 'missing', 'rotated', 'truncated', 'unavailable', 'limit'}
+                        or any(type(log[key]) is not int or not 0 <= log[key] <= 255 for key in counters)
+                        or (log['status'] != 'complete' and any(log[key] for key in counters))):
+                    raise ValueError('invalid passive Zed retry log observation')
+                record['retryLogObservation'] = log.copy()
+
             for key in ('exportResumeCount', 'exportAgentCount', 'exportTotalAssistantTextCount', 'exportUserCount', 'exportAssistantTextCount', 'trustControlCount', 'panelControlCount', 'retryControlCount', 'retryControlCountAfterActivation', 'retryTitleCount', 'retryCandidateCount', 'retryTooltipCount', 'retryLabelCount',
                         'retryInventoryTotal', 'retryInventoryButtons', 'retryInventoryStaticText',
                         'retryInventoryTitleMatches', 'retryInventoryGenerationMatches', 'retryInventoryRetryMatches'):

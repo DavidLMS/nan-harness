@@ -86,6 +86,12 @@ The next candidate groups these changes before another hosted campaign:
   volume/file identity and retained metadata. This permits alternate names for
   that same file, not different files or foreign processes. The failed run
   establishes a path mismatch, not its cause; hosted verification is pending.
+- Hosted Linux Zed enables the official agent debug filter and observes only
+  the bounded log interval surrounding the single Retry. Named counters cover
+  session lookup, native Resume, ordinary Send and turn lifecycle events from
+  the pinned source. Private message suffixes are discarded; rotated, missing
+  or incomplete logs cannot be mistaken for zero observed events. These
+  untrusted diagnostics cannot authorize input or replace provider/UI evidence.
 
 The hidden launch-wrapper option is restricted to deterministic ChatGPT startup
 diagnostics. Only application launch is instrumented; help, version and restore
