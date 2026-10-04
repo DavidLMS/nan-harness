@@ -200,6 +200,31 @@ pub fn verify_private_file(file: &File) -> io::Result<()> {
     windows::verify_handle(file, PrivatePathKind::File)
 }
 
+/// Exact Windows handle DACL shapes for owned disposable configuration only.
+/// This classification never repairs permissions or authorizes a file read.
+#[cfg(windows)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OwnedWindowsDacl {
+    /// Existing protected private-filesystem contract.
+    Protected,
+    /// Exactly inherited current-user and SYSTEM FullAccess entries.
+    Inherited,
+    /// Readable descriptor outside either exact contract.
+    Unexpected,
+    /// Descriptor could not be inspected.
+    Unavailable,
+}
+
+/// Inspect a retained handle without modifying its descriptor.
+///
+/// Inherited admission requires the caller to continuously retain and verify
+/// the original protected parent and its fixed child path. This function is a
+/// classifier; general credential-file readers retain their protected policy.
+#[cfg(windows)]
+pub fn classify_owned_windows_dacl(file: &File, kind: PrivatePathKind) -> OwnedWindowsDacl {
+    windows::classify_owned_handle(file, kind)
+}
+
 fn finish_private_read(
     mut file: File,
     already_private: bool,

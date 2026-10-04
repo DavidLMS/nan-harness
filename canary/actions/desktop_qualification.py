@@ -1572,12 +1572,27 @@ def semantic_observations(directory, app):
             document_stages={'document-metadata','document-open','document-privacy','document-lock','document-json'}
             stages=document_stages|{'initial-custody','native-policy','library-metadata','library-lock',
                 'configuration-values','final-custody','deadline','completed'}
-            if (app!='claude-desktop' or set(value)!={'schemaVersion','mechanism','diagnosticsOnly','stage','documentIndex','completed'}
+            fields=set('schemaVersion mechanism diagnosticsOnly stage documentIndex completed'.split())
+            privacy_fields={'rootPrivacy','libraryPrivacy','documentPrivacy'}
+            if (app!='claude-desktop' or set(value) not in (fields,fields|privacy_fields)
                     or value['diagnosticsOnly'] is not True or type(value['stage']) is not str or value['stage'] not in stages
                     or type(value['completed']) is not bool or value['completed']!=(value['stage']=='completed')
                     or value['stage'] in document_stages and (type(value['documentIndex']) is not int or not 0<=value['documentIndex']<=2)
                     or value['stage'] not in document_stages and value['documentIndex'] is not None):
                 raise ValueError('invalid Claude Windows profile seal observation')
+            if privacy_fields<=set(value):
+                allowed={'protected','inherited','unexpected','unavailable'}
+                nullable=lambda v:v is None or type(v) is str and v in allowed
+                accepted=lambda v:type(v) is str and v in {'protected','inherited'}
+                documents=value['documentPrivacy']
+                if (not nullable(value['rootPrivacy']) or not nullable(value['libraryPrivacy'])
+                        or type(documents) is not list or len(documents)!=3 or not all(map(nullable,documents))
+                        or value['completed'] and (value['rootPrivacy']!='protected'
+                            or not accepted(value['libraryPrivacy']) or not all(map(accepted,documents)))
+                        or value['documentIndex'] is not None and any(documents[i] is not None
+                            for i in range(value['documentIndex']+1,3))):
+                    raise ValueError('invalid Claude Windows immutable privacy observation')
+                record.update({k:value[k] for k in privacy_fields})
             record.update({key:value[key] for key in ['diagnosticsOnly','stage','documentIndex','completed']})
         elif mechanism == 'claude-private-storage-stage':
             fields = set('schemaVersion mechanism diagnosticsOnly phase stage'.split())

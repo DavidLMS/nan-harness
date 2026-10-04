@@ -4037,6 +4037,26 @@ class ClaudeWindowsProfileSealTests(unittest.TestCase):
                     path.write_text(json.dumps(good))
                     with self.assertRaises(ValueError):q.semantic_observations(root,'zed-desktop')
 
+class ClaudeWindowsImmutablePrivacyTests(unittest.TestCase):
+    def test_exact_closed_descriptors_and_partial_failures(self):
+        good=dict(schemaVersion=1,mechanism='claude-windows-profile-seal',diagnosticsOnly=True,
+            stage='completed',documentIndex=None,completed=True,rootPrivacy='protected',
+            libraryPrivacy='inherited',documentPrivacy=['inherited','protected','protected'])
+        with tempfile.TemporaryDirectory() as root:
+            path=Path(root)/'seal.json';path.write_text(json.dumps(good))
+            self.assertEqual(q.semantic_observations(root,'claude-desktop'),[good])
+            denied=good|dict(stage='document-privacy',documentIndex=0,completed=False,
+                documentPrivacy=['unexpected',None,None])
+            path.write_text(json.dumps(denied))
+            self.assertEqual(q.semantic_observations(root,'claude-desktop'),[denied])
+            for changed in [good|{'rootPrivacy':'inherited'},good|{'documentPrivacy':['protected']},
+                good|{'documentPrivacy':['protected','protected',None]},good|{'libraryPrivacy':'unexpected'},
+                good|{'libraryPrivacy':{}},good|{'documentPrivacy':['PRIVATE','protected','protected']},
+                {k:v for k,v in good.items() if k!='rootPrivacy'},
+                denied|{'documentPrivacy':['unexpected','protected',None]}]:
+                path.write_text(json.dumps(changed))
+                with self.assertRaises(ValueError):q.semantic_observations(root,'claude-desktop')
+
 class WindowsCleanupProgressTests(unittest.TestCase):
     def test_closed_monotonic_stage_counts_never_export_identity(self):
         stages=['none','file-open','file-hash','file-identity','process-open','snapshot','targets','owner-recheck']

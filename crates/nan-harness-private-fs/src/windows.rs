@@ -1,4 +1,4 @@
-use super::{PrivateFileReadStatus, PrivatePathKind};
+use super::{OwnedWindowsDacl, PrivateFileReadStatus, PrivatePathKind};
 use std::fs::{self, File, OpenOptions};
 use std::io;
 use std::os::windows::fs::OpenOptionsExt;
@@ -266,6 +266,83 @@ fn verify_descriptor(descriptor: &SecurityDescriptor, kind: PrivatePathKind) -> 
     }
 
     verify_required_principals(saw_user, saw_system)
+}
+
+fn verify_inherited_descriptor(
+    descriptor: &SecurityDescriptor,
+    kind: PrivatePathKind,
+) -> io::Result<()> {
+    let sddl = wrappers::ConvertSecurityDescriptorToStringSecurityDescriptor(
+        descriptor,
+        SecurityInformation::Dacl,
+    )
+    .map_err(|_| postcondition_failed("could not read inherited descriptor"))?;
+    let sddl = sddl.to_string_lossy();
+    // No protection/pending auto-inherit/unknown controls. Accept only the
+    // ordinary unprotected inherited DACL, with optional auto-inherited bit.
+    let body = sddl
+        .strip_prefix("D:AI")
+        .or_else(|| sddl.strip_prefix("D:"))
+        .filter(|body| body.starts_with('('))
+        .ok_or_else(|| postcondition_failed("unexpected inherited DACL controls"))?;
+    let flags = match kind {
+        PrivatePathKind::File => "ID",
+        PrivatePathKind::Directory => "OICIID",
+    };
+    let mut remaining = body;
+    let mut count = 0;
+    while !remaining.is_empty() {
+        let (ace, rest) = remaining
+            .strip_prefix('(')
+            .and_then(|s| s.split_once(')'))
+            .ok_or_else(|| postcondition_failed("malformed inherited DACL"))?;
+        let fields = ace.split(';').collect::<Vec<_>>();
+        if fields.len() != 6
+            || fields[0] != "A"
+            || fields[1] != flags
+            || fields[2] != "FA"
+            || !fields[3].is_empty()
+            || !fields[4].is_empty()
+        {
+            return Err(postcondition_failed("unexpected inherited ACE"));
+        }
+        count += 1;
+        remaining = rest;
+    }
+    if count != 2 {
+        return Err(postcondition_failed("unexpected inherited ACE count"));
+    }
+    let dacl = descriptor_dacl(descriptor)?;
+    let (user, system) = expected_principal_sids()?;
+    let inherited = expected_ace_flags(kind) | AceFlags::Inherited;
+    let (mut saw_user, mut saw_system) = (false, false);
+    for index in 0..dacl.len() {
+        let sid = validate_ace(dacl, index, inherited)?;
+        classify_principal(sid, &user, &system, &mut saw_user, &mut saw_system)?;
+    }
+    verify_required_principals(saw_user, saw_system)
+}
+fn classify_owned_descriptor(
+    descriptor: &SecurityDescriptor,
+    kind: PrivatePathKind,
+) -> OwnedWindowsDacl {
+    if verify_descriptor(descriptor, kind).is_ok() {
+        OwnedWindowsDacl::Protected
+    } else if verify_inherited_descriptor(descriptor, kind).is_ok() {
+        OwnedWindowsDacl::Inherited
+    } else {
+        OwnedWindowsDacl::Unexpected
+    }
+}
+pub(super) fn classify_owned_handle(file: &File, kind: PrivatePathKind) -> OwnedWindowsDacl {
+    match wrappers::GetSecurityInfo(
+        file,
+        SeObjectType::SE_FILE_OBJECT,
+        SecurityInformation::Dacl,
+    ) {
+        Ok(descriptor) => classify_owned_descriptor(&descriptor, kind),
+        Err(_) => OwnedWindowsDacl::Unavailable,
+    }
 }
 
 pub(super) fn verify_handle<H: AsRawHandle>(handle: &H, kind: PrivatePathKind) -> io::Result<()> {

@@ -676,6 +676,39 @@ pub(super) fn reject_symlink(path: &Path) -> Result<(), ClaudeDesktopError> {
 
 #[cfg(all(test, windows))]
 mod configuration_persist_tests {
+    #[test]
+    fn production_configuration_writer_preserves_protected_dacl_without_repair() {
+        use nan_harness_private_fs::{OwnedWindowsDacl as Dacl, PrivatePathKind};
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("owned-profile");
+        nan_harness_private_fs::create_private_dir(&root).unwrap();
+        let held = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(3)
+            .custom_flags(0x0200_0000 | 0x0020_0000)
+            .open(&root)
+            .unwrap();
+        let path = root.join("claude_desktop_config.json");
+        super::atomic_write(&path, b"{\"ordinary\":true}", None, false).unwrap();
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .access_mode(0x8002_0000)
+            .share_mode(1)
+            .custom_flags(0x0020_0000)
+            .open(&path)
+            .unwrap();
+        assert_eq!(
+            nan_harness_private_fs::classify_owned_windows_dacl(&held, PrivatePathKind::Directory),
+            Dacl::Protected
+        );
+        assert_eq!(
+            nan_harness_private_fs::classify_owned_windows_dacl(&file, PrivatePathKind::File),
+            Dacl::Protected
+        );
+        nan_harness_private_fs::verify_private_file(&file).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"{\"ordinary\":true}");
+    }
+
     use super::*;
     use std::os::windows::fs::OpenOptionsExt as _;
     #[cfg(feature = "desktop-qualification")]

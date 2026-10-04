@@ -267,6 +267,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo test --locked -p nan-harness-cli --features desktop-qualification --lib commands::claude_desktop::session::configuration_persist_tests
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test --locked -p nan-harness-private-fs --lib
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo test --locked -p nan-harness-desktop-check --lib probe::claude_windows_profile::tests
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo test --locked -p nan-harness-desktop-check --lib native::windows_chat_turn::tests

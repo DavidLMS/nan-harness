@@ -27,12 +27,51 @@ enum SealStage {
     Completed,
 }
 
+struct SealObservation {
+    stage: SealStage,
+    document_index: Option<usize>,
+    root_privacy: Option<nan_harness_private_fs::OwnedWindowsDacl>,
+    library_privacy: Option<nan_harness_private_fs::OwnedWindowsDacl>,
+    document_privacy: [Option<nan_harness_private_fs::OwnedWindowsDacl>; 3],
+}
+impl SealObservation {
+    fn new() -> Self {
+        Self {
+            stage: SealStage::InitialCustody,
+            document_index: None,
+            root_privacy: None,
+            library_privacy: None,
+            document_privacy: [None; 3],
+        }
+    }
+    fn record(&self, completed: bool) {
+        crate::process::windows_correlation::record_profile_seal(&serde_json::json!({
+            "schemaVersion":1,"mechanism":"claude-windows-profile-seal","diagnosticsOnly":true,
+            "stage":self.stage,"documentIndex":self.document_index,"completed":completed,
+            "rootPrivacy":self.root_privacy.map(privacy_label),
+            "libraryPrivacy":self.library_privacy.map(privacy_label),
+            "documentPrivacy":self.document_privacy.map(|p|p.map(privacy_label))
+        }));
+    }
+}
+
 pub(crate) struct FreshClaudeWindowsProfile {
     workspace: PathBuf,
     root: PathBuf,
     directories: Vec<File>,
+    root_directory_index: usize,
+    library_directory_index: Option<usize>,
     configuration: Vec<File>,
     native: Native,
+}
+fn privacy_label(value: nan_harness_private_fs::OwnedWindowsDacl) -> &'static str {
+    use nan_harness_private_fs::OwnedWindowsDacl;
+    match value {
+        OwnedWindowsDacl::Protected => "protected",
+        OwnedWindowsDacl::Inherited => "inherited",
+        OwnedWindowsDacl::Unexpected => "unexpected",
+        OwnedWindowsDacl::Unavailable => "unavailable",
+    }
 }
 fn regular(path: &Path, directory: bool) -> bool {
     use std::os::windows::fs::MetadataExt as _;
@@ -229,6 +268,8 @@ impl FreshClaudeWindowsProfile {
         Ok(Some(Self {
             workspace,
             root,
+            root_directory_index: directories.len() - 1,
+            library_directory_index: None,
             directories,
             configuration: Vec::new(),
             native,
@@ -240,29 +281,11 @@ impl FreshClaudeWindowsProfile {
         token: &str,
         deadline: Instant,
     ) -> Result<(), Reason> {
-        use std::os::windows::fs::OpenOptionsExt as _;
-        let mut stage = SealStage::InitialCustody;
-        let mut document_index = None;
+        let mut observation = SealObservation::new();
         let result = (|| {
-            if !self.configuration.is_empty()
-                || !self.directories.iter().all(retained_directory_regular)
-            {
-                return Err(Reason::IsolationUnavailable);
-            }
-            stage = SealStage::NativePolicy;
-            if !self.native.claude_policy_absent(deadline) {
-                return Err(Reason::IsolationUnavailable);
-            }
-            let library = self.root.join("configLibrary");
-            stage = SealStage::LibraryMetadata;
-            if !regular(&library, true) {
-                return Err(Reason::IsolationUnavailable);
-            }
-            stage = SealStage::LibraryLock;
-            self.directories
-                .push(lock_directory(&library).map_err(|_| Reason::IsolationUnavailable)?);
-            let mut files = Vec::new();
-            let mut values = Vec::new();
+            self.check_initial_seal_custody(deadline, &mut observation)?;
+            let library = self.hold_configuration_library(&mut observation)?;
+            let mut documents = Vec::new();
             for (index, path) in [
                 self.root.join("claude_desktop_config.json"),
                 library.join("_meta.json"),
@@ -271,71 +294,281 @@ impl FreshClaudeWindowsProfile {
             .into_iter()
             .enumerate()
             {
-                document_index = Some(index);
-                stage = SealStage::DocumentMetadata;
-                if !regular(&path, false) {
-                    return Err(Reason::IsolationUnavailable);
-                }
-                stage = SealStage::DocumentOpen;
-                let (private, status) = nan_harness_private_fs::open_private_read(&path)
-                    .map_err(|_| Reason::IsolationUnavailable)?;
-                stage = SealStage::DocumentPrivacy;
-                if status != nan_harness_private_fs::PrivateFileReadStatus::AlreadyPrivate {
-                    return Err(Reason::IsolationUnavailable);
-                }
-                // Deny mutation/replacement after CLI configuration has completed.
-                stage = SealStage::DocumentLock;
-                let mut file = std::fs::OpenOptions::new()
-                    .read(true)
-                    .share_mode(1)
-                    .custom_flags(0x0020_0000)
-                    .open(&path)
-                    .map_err(|_| Reason::IsolationUnavailable)?;
-                drop(private);
-                stage = SealStage::DocumentJson;
-                values.push(document(&mut file).ok_or(Reason::IsolationUnavailable)?);
-                files.push(file);
+                documents.push(self.seal_owned_document(
+                    &path,
+                    index,
+                    deadline,
+                    &mut observation,
+                )?);
             }
-            document_index = None;
-            stage = SealStage::ConfigurationValues;
-            if !configured(&values, base, token) {
-                return Err(Reason::IsolationUnavailable);
-            }
-            stage = SealStage::FinalCustody;
-            if !self.directories.iter().all(retained_directory_regular) {
-                return Err(Reason::IsolationUnavailable);
-            }
-            stage = SealStage::Deadline;
-            if Instant::now() >= deadline {
-                return Err(Reason::IsolationUnavailable);
-            }
-            self.configuration = files;
-            stage = SealStage::Completed;
-            Ok(())
+            self.retain_sealed_configuration(documents, base, token, deadline, &mut observation)
         })();
-        crate::process::windows_correlation::record_profile_seal(&serde_json::json!({
-            "schemaVersion":1,"mechanism":"claude-windows-profile-seal","diagnosticsOnly":true,
-            "stage":stage,"documentIndex":document_index,"completed":result.is_ok()
-        }));
+        observation.record(result.is_ok());
         result
     }
+    fn check_initial_seal_custody(
+        &self,
+        deadline: Instant,
+        observation: &mut SealObservation,
+    ) -> Result<(), Reason> {
+        if !self.configuration.is_empty()
+            || !self.directories.iter().all(retained_directory_regular)
+        {
+            return Err(Reason::IsolationUnavailable);
+        }
+        observation.root_privacy = Some(nan_harness_private_fs::classify_owned_windows_dacl(
+            &self.directories[self.root_directory_index],
+            nan_harness_private_fs::PrivatePathKind::Directory,
+        ));
+        if observation.root_privacy != Some(nan_harness_private_fs::OwnedWindowsDacl::Protected) {
+            return Err(Reason::IsolationUnavailable);
+        }
+        observation.stage = SealStage::NativePolicy;
+        if !self.native.claude_policy_absent(deadline) {
+            return Err(Reason::IsolationUnavailable);
+        }
+        Ok(())
+    }
+    fn hold_configuration_library(
+        &mut self,
+        observation: &mut SealObservation,
+    ) -> Result<PathBuf, Reason> {
+        let library = self.root.join("configLibrary");
+        observation.stage = SealStage::LibraryMetadata;
+        if !regular(&library, true) {
+            return Err(Reason::IsolationUnavailable);
+        }
+        observation.stage = SealStage::LibraryLock;
+        self.directories
+            .push(lock_directory(&library).map_err(|_| Reason::IsolationUnavailable)?);
+        self.library_directory_index = Some(self.directories.len() - 1);
+        observation.library_privacy = Some(nan_harness_private_fs::classify_owned_windows_dacl(
+            self.directories
+                .last()
+                .ok_or(Reason::IsolationUnavailable)?,
+            nan_harness_private_fs::PrivatePathKind::Directory,
+        ));
+        if !matches!(
+            observation.library_privacy,
+            Some(
+                nan_harness_private_fs::OwnedWindowsDacl::Protected
+                    | nan_harness_private_fs::OwnedWindowsDacl::Inherited
+            )
+        ) || !self.private_ancestors()
+        {
+            return Err(Reason::IsolationUnavailable);
+        }
+        Ok(library)
+    }
+    fn seal_owned_document(
+        &self,
+        path: &Path,
+        index: usize,
+        deadline: Instant,
+        observation: &mut SealObservation,
+    ) -> Result<(File, serde_json::Value), Reason> {
+        use std::os::windows::fs::{MetadataExt as _, OpenOptionsExt as _};
+        observation.document_index = Some(index);
+        observation.stage = SealStage::DocumentMetadata;
+        if !regular(path, false) {
+            return Err(Reason::IsolationUnavailable);
+        }
+        if !self.private_ancestors() || Instant::now() >= deadline {
+            return Err(Reason::IsolationUnavailable);
+        }
+        observation.stage = SealStage::DocumentOpen;
+        // One read-only retained handle; no WRITE_DAC and no repairing reader.
+        let mut file = std::fs::OpenOptions::new()
+            .read(true)
+            .access_mode(0x8002_0000)
+            .share_mode(1)
+            .custom_flags(0x0020_0000)
+            .open(path)
+            .map_err(|_| Reason::IsolationUnavailable)?;
+        observation.stage = SealStage::DocumentLock;
+        if !file
+            .metadata()
+            .is_ok_and(|m| m.is_file() && m.file_attributes() & 0x400 == 0)
+        {
+            return Err(Reason::IsolationUnavailable);
+        }
+        observation.stage = SealStage::DocumentPrivacy;
+        let privacy = nan_harness_private_fs::classify_owned_windows_dacl(
+            &file,
+            nan_harness_private_fs::PrivatePathKind::File,
+        );
+        observation.document_privacy[index] = Some(privacy);
+        if !matches!(
+            privacy,
+            nan_harness_private_fs::OwnedWindowsDacl::Protected
+                | nan_harness_private_fs::OwnedWindowsDacl::Inherited
+        ) || !self.private_ancestors()
+            || Instant::now() >= deadline
+        {
+            return Err(Reason::IsolationUnavailable);
+        }
+        observation.stage = SealStage::DocumentJson;
+        let value = document(&mut file).ok_or(Reason::IsolationUnavailable)?;
+        if nan_harness_private_fs::classify_owned_windows_dacl(
+            &file,
+            nan_harness_private_fs::PrivatePathKind::File,
+        ) != privacy
+            || !self.private_ancestors()
+            || Instant::now() >= deadline
+        {
+            return Err(Reason::IsolationUnavailable);
+        }
+        Ok((file, value))
+    }
+    fn retain_sealed_configuration(
+        &mut self,
+        documents: Vec<(File, serde_json::Value)>,
+        base: &str,
+        token: &str,
+        deadline: Instant,
+        observation: &mut SealObservation,
+    ) -> Result<(), Reason> {
+        use std::os::windows::fs::MetadataExt as _;
+        let (files, values): (Vec<_>, Vec<_>) = documents.into_iter().unzip();
+        observation.document_index = None;
+        observation.stage = SealStage::ConfigurationValues;
+        if !configured(&values, base, token) {
+            return Err(Reason::IsolationUnavailable);
+        }
+        observation.stage = SealStage::FinalCustody;
+        if !self.private_ancestors()
+            || !files.iter().enumerate().all(|(index, file)| {
+                file.metadata()
+                    .is_ok_and(|m| m.is_file() && m.file_attributes() & 0x400 == 0)
+                    && Some(nan_harness_private_fs::classify_owned_windows_dacl(
+                        file,
+                        nan_harness_private_fs::PrivatePathKind::File,
+                    )) == observation.document_privacy[index]
+            })
+        {
+            return Err(Reason::IsolationUnavailable);
+        }
+        observation.stage = SealStage::Deadline;
+        if Instant::now() >= deadline {
+            return Err(Reason::IsolationUnavailable);
+        }
+        self.configuration = files;
+        observation.stage = SealStage::Completed;
+        Ok(())
+    }
+    fn private_ancestors(&self) -> bool {
+        owned_directory_custody(
+            &self.directories,
+            self.root_directory_index,
+            self.library_directory_index,
+        )
+    }
     pub(crate) fn verifies_owned(&self, workspace: &Path, deadline: Instant) -> bool {
+        use std::os::windows::fs::MetadataExt as _;
         self.configuration.len() == 3
             && workspace.canonicalize().ok().as_deref() == Some(self.workspace.as_path())
             && regular(&self.root, true)
-            && self.directories.iter().all(retained_directory_regular)
-            && self
-                .configuration
-                .iter()
-                .all(|f| f.metadata().is_ok_and(|m| m.is_file()))
+            && self.private_ancestors()
+            && self.configuration.iter().all(|f| {
+                f.metadata()
+                    .is_ok_and(|m| m.is_file() && m.file_attributes() & 0x400 == 0)
+                    && matches!(
+                        nan_harness_private_fs::classify_owned_windows_dacl(
+                            f,
+                            nan_harness_private_fs::PrivatePathKind::File
+                        ),
+                        nan_harness_private_fs::OwnedWindowsDacl::Protected
+                            | nan_harness_private_fs::OwnedWindowsDacl::Inherited
+                    )
+            })
             && self.native.claude_policy_absent(deadline)
             && Instant::now() < deadline
     }
 }
 
+fn owned_directory_custody(
+    directories: &[File],
+    root_directory_index: usize,
+    library_directory_index: Option<usize>,
+) -> bool {
+    use nan_harness_private_fs::{OwnedWindowsDacl as Dacl, PrivatePathKind};
+    directories.iter().all(retained_directory_regular)
+        && directories.get(root_directory_index).is_some_and(|f| {
+            nan_harness_private_fs::classify_owned_windows_dacl(f, PrivatePathKind::Directory)
+                == Dacl::Protected
+        })
+        && library_directory_index
+            .and_then(|i| directories.get(i))
+            .is_some_and(|f| {
+                matches!(
+                    nan_harness_private_fs::classify_owned_windows_dacl(
+                        f,
+                        PrivatePathKind::Directory
+                    ),
+                    Dacl::Protected | Dacl::Inherited
+                )
+            })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn retained_owned_root_and_inherited_library_admit_only_readonly_exact_files() {
+        use nan_harness_private_fs::{OwnedWindowsDacl as Dacl, PrivatePathKind};
+        use std::os::windows::fs::OpenOptionsExt as _;
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("owned-profile");
+        nan_harness_private_fs::create_private_dir(&root).unwrap();
+        let library = root.join("configLibrary");
+        std::fs::create_dir(&library).unwrap();
+        let directories = vec![
+            lock_directory(&root).unwrap(),
+            lock_directory(&library).unwrap(),
+        ];
+        assert!(owned_directory_custody(&directories, 0, Some(1)));
+        assert!(!owned_directory_custody(&directories, 0, None));
+        let mut retained = Vec::new();
+        for path in [
+            root.join("claude_desktop_config.json"),
+            library.join("_meta.json"),
+            library.join(format!("{PROFILE_ID}.json")),
+        ] {
+            std::fs::write(&path, b"{\"ordinary\":true}").unwrap();
+            let mut file = std::fs::OpenOptions::new()
+                .read(true)
+                .access_mode(0x8002_0000)
+                .share_mode(1)
+                .custom_flags(0x0020_0000)
+                .open(&path)
+                .unwrap();
+            assert!(owned_directory_custody(&directories, 0, Some(1)));
+            assert_eq!(
+                nan_harness_private_fs::classify_owned_windows_dacl(&file, PrivatePathKind::File),
+                Dacl::Inherited
+            );
+            assert_eq!(
+                document(&mut file).unwrap(),
+                serde_json::json!({"ordinary":true})
+            );
+            assert_eq!(
+                std::fs::OpenOptions::new()
+                    .write(true)
+                    .open(&path)
+                    .unwrap_err()
+                    .raw_os_error(),
+                Some(32)
+            );
+            assert_eq!(
+                nan_harness_private_fs::classify_owned_windows_dacl(&file, PrivatePathKind::File),
+                Dacl::Inherited
+            );
+            retained.push(file);
+        }
+        assert_eq!(retained.len(), 3);
+        assert!(owned_directory_custody(&directories, 0, Some(1)));
+        drop(retained);
+    }
     fn valid() -> Vec<serde_json::Value> {
         vec![
             serde_json::json!({"deploymentMode":"3p"}),
@@ -358,7 +591,21 @@ mod tests {
         drop(file);
         std::fs::rename(&source, &destination).unwrap();
         assert_eq!(std::fs::read(&destination).unwrap(), b"private-fixture");
-        assert!(nan_harness_private_fs::open_private_read(&destination).is_ok());
+        let readonly = std::fs::OpenOptions::new()
+            .read(true)
+            .access_mode(0x8002_0000)
+            .share_mode(1)
+            .custom_flags(0x0020_0000)
+            .open(&destination)
+            .unwrap();
+        assert_eq!(
+            nan_harness_private_fs::classify_owned_windows_dacl(
+                &readonly,
+                nan_harness_private_fs::PrivatePathKind::File
+            ),
+            nan_harness_private_fs::OwnedWindowsDacl::Protected
+        );
+        drop(readonly);
         let delete = std::fs::OpenOptions::new()
             .access_mode(0x0001_0000)
             .share_mode(7)
