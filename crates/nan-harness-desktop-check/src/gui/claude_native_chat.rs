@@ -56,6 +56,8 @@ struct Facts {
     provider_observation: Option<ProviderObservation>,
     #[serde(skip_serializing_if = "Option::is_none")]
     row_shape: Option<crate::native::FailureRowShape>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    scope_shape: Option<crate::native::FailureScopeShape>,
     submitted_turns: u8,
     input_verified_turns: u8,
     copied_responses: u8,
@@ -74,6 +76,7 @@ impl Default for Facts {
             guard_rejection: None,
             provider_observation: None,
             row_shape: None,
+            scope_shape: None,
             submitted_turns: 0,
             input_verified_turns: 0,
             copied_responses: 0,
@@ -181,6 +184,9 @@ impl ClaudeNativeChatSession<'_> {
         }
         if let Some(shape) = receipt.row_shape {
             self.facts.row_shape = Some(shape);
+        }
+        if let Some(shape) = receipt.scope_shape {
+            self.facts.scope_shape = Some(shape);
         }
         self.facts.action_phase = Some(ChatActionPhase::Completed);
         Ok(stage)

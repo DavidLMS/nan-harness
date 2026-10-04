@@ -728,7 +728,7 @@ def semantic_observations(directory, app):
             fields = counts | flags | {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'stage'}
             stages = set('request window tree tree-query tree-duplicate tree-type tree-limit tree-pid tree-focus tree-window mode composer focus input-focus-guard input-focus-setting input-focused-identity input-replace-select-key input-prompt-before-guard input-prompt-clipboard input-prompt-after-guard input-paste-key input-readback-before-guard input-sentinel-clipboard input-sentinel-after-guard input-readback-select-key input-readback-select-guard input-readback-copy-key input-collapse-guard input-collapse-key input-mismatch input-initial-unavailable input-initial-nonempty input-clipboard-mismatch input-value-mismatch control scope scope-anchor-absent scope-heading-absent scope-assistant-heading-absent scope-marker-heading-absent scope-anchor-ambiguous scope-control-absent scope-control-ambiguous scope-heading-ambiguous scope-prompt-mismatch deadline action-uncertain response-mismatch sent copied retry-ready failure-details-ready failure-details-opened retried completed deadline-window deadline-tree deadline-focus deadline-input deadline-input-paste deadline-input-readback deadline-press deadline-copy deadline-retry-ready deadline-retry'.split())
             phase_fields = {'actionPhase', 'transportFailure'}
-            if (app != 'claude-desktop' or set(value) - {'providerObservation', 'guardRejection', 'rowShape'} not in (fields, fields | phase_fields) or value['diagnosticsOnly'] is not True
+            if (app != 'claude-desktop' or set(value) - {'providerObservation', 'guardRejection', 'rowShape', 'scopeShape'} not in (fields, fields | phase_fields) or value['diagnosticsOnly'] is not True
                     or type(value['stage']) is not str or value['stage'] not in stages
                     or any(type(value[key]) is not bool for key in flags)
                     or any(type(value[key]) is not int or not 0 <= value[key] <= 3 for key in counts)
@@ -762,6 +762,21 @@ def semantic_observations(directory, app):
                         or any(type(flag) is not bool for flag in observation.values())):
                     raise ValueError('invalid Claude provider observation')
                 record['providerObservation'] = observation
+            if 'scopeShape' in value:
+                shape = value['scopeShape']
+                counts = {'groupAncestorCount', 'sourceRowLabelsAnyRole', 'streamingLabelsAnyRole',
+                          'tryAgainLabelsAnyRole', 'tryAgainButtons', 'viewDetailsLabelsAnyRole', 'viewDetailsButtons'}
+                if (mechanism != 'claude-native-chat' or 'rowShape' not in value or type(shape) is not dict
+                        or set(shape) != counts | {'parentKind', 'walkEnd'}
+                        or type(shape['parentKind']) is not str or shape['parentKind'] not in {'none', 'group', 'web-area', 'scroll-area', 'window', 'other'}
+                        or type(shape['walkEnd']) is not str or shape['walkEnd'] not in {'boundary-web-area', 'boundary-scroll-area', 'boundary-window', 'root', 'depth-limit'}
+                        or any(type(shape[key]) is not int or not 0 <= shape[key] <= 1024 for key in counts)
+                        or shape['groupAncestorCount'] > 6
+                        or shape['tryAgainButtons'] > shape['tryAgainLabelsAnyRole']
+                        or shape['viewDetailsButtons'] > shape['viewDetailsLabelsAnyRole']
+                        or (shape['parentKind'] == 'none' and (shape['walkEnd'] != 'root' or shape['groupAncestorCount'] != 0))):
+                    raise ValueError('invalid passive Claude failure scope shape')
+                record['scopeShape'] = shape
             if 'rowShape' in value:
                 shape = value['rowShape']
                 count_keys = {'sourceRows', 'streamingRows', 'exactUserHeadings', 'exactPromptNodes',

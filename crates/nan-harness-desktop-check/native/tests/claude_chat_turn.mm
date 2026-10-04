@@ -32,6 +32,19 @@ int main() {
             [] { return true; }, [&] { ++value_pauses; })) ++readback_keys;
     assert(value_queries==1 && readback_keys==0 && value_pauses==0);
 
+    Tree scope_tree;
+    scope_tree.nodes = {fixture(-1, "AXWindow", ""), fixture(0, "AXWebArea", ""),
+        fixture(1, "AXStaticText", "Server error"), fixture(1, "AXButton", "Try again"),
+        fixture(1, "AXButton", "View details"), fixture(1, "AXOther", "Message 3")};
+    ScopeShape shape;
+    assert(observe_scope_shape(scope_tree, shape, [] { return true; }));
+    assert(std::string(shape.parent_kind) == "web-area" && std::string(shape.walk_end) == "boundary-web-area");
+    assert(shape.counts[0] == 0 && shape.counts[1] == 1 && shape.counts[4] == 1);
+    scope_tree.nodes.push_back(fixture(1, "AXStaticText", "Server error"));
+    assert(!observe_scope_shape(scope_tree, shape, [] { return true; }));
+    scope_tree.nodes.pop_back();
+    assert(!observe_scope_shape(scope_tree, shape, [] { return false; }));
+
     Request diagnostic;
     for (const char* phase : {"deadline-window", "deadline-tree", "deadline-focus", "deadline-input",
             "deadline-press", "deadline-copy", "deadline-retry-ready", "deadline-retry"}) {

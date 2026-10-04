@@ -603,6 +603,51 @@ static bool observe_row_shape(const Tree& tree, const Request& request, RowShape
     }
     return in_time();
 }
+struct ScopeShape {
+    const char* parent_kind = "none";
+    const char* walk_end = "root";
+    std::array<unsigned, 7> counts{};
+};
+static const char* parent_kind(const std::string& role) {
+    if (role == "AXGroup") return "group";
+    if (role == "AXWebArea") return "web-area";
+    if (role == "AXScrollArea") return "scroll-area";
+    if (role == "AXWindow") return "window";
+    return "other";
+}
+template<class InTime>
+static bool observe_scope_shape(const Tree& tree, ScopeShape& shape, InTime in_time) {
+    if (tree.nodes.size() > 1024) return false;
+    shape = ScopeShape{};
+    unsigned anchors = 0; int anchor = -1;
+    for (std::size_t i = 0; i < tree.nodes.size(); ++i) {
+        if (!in_time()) return false;
+        const auto& node = tree.nodes[i];
+        if (node.role == "AXStaticText" && node.label == "Server error" && descendant(tree, i, 0)) {
+            ++anchors; anchor = i;
+        }
+        shape.counts[1] += source_row_position(node.label) != 0;
+        shape.counts[2] += node.label == "Currently streaming message";
+        shape.counts[3] += node.label == MODERN_RETRY_LABEL;
+        shape.counts[4] += node.label == MODERN_RETRY_LABEL && node.role == "AXButton";
+        shape.counts[5] += node.label == "View details";
+        shape.counts[6] += node.label == "View details" && node.role == "AXButton";
+    }
+    if (anchors != 1) return false;
+    int ancestor = tree.nodes[anchor].parent;
+    if (ancestor >= 0) shape.parent_kind = parent_kind(tree.nodes[ancestor].role);
+    unsigned depth = 0;
+    for (; ancestor > 0 && depth < 6; ++depth, ancestor = tree.nodes[ancestor].parent) {
+        if (!in_time()) return false;
+        const auto& role = tree.nodes[ancestor].role;
+        if (role == "AXWebArea") { shape.walk_end = "boundary-web-area"; return true; }
+        if (role == "AXScrollArea") { shape.walk_end = "boundary-scroll-area"; return true; }
+        if (role == "AXWindow") { shape.walk_end = "boundary-window"; return true; }
+        shape.counts[0] += role == "AXGroup";
+    }
+    if (ancestor > 0 && depth == 6) shape.walk_end = "depth-limit";
+    return in_time();
+}
 // The source server-error card keeps raw details collapsed. This selector only
 // authorizes its disclosure inside one failed-user turn; Retry stays marker-bound.
 static int failure_details_control(const Tree& tree, const Request& request, const char** failure = nullptr) {
@@ -685,6 +730,7 @@ int claude_chat_turn() {
         Request value;
         const char* stage = "request";
         RowShape row_shape{}; bool row_shape_observed = false;
+        ScopeShape scope_shape{}; bool scope_shape_observed = false;
         if (request(value)) {
             Tree tree;
             if (!owned(value)) stage = "window";
@@ -695,8 +741,10 @@ int claude_chat_turn() {
                     value.deadline_phase = input_mode(value.mode) ? "deadline-input"
                         : value.mode == "copy" ? "deadline-copy"
                         : value.mode == "retry-ready" ? "deadline-retry-ready" : "deadline-retry";
-                    if (value.mode == "failure-details" || value.mode == "failure-details-ready")
+                    if (value.mode == "failure-details" || value.mode == "failure-details-ready") {
                         row_shape_observed = observe_row_shape(tree, value, row_shape, [&] { return within(value); });
+                        scope_shape_observed = row_shape_observed && observe_scope_shape(tree, scope_shape, [&] { return within(value); });
+                    }
                     stage = input_mode(value.mode) ? input(value, tree) : action(value, tree);
                 }
             }
@@ -707,6 +755,11 @@ int claude_chat_turn() {
             std::cout << "rows";
             for (unsigned count : row_shape) std::cout << ' ' << count;
             std::cout << '\n';
+            if (scope_shape_observed && within(value)) {
+                std::cout << "scope " << scope_shape.parent_kind << ' ' << scope_shape.walk_end;
+                for (unsigned count : scope_shape.counts) std::cout << ' ' << count;
+                std::cout << '\n';
+            }
         }
         return std::cout ? 0 : 5;
     }

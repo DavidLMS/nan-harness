@@ -3127,5 +3127,37 @@ class ClaudeClassicRoleShapeTests(unittest.TestCase):
             self.assertNotIn('classicRoleShape', q.semantic_observations(root, 'claude-desktop')[0])
 
 
+
+class ClaudeFailureScopeShapeTests(unittest.TestCase):
+    def test_scope_is_advisory_closed_and_requires_legacy_row_receipt(self):
+        keys = 'sourceRows streamingRows exactUserHeadings exactPromptNodes serverErrorLabels retryControls detailsControls userRows errorRows sharedParentPairs adjacentPairs assistantHeadingsInErrorRows duplicatePositions'.split()
+        counts = dict(zip(keys, [2, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0]))
+        shape = dict(sourceVersion='2.19675.0', sourceSha256='87e6b710a540352fcd4f9a1f0f6a8f9f9b6377ca676fd99c3e4d8bc87653dceb',
+                     navigationSourceSha256='948270963cdf93cc411d95393157f5c7e2c06f18916d8c4ea1971828fb0c677c', phase='pre-disclosure', counts=counts)
+        value = dict(schemaVersion=1, mechanism='claude-native-chat', diagnosticsOnly=True,
+                     stage='scope-heading-ambiguous', submittedTurns=3, inputVerifiedTurns=3, copiedResponses=2,
+                     retryAttempted=False, clipboardCleared=True, rowShape=shape)
+        scope = dict(parentKind='web-area', walkEnd='boundary-web-area', groupAncestorCount=0,
+                     sourceRowLabelsAnyRole=0, streamingLabelsAnyRole=0, tryAgainLabelsAnyRole=1,
+                     tryAgainButtons=1, viewDetailsLabelsAnyRole=1, viewDetailsButtons=1)
+        value['scopeShape'] = scope
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'scope.json'
+            path.write_text(json.dumps(value))
+            observed = q.semantic_observations(root, 'claude-desktop')[0]
+            self.assertEqual(observed['scopeShape'], scope)
+            self.assertFalse(observed['retryAttempted'])
+            for changes in ({'parentKind': 'PRIVATE'}, {'parentKind': []}, {'walkEnd': 'PRIVATE'},
+                            {'groupAncestorCount': 7}, {'sourceRowLabelsAnyRole': 1025},
+                            {'tryAgainLabelsAnyRole': 0}, {'viewDetailsLabelsAnyRole': 0},
+                            {'groupAncestorCount': True}, {'rawRole': 'PRIVATE'},
+                            {'parentKind': 'none', 'walkEnd': 'depth-limit'}):
+                path.write_text(json.dumps({**value, 'scopeShape': {**scope, **changes}}))
+                with self.assertRaises(ValueError): q.semantic_observations(root, 'claude-desktop')
+            path.write_text(json.dumps({key: val for key, val in value.items() if key != 'rowShape'}))
+            with self.assertRaises(ValueError): q.semantic_observations(root, 'claude-desktop')
+            path.write_text(json.dumps({key: val for key, val in value.items() if key != 'scopeShape'}))
+            self.assertNotIn('scopeShape', q.semantic_observations(root, 'claude-desktop')[0])
+
 if __name__ == '__main__':
     unittest.main()

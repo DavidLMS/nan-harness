@@ -224,10 +224,81 @@ pub(crate) struct FailureRowShape {
     phase: &'static str,
     counts: FailureRowCounts,
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct FailureScopeShape {
+    parent_kind: &'static str,
+    walk_end: &'static str,
+    group_ancestor_count: u16,
+    source_row_labels_any_role: u16,
+    streaming_labels_any_role: u16,
+    try_again_labels_any_role: u16,
+    try_again_buttons: u16,
+    view_details_labels_any_role: u16,
+    view_details_buttons: u16,
+}
+impl FailureScopeShape {
+    fn parse(line: &str) -> Option<Self> {
+        let fields: Vec<_> = line.strip_prefix("scope ")?.split(' ').collect();
+        if fields.len() != 9 {
+            return None;
+        }
+        let parent_kind = match fields[0] {
+            "none" => "none",
+            "group" => "group",
+            "web-area" => "web-area",
+            "scroll-area" => "scroll-area",
+            "window" => "window",
+            "other" => "other",
+            _ => return None,
+        };
+        let walk_end = match fields[1] {
+            "boundary-web-area" => "boundary-web-area",
+            "boundary-scroll-area" => "boundary-scroll-area",
+            "boundary-window" => "boundary-window",
+            "root" => "root",
+            "depth-limit" => "depth-limit",
+            _ => return None,
+        };
+        let mut values = [0_u16; 7];
+        for (i, field) in fields[2..].iter().enumerate() {
+            if field.is_empty()
+                || field.len() > 4
+                || !field.bytes().all(|v| v.is_ascii_digit())
+                || (field.len() > 1 && field.starts_with('0'))
+            {
+                return None;
+            }
+            values[i] = field.parse().ok()?;
+            if values[i] > 1024 {
+                return None;
+            }
+        }
+        if values[0] > 6
+            || values[4] > values[3]
+            || values[6] > values[5]
+            || (parent_kind == "none" && (values[0] != 0 || walk_end != "root"))
+        {
+            return None;
+        }
+        Some(Self {
+            parent_kind,
+            walk_end,
+            group_ancestor_count: values[0],
+            source_row_labels_any_role: values[1],
+            streaming_labels_any_role: values[2],
+            try_again_labels_any_role: values[3],
+            try_again_buttons: values[4],
+            view_details_labels_any_role: values[5],
+            view_details_buttons: values[6],
+        })
+    }
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ChatTurnReceipt {
     pub(crate) stage: ChatTurnStage,
     pub(crate) row_shape: Option<FailureRowShape>,
+    pub(crate) scope_shape: Option<FailureScopeShape>,
 }
 impl ChatTurnReceipt {
     pub(crate) fn parse(output: &str, mode: &str) -> Option<Self> {
@@ -240,12 +311,19 @@ impl ChatTurnReceipt {
             return Some(Self {
                 stage,
                 row_shape: None,
+                scope_shape: None,
             });
         }
         if !matches!(mode, "failure-details" | "failure-details-ready") {
             return None;
         }
-        let row_line = remainder.strip_suffix('\n')?.strip_prefix("rows ")?;
+        let (row_line, remainder) = remainder.split_once('\n')?;
+        let scope_shape = if remainder.is_empty() {
+            None
+        } else {
+            Some(FailureScopeShape::parse(remainder.strip_suffix('\n')?)?)
+        };
+        let row_line = row_line.strip_prefix("rows ")?;
         let fields: Vec<_> = row_line.split(' ').collect();
         if fields.len() != 13 {
             return None;
@@ -275,6 +353,7 @@ impl ChatTurnReceipt {
         }
         Some(Self {
             stage,
+            scope_shape,
             row_shape: Some(FailureRowShape {
                 source_version: "2.19675.0",
                 source_sha256: "87e6b710a540352fcd4f9a1f0f6a8f9f9b6377ca676fd99c3e4d8bc87653dceb",
@@ -362,6 +441,44 @@ pub(super) fn request(
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn optional_scope_shape_is_bounded_and_never_changes_stage() {
+        let legacy = "turn scope-control-absent\nrows 0 0 0 0 1 1 1 0 0 0 0 0 0\n";
+        assert!(
+            ChatTurnReceipt::parse(legacy, "failure-details-ready")
+                .unwrap()
+                .scope_shape
+                .is_none()
+        );
+        let framed = format!("{legacy}scope web-area boundary-web-area 0 0 0 1 1 1 1\n");
+        let receipt = ChatTurnReceipt::parse(&framed, "failure-details-ready").unwrap();
+        assert_eq!(receipt.stage, ChatTurnStage::ScopeControlAbsent);
+        assert!(receipt.scope_shape.is_some());
+        assert!(ChatTurnReceipt::parse(&framed, "copy").is_none());
+        for line in [
+            "scope PRIVATE root 0 0 0 0 0 0 0",
+            "scope group PRIVATE 0 0 0 0 0 0 0",
+            "scope group root 7 0 0 0 0 0 0",
+            "scope group root 1 1025 0 0 0 0 0",
+            "scope group root 1 0 0 0 1 0 0",
+            "scope group root 1 0 0 0 0 0 1",
+            "scope none depth-limit 0 0 0 0 0 0 0",
+            "scope group root 01 0 0 0 0 0 0",
+            "scope group root 1 0 0 0 0 0 0 PRIVATE",
+        ] {
+            assert!(
+                ChatTurnReceipt::parse(&format!("{legacy}{line}\n"), "failure-details").is_none()
+            );
+        }
+        assert!(
+            ChatTurnReceipt::parse(
+                &format!("{framed}scope group root 0 0 0 0 0 0 0\n"),
+                "failure-details"
+            )
+            .is_none()
+        );
+    }
+
     #[test]
     fn failure_rows_are_closed_advisory_and_only_accepted_for_disclosure() {
         let observed = "turn scope-heading-ambiguous\nrows 2 0 1 1 1 1 1 1 1 1 1 1 0\n";

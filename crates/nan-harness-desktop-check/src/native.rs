@@ -27,7 +27,9 @@ pub(crate) use mac_chat::ChatPressStage;
 #[cfg(target_os = "macos")]
 pub(crate) use mac_chat_turn::{CHAT_TURN_MAX_MILLIS, ChatActionPhase, failure_label};
 #[cfg(target_os = "macos")]
-pub(crate) use mac_chat_turn::{ChatTurnReceipt, ChatTurnStage, FailureRowShape};
+pub(crate) use mac_chat_turn::{
+    ChatTurnReceipt, ChatTurnStage, FailureRowShape, FailureScopeShape,
+};
 pub(crate) use ocr::Page;
 pub(crate) use process::FailureCategory;
 #[cfg(windows)]
