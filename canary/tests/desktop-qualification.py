@@ -2500,6 +2500,22 @@ class QualificationTests(unittest.TestCase):
                 with self.assertRaises(ValueError):q.semantic_observations(root,'chatgpt-desktop')
             path.write_text(json.dumps({**value,'initialMainActivation':{**item,'nativeBoundary':'trust'}}))
             with self.assertRaises(ValueError):q.semantic_observations(root,'chatgpt-desktop')
+            for phase, outer in [('activation','activation'),('verification','polling')]:
+                failure = dict(phase=phase, boundary='app-unfocused')
+                item = {**facts, 'phase':outer, 'status':'query-failed', 'nativeActivationFailure':failure}
+                path.write_text(json.dumps({**value, 'initialMainActivation':item}))
+                self.assertEqual(q.semantic_observations(root,'chatgpt-desktop')[0]['initialMainActivation'],item)
+                for invalid in ({**failure,'boundary':'PRIVATE'}, {**failure,'phase':True},
+                                {**failure,'path':'PRIVATE'}, {**failure,'inventory':inventory}):
+                    path.write_text(json.dumps({**value,'initialMainActivation':{**item,'nativeActivationFailure':invalid}}))
+                    with self.assertRaises(ValueError):q.semantic_observations(root,'chatgpt-desktop')
+                for invalid in ({**item,'activationAttempted':False},{**item,'phase':'pre-proof'},
+                                {**item,'status':'focused'}):
+                    path.write_text(json.dumps({**value,'initialMainActivation':invalid}))
+                    with self.assertRaises(ValueError):q.semantic_observations(root,'chatgpt-desktop')
+                measured = {**item,'nativeActivationFailure':{**failure,'boundary':'cg-inventory-after','inventory':inventory}}
+                path.write_text(json.dumps({**value,'initialMainActivation':measured}))
+                self.assertEqual(q.semantic_observations(root,'chatgpt-desktop')[0]['initialMainActivation'],measured)
             for item in (facts, {**facts, 'phase': 'final-proof', 'status': 'focused'},
                          {**facts, 'phase': 'pre-proof', 'status': 'rejected',
                           'activationAttempted': False, 'guardFailure': 'native-ownership'}):

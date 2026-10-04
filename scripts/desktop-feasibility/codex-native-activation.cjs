@@ -22,8 +22,10 @@ function controller(config,owner,launcher,deadline,run=child.execFileSync,now=Da
     if(typeof file!=='string'||!path.isAbsolute(file)||fs.realpathSync(file)!==file
       ||!fs.lstatSync(file).isFile()||fs.lstatSync(file).isSymbolicLink())throw Error('native activation rejected');
   }
-  let held=null,cutoff=BigInt(config.cutoffNanos),attempted=false,nativeBoundary=null,nativeInventoryFailure=null;
+  let held=null,cutoff=BigInt(config.cutoffNanos),attempted=false,nativeBoundary=null,nativeInventoryFailure=null,nativeActivationFailure=null;
   const boundaries=new Set(['request','cg-inventory-before','ax-main-before','cg-inventory-after','ax-main-after','identity','trust']);
+  const actionBoundaries=new Set([...boundaries,'app-unavailable','app-unfocused','foreground-unfocused',
+    'focused-window-query','focused-window-type','focused-window-identity','app-activate','raise','deadline']);
   const execute=phase=>{
     const remaining=deadline-now();
     if(remaining<=0)throw Error('native activation expired');
@@ -34,19 +36,25 @@ function controller(config,owner,launcher,deadline,run=child.execFileSync,now=Da
       output=run(config.helper,['--codex-activate-main'],{input,encoding:'utf8',timeout:remaining,
         maxBuffer:4096,stdio:['pipe','pipe','ignore']});
     } catch(error) {
-      if(phase==='prepare'&&typeof error?.stdout==='string'&&error.stdout.length<=128) {
+      if(typeof error?.stdout==='string'&&error.stdout.length<=128) {
         const match=/^activation-rejected ([a-z-]+)(?: ([a-z-]+) ([0-9]+) ([0-9]+) ([0-9]+))?\n$/.exec(error.stdout);
-        if(match&&boundaries.has(match[1])) {
-          if(!match[2])nativeBoundary=match[1];
+        if(match&&(phase==='prepare'?boundaries:actionBoundaries).has(match[1])) {
+          let accepted=!match[2],inventory=null;
+          if(!match[2]&&phase==='prepare')nativeBoundary=match[1];
           else {
             const counts=match.slice(3).map(Number);
             if(['cg-inventory-before','cg-inventory-after'].includes(match[1])
               &&['inventory-unavailable','limit','metadata','geometry','process-identity','identity','candidates-missing','candidates-ambiguous','other-owned-normal','overlapping-ahead','off-display','deadline'].includes(match[2])&&counts.every(v=>Number.isSafeInteger(v)&&v>=0&&v<=1024)
               &&counts.reduce((a,b)=>a+b,0)<=1024) {
-              nativeBoundary=match[1];
-              nativeInventoryFailure={reason:match[2],candidateCount:counts[0],
+              accepted=true;
+              inventory={reason:match[2],candidateCount:counts[0],
                 executableRejectedCount:counts[1],ancestryRejectedCount:counts[2]};
+              if(phase==='prepare'){nativeBoundary=match[1];nativeInventoryFailure=inventory;}
             }
+          }
+          if(accepted&&phase!=='prepare') {
+            nativeActivationFailure={phase:phase==='activate'?'activation':'verification',boundary:match[1]};
+            if(inventory)nativeActivationFailure.inventory=inventory;
           }
         }
       }
@@ -58,6 +66,7 @@ function controller(config,owner,launcher,deadline,run=child.execFileSync,now=Da
   return {
     failure:()=>nativeBoundary,
     inventoryFailure:()=>nativeInventoryFailure,
+    actionFailure:()=>nativeActivationFailure,
     prepare() {
       if(held||attempted)throw Error('native activation consumed');
       held=binding(execute('prepare'));

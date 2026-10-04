@@ -1814,7 +1814,7 @@ def semantic_observations(directory, app):
             if 'initialMainActivation' in value:
                 activation = value['initialMainActivation']
                 if (app != 'chatgpt-desktop' or type(activation) is not dict
-                        or set(activation) - {'nativeBoundary','nativeInventoryFailure'} != {'phase', 'status', 'activationAttempted', 'guardFailure'}
+                        or set(activation) - {'nativeBoundary','nativeInventoryFailure','nativeActivationFailure'} != {'phase', 'status', 'activationAttempted', 'guardFailure'}
                         or type(activation['phase']) is not str or activation['phase'] not in {
                             'pre-proof', 'pre-identity', 'activation', 'polling', 'final-proof'}
                         or type(activation['status']) is not str or activation['status'] not in {
@@ -1849,6 +1849,31 @@ def semantic_observations(directory, app):
                             or any(type(inventory[k]) is not int or not 0 <= inventory[k] <= 1024 for k in counts)
                             or sum(inventory[k] for k in counts) > 1024):
                         raise ValueError('invalid Codex native inventory failure')
+                if 'nativeActivationFailure' in activation:
+                    failure = activation['nativeActivationFailure']
+                    boundaries = {'request','cg-inventory-before','ax-main-before','cg-inventory-after',
+                                  'ax-main-after','identity','trust','app-unavailable','app-unfocused',
+                                  'foreground-unfocused','focused-window-query','focused-window-type',
+                                  'focused-window-identity','app-activate','raise','deadline'}
+                    if (type(failure) is not dict or set(failure) - {'inventory'} != {'phase','boundary'}
+                            or type(failure['phase']) is not str or failure['phase'] not in {'activation','verification'}
+                            or type(failure['boundary']) is not str or failure['boundary'] not in boundaries
+                            or not activation['activationAttempted'] or activation['status'] not in {'query-failed','deadline'}
+                            or activation['phase'] != ('activation' if failure['phase'] == 'activation' else 'polling')
+                            or 'nativeBoundary' in activation or 'nativeInventoryFailure' in activation):
+                        raise ValueError('invalid Codex native activation failure')
+                    if 'inventory' in failure:
+                        inventory = failure['inventory']
+                        counts = {'candidateCount','executableRejectedCount','ancestryRejectedCount'}
+                        if (failure['boundary'] not in {'cg-inventory-before','cg-inventory-after'}
+                                or type(inventory) is not dict or set(inventory) != counts | {'reason'}
+                                or type(inventory['reason']) is not str or inventory['reason'] not in {
+                                    'inventory-unavailable','limit','metadata','geometry','process-identity','identity',
+                                    'candidates-missing','candidates-ambiguous','other-owned-normal','overlapping-ahead',
+                                    'off-display','deadline'}
+                                or any(type(inventory[k]) is not int or not 0 <= inventory[k] <= 1024 for k in counts)
+                                or sum(inventory[k] for k in counts) > 1024):
+                            raise ValueError('invalid Codex activation inventory failure')
                 record['initialMainActivation'] = activation
             if 'initialMainConfirmation' in value:
                 confirmation = value['initialMainConfirmation']

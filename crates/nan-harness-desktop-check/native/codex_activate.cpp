@@ -234,12 +234,20 @@ int codex_activate_main() {
         if(request.verify) {
             auto app=[NSRunningApplication runningApplicationWithProcessIdentifier:held.pid];
             AXUIElementRef application=AXUIElementCreateApplication(held.pid);CFTypeRef focused=nullptr;
-            bool proved=app&&app.active&&!app.hidden
-                &&[[[NSWorkspace sharedWorkspace] frontmostApplication] processIdentifier]==held.pid
-                &&application&&attribute(request,application,kAXFocusedWindowAttribute,focused)
-                &&CFGetTypeID(focused)==AXUIElementGetTypeID()&&CFEqual(first,focused)&&alive(request);
+            // Same ordered reads as the boolean proof; no failure retries them.
+            const auto rejection=[&]() -> const char* {
+                if(!app)return "app-unavailable";
+                if(!app.active||app.hidden)return "app-unfocused";
+                if([[[NSWorkspace sharedWorkspace] frontmostApplication] processIdentifier]!=held.pid)
+                    return "foreground-unfocused";
+                if(!application||!attribute(request,application,kAXFocusedWindowAttribute,focused))
+                    return "focused-window-query";
+                if(CFGetTypeID(focused)!=AXUIElementGetTypeID())return "focused-window-type";
+                if(!CFEqual(first,focused))return "focused-window-identity";
+                return alive(request)?nullptr:"deadline";
+            }();
             if(focused)CFRelease(focused);if(application)CFRelease(application);CFRelease(first);
-            if(!proved)return 5;std::cout<<"verified\n";return 0;
+            if(rejection)return activation_rejected(rejection);std::cout<<"verified\n";return 0;
         }
         if(!request.action) {
             std::cout<<std::setprecision(17)<<held.id<<' '<<held.pid<<' '<<held.bounds.origin.x<<' '
@@ -249,15 +257,22 @@ int codex_activate_main() {
             std::cout<<' '<<(uint64_t(ticks.tv_sec)*1000000000ULL+uint64_t(ticks.tv_nsec))<<'\n';CFRelease(first);return 0;
         }
         auto app=[NSRunningApplication runningApplicationWithProcessIdentifier:held.pid];
-        if(!app||!alive(request)||![app activateWithOptions:NSApplicationActivateIgnoringOtherApps]){CFRelease(first);return 5;}
+        if(!app){CFRelease(first);return activation_rejected("app-unavailable");}
+        if(!alive(request)){CFRelease(first);return activation_rejected("deadline");}
+        if(![app activateWithOptions:NSApplicationActivateIgnoringOtherApps]){CFRelease(first);return activation_rejected("app-activate");}
         // The first activation is consumed. Any later failure is terminal.
         Binding final=held;
-        AXUIElementRef current=inventory(request,final,false,nullptr,true)?main_window(request,held):nullptr;
-        bool unchanged=current&&CFEqual(first,current)&&alive(request);
+        bool final_inventory=inventory(request,final,false,&failure,true);
+        boundary=final_inventory?"ax-main-after":"cg-inventory-after";
+        AXUIElementRef current=final_inventory?main_window(request,held,&boundary):nullptr;
+        if(current)boundary="identity";
+        bool unchanged=current&&CFEqual(first,current);
+        if(unchanged){boundary="deadline";unchanged=alive(request);}
         if(current)CFRelease(current);
-        if(!unchanged){CFRelease(first);return 5;}
+        if(!unchanged){CFRelease(first);return activation_rejected(boundary,final_inventory?nullptr:&failure);}
         AXError raised=AXUIElementPerformAction(first,kAXRaiseAction);CFRelease(first);
-        if(raised!=kAXErrorSuccess||!alive(request))return 5;
+        if(raised!=kAXErrorSuccess)return activation_rejected("raise");
+        if(!alive(request))return activation_rejected("deadline");
         std::cout<<"activated\n";return 0;
     }
 #else

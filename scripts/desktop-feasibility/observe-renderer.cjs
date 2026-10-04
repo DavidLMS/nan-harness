@@ -319,6 +319,8 @@ async function focusCapturedMain(held,proof,deadline,identity=correlationIdentit
       const inventory=typeof nativeActivation?.inventoryFailure==='function'?nativeActivation.inventoryFailure():null;
       if(inventory)diagnostic.nativeInventoryFailure=inventory;
     }
+    const actionFailure=typeof nativeActivation?.actionFailure==='function'?nativeActivation.actionFailure():null;
+    if(diagnostic&&actionFailure)diagnostic.nativeActivationFailure=actionFailure;
     return stop(Date.now()>=deadline?'deadline':'query-failed');
   }
 }

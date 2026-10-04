@@ -62,3 +62,21 @@ for(const [line,expected] of [
  assert.throws(()=>native.prepare());
  assert.equal(native.inventoryFailure()!==null,expected);
 }
+
+for(const phase of ['activate','verify'])for(const boundary of ['app-unavailable','app-unfocused','foreground-unfocused',
+ 'focused-window-query','focused-window-type','focused-window-identity','app-activate','raise','deadline','PRIVATE']) {
+ let calls=[];
+ const native=controller(config,20,25,2000,(_h,_a,options)=>{
+  const current=options.input.split(' ')[0];calls.push(current);
+  if(current==='prepare')return '42 100 10 20 600 400 500 0 1000000000\n';
+  if(current!==phase)return 'activated\n';
+  const e=Error('PRIVATE');e.stdout=`activation-rejected ${boundary}\n`;throw e;
+ },()=>1000);
+ native.prepare();
+ if(phase==='verify')native.activate();
+ assert.throws(()=>phase==='activate'?native.activate():native.verify());
+ const failure=native.actionFailure();assert.equal(failure!==null,boundary!=='PRIVATE');
+ if(failure){assert.equal(failure.phase,phase==='activate'?'activation':'verification');assert.equal(failure.boundary,boundary);}
+ assert.throws(()=>native.activate()); // A diagnostic cannot replay consumed activation.
+ assert.equal(calls.filter(x=>x==='activate').length,1);
+}
