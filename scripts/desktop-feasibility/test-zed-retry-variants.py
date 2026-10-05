@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import runpy
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -18,8 +19,7 @@ class VariantTests(unittest.TestCase):
         repository = Path(__file__).resolve().parents[2]
         with tempfile.TemporaryDirectory() as tmp:
             stub = Path(tmp) / 'dbus-run-session'
-            stub.write_text('#!/bin/sh\nexit 0\n')
-            stub.chmod(0o700)
+            stub.symlink_to(shutil.which('true'))
             env = {**os.environ, 'PATH': tmp + os.pathsep + os.environ['PATH'],
                    'NANH_ZED_SCREEN_POLICY': 'height-1536', 'GITHUB_ACTIONS': 'true',
                    'RUNNER_ENVIRONMENT': 'github-hosted', 'RUNNER_OS': 'Linux',
