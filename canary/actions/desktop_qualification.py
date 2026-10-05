@@ -842,6 +842,20 @@ DOM_TAGS = {'html', 'body', 'button', 'div', 'span', 'svg', 'other', 'none', 'un
 DOM_REGIONS = {'thread-viewport', 'composer-root', 'composer-dock', 'composer-drag-region', 'composer-bounds', 'composer-portal', 'particle-field', 'chat-drop-overlay', 'titlebar-drag', 'pane-overlay', 'pane-host', 'narrow-overlay', 'floating-pane', 'tree-group', 'panel-header', 'panel-page-header', 'zone-tabstrip', 'window-drag-handle', 'gateway-connecting', 'onboarding', 'command-backdrop', 'dialog-overlay', 'dialog', 'popover', 'tooltip', 'other', 'none', 'unmeasured'}
 
 
+def validate_overlay_render_counts(value, started):
+    keys = {'notification', 'commandPalette', 'fallbackPrompt', 'contextMenu',
+            'zedPrompt', 'whichKey', 'securityModal'}
+    if (type(value) is not dict or set(value) != {'totals', 'windows'}
+            or type(value['windows']) is not list or len(value['windows']) != started):
+        raise ValueError('invalid overlay render identity')
+    for counts in [value['totals'], *value['windows']]:
+        if (type(counts) is not dict or set(counts) != keys
+                or any(type(n) is not int or not 0 <= n <= 65536 for n in counts.values())):
+            raise ValueError('invalid overlay render counts')
+    if any(sum(window[key] for window in value['windows']) > value['totals'][key] for key in keys):
+        raise ValueError('inconsistent overlay render counts')
+
+
 def validate_overlay_census(value):
     if type(value) is not dict or set(value) != {'status', 'counts', 'actions'}:
         raise ValueError('invalid overlay census')
@@ -2288,7 +2302,7 @@ def semantic_observations(directory, app):
             enum(record, value, 'failureStage', {'read', 'prepare', 'verify', 'running', 'restore'})
         elif mechanism == 'zed-retry-entry-counts':
             fields = set('schemaVersion mechanism diagnosticsOnly status stage cleanup retryEntries nativeRetryEntries'.split())
-            if (set(value) - {'inputDispatchEntries', 'activationWindows', 'attachFailure', 'hitTestGeometry', 'readbackFailure', 'markerReadFaults'} != fields or app != 'zed-desktop' or value['diagnosticsOnly'] is not True
+            if (set(value) - {'inputDispatchEntries', 'activationWindows', 'attachFailure', 'hitTestGeometry', 'readbackFailure', 'markerReadFaults', 'overlayRenderEntries'} != fields or app != 'zed-desktop' or value['diagnosticsOnly'] is not True
                     or type(value['status']) is not str or value['status'] not in {'complete', 'unavailable'}
                     or type(value['stage']) is not str or value['stage'] not in {'attach', 'stop', 'readback', 'complete'}
                     or (value['status'] == 'complete') != (value['stage'] == 'complete')
@@ -2331,6 +2345,10 @@ def semantic_observations(directory, app):
                     if return_fields <= set(window) and any(window[key] > window['inputDispatchReturns']
                             for key in ('inputPropagationStops', 'inputDefaultPreventions', 'inputInvalidReturns')):
                         raise ValueError('inconsistent dispatch returns')
+            if 'overlayRenderEntries' in value:
+                if value['status'] != 'complete' or 'activationWindows' not in value:
+                    raise ValueError('invalid overlay render state')
+                validate_overlay_render_counts(value['overlayRenderEntries'], value['activationWindows']['started'])
             if 'hitTestGeometry' in value:
                 geometry = value['hitTestGeometry']
                 if (value['status'] != 'complete' or type(geometry) is not dict

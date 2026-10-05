@@ -11,6 +11,7 @@ import time
 
 from cell import write_json
 import zed_hit_geometry
+import zed_render_counts
 
 BINARY_SHA256 = '18f225903713f623e1564a2e1902ef4ba84d2b5fb6aa58fd59af2d62646943b2'
 SYMBOLS = (
@@ -112,6 +113,8 @@ def program(executable, markers=None, geometry=False):
             raise ValueError('geometry requires activation markers')
         lines[0] = lines[0][:-1] + zed_hit_geometry.seeds() + ' }'
         lines.append(zed_hit_geometry.probe(path, SYMBOLS[2]))
+        lines[0] = lines[0][:-1] + zed_render_counts.seeds() + ' }'
+        lines.append(zed_render_counts.probes(path))
         lines = [line.replace('delete(@active);', 'delete(@active); ' + zed_hit_geometry.cleanup()) for line in lines]
     return '\n'.join(lines)
 
@@ -316,11 +319,14 @@ class Capture:
                         output, ignored = zed_hit_geometry.strip_marker_faults(output, self.marker_lines)
                         self.receipt['markerReadFaults'] = ignored
                         output, geometry_maps = zed_hit_geometry.split_maps(output)
+                        output, renders = zed_render_counts.split_counts(output)
                     (retry, native, inputs), clicks = parse_click_counts(output)
                     self.receipt.update(status='complete', stage='complete', retryEntries=retry,
                                         nativeRetryEntries=native, inputDispatchEntries=inputs,
                                         activationWindows=clicks)
                     if geometry_maps is not None:
+                        self.receipt['overlayRenderEntries'] = dict(totals=renders['totals'],
+                            windows=renders['windows'][:clicks['started']])
                         try:
                             windows = zed_hit_geometry.observations(geometry_maps, self.markers, clicks['started'])
                             self.receipt['hitTestGeometry'] = dict(status='complete', windows=windows)

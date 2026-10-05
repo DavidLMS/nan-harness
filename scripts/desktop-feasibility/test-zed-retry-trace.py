@@ -12,11 +12,17 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'canary/actions'))
 from zed_retry_trace import CLICK_FIELDS, Capture, attach_failure, parse_counts, parse_click_counts, program, read_ready
+from zed_render_counts import SYMBOLS as RENDER_SYMBOLS
 
 
 def maps(retry, native, inputs=1):
     return ('\n'.join(json.dumps({'type': 'map', 'data': {key: value}})
                       for key, value in (('@retry', retry), ('@native', native), ('@input', inputs))) + '\n').encode()
+
+
+def render_maps():
+    return b''.join((json.dumps(dict(type='map', data={f'@render{key}{slot}': 1})) + '\n').encode()
+                    for key in RENDER_SYMBOLS for slot in range(4))
 
 
 def click_maps(started=3, ended=3):
@@ -79,7 +85,7 @@ class TraceTests(unittest.TestCase):
                 returncode = 0
                 pid = 123
                 def poll(self): return None
-                def communicate(self, timeout): return maps(1, 1) + click_maps() + raw, None
+                def communicate(self, timeout): return maps(1, 1) + click_maps() + raw + render_maps(), None
             capture.process = Process()
             with patch('zed_retry_trace.subprocess.run'):
                 capture.__exit__()
