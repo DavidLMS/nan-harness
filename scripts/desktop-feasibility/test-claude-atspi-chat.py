@@ -951,6 +951,18 @@ class CorrelatedNextInputTests(unittest.TestCase):
         self.assertEqual(a.send_count,1)
         with self.assertRaises(chat.Rejected):c.restore_next_input(b,h)
 
+    def test_next_turn_history_and_send_ignore_sibling_application_windows(self):
+        a,c,b,h=self.fixture()
+        children,identity,owner=a.children,a.identity,a.owner
+        a.children=lambda node:children(node)+[('r','sibling')] if node==('r','root') else [] if node==('r','sibling') else children(node)
+        a.identity=lambda node:(23,'PRIVATE sibling window','') if node==('r','sibling') else identity(node)
+        a.owner=lambda node:7 if node==('r','sibling') else owner(node)
+        c.restore_next_input(b,h)
+        facts=c.submit('owned next prompt')
+        self.assertTrue(facts['sendForwarded'])
+        self.assertEqual((a.paste_count,a.send_count),(1,1))
+        self.assertNotIn('PRIVATE',str(facts))
+
     def test_two_prior_pairs_are_complete_without_tree_order_chronology(self):
         a,c,b,h=self.fixture()
         extra={'userrow2':(39,'',''),'userheading2':(83,'You said: second owned prompt',''),

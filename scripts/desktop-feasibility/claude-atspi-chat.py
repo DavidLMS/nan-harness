@@ -750,10 +750,11 @@ class Controller:
                     raise Rejected()
             finally:
                 self.readback_active = False
-            # One fresh complete tree serves both history validation and Send
-            # discovery at this boundary. No snapshot survives an input action;
-            # the final proof below still traverses history again before Send.
-            nodes = self.tree()
+            # History and Send share the retained foreground frame's complete
+            # subtree. An application-wide snapshot can include sibling windows
+            # and cannot stand in for a conversation scope. No snapshot survives
+            # an input action; the final proof still refreshes history before Send.
+            nodes = self.tree(self.frame)
             self.proof(focused=True, history_nodes=nodes)
             self.facts['inputVerified'] = True
             self.current_chat(nodes)
