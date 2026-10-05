@@ -2259,7 +2259,7 @@ def semantic_observations(directory, app):
                 if (value['status'] == 'complete' and (type(inputs) is not int or not 0 <= inputs <= 65536)
                         or value['status'] == 'unavailable' and inputs is not None):
                     raise ValueError('invalid Zed input entry count')
-            enum(record, value, 'attachFailure', {'unclassified', 'version-mismatch', 'compiler-stack', 'compiler-syntax', 'tracepoint-unavailable', 'permission', 'program-load', 'symbol-unavailable'})
+            enum(record, value, 'attachFailure', {'unclassified', 'version-mismatch', 'compiler-stack', 'compiler-syntax', 'tracepoint-unavailable', 'permission', 'program-load', 'symbol-unavailable', 'tracer-error', 'readiness-incomplete', 'tracer-exited'})
             if 'activationWindows' in value:
                 clicks = value['activationWindows']
                 if (value['status'] != 'complete' or type(clicks) is not dict

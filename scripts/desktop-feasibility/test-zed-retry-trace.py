@@ -63,7 +63,33 @@ class TraceTests(unittest.TestCase):
     def test_attach_errors_never_export_diagnostic_text(self):
         self.assertEqual(attach_failure(b'PRIVATE: BPF stack limit of 512 bytes exceeded'), 'compiler-stack')
         self.assertEqual(attach_failure(b'PRIVATE: Operation not permitted'), 'permission')
+        self.assertEqual(attach_failure(b'PRIVATE: ERROR: unknown compiler rejection'), 'tracer-error')
         self.assertIsNone(attach_failure(b'PRIVATE unknown failure'))
+
+    def test_late_attach_error_is_classified_without_exporting_text(self):
+        with tempfile.TemporaryDirectory() as directory:
+            capture = Capture('/unused', directory)
+            capture.receipt['attachFailure'] = 'readiness-incomplete'
+            class Process:
+                stdout = io.BytesIO()
+                returncode = 1
+                def poll(self): return 1
+                def communicate(self, timeout):
+                    return b'', b'PRIVATE: failed to load program\nPRIVATE ERROR: final rejection\n'
+            capture.process = Process()
+            capture.__exit__()
+            receipt = json.loads((Path(directory) / 'zed-retry-entry-counts.json').read_text())
+            self.assertEqual(receipt['status'], 'unavailable')
+            self.assertEqual(receipt['attachFailure'], 'program-load')
+            self.assertNotIn('PRIVATE', str(receipt))
+
+    def test_unterminated_readiness_error_is_observed(self):
+        errors = []
+        code = 'import sys;sys.stderr.buffer.write(b"ERROR: synthetic")'
+        with subprocess.Popen([sys.executable, '-c', code], stderr=subprocess.PIPE) as child:
+            self.assertFalse(read_ready(child.stderr, 2, observe=errors.append))
+            child.wait(timeout=2)
+        self.assertEqual(errors, [b'ERROR: synthetic'])
 
     def test_activation_intervals_require_complete_bounded_marker_pairs(self):
         total, clicks = parse_click_counts(maps(1, 1, 20) + click_maps())

@@ -159,7 +159,8 @@ def attach_failure(line):
                              (b'permission denied', 'permission'),
                              (b'operation not permitted', 'permission'),
                              (b'failed to load program', 'program-load'),
-                             (b'could not resolve symbol', 'symbol-unavailable')):
+                             (b'could not resolve symbol', 'symbol-unavailable'),
+                             (b'error:', 'tracer-error')):
         if phrase in line:
             return category
     return None
@@ -178,6 +179,8 @@ def read_ready(stream, timeout=15, observe=None):
                 return False
             byte = os.read(stream.fileno(), 1)
             if not byte:
+                if line and observe is not None:
+                    observe(bytes(line))
                 return False
             if byte == b'\n':
                 if line == marker:
@@ -238,11 +241,15 @@ class Capture:
                 bufsize=0, start_new_session=True, env={'PATH': '/usr/bin:/bin', 'LANG': 'C'})
             def observe(line):
                 category = attach_failure(line)
-                if category is not None:
+                if category is not None and (category != 'tracer-error'
+                                             or self.receipt['attachFailure'] == 'unclassified'):
                     self.receipt['attachFailure'] = category
             if read_ready(self.process.stderr, observe=observe) and self.process.poll() is None:
                 self.receipt['status'] = 'attached'
                 self.receipt['attachFailure'] = None
+            elif self.receipt['attachFailure'] == 'unclassified':
+                self.receipt['attachFailure'] = ('readiness-incomplete' if self.process.poll() is None
+                                                 else 'tracer-exited')
         except (OSError, ValueError, subprocess.SubprocessError):
             pass
         return self
@@ -261,13 +268,21 @@ class Capture:
                 try:
                     # Numeric geometry maps, when enabled, remain in this private
                     # pipe and are reduced before publishing any receipt.
-                    output, _ = process.communicate(timeout=5)
+                    output, errors = process.communicate(timeout=5)
                 except subprocess.TimeoutExpired:
                     self.receipt['status'] = 'unavailable'
                     subprocess.run(['/usr/bin/sudo', '-n', '/bin/kill', '-KILL', '--',
                                     str(-process.pid)], timeout=3, check=True,
                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    output, _ = process.communicate(timeout=3)
+                    output, errors = process.communicate(timeout=3)
+                # Compilation can finish after the readiness observation ended.
+                # Retain only closed categories from the remaining private pipe.
+                if self.receipt['stage'] == 'attach':
+                    for line in (errors or b'').splitlines():
+                        category = attach_failure(line)
+                        if category is not None and (category != 'tracer-error' or self.receipt['attachFailure'] in {
+                                'unclassified', 'readiness-incomplete', 'tracer-exited'}):
+                            self.receipt['attachFailure'] = category
                 if self.receipt['status'] == 'attached' and alive and process.returncode == 0:
                     self.receipt['stage'] = 'readback'
                     geometry_maps = None

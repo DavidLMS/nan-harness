@@ -1479,6 +1479,15 @@ class QualificationTests(unittest.TestCase):
         self.assertEqual(result['reason'], 'instrumented-diagnostic')
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'trace.json'
+            unavailable = {**value, 'status': 'unavailable', 'stage': 'attach',
+                           'retryEntries': None, 'nativeRetryEntries': None, 'inputDispatchEntries': None}
+            for category in ('tracer-error', 'readiness-incomplete', 'tracer-exited'):
+                record = {**unavailable, 'attachFailure': category}
+                path.write_text(json.dumps(record))
+                self.assertEqual(q.semantic_observations(directory, 'zed-desktop'), [record])
+            path.write_text(json.dumps({**unavailable, 'attachFailure': 'PRIVATE diagnostic'}))
+            with self.assertRaises(ValueError):
+                q.semantic_observations(directory, 'zed-desktop')
             path.write_text(json.dumps(value))
             self.assertEqual(q.semantic_observations(directory, 'zed-desktop'), [value])
             legacy = {key: entry for key, entry in value.items() if key != 'inputDispatchEntries'}
