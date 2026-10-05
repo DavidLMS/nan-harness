@@ -204,6 +204,22 @@ jobs:
           apt_options=(-o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
           sudo apt-get "${apt_options[@]}" update
           sudo apt-get "${apt_options[@]}" install --no-install-recommends -y cmake xvfb openbox x11-utils xclip xdotool zstd dbus-x11 python3-dbus at-spi2-core libx11-dev libxres1 libxtst6 libcairo2 libxkbcommon-dev libxkbcommon-x11-dev libegl1 libvulkan1 mesa-vulkan-drivers libgtk-3-0 libnss3 libasound2t64 libgbm1 libsecret-1-0 libnotify4 adwaita-icon-theme
+      - name: Verify synthetic Zed tracing before building native binaries
+        if: runner.os == 'Linux' && matrix.app == 'zed-desktop' && inputs.platform == 'open-cells' && inputs.experiment == 'deterministic-full'
+        shell: bash
+        run: |
+          sudo apt-get install -y bpftrace
+          python3 scripts/desktop-feasibility/zed-geometry-fixture.py
+          echo 'NANH_ZED_RETRY_ENTRY_TRACE=1' >> "$GITHUB_ENV"
+          echo 'NANH_ZED_HIT_GEOMETRY=1' >> "$GITHUB_ENV"
+      - name: Retain the synthetic geometry probe result
+        if: always() && runner.os == 'Linux' && matrix.app == 'zed-desktop' && inputs.platform == 'open-cells' && inputs.experiment == 'deterministic-full'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: deterministic-qualification-zed-geometry-fixture
+          path: ${{ runner.temp }}/zed-geometry-fixture.json
+          if-no-files-found: error
+          retention-days: 7
       - name: Prepare Codex Linux command sandbox prerequisites
         if: runner.os == 'Linux' && matrix.app == 'chatgpt-desktop'
         timeout-minutes: 10
@@ -477,22 +493,6 @@ jobs:
         if: runner.os == 'macOS' && matrix.app == 'chatgpt-desktop' && inputs.experiment == 'deterministic-full'
         shell: bash
         run: echo 'NANH_CODEX_OWNED_MOVE=source-point' >> "$GITHUB_ENV"
-      - name: Prepare count-only Zed recovery tracing for the diagnostic campaign
-        if: runner.os == 'Linux' && matrix.app == 'zed-desktop' && inputs.platform == 'open-cells' && inputs.experiment == 'deterministic-full'
-        shell: bash
-        run: |
-          sudo apt-get install -y bpftrace
-          python3 scripts/desktop-feasibility/zed-geometry-fixture.py
-          echo 'NANH_ZED_RETRY_ENTRY_TRACE=1' >> "$GITHUB_ENV"
-          echo 'NANH_ZED_HIT_GEOMETRY=1' >> "$GITHUB_ENV"
-      - name: Retain the synthetic geometry probe result
-        if: always() && runner.os == 'Linux' && matrix.app == 'zed-desktop' && inputs.platform == 'open-cells' && inputs.experiment == 'deterministic-full'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: deterministic-qualification-zed-geometry-fixture
-          path: ${{ runner.temp }}/zed-geometry-fixture.json
-          if-no-files-found: error
-          retention-days: 7
       - name: Enable passive owned-client Zed event delivery observation
         if: runner.os == 'Linux' && matrix.app == 'zed-desktop' && inputs.experiment == 'deterministic-full'
         shell: bash
