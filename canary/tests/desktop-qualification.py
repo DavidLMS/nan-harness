@@ -2548,6 +2548,20 @@ class QualificationTests(unittest.TestCase):
                 path.write_text(json.dumps({**value, 'operationTiming':{**timing, **change}}))
                 with self.assertRaises(ValueError):q.semantic_observations(tmp, 'claude-desktop')
 
+    def test_zed_pointer_target_readback_is_closed_and_passive(self):
+        value = dict(schemaVersion=1, mechanism='zed-pointer-observation', diagnosticsOnly=True,
+                     maximizedHorizontal=True, maximizedVertical=True, enabled=True, sensitive=True,
+                     showing=None, visible=None, defunct=False, retryContains=True,
+                     pointerTarget='client', pointerChild='client')
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp)/'pointer.json'
+            for state in ('unavailable','defunct','same-source','changed-source'):
+                path.write_text(json.dumps({**value,'targetAfterClick':state}))
+                self.assertEqual(q.semantic_observations(tmp,'zed-desktop')[0]['targetAfterClick'],state)
+            for state in (True,None,'PRIVATE',{'name':'PRIVATE'}):
+                path.write_text(json.dumps({**value,'targetAfterClick':state}))
+                with self.assertRaises(ValueError):q.semantic_observations(tmp,'zed-desktop')
+
     def test_windows_failure_scope_counts_are_closed_without_qualifying_retry(self):
         counts = dict(serverErrorCount=1, failedUserHeadingCount=1, failedPromptTextCount=1,
                       retryButtonCount=1, detailsButtonCount=0, exactPromptGroupCount=1,

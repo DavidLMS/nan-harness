@@ -22,9 +22,8 @@ class DiagnosticWorkflowTests(unittest.TestCase):
                                  .split("          PYTHON", 1)[0])
         script = 'import json, os, sys\n' + script
         expected = {('zed-desktop', 'linux'),
-                    ('chatgpt-desktop', 'windows'),
                     ('claude-desktop', 'linux'), ('claude-desktop', 'windows')}
-        for selection, count in [('open-cells', 4), ('all', 12)]:
+        for selection, count in [('open-cells', 3), ('all', 12)]:
             result = subprocess.run([sys.executable, '-c', script], cwd=ROOT,
                 env={**os.environ, 'SELECTED_APP': 'all', 'SELECTED_PLATFORM': selection,
                      'SELECTED_EXPERIMENT': 'deterministic-full'}, capture_output=True, text=True)

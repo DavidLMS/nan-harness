@@ -1,12 +1,52 @@
 import importlib.util
 from pathlib import Path
 import unittest
+from unittest.mock import Mock, patch
 
 spec = importlib.util.spec_from_file_location('retry', Path(__file__).with_name('zed-atspi-retry.py'))
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 
 class NativeActionTests(unittest.TestCase):
+    def test_pointer_readback_distinguishes_identity_from_transport(self):
+        bounds = (10,20,80,30)
+        for identity,expected in (((43,'Retry',bounds),'same-source'),
+                ((43,'PRIVATE other',bounds),'changed-source'),
+                ((43,'Retry',(11,20,80,30)),'changed-source'),
+                ((43,'Retry',(10,20,0,30)),'unavailable')):
+            self.assertEqual(module.classify_pointer_target((0,0),lambda:identity,bounds),expected)
+        self.assertEqual(module.classify_pointer_target((64,0),lambda:self.fail('defunct node queried'),bounds),'defunct')
+        for states in ((True,0),(-1,0),(0,),[0,0]):
+            self.assertEqual(module.classify_pointer_target(states,lambda:self.fail('invalid state queried'),bounds),'unavailable')
+
+    def test_pointer_readback_checks_owner_geometry_guard_and_closes_bus(self):
+        request=dict(bus=':1.2',path='/org/a11y/atspi/accessible/3',pid=7,
+                     bounds=(110,220,80,30),clientOrigin=(100,200))
+        for case,expected in (('same','same-source'),('foreign','unavailable'),
+                ('lost-guard','unavailable'),('query-failed','unavailable'),('close-failed','unavailable')):
+            with self.subTest(case=case):
+                node=Mock()
+                node.GetState.return_value=(0,0)
+                node.GetRole.return_value=43
+                node.Get.return_value='Retry'
+                node.GetExtents.return_value=(10,20,80,30)
+                bus=Mock()
+                owner=Mock()
+                owner.GetConnectionUnixProcessID.return_value=8 if case=='foreign' else 7
+                bus.get_object.side_effect=lambda name,path:owner if name=='org.freedesktop.DBus' else node
+                dbus=Mock()
+                dbus.UInt32.side_effect=lambda value:value
+                dbus.bus.BusConnection.return_value=bus
+                if case=='query-failed':node.GetState.side_effect=RuntimeError('PRIVATE')
+                if case=='close-failed':bus.close.side_effect=RuntimeError('PRIVATE')
+                guard=Mock(side_effect=[True,case!='lost-guard'])
+                with patch.dict('sys.modules',dbus=dbus):
+                    result=module.observe_pointer_target(request,guard,4,clock=lambda:0)
+                self.assertEqual(result,expected)
+                bus.close.assert_called_once()
+                node.DoAction.assert_not_called()
+                if case=='same':self.assertEqual(node.GetExtents.call_args.args,(1,))
+
     def run_action(self, snapshots, response=True, clock=lambda: 0, post=lambda: True):
         facts = {'actionAttempted': False, 'forwarded': False}
         values = iter(snapshots)

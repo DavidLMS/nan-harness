@@ -76,6 +76,69 @@ def observe_retained_target(states_query, identity_query, sealed, guard, deadlin
     return state, True
 
 
+def classify_pointer_target(states, identity, bounds):
+    """Compare only the public identity sealed by the pointer preflight."""
+    if (type(states) is not tuple or len(states) != 2
+            or any(type(v) is not int or not 0 <= v <= 4294967295 for v in states)):
+        return 'unavailable'
+    if states[0] & (1 << 6):
+        return 'defunct'
+    role,name,rect = identity()
+    if (type(role) is not int or type(name) is not str or len(name) > 512
+            or type(rect) is not tuple or len(rect) != 4
+            or any(type(v) is not int for v in rect) or rect[2] <= 0 or rect[3] <= 0):
+        return 'unavailable'
+    return 'same-source' if (role,name,rect) == (43,'Retry',tuple(bounds)) else 'changed-source'
+
+
+def observe_pointer_target(request, guard, deadline, clock=time.monotonic):
+    """Passive same-path readback. No retry, input, or deadline extension."""
+    bus = None
+    result = 'unavailable'
+    try:
+        import dbus
+        def timeout():
+            remaining = deadline-clock()
+            if remaining <= 0:
+                raise TimeoutError()
+            return min(0.25,remaining)
+        if clock() >= deadline or not guard():
+            return result
+        session = dbus.SessionBus()
+        address = session.get_object('org.a11y.Bus','/org/a11y/bus').GetAddress(
+            dbus_interface='org.a11y.Bus',timeout=timeout())
+        bus = dbus.bus.BusConnection(str(address))
+        def owned():
+            owner = bus.get_object('org.freedesktop.DBus','/org/freedesktop/DBus').GetConnectionUnixProcessID(
+                request['bus'],dbus_interface='org.freedesktop.DBus',timeout=timeout())
+            return int(owner)==request['pid']
+        if not owned():
+            return result
+        node = bus.get_object(request['bus'],request['path'])
+        states = tuple(int(v) for v in node.GetState(
+            dbus_interface='org.a11y.atspi.Accessible',timeout=timeout()))
+        def identity():
+            role = int(node.GetRole(dbus_interface='org.a11y.atspi.Accessible',timeout=timeout()))
+            name = str(node.Get('org.a11y.atspi.Accessible','Name',
+                dbus_interface='org.freedesktop.DBus.Properties',timeout=timeout()))
+            bounds = tuple(int(v) for v in node.GetExtents(dbus.UInt32(1),
+                dbus_interface='org.a11y.atspi.Component',timeout=timeout()))
+            bounds = (request['clientOrigin'][0]+bounds[0],request['clientOrigin'][1]+bounds[1],*bounds[2:])
+            return role,name,bounds
+        result = classify_pointer_target(states,identity,request['bounds'])
+        if not owned() or not guard() or clock()>=deadline:
+            result = 'unavailable'
+    except Exception:
+        result = 'unavailable'
+    finally:
+        if bus is not None:
+            try:
+                bus.close()
+            except Exception:
+                result = 'unavailable'
+    return result
+
+
 def close_transport(bus, publish, facts):
     closed = True
     try:

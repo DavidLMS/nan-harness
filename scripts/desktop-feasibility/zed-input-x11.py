@@ -939,6 +939,15 @@ def retry_click(payload):
                 return 18
         # One ordinary activation, never another press after an uncertain receipt.
         run(['click', '--clearmodifiers', '1'])
+        if os.environ.get('NANH_ZED_XRECORD') == '1':
+            facts['targetAfterClick'] = 'unavailable'
+            if live_cursor is not None and time.monotonic() < deadline:
+                try:
+                    module = runpy.run_path(str(Path(__file__).with_name('zed-atspi-retry.py')))
+                    facts['targetAfterClick'] = module['observe_pointer_target'](
+                        dict(request,bounds=held_bounds,clientOrigin=geometry[:2]), cursor_scope, deadline)
+                except Exception:
+                    pass
         if observer is not None:
             facts['inputDelivery'] = observer.finish()
         return 0

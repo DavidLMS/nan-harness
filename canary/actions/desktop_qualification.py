@@ -2058,9 +2058,14 @@ def semantic_observations(directory, app):
                 elif total is not None or mapped is not None:
                     raise ValueError('incomplete Zed transient dialog counts')
                 record[field] = dict(dialogs)
+            if 'targetAfterClick' in value:
+                target = value['targetAfterClick']
+                if type(target) is not str or target not in {'unavailable','defunct','same-source','changed-source'}:
+                    raise ValueError('invalid Zed retained target observation')
+                record['targetAfterClick'] = target
             if 'xi2Motion' in value:
                 record['xi2Motion']=zed_xi2_motion(value['xi2Motion'])
-            if (set(value) - modifier_fields - ancestor_fields - ancestor_stage_fields - {'cursorSelection', 'transientDialogs','transientDialogsBeforeHover','transientDialogsBeforeDispatch','entryCrossing','xi2Motion','retryHitPolicy'} not in (base, base | {'inputDelivery'}, base | coordinate_fields,
+            if (set(value) - modifier_fields - ancestor_fields - ancestor_stage_fields - {'cursorSelection', 'transientDialogs','transientDialogsBeforeHover','transientDialogsBeforeDispatch','entryCrossing','xi2Motion','retryHitPolicy','targetAfterClick'} not in (base, base | {'inputDelivery'}, base | coordinate_fields,
                                   base | coordinate_fields | {'inputDelivery'}, base | coordinate_fields | authority_fields,
                                   base | coordinate_fields | authority_fields | {'inputDelivery'})
                     or present_modifiers and present_modifiers != modifier_fields
