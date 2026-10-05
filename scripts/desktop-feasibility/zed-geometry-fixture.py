@@ -12,6 +12,27 @@ from zed_retry_trace import attach_failure, read_ready
 from zed_hit_geometry import observations, probe, save_target, split_maps
 
 
+def diagnostics(data):
+    result = {category for line in data.splitlines() if (category := attach_failure(line)) is not None}
+    lowered = data.lower()
+    # Fixed signatures only; compiler and verifier text never leaves this runner.
+    for phrase, category in (
+            (b'error loading program:', 'program-load'),
+            (b'bpf program is too large', 'verifier-complexity'),
+            (b'infinite loop detected', 'verifier-loop'),
+            (b'invalid mem access', 'verifier-memory'),
+            (b'invalid access to map', 'verifier-map'),
+            (b'invalid indirect read from stack', 'verifier-stack'),
+            (b'unknown identifier', 'compiler-identifier'),
+            (b'unknown function', 'compiler-function'),
+            (b'cannot cast', 'compiler-cast'),
+            (b'type mismatch', 'compiler-type'),
+            (b'failed to create map', 'map-creation')):
+        if phrase in lowered:
+            result.add(category)
+    return sorted(result)
+
+
 def run(directory, receipt):
     executable = directory / 'fixture'
     receipt['stage'] = 'build'
@@ -21,17 +42,26 @@ def run(directory, receipt):
     source = ('BEGIN { @active = 1; @slot = 1; @geometrySlot = 0; }\n'
               + probe(executable, 'synthetic_dispatch')
               + '\nEND { delete(@active); delete(@slot); delete(@geometrySlot); }')
+    prefix = ['sudo', '-n', 'env', '__BPFTRACE_NOTIFY_PROBES_ATTACHED=1', 'BPFTRACE_STRLEN=128',
+              '/usr/bin/bpftrace', '-kk', '-B', 'none', '-f', 'json']
+    environment = {'PATH': '/usr/bin:/bin', 'LANG': 'C'}
+    receipt['stage'] = 'compile'
+    compiled = subprocess.run([*prefix, '-d', '-e', source], timeout=30,
+                              stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, env=environment)
+    if compiled.returncode != 0:
+        receipt['failure'] = 'compilation'
+        receipt['diagnosticCategories'] = diagnostics(compiled.stderr)
+        return
+    capture = directory / 'maps.jsonl'
+    capture.touch(mode=0o600)
     receipt['stage'] = 'attach'
     categories = []
     def observe(line):
-        category = attach_failure(line)
-        if category is not None:
-            categories.append(category)
+        categories.extend(diagnostics(line))
     process = subprocess.Popen(
-        ['sudo', '-n', 'env', '__BPFTRACE_NOTIFY_PROBES_ATTACHED=1', 'BPFTRACE_STRLEN=128',
-         '/usr/bin/bpftrace', '-q', '-kk', '-B', 'none', '-f', 'json', '-e', source],
+        [*prefix, '-v', '-o', str(capture), '-e', source],
         stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        start_new_session=True, env={'PATH': '/usr/bin:/bin', 'LANG': 'C'})
+        start_new_session=True, env=environment)
     try:
         ready = read_ready(process.stderr, observe=observe)
         if ready and process.poll() is None:
@@ -53,12 +83,12 @@ def run(directory, receipt):
             receipt['failure'] = 'stop-timeout'
         for line in errors.splitlines():
             observe(line)
-        receipt['diagnosticCategories'] = sorted(set(categories))
+        receipt['diagnosticCategories'] = sorted(set(categories) | set(diagnostics(output + errors)))
         receipt['processExitedSuccessfully'] = process.returncode == 0
     if receipt['failure'] is not None or process.returncode != 0:
         return
     receipt['stage'] = 'readback'
-    remaining, maps = split_maps(output)
+    remaining, maps = split_maps(capture.read_bytes())
     expected = dict(status='matched', renderedHitboxes=2, boundsMatches=1,
                     priorPointerMatches=True, targetMaskContainsPoint=True,
                     blockingHitboxesAhead=1, targetWouldBeHovered=False)
