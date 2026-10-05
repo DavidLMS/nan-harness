@@ -583,7 +583,7 @@ class Controller:
         self.sealed_frame = (self.query('identity', self.frame), self.query('bounds', self.frame))
         self.proof()
 
-    def proof(self, focused=False, pending=False, full_history=True):
+    def proof(self, focused=False, pending=False, full_history=True, history_nodes=None):
         if not self.query('guard'):
             raise Rejected('native-window')
         if self.chat is not None:
@@ -603,7 +603,7 @@ class Controller:
                 raise Rejected('policy')
             if not self.next_consumed:
                 if full_history:
-                    self.next_input_proof()
+                    self.next_input_proof(history_nodes)
                 self.empty_class_proof()
         self.state(self.editor, editable=True)
         # The exact retained native X11 foreground/client/clear-stack proof above
@@ -750,9 +750,12 @@ class Controller:
                     raise Rejected()
             finally:
                 self.readback_active = False
-            self.proof(focused=True)
-            self.facts['inputVerified'] = True
+            # One fresh complete tree serves both history validation and Send
+            # discovery at this boundary. No snapshot survives an input action;
+            # the final proof below still traverses history again before Send.
             nodes = self.tree()
+            self.proof(focused=True, history_nodes=nodes)
+            self.facts['inputVerified'] = True
             self.current_chat(nodes)
             sends = [node for node, identity in nodes if identity[0] == 43
                      and identity[1] in ('Start task', 'Send message')]
@@ -881,11 +884,12 @@ class Controller:
         self.adapter.key_guard = no_keys
         self.proof()
 
-    def next_history_scope(self, history, include_nodes=False):
+    def next_history_scope(self, history, include_nodes=False, nodes=None):
         # Read-only observable authority: exact owned prompts plus independently
         # copied nonces. Tree traversal order never establishes chronology.
         self.response_frame_proof()
-        nodes = self.tree(self.frame)
+        if nodes is None:
+            nodes = self.tree(self.frame)
         if any(node != self.frame and identity[0] in (16,23,69) for node,identity in nodes):
             raise Rejected('frame')
         self.current_chat(nodes)
@@ -1045,8 +1049,8 @@ class Controller:
         self.empty_class_proof()
         self.empty_class_dispatched=True
 
-    def next_input_proof(self):
-        fresh,nodes=self.next_history_scope(self.next_history,include_nodes=True)
+    def next_input_proof(self, nodes=None):
+        fresh,nodes=self.next_history_scope(self.next_history,include_nodes=True,nodes=nodes)
         if fresh != self.next_witness:
             raise Rejected('response')
         if any(node != self.frame and identity[0] in (16,23,69) for node,identity in nodes):

@@ -980,6 +980,20 @@ class CorrelatedNextInputTests(unittest.TestCase):
         self.assertEqual((a.paste_count,a.send_count),(1,0))
         self.assertFalse(facts['sendAttempted'])
 
+    def test_history_changed_after_send_discovery_is_rechecked_before_dispatch(self):
+        a,c,b,h=self.fixture();c.restore_next_input(b,h)
+        actions=a.actions
+        def changed(node):
+            value=actions(node)
+            a.extra_after_focus=True
+            return value
+        a.actions=changed
+        facts=c.submit('owned next prompt')
+        self.assertTrue(facts['inputVerified'])
+        self.assertEqual(facts['failureBoundary'],'response-heading')
+        self.assertEqual((a.paste_count,a.send_count),(1,0))
+        self.assertFalse(facts['sendAttempted'])
+
     def test_readback_keys_keep_native_guard_and_recheck_history_before_send(self):
         for lose_window in (False, True):
             with self.subTest(lose_window=lose_window):
