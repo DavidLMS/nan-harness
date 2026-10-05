@@ -228,6 +228,15 @@ fn retry_candidate_ready(facts: &Value) -> bool {
     })
 }
 
+fn retry_observation_ready(facts: &Value) -> Result<bool, Reason> {
+    // Only a valid passive observation permits another wait. A rejected proof
+    // must remain the reported boundary rather than being overwritten at expiry.
+    if facts["stage"] != "retry-diagnostic" || retry_candidate_observation(facts).is_none() {
+        return Err(Reason::ActionUnsupported);
+    }
+    Ok(retry_candidate_ready(facts))
+}
+
 fn empty_input_drift(facts: &Value) -> Option<EmptyInputDrift> {
     let value: EmptyInputDrift =
         serde_json::from_value(facts.get("emptyInputDrift")?.clone()).ok()?;
@@ -1094,7 +1103,7 @@ impl ClaudeLinuxChatSession<'_> {
                 &prompt,
                 deadline.min(Instant::now() + Duration::from_secs(15)),
             )?;
-            if retry_candidate_ready(&facts) {
+            if retry_observation_ready(&facts)? {
                 return Ok(());
             }
             if Instant::now() >= deadline {
@@ -1208,7 +1217,7 @@ impl ClaudeLinuxChatSession<'_> {
 
 #[cfg(test)]
 mod input_shape_tests {
-    use super::{decode, input_shape, retry_candidate_ready};
+    use super::{decode, input_shape, retry_candidate_ready, retry_observation_ready};
     use serde_json::{Value, json};
 
     #[test]
@@ -1223,6 +1232,17 @@ mod input_shape_tests {
             "responseVerified":false,"toolVerified":false,"recoveryVerified":false,
             "retryCandidateObservation":candidate});
         assert!(retry_candidate_ready(&facts));
+        assert_eq!(retry_observation_ready(&facts), Ok(true));
+        for stage in [
+            "blocked",
+            "action-uncertain",
+            "deadline",
+            "clipboard-cleanup",
+        ] {
+            let mut rejected = facts.clone();
+            rejected["stage"] = json!(stage);
+            assert!(retry_observation_ready(&rejected).is_err());
+        }
         for key in [
             "historyMatched",
             "candidateEnabled",
@@ -1232,6 +1252,7 @@ mod input_shape_tests {
         ] {
             facts["retryCandidateObservation"][key] = json!(false);
             assert!(!retry_candidate_ready(&facts));
+            assert_eq!(retry_observation_ready(&facts), Ok(false));
             facts["retryCandidateObservation"][key] = json!(true);
         }
         facts
