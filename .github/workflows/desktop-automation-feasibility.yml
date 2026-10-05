@@ -482,8 +482,17 @@ jobs:
         shell: bash
         run: |
           sudo apt-get install -y bpftrace
+          python3 scripts/desktop-feasibility/zed-geometry-fixture.py
           echo 'NANH_ZED_RETRY_ENTRY_TRACE=1' >> "$GITHUB_ENV"
           echo 'NANH_ZED_HIT_GEOMETRY=1' >> "$GITHUB_ENV"
+      - name: Retain the synthetic geometry probe result
+        if: always() && runner.os == 'Linux' && matrix.app == 'zed-desktop' && inputs.platform == 'open-cells' && inputs.experiment == 'deterministic-full'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: deterministic-qualification-zed-geometry-fixture
+          path: ${{ runner.temp }}/zed-geometry-fixture.json
+          if-no-files-found: error
+          retention-days: 7
       - name: Enable passive owned-client Zed event delivery observation
         if: runner.os == 'Linux' && matrix.app == 'zed-desktop' && inputs.experiment == 'deterministic-full'
         shell: bash
