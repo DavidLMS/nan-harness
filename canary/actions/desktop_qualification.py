@@ -1611,7 +1611,7 @@ def semantic_observations(directory, app):
             if 'failureBoundary' in value:
                 boundary = value['failureBoundary']
                 if (type(boundary) is not str or boundary not in {
-                        'request','policy','native-window','source-owner','tree','tree-cycle','tree-depth','tree-limit','tree-identity','tree-children','response-heading','response-row','response-row-role-limit','response-row-copy-absent','response-row-copy-ambiguous','response-row-headings','response-row-attachment','state','frame','frame-active','frame-count','frame-client','client',
+                        'request','policy','native-window','source-owner','tree','tree-cycle','tree-depth','tree-limit','tree-identity','tree-children','response-heading','response-row','response-row-role-limit','response-row-copy-absent','response-row-copy-ambiguous','response-row-headings','response-row-attachment','state','frame','frame-active','frame-state','frame-identity','frame-bounds','frame-ancestry-cycle','frame-ancestry-depth','frame-nested-dialog','frame-nested-frame','frame-nested-window','frame-editor-outside','frame-count','frame-client','client',
                         'mode','focus','input','input-mapping-state','input-mapping-changed','input-empty-state','input-empty-witness','clipboard','action','action-count','action-name','action-hit','response','transport','transport-spawn','transport-io','transport-wait',
                         'transport-status','transport-size','transport-decode','transport-deadline'}
                         or value['stage'] not in {'blocked','action-uncertain','deadline','clipboard-cleanup',

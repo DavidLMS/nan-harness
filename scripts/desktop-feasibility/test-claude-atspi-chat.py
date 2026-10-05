@@ -907,6 +907,36 @@ class CorrelatedNextInputTests(unittest.TestCase):
         history=[dict(prompt='owned prior prompt',marker='private-marker')]
         return adapter,controller,binding,history
 
+    def test_frame_rejections_identify_the_failed_invariant_without_input(self):
+        for change,expected in (('identity','frame-identity'),('bounds','frame-bounds'),
+                ('state','frame-state'),('cycle','frame-ancestry-cycle')):
+            with self.subTest(change=change):
+                a,c,b,h=self.fixture()
+                method='parent' if change=='cycle' else change
+                original=getattr(a,method)
+                def changed(node,original=original,change=change):
+                    if node==('r','frame'):
+                        return {'identity':(23,'PRIVATE changed title',''),
+                            'bounds':(1,0,800,600),'state':0,'cycle':node}[change]
+                    return original(node)
+                setattr(a,method,changed)
+                with self.assertRaises(chat.Rejected) as raised:c.restore_next_input(b,h)
+                self.assertEqual(raised.exception.boundary,expected)
+                self.assertEqual((a.focus_count,a.paste_count,a.send_count),(0,0,0))
+                self.assertNotIn('PRIVATE',str(c.facts))
+
+    def test_nested_surface_roles_have_distinct_closed_reasons(self):
+        for role,expected in ((16,'frame-nested-dialog'),(23,'frame-nested-frame'),
+                (69,'frame-nested-window')):
+            with self.subTest(role=role):
+                a,c,b,h=self.fixture(dialog=True)
+                identity=a.identity
+                a.identity=lambda node:(role,'PRIVATE surface','') if node==('r','dialog') else identity(node)
+                with self.assertRaises(chat.Rejected) as raised:c.restore_next_input(b,h)
+                self.assertEqual(raised.exception.boundary,expected)
+                self.assertEqual((a.focus_count,a.paste_count,a.send_count),(0,0,0))
+                self.assertNotIn('PRIVATE',str(c.facts))
+
     def test_unique_new_empty_editor_can_submit_under_exact_history(self):
         a,c,b,h=self.fixture();c.restore_next_input(b,h)
         self.assertEqual(c.editor,('r','editor2'))

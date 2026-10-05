@@ -25,7 +25,7 @@ def inside(rect, outer):
 RESPONSE_CONTAINER_ROLES = frozenset((39, 85, 99))
 
 BOUNDARIES = frozenset(('request','policy','native-window','source-owner','tree','tree-cycle','tree-depth','tree-limit','tree-identity','tree-children','response-heading','response-row','response-row-role-limit','response-row-copy-absent','response-row-copy-ambiguous','response-row-headings','response-row-attachment','state',
-    'frame','frame-active','frame-count','frame-client','client','mode','focus','input','input-mapping-state','input-mapping-changed','input-empty-state','input-empty-witness','clipboard','action','action-count','action-name','action-hit','response','transport'))
+    'frame','frame-active','frame-state','frame-identity','frame-bounds','frame-ancestry-cycle','frame-ancestry-depth','frame-nested-dialog','frame-nested-frame','frame-nested-window','frame-editor-outside','frame-count','frame-client','client','mode','focus','input','input-mapping-state','input-mapping-changed','input-empty-state','input-empty-witness','clipboard','action','action-count','action-name','action-hit','response','transport'))
 QUERY_BOUNDARIES = dict(owner='source-owner', identity='tree-identity', children='tree-children', parent='frame',
     state='state', bounds='frame', guard='native-window', client_bounds='client',
     attributes='mode', focused='focus', grab_focus='focus', text='input', paste_once='input',
@@ -530,7 +530,7 @@ class Controller:
         if (type(bits) is not int or not 0 <= bits < 2**64 or bits & (1 << 6)
                 or not bits & (1 << 30) or not bits & (1 << 25)
                 or editable and not bits & (1 << 7)):
-            raise Rejected('input' if editable else 'frame' if frame else 'state')
+            raise Rejected('input' if editable else 'frame-state' if frame else 'state')
         return bits
 
     def bind(self):
@@ -843,18 +843,28 @@ class Controller:
             self.adapter.key_guard = lambda: self.proof(focused=True)
             self.proof()
 
+    def reject_nested_frames(self, nodes, dialogs=False):
+        boundaries = {23:'frame-nested-frame',69:'frame-nested-window'}
+        if dialogs:
+            boundaries[16] = 'frame-nested-dialog'
+        for node,identity in nodes:
+            if node != self.frame and identity[0] in boundaries:
+                raise Rejected(boundaries[identity[0]])
+
     def response_frame_proof(self):
         if not self.query('guard'):
             raise Rejected('native-window')
         self.state(self.frame, frame=True)
-        if (self.query('identity',self.frame),self.query('bounds',self.frame)) != self.sealed_frame:
-            raise Rejected('frame')
+        if self.query('identity',self.frame) != self.sealed_frame[0]:
+            raise Rejected('frame-identity')
+        if self.query('bounds',self.frame) != self.sealed_frame[1]:
+            raise Rejected('frame-bounds')
         if self.query('client_bounds') != self.sealed_frame[1]:
             raise Rejected('frame-client')
         node,seen=self.frame,set()
         for _ in range(32):
             if node in seen:
-                raise Rejected('frame')
+                raise Rejected('frame-ancestry-cycle')
             seen.add(node);self.owned(node)
             identity=self.query('identity',node)
             if node==(self.root['bus'],self.root['path']):
@@ -862,11 +872,10 @@ class Controller:
                     raise Rejected('source-owner')
                 break
             self.state(node)
-            if node!=self.frame and identity[0] in (23,69):
-                raise Rejected('frame')
+            self.reject_nested_frames([(node,identity)])
             node=self.query('parent',node)
         else:
-            raise Rejected('frame')
+            raise Rejected('frame-ancestry-depth')
         if not self.query('guard'):
             raise Rejected('native-window')
 
@@ -876,8 +885,7 @@ class Controller:
         self.response_only = True
         self.response_frame_proof()
         nodes=self.tree(self.frame)
-        if any(node!=self.frame and identity[0] in (23,69) for node,identity in nodes):
-            raise Rejected('frame')
+        self.reject_nested_frames(nodes)
         self.current_chat(nodes)
         def no_keys():
             raise Rejected('policy')
@@ -890,8 +898,7 @@ class Controller:
         self.response_frame_proof()
         if nodes is None:
             nodes = self.tree(self.frame)
-        if any(node != self.frame and identity[0] in (16,23,69) for node,identity in nodes):
-            raise Rejected('frame')
+        self.reject_nested_frames(nodes, dialogs=True)
         self.current_chat(nodes)
         headings = [(node,identity) for node,identity in nodes if identity[0] == 83
             and identity[1].startswith(('You said:', 'Claude responded:'))]
@@ -966,7 +973,7 @@ class Controller:
         self.state(editor,editable=True)
         sealed = (self.query('identity',editor),self.query('bounds',editor))
         if not inside(sealed[1],self.sealed_frame[1]):
-            raise Rejected('frame')
+            raise Rejected('frame-editor-outside')
         initial = self.query('text',editor)
         inventory = getattr(self.adapter,'input_text_inventory',None)
         witness=getattr(self.adapter,'empty_class_witness',None)
@@ -1053,8 +1060,7 @@ class Controller:
         fresh,nodes=self.next_history_scope(self.next_history,include_nodes=True,nodes=nodes)
         if fresh != self.next_witness:
             raise Rejected('response')
-        if any(node != self.frame and identity[0] in (16,23,69) for node,identity in nodes):
-            raise Rejected('frame')
+        self.reject_nested_frames(nodes, dialogs=True)
         editors = [node for node,identity in nodes if identity[0] in (61,78,79)
             and 'Write your prompt to Claude' in identity[1:]]
         if editors != [self.editor]:
@@ -1110,8 +1116,7 @@ class Controller:
         def observe():
             self.response_frame_proof()
             nodes=self.tree(self.frame);self.current_chat(nodes)
-            if any(node!=self.frame and item[0] in (16,23,69) for node,item in nodes):
-                raise Rejected('frame')
+            self.reject_nested_frames(nodes, dialogs=True)
             headings=[(node,item) for node,item in nodes if item[0]==83
                 and item[1].startswith(('You said:','Claude responded:'))]
             users=[node for node,item in headings if item[1]=='You said: '+prompt]
@@ -1195,8 +1200,7 @@ class Controller:
     def response_scope(self, marker, nodes=None):
         if nodes is None:
             nodes = self.tree(self.frame)
-        if any(node!=self.frame and identity[0] in (23,69) for node,identity in nodes):
-            raise Rejected('frame')
+        self.reject_nested_frames(nodes)
         headings = [node for node,identity in nodes if identity[0] == 83
             and identity[1].startswith('Claude responded: ') and marker in identity[1]]
         if not headings:

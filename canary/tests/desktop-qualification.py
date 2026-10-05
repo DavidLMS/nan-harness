@@ -3025,7 +3025,7 @@ class QualificationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             path = root / 'boundary.json'
-            for boundary in ('request','policy','native-window','source-owner','tree','tree-cycle','tree-depth','tree-limit','tree-identity','tree-children','response-heading','response-row','response-row-role-limit','response-row-copy-absent','response-row-copy-ambiguous','response-row-headings','response-row-attachment','state','frame','frame-active','frame-count','frame-client','client',
+            for boundary in ('request','policy','native-window','source-owner','tree','tree-cycle','tree-depth','tree-limit','tree-identity','tree-children','response-heading','response-row','response-row-role-limit','response-row-copy-absent','response-row-copy-ambiguous','response-row-headings','response-row-attachment','state','frame','frame-active','frame-state','frame-identity','frame-bounds','frame-ancestry-cycle','frame-ancestry-depth','frame-nested-dialog','frame-nested-frame','frame-nested-window','frame-editor-outside','frame-count','frame-client','client',
                              'mode','focus','input','clipboard','action','response','transport'):
                 path.write_text(json.dumps({**facts,'failureBoundary':boundary}))
                 record = q.semantic_observations(root,'claude-desktop')[0]
