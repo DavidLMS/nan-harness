@@ -23,6 +23,49 @@ spec.loader.exec_module(runner)
 
 
 class CodexProjectPreflightTests(unittest.TestCase):
+    def test_reducer_rejection_publishes_counts_and_never_exception_contents(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output = root / 'qualification.json'
+            facts = root / 'facts'
+            facts.mkdir()
+            for index in range(65):
+                (facts / f'fact-{index}.json').write_text('{}')
+            report = root / 'report.json'
+            report.write_text('{}')
+            pending = q.envelope('claude-desktop', 'windows', 'x86_64', 'a' * 40)
+            options = dict(app='claude-desktop', platform='windows', architecture='x86_64',
+                source_sha='a' * 40, output=output, facts=facts, report=report, model='qwen3.6',
+                frozen=root/'frozen', prepared=root/'prepared', checker=root/'checker',
+                launcher=root/'launcher', real_nanh=root/'nanh')
+            argv = ['desktop_qualification.py', 'reduce']
+            for key, value in options.items():
+                argv.extend(['--' + key.replace('_', '-'), str(value)])
+            output.write_text(json.dumps(pending))
+            with patch.object(sys, 'argv', argv), self.assertRaises(SystemExit):
+                q.main()
+            result = json.loads(output.read_text())
+            fact = result['semanticObservations'][0]
+            self.assertEqual(fact['category'], 'observation-budget')
+            self.assertEqual(fact['observationCount'], 65)
+            self.assertTrue(fact['reportPresent'])
+            self.assertEqual(result['qualification'], 'unqualified')
+            output.write_text(json.dumps(pending))
+            with patch.object(sys, 'argv', argv), patch.object(q, 'reduce_report', side_effect=ValueError('PRIVATE_OUTPUT')), self.assertRaises(SystemExit):
+                q.main()
+            self.assertNotIn('PRIVATE_OUTPUT', output.read_text())
+            self.assertEqual(json.loads(output.read_text())['semanticObservations'][0]['category'], 'invalid-evidence')
+            receipt_dir = root / 'receipt'
+            receipt_dir.mkdir()
+            (receipt_dir / 'failure.json').write_text(json.dumps(fact))
+            self.assertEqual(q.semantic_observations(receipt_dir, 'claude-desktop'), [fact])
+            for change in ({'sourceSha': 'b' * 40}, {'qualification': 'deterministic-full'},
+                           {'semanticObservations': [fact]}):
+                retained = {**pending, **change}
+                output.write_text(json.dumps(retained))
+                q.publish_reduction_failure(argparse.Namespace(**options), 'invalid-evidence')
+                self.assertEqual(json.loads(output.read_text()), retained)
+
     def test_absent_report_retains_closed_preparation_failure_without_qualification(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

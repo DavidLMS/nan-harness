@@ -888,10 +888,10 @@ def semantic_observations(directory, app):
         if type(value) is not dict:
             raise ValueError('invalid semantic observation')
         mechanism = value.get('mechanism')
-        if mechanism not in {'codex-renderer-qualification', 'qualification-runner-failure', 'hermes-windows-catalog-readiness', 'hermes-renderer-qualification', 'zed-native-copy', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'zed-retry-visual', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-atspi-retry', 'windows-foreground-session', 'zed-retry-entry-counts', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'codex-static-dialog-title', 'codex-linux-startup-dialog', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'codex-project-preflight', 'windows-process-absence', 'windows-post-stop-process', 'windows-process-baseline', 'windows-process-settlement', 'windows-owned-stop', 'windows-process-correlation', 'windows-owned-descendant-cleanup', 'windows-owned-cleanup-preflight', 'windows-owned-cleanup-preflight-progress', 'claude-owned-configuration', 'claude-restore', 'claude-model-discovery', 'claude-cli-prelaunch', 'claude-config-persist-owners', 'claude-window-stack', 'claude-window-focus', 'claude-chat-navigation', 'claude-native-chat', 'claude-windows-native-chat', 'claude-linux-native-chat', 'claude-window-fit', 'claude-windows-fit', 'claude-windows-uia', 'claude-windows-fit-rejection', 'claude-storage-use', 'claude-native-storage', 'claude-private-storage-stage', 'claude-windows-profile-seal', 'codex-windows-profile-prepare', 'claude-native-composer', 'claude-linux-mode-roles', 'claude-linux-classic-visibility', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}:
+        if mechanism not in {'codex-renderer-qualification', 'qualification-runner-failure', 'qualification-reduction-failure', 'hermes-windows-catalog-readiness', 'hermes-renderer-qualification', 'zed-native-copy', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'zed-retry-visual', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-atspi-retry', 'windows-foreground-session', 'zed-retry-entry-counts', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'codex-static-dialog-title', 'codex-linux-startup-dialog', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'codex-project-preflight', 'windows-process-absence', 'windows-post-stop-process', 'windows-process-baseline', 'windows-process-settlement', 'windows-owned-stop', 'windows-process-correlation', 'windows-owned-descendant-cleanup', 'windows-owned-cleanup-preflight', 'windows-owned-cleanup-preflight-progress', 'claude-owned-configuration', 'claude-restore', 'claude-model-discovery', 'claude-cli-prelaunch', 'claude-config-persist-owners', 'claude-window-stack', 'claude-window-focus', 'claude-chat-navigation', 'claude-native-chat', 'claude-windows-native-chat', 'claude-linux-native-chat', 'claude-window-fit', 'claude-windows-fit', 'claude-windows-uia', 'claude-windows-fit-rejection', 'claude-storage-use', 'claude-native-storage', 'claude-private-storage-stage', 'claude-windows-profile-seal', 'codex-windows-profile-prepare', 'claude-native-composer', 'claude-linux-mode-roles', 'claude-linux-classic-visibility', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}:
             continue
         expected = 'hermes-renderer-qualification' if app == 'hermes-desktop' else 'zed-native-copy'
-        if (mechanism != expected and mechanism not in {'codex-renderer-qualification', 'qualification-runner-failure', 'hermes-windows-catalog-readiness', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'zed-retry-visual', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-atspi-retry', 'windows-foreground-session', 'zed-retry-entry-counts', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'codex-static-dialog-title', 'codex-linux-startup-dialog', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'codex-project-preflight', 'windows-process-absence', 'windows-post-stop-process', 'windows-process-baseline', 'windows-process-settlement', 'windows-owned-stop', 'windows-process-correlation', 'windows-owned-descendant-cleanup', 'windows-owned-cleanup-preflight', 'windows-owned-cleanup-preflight-progress', 'claude-owned-configuration', 'claude-restore', 'claude-model-discovery', 'claude-cli-prelaunch', 'claude-config-persist-owners', 'claude-window-stack', 'claude-window-focus', 'claude-chat-navigation', 'claude-native-chat', 'claude-windows-native-chat', 'claude-linux-native-chat', 'claude-window-fit', 'claude-windows-fit', 'claude-windows-uia', 'claude-windows-fit-rejection', 'claude-storage-use', 'claude-native-storage', 'claude-private-storage-stage', 'claude-windows-profile-seal', 'codex-windows-profile-prepare', 'claude-native-composer', 'claude-linux-mode-roles', 'claude-linux-classic-visibility', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}) or type(value.get('schemaVersion')) is not int or value['schemaVersion'] != 1:
+        if (mechanism != expected and mechanism not in {'codex-renderer-qualification', 'qualification-runner-failure', 'qualification-reduction-failure', 'hermes-windows-catalog-readiness', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'zed-retry-visual', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-atspi-retry', 'windows-foreground-session', 'zed-retry-entry-counts', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'codex-static-dialog-title', 'codex-linux-startup-dialog', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'codex-project-preflight', 'windows-process-absence', 'windows-post-stop-process', 'windows-process-baseline', 'windows-process-settlement', 'windows-owned-stop', 'windows-process-correlation', 'windows-owned-descendant-cleanup', 'windows-owned-cleanup-preflight', 'windows-owned-cleanup-preflight-progress', 'claude-owned-configuration', 'claude-restore', 'claude-model-discovery', 'claude-cli-prelaunch', 'claude-config-persist-owners', 'claude-window-stack', 'claude-window-focus', 'claude-chat-navigation', 'claude-native-chat', 'claude-windows-native-chat', 'claude-linux-native-chat', 'claude-window-fit', 'claude-windows-fit', 'claude-windows-uia', 'claude-windows-fit-rejection', 'claude-storage-use', 'claude-native-storage', 'claude-private-storage-stage', 'claude-windows-profile-seal', 'codex-windows-profile-prepare', 'claude-native-composer', 'claude-linux-mode-roles', 'claude-linux-classic-visibility', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}) or type(value.get('schemaVersion')) is not int or value['schemaVersion'] != 1:
             raise ValueError('semantic observation identity differs')
         record = {'schemaVersion': 1, 'mechanism': mechanism}
         if mechanism == 'codex-project-preflight':
@@ -2382,6 +2382,15 @@ def semantic_observations(directory, app):
                     raise ValueError('invalid preparation reason')
                 record['preparationReason'] = reason
             record.update(diagnosticsOnly=True, errorCategory=value['errorCategory'])
+        elif mechanism == 'qualification-reduction-failure':
+            fields = set('schemaVersion mechanism diagnosticsOnly category reportPresent observationCount metadataCount countsCapped'.split())
+            if (set(value) != fields or value['diagnosticsOnly'] is not True
+                    or type(value['category']) is not str or value['category'] not in REDUCTION_CATEGORIES
+                    or type(value['reportPresent']) is not bool or type(value['countsCapped']) is not bool
+                    or any(value[key] is not None and (type(value[key]) is not int or not 0 <= value[key] <= 1024)
+                           for key in ('observationCount', 'metadataCount'))):
+                raise ValueError('invalid reduction failure receipt')
+            record.update(value)
         elif mechanism == 'codex-renderer-qualification':
             flags = set('endpointOwned targetVerified attached bindingVerified auxiliaryInert codingComposerReady uniqueComposer inputReadback inputSubmitted userTurnObserved responseVerified errorObserved retryControl retryAttempted retryCompleted providerResponseVerified'.split())
             fields = flags | set('schemaVersion mechanism diagnosticsOnly assistantTurnCount providerGenerationCount errorCategory'.split())
@@ -3275,6 +3284,59 @@ def diagnose_pending(app, platform, architecture, source_sha, output, facts):
     return pending
 
 
+REDUCTION_ERRORS = {
+    'too many semantic observations': 'observation-budget',
+    'too many private semantic metadata files': 'metadata-budget',
+    'semantic observation identity differs': 'observation-identity',
+    'runtime version is not closed': 'runtime-version',
+    'prepared provenance differs': 'prepared-provenance',
+    'checker report exceeds its bound': 'report-budget',
+    'checker report failed trusted validation': 'report-validation',
+    'report identity differs from the cell': 'report-identity',
+    'observed application version differs from frozen version': 'application-version',
+    'invalid Windows foreground session receipt': 'foreground-receipt',
+    'pending evidence differs': 'pending-identity',
+    'evidence exceeds its bound': 'evidence-budget',
+}
+REDUCTION_CATEGORIES = set(REDUCTION_ERRORS.values()) | {'invalid-evidence', 'io-failure', 'runtime-failure'}
+
+
+def publish_reduction_failure(args, category):
+    # Never replace a completed result or evidence from another commit. This
+    # fallback reads filenames only for counts, never rejected record contents.
+    try:
+        if category not in REDUCTION_CATEGORIES:
+            return
+        pending = envelope(args.app, args.platform, args.architecture, args.source_sha)
+        output = Path(args.output)
+        if bounded_json(output, 65536) != pending:
+            return
+        ordinary = metadata = None
+        capped = False
+        if args.facts:
+            facts = Path(args.facts)
+            if not facts.is_symlink() and facts.is_dir():
+                ordinary = metadata = 0
+                for index, path in enumerate(facts.glob('*.json')):
+                    if index == 1024:
+                        capped = True
+                        break
+                    if path.name == 'native-diagnostics.json':
+                        continue
+                    if path.name.startswith(('connection-', 'startup-', 'closed-startup-')):
+                        metadata += 1
+                    else:
+                        ordinary += 1
+        report = Path(args.report) if args.report else output.parent / 'report.json'
+        fact = dict(schemaVersion=1, mechanism='qualification-reduction-failure',
+                    diagnosticsOnly=True, category=category, reportPresent=report.is_file() and not report.is_symlink(),
+                    observationCount=ordinary, metadataCount=metadata, countsCapped=capped)
+        pending['semanticObservations'] = [fact]
+        output.write_text(json.dumps(pending, sort_keys=True) + '\n')
+    except (OSError, ValueError, TypeError, KeyError):
+        return  # Preserve the original rejection even if publication is unavailable.
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('command', choices=('matrix', 'pending', 'diagnose-pending', 'reduce', 'aggregate'))
@@ -3304,15 +3366,11 @@ def main():
         destination.chmod(0o600)
         if args.command == 'aggregate' and result['qualification'] != 'deterministic-full':
             raise SystemExit('desktop qualification matrix remains incomplete')
-    except (OSError, ValueError, TypeError, KeyError) as error:
-        categories = {
-            'too many semantic observations': 'observation-budget',
-            'too many private semantic metadata files': 'metadata-budget',
-            'semantic observation identity differs': 'observation-identity',
-            'runtime version is not closed': 'runtime-version',
-            'prepared provenance differs': 'prepared-provenance',
-        }
-        category = categories.get(str(error), 'invalid-evidence')
+    except (OSError, ValueError, TypeError, KeyError, RuntimeError) as error:
+        category = REDUCTION_ERRORS.get(str(error), 'io-failure' if isinstance(error, OSError)
+                                        else 'runtime-failure' if isinstance(error, RuntimeError) else 'invalid-evidence')
+        if args.command in {'reduce', 'diagnose-pending'}:
+            publish_reduction_failure(args, category)
         raise SystemExit('desktop qualification evidence rejected: ' + category) from None
 
 
