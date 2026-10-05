@@ -212,14 +212,13 @@ fn executable_digest(path: &Path) -> std::io::Result<String> {
     Ok(encoded)
 }
 
-pub(super) fn apply(
-    command: &mut Command,
+fn admitted_workspace(
     installation: &ChatGptInstallation,
     profile: &ManagedProfile,
     debug: bool,
-) -> Result<(), ChatGptDesktopError> {
+) -> Result<Option<PathBuf>, ChatGptDesktopError> {
     if std::env::var_os("NANH_CODEX_PROJECT_POLICY").is_none() {
-        return Ok(());
+        return Ok(None);
     }
     let environment: BTreeMap<_, _> = POLICY_KEYS
         .iter()
@@ -258,12 +257,45 @@ pub(super) fn apply(
         }
         Ok(cwd)
     })();
-    let cwd = match outcome {
-        Ok(cwd) => cwd,
+    match outcome {
+        Ok(cwd) => Ok(Some(cwd)),
         Err(error) => {
             record_failure(stage, debug);
-            return Err(error);
+            Err(error)
         }
+    }
+}
+
+pub(super) fn prepare_profile(
+    installation: &ChatGptInstallation,
+    profile: &ManagedProfile,
+    debug: bool,
+) -> Result<(), ChatGptDesktopError> {
+    if !cfg!(windows) || admitted_workspace(installation, profile, debug)?.is_none() {
+        return Ok(());
+    }
+    seed_windows_sandbox(profile)
+}
+
+fn seed_windows_sandbox(profile: &ManagedProfile) -> Result<(), ChatGptDesktopError> {
+    use std::io::Write as _;
+    // The official 0.160.0 runtime treats unelevated sandbox configuration as
+    // ready without elevated profile ACL provisioning. This is original trial
+    // configuration: the ordinary session overlay backs it up and restores it.
+    // Exclusive creation refuses to replace any existing native configuration.
+    crate::commands::desktop::create_private_new(&profile.config)?
+        .write_all(b"[windows]\nsandbox = \"unelevated\"\n")
+        .map_err(ChatGptDesktopError::WriteState)
+}
+
+pub(super) fn apply(
+    command: &mut Command,
+    installation: &ChatGptInstallation,
+    profile: &ManagedProfile,
+    debug: bool,
+) -> Result<(), ChatGptDesktopError> {
+    let Some(cwd) = admitted_workspace(installation, profile, debug)? else {
+        return Ok(());
     };
     // Chromium does not expose the web subtree on macOS until accessibility
     // is enabled. Scope this launch flag to the fully admitted owned trial.
@@ -283,6 +315,44 @@ pub(super) fn apply(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sandbox_seed_is_exclusive_and_survives_managed_session_restoration() {
+        use crate::commands::chatgpt_desktop as desktop;
+        use desktop::session::settings::managed_document;
+        use desktop::session::{apply_managed_session, restore_session};
+        let directory = private_tempdir();
+        let root = directory.path().join("profile");
+        let profile = ManagedProfile {
+            marker: root.join(desktop::PROFILE_MARKER_NAME),
+            receipt: root.join(desktop::SESSION_RECEIPT_NAME),
+            config: root.join(desktop::CONFIG_FILE_NAME),
+            catalog: root.join(desktop::MODEL_CATALOG_FILE_NAME),
+            config_backup: root.join(desktop::CONFIG_BACKUP_NAME),
+            root,
+        };
+        desktop::profile::ensure_managed_profile(&profile).unwrap();
+        seed_windows_sandbox(&profile).unwrap();
+        let original = std::fs::read(&profile.config).unwrap();
+        assert!(seed_windows_sandbox(&profile).is_err());
+        assert_eq!(std::fs::read(&profile.config).unwrap(), original);
+        let managed = managed_document(
+            "test-model",
+            "http://127.0.0.1:1234",
+            &profile.catalog,
+            false,
+        );
+        apply_managed_session(&profile, &managed, "{\"models\":[]}").unwrap();
+        let applied = std::fs::read_to_string(&profile.config)
+            .unwrap()
+            .parse::<toml_edit::DocumentMut>()
+            .unwrap();
+        assert_eq!(applied["windows"]["sandbox"].as_str(), Some("unelevated"));
+        assert!(restore_session(&profile).unwrap());
+        assert_eq!(std::fs::read(&profile.config).unwrap(), original);
+        assert!(!profile.receipt.exists());
+        assert!(!profile.config_backup.exists());
+    }
 
     fn private_tempdir() -> tempfile::TempDir {
         let directory = tempfile::tempdir().unwrap();

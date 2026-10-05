@@ -21,6 +21,15 @@ mod qualification_restart;
 #[path = "qualification_project.rs"]
 mod qualification_project;
 
+#[cfg(feature = "desktop-qualification")]
+pub(super) fn prepare_qualification_profile(
+    installation: &ChatGptInstallation,
+    profile: &ManagedProfile,
+    debug: bool,
+) -> Result<(), ChatGptDesktopError> {
+    qualification_project::prepare_profile(installation, profile, debug)
+}
+
 #[derive(Clone, Copy)]
 pub(super) enum StopCause {
     StartupTimeout,

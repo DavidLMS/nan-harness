@@ -81,6 +81,8 @@ pub(super) async fn run_managed_session(
         eprintln!("{}", messages::chatgpt_session_recovered(locale()));
     }
     reject_orphaned_session_files(&profile)?;
+    #[cfg(feature = "desktop-qualification")]
+    super::process::prepare_qualification_profile(installation, &profile, arguments.debug)?;
 
     let mut config = crate::commands::credentials::resolve_or_onboard(
         arguments.provider_base_url.clone(),
