@@ -85,8 +85,27 @@ static void failure_counts_contract() {
     counts=uia_chat_failure_counts(nodes,L"other");
     assert(counts.user_headings==0 && counts.prompt_texts==0 && counts.prompt_groups==0);
 }
+static void failure_button_shape_contract() {
+    using R=UiaChatRole;
+    std::vector<UiaChatScopeNode> nodes{{R::Boundary,L"",-1},{R::Group,L"",0},
+        {R::Heading,L"You said: PRIVATE",1},{R::Text,L"PRIVATE",1},
+        {R::Text,L"Server error",1},{R::Button,L"PRIVATE unfamiliar label",1},
+        {R::Button,L"",1},{R::Button,L"Outside",0}};
+    auto counts=uia_chat_failure_counts(nodes,L"PRIVATE");
+    assert(counts.buttons==3 && counts.unnamed_buttons==1);
+    assert(counts.group_buttons==2 && counts.group_unnamed_buttons==1);
+    assert(counts.error_group_buttons==2 && counts.error_group_unnamed_buttons==1);
+    assert(uia_chat_failure_details(nodes,L"PRIVATE").control<0);
+    nodes[4].parent=0;
+    counts=uia_chat_failure_counts(nodes,L"PRIVATE");
+    assert(counts.group_buttons==2 && counts.error_group_buttons==0);
+    nodes.push_back({R::Heading,L"Claude responded: unrelated",1});
+    counts=uia_chat_failure_counts(nodes,L"PRIVATE");
+    assert(counts.buttons==3 && counts.group_buttons==0);
+}
 int main() {
     failure_counts_contract();
+    failure_button_shape_contract();
     container_projection_contract();
     control_view_scope_contract();
     using R=UiaChatRole;

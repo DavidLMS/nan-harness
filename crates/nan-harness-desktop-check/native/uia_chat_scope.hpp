@@ -114,12 +114,16 @@ inline UiaChatScope uia_chat_failure_details(const std::vector<UiaChatScopeNode>
 struct UiaChatFailureCounts {
     unsigned server_errors=0,user_headings=0,prompt_texts=0,retries=0,details=0,
         prompt_groups=0,group_retries=0,group_details=0,retry_labels=0,details_labels=0;
+    unsigned buttons=0,unnamed_buttons=0,group_buttons=0,group_unnamed_buttons=0,
+        error_group_buttons=0,error_group_unnamed_buttons=0;
 };
 inline UiaChatFailureCounts uia_chat_failure_counts(const std::vector<UiaChatScopeNode>& nodes,
                                                    const std::wstring& prompt) {
     UiaChatFailureCounts result;
     if(nodes.size()>1024 || prompt.empty())return result;
     for(const auto& node:nodes) {
+        result.buttons+=node.role==UiaChatRole::Button;
+        result.unnamed_buttons+=node.role==UiaChatRole::Button && node.label.empty();
         result.server_errors+=node.role==UiaChatRole::Text && node.label==L"Server error";
         result.user_headings+=node.role==UiaChatRole::Heading && node.label==L"You said: "+prompt;
         result.prompt_texts+=node.role==UiaChatRole::Text && node.label==prompt;
@@ -130,10 +134,13 @@ inline UiaChatFailureCounts uia_chat_failure_counts(const std::vector<UiaChatSco
     }
     for(std::size_t group=0;group<nodes.size();++group) {
         if(nodes[group].role!=UiaChatRole::Group)continue;
-        unsigned headings=0,users=0,prompts=0,retries=0,details=0;
+        unsigned headings=0,users=0,prompts=0,retries=0,details=0,buttons=0,unnamed=0,errors=0;
         for(std::size_t index=0;index<nodes.size();++index) {
             if(!uia_chat_descendant(nodes,index,static_cast<int>(group)))continue;
             const auto& node=nodes[index];
+            buttons+=node.role==UiaChatRole::Button;
+            unnamed+=node.role==UiaChatRole::Button && node.label.empty();
+            errors+=node.role==UiaChatRole::Text && node.label==L"Server error";
             headings+=node.role==UiaChatRole::Heading;
             users+=node.role==UiaChatRole::Heading && node.label==L"You said: "+prompt;
             prompts+=node.role==UiaChatRole::Text && node.label==prompt;
@@ -142,6 +149,12 @@ inline UiaChatFailureCounts uia_chat_failure_counts(const std::vector<UiaChatSco
         }
         if(headings==1 && users==1 && prompts==1) {
             ++result.prompt_groups;
+            result.group_buttons=std::max(result.group_buttons,buttons);
+            result.group_unnamed_buttons=std::max(result.group_unnamed_buttons,unnamed);
+            if(errors==1) {
+                result.error_group_buttons=std::max(result.error_group_buttons,buttons);
+                result.error_group_unnamed_buttons=std::max(result.error_group_unnamed_buttons,unnamed);
+            }
             // Maxima avoid double counting controls across nested groups.
             result.group_retries=std::max(result.group_retries,retries);
             result.group_details=std::max(result.group_details,details);

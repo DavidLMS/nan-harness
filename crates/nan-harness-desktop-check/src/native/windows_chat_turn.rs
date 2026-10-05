@@ -29,6 +29,8 @@ pub(crate) struct FailureScopeCounts {
     details_labels: u16,
     unfiltered_retry_label_count: Option<u16>,
     unfiltered_details_label_count: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    button_shape: Option<[u16; 6]>,
 }
 impl FailureScopeCounts {
     // Keep the latest successful passive query when a later deadline prevents
@@ -61,7 +63,7 @@ impl WindowsChatReceipt {
             }
             let line = rest.strip_prefix("failure-scope ")?.strip_suffix('\n')?;
             let words: Vec<_> = line.split(' ').collect();
-            if words.len() != 10 && words.len() != 12 {
+            if ![10, 12, 18].contains(&words.len()) {
                 return None;
             }
             let optional_count = |word: &str| -> Option<Option<u16>> {
@@ -76,11 +78,33 @@ impl WindowsChatReceipt {
                 ))
             };
             let (unfiltered_retry_label_count, unfiltered_details_label_count) =
-                if words.len() == 12 {
+                if words.len() >= 12 {
                     (optional_count(words[10])?, optional_count(words[11])?)
                 } else {
                     (None, None)
                 };
+            // Whole tree, exact prompt groups, and exact prompt+error groups;
+            // each pair is total buttons and unnamed buttons. No labels escape.
+            let button_shape = if words.len() == 18 {
+                let values = words[12..]
+                    .iter()
+                    .map(|word| optional_count(word).flatten())
+                    .collect::<Option<Vec<_>>>()?;
+                let shape: [u16; 6] = values.try_into().ok()?;
+                if shape[1] > shape[0]
+                    || shape[2] > shape[0]
+                    || shape[3] > shape[2]
+                    || shape[3] > shape[1]
+                    || shape[4] > shape[2]
+                    || shape[5] > shape[4]
+                    || shape[5] > shape[3]
+                {
+                    return None;
+                }
+                Some(shape)
+            } else {
+                None
+            };
             let counts: Vec<u16> = words[..10]
                 .iter()
                 .map(|word| {
@@ -106,6 +130,12 @@ impl WindowsChatReceipt {
                 || group_details_buttons > details_buttons
                 || retry_buttons > retry_labels
                 || details_buttons > details_labels
+                || button_shape.is_some_and(|shape| {
+                    retry_buttons > shape[0]
+                        || details_buttons > shape[0]
+                        || group_retry_buttons > shape[2]
+                        || group_details_buttons > shape[2]
+                })
             {
                 return None;
             }
@@ -122,6 +152,7 @@ impl WindowsChatReceipt {
                 details_labels,
                 unfiltered_retry_label_count,
                 unfiltered_details_label_count,
+                button_shape,
             })
         };
         Some(Self {
@@ -452,6 +483,32 @@ mod tests {
 #[cfg(test)]
 mod receipt_tests {
     use super::{WindowsChatReceipt, WindowsChatStage};
+    #[test]
+    fn button_shape_is_passive_bounded_and_structurally_consistent() {
+        let prefix = "turn scope-control-absent\nfailure-scope 1 1 1 0 0 1 0 0 0 0 - -";
+        let receipt =
+            WindowsChatReceipt::parse(&format!("{prefix} 3 1 2 1 2 1\n"), "retry-ready").unwrap();
+        assert_eq!(receipt.stage, WindowsChatStage::ScopeControlAbsent);
+        assert_eq!(
+            receipt.failure_scope.unwrap().button_shape,
+            Some([3, 1, 2, 1, 2, 1])
+        );
+        for tail in [
+            "3 1 2 1 2",
+            "3 4 2 1 2 1",
+            "3 1 4 1 2 1",
+            "3 1 2 1 3 1",
+            "3 1 2 1 2 2",
+            "1025 0 0 0 0 0",
+            "3 1 2 1 PRIVATE 1",
+            "3 1 2 1 - 1",
+        ] {
+            assert!(
+                WindowsChatReceipt::parse(&format!("{prefix} {tail}\n"), "retry-ready").is_none()
+            );
+        }
+    }
+
     #[test]
     fn unfiltered_labels_remain_passive_bounded_and_keep_last_successful_sample() {
         let prefix = "turn scope-control-absent\nfailure-scope 1 1 1 0 0 1 0 0 0 0";

@@ -359,7 +359,10 @@ int windows_claude_chat_turn() {
                 <<counts.prompt_groups<<' '<<counts.group_retries<<' '<<counts.group_details<<' '
                 <<counts.retry_labels<<' '<<counts.details_labels<<' '
                 <<(unfiltered_retry?std::to_string(*unfiltered_retry):"-")<<' '
-                <<(unfiltered_details?std::to_string(*unfiltered_details):"-")<<'\n';
+                <<(unfiltered_details?std::to_string(*unfiltered_details):"-")<<' '
+                <<counts.buttons<<' '<<counts.unnamed_buttons<<' '<<counts.group_buttons<<' '
+                <<counts.group_unnamed_buttons<<' '<<counts.error_group_buttons<<' '
+                <<counts.error_group_unnamed_buttons<<'\n';
         }
         return std::cout?0:4;
     };

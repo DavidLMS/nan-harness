@@ -2569,6 +2569,15 @@ class QualificationTests(unittest.TestCase):
             observed = q.semantic_observations(tmp, 'claude-desktop')[0]
             self.assertEqual(observed['failureScopeCounts'], unfiltered)
             self.assertFalse(observed['retryAttempted'])
+            shaped = {**unfiltered, 'buttonShape': [3,1,2,1,2,1]}
+            path.write_text(json.dumps({**value, 'failureScopeCounts': shaped}))
+            observed = q.semantic_observations(tmp, 'claude-desktop')[0]
+            self.assertEqual(observed['failureScopeCounts'], shaped)
+            self.assertFalse(observed['retryAttempted'])
+            for bad in (None, 'PRIVATE', [3,1], [True,0,0,0,0,0], [1025,0,0,0,0,0],
+                        [0,0,0,0,0,0], [3,4,2,1,2,1], [3,1,4,1,2,1], [3,1,2,1,3,1], [3,1,2,1,2,2]):
+                path.write_text(json.dumps({**value, 'failureScopeCounts': {**shaped, 'buttonShape':bad}}))
+                with self.assertRaises(ValueError):q.semantic_observations(tmp, 'claude-desktop')
             for bad in (True, -1, 1025, 'PRIVATE'):
                 path.write_text(json.dumps({**value, 'failureScopeCounts':
                     {**unfiltered, 'unfilteredRetryLabelCount': bad}}))

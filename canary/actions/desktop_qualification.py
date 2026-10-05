@@ -1318,8 +1318,8 @@ def semantic_observations(directory, app):
                 names = set('serverErrorCount failedUserHeadingCount failedPromptTextCount retryButtonCount detailsButtonCount exactPromptGroupCount groupRetryButtonCount groupDetailsButtonCount'.split())
                 label_names = {'retryLabelCount', 'detailsLabelCount'}
                 unfiltered_names = {'unfilteredRetryLabelCount', 'unfilteredDetailsLabelCount'}
-                if (mechanism != 'claude-windows-native-chat' or type(counts) is not dict or set(counts) not in (names, names | label_names, names | label_names | unfiltered_names)
-                        or any(type(item) is not int or not 0 <= item <= 1024 for key,item in counts.items() if key not in unfiltered_names)
+                if (mechanism != 'claude-windows-native-chat' or type(counts) is not dict or set(counts) not in (names, names | label_names, names | label_names | unfiltered_names, names | label_names | unfiltered_names | {'buttonShape'})
+                        or any(type(item) is not int or not 0 <= item <= 1024 for key,item in counts.items() if key not in unfiltered_names | {'buttonShape'})
                         or any(item is not None and (type(item) is not int or not 0 <= item <= 1024)
                                for key,item in counts.items() if key in unfiltered_names)
                         or counts['groupRetryButtonCount'] > counts['retryButtonCount']
@@ -1328,6 +1328,13 @@ def semantic_observations(directory, app):
                 if label_names <= set(counts) and (counts['retryButtonCount'] > counts['retryLabelCount']
                         or counts['detailsButtonCount'] > counts['detailsLabelCount']):
                     raise ValueError('invalid Windows failure label counts')
+                if 'buttonShape' in counts:
+                    shape = counts['buttonShape']
+                    if (type(shape) is not list or len(shape) != 6
+                            or any(type(item) is not int or not 0 <= item <= 1024 for item in shape)
+                            or any(shape[a] > shape[b] for a,b in ((1,0),(2,0),(3,2),(3,1),(4,2),(5,4),(5,3)))
+                            or any(counts[key] > shape[index] for key,index in (('retryButtonCount',0),('detailsButtonCount',0),('groupRetryButtonCount',2),('groupDetailsButtonCount',2)))):
+                        raise ValueError('invalid Windows failure button shape')
                 record['failureScopeCounts'] = counts.copy()
             if 'guardRejection' in value:
                 rejection = value['guardRejection']
