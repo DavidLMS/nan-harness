@@ -1485,10 +1485,11 @@ class QualificationTests(unittest.TestCase):
                 record = {**unavailable, 'attachFailure': category}
                 path.write_text(json.dumps(record))
                 self.assertEqual(q.semantic_observations(directory, 'zed-desktop'), [record])
-            record = {**unavailable, 'stage': 'readback', 'readbackFailure': 'user-memory-read'}
+            record = {**unavailable, 'stage': 'readback', 'readbackFailure': 'user-memory-read', 'markerReadFaults': 1}
             path.write_text(json.dumps(record))
             self.assertEqual(q.semantic_observations(directory, 'zed-desktop'), [record])
-            for change in ({'stage': 'attach'}, {'readbackFailure': 'PRIVATE'}):
+            for change in ({'stage': 'attach'}, {'readbackFailure': 'PRIVATE'},
+                           {'markerReadFaults': True}, {'markerReadFaults': 1025}):
                 path.write_text(json.dumps({**record, **change}))
                 with self.assertRaises(ValueError):
                     q.semantic_observations(directory, 'zed-desktop')

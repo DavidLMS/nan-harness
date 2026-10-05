@@ -6,7 +6,7 @@ import struct
 import tempfile
 import unittest
 
-from zed_hit_geometry import classify, observations, probe, save_target, split_maps
+from zed_hit_geometry import classify, observations, probe, save_target, split_maps, strip_marker_faults
 
 
 TARGET = dict(point=[30, 30], bounds=[10, 20, 40, 20], viewport=[200, 200])
@@ -25,6 +25,22 @@ def frame(boxes):
 
 
 class GeometryTests(unittest.TestCase):
+    def test_only_exact_marker_predicate_read_faults_can_be_separated(self):
+        fault = dict(type='helper_error', msg='PRIVATE', helper='probe_read_user_str', retcode=-14, line=6, col=55)
+        counter = b'{"type":"map","data":{"@input":3}}'
+        raw = json.dumps(fault).encode() + b'\n' + counter
+        self.assertEqual(strip_marker_faults(raw, (6, 7)), (counter, 1))
+        for change in ({'line': 8}, {'line': True}, {'retcode': -1},
+                       {'helper': 'probe_read_user'}, {'col': 0}, {'extra': 'PRIVATE'}):
+            changed = json.dumps({**fault, **change}).encode()
+            retained, count = strip_marker_faults(changed, (6, 7))
+            self.assertEqual(count, 0)
+            self.assertEqual(retained, changed)
+            with self.assertRaises(ValueError):
+                split_maps(retained)
+        with self.assertRaises(ValueError):
+            strip_marker_faults((json.dumps(fault).encode() + b'\n') * 1025, (6, 7))
+
     def test_targets_are_private_exclusive_and_bounded_to_three_activations(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()

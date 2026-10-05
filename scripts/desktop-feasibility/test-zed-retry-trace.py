@@ -62,6 +62,7 @@ class TraceTests(unittest.TestCase):
             capture = Capture('/unused', directory)
             capture.geometry = True
             capture.receipt['status'] = 'attached'
+            capture.marker_lines = (6, 7)
             capture.markers.mkdir(mode=0o700)
             headers, rectangles = {}, {}
             for slot in range(1, 4):
@@ -71,6 +72,8 @@ class TraceTests(unittest.TestCase):
                 rectangles[','.join(map(str, [slot, 0, *(bits(n) for n in (10, 20, 40, 20, 0, 0, 200, 200)), 0]))] = 1
             raw = b''.join((json.dumps(dict(type='map', data={name: values})) + '\n').encode()
                            for name, values in (('@geometryHeaders', headers), ('@geometryRects', rectangles)))
+            raw += json.dumps(dict(type='helper_error', msg='PRIVATE', helper='probe_read_user_str',
+                                   retcode=-14, line=6, col=55)).encode() + b'\n'
             class Process:
                 stdout = io.BytesIO()
                 returncode = 0
@@ -82,6 +85,8 @@ class TraceTests(unittest.TestCase):
                 capture.__exit__()
             public = json.loads((Path(directory) / 'zed-retry-entry-counts.json').read_text())
             self.assertEqual(public['hitTestGeometry']['status'], 'complete')
+            self.assertEqual(public['markerReadFaults'], 1)
+            self.assertNotIn('PRIVATE', str(public))
             self.assertEqual(len(public['hitTestGeometry']['windows']), 3)
             self.assertTrue(all(item['targetWouldBeHovered'] for item in public['hitTestGeometry']['windows']))
             self.assertNotIn('geometryHeaders', str(public))

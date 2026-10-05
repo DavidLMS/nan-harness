@@ -93,6 +93,33 @@ def split_maps(data):
     return b'\n'.join(remaining), maps
 
 
+def strip_marker_faults(data, marker_lines):
+    """Separate EFAULT from the exact openat filename predicates, never geometry.
+
+    A failed filename read cannot match either private marker path. Complete
+    start/end counters still establish the observed activation intervals.
+    """
+    if len(data) > MAX_OUTPUT:
+        raise ValueError('geometry output budget')
+    retained, ignored = [], 0
+    for line in data.splitlines():
+        if not line.strip():
+            continue
+        value = json.loads(line)
+        if (type(value) is dict and set(value) == {'type', 'msg', 'helper', 'retcode', 'line', 'col'}
+                and value['type'] == 'helper_error' and value['helper'] == 'probe_read_user_str'
+                and type(value['retcode']) is int and value['retcode'] == -14
+                and type(value['line']) is int and value['line'] in marker_lines
+                and type(value['col']) is int and value['col'] > 0
+                and type(value['msg']) is str and len(value['msg']) <= 512):
+            ignored += 1
+            if ignored > 1024:
+                raise ValueError('geometry marker fault budget')
+        else:
+            retained.append(line)
+    return b'\n'.join(retained), ignored
+
+
 def number(bits):
     if type(bits) is not int or not 0 <= bits <= 0xffffffff:
         raise ValueError('invalid geometry number')

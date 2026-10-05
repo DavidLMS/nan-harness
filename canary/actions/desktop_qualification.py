@@ -2243,7 +2243,7 @@ def semantic_observations(directory, app):
             enum(record, value, 'failureStage', {'read', 'prepare', 'verify', 'running', 'restore'})
         elif mechanism == 'zed-retry-entry-counts':
             fields = set('schemaVersion mechanism diagnosticsOnly status stage cleanup retryEntries nativeRetryEntries'.split())
-            if (set(value) - {'inputDispatchEntries', 'activationWindows', 'attachFailure', 'hitTestGeometry', 'readbackFailure'} != fields or app != 'zed-desktop' or value['diagnosticsOnly'] is not True
+            if (set(value) - {'inputDispatchEntries', 'activationWindows', 'attachFailure', 'hitTestGeometry', 'readbackFailure', 'markerReadFaults'} != fields or app != 'zed-desktop' or value['diagnosticsOnly'] is not True
                     or type(value['status']) is not str or value['status'] not in {'complete', 'unavailable'}
                     or type(value['stage']) is not str or value['stage'] not in {'attach', 'stop', 'readback', 'complete'}
                     or (value['status'] == 'complete') != (value['stage'] == 'complete')
@@ -2260,7 +2260,11 @@ def semantic_observations(directory, app):
                         or value['status'] == 'unavailable' and inputs is not None):
                     raise ValueError('invalid Zed input entry count')
             enum(record, value, 'attachFailure', {'unclassified', 'version-mismatch', 'compiler-stack', 'compiler-syntax', 'tracepoint-unavailable', 'permission', 'program-load', 'symbol-unavailable', 'tracer-error', 'readiness-incomplete', 'tracer-exited'})
-            enum(record, value, 'readbackFailure', set('geometry-output-budget geometry-output-shape geometry-map-duplicate geometry-map-budget geometry-tuple geometry-fields user-memory-read marker-read helper-error lost-events counter-output-budget counter-output-shape activation-counter activation-incomplete dispatch-returns counter-value counter-incomplete rejected'.split()))
+            enum(record, value, 'readbackFailure', set('geometry-output-budget geometry-output-shape geometry-map-duplicate geometry-map-budget geometry-tuple geometry-fields user-memory-read marker-read marker-read-budget helper-error lost-events counter-output-budget counter-output-shape activation-counter activation-incomplete dispatch-returns counter-value counter-incomplete rejected'.split()))
+            if 'markerReadFaults' in value:
+                if type(value['markerReadFaults']) is not int or not 0 <= value['markerReadFaults'] <= 1024:
+                    raise ValueError('invalid marker read fault count')
+                record['markerReadFaults'] = value['markerReadFaults']
             if value.get('readbackFailure') is not None and (value['stage'] != 'readback' or value['status'] != 'unavailable'):
                 raise ValueError('invalid Zed readback failure state')
             if 'activationWindows' in value:

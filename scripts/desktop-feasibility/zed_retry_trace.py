@@ -44,6 +44,7 @@ READBACK_FAILURES = {
     'invalid geometry fields': 'geometry-fields',
     'geometry user read fault': 'user-memory-read',
     'geometry marker read fault': 'marker-read',
+    'geometry marker fault budget': 'marker-read-budget',
     'geometry helper failure': 'helper-error',
     'geometry lost events': 'lost-events',
     'trace output limit': 'counter-output-budget',
@@ -219,6 +220,7 @@ class Capture:
         self.launcher = Path(executable)
         self.facts = Path(facts)
         self.process = None
+        self.marker_lines = ()
         self.geometry = os.environ.get('NANH_ZED_HIT_GEOMETRY') == '1'
         self.markers = self.facts / 'retry-trace-markers'
         self.receipt = dict(schemaVersion=1, mechanism='zed-retry-entry-counts',
@@ -253,10 +255,13 @@ class Capture:
             if version != b'bpftrace v0.20.2':
                 self.receipt['attachFailure'] = 'version-mismatch'
                 return self
+            source = program(self.executable, self.markers, self.geometry)
+            self.marker_lines = tuple(index for index, line in enumerate(source.splitlines(), 1)
+                if line.startswith('tracepoint:syscalls:sys_enter_openat /str(args->filename)'))
             self.process = subprocess.Popen(
                 ['/usr/bin/sudo', '-n', '/usr/bin/env', '__BPFTRACE_NOTIFY_PROBES_ATTACHED=1', 'BPFTRACE_STRLEN=128',
                  '/usr/bin/bpftrace', '-q', *(['-kk'] if self.geometry else []), '-B', 'none', '-f', 'json',
-                 '-e', program(self.executable, self.markers, self.geometry)],
+                 '-e', source],
                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 bufsize=0, start_new_session=True, env={'PATH': '/usr/bin:/bin', 'LANG': 'C'})
             def observe(line):
@@ -308,6 +313,8 @@ class Capture:
                     self.receipt['stage'] = 'readback'
                     geometry_maps = None
                     if self.geometry:
+                        output, ignored = zed_hit_geometry.strip_marker_faults(output, self.marker_lines)
+                        self.receipt['markerReadFaults'] = ignored
                         output, geometry_maps = zed_hit_geometry.split_maps(output)
                     (retry, native, inputs), clicks = parse_click_counts(output)
                     self.receipt.update(status='complete', stage='complete', retryEntries=retry,
