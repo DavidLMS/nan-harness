@@ -13,9 +13,6 @@ use zeroize::Zeroizing;
 
 const RESPONSE_COPY: &str = "button[name=\"Copy This Agent Response\"], button[description=\"Copy This Agent Response\"], menu_item[name=\"Copy This Agent Response\"]";
 const RETRY_CONTROL: &str = "button[name=\"Retry\"], button[description=\"Retry\"], button[name=\"Retry Generation\"], button[description=\"Retry Generation\"]";
-// Exact public callout titles from the pinned Zed source. Counts are passive
-// observations; only the provider and response oracle can certify recovery.
-const RETRY_ERROR_TITLES: &str = "static_text[name=\"An Error Happened\"], static_text[value=\"An Error Happened\"], static_text[name=\"Provider Unavailable\"], static_text[value=\"Provider Unavailable\"], static_text[name=\"Rate Limit Reached\"], static_text[value=\"Rate Limit Reached\"], static_text[name=\"Connection Interrupted\"], static_text[value=\"Connection Interrupted\"]";
 
 #[derive(Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -88,12 +85,6 @@ struct Facts {
     retry_control_count_after_activation: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     retry_control_count_after_readback: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    retry_error_title_count_before_activation: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    retry_error_title_count_after_activation: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    retry_error_title_count_after_readback: Option<usize>,
     retry_title_count: Option<usize>,
     retry_label_count: Option<usize>,
     retry_inventory_status: Option<&'static str>,
@@ -584,9 +575,6 @@ fn native_copy_facts() -> Facts {
         retry_action_receipt: None,
         retry_control_count_after_activation: None,
         retry_control_count_after_readback: None,
-        retry_error_title_count_before_activation: None,
-        retry_error_title_count_after_activation: None,
-        retry_error_title_count_after_readback: None,
         retry_title_count: None,
         retry_label_count: None,
         retry_inventory_status: None,
@@ -1039,8 +1027,6 @@ impl NativeClipboardSession<'_> {
             .native_export_response(&mut self.facts, marker, timeout);
         if cfg!(target_os = "linux") && self.facts.retry_action_receipt.is_some() {
             self.facts.retry_control_count_after_readback = self.passive_retry_count(RETRY_CONTROL);
-            self.facts.retry_error_title_count_after_readback =
-                self.passive_retry_count(RETRY_ERROR_TITLES);
         }
         #[cfg(unix)]
         if let Some(capture) = self.retry_log_capture.take() {
@@ -1633,10 +1619,6 @@ impl NativeClipboardSession<'_> {
                 Err(receipt) => self.facts.retry_log_observation = Some(receipt),
             }
         }
-        if cfg!(target_os = "linux") {
-            self.facts.retry_error_title_count_before_activation =
-                self.passive_retry_count(RETRY_ERROR_TITLES);
-        }
         let result = self.dispatch_retry_once();
         #[cfg(unix)]
         if result.is_err()
@@ -1650,8 +1632,6 @@ impl NativeClipboardSession<'_> {
             // only the independent provider/response oracle can certify recovery.
             self.facts.retry_control_count_after_activation =
                 self.passive_retry_count(RETRY_CONTROL);
-            self.facts.retry_error_title_count_after_activation =
-                self.passive_retry_count(RETRY_ERROR_TITLES);
         }
         result
     }
