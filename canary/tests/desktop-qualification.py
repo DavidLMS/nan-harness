@@ -1488,6 +1488,24 @@ class QualificationTests(unittest.TestCase):
                 retryEntries=0, nativeRetryEntries=0, errorClearEntries=0) for _ in range(3)])
             path.write_text(json.dumps({**value, 'activationWindows': windows}))
             self.assertEqual(q.semantic_observations(directory, 'zed-desktop')[0]['activationWindows'], windows)
+            geometry_item = dict(status='matched', renderedHitboxes=10, boundsMatches=1,
+                priorPointerMatches=True, targetMaskContainsPoint=True, blockingHitboxesAhead=1,
+                targetWouldBeHovered=False)
+            geometry = dict(status='complete', windows=[geometry_item] * 3)
+            measured = {**value, 'activationWindows': windows, 'hitTestGeometry': geometry}
+            path.write_text(json.dumps(measured))
+            self.assertEqual(q.semantic_observations(directory, 'zed-desktop')[0]['hitTestGeometry'], geometry)
+            for change in ({'targetWouldBeHovered': True}, {'boundsMatches': True},
+                           {'blockingHitboxesAhead': 10}, {'bounds': [1, 2, 3, 4]},
+                           {'priorPointerMatches': 'PRIVATE'}, {'status': 'absent'}):
+                altered = {**geometry, 'windows': [{**geometry_item, **change}] * 3}
+                path.write_text(json.dumps({**measured, 'hitTestGeometry': altered}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(directory, 'zed-desktop')
+            for geometry in (dict(status='complete', windows=[]), dict(status='unavailable', windows=[geometry_item])):
+                path.write_text(json.dumps({**measured, 'hitTestGeometry': geometry}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(directory, 'zed-desktop')
             returns = dict(inputDispatchReturns=2, inputPropagationStops=1, inputDefaultPreventions=1,
                            inputInvalidReturns=0, hoverTrueReturns=4, hoverFalseReturns=20, hoverInvalidReturns=0)
             extended = {**windows, 'windows': [{**item, **returns} for item in windows['windows']]}

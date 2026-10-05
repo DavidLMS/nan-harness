@@ -483,6 +483,7 @@ jobs:
         run: |
           sudo apt-get install -y bpftrace
           echo 'NANH_ZED_RETRY_ENTRY_TRACE=1' >> "$GITHUB_ENV"
+          echo 'NANH_ZED_HIT_GEOMETRY=1' >> "$GITHUB_ENV"
       - name: Enable passive owned-client Zed event delivery observation
         if: runner.os == 'Linux' && matrix.app == 'zed-desktop' && inputs.experiment == 'deterministic-full'
         shell: bash

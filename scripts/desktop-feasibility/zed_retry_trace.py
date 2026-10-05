@@ -10,6 +10,7 @@ import sys
 import time
 
 from cell import write_json
+import zed_hit_geometry
 
 BINARY_SHA256 = '18f225903713f623e1564a2e1902ef4ba84d2b5fb6aa58fd59af2d62646943b2'
 SYMBOLS = (
@@ -35,7 +36,7 @@ CLICK_FIELDS = {
 }
 
 
-def program(executable, markers=None):
+def program(executable, markers=None, geometry=False):
     path = str(executable)
     if not re.fullmatch(r'/[A-Za-z0-9_./-]+', path):
         raise ValueError('unsupported executable path')
@@ -85,6 +86,12 @@ def program(executable, markers=None):
                          f'if ($hover == 0) {{ @clickHoverFalse{index} = count(); }} '
                          f'else if ($hover == 1) {{ @clickHoverTrue{index} = count(); }} '
                          f'else {{ @clickHoverInvalid{index} = count(); }} }}')
+    if geometry:
+        if markers is None:
+            raise ValueError('geometry requires activation markers')
+        lines[0] = lines[0][:-1] + '@geometrySlot = 0; }'
+        lines.append(zed_hit_geometry.probe(path, SYMBOLS[2]))
+        lines = [line.replace('delete(@active);', 'delete(@active); delete(@geometrySlot);') for line in lines]
     return '\n'.join(lines)
 
 
@@ -189,6 +196,7 @@ class Capture:
         self.launcher = Path(executable)
         self.facts = Path(facts)
         self.process = None
+        self.geometry = os.environ.get('NANH_ZED_HIT_GEOMETRY') == '1'
         self.markers = self.facts / 'retry-trace-markers'
         self.receipt = dict(schemaVersion=1, mechanism='zed-retry-entry-counts',
                             diagnosticsOnly=True, status='unavailable', stage='attach', cleanup='passed',
@@ -224,7 +232,8 @@ class Capture:
                 return self
             self.process = subprocess.Popen(
                 ['/usr/bin/sudo', '-n', '/usr/bin/env', '__BPFTRACE_NOTIFY_PROBES_ATTACHED=1', 'BPFTRACE_STRLEN=128',
-                 '/usr/bin/bpftrace', '-q', '-B', 'none', '-f', 'json', '-e', program(self.executable, self.markers)],
+                 '/usr/bin/bpftrace', '-q', *(['-kk'] if self.geometry else []), '-B', 'none', '-f', 'json',
+                 '-e', program(self.executable, self.markers, self.geometry)],
                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 bufsize=0, start_new_session=True, env={'PATH': '/usr/bin:/bin', 'LANG': 'C'})
             def observe(line):
@@ -250,7 +259,8 @@ class Capture:
                                     str(-process.pid)], timeout=3, check=True,
                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 try:
-                    # Only fixed counter maps are printed, never per-event data.
+                    # Numeric geometry maps, when enabled, remain in this private
+                    # pipe and are reduced before publishing any receipt.
                     output, _ = process.communicate(timeout=5)
                 except subprocess.TimeoutExpired:
                     self.receipt['status'] = 'unavailable'
@@ -260,10 +270,19 @@ class Capture:
                     output, _ = process.communicate(timeout=3)
                 if self.receipt['status'] == 'attached' and alive and process.returncode == 0:
                     self.receipt['stage'] = 'readback'
+                    geometry_maps = None
+                    if self.geometry:
+                        output, geometry_maps = zed_hit_geometry.split_maps(output)
                     (retry, native, inputs), clicks = parse_click_counts(output)
                     self.receipt.update(status='complete', stage='complete', retryEntries=retry,
                                         nativeRetryEntries=native, inputDispatchEntries=inputs,
                                         activationWindows=clicks)
+                    if geometry_maps is not None:
+                        try:
+                            windows = zed_hit_geometry.observations(geometry_maps, self.markers, clicks['started'])
+                            self.receipt['hitTestGeometry'] = dict(status='complete', windows=windows)
+                        except (OSError, ValueError):
+                            self.receipt['hitTestGeometry'] = dict(status='unavailable', windows=[])
                 else:
                     self.receipt['status'] = 'unavailable'
         except (OSError, ValueError, subprocess.SubprocessError):

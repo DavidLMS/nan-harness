@@ -2243,7 +2243,7 @@ def semantic_observations(directory, app):
             enum(record, value, 'failureStage', {'read', 'prepare', 'verify', 'running', 'restore'})
         elif mechanism == 'zed-retry-entry-counts':
             fields = set('schemaVersion mechanism diagnosticsOnly status stage cleanup retryEntries nativeRetryEntries'.split())
-            if (set(value) - {'inputDispatchEntries', 'activationWindows', 'attachFailure'} != fields or app != 'zed-desktop' or value['diagnosticsOnly'] is not True
+            if (set(value) - {'inputDispatchEntries', 'activationWindows', 'attachFailure', 'hitTestGeometry'} != fields or app != 'zed-desktop' or value['diagnosticsOnly'] is not True
                     or type(value['status']) is not str or value['status'] not in {'complete', 'unavailable'}
                     or type(value['stage']) is not str or value['stage'] not in {'attach', 'stop', 'readback', 'complete'}
                     or (value['status'] == 'complete') != (value['stage'] == 'complete')
@@ -2279,6 +2279,31 @@ def semantic_observations(directory, app):
                     if return_fields <= set(window) and any(window[key] > window['inputDispatchReturns']
                             for key in ('inputPropagationStops', 'inputDefaultPreventions', 'inputInvalidReturns')):
                         raise ValueError('inconsistent dispatch returns')
+            if 'hitTestGeometry' in value:
+                geometry = value['hitTestGeometry']
+                if (value['status'] != 'complete' or type(geometry) is not dict
+                        or set(geometry) != {'status', 'windows'}
+                        or geometry['status'] not in ('complete', 'unavailable')
+                        or type(geometry['windows']) is not list
+                        or 'activationWindows' not in value
+                        or len(geometry['windows']) != (value['activationWindows']['started'] if geometry['status'] == 'complete' else 0)):
+                    raise ValueError('invalid hit-test geometry identity')
+                for item in geometry['windows']:
+                    if (type(item) is not dict or set(item) != {'status', 'renderedHitboxes', 'boundsMatches',
+                            'priorPointerMatches', 'targetMaskContainsPoint', 'blockingHitboxesAhead', 'targetWouldBeHovered'}
+                            or type(item['renderedHitboxes']) is not int or not 1 <= item['renderedHitboxes'] <= 1024
+                            or type(item['boundsMatches']) is not int or not 0 <= item['boundsMatches'] <= item['renderedHitboxes']
+                            or type(item['priorPointerMatches']) is not bool
+                            or item['status'] != ('matched' if item['boundsMatches'] == 1 else 'absent' if item['boundsMatches'] == 0 else 'ambiguous')):
+                        raise ValueError('invalid hit-test geometry counts')
+                    if item['status'] == 'matched':
+                        if (type(item['targetMaskContainsPoint']) is not bool or type(item['targetWouldBeHovered']) is not bool
+                                or type(item['blockingHitboxesAhead']) is not int
+                                or not 0 <= item['blockingHitboxesAhead'] < item['renderedHitboxes']
+                                or item['targetWouldBeHovered'] != (item['targetMaskContainsPoint'] and item['blockingHitboxesAhead'] == 0)):
+                            raise ValueError('inconsistent hit-test geometry')
+                    elif any(item[key] is not None for key in ('targetMaskContainsPoint', 'blockingHitboxesAhead', 'targetWouldBeHovered')):
+                        raise ValueError('ambiguous hit-test geometry')
             record.update(value)
         elif mechanism == 'zed-atspi-retry':
             fields = set('schemaVersion mechanism diagnosticsOnly method stage actionAttempted forwarded'.split())

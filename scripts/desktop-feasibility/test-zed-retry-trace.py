@@ -4,6 +4,7 @@ import io
 import json
 from pathlib import Path
 import subprocess
+import struct
 import sys
 import tempfile
 import unittest
@@ -27,6 +28,38 @@ def click_maps(started=3, ended=3):
 
 
 class TraceTests(unittest.TestCase):
+    def test_geometry_capture_reduces_private_numeric_maps_before_publication(self):
+        def bits(value):
+            return struct.unpack('<I', struct.pack('<f', value))[0]
+        with tempfile.TemporaryDirectory() as directory:
+            capture = Capture('/unused', directory)
+            capture.geometry = True
+            capture.receipt['status'] = 'attached'
+            capture.markers.mkdir(mode=0o700)
+            headers, rectangles = {}, {}
+            for slot in range(1, 4):
+                target = dict(point=[30, 30], bounds=[10, 20, 40, 20], viewport=[200, 200])
+                (capture.markers / f'target-{slot}.json').write_text(json.dumps(target))
+                headers[','.join(map(str, [slot, 1, bits(30), bits(30), bits(200), bits(200)]))] = 1
+                rectangles[','.join(map(str, [slot, 0, *(bits(n) for n in (10, 20, 40, 20, 0, 0, 200, 200)), 0]))] = 1
+            raw = b''.join((json.dumps(dict(type='map', data={name: values})) + '\n').encode()
+                           for name, values in (('@geometryHeaders', headers), ('@geometryRects', rectangles)))
+            class Process:
+                stdout = io.BytesIO()
+                returncode = 0
+                pid = 123
+                def poll(self): return None
+                def communicate(self, timeout): return maps(1, 1) + click_maps() + raw, None
+            capture.process = Process()
+            with patch('zed_retry_trace.subprocess.run'):
+                capture.__exit__()
+            public = json.loads((Path(directory) / 'zed-retry-entry-counts.json').read_text())
+            self.assertEqual(public['hitTestGeometry']['status'], 'complete')
+            self.assertEqual(len(public['hitTestGeometry']['windows']), 3)
+            self.assertTrue(all(item['targetWouldBeHovered'] for item in public['hitTestGeometry']['windows']))
+            self.assertNotIn('geometryHeaders', str(public))
+            self.assertNotIn('viewport', str(public))
+
     def test_attach_errors_never_export_diagnostic_text(self):
         self.assertEqual(attach_failure(b'PRIVATE: BPF stack limit of 512 bytes exceeded'), 'compiler-stack')
         self.assertEqual(attach_failure(b'PRIVATE: Operation not permitted'), 'permission')

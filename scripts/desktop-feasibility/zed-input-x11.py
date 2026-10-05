@@ -639,7 +639,7 @@ def select_with_ancestor_diagnostic(select, observe, compare, scope, facts, dead
     return point
 
 
-def trace_marker(name):
+def trace_marker(name, target=None):
     directory = os.environ.get('NANH_ZED_RETRY_TRACE_MARKERS')
     if directory is None:
         return False
@@ -651,6 +651,9 @@ def trace_marker(name):
     path = Path(directory) / name
     if not path.is_absolute() or path.resolve() != path:
         raise ValueError('invalid trace marker path')
+    if name == 'start' and target is not None:
+        from zed_hit_geometry import save_target
+        save_target(path.parent, target)
     descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
     try:
         import stat
@@ -962,7 +965,11 @@ def retry_click(payload):
                     or independent_client_snapshot(active) != second_geometry):
                 return 18
         # One ordinary activation, never another press after an uncertain receipt.
-        trace_started = trace_marker('start')
+        trace_started = trace_marker('start', dict(
+            point=[point[0] - geometry[0], point[1] - geometry[1]],
+            viewport=list(geometry[2:]),
+            bounds=[held_bounds[0] - geometry[0], held_bounds[1] - geometry[1], *held_bounds[2:]])
+            if live_cursor is not None else None)
         run(['click', '--clearmodifiers', '1'])
         if os.environ.get('NANH_ZED_XRECORD') == '1':
             facts['targetAfterClick'] = 'unavailable'

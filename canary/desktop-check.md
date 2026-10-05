@@ -3156,8 +3156,8 @@ The `open-cells` feasibility campaign enables `NANH_ZED_RETRY_ENTRY_TRACE=1`
 for Zed Linux only. It attaches uprobes to `ThreadView::retry_generation`,
 `NativeAgentSessionRetry::run` and `Window::dispatch_event` in the exact inspected official 1.22.0 GUI
 binary. The prepared CLI locates its sibling `libexec/zed-editor`; its SHA256
-must also match. It reads no application function arguments, application memory,
-stacks or user data.
+must also match. The entry/return counters read no application memory, stacks
+or user data. Return probes classify only the verified boolean return registers.
 The public receipt contains only bounded entry counts, lifecycle stage and
 completion/cleanup status. Counts cover the three probe sessions together.
 `inputDispatchEntries` provides an independent control for ordinary GUI event
@@ -3174,6 +3174,24 @@ cannot exclude compiler inlining. Missing or unmatched markers invalidate the
 interval capture. A matched interval still measures a time window, not a causal
 association between every counted event and the click. No tracing result changes
 input authority or qualifies a cell.
+
+The optional `NANH_ZED_HIT_GEOMETRY=1` diagnostic reads a bounded set of numeric
+fields from the pinned GPUI window during the first dispatch in each activation
+interval: viewport size, prior pointer position and at most 1,024 rendered
+hitbox rectangles, content masks and behavior flags. It reads no text, object
+identifiers, stacks or credentials. Numeric maps remain in the runner's private
+tracer pipe; only closed counts and classifications enter the qualification
+artifact. Raw numeric maps and addresses are never uploaded. The exact official
+binary hash is mandatory because these field offsets are version-specific.
+
+The owned pointer helper records its independently checked target in a private
+marker directory before activation. The reducer uses the physical/logical
+viewport ratio, requires a complete frame, and compares the accessible rectangle
+with the rendered hitboxes. It distinguishes absent/ambiguous bounds, clipping
+and blocking hitboxes ahead in paint order. A geometric match does not prove
+element identity; these observations never authorize input. The pointer sample
+precedes dispatch and is not claimed as the incoming event's coordinates.
+Invalid, oversized or incomplete geometry remains unavailable.
 
 The runner uses Ubuntu 24.04's bpftrace 0.20.2. Its source-defined
 `__BPFTRACE_NOTIFY_PROBES_ATTACHED` notification establishes attachment readiness;
