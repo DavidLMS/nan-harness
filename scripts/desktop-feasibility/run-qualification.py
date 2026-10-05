@@ -16,6 +16,7 @@ sys.path.insert(0, str(ROOT / 'canary/actions'))
 from cell import private_command, ensure_private_directory, write_json
 from desktop_diagnostics import Capture
 from zed_retry_trace import Capture as ZedRetryTrace
+from windows_foreground_session import prepare as prepare_windows_foreground
 from codex_release import CODEX_PROJECT_RELEASES, CODEX_PROJECT_VERSIONS
 from desktop_qualification import APPS, PREPARATION_FAILURES, bounded_json, cell, digest, envelope
 from desktop_suite import read_frozen_manifest
@@ -540,7 +541,12 @@ def run(args):
         trace = (ZedRetryTrace(executable, facts)
                  if args.app == 'zed-desktop' and args.platform == 'linux'
                  and os.environ.get('NANH_ZED_RETRY_ENTRY_TRACE') == '1' else nullcontext())
-        with trace:
+        foreground = (prepare_windows_foreground(facts)
+                      if args.app == 'claude-desktop' and args.platform == 'windows'
+                      else nullcontext())
+        with foreground, trace:
+            if isinstance(trace, ZedRetryTrace) and trace.receipt['status'] == 'attached':
+                environment['NANH_ZED_RETRY_TRACE_MARKERS'] = str(trace.markers)
             status = execute_with_diagnostics(command, args.directory, facts, args.platform,
                                               args.source_sha, environment)
         if report.exists():

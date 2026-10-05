@@ -17,6 +17,26 @@ native_snapshot = module['independent_client_snapshot']
 native_package = module['coordinate_package']
 
 
+class TraceMarkerTests(unittest.TestCase):
+    def test_markers_require_hosted_empty_owned_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            (root / 'start').touch(mode=0o600)
+            env = dict(NANH_ZED_RETRY_TRACE_MARKERS=str(root), GITHUB_ACTIONS='true',
+                       RUNNER_ENVIRONMENT='github-hosted', RUNNER_OS='Linux')
+            with patch.dict(os.environ, env), patch.object(sys, 'platform', 'linux'):
+                self.assertTrue(module['trace_marker']('start'))
+                (root / 'end').symlink_to(root / 'start')
+                with self.assertRaises(ValueError):
+                    module['trace_marker']('end')
+                (root / 'start').write_bytes(b'synthetic nonempty')
+                with self.assertRaises(ValueError):
+                    module['trace_marker']('start')
+                with patch.dict(os.environ, RUNNER_ENVIRONMENT='self-hosted'):
+                    with self.assertRaises(ValueError):
+                        module['trace_marker']('start')
+
+
 class AccessiblePointTests(unittest.TestCase):
     def test_exact_accessible_point_needs_three_proofs_and_one_owned_motion(self):
         events=[]

@@ -276,6 +276,7 @@ fn neutral_input(executable: &Path, mode: &str, prompt: &str) -> Result<(), Reas
         "RUNNER_OS",
         "NANH_DESKTOP_QUALIFICATION_FACTS",
         "NANH_ZED_XRECORD",
+        "NANH_ZED_RETRY_TRACE_MARKERS",
         "NANH_ZED_XI2_PAYLOAD",
         "NANH_ZED_CURSOR_HIT",
         "NANH_ZED_RETRY_HIT_POLICY",
@@ -2468,12 +2469,18 @@ mod tests {
         } else {
             "unset"
         };
+        let trace_markers = if cfg!(target_os = "linux") {
+            "/synthetic/markers"
+        } else {
+            "unset"
+        };
         std::fs::write(
             &script,
             format!(
                 "[ \"${{NANH_ZED_XRECORD-unset}}\" = \"{expected}\" ] && \
                  [ \"${{NANH_ZED_CURSOR_HIT-unset}}\" = \"{expected}\" ] && \
                  [ \"${{NANH_ZED_XI2_PAYLOAD-unset}}\" = \"{expected}\" ] && \
+                 [ \"${{NANH_ZED_RETRY_TRACE_MARKERS-unset}}\" = \"{trace_markers}\" ] && \
                  [ \"${{NANH_ZED_RETRY_HIT_POLICY-unset}}\" = \"{hit_policy}\" ] && \
                  [ \"${{NANH_ZED_ENTER_POLICY-unset}}\" = \"{enter_policy}\" ] && [ \"${{NAN_API_KEY-unset}}\" = unset ] && [ \"$1\" = select-all ]\n"
             ),
@@ -2490,6 +2497,7 @@ mod tests {
             .env("NANH_TEST_INPUT_ENV_CHILD", "1")
             .env("FEASIBILITY_ZED_INPUT_SCRIPT", &script)
             .env("NANH_ZED_XRECORD", "1")
+            .env("NANH_ZED_RETRY_TRACE_MARKERS", "/synthetic/markers")
             .env("NANH_ZED_XI2_PAYLOAD", "1")
             .env("NANH_ZED_CURSOR_HIT", "1")
             .env("NANH_ZED_RETRY_HIT_POLICY", "accessibility")

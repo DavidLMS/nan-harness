@@ -639,10 +639,34 @@ def select_with_ancestor_diagnostic(select, observe, compare, scope, facts, dead
     return point
 
 
+def trace_marker(name):
+    directory = os.environ.get('NANH_ZED_RETRY_TRACE_MARKERS')
+    if directory is None:
+        return False
+    if (name not in ('start', 'end') or sys.platform != 'linux'
+            or os.environ.get('GITHUB_ACTIONS') != 'true'
+            or os.environ.get('RUNNER_ENVIRONMENT') != 'github-hosted'
+            or os.environ.get('RUNNER_OS') != 'Linux'):
+        raise ValueError('invalid hosted trace marker')
+    path = Path(directory) / name
+    if not path.is_absolute() or path.resolve() != path:
+        raise ValueError('invalid trace marker path')
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    try:
+        import stat
+        info = os.fstat(descriptor)
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_size != 0:
+            raise ValueError('invalid trace marker identity')
+    finally:
+        os.close(descriptor)
+    return True
+
+
 def retry_click(payload):
     facts = pointer_observation()
     observer = None
     xi_motion = None
+    trace_started = False
     try:
         request = json.loads(payload)
         if (type(request) is not dict or set(request) != {'pid', 'window', 'x', 'y', 'bus', 'path'}
@@ -938,6 +962,7 @@ def retry_click(payload):
                     or independent_client_snapshot(active) != second_geometry):
                 return 18
         # One ordinary activation, never another press after an uncertain receipt.
+        trace_started = trace_marker('start')
         run(['click', '--clearmodifiers', '1'])
         if os.environ.get('NANH_ZED_XRECORD') == '1':
             facts['targetAfterClick'] = 'unavailable'
@@ -997,6 +1022,11 @@ def retry_click(payload):
         if observer is not None:
             observer.close()
             facts['inputDelivery'] = observer.result
+        if trace_started:
+            try:
+                trace_marker('end')
+            except (ValueError, OSError):
+                pass  # An unmatched marker invalidates the separate trace receipt.
         publish_observation(facts)
 
 

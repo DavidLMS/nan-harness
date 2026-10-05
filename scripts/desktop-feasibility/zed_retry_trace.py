@@ -18,8 +18,10 @@ SYMBOLS = (
     '_RNvMst_NtCs1R78ycJoit4_4gpui6windowNtB5_6Window14dispatch_event',
 )
 
+CLEAR_SYMBOL = '_RNvMs8_NtNtCs49dSLSzPpau_8agent_ui17conversation_view11thread_viewNtB5_10ThreadView18clear_thread_error'
 
-def program(executable):
+
+def program(executable, markers=None):
     path = str(executable)
     if not re.fullmatch(r'/[A-Za-z0-9_./-]+', path):
         raise ValueError('unsupported executable path')
@@ -27,13 +29,66 @@ def program(executable):
     # Let bpftrace print once after detaching. In 0.20.2 scalar count maps are
     # per-CPU arrays: clear() zeroes them, so an END print/clear also produces
     # a second pair of zero-valued maps during the automatic final print.
-    return '\n'.join([
+    lines = [
         'BEGIN { @retry = count(); @native = count(); @input = count(); }',
         f'uprobe:{path}:{SYMBOLS[0]} {{ @retry = count(); }}',
         f'uprobe:{path}:{SYMBOLS[1]} {{ @native = count(); }}',
         f'uprobe:{path}:{SYMBOLS[2]} {{ @input = count(); }}',
         'interval:s:1800 { exit(); }',
-    ])
+    ]
+    if markers is not None:
+        start, end = (str(markers / name) for name in ('start', 'end'))
+        if not all(len(value.encode()) < 256 and re.fullmatch(r'/[A-Za-z0-9_./-]+', value) for value in (start, end)):
+            raise ValueError('unsupported marker path')
+        seeds = ' '.join(f'@click{kind}{index} = count();'
+                        for index in range(1, 4) for kind in ('Input', 'Retry', 'Native', 'Clear'))
+        lines[0] = (lines[0][:-1] + '@slot = 0; @active = 0; '
+                    '@clickStarts = count(); @clickEnds = count(); ' + seeds + ' }')
+        lines.extend([
+            f'tracepoint:syscalls:sys_enter_openat /str(args->filename) == "{start}"/ '
+            '{ @slot = @slot + 1; @active = 1; @clickStarts = count(); }',
+            f'tracepoint:syscalls:sys_enter_openat /str(args->filename) == "{end}"/ '
+            '{ @active = 0; @clickEnds = count(); }',
+            # Plain scalar hash entries can be deleted; count maps remain for
+            # the single automatic final print, as in the campaign counters.
+            'END { delete(@slot); delete(@active); }',
+        ])
+        for index in range(1, 4):
+            for kind, symbol in zip(('Retry', 'Native', 'Input', 'Clear'), (*SYMBOLS, CLEAR_SYMBOL)):
+                lines.append(f'uprobe:{path}:{symbol} /@active == 1 && @slot == {index}/ '
+                             f'{{ @click{kind}{index} = count(); }}')
+    return '\n'.join(lines)
+
+
+def parse_click_counts(data):
+    """Separate bounded per-activation counters from the original maps."""
+    if len(data) > 8192:
+        raise ValueError('trace output limit')
+    counters, ordinary = {}, []
+    expected = {'@clickStarts', '@clickEnds'} | {
+        f'@click{kind}{index}' for index in range(1, 4) for kind in ('Input', 'Retry', 'Native', 'Clear')}
+    for line in data.splitlines():
+        if not line.strip():
+            continue
+        item = json.loads(line)
+        if (type(item) is not dict or item.get('type') != 'map'
+                or type(item.get('data')) is not dict or len(item['data']) != 1):
+            raise ValueError('unexpected trace output')
+        key, value = next(iter(item['data'].items()))
+        if key not in expected:
+            ordinary.append(line)
+            continue
+        limit = 65537 if key.startswith('@clickInput') else 1025
+        if key in counters or type(value) is not int or not 1 <= value <= limit:
+            raise ValueError('invalid activation counter')
+        counters[key] = value - 1
+    if set(counters) != expected or not 0 <= counters['@clickEnds'] == counters['@clickStarts'] <= 3:
+        raise ValueError('incomplete activation counters')
+    clicks = [dict(inputDispatchEntries=counters[f'@clickInput{i}'],
+                   retryEntries=counters[f'@clickRetry{i}'], nativeRetryEntries=counters[f'@clickNative{i}'], errorClearEntries=counters[f'@clickClear{i}'])
+              for i in range(1, 4)]
+    return parse_counts(b'\n'.join(ordinary)), dict(
+        started=counters['@clickStarts'], ended=counters['@clickEnds'], windows=clicks)
 
 
 def parse_counts(data):
@@ -86,6 +141,7 @@ class Capture:
         self.launcher = Path(executable)
         self.facts = Path(facts)
         self.process = None
+        self.markers = self.facts / 'retry-trace-markers'
         self.receipt = dict(schemaVersion=1, mechanism='zed-retry-entry-counts',
                             diagnosticsOnly=True, status='unavailable', stage='attach', cleanup='passed',
                             retryEntries=None, nativeRetryEntries=None, inputDispatchEntries=None)
@@ -107,14 +163,18 @@ class Capture:
         with self.executable.open('rb') as source:
             if hashlib.file_digest(source, 'sha256').hexdigest() != BINARY_SHA256:
                 raise ValueError('trace executable differs from inspected binary')
+        self.markers.mkdir(mode=0o700)
+        for name in ('start', 'end'):
+            descriptor = os.open(self.markers / name, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+            os.close(descriptor)
         try:
             version = subprocess.run(['/usr/bin/bpftrace', '--version'], timeout=3,
                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=True).stdout.strip()
             if version != b'bpftrace v0.20.2':
                 return self
             self.process = subprocess.Popen(
-                ['/usr/bin/sudo', '-n', '/usr/bin/env', '__BPFTRACE_NOTIFY_PROBES_ATTACHED=1',
-                 '/usr/bin/bpftrace', '-q', '-B', 'none', '-f', 'json', '-e', program(self.executable)],
+                ['/usr/bin/sudo', '-n', '/usr/bin/env', '__BPFTRACE_NOTIFY_PROBES_ATTACHED=1', 'BPFTRACE_STRLEN=256',
+                 '/usr/bin/bpftrace', '-q', '-B', 'none', '-f', 'json', '-e', program(self.executable, self.markers)],
                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 bufsize=0, start_new_session=True, env={'PATH': '/usr/bin:/bin', 'LANG': 'C'})
             if read_ready(self.process.stderr) and self.process.poll() is None:
@@ -135,7 +195,7 @@ class Capture:
                                     str(-process.pid)], timeout=3, check=True,
                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 try:
-                    # Only three maps can be printed; no probe prints per-event data.
+                    # Only fixed counter maps are printed, never per-event data.
                     output, _ = process.communicate(timeout=5)
                 except subprocess.TimeoutExpired:
                     self.receipt['status'] = 'unavailable'
@@ -145,9 +205,10 @@ class Capture:
                     output, _ = process.communicate(timeout=3)
                 if self.receipt['status'] == 'attached' and alive and process.returncode == 0:
                     self.receipt['stage'] = 'readback'
-                    retry, native, inputs = parse_counts(output)
+                    (retry, native, inputs), clicks = parse_click_counts(output)
                     self.receipt.update(status='complete', stage='complete', retryEntries=retry,
-                                        nativeRetryEntries=native, inputDispatchEntries=inputs)
+                                        nativeRetryEntries=native, inputDispatchEntries=inputs,
+                                        activationWindows=clicks)
                 else:
                     self.receipt['status'] = 'unavailable'
         except (OSError, ValueError, subprocess.SubprocessError):

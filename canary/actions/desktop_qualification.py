@@ -888,10 +888,10 @@ def semantic_observations(directory, app):
         if type(value) is not dict:
             raise ValueError('invalid semantic observation')
         mechanism = value.get('mechanism')
-        if mechanism not in {'codex-renderer-qualification', 'qualification-runner-failure', 'hermes-windows-catalog-readiness', 'hermes-renderer-qualification', 'zed-native-copy', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'zed-retry-visual', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-atspi-retry', 'zed-retry-entry-counts', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'codex-static-dialog-title', 'codex-linux-startup-dialog', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'codex-project-preflight', 'windows-process-absence', 'windows-post-stop-process', 'windows-process-baseline', 'windows-process-settlement', 'windows-owned-stop', 'windows-process-correlation', 'windows-owned-descendant-cleanup', 'windows-owned-cleanup-preflight', 'windows-owned-cleanup-preflight-progress', 'claude-owned-configuration', 'claude-restore', 'claude-model-discovery', 'claude-cli-prelaunch', 'claude-config-persist-owners', 'claude-window-stack', 'claude-window-focus', 'claude-chat-navigation', 'claude-native-chat', 'claude-windows-native-chat', 'claude-linux-native-chat', 'claude-window-fit', 'claude-windows-fit', 'claude-windows-uia', 'claude-windows-fit-rejection', 'claude-storage-use', 'claude-native-storage', 'claude-private-storage-stage', 'claude-windows-profile-seal', 'codex-windows-profile-prepare', 'claude-native-composer', 'claude-linux-mode-roles', 'claude-linux-classic-visibility', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}:
+        if mechanism not in {'codex-renderer-qualification', 'qualification-runner-failure', 'hermes-windows-catalog-readiness', 'hermes-renderer-qualification', 'zed-native-copy', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'zed-retry-visual', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-atspi-retry', 'windows-foreground-session', 'zed-retry-entry-counts', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'codex-static-dialog-title', 'codex-linux-startup-dialog', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'codex-project-preflight', 'windows-process-absence', 'windows-post-stop-process', 'windows-process-baseline', 'windows-process-settlement', 'windows-owned-stop', 'windows-process-correlation', 'windows-owned-descendant-cleanup', 'windows-owned-cleanup-preflight', 'windows-owned-cleanup-preflight-progress', 'claude-owned-configuration', 'claude-restore', 'claude-model-discovery', 'claude-cli-prelaunch', 'claude-config-persist-owners', 'claude-window-stack', 'claude-window-focus', 'claude-chat-navigation', 'claude-native-chat', 'claude-windows-native-chat', 'claude-linux-native-chat', 'claude-window-fit', 'claude-windows-fit', 'claude-windows-uia', 'claude-windows-fit-rejection', 'claude-storage-use', 'claude-native-storage', 'claude-private-storage-stage', 'claude-windows-profile-seal', 'codex-windows-profile-prepare', 'claude-native-composer', 'claude-linux-mode-roles', 'claude-linux-classic-visibility', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}:
             continue
         expected = 'hermes-renderer-qualification' if app == 'hermes-desktop' else 'zed-native-copy'
-        if (mechanism != expected and mechanism not in {'codex-renderer-qualification', 'qualification-runner-failure', 'hermes-windows-catalog-readiness', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'zed-retry-visual', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-atspi-retry', 'zed-retry-entry-counts', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'codex-static-dialog-title', 'codex-linux-startup-dialog', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'codex-project-preflight', 'windows-process-absence', 'windows-post-stop-process', 'windows-process-baseline', 'windows-process-settlement', 'windows-owned-stop', 'windows-process-correlation', 'windows-owned-descendant-cleanup', 'windows-owned-cleanup-preflight', 'windows-owned-cleanup-preflight-progress', 'claude-owned-configuration', 'claude-restore', 'claude-model-discovery', 'claude-cli-prelaunch', 'claude-config-persist-owners', 'claude-window-stack', 'claude-window-focus', 'claude-chat-navigation', 'claude-native-chat', 'claude-windows-native-chat', 'claude-linux-native-chat', 'claude-window-fit', 'claude-windows-fit', 'claude-windows-uia', 'claude-windows-fit-rejection', 'claude-storage-use', 'claude-native-storage', 'claude-private-storage-stage', 'claude-windows-profile-seal', 'codex-windows-profile-prepare', 'claude-native-composer', 'claude-linux-mode-roles', 'claude-linux-classic-visibility', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}) or type(value.get('schemaVersion')) is not int or value['schemaVersion'] != 1:
+        if (mechanism != expected and mechanism not in {'codex-renderer-qualification', 'qualification-runner-failure', 'hermes-windows-catalog-readiness', 'semantic-provider-oracle', 'semantic-failure-policy', 'hermes-retry-policy', 'semantic-inventory', 'zed-native-icons', 'zed-retry-visual', 'hermes-front-source', 'hermes-backend-failure', 'hermes-policy-preparation', 'zed-atspi-retry', 'windows-foreground-session', 'zed-retry-entry-counts', 'zed-pointer-transport', 'zed-pointer-observation', 'zed-clipboard-transport', 'windows-endpoint-proof', 'renderer-inventory', 'codex-static-dialog-title', 'codex-linux-startup-dialog', 'native-window-stability', 'renderer-startup', 'renderer-startup-baseline', 'codex-owned-relaunch', 'codex-restore', 'codex-project-preflight', 'windows-process-absence', 'windows-post-stop-process', 'windows-process-baseline', 'windows-process-settlement', 'windows-owned-stop', 'windows-process-correlation', 'windows-owned-descendant-cleanup', 'windows-owned-cleanup-preflight', 'windows-owned-cleanup-preflight-progress', 'claude-owned-configuration', 'claude-restore', 'claude-model-discovery', 'claude-cli-prelaunch', 'claude-config-persist-owners', 'claude-window-stack', 'claude-window-focus', 'claude-chat-navigation', 'claude-native-chat', 'claude-windows-native-chat', 'claude-linux-native-chat', 'claude-window-fit', 'claude-windows-fit', 'claude-windows-uia', 'claude-windows-fit-rejection', 'claude-storage-use', 'claude-native-storage', 'claude-private-storage-stage', 'claude-windows-profile-seal', 'codex-windows-profile-prepare', 'claude-native-composer', 'claude-linux-mode-roles', 'claude-linux-classic-visibility', 'claude-native-root-preflight', 'zed-panel-zoom', 'zed-atspi-geometry'}) or type(value.get('schemaVersion')) is not int or value['schemaVersion'] != 1:
             raise ValueError('semantic observation identity differs')
         record = {'schemaVersion': 1, 'mechanism': mechanism}
         if mechanism == 'codex-project-preflight':
@@ -2227,9 +2227,20 @@ def semantic_observations(directory, app):
                                         'enter','non-normal-enter','leave','motion','press','release'} for event in order))):
                             raise ValueError('invalid Zed crossing event order')
                 record['inputDelivery'] = dict(delivery)
+        elif mechanism == 'windows-foreground-session':
+            fields = set('schemaVersion mechanism diagnosticsOnly stage originalTimeoutMs prepared restored'.split())
+            timeout = value.get('originalTimeoutMs')
+            if (app != 'claude-desktop' or set(value) != fields or value['diagnosticsOnly'] is not True
+                    or type(value['stage']) is not str or value['stage'] not in {'read', 'prepare', 'verify', 'running', 'restore', 'completed'}
+                    or timeout is not None and (type(timeout) is not int or not 0 <= timeout <= 4294967295)
+                    or type(value['prepared']) is not bool or type(value['restored']) is not bool
+                    or (value['prepared'] or value['restored']) and timeout is None
+                    or value['stage'] == 'completed' and not (value['prepared'] and value['restored'])):
+                raise ValueError('invalid Windows foreground session receipt')
+            record.update({key: value[key] for key in fields - {'schemaVersion', 'mechanism'}})
         elif mechanism == 'zed-retry-entry-counts':
             fields = set('schemaVersion mechanism diagnosticsOnly status stage cleanup retryEntries nativeRetryEntries'.split())
-            if (set(value) - {'inputDispatchEntries'} != fields or app != 'zed-desktop' or value['diagnosticsOnly'] is not True
+            if (set(value) - {'inputDispatchEntries', 'activationWindows'} != fields or app != 'zed-desktop' or value['diagnosticsOnly'] is not True
                     or type(value['status']) is not str or value['status'] not in {'complete', 'unavailable'}
                     or type(value['stage']) is not str or value['stage'] not in {'attach', 'stop', 'readback', 'complete'}
                     or (value['status'] == 'complete') != (value['stage'] == 'complete')
@@ -2245,6 +2256,19 @@ def semantic_observations(directory, app):
                 if (value['status'] == 'complete' and (type(inputs) is not int or not 0 <= inputs <= 65536)
                         or value['status'] == 'unavailable' and inputs is not None):
                     raise ValueError('invalid Zed input entry count')
+            if 'activationWindows' in value:
+                clicks = value['activationWindows']
+                if (value['status'] != 'complete' or type(clicks) is not dict
+                        or set(clicks) != {'started', 'ended', 'windows'}
+                        or type(clicks['started']) is not int or type(clicks['ended']) is not int
+                        or not 0 <= clicks['started'] == clicks['ended'] <= 3
+                        or type(clicks['windows']) is not list or len(clicks['windows']) != 3):
+                    raise ValueError('invalid activation windows')
+                for window in clicks['windows']:
+                    if (type(window) is not dict or set(window) != {'retryEntries', 'nativeRetryEntries', 'inputDispatchEntries', 'errorClearEntries'}
+                            or any(type(count) is not int or not 0 <= count <= (65536 if key == 'inputDispatchEntries' else 1024)
+                                   for key, count in window.items())):
+                        raise ValueError('invalid activation window counts')
             record.update(value)
         elif mechanism == 'zed-atspi-retry':
             fields = set('schemaVersion mechanism diagnosticsOnly method stage actionAttempted forwarded'.split())
@@ -3193,7 +3217,10 @@ def reduce_report(*, app, platform, architecture, source_sha, model, frozen, pre
         for observation in result['semanticObservations']) == 3
     instrumented = any(item['mechanism'] == 'zed-retry-entry-counts'
                        for item in result['semanticObservations'])
-    accepted = (not instrumented and result['backend'] != 'renderer-inventory' and policy_disclosed and len(probes) == 3 and result['appCleanup'] == 'passed' and result['globalCleanup'] == 'passed'
+    foreground_restored = all(item['stage'] == 'completed' and item['prepared'] and item['restored']
+                              for item in result['semanticObservations']
+                              if item['mechanism'] == 'windows-foreground-session')
+    accepted = (foreground_restored and not instrumented and result['backend'] != 'renderer-inventory' and policy_disclosed and len(probes) == 3 and result['appCleanup'] == 'passed' and result['globalCleanup'] == 'passed'
                 and all(probe.get('status') == 'passed' and len(probe.get('steps', [])) == 5
                         and set(probe.get('steps', [])) == STEPS
                         and (probe.get('inputMode'), probe.get('responseVerification')) in semantic_pairs for probe in probes))

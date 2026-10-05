@@ -75,6 +75,16 @@ another activation attempt.
 Closed failure stages distinguish window eligibility, an OS activation denial,
 and a failed postcondition without exporting window identities.
 
+The disposable hosted Windows Claude qualification runner temporarily sets the
+foreground lock timeout to zero before launching its three sessions. This uses
+`SystemParametersInfoW` with flags zero, without persisting a user setting. It
+reads back preparation and restores and verifies the original value in a
+`finally` block, including when qualification fails. A closed
+`windows-foreground-session` receipt prevents acceptance if preparation or
+restoration is incomplete. This runner-only setup does not change the native
+checker's single activation attempt or its ownership, focus and occlusion
+checks. Local and self-hosted desktops cannot enter this preparation path.
+
 Before a subsequent Windows Claude prompt, an exact single composer with no
 Send or Start button produces `composer-send-pending`. This is a read-only
 observation before any input; the supervisor may repeat it within the original

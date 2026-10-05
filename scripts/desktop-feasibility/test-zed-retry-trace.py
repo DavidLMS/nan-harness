@@ -10,7 +10,7 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'canary/actions'))
-from zed_retry_trace import Capture, parse_counts, program, read_ready
+from zed_retry_trace import Capture, parse_counts, parse_click_counts, program, read_ready
 
 
 def maps(retry, native, inputs=1):
@@ -18,7 +18,32 @@ def maps(retry, native, inputs=1):
                       for key, value in (('@retry', retry), ('@native', native), ('@input', inputs))) + '\n').encode()
 
 
+def click_maps(started=3, ended=3):
+    values = {'@clickStarts': started + 1, '@clickEnds': ended + 1}
+    values.update({f'@click{kind}{index}': 3 if kind == 'Input' else 1
+                   for index in range(1, 4) for kind in ('Input', 'Retry', 'Native', 'Clear')})
+    return b''.join((json.dumps({'type': 'map', 'data': {key: value}}) + '\n').encode()
+                    for key, value in values.items())
+
+
 class TraceTests(unittest.TestCase):
+    def test_activation_intervals_require_complete_bounded_marker_pairs(self):
+        total, clicks = parse_click_counts(maps(1, 1, 20) + click_maps())
+        self.assertEqual(total, (0, 0, 19))
+        self.assertEqual(clicks['started'], 3)
+        self.assertEqual([item['inputDispatchEntries'] for item in clicks['windows']], [2, 2, 2])
+        for data in (maps(1, 1), maps(1, 1) + click_maps(3, 2),
+                     maps(1, 1) + click_maps(4, 4), maps(1, 1) + click_maps() * 2):
+            with self.assertRaises(ValueError):
+                parse_click_counts(data)
+        source = program('/tmp/owned/zed-editor', Path('/tmp/owned/markers'))
+        self.assertEqual(source.count('BEGIN {'), 1)
+        self.assertEqual(source.count('END {'), 1)
+        self.assertIn('sys_enter_openat', source)
+        self.assertIn('delete(@slot); delete(@active);', source)
+        self.assertNotIn('printf(', source)
+        self.assertNotIn('ustack', source)
+
     def test_gui_identity_is_checked_before_any_privileged_process(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
@@ -76,7 +101,7 @@ class TraceTests(unittest.TestCase):
                     returncode = 0
                     pid = 123
                     def poll(self): return None if alive else 0
-                    def communicate(self, timeout): return maps(1, 1), None
+                    def communicate(self, timeout): return maps(1, 1) + click_maps(), None
                 capture.process = Process()
                 with patch('zed_retry_trace.subprocess.run'):
                     capture.__exit__()

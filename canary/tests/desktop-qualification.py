@@ -1384,6 +1384,28 @@ class QualificationTests(unittest.TestCase):
         for change in changes:
             self.assertEqual(self.trial(change)['qualification'], 'unqualified')
 
+    def test_foreground_preparation_and_restoration_are_required_when_present(self):
+        value = dict(schemaVersion=1, mechanism='windows-foreground-session', diagnosticsOnly=True,
+                     stage='completed', originalTimeoutMs=200000, prepared=True, restored=True)
+        self.assertEqual(self.trial(app='claude-desktop', policy_count=0,
+                                   observations=[value])['qualification'], 'deterministic-full')
+        for change in ({'stage': 'restore', 'restored': False}, {'stage': 'restore', 'prepared': False}):
+            self.assertEqual(self.trial(app='claude-desktop', policy_count=0,
+                observations=[{**value, **change}])['qualification'], 'unqualified')
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'foreground.json'
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(directory, 'claude-desktop'), [value])
+            for change in ({'originalTimeoutMs': True}, {'originalTimeoutMs': -1},
+                           {'originalTimeoutMs': 4294967296}, {'restored': False},
+                           {'prepared': False}, {'stage': 'PRIVATE'}, {'pid': 123}):
+                path.write_text(json.dumps({**value, **change}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(directory, 'claude-desktop')
+            path.write_text(json.dumps(value))
+            with self.assertRaises(ValueError):
+                q.semantic_observations(directory, 'zed-desktop')
+
     def test_entry_tracing_never_promotes_a_full_native_success(self):
         value = dict(schemaVersion=1, mechanism='zed-retry-entry-counts', diagnosticsOnly=True,
                      status='complete', stage='complete', cleanup='passed', retryEntries=3, nativeRetryEntries=3,
@@ -1399,6 +1421,14 @@ class QualificationTests(unittest.TestCase):
             legacy = {key: entry for key, entry in value.items() if key != 'inputDispatchEntries'}
             path.write_text(json.dumps(legacy))
             self.assertEqual(q.semantic_observations(directory, 'zed-desktop'), [legacy])
+            windows = dict(started=3, ended=3, windows=[dict(inputDispatchEntries=2,
+                retryEntries=0, nativeRetryEntries=0, errorClearEntries=0) for _ in range(3)])
+            path.write_text(json.dumps({**value, 'activationWindows': windows}))
+            self.assertEqual(q.semantic_observations(directory, 'zed-desktop')[0]['activationWindows'], windows)
+            for changes in ({'started': True}, {'ended': 2}, {'windows': []}, {'pid': 5}):
+                path.write_text(json.dumps({**value, 'activationWindows': {**windows, **changes}}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(directory, 'zed-desktop')
             for change in ({'retryEntries': True}, {'nativeRetryEntries': -1}, {'pid': 123},
                            {'inputDispatchEntries': True}, {'inputDispatchEntries': -1},
                            {'inputDispatchEntries': 65537}, {'inputDispatchEntries': None},
