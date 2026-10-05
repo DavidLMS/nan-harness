@@ -8,8 +8,9 @@ a separate risk that must be controlled before personal-machine rollout. See the
 
 ## Qualification status
 
-Eleven of twelve active cells have historical full acceptance. Zed Linux remains
-unresolved; the final same-commit matrix is still unqualified. See the
+Eleven of twelve active cells have historical full acceptance. Zed Linux now
+passes all three instrumented diagnostic sessions; uninstrumented acceptance
+and the final same-commit matrix remain unqualified. See the
 [current semantic qualification table](#semantic-deterministic-qualification).
 
 ### Historical joint campaign
@@ -343,7 +344,7 @@ acknowledgements and partial sessions cannot satisfy that gate.
 
 | Application | Linux x64 | macOS ARM64 | Windows x64 |
 | --- | --- | --- | --- |
-| Zed | Response/tool pass; recovery remains unresolved | Historical full pass | Historical full pass |
+| Zed | Three full diagnostic sessions pass; uninstrumented acceptance pending | Historical full pass | Historical full pass |
 | Codex | Historical full pass | Historical full pass | Historical full pass |
 | Claude | Historical full pass | Historical full pass | Historical full pass |
 | Hermes | Historical full pass | Historical full pass | Historical full pass |
@@ -360,6 +361,18 @@ Claude Windows completed all three full sessions in
 on `3fa4575802c451e04e7967413fc9dd5cd3d22356`, with application/global cleanup
 and foreground restoration passing. The native readiness observer waits for
 the exact failed user row without accepting an ambiguous control.
+
+Zed Linux completed three full instrumented sessions in
+[37288941016](https://github.com/DavidLMS/nan-harness/actions/runs/37288941016)
+on `d28de4f5dcc19b4fc01f6ec3fc5e5a2a6b7fb979`. The qualification environment
+had dropped the hosted session's explicit `ZED_ALLOW_EMULATED_GPU=1` opt-in.
+Zed consequently rendered its full-window Unsupported GPU prompt over Retry.
+Preserving that exact opt-in for hosted Linux Zed removes the prompt: the
+closed diagnostic reports zero prompt renders, no blocking hitboxes, and one
+Retry handler entry per session. Response, real tool execution, explicit Retry
+recovery and both cleanup scopes pass in all three sessions. Instrumentation
+intentionally keeps this report unqualified; the uninstrumented twelve-cell
+campaign and final repository gate are still required.
 
 Earlier Claude Windows campaign
 [37269411810](https://github.com/DavidLMS/nan-harness/actions/runs/37269411810)
