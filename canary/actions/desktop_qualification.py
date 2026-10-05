@@ -3062,7 +3062,8 @@ def semantic_observations(directory, app):
                     raise ValueError('invalid passive Zed retry log observation')
                 record['retryLogObservation'] = log.copy()
 
-            for key in ('exportResumeCount', 'exportAgentCount', 'exportTotalAssistantTextCount', 'exportUserCount', 'exportAssistantTextCount', 'trustControlCount', 'panelControlCount', 'retryControlCount', 'retryControlCountAfterActivation', 'retryTitleCount', 'retryCandidateCount', 'retryTooltipCount', 'retryLabelCount',
+            for key in ('exportResumeCount', 'exportAgentCount', 'exportTotalAssistantTextCount', 'exportUserCount', 'exportAssistantTextCount', 'trustControlCount', 'panelControlCount', 'retryControlCount', 'retryControlCountAfterActivation', 'retryControlCountAfterReadback',
+                        'retryErrorTitleCountBeforeActivation', 'retryErrorTitleCountAfterActivation', 'retryErrorTitleCountAfterReadback', 'retryTitleCount', 'retryCandidateCount', 'retryTooltipCount', 'retryLabelCount',
                         'retryInventoryTotal', 'retryInventoryButtons', 'retryInventoryStaticText',
                         'retryInventoryTitleMatches', 'retryInventoryGenerationMatches', 'retryInventoryRetryMatches'):
                 if key in value:

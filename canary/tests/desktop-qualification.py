@@ -724,6 +724,17 @@ class QualificationTests(unittest.TestCase):
                 path.write_text(json.dumps({**native, field: invalid}))
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'zed-desktop')
+            for field in ('retryControlCountAfterReadback', 'retryErrorTitleCountBeforeActivation',
+                          'retryErrorTitleCountAfterActivation', 'retryErrorTitleCountAfterReadback'):
+                for count in (None, 0, 1):
+                    path.write_text(json.dumps({**native, field: count}))
+                    observation = q.semantic_observations(root, 'zed-desktop')[0]
+                    self.assertEqual(observation[field], count)
+                    self.assertFalse(observation['responseVerified'])
+                for invalid in (True, -1, 4097, 'PRIVATE'):
+                    path.write_text(json.dumps({**native, field: invalid}))
+                    with self.assertRaises(ValueError):
+                        q.semantic_observations(root, 'zed-desktop')
             receipt = dict(status='complete', sessionFound=1, sessionMissing=0, resumeMessages=1, ordinarySend=0, turnStarted=1, turnCompleted=0, turnFailed=1, turnCancelled=0)
             path.write_text(json.dumps({**native, 'retryLogObservation': receipt}))
             self.assertEqual(q.semantic_observations(root, 'zed-desktop')[0]['retryLogObservation'], receipt)
