@@ -10,7 +10,7 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'canary/actions'))
-from zed_retry_trace import Capture, parse_counts, parse_click_counts, program, read_ready
+from zed_retry_trace import Capture, attach_failure, parse_counts, parse_click_counts, program, read_ready
 
 
 def maps(retry, native, inputs=1):
@@ -27,6 +27,11 @@ def click_maps(started=3, ended=3):
 
 
 class TraceTests(unittest.TestCase):
+    def test_attach_errors_never_export_diagnostic_text(self):
+        self.assertEqual(attach_failure(b'PRIVATE: BPF stack limit of 512 bytes exceeded'), 'compiler-stack')
+        self.assertEqual(attach_failure(b'PRIVATE: Operation not permitted'), 'permission')
+        self.assertIsNone(attach_failure(b'PRIVATE unknown failure'))
+
     def test_activation_intervals_require_complete_bounded_marker_pairs(self):
         total, clicks = parse_click_counts(maps(1, 1, 20) + click_maps())
         self.assertEqual(total, (0, 0, 19))

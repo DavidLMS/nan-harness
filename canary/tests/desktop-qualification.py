@@ -23,6 +23,26 @@ spec.loader.exec_module(runner)
 
 
 class CodexProjectPreflightTests(unittest.TestCase):
+    def test_absent_report_retains_closed_preparation_failure_without_qualification(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output = root / 'qualification.json'
+            facts = root / 'facts'
+            facts.mkdir()
+            pending = q.envelope('claude-desktop', 'windows', 'x86_64', 'a' * 40)
+            output.write_text(json.dumps(pending))
+            receipt = dict(schemaVersion=1, mechanism='windows-foreground-session',
+                diagnosticsOnly=True, stage='restore', originalTimeoutMs=200000,
+                prepared=False, restored=True, failureStage='prepare')
+            (facts / 'foreground.json').write_text(json.dumps(receipt))
+            result = q.diagnose_pending('claude-desktop', 'windows', 'x86_64', 'a' * 40, output, facts)
+            self.assertEqual(result['qualification'], 'unqualified')
+            self.assertEqual(result['probes'], [])
+            self.assertEqual(result['semanticObservations'][1], receipt)
+            with self.assertRaises(ValueError):
+                q.diagnose_pending('claude-desktop', 'windows', 'x86_64', 'b' * 40, output, facts)
+            self.assertEqual(json.loads(output.read_text()), pending)
+
     def test_rejected_stage_is_closed_and_never_qualifies(self):
         value = dict(schemaVersion=1, mechanism='codex-project-preflight', diagnosticsOnly=True, stage='workspace')
         with tempfile.TemporaryDirectory() as tmp:

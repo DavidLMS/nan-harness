@@ -540,6 +540,8 @@ jobs:
               launcher="${FEASIBILITY_HERMES_LAUNCHER:-$GITHUB_WORKSPACE/scripts/desktop-feasibility/nanh-shim.py}"
             fi
             python3 canary/actions/desktop_qualification.py reduce --app '${{ matrix.app }}' --platform '${{ matrix.platform }}' --architecture '${{ matrix.architecture }}' --source-sha "$GITHUB_SHA" --model qwen3.6 --checker "$FEASIBILITY_CHECKER" --launcher "$launcher" --real-nanh "$FEASIBILITY_REAL_NANH" --prepared "$RUNNER_TEMP/semantic-feasibility/prepared.json" --frozen "$RUNNER_TEMP/semantic-feasibility/frozen.json" --report "$RUNNER_TEMP/semantic-feasibility/report.json" --facts "$RUNNER_TEMP/semantic-feasibility/qualification-facts" --output "$RUNNER_TEMP/semantic-feasibility/qualification.json"
+          else
+            python3 canary/actions/desktop_qualification.py diagnose-pending --app '${{ matrix.app }}' --platform '${{ matrix.platform }}' --architecture '${{ matrix.architecture }}' --source-sha "$GITHUB_SHA" --facts "$RUNNER_TEMP/semantic-feasibility/qualification-facts" --output "$RUNNER_TEMP/semantic-feasibility/qualification.json"
           fi
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always() && contains(fromJSON('["deterministic-full","startup-baseline"]'), inputs.experiment)

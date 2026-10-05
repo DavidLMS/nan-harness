@@ -36,11 +36,12 @@ def prepare(facts):
         raise ValueError('foreground preparation requires hosted Windows')
     receipt = dict(schemaVersion=1, mechanism='windows-foreground-session',
                    diagnosticsOnly=True, stage='read', originalTimeoutMs=None,
-                   prepared=False, restored=False)
-    api = ForegroundTimeout()
+                   prepared=False, restored=False, failureStage=None)
+    api = None
     original = None
     changed = False
     try:
+        api = ForegroundTimeout()
         original = api.read()
         receipt['originalTimeoutMs'] = original
         receipt['stage'] = 'prepare'
@@ -54,6 +55,9 @@ def prepare(facts):
             raise RuntimeError('foreground timeout preparation unverified')
         receipt.update(prepared=True, stage='running')
         yield
+    except (OSError, RuntimeError, ValueError):
+        receipt['failureStage'] = receipt['stage']
+        raise
     finally:
         try:
             if original is not None:
@@ -65,5 +69,9 @@ def prepare(facts):
                 receipt['restored'] = True
                 if receipt['prepared']:
                     receipt['stage'] = 'completed'
+        except (OSError, RuntimeError, ValueError):
+            if receipt['failureStage'] is None:
+                receipt['failureStage'] = 'restore'
+            raise
         finally:
             write_json(Path(facts) / 'windows-foreground-session.json', receipt)

@@ -74,6 +74,7 @@ class ForegroundSessionTests(unittest.TestCase):
         self.assertEqual(error, 'synthetic restore failure')
         self.assertFalse(receipt['restored'])
         self.assertEqual(receipt['stage'], 'restore')
+        self.assertEqual(receipt['failureStage'], 'restore')
 
     def test_failed_preparation_never_executes_and_attempts_restore(self):
         api = FakeTimeout()
@@ -88,6 +89,7 @@ class ForegroundSessionTests(unittest.TestCase):
         self.assertEqual(api.value, 200000)
         self.assertFalse(receipt['prepared'])
         self.assertTrue(receipt['restored'])
+        self.assertEqual(receipt['failureStage'], 'prepare')
 
     def test_local_and_self_hosted_sessions_rejected_before_native_access(self):
         for change in ({'RUNNER_ENVIRONMENT': 'self-hosted'}, {'RUNNER_OS': 'Linux'}, {'GITHUB_ACTIONS': 'false'}):

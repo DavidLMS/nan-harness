@@ -38,7 +38,7 @@ def program(executable, markers=None):
     ]
     if markers is not None:
         start, end = (str(markers / name) for name in ('start', 'end'))
-        if not all(len(value.encode()) < 256 and re.fullmatch(r'/[A-Za-z0-9_./-]+', value) for value in (start, end)):
+        if not all(len(value.encode()) < 128 and re.fullmatch(r'/[A-Za-z0-9_./-]+', value) for value in (start, end)):
             raise ValueError('unsupported marker path')
         seeds = ' '.join(f'@click{kind}{index} = count();'
                         for index in range(1, 4) for kind in ('Input', 'Retry', 'Native', 'Clear'))
@@ -112,7 +112,22 @@ def parse_counts(data):
     return counts['@retry'], counts['@native'], counts['@input']
 
 
-def read_ready(stream, timeout=15):
+def attach_failure(line):
+    """Discard tracer text; retain only a fixed compiler/attachment category."""
+    line = line.lower()
+    for phrase, category in ((b'stack limit', 'compiler-stack'),
+                             (b'syntax error', 'compiler-syntax'),
+                             (b'tracepoint not found', 'tracepoint-unavailable'),
+                             (b'permission denied', 'permission'),
+                             (b'operation not permitted', 'permission'),
+                             (b'failed to load program', 'program-load'),
+                             (b'could not resolve symbol', 'symbol-unavailable')):
+        if phrase in line:
+            return category
+    return None
+
+
+def read_ready(stream, timeout=15, observe=None):
     """Pinned 0.20.2 emits this test notification after all probes attach."""
     marker = b'__BPFTRACE_NOTIFY_PROBES_ATTACHED'
     deadline = time.monotonic() + timeout
@@ -129,6 +144,8 @@ def read_ready(stream, timeout=15):
             if byte == b'\n':
                 if line == marker:
                     return True
+                if observe is not None:
+                    observe(bytes(line))
                 line.clear()
             else:
                 line.extend(byte)
@@ -144,7 +161,8 @@ class Capture:
         self.markers = self.facts / 'retry-trace-markers'
         self.receipt = dict(schemaVersion=1, mechanism='zed-retry-entry-counts',
                             diagnosticsOnly=True, status='unavailable', stage='attach', cleanup='passed',
-                            retryEntries=None, nativeRetryEntries=None, inputDispatchEntries=None)
+                            retryEntries=None, nativeRetryEntries=None, inputDispatchEntries=None,
+                            attachFailure='unclassified')
 
     def __enter__(self):
         if (sys.platform != 'linux' or os.environ.get('GITHUB_ACTIONS') != 'true'
@@ -171,14 +189,20 @@ class Capture:
             version = subprocess.run(['/usr/bin/bpftrace', '--version'], timeout=3,
                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=True).stdout.strip()
             if version != b'bpftrace v0.20.2':
+                self.receipt['attachFailure'] = 'version-mismatch'
                 return self
             self.process = subprocess.Popen(
-                ['/usr/bin/sudo', '-n', '/usr/bin/env', '__BPFTRACE_NOTIFY_PROBES_ATTACHED=1', 'BPFTRACE_STRLEN=256',
+                ['/usr/bin/sudo', '-n', '/usr/bin/env', '__BPFTRACE_NOTIFY_PROBES_ATTACHED=1', 'BPFTRACE_STRLEN=128',
                  '/usr/bin/bpftrace', '-q', '-B', 'none', '-f', 'json', '-e', program(self.executable, self.markers)],
                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 bufsize=0, start_new_session=True, env={'PATH': '/usr/bin:/bin', 'LANG': 'C'})
-            if read_ready(self.process.stderr) and self.process.poll() is None:
+            def observe(line):
+                category = attach_failure(line)
+                if category is not None:
+                    self.receipt['attachFailure'] = category
+            if read_ready(self.process.stderr, observe=observe) and self.process.poll() is None:
                 self.receipt['status'] = 'attached'
+                self.receipt['attachFailure'] = None
         except (OSError, ValueError, subprocess.SubprocessError):
             pass
         return self

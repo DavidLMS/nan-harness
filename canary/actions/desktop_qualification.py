@@ -2230,7 +2230,7 @@ def semantic_observations(directory, app):
         elif mechanism == 'windows-foreground-session':
             fields = set('schemaVersion mechanism diagnosticsOnly stage originalTimeoutMs prepared restored'.split())
             timeout = value.get('originalTimeoutMs')
-            if (app != 'claude-desktop' or set(value) != fields or value['diagnosticsOnly'] is not True
+            if (app != 'claude-desktop' or set(value) - {'failureStage'} != fields or value['diagnosticsOnly'] is not True
                     or type(value['stage']) is not str or value['stage'] not in {'read', 'prepare', 'verify', 'running', 'restore', 'completed'}
                     or timeout is not None and (type(timeout) is not int or not 0 <= timeout <= 4294967295)
                     or type(value['prepared']) is not bool or type(value['restored']) is not bool
@@ -2238,9 +2238,10 @@ def semantic_observations(directory, app):
                     or value['stage'] == 'completed' and not (value['prepared'] and value['restored'])):
                 raise ValueError('invalid Windows foreground session receipt')
             record.update({key: value[key] for key in fields - {'schemaVersion', 'mechanism'}})
+            enum(record, value, 'failureStage', {'read', 'prepare', 'verify', 'running', 'restore'})
         elif mechanism == 'zed-retry-entry-counts':
             fields = set('schemaVersion mechanism diagnosticsOnly status stage cleanup retryEntries nativeRetryEntries'.split())
-            if (set(value) - {'inputDispatchEntries', 'activationWindows'} != fields or app != 'zed-desktop' or value['diagnosticsOnly'] is not True
+            if (set(value) - {'inputDispatchEntries', 'activationWindows', 'attachFailure'} != fields or app != 'zed-desktop' or value['diagnosticsOnly'] is not True
                     or type(value['status']) is not str or value['status'] not in {'complete', 'unavailable'}
                     or type(value['stage']) is not str or value['stage'] not in {'attach', 'stop', 'readback', 'complete'}
                     or (value['status'] == 'complete') != (value['stage'] == 'complete')
@@ -2256,6 +2257,7 @@ def semantic_observations(directory, app):
                 if (value['status'] == 'complete' and (type(inputs) is not int or not 0 <= inputs <= 65536)
                         or value['status'] == 'unavailable' and inputs is not None):
                     raise ValueError('invalid Zed input entry count')
+            enum(record, value, 'attachFailure', {'unclassified', 'version-mismatch', 'compiler-stack', 'compiler-syntax', 'tracepoint-unavailable', 'permission', 'program-load', 'symbol-unavailable'})
             if 'activationWindows' in value:
                 clicks = value['activationWindows']
                 if (value['status'] != 'complete' or type(clicks) is not dict
@@ -3261,9 +3263,21 @@ def aggregate(directory, source_sha, excluded=()):
     return result
 
 
+def diagnose_pending(app, platform, architecture, source_sha, output, facts):
+    """Retain closed preparation facts even when no checker report was created."""
+    pending = envelope(app, platform, architecture, source_sha)
+    if bounded_json(output, 65536) != pending:
+        raise ValueError('pending evidence differs')
+    observations = semantic_observations(facts, app) if facts and Path(facts).exists() else []
+    pending['semanticObservations'] = [dict(schemaVersion=1,
+        mechanism='qualification-runner-failure', diagnosticsOnly=True,
+        errorCategory='report-absent'), *observations]
+    return pending
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', choices=('matrix', 'pending', 'reduce', 'aggregate'))
+    parser.add_argument('command', choices=('matrix', 'pending', 'diagnose-pending', 'reduce', 'aggregate'))
     parser.add_argument('--exclude-app', action='append', choices=APPS, default=[])
     for name in ('app', 'platform', 'architecture', 'source-sha', 'output', 'model', 'frozen', 'prepared',
                  'checker', 'launcher', 'real-nanh', 'report', 'directory', 'facts'):
@@ -3279,7 +3293,9 @@ def main():
             required += ['model', 'frozen', 'prepared', 'checker', 'launcher', 'real_nanh', 'report']
         if any(getattr(args, key) is None for key in required):
             raise ValueError('required cell evidence is missing')
-        result = (aggregate(args.directory, args.source_sha, args.exclude_app) if args.command == 'aggregate' else
+        result = (diagnose_pending(args.app, args.platform, args.architecture, args.source_sha,
+                                  args.output, args.facts) if args.command == 'diagnose-pending' else
+                  aggregate(args.directory, args.source_sha, args.exclude_app) if args.command == 'aggregate' else
                   envelope(args.app, args.platform, args.architecture, args.source_sha)
                   if args.command == 'pending' else reduce_report(**{key: getattr(args, key) for key in required if key != 'output'}, facts=args.facts))
         destination = Path(args.output)
