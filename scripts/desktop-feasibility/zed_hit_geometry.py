@@ -171,6 +171,36 @@ def save_target(directory, target):
     raise ValueError('geometry target budget')
 
 
+def occlusion_profile(index, boxes, point, viewport):
+    """Closed spatial relationships only; these observations never authorize input."""
+    bounds, mask, _ = boxes[index]
+    ahead = [(i, rect, clip, behavior) for i, (rect, clip, behavior) in enumerate(boxes)
+             if i > index and behavior != 0]
+    samples = [(bounds[0] + bounds[2] * column / 4,
+                bounds[1] + bounds[3] * row / 4)
+               for row in (1, 2, 3) for column in (1, 2, 3)]
+    free = sum(1 << bit for bit, sample in enumerate(samples)
+               if contains(bounds, sample) and contains(mask, sample)
+               and not any(contains(rect, sample) and contains(clip, sample)
+                           for _, rect, clip, _ in ahead))
+    blockers = [(i, rect, clip, behavior) for i, rect, clip, behavior in ahead
+                if contains(rect, point) and contains(clip, point)]
+    top = None
+    if blockers:
+        i, rect, clip, behavior = blockers[-1]
+
+        def covers(outer, inner):
+            return (outer[0] <= inner[0] and outer[1] <= inner[1]
+                    and outer[0] + outer[2] >= inner[0] + inner[2]
+                    and outer[1] + outer[3] >= inner[1] + inner[3])
+
+        top = dict(behavior='block-mouse' if behavior == 1 else 'block-mouse-except-scroll',
+                   distanceFromTarget=i - index, distanceFromFront=len(boxes) - 1 - i,
+                   coversTarget=covers(rect, bounds) and covers(clip, bounds),
+                   coversViewport=covers(rect, (0, 0, *viewport)) and covers(clip, (0, 0, *viewport)))
+    return dict(unoccludedGridMask=free, topBlocker=top)
+
+
 def classify(target, pointer, boxes, viewport):
     """Replay normal-mouse clipping/occlusion at the independently owned point.
 
@@ -203,7 +233,8 @@ def classify(target, pointer, boxes, viewport):
         blockers = sum(behavior != 0 and contains(bounds, point) and contains(mask, point)
                        for bounds, mask, behavior in boxes[index + 1:])
         result.update(targetMaskContainsPoint=visible, blockingHitboxesAhead=blockers,
-                      targetWouldBeHovered=visible and blockers == 0)
+                      targetWouldBeHovered=visible and blockers == 0,
+                      occlusionProfile=occlusion_profile(index, boxes, point, viewport))
     return result
 
 

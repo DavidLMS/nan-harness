@@ -25,6 +25,21 @@ def frame(boxes):
 
 
 class GeometryTests(unittest.TestCase):
+    def test_profiles_partial_full_and_clipped_occluders_without_coordinates(self):
+        target = (BOUNDS, MASK, 0)
+        partial = ((25, 0, 20, 200), MASK, 2)
+        profile = classify(TARGET, (30, 30), [target, partial], (200, 200))['occlusionProfile']
+        self.assertEqual(profile, dict(unoccludedGridMask=73, topBlocker=dict(
+            behavior='block-mouse-except-scroll', distanceFromTarget=1, distanceFromFront=0,
+            coversTarget=False, coversViewport=False)))
+        full = classify(TARGET, (30, 30), [target, (MASK, MASK, 1), partial], (200, 200))['occlusionProfile']
+        self.assertEqual(full['unoccludedGridMask'], 0)
+        self.assertFalse(full['topBlocker']['coversTarget'])
+        clipped = classify(TARGET, (30, 30), [target, (MASK, (0, 0, 5, 5), 1)], (200, 200))['occlusionProfile']
+        self.assertEqual(clipped, dict(unoccludedGridMask=511, topBlocker=None))
+        masked = classify(TARGET, (30, 30), [(BOUNDS, (0, 0, 25, 200), 0)], (200, 200))['occlusionProfile']
+        self.assertEqual(masked, dict(unoccludedGridMask=73, topBlocker=None))
+
     def test_only_exact_marker_predicate_read_faults_can_be_separated(self):
         fault = dict(type='helper_error', msg='PRIVATE', helper='probe_read_user_str', retcode=-14, line=6, col=55)
         counter = b'{"type":"map","data":{"@input":3}}'

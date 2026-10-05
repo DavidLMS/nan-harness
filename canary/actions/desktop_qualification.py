@@ -842,6 +842,29 @@ DOM_TAGS = {'html', 'body', 'button', 'div', 'span', 'svg', 'other', 'none', 'un
 DOM_REGIONS = {'thread-viewport', 'composer-root', 'composer-dock', 'composer-drag-region', 'composer-bounds', 'composer-portal', 'particle-field', 'chat-drop-overlay', 'titlebar-drag', 'pane-overlay', 'pane-host', 'narrow-overlay', 'floating-pane', 'tree-group', 'panel-header', 'panel-page-header', 'zone-tabstrip', 'window-drag-handle', 'gateway-connecting', 'onboarding', 'command-backdrop', 'dialog-overlay', 'dialog', 'popover', 'tooltip', 'other', 'none', 'unmeasured'}
 
 
+def validate_occlusion_profile(item):
+    profile = item['occlusionProfile']
+    if (item['status'] != 'matched' or type(profile) is not dict
+            or set(profile) != {'unoccludedGridMask', 'topBlocker'}
+            or type(profile['unoccludedGridMask']) is not int
+            or not 0 <= profile['unoccludedGridMask'] <= 511):
+        raise ValueError('invalid occlusion profile')
+    top = profile['topBlocker']
+    if item['blockingHitboxesAhead'] == 0:
+        if top is not None:
+            raise ValueError('unexpected occluding hitbox')
+        return
+    if (type(top) is not dict or set(top) != {'behavior', 'distanceFromTarget',
+            'distanceFromFront', 'coversTarget', 'coversViewport'}
+            or top['behavior'] not in ('block-mouse', 'block-mouse-except-scroll')
+            or type(top['distanceFromTarget']) is not int or top['distanceFromTarget'] < 1
+            or type(top['distanceFromFront']) is not int or top['distanceFromFront'] < 0
+            or top['distanceFromTarget'] + top['distanceFromFront'] >= item['renderedHitboxes']
+            or type(top['coversTarget']) is not bool or type(top['coversViewport']) is not bool
+            or top['coversTarget'] and profile['unoccludedGridMask'] != 0):
+        raise ValueError('invalid occluding hitbox')
+
+
 def semantic_observations(directory, app):
     if directory is None:
         return []
@@ -2296,7 +2319,7 @@ def semantic_observations(directory, app):
                         or len(geometry['windows']) != (value['activationWindows']['started'] if geometry['status'] == 'complete' else 0)):
                     raise ValueError('invalid hit-test geometry identity')
                 for item in geometry['windows']:
-                    if (type(item) is not dict or set(item) != {'status', 'renderedHitboxes', 'boundsMatches',
+                    if (type(item) is not dict or set(item) - {'occlusionProfile'} != {'status', 'renderedHitboxes', 'boundsMatches',
                             'priorPointerMatches', 'targetMaskContainsPoint', 'blockingHitboxesAhead', 'targetWouldBeHovered'}
                             or type(item['renderedHitboxes']) is not int or not 1 <= item['renderedHitboxes'] <= 1024
                             or type(item['boundsMatches']) is not int or not 0 <= item['boundsMatches'] <= item['renderedHitboxes']
@@ -2311,6 +2334,8 @@ def semantic_observations(directory, app):
                             raise ValueError('inconsistent hit-test geometry')
                     elif any(item[key] is not None for key in ('targetMaskContainsPoint', 'blockingHitboxesAhead', 'targetWouldBeHovered')):
                         raise ValueError('ambiguous hit-test geometry')
+                    if 'occlusionProfile' in item:
+                        validate_occlusion_profile(item)
             record.update(value)
         elif mechanism == 'zed-atspi-retry':
             fields = set('schemaVersion mechanism diagnosticsOnly method stage actionAttempted forwarded'.split())

@@ -109,7 +109,10 @@ def run(directory, receipt):
         return
     expected = dict(status='matched', renderedHitboxes=1024, boundsMatches=1,
                     priorPointerMatches=True, targetMaskContainsPoint=True,
-                    blockingHitboxesAhead=1, targetWouldBeHovered=False)
+                    blockingHitboxesAhead=1, targetWouldBeHovered=False,
+                    occlusionProfile=dict(unoccludedGridMask=0, topBlocker=dict(
+                        behavior='block-mouse', distanceFromTarget=1023, distanceFromFront=0,
+                        coversTarget=True, coversViewport=True)))
     try:
         observed = observations(maps, directory, 1)
     except ValueError:

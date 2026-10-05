@@ -1512,6 +1512,22 @@ class QualificationTests(unittest.TestCase):
             measured = {**value, 'activationWindows': windows, 'hitTestGeometry': geometry}
             path.write_text(json.dumps(measured))
             self.assertEqual(q.semantic_observations(directory, 'zed-desktop')[0]['hitTestGeometry'], geometry)
+            profile = dict(unoccludedGridMask=0, topBlocker=dict(behavior='block-mouse',
+                distanceFromTarget=3, distanceFromFront=2, coversTarget=True, coversViewport=False))
+            profiled_item = {**geometry_item, 'occlusionProfile': profile}
+            profiled_geometry = {**geometry, 'windows': [profiled_item] * 3}
+            path.write_text(json.dumps({**measured, 'hitTestGeometry': profiled_geometry}))
+            self.assertEqual(q.semantic_observations(directory, 'zed-desktop')[0]['hitTestGeometry'], profiled_geometry)
+            for change in ({'unoccludedGridMask': True}, {'unoccludedGridMask': 512},
+                           {'unoccludedGridMask': 1}, {'topBlocker': None}, {'bounds': [1, 2, 3, 4]}):
+                with self.assertRaises(ValueError):
+                    q.validate_occlusion_profile({**profiled_item, 'occlusionProfile': {**profile, **change}})
+            for change in ({'behavior': 'PRIVATE'}, {'distanceFromTarget': True},
+                           {'distanceFromTarget': 0}, {'distanceFromFront': 7},
+                           {'coversViewport': 'PRIVATE'}, {'bounds': [1, 2, 3, 4]}):
+                with self.assertRaises(ValueError):
+                    q.validate_occlusion_profile({**profiled_item, 'occlusionProfile': {
+                        **profile, 'topBlocker': {**profile['topBlocker'], **change}}})
             for change in ({'targetWouldBeHovered': True}, {'boundsMatches': True},
                            {'blockingHitboxesAhead': 10}, {'bounds': [1, 2, 3, 4]},
                            {'priorPointerMatches': 'PRIVATE'}, {'status': 'absent'}):
