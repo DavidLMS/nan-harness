@@ -137,6 +137,19 @@ class CodexRetainedCustodyTests(unittest.TestCase):
 
 
 class RendererCheckpointTests(unittest.TestCase):
+    def test_parent_failure_boundaries_are_closed(self):
+        value = dict(schemaVersion=1, mechanism='renderer-inventory-failure',
+                     diagnosticsOnly=True, stage='process-custody', reason='isolation-unavailable')
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp)/'failure.json'
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(tmp, 'chatgpt-desktop'), [value])
+            for change in ({'stage':'PRIVATE'}, {'reason':'PRIVATE'}, {'path':'PRIVATE'},
+                           {'diagnosticsOnly':False}):
+                path.write_text(json.dumps({**value, **change}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(tmp, 'chatgpt-desktop')
+
     def test_partial_phase_is_closed_and_cannot_claim_completed_inventory(self):
         value=dict(schemaVersion=1,mechanism='renderer-inventory',diagnosticsOnly=True,
             app='chatgpt-desktop',endpointOwned=True,launcherOwned=True,attached=True,

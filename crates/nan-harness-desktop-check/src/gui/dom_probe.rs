@@ -684,9 +684,25 @@ impl<'a> RendererSession<'a> {
             .codex_profile
             .is_some_and(|profile| !profile.verifies_owned(self.readiness_deadline))
         {
-            return Err(Reason::IsolationUnavailable);
+            return Err(self.inventory_failure("profile-custody", Reason::IsolationUnavailable));
         }
         renderer_guard(self.process, self.owner)
+            .map_err(|reason| self.inventory_failure("process-custody", reason))
+    }
+
+    fn inventory_failure(&self, stage: &str, reason: Reason) -> Reason {
+        let value = serde_json::json!({"schemaVersion":1,
+            "mechanism":"renderer-inventory-failure", "diagnosticsOnly":true,
+            "stage":stage, "reason":reason});
+        // First failure at each boundary is sufficient. Diagnostic I/O cannot
+        // replace the original failure or grant authority to continue.
+        let _ = open_private_new(
+            &self
+                .directory
+                .join(format!("renderer-failure-{}-{stage}.json", self.owner)),
+        )
+        .and_then(|mut file| file.write_all(value.to_string().as_bytes()));
+        reason
     }
 
     pub(crate) fn prepare_hermes_profile(&mut self, workspace: &Path) -> Result<(), Reason> {
@@ -805,19 +821,20 @@ impl<'a> RendererSession<'a> {
             inventory_driver_limit(),
             || self.guard(),
         );
-        std::fs::remove_file(request_path).map_err(|_| Reason::IsolationUnavailable)?;
+        std::fs::remove_file(request_path)
+            .map_err(|_| self.inventory_failure("request-removal", Reason::IsolationUnavailable))?;
         drop(native);
         self.guard()?;
-        outcome?;
+        outcome.map_err(|reason| self.inventory_failure("driver", reason))?;
         let mut bytes = Vec::new();
         open_private_read(&output_path)
             .and_then(|(file, _)| file.take(8193).read_to_end(&mut bytes))
-            .map_err(|_| Reason::IsolationUnavailable)?;
+            .map_err(|_| self.inventory_failure("receipt-read", Reason::IsolationUnavailable))?;
         if bytes.len() > 8192 {
-            return Err(Reason::IsolationUnavailable);
+            return Err(self.inventory_failure("receipt-size", Reason::IsolationUnavailable));
         }
-        let value: serde_json::Value =
-            serde_json::from_slice(&bytes).map_err(|_| Reason::IsolationUnavailable)?;
+        let value: serde_json::Value = serde_json::from_slice(&bytes)
+            .map_err(|_| self.inventory_failure("receipt-json", Reason::IsolationUnavailable))?;
         if value["schemaVersion"] != 1
             || value["mechanism"] != "renderer-inventory"
             || value["observerStage"] != "complete"
