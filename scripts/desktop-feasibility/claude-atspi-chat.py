@@ -524,11 +524,11 @@ class Controller:
             self.owned(node)
         return nodes
 
-    def state(self, node, editable=False, frame=False):
+    def state(self, node, editable=False, frame=False, showing=True):
         self.owned(node)
         bits = self.query('state', node)
         if (type(bits) is not int or not 0 <= bits < 2**64 or bits & (1 << 6)
-                or not bits & (1 << 30) or not bits & (1 << 25)
+                or not bits & (1 << 30) or showing and not bits & (1 << 25)
                 or editable and not bits & (1 << 7)):
             raise Rejected('input' if editable else 'frame-state' if frame else 'state')
         return bits
@@ -1135,7 +1135,9 @@ class Controller:
                 for items in pair:
                     node=items[0][0]
                     if node in matched:history_matched=False
-                    matched.add(node);self.state(node);attachment(node)
+                    # Prior turns are read-only witnesses and may be scrolled
+                    # out of view. Retry itself still requires SHOWING and a hit.
+                    matched.add(node);self.state(node,showing=False);attachment(node)
             user_chain=attachment(users[0]) if len(users)==1 else ()
             label='none' if not candidates else 'ambiguous'
             enabled=action=hit=attached=False;row_headings=0;sealed=None

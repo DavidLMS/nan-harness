@@ -23,12 +23,14 @@ def program(executable):
     if not re.fullmatch(r'/[A-Za-z0-9_./-]+', path):
         raise ValueError('unsupported executable path')
     # Seed both count maps so zero events is distinguishable from missing output.
+    # Let bpftrace print once after detaching. In 0.20.2 scalar count maps are
+    # per-CPU arrays: clear() zeroes them, so an END print/clear also produces
+    # a second pair of zero-valued maps during the automatic final print.
     return '\n'.join([
         'BEGIN { @retry = count(); @native = count(); }',
         f'uprobe:{path}:{SYMBOLS[0]} {{ @retry = count(); }}',
         f'uprobe:{path}:{SYMBOLS[1]} {{ @native = count(); }}',
         'interval:s:1800 { exit(); }',
-        'END { print(@retry); print(@native); clear(@retry); clear(@native); }',
     ])
 
 

@@ -1485,6 +1485,10 @@ class RetryActionTests(unittest.TestCase):
                ('r','prior-response-1'):'Claude responded: owned-marker-1'}
         recovered=[False]
         adapter.identity=lambda node:(83,prior[node],'') if node in prior else identity(node)
+        state=adapter.state
+        # Earlier turns can scroll out of view when the failed turn appears.
+        # They remain semantic witnesses, never input targets.
+        adapter.state=lambda node:state(node)&~(1<<25) if node in prior else state(node)
         def items(node):
             if node in prior:return []
             if node==('r','frame'):return children(node)+list(prior)
@@ -1499,6 +1503,17 @@ class RetryActionTests(unittest.TestCase):
             return invoke(node,index)
         adapter.invoke_once=action
         records=[{'prompt':f'owned-prior-{index}','marker':f'owned-marker-{index}'} for index in range(2)]
+        offscreen_state=adapter.state
+        for invalid in (lambda bits:bits|(1<<6), lambda bits:bits&~(1<<30)):
+            adapter.state=lambda node:invalid(offscreen_state(node)) if node in prior else offscreen_state(node)
+            with self.assertRaises(chat.Rejected):
+                c.retry_ready('private-failed-prompt',records,activate=True)
+            self.assertEqual(adapter.send_count,0)
+        adapter.state=lambda node:offscreen_state(node)&~(1<<25) if node==('r','retry') else offscreen_state(node)
+        with self.assertRaises(chat.Rejected):
+            c.retry_ready('private-failed-prompt',records,activate=True)
+        self.assertEqual(adapter.send_count,0)
+        adapter.state=offscreen_state
         facts=c.retry_ready('private-failed-prompt',records,activate=True)
         self.assertEqual(facts['stage'],'retry-forwarded')
         facts=c.copy_response('private-marker')
