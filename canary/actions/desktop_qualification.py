@@ -2661,7 +2661,7 @@ def semantic_observations(directory, app):
             record.update({key: value[key] for key in fields - {'schemaVersion', 'mechanism'}})
         elif mechanism == 'renderer-inventory':
             fields = set('schemaVersion mechanism diagnosticsOnly app endpointOwned launcherOwned attached pageCount textareaCount editableCount sendCount retryCount newThreadCount loginCount dialogCount errorCategory'.split())
-            if set(value) - {'observerStage', 'documentState', 'startupScreen', 'landingCounts', 'onboardingCounts', 'publicOnboarding', 'mainAuxCorrelation', 'codexSession', 'initialMainBinding', 'initialMainConfirmation', 'initialMainActivation', 'sourceScreen', 'managedSignIn', 'sourceDialog', 'nativeOwnershipFailure', 'nativeListenerShape', 'sourceDialogPhase', 'folderTrustObservation', 'mainGuardObservation'} != fields or value['app'] != app or value['diagnosticsOnly'] is not True:
+            if set(value) - {'observerShutdown', 'observerStage', 'documentState', 'startupScreen', 'landingCounts', 'onboardingCounts', 'publicOnboarding', 'mainAuxCorrelation', 'codexSession', 'initialMainBinding', 'initialMainConfirmation', 'initialMainActivation', 'sourceScreen', 'managedSignIn', 'sourceDialog', 'nativeOwnershipFailure', 'nativeListenerShape', 'sourceDialogPhase', 'folderTrustObservation', 'mainGuardObservation'} != fields or value['app'] != app or value['diagnosticsOnly'] is not True:
                 raise ValueError('invalid renderer inventory identity')
             if 'sourceDialogPhase' in value:
                 if app != 'chatgpt-desktop' or type(value['sourceDialogPhase']) is not str:
@@ -2688,6 +2688,10 @@ def semantic_observations(directory, app):
                     raise ValueError('invalid folder trust progress')
                 folder_trust_observation({key: item for key, item in trust.items() if key != 'phase'})
                 record['folderTrustObservation'] = trust
+            if 'observerShutdown' in value:
+                if type(value['observerShutdown']) is not str:
+                    raise ValueError('invalid renderer shutdown phase')
+                enum(record, value, 'observerShutdown', {'disconnecting', 'disconnected', 'returned'})
             if 'observerStage' in value:
                 if type(value['observerStage']) is not str:
                     raise ValueError('invalid renderer checkpoint phase')

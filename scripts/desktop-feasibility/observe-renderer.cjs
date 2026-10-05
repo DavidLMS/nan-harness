@@ -536,6 +536,7 @@ async function run() {
   checkpoint('endpoint');
   const rootProof = require('./endpoint-ownership.cjs').proof(String(request.ownerPid), String(connection.port));
   facts.launcherOwned = rootProof.descendant(connection.launcherPid, deadline);
+  save();
   if (!facts.launcherOwned) { facts.errorCategory = 'launcher-unowned'; save(); return; }
   const ownership = require('./endpoint-ownership.cjs').proof(String(connection.launcherPid), String(connection.port));
   while (Date.now() < deadline && !ownership.ownedEndpoint(deadline)) await new Promise(r => setTimeout(r, 250));
@@ -802,6 +803,12 @@ async function run() {
     Object.assign(facts, counts, { errorCategory: null }); checkpoint('complete');
   } catch(error) {
     facts.errorCategory='attachment-or-action-failed';save();throw error;
-  } finally { await browser.close(); }
+  } finally {
+    facts.observerShutdown = 'disconnecting'; save();
+    await browser.close();
+    facts.observerShutdown = 'disconnected'; save();
+  }
 }
-run().catch(() => { facts.errorCategory = 'attachment-or-action-failed'; save(); process.exitCode = 1; });
+run().then(() => {
+  facts.observerShutdown = 'returned'; save();
+}).catch(() => { facts.errorCategory = 'attachment-or-action-failed'; save(); process.exitCode = 1; });

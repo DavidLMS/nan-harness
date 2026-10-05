@@ -650,3 +650,35 @@ console.log('Renderer checkpoint survives interrupted work without claiming comp
   assert.equal(guard.failure(),'native-ownership');
   console.log('Retained guard pending boundary, timing and observer failure fixtures PASS');
 })().catch(error=>{console.error(error);process.exitCode=1;});
+
+// Exercise the actual shutdown and top-level completion code without an app.
+// A pending disconnect must remain distinguishable from a returned observer.
+(async()=>{
+  const shutdownStart=source.lastIndexOf('  } finally {');
+  const shutdownEnd=source.indexOf('\n}\nrun().then(',shutdownStart);
+  const shutdown=source.slice(shutdownStart+'  } finally {'.length,shutdownEnd);
+  const completion=source.slice(shutdownEnd+3);
+  async function fixture(rejectClose=false) {
+    let release;
+    const pending=new Promise((resolve,reject)=>{release=()=>rejectClose?reject(Error('PRIVATE')):resolve();});
+    const facts={errorCategory:null},saved=[],process={exitCode:0};
+    const context={facts,process,browser:{close:()=>pending},save:()=>saved.push({...facts})};
+    const run=vm.runInNewContext(`(async()=>{${shutdown})`,context);
+    const finished=vm.runInNewContext(completion,{...context,run});
+    assert.equal(saved.at(-1).observerShutdown,'disconnecting');
+    assert.equal(saved.length,1);
+    release();await finished;
+    if(rejectClose) {
+      assert.equal(facts.observerShutdown,'disconnecting');
+      assert.equal(facts.errorCategory,'attachment-or-action-failed');
+      assert.equal(process.exitCode,1);
+    } else {
+      assert.deepEqual(saved.map(value=>value.observerShutdown),['disconnecting','disconnected','returned']);
+      assert.equal(facts.errorCategory,null);
+      assert.equal(process.exitCode,0);
+    }
+    assert(!JSON.stringify(saved).includes('PRIVATE'));
+  }
+  await fixture();await fixture(true);
+  console.log('Renderer shutdown distinguishes pending, returned and failed disconnects');
+})().catch(error=>{console.error(error);process.exitCode=1;});

@@ -147,7 +147,11 @@ class RendererCheckpointTests(unittest.TestCase):
             path=Path(tmp)/'facts.json'
             path.write_text(json.dumps(value))
             self.assertEqual(q.semantic_observations(tmp,'chatgpt-desktop'),[value])
-            for changes in ({'observerStage':'PRIVATE'},{'observerStage':None},{'errorCategory':None}):
+            for phase in ('disconnecting', 'disconnected', 'returned'):
+                closed = {**value, 'observerShutdown':phase}
+                path.write_text(json.dumps(closed))
+                self.assertEqual(q.semantic_observations(tmp,'chatgpt-desktop'),[closed])
+            for changes in ({'observerShutdown':'PRIVATE'},{'observerShutdown':None},{'observerStage':'PRIVATE'},{'observerStage':None},{'errorCategory':None}):
                 path.write_text(json.dumps({**value,**changes}))
                 with self.assertRaises(ValueError):q.semantic_observations(tmp,'chatgpt-desktop')
 
