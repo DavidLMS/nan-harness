@@ -873,6 +873,12 @@ async fn scenario_owned(
             Err(reason) => Err(reason),
         }
     };
+    capture_failed_acquisition(
+        conversation.uses_renderer() && outcome.is_err(),
+        &mut process,
+        spec,
+        launch_observation,
+    );
     capture_native_focus_failure(outcome, &mut process, spec, launch_observation);
     // Release configuration locks before the existing receipt restoration.
     #[cfg(windows)]

@@ -635,6 +635,25 @@ pub(crate) struct RendererSession<'a> {
     codex_profile: Option<&'a crate::probe::FreshCodexProfile>,
 }
 
+// A passive inventory must finish successfully before a turn controller can
+// borrow its binding. The auxiliary page is allowed only for the Codex adapter.
+fn inventory_receipt_valid(value: &serde_json::Value, codex: bool) -> bool {
+    value["schemaVersion"] == 1
+        && value["mechanism"] == "renderer-inventory"
+        && value["observerStage"] == "complete"
+        && value.get("errorCategory") == Some(&serde_json::Value::Null)
+        && value["endpointOwned"] == true
+        && value["launcherOwned"] == true
+        && value["attached"] == true
+        && (value["pageCount"] == 1
+            || (codex
+                && value["pageCount"] == 2
+                && value["codexSession"]["pageCount"] == 2
+                && value["codexSession"]["bindingVerified"] == true
+                && value["codexSession"]["auxiliaryInert"] == true
+                && value["codexSession"]["codingComposerReady"] == true))
+}
+
 fn renderer_guard(
     process: &mut impl crate::process::Observation,
     owner: u32,
@@ -824,8 +843,8 @@ impl<'a> RendererSession<'a> {
         std::fs::remove_file(request_path)
             .map_err(|_| self.inventory_failure("request-removal", Reason::IsolationUnavailable))?;
         drop(native);
-        self.guard()?;
         outcome.map_err(|reason| self.inventory_failure("driver", reason))?;
+        self.guard()?;
         let mut bytes = Vec::new();
         open_private_read(&output_path)
             .and_then(|(file, _)| file.take(8193).read_to_end(&mut bytes))
@@ -835,22 +854,10 @@ impl<'a> RendererSession<'a> {
         }
         let value: serde_json::Value = serde_json::from_slice(&bytes)
             .map_err(|_| self.inventory_failure("receipt-json", Reason::IsolationUnavailable))?;
-        if value["schemaVersion"] != 1
-            || value["mechanism"] != "renderer-inventory"
-            || value["observerStage"] != "complete"
-            || value.get("errorCategory") != Some(&serde_json::Value::Null)
-            || value["endpointOwned"] != true
-            || value["launcherOwned"] != true
-            || value["attached"] != true
-            || (value["pageCount"] != 1
-                && !(std::env::var("NANH_DESKTOP_RENDERER_APP").as_deref()
-                    == Ok("chatgpt-desktop")
-                    && value["pageCount"] == 2
-                    && value["codexSession"]["pageCount"] == 2
-                    && value["codexSession"]["bindingVerified"] == true
-                    && value["codexSession"]["auxiliaryInert"] == true
-                    && value["codexSession"]["codingComposerReady"] == true))
-        {
+        if !inventory_receipt_valid(
+            &value,
+            std::env::var("NANH_DESKTOP_RENDERER_APP").as_deref() == Ok("chatgpt-desktop"),
+        ) {
             return Err(Reason::ActionUnsupported);
         }
         Ok(())
@@ -1224,6 +1231,40 @@ fn run_driver(
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn inventory_requires_completed_owned_evidence_before_borrowing_a_binding() {
+        let valid = serde_json::json!({"schemaVersion":1,"mechanism":"renderer-inventory",
+            "observerStage":"complete","errorCategory":null,"endpointOwned":true,
+            "launcherOwned":true,"attached":true,"pageCount":1});
+        assert!(inventory_receipt_valid(&valid, false));
+        for (key, replacement) in [
+            ("observerStage", serde_json::json!("final-inventory")),
+            (
+                "errorCategory",
+                serde_json::json!("attachment-or-action-failed"),
+            ),
+            ("endpointOwned", serde_json::json!(false)),
+            ("launcherOwned", serde_json::json!(false)),
+            ("attached", serde_json::json!(false)),
+            ("pageCount", serde_json::json!(2)),
+        ] {
+            let mut rejected = valid.clone();
+            rejected[key] = replacement;
+            assert!(!inventory_receipt_valid(&rejected, true));
+        }
+        let mut missing = valid.clone();
+        missing.as_object_mut().unwrap().remove("errorCategory");
+        assert!(!inventory_receipt_valid(&missing, true));
+        let mut auxiliary = valid;
+        auxiliary["pageCount"] = serde_json::json!(2);
+        auxiliary["codexSession"] = serde_json::json!({"pageCount":2,
+            "bindingVerified":true,"auxiliaryInert":true,"codingComposerReady":true});
+        assert!(inventory_receipt_valid(&auxiliary, true));
+        assert!(!inventory_receipt_valid(&auxiliary, false));
+        auxiliary["codexSession"]["auxiliaryInert"] = serde_json::json!(false);
+        assert!(!inventory_receipt_valid(&auxiliary, true));
+    }
+
     #[test]
     fn inventory_cutoff_reserves_exit_time_from_the_original_clock() {
         let now = Instant::now();

@@ -3241,7 +3241,8 @@ Campaign [37290009354](https://github.com/DavidLMS/nan-harness/actions/runs/3729
 on `4fbe72cb09f9b972f8f4186aaad081050da190b4` accepted nine cells, including
 all Zed and Claude platforms, Hermes Linux/macOS and Codex Linux. Codex macOS
 and Hermes Windows each completed two full sessions; their first sessions
-failed before acquisition. Both cleanup scopes passed. Closed prelaunch
+did not qualify. The `not-started` summary alone does not establish whether
+the application launched. Both cleanup scopes passed. Closed prelaunch
 categories now distinguish process inspection, capability probing and profile
 preparation without changing their admission or timing policies.
 
@@ -3254,6 +3255,29 @@ All 202 catalog entries retain verified source provenance, including the six
 indirect descriptor, branding and finite plural bindings. Ordinary onboarding
 Skip, retained home composer and semantic conversation markers remain required.
 Native acceptance of this replacement remains pending.
+
+Hermes Windows subsequently passed all three full sessions in
+[37339322507](https://github.com/DavidLMS/nan-harness/actions/runs/37339322507).
+Codex macOS passed all three in
+[37357588636](https://github.com/DavidLMS/nan-harness/actions/runs/37357588636)
+on `74a03d40d441587e8d76858be56230d894a55b81`, including real-tool verification,
+UI recovery and both cleanup scopes. Its inventory had completed but the CDP
+client's disconnect stalled. The observer now bounds that disconnect to two
+seconds and exits its own process; the parent retains application/profile
+custody and rechecks the completed inventory before starting a separate turn
+controller. All three sessions exercised that bounded exit. An incomplete or
+failed inventory cannot qualify through the disconnect fallback.
+
+Codex Windows remains unqualified. In
+[37359120776](https://github.com/DavidLMS/nan-harness/actions/runs/37359120776),
+the parent-side diagnostic records `application-exited` at `process-custody`
+in all three sessions, before attaching the observer. A later custody check
+had obscured that initial failure with `isolation-unavailable`. Profile
+preparation and both cleanup scopes passed. The checker now preserves the
+original observer failure and captures the existing closed launcher diagnostic
+before cleanup, as it already does for native acquisition failures. Eleven cells now
+have full evidence across different commits; this is not a successful final
+twelve-cell campaign.
 
 Use `app=all`, `platform=final-corrections`, `experiment=deterministic-full`
 and `native_only=true` to run only Codex macOS/Windows and Hermes Windows.
