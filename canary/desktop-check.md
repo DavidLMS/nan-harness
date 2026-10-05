@@ -3234,3 +3234,33 @@ See the [pinned bpftrace implementation](https://github.com/bpftrace/bpftrace/bl
 Even otherwise successful probes with this receipt remain `unqualified`, with
 reason `instrumented-diagnostic`. Run `platform=all` without the trace opt-in
 for the final twelve-cell qualification. The final matrix excludes Pen.
+
+### Same-commit campaign corrections (2026-10-05)
+
+Campaign [37290009354](https://github.com/DavidLMS/nan-harness/actions/runs/37290009354)
+on `4fbe72cb09f9b972f8f4186aaad081050da190b4` accepted nine cells, including
+all Zed and Claude platforms, Hermes Linux/macOS and Codex Linux. Codex macOS
+and Hermes Windows each completed two full sessions; their first sessions
+failed before acquisition. Both cleanup scopes passed. Closed prelaunch
+categories now distinguish process inspection, capability probing and profile
+preparation without changing their admission or timing policies.
+
+Codex Windows failed before installation because the official mutable MSIX
+changed. The inspected replacement has package version `26.930.41038`, MSIX
+identity version `26.930.4958.0`, and archive SHA256
+`e03019134d729c6416173b0712aa5c51d079966253f77077f4bf105d29d8fce7`.
+The executable and passive title catalog are pinned to those inspected bytes.
+All 202 catalog entries retain verified source provenance, including the six
+indirect descriptor, branding and finite plural bindings. Ordinary onboarding
+Skip, retained home composer and semantic conversation markers remain required.
+Native acceptance of this replacement remains pending.
+
+Use `app=all`, `platform=final-corrections`, `experiment=deterministic-full`
+and `native_only=true` to run only Codex macOS/Windows and Hermes Windows.
+This diagnostic selection does not run the twelve-cell aggregate. After it
+passes, the complete `platform=all` campaign must still pass on one commit.
+The first local final gate hit five synthetic process timeouts; all 93 native
+contracts passed when run serially. Use `RUST_TEST_THREADS=1` for the next full
+local gate, preserving production deadlines. The hosted full Cargo gate passed;
+its subsequent automation contracts exposed a stale diagnostic expectation,
+which is corrected separately.

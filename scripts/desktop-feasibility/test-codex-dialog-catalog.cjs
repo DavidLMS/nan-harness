@@ -41,7 +41,7 @@ async function main() {
  const mac=require('./codex-dialog-title-catalog-macos.json');
  assert.equal(new Set(mac.entries.map(e=>e.id)).size,195);
  assert.equal(require('node:crypto').createHash('sha256').update(require('node:fs').readFileSync(require.resolve('./codex-dialog-title-catalog-macos.json'))).digest('hex'),helper.facts('darwin').catalogSha256);
- assert.equal(helper.facts('win32').sourceVersion,'26.930.31730');
+ assert.equal(helper.facts('win32').sourceVersion,'26.930.41038');
  for(const [text,id]of [['Welcome to ChatGPT','workspaceOnboarding.dialogTitle'],['What kind of work do you do?','work.onboarding.role.new.question']]) {
   const f=fixture(text);const entries=Object.values(Object.fromEntries(linux.entries.map(e=>[e.id,e])));
   assert.equal(f.classify({held:f.held,entries}).sourceTitleIds[0],id);

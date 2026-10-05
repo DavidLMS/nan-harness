@@ -5,9 +5,9 @@ const linuxCatalog=require('./codex-dialog-title-catalog-linux.json');
 const linuxCatalogSha256='b6566a8d50edd58ed59e29eb2c9ef9de10d72f6e650f3ee0ec0a50a927106ee0';
 const catalog=require('./codex-dialog-title-catalog.json');
 const windowsCatalog=require('./codex-dialog-title-catalog-windows.json');
-const windowsCatalogSha256='1b5e63b9905a66ae8355ae581beb190f0f8175d742ecc5a37076f5791bab758e';
+const windowsCatalogSha256='0da9cf33a60a14a892c76c09219548d80e41eac46a5362fff215b8aa85083c51';
 const pins={
- win32:{artifact:'f7b0266d6c00d4743da01d62bc82488f7ec5560c642501758119cb9885f67c87',wrapper:'5e3a36d643393af861d2009584f64289f2247928e793f1985fe12cfec803a40b',runner:'Windows'},
+ win32:{artifact:'e03019134d729c6416173b0712aa5c51d079966253f77077f4bf105d29d8fce7',wrapper:'ddb65d8470cdb5b3a44e9f53777b805b263c37441b07367fccd144df6c9ce92b',runner:'Windows'},
  linux:{artifact:'ee7854145554718d7239d01ea37d44f6ba1e0ba4a93f47ac097d6e0f964da47c',wrapper:'c3c9a86a6d9c3a2a8cecaf0a6a22527c69f89949cb0d8958896bc86131e9c6c9',runner:'Linux'},
  darwin:{artifact:'f6cf4d2e9b69aeefa33adda4bcd1a2d306357f5253a1ac6049700870c28dd0c7',wrapper:'0703d0aa97450d6d21346e1c79c887a5bf9062cd0069e8251ec03748a33b6dd0',runner:'macOS'}
 };
@@ -23,7 +23,7 @@ function policy(app,platform,env) {
 function facts(platform) {
  const pin=pins[platform];
  return {schemaVersion:1,mechanism:'codex-static-dialog-title',diagnosticsOnly:true,
-  sourceVersion:platform==='linux'?linuxCatalog.sourceVersion:platform==='darwin'?macCatalog.sourceVersion:catalog.sourceVersion,platform:platform==='win32'?'windows':platform==='darwin'?'macos':'linux',
+  sourceVersion:platform==='linux'?linuxCatalog.sourceVersion:platform==='darwin'?macCatalog.sourceVersion:windowsCatalog.sourceVersion,platform:platform==='win32'?'windows':platform==='darwin'?'macos':'linux',
   artifactSha256:pin.artifact,wrapperSourceSha256:pin.wrapper,catalogSha256:platform==='win32'?windowsCatalogSha256:platform==='linux'?linuxCatalogSha256:platform==='darwin'?macCatalogSha256:catalogSha256,
   status:'guard-rejected',sourceShape:null,commandMenuShape:null,rejectionStage:'unmeasured',guardFailure:null,titleReferenceCount:null,matchCount:null,sourceTitleEmpty:null,sourceTitleIds:[]};
 }

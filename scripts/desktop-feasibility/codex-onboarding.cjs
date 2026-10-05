@@ -630,7 +630,7 @@ async function run(page, ownerGuard, deadline, rejected, mainGuard, folderTrust,
     facts.stage='scope-transition';
     let taskKind;
     const skipAdmitted=(process.platform==='linux'&&process.env.NANH_CODEX_PROJECT_ARTIFACT_SHA256==='ee7854145554718d7239d01ea37d44f6ba1e0ba4a93f47ac097d6e0f964da47c')
-      ||(process.platform==='win32'&&process.env.NANH_CODEX_PROJECT_ARTIFACT_SHA256==='f7b0266d6c00d4743da01d62bc82488f7ec5560c642501758119cb9885f67c87')
+      ||(process.platform==='win32'&&process.env.NANH_CODEX_PROJECT_ARTIFACT_SHA256==='e03019134d729c6416173b0712aa5c51d079966253f77077f4bf105d29d8fce7')
       ||(process.platform==='darwin'&&process.env.NANH_CODEX_PROJECT_ARTIFACT_SHA256==='f6cf4d2e9b69aeefa33adda4bcd1a2d306357f5253a1ac6049700870c28dd0c7');
     const observeTask=async()=>{
       const shape=await transitionScope.evaluate(taskContinuation,true);

@@ -28,7 +28,7 @@ on:
         description: Native target; pilots keeps the previously qualified pair
         type: choice
         default: pilots
-        options: [pilots, expansion, remaining, open-cells, all, macos, linux, windows]
+        options: [pilots, expansion, remaining, open-cells, final-corrections, all, macos, linux, windows]
       quality_only:
         description: Verify integration without repeating native measurements
         type: boolean
@@ -82,6 +82,8 @@ jobs:
                         {('zed-desktop', 'macos'), ('hermes-desktop', 'linux')}
                         or platform == 'open-cells' and (c['app'], c['platform']) in
                         {('zed-desktop', 'linux'), ('claude-desktop', 'windows')}
+                        or platform == 'final-corrections' and (c['app'], c['platform']) in
+                        {('chatgpt-desktop', 'windows'), ('chatgpt-desktop', 'macos'), ('hermes-desktop', 'windows')}
                         or platform == 'all' or platform == c['platform']
                         or platform == 'remaining' and c['app'] in {'chatgpt-desktop', 'claude-desktop', 'pen-desktop'}
                         or platform == 'expansion' and (c['app'], c['platform']) not in

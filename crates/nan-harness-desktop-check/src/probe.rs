@@ -721,8 +721,10 @@ async fn scenario(
     gui_acquisition: &mut Option<crate::diagnostics::GuiAcquisitionDiagnostic>,
 ) -> Result<(), Reason> {
     *diagnostic_allowed = validate_launch_binding(spec)?;
-    prepare_scenario(spec).await?;
-    let mut native_roots = NativeRoots::prepare(spec).await?;
+    prepare_scenario(spec, launch_observation).await?;
+    let mut native_roots = NativeRoots::prepare(spec).await.inspect_err(|_| {
+        launch_observation.failure = Some(crate::diagnostics::LaunchFailure::NativeProfile);
+    })?;
     let outcome = scenario_owned(
         spec,
         result,
@@ -758,7 +760,9 @@ async fn scenario_owned(
         return Err(Reason::IsolationUnavailable);
     }
     let marker = visual_marker("NAN CHECK READ")?;
-    let fixture = prepare_read_fixture(spec, &marker)?;
+    let fixture = prepare_read_fixture(spec, &marker).inspect_err(|_| {
+        launch_observation.failure = Some(crate::diagnostics::LaunchFailure::NativeProfile);
+    })?;
     let final_marker = if semantic.is_some() {
         semantic_marker("NAN CHECK RESPONSE")?
     } else {
@@ -800,10 +804,17 @@ async fn scenario_owned(
         spec,
         &prepared_launch,
         Instant::now() + Duration::from_secs(1),
-    )?;
+    )
+    .inspect_err(|_| {
+        launch_observation.failure = Some(crate::diagnostics::LaunchFailure::NativeProfile);
+    })?;
     #[cfg(any(target_os = "linux", target_os = "macos", windows))]
     if let Some(profile) = fresh_codex_profile.as_mut() {
-        profile.before_launch(&prepared_launch, Instant::now() + Duration::from_secs(1))?;
+        profile
+            .before_launch(&prepared_launch, Instant::now() + Duration::from_secs(1))
+            .inspect_err(|_| {
+                launch_observation.failure = Some(crate::diagnostics::LaunchFailure::NativeProfile);
+            })?;
     }
     let mut process = launch(spec, prepared_launch).map_err(|(reason, failure)| {
         launch_observation.failure = Some(failure);
@@ -952,17 +963,29 @@ fn capture_native_focus_failure(
     }
 }
 
-async fn prepare_scenario(spec: &ProbeSpec) -> Result<(), Reason> {
+async fn prepare_scenario(
+    spec: &ProbeSpec,
+    observation: &mut LaunchObservation,
+) -> Result<(), Reason> {
     // Windows known folders and credential stores follow the OS identity, not
     // HOME. Only an explicitly declared disposable hosted VM may use that account.
     if !spec.session.available()
         || (cfg!(windows) && spec.session != crate::cli::SessionMode::GithubHosted)
     {
+        observation.failure = Some(crate::diagnostics::LaunchFailure::NativeProfile);
         return Err(Reason::IsolationUnavailable);
     }
-    Gui::ensure_absent_before_launch(spec.kind).map_err(|failure| failure.reason)?;
-    require_endpoint_override(spec).await?;
-    create_private_dir_all(&spec.workspace).map_err(|_| Reason::IsolationUnavailable)?;
+    Gui::ensure_absent_before_launch(spec.kind).map_err(|failure| {
+        observation.failure = Some(crate::diagnostics::LaunchFailure::NativeProcessInspection);
+        failure.reason
+    })?;
+    require_endpoint_override(spec).await.inspect_err(|_| {
+        observation.failure = Some(crate::diagnostics::LaunchFailure::NativeCapabilityProbe);
+    })?;
+    create_private_dir_all(&spec.workspace).map_err(|_| {
+        observation.failure = Some(crate::diagnostics::LaunchFailure::NativeProfile);
+        Reason::IsolationUnavailable
+    })?;
     prepare_zed_profile(spec)?;
     Ok(())
 }
