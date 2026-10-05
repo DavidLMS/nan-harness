@@ -575,7 +575,7 @@ jobs:
         shell: bash
         run: |
           unset NAN_API_KEY GH_TOKEN GITHUB_TOKEN
-          bash scripts/run-desktop-check-session.sh python3 scripts/desktop-feasibility/zed-retry-variants.py
+          python3 scripts/desktop-feasibility/zed-retry-variants.py
       - name: Retain closed Zed variant reports
         if: always() && runner.os == 'Linux' && matrix.app == 'zed-desktop' && inputs.platform == 'open-cells' && inputs.experiment == 'deterministic-full'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

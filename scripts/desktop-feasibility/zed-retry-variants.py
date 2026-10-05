@@ -39,9 +39,12 @@ def main():
         directory = output / placement
         ensure_private_directory(directory)
         environment = {**os.environ, 'NANH_ZED_RETRY_POINT': placement}
-        subprocess.run([sys.executable, str(Path(__file__).with_name('run-qualification.py')),
+        repository = Path(__file__).resolve().parents[2]
+        subprocess.run(['bash', str(repository / 'scripts/run-desktop-check-session.sh'),
+                        'python3', 'scripts/desktop-feasibility/run-qualification.py',
                         *common, '--directory', str(directory)], env=environment,
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1300, check=False)
+                       cwd=repository, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                       timeout=1300, check=False)
         report = directory / 'report.json'
         previous = directory / 'qualification.json'
         reducer = Path(__file__).resolve().parents[2] / 'canary/actions/desktop_qualification.py'

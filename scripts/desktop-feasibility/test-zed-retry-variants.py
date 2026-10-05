@@ -14,6 +14,25 @@ module = runpy.run_path(str(Path(__file__).with_name('zed-retry-variants.py')))
 
 
 class VariantTests(unittest.TestCase):
+    def test_real_session_guard_accepts_only_the_qualification_entry(self):
+        repository = Path(__file__).resolve().parents[2]
+        with tempfile.TemporaryDirectory() as tmp:
+            stub = Path(tmp) / 'dbus-run-session'
+            stub.write_text('#!/bin/sh\nexit 0\n')
+            stub.chmod(0o700)
+            env = {**os.environ, 'PATH': tmp + os.pathsep + os.environ['PATH'],
+                   'NANH_ZED_SCREEN_POLICY': 'height-1536', 'GITHUB_ACTIONS': 'true',
+                   'RUNNER_ENVIRONMENT': 'github-hosted', 'RUNNER_OS': 'Linux',
+                   'FEASIBILITY_ZED_MAXIMIZED': '1', 'NANH_ZED_PANEL_LAYOUT': 'fixed-wide'}
+            for key in ('NANH_ZED_LAYOUT_POLICY', 'NANH_ZED_PANEL_ZOOM'):
+                env.pop(key, None)
+            prefix = ['bash', str(repository / 'scripts/run-desktop-check-session.sh'), 'python3']
+            for entry, expected in [('run-qualification.py', 0), ('zed-retry-variants.py', 1)]:
+                result = subprocess.run([*prefix, 'scripts/desktop-feasibility/' + entry,
+                    '--app', 'zed-desktop', '--platform', 'linux'], env=env,
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
+                self.assertEqual(result.returncode, expected)
+
     def test_variants_continue_after_assertion_failure_but_stop_after_uncertain_cleanup(self):
         for clean in (True, False):
             with self.subTest(clean=clean), tempfile.TemporaryDirectory() as tmp:
@@ -29,6 +48,9 @@ class VariantTests(unittest.TestCase):
                         result = {**baseline, 'appCleanup': 'passed' if clean else 'failed'}
                         Path(command[command.index('--output') + 1]).write_text(json.dumps(result))
                     else:
+                        self.assertEqual(command[0], 'bash')
+                        self.assertEqual(command[2:8], ['python3', 'scripts/desktop-feasibility/run-qualification.py',
+                            '--app', 'zed-desktop', '--platform', 'linux'])
                         self.assertIn(kwargs['env']['NANH_ZED_RETRY_POINT'], ('left-quarter', 'right-quarter'))
                         self.assertIn('--directory', command)
                     self.assertEqual(kwargs['stdout'], subprocess.DEVNULL)
