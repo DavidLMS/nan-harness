@@ -127,7 +127,39 @@ static void public_retry_alias_contract() {
     for(const auto* label:{L"Try again with another model",L"Retry purchase",L"Try again PRIVATE",L"try again"})
         assert(uia_chat_retry_name(label)==nullptr);
 }
+static void following_failed_turn_contract() {
+    using R=UiaChatRole;
+    const std::vector<UiaChatScopeNode> source={
+        {R::Boundary,L"",-1},{R::Group,L"",0},
+        {R::Group,L"",1},{R::Heading,L"You said: prior",2},{R::Text,L"prior",2},
+        {R::Group,L"",1},{R::Heading,L"Claude responded: earlier",5},{R::Button,L"Copy",5},
+        {R::Group,L"",1},{R::Heading,L"You said: owned",8},{R::Text,L"owned",8},
+        {R::Group,L"",1},{R::Heading,L"Claude responded: error",11},
+        {R::Group,L"",11},{R::Text,L"NAN_CHECK_EXPECTED_FAILURE",13},{R::Button,L"Try again",13}};
+    auto scope=[](const auto& nodes){return uia_chat_scope(nodes,L"owned",L"NAN_CHECK_EXPECTED_FAILURE",true);};
+    assert(uia_chat_local_scope(source,L"owned",L"NAN_CHECK_EXPECTED_FAILURE",true).control<0);
+    auto result=scope(source);
+    assert(result.control==15 && result.anchor==14 && result.ancestor==1 && result.user_heading==9);
+    auto nodes=source;nodes[12].role=R::Other;
+    assert(scope(nodes).control==15); // Failed replies may have no summary heading.
+    nodes=source;nodes[15].label=L"Retry";assert(scope(nodes).control==15);
+    nodes=source;nodes[9].label=L"You said: other";assert(scope(nodes).control<0);
+    nodes=source;nodes[10].parent=1;assert(scope(nodes).control<0);
+    nodes=source;nodes[15].parent=5;assert(scope(nodes).control<0);
+    nodes=source;nodes[11].role=R::Boundary;assert(scope(nodes).control<0);
+    nodes=source;nodes[1].role=R::Boundary;assert(scope(nodes).control<0);
+    nodes=source;nodes[12].label=L"Unrelated heading";assert(scope(nodes).control<0);
+    nodes=source;nodes.push_back({R::Heading,L"You said: newer",1});assert(scope(nodes).control<0);
+    nodes=source;nodes.push_back({R::Heading,L"Claude responded: another",11});assert(scope(nodes).control<0);
+    nodes=source;nodes.push_back({R::Button,L"Retry",13});assert(scope(nodes).control<0);
+    nodes=source;nodes.push_back({R::Text,L"NAN_CHECK_EXPECTED_FAILURE",5});assert(scope(nodes).control<0);
+    nodes=source;nodes[9].parent=11;nodes[10].parent=11;assert(scope(nodes).control<0);
+    nodes=source;nodes[11].parent=11;assert(scope(nodes).control<0);
+    nodes=source;nodes[1].parent=1;assert(scope(nodes).control<0);
+}
+
 int main() {
+    following_failed_turn_contract();
     public_retry_alias_contract();
     failure_counts_contract();
     failure_button_shape_contract();

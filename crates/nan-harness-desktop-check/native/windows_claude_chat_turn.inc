@@ -215,12 +215,15 @@ struct ChatInput {
                 || FAILED(fresh.automation->CompareElements(collection.held[pair.first].Get(),fresh.held[pair.second].Get(),&equal))
                 || !equal)return false;
         }
-        if(mode=="failure-details") {
+        if(original_scope.user_heading>=0 || scope.user_heading>=0) {
             BOOL equal=FALSE;
-            if(original_scope.retry<0 || scope.retry<0 || original_scope.user_heading<0 || scope.user_heading<0
+            if(original_scope.user_heading<0 || scope.user_heading<0
                 || FAILED(fresh.automation->CompareElements(collection.held[original_scope.user_heading].Get(),
                     fresh.held[scope.user_heading].Get(),&equal)) || !equal)return false;
-            equal=FALSE;
+        }
+        if(mode=="failure-details") {
+            BOOL equal=FALSE;
+            if(original_scope.retry<0 || scope.retry<0)return false;
             std::array<long,4> retry_bounds{};bool retry_enabled=false;
             const auto* retry_name=uia_chat_retry_name(collection.chat_nodes[original_scope.retry].label);
             if(!retry_name)return false;

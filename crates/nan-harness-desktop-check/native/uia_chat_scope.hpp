@@ -30,7 +30,7 @@ inline bool uia_chat_descendant(const std::vector<UiaChatScopeNode>& nodes,std::
     }
     return false;
 }
-inline UiaChatScope uia_chat_scope(const std::vector<UiaChatScopeNode>& nodes,
+inline UiaChatScope uia_chat_local_scope(const std::vector<UiaChatScopeNode>& nodes,
         const std::wstring& prompt,const std::wstring& marker,bool retry) {
     UiaChatScope result;
     if(nodes.size()>1024 || marker.empty())return result;
@@ -71,6 +71,82 @@ inline UiaChatScope uia_chat_scope(const std::vector<UiaChatScopeNode>& nodes,
         ancestor=next;
     }
     result.failure=mismatch?"scope-prompt-mismatch":ambiguous?"scope-control-ambiguous":"scope-control-absent";
+    return result;
+}
+
+inline int uia_chat_branch(const std::vector<UiaChatScopeNode>& nodes,int child,int ancestor) {
+    for(unsigned depth=0;child>=0 && static_cast<std::size_t>(child)<nodes.size() && depth<32;++depth) {
+        const int parent=nodes[child].parent;
+        if(parent==ancestor)return child;
+        if(parent<0 || parent>=child || nodes[parent].role==UiaChatRole::Boundary)return -1;
+        child=parent;
+    }
+    return -1;
+}
+
+// The official renderer separates the user row from the following assistant
+// error row. Correlate the last exact user turn, not arbitrary conversation-wide
+// headings or a nearest-name control. ControlView traversal is in document order.
+inline UiaChatScope uia_chat_following_retry(const std::vector<UiaChatScopeNode>& nodes,
+        const std::wstring& prompt,const std::wstring& marker) {
+    UiaChatScope result;
+    if(nodes.size()>1024 || prompt.empty() || marker.empty())return result;
+    int text=-1,retry=-1;
+    for(std::size_t index=0;index<nodes.size();++index) {
+        const auto& node=nodes[index];
+        if(node.parent < -1 || (node.parent>=0 && static_cast<std::size_t>(node.parent)>=index))return result;
+        if(node.label.find(marker)!=std::wstring::npos) {
+            if(result.anchor>=0)return result;
+            result.anchor=static_cast<int>(index);
+        }
+        if(node.role==UiaChatRole::Heading && node.label==L"You said: "+prompt) {
+            if(result.user_heading>=0)return result;
+            result.user_heading=static_cast<int>(index);
+        }
+        if(node.role==UiaChatRole::Text && node.label==prompt) {
+            if(text>=0)return result;
+            text=static_cast<int>(index);
+        }
+        if(node.role==UiaChatRole::Button && uia_chat_retry_name(node.label)) {
+            if(retry>=0)return result;
+            retry=static_cast<int>(index);
+        }
+    }
+    if(result.user_heading<0 || text<=result.user_heading || result.anchor<=text || retry<=text)return result;
+    int ancestor=nodes[result.anchor].parent;
+    for(unsigned depth=0;ancestor>=0 && depth<6;++depth) {
+        if(static_cast<std::size_t>(ancestor)>=nodes.size() || nodes[ancestor].parent<0
+            || nodes[ancestor].role==UiaChatRole::Boundary)return result;
+        const int user_branch=uia_chat_branch(nodes,result.user_heading,ancestor);
+        const int error_branch=uia_chat_branch(nodes,result.anchor,ancestor);
+        if(nodes[ancestor].role==UiaChatRole::Group && user_branch>=0 && error_branch>=0
+            && user_branch!=error_branch && uia_chat_branch(nodes,text,ancestor)==user_branch
+            && uia_chat_branch(nodes,retry,ancestor)==error_branch) {
+            unsigned reply_headings=0;
+            for(std::size_t index=0;index<nodes.size();++index) {
+                if(!uia_chat_descendant(nodes,index,ancestor) || nodes[index].role!=UiaChatRole::Heading)continue;
+                if(static_cast<int>(index)>result.user_heading) {
+                    if(nodes[index].label.rfind(L"Claude responded:",0)!=0
+                        || uia_chat_branch(nodes,static_cast<int>(index),ancestor)!=error_branch
+                        || ++reply_headings>1)return result;
+                }
+            }
+            result.control=retry;result.ancestor=ancestor;return result;
+        }
+        const int next=nodes[ancestor].parent;
+        if(next>=ancestor)return result;
+        ancestor=next;
+    }
+    return result;
+}
+
+inline UiaChatScope uia_chat_scope(const std::vector<UiaChatScopeNode>& nodes,
+        const std::wstring& prompt,const std::wstring& marker,bool retry) {
+    auto result=uia_chat_local_scope(nodes,prompt,marker,retry);
+    if(retry && result.control<0) {
+        auto following=uia_chat_following_retry(nodes,prompt,marker);
+        if(following.control>=0)return following;
+    }
     return result;
 }
 

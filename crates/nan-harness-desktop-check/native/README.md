@@ -97,3 +97,14 @@ proved failed-turn scope and rechecks its exact name and retained identity befor
 Invoke. Both labels appearing together are ambiguous; model-switching and
 purchase-retry controls are excluded. Retry diagnostic counts include both exact
 labels, while action authority continues to require the Button role.
+
+The official conversation renderer places user and assistant content in separate
+message rows (`cd5a31703-DiwdunLT.js`, SHA-256
+`87e6b710a540352fcd4f9a1f0f6a8f9f9b6377ca676fd99c3e4d8bc87653dceb`).
+For this layout, recovery requires a unique exact user heading and prompt text
+in one branch, followed by the unique failure marker and Retry in another branch
+of the same non-boundary Group. Later user headings, unrelated reply branches,
+duplicate controls and crossed Document/Pane/Window boundaries are rejected.
+The failed user heading joins the control, failure anchor and shared ancestor
+in the retained identity checks immediately before Invoke. Earlier conversation
+headings do not make the final failed turn ambiguous by themselves.
