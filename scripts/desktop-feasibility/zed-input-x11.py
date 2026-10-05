@@ -504,9 +504,14 @@ def guarded_pointer_sample(point, position, child, observation):
     observation['pointerChildMatches'] = observation.get('pointerChildMatches', 0) + 1
 
 
-def select_accessible_retry_point(bounds, move, prove, pointer_proof, deadline, now=time.monotonic):
+def select_accessible_retry_point(bounds, move, prove, pointer_proof, deadline, now=time.monotonic, placement='center'):
     """One retained accessible target; cursor appearance is not actionability."""
     point=interior_points(bounds)[0]
+    if placement not in ('center', 'left-quarter', 'right-quarter'):
+        raise RetryHitFailure('identity-rejected')
+    if placement != 'center':
+        x, y, width, height = bounds
+        point = (x + width * (1 if placement == 'left-quarter' else 3) // 4, y + height // 2)
     def checked():
         if now()>=deadline:
             raise RetryHitFailure('deadline')
@@ -855,7 +860,13 @@ def retry_click(payload):
                 if accessible_policy:
                     for key in ('pointerChecks','pointerPositionMatches','pointerChildMatches'):
                         facts['cursorSelection'].setdefault(key,0)
-                    selected=select_accessible_retry_point(held_bounds,move,prove_hit,prove_pointer,deadline)
+                    placement = os.environ.get('NANH_ZED_RETRY_POINT', 'center')
+                    if placement != 'center' and (not os.environ.get('NANH_ZED_RETRY_TRACE_MARKERS')
+                            or os.environ.get('GITHUB_ACTIONS') != 'true'
+                            or os.environ.get('RUNNER_ENVIRONMENT') != 'github-hosted'):
+                        raise RetryHitFailure('identity-rejected')
+                    selected=select_accessible_retry_point(held_bounds,move,prove_hit,prove_pointer,deadline,
+                                                          placement=placement)
                     facts['cursorSelection'].update(status='accessible-hit',sampledPoints=1,
                         accessibleHitVerified=True,exactPointerMatched=False,failureReason=None)
                     return selected

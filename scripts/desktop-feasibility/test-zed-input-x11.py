@@ -38,6 +38,18 @@ class TraceMarkerTests(unittest.TestCase):
 
 
 class AccessiblePointTests(unittest.TestCase):
+    def test_quarter_variants_keep_all_target_and_pointer_guards(self):
+        for placement, expected in [('left-quarter', (20, 30)), ('right-quarter', (40, 30))]:
+            events = []
+            selected = module['select_accessible_retry_point']((10, 20, 40, 20),
+                lambda p: events.append(('move', p)), lambda p: events.append(('proof', p)),
+                lambda p: events.append(('pointer', p)), 10, now=lambda: 0, placement=placement)
+            self.assertEqual(selected, expected)
+            self.assertEqual(events, [(kind, expected) for kind in ('proof', 'move', 'proof', 'pointer', 'proof')])
+        with self.assertRaises(ValueError):
+            module['select_accessible_retry_point']((10, 20, 40, 20),
+                lambda p: self.fail('unexpected motion'), lambda p: None, lambda p: None,
+                10, now=lambda: 0, placement='unknown')
     def test_exact_accessible_point_needs_three_proofs_and_one_owned_motion(self):
         events=[]
         selected=module['select_accessible_retry_point']((10,20,40,20),

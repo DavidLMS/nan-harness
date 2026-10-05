@@ -485,6 +485,13 @@ def run(args):
     if report.exists() or report.is_symlink():
         raise ValueError('report destination already exists')
     environment = qualification_environment(args.app, facts, args.real_nanh, executable)
+    if os.environ.get('NANH_ZED_RETRY_POINT') is not None:
+        placement = os.environ['NANH_ZED_RETRY_POINT']
+        if (args.app != 'zed-desktop' or args.platform != 'linux'
+                or os.environ.get('NANH_ZED_RETRY_ENTRY_TRACE') != '1'
+                or placement not in ('left-quarter', 'right-quarter')):
+            raise ValueError('Zed diagnostic point policy differs')
+        environment['NANH_ZED_RETRY_POINT'] = placement
     release = manifest['apps'][0]
     if environment.get('NANH_CLAUDE_WINDOWS_FRESH_PROFILE') == '1':
         # Frozen release, prepared executable and bootstrap have all been checked.
