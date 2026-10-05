@@ -15,7 +15,7 @@ sys.path.insert(0, str(ROOT / 'canary/actions'))
 from cell import private_command, ensure_private_directory, write_json
 from desktop_diagnostics import Capture
 from codex_release import CODEX_PROJECT_RELEASES, CODEX_PROJECT_VERSIONS
-from desktop_qualification import APPS, bounded_json, cell, digest, envelope
+from desktop_qualification import APPS, PREPARATION_FAILURES, bounded_json, cell, digest, envelope
 from desktop_suite import read_frozen_manifest
 
 # Start from a session allowlist, rather than attempting to enumerate every
@@ -31,6 +31,20 @@ WINDOWS_PROOF = {'FEASIBILITY_WINDOWS_PROOF_PYTHON', 'FEASIBILITY_WINDOWS_PROOF_
 HERMES_RUNTIME = {'HERMES_DESKTOP_HERMES_ROOT', 'HERMES_DESKTOP_HERMES'}
 CLAUDE_WINDOWS_BOOTSTRAP_SHA256 = '97910a0668710a80315da1ab12d215c4b8d58d9f159886493e37848feb92351e'
 CLAUDE_BOOTSTRAP_SHA256 = '83126565df48e98691a3845f27bb7ee78d0632aa14b5881adad8c7ac4f0a3adf'
+
+
+class PreparedAppUnavailable(ValueError):
+    def __init__(self, reason):
+        super().__init__('prepared app is unavailable')
+        self.reason = reason if type(reason) is str and reason in PREPARATION_FAILURES else 'unclassified'
+
+
+def require_prepared_app(apps, app):
+    if (type(apps) is not list or len(apps) != 1 or type(apps[0]) is not dict
+            or apps[0].get('app') != app):
+        raise PreparedAppUnavailable('receipt-shape')
+    if apps[0].get('blocked') is not None:
+        raise PreparedAppUnavailable(apps[0]['blocked'])
 
 
 def validate_claude_bundle(executable):
@@ -455,8 +469,7 @@ def run(args):
             or prepared.get('frozen') != {'sha256': frozen_hash, 'model': 'qwen3.6'}):
         raise ValueError('prepared identities differ')
     apps = prepared.get('apps', [])
-    if len(apps) != 1 or apps[0].get('app') != args.app or apps[0].get('blocked') is not None:
-        raise ValueError('prepared app is unavailable')
+    require_prepared_app(apps, args.app)
     executable = (apps[0].get('executable') or {}).get('path')
     if not isinstance(executable, str) or not Path(executable).is_absolute():
         raise ValueError('prepared executable identity is missing')
@@ -565,7 +578,7 @@ def execute_with_diagnostics(command, directory, facts, platform, source_sha, en
                 raise
 
 
-def publish_runner_failure(args, category):
+def publish_runner_failure(args, category, preparation_reason=None):
     """Replace only the same-commit pending envelope with a closed failure fact."""
     if (os.environ.get('GITHUB_ACTIONS') != 'true'
             or os.environ.get('RUNNER_ENVIRONMENT') != 'github-hosted'):
@@ -585,6 +598,11 @@ def publish_runner_failure(args, category):
         from desktop_qualification import RUNNER_FAILURES
         if category not in RUNNER_FAILURES:
             return
+        if preparation_reason is not None:
+            if (category != 'prepared-app-unavailable' or type(preparation_reason) is not str
+                    or preparation_reason not in PREPARATION_FAILURES):
+                return
+            fact['preparationReason'] = preparation_reason
         pending['semanticObservations'] = [fact]
         write_json(output, pending)
     except (OSError, ValueError, TypeError, RuntimeError):
@@ -626,7 +644,8 @@ def main():
                 'claude-windows-policy-invalid')},
         }
         category = categories.get(str(error), 'invalid-preflight')
-        publish_runner_failure(args, category)
+        publish_runner_failure(args, category,
+                               error.reason if isinstance(error, PreparedAppUnavailable) else None)
         raise SystemExit('desktop qualification failed: ' + category) from None
     except (OSError, RuntimeError, subprocess.SubprocessError):
         publish_runner_failure(args, 'execution-failed')

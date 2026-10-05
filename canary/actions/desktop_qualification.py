@@ -29,6 +29,7 @@ BACKENDS[('chatgpt-desktop', 'windows', 'x86_64')] = 'renderer-dom'
 BACKENDS[('chatgpt-desktop', 'linux', 'x86_64')] = 'renderer-dom'
 BACKENDS[('chatgpt-desktop', 'macos', 'aarch64')] = 'renderer-dom'
 RUNNER_FAILURES = set('windows-ownership-helper-missing windows-ownership-helper-invalid prepared-identity-mismatch prepared-app-unavailable prepared-executable-missing prepared-executable-changed host-platform-mismatch backend-unavailable frozen-app-unavailable report-absent claude-windows-executable-invalid claude-windows-bootstrap-invalid claude-windows-bootstrap-mismatch claude-windows-release-mismatch claude-windows-policy-invalid codex-project-release-mismatch claude-persist-policy-invalid claude-persist-source-mismatch invalid-preflight execution-failed'.split())
+PREPARATION_FAILURES = set('receipt-shape unclassified installation-unavailable installation-unreadable installation-ambiguous installation-failed unsupported-version version-unknown'.split())
 STEPS = {'launched', 'input-submitted', 'response-verified', 'tool-verified', 'error-recovered'}
 COMMIT = re.compile(r'[0-9a-f]{40}\Z')
 HASH = re.compile(r'[0-9a-f]{64}\Z')
@@ -2311,9 +2312,15 @@ def semantic_observations(directory, app):
             record.update(diagnosticsOnly=True, counts=counts)
         elif mechanism == 'qualification-runner-failure':
             fields = {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'errorCategory'}
-            if (set(value) != fields or value['diagnosticsOnly'] is not True
+            if (set(value) - {'preparationReason'} != fields or value['diagnosticsOnly'] is not True
                     or type(value['errorCategory']) is not str or value['errorCategory'] not in RUNNER_FAILURES):
                 raise ValueError('invalid qualification runner failure')
+            if 'preparationReason' in value:
+                reason = value['preparationReason']
+                if (value['errorCategory'] != 'prepared-app-unavailable'
+                        or type(reason) is not str or reason not in PREPARATION_FAILURES):
+                    raise ValueError('invalid preparation reason')
+                record['preparationReason'] = reason
             record.update(diagnosticsOnly=True, errorCategory=value['errorCategory'])
         elif mechanism == 'codex-renderer-qualification':
             flags = set('endpointOwned targetVerified attached bindingVerified auxiliaryInert codingComposerReady uniqueComposer inputReadback inputSubmitted userTurnObserved responseVerified errorObserved retryControl retryAttempted retryCompleted providerResponseVerified'.split())

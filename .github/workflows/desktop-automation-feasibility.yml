@@ -65,7 +65,7 @@ jobs:
                         {('zed-desktop', 'macos'), ('hermes-desktop', 'linux')}
                         or platform == 'open-cells' and (c['app'], c['platform']) in
                         {('zed-desktop', 'linux'),
-                         ('chatgpt-desktop', 'linux'), ('chatgpt-desktop', 'windows'),
+                         ('chatgpt-desktop', 'windows'),
                          ('claude-desktop', 'linux'), ('claude-desktop', 'windows')}
                         or platform == 'all' or platform == c['platform']
                         or platform == 'remaining' and c['app'] in {'chatgpt-desktop', 'claude-desktop', 'pen-desktop'}

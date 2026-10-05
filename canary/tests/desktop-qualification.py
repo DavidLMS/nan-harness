@@ -605,6 +605,47 @@ class QualificationTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 q.semantic_observations(facts, args.app)
 
+    def test_preparation_failure_is_closed_and_cannot_qualify_an_app(self):
+        for apps, expected in [([], 'receipt-shape'), ({}, 'receipt-shape'),
+                              ([None], 'receipt-shape'),
+                              ([{'app': 'zed-desktop'}], 'receipt-shape'),
+                              ([{'app': 'chatgpt-desktop', 'blocked': 'unsupported-version'}], 'unsupported-version'),
+                              ([{'app': 'chatgpt-desktop', 'blocked': 'PRIVATE'}], 'unclassified'),
+                              ([{'app': 'chatgpt-desktop', 'blocked': {}}], 'unclassified')]:
+            with self.assertRaises(runner.PreparedAppUnavailable) as caught:
+                runner.require_prepared_app(apps, 'chatgpt-desktop')
+            self.assertEqual(caught.exception.reason, expected)
+            self.assertNotIn('PRIVATE', str(caught.exception))
+        runner.require_prepared_app([{'app': 'chatgpt-desktop', 'blocked': None}], 'chatgpt-desktop')
+        with tempfile.TemporaryDirectory() as root:
+            directory = Path(root).resolve()
+            args = argparse.Namespace(directory=directory, app='chatgpt-desktop',
+                                      platform='windows', source_sha='a' * 40)
+            value = q.envelope(args.app, args.platform, 'x86_64', args.source_sha)
+            output = directory / 'qualification.json'
+            env = {'GITHUB_ACTIONS': 'true', 'RUNNER_ENVIRONMENT': 'github-hosted'}
+            for reason in ('PRIVATE', {}, 'unsupported-version'):
+                output.write_text(json.dumps(value))
+                with patch.dict(runner.os.environ, env, clear=True):
+                    runner.publish_runner_failure(args, 'prepared-app-unavailable', reason)
+                observed = json.loads(output.read_text())
+                if reason != 'unsupported-version':
+                    self.assertEqual(observed, value)
+                    continue
+                self.assertEqual(observed['qualification'], 'unqualified')
+                self.assertEqual(observed['probes'], [])
+                fact = observed['semanticObservations'][0]
+                facts = directory / 'facts'
+                facts.mkdir()
+                path = facts / 'failure.json'
+                path.write_text(json.dumps(fact))
+                self.assertEqual(q.semantic_observations(facts, args.app)[0]['preparationReason'], reason)
+                for bad in ({**fact, 'preparationReason': 'PRIVATE'},
+                            {**fact, 'errorCategory': 'execution-failed'}):
+                    path.write_text(json.dumps(bad))
+                    with self.assertRaises(ValueError):
+                        q.semantic_observations(facts, args.app)
+
     def test_exact_initial_matrix_separates_scenario_backends_and_inventories(self):
         cells = q.matrix()['include']
         self.assertEqual(len(cells), 15)
