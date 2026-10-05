@@ -85,6 +85,19 @@ class InputShapeTests(unittest.TestCase):
             with self.assertRaises(chat.Rejected):
                 chat.work_cutoff(deadline, 0)
 
+    def test_history_input_gets_one_larger_budget_without_extending_other_operations(self):
+        for mode in ('input-next-correlated', 'input-next-empty-class'):
+            self.assertEqual(chat.work_cutoff(30, 0, mode), 29.5)
+            self.assertEqual(chat.work_cutoff(30, 20, mode), 29.5)
+            with self.assertRaises(chat.Rejected):
+                chat.work_cutoff(31, 0, mode)
+            with self.assertRaises(TimeoutError):
+                chat.work_cutoff(30, 29.6, mode)
+        for mode in ('input', 'input-first-owned', 'copy', 'retry-ready', 'retry'):
+            self.assertEqual(chat.work_cutoff(15, 0, mode), 14.5)
+            with self.assertRaises(chat.Rejected):
+                chat.work_cutoff(30, 0, mode)
+
     def test_closed_shapes_and_private_mixed_content(self):
         for value,expected in [ ('\n\r\n',(3,True,True,False)),
                 (' \t',(2,False,True,False)), ('\u200b\ufeff',(2,False,False,True)),
@@ -731,7 +744,7 @@ class NativeAdapterWiringTests(unittest.TestCase):
         scope=dict(GITHUB_ACTIONS='true',RUNNER_ENVIRONMENT='github-hosted',RUNNER_OS='Linux',
             NANH_CLAUDE_LINUX_SOURCE_POLICY='official-2.9939.4',
             NANH_CLAUDE_LINUX_NATIVE_CHAT='first-turn',NANH_DESKTOP_QUALIFICATION_MODE='startup-baseline')
-        request=dict(pid=7,checkerPid=9,nativeExecutable=str(Path(__file__).resolve()),deadline=110.5)
+        request=dict(pid=7,checkerPid=9,mode='input',nativeExecutable=str(Path(__file__).resolve()),deadline=110.5)
         def run(argv,**kwargs):
             calls.append((argv,kwargs));return SimpleNamespace(stdout=b'')
         with patch.dict(os.environ,scope),patch.object(chat,'load_visibility',
@@ -773,7 +786,7 @@ class NativeAdapterWiringTests(unittest.TestCase):
                     return_value=SimpleNamespace(Adapter=lambda deadline:adapter)),\
                     patch('runpy.run_path',return_value={}):
                 deadline=chat.time.monotonic()+10
-                native=chat.native_adapter(dict(pid=7,nativeExecutable=str(Path(__file__).resolve()),deadline=deadline),
+                native=chat.native_adapter(dict(pid=7,mode='input',nativeExecutable=str(Path(__file__).resolve()),deadline=deadline),
                     deadline)
             self.assertEqual(native.hit(button,frame),expected)
             self.assertEqual(calls,[(frame,'GetAccessibleAtPoint','org.a11y.atspi.Component',(25,40,0))])

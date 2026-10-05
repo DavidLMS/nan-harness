@@ -988,7 +988,10 @@ impl ClaudeLinuxChatSession<'_> {
         } else {
             return Err(Reason::ActionUnsupported);
         };
-        let facts = self.operation(mode, prompt, Instant::now() + Duration::from_secs(15))?;
+        // Later turns also prove the complete prior conversation. Hosted AT-SPI
+        // measurements exhaust 15s before Send; retain one bounded input deadline.
+        let budget = if self.submitted == 0 { 15 } else { 30 };
+        let facts = self.operation(mode, prompt, Instant::now() + Duration::from_secs(budget))?;
         if facts["inputVerified"] == true {
             self.verified += 1;
         }

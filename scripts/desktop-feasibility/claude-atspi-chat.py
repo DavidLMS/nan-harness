@@ -1356,10 +1356,14 @@ def snapshot_clear(text, held):
                    for window in windows[:index])
 
 
-def work_cutoff(deadline, now):
+def operation_limit(mode):
+    return 30 if mode in ('input-next-correlated', 'input-next-empty-class') else 15
+
+
+def work_cutoff(deadline, now, mode='input'):
     # The supervisor retains its original cutoff. Stop native work earlier so
     # private clipboard cleanup and the closed receipt can finish inside it.
-    if not now < deadline <= now + 15:
+    if not now < deadline <= now + operation_limit(mode):
         raise Rejected('policy')
     cutoff = deadline - .5
     if cutoff <= now:
@@ -1379,7 +1383,7 @@ def native_adapter(request, deadline, cleanup_deadline=None):
     executable = Path(request['nativeExecutable'])
     if not executable.is_absolute() or executable.is_symlink() or not executable.is_file():
         raise Rejected('policy')
-    if not time.monotonic() < deadline <= time.monotonic() + 15:
+    if not time.monotonic() < deadline <= time.monotonic() + operation_limit(request['mode']):
         raise Rejected()
     try:
         visibility = load_visibility()
@@ -1545,7 +1549,7 @@ def main():
             raise Rejected()
         boundary = 'policy'
         custody = ProfileCustody(request['profileAuthority'], deadline)
-        cutoff = work_cutoff(deadline, time.monotonic())
+        cutoff = work_cutoff(deadline, time.monotonic(), request['mode'])
         adapter = native_adapter(request,cutoff,cleanup_deadline=deadline)
         adapter.profile_guard = custody.verify
         controller = Controller(adapter,request,cutoff)
