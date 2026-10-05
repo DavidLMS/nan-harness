@@ -93,6 +93,12 @@ verification budget, for at most 30 seconds overall. A late Send button must not
 cause input with an almost exhausted post-action verification budget. Ambiguous
 controls and uncertain input delivery remain terminal.
 
+During Windows Retry readiness, earlier conversation headings may coexist with
+an error row before the exact failed user heading and text appear in UIA. When
+both are absent, `scope-prompt-absent` permits bounded read-only reobservation;
+it never selects a control. A partial exact row or ambiguity with the expected
+row present retains the original rejection.
+
 Windows clipboard modes use `CF_UNICODETEXT` directly through User32, with a
 private message-only owner window and one `OpenClipboard` attempt. Writes accept
 at most 1 KiB of valid UTF-8 without embedded NULs; reads accept at most 64 KiB

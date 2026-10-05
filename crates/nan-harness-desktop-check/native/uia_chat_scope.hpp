@@ -146,6 +146,14 @@ inline UiaChatScope uia_chat_scope(const std::vector<UiaChatScopeNode>& nodes,
     if(retry && result.control<0) {
         auto following=uia_chat_following_retry(nodes,prompt,marker);
         if(following.control>=0)return following;
+        // A fresh error row may precede the exact user row in a UIA snapshot.
+        // Earlier conversation headings do not establish ambiguity of a user
+        // row that is wholly absent. This remains a non-actionable observation.
+        if(std::string(result.failure)=="scope-heading-ambiguous"
+            && std::none_of(nodes.begin(),nodes.end(),[&](const auto& node) {
+                return (node.role==UiaChatRole::Heading && node.label==L"You said: "+prompt)
+                    || (node.role==UiaChatRole::Text && node.label==prompt);
+            }))result.failure="scope-prompt-absent";
     }
     return result;
 }

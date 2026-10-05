@@ -140,6 +140,17 @@ static void following_failed_turn_contract() {
     assert(uia_chat_local_scope(source,L"owned",L"NAN_CHECK_EXPECTED_FAILURE",true).control<0);
     auto result=scope(source);
     assert(result.control==15 && result.anchor==14 && result.ancestor==1 && result.user_heading==9);
+    auto pending=source;
+    pending[9].label=L"You said: preceding";pending[10].label=L"preceding";
+    assert(scope(pending).control<0);
+    assert(std::string(scope(pending).failure)=="scope-prompt-absent");
+    // A partial exact row is not evidence that the entire expected row is absent.
+    pending[10].label=L"owned";
+    assert(scope(pending).control<0);
+    assert(std::string(scope(pending).failure)=="scope-heading-ambiguous");
+    pending=source;pending.push_back({R::Heading,L"Claude responded: another",11});
+    assert(scope(pending).control<0);
+    assert(std::string(scope(pending).failure)=="scope-heading-ambiguous");
     auto nodes=source;nodes[12].role=R::Other;
     assert(scope(nodes).control==15); // Failed replies may have no summary heading.
     nodes=source;nodes[15].label=L"Retry";assert(scope(nodes).control==15);

@@ -212,6 +212,7 @@ pub(crate) enum WindowsChatStage {
     ScopeControlAbsent,
     ScopeControlAmbiguous,
     ScopeHeadingAmbiguous,
+    ScopePromptAbsent,
     ScopePromptMismatch,
     ResponseMismatch,
     Copied,
@@ -232,7 +233,10 @@ impl WindowsChatStage {
     pub(crate) fn passive_pending(self) -> bool {
         matches!(
             self,
-            Self::ScopeAnchorAbsent | Self::ScopeControlAbsent | Self::TreeQuery
+            Self::ScopeAnchorAbsent
+                | Self::ScopeControlAbsent
+                | Self::ScopePromptAbsent
+                | Self::TreeQuery
         )
     }
 
@@ -286,6 +290,7 @@ impl WindowsChatStage {
             "turn scope-control-absent\n" => Self::ScopeControlAbsent,
             "turn scope-control-ambiguous\n" => Self::ScopeControlAmbiguous,
             "turn scope-heading-ambiguous\n" => Self::ScopeHeadingAmbiguous,
+            "turn scope-prompt-absent\n" => Self::ScopePromptAbsent,
             "turn scope-prompt-mismatch\n" => Self::ScopePromptMismatch,
             "turn response-mismatch\n" => Self::ResponseMismatch,
             "turn copied\n" => Self::Copied,
@@ -395,6 +400,13 @@ mod tests {
         use super::WindowsChatStage as S;
         assert_eq!(S::parse("turn tree-query\n"), Some(S::TreeQuery));
         assert!(S::TreeQuery.passive_pending());
+        assert_eq!(
+            S::parse("turn scope-prompt-absent\n"),
+            Some(S::ScopePromptAbsent)
+        );
+        assert!(S::ScopePromptAbsent.passive_pending());
+        assert!(!S::ScopeHeadingAmbiguous.passive_pending());
+        assert!(!S::ScopePromptMismatch.passive_pending());
         for (wire, stage) in [
             ("turn composer-send-pending\n", S::ComposerSendPending),
             ("turn tree-limit\n", S::TreeLimit),
