@@ -856,11 +856,13 @@ def semantic_observations(directory, app):
         raise ValueError('too many private semantic metadata files')
     paths = [path for path in all_paths if path.name != 'native-diagnostics.json'
              and not path.name.startswith(('connection-', 'startup-', 'closed-startup-'))]
-    # Three complete renderer probes also retain policy, provider, frontend,
-    # backend and fresh Windows ownership receipts. These can exceed 32 even
-    # when every probe succeeds; each record still has its own closed schema
-    # and 8 KiB bound, and private connection metadata remains separate.
-    if len(paths) > 64:
+    # Claude's three native sessions retain storage, focus, process lifecycle,
+    # provider and recovery receipts, plus the shared foreground receipt. A
+    # hosted campaign produced 70 records, exceeding the old renderer budget.
+    # Allow 96 for Claude (at most 768 KiB); retain every record's closed schema
+    # and 8 KiB bound, and keep private connection metadata separate.
+    limit = 96 if app == 'claude-desktop' else 64
+    if len(paths) > limit:
         raise ValueError('too many semantic observations')
     startup_paths = [path for path in private if path.name.startswith('closed-startup-')]
     if len(startup_paths) > 3:

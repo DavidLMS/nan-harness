@@ -29,7 +29,7 @@ class CodexProjectPreflightTests(unittest.TestCase):
             output = root / 'qualification.json'
             facts = root / 'facts'
             facts.mkdir()
-            for index in range(65):
+            for index in range(97):
                 (facts / f'fact-{index}.json').write_text('{}')
             report = root / 'report.json'
             report.write_text('{}')
@@ -47,7 +47,7 @@ class CodexProjectPreflightTests(unittest.TestCase):
             result = json.loads(output.read_text())
             fact = result['semanticObservations'][0]
             self.assertEqual(fact['category'], 'observation-budget')
-            self.assertEqual(fact['observationCount'], 65)
+            self.assertEqual(fact['observationCount'], 97)
             self.assertTrue(fact['reportPresent'])
             self.assertEqual(result['qualification'], 'unqualified')
             output.write_text(json.dumps(pending))
@@ -1597,6 +1597,27 @@ class QualificationTests(unittest.TestCase):
                 (root / f'fact-{index}.json').write_text(json.dumps(value))
             with self.assertRaises(ValueError):
                 q.semantic_observations(root, 'hermes-desktop')
+
+    def test_claude_native_campaign_budget_keeps_validation_and_hard_limit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            value = dict(schemaVersion=1, mechanism='semantic-inventory', requestCount=1,
+                         toolCount=1, knownReadToolCount=1, readToolSelected=True)
+            for index in range(70):
+                (root / f'fact-{index}.json').write_text(json.dumps(value))
+            self.assertEqual(len(q.semantic_observations(root, 'claude-desktop')), 70)
+            # The higher file budget must not turn malformed evidence into a
+            # partial success by dropping records after the former cutoff.
+            (root / 'fact-69.json').write_text(json.dumps({**value, 'toolCount': 'PRIVATE'}))
+            with self.assertRaises(ValueError):
+                q.semantic_observations(root, 'claude-desktop')
+            (root / 'fact-69.json').write_text(json.dumps(value))
+            for index in range(70, 96):
+                (root / f'fact-{index}.json').write_text(json.dumps(value))
+            self.assertEqual(len(q.semantic_observations(root, 'claude-desktop')), 96)
+            (root / 'fact-96.json').write_text(json.dumps(value))
+            with self.assertRaisesRegex(ValueError, 'too many semantic observations'):
+                q.semantic_observations(root, 'claude-desktop')
 
     def test_source_fingerprints_publish_bounded_hashes_without_dom_attributes(self):
         with tempfile.TemporaryDirectory() as tmp:
