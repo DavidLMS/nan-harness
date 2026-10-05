@@ -251,16 +251,25 @@ impl ClaudeWindowsChatSession<'_> {
         }
         self.retry_ready = false;
         self.prompt = Zeroizing::new(prompt.to_owned());
-        let deadline = Instant::now() + Duration::from_millis(u64::from(WINDOWS_CHAT_MAX_MILLIS));
+        let action_budget = Duration::from_millis(u64::from(WINDOWS_CHAT_MAX_MILLIS));
+        let readiness_deadline = Instant::now() + action_budget;
         let result = loop {
-            let result = self.action("input-replace-owned", "", deadline);
+            let now = Instant::now();
+            if now >= readiness_deadline {
+                return Err(Reason::Timeout);
+            }
+            // Admit attempts for at most 15 seconds, but give each admitted
+            // attempt its full bounded input/verification budget. Otherwise a
+            // late Send button can trigger input with only milliseconds left
+            // for the mandatory post-action ownership proof. Total <= 30s.
+            let result = self.action("input-replace-owned", "", now + action_budget);
             // A copied answer can precede the renderer restoring its Send button.
             // This receipt proves no input was attempted; every retry rechecks
             // the owned window, profile and complete semantic tree.
             if result != Ok(WindowsChatStage::ComposerSendPending) {
                 break result;
             }
-            let remaining = deadline.saturating_duration_since(Instant::now());
+            let remaining = readiness_deadline.saturating_duration_since(Instant::now());
             if remaining.is_zero() {
                 return Err(Reason::Timeout);
             }

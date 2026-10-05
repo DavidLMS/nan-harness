@@ -87,8 +87,11 @@ checks. Local and self-hosted desktops cannot enter this preparation path.
 
 Before a subsequent Windows Claude prompt, an exact single composer with no
 Send or Start button produces `composer-send-pending`. This is a read-only
-observation before any input; the supervisor may repeat it within the original
-deadline. Ambiguous controls and uncertain input delivery remain terminal.
+observation before any input. The supervisor admits attempts for at most 15
+seconds and gives each admitted attempt its own 15-second action and ownership
+verification budget, for at most 30 seconds overall. A late Send button must not
+cause input with an almost exhausted post-action verification budget. Ambiguous
+controls and uncertain input delivery remain terminal.
 
 Windows clipboard modes use `CF_UNICODETEXT` directly through User32, with a
 private message-only owner window and one `OpenClipboard` attempt. Writes accept
