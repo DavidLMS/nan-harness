@@ -1488,6 +1488,21 @@ class QualificationTests(unittest.TestCase):
                 retryEntries=0, nativeRetryEntries=0, errorClearEntries=0) for _ in range(3)])
             path.write_text(json.dumps({**value, 'activationWindows': windows}))
             self.assertEqual(q.semantic_observations(directory, 'zed-desktop')[0]['activationWindows'], windows)
+            returns = dict(inputDispatchReturns=2, inputPropagationStops=1, inputDefaultPreventions=1,
+                           inputInvalidReturns=0, hoverTrueReturns=4, hoverFalseReturns=20, hoverInvalidReturns=0)
+            extended = {**windows, 'windows': [{**item, **returns} for item in windows['windows']]}
+            path.write_text(json.dumps({**value, 'activationWindows': extended}))
+            self.assertEqual(q.semantic_observations(directory, 'zed-desktop')[0]['activationWindows'], extended)
+            for change in ({'inputPropagationStops': 3}, {'inputDefaultPreventions': True},
+                           {'hoverTrueReturns': -1}, {'hoverFalseReturns': 65537}, {'rawReturn': 'PRIVATE'}):
+                invalid = {**extended, 'windows': [{**item, **change} for item in extended['windows']]}
+                path.write_text(json.dumps({**value, 'activationWindows': invalid}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(directory, 'zed-desktop')
+            incomplete = {**windows, 'windows': [{**item, 'inputDispatchReturns': 2} for item in windows['windows']]}
+            path.write_text(json.dumps({**value, 'activationWindows': incomplete}))
+            with self.assertRaises(ValueError):
+                q.semantic_observations(directory, 'zed-desktop')
             for changes in ({'started': True}, {'ended': 2}, {'windows': []}, {'pid': 5}):
                 path.write_text(json.dumps({**value, 'activationWindows': {**windows, **changes}}))
                 with self.assertRaises(ValueError):

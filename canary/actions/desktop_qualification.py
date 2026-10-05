@@ -2269,10 +2269,16 @@ def semantic_observations(directory, app):
                         or type(clicks['windows']) is not list or len(clicks['windows']) != 3):
                     raise ValueError('invalid activation windows')
                 for window in clicks['windows']:
-                    if (type(window) is not dict or set(window) != {'retryEntries', 'nativeRetryEntries', 'inputDispatchEntries', 'errorClearEntries'}
-                            or any(type(count) is not int or not 0 <= count <= (65536 if key == 'inputDispatchEntries' else 1024)
+                    base_fields = {'retryEntries', 'nativeRetryEntries', 'inputDispatchEntries', 'errorClearEntries'}
+                    return_fields = {'inputDispatchReturns', 'inputPropagationStops', 'inputDefaultPreventions',
+                                     'inputInvalidReturns', 'hoverTrueReturns', 'hoverFalseReturns', 'hoverInvalidReturns'}
+                    if (type(window) is not dict or set(window) not in (base_fields, base_fields | return_fields)
+                            or any(type(count) is not int or not 0 <= count <= (1024 if key in {'retryEntries', 'nativeRetryEntries', 'errorClearEntries'} else 65536)
                                    for key, count in window.items())):
                         raise ValueError('invalid activation window counts')
+                    if return_fields <= set(window) and any(window[key] > window['inputDispatchReturns']
+                            for key in ('inputPropagationStops', 'inputDefaultPreventions', 'inputInvalidReturns')):
+                        raise ValueError('inconsistent dispatch returns')
             record.update(value)
         elif mechanism == 'zed-atspi-retry':
             fields = set('schemaVersion mechanism diagnosticsOnly method stage actionAttempted forwarded'.split())

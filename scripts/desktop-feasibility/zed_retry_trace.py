@@ -19,6 +19,20 @@ SYMBOLS = (
 )
 
 CLEAR_SYMBOL = '_RNvMs8_NtNtCs49dSLSzPpau_8agent_ui17conversation_view11thread_viewNtB5_10ThreadView18clear_thread_error'
+HOVER_SYMBOL = '_RNvMsj_NtCs1R78ycJoit4_4gpui6windowNtB5_6Hitbox10is_hovered'
+# Exact instructions in BINARY_SHA256, verified by static disassembly. The
+# dispatch epilogue returns propagate in AL and default_prevented in DL;
+# Hitbox::is_hovered returns its boolean in AL. Observe function returns rather
+# than requiring the runner's bpftrace to support instruction-offset probes.
+# Never read arguments, hitbox identities, coordinates or application memory.
+CLICK_FIELDS = {
+    'Input': 'inputDispatchEntries', 'Retry': 'retryEntries',
+    'Native': 'nativeRetryEntries', 'Clear': 'errorClearEntries',
+    'Return': 'inputDispatchReturns', 'Stopped': 'inputPropagationStops',
+    'Prevented': 'inputDefaultPreventions', 'Invalid': 'inputInvalidReturns',
+    'HoverTrue': 'hoverTrueReturns', 'HoverFalse': 'hoverFalseReturns',
+    'HoverInvalid': 'hoverInvalidReturns',
+}
 
 
 def program(executable, markers=None):
@@ -41,7 +55,7 @@ def program(executable, markers=None):
         if not all(len(value.encode()) < 128 and re.fullmatch(r'/[A-Za-z0-9_./-]+', value) for value in (start, end)):
             raise ValueError('unsupported marker path')
         seeds = ' '.join(f'@click{kind}{index} = count();'
-                        for index in range(1, 4) for kind in ('Input', 'Retry', 'Native', 'Clear'))
+                        for index in range(1, 4) for kind in CLICK_FIELDS)
         lines[0] = (lines[0][:-1] + '@slot = 0; @active = 0; '
                     '@clickStarts = count(); @clickEnds = count(); ' + seeds + ' }')
         lines.extend([
@@ -57,6 +71,20 @@ def program(executable, markers=None):
             for kind, symbol in zip(('Retry', 'Native', 'Input', 'Clear'), (*SYMBOLS, CLEAR_SYMBOL)):
                 lines.append(f'uprobe:{path}:{symbol} /@active == 1 && @slot == {index}/ '
                              f'{{ @click{kind}{index} = count(); }}')
+            lines.append(f'uretprobe:{path}:{SYMBOLS[2]} '
+                         f'/@active == 1 && @slot == {index}/ {{ '
+                         '$propagate = reg("ax") & 255; $prevented = reg("dx") & 255; '
+                         f'@clickReturn{index} = count(); '
+                         f'if ($propagate > 1 || $prevented > 1) {{ @clickInvalid{index} = count(); }} '
+                         'else { '
+                         f'if ($propagate == 0) {{ @clickStopped{index} = count(); }} '
+                         f'if ($prevented == 1) {{ @clickPrevented{index} = count(); }} '
+                         '} }')
+            lines.append(f'uretprobe:{path}:{HOVER_SYMBOL} /@active == 1 && @slot == {index}/ '
+                         '{ $hover = reg("ax") & 255; '
+                         f'if ($hover == 0) {{ @clickHoverFalse{index} = count(); }} '
+                         f'else if ($hover == 1) {{ @clickHoverTrue{index} = count(); }} '
+                         f'else {{ @clickHoverInvalid{index} = count(); }} }}')
     return '\n'.join(lines)
 
 
@@ -66,7 +94,7 @@ def parse_click_counts(data):
         raise ValueError('trace output limit')
     counters, ordinary = {}, []
     expected = {'@clickStarts', '@clickEnds'} | {
-        f'@click{kind}{index}' for index in range(1, 4) for kind in ('Input', 'Retry', 'Native', 'Clear')}
+        f'@click{kind}{index}' for index in range(1, 4) for kind in CLICK_FIELDS}
     for line in data.splitlines():
         if not line.strip():
             continue
@@ -78,15 +106,18 @@ def parse_click_counts(data):
         if key not in expected:
             ordinary.append(line)
             continue
-        limit = 65537 if key.startswith('@clickInput') else 1025
+        limit = 1025 if any(key.startswith('@click' + kind) for kind in ('Retry', 'Native', 'Clear')) else 65537
         if key in counters or type(value) is not int or not 1 <= value <= limit:
             raise ValueError('invalid activation counter')
         counters[key] = value - 1
     if set(counters) != expected or not 0 <= counters['@clickEnds'] == counters['@clickStarts'] <= 3:
         raise ValueError('incomplete activation counters')
-    clicks = [dict(inputDispatchEntries=counters[f'@clickInput{i}'],
-                   retryEntries=counters[f'@clickRetry{i}'], nativeRetryEntries=counters[f'@clickNative{i}'], errorClearEntries=counters[f'@clickClear{i}'])
+    clicks = [{field: counters[f'@click{kind}{i}'] for kind, field in CLICK_FIELDS.items()}
               for i in range(1, 4)]
+    for click in clicks:
+        if any(click[key] > click['inputDispatchReturns'] for key in (
+                'inputPropagationStops', 'inputDefaultPreventions', 'inputInvalidReturns')):
+            raise ValueError('inconsistent dispatch returns')
     return parse_counts(b'\n'.join(ordinary)), dict(
         started=counters['@clickStarts'], ended=counters['@clickEnds'], windows=clicks)
 

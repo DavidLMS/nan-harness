@@ -10,7 +10,7 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'canary/actions'))
-from zed_retry_trace import Capture, attach_failure, parse_counts, parse_click_counts, program, read_ready
+from zed_retry_trace import CLICK_FIELDS, Capture, attach_failure, parse_counts, parse_click_counts, program, read_ready
 
 
 def maps(retry, native, inputs=1):
@@ -20,8 +20,8 @@ def maps(retry, native, inputs=1):
 
 def click_maps(started=3, ended=3):
     values = {'@clickStarts': started + 1, '@clickEnds': ended + 1}
-    values.update({f'@click{kind}{index}': 3 if kind == 'Input' else 1
-                   for index in range(1, 4) for kind in ('Input', 'Retry', 'Native', 'Clear')})
+    values.update({f'@click{kind}{index}': 3 if kind in ('Input', 'Return') else 1
+                   for index in range(1, 4) for kind in CLICK_FIELDS})
     return b''.join((json.dumps({'type': 'map', 'data': {key: value}}) + '\n').encode()
                     for key, value in values.items())
 
@@ -48,6 +48,30 @@ class TraceTests(unittest.TestCase):
         self.assertIn('delete(@slot); delete(@active);', source)
         self.assertNotIn('printf(', source)
         self.assertNotIn('ustack', source)
+        self.assertIn('reg("ax") & 255', source)
+        self.assertIn('reg("dx") & 255', source)
+        self.assertEqual(source.count('uretprobe:'), 6)
+        for forbidden in ('arg0', 'arg1', 'buf(', 'printf(', 'retval', 'ustack'):
+            self.assertNotIn(forbidden, source)
+
+    def test_return_counters_require_complete_consistent_closed_evidence(self):
+        raw = maps(1, 1, 20) + click_maps()
+        records = [json.loads(line) for line in raw.splitlines()]
+        def replace(key, value):
+            return b'\n'.join(json.dumps({'type': 'map', 'data': {
+                name: value if name == key else count for name, count in record['data'].items()
+            }}).encode() for record in records)
+        _, clicks = parse_click_counts(replace('@clickStopped1', 2))
+        self.assertEqual(clicks['windows'][0]['inputPropagationStops'], 1)
+        for key, value in (('@clickStopped1', 4), ('@clickPrevented1', 4),
+                           ('@clickInvalid1', 4), ('@clickHoverTrue1', True),
+                           ('@clickHoverFalse1', 65538)):
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                parse_click_counts(replace(key, value))
+        missing = b'\n'.join(json.dumps(record).encode() for record in records
+                             if '@clickHoverTrue1' not in record['data'])
+        with self.assertRaises(ValueError):
+            parse_click_counts(missing)
 
     def test_gui_identity_is_checked_before_any_privileged_process(self):
         with tempfile.TemporaryDirectory() as directory:
