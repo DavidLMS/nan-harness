@@ -21,8 +21,8 @@ def maps(retry, native, inputs=1):
 
 
 def render_maps():
-    return b''.join((json.dumps(dict(type='map', data={f'@render{key}{slot}': 1})) + '\n').encode()
-                    for key in RENDER_SYMBOLS for slot in range(4))
+    return (json.dumps(dict(type='map', data={'@renders': {
+        f'{index},{slot}': 1 for index in range(len(RENDER_SYMBOLS)) for slot in range(4)}})) + '\n').encode()
 
 
 def click_maps(started=3, ended=3):

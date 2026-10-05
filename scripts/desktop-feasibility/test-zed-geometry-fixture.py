@@ -12,6 +12,8 @@ from unittest.mock import Mock, patch
 spec = importlib.util.spec_from_file_location('geometry_fixture', Path(__file__).with_name('zed-geometry-fixture.py'))
 fixture = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(fixture)
+from zed_retry_trace import CLICK_FIELDS
+from zed_render_counts import SYMBOLS
 
 
 def maps():
@@ -20,9 +22,14 @@ def maps():
     header = [1, 1024, *map(bits, (30, 30, 200, 200))]
     target = [1, 0, *map(bits, (10, 20, 40, 20, 0, 0, 200, 200)), 0]
     blocker = [1, 1023, *map(bits, (0, 0, 200, 200, 0, 0, 200, 200)), 1]
-    return b'\n'.join(json.dumps(dict(type='map', data={key: {
+    geometry = b'\n'.join(json.dumps(dict(type='map', data={key: {
         ','.join(map(str, row)): 1 for row in rows}})).encode()
         for key, rows in (('@geometryHeaders', [header]), ('@geometryRects', [target, *([1, i, *([0] * 9)] for i in range(1, 1023)), blocker])))
+    counts = dict.fromkeys(('@retry', '@native', '@input', '@clickStarts', '@clickEnds'), 1)
+    counts.update({f'@click{kind}{slot}': 1 for kind in CLICK_FIELDS for slot in range(1, 4)})
+    counts['@renders'] = {f'{index},{slot}': 1 for index in range(len(SYMBOLS)) for slot in range(4)}
+    return geometry + b'\n' + b'\n'.join(json.dumps(dict(type='map', data={key: value})).encode()
+                                         for key, value in counts.items())
 
 
 class FixtureTests(unittest.TestCase):

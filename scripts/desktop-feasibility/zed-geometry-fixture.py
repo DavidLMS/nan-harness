@@ -8,8 +8,9 @@ import sys
 import tempfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'canary/actions'))
-from zed_retry_trace import attach_failure, read_ready
-from zed_hit_geometry import cleanup, observations, probe, save_target, seeds, split_maps
+from zed_retry_trace import attach_failure, read_ready, program, parse_click_counts
+from zed_render_counts import split_counts
+from zed_hit_geometry import cleanup, observations, probe, save_target, split_maps
 
 
 def diagnostics(data):
@@ -40,7 +41,11 @@ def run(directory, receipt):
     subprocess.run(['cc', '-O0', '-g', str(Path(__file__).with_suffix('.c')), '-o', str(executable)],
                    check=True, timeout=30, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     save_target(directory, dict(point=[30, 30], bounds=[10, 20, 40, 20], viewport=[200, 200]))
-    source = ('BEGIN { @active = 1; @slot = 1; ' + seeds() + ' }\n'
+    # Exercise the real complete initializer, including all counter maps, so
+    # kernel map-reference limits fail here before building or launching Zed.
+    initializer = program(executable, directory, True).splitlines()[0]
+    initializer = initializer.replace('@active = 0;', '@active = 1;').replace('@slot = 0;', '@slot = 1;')
+    source = (initializer + '\n'
               + probe(executable, 'synthetic_dispatch')
               + '\nEND { delete(@active); delete(@slot); ' + cleanup() + ' }')
     prefix = ['sudo', '-n', 'env', '__BPFTRACE_NOTIFY_PROBES_ATTACHED=1', 'BPFTRACE_STRLEN=128',
@@ -118,7 +123,14 @@ def run(directory, receipt):
     except ValueError:
         receipt['failure'] = 'geometry-format'
         return
-    if remaining.strip() or observed != [expected]:
+    try:
+        remaining, renders = split_counts(remaining)
+        counts, clicks = parse_click_counts(remaining)
+    except ValueError:
+        receipt['failure'] = 'counter-format'
+        return
+    if (counts != (0, 0, 0) or clicks['started'] != 0
+            or any(renders['totals'].values()) or observed != [expected]):
         receipt['failure'] = 'geometry-mismatch'
         return
     receipt.update(status='passed', stage='complete')

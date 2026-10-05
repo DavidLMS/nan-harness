@@ -9,14 +9,15 @@ SYMBOLS = {'notification': '_RNvXs5_NtNtCsiUBGiTlBjqq_9workspace13notifications2
 
 
 def seeds():
-    return ' '.join(f'@render{key}{slot} = count();' for key in SYMBOLS for slot in range(4))
+    # One indexed map keeps the complete BEGIN below Linux MAX_USED_MAPS=64.
+    return ' '.join(f'@renders[{index}, {slot}] = count();' for index in range(7) for slot in range(4))
 
 
 def probes(executable):
     lines = []
-    for key, symbol in SYMBOLS.items():
-        body = f'@render{key}0 = count(); '
-        body += ' '.join(f'if (@active == 1 && @slot == {slot}) {{ @render{key}{slot} = count(); }}'
+    for index, symbol in enumerate(SYMBOLS.values()):
+        body = f'@renders[{index}, 0] = count(); '
+        body += ' '.join(f'if (@active == 1 && @slot == {slot}) {{ @renders[{index}, {slot}] = count(); }}'
                          for slot in range(1, 4))
         lines.append(f'uprobe:{executable}:{symbol} {{ {body} }}')
     return '\n'.join(lines)
@@ -25,8 +26,9 @@ def probes(executable):
 def split_counts(data):
     if len(data) > 16384:
         raise ValueError('render count budget')
-    expected = {f'@render{key}{slot}': (key, slot) for key in SYMBOLS for slot in range(4)}
+    expected = {f'{index},{slot}': (key, slot) for index, key in enumerate(SYMBOLS) for slot in range(4)}
     counts, remaining = {}, []
+    found = False
     for line in data.splitlines():
         if not line.strip():
             continue
@@ -35,16 +37,20 @@ def split_counts(data):
                 or type(record.get('data')) is not dict or len(record['data']) != 1):
             raise ValueError('invalid render count record')
         key, value = next(iter(record['data'].items()))
-        if key not in expected:
+        if key != '@renders':
             remaining.append(line)
             continue
-        if key in counts or type(value) is not int or not 1 <= value <= 65537:
+        if found or type(value) is not dict or set(value) != set(expected):
             raise ValueError('invalid render count')
-        counts[key] = value - 1
+        found = True
+        for item, count in value.items():
+            if type(count) is not int or not 1 <= count <= 65537:
+                raise ValueError('invalid render count')
+            counts[item] = count - 1
     if set(counts) != set(expected):
         raise ValueError('incomplete render counts')
-    totals = {key: counts[f'@render{key}0'] for key in SYMBOLS}
-    windows = [{key: counts[f'@render{key}{slot}'] for key in SYMBOLS} for slot in range(1, 4)]
+    totals = {key: counts[f'{index},0'] for index, key in enumerate(SYMBOLS)}
+    windows = [{key: counts[f'{index},{slot}'] for index, key in enumerate(SYMBOLS)} for slot in range(1, 4)]
     if any(sum(window[key] for window in windows) > totals[key] for key in SYMBOLS):
         raise ValueError('inconsistent render counts')
     return b'\n'.join(remaining), dict(totals=totals, windows=windows)

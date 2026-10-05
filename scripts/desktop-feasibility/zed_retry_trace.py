@@ -183,6 +183,7 @@ def attach_failure(line):
                              (b'permission denied', 'permission'),
                              (b'operation not permitted', 'permission'),
                              (b'failed to load program', 'program-load'),
+                             (b'error loading program:', 'program-load'),
                              (b'could not resolve symbol', 'symbol-unavailable'),
                              (b'error:', 'tracer-error')):
         if phrase in line:
