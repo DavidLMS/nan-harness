@@ -10,6 +10,22 @@ spec.loader.exec_module(runner)
 
 
 class Policy(unittest.TestCase):
+    def test_software_gpu_opt_in_survives_filter_without_forwarding_credentials(self):
+        source = {key: 'synthetic' for key in runner.ZED_HELPERS}
+        source.update(GITHUB_ACTIONS='true', RUNNER_ENVIRONMENT='github-hosted', RUNNER_OS='Linux',
+                      FEASIBILITY_ZED_INPUT_DRIVER_MODE='paste', FEASIBILITY_ZED_RESPONSE_METHOD='thread-export',
+                      ZED_ALLOW_EMULATED_GPU='1', NAN_API_KEY='PRIVATE', GITHUB_TOKEN='PRIVATE')
+        args = ('zed-desktop', Path('/facts'), Path('/nanh'), '/zed')
+        result = runner.qualification_environment(*args, source)
+        self.assertEqual(result['ZED_ALLOW_EMULATED_GPU'], '1')
+        self.assertNotIn('NAN_API_KEY', result)
+        self.assertNotIn('GITHUB_TOKEN', result)
+        for change in ({'ZED_ALLOW_EMULATED_GPU': None}, {'ZED_ALLOW_EMULATED_GPU': 'arbitrary'},
+                       {'RUNNER_OS': 'macOS'}):
+            self.assertNotIn('ZED_ALLOW_EMULATED_GPU', runner.qualification_environment(*args, {**source, **change}))
+        with self.assertRaises(ValueError):
+            runner.qualification_environment(*args, {**source, 'RUNNER_ENVIRONMENT': 'self-hosted'})
+
     def test_layout_policy_is_forwarded_only_in_the_owned_linux_cell(self):
         source = {key: 'synthetic' for key in runner.ZED_HELPERS}
         source.update(GITHUB_ACTIONS='true', RUNNER_ENVIRONMENT='github-hosted', RUNNER_OS='Linux',

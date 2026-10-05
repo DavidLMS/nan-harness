@@ -243,6 +243,11 @@ def qualification_environment(app, facts, real_nanh, executable, inherited=None)
                        FEASIBILITY_FACTS=str(facts), FEASIBILITY_REAL_NANH=str(real_nanh))
     if app == 'zed-desktop':
         environment.update({key: value for key, value in source.items() if key in ZED_HELPERS})
+        # The Xvfb wrapper explicitly opts into software rendering. Dropping
+        # this flag makes Zed show a full-window Unsupported GPU prompt, whose
+        # backdrop intercepts pointer input even when Retry remains accessible.
+        if source.get('RUNNER_OS') == 'Linux' and source.get('ZED_ALLOW_EMULATED_GPU') == '1':
+            environment['ZED_ALLOW_EMULATED_GPU'] = '1'
         if layout is not None:
             environment['NANH_ZED_LAYOUT_POLICY'] = layout
         if zoom is not None:
