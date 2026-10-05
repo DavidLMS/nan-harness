@@ -3,6 +3,7 @@
 import importlib.util
 from pathlib import Path
 import tempfile
+import re
 import unittest
 
 spec = importlib.util.spec_from_file_location('qualification', Path(__file__).with_name('run-qualification.py'))
@@ -11,6 +12,16 @@ spec.loader.exec_module(module)
 
 
 class ProjectPolicy(unittest.TestCase):
+    def test_rust_admission_matches_the_installer_release_pins(self):
+        root = Path(__file__).resolve().parents[2]
+        source = (root / 'crates/nan-harness-cli/src/commands/chatgpt_desktop/qualification_project.rs').read_text()
+        constants = dict(re.findall(r'const ([A-Z_]+): &str = "([^"]+)";', source))
+        for platform in ('windows', 'linux', 'macos'):
+            release = dict(version=constants['VERSION'],
+                           digest='sha256:' + constants[platform.upper() + '_ARTIFACT'])
+            module.validate_codex_project_release(
+                release, constants[platform.upper() + '_EXECUTABLE'], platform)
+
     def test_exact_frozen_release_and_application_are_both_required(self):
         targets = {
             'macos': ('f6cf4d2e9b69aeefa33adda4bcd1a2d306357f5253a1ac6049700870c28dd0c7',
