@@ -60,6 +60,14 @@ def split_maps(data):
         if not line.strip():
             continue
         record = json.loads(line)
+        if type(record) is dict and record.get('type') == 'helper_error':
+            if record.get('helper') == 'probe_read_user' and record.get('retcode') == -14:
+                raise ValueError('geometry user read fault')
+            if record.get('helper') == 'probe_read_user_str' and record.get('retcode') == -14:
+                raise ValueError('geometry marker read fault')
+            raise ValueError('geometry helper failure')
+        if type(record) is dict and record.get('type') == 'lost_events':
+            raise ValueError('geometry lost events')
         if (type(record) is not dict or record.get('type') != 'map'
                 or type(record.get('data')) is not dict or len(record['data']) != 1):
             raise ValueError('unexpected geometry output')

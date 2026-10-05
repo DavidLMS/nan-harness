@@ -35,6 +35,26 @@ CLICK_FIELDS = {
     'HoverInvalid': 'hoverInvalidReturns',
 }
 
+READBACK_FAILURES = {
+    'geometry output budget': 'geometry-output-budget',
+    'unexpected geometry output': 'geometry-output-shape',
+    'duplicate geometry map': 'geometry-map-duplicate',
+    'geometry map budget': 'geometry-map-budget',
+    'invalid geometry tuple': 'geometry-tuple',
+    'invalid geometry fields': 'geometry-fields',
+    'geometry user read fault': 'user-memory-read',
+    'geometry marker read fault': 'marker-read',
+    'geometry helper failure': 'helper-error',
+    'geometry lost events': 'lost-events',
+    'trace output limit': 'counter-output-budget',
+    'unexpected trace output': 'counter-output-shape',
+    'invalid activation counter': 'activation-counter',
+    'incomplete activation counters': 'activation-incomplete',
+    'inconsistent dispatch returns': 'dispatch-returns',
+    'invalid trace count': 'counter-value',
+    'incomplete trace output': 'counter-incomplete',
+}
+
 
 def program(executable, markers=None, geometry=False):
     path = str(executable)
@@ -301,8 +321,10 @@ class Capture:
                             self.receipt['hitTestGeometry'] = dict(status='unavailable', windows=[])
                 else:
                     self.receipt['status'] = 'unavailable'
-        except (OSError, ValueError, subprocess.SubprocessError):
+        except (OSError, ValueError, subprocess.SubprocessError) as error:
             self.receipt['status'] = 'unavailable'
+            if self.receipt['stage'] == 'readback':
+                self.receipt['readbackFailure'] = READBACK_FAILURES.get(str(error), 'rejected')
             if process is not None and process.poll() is None:
                 self.receipt['cleanup'] = 'failed'
         finally:

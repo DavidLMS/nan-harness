@@ -28,6 +28,33 @@ def click_maps(started=3, ended=3):
 
 
 class TraceTests(unittest.TestCase):
+    def test_native_geometry_rejection_retains_only_closed_readback_reason(self):
+        for raw, reason in (
+                (b'{"type":"helper_error","helper":"probe_read_user","retcode":-14,"msg":"PRIVATE"}', 'user-memory-read'),
+                (b'{"type":"lost_events","data":{"events":1}}', 'lost-events'),
+                (b'{"type":"map","data":{"@geometryRects":{"1,-1,0":1}}}', 'geometry-tuple')):
+            with tempfile.TemporaryDirectory() as directory:
+                capture = Capture('/unused', directory)
+                capture.geometry = True
+                capture.receipt['status'] = 'attached'
+                class Process:
+                    stdout = io.BytesIO()
+                    returncode = 0
+                    pid = 123
+                    finished = False
+                    def poll(self): return 0 if self.finished else None
+                    def communicate(self, timeout):
+                        self.finished = True
+                        return raw, b''
+                capture.process = Process()
+                with patch('zed_retry_trace.subprocess.run'):
+                    capture.__exit__()
+                public = json.loads((Path(directory) / 'zed-retry-entry-counts.json').read_text())
+                self.assertEqual(public['status'], 'unavailable')
+                self.assertEqual(public['readbackFailure'], reason)
+                self.assertIsNone(public['retryEntries'])
+                self.assertNotIn('PRIVATE', str(public))
+
     def test_geometry_capture_reduces_private_numeric_maps_before_publication(self):
         def bits(value):
             return struct.unpack('<I', struct.pack('<f', value))[0]
