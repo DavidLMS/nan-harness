@@ -3130,3 +3130,24 @@ and final observations, and rechecks the same owner and original cutoff. A
 positive count supports the source-defined input-blocking hypothesis; zero does
 not expose or rule out stale GPUI internal state. The census grants no input
 authority. Synthetic driver, transient-census and report-reducer checks pass.
+
+### Count-only Linux Zed recovery diagnostic
+
+The `open-cells` feasibility campaign enables `NANH_ZED_RETRY_ENTRY_TRACE=1`
+for Zed Linux only. It attaches uprobes to `ThreadView::retry_generation` and
+`NativeAgentSessionRetry::run` in the exact inspected official 1.22.0 GUI
+binary. The prepared CLI locates its sibling `libexec/zed-editor`; its SHA256
+must also match. It reads no function arguments, memory, stacks or user data.
+The public receipt contains only bounded entry counts, lifecycle stage and
+completion/cleanup status. Counts cover the three probe sessions together.
+
+A private root-authenticated `sd_notify` socket establishes attachment readiness;
+`BEGIN` is insufficient because bpftrace executes it before attaching probes.
+Missing probes, early exit and incomplete output remain unavailable, never zero.
+Capture starts outside the pointer helper's action deadline and ends after the
+checker; failed capture cleanup fails the driver. A bounded timer also expires
+the tracer if its parent disappears. See [bpftrace runtime documentation](https://bpftrace.org/docs/0.21).
+
+Even otherwise successful probes with this receipt remain `unqualified`, with
+reason `instrumented-diagnostic`. Run `platform=all` without the trace opt-in
+for the final twelve-cell qualification. The final matrix excludes Pen.

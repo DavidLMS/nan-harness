@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Run full deterministic qualification only inside a disposable hosted session."""
 import argparse
+from contextlib import nullcontext
 import hashlib
 import json
 import struct
@@ -14,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(ROOT / 'canary/actions'))
 from cell import private_command, ensure_private_directory, write_json
 from desktop_diagnostics import Capture
+from zed_retry_trace import Capture as ZedRetryTrace
 from codex_release import CODEX_PROJECT_RELEASES, CODEX_PROJECT_VERSIONS
 from desktop_qualification import APPS, PREPARATION_FAILURES, bounded_json, cell, digest, envelope
 from desktop_suite import read_frozen_manifest
@@ -535,8 +537,12 @@ def run(args):
                '--session', 'github-hosted', '--verification', 'semantic-only',
                '--prepared', str(args.prepared), '--output', str(report)]
     try:
-        status = execute_with_diagnostics(command, args.directory, facts, args.platform,
-                                          args.source_sha, environment)
+        trace = (ZedRetryTrace(executable, facts)
+                 if args.app == 'zed-desktop' and args.platform == 'linux'
+                 and os.environ.get('NANH_ZED_RETRY_ENTRY_TRACE') == '1' else nullcontext())
+        with trace:
+            status = execute_with_diagnostics(command, args.directory, facts, args.platform,
+                                              args.source_sha, environment)
         if report.exists():
             report_hash = digest(report)
             subprocess.run([str(args.checker), 'validate-report', str(report)], env=environment,

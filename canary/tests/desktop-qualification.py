@@ -1341,7 +1341,7 @@ class QualificationTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 q.semantic_observations(root, 'hermes-desktop')
 
-    def trial(self, mutate=lambda report: None, policy_count=3, app='hermes-desktop'):
+    def trial(self, mutate=lambda report: None, policy_count=3, app='hermes-desktop', observations=()):
         with tempfile.TemporaryDirectory() as root:
             paths = {key: Path(root) / key for key in ('checker', 'launcher', 'real_nanh', 'prepared', 'frozen', 'report')}
             for key, path in paths.items():
@@ -1351,9 +1351,10 @@ class QualificationTests(unittest.TestCase):
                           nanHarness={'sha256': q.digest(paths['launcher'])}, cleanup='passed',
                           results=[dict(app=app, appVersion='0.17.6', cleanup='passed',
                                         deterministic=[copy.deepcopy(probe) for _ in range(3)])])
-            if app == 'claude-desktop':
+            if app in {'claude-desktop', 'zed-desktop'}:
                 for item in report['results'][0]['deterministic']:
-                    item.update(inputMode='native-clipboard-and-keyboard', responseVerification='native-assistant-clipboard')
+                    item.update(inputMode='native-clipboard-and-keyboard', responseVerification=(
+                        'native-thread-export' if app == 'zed-desktop' else 'native-assistant-clipboard'))
             mutate(report)
             manifest = {'apps': [dict(status='frozen', app=app, version='0.17.6', revision='b' * 40)]}
             receipt = dict(schemaVersion=2, platform='linux', architecture='x86_64',
@@ -1365,7 +1366,7 @@ class QualificationTests(unittest.TestCase):
                  patch.object(q, 'semantic_observations', return_value=[dict(
                      schemaVersion=1, mechanism='hermes-retry-policy', policy='explicit-ui-retry',
                      autoRecoveryCycles=0, apiMaxRetries=3, configBeforeSha256='e' * 64,
-                     configAfterSha256='f' * 64) for _ in range(policy_count)]), \
+                     configAfterSha256='f' * 64) for _ in range(policy_count)] + list(observations)), \
                  patch.object(q, 'validated_report', return_value=(report, 'd' * 64)):
                 return q.reduce_report(app=app, platform='linux', architecture='x86_64',
                                        source_sha='a' * 40, model='qwen3.6', **paths)
@@ -1382,6 +1383,28 @@ class QualificationTests(unittest.TestCase):
                    lambda r: r['results'][0]['deterministic'][0].update(inputMode='native-clipboard-and-keyboard')]
         for change in changes:
             self.assertEqual(self.trial(change)['qualification'], 'unqualified')
+
+    def test_entry_tracing_never_promotes_a_full_native_success(self):
+        value = dict(schemaVersion=1, mechanism='zed-retry-entry-counts', diagnosticsOnly=True,
+                     status='complete', stage='complete', cleanup='passed', retryEntries=3, nativeRetryEntries=3)
+        self.assertEqual(self.trial(app='zed-desktop', policy_count=0)['qualification'], 'deterministic-full')
+        result = self.trial(app='zed-desktop', policy_count=0, observations=[value])
+        self.assertEqual(result['qualification'], 'unqualified')
+        self.assertEqual(result['reason'], 'instrumented-diagnostic')
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'trace.json'
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(directory, 'zed-desktop'), [value])
+            for change in ({'retryEntries': True}, {'nativeRetryEntries': -1}, {'pid': 123},
+                           {'status': 'unavailable'}, {'cleanup': 'failed'}, {'diagnosticsOnly': False}):
+                path.write_text(json.dumps({**value, **change}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(directory, 'zed-desktop')
+            value.update(status='unavailable', stage='attach', retryEntries=None, nativeRetryEntries=None)
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(directory, 'zed-desktop'), [value])
+            with self.assertRaises(ValueError):
+                q.semantic_observations(directory, 'claude-desktop')
 
     def test_linux_claude_qualifies_only_complete_native_recovery(self):
         result = self.trial(app='claude-desktop', policy_count=0)

@@ -461,6 +461,12 @@ jobs:
         if: runner.os == 'macOS' && matrix.app == 'chatgpt-desktop' && inputs.experiment == 'deterministic-full'
         shell: bash
         run: echo 'NANH_CODEX_OWNED_MOVE=source-point' >> "$GITHUB_ENV"
+      - name: Prepare count-only Zed recovery tracing for the diagnostic campaign
+        if: runner.os == 'Linux' && matrix.app == 'zed-desktop' && inputs.platform == 'open-cells' && inputs.experiment == 'deterministic-full'
+        shell: bash
+        run: |
+          sudo apt-get install -y bpftrace
+          echo 'NANH_ZED_RETRY_ENTRY_TRACE=1' >> "$GITHUB_ENV"
       - name: Enable passive owned-client Zed event delivery observation
         if: runner.os == 'Linux' && matrix.app == 'zed-desktop' && inputs.experiment == 'deterministic-full'
         shell: bash
