@@ -92,7 +92,9 @@ class FixtureTests(unittest.TestCase):
     def test_verifier_diagnostics_are_closed_categories(self):
         observed = fixture.diagnostics(b'PRIVATE BPF program is too large. Processed 1000001 insn\n'
                                        b'ERROR: Error loading program: PRIVATE')
-        self.assertEqual(observed, ['program-load', 'tracer-error', 'verifier-complexity'])
+        self.assertEqual(observed, ['program-load', 'verifier-complexity'])
+        self.assertEqual(fixture.diagnostics(b'ERROR: PRIVATE unknown failure'), ['tracer-error'])
+        self.assertNotIn('PRIVATE', str(observed))
 
 
 if __name__ == '__main__':
