@@ -6,11 +6,18 @@
 #include <algorithm>
 
 enum class UiaChatRole { Other, Heading, Button, Text, Group, Boundary };
+// Both public labels dispatch the pinned renderer's ordinary onRetry handler.
+// Return only a closed label; arbitrary accessible names never become actions.
+inline const wchar_t* uia_chat_retry_name(const std::wstring& label) {
+    if(label==L"Retry")return L"Retry";
+    if(label==L"Try again")return L"Try again";
+    return nullptr;
+}
 // Containers retain topology, not duplicated aggregate names. Exact public
 // recovery labels remain observable across roles without granting action authority.
 inline bool uia_chat_retains_label(UiaChatRole role, const std::wstring& label) {
     return (role != UiaChatRole::Group && role != UiaChatRole::Boundary)
-        || label == L"Retry" || label == L"View details";
+        || uia_chat_retry_name(label) || label == L"View details";
 }
 struct UiaChatScopeNode { UiaChatRole role{}; std::wstring label; int parent=-1; };
 struct UiaChatScope { int control=-1,anchor=-1,ancestor=-1,user_heading=-1,retry=-1; const char* failure="scope"; };
@@ -49,7 +56,7 @@ inline UiaChatScope uia_chat_scope(const std::vector<UiaChatScopeNode>& nodes,
             const auto& node=nodes[index];
             headings+=node.role==UiaChatRole::Heading;
             prompts+=node.label==prompt;
-            if(node.role==UiaChatRole::Button && node.label==(retry?L"Retry":L"Copy")) {
+            if(node.role==UiaChatRole::Button && (retry?uia_chat_retry_name(node.label)!=nullptr:node.label==L"Copy")) {
                 ++controls;control=static_cast<int>(index);
             }
         }
@@ -89,7 +96,7 @@ inline UiaChatScope uia_chat_failure_details(const std::vector<UiaChatScopeNode>
                 headings+=node.role==UiaChatRole::Heading;
                 if(node.role==UiaChatRole::Heading && node.label==L"You said: "+prompt){++users;user=static_cast<int>(index);}
                 prompts+=node.role==UiaChatRole::Text && node.label==prompt;
-                if(node.role==UiaChatRole::Button && node.label==L"Retry"){++retries;retry=static_cast<int>(index);}
+                if(node.role==UiaChatRole::Button && uia_chat_retry_name(node.label)!=nullptr){++retries;retry=static_cast<int>(index);}
                 if(node.role==UiaChatRole::Button && node.label==L"View details"){++details;control=static_cast<int>(index);}
             }
             if(users==1 && headings==1 && prompts==1 && retries==1 && details==1) {
@@ -127,9 +134,9 @@ inline UiaChatFailureCounts uia_chat_failure_counts(const std::vector<UiaChatSco
         result.server_errors+=node.role==UiaChatRole::Text && node.label==L"Server error";
         result.user_headings+=node.role==UiaChatRole::Heading && node.label==L"You said: "+prompt;
         result.prompt_texts+=node.role==UiaChatRole::Text && node.label==prompt;
-        result.retry_labels+=node.label==L"Retry";
+        result.retry_labels+=uia_chat_retry_name(node.label)!=nullptr;
         result.details_labels+=node.label==L"View details";
-        result.retries+=node.role==UiaChatRole::Button && node.label==L"Retry";
+        result.retries+=node.role==UiaChatRole::Button && uia_chat_retry_name(node.label)!=nullptr;
         result.details+=node.role==UiaChatRole::Button && node.label==L"View details";
     }
     for(std::size_t group=0;group<nodes.size();++group) {
@@ -144,7 +151,7 @@ inline UiaChatFailureCounts uia_chat_failure_counts(const std::vector<UiaChatSco
             headings+=node.role==UiaChatRole::Heading;
             users+=node.role==UiaChatRole::Heading && node.label==L"You said: "+prompt;
             prompts+=node.role==UiaChatRole::Text && node.label==prompt;
-            retries+=node.role==UiaChatRole::Button && node.label==L"Retry";
+            retries+=node.role==UiaChatRole::Button && uia_chat_retry_name(node.label)!=nullptr;
             details+=node.role==UiaChatRole::Button && node.label==L"View details";
         }
         if(headings==1 && users==1 && prompts==1) {

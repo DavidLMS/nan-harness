@@ -103,7 +103,32 @@ static void failure_button_shape_contract() {
     counts=uia_chat_failure_counts(nodes,L"PRIVATE");
     assert(counts.buttons==3 && counts.group_buttons==0);
 }
+static void public_retry_alias_contract() {
+    using R=UiaChatRole;
+    for(const auto* label:{L"Retry",L"Try again"}) {
+        std::vector<UiaChatScopeNode> nodes{{R::Boundary,L"",-1},{R::Group,L"",0},
+            {R::Heading,L"You said: owned",1},{R::Text,L"owned",1},
+            {R::Text,L"Server error",1},{R::Text,L"NAN_CHECK_EXPECTED_FAILURE",1},
+            {R::Button,label,1},{R::Button,L"View details",1}};
+        assert(uia_chat_scope(nodes,L"owned",L"NAN_CHECK_EXPECTED_FAILURE",true).control==6);
+        assert(uia_chat_failure_details(nodes,L"owned").retry==6);
+        assert(uia_chat_failure_counts(nodes,L"owned").retries==1);
+        // A second alias is a second action, not a fallback candidate.
+        nodes.push_back({R::Button,label==std::wstring(L"Retry")?L"Try again":L"Retry",1});
+        assert(uia_chat_scope(nodes,L"owned",L"NAN_CHECK_EXPECTED_FAILURE",true).control<0);
+        assert(uia_chat_failure_details(nodes,L"owned").control<0);
+        nodes.pop_back();nodes[6].parent=0;
+        assert(uia_chat_scope(nodes,L"owned",L"NAN_CHECK_EXPECTED_FAILURE",true).control<0);
+        nodes[6].parent=1;nodes[6].role=R::Group;
+        assert(uia_chat_scope(nodes,L"owned",L"NAN_CHECK_EXPECTED_FAILURE",true).control<0);
+        nodes[6].role=R::Button;nodes[3].label=L"unrelated prompt";
+        assert(uia_chat_scope(nodes,L"owned",L"NAN_CHECK_EXPECTED_FAILURE",true).control<0);
+    }
+    for(const auto* label:{L"Try again with another model",L"Retry purchase",L"Try again PRIVATE",L"try again"})
+        assert(uia_chat_retry_name(label)==nullptr);
+}
 int main() {
+    public_retry_alias_contract();
     failure_counts_contract();
     failure_button_shape_contract();
     container_projection_contract();

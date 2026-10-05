@@ -86,3 +86,14 @@ confidence, exact-match, entropy and visible-transcript requirements.
 `THIRD_PARTY_NOTICES.txt` is embedded and available through
 `nanh-desktop-check licenses`. The synthetic-pixel OCR test checks the shipped
 helper/model together, independently of an installed GUI or system OCR package.
+
+Windows Claude recovery accepts the exact public button labels `Retry` and
+`Try again`. In the official 2.19675.0 MSIX, the renderer action builder in
+`app/resources/ion-dist/assets/v1/c3e34355f-BCwspPRT.js`
+(SHA-256 `99571dee5d72e9985b0fec05f14aefc98b68bc379569b9739ca4f62f86a4d513`)
+uses `Try again` for its ordinary `onRetry` action. These renderer resources are
+outside `app.asar`. The adapter requires one matching button in the independently
+proved failed-turn scope and rechecks its exact name and retained identity before
+Invoke. Both labels appearing together are ambiguous; model-switching and
+purchase-retry controls are excluded. Retry diagnostic counts include both exact
+labels, while action authority continues to require the Button role.

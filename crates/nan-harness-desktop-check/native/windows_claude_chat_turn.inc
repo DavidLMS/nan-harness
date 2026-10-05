@@ -222,9 +222,11 @@ struct ChatInput {
                     fresh.held[scope.user_heading].Get(),&equal)) || !equal)return false;
             equal=FALSE;
             std::array<long,4> retry_bounds{};bool retry_enabled=false;
+            const auto* retry_name=uia_chat_retry_name(collection.chat_nodes[original_scope.retry].label);
+            if(!retry_name)return false;
             if(FAILED(fresh.automation->CompareElements(collection.held[original_scope.retry].Get(),
                 fresh.held[scope.retry].Get(),&equal)) || !equal
-                || !fresh.source_control(fresh.held[scope.retry].Get(),UIA_ButtonControlTypeId,L"Retry",retry_bounds,retry_enabled)
+                || !fresh.source_control(fresh.held[scope.retry].Get(),UIA_ButtonControlTypeId,retry_name,retry_bounds,retry_enabled)
                 || !retry_enabled)return false;
         }
         return fresh.guard() && action_control(control,name,bounds) && within();
@@ -234,7 +236,9 @@ struct ChatInput {
         const auto scope=mode=="failure-details"?uia_chat_failure_details(collection.chat_nodes,prompt)
             :uia_chat_scope(collection.chat_nodes,prompt,marker,mode!="copy");
         if(scope.control<0)return scope.failure;
-        const wchar_t* name=mode=="copy"?L"Copy":mode=="failure-details"?L"View details":L"Retry";
+        const wchar_t* name=mode=="copy"?L"Copy":mode=="failure-details"?L"View details"
+            :uia_chat_retry_name(collection.chat_nodes[scope.control].label);
+        if(!name)return "control";
         const auto control=collection.held[scope.control];
         std::array<long,4> bounds{};bool enabled=false;
         if(!collection.source_control(control.Get(),UIA_ButtonControlTypeId,name,bounds,enabled)
@@ -409,7 +413,9 @@ int windows_claude_chat_turn() {
     if(turn.mode!="input-replace-owned") {
         const char* result=turn.action();
         if(turn.mode=="retry-ready" && std::string(result)=="scope-control-absent") {
-            unfiltered_retry=turn.unfiltered_label_count(L"Retry");
+            const auto retry=turn.unfiltered_label_count(L"Retry");
+            const auto try_again=turn.unfiltered_label_count(L"Try again");
+            if(retry && try_again && *retry+*try_again<=1024)unfiltered_retry=*retry+*try_again;
             unfiltered_details=turn.unfiltered_label_count(L"View details");
         }
         return emit(result);
