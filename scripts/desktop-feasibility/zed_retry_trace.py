@@ -4,11 +4,10 @@ import json
 import os
 from pathlib import Path
 import re
-import socket
-import struct
+import selectors
 import subprocess
 import sys
-import tempfile
+import time
 
 from cell import write_json
 
@@ -53,9 +52,27 @@ def parse_counts(data):
     return counts['@retry'], counts['@native']
 
 
-def ready_notification(data, credentials):
-    # sd_notify runs after attachment; BEGIN runs before it and is insufficient.
-    return data.strip() == b'READY=1' and len(credentials) == 12 and struct.unpack('3i', credentials)[1] == 0
+def read_ready(stream, timeout=15):
+    """Pinned 0.20.2 emits this test notification after all probes attach."""
+    marker = b'__BPFTRACE_NOTIFY_PROBES_ATTACHED'
+    deadline = time.monotonic() + timeout
+    line = bytearray()
+    with selectors.DefaultSelector() as selector:
+        selector.register(stream, selectors.EVENT_READ)
+        for _ in range(65536):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or not selector.select(remaining):
+                return False
+            byte = os.read(stream.fileno(), 1)
+            if not byte:
+                return False
+            if byte == b'\n':
+                if line == marker:
+                    return True
+                line.clear()
+            else:
+                line.extend(byte)
+    return False
 
 
 class Capture:
@@ -86,25 +103,17 @@ class Capture:
             if hashlib.file_digest(source, 'sha256').hexdigest() != BINARY_SHA256:
                 raise ValueError('trace executable differs from inspected binary')
         try:
-            # A short private pathname stays within AF_UNIX's 108-byte limit.
-            with tempfile.TemporaryDirectory(prefix='nanh-trace-', dir='/tmp') as directory:
-                with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as notify:
-                    notify.setsockopt(socket.SOL_SOCKET, socket.SO_PASSCRED, 1)
-                    notify.settimeout(15)
-                    address = str(Path(directory) / 'ready')
-                    notify.bind(address)
-                    self.process = subprocess.Popen(
-                        ['/usr/bin/sudo', '-n', '/usr/bin/env', 'NOTIFY_SOCKET=' + address,
-                         'BPFTRACE_MISSING_PROBES=error', '/usr/bin/bpftrace', '-q', '-B', 'none',
-                         '-f', 'json', '-e', program(self.executable)],
-                        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                        bufsize=0, start_new_session=True, env={'PATH': '/usr/bin:/bin', 'LANG': 'C'})
-                    data, ancillary, _, _ = notify.recvmsg(128, socket.CMSG_SPACE(12))
-                    credentials = [data for level, kind, data in ancillary
-                                   if level == socket.SOL_SOCKET and kind == socket.SCM_CREDENTIALS]
-                    if (len(credentials) == 1 and ready_notification(data, credentials[0])
-                            and self.process.poll() is None):
-                        self.receipt['status'] = 'attached'
+            version = subprocess.run(['/usr/bin/bpftrace', '--version'], timeout=3,
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=True).stdout.strip()
+            if version != b'bpftrace v0.20.2':
+                return self
+            self.process = subprocess.Popen(
+                ['/usr/bin/sudo', '-n', '/usr/bin/env', '__BPFTRACE_NOTIFY_PROBES_ATTACHED=1',
+                 '/usr/bin/bpftrace', '-q', '-B', 'none', '-f', 'json', '-e', program(self.executable)],
+                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                bufsize=0, start_new_session=True, env={'PATH': '/usr/bin:/bin', 'LANG': 'C'})
+            if read_ready(self.process.stderr) and self.process.poll() is None:
+                self.receipt['status'] = 'attached'
         except (OSError, ValueError, subprocess.SubprocessError):
             pass
         return self
@@ -140,8 +149,10 @@ class Capture:
             if process is not None and process.poll() is None:
                 self.receipt['cleanup'] = 'failed'
         finally:
-            if process is not None and process.stdout is not None:
-                process.stdout.close()
+            if process is not None:
+                for stream in (process.stdout, getattr(process, 'stderr', None)):
+                    if stream is not None:
+                        stream.close()
             write_json(self.facts / 'zed-retry-entry-counts.json', self.receipt)
         if self.receipt['cleanup'] != 'passed':
             raise RuntimeError('trace cleanup failed')

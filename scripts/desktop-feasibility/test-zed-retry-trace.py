@@ -4,14 +4,13 @@ import io
 import json
 from pathlib import Path
 import subprocess
-import struct
 import sys
 import tempfile
 import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'canary/actions'))
-from zed_retry_trace import Capture, parse_counts, program, ready_notification
+from zed_retry_trace import Capture, parse_counts, program, read_ready
 
 
 def maps(retry, native):
@@ -55,11 +54,15 @@ class TraceTests(unittest.TestCase):
             with self.subTest(path=path), self.assertRaises(ValueError):
                 program(path)
 
-    def test_only_root_attachment_notification_is_ready(self):
-        self.assertTrue(ready_notification(b'READY=1', struct.pack('3i', 123, 0, 0)))
-        for data, creds in ((b'READY=1', struct.pack('3i', 123, 1000, 1000)),
-                            (b'BEGIN', struct.pack('3i', 123, 0, 0)), (b'READY=1', b'')):
-            self.assertFalse(ready_notification(data, creds))
+    def test_readiness_requires_the_exact_post_attach_notification(self):
+        for line, expected in ((b'__BPFTRACE_NOTIFY_PROBES_ATTACHED\n', True),
+                               (b'BEGIN\n', False), (b'__BPFTRACE_NOTIFY_PROBES_ATTACHED extra\n', False),
+                               (b'private diagnostic\n__BPFTRACE_NOTIFY_PROBES_ATTACHED\n', True)):
+            with self.subTest(line=line):
+                code = 'import sys;sys.stderr.buffer.write(' + repr(line) + ')'
+                with subprocess.Popen([sys.executable, '-c', code], stderr=subprocess.PIPE) as child:
+                    self.assertEqual(read_ready(child.stderr, 2), expected)
+                    child.wait(timeout=2)
 
     def test_complete_and_premature_exit_are_distinct(self):
         for alive, expected in ((True, 'complete'), (False, 'unavailable')):
