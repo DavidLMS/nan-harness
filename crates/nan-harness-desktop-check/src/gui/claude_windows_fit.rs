@@ -1,6 +1,18 @@
 //! One pre-input fit may reveal the original owned Windows Claude window.
 use crate::native::{GuardFailure, Snapshot, Window};
 
+#[cfg(any(windows, test))]
+pub(super) fn activation_candidate(snapshot: &Snapshot, window: &Window) -> bool {
+    snapshot.guard_failure(window) == Err(GuardFailure::ForegroundChanged)
+        && snapshot
+            .windows
+            .iter()
+            .filter(|item| item.pid == window.pid)
+            .count()
+            == 1
+        && snapshot.windows.iter().any(|item| item == window)
+}
+
 /// Passive attachment may lack display containment; it never proves readiness.
 pub(super) fn pending_candidate(
     snapshot: &Snapshot,
@@ -84,6 +96,39 @@ fn overlaps(first: &Window, second: &Window) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn initial_activation_requires_one_exact_window_and_foreground_failure() {
+        let snapshot = Snapshot::parse(
+            "FG 11 43\nDISPLAY 0 0 1920 1080\nWIN 43 11 0 0 1000 800 72756e6e6572\nWIN 42 10 100 100 800 600 636c61756465\n",
+        ).unwrap();
+        let window = snapshot.windows[1].clone();
+        assert!(activation_candidate(&snapshot, &window));
+        let mut changed = snapshot.clone();
+        changed.windows.push(Window {
+            id: 44,
+            ..window.clone()
+        });
+        assert!(!activation_candidate(&changed, &window));
+        assert!(!activation_candidate(
+            &snapshot,
+            &Window {
+                id: 99,
+                ..window.clone()
+            }
+        ));
+        assert!(!activation_candidate(
+            &snapshot,
+            &Window {
+                name: "replacement".into(),
+                ..window.clone()
+            }
+        ));
+        let ready = Snapshot::parse(
+            "FG 10 42\nDISPLAY 0 0 1920 1080\nWIN 42 10 100 100 800 600 636c61756465\n",
+        )
+        .unwrap();
+        assert!(!activation_candidate(&ready, &window));
+    }
     #[test]
     fn fit_requires_unique_original_off_display_owned_foreground() {
         let parse = |text| Snapshot::parse(text).unwrap();

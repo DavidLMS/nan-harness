@@ -63,6 +63,16 @@ It does not activate another app or change stacking order. The checker then
 acquires stable bounds again and retains every capture/input guard. This uses
 the documented [SetWindowPos flags](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setwindowpos).
 
+Hosted Claude startup may first request foreground activation once when the
+unique launch-owned window is behind the runner. The helper rechecks its HWND,
+PID, top-level ownership, visibility, enabled state and absence of an active
+popup before calling
+[SetForegroundWindow](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setforegroundwindow).
+Windows may deny the request; denial stops acquisition. A successful request
+still requires a fresh stable snapshot and the existing focus, containment and
+occlusion guards. Later window identity changes or focus losses cannot trigger
+another activation attempt.
+
 Windows clipboard modes use `CF_UNICODETEXT` directly through User32, with a
 private message-only owner window and one `OpenClipboard` attempt. Writes accept
 at most 1 KiB of valid UTF-8 without embedded NULs; reads accept at most 64 KiB

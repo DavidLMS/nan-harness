@@ -26,7 +26,9 @@ int window_state(const std::string&) { return 5; }
 
 #if !defined(__APPLE__)
 int claude_chat_press() { return 5; }
+#if !defined(_WIN32)
 int activate_window(const std::string&) { return 5; }
+#endif
 int observe_claude() { return 5; }
 int claude_known_folders() { return 5; }
 int windows_focus(const std::string&) { return 5; }
@@ -984,6 +986,33 @@ int activate_window(const std::string& request) {
 #include <tlhelp32.h>
 #include <shlobj.h>
 #include <bcrypt.h>
+
+int activate_window(const std::string& request) {
+    std::istringstream input(request);
+    std::string id_text, pid_text, extra;
+    if (!(input >> id_text >> pid_text) || (input >> extra)) return 5;
+    auto number = [](const std::string& text, std::uint64_t& value) {
+        if (text.empty() || text.find_first_not_of("0123456789") != std::string::npos) return false;
+        auto result = std::from_chars(text.data(), text.data() + text.size(), value);
+        return result.ec == std::errc{} && result.ptr == text.data() + text.size();
+    };
+    std::uint64_t id = 0, pid = 0;
+    if (!number(id_text, id) || !number(pid_text, pid) || !id || !pid
+        || id > (std::numeric_limits<std::uintptr_t>::max)()
+        || pid > (std::numeric_limits<DWORD>::max)()) return 5;
+    HWND window = reinterpret_cast<HWND>(static_cast<std::uintptr_t>(id));
+    auto owned = [&] {
+        DWORD actual = 0;
+        return GetWindowThreadProcessId(window, &actual) && actual == pid
+            && GetAncestor(window, GA_ROOT) == window && !GetWindow(window, GW_OWNER)
+            && IsWindowVisible(window) && IsWindowEnabled(window) && !IsIconic(window)
+            && GetLastActivePopup(window) == window;
+    };
+    // The caller proves launch ownership and consumes this one initial attempt.
+    // Respect Windows focus arbitration; never synthesize keys or attach input queues.
+    if (!owned() || !SetForegroundWindow(window)) return 5;
+    return owned() && GetForegroundWindow() == window ? 0 : 5;
+}
 
 // Private wire identities stay in the checker RAM, never in public diagnostics.
 #include <vector>

@@ -598,6 +598,27 @@ impl Native {
     }
 
     #[cfg(windows)]
+    pub(crate) fn activate_windows_owned_until(
+        &self,
+        window: &Window,
+        deadline: std::time::Instant,
+    ) -> Result<(), FailureCategory> {
+        let argument = format!("--activate-window {} {}", window.id, window.pid);
+        let output = process::run_windows_fit_until(
+            &self.executable,
+            std::ffi::OsStr::new(&argument),
+            deadline,
+        )?;
+        if std::time::Instant::now() >= deadline {
+            return Err(FailureCategory::Timeout);
+        }
+        if !output.trim().is_empty() {
+            return Err(FailureCategory::Output);
+        }
+        Ok(())
+    }
+
+    #[cfg(windows)]
     pub(crate) fn missing_window_state(&self, window: &Window) -> &'static str {
         let argument = format!("--window-state {} {}", window.id, window.pid);
         match process::run_with_category(&self.executable, std::ffi::OsStr::new(&argument), None) {

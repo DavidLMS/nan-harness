@@ -346,6 +346,7 @@ impl Visual {
         #[cfg(windows)]
         let mut windows_fit = WindowsInitialFit {
             fitted: false,
+            activated: None,
             claude: kind == DesktopHarnessKind::Claude && super::claude_windows_ready::policy(),
         };
         #[cfg(target_os = "macos")]
@@ -373,7 +374,7 @@ impl Visual {
             if let Some(window) = windows.first() {
                 require_owned_candidate(window, owner)?;
                 #[cfg(windows)]
-                if initial_windows_fit(&native, &snapshot, window, &mut windows_fit)? {
+                if initial_windows_fit(&native, &snapshot, window, &mut windows_fit, deadline)? {
                     previous = None;
                     settle.reset();
                     stability = super::stability::Stability::default();
@@ -1336,6 +1337,7 @@ impl Visual {
 #[cfg(windows)]
 struct WindowsInitialFit {
     fitted: bool,
+    activated: Option<Window>,
     claude: bool,
 }
 
@@ -1345,6 +1347,7 @@ fn initial_windows_fit(
     snapshot: &Snapshot,
     window: &Window,
     state: &mut WindowsInitialFit,
+    deadline: Instant,
 ) -> Result<bool, AcquisitionFailure> {
     if !state.fitted && !state.claude {
         fit_owned_window(native, window)?;
@@ -1352,6 +1355,29 @@ fn initial_windows_fit(
         return Ok(true);
     }
     if state.claude {
+        if state.activated.as_ref().is_some_and(|held| {
+            held.id != window.id || held.pid != window.pid || held.name != window.name
+        }) {
+            return Err(acquisition_failure(
+                Reason::FocusChanged,
+                crate::diagnostics::GuiAcquisitionStage::WindowStability,
+            ));
+        }
+        if state.activated.is_none()
+            && super::claude_windows_fit::activation_candidate(snapshot, window)
+        {
+            state.activated = Some(window.clone());
+            native
+                .activate_windows_owned_until(window, deadline)
+                .map_err(|failure| {
+                    acquisition_failure(
+                        failure.reason(),
+                        crate::diagnostics::GuiAcquisitionStage::WindowStability,
+                    )
+                })?;
+            // A successful OS call is not readiness: observe a fresh stable snapshot.
+            return Ok(true);
+        }
         // Attachment is passive. The only fit belongs to source-ready finalization.
         super::claude_windows_fit::pending_candidate(snapshot, window, &[window]).map_err(
             |error| {
