@@ -70,7 +70,7 @@ def run(directory, receipt):
     verbose_path.touch(mode=0o600)
     with verbose_path.open('w+b') as verbose:
         process = subprocess.Popen(
-            [*prefix, '-v', '-o', str(capture), '-e', source],
+            [*prefix, '-q', '-v', '-o', str(capture), '-e', source],
             stdin=subprocess.DEVNULL, stdout=verbose, stderr=subprocess.PIPE,
             start_new_session=True, env=environment)
         try:
@@ -102,11 +102,20 @@ def run(directory, receipt):
     if receipt['failure'] is not None or process.returncode != 0:
         return
     receipt['stage'] = 'readback'
-    remaining, maps = split_maps(capture.read_bytes())
+    try:
+        remaining, maps = split_maps(capture.read_bytes())
+    except ValueError:
+        receipt['failure'] = 'map-format'
+        return
     expected = dict(status='matched', renderedHitboxes=1024, boundsMatches=1,
                     priorPointerMatches=True, targetMaskContainsPoint=True,
                     blockingHitboxesAhead=1, targetWouldBeHovered=False)
-    if remaining.strip() or observations(maps, directory, 1) != [expected]:
+    try:
+        observed = observations(maps, directory, 1)
+    except ValueError:
+        receipt['failure'] = 'geometry-format'
+        return
+    if remaining.strip() or observed != [expected]:
         receipt['failure'] = 'geometry-mismatch'
         return
     receipt.update(status='passed', stage='complete')

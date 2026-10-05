@@ -58,8 +58,16 @@ class FixtureTests(unittest.TestCase):
         self.assertNotIn('PRIVATE', str(receipt))
 
     def test_missing_geometry_cannot_pass_preflight(self):
-        with self.assertRaises(ValueError):
-            self.execute(True, 0, b'', b'')
+        receipt, _ = self.execute(True, 0, b'', b'')
+        self.assertEqual(receipt['status'], 'failed')
+        self.assertEqual(receipt['failure'], 'geometry-format')
+
+    def test_non_map_notifications_remain_rejected(self):
+        for kind in ('attached_probes', 'helper_error', 'lost_events'):
+            output = json.dumps(dict(type=kind, data={})).encode() + b'\n' + maps()
+            receipt, _ = self.execute(True, 0, output, b'')
+            self.assertEqual(receipt['status'], 'failed')
+            self.assertEqual(receipt['failure'], 'map-format')
 
     def test_compilation_rejection_never_attaches(self):
         receipt = dict(status='failed', failure=None)
