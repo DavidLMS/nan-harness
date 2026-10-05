@@ -166,14 +166,14 @@ def attach_failure(line):
     return None
 
 
-def read_ready(stream, timeout=15, observe=None):
+def read_ready(stream, timeout=15, observe=None, max_bytes=65536):
     """Pinned 0.20.2 emits this test notification after all probes attach."""
     marker = b'__BPFTRACE_NOTIFY_PROBES_ATTACHED'
     deadline = time.monotonic() + timeout
     line = bytearray()
     with selectors.DefaultSelector() as selector:
         selector.register(stream, selectors.EVENT_READ)
-        for _ in range(65536):
+        for _ in range(max_bytes):
             remaining = deadline - time.monotonic()
             if remaining <= 0 or not selector.select(remaining):
                 return False

@@ -56,35 +56,47 @@ def run(directory, receipt):
     capture.touch(mode=0o600)
     receipt['stage'] = 'attach'
     categories = []
+    diagnostic_bytes = 0
     def observe(line):
+        nonlocal diagnostic_bytes
+        diagnostic_bytes += len(line) + 1
         categories.extend(diagnostics(line))
-    process = subprocess.Popen(
-        [*prefix, '-v', '-o', str(capture), '-e', source],
-        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        start_new_session=True, env=environment)
-    try:
-        ready = read_ready(process.stderr, observe=observe)
-        if ready and process.poll() is None:
-            receipt['stage'] = 'dispatch'
-            subprocess.run([str(executable)], check=True, timeout=5,
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        else:
-            receipt['failure'] = 'readiness-incomplete' if process.poll() is None else 'tracer-exited'
-    finally:
-        if process.poll() is None:
-            subprocess.run(['sudo', '-n', 'kill', '-INT', '--', str(-process.pid)], check=True,
-                           timeout=3, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    # Verbose verifier output can fill a pipe before the attached notification.
+    # Keep this synthetic-only stream in a private temporary file, not an unread
+    # stdout pipe. The numeric map stream remains independently bounded below.
+    verbose_path = directory / 'verbose.txt'
+    verbose_path.touch(mode=0o600)
+    with verbose_path.open('w+b') as verbose:
+        process = subprocess.Popen(
+            [*prefix, '-v', '-o', str(capture), '-e', source],
+            stdin=subprocess.DEVNULL, stdout=verbose, stderr=subprocess.PIPE,
+            start_new_session=True, env=environment)
         try:
-            output, errors = process.communicate(timeout=5)
-        except subprocess.TimeoutExpired:
-            subprocess.run(['sudo', '-n', 'kill', '-KILL', '--', str(-process.pid)], check=True,
-                           timeout=3, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            output, errors = process.communicate(timeout=3)
-            receipt['failure'] = 'stop-timeout'
-        for line in errors.splitlines():
-            observe(line)
-        receipt['diagnosticCategories'] = sorted(set(categories) | set(diagnostics(output + errors)))
-        receipt['processExitedSuccessfully'] = process.returncode == 0
+            ready = read_ready(process.stderr, timeout=45, observe=observe, max_bytes=4 * 1024 * 1024)
+            if ready and process.poll() is None:
+                receipt['stage'] = 'dispatch'
+                subprocess.run([str(executable)], check=True, timeout=5,
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            else:
+                receipt['failure'] = 'readiness-incomplete' if process.poll() is None else 'tracer-exited'
+        finally:
+            if process.poll() is None:
+                subprocess.run(['sudo', '-n', 'kill', '-INT', '--', str(-process.pid)], check=True,
+                               timeout=3, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            try:
+                output, errors = process.communicate(timeout=5)
+            except subprocess.TimeoutExpired:
+                subprocess.run(['sudo', '-n', 'kill', '-KILL', '--', str(-process.pid)], check=True,
+                               timeout=3, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                output, errors = process.communicate(timeout=3)
+                receipt['failure'] = 'stop-timeout'
+            for line in errors.splitlines():
+                observe(line)
+            verbose.seek(0)
+            diagnostic_output = verbose.read(4 * 1024 * 1024)
+            receipt['diagnosticCategories'] = sorted(set(categories) | set(diagnostics(diagnostic_output + errors)))
+            receipt['readinessDiagnosticBytes'] = diagnostic_bytes
+            receipt['processExitedSuccessfully'] = process.returncode == 0
     if receipt['failure'] is not None or process.returncode != 0:
         return
     receipt['stage'] = 'readback'

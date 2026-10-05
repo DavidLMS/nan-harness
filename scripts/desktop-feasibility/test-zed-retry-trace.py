@@ -91,6 +91,16 @@ class TraceTests(unittest.TestCase):
             child.wait(timeout=2)
         self.assertEqual(errors, [b'ERROR: synthetic'])
 
+    def test_synthetic_verbose_budget_can_reach_notification_after_large_diagnostic(self):
+        sizes = []
+        code = ('import sys;sys.stderr.buffer.write(b"v"*70000 + '
+                'b"\\n__BPFTRACE_NOTIFY_PROBES_ATTACHED\\n")')
+        with subprocess.Popen([sys.executable, '-c', code], stderr=subprocess.PIPE) as child:
+            self.assertTrue(read_ready(child.stderr, 5, observe=lambda line: sizes.append(len(line)),
+                                       max_bytes=100000))
+            child.wait(timeout=2)
+        self.assertEqual(sizes, [70000])
+
     def test_activation_intervals_require_complete_bounded_marker_pairs(self):
         total, clicks = parse_click_counts(maps(1, 1, 20) + click_maps())
         self.assertEqual(total, (0, 0, 19))
