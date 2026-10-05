@@ -1537,6 +1537,24 @@ class NativeTreeDiagnosticTests(unittest.TestCase):
         self.assertEqual((a.paste_count,a.send_count),(0,0))
 
 class QueryTimingTests(unittest.TestCase):
+    def test_nested_queries_count_duration_once_and_unwind_after_failure(self):
+        adapter = Adapter()
+        controller = chat.Controller(adapter, {}, 10, clock=lambda: adapter.now)
+        def guard():
+            adapter.now += 1
+            return True
+        def paste_once(prompt):
+            controller.query('guard')
+            adapter.now += 2
+            raise ValueError('PRIVATE')
+        adapter.guard, adapter.paste_once = guard, paste_once
+        with self.assertRaises(ValueError):
+            controller.query('paste_once', 'PRIVATE')
+        self.assertTrue(controller.query('guard'))
+        self.assertEqual(controller.facts['queryObservation'], dict(
+            calls=3, elapsedMs=4000, nativeWindowMs=2000, lastMs=1000))
+        self.assertNotIn('PRIVATE', str(controller.facts))
+
     def test_query_timing_preserves_timeout_and_counts_native_guard_cost(self):
         adapter = Adapter()
         controller = chat.Controller(adapter, {}, 10, clock=lambda: adapter.now)

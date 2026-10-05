@@ -403,6 +403,7 @@ class Controller:
         self.copy_attempted = False
         self.retry_attempted = False
         self.readback_active = False
+        self.query_depth = 0
         self.focus_attempted = self.paste_attempted = self.send_attempted = False
         self.facts = dict(schemaVersion=1, mechanism='claude-linux-native-chat', diagnosticsOnly=True,
             stage='source', inputVerified=False, pasteAttempted=False,
@@ -411,6 +412,7 @@ class Controller:
 
     def query(self, method, *args):
         started = self.clock()
+        self.query_depth += 1
         try:
             return self._query(method, *args)
         finally:
@@ -418,7 +420,11 @@ class Controller:
             timing = self.facts.setdefault('queryObservation', dict(
                 calls=0, elapsedMs=0, nativeWindowMs=0, lastMs=0))
             timing['calls'] = min(100000, timing['calls'] + 1)
-            timing['elapsedMs'] = min(600000, timing['elapsedMs'] + elapsed)
+            self.query_depth -= 1
+            # Clipboard operations call guarded queries recursively. Count each
+            # call, but charge its duration only to the outermost query.
+            if self.query_depth == 0:
+                timing['elapsedMs'] = min(600000, timing['elapsedMs'] + elapsed)
             timing['lastMs'] = elapsed
             if method == 'guard':
                 timing['nativeWindowMs'] = min(600000, timing['nativeWindowMs'] + elapsed)
