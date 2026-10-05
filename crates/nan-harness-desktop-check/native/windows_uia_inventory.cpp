@@ -424,7 +424,7 @@ struct Collection {
                 :type==UIA_GroupControlTypeId?UiaChatRole::Group
                 :(type==UIA_DocumentControlTypeId || type==UIA_WindowControlTypeId || type==UIA_PaneControlTypeId)?UiaChatRole::Boundary
                 :UiaChatRole::Other;
-            const bool retain_label=uia_chat_retains_label(chat_role);
+            const bool retain_label=uia_chat_retains_label(chat_role,text);
             chat_text_units+=retain_label?text.size():0;
             if(chat_text_units>65536){stage="limit-text";return false;}
             chat_nodes.push_back({chat_role,retain_label?text:L"",parent});

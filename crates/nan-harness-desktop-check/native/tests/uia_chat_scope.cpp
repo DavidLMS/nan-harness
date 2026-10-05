@@ -4,13 +4,13 @@
 #include "../uia_attachment.hpp"
 static void container_projection_contract() {
     using R = UiaChatRole;
-    assert(!uia_chat_retains_label(R::Group));
-    assert(!uia_chat_retains_label(R::Boundary));
-    for (auto role : {R::Other,R::Text,R::Heading,R::Button}) assert(uia_chat_retains_label(role));
+    assert(!uia_chat_retains_label(R::Group,L"private aggregate"));
+    assert(!uia_chat_retains_label(R::Boundary,L"private aggregate"));
+    for (auto role : {R::Other,R::Text,R::Heading,R::Button}) assert(uia_chat_retains_label(role,L"source label"));
     std::vector<UiaChatScopeNode> nodes;
     std::size_t units = 0;
     auto append = [&](R role, const std::wstring& label, int parent) {
-        const auto retained = uia_chat_retains_label(role) ? label : L"";
+        const auto retained = uia_chat_retains_label(role,label) ? label : L"";
         units += retained.size(); nodes.push_back({role,retained,parent});
     };
     // Repeated container accessible names are private metadata, not independent
@@ -24,6 +24,15 @@ static void container_projection_contract() {
     nodes[3] = {R::Other,L"NAN_CHECK_EXPECTED_FAILURE",2};nodes[4].label=L"Retry";
     append(R::Text,L"owned-prompt",2);
     assert(uia_chat_scope(nodes,L"owned-prompt",L"NAN_CHECK_EXPECTED_FAILURE",true).control == 4);
+    nodes[4].label=L"";
+    append(R::Group,L"Retry",2);append(R::Boundary,L"View details",2);
+    const auto counts=uia_chat_failure_counts(nodes,L"owned-prompt");
+    assert(counts.retry_labels==1 && counts.details_labels==1);
+    assert(counts.retries==0 && counts.details==0);
+    assert(uia_chat_scope(nodes,L"owned-prompt",L"NAN_CHECK_EXPECTED_FAILURE",true).control<0);
+    assert(uia_chat_failure_details(nodes,L"owned-prompt").control<0);
+    assert(!uia_chat_retains_label(R::Group,L"Retry private aggregate"));
+    assert(!uia_chat_retains_label(R::Boundary,L"View details private aggregate"));
 }
 static void control_view_scope_contract() {
     using R=UiaChatRole;
