@@ -9,7 +9,7 @@ import tempfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'canary/actions'))
 from zed_retry_trace import attach_failure, read_ready
-from zed_hit_geometry import observations, probe, save_target, split_maps
+from zed_hit_geometry import cleanup, observations, probe, save_target, seeds, split_maps
 
 
 def diagnostics(data):
@@ -18,6 +18,7 @@ def diagnostics(data):
     # Fixed signatures only; compiler and verifier text never leaves this runner.
     for phrase, category in (
             (b'error loading program:', 'program-load'),
+            (b'verification log buffer', 'verifier-log-truncated'),
             (b'bpf program is too large', 'verifier-complexity'),
             (b'infinite loop detected', 'verifier-loop'),
             (b'invalid mem access', 'verifier-memory'),
@@ -39,10 +40,11 @@ def run(directory, receipt):
     subprocess.run(['cc', '-O0', '-g', str(Path(__file__).with_suffix('.c')), '-o', str(executable)],
                    check=True, timeout=30, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     save_target(directory, dict(point=[30, 30], bounds=[10, 20, 40, 20], viewport=[200, 200]))
-    source = ('BEGIN { @active = 1; @slot = 1; @geometrySlot = 0; }\n'
+    source = ('BEGIN { @active = 1; @slot = 1; ' + seeds() + ' }\n'
               + probe(executable, 'synthetic_dispatch')
-              + '\nEND { delete(@active); delete(@slot); delete(@geometrySlot); }')
+              + '\nEND { delete(@active); delete(@slot); ' + cleanup() + ' }')
     prefix = ['sudo', '-n', 'env', '__BPFTRACE_NOTIFY_PROBES_ATTACHED=1', 'BPFTRACE_STRLEN=128',
+              'BPFTRACE_LOG_SIZE=4194304',
               '/usr/bin/bpftrace', '-kk', '-B', 'none', '-f', 'json']
     environment = {'PATH': '/usr/bin:/bin', 'LANG': 'C'}
     receipt['stage'] = 'compile'
@@ -72,7 +74,7 @@ def run(directory, receipt):
             stdin=subprocess.DEVNULL, stdout=verbose, stderr=subprocess.PIPE,
             start_new_session=True, env=environment)
         try:
-            ready = read_ready(process.stderr, timeout=45, observe=observe, max_bytes=4 * 1024 * 1024)
+            ready = read_ready(process.stderr, timeout=45, observe=observe, max_bytes=8 * 1024 * 1024)
             if ready and process.poll() is None:
                 receipt['stage'] = 'dispatch'
                 subprocess.run([str(executable)], check=True, timeout=5,
@@ -101,7 +103,7 @@ def run(directory, receipt):
         return
     receipt['stage'] = 'readback'
     remaining, maps = split_maps(capture.read_bytes())
-    expected = dict(status='matched', renderedHitboxes=2, boundsMatches=1,
+    expected = dict(status='matched', renderedHitboxes=1024, boundsMatches=1,
                     priorPointerMatches=True, targetMaskContainsPoint=True,
                     blockingHitboxesAhead=1, targetWouldBeHovered=False)
     if remaining.strip() or observations(maps, directory, 1) != [expected]:

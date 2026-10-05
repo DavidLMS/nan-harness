@@ -16,23 +16,39 @@ MAX_HITBOXES = 1024
 MAX_OUTPUT = 768 * 1024
 
 
+CHUNK_SIZE = 64
+CHUNKS = range(MAX_HITBOXES // CHUNK_SIZE)
+
+
+def seeds():
+    return ' '.join(f'@geometrySlot{chunk} = 0;' for chunk in CHUNKS)
+
+
+def cleanup():
+    return ' '.join(f'delete(@geometrySlot{chunk});' for chunk in CHUNKS)
+
+
 def probe(executable, symbol):
-    # Verified in the pinned ELF: rendered hitbox Vec pointer/length are at
-    # Window+0x250/+0x258; last mouse position at +0x1ea0/+0x1ea4. Each Hitbox
-    # occupies 48 bytes: bounds at +8, content mask at +24, behavior at +40.
-    # Capture once per activation, before dispatch mutates the rendered frame.
+    # Verified in the pinned ELF: rendered Vec at +592/+600, last pointer at
+    # +7840/+7844, viewport at +6416/+6420. Hitbox stride is 48 bytes, excluding
+    # the object ID at +0. Independent straight-line programs avoid asking the
+    # kernel verifier to explore a 1024-iteration loop with helper-error branches.
     fields = ', '.join(f'*(uint32*)uptr($box + {offset})' for offset in range(8, 40, 4))
-    return (f'uprobe:{executable}:{symbol} /@active == 1 && @slot >= 1 && @slot <= 3/ {{ '
-            'if (@geometrySlot != @slot) { @geometrySlot = @slot; '
-            '$window = arg0; $n = *(uint64*)uptr($window + 600); '
-            '$x = *(uint32*)uptr($window + 7840); $y = *(uint32*)uptr($window + 7844); '
-            '$vw = *(uint32*)uptr($window + 6416); $vh = *(uint32*)uptr($window + 6420); '
-            '@geometryHeaders[@slot, $n, $x, $y, $vw, $vh] = count(); '
+    programs = []
+    for chunk in CHUNKS:
+        header = ('$x = *(uint32*)uptr($window + 7840); $y = *(uint32*)uptr($window + 7844); '
+                  '$vw = *(uint32*)uptr($window + 6416); $vh = *(uint32*)uptr($window + 6420); '
+                  '@geometryHeaders[@slot, $n, $x, $y, $vw, $vh] = count(); ') if chunk == 0 else ''
+        programs.append(
+            f'uprobe:{executable}:{symbol} /@active == 1 && @slot >= 1 && @slot <= 3/ {{ '
+            f'if (@geometrySlot{chunk} != @slot) {{ @geometrySlot{chunk} = @slot; '
+            '$window = arg0; $n = *(uint64*)uptr($window + 600); ' + header +
             f'if ($n > 0 && $n <= {MAX_HITBOXES}) {{ '
-            '$base = *(uint64*)uptr($window + 592); $i = 0; '
-            f'while ($i < $n && $i < {MAX_HITBOXES}) {{ $box = $base + $i * 48; '
+            f'$base = *(uint64*)uptr($window + 592); $i = {chunk * CHUNK_SIZE}; '
+            f'unroll({CHUNK_SIZE}) {{ if ($i < $n) {{ $box = $base + $i * 48; '
             f'@geometryRects[@slot, $i, {fields}, *(uint8*)uptr($box + 40)] = count(); '
-            '$i = $i + 1; } } } }')
+            '} $i = $i + 1; } } } }')
+    return '\n'.join(programs)
 
 
 def split_maps(data):

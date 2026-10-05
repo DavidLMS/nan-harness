@@ -118,9 +118,11 @@ class GeometryTests(unittest.TestCase):
 
     def test_probe_bounds_reads_and_never_exports_object_identity(self):
         source = probe('/owned/zed-editor', 'dispatch_event')
-        self.assertIn('$i < 1024', source)
+        self.assertEqual(source.count('unroll(64)'), 16)
+        self.assertNotIn('while', source)
+        self.assertIn('$i = 960;', source)
         self.assertIn('$n <= 1024', source)
-        self.assertIn('@geometrySlot != @slot', source)
+        self.assertIn('@geometrySlot15 != @slot', source)
         self.assertNotIn('printf', source)
         self.assertNotIn('ustack', source)
         self.assertNotIn('arg1', source)

@@ -89,9 +89,9 @@ def program(executable, markers=None, geometry=False):
     if geometry:
         if markers is None:
             raise ValueError('geometry requires activation markers')
-        lines[0] = lines[0][:-1] + '@geometrySlot = 0; }'
+        lines[0] = lines[0][:-1] + zed_hit_geometry.seeds() + ' }'
         lines.append(zed_hit_geometry.probe(path, SYMBOLS[2]))
-        lines = [line.replace('delete(@active);', 'delete(@active); delete(@geometrySlot);') for line in lines]
+        lines = [line.replace('delete(@active);', 'delete(@active); ' + zed_hit_geometry.cleanup()) for line in lines]
     return '\n'.join(lines)
 
 
@@ -244,7 +244,8 @@ class Capture:
                 if category is not None and (category != 'tracer-error'
                                              or self.receipt['attachFailure'] == 'unclassified'):
                     self.receipt['attachFailure'] = category
-            if read_ready(self.process.stderr, observe=observe) and self.process.poll() is None:
+            if (read_ready(self.process.stderr, timeout=45 if self.geometry else 15, observe=observe)
+                    and self.process.poll() is None):
                 self.receipt['status'] = 'attached'
                 self.receipt['attachFailure'] = None
             elif self.receipt['attachFailure'] == 'unclassified':

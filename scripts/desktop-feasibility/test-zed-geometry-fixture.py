@@ -17,12 +17,12 @@ spec.loader.exec_module(fixture)
 def maps():
     def bits(value):
         return struct.unpack('<I', struct.pack('<f', value))[0]
-    header = [1, 2, *map(bits, (30, 30, 200, 200))]
+    header = [1, 1024, *map(bits, (30, 30, 200, 200))]
     target = [1, 0, *map(bits, (10, 20, 40, 20, 0, 0, 200, 200)), 0]
-    blocker = [1, 1, *map(bits, (0, 0, 200, 200, 0, 0, 200, 200)), 1]
+    blocker = [1, 1023, *map(bits, (0, 0, 200, 200, 0, 0, 200, 200)), 1]
     return b'\n'.join(json.dumps(dict(type='map', data={key: {
         ','.join(map(str, row)): 1 for row in rows}})).encode()
-        for key, rows in (('@geometryHeaders', [header]), ('@geometryRects', [target, blocker])))
+        for key, rows in (('@geometryHeaders', [header]), ('@geometryRects', [target, *([1, i, *([0] * 9)] for i in range(1, 1023)), blocker])))
 
 
 class FixtureTests(unittest.TestCase):
