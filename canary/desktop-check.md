@@ -8,7 +8,14 @@ a separate risk that must be controlled before personal-machine rollout. See the
 
 ## Qualification status
 
-### Joint campaign (current branch)
+Eleven of twelve active cells have historical full acceptance. Zed Linux remains
+unresolved; the final same-commit matrix is still unqualified. See the
+[current semantic qualification table](#semantic-deterministic-qualification).
+
+### Historical joint campaign
+
+The following subsection records an earlier six-cell investigation, not current
+acceptance status.
 
 Pen is deferred. The active acceptance matrix contains twelve cells: Zed,
 Codex, Claude and Hermes on Linux x64, macOS ARM64 and Windows x64. The six
@@ -324,9 +331,11 @@ Until the qualification entry point is registered on the default branch, use
 and `quality_only=false`. For targeted iteration use `platform=open-cells` and
 `native_only=true`; this selects Zed Linux and Claude Windows and enables the
 Zed diagnostic tracer. Instrumented results cannot qualify the final matrix.
-Use `quality_only=true` when only the repository gate is needed.
+For the remaining Zed-only investigation, also set `app=zed-desktop`; this
+avoids repeating the qualified Claude cell. Use `quality_only=true` when only
+the repository gate is needed.
 
-As of 2026-10-05, ten cells have completed three full sessions on historical
+As of 2026-10-05, eleven cells have completed three full sessions on historical
 commits. These results do not establish a complete matrix on the current SHA.
 Each full session requires a verified response, real tool execution, explicit
 UI error recovery and successful cleanup. Startup inventories, action
@@ -336,7 +345,7 @@ acknowledgements and partial sessions cannot satisfy that gate.
 | --- | --- | --- | --- |
 | Zed | Response/tool pass; recovery remains unresolved | Historical full pass | Historical full pass |
 | Codex | Historical full pass | Historical full pass | Historical full pass |
-| Claude | Historical full pass | Historical full pass | One session previously passed; three-session acceptance remains unproven |
+| Claude | Historical full pass | Historical full pass | Historical full pass |
 | Hermes | Historical full pass | Historical full pass | Historical full pass |
 | Pen | Deferred | Deferred | Deferred |
 
@@ -346,7 +355,13 @@ The historical passes are recorded in campaigns
 [37248461596](https://github.com/DavidLMS/nan-harness/actions/runs/37248461596),
 [37251043590](https://github.com/DavidLMS/nan-harness/actions/runs/37251043590) and
 [37262040806](https://github.com/DavidLMS/nan-harness/actions/runs/37262040806).
-Claude Windows campaign
+Claude Windows completed all three full sessions in
+[37275786700](https://github.com/DavidLMS/nan-harness/actions/runs/37275786700)
+on `3fa4575802c451e04e7967413fc9dd5cd3d22356`, with application/global cleanup
+and foreground restoration passing. The native readiness observer waits for
+the exact failed user row without accepting an ambiguous control.
+
+Earlier Claude Windows campaign
 [37269411810](https://github.com/DavidLMS/nan-harness/actions/runs/37269411810)
 produced a report but its 70 observations exceeded the reducer's former limit.
 The corrected Claude limit is 96 individually validated records; this capacity
