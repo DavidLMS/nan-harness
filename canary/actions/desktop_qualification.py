@@ -842,6 +842,25 @@ DOM_TAGS = {'html', 'body', 'button', 'div', 'span', 'svg', 'other', 'none', 'un
 DOM_REGIONS = {'thread-viewport', 'composer-root', 'composer-dock', 'composer-drag-region', 'composer-bounds', 'composer-portal', 'particle-field', 'chat-drop-overlay', 'titlebar-drag', 'pane-overlay', 'pane-host', 'narrow-overlay', 'floating-pane', 'tree-group', 'panel-header', 'panel-page-header', 'zone-tabstrip', 'window-drag-handle', 'gateway-connecting', 'onboarding', 'command-backdrop', 'dialog-overlay', 'dialog', 'popover', 'tooltip', 'other', 'none', 'unmeasured'}
 
 
+def validate_overlay_census(value):
+    if type(value) is not dict or set(value) != {'status', 'counts', 'actions'}:
+        raise ValueError('invalid overlay census')
+    if value['status'] == 'unavailable':
+        if value['counts'] is not None or value['actions'] is not None:
+            raise ValueError('incomplete overlay census')
+        return value
+    counts, actions = value['counts'], value['actions']
+    if (value['status'] != 'complete' or type(counts) is not dict or type(actions) is not dict
+            or set(counts) != {'nodes', 'dialogs', 'alerts', 'modalNodes', 'focusedNodes', 'buttons'}
+            or set(actions) != {'cancel', 'ok', 'yes', 'no', 'save', 'discard', 'reload', 'close',
+                               'trust', 'retry', 'continue', 'open', 'dismiss', 'other'}
+            or any(type(n) is not int or not 0 <= n <= 1024 for n in (*counts.values(), *actions.values()))
+            or counts['nodes'] < 1 or any(n > counts['nodes'] for n in counts.values())
+            or sum(actions.values()) != counts['buttons']):
+        raise ValueError('invalid overlay census counts')
+    return value
+
+
 def validate_occlusion_profile(item):
     profile = item['occlusionProfile']
     if (item['status'] != 'matched' or type(profile) is not dict
@@ -2088,9 +2107,12 @@ def semantic_observations(directory, app):
                 if type(target) is not str or target not in {'unavailable','defunct','same-source','changed-source'}:
                     raise ValueError('invalid Zed retained target observation')
                 record['targetAfterClick'] = target
+            for field in ('overlayBeforeClick', 'overlayAfterClick'):
+                if field in value:
+                    record[field] = validate_overlay_census(value[field])
             if 'xi2Motion' in value:
                 record['xi2Motion']=zed_xi2_motion(value['xi2Motion'])
-            if (set(value) - modifier_fields - ancestor_fields - ancestor_stage_fields - {'cursorSelection', 'transientDialogs','transientDialogsBeforeHover','transientDialogsBeforeDispatch','entryCrossing','xi2Motion','retryHitPolicy','targetAfterClick'} not in (base, base | {'inputDelivery'}, base | coordinate_fields,
+            if (set(value) - modifier_fields - ancestor_fields - ancestor_stage_fields - {'cursorSelection', 'transientDialogs','transientDialogsBeforeHover','transientDialogsBeforeDispatch','entryCrossing','xi2Motion','retryHitPolicy','targetAfterClick','overlayBeforeClick','overlayAfterClick'} not in (base, base | {'inputDelivery'}, base | coordinate_fields,
                                   base | coordinate_fields | {'inputDelivery'}, base | coordinate_fields | authority_fields,
                                   base | coordinate_fields | authority_fields | {'inputDelivery'})
                     or present_modifiers and present_modifiers != modifier_fields

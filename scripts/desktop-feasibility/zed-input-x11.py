@@ -975,6 +975,16 @@ def retry_click(payload):
             if (time.monotonic() >= deadline or not record_scope()
                     or independent_client_snapshot(active) != second_geometry):
                 return 18
+        overlay_capture = None
+        if os.environ.get('NANH_ZED_RETRY_TRACE_MARKERS') and live_cursor is not None:
+            overlay_capture = runpy.run_path(str(Path(__file__).with_name('zed-overlay-census.py')))['capture']
+            facts['overlayBeforeClick'] = overlay_capture(request, record_scope,
+                min(deadline, time.monotonic() + 0.4))
+            if time.monotonic() >= deadline or not record_scope():
+                return 18
+            prove_hit(point)
+            if run(['getmouselocation', '--shell'], 'position') != (px, py, pointer_window):
+                return 18
         # One ordinary activation, never another press after an uncertain receipt.
         trace_started = trace_marker('start', dict(
             point=[point[0] - geometry[0], point[1] - geometry[1]],
@@ -982,6 +992,9 @@ def retry_click(payload):
             bounds=[held_bounds[0] - geometry[0], held_bounds[1] - geometry[1], *held_bounds[2:]])
             if live_cursor is not None else None)
         run(['click', '--clearmodifiers', '1'])
+        if overlay_capture is not None:
+            facts['overlayAfterClick'] = overlay_capture(request, record_scope,
+                min(deadline, time.monotonic() + 0.4))
         if os.environ.get('NANH_ZED_XRECORD') == '1':
             facts['targetAfterClick'] = 'unavailable'
             if live_cursor is not None and time.monotonic() < deadline:
