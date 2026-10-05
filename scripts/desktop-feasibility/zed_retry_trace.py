@@ -15,6 +15,7 @@ BINARY_SHA256 = '18f225903713f623e1564a2e1902ef4ba84d2b5fb6aa58fd59af2d62646943b
 SYMBOLS = (
     '_RNvMs8_NtNtCs49dSLSzPpau_8agent_ui17conversation_view11thread_viewNtB5_10ThreadView16retry_generation',
     '_RNvXsd_Cs5P68OkLbxMe_5agentNtB5_23NativeAgentSessionRetryNtNtCs2R6xX2UfTue_10acp_thread10connection17AgentSessionRetry3run',
+    '_RNvMst_NtCs1R78ycJoit4_4gpui6windowNtB5_6Window14dispatch_event',
 )
 
 
@@ -22,14 +23,15 @@ def program(executable):
     path = str(executable)
     if not re.fullmatch(r'/[A-Za-z0-9_./-]+', path):
         raise ValueError('unsupported executable path')
-    # Seed both count maps so zero events is distinguishable from missing output.
+    # Seed every count map so zero events is distinguishable from missing output.
     # Let bpftrace print once after detaching. In 0.20.2 scalar count maps are
     # per-CPU arrays: clear() zeroes them, so an END print/clear also produces
     # a second pair of zero-valued maps during the automatic final print.
     return '\n'.join([
-        'BEGIN { @retry = count(); @native = count(); }',
+        'BEGIN { @retry = count(); @native = count(); @input = count(); }',
         f'uprobe:{path}:{SYMBOLS[0]} {{ @retry = count(); }}',
         f'uprobe:{path}:{SYMBOLS[1]} {{ @native = count(); }}',
+        f'uprobe:{path}:{SYMBOLS[2]} {{ @input = count(); }}',
         'interval:s:1800 { exit(); }',
     ])
 
@@ -46,12 +48,13 @@ def parse_counts(data):
                 or type(item.get('data')) is not dict or len(item['data']) != 1):
             raise ValueError('unexpected trace output')
         key, value = next(iter(item['data'].items()))
-        if key not in ('@retry', '@native') or key in counts or type(value) is not int or not 1 <= value <= 1025:
+        limit = 65537 if key == '@input' else 1025
+        if key not in ('@retry', '@native', '@input') or key in counts or type(value) is not int or not 1 <= value <= limit:
             raise ValueError('invalid trace count')
         counts[key] = value - 1
-    if set(counts) != {'@retry', '@native'}:
+    if set(counts) != {'@retry', '@native', '@input'}:
         raise ValueError('incomplete trace output')
-    return counts['@retry'], counts['@native']
+    return counts['@retry'], counts['@native'], counts['@input']
 
 
 def read_ready(stream, timeout=15):
@@ -85,7 +88,7 @@ class Capture:
         self.process = None
         self.receipt = dict(schemaVersion=1, mechanism='zed-retry-entry-counts',
                             diagnosticsOnly=True, status='unavailable', stage='attach', cleanup='passed',
-                            retryEntries=None, nativeRetryEntries=None)
+                            retryEntries=None, nativeRetryEntries=None, inputDispatchEntries=None)
 
     def __enter__(self):
         if (sys.platform != 'linux' or os.environ.get('GITHUB_ACTIONS') != 'true'
@@ -132,7 +135,7 @@ class Capture:
                                     str(-process.pid)], timeout=3, check=True,
                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 try:
-                    # Only two maps can be printed; no probe prints per-event data.
+                    # Only three maps can be printed; no probe prints per-event data.
                     output, _ = process.communicate(timeout=5)
                 except subprocess.TimeoutExpired:
                     self.receipt['status'] = 'unavailable'
@@ -142,8 +145,9 @@ class Capture:
                     output, _ = process.communicate(timeout=3)
                 if self.receipt['status'] == 'attached' and alive and process.returncode == 0:
                     self.receipt['stage'] = 'readback'
-                    retry, native = parse_counts(output)
-                    self.receipt.update(status='complete', stage='complete', retryEntries=retry, nativeRetryEntries=native)
+                    retry, native, inputs = parse_counts(output)
+                    self.receipt.update(status='complete', stage='complete', retryEntries=retry,
+                                        nativeRetryEntries=native, inputDispatchEntries=inputs)
                 else:
                     self.receipt['status'] = 'unavailable'
         except (OSError, ValueError, subprocess.SubprocessError):

@@ -191,6 +191,7 @@ pub(crate) enum WindowsChatStage {
     TreePid,
     Mode,
     Composer,
+    ComposerSendPending,
     Control,
     Deadline,
     Sent,
@@ -256,6 +257,7 @@ impl WindowsChatStage {
             "turn tree-pid\n" => Self::TreePid,
             "turn mode\n" => Self::Mode,
             "turn composer\n" => Self::Composer,
+            "turn composer-send-pending\n" => Self::ComposerSendPending,
             "turn control\n" => Self::Control,
             "turn deadline\n" => Self::Deadline,
             "turn sent\n" => Self::Sent,
@@ -358,6 +360,7 @@ mod tests {
         assert_eq!(S::parse("turn tree-query\n"), Some(S::TreeQuery));
         assert!(S::TreeQuery.passive_pending());
         for (wire, stage) in [
+            ("turn composer-send-pending\n", S::ComposerSendPending),
             ("turn tree-limit\n", S::TreeLimit),
             ("turn clipboard-owner\n", S::ClipboardOwner),
             ("turn clipboard-allocation\n", S::ClipboardAllocation),

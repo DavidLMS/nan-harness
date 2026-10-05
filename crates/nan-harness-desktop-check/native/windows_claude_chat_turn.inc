@@ -423,7 +423,9 @@ int windows_claude_chat_turn() {
         }
         return emit(result);
     }
-    if(c.classic_controls.size()!=1 || c.start_controls.size()+c.send_controls.size()!=1)return emit("composer");
+    if(c.classic_controls.size()!=1)return emit("composer");
+    if(c.start_controls.empty() && c.send_controls.empty())return emit("composer-send-pending");
+    if(c.start_controls.size()+c.send_controls.size()!=1)return emit("composer");
     turn.editor=c.classic_controls.front();
     turn.send=c.start_controls.empty()?c.send_controls.front():c.start_controls.front();
     turn.send_name=c.start_controls.empty()?L"Send message":L"Start task";

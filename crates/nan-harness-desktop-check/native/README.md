@@ -72,6 +72,13 @@ Windows may deny the request; denial stops acquisition. A successful request
 still requires a fresh stable snapshot and the existing focus, containment and
 occlusion guards. Later window identity changes or focus losses cannot trigger
 another activation attempt.
+Closed failure stages distinguish window eligibility, an OS activation denial,
+and a failed postcondition without exporting window identities.
+
+Before a subsequent Windows Claude prompt, an exact single composer with no
+Send or Start button produces `composer-send-pending`. This is a read-only
+observation before any input; the supervisor may repeat it within the original
+deadline. Ambiguous controls and uncertain input delivery remain terminal.
 
 Windows clipboard modes use `CF_UNICODETEXT` directly through User32, with a
 private message-only owner window and one `OpenClipboard` attempt. Writes accept

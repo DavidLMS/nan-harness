@@ -3134,12 +3134,15 @@ authority. Synthetic driver, transient-census and report-reducer checks pass.
 ### Count-only Linux Zed recovery diagnostic
 
 The `open-cells` feasibility campaign enables `NANH_ZED_RETRY_ENTRY_TRACE=1`
-for Zed Linux only. It attaches uprobes to `ThreadView::retry_generation` and
-`NativeAgentSessionRetry::run` in the exact inspected official 1.22.0 GUI
+for Zed Linux only. It attaches uprobes to `ThreadView::retry_generation`,
+`NativeAgentSessionRetry::run` and `Window::dispatch_event` in the exact inspected official 1.22.0 GUI
 binary. The prepared CLI locates its sibling `libexec/zed-editor`; its SHA256
 must also match. It reads no function arguments, memory, stacks or user data.
 The public receipt contains only bounded entry counts, lifecycle stage and
 completion/cleanup status. Counts cover the three probe sessions together.
+`inputDispatchEntries` provides an independent control for ordinary GUI event
+activity; zero Retry entries without observed input activity cannot establish
+where recovery stopped. Older receipts lacking this field remain readable.
 
 The runner uses Ubuntu 24.04's bpftrace 0.20.2. Its source-defined
 `__BPFTRACE_NOTIFY_PROBES_ATTACHED` notification establishes attachment readiness;

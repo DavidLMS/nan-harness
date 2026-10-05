@@ -13,9 +13,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'canary/actions'))
 from zed_retry_trace import Capture, parse_counts, program, read_ready
 
 
-def maps(retry, native):
+def maps(retry, native, inputs=1):
     return ('\n'.join(json.dumps({'type': 'map', 'data': {key: value}})
-                      for key, value in (('@retry', retry), ('@native', native))) + '\n').encode()
+                      for key, value in (('@retry', retry), ('@native', native), ('@input', inputs))) + '\n').encode()
 
 
 class TraceTests(unittest.TestCase):
@@ -36,10 +36,11 @@ class TraceTests(unittest.TestCase):
                 spawn.assert_not_called()
 
     def test_zero_requires_both_seeded_maps(self):
-        self.assertEqual(parse_counts(maps(1, 1)), (0, 0))
-        self.assertEqual(parse_counts(maps(4, 2)), (3, 1))
+        self.assertEqual(parse_counts(maps(1, 1)), (0, 0, 0))
+        self.assertEqual(parse_counts(maps(4, 2, 301)), (3, 1, 300))
+        self.assertEqual(parse_counts(maps(1, 1, 65537)), (0, 0, 65536))
         for raw in (b'', maps(0, 1), maps(True, 1), maps(1026, 1),
-                    maps(1, 1) * 2, b'x' * 4097,
+                    maps(1, 1) * 2, maps(1, 1, True), maps(1, 1, 65538), b'x' * 4097,
                     b'{"type":"map","data":{"@retry":1}}\n',
                     b'{"type":"printf","data":"private output"}\n'):
             with self.subTest(raw=raw[:40]), self.assertRaises(ValueError):
@@ -47,7 +48,7 @@ class TraceTests(unittest.TestCase):
 
     def test_program_has_only_known_entry_counters(self):
         text = program('/tmp/owned/zed-editor')
-        self.assertEqual(text.count('uprobe:'), 2)
+        self.assertEqual(text.count('uprobe:'), 3)
         for forbidden in ('arg0', 'ustack', 'str(', 'system(', 'pid', 'comm'):
             self.assertNotIn(forbidden, text)
         for path in ('relative', '/tmp/name";exit()', '/tmp/a*b', '/tmp/a:b'):

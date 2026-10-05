@@ -251,11 +251,21 @@ impl ClaudeWindowsChatSession<'_> {
         }
         self.retry_ready = false;
         self.prompt = Zeroizing::new(prompt.to_owned());
-        let result = self.action(
-            "input-replace-owned",
-            "",
-            Instant::now() + Duration::from_millis(u64::from(WINDOWS_CHAT_MAX_MILLIS)),
-        );
+        let deadline = Instant::now() + Duration::from_millis(u64::from(WINDOWS_CHAT_MAX_MILLIS));
+        let result = loop {
+            let result = self.action("input-replace-owned", "", deadline);
+            // A copied answer can precede the renderer restoring its Send button.
+            // This receipt proves no input was attempted; every retry rechecks
+            // the owned window, profile and complete semantic tree.
+            if result != Ok(WindowsChatStage::ComposerSendPending) {
+                break result;
+            }
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err(Reason::Timeout);
+            }
+            std::thread::sleep(Duration::from_millis(100).min(remaining));
+        };
         match result {
             Ok(WindowsChatStage::Sent) => {
                 self.facts.input_verified_turns += 1;

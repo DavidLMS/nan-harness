@@ -1263,7 +1263,7 @@ def semantic_observations(directory, app):
             counts = {'submittedTurns', 'inputVerifiedTurns', 'copiedResponses'}
             flags = {'retryAttempted', 'clipboardCleared'}
             fields = counts | flags | {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'stage'}
-            stages = set('request window tree tree-query tree-duplicate tree-type tree-limit tree-pid tree-focus tree-window mode composer focus input-focus-guard input-focus-setting input-focused-identity input-replace-select-key input-prompt-before-guard input-prompt-clipboard input-prompt-after-guard input-paste-key input-readback-before-guard input-sentinel-clipboard input-sentinel-after-guard input-readback-select-key input-readback-select-guard input-readback-copy-key input-collapse-guard input-collapse-key input-mismatch input-initial-unavailable input-initial-nonempty input-clipboard-mismatch input-value-mismatch control scope scope-anchor-absent scope-heading-absent scope-assistant-heading-absent scope-marker-heading-absent scope-anchor-ambiguous scope-control-absent scope-control-ambiguous scope-heading-ambiguous scope-prompt-mismatch deadline action-uncertain response-mismatch sent copied retry-ready failure-details-ready failure-details-opened retried completed deadline-window deadline-tree deadline-focus deadline-input deadline-input-paste deadline-input-readback deadline-press deadline-copy deadline-retry-ready deadline-retry'.split())
+            stages = set('request window tree tree-query tree-duplicate tree-type tree-limit tree-pid tree-focus tree-window mode composer composer-send-pending focus input-focus-guard input-focus-setting input-focused-identity input-replace-select-key input-prompt-before-guard input-prompt-clipboard input-prompt-after-guard input-paste-key input-readback-before-guard input-sentinel-clipboard input-sentinel-after-guard input-readback-select-key input-readback-select-guard input-readback-copy-key input-collapse-guard input-collapse-key input-mismatch input-initial-unavailable input-initial-nonempty input-clipboard-mismatch input-value-mismatch control scope scope-anchor-absent scope-heading-absent scope-assistant-heading-absent scope-marker-heading-absent scope-anchor-ambiguous scope-control-absent scope-control-ambiguous scope-heading-ambiguous scope-prompt-mismatch deadline action-uncertain response-mismatch sent copied retry-ready failure-details-ready failure-details-opened retried completed deadline-window deadline-tree deadline-focus deadline-input deadline-input-paste deadline-input-readback deadline-press deadline-copy deadline-retry-ready deadline-retry'.split())
             stages.update('tree-depth tree-nodes tree-name-limit tree-text-limit tree-window-limit tree-process-limit'.split())
             stages.update('clipboard-owner clipboard-allocation clipboard-lock clipboard-empty clipboard-set clipboard-close clipboard-guard-before clipboard-guard-after clipboard-deadline-before clipboard-deadline-after clipboard-open-deadline'.split())
             phase_fields = {'actionPhase', 'transportFailure'}
@@ -2229,7 +2229,7 @@ def semantic_observations(directory, app):
                 record['inputDelivery'] = dict(delivery)
         elif mechanism == 'zed-retry-entry-counts':
             fields = set('schemaVersion mechanism diagnosticsOnly status stage cleanup retryEntries nativeRetryEntries'.split())
-            if (set(value) != fields or app != 'zed-desktop' or value['diagnosticsOnly'] is not True
+            if (set(value) - {'inputDispatchEntries'} != fields or app != 'zed-desktop' or value['diagnosticsOnly'] is not True
                     or type(value['status']) is not str or value['status'] not in {'complete', 'unavailable'}
                     or type(value['stage']) is not str or value['stage'] not in {'attach', 'stop', 'readback', 'complete'}
                     or (value['status'] == 'complete') != (value['stage'] == 'complete')
@@ -2240,6 +2240,11 @@ def semantic_observations(directory, app):
                     or any(type(count) is not int or not 0 <= count <= 1024 for count in counts))
                     or value['status'] == 'unavailable' and counts != [None, None]):
                 raise ValueError('invalid Zed entry counts')
+            if 'inputDispatchEntries' in value:
+                inputs = value['inputDispatchEntries']
+                if (value['status'] == 'complete' and (type(inputs) is not int or not 0 <= inputs <= 65536)
+                        or value['status'] == 'unavailable' and inputs is not None):
+                    raise ValueError('invalid Zed input entry count')
             record.update(value)
         elif mechanism == 'zed-atspi-retry':
             fields = set('schemaVersion mechanism diagnosticsOnly method stage actionAttempted forwarded'.split())

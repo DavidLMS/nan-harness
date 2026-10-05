@@ -1370,9 +1370,12 @@ fn initial_windows_fit(
             native
                 .activate_windows_owned_until(window, deadline)
                 .map_err(|failure| {
-                    acquisition_failure(
-                        failure.reason(),
+                    (
+                        Reason::ActionUnsupported,
                         crate::diagnostics::GuiAcquisitionStage::WindowStability,
+                        fit_error_category(failure),
+                        None,
+                        None,
                     )
                 })?;
             // A successful OS call is not readiness: observe a fresh stable snapshot.

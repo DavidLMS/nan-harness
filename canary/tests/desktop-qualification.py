@@ -1386,7 +1386,8 @@ class QualificationTests(unittest.TestCase):
 
     def test_entry_tracing_never_promotes_a_full_native_success(self):
         value = dict(schemaVersion=1, mechanism='zed-retry-entry-counts', diagnosticsOnly=True,
-                     status='complete', stage='complete', cleanup='passed', retryEntries=3, nativeRetryEntries=3)
+                     status='complete', stage='complete', cleanup='passed', retryEntries=3, nativeRetryEntries=3,
+                     inputDispatchEntries=300)
         self.assertEqual(self.trial(app='zed-desktop', policy_count=0)['qualification'], 'deterministic-full')
         result = self.trial(app='zed-desktop', policy_count=0, observations=[value])
         self.assertEqual(result['qualification'], 'unqualified')
@@ -1395,12 +1396,18 @@ class QualificationTests(unittest.TestCase):
             path = Path(directory) / 'trace.json'
             path.write_text(json.dumps(value))
             self.assertEqual(q.semantic_observations(directory, 'zed-desktop'), [value])
+            legacy = {key: entry for key, entry in value.items() if key != 'inputDispatchEntries'}
+            path.write_text(json.dumps(legacy))
+            self.assertEqual(q.semantic_observations(directory, 'zed-desktop'), [legacy])
             for change in ({'retryEntries': True}, {'nativeRetryEntries': -1}, {'pid': 123},
+                           {'inputDispatchEntries': True}, {'inputDispatchEntries': -1},
+                           {'inputDispatchEntries': 65537}, {'inputDispatchEntries': None},
                            {'status': 'unavailable'}, {'cleanup': 'failed'}, {'diagnosticsOnly': False}):
                 path.write_text(json.dumps({**value, **change}))
                 with self.assertRaises(ValueError):
                     q.semantic_observations(directory, 'zed-desktop')
-            value.update(status='unavailable', stage='attach', retryEntries=None, nativeRetryEntries=None)
+            value.update(status='unavailable', stage='attach', retryEntries=None, nativeRetryEntries=None,
+                         inputDispatchEntries=None)
             path.write_text(json.dumps(value))
             self.assertEqual(q.semantic_observations(directory, 'zed-desktop'), [value])
             with self.assertRaises(ValueError):

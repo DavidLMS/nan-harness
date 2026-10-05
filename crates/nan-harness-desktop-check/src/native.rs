@@ -602,18 +602,22 @@ impl Native {
         &self,
         window: &Window,
         deadline: std::time::Instant,
-    ) -> Result<(), FailureCategory> {
+    ) -> Result<(), FitWindowError> {
         let argument = format!("--activate-window {} {}", window.id, window.pid);
         let output = process::run_windows_fit_until(
             &self.executable,
             std::ffi::OsStr::new(&argument),
             deadline,
-        )?;
+        )
+        .map_err(FitWindowError::Transport)?;
         if std::time::Instant::now() >= deadline {
-            return Err(FailureCategory::Timeout);
+            return Err(FitWindowError::Transport(FailureCategory::Timeout));
         }
         if !output.trim().is_empty() {
-            return Err(FailureCategory::Output);
+            return Err(FitWindowError::Diagnostic(
+                FitFailure::parse(&output)
+                    .map_err(|_| FitWindowError::Transport(FailureCategory::Output))?,
+            ));
         }
         Ok(())
     }

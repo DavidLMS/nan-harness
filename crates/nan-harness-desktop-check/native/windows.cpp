@@ -1001,17 +1001,23 @@ int activate_window(const std::string& request) {
         || id > (std::numeric_limits<std::uintptr_t>::max)()
         || pid > (std::numeric_limits<DWORD>::max)()) return 5;
     HWND window = reinterpret_cast<HWND>(static_cast<std::uintptr_t>(id));
-    auto owned = [&] {
+    auto owned = [&]() -> const char* {
         DWORD actual = 0;
-        return GetWindowThreadProcessId(window, &actual) && actual == pid
-            && GetAncestor(window, GA_ROOT) == window && !GetWindow(window, GW_OWNER)
-            && IsWindowVisible(window) && IsWindowEnabled(window) && !IsIconic(window)
-            && GetLastActivePopup(window) == window;
+        if (!GetWindowThreadProcessId(window, &actual)) return "identity-read";
+        if (actual != pid) return "identity-mismatch";
+        if (GetAncestor(window, GA_ROOT) != window || GetWindow(window, GW_OWNER)
+            || !IsWindowVisible(window) || !IsWindowEnabled(window) || IsIconic(window)
+            || GetLastActivePopup(window) != window) return "window-read";
+        return nullptr;
     };
+    auto failure = [](const char* stage) { std::cout << "FIT_FAILURE " << stage << '\n'; return 0; };
     // The caller proves launch ownership and consumes this one initial attempt.
     // Respect Windows focus arbitration; never synthesize keys or attach input queues.
-    if (!owned() || !SetForegroundWindow(window)) return 5;
-    return owned() && GetForegroundWindow() == window ? 0 : 5;
+    if (const char* stage = owned()) return failure(stage);
+    if (!SetForegroundWindow(window)) return failure("foreground-mismatch");
+    if (owned()) return failure("postcondition-identity-mismatch");
+    if (GetForegroundWindow() != window) return failure("postcondition-foreground-mismatch");
+    return 0;
 }
 
 // Private wire identities stay in the checker RAM, never in public diagnostics.
