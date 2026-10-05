@@ -820,6 +820,8 @@ impl<'a> RendererSession<'a> {
             serde_json::from_slice(&bytes).map_err(|_| Reason::IsolationUnavailable)?;
         if value["schemaVersion"] != 1
             || value["mechanism"] != "renderer-inventory"
+            || value["observerStage"] != "complete"
+            || value.get("errorCategory") != Some(&serde_json::Value::Null)
             || value["endpointOwned"] != true
             || value["launcherOwned"] != true
             || value["attached"] != true

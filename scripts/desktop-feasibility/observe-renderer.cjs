@@ -804,9 +804,7 @@ async function run() {
   } catch(error) {
     facts.errorCategory='attachment-or-action-failed';save();throw error;
   } finally {
-    facts.observerShutdown = 'disconnecting'; save();
-    await browser.close();
-    facts.observerShutdown = 'disconnected'; save();
+    await require('./renderer-disconnect.cjs').disconnect(browser, facts, save);
   }
 }
 run().then(() => {

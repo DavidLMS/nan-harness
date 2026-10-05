@@ -2691,7 +2691,7 @@ def semantic_observations(directory, app):
             if 'observerShutdown' in value:
                 if type(value['observerShutdown']) is not str:
                     raise ValueError('invalid renderer shutdown phase')
-                enum(record, value, 'observerShutdown', {'disconnecting', 'disconnected', 'returned'})
+                enum(record, value, 'observerShutdown', {'disconnecting', 'disconnected', 'returned', 'disconnect-timeout'})
             if 'observerStage' in value:
                 if type(value['observerStage']) is not str:
                     raise ValueError('invalid renderer checkpoint phase')

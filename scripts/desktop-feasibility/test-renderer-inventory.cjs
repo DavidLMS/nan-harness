@@ -662,7 +662,7 @@ console.log('Renderer checkpoint survives interrupted work without claiming comp
     let release;
     const pending=new Promise((resolve,reject)=>{release=()=>rejectClose?reject(Error('PRIVATE')):resolve();});
     const facts={errorCategory:null},saved=[],process={exitCode:0};
-    const context={facts,process,browser:{close:()=>pending},save:()=>saved.push({...facts})};
+    const context={facts,process,require,browser:{close:()=>pending},save:()=>saved.push({...facts})};
     const run=vm.runInNewContext(`(async()=>{${shutdown})`,context);
     const finished=vm.runInNewContext(completion,{...context,run});
     assert.equal(saved.at(-1).observerShutdown,'disconnecting');
@@ -681,4 +681,25 @@ console.log('Renderer checkpoint survives interrupted work without claiming comp
   }
   await fixture();await fixture(true);
   console.log('Renderer shutdown distinguishes pending, returned and failed disconnects');
+})().catch(error=>{console.error(error);process.exitCode=1;});
+
+// A real child with a stuck CDP close must release its own event loop, and
+// only a completed, successful inventory may use a successful exit code.
+(async()=>{
+  const {execFile}=require('node:child_process');
+  const helper=require('node:path').join(__dirname,'renderer-disconnect.cjs');
+  for(const [stage,errorCategory,expected] of [
+    ['complete',null,0],['final-inventory',null,1],['complete','attachment-or-action-failed',1],
+  ]) {
+    const program=`const facts=${JSON.stringify({observerStage:stage,errorCategory})};
+      require(${JSON.stringify(helper)}).disconnect({close:()=>new Promise(()=>{})},facts,
+        ()=>process.stdout.write(JSON.stringify(facts)+'\\n'));`;
+    const result=await new Promise(resolve=>execFile(process.execPath,['-e',program],
+      {timeout:5000},(error,stdout)=>resolve({error,stdout})));
+    assert.equal(result.error?.code??0,expected);
+    const receipts=result.stdout.trim().split('\n').map(line=>JSON.parse(line));
+    assert.deepEqual(receipts.map(value=>value.observerShutdown),['disconnecting','disconnect-timeout']);
+    assert.equal(receipts.at(-1).errorCategory,errorCategory);
+  }
+  console.log('Renderer stuck disconnect exits without accepting incomplete or failed inventory');
 })().catch(error=>{console.error(error);process.exitCode=1;});

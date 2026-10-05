@@ -472,6 +472,9 @@ jobs:
         run: python3 canary/actions/desktop_qualification.py pending --app '${{ matrix.app }}' --platform '${{ matrix.platform }}' --architecture '${{ matrix.architecture }}' --source-sha "$GITHUB_SHA" --output "$RUNNER_TEMP/semantic-feasibility/qualification.json"
       - name: Observe closed Windows desktop session facts
         if: runner.os == 'Windows' && contains(fromJSON('["deterministic-full","startup-baseline"]'), inputs.experiment)
+        # Advisory inventory has no input authority; qualification retains its
+        # own mandatory process, profile and session ownership checks.
+        continue-on-error: true
         shell: bash
         run: python3 scripts/desktop-feasibility/windows-session.py "$RUNNER_TEMP/semantic-feasibility/windows-session.json"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
