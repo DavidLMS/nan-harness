@@ -86,11 +86,10 @@ impl WindowsChatReceipt {
             // Whole tree, exact prompt groups, and exact prompt+error groups;
             // each pair is total buttons and unnamed buttons. No labels escape.
             let button_shape = if words.len() == 18 {
-                let values = words[12..]
-                    .iter()
-                    .map(|word| optional_count(word).flatten())
-                    .collect::<Option<Vec<_>>>()?;
-                let shape: [u16; 6] = values.try_into().ok()?;
+                let mut shape = [0_u16; 6];
+                for (slot, word) in shape.iter_mut().zip(&words[12..]) {
+                    *slot = optional_count(word)??;
+                }
                 if shape[1] > shape[0]
                     || shape[2] > shape[0]
                     || shape[3] > shape[2]
@@ -105,15 +104,10 @@ impl WindowsChatReceipt {
             } else {
                 None
             };
-            let counts: Vec<u16> = words[..10]
-                .iter()
-                .map(|word| {
-                    if word.is_empty() || !word.bytes().all(|byte| byte.is_ascii_digit()) {
-                        return None;
-                    }
-                    word.parse::<u16>().ok().filter(|count| *count <= 1024)
-                })
-                .collect::<Option<_>>()?;
+            let mut counts = [0_u16; 10];
+            for (slot, word) in counts.iter_mut().zip(&words[..10]) {
+                *slot = optional_count(word)??;
+            }
             let [
                 server_errors,
                 failed_user_headings,
@@ -125,7 +119,7 @@ impl WindowsChatReceipt {
                 group_details_buttons,
                 retry_labels,
                 details_labels,
-            ]: [u16; 10] = counts.try_into().ok()?;
+            ] = counts;
             if group_retry_buttons > retry_buttons
                 || group_details_buttons > details_buttons
                 || retry_buttons > retry_labels
