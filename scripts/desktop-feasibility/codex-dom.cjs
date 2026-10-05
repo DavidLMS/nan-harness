@@ -135,12 +135,24 @@ async function ordinaryClick(locator,guard,deadline,attempt,after=guard,observe=
   const handle=await locator.elementHandle();if(!handle)return false;
   try {
     phase('sample-first');
-    const first=await handle.evaluate(sampleEditor,'button');if(first.blocked)return false;
-    await pause(Math.min(100,Math.max(0,deadline-Date.now())));
-    phase('revalidate');
-    if(!await guard()||!await locator.evaluate((e,held)=>e===held,handle))return false;
-    phase('sample-second');
-    const second=await handle.evaluate(sampleEditor,'button'),point=candidate(first,second);if(!point)return false;
+    let first=await handle.evaluate(sampleEditor,'button');if(first.blocked)return false;
+    let point;
+    while(!point) {
+      await pause(Math.min(100,Math.max(0,deadline-Date.now())));
+      phase('revalidate');
+      if(!await guard()||Date.now()>=deadline||await locator.count()!==1
+          ||!await locator.isEnabled()||!await locator.evaluate((e,held)=>e===held,handle))return false;
+      phase('sample-second');
+      const second=await handle.evaluate(sampleEditor,'button');
+      point=candidate(first,second);
+      if(point)break;
+      // A retained button may move while its transcript row settles. Only
+      // geometry changes with owned hit points may wait; replacement, overlays
+      // and lost hit authority remain terminal. No input has been attempted.
+      if(second.blocked||!first.points.length||!second.points.length
+          ||JSON.stringify(first.rect)===JSON.stringify(second.rect))return false;
+      first=second;
+    }
     if(!await guard()||Date.now()>=deadline)return false;
     phase('sample-final');
     const final=await handle.evaluate(sampleEditor,'button');
