@@ -1317,8 +1317,11 @@ def semantic_observations(directory, app):
                 counts = value['failureScopeCounts']
                 names = set('serverErrorCount failedUserHeadingCount failedPromptTextCount retryButtonCount detailsButtonCount exactPromptGroupCount groupRetryButtonCount groupDetailsButtonCount'.split())
                 label_names = {'retryLabelCount', 'detailsLabelCount'}
-                if (mechanism != 'claude-windows-native-chat' or type(counts) is not dict or set(counts) not in (names, names | label_names)
-                        or any(type(item) is not int or not 0 <= item <= 1024 for item in counts.values())
+                unfiltered_names = {'unfilteredRetryLabelCount', 'unfilteredDetailsLabelCount'}
+                if (mechanism != 'claude-windows-native-chat' or type(counts) is not dict or set(counts) not in (names, names | label_names, names | label_names | unfiltered_names)
+                        or any(type(item) is not int or not 0 <= item <= 1024 for key,item in counts.items() if key not in unfiltered_names)
+                        or any(item is not None and (type(item) is not int or not 0 <= item <= 1024)
+                               for key,item in counts.items() if key in unfiltered_names)
                         or counts['groupRetryButtonCount'] > counts['retryButtonCount']
                         or counts['groupDetailsButtonCount'] > counts['detailsButtonCount']):
                     raise ValueError('invalid Windows failure scope counts')

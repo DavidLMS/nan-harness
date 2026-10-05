@@ -33,6 +33,31 @@ struct ChatInput {
             && current && SUCCEEDED(collection.automation->CompareElements(root.Get(),current.Get(),&same))
             && same && within();
     }
+    // Passive exact-name query without ControlView filtering. No returned element
+    // is retained for actions; unknown/expired observations remain unavailable.
+    std::optional<unsigned> unfiltered_label_count(const wchar_t* name) {
+        if(!owned())return std::nullopt;
+        VARIANT label;VariantInit(&label);label.vt=VT_BSTR;label.bstrVal=SysAllocString(name);
+        ComPtr<IUIAutomationCondition> condition;
+        const bool made=label.bstrVal && SUCCEEDED(collection.automation->CreatePropertyCondition(
+            UIA_NamePropertyId,label,&condition));
+        VariantClear(&label);
+        if(!made || !within())return std::nullopt;
+        ComPtr<IUIAutomationElementArray> matches;
+        if(FAILED(root->FindAll(TreeScope_Descendants,condition.Get(),&matches)) || !matches)
+            return std::nullopt;
+        int count=0;
+        if(FAILED(matches->get_Length(&count)) || count<0 || count>1024)return std::nullopt;
+        for(int i=0;i<count;++i) {
+            if(!within())return std::nullopt;
+            ComPtr<IUIAutomationElement> element;int pid=0;
+            if(FAILED(matches->GetElement(i,&element)) || !element
+                || FAILED(element->get_CurrentProcessId(&pid)) || pid<=0)return std::nullopt;
+            if(static_cast<DWORD>(pid)!=collection.request.pid
+                && collection.retain_descendant(static_cast<DWORD>(pid)))return std::nullopt;
+        }
+        return owned()?std::optional<unsigned>(static_cast<unsigned>(count)):std::nullopt;
+    }
     bool unique_source(IUIAutomationElement* retained,int type,const wchar_t* name) {
         if(!within())return false;
         VARIANT label;VariantInit(&label);label.vt=VT_BSTR;label.bstrVal=SysAllocString(name);
@@ -323,6 +348,7 @@ int windows_claude_chat_turn() {
     turn.checker.value=OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION|SYNCHRONIZE,FALSE,turn.checker_pid);
     live_creation(c.root_process.value,c.root_creation);live_creation(turn.checker.value,turn.checker_creation);
     std::optional<UiaChatFailureCounts> failure_counts;
+    std::optional<unsigned> unfiltered_retry,unfiltered_details;
     const auto emit=[&](const char* stage) {
         if(std::string(stage)!="action-uncertain" && !turn.time_left())stage="deadline";
         std::cout<<"turn "<<stage<<'\n';
@@ -331,7 +357,9 @@ int windows_claude_chat_turn() {
             std::cout<<"failure-scope "<<counts.server_errors<<' '<<counts.user_headings<<' '
                 <<counts.prompt_texts<<' '<<counts.retries<<' '<<counts.details<<' '
                 <<counts.prompt_groups<<' '<<counts.group_retries<<' '<<counts.group_details<<' '
-                <<counts.retry_labels<<' '<<counts.details_labels<<'\n';
+                <<counts.retry_labels<<' '<<counts.details_labels<<' '
+                <<(unfiltered_retry?std::to_string(*unfiltered_retry):"-")<<' '
+                <<(unfiltered_details?std::to_string(*unfiltered_details):"-")<<'\n';
         }
         return std::cout?0:4;
     };
@@ -375,7 +403,14 @@ int windows_claude_chat_turn() {
     if(std::string(c.mode_status)!="chat")return emit("mode");
     if(turn.mode=="retry-ready" || turn.mode=="retry" || turn.mode=="failure-details")
         failure_counts=uia_chat_failure_counts(c.chat_nodes,turn.prompt);
-    if(turn.mode!="input-replace-owned")return emit(turn.action());
+    if(turn.mode!="input-replace-owned") {
+        const char* result=turn.action();
+        if(turn.mode=="retry-ready" && std::string(result)=="scope-control-absent") {
+            unfiltered_retry=turn.unfiltered_label_count(L"Retry");
+            unfiltered_details=turn.unfiltered_label_count(L"View details");
+        }
+        return emit(result);
+    }
     if(c.classic_controls.size()!=1 || c.start_controls.size()+c.send_controls.size()!=1)return emit("composer");
     turn.editor=c.classic_controls.front();
     turn.send=c.start_controls.empty()?c.send_controls.front():c.start_controls.front();

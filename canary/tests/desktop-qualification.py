@@ -2564,6 +2564,15 @@ class QualificationTests(unittest.TestCase):
             labels = {**counts, 'retryLabelCount':2, 'detailsLabelCount':1}
             path.write_text(json.dumps({**value, 'failureScopeCounts':labels}))
             self.assertEqual(q.semantic_observations(tmp, 'claude-desktop')[0]['failureScopeCounts'], labels)
+            unfiltered = {**labels, 'unfilteredRetryLabelCount': 3, 'unfilteredDetailsLabelCount': None}
+            path.write_text(json.dumps({**value, 'failureScopeCounts': unfiltered}))
+            observed = q.semantic_observations(tmp, 'claude-desktop')[0]
+            self.assertEqual(observed['failureScopeCounts'], unfiltered)
+            self.assertFalse(observed['retryAttempted'])
+            for bad in (True, -1, 1025, 'PRIVATE'):
+                path.write_text(json.dumps({**value, 'failureScopeCounts':
+                    {**unfiltered, 'unfilteredRetryLabelCount': bad}}))
+                with self.assertRaises(ValueError):q.semantic_observations(tmp, 'claude-desktop')
             for change in ({'retryLabelCount':0}, {'detailsLabelCount':True}, {'text':'PRIVATE'}):
                 path.write_text(json.dumps({**value, 'failureScopeCounts':{**labels, **change}}))
                 with self.assertRaises(ValueError):q.semantic_observations(tmp,'claude-desktop')

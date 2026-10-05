@@ -221,7 +221,8 @@ impl ClaudeWindowsChatSession<'_> {
         self.facts.operation_timing.elapsed_ms = started.elapsed().as_millis();
         let stage = match result {
             Ok(receipt) => {
-                if let Some(counts) = receipt.failure_scope {
+                if let Some(mut counts) = receipt.failure_scope {
+                    counts.retain_unfiltered(self.facts.failure_scope_counts.as_ref());
                     self.facts.failure_scope_counts = Some(counts);
                 }
                 receipt.stage

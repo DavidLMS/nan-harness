@@ -27,6 +27,22 @@ pub(crate) struct FailureScopeCounts {
     retry_labels: u16,
     #[serde(rename = "detailsLabelCount")]
     details_labels: u16,
+    unfiltered_retry_label_count: Option<u16>,
+    unfiltered_details_label_count: Option<u16>,
+}
+impl FailureScopeCounts {
+    // Keep the latest successful passive query when a later deadline prevents
+    // observing it. These diagnostics never grant scope or action authority.
+    pub(crate) fn retain_unfiltered(&mut self, previous: Option<&Self>) {
+        if let Some(previous) = previous {
+            self.unfiltered_retry_label_count = self
+                .unfiltered_retry_label_count
+                .or(previous.unfiltered_retry_label_count);
+            self.unfiltered_details_label_count = self
+                .unfiltered_details_label_count
+                .or(previous.unfiltered_details_label_count);
+        }
+    }
 }
 
 pub(crate) struct WindowsChatReceipt {
@@ -44,8 +60,29 @@ impl WindowsChatReceipt {
                 return None;
             }
             let line = rest.strip_prefix("failure-scope ")?.strip_suffix('\n')?;
-            let counts: Vec<u16> = line
-                .split(' ')
+            let words: Vec<_> = line.split(' ').collect();
+            if words.len() != 10 && words.len() != 12 {
+                return None;
+            }
+            let optional_count = |word: &str| -> Option<Option<u16>> {
+                if word == "-" {
+                    return Some(None);
+                }
+                if word.is_empty() || !word.bytes().all(|byte| byte.is_ascii_digit()) {
+                    return None;
+                }
+                Some(Some(
+                    word.parse::<u16>().ok().filter(|count| *count <= 1024)?,
+                ))
+            };
+            let (unfiltered_retry_label_count, unfiltered_details_label_count) =
+                if words.len() == 12 {
+                    (optional_count(words[10])?, optional_count(words[11])?)
+                } else {
+                    (None, None)
+                };
+            let counts: Vec<u16> = words[..10]
+                .iter()
                 .map(|word| {
                     if word.is_empty() || !word.bytes().all(|byte| byte.is_ascii_digit()) {
                         return None;
@@ -83,6 +120,8 @@ impl WindowsChatReceipt {
                 group_details_buttons,
                 retry_labels,
                 details_labels,
+                unfiltered_retry_label_count,
+                unfiltered_details_label_count,
             })
         };
         Some(Self {
@@ -413,6 +452,29 @@ mod tests {
 #[cfg(test)]
 mod receipt_tests {
     use super::{WindowsChatReceipt, WindowsChatStage};
+    #[test]
+    fn unfiltered_labels_remain_passive_bounded_and_keep_last_successful_sample() {
+        let prefix = "turn scope-control-absent\nfailure-scope 1 1 1 0 0 1 0 0 0 0";
+        let receipt = WindowsChatReceipt::parse(&format!("{prefix} 2 1\n"), "retry-ready").unwrap();
+        assert_eq!(receipt.stage, WindowsChatStage::ScopeControlAbsent);
+        let counts = receipt.failure_scope.unwrap();
+        assert_eq!(counts.unfiltered_retry_label_count, Some(2));
+        assert_eq!(counts.retry_buttons, 0);
+        let mut later = WindowsChatReceipt::parse(&format!("{prefix} - 0\n"), "retry-ready")
+            .unwrap()
+            .failure_scope
+            .unwrap();
+        later.retain_unfiltered(Some(&counts));
+        assert_eq!(later.unfiltered_retry_label_count, Some(2));
+        assert_eq!(later.unfiltered_details_label_count, Some(0));
+        for tail in [" 1025 0", " -1 0", " PRIVATE 0", " 1", " 1 0 0", " +1 0"] {
+            assert!(
+                WindowsChatReceipt::parse(&format!("{prefix}{tail}\n"), "retry-ready").is_none()
+            );
+        }
+        assert!(WindowsChatReceipt::parse(&format!("{prefix} 1 0\n"), "copy").is_none());
+    }
+
     #[test]
     fn optional_failure_counts_cannot_override_stage_or_export_payloads() {
         let wire = "turn scope-control-absent\nfailure-scope 1 1 1 1 0 1 1 0 1 0\n";
