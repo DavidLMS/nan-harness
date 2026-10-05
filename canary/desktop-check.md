@@ -309,35 +309,54 @@ ownership evidence.
 
 ## Semantic deterministic qualification
 
-The manual `desktop-check-qualification.yml` workflow evaluates the initial
-Linux x64, macOS ARM64 and Windows x64 matrix. A pending backend remains an
-explicit unqualified cell and prevents aggregate acceptance. Current qualified semantic
-adapters cover Zed on macOS ARM64 and Windows x64, and Hermes on Linux x64 and
-macOS ARM64 and Windows x64, plus Claude on macOS ARM64; additional application and platform adapters
-require their own native evidence.
+The manual `desktop-check-qualification.yml` workflow calls the reusable
+`desktop-automation-feasibility.yml` workflow from the same commit. It selects
+all twelve active cells: Zed, Codex, Claude and Hermes on Linux x64, macOS ARM64
+and Windows x64. Pen is excluded. This keeps installation, native preparation,
+evidence reduction and cleanup on the same implementation used by diagnostic
+campaigns. The final invocation runs the repository gate and aggregates all
+twelve reports against its source SHA. Any missing or unqualified cell prevents
+aggregate acceptance.
 
-Until the qualification workflow is present on the default branch, use the
-registered `Desktop semantic automation feasibility` workflow on the integration
-branch with `experiment=deterministic-full`. Select `native_only=true` while
-iterating. For the final tree, select `app=all`, `native_only=false` and
-`quality_only=false` to run both native adapters and the repository gate on the
-same commit. Select `quality_only=true` when only the repository gate is needed. The older
-`native-copy-dom` experiment remains feasibility evidence and cannot satisfy
-the full acceptance gate. Implemented adapters are accepted only when their
-full native result meets the gate; implementation and feasibility alone do not
-qualify a cell.
+Until the qualification entry point is registered on the default branch, use
+`Desktop semantic automation feasibility` on the integration branch with
+`app=all`, `platform=all`, `experiment=deterministic-full`, `native_only=false`
+and `quality_only=false`. For targeted iteration use `platform=open-cells` and
+`native_only=true`; this selects Zed Linux and Claude Windows and enables the
+Zed diagnostic tracer. Instrumented results cannot qualify the final matrix.
+Use `quality_only=true` when only the repository gate is needed.
 
-Six of twelve active cells are qualified, leaving six open; the three Pen
-cells are deferred. All fifteen inventory cells have official distributions. The following
-observations describe completed runs, rather than additional qualification:
+As of 2026-10-05, ten cells have completed three full sessions on historical
+commits. These results do not establish a complete matrix on the current SHA.
+Each full session requires a verified response, real tool execution, explicit
+UI error recovery and successful cleanup. Startup inventories, action
+acknowledgements and partial sessions cannot satisfy that gate.
 
 | Application | Linux x64 | macOS ARM64 | Windows x64 |
 | --- | --- | --- | --- |
-| Zed | Response and file-tool steps pass; pointer and accessibility Retry acknowledgements do not produce provider recovery. | Three complete probes pass the expanded retry policy. | Three complete probes pass with direct native clipboard transport and all cleanup checks. |
-| Hermes | Three complete probes pass with renderer process ownership. | Three complete probes pass with private native userData and bounded cold-start waits. | Three complete probes pass after ordinary onboarding dismissal and fresh catalog readiness, including explicit UI Retry and cleanup. |
-| ChatGPT / Codex | All three sessions complete onboarding and expose one source-defined local home composer. The existing adapter requires a thread composer and conversation; the initial-send lifecycle still needs adaptation. | Two sessions acknowledge activation but retain one elevated overlap outside the classified menu, status and Dock levels; another starts focused and later rejects an auxiliary page transition. | All three sessions complete folder trust, Engineering, Continue, Skip and its ordinary confirmation; the coding composer and conversation remain absent. |
-| Claude | All three sessions verify the exact draft and dispatch Send. Response verification stops at the retained editor guard; a response-only original-frame adapter is under evaluation. | Three complete native probes pass input, response, file-tool, controlled failure recovery and cleanup. | The actual launch still fails at the selected safe Rust rename dispatch with a sharing violation. The production-writer fixture passes before installation and fails after installation; its exact failure category is under evaluation. |
-| Pen | Software GLES removes GPU startup failure; three fresh sessions show sign-in and no editor. No official account-free route found for the frozen release. | Two probes expose composer/Send; another exposes sign-in. Conversation adapter remains unimplemented. | Owned renderer loads sign-in and a dialog; conversation adapter remains unimplemented. |
+| Zed | Response/tool pass; recovery remains unresolved | Historical full pass | Historical full pass |
+| Codex | Historical full pass | Historical full pass | Historical full pass |
+| Claude | Historical full pass | Historical full pass | One session previously passed; three-session acceptance remains unproven |
+| Hermes | Historical full pass | Historical full pass | Historical full pass |
+| Pen | Deferred | Deferred | Deferred |
+
+The historical passes are recorded in campaigns
+[37242619508](https://github.com/DavidLMS/nan-harness/actions/runs/37242619508),
+[37245073630](https://github.com/DavidLMS/nan-harness/actions/runs/37245073630),
+[37248461596](https://github.com/DavidLMS/nan-harness/actions/runs/37248461596),
+[37251043590](https://github.com/DavidLMS/nan-harness/actions/runs/37251043590) and
+[37262040806](https://github.com/DavidLMS/nan-harness/actions/runs/37262040806).
+Claude Windows campaign
+[37269411810](https://github.com/DavidLMS/nan-harness/actions/runs/37269411810)
+produced a report but its 70 observations exceeded the reducer's former limit.
+The corrected Claude limit is 96 individually validated records; this capacity
+correction does not itself establish application success.
+
+### Historical investigation notes
+
+The following observations describe earlier campaigns and hypotheses. The
+status table above distinguishes historical acceptance from unresolved cells;
+only a complete same-commit aggregate establishes final matrix acceptance.
 
 Codex Linux completed onboarding in all three sessions in
 [37190228367](https://github.com/DavidLMS/nan-harness/actions/runs/37190228367).

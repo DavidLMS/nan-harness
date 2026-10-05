@@ -1,5 +1,22 @@
 name: Desktop semantic automation feasibility
 on:
+  workflow_call:
+    inputs:
+      app:
+        type: string
+        default: all
+      platform:
+        type: string
+        default: all
+      experiment:
+        type: string
+        default: deterministic-full
+      native_only:
+        type: boolean
+        default: false
+      quality_only:
+        type: boolean
+        default: false
   workflow_dispatch:
     inputs:
       app:

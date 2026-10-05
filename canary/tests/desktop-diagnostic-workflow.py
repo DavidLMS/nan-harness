@@ -16,6 +16,23 @@ SYNTHETIC_WORKFLOW = (ROOT / ".github/workflows/desktop-check-chatgpt-wave29-syn
 
 
 class DiagnosticWorkflowTests(unittest.TestCase):
+    def test_full_qualification_reuses_current_campaign_on_the_same_commit(self):
+        wrapper = (ROOT / '.github/workflows/desktop-check-qualification.yml').read_text()
+        shared = (ROOT / '.github/workflows/desktop-automation-feasibility.yml').read_text()
+        self.assertIn('uses: ./.github/workflows/desktop-automation-feasibility.yml', wrapper)
+        self.assertNotIn('runs-on:', wrapper)
+        for setting in ('app: all', 'platform: all', 'experiment: deterministic-full',
+                        'native_only: false', 'quality_only: false'):
+            self.assertIn('      ' + setting, wrapper)
+        call = shared.split('  workflow_call:\n', 1)[1].split('  workflow_dispatch:', 1)[0]
+        for name in ('app', 'platform', 'experiment', 'native_only', 'quality_only'):
+            self.assertIn('      ' + name + ':', call)
+        # A local reusable workflow follows the caller commit. Keep the quality
+        # gate and the twelve-cell aggregation in that same invocation.
+        self.assertIn('if: inputs.native_only != true', shared)
+        self.assertIn('needs: [select, native]', shared)
+        self.assertIn('--source-sha "$GITHUB_SHA" --exclude-app pen-desktop', shared)
+
     def test_joint_campaign_selects_two_open_and_twelve_final_cells(self):
         workflow = (ROOT / '.github/workflows/desktop-automation-feasibility.yml').read_text()
         script = textwrap.dedent(workflow.split("          import json, os, sys\n", 1)[1]
