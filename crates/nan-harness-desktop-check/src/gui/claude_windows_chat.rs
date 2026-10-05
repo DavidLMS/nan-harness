@@ -303,7 +303,7 @@ impl ClaudeWindowsChatSession<'_> {
                     self.facts.copied_responses += 1;
                     return Ok(());
                 }
-                stage if stage.passive_pending() => {}
+                stage if stage.copy_pending() => {}
                 WindowsChatStage::ResponseMismatch => return Err(Reason::ResponseMismatch),
                 _ => return Err(Reason::ActionUnsupported),
             }

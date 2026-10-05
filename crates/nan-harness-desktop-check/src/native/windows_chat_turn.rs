@@ -221,6 +221,14 @@ pub(crate) enum WindowsChatStage {
 }
 impl WindowsChatStage {
     #[cfg(any(windows, test))]
+    pub(crate) fn copy_pending(self) -> bool {
+        // In the helper's copy path, Control is returned before Invoke. The
+        // response may still be rendering between the two owned-tree checks.
+        // Input replacement and Retry do not inherit this waiting policy.
+        self == Self::Control || self.passive_pending()
+    }
+
+    #[cfg(any(windows, test))]
     pub(crate) fn passive_pending(self) -> bool {
         matches!(
             self,
@@ -354,6 +362,34 @@ pub(super) fn request(
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn copy_can_reobserve_preinvoke_control_but_never_replay_uncertain_actions() {
+        use super::WindowsChatStage as S;
+        for stage in [
+            S::Control,
+            S::TreeQuery,
+            S::ScopeAnchorAbsent,
+            S::ScopeControlAbsent,
+        ] {
+            assert!(stage.copy_pending());
+        }
+        assert!(!S::Control.passive_pending());
+        for stage in [
+            S::Copied,
+            S::ActionUncertain,
+            S::ResponseMismatch,
+            S::Deadline,
+            S::ClipboardOwner,
+            S::TreePid,
+            S::ScopeControlAmbiguous,
+            S::ComposerSendPending,
+            S::Sent,
+            S::Retried,
+        ] {
+            assert!(!stage.copy_pending());
+        }
+    }
+
     #[test]
     fn only_read_query_failures_can_wait_for_a_fresh_tree() {
         use super::WindowsChatStage as S;
