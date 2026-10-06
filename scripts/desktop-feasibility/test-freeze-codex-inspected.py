@@ -37,7 +37,7 @@ class InspectedCodex(unittest.TestCase):
             self.assertIn(value['apps'][0]['digest'], runner)
             self.assertIn(value['apps'][0]['version'], value['apps'][0]['url'])
 
-    def test_staging_requires_exact_bytes_and_never_reuses_existing_file(self):
+    def test_staging_reuses_only_verified_cached_bytes_without_fetching(self):
         content = b'synthetic inspected package'
         digest = hashlib.sha256(content).hexdigest()
         entry = {**module.manifest('macos')['apps'][0], 'digest': 'sha256:' + digest}
@@ -48,10 +48,22 @@ class InspectedCodex(unittest.TestCase):
             destination = module.stage(entry, root, fetch)
             self.assertEqual(destination.name, 'chatgpt-desktop-' + digest)
             self.assertEqual(destination.read_bytes(), content)
-            with self.assertRaises(FileExistsError):
-                module.stage(entry, root, fetch)
+            self.assertEqual(module.stage(entry, root, lambda *_: self.fail('unexpected download')),
+                             destination)
             self.assertEqual(destination.read_bytes(), content)
             self.assertEqual(list(root.iterdir()), [destination])
+            destination.write_bytes(b'corrupt cache')
+            with self.assertRaisesRegex(ValueError, 'artifact-mismatch'):
+                module.stage(entry, root, lambda *_: self.fail('unexpected download'))
+
+    def test_staging_rejects_symlink_cache(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            entry = module.manifest('macos')['apps'][0]
+            destination = root / (entry['app'] + '-' + entry['digest'].removeprefix('sha256:'))
+            destination.symlink_to(root / 'missing')
+            with self.assertRaisesRegex(ValueError, 'cache-invalid'):
+                module.stage(entry, root, lambda *_: self.fail('unexpected download'))
 
     def test_mismatch_cleans_partial_and_publishes_nothing(self):
         with tempfile.TemporaryDirectory() as temporary:

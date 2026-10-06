@@ -41,7 +41,7 @@ async function main() {
  const mac=require('./codex-dialog-title-catalog-macos.json');
  assert.equal(new Set(mac.entries.map(e=>e.id)).size,195);
  assert.equal(require('node:crypto').createHash('sha256').update(require('node:fs').readFileSync(require.resolve('./codex-dialog-title-catalog-macos.json'))).digest('hex'),helper.facts('darwin').catalogSha256);
- assert.equal(helper.facts('win32').sourceVersion,'26.930.51102');
+ assert.equal(helper.facts('win32').sourceVersion,'26.930.61225');
  for(const [text,id]of [['Welcome to ChatGPT','workspaceOnboarding.dialogTitle'],['What kind of work do you do?','work.onboarding.role.new.question']]) {
   const f=fixture(text);const entries=Object.values(Object.fromEntries(linux.entries.map(e=>[e.id,e])));
   assert.equal(f.classify({held:f.held,entries}).sourceTitleIds[0],id);
@@ -135,8 +135,9 @@ async function main() {
  assert.equal(new Set(catalog.entries.map(e=>e.id)).size,63);
  for(const [text,id]of [['Global search','chatgpt.global_search.modal.title'],['Import from your browser','settings.browserUse.profileImport.title'],['Import unverified extensions?','settings.browserUse.profileImport.extensionsConfirmationTitle']]) {const added=fixture(text);assert.equal(added.classify({held:added.held,entries:added.entries}).sourceTitleIds[0],id);}
  const windowsCatalog=require('./codex-dialog-title-catalog-windows.json');
- assert.equal(new Set(windowsCatalog.entries.map(e=>e.id)).size,200);
- assert.ok(catalog.entries.filter(e=>e.platform==='windows').every(original=>windowsCatalog.entries.some(e=>original.id===e.id&&original.text===e.text)));
+ assert.equal(windowsCatalog.entries.some(e=>e.id==='settings.browserUse.profileImport.title'),false);
+ assert.equal(new Set(windowsCatalog.entries.map(e=>e.id)).size,199);
+ assert.ok(catalog.entries.filter(e=>e.platform==='windows'&&e.id!=='settings.browserUse.profileImport.title').every(original=>windowsCatalog.entries.some(e=>original.id===e.id&&original.text===e.text)));
  d.title.textContent='Skip setup?';reads=0;
  page.evaluate=async(fn,arg)=>{reads++;return vm.runInNewContext('('+fn.toString()+')',d.context)({...arg,held:arg.held.value});};
  const windows=await helper.observe(held,'win32',opts);

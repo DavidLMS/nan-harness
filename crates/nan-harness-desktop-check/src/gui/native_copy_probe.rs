@@ -80,6 +80,8 @@ struct Facts {
     response_control_count: Option<usize>,
     retry_control_count: Option<usize>,
     retry_selector: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    retry_identity_mismatch: Option<&'static str>,
     retry_action_receipt: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     retry_control_count_after_activation: Option<usize>,
@@ -573,6 +575,7 @@ fn native_copy_facts() -> Facts {
         response_control_count: None,
         retry_control_count: None,
         retry_selector: None,
+        retry_identity_mismatch: None,
         retry_action_receipt: None,
         retry_control_count_after_activation: None,
         retry_control_count_after_readback: None,
@@ -702,18 +705,28 @@ fn same_retry_element(before: &xa11y::Element, after: &xa11y::Element) -> bool {
 }
 
 fn same_named_retry_element(before: &xa11y::ElementData, after: &xa11y::ElementData) -> bool {
-    // GPUI may omit a stable accessibility ID. Preserve semantic identity
-    // across native tree refreshes even when that optional property is absent.
-    before.pid.is_some()
-        && before.pid == after.pid
-        && before.bounds.is_some()
-        && before.bounds == after.bounds
-        && before.stable_id == after.stable_id
-        && before.role == after.role
-        && before.name == after.name
-        && before.description == after.description
-        && before.states.visible
-        && after.states.visible
+    named_retry_mismatch(before, after).is_none()
+}
+
+fn named_retry_mismatch(
+    before: &xa11y::ElementData,
+    after: &xa11y::ElementData,
+) -> Option<&'static str> {
+    // Only the failed invariant is public; native identifiers and UI text stay private.
+    [
+        (before.pid.is_some() && before.pid == after.pid, "process"),
+        (
+            before.bounds.is_some() && before.bounds == after.bounds,
+            "bounds",
+        ),
+        (before.stable_id == after.stable_id, "identity"),
+        (before.role == after.role, "role"),
+        (before.name == after.name, "name"),
+        (before.description == after.description, "description"),
+        (before.states.visible && after.states.visible, "visibility"),
+    ]
+    .into_iter()
+    .find_map(|(matches, field)| (!matches).then_some(field))
 }
 
 // An absent accessibility candidate may settle before the original cutoff.
@@ -1063,7 +1076,8 @@ impl NativeClipboardSession<'_> {
                         .native_copy_guard(&mut self.facts, "retry-element-capture")?;
                     Ok(candidates)
                 })?;
-                let retained = wait_retained_retry(
+                let mismatch = std::cell::Cell::new(None);
+                let retained_result = wait_retained_retry(
                     &captured,
                     deadline,
                     || {
@@ -1074,8 +1088,13 @@ impl NativeClipboardSession<'_> {
                             .native_copy_guard(&mut self.facts, "retry-revalidate")?;
                         Ok(candidates)
                     },
-                    |before, after| same_named_retry_element(before.data(), after.data()),
-                )?;
+                    |before, after| {
+                        mismatch.set(named_retry_mismatch(before.data(), after.data()));
+                        same_named_retry_element(before.data(), after.data())
+                    },
+                );
+                self.facts.retry_identity_mismatch = mismatch.get();
+                let retained = retained_result?;
                 self.retry_element = Some(retained);
                 self.retry_deadline = Some(deadline);
                 self.retry_ready = true;
@@ -1646,7 +1665,8 @@ impl NativeClipboardSession<'_> {
                 let deadline = retained_deadline.ok_or(Reason::ActionUnsupported)?;
                 let app = self.gui.app.as_ref().ok_or(Reason::SelectorNotMatched)?;
                 let retry = app.locator(RETRY_CONTROL);
-                let button = wait_retained_retry(
+                let mismatch = std::cell::Cell::new(None);
+                let button_result = wait_retained_retry(
                     &captured,
                     deadline,
                     || {
@@ -1658,8 +1678,13 @@ impl NativeClipboardSession<'_> {
                             .native_copy_guard(&mut self.facts, "retry-revalidate")?;
                         Ok(candidates)
                     },
-                    |before, after| same_named_retry_element(before.data(), after.data()),
-                )?;
+                    |before, after| {
+                        mismatch.set(named_retry_mismatch(before.data(), after.data()));
+                        same_named_retry_element(before.data(), after.data())
+                    },
+                );
+                self.facts.retry_identity_mismatch = mismatch.get();
+                let button = button_result?;
                 self.gui
                     .native_copy_guard(&mut self.facts, "retry-before")?;
                 if Instant::now() >= deadline {

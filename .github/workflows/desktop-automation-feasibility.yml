@@ -388,6 +388,13 @@ jobs:
           path: ${{ runner.temp }}/configuration-fixture-driver-before-installation.json
           if-no-files-found: ignore
           retention-days: 7
+      - name: Restore inspected public Codex Windows package
+        if: matrix.app == 'chatgpt-desktop' && runner.os == 'Windows' && inputs.experiment == 'deterministic-full'
+        id: inspected-package
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ${{ runner.temp }}/semantic-feasibility/artifacts
+          key: inspected-codex-windows-v1-${{ hashFiles('scripts/desktop-feasibility/codex_release.py') }}
       - name: Freeze authenticated public official metadata
         env:
           GH_TOKEN: ${{ github.token }}
@@ -407,6 +414,12 @@ jobs:
           else
             "$FEASIBILITY_CHECKER" resolve --app '${{ matrix.app }}' --model qwen3.6 --artifacts "$RUNNER_TEMP/semantic-feasibility/artifacts" --output "$RUNNER_TEMP/semantic-feasibility/frozen.json"
           fi
+      - name: Preserve verified public package before GUI qualification
+        if: matrix.app == 'chatgpt-desktop' && runner.os == 'Windows' && inputs.experiment == 'deterministic-full' && steps.inspected-package.outputs.cache-hit != 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ${{ runner.temp }}/semantic-feasibility/artifacts
+          key: ${{ steps.inspected-package.outputs.cache-primary-key }}
       - name: Install exact frozen application without credentials
         env:
           FEASIBILITY_FACTS: ${{ runner.temp }}/semantic-feasibility/facts

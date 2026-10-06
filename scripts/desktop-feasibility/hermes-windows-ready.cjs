@@ -174,21 +174,23 @@ exports.run = async function run(page, session, ownedEndpoint, deadline, expecte
         observation.sampleStatus=value.sampleStatus;observation.blocker=value.blocker;
         return value.point;
       };
-      const first=await inspect();
-      if (!first) throw new Error('actionability');
-      await delay(Math.min(100,Math.max(0,deadline-Date.now())));
-      const second=await inspect();
-      if (!second) throw new Error('actionability');
-      if (!guard()) {observation.sampleStatus='guard-rejected';throw new Error('guard');}
-      if (JSON.stringify(first)!==JSON.stringify(second)) {observation.sampleStatus='unstable';throw new Error('actionability');}
-      if (await locator.count()!==1 || !await locator.evaluate((element,held)=>element===held,handle)) {
-        observation.sampleStatus='control-replaced';throw new Error('actionability');
+      let last=null, previous=null, stableSamples=0;
+      // Menu layout may settle after opening. Wait on the retained control;
+      // replacement, loss of custody or an obscured hit point remain terminal.
+      while (guard()) {
+        await frame();
+        if (await locator.count()!==1 || !await locator.evaluate((element,held)=>element===held,handle)) {
+          observation.sampleStatus='control-replaced';throw new Error('actionability');
+        }
+        const current=await inspect();
+        if (!current) throw new Error('actionability');
+        stableSamples=JSON.stringify(previous)===JSON.stringify(current)?stableSamples+1:1;
+        previous=current;
+        if (stableSamples===3) {last=current;break;}
+        observation.sampleStatus='unstable';
+        await delay(Math.min(100,Math.max(0,deadline-Date.now())));
       }
-      const last=await inspect();
-      await frame();
-      if (!last) throw new Error('actionability');
-      if (JSON.stringify(second)!==JSON.stringify(last)) {observation.sampleStatus='unstable';throw new Error('actionability');}
-      if (!guard()) {observation.sampleStatus='guard-rejected';throw new Error('guard');}
+      if (!last || !guard()) {observation.sampleStatus='guard-rejected';throw new Error('guard');}
       try {
         await handle.click({position:{x:last.x,y:last.y},timeout:Math.min(5000,Math.max(1,deadline-Date.now()))});
       } catch {observation.sampleStatus='click-failed';throw new Error('action');}

@@ -78,6 +78,15 @@ def stage(entry, directory, fetch=download):
     ensure_private_directory(directory, reusable=True)
     expected = entry['digest'].removeprefix('sha256:')
     destination = directory / (entry['app'] + '-' + expected)
+    # A restored public package is only a transport cache, never an authority.
+    if destination.is_symlink():
+        raise ValueError('inspected-desktop-cache-invalid')
+    if destination.exists():
+        with destination.open('rb') as stream:
+            actual = hashlib.file_digest(stream, 'sha256').hexdigest()
+        if actual != expected:
+            raise ValueError('inspected-desktop-artifact-mismatch')
+        return destination
     # Exclusive temporary storage; a mismatch never becomes an installable file.
     with tempfile.TemporaryDirectory(prefix='desktop-stage-', dir=directory) as temporary:
         partial = Path(temporary) / 'artifact'

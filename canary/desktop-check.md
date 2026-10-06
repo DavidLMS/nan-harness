@@ -3379,3 +3379,27 @@ retained Retry identity after its already constrained onboarding-remount proof;
 it no longer rejects that remount before the proof can run. Neither change
 replays an attempted Retry. Codex restore diagnostics distinguish closed I/O
 categories without changing restoration behavior or exposing paths/messages.
+
+### Follow-up qualification after `ef2f0c48`
+
+Runs `37430942957` and `37430946272` passed all three sessions and cleanup
+for Codex Linux/macOS and Hermes Linux/macOS. Hermes Windows passed its third
+session; its earlier startup attempts reported a frame-query rejection and an
+unstable Refresh models button. The latter now waits for three stable samples
+of the same retained, owned control before dispatch, within the original budget.
+An uncertain click is never repeated. Zed Retry diagnostics now report only the
+failed identity invariant, preserving strict action admission.
+
+Codex Windows failed before installation because its moving official MSIX URL
+changed. The replacement was statically inspected as application `26.930.61225`
+(MSIX identity `26.930.7945.0`), artifact SHA-256
+`0fcd11295dfd239ef8b6a2cb088a4ead18316b80a87e0c0e1abbad9d830edef3`,
+executable SHA-256
+`746fc8e491616076dad7ae3348bc73748d27ee8471dc589844390d08f4fba25d`.
+The passive Windows dialog catalog retains only literals verified in this
+package's renderer sources; the removed browser-import title is not admitted.
+The deterministic workflow now caches the verified public MSIX before any GUI
+work. Restored bytes must match the committed digest; symlinks and corrupt
+cache entries fail closed. No credentials, profiles or GUI output enter that
+cache. Cache eviction still requires the exact official package to be available.
+These targeted results do not qualify the remaining cells or a full matrix.
