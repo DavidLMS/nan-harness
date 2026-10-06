@@ -424,8 +424,8 @@ fn tree_fingerprint_observed(
                     fingerprint_io_failure(relative, FingerprintStage::FileOpen, error);
                 #[cfg(unix)]
                 let context = {
-                    let mut context = context;
                     use std::os::unix::fs::MetadataExt as _;
+                    let mut context = context;
                     if let Some(context) = &mut context {
                         context.file_access = Some(FileAccessObservation {
                             owner_readable: metadata.mode() & 0o400 != 0,
