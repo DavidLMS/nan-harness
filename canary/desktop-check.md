@@ -3597,3 +3597,19 @@ extra members and path traversal are rejected. The exact API download and the
 unchanged reducer have been validated against all twelve actual latest receipts
 from `37463015081`, producing a complete matrix. Synthetic tests cover changed
 digests, sizes, archive membership, pagination and outcome-independent selection.
+
+Run `37467582584` at `ba9f493f` passed quality and eleven cells across two
+attempts. Claude Windows twice completed response and file-tool verification
+but timed out before its third input: its exact editor was present while Send
+was absent. Static inspection of the pinned official MSIX's ion-dist composer
+shows conditional Send rendering based on running state and draft content.
+Requiring Send before preparing an empty draft can therefore prevent progress.
+
+Windows input now prepares and verifies the retained owned editor before
+acquiring Send. Fresh bounded UIA observations then require the same editor and
+one enabled Send/Start control; the retained button is revalidated immediately
+before its single invocation. No paste or uncertain submission is retried, and
+ownership, focus, bounds, exact Value/clipboard readback and cleanup remain
+required. Portable tests cover pending readiness, rejection, persistent absence
+and an observation crossing its deadline. Hosted qualification is still required
+for this change; prior passing cells do not qualify a new source commit.

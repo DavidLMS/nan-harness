@@ -85,13 +85,16 @@ restoration is incomplete. This runner-only setup does not change the native
 checker's single activation attempt or its ownership, focus and occlusion
 checks. Local and self-hosted desktops cannot enter this preparation path.
 
-Before a subsequent Windows Claude prompt, an exact single composer with no
-Send or Start button produces `composer-send-pending`. This is a read-only
-observation before any input. The supervisor admits attempts for at most 15
-seconds and gives each admitted attempt its own 15-second action and ownership
-verification budget, for at most 30 seconds overall. A late Send button must not
-cause input with an almost exhausted post-action verification budget. Ambiguous
-controls and uncertain input delivery remain terminal.
+For each Windows Claude prompt, the helper first retains the exact single editor
+and verifies its ownership, focus, identity, bounds and pasted draft through
+both UIA Value and clipboard readback. The official composer can hide Send while
+the draft is empty, so Send is acquired only after that readback. Fresh complete
+UIA scans may wait for a single enabled Send or Start button within the original
+15-second action budget. Each scan rechecks the same editor and owned window;
+ambiguous controls, replacement editors and failed ownership remain terminal.
+The retained button is revalidated and invoked once. Neither paste nor submission
+is replayed on timeout or uncertain delivery. The supervisor then verifies
+profile ownership as for every native action.
 
 During Windows Retry readiness, earlier conversation headings may coexist with
 an error row before the exact failed user heading and text appear in UIA. When

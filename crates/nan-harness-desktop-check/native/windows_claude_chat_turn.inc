@@ -78,19 +78,50 @@ struct ChatInput {
     }
     bool target(bool submitting=false) {
         if(!owned() || !collection.mode_attached(editor.Get(),root.Get())
-            || !collection.mode_attached(send.Get(),root.Get())
-            || !unique_source(editor.Get(),UIA_EditControlTypeId,L"Write your prompt to Claude")
-            || !unique_source(send.Get(),UIA_ButtonControlTypeId,send_name))return false;
-        std::array<long,4> editor_bounds{},send_bounds{};bool editor_enabled=false,send_enabled=false;
+            || !unique_source(editor.Get(),UIA_EditControlTypeId,L"Write your prompt to Claude"))return false;
+        std::array<long,4> editor_bounds{};bool editor_enabled=false;
         if(!collection.source_control(editor.Get(),UIA_EditControlTypeId,L"Write your prompt to Claude",editor_bounds,editor_enabled)
-            || !editor_enabled || editor_bounds!=original.editor_bounds
-            || !collection.source_control(send.Get(),UIA_ButtonControlTypeId,send_name,send_bounds,send_enabled)
-            || send_bounds!=original.start_bounds || (submitting&&!send_enabled))return false;
+            || !editor_enabled || editor_bounds!=original.editor_bounds)return false;
         BOOL read_only=TRUE,password=TRUE;
         if(FAILED(value->get_CurrentIsReadOnly(&read_only)) || read_only
             || FAILED(editor->get_CurrentIsPassword(&password)) || password)return false;
+        if(submitting) {
+            std::array<long,4> send_bounds{};bool send_enabled=false;
+            if(!send || !invoke || !collection.mode_attached(send.Get(),root.Get())
+                || !unique_source(send.Get(),UIA_ButtonControlTypeId,send_name)
+                || !collection.source_control(send.Get(),UIA_ButtonControlTypeId,send_name,send_bounds,send_enabled)
+                || !send_enabled || send_bounds!=original.start_bounds)return false;
+        }
         collection.observe_mode(root.Get());
         return std::string(collection.mode_status)=="chat" && owned();
+    }
+    UiaChatInputValue retain_send() {
+        if(pasted()!=UiaChatInputValue::Ready)return UiaChatInputValue::Rejected;
+        Collection fresh;fresh.request=collection.request;fresh.deadline=collection.deadline;
+        fresh.collect_chat=true;fresh.automation=collection.automation;fresh.walker=collection.walker;
+        fresh.root_process.value=OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION|SYNCHRONIZE,FALSE,fresh.request.pid);
+        if(!live_creation(fresh.root_process.value,fresh.root_creation)
+            || fresh.root_creation!=collection.root_creation || !fresh.guard()
+            || !fresh.append(root.Get(),0))return UiaChatInputValue::Rejected;
+        if(fresh.classic_controls.size()!=1)return UiaChatInputValue::Rejected;
+        BOOL same=FALSE;
+        if(FAILED(collection.automation->CompareElements(editor.Get(),fresh.classic_controls.front().Get(),&same))
+            || !same || !owned())return UiaChatInputValue::Rejected;
+        const auto count=fresh.start_controls.size()+fresh.send_controls.size();
+        if(count==0)return UiaChatInputValue::Pending;
+        if(count!=1)return UiaChatInputValue::Rejected;
+        const auto candidate=fresh.start_controls.empty()?fresh.send_controls.front():fresh.start_controls.front();
+        const auto name=fresh.start_controls.empty()?L"Send message":L"Start task";
+        std::array<long,4> bounds{};bool enabled=false;
+        if(!fresh.mode_attached(candidate.Get(),root.Get())
+            || !fresh.source_control(candidate.Get(),UIA_ButtonControlTypeId,name,bounds,enabled)
+            || !fresh.guard() || !owned())return UiaChatInputValue::Rejected;
+        if(!enabled)return UiaChatInputValue::Pending;
+        ComPtr<IUIAutomationInvokePattern> action;
+        if(FAILED(candidate->GetCurrentPatternAs(UIA_InvokePatternId,IID_PPV_ARGS(&action))) || !action)
+            return UiaChatInputValue::Rejected;
+        send=candidate;send_name=name;invoke=action;original.start_bounds=bounds;
+        return target(true)?UiaChatInputValue::Ready:UiaChatInputValue::Rejected;
     }
     UiaChatInputValue focus() {
         if(!target())return UiaChatInputValue::Rejected;
@@ -294,6 +325,11 @@ struct ChatInput {
             std::this_thread::sleep_for(std::chrono::milliseconds(20));
         }
         if(!within() || clipboard_matches(prompt)!=true || pasted()!=UiaChatInputValue::Ready)return "input-clipboard-mismatch";
+        // The official composer may hide Send until a draft exists. Write and
+        // verify only the retained editor first; then admit one fresh Send.
+        // This wait is read-only and never repeats paste or an uncertain send.
+        if(!uia_chat_settle([&]{return retain_send();},[&]{return within();},
+            []{std::this_thread::sleep_for(std::chrono::milliseconds(20));}))return "control";
         if(!wait_focus() || !target(true))return "control";
         BOOL enabled=FALSE;
         if(FAILED(send->get_CurrentIsEnabled(&enabled)) || !enabled || !owned() || !within())return "control";
@@ -424,17 +460,11 @@ int windows_claude_chat_turn() {
         return emit(result);
     }
     if(c.classic_controls.size()!=1)return emit("composer");
-    if(c.start_controls.empty() && c.send_controls.empty())return emit("composer-send-pending");
-    if(c.start_controls.size()+c.send_controls.size()!=1)return emit("composer");
     turn.editor=c.classic_controls.front();
-    turn.send=c.start_controls.empty()?c.send_controls.front():c.start_controls.front();
-    turn.send_name=c.start_controls.empty()?L"Send message":L"Start task";
     if(!c.source_control(turn.editor.Get(),UIA_EditControlTypeId,L"Write your prompt to Claude",turn.original.editor_bounds,turn.original.editor_enabled)
-        || !turn.original.editor_enabled
-        || !c.source_control(turn.send.Get(),UIA_ButtonControlTypeId,turn.send_name,turn.original.start_bounds,turn.original.start_enabled))return emit("control");
+        || !turn.original.editor_enabled)return emit("control");
     BOOL read_only=TRUE,password=TRUE,focusable=FALSE;
     if(FAILED(turn.editor->GetCurrentPatternAs(UIA_ValuePatternId,IID_PPV_ARGS(&turn.value))) || !turn.value
-        || FAILED(turn.send->GetCurrentPatternAs(UIA_InvokePatternId,IID_PPV_ARGS(&turn.invoke))) || !turn.invoke
         || FAILED(turn.value->get_CurrentIsReadOnly(&read_only)) || read_only
         || FAILED(turn.editor->get_CurrentIsPassword(&password)) || password
         || FAILED(turn.editor->get_CurrentIsKeyboardFocusable(&focusable)) || !focusable)return emit("control");

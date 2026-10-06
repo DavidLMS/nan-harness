@@ -25,8 +25,26 @@ static void clipboard_acquisition_contract() {
     assert(!uia_chat_acquire_clipboard([&]{++opens;return true;},[]{return true;},[]{return false;},[]{}));
     assert(opens==0);
 }
+static void send_readiness_contract() {
+    // Draft preparation happens once before the passive wait. No submit may
+    // follow an expired observation, a rejected target or persistent pending.
+    for(unsigned scenario=0;scenario<4;++scenario) {
+        unsigned pastes=1,queries=0,submits=0;bool live=true;
+        const bool ready=uia_chat_settle([&] {
+            ++queries;assert(pastes==1 && submits==0);
+            if(queries==1)return UiaChatInputValue::Pending;
+            if(scenario==1)return UiaChatInputValue::Rejected;
+            if(scenario==2)live=false;
+            return scenario==3?UiaChatInputValue::Pending:UiaChatInputValue::Ready;
+        },[&]{return live;},[&]{if(queries>=3)live=false;});
+        if(ready)++submits;
+        assert(pastes==1 && submits==(scenario==0?1u:0u));
+        assert(queries==(scenario==3?3u:2u));
+    }
+}
 int main() {
     clipboard_acquisition_contract();
+    send_readiness_contract();
     assert(uia_chat_focus_state(true,true,true,true,true)==UiaChatInputValue::Ready);
     assert(uia_chat_focus_state(true,true,false,true,true)==UiaChatInputValue::Pending);
     for(unsigned index=0;index<4;++index) {
