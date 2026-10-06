@@ -3558,3 +3558,25 @@ settlement receipt: the validator still restricted that existing schema to
 Claude. The closed diagnostic contract now admits Codex too, with the same
 field, enum, count and privacy restrictions; unrelated harnesses remain rejected.
 The complete Node contract suite and 184 qualification reducer tests pass.
+
+
+### Latest-attempt artifact selection
+
+Run `37458782183` at `daa8c422` qualified eleven cells and passed integration
+quality on its first attempt. Claude macOS rejected input readback in one
+session; a separate run (`37459532186`) rejected initial focus in one session.
+Both preserved cleanup and neither replayed uncertain input. The matrix's
+second attempt qualified all three Claude macOS sessions. Selecting the latest
+closed receipt for each cell and applying the unchanged reducer qualifies all
+twelve cells and all 36 sessions, including application and global cleanup.
+
+The second aggregate job nevertheless consumed the older Claude artifact:
+GitHub retained duplicate names across attempts, and pattern download could
+extract an old receipt over the new one. Aggregation now lists every artifact
+page and downloads exactly the latest artifact ID per expected cell. Selection
+checks run and source identity, excludes fixtures and previous aggregate files,
+and rejects missing, expired or ambiguous latest evidence. It never selects by
+qualification outcome and never falls back to an earlier successful receipt.
+Read-only Actions permission is confined to aggregation and its reusable caller.
+The selector has been exercised against the actual duplicate artifact inventory;
+the unchanged reducer accepts the resulting 12-cell, 36-session matrix.

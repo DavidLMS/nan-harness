@@ -624,15 +624,28 @@ jobs:
     name: Aggregate the twelve-cell desktop qualification
     needs: [select, native]
     if: always() && !cancelled() && needs.select.result == 'success' && inputs.app == 'all' && inputs.platform == 'all' && inputs.experiment == 'deterministic-full'
+    permissions:
+      contents: read
+      actions: read
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Select latest closed cell artifacts across attempts
+        id: cell-artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" > "$RUNNER_TEMP/qualification-artifacts.json"
+          python3 scripts/desktop-feasibility/select-qualification-artifacts.py \
+            --metadata "$RUNNER_TEMP/qualification-artifacts.json" \
+            --run-id "$GITHUB_RUN_ID" --source-sha "$GITHUB_SHA" >> "$GITHUB_OUTPUT"
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          pattern: deterministic-qualification-*
+          artifact-ids: ${{ steps.cell-artifacts.outputs.ids }}
           path: ${{ runner.temp }}/qualification-cells
       - name: Require all active cells from this commit
         shell: bash
