@@ -17,7 +17,7 @@ for (const [app, platform, env] of [
 ]) assert.equal(timing.onboardingTrial(app, platform, env), false);
 const prepared={codexProfileIsolation:'prepared-windows',inventoryDeadlineUnixMs:100000};
 assert.equal(timing.inventoryDeadlines(true,'win32',prepared,1000).total,100000);
-assert.equal(timing.inventoryDeadlines(true,'win32',prepared,1000).startup,36000);
+assert.equal(timing.inventoryDeadlines(true,'win32',prepared,1000).startup,100000);
 assert.equal(timing.inventoryDeadlines(true,'win32',{...prepared,inventoryDeadlineUnixMs:2000},1000).startup,2000);
 for(const value of [undefined,1000,999,121001,Infinity,NaN,'100000',1000.5]) {
  assert.throws(()=>timing.inventoryDeadlines(true,'win32',{...prepared,inventoryDeadlineUnixMs:value},1000));

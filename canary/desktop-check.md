@@ -3316,3 +3316,11 @@ provider now follows that exact returned session with at most three empty
 script, preserves the existing turn deadline, and refuses missing tools,
 changed sessions and exhausted polling. No session identifiers enter reports.
 This continuation is opt-in for the desktop fixture-read scenario.
+
+The second attempt of `37412936566` at `b5058dbd` completed two full sessions
+and both cleanup scopes. The first session stopped during initial document
+readiness, with an expired endpoint proof and no UI action. Windows cold
+startup now shares the original 120-second qualification cutoff instead of
+shorter 35-second startup and 10-second document clocks. This does not extend
+the parent cutoff or permit input without fresh ownership and document proof.
+The full local `cargo check-all` passed at `b5058dbd` before this timing change.

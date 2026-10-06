@@ -40,7 +40,9 @@ function inventoryDeadlines(trial,platform,request,started) {
   if(provided!==undefined&&(!preparedWindows||!Number.isSafeInteger(provided)
       ||provided<=started||provided>ownTotal))throw new Error('inventory-cutoff-invalid');
   const total=provided===undefined?ownTotal:Math.min(ownTotal,provided);
-  return {total,startup:Math.min(started+(trial?35000:25000),total)};
+  // Windows cold document readiness shares the original trial cutoff. A
+  // shorter startup clock must not expire while the owned app is still loading.
+  return {total,startup:trial&&platform==='win32'?total:Math.min(started+(trial?35000:25000),total)};
 }
 // This passive receipt never relaxes the page-count guard or sends input.
 function correlationFacts() {
@@ -587,7 +589,8 @@ async function run() {
       correlationIdentity,ms=>new Promise(resolve=>setTimeout(resolve,ms)),facts.initialMainBinding):null;
     let pageErrorCount = 0;
     page.on('pageerror', () => { pageErrorCount = Math.min(4096, pageErrorCount + 1); });
-    const documentDeadline = Math.min(deadline, Date.now() + 10000);
+    const documentDeadline = trial&&process.platform==='win32'
+      ? deadline : Math.min(deadline, Date.now() + 10000);
     while (Date.now() < documentDeadline && ownership.ownedEndpoint(documentDeadline)) {
       const loaded = await page.evaluate(() => document.readyState === 'complete'
         && document.body !== null && document.querySelectorAll('button,input,textarea,[contenteditable="true"]').length > 0);
