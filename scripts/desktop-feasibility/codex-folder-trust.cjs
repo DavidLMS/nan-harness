@@ -1,0 +1,170 @@
+'use strict';
+const fs=require('node:fs');
+const path=require('node:path');
+function authority(ownedWorkspace, io=fs, platform=process.platform) {
+  let fd;
+  const paths=platform==='win32'?path.win32:path.posix;
+  const invalid={workspace:'',spellings:[],verify:()=>false,close:()=>{}};
+  try {
+    if(typeof ownedWorkspace!=='string'||ownedWorkspace.includes('\0'))return invalid;
+    const workspace=platform==='win32'&&/^\\\\\?\\[A-Za-z]:\\/.test(ownedWorkspace)
+      ?ownedWorkspace.slice(4):ownedWorkspace;
+    if(!paths.isAbsolute(workspace)||platform==='win32'&&!/^[A-Za-z]:\\/.test(workspace))return invalid;
+    const ancestors=[];
+    for(let current=workspace;;current=paths.dirname(current)) {
+      const stat=io.lstatSync(current,{bigint:true});
+      if(!stat.isDirectory()||stat.isSymbolicLink()||stat.ino<=0n)return invalid;
+      ancestors.push({path:current,dev:stat.dev,ino:stat.ino,birth:stat.birthtimeNs});
+      if(paths.dirname(current)===current)break;
+    }
+    const canonical=io.realpathSync.native(workspace);
+    const normal=value=>platform==='win32'&&/^\\\\\?\\[A-Za-z]:\\/.test(value)?value.slice(4):value;
+    if(normal(canonical)!==workspace)return invalid;
+    const own=io.lstatSync(workspace,{bigint:true});
+    // The CLI opens its canonical Windows path with a verbatim prefix. Only
+    // finite full-path spellings proved to name this retained directory may
+    // match the source dialog; displayed paths never establish ownership.
+    const spellings=[...new Set(platform==='win32'
+      ?[workspace,ownedWorkspace,workspace.replaceAll('\\','/')]:[workspace])];
+    const spellingOwned=value=>{
+      const stat=io.lstatSync(value,{bigint:true});
+      const canonical=normal(io.realpathSync.native(value));
+      return stat.isDirectory()&&!stat.isSymbolicLink()&&stat.dev===own.dev
+        &&stat.ino===own.ino&&stat.birthtimeNs===own.birthtimeNs&&canonical===workspace;
+    };
+    if(!spellings.every(spellingOwned))return invalid;
+    if(platform!=='win32'&&(own.uid!==BigInt(process.getuid())||(own.mode&0o077n)!==0n))return invalid;
+    try {fd=io.openSync(workspace,fs.constants.O_RDONLY|(fs.constants.O_NOFOLLOW||0));}
+    catch(error){if(platform!=='win32'||!['EPERM','EACCES','EISDIR'].includes(error.code))return invalid;}
+    return {workspace,spellings,verify:()=>{
+      try {
+        if(!spellings.every(spellingOwned))return false;
+        for(const held of ancestors){const current=io.lstatSync(held.path,{bigint:true});
+          if(!current.isDirectory()||current.isSymbolicLink()||current.dev!==held.dev
+            ||current.ino!==held.ino||current.birthtimeNs!==held.birth)return false;}
+        if(fd!==undefined){const current=io.fstatSync(fd,{bigint:true});
+          if(current.dev!==own.dev||current.ino!==own.ino)return false;}
+        return true;
+      } catch{return false;}
+    },close:()=>{if(fd!==undefined){io.closeSync(fd);fd=undefined;}}};
+  } catch {if(fd!==undefined)io.closeSync(fd);return invalid;}
+}
+
+// Pinned project-folder-consent-dialog components: Linux 5ab3b26d..., Mac
+// 24a177c6..., Windows 3fbae19f.... Authority is private caller-owned state.
+function sample({workspace,spellings=[workspace],held}) {
+  const visible=e=>{const r=e.getBoundingClientRect(),s=getComputedStyle(e);return e.isConnected&&r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden';};
+  const dialogs=[...document.querySelectorAll('[role="dialog"],[role="alertdialog"],[aria-modal="true"],[role="menu"]')].filter(visible);
+  if(dialogs.length===0)return {status:'absent'};
+  if(dialogs.length!==1||dialogs[0].getAttribute('role')!=='dialog')return {status:'blocked',rejectionStage:'dialog'};
+  const dialog=dialogs[0];
+  const forms=[...dialog.querySelectorAll('form.select-none')].filter(visible);
+  if(forms.length!==1)return {status:'blocked',rejectionStage:'form'};
+  const form=forms[0];
+  const titles=[...form.querySelectorAll('h2.contents')].filter(e=>{
+    const style=getComputedStyle(e);
+    return e.isConnected&&style.display==='contents'&&style.visibility!=='hidden'
+      &&e.textContent.trim()==='Trust this folder?';
+  });
+  const lists=[...form.querySelectorAll('ul.flex.flex-col.select-text')].filter(visible);
+  const items=lists.length===1?[...lists[0].children]:[];
+  const buttons=[...form.querySelectorAll('button')].filter(visible);
+  const trust=buttons.filter(e=>e.textContent.trim()==='Trust folder'&&e.getAttribute('type')==='submit');
+  const cancel=buttons.filter(e=>e.textContent.trim()==='Cancel'&&e.getAttribute('type')==='button');
+  if(titles.length!==1||titles[0].tagName!=='H2'||!titles[0].id
+      ||dialog.getAttribute('aria-labelledby')!==titles[0].id)
+    return {status:'blocked',rejectionStage:'title'};
+  if(lists.length!==1||items.length!==1||items[0].tagName!=='LI'
+      ||!items[0].classList.contains('break-all')||!visible(items[0])||!spellings.includes(items[0].textContent))
+    return {status:'blocked',rejectionStage:'path'};
+  if(buttons.length!==2||trust.length!==1||cancel.length!==1||trust[0].disabled
+      ||trust[0].getAttribute('aria-disabled')==='true'
+      ||form.querySelectorAll('input,textarea,[contenteditable="true"]').length!==0)
+    return {status:'blocked',rejectionStage:'controls'};
+  const button=trust[0],rect=button.getBoundingClientRect();
+  if(![rect.left,rect.top,rect.width,rect.height].every(Number.isFinite))return {status:'blocked',rejectionStage:'hit'};
+  const x=rect.left+rect.width/2,y=rect.top+rect.height/2,hit=document.elementFromPoint(x,y);
+  if(!hit||!button.contains(hit))return {status:'blocked',rejectionStage:'hit'};
+  if(held&&(held.dialog!==dialog||held.form!==form||held.title!==titles[0]
+      ||held.item!==items[0]||held.spelling!==items[0].textContent||held.button!==button||held.left!==rect.left||held.top!==rect.top
+      ||held.width!==rect.width||held.height!==rect.height))return {status:'blocked',rejectionStage:'identity'};
+  return {status:'proved',dialog,form,title:titles[0],item:items[0],spelling:items[0].textContent,button,
+    left:rect.left,top:rect.top,width:rect.width,height:rect.height};
+}
+async function run(page,guard,deadline,authority,seal=()=>{},progress=()=>{}) {
+  const receipt={status:'blocked',clickAttempted:false,clickCompleted:false};
+  let held,phase='initial';
+  const checkpoint=value=>{phase=value;try {progress({phase,...receipt});}catch {}};
+  const reject=stage=>{receipt.rejectionStage=stage;checkpoint(phase);return false;};
+  const owned=async()=>{
+    if(Date.now()>=deadline)return reject('deadline');
+    checkpoint('authority-before');
+    if(await authority.verify()!==true)return reject('authority');
+    checkpoint('guard');
+    if(await guard()!==true) {
+      const failure=typeof guard.failure==='function'?guard.failure():null;
+      if(['deadline','native-ownership','page-set','main-identity','main-focus','main-scope',
+        'auxiliary-route','auxiliary-identity','auxiliary-focus','auxiliary-controls','query-failed','unmeasured'].includes(failure))
+        receipt.guardFailure=failure;
+      return reject('guard');
+    }
+    if(Date.now()>=deadline)return reject('deadline');
+    checkpoint('authority-after');
+    if(await authority.verify()!==true)return reject('authority');
+    return Date.now()<deadline||reject('deadline');
+  };
+  const sampled=result=>{
+    if(result.status==='proved')return true;
+    return reject(result.rejectionStage);
+  };
+  try {
+    if(!authority||typeof authority.workspace!=='string'||!authority.workspace
+        ||typeof authority.verify!=='function'){reject('authority');return receipt;}
+    if(!await owned())return receipt;
+    checkpoint('sample-initial');
+    held=await page.evaluateHandle(sample,{workspace:authority.workspace,spellings:authority.spellings,held:null});
+    checkpoint('sample-result');
+    const first=await held.evaluate(e=>({status:e.status,rejectionStage:e.rejectionStage}));
+    if(first.status==='absent'){receipt.status='absent';return receipt;}
+    if(!sampled(first)||!await owned())return receipt;
+    await new Promise(resolve=>setTimeout(resolve,Math.min(100,Math.max(0,deadline-Date.now()))));
+    if(!await owned())return receipt;
+    const current=await page.evaluate(sample,{workspace:authority.workspace,spellings:authority.spellings,held});
+    if(!sampled(current)||!await owned())return receipt;
+    const button=await held.evaluateHandle(e=>e.button);
+    try {
+      checkpoint('sample-held');
+      const final=await page.evaluate(sample,{workspace:authority.workspace,spellings:authority.spellings,held});
+      if(!sampled(final)||!await owned())return receipt;
+      seal();
+      receipt.clickAttempted=true;receipt.status='action-uncertain';
+      checkpoint('dispatch');
+      // The source closes this portal before onboarding continues. Do not
+      // conflate Playwright's post-click navigation wait with input delivery;
+      // prove that transition ourselves on the retained dialog below.
+      try {
+        await button.asElement().click({noWaitAfter:true,position:{x:final.width/2,y:final.height/2},
+          timeout:Math.max(1,Math.min(8000,deadline-Date.now()))});
+      } catch(error) {
+        reject(error?.name==='TimeoutError'?'click-timeout':'query');return receipt;
+      }
+      receipt.clickCompleted=true;receipt.status='blocked';checkpoint('post-dispatch');
+      while(await owned()) {
+        const closed=await held.evaluate(e=>!e.dialog.isConnected&&!e.form.isConnected&&!e.button.isConnected);
+        if(closed) {
+          if(!await owned())return receipt;
+          receipt.status='completed';return receipt;
+        }
+        await new Promise(resolve=>setTimeout(resolve,Math.min(100,Math.max(0,deadline-Date.now()))));
+      }
+      return receipt;
+    } finally {await button.dispose();}
+  } catch {
+    if(receipt.status==='completed')receipt.status='blocked';
+    reject(Date.now()>=deadline?'deadline':'query');return receipt;
+  } finally {checkpoint(receipt.status==='completed'||receipt.status==='absent'?'finished':phase);if(held)await held.dispose();authority?.close?.();}
+}
+exports.sample=sample;
+exports.run=run;
+
+exports.authority=authority;

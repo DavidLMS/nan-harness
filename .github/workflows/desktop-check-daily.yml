@@ -1,0 +1,85 @@
+name: Daily desktop compatibility
+on:
+  schedule:
+    - cron: '23 6 * * *'
+      timezone: Europe/Madrid
+  workflow_dispatch:
+    inputs:
+      plan_only:
+        description: Inspect official versions and selection without launching applications
+        type: boolean
+        default: true
+      force:
+        description: Recheck supported current versions even when already qualified
+        type: boolean
+        default: false
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: desktop-daily-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  plan:
+    if: github.event_name == 'workflow_dispatch' || github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    outputs:
+      cells: ${{ steps.plan.outputs.cells }}
+      has_cells: ${{ steps.plan.outputs.has_cells }}
+      resolution_failed: ${{ steps.plan.outputs.resolution_failed }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: rustup show
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Install checker build dependencies
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y cmake libx11-dev libxkbcommon-dev
+      - name: Build metadata resolver without launching vendor applications
+        run: cargo build --locked -p nan-harness-desktop-check --bin nanh-desktop-check
+      - id: plan
+        name: Detect official updates and select missing supported evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          FORCE: ${{ inputs.force || false }}
+        shell: bash
+        run: |
+          args=()
+          if [[ "$FORCE" == true ]]; then args+=(--force); fi
+          python3 canary/actions/desktop_maintenance.py \
+            --checker target/debug/nanh-desktop-check \
+            --output "$RUNNER_TEMP/desktop-maintenance.json" "${args[@]}"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: desktop-maintenance-plan
+          path: ${{ runner.temp }}/desktop-maintenance.json
+          if-no-files-found: error
+          retention-days: 30
+  qualify:
+    needs: plan
+    if: needs.plan.outputs.has_cells == 'true' && inputs.plan_only != true
+    uses: ./.github/workflows/desktop-automation-feasibility.yml
+    with:
+      app: all
+      platform: all
+      experiment: deterministic-full
+      native_only: true
+      quality_only: false
+      cells: ${{ needs.plan.outputs.cells }}
+  result:
+    if: always() && !cancelled()
+    needs: [plan, qualify]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Preserve incomplete resolution and qualification as failures
+        env:
+          PLAN_RESULT: ${{ needs.plan.result }}
+          RESOLUTION_FAILED: ${{ needs.plan.outputs.resolution_failed }}
+          QUALIFICATION_RESULT: ${{ needs.qualify.result }}
+        run: |
+          test "$PLAN_RESULT" = success
+          test "$RESOLUTION_FAILED" = false
+          test "$QUALIFICATION_RESULT" = success || test "$QUALIFICATION_RESULT" = skipped

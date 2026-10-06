@@ -20,6 +20,7 @@ fn synthetic_failures() -> Vec<SyntheticFailure> {
         SyntheticFailure {
             context: "upstream HTTP 429",
             error: ApiError::UpstreamStatus {
+                retry_hint: crate::error::RetryHint::Default,
                 status: StatusCode::TOO_MANY_REQUESTS,
                 message: "synthetic private upstream rate-limit message".to_owned(),
             },
@@ -29,6 +30,7 @@ fn synthetic_failures() -> Vec<SyntheticFailure> {
         SyntheticFailure {
             context: "representative upstream HTTP 4xx",
             error: ApiError::UpstreamStatus {
+                retry_hint: crate::error::RetryHint::Default,
                 status: StatusCode::UNPROCESSABLE_ENTITY,
                 message: "synthetic private upstream 4xx message".to_owned(),
             },
@@ -44,6 +46,7 @@ fn synthetic_failures() -> Vec<SyntheticFailure> {
         SyntheticFailure {
             context: "upstream HTTP 503",
             error: ApiError::UpstreamStatus {
+                retry_hint: crate::error::RetryHint::Default,
                 status: StatusCode::SERVICE_UNAVAILABLE,
                 message: "synthetic private upstream 503 message".to_owned(),
             },

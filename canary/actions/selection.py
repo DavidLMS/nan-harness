@@ -146,15 +146,71 @@ def select_cli(platforms="all", harnesses="all", mode="deterministic", model="")
     return {"mode": mode, "model": resolve_model(model), "cells": cells, "skipped": skipped}
 
 
+# Desktop suites retain their native x64 Linux GUI target independently of the
+# CLI release matrix. The target suffix is consumed with architecture by desktop
+# release staging; CLI callers continue to use the full main target from platform().
+DESKTOP_HARNESSES = (
+    "chatgpt-desktop", "claude-desktop", "hermes-desktop", "pen-desktop", "zed-desktop",
+)
+
+
+def select_names(value, known, label):
+    """Canonical names for standalone suite and detector callers."""
+    return _names(value, known, label)
+
+
+def native_platform(suite, system):
+    """Suite platform metadata, without altering the CLI release table."""
+    if suite not in ("cli", "desktop"):
+        raise ValueError("suite must be cli or desktop")
+    entry = dict(platform(system))
+    if suite == "desktop":
+        if system == "linux":
+            entry.update(runner="ubuntu-24.04", architecture="x86_64")
+        elif system == "macos":
+            entry["runner"] = "macos-15"
+    # Desktop staging and legacy grouped consumers combine arch and suffix.
+    entry["target"] = entry["target"].split("-", 1)[1]
+    return {"system": system, **entry}
+
+
+def select_suite(suite, platforms="all", harnesses="all", mode="deterministic", model=""):
+    """Grouped standalone suites; CLI availability follows the main policy."""
+    if suite not in ("cli", "desktop"):
+        raise ValueError("suite must be cli or desktop")
+    if mode not in ("deterministic", "live"):
+        raise ValueError("mode must be deterministic or live")
+    catalog = CLI_HARNESSES if suite == "cli" else DESKTOP_HARNESSES
+    selected = _names(harnesses, catalog, "harnesses")
+    systems = _names(platforms, SYSTEMS, "platforms")
+    jobs, unsupported = [], []
+    for system in systems:
+        available = []
+        for harness in selected:
+            if suite == "cli" and system == "windows" and harness in WINDOWS_UNAVAILABLE:
+                unsupported.append({"platform": system, "harness": harness,
+                                    "reason": WINDOWS_SKIP_REASON})
+            else:
+                available.append(harness)
+        if available:
+            jobs.append({**native_platform(suite, system), "harnesses": available})
+    if not jobs:
+        raise ValueError("selected harnesses have no upstream-supported native platform")
+    return {"suite": suite, "mode": mode, "model": resolve_model(model),
+            "harnesses": selected, "platforms": jobs, "unsupported": unsupported}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--suite", choices=("cli", "desktop"))
     parser.add_argument("--platforms", default="all")
     parser.add_argument("--harnesses", default="all")
     parser.add_argument("--mode", default="deterministic")
     parser.add_argument("--model", default="")
     args = parser.parse_args()
     try:
-        result = select_cli(args.platforms, args.harnesses, args.mode, args.model)
+        result = (select_suite(args.suite, args.platforms, args.harnesses, args.mode, args.model)
+                  if args.suite else select_cli(args.platforms, args.harnesses, args.mode, args.model))
     except ValueError as error:
         parser.error(str(error))
     print(json.dumps(result, sort_keys=True))

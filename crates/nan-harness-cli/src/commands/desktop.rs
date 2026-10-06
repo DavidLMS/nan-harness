@@ -1,3 +1,26 @@
+#[cfg(feature = "desktop-qualification")]
+mod claude_profile;
+#[cfg(feature = "desktop-qualification")]
+mod qualification;
+
+pub(crate) fn spawn_observed_desktop(
+    command: &mut std::process::Command,
+    app: &'static str,
+) -> std::io::Result<()> {
+    #[cfg(feature = "desktop-qualification")]
+    {
+        qualification::spawn(command, app)
+    }
+    #[cfg(not(feature = "desktop-qualification"))]
+    {
+        let _ = app;
+        command
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .map(|_| ())
+    }
+}
+
 use nan_harness_private_fs::{
     PrivatePathKind, open_private_new, open_private_read_write, restrict_path,
 };
@@ -213,4 +236,189 @@ mod warning_tests {
         assert!(warning.contains("continuing"));
         assert!(!warning.contains("--allow-untested"));
     }
+}
+
+/// Fixed loopback renderer instrumentation, inactive without hosted opt-in.
+pub(crate) fn qualification_renderer_arguments(
+    kind: nan_harness_core::DesktopHarnessKind,
+) -> Vec<String> {
+    #[cfg(feature = "desktop-qualification")]
+    {
+        let hosted = std::env::var("GITHUB_ACTIONS").as_deref() == Ok("true")
+            && std::env::var("RUNNER_ENVIRONMENT").as_deref() == Ok("github-hosted");
+        let mut arguments = renderer_arguments(
+            kind,
+            hosted,
+            std::env::var_os("NANH_DESKTOP_QUALIFICATION_FACTS")
+                .map(std::path::PathBuf::from)
+                .as_deref(),
+            std::env::var("NANH_DESKTOP_QUALIFICATION_CDP_PORT")
+                .ok()
+                .as_deref(),
+        );
+        if std::env::var("NANH_DESKTOP_QUALIFICATION_MODE").as_deref() == Ok("startup-baseline") {
+            arguments.clear();
+            arguments.extend(startup_accessibility_arguments(
+                kind,
+                std::env::consts::OS,
+                std::env::var("RUNNER_OS").ok().as_deref(),
+                qualification_capture_enabled(),
+                std::env::var("NANH_CLAUDE_MAC_PROFILE_POLICY")
+                    .ok()
+                    .as_deref(),
+            ));
+        }
+        if qualification_capture_enabled()
+            && cfg!(target_os = "linux")
+            && std::env::var("NANH_DESKTOP_QUALIFICATION_NAMESPACE_POLICY").as_deref()
+                == Ok("scoped-apparmor-userns")
+        {
+            arguments.push("--disable-setuid-sandbox".into());
+        }
+        arguments
+    }
+    #[cfg(not(feature = "desktop-qualification"))]
+    {
+        let _ = kind;
+        Vec::new()
+    }
+}
+
+#[cfg(feature = "desktop-qualification")]
+fn startup_accessibility_arguments(
+    kind: nan_harness_core::DesktopHarnessKind,
+    platform: &str,
+    runner_os: Option<&str>,
+    capture_enabled: bool,
+    mac_policy: Option<&str>,
+) -> Vec<String> {
+    // Chromium's public flag exposes native semantics without enabling CDP.
+    let supported = platform == "linux"
+        || (platform == "macos"
+            && runner_os == Some("macOS")
+            && mac_policy == Some("native-known-folders"));
+    if kind == nan_harness_core::DesktopHarnessKind::Claude && capture_enabled && supported {
+        vec!["--force-renderer-accessibility".into()]
+    } else {
+        Vec::new()
+    }
+}
+
+#[cfg(feature = "desktop-qualification")]
+fn qualification_capture_enabled() -> bool {
+    let hosted = std::env::var("GITHUB_ACTIONS").as_deref() == Ok("true")
+        && std::env::var("RUNNER_ENVIRONMENT").as_deref() == Ok("github-hosted");
+    hosted
+        && std::env::var_os("NANH_DESKTOP_QUALIFICATION_FACTS")
+            .map(std::path::PathBuf::from)
+            .is_some_and(|path| path.is_absolute() && path.is_dir() && !path.is_symlink())
+}
+
+#[cfg(feature = "desktop-qualification")]
+fn renderer_arguments(
+    kind: nan_harness_core::DesktopHarnessKind,
+    hosted: bool,
+    directory: Option<&Path>,
+    port: Option<&str>,
+) -> Vec<String> {
+    if hosted
+        && directory.is_some_and(|path| path.is_absolute() && path.is_dir() && !path.is_symlink())
+        && let Some(port) = port.and_then(|value| value.parse::<u16>().ok())
+        && port > 1024
+    {
+        let mut arguments = vec![
+            format!("--remote-debugging-port={port}"),
+            "--remote-debugging-address=127.0.0.1".into(),
+        ];
+        if kind == nan_harness_core::DesktopHarnessKind::Pen && cfg!(target_os = "linux") {
+            // SwANGLE supplies a software GLES driver on GPU-less hosted runners.
+            arguments.extend(["--use-gl=angle".into(), "--use-angle=swiftshader".into()]);
+        }
+        return arguments;
+    }
+    Vec::new()
+}
+
+#[cfg(all(test, feature = "desktop-qualification"))]
+mod renderer_tests {
+    use super::{renderer_arguments, startup_accessibility_arguments};
+    use nan_harness_core::DesktopHarnessKind;
+    #[test]
+    fn startup_accessibility_preserves_linux_and_scopes_the_mac_trial() {
+        let claude = DesktopHarnessKind::Claude;
+        let flag = vec!["--force-renderer-accessibility".to_owned()];
+        assert_eq!(
+            startup_accessibility_arguments(claude, "linux", None, true, None),
+            flag
+        );
+        assert_eq!(
+            startup_accessibility_arguments(
+                claude,
+                "macos",
+                Some("macOS"),
+                true,
+                Some("native-known-folders")
+            ),
+            flag
+        );
+        for (kind, platform, runner, capture, policy) in [
+            (claude, "macos", None, true, Some("native-known-folders")),
+            (
+                claude,
+                "macos",
+                Some("macOS"),
+                false,
+                Some("native-known-folders"),
+            ),
+            (
+                claude,
+                "macos",
+                Some("macOS"),
+                true,
+                Some("electron-user-data-dir"),
+            ),
+            (
+                claude,
+                "windows",
+                Some("Windows"),
+                true,
+                Some("native-known-folders"),
+            ),
+            (
+                DesktopHarnessKind::Pen,
+                "macos",
+                Some("macOS"),
+                true,
+                Some("native-known-folders"),
+            ),
+            (claude, "linux", None, false, None),
+        ] {
+            assert!(
+                startup_accessibility_arguments(kind, platform, runner, capture, policy).is_empty()
+            );
+        }
+    }
+    #[test]
+    fn instrumentation_requires_owned_hosted_context_and_numeric_loopback_port() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = Some(directory.path());
+        assert!(renderer_arguments(DesktopHarnessKind::Pen, false, root, Some("43210")).is_empty());
+        assert!(renderer_arguments(DesktopHarnessKind::Pen, true, None, Some("43210")).is_empty());
+        for port in ["0", "1024", "65536", "43210 --no-sandbox", "*:43210"] {
+            assert!(renderer_arguments(DesktopHarnessKind::Pen, true, root, Some(port)).is_empty());
+        }
+        assert_eq!(
+            renderer_arguments(DesktopHarnessKind::Claude, true, root, Some("43210")),
+            [
+                "--remote-debugging-port=43210",
+                "--remote-debugging-address=127.0.0.1"
+            ]
+        );
+    }
+}
+
+/// A qualification-only native Electron profile override; ordinary launches are unchanged.
+#[cfg(feature = "desktop-qualification")]
+pub(crate) fn claude_profile_arguments(executable: Option<&Path>) -> std::io::Result<Vec<String>> {
+    claude_profile::arguments(executable)
 }

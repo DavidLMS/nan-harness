@@ -63,6 +63,50 @@ fn execute() -> Result<(), String> {
             print_help();
             Ok(())
         }
+        [task, output] if task == "versioned-compatibility-feed" => {
+            release::generate_versioned_compatibility_feed(Path::new(output))
+        }
+        [task, output] if task == "hosted-compatibility-feed" => {
+            release::generate_hosted_compatibility_feed(Path::new(output))
+        }
+        [task, base, updates, output] if task == "merge-hosted-compatibility-feed" => {
+            release::merge_hosted_compatibility_feed(
+                Path::new(base),
+                Path::new(updates),
+                Path::new(output),
+            )
+        }
+        [task, input] if task == "validate-hosted-compatibility-feed" => {
+            release::validate_hosted_compatibility_feed(Path::new(input))
+        }
+        [task, base, updates, registry, version, output] if task == "merge-hosted-checks" => {
+            release::merge_release_hosted_checks(
+                Path::new(base),
+                Path::new(updates),
+                Path::new(registry),
+                version,
+                Path::new(output),
+            )
+        }
+        [task, base, updates, registry, version, output] if task == "merge-desktop-checks" => {
+            release::merge_release_checks(
+                Path::new(base),
+                Path::new(updates),
+                Path::new(registry),
+                version,
+                Path::new(output),
+            )
+        }
+        [task, base, updates, output] if task == "merge-versioned-compatibility-feed" => {
+            release::merge_versioned_compatibility_feed(
+                Path::new(base),
+                Path::new(updates),
+                Path::new(output),
+            )
+        }
+        [task, input] if task == "validate-versioned-compatibility-feed" => {
+            release::validate_versioned_compatibility_feed(Path::new(input))
+        }
         [] => {
             print_help();
             Ok(())
@@ -189,4 +233,16 @@ fn print_help() {
         "  validate-unified-compatibility-feed <FILE>  Validate a schema-v3 compatibility feed"
     );
     println!("  help                                       Print this help");
+    println!("  versioned-compatibility-feed <FILE>        Build the schema-v4 feed");
+    println!("  merge-versioned-compatibility-feed <BASE> <DIR> <FILE> Merge schema-v4 evidence");
+    println!("  validate-versioned-compatibility-feed <FILE> Validate a schema-v4 feed");
+    println!("  hosted-compatibility-feed <FILE>           Build the schema-v5 feed");
+    println!("  merge-hosted-compatibility-feed <BASE> <DIR> <FILE> Merge exact hosted evidence");
+    println!("  validate-hosted-compatibility-feed <FILE>   Validate a schema-v5 feed");
+    println!(
+        "  merge-hosted-checks <BASE> <DIR> <REGISTRY> <VERSION> <FILE> Merge authenticated native checks"
+    );
+    println!(
+        "  merge-desktop-checks <BASE> <DIR> <REGISTRY> <VERSION> <FILE> Merge with authenticated release rules"
+    );
 }

@@ -81,7 +81,7 @@ fn validate_structure(
     Ok(())
 }
 
-fn validate_against_embedded(
+pub(super) fn validate_against_embedded(
     verification: &DesktopVerificationEntry,
     id: DesktopHarnessKind,
     platform: &str,

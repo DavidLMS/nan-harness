@@ -216,3 +216,142 @@ fn rejects_unprotected_unknown_or_malformed_dacl_headers() {
         );
     }
 }
+
+#[test]
+fn owned_classifier_accepts_only_exact_protected_or_inherited_shapes() {
+    use super::{OwnedWindowsDacl, classify_owned_descriptor};
+    let user = current_user_sid();
+    for kind in [PrivatePathKind::File, PrivatePathKind::Directory] {
+        let protected = descriptor_from_body(&valid_body(kind));
+        assert_eq!(
+            classify_owned_descriptor(&protected, kind),
+            OwnedWindowsDacl::Protected
+        );
+        let flags = if matches!(kind, PrivatePathKind::File) {
+            "ID"
+        } else {
+            "OICIID"
+        };
+        let body = format!(
+            "{}{}",
+            ace("A", flags, "FA", &user),
+            ace("A", flags, "FA", "SY")
+        );
+        for controls in ["", "AI"] {
+            let descriptor: LocalBox<SecurityDescriptor> =
+                format!("D:{controls}{body}").parse().unwrap();
+            assert_eq!(
+                classify_owned_descriptor(&descriptor, kind),
+                OwnedWindowsDacl::Inherited
+            );
+        }
+        let descriptor: LocalBox<SecurityDescriptor> = format!("D:P{body}").parse().unwrap();
+        assert_eq!(
+            classify_owned_descriptor(&descriptor, kind),
+            OwnedWindowsDacl::Unexpected
+        );
+    }
+    for body in [
+        format!(
+            "{}{}",
+            ace("A", "ID", "FA", &user),
+            ace("A", "ID", "FA", "WD")
+        ),
+        format!(
+            "{}{}",
+            ace("A", "ID", "FA", &user),
+            ace("A", "ID", "FA", &user)
+        ),
+        format!(
+            "{}{}",
+            ace("A", "ID", "FA", "SY"),
+            ace("A", "ID", "FA", "SY")
+        ),
+        format!(
+            "{}{}{}",
+            ace("A", "ID", "FA", &user),
+            ace("A", "ID", "FA", "SY"),
+            ace("A", "ID", "FA", "WD")
+        ),
+        format!(
+            "{}{}",
+            ace("D", "ID", "FA", &user),
+            ace("A", "ID", "FA", "SY")
+        ),
+        format!(
+            "{}{}",
+            ace("A", "ID", "FR", &user),
+            ace("A", "ID", "FA", "SY")
+        ),
+        format!(
+            "{}{}",
+            ace("A", "OICIID", "FA", &user),
+            ace("A", "OICIID", "FA", "SY")
+        ),
+        format!(
+            "{}{}",
+            ace("A", "", "FA", &user),
+            ace("A", "ID", "FA", "SY")
+        ),
+    ] {
+        let descriptor: LocalBox<SecurityDescriptor> = format!("D:AI{body}").parse().unwrap();
+        assert_eq!(
+            classify_owned_descriptor(&descriptor, PrivatePathKind::File),
+            OwnedWindowsDacl::Unexpected
+        );
+    }
+}
+
+#[test]
+fn readonly_owned_classifier_preserves_actual_inherited_descriptor_and_contents() {
+    use super::classify_owned_handle;
+    use crate::OwnedWindowsDacl;
+    use std::{fs::OpenOptions, os::windows::fs::OpenOptionsExt as _};
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("owned");
+    crate::create_private_dir(&root).unwrap();
+    let path = root.join("config.json");
+    std::fs::write(&path, b"{\"ordinary\":true}").unwrap();
+    let file = OpenOptions::new()
+        .read(true)
+        .access_mode(0x8002_0000)
+        .share_mode(1)
+        .custom_flags(0x0020_0000)
+        .open(&path)
+        .unwrap();
+    let descriptor = windows_permissions::wrappers::GetSecurityInfo(
+        &file,
+        windows_permissions::constants::SeObjectType::SE_FILE_OBJECT,
+        windows_permissions::constants::SecurityInformation::Dacl,
+    )
+    .unwrap();
+    let before =
+        windows_permissions::wrappers::ConvertSecurityDescriptorToStringSecurityDescriptor(
+            &descriptor,
+            windows_permissions::constants::SecurityInformation::Dacl,
+        )
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    assert_eq!(
+        classify_owned_handle(&file, PrivatePathKind::File),
+        OwnedWindowsDacl::Inherited
+    );
+    let descriptor = windows_permissions::wrappers::GetSecurityInfo(
+        &file,
+        windows_permissions::constants::SeObjectType::SE_FILE_OBJECT,
+        windows_permissions::constants::SecurityInformation::Dacl,
+    )
+    .unwrap();
+    let after = windows_permissions::wrappers::ConvertSecurityDescriptorToStringSecurityDescriptor(
+        &descriptor,
+        windows_permissions::constants::SecurityInformation::Dacl,
+    )
+    .unwrap()
+    .to_string_lossy()
+    .into_owned();
+    assert_eq!(before, after);
+    assert_eq!(std::fs::read(&path).unwrap(), b"{\"ordinary\":true}");
+    // General credential policy still refuses inherited files.
+    assert!(crate::verify_private_file(&file).is_err());
+}

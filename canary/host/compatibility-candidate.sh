@@ -66,7 +66,7 @@ recover_base_feed() {
         cargo_xtask validate-compatibility-feed "$backup_download" >/dev/null
         cp "$backup_download" "$base"
         restored_backup_name="$backup_name"
-        if [ -n "${verified_updates:-}" ] && [ "$publish_feed" = false ]; then
+        if [ "$publish_feed" != true ]; then
           first_publication=true
           return 0
         fi
@@ -189,7 +189,7 @@ recover_unified_base_feed() {
     cargo_xtask validate-unified-compatibility-feed "$backup_download" >/dev/null
     cp "$backup_download" "$base_v3"
     unified_restored_backup_name="$backup_name"
-    if [ -n "${verified_updates:-}" ] && [ "$publish_feed" = false ]; then
+    if [ "$publish_feed" != true ]; then
       unified_first_publication=true
       return 0
     fi

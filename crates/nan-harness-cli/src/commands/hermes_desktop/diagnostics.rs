@@ -71,6 +71,8 @@ pub(crate) enum HermesDesktopError {
     DesktopVersionUnsupported { detected: Version, minimum: Version },
     #[error("Hermes Desktop is unavailable on this platform")]
     DesktopUnavailable,
+    #[error("the selected Hermes Desktop executable must be an absolute executable file")]
+    InvalidDesktopExecutable,
     #[error(transparent)]
     Compatibility(#[from] nan_harness_runtime::DesktopCompatibilityError),
     #[error("the embedded Hermes Desktop compatibility evidence is incomplete")]
@@ -245,6 +247,7 @@ impl HermesDesktopError {
             | Self::UnsupportedDesktopArgument(_)
             | Self::DesktopVersionUnsupported { .. }
             | Self::DesktopUnavailable
+            | Self::InvalidDesktopExecutable
             | Self::MissingDesktopCapabilities(_)
             | Self::InvalidStateDirectory
             | Self::InvalidHermesHome
@@ -317,6 +320,7 @@ impl HermesDesktopError {
             | Self::MissingDesktopCapabilities(_)
             | Self::ProfileEnvUtf8(_)
             | Self::InvalidProfilePath
+            | Self::InvalidDesktopExecutable
             | Self::InvalidStateDirectory
             | Self::InvalidHermesHome
             | Self::ParseReceipt(_)
@@ -466,6 +470,9 @@ impl nan_harness_i18n::TerminalMessage for HermesDesktopError {
             return self.to_string();
         }
         match self {
+            Self::InvalidDesktopExecutable => {
+                m::error_hermes_desktop_invalid_desktop_executable(locale)
+            }
             Self::AlreadyRunning => m::error_hermes_desktop_already_running(locale),
             Self::ConcurrentSession => m::error_hermes_desktop_concurrent_session(locale),
             Self::UpdateAlreadyRunning => m::error_hermes_desktop_update_already_running(locale),

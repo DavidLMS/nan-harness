@@ -98,7 +98,14 @@ struct RegistryEntry {
 /// Reads the embedded Desktop registry that bounds every published Desktop record.
 pub(super) fn desktop_requirements() -> Result<DesktopRequirements, String> {
     let source_path = repository_root().join(DESKTOP_SOURCE_PATH);
-    let source = fs::read(&source_path)
+    desktop_requirements_from_path(&source_path)
+}
+
+/// The publisher resolves this path from an immutable official release commit, not the report.
+pub(super) fn desktop_requirements_from_path(
+    source_path: &std::path::Path,
+) -> Result<DesktopRequirements, String> {
+    let source = fs::read(source_path)
         .map_err(|error| format!("could not read '{}': {error}", source_path.display()))?;
     let registry: Registry = serde_json::from_slice(&source).map_err(|error| {
         format!(

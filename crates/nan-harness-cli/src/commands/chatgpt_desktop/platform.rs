@@ -124,7 +124,13 @@ mod platform_discovery {
             .ok_or(ChatGptDesktopError::AppNotFound)?;
         reject_symlink(&application).map_err(ChatGptDesktopError::from)?;
         let executable = application.join("Contents/MacOS/ChatGPT");
-        let bundled_codex = application.join("Contents/Resources/codex");
+        let bundled_codex = nan_harness_core::desktop_metadata::codex_runtime_candidates(
+            &application.join("Contents/Resources"),
+            false,
+        )
+        .into_iter()
+        .find(|path| path.is_file())
+        .ok_or(ChatGptDesktopError::InvalidInstallation)?;
         let info_plist = application.join("Contents/Info.plist");
         if !executable.is_file() || !bundled_codex.is_file() || !info_plist.is_file() {
             return Err(ChatGptDesktopError::InvalidInstallation);
@@ -168,7 +174,6 @@ mod platform_discovery {
 #[cfg(target_os = "windows")]
 mod platform_discovery {
     use super::{ChatGptDesktopError, ChatGptInstallation, Path, PathBuf, parse_version_output};
-    use semver::Version;
     use std::fs;
 
     pub(super) fn discover_installation(
@@ -188,7 +193,11 @@ mod platform_discovery {
                 .filter(|path| {
                     path.file_name()
                         .and_then(|name| name.to_str())
-                        .is_some_and(|name| name.starts_with("OpenAI.ChatGPT_"))
+                        .is_some_and(|name| {
+                            name.starts_with("OpenAI.ChatGPT_")
+                                || name.starts_with("OpenAI.Codex_")
+                                || name.starts_with("OpenAI.ChatGPT-Desktop_")
+                        })
                 })
                 .collect::<Vec<_>>();
             roots.sort_unstable();
@@ -211,29 +220,36 @@ mod platform_discovery {
             .find(|path| {
                 path.file_name()
                     .and_then(|name| name.to_str())
-                    .is_some_and(|name| name.starts_with("OpenAI.ChatGPT_"))
+                    .is_some_and(|name| {
+                        name.starts_with("OpenAI.ChatGPT_")
+                            || name.starts_with("OpenAI.Codex_")
+                            || name.starts_with("OpenAI.ChatGPT-Desktop_")
+                    })
             })
             .ok_or(ChatGptDesktopError::InvalidInstallation)?;
         if executable.file_name().and_then(|name| name.to_str()) != Some("ChatGPT.exe") {
             return Err(ChatGptDesktopError::InvalidInstallation);
         }
-        let package_name = package_root
-            .file_name()
-            .and_then(|name| name.to_str())
-            .ok_or(ChatGptDesktopError::UnparseableVersion)?;
-        let app_version = package_name
-            .split('_')
-            .nth(1)
-            .and_then(|version| Version::parse(version).ok())
-            .ok_or(ChatGptDesktopError::UnparseableVersion)?;
-        let bundled_codex = [
-            package_root.join("app/resources/codex.exe"),
-            package_root.join("resources/codex.exe"),
-            package_root.join("codex.exe"),
+        let parent = executable
+            .parent()
+            .ok_or(ChatGptDesktopError::InvalidInstallation)?;
+        let resources = [
+            parent.join("resources"),
+            package_root.join("app/resources"),
+            package_root.join("resources"),
         ]
         .into_iter()
-        .find(|path| path.is_file())
+        .find(|path| path.join("app.asar").is_file())
         .ok_or(ChatGptDesktopError::InvalidInstallation)?;
+        let app_version = nan_harness_core::desktop_metadata::version(&resources.join("app.asar"))
+            .map_err(|_| ChatGptDesktopError::InvalidInstallation)?
+            .ok_or(ChatGptDesktopError::UnparseableVersion)?;
+        let bundled_codex =
+            nan_harness_core::desktop_metadata::codex_runtime_candidates(&resources, true)
+                .into_iter()
+                .chain([package_root.join("codex.exe")])
+                .find(|path| path.is_file())
+                .ok_or(ChatGptDesktopError::InvalidInstallation)?;
         let codex_output = std::process::Command::new(bundled_codex)
             .arg("--version")
             .output()

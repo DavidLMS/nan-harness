@@ -9,7 +9,7 @@ use supervision::SystemDesktopLifecycle;
 use update_wait::{SystemUpdateState, UPDATE_STALE_GRACE, UpdateWaitTiming};
 
 pub(super) fn spawn_desktop(
-    executable: &str,
+    executable: &Path,
     arguments: &[String],
     paths: &DesktopPaths,
     working_directory: &Path,
@@ -76,6 +76,7 @@ pub(super) async fn supervise_desktop(
             eprintln!("{}", nan_harness_i18n::messages::process_hermes_desktop_s_launcher_exited_continuing_to_supervise_the_running_app(nan_harness_i18n::locale()));
             return supervise_running_desktop(process, &mut gateway, signals).await;
         }
+        crate::native_diagnostic::emit_hermes_child_exit(initial_status);
         return Ok(LifecycleCompletion::Closed(exit_code(initial_status)));
     }
 

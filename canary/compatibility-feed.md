@@ -198,3 +198,17 @@ Publishing the unified asset never invalidates the legacy one: it is a separate
 asset, replaced after the legacy swap has already been verified. A failure
 while publishing the unified asset leaves the legacy asset published and valid,
 and the next run recovers the unified asset from its backup.
+
+
+## Quarantined desktop qualification publication
+
+The integration branch retains exact-version Desktop checker reports and
+`merge-desktop-checks` validation as deterministic contracts. The older
+`compatibility-approve.yml`, `compatibility-publisher.yml` and
+`hosted-evidence-ingest.yml` jobs are explicitly disabled during integration.
+They must not compete with main's current daily/release publication writer.
+Standalone Desktop workflows remain manual, and their qualification artifacts
+do not automatically advance compatibility records. Future Desktop ingestion
+requires qualified native evidence and a reviewed integration with the active
+main writer, preserving exact launcher/checker/app/runtime identities and private
+artifact boundaries. See [Desktop checks](desktop-check.md).

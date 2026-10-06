@@ -19,6 +19,8 @@ fn overlay_only_advances_known_compatible_versions() {
     let remote = VerificationManifest {
         schema_version: 2,
         releases: vec![VerificationRelease {
+            hosted_checks: Vec::new(),
+            desktop_checks: Vec::new(),
             nan_harness_version: Version::parse(env!("CARGO_PKG_VERSION")).unwrap(),
             verifications: vec![VerificationEntry {
                 id: "codex".to_owned(),
@@ -43,6 +45,8 @@ fn overlay_only_advances_known_compatible_versions() {
 fn overlay_never_regresses_the_embedded_compatible_version() {
     let mut base = base_manifest();
     let remote = VerificationRelease {
+        hosted_checks: Vec::new(),
+        desktop_checks: Vec::new(),
         nan_harness_version: Version::parse(env!("CARGO_PKG_VERSION")).unwrap(),
         verifications: vec![VerificationEntry {
             id: "codex".to_owned(),
@@ -157,11 +161,15 @@ fn duplicate_releases_and_known_harnesses_are_rejected() {
         schema_version: 2,
         releases: vec![
             VerificationRelease {
+                hosted_checks: Vec::new(),
+                desktop_checks: Vec::new(),
                 nan_harness_version: current.clone(),
                 verifications: vec![valid.clone()],
                 desktop_verifications: Vec::new(),
             },
             VerificationRelease {
+                hosted_checks: Vec::new(),
+                desktop_checks: Vec::new(),
                 nan_harness_version: current,
                 verifications: vec![valid.clone()],
                 desktop_verifications: Vec::new(),

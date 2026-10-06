@@ -15,7 +15,13 @@ pub(super) struct ZedPaths {
 }
 
 impl ZedPaths {
-    pub(super) fn from_environment() -> Result<Self, ZedDesktopError> {
+    pub(super) fn from_environment(user_data_dir: Option<&Path>) -> Result<Self, ZedDesktopError> {
+        if let Some(directory) = user_data_dir {
+            return Self::new(
+                directory.join("config/settings.json"),
+                directory.join(".nan-harness-session"),
+            );
+        }
         let home = user_home().ok_or(ZedDesktopError::MissingHomeDirectory)?;
         let state_directory = config_directory()
             .ok_or(ZedDesktopError::MissingStateDirectory)?
@@ -76,7 +82,8 @@ pub(super) fn settings_path_for_platform(
         return Err(ZedDesktopError::InvalidPath);
     }
     let directory = match platform {
-        ZedPlatform::Macos | ZedPlatform::Linux => xdg_config_home
+        ZedPlatform::Macos => home.join(".config/zed"),
+        ZedPlatform::Linux => xdg_config_home
             .map_or_else(|| home.join(".config"), Path::to_path_buf)
             .join("zed"),
         ZedPlatform::Windows => app_data

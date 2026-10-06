@@ -200,6 +200,7 @@ mod tests {
                 error: CliError::Discovery(DiscoveryError::VersionCommandFailed {
                     command: "provider response secret".to_owned(),
                     exit_code: Some(17),
+                    signal: None,
                 }),
                 expected: Diagnostic::new(
                     DiagnosticReason::ProcessExited,

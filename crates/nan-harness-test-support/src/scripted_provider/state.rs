@@ -121,6 +121,7 @@ pub(super) struct ScriptProgress {
     pub(super) emitted: bool,
     pub(super) result_identifiers: Vec<String>,
     pub(super) completed: bool,
+    pub(super) exec_poll: super::polling::ExecPoll,
 }
 
 #[cfg(test)]

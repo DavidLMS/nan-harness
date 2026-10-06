@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+# wave12-fake-driver
+# Fake `nanh-desktop-check`. It never opens a GUI, never runs OCR/native code and
+# never touches a real window. It produces a schema-plausible canonical report
+# (and optionally an occlusion diagnostic) so the orchestrator's per-condition
+# wiring, validation gating and staging can be exercised deterministically. It
+# is NOT a native-qualification oracle.
+set -u
+printf 'checker %s\n' "$*" >> "${WAVE12_FIXTURE_LOG:?}"
+
+cmd="${1:-}"; shift || true
+
+# Emits the digest of a file carrying the schemaVersion key.
+validate() {
+  local file="${1:-}" content digest
+  [ -f "$file" ] || exit 1
+  content="$(< "$file")"
+  [[ "$content" == *'"schemaVersion"'* ]] || exit 1
+  digest="$(shasum -a 256 "$file")" || exit 1
+  printf '%s\n' "${digest%% *}"
+}
+
+case "$cmd" in
+  validate-report)
+    [ "${WAVE12_FIXTURE_INVALID_REPORT:-0}" != 1 ] || exit 1
+    validate "${1:-}"
+    ;;
+  validate-occlusion)
+    validate "${1:-}"
+    ;;
+  run)
+    output=""; prepared=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --output) output="${2:?}"; shift 2 ;;
+        --prepared) prepared="${2:?}"; shift 2 ;;
+        --app|--session|--mode) shift 2 ;;
+        *) shift ;;
+      esac
+    done
+    [ -n "$output" ] && [ -s "$prepared" ] || exit 64
+    if [ "${WAVE12_FIXTURE_OCCLUDED:-1}" = 1 ]; then
+      status=blocked; reason='"window-occluded"'
+    else
+      status=passed; reason=null
+    fi
+    step="{ \"status\": \"$status\", \"reason\": $reason, \"durationMilliseconds\": 1 }"
+    {
+      printf '{\n'
+      printf '  "schemaVersion": 2,\n'
+      printf '  "checkerVersion": "0.1.0",\n'
+      printf '  "runId": "fixture-run",\n'
+      printf '  "startedAt": "1970-01-01T00:00:00Z",\n'
+      printf '  "platform": "macos",\n'
+      printf '  "architecture": "aarch64",\n'
+      printf '  "nanHarness": { "version": "0.1.2", "sha256": "abc" },\n'
+      printf '  "results": [\n'
+      printf '    { "app": "zed-desktop",\n'
+      printf '      "deterministic": [ %s, %s, %s ],\n' "$step" "$step" "$step"
+      printf '      "live": { "status": "skipped", "reason": "no-credential", "durationMilliseconds": 0 },\n'
+      printf '      "cleanup": "passed"\n'
+      printf '    }\n'
+      printf '  ],\n'
+      printf '  "cleanup": "passed"\n'
+      printf '}\n'
+    } > "$output"
+    if [ "${WAVE12_FIXTURE_OCCLUDED:-1}" = 1 ] && [ -n "${NAN_DESKTOP_OCCLUSION_DIAGNOSTIC:-}" ]; then
+      printf '%s\n' '{ "schemaVersion": 1, "occluderCount": 1, "occluders": [' \
+        '  { "class": "dock", "sameProcess": false, "layer": 20,' \
+        '    "overlapArea": 697344, "overlapPerMille": 1000 } ] }' \
+        > "$NAN_DESKTOP_OCCLUSION_DIAGNOSTIC"
+    fi
+    exit "${WAVE12_FIXTURE_RUN_EXIT:-0}"
+    ;;
+  *)
+    exit 64
+    ;;
+esac

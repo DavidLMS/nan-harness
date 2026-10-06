@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# wave12-fake-driver
+# Fake runner identity: the disposability signal fake mode uses instead of the
+# real GITHUB_ACTIONS/RUNNER_ENVIRONMENT variables, which fake mode ignores.
+set -u
+printf 'runner-environment\n' >> "${WAVE12_FIXTURE_LOG:?}"
+printf '%s\n' "${WAVE12_FIXTURE_RUNNER_ENVIRONMENT-github-hosted}"

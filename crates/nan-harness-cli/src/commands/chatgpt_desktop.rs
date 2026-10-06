@@ -33,6 +33,8 @@ mod orchestration;
 mod platform;
 mod process;
 mod profile;
+#[cfg(feature = "desktop-qualification")]
+mod qualification_restore;
 mod session;
 mod startup;
 #[cfg(test)]
@@ -84,22 +86,7 @@ pub(crate) async fn run(
     let manager = PersistenceManager::from_environment()?;
     let state_directory = manager.state_directory().join(STATE_DIRECTORY_NAME);
     if arguments.restore {
-        let _lock =
-            DesktopSessionLock::acquire(&state_directory).map_err(ChatGptDesktopError::from)?;
-        require_app_stopped()?;
-        let profile = ManagedProfile::for_manager(&manager);
-        if !profile.root.exists() {
-            println!("{}", nan_harness_i18n::messages::chatgpt_desktop_no_managed_chatgpt_desktop_session_needs_recovery(nan_harness_i18n::locale()));
-            return Ok(0);
-        }
-        validate_managed_profile(&profile)?;
-        if restore_session(&profile)? {
-            println!("{}", nan_harness_i18n::messages::chatgpt_desktop_recovered_the_managed_chatgpt_desktop_profile(nan_harness_i18n::locale()));
-        } else {
-            reject_orphaned_session_files(&profile)?;
-            println!("{}", nan_harness_i18n::messages::chatgpt_desktop_no_managed_chatgpt_desktop_session_needs_recovery(nan_harness_i18n::locale()));
-        }
-        return Ok(0);
+        return recover_managed_profile(&manager, arguments.debug).map_err(CliError::from);
     }
 
     let installation = discover_installation(arguments.executable.as_deref())?;
@@ -137,6 +124,57 @@ pub(crate) async fn run(
         remembered_model.as_deref(),
     )
     .await
+}
+
+fn recover_managed_profile(
+    manager: &PersistenceManager,
+    debug: bool,
+) -> Result<i32, ChatGptDesktopError> {
+    #[cfg(not(feature = "desktop-qualification"))]
+    let _ = debug;
+    #[cfg(feature = "desktop-qualification")]
+    let mut stage = qualification_restore::Stage::Lock;
+    let outcome = (|| -> Result<i32, ChatGptDesktopError> {
+        let _lock =
+            DesktopSessionLock::acquire(&manager.state_directory().join(STATE_DIRECTORY_NAME))
+                .map_err(ChatGptDesktopError::from)?;
+        #[cfg(feature = "desktop-qualification")]
+        {
+            stage = qualification_restore::Stage::Process;
+        }
+        require_app_stopped()?;
+        let profile = ManagedProfile::for_manager(manager);
+        if !profile.root.exists() {
+            println!("{}", nan_harness_i18n::messages::chatgpt_desktop_no_managed_chatgpt_desktop_session_needs_recovery(nan_harness_i18n::locale()));
+            return Ok(0);
+        }
+        #[cfg(feature = "desktop-qualification")]
+        {
+            stage = qualification_restore::Stage::Ownership;
+        }
+        validate_managed_profile(&profile)?;
+        #[cfg(feature = "desktop-qualification")]
+        {
+            stage = qualification_restore::Stage::Restore;
+        }
+        if restore_session(&profile)? {
+            println!("{}", nan_harness_i18n::messages::chatgpt_desktop_recovered_the_managed_chatgpt_desktop_profile(nan_harness_i18n::locale()));
+        } else {
+            reject_orphaned_session_files(&profile)?;
+            println!("{}", nan_harness_i18n::messages::chatgpt_desktop_no_managed_chatgpt_desktop_session_needs_recovery(nan_harness_i18n::locale()));
+        }
+        Ok(0)
+    })();
+    #[cfg(feature = "desktop-qualification")]
+    if let Err(error) = &outcome {
+        qualification_restore::emit(
+            &ManagedProfile::for_manager(manager).root,
+            stage,
+            error,
+            debug,
+        );
+    }
+    outcome
 }
 
 #[derive(Debug, Error)]

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export NAN_CANARY_WRITER=actions GITHUB_ACTIONS=true
 
 # Covers the explicit maintainer recommendation: it moves GitHub's `latest` pointer only with
 # complete, revalidated gate evidence, and never on an uncertain read. Every GitHub call is mocked.

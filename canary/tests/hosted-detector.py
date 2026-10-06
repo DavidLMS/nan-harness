@@ -1,0 +1,94 @@
+#!/usr/bin/env python3
+"""Read-only detector resolution never turns an API failure into an empty feed."""
+
+from pathlib import Path
+import json
+import sys
+import tempfile
+import unittest
+from unittest.mock import patch
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "canary/actions"))
+import detector
+from state import StateError
+
+
+class DetectorTests(unittest.TestCase):
+    def test_combined_detector_keeps_native_architectures_and_suite_selections_separate(self):
+        selected = detector.select_detector("all", "all", "all", "all", "live", "chosen-model")
+        self.assertEqual((selected["cli"], selected["desktop"]), ("true", "true"))
+        self.assertEqual(selected["model"], "chosen-model")
+        jobs = json.loads(selected["matrix"])["include"]
+        self.assertEqual([(job["system"], job["architecture"], len(job["harnesses"])) for job in jobs],
+                         [("linux", "aarch64", 17), ("macos", "aarch64", 17), ("windows", "x86_64", 15)])
+        self.assertEqual(selected["desktop_platforms"], "linux,macos,windows")
+        self.assertEqual(len(selected["desktop_harnesses"].split(",")), 5)
+
+    def test_desktop_only_has_no_cli_jobs_and_invalid_selections_fail_before_dispatch(self):
+        selected = detector.select_detector("desktop", "windows", "all", "zed-desktop", "deterministic", "model")
+        self.assertEqual(json.loads(selected["matrix"]), {"include": []})
+        self.assertEqual((selected["cli"], selected["desktop"]), ("false", "true"))
+        self.assertEqual(selected["desktop_platforms"], "windows")
+        self.assertEqual(selected["desktop_harnesses"], "zed-desktop")
+        for suites, platforms, apps in (("cli,cli", "all", "all"), ("desktop", "unknown", "all"),
+                                       ("desktop", "all", "codex")):
+            with self.assertRaises(ValueError):
+                detector.select_detector(suites, platforms, "all", apps, "deterministic", "model")
+
+    def test_current_feed_wins_and_only_model_scoped_backups_are_eligible(self):
+        old = {"name": "compatibility-v4.json", "created_at": "2026-09-12"}
+        first = {"name": "compatibility-v5.json.backup.a", "created_at": "2026-09-10"}
+        last = {"name": "compatibility-v5.json.backup.b", "created_at": "2026-09-11"}
+        current = {"name": "compatibility-v5.json"}
+        self.assertIsNone(detector.feed_asset([old]))
+        self.assertEqual(detector.feed_asset([old, last, first]), last["name"])
+        self.assertEqual(detector.feed_asset([last, current]), current["name"])
+        with self.assertRaises(StateError):
+            detector.feed_asset([current, current])
+
+    def test_api_failure_cannot_fabricate_an_empty_validated_feed(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "feed.json"
+            argv = ["detector", "feed", "--repository", "owner/repository",
+                    "--output", str(output), "--validator", "/trusted/xtask"]
+            with patch.object(sys, "argv", argv), patch.object(detector, "Store") as store, \
+                    patch.object(detector, "validate") as validate:
+                store.return_value.call.side_effect = StateError("unavailable")
+                self.assertEqual(detector.main(), 1)
+                validate.assert_not_called()
+                self.assertFalse(output.exists())
+
+    def test_legacy_feed_requires_positive_api_observation_and_trusted_validation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "feed.json"
+            argv = ["detector", "feed", "--repository", "owner/repository",
+                    "--output", str(output), "--validator", "/trusted/xtask"]
+            with patch.object(sys, "argv", argv), patch.object(detector, "Store") as store, \
+                    patch.object(detector, "validate") as validate:
+                store.return_value.call.return_value = {"assets": [{"name": "compatibility-v4.json"}]}
+                self.assertEqual(detector.main(), 0)
+                self.assertEqual([call.args[0][1] for call in validate.call_args_list],
+                                 ["hosted-compatibility-feed", "validate-hosted-compatibility-feed"])
+
+    def test_main_daily_workflow_owns_schedule_and_publishing_boundary(self):
+        workflow = (ROOT / ".github/workflows/harness-canary.yml").read_text()
+        self.assertEqual(workflow.count('cron: "0 5 * * *"'), 1)
+        self.assertEqual(workflow.count("cron:"), 1)
+        self.assertIn("group: release-channel-${{ github.repository }}", workflow)
+        self.assertIn("cancel-in-progress: false", workflow)
+        self.assertIn("daily_compatibility.py prepare", workflow)
+        self.assertIn("persist-credentials: false", workflow)
+        self.assertNotIn("secrets: inherit", workflow)
+        setup, live = workflow.split("  cell:\n", 1)
+        self.assertNotIn("NAN_API_KEY", setup)
+        self.assertIn("environment: compatibility-live", live)
+        diagnostic = (ROOT / ".github/workflows/desktop-check-diagnostics.yml").read_text()
+        self.assertNotIn("schedule:", diagnostic)
+        self.assertNotIn("NAN_API_KEY", diagnostic)
+        self.assertIn("hosted_evidence: false", diagnostic)
+        self.assertNotIn("contents: write", diagnostic)
+
+
+if __name__ == "__main__":
+    unittest.main()

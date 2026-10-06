@@ -1,0 +1,1935 @@
+{
+  "entries": [
+    {
+      "file": "add-sources-dialog-2814d5943f40.js",
+      "id": "chatgptConversations.projectHome.textSource.title",
+      "platform": "windows",
+      "sha": "7e7e0dce9a9bf40beffeb534368c463084edd003f97a377d5b1376897964e2dc",
+      "text": "Add text source"
+    },
+    {
+      "file": "add-sources-dialog-2814d5943f40.js",
+      "id": "chatgptProjectHome.website.title",
+      "platform": "windows",
+      "sha": "7e7e0dce9a9bf40beffeb534368c463084edd003f97a377d5b1376897964e2dc",
+      "text": "Add URL"
+    },
+    {
+      "file": "chatgpt-image-upload-reminder-dialog-7c7719d5ffc4.js",
+      "id": "chatgptConversations.imageUploadReminder.title",
+      "platform": "windows",
+      "sha": "69310e2be352f91f2a6479854c6c1e3c9ce7d63de1d225546ed3c07b9dd02d8d",
+      "text": "Check before sharing"
+    },
+    {
+      "file": "habitat-automation-migration-dialog-4d21faeb871b.js",
+      "id": "inbox.automations.habitatMigration.title",
+      "platform": "windows",
+      "sha": "de1252628d446a22c65a6c8afd1474f59d7f351a26ad9fcc0263a770dcb0e120",
+      "text": "Sync your local automations"
+    },
+    {
+      "file": "dialog-9a12c9336740.js",
+      "id": "workspaceAgents.sharing.removeTitle",
+      "platform": "windows",
+      "sha": "d90ef2e995504a990d6b2286d5df51a043b1a8c1e30db82b06e12e3bfffd21d8",
+      "text": "Remove access?"
+    },
+    {
+      "file": "subscription-update-dialog-111f790d6d5c.js",
+      "id": "settings.usage.pricingPlanPage.subscriptionUpdate.title",
+      "platform": "windows",
+      "sha": "0199f1d820e4125d3b5041be716e883e755bdf33bf2515f1a4e6015b61e9e23a",
+      "text": "Confirm plan changes"
+    },
+    {
+      "file": "settings-unsaved-changes-dialog-2000cd2dd288.js",
+      "id": "settings.unsavedChanges.discardTitle",
+      "platform": "windows",
+      "sha": "b798b5c1072160a1542bfdd21f381aa66616757c034bc144480610d68893d0be",
+      "text": "Discard changes?"
+    },
+    {
+      "file": "dialog-f06ba87d1061.js",
+      "id": "appgenSettings.transfer.dialogTitle",
+      "platform": "windows",
+      "sha": "ecb12d141ad9092236377291e63dd1f49f35b33e542ce122155e4ed145d2ad9b",
+      "text": "Transfer ownership"
+    },
+    {
+      "file": "app-connect-mfa-dialog-9fb7d9540b64.js",
+      "id": "apps.connectMfa.title",
+      "platform": "windows",
+      "sha": "1c62646bb459ad6456df1890a7b4339a35c47e7352f6599f2b69301a2bd5cead",
+      "text": "Enable a second factor to continue"
+    },
+    {
+      "file": "trusted-contact-no-thanks-dialog-30273cd9efe6.js",
+      "id": "message.trustedContactNoThanksModal.title",
+      "platform": "windows",
+      "sha": "cd5b8ef21139b63a24c5197b5a198c4e6aad513ff4e90c6370a87ad5f38f2244",
+      "text": "Thanks for letting us know"
+    },
+    {
+      "file": "team-setup-dialog-ebdf3dc5cced.js",
+      "id": "teams.spaces.setup.loading",
+      "platform": "windows",
+      "sha": "bc2bd43175fa36fc3ceee79127078568fd6890dc545fec75544ec23ab83abb9b",
+      "text": "Loading Spaces\u2026"
+    },
+    {
+      "file": "setup-dialog-529fbd9c72d8.js",
+      "id": "restricted.aeon.slack.setup.title",
+      "platform": "windows",
+      "sha": "87bc394ed7008fcd200f7738ce057269cb41f367e42df690bc3e8b1bb9be88fd",
+      "text": "Add to Slack"
+    },
+    {
+      "file": "gpt-about-dialog-5450ba03a5c1.js",
+      "id": "chatgptConversations.gpts.about.loadError",
+      "platform": "windows",
+      "sha": "8f4d2bf37d6250254765702a5bdbe47c7b348a695f29698551f57a0eca38bda3",
+      "text": "Couldn't load this GPT"
+    },
+    {
+      "file": "gpt-about-dialog-5450ba03a5c1.js",
+      "id": "chatgptConversations.gpts.about.loading",
+      "platform": "windows",
+      "sha": "8f4d2bf37d6250254765702a5bdbe47c7b348a695f29698551f57a0eca38bda3",
+      "text": "Loading GPT details"
+    },
+    {
+      "file": "create-dialog-c7a4fe4b6f38.js",
+      "id": "restricted.environmentSetup.create.title",
+      "platform": "windows",
+      "sha": "fbef8487de5d730cb3959330032261db257fe19a07192cf5974155dbf5864fcf",
+      "text": "Create a cloud environment"
+    },
+    {
+      "file": "chatgpt-keyboard-shortcuts-dialog-131302de0898.js",
+      "id": "keyboardShortcutsDialog.title",
+      "platform": "windows",
+      "sha": "824ae647825ea1fa4e02dd9e62a988c719e3178f75c81a2d13ae5de082df7bc1",
+      "text": "Keyboard shortcuts"
+    },
+    {
+      "file": "dialog-e1aeabf40ed2.js",
+      "id": "settings.chatGpt.sharedLinks.title",
+      "platform": "windows",
+      "sha": "314e1aad9e3040aed2707ebd7d63d24a3299634af050830532e85f69231eb038",
+      "text": "Shared links"
+    },
+    {
+      "file": "dialog-e1aeabf40ed2.js",
+      "id": "settings.chatGpt.sharedLinks.deleteAllConfirmTitle",
+      "platform": "windows",
+      "sha": "314e1aad9e3040aed2707ebd7d63d24a3299634af050830532e85f69231eb038",
+      "text": "Delete all shared links?"
+    },
+    {
+      "file": "attach-site-dialog-77889ec71b92.js",
+      "id": "codex.space.sitePage.attach.title",
+      "platform": "windows",
+      "sha": "fd872e0bc4638b2d8ffb4f7449af8b5b7c362dee6e14eb6debe8d3d424d1b3c0",
+      "text": "Add existing Site"
+    },
+    {
+      "file": "feedback-form-dialog-6b3770cc4a40.js",
+      "id": "feedbackFormDialog.title",
+      "platform": "windows",
+      "sha": "8b064e54451c8e9126cee55ec340a82129249ac5cee7ac8d9731962721505199",
+      "text": "Share feedback"
+    },
+    {
+      "file": "appgen-change-slug-dialog-eba76eac3e7f.js",
+      "id": "appgenSettings.general.url.changeDialog.title",
+      "platform": "windows",
+      "sha": "1036114f1ce102b2745866313b1b36cb21eeb17fa1ff8a08d760bedf8ed2fb8a",
+      "text": "Change URL"
+    },
+    {
+      "file": "artifact-feedback-dialog-4b987d997eab.js",
+      "id": "artifactFeedback.title",
+      "platform": "windows",
+      "sha": "b08a793cf379e75ed83be8d9ee86c77511c1008ae47354f364f5249f10bd78a2",
+      "text": "Help our team improve ChatGPT"
+    },
+    {
+      "file": "dialog-4047716c1354.js",
+      "id": "composer.hooks.review.title",
+      "platform": "windows",
+      "sha": "0cc351f307322fa40a5a6484f9e2b0aa8c598f0a379c0424132539a2b3157dce",
+      "text": "Review hooks"
+    },
+    {
+      "file": "voice-personalization-dialog-e3a117d1ffda.js",
+      "id": "chatgpt.pepper.personalization.voice.title",
+      "platform": "windows",
+      "sha": "d649f56ac8f4b3199b788045b9b16aa4ea967a6bce1c956d107b6902cfa9f263",
+      "text": "Choose a voice"
+    },
+    {
+      "file": "renewal-dialog-a51db92bb9dd.js",
+      "id": "settings.consumerBilling.renewalTitle",
+      "platform": "windows",
+      "sha": "ba8c0e333c97ed091693852066f63b61a4d15ee9f58da533a7747d2267ceb9ab",
+      "text": "Confirm plan changes"
+    },
+    {
+      "file": "dialog-8e8bf01eec70.js",
+      "id": "chatGpt.quietHours.active.title",
+      "platform": "windows",
+      "sha": "50da836455c66097ca04bff493cfb00a6974a14b1fc708928c1ddf717ef29761",
+      "text": "Time for a break"
+    },
+    {
+      "file": "shared-task-dialog-73eee2f4d491.js",
+      "id": "automations.sharing.preview.dialog.title",
+      "platform": "windows",
+      "sha": "abd0e837c23823476fd94c797101e5e5e40f0948c5fe33d6adb1cea8b3b781a6",
+      "text": "Shared with you"
+    },
+    {
+      "file": "shared-task-dialog-73eee2f4d491.js",
+      "id": "automations.sharing.preview.dialog.title",
+      "platform": "windows",
+      "sha": "abd0e837c23823476fd94c797101e5e5e40f0948c5fe33d6adb1cea8b3b781a6",
+      "text": "Shared with you"
+    },
+    {
+      "file": "reboot-dialog-77200282ba39.js",
+      "id": "orbit.primary.reboot.title",
+      "platform": "windows",
+      "sha": "097389acff2cf0843b3f0f0e071c771c39f4ab37881371925faae435eb594046",
+      "text": "Reboot your dot?"
+    },
+    {
+      "file": "cloud-environment-packages-dialog-f282472dc187.js",
+      "id": "settings.cloudEnvironments.packages.title",
+      "platform": "windows",
+      "sha": "c56bbf64ad58e675c44d7aca2e4c8403b2e01d434dd80fd8cef25230c49fd34b",
+      "text": "Preinstalled packages"
+    },
+    {
+      "file": "dialog-4871d5ef4198.js",
+      "id": "profile.sharing.title",
+      "platform": "windows",
+      "sha": "8a0b971a6e5d4b48a8936942bfed57c960ee68e86a2825cbc85945b1168f381f",
+      "text": "Share your profile"
+    },
+    {
+      "file": "upgrade-dialog-a64c268b961f.js",
+      "id": "pricing.comparison.title",
+      "platform": "windows",
+      "sha": "4a9557ea397a8bd38e2074047914146c2c9c250916549e6c50fac4a0166d8160",
+      "text": "Upgrade your plan"
+    },
+    {
+      "file": "pending-edits-dialog-3059251135f3.js",
+      "id": "codex.writingBlock.confirmCloseTitle",
+      "platform": "windows",
+      "sha": "f53f6b7290cdb79faa86199e1dd40bf9f8339470330ff05484306eae33879848",
+      "text": "Close editor?"
+    },
+    {
+      "file": "gitlab-merge-request-form-dialog-0fe0efb0c20c.js",
+      "id": "localConversationPage.createPrModal.gitLabTitle",
+      "platform": "windows",
+      "sha": "c78a9d39170b2cb5acabaf830e039c34eeb2b871a7271c10e915a87a5556a53c",
+      "text": "Create merge request"
+    },
+    {
+      "file": "create-dialog-9d7600237cc5.js",
+      "id": "plugins.create.title",
+      "platform": "windows",
+      "sha": "c61726658b1158730c5a6d36fe5b058ee4fd98b987424dfee40af44b0f03ea79",
+      "text": "New Plugin"
+    },
+    {
+      "file": "dictionary-dialog-41a54366fe23.js",
+      "id": "speechSettings.content.customDictionary.page.title",
+      "platform": "windows",
+      "sha": "e7b3b66898ed6c4e0a381eb0be99ce5306399243c8eb991af7cf7035182fa9cc",
+      "text": "Voice dictionary"
+    },
+    {
+      "file": "versions-dialog-e25f437ae439.js",
+      "id": "chatgpt.versions.title",
+      "platform": "windows",
+      "sha": "5ae3a68c3ed8065618f51258fffe8310785b7d9af86e0dede46bcf848d4151dd",
+      "text": "Versions"
+    },
+    {
+      "file": "create-project-dialog-6ca04e3eb284.js",
+      "id": "projectSetup.remoteSource.choose",
+      "platform": "windows",
+      "sha": "b4066d9fedde45340084e46020bec391e2ba4c8987c851a8a8ce23c94fbb7a94",
+      "text": "Choose a source folder"
+    },
+    {
+      "file": "create-project-dialog-6ca04e3eb284.js",
+      "id": "projectSetupDialog.createMissingRemoteFolderTitle",
+      "platform": "windows",
+      "sha": "b4066d9fedde45340084e46020bec391e2ba4c8987c851a8a8ce23c94fbb7a94",
+      "text": "Create missing folder?"
+    },
+    {
+      "file": "order-yubikey-dialog-6c19597cff79.js",
+      "id": "settings.chatGpt.security.orderYubikey.title",
+      "platform": "windows",
+      "sha": "0ad778779f8ce16abc10187811c5bac6142da74c2306c662e5dc26db6453515e",
+      "text": "Order a YubiKey"
+    },
+    {
+      "file": "codex-mobile-setup-dialog-f2d7064d041a.js",
+      "id": "codexMobile.setupPage.waiting.pairing.fullscreenQrCodeTitle",
+      "platform": "windows",
+      "sha": "7be4458c7951363c19bc450ab217865827dec551964c1f15a7bde70f45a501e1",
+      "text": "Pairing QR code"
+    },
+    {
+      "file": "products-dialog-44ed05c7ab01.js",
+      "id": "businessProfiles.feedProducts.title",
+      "platform": "windows",
+      "sha": "8d57cc75a9c5bebd0d004aef43b6ad682c682652a15d085f947f25d4de5ee9a6",
+      "text": "Products"
+    },
+    {
+      "file": "personal-workspace-access-blocked-dialog-227b1120d567.js",
+      "id": "personalWorkspaceAccessBlocked.title",
+      "platform": "windows",
+      "sha": "166eabdbd51ccab2678eb2c5f1d06f18c369e79d5abec933c0e6edac1f2716c8",
+      "text": "Personal workspace access blocked"
+    },
+    {
+      "file": "education-dialog-2b5da5317072.js",
+      "id": "composer.worktreePrompt.education.title",
+      "platform": "windows",
+      "sha": "e115fd876ab3ade9f8ec349b7e7bfae4b5b7b4438571656a395303f4fa05f917",
+      "text": "Worktrees that just work"
+    },
+    {
+      "file": "run-history-dialog-5ec6f2e24797.js",
+      "id": "chatgpt.tasks.run_history.title",
+      "platform": "windows",
+      "sha": "a1259896b3dccc8faf8ffe599cf54db12310e1c5653cdaf57c58ad030895c0ae",
+      "text": "Run history"
+    },
+    {
+      "file": "my-gpt-delete-dialog-a478f438ada6.js",
+      "id": "chatgptConversations.gpts.mine.deleteTitle",
+      "platform": "windows",
+      "sha": "b1e3aae478bf5414a48e2956ace6e2777ea6c2c7cbc3e248f6a48d0b4e71f00a",
+      "text": "Delete GPT"
+    },
+    {
+      "file": "keyboard-shortcuts-dialog-d67c7a2358eb.js",
+      "id": "keyboardShortcutsDialog.title",
+      "platform": "windows",
+      "sha": "396fd97836b7a8cea50c38255ef212488772988ec103c8b96406afbc5525e2b5",
+      "text": "Keyboard shortcuts"
+    },
+    {
+      "file": "chatgpt-saved-memory-source-delete-dialog-4e4b63bd0840.js",
+      "id": "chatgptConversations.summaryPanel.sources.memory.delete.title",
+      "platform": "windows",
+      "sha": "9e5bd2a3ad5f73a513daf27652bd708ea77efaed3103b67a3af38796531e72a6",
+      "text": "Delete this memory?"
+    },
+    {
+      "file": "dialog-44edb451dec9.js",
+      "id": "chatgptConversations.projectSettings.title",
+      "platform": "windows",
+      "sha": "a4b54ae526edcb9c4994770d5b777d6b07f57d85ae642d246f6a28b1364868d8",
+      "text": "Project settings"
+    },
+    {
+      "file": "realtime-voice-picker-dialog-43dea992392c.js",
+      "id": "settings.general.realtimeVoice.dialog.title",
+      "platform": "windows",
+      "sha": "8517648b8e13700f47ffe3a003363d1c0483b7083490db6a65840cda7144868a",
+      "text": "Choose a voice"
+    },
+    {
+      "file": "permission-denied-dialog-eaa645ad2bbe.js",
+      "id": "chatgptConversations.preciseLocation.permissionDenied.title",
+      "platform": "windows",
+      "sha": "765ab4b2d9d058d29ed872cd25f9d2c26e262e583710b4466807542b906b9a6e",
+      "text": "Turn on location access"
+    },
+    {
+      "file": "sites-handoff-dialog-8ad96961dff7.js",
+      "id": "sitesPreview.handoff.title",
+      "platform": "windows",
+      "sha": "f952ff9fcca3cd036ca65647d05ef3d5d67caa168a8c9d4a41f663c605c145d8",
+      "text": "Continue your website in Work"
+    },
+    {
+      "file": "import-dialog-526d7591dff5.js",
+      "id": "personalVault.importTitle",
+      "platform": "windows",
+      "sha": "9e92b156770a719aefb56497845eb691ca801af4b68a545460254ca9bf6ea7c1",
+      "text": "Import local variables"
+    },
+    {
+      "file": "library-move-dialog-1b37c1053d89.js",
+      "id": "libraryNext.move.title",
+      "platform": "windows",
+      "sha": "24b0851d98e62008362dcdfec7fa93d870b80cd7d07300f5a0bb954f13fbb13f",
+      "text": "Move to\u2026"
+    },
+    {
+      "file": "downgrade-dialog-5f6c579e80de.js",
+      "id": "settings.consumerBilling.downgradeTitle",
+      "platform": "windows",
+      "sha": "f471507d02c32b768227895d2a50f41f2e76e6ece3ef8b0c91b19ef825c03687",
+      "text": "Confirm plan changes"
+    },
+    {
+      "file": "onboarding-page-65aa525f17a5.js",
+      "id": "electron.onboarding.conversationalOnboarding.skipDialog.title",
+      "platform": "windows",
+      "sha": "99d54acc5ef451763aeec7d742e0b32f46c92e24a2f078e345746f30721c409d",
+      "text": "Skip setup?"
+    },
+    {
+      "file": "delete-thread-dialog-44d9a8415288.js",
+      "id": "sidebarElectron.deleteThreadDialog.title",
+      "platform": "windows",
+      "sha": "d8f87eae14b301e496fd2c4ddecf9e94994abc905d63bf65faad73b716328053",
+      "text": "Delete task?"
+    },
+    {
+      "file": "dialog-e741cf50b199.js",
+      "id": "libraryNext.flashcards.dialogTitle",
+      "platform": "windows",
+      "sha": "0bd2806a4fb838484111f048b2bfa0fde6c52c36acbde35a5ac8fc54e5b2ccf1",
+      "text": "Flashcards"
+    },
+    {
+      "file": "publish-dialog-39711b361d3d.js",
+      "id": "sitesPreview.share.title",
+      "platform": "windows",
+      "sha": "713a48865528f1739134c6ac71dcb1ff9b0c8398d33ddf1b3db83aa5e1097292",
+      "text": "Ready to share your site?"
+    },
+    {
+      "file": "new-space-dialog-12b6a0c02700.js",
+      "id": "codex.space.creation.discardTitle",
+      "platform": "windows",
+      "sha": "a9495e88a495305d560ea386c425623914a51996eb8451e55a9c26206e23bec0",
+      "text": "Discard changes?"
+    },
+    {
+      "file": "dialog-85768d2326ef.js",
+      "id": "workspaceAgents.schedules.editor.title",
+      "platform": "windows",
+      "sha": "1d34be18f087d68f14acf3f6c257d3e461097b49318a7b1dcf718b6751aa66ae",
+      "text": "Scheduled automation"
+    },
+    {
+      "file": "chatgpt-onboarding-dialog-e1ff901ebbe1.js",
+      "id": "chatgpt.new-onboarding.all-done-2",
+      "platform": "windows",
+      "sha": "645d73d0a333f8ffe81a59bba9be2c781bd46057943877a6e4563ff72323c51e",
+      "text": "You're all set"
+    },
+    {
+      "binding": "DialogTitle sr-only child Intl spreads local title descriptor",
+      "file": "dialog-b5fb1e02ec3f.js",
+      "id": "chatgpt.global_search.modal.title",
+      "platform": "windows",
+      "sha": "abd74e6712d657e4c19f3c9b572ecaa35c3a929b43a72d02645154d300aa79c0",
+      "text": "Global search"
+    },
+    {
+      "binding": "Static Intl child s assigned from o then rendered as DialogTitle child s",
+      "file": "dialog-cf877a6c47e4.js",
+      "id": "settings.browserUse.profileImport.extensionsConfirmationTitle",
+      "platform": "windows",
+      "sha": "e0c477bdfa5ed7c579aea7909447d6ba0d71bc538e89830fe5734de32c782c3f",
+      "text": "Import unverified extensions?"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "aeon-summary-panel-identity-2d7b093b5a84.js",
+      "id": "restricted.aeon.email.dialog.loadingTitle",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "2ebb6bddd9b49c51b6b8543506d7b0f48b68a7e36e7129628e3b4a666573d7ab",
+      "text": "Email",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "analysis-dialog-154975b470b0.js",
+      "id": "chatgpt.pythonExecution.analysisTitle",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "461cc939013570fa1c4e925e427804c845827d5173fb2917de073a93ba849b39",
+      "text": "Analysis",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "annotation-editor-63a877ae1bdf.js",
+      "id": "composer.annotationEditor.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "0cf060ece384206f951ae8f038dffc6920076ca4ec9c969a061061a3128cb728",
+      "text": "Edit annotation",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "app-initial-7ad941570eaa.js",
+      "id": "composer.appshotCapture.firstUse.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "ead27bea1a76438c4d6bd5449a203fc9a7dc1b024bcd43493109848db0025344",
+      "text": "Enable Appshots",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "app-initial-7ad941570eaa.js",
+      "id": "realtimeVoice.onboarding.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "ead27bea1a76438c4d6bd5449a203fc9a7dc1b024bcd43493109848db0025344",
+      "text": "Set up voice chat",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "app-initial-7ad941570eaa.js",
+      "id": "codex.space.page.move.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "ead27bea1a76438c4d6bd5449a203fc9a7dc1b024bcd43493109848db0025344",
+      "text": "Move page",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "app-initial-7ad941570eaa.js",
+      "id": "beacons.connectApp.loading.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "ead27bea1a76438c4d6bd5449a203fc9a7dc1b024bcd43493109848db0025344",
+      "text": "Connect app",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "app-initial-7ad941570eaa.js",
+      "id": "beacons.connectApp.loadError.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "ead27bea1a76438c4d6bd5449a203fc9a7dc1b024bcd43493109848db0025344",
+      "text": "Couldn\u2019t load connector",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "app-initial-7ad941570eaa.js",
+      "id": "libraryNext.connectPlugin.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "ead27bea1a76438c4d6bd5449a203fc9a7dc1b024bcd43493109848db0025344",
+      "text": "Connect your files",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "app-initial-7ad941570eaa.js",
+      "id": "libraryNext.createFolder.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "ead27bea1a76438c4d6bd5449a203fc9a7dc1b024bcd43493109848db0025344",
+      "text": "New folder",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "app-initial-7ad941570eaa.js",
+      "id": "sidebarCustomization.customizeSidebar",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "ead27bea1a76438c4d6bd5449a203fc9a7dc1b024bcd43493109848db0025344",
+      "text": "Customize",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "app-initial-7ad941570eaa.js",
+      "id": "chatgptConversations.sidebar.project.delete.dialog.title.crossMode",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "ead27bea1a76438c4d6bd5449a203fc9a7dc1b024bcd43493109848db0025344",
+      "text": "Delete this project from Chat and Work?",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "app-initial-7ad941570eaa.js",
+      "id": "projectSetup.editRemoteProject.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "ead27bea1a76438c4d6bd5449a203fc9a7dc1b024bcd43493109848db0025344",
+      "text": "Edit remote project",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "app-initial-7ad941570eaa.js",
+      "id": "codex.remoteConnectionEditor.loadError.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "ead27bea1a76438c4d6bd5449a203fc9a7dc1b024bcd43493109848db0025344",
+      "text": "Couldn\u2019t open connection editor",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "app-initial-7ad941570eaa.js",
+      "id": "localConversation.sideChat.closeConfirmation.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "ead27bea1a76438c4d6bd5449a203fc9a7dc1b024bcd43493109848db0025344",
+      "text": "Close side chat?",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "app-initial-7ad941570eaa.js",
+      "id": "appUpdate.installProgress.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "ead27bea1a76438c4d6bd5449a203fc9a7dc1b024bcd43493109848db0025344",
+      "text": "Installing update",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "app-initial-7ad941570eaa.js",
+      "id": "traceRecording.startDetails.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "ead27bea1a76438c4d6bd5449a203fc9a7dc1b024bcd43493109848db0025344",
+      "text": "How Trace Recording Works",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "app-initial-7ad941570eaa.js",
+      "id": "traceRecording.details.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "ead27bea1a76438c4d6bd5449a203fc9a7dc1b024bcd43493109848db0025344",
+      "text": "Send profile trace?",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "app-initial-7ad941570eaa.js",
+      "id": "appgenPublicationTerms.modal.title.v20260612",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "ead27bea1a76438c4d6bd5449a203fc9a7dc1b024bcd43493109848db0025344",
+      "text": "Sites terms",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "app-initial-7ad941570eaa.js",
+      "id": "feedback.dialog.loadError.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "ead27bea1a76438c4d6bd5449a203fc9a7dc1b024bcd43493109848db0025344",
+      "text": "Couldn\u2019t open feedback",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "app-initial-7ad941570eaa.js",
+      "id": "notifications.clearAllUnreads.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "ead27bea1a76438c4d6bd5449a203fc9a7dc1b024bcd43493109848db0025344",
+      "text": "Clear all unreads?",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "app-initial-7ad941570eaa.js",
+      "id": "artifactViewer.present.slideshow",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "ead27bea1a76438c4d6bd5449a203fc9a7dc1b024bcd43493109848db0025344",
+      "text": "Slideshow",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "app-primary-c45f4947797f.js",
+      "id": "composer.mode.agentMode.ultraFullAccessConfirm.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "0745236224eb4857424694421fa46549b85a5d704a23577acb7b516c9d5e43db",
+      "text": "Use Ultra with Full access?",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "app-primary-c45f4947797f.js",
+      "id": "composer.threadGoal.replaceConfirmation.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "0745236224eb4857424694421fa46549b85a5d704a23577acb7b516c9d5e43db",
+      "text": "Replace current goal?",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "app-primary-c45f4947797f.js",
+      "id": "composer.threadGoal.editDialog.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "0745236224eb4857424694421fa46549b85a5d704a23577acb7b516c9d5e43db",
+      "text": "Edit goal",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "app-primary-c45f4947797f.js",
+      "id": "composer.memoriesSlashCommand.dialogTitle",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "0745236224eb4857424694421fa46549b85a5d704a23577acb7b516c9d5e43db",
+      "text": "Chat memories",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "app-primary-c45f4947797f.js",
+      "id": "workspaceDiscovery.loadFailed",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "0745236224eb4857424694421fa46549b85a5d704a23577acb7b516c9d5e43db",
+      "text": "Could not load workspaces",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "appgen-settings-page-723960061d80.js",
+      "id": "appgenSettings.accessRequest.loadError",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "f59ad99fa5fe0e1118c98e5e923832dbca8240d7a45965a8f6b62e8e157adf90",
+      "text": "Unable to load access request",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "appgen-settings-page-723960061d80.js",
+      "id": "appgenSettings.customDomains.addDialog.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "f59ad99fa5fe0e1118c98e5e923832dbca8240d7a45965a8f6b62e8e157adf90",
+      "text": "Add custom domain",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "automation-frequency-section-e8b83050e9bc.js",
+      "id": "inbox.automations.scheduleRule.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "48d0ce2fd490a61d8faecd96f69adf38f0ce5ee7f77a908ca19d2c44f5b0be7d",
+      "text": "Edit schedule rule",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "chatgpt-conversation-turn-content-419255fafe91.js",
+      "id": "chatgptConversations.toolApproval.detailsTitle",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "02a57745853d980b5bda2d4446b9378dcf1e195fe6108401c44e16113d52c787",
+      "text": "Details",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "cloud-environment-editor-e710b1b53994.js",
+      "id": "settings.cloudEnvironments.editor.repository.dialogTitle",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "703063abd60b85543d408a68f1fb3c6d44713e951033fc5988b6384f258a3f7d",
+      "text": "Choose a repository",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "cloud-environment-editor-e710b1b53994.js",
+      "id": "settings.cloudEnvironments.editor.repository.loading",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "703063abd60b85543d408a68f1fb3c6d44713e951033fc5988b6384f258a3f7d",
+      "text": "Loading repositories\u2026",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "cloud-environment-editor-e710b1b53994.js",
+      "id": "settings.cloudEnvironments.editor.repository.loadFailed",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "703063abd60b85543d408a68f1fb3c6d44713e951033fc5988b6384f258a3f7d",
+      "text": "Couldn\u2019t open the repository picker. Reload the app and try again",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "cloud-environments-settings-page-4b7c8372ccb1.js",
+      "id": "settings.cloudEnvironments.resetCache.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "ce553d4c29ad2d8a222131ff089048f5e3d52c6444533ee8c204c97a6a53897a",
+      "text": "Reset cached containers?",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "codex-micro-settings-40db24d9ab6d.js",
+      "id": "settings.codexMicro.analog.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "e1e7b73ec05042a7d382af0d0a36934993474541d5ac72a5c85a8a9af540de63",
+      "text": "Analog stick",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "codex-micro-settings-40db24d9ab6d.js",
+      "id": "settings.codexMicro.encoder.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "e1e7b73ec05042a7d382af0d0a36934993474541d5ac72a5c85a8a9af540de63",
+      "text": "Knob",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "composer-policy-22d028b55d7b.js",
+      "id": "codex.lunaReserve.dialog.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "ea97bb1cc3a04e8fe8d7b0f9182591ead9eb5af18e48c1df5ab9aa8b15616bb8",
+      "text": "Regain access to our most powerful models",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "configuration-fields-1f344a30a0d3.js",
+      "id": "environmentSetup.vpn.dialogTitle",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "1d3733613f5e546f6a1114a24e0fb1f79a4c6ee9f0adb271186c6edb84afe5ed",
+      "text": "Tailscale VPN",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "confirmation-898d4711f35c.js",
+      "id": "orbit.safety.confirmation.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "05d43314e79b78a3b127514c9b8099367f0c91cc664c7aca7a35512f8b064a8d",
+      "text": "Confirm to continue",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "contact-setup-a31c5dbf1596.js",
+      "id": "restricted.aeonMessaging.contactSetupTitle",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "8f3813852d12cb44571ef3cc0a41b35b998a77f55357e242e23160b6295f1c85",
+      "text": "Contact your dot anywhere",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "content-c2d18c7caa4d.js",
+      "id": "codex.page.taskMention.deleteTitle",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "241eabc068d0caa0877657f09121cc5a8e27474fa1cd4ec0f1ad54ffe34b5234",
+      "text": "Remove ChatGPT mention?",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "content-c2d18c7caa4d.js",
+      "id": "codex.space.page.recovery.discardTitle",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "241eabc068d0caa0877657f09121cc5a8e27474fa1cd4ec0f1ad54ffe34b5234",
+      "text": "Discard recovery copies?",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "content-c2d18c7caa4d.js",
+      "id": "codex.space.page.recovery.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "241eabc068d0caa0877657f09121cc5a8e27474fa1cd4ec0f1ad54ffe34b5234",
+      "text": "Page recovery copy",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "content-c2d18c7caa4d.js",
+      "id": "codex.space.page.linkDialog.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "241eabc068d0caa0877657f09121cc5a8e27474fa1cd4ec0f1ad54ffe34b5234",
+      "text": "Link to page",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "conversation-ui-43b4aade662b.js",
+      "id": "chatgptConversations.businessAgent.disclosureTitle",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "d98e7619f6df3a5a5dc88434acce13b9694e0e3d26f4f5a4cf04b210b69e3b31",
+      "text": "About chats with businesses",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "create-route-436254152b4c.js",
+      "id": "cloudEnvironments.createLink.unavailableTitle",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "da32b99097457e845fe1a7399943edea712828a9e1dcf385b8cd6c48acd9bd21",
+      "text": "Cloud environments unavailable",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "debug-panel-355f21836af2.js",
+      "id": "multiplayer.debug.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "007c34083138aafda776f3725abcdf9137872171b916b97f9fa67d7406fccf00",
+      "text": "Multiplayer note capture",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "details-687b321ce645.js",
+      "id": "restricted.aeonMessaging.email.details",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "838b03b0c4aa1508b4ab9089a73c4298163d558822e5ed7b6e1730769a6a267a",
+      "text": "Email details",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "dialog-53dbb47aefc8.js",
+      "id": "codex.cme.dialog.cme",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "659d84779486508156cada405bced2a642599ae9ec73c8cfafef83c62e14219d",
+      "text": "CME",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "dialog-53dbb47aefc8.js",
+      "id": "codex.cme.dialog.removeConversationFromClaim",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "659d84779486508156cada405bced2a642599ae9ec73c8cfafef83c62e14219d",
+      "text": "Remove conversation from Claim?",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "directory-b98b9aee7a3e.js",
+      "id": "browserSkills.uploadTitle",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "772be6abec107bf61c30217d23279d3419d7c8e1b5a86a8eeec1054920ba14e6",
+      "text": "Upload a skill",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "duplicate-agent-d408168562a5.js",
+      "id": "workspaceAgents.management.deleteTitle",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "a60683107ce52113bda1229ab2b80f50051a7eda95e64362a524b518d4c31f2b",
+      "text": "Delete agent?",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "duplicate-confirmation-88e2ee2d0c5f.js",
+      "id": "browserSkills.duplicateTitle",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "f061ce68cebe6865fd1cca97e6ccc37274a1774d853efeca50d89d6b571ec2fc",
+      "text": "Skill already exists",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "hook-stats-dialog-a68de48b5669.js",
+      "id": "assistantMessage.hookStats.dialogTitle",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "b13c88c58822832440b0c3411c0e3dba0b30c8c645673c7ac7b905667132f733",
+      "text": "Hook stats",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "host-df6d7f26d7c1.js",
+      "id": "MoonshineNuxV2Modal.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "d0bd504f8d6337058dc0f7262dd239ab74ef34304494f3ed53b36cc382458641",
+      "text": "Introducing new, improved memory",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "hosted-map-3bbd36a88aa8.js",
+      "id": "chatgpt.contentReferences.map.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "c76f82e15cb4f99411081588429d3bfa18f0de0e0c50093baaac49ce350f0605",
+      "text": "Map",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "image-side-panel-3c7909e8dcfc.js",
+      "id": "imagePanorama.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "8a65f8154d70d5780a28dfe03cc3a4f89769eab6f0b4ef8f1936fd95dde9f95a",
+      "text": "360 viewer",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "landing-route-5ec066ac00f4.js",
+      "id": "orbit.landing.loadError",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "b9e4c1720cf9ea197ac4e988832d534aebad8d4b6f358ba6355fc152868ff8e4",
+      "text": "We couldn\u2019t check your access to dots",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "library-empty-trash-1a2192dfea89.js",
+      "id": "library.emptyTrash.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "c479f16810f52f7b1343a0e56f5210e338503dbe8a4eacd93f88585bce29e109",
+      "text": "Delete forever?",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "library-selection-toolbar-69f1c961e320.js",
+      "id": "library.emptyTrash.loadError.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "eb819a7f28345752d2f81be4b6e03ea61775eb9a3e34f5d28a35f34a454b64ea",
+      "text": "Couldn\u2019t open Empty file trash",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "local-conversation-git-actions-967026f9886c.js",
+      "id": "localConversationPage.createPrModal.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "683b6abaf3342526749ced464de1e054add98390157711cd6135ff000da3a9ff",
+      "text": "Create PR",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "local-conversation-thread-abf25c8581ac.js",
+      "id": "settings.localEnvironments.createDialog.discardTitle",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "99e46c9336051727337ea58ac865b43b7b2860f6e46ad18bb754b5d9324cd038",
+      "text": "Discard local environment draft?",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "local-conversation-thread-abf25c8581ac.js",
+      "id": "localConversation.forkFromOlderTurnDialog.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "99e46c9336051727337ea58ac865b43b7b2860f6e46ad18bb754b5d9324cd038",
+      "text": "Fork chat from here",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "manager-67ea51ae7a54.js",
+      "id": "businessProfiles.field.conflict.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "69b9995ab758e598a710ff573bcf730c6921a0370f9557aa670913c09b7fec9a",
+      "text": "Someone else edited this value",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "manager-67ea51ae7a54.js",
+      "id": "businessProfiles.leave.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "69b9995ab758e598a710ff573bcf730c6921a0370f9557aa670913c09b7fec9a",
+      "text": "Discard unsaved changes?",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "manager-67ea51ae7a54.js",
+      "id": "businessProfiles.manual.productTitle",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "69b9995ab758e598a710ff573bcf730c6921a0370f9557aa670913c09b7fec9a",
+      "text": "Add product",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "mcp-app-follow-up-confirmation-dialog-77a435fd28ea.js",
+      "id": "codex.mcpTool.confirmFollowUp.widgetStateTitle",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "e00ad1c32b0115d2718f6c6ed63e17f9e09e24f4130f2c5c8836e1dfba941d1e",
+      "text": "Widget state",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "message-json-dialog-135f7c53f520.js",
+      "id": "chatgptConversations.debugPanel.messageJsonTitle",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "3854c1838e389986a4c78026f9d18b0585e48544b9a075b6de3654b66db767e2",
+      "text": "Message JSON",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "mobile-block-730671e62e43.js",
+      "id": "chatgpt.contentReferences.learningBlock.dialog.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "f8f1bdf1c9eeec2ff86fae6e877d1a801c8d5d3a9d950577414b69b070198014",
+      "text": "Interactive learning block",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "modal-ecb5e5b9161b.js",
+      "id": "chatgpt.pepper.personalization.accent_color.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "adb591b446bd24b03ae09ea7412a3cfe9494f1b29d57c91aac1934289be23322",
+      "text": "Choose a theme color",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "offer-page-d9aff0922c9d.js",
+      "id": "NoAuthPromoRedemptionModal.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "6662863b2cd9b81016b682226aa1afad9dd01e758b3aeb3dbd632c6ffc4e5397",
+      "text": "Log in or sign up to redeem your promotion",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "open-editors-bf58ece04f33.js",
+      "id": "defenseFactory.editors.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "cf7569bf03ef7a5323e2c81a1989cc613b9f368dff6bba17a8ab5aa1030386a3",
+      "text": "Choose editors",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "overlay-d0198ec0c930.js",
+      "id": "imagePreviewDialog.label",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "f98abfc41f27bfcb854cd3f65547b294182ab5c81bdd470737136ea12d16ea64",
+      "text": "Image preview",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "page-ddf9d1e448c8.js",
+      "id": "postSharingModal.contentUnavailable",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "ec70cd4261e382bf19429bc145fa7a00074edbe2df09881920e0a7ef3b534952",
+      "text": "Content Unavailable",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "page-5b4e93c6c045.js",
+      "id": "settings.userRules.deleteTitle",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "a536cff20f4784cca94990d0d6e71f0dd658f9c7660039f752775cae10288140",
+      "text": "Delete rule?",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "page-a4e1f9d89e80.js",
+      "id": "personalFinance.dashboard.settings.accessibleTitle",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "052f1b8fe3039205b009e8b07c5d240e55cbfc21f5b9ea93de7d164e79b723de",
+      "text": "Customize dashboard",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "page-a4e1f9d89e80.js",
+      "id": "personalFinance.memories.accessibleTitle",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "052f1b8fe3039205b009e8b07c5d240e55cbfc21f5b9ea93de7d164e79b723de",
+      "text": "Saved financial memories",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "page-b2d3527bd6b6.js",
+      "id": "workspaceAgents.builder.apps.dialogTitle",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "49002b85cfcf4d66139cc9a6eb110ba8b53cd24f50e3a709a51e15affe42529b",
+      "text": "Choose apps",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "page-b2d3527bd6b6.js",
+      "id": "workspaceAgents.builder.history.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "49002b85cfcf4d66139cc9a6eb110ba8b53cd24f50e3a709a51e15affe42529b",
+      "text": "Version history",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "page-b2d3527bd6b6.js",
+      "id": "workspaceAgents.builder.skillPickerTitle",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "49002b85cfcf4d66139cc9a6eb110ba8b53cd24f50e3a709a51e15affe42529b",
+      "text": "Select a skill",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "page-b0d99993a4d2.js",
+      "id": "lighthouseHome.keyboard.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "5326a0c9ac052d54b762cf89c2411c29ec679694a99462ed9bf0ab4eca29d0b6",
+      "text": "Work catch-up shortcuts",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "personalization-settings-7bdc0f11436f.js",
+      "id": "settings.memory.resetDialogTitle.host",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "59e1920d7e24842b56691927367ad60f4f04cfbcd21363c49e14c3268d2da493",
+      "text": "Delete all Codex memories?",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "pets-settings-route-37ab5d08cf5e.js",
+      "id": "settings.pets.preview.customize.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "560606a464fd905f3a09c3a544f07ec294e9e3e1c75cbfa20c7175d3e05c5a6b",
+      "text": "Customize pet",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "placement-62bf63cb9e57.js",
+      "id": "chatgpt.ads.onboarding.dialogTitle",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "a37eed37e3ce457e494fc1a79454838c336e0c177d99da2fd6b124f965d3f146",
+      "text": "About ads in ChatGPT",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "plugins-cards-grid-511b62ba3519.js",
+      "id": "skills.appsPage.addMarketplace.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "5e0c74ae47d6a7926d18bd52e3454703d97ffaa58128e0003298db41ec942a22",
+      "text": "Add plugin marketplace",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "plugins-skills-tabs-f1a8aa91f1de.js",
+      "id": "browser.adminConsoleOAuthRedirect.status",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "2e1a01f2e1fe944923948fa94331bb647be3a36d661100b0e844429b531d43bf",
+      "text": "Redirecting to admin console\u2026",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "plugins-skills-tabs-f1a8aa91f1de.js",
+      "id": "skills.appsPage.pluginRequest.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "2e1a01f2e1fe944923948fa94331bb647be3a36d661100b0e844429b531d43bf",
+      "text": "Request a plugin",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "preview-9a080babfb42.js",
+      "id": "lighthouseHome.preview.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "eb1b524001d3a9c7d58fc615e3bcb15012dae77eaf35a2d3141b3bd726da374b",
+      "text": "Conversation preview",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "profile-entrypoint-6d343cdcc0d1.js",
+      "id": "codex.subscriptionPaymentRecovery.loadError.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "9d49cd643a4773430fffbbfa77085395eab13a76c28956fe8bc5f23080c37334",
+      "text": "Couldn\u2019t open payment recovery",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "profile-3cd3d986f1ab.js",
+      "id": "profile.shareCard.preview.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "68ce806559da1dec1667e6361e26a36048c0551bd6a9dae916dd13d94dc7e46d",
+      "text": "Share profile card",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "pull-request-comment-3dee3e7b5885.js",
+      "id": "pullRequestDetail.comment.deleteTitle",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "cad6b39bed10aca958bd2da623846a400f187076e86b83617eb667ac94666bfc",
+      "text": "Delete comment",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "pull-request-detail-actions-aa18dac7223e.js",
+      "id": "pullRequestDetail.merge.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "f6b023b84474b2cbd0f1ef1ebe59a04b5235d98ede5aca58bbf7bad7ee179acb",
+      "text": "Merge pull request",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "pull-request-detail-query-f3606b53e181.js",
+      "id": "pullRequestSubmitReview.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "c6dfc2a73c9bfb0a8f8288aa20c93bd9df451ffd69b7ce9f04ca94016da25368",
+      "text": "Submit review",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "remote-connection-editor-modal-1fc45d407baa.js",
+      "id": "codex.remoteConnectionEditor.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "c6e737841e4472974edff96127599c9fe3224144f0095cb3163514db55ca6a57",
+      "text": "Edit connection",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "remote-connections-settings-92e671fcf183.js",
+      "id": "settings.remoteConnections.details.allowSignedInDevicesDialog.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "04a779af1e0189d68bf8b7d070cc429cb22bd9cc8f5cde1d24a1ff4128b0c435",
+      "text": "Allow devices to control this connection?",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "remote-connections-settings-92e671fcf183.js",
+      "id": "settings.remoteConnections.manualPairingDialog.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "04a779af1e0189d68bf8b7d070cc429cb22bd9cc8f5cde1d24a1ff4128b0c435",
+      "text": "Add a device",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "remote-conversation-page-990cc22a7edb.js",
+      "id": "codex.applyResultsDialog.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "a126004d35aad90e3443935babe87153875653aa7ca86591892dda6b726b1a2e",
+      "text": "Apply results",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "request-screen-3c04feb7833b.js",
+      "id": "settings.teams.connectionRequest.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "518b183349ec2f1632182326300d4029100976c0dfb82725bee6dbd6a21e0040",
+      "text": "Request workspace connection",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "request-site-preview-3897d38d7894.js",
+      "id": "chatgpt.tpp.onboarding.website_permission.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "f050c4449b92b4d0775910f5b1c038ca1e026e8f28a5eb9c3535f532ceb406ce",
+      "text": "Allow ChatGPT to preview your site?",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "route-83bc40e27be3.js",
+      "id": "workspaceOnboarding.dialogTitle",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "75008b179d74425d3462f5175974d162f5791dc66595ed8ec3ee08c98cd56c85",
+      "text": "Welcome to ChatGPT",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "route-83bc40e27be3.js",
+      "id": "chatgpt.onboarding.new_workspace.codex_screen.chatgpt_desktop_app.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "75008b179d74425d3462f5175974d162f5791dc66595ed8ec3ee08c98cd56c85",
+      "text": "Download the ChatGPT Desktop app",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "route-83bc40e27be3.js",
+      "id": "work.onboarding.role.new.question",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "75008b179d74425d3462f5175974d162f5791dc66595ed8ec3ee08c98cd56c85",
+      "text": "What kind of work do you do?",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "route-d95d3d6690ca.js",
+      "id": "settings.ads.deleteDataTitle",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "d3802e6dd7ab81f70a18f3621385fe8d81c325180d3eb01e51ee968b1f9d2d2c",
+      "text": "Delete all ads data?",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "saved-memories-2288977c6b1a.js",
+      "id": "settings.chatGpt.personalization.memories.experience.confirmRevert.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "b28c06bfe13899bc4beaa6a1d5d65ced433e02db2ac063ff51f7f45c907c5e60",
+      "text": "Revert to the legacy saved memories experience?",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "saved-memories-2288977c6b1a.js",
+      "id": "settings.chatGpt.personalization.memories.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "b28c06bfe13899bc4beaa6a1d5d65ced433e02db2ac063ff51f7f45c907c5e60",
+      "text": "Saved memories",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "security-route-e99edbf5d555.js",
+      "id": "security.findingClose.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "ad296108038cf4d2b30cbf1725c01f2f8dede4217233a859dee3865fcfd96842",
+      "text": "Close finding",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "security-route-e99edbf5d555.js",
+      "id": "security.scanDetail.context.dialogTitle",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "ad296108038cf4d2b30cbf1725c01f2f8dede4217233a859dee3865fcfd96842",
+      "text": "Additional context",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "security-settings-d2f663b374b1.js",
+      "id": "settings.chatGpt.security.linkedApps.connectedApps.manageTitle",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "67b4f4bababbf91bfd06c805ebc7db6dc2fe5e6517c66dc6ec54c1d8556fac5e",
+      "text": "Connected Apps",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "security-settings-d2f663b374b1.js",
+      "id": "settings.chatGpt.security.passkeys.renameTitle",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "67b4f4bababbf91bfd06c805ebc7db6dc2fe5e6517c66dc6ec54c1d8556fac5e",
+      "text": "Rename security key",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "settings-b3d1daa89cde.js",
+      "id": "settings.chatGpt.cloudBrowser.addDialog.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "b8fe7d1d4ea93dab2f0ca2da9ebf703a41f2bf5d04d10e42a1d33197fe82e55e",
+      "text": "Add website",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "settings-b3d1daa89cde.js",
+      "id": "settings.chatGpt.cloudBrowser.credentials.choose",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "b8fe7d1d4ea93dab2f0ca2da9ebf703a41f2bf5d04d10e42a1d33197fe82e55e",
+      "text": "Choose a password manager",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "site-preview-8ecc324caf63.js",
+      "id": "sites.preview.discardAnnotations.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "ad673e150c364097313e0f16dbeac552b39d5842c28032c2ee5ba5a30cd4f9c2",
+      "text": "Discard annotations?",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "sites-end-resource-a842acdd1833.js",
+      "id": "assistantMessage.autoReviewStats.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "aa7aea334b4ab697a5d7b0000b4697d319833f0f313b1fe55e2200ef8994c1f9",
+      "text": "Auto-review stats",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "start-voice-cde7ea1e2679.js",
+      "id": "chatgptConversations.dil.geolocationPermission.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "3f36700a3fbb9ad0fb013a5c4c727745c19a81968edb3a42b318f962db36d9b2",
+      "text": "Allow location access?",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "suggestions-8eefbab9aebc.js",
+      "id": "chatgpt.tpp.onboarding.plugins_nux.browse.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "4abc744d372379285faa53848cb678ea31461e7ae154e6672bcdf9416b88705d",
+      "text": "Browse plugins",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "tab-content-ad8ff0a11551.js",
+      "id": "browserProfileImport.nux.modal.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "09f4e1cdc2a22208ea6b6b91cfe46fd48b3cdedbab8a4288d3f1b657df1777fa",
+      "text": "Import data from another browser",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "template-picker-4938c6429eaf.js",
+      "id": "codex.writingBlock.slides.templates.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "c0ca630b2ff31cfcd237a5cd72d3e6ac29e73e2224f830085fe00fd1273089d5",
+      "text": "Pick a template",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "thread-side-panel-tab-content-6b457126d4a3.js",
+      "id": "codex.review.revertDialog.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "76498ce4d3f9ac0e0f11f3e78d18b90aee89b6dc45b9d2c6451bd711f8c03ef0",
+      "text": "Revert changes?",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "tweaks-toolbar-view-d60d26476994.js",
+      "id": "thread.browser.tweaks.cancelConfirmTitle",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "aabf700280a9bdd9815eeab579ef00fe0d6f44311bfac25ec7310756033c2c9d",
+      "text": "Discard all pending annotations?",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "use-diff-annotations-6a0ec699c0de.js",
+      "id": "code.diffComment.dismissConfirmation.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "d12e0ebbfd40b3305fe195bf619d3aa628d8d77aeb88e7799b8519cc13950ebd",
+      "text": "Dismiss this review comment?",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "viewer-b0feb32194a7.js",
+      "id": "chatgptConversations.paragen.dialogTitle",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "8bdb77d72a698ab649e26eee0cf88295a04f809512c72fcff15068af10cb2cce",
+      "text": "Compare responses",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "visualization-directive-renderer-2400e3f950f5.js",
+      "id": "codex.visualization.externalLinkConfirmation.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "635284ad6ad89714afb74274db65e447e409e0143735f264e0ce93fab7bf7dbb",
+      "text": "Open external link?",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "voice-session-f476108638d0.js",
+      "id": "voiceFloatingOrbSettingsModal.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "22eafa02af2aa599722624cf784cbc7e576661fe9df25acd7e17ac4ff5bdb5e8",
+      "text": "Voice settings",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "voice-session-f476108638d0.js",
+      "id": "voice-navigation-blocker.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "22eafa02af2aa599722624cf784cbc7e576661fe9df25acd7e17ac4ff5bdb5e8",
+      "text": "Voice is still active",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "wingman-voice-nux-9ad8c4a8c596.js",
+      "id": "choose_your_voice",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "dbdac70851abd4282049169dc5f933d904e55150220899a532b9d76082926c02",
+      "text": "Choose your voice",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "workspace-b1d230348566.js",
+      "id": "codex.page.versions.restore.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "c93c1a42a85f5938bf433b340ba66802f2a664ff3fa29d31bf96a52887d92d00",
+      "text": "Restore this version?",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "workspace-ecdf42552f6f.js",
+      "id": "latex.images.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "6c7262563c34ca9df667fbfd17f983c320d1b27320c7e24efb91f9debc97d87c",
+      "text": "Insert image",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "binding": "Direct DialogTitle child Intl literal",
+      "file": "worktrees-settings-page-e4822a3e47db.js",
+      "id": "settings.worktrees.autoCleanup.confirm.title",
+      "importExport": "eC",
+      "importFile": "app-shared-b7451c6d4857.js",
+      "platform": "windows",
+      "sha": "016048ca1809ba75c1286837f42e00306dffcf3e97ec91227eaa4413f03002af",
+      "text": "Disable automatic worktree deletion?",
+      "wrapperSha256": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd"
+    },
+    {
+      "file": "command-menu-dialog-20a916555347.js",
+      "id": "codex.commandMenu.title",
+      "platform": "windows",
+      "sha": "5a39b75a40a97e06046e883e37816e3f1ecdde097dfa0c0c9b4d8070422151e4",
+      "text": "Command menu"
+    },
+    {
+      "file": "dialog-da03375b9672.js",
+      "id": "desktop.windowCloseConfirmation.title",
+      "platform": "windows",
+      "sha": "f5d516ff8de75771bd4d28f1286ffbd19940b5acd864b09ac5bf066c2f21a74f",
+      "text": "Are you sure you want to close the window?"
+    },
+    {
+      "file": "dialog-controller-3b3ea9db2b26.js",
+      "id": "chatgptConversations.lockdown.dialog.title",
+      "platform": "windows",
+      "sha": "8fe98affe8d9c545d056ac878712d70e0d4dc47f0425921411cff1f50928b78f",
+      "text": "Lockdown mode is on for this chat"
+    },
+    {
+      "binding": {
+        "file": "app-shared-b7451c6d4857.js",
+        "sha": "229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd",
+        "value": "ChatGPT"
+      },
+      "file": "app-initial-7ad941570eaa.js",
+      "id": "appHeader.installUpdate.confirmTitle",
+      "platform": "windows",
+      "sha": "ead27bea1a76438c4d6bd5449a203fc9a7dc1b024bcd43493109848db0025344",
+      "text": "Update ChatGPT now?"
+    },
+    {
+      "file": "project-folder-consent-dialog-59d0157a68c9.js",
+      "id": "projectSetup.consent.title.one",
+      "platform": "windows",
+      "sha": "baf46e603f79f795863e27abb472b8f5fbd29b95cc8f88ae1a6ff95d26597edd",
+      "text": "Trust this folder?"
+    },
+    {
+      "file": "project-folder-consent-dialog-59d0157a68c9.js",
+      "id": "projectSetup.consent.title.other",
+      "platform": "windows",
+      "sha": "baf46e603f79f795863e27abb472b8f5fbd29b95cc8f88ae1a6ff95d26597edd",
+      "text": "Trust these folders?"
+    },
+    {
+      "file": "project-folder-consent-dialog-59d0157a68c9.js",
+      "id": "projectSetup.consent.untrustedTitle.one",
+      "platform": "windows",
+      "sha": "baf46e603f79f795863e27abb472b8f5fbd29b95cc8f88ae1a6ff95d26597edd",
+      "text": "This folder is marked untrusted"
+    },
+    {
+      "file": "project-folder-consent-dialog-59d0157a68c9.js",
+      "id": "projectSetup.consent.untrustedTitle.other",
+      "platform": "windows",
+      "sha": "baf46e603f79f795863e27abb472b8f5fbd29b95cc8f88ae1a6ff95d26597edd",
+      "text": "These folders are marked untrusted"
+    }
+  ],
+  "sourceVersion": "26.930.61225"
+}

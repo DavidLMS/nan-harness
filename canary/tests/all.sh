@@ -17,6 +17,8 @@ for test_script in \
   release-channels.sh \
   release-recommendation.sh \
   release-workflow.sh \
+  hosted-actions.sh \
+  checker-bootstrap.sh \
   probe-harness.sh \
   conformance-policy.sh \
   run-suite.sh; do
@@ -31,6 +33,8 @@ done
 # build it explicitly instead of depending on a binary left by an earlier run.
 cargo build --locked --package nan-harness-canary --bin nan-harness-canary
 for test_script in \
+  desktop-qualification.py \
+  desktop-maintenance.py desktop-release-binding.py \
   hosted-cli-selection.py \
   hosted-cli-workflow.py \
   daily-compatibility.py \
@@ -52,3 +56,9 @@ for test_script in \
   printf '==> canary/tests/%s\n' "$test_script"
   python3 "$tests_directory/$test_script"
 done
+
+# Offline source-bound SVG references have a separate, locked build-only graph.
+reference_manifest="$tests_directory/../../scripts/desktop-feasibility/zed-icon-raster/Cargo.toml"
+cargo fmt --manifest-path "$reference_manifest" --check
+cargo clippy --locked --manifest-path "$reference_manifest" --all-targets -- -D warnings
+cargo test --locked --manifest-path "$reference_manifest"

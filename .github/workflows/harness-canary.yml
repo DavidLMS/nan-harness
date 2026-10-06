@@ -147,6 +147,7 @@ jobs:
         run: cargo build --locked --package nan-harness-canary --bin nan-harness-canary
       - name: Publish independent complete harness results
         env:
+          NAN_CANARY_WRITER: actions
           GH_TOKEN: ${{ github.token }}
           PUBLISH: ${{ github.event_name == 'schedule' || !inputs.verification_only }}
         run: |

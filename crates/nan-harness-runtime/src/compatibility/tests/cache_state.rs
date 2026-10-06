@@ -63,12 +63,14 @@ fn cache_state_round_trips() {
     let directory = tempfile::tempdir().expect("temporary directory");
     let store = CompatibilityStateStore::new(directory.path());
     let state = CompatibilityState {
-        schema_version: 3,
+        schema_version: 4,
         source_fingerprint: Some(source_fingerprint(FEED_URL)),
         last_checked_unix_seconds: Some(42),
         cached_manifest: Some(VerificationManifest {
             schema_version: 2,
             releases: vec![VerificationRelease {
+                hosted_checks: Vec::new(),
+                desktop_checks: Vec::new(),
                 nan_harness_version: Version::parse(env!("CARGO_PKG_VERSION")).unwrap(),
                 verifications: vec![VerificationEntry {
                     id: "claude-code".to_owned(),
@@ -83,6 +85,23 @@ fn cache_state_round_trips() {
     };
     store.save(&state).expect("state should save");
     assert_eq!(store.load().expect("state should load"), state);
+}
+
+#[test]
+fn hosted_cache_does_not_overwrite_older_client_state() {
+    let directory = tempfile::tempdir().unwrap();
+    let old = directory.path().join("compatibility-v3.json");
+    let versioned = directory.path().join("compatibility-v4.json");
+    std::fs::write(&old, b"synthetic old cache").unwrap();
+    std::fs::write(&versioned, b"synthetic exact-version cache").unwrap();
+    let store = CompatibilityStateStore::new(directory.path());
+    store.save(&CompatibilityState::default()).unwrap();
+    assert_eq!(std::fs::read(old).unwrap(), b"synthetic old cache");
+    assert_eq!(
+        std::fs::read(versioned).unwrap(),
+        b"synthetic exact-version cache"
+    );
+    assert!(directory.path().join("compatibility-v5.json").is_file());
 }
 
 #[tokio::test]
@@ -101,7 +120,7 @@ async fn state_read_errors_are_returned_instead_of_resetting_state() {
 #[test]
 fn future_cache_timestamps_are_not_fresh() {
     let state = CompatibilityState {
-        schema_version: 3,
+        schema_version: 4,
         source_fingerprint: Some(source_fingerprint(FEED_URL)),
         last_checked_unix_seconds: Some(u64::MAX),
         cached_manifest: Some(VerificationManifest {
@@ -116,12 +135,14 @@ fn future_cache_timestamps_are_not_fresh() {
 #[test]
 fn compatibility_cache_expires_after_one_hour() {
     let state = CompatibilityState {
-        schema_version: 3,
+        schema_version: 4,
         source_fingerprint: Some(source_fingerprint(FEED_URL)),
         last_checked_unix_seconds: Some(1_000),
         cached_manifest: Some(VerificationManifest {
             schema_version: 2,
             releases: vec![VerificationRelease {
+                hosted_checks: Vec::new(),
+                desktop_checks: Vec::new(),
                 nan_harness_version: Version::parse(env!("CARGO_PKG_VERSION")).unwrap(),
                 verifications: vec![],
                 desktop_verifications: Vec::new(),

@@ -1,0 +1,779 @@
+name: Desktop native qualification and diagnostics
+on:
+  workflow_call:
+    inputs:
+      release_tag:
+        description: Exact attested release to test instead of a branch build
+        type: string
+        default: ''
+      release_commit:
+        description: Immutable commit of the release assets
+        type: string
+        default: ''
+      cells:
+        description: Optional canonical app/platform pairs selected by daily maintenance
+        type: string
+        default: ''
+      app:
+        type: string
+        default: all
+      platform:
+        type: string
+        default: all
+      experiment:
+        type: string
+        default: deterministic-full
+      native_only:
+        type: boolean
+        default: false
+      quality_only:
+        type: boolean
+        default: false
+  workflow_dispatch:
+    inputs:
+      app:
+        description: One bounded native experiment
+        type: choice
+        default: all
+        options: [all, zed-desktop, hermes-desktop, chatgpt-desktop, claude-desktop, pen-desktop]
+      platform:
+        description: Native target; pilots keeps the previously qualified pair
+        type: choice
+        default: pilots
+        options: [pilots, expansion, remaining, open-cells, final-corrections, all, macos, linux, windows]
+      quality_only:
+        description: Verify integration without repeating native measurements
+        type: boolean
+        default: false
+      native_only:
+        description: Iterate native experiments; run the full gate on the final tree
+        type: boolean
+        default: false
+      experiment:
+        description: Observation mechanism to evaluate
+        type: choice
+        default: native-copy-dom
+        options: [native-copy-dom, strict-semantic, deterministic-full, startup-baseline, x11-motion-fixture, preinstall-only]
+permissions:
+  contents: read
+env:
+  QUALIFICATION_SOURCE_SHA: ${{ github.sha }}
+concurrency:
+  group: desktop-semantic-feasibility-${{ github.ref }}-${{ inputs.app }}-${{ inputs.platform }}
+  cancel-in-progress: false
+jobs:
+  select:
+    if: inputs.quality_only != true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.selection.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify exact qualification source
+        shell: bash
+        run: |
+          [[ "$QUALIFICATION_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$QUALIFICATION_SOURCE_SHA"
+      - name: Validate release selection
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          RELEASE_COMMIT: ${{ inputs.release_commit }}
+        run: python3 canary/actions/desktop_release_binding.py validate-selection
+      - id: selection
+        env:
+          SELECTED_CELLS: ${{ inputs.cells || '' }}
+          SELECTED_APP: ${{ inputs.app || 'all' }}
+          SELECTED_PLATFORM: ${{ inputs.platform || 'pilots' }}
+          SELECTED_EXPERIMENT: ${{ inputs.experiment }}
+        shell: bash
+        run: |
+          python3 - <<'PYTHON' >> "$GITHUB_OUTPUT"
+          import json, os, sys
+          sys.path.insert(0, 'canary/actions')
+          from desktop_qualification import matrix
+          selected = os.environ['SELECTED_APP']
+          platform = os.environ['SELECTED_PLATFORM']
+          if os.environ['SELECTED_EXPERIMENT'] == 'preinstall-only' and (selected, platform) != ('claude-desktop', 'windows'):
+              raise SystemExit('The preinstall compiler fixture requires Claude Windows selection')
+          if os.environ['SELECTED_EXPERIMENT'] == 'x11-motion-fixture' and (selected, platform) != ('zed-desktop', 'linux'):
+              raise SystemExit('The neutral motion fixture requires Zed Linux selection')
+          cells = [c for c in matrix(['pen-desktop'] if os.environ['SELECTED_APP'] == 'all' else [])['include'] if c['backend'] != 'pending'
+                   and (selected == 'all' or c['app'] == selected)
+                   and (os.environ['SELECTED_EXPERIMENT'] != 'startup-baseline' or c['backend'] in {'renderer-inventory', 'native-assistant-clipboard'})
+                   and (platform == 'pilots' and (c['app'], c['platform']) in
+                        {('zed-desktop', 'macos'), ('hermes-desktop', 'linux')}
+                        or platform == 'open-cells' and (c['app'], c['platform']) in
+                        {('zed-desktop', 'linux'), ('claude-desktop', 'windows')}
+                        or platform == 'final-corrections' and (c['app'], c['platform']) in
+                        {('chatgpt-desktop', 'windows'), ('chatgpt-desktop', 'macos'), ('hermes-desktop', 'windows')}
+                        or platform == 'all' or platform == c['platform']
+                        or platform == 'remaining' and c['app'] in {'chatgpt-desktop', 'claude-desktop', 'pen-desktop'}
+                        or platform == 'expansion' and (c['app'], c['platform']) not in
+                        {('zed-desktop', 'macos'), ('hermes-desktop', 'linux')})]
+          requested = os.environ.get('SELECTED_CELLS', '')
+          if requested:
+              requested = json.loads(requested)
+              allowed = {c['app'] + '/' + c['platform'] for c in cells}
+              if (type(requested) is not list or not requested
+                      or any(type(item) is not str or item not in allowed for item in requested)
+                      or len(requested) != len(set(requested))):
+                  raise SystemExit('Invalid maintenance cell selection')
+              cells = [c for c in cells if c['app'] + '/' + c['platform'] in requested]
+          if not cells:
+              raise SystemExit('No implemented native target selected')
+          print('matrix=' + json.dumps({'include': cells}, separators=(',', ':')))
+          PYTHON
+
+  x11-motion-fixture:
+    needs: select
+    if: inputs.experiment == 'x11-motion-fixture'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Prepare neutral X11 fixture dependencies
+        run: sudo apt-get update && sudo apt-get install -y xvfb xauth libxi6 libxtst6
+      - name: Measure owned neutral XI2 motion delivery without an application
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/desktop-feasibility/x11-motion-fixture/test-motion-fixture.py
+          xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/desktop-feasibility/x11-motion-fixture/motion-fixture.py > "$RUNNER_TEMP/motion-fixture.json"
+          python3 -c 'import json,sys; v=json.load(open(sys.argv[1])); print(v); sys.exit(v["status"] != "complete")' "$RUNNER_TEMP/motion-fixture.json"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.0
+        if: always()
+        with:
+          name: deterministic-qualification-x11-motion-fixture
+          path: ${{ runner.temp }}/motion-fixture.json
+          retention-days: 7
+
+  windows-preinstall-fixture:
+    needs: select
+    if: inputs.experiment == 'preinstall-only'
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          cache-on-failure: true
+      - name: Compile exact synthetic fixture without a vendor application
+        run: cargo test --locked -p nan-harness-cli --features desktop-qualification --lib --no-run
+      - name: Distinguish Windows source and destination persistence primitives without an application
+        run: cargo test --locked -p nan-harness-cli --features desktop-qualification --lib commands::claude_desktop::session::configuration_persist_tests::configuration_persist_primitive_stage_diagnostics -- --exact --nocapture --test-threads=1
+      - name: Verify closed Windows lifecycle fixtures without an application
+        run: cargo test --locked -p nan-harness-cli --features desktop-qualification --lib commands::claude_desktop::session::configuration_persist_tests -- --test-threads=1
+      - name: Observe exact synthetic compiler fixture before any vendor metadata or installation
+        if: always()
+        env:
+          RUST_TEST_THREADS: 1
+          NANH_CONFIGURATION_POSTINSTALL_OBSERVATION: '0'
+          NANH_CONFIGURATION_FIXTURE_PHASE: before-installation
+        run: python scripts/desktop-feasibility/windows-config-fixture.py
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: deterministic-qualification-windows-preinstall-fixture
+          path: ${{ runner.temp }}/configuration-fixture-driver-before-installation.json
+          if-no-files-found: ignore
+          retention-days: 7
+
+  native:
+    if: inputs.experiment != 'x11-motion-fixture' && inputs.experiment != 'preinstall-only'
+    needs: select
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.select.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          cache-on-failure: true
+      - name: Prepare macOS GUI session
+        if: runner.os == 'macOS'
+        run: bash canary/actions/prepare-desktop-macos.sh
+      - name: Build neutral Quartz text input helper
+        if: runner.os == 'macOS' && matrix.app == 'zed-desktop'
+        shell: bash
+        run: |
+          swiftc scripts/desktop-feasibility/zed-input.swift -o "$RUNNER_TEMP/zed-neutral-input"
+          echo "FEASIBILITY_ZED_INPUT_DRIVER=$RUNNER_TEMP/zed-neutral-input" >> "$GITHUB_ENV"
+          echo "FEASIBILITY_ZED_INPUT_DRIVER_MODE=paste" >> "$GITHUB_ENV"
+          zed_zstd_binary="$(command -v zstd)"
+          echo "FEASIBILITY_ZED_ZSTD=$zed_zstd_binary" >> "$GITHUB_ENV"
+          echo "FEASIBILITY_ZED_EXPORT_PARSER=$GITHUB_WORKSPACE/scripts/desktop-feasibility/zed-export.py" >> "$GITHUB_ENV"
+          echo "FEASIBILITY_ZED_RESPONSE_METHOD=thread-export" >> "$GITHUB_ENV"
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        if: contains(fromJSON('["deterministic-full","startup-baseline"]'), inputs.experiment) && (runner.os == 'macOS' || runner.os == 'Windows' || matrix.app == 'hermes-desktop')
+        with:
+          python-version: '3.11.9'
+      - name: Prepare exact-source Zed icon diagnostics
+        if: runner.os == 'macOS' && matrix.app == 'zed-desktop' && contains(fromJSON('["deterministic-full","startup-baseline"]'), inputs.experiment)
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset NAN_API_KEY GH_TOKEN GITHUB_TOKEN
+          brew install cairo
+          python3 -m venv "$RUNNER_TEMP/zed-icon-build"
+          "$RUNNER_TEMP/zed-icon-build/bin/python" -m pip install --disable-pip-version-check -r scripts/desktop-feasibility/zed-icon-requirements.txt
+          export DYLD_FALLBACK_LIBRARY_PATH="$(brew --prefix cairo)/lib"
+          export NANH_ZED_ICON_TEMPLATES="$RUNNER_TEMP/zed-icon-templates"
+          "$RUNNER_TEMP/zed-icon-build/bin/python" scripts/desktop-feasibility/zed-icon-templates.py
+          echo "NANH_ZED_ICON_TEMPLATES=$NANH_ZED_ICON_TEMPLATES" >> "$GITHUB_ENV"
+      - name: Install Linux desktop dependencies
+        if: runner.os == 'Linux'
+        timeout-minutes: 20
+        shell: bash
+        run: |
+          apt_options=(-o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
+          sudo apt-get "${apt_options[@]}" update
+          sudo apt-get "${apt_options[@]}" install --no-install-recommends -y cmake xvfb openbox x11-utils xclip xdotool zstd dbus-x11 python3-dbus at-spi2-core libx11-dev libxres1 libxtst6 libcairo2 libxkbcommon-dev libxkbcommon-x11-dev libegl1 libvulkan1 mesa-vulkan-drivers libgtk-3-0 libnss3 libasound2t64 libgbm1 libsecret-1-0 libnotify4 adwaita-icon-theme
+      - name: Verify synthetic Zed tracing before building native binaries
+        if: runner.os == 'Linux' && matrix.app == 'zed-desktop' && inputs.platform == 'open-cells' && inputs.experiment == 'deterministic-full'
+        shell: bash
+        run: |
+          sudo apt-get install -y bpftrace
+          python3 scripts/desktop-feasibility/zed-geometry-fixture.py
+          echo 'NANH_ZED_RETRY_ENTRY_TRACE=1' >> "$GITHUB_ENV"
+          echo 'NANH_ZED_HIT_GEOMETRY=1' >> "$GITHUB_ENV"
+      - name: Retain the synthetic geometry probe result
+        if: always() && runner.os == 'Linux' && matrix.app == 'zed-desktop' && inputs.platform == 'open-cells' && inputs.experiment == 'deterministic-full'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: deterministic-qualification-zed-geometry-fixture
+          path: ${{ runner.temp }}/zed-geometry-fixture.json
+          if-no-files-found: error
+          retention-days: 7
+      - name: Prepare Codex Linux command sandbox prerequisites
+        if: runner.os == 'Linux' && matrix.app == 'chatgpt-desktop'
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Official Ubuntu 24.04 prerequisite; preserve the host userns restriction.
+          # https://developers.openai.com/codex/concepts/sandboxing#prerequisites
+          apt_options=(-o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
+          sudo apt-get "${apt_options[@]}" install --no-install-recommends -y bubblewrap apparmor-profiles apparmor-utils
+          sudo install -m 0644 /usr/share/apparmor/extra-profiles/bwrap-userns-restrict /etc/apparmor.d/bwrap-userns-restrict
+          sudo apparmor_parser -r /etc/apparmor.d/bwrap-userns-restrict
+          timeout 15 /usr/bin/bwrap --unshare-user --unshare-pid --unshare-net --ro-bind / / --proc /proc --dev /dev /usr/bin/true
+      - name: Prepare exact-source Linux Zed panel diagnostics
+        if: runner.os == 'Linux' && matrix.app == 'zed-desktop' && inputs.experiment == 'deterministic-full'
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset NAN_API_KEY GH_TOKEN GITHUB_TOKEN
+          python3 -m venv "$RUNNER_TEMP/zed-icon-build"
+          "$RUNNER_TEMP/zed-icon-build/bin/python" -m pip install --disable-pip-version-check -r scripts/desktop-feasibility/zed-icon-requirements.txt
+          export NANH_ZED_ICON_TEMPLATES="$RUNNER_TEMP/zed-icon-templates"
+          "$RUNNER_TEMP/zed-icon-build/bin/python" scripts/desktop-feasibility/zed-icon-templates.py
+          echo "NANH_ZED_ICON_TEMPLATES=$NANH_ZED_ICON_TEMPLATES" >> "$GITHUB_ENV"
+      - name: Verify passive observer runtime libraries without a display
+        if: runner.os == 'Linux' && matrix.app == 'zed-desktop'
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import ctypes
+          for library, symbol in [('libX11.so.6', 'XOpenDisplay'), ('libXtst.so.6', 'XRecordQueryVersion'), ('libXRes.so.1', 'XResQueryClientIds')]:
+              getattr(ctypes.CDLL(library), symbol)
+          print('PASS: passive observer runtime libraries')
+          PY
+      - name: Prepare fixed X11 Zed input and export helpers
+        if: runner.os == 'Linux' && matrix.app == 'zed-desktop'
+        shell: bash
+        run: |
+          echo 'FEASIBILITY_ZED_MAXIMIZED=1' >> "$GITHUB_ENV"
+          echo 'FEASIBILITY_ZED_INPUT_DRIVER=/usr/bin/python3' >> "$GITHUB_ENV"
+          echo "FEASIBILITY_ZED_INPUT_SCRIPT=$GITHUB_WORKSPACE/scripts/desktop-feasibility/zed-input-x11.py" >> "$GITHUB_ENV"
+          echo 'FEASIBILITY_ZED_INPUT_DRIVER_MODE=paste' >> "$GITHUB_ENV"
+          echo "FEASIBILITY_ZED_ZSTD=$(command -v zstd)" >> "$GITHUB_ENV"
+          echo "FEASIBILITY_ZED_EXPORT_PARSER=$GITHUB_WORKSPACE/scripts/desktop-feasibility/zed-export.py" >> "$GITHUB_ENV"
+          echo 'FEASIBILITY_ZED_RESPONSE_METHOD=thread-export' >> "$GITHUB_ENV"
+      - name: Prepare fixed Windows Zed input and export helpers
+        if: runner.os == 'Windows' && matrix.app == 'zed-desktop'
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset NAN_API_KEY GH_TOKEN GITHUB_TOKEN
+          python3 scripts/desktop-feasibility/install-zstd-windows.py --output "$RUNNER_TEMP/zed-zstd.exe"
+          zed_python="$(python3 -c 'import sys; print(sys.executable)')"
+          echo "FEASIBILITY_ZED_INPUT_DRIVER=$zed_python" >> "$GITHUB_ENV"
+          echo "FEASIBILITY_ZED_INPUT_SCRIPT=$GITHUB_WORKSPACE/scripts/desktop-feasibility/zed-input-windows.py" >> "$GITHUB_ENV"
+          echo 'FEASIBILITY_ZED_INPUT_DRIVER_MODE=paste' >> "$GITHUB_ENV"
+          echo "FEASIBILITY_ZED_ZSTD=$RUNNER_TEMP/zed-zstd.exe" >> "$GITHUB_ENV"
+          echo "FEASIBILITY_ZED_EXPORT_PARSER=$GITHUB_WORKSPACE/scripts/desktop-feasibility/zed-export.py" >> "$GITHUB_ENV"
+          echo 'FEASIBILITY_ZED_RESPONSE_METHOD=thread-export' >> "$GITHUB_ENV"
+      - name: Export fixed Windows native ownership interpreter
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          python3 scripts/desktop-feasibility/test-endpoint-owner-windows.py
+          echo "FEASIBILITY_WINDOWS_PROOF_SCRIPT=$(python3 -c 'from pathlib import Path; print(Path("scripts/desktop-feasibility/endpoint-owner-windows.py").resolve(strict=True))')" >> "$GITHUB_ENV"
+          echo "FEASIBILITY_WINDOWS_PROOF_PYTHON=$(python3 -c 'import sys; from pathlib import Path; print(Path(sys.executable).resolve(strict=True))')" >> "$GITHUB_ENV"
+      - name: Build exact branch binaries
+        run: cargo build --locked -p nan-harness-desktop-check -p nan-harness-cli --features nan-harness-cli/desktop-qualification --bins
+      - name: Verify Linux owned desktop adapter lints before installation
+        if: runner.os == 'Linux' && contains(fromJSON('["chatgpt-desktop","claude-desktop"]'), matrix.app)
+        run: cargo clippy --locked -p nan-harness-desktop-check --all-features --all-targets -- -D warnings
+      - name: Verify retained Linux Codex profile custody without an application
+        if: runner.os == 'Linux' && matrix.app == 'chatgpt-desktop'
+        run: cargo test --locked -p nan-harness-desktop-check --lib probe::codex_linux_profile
+      - name: Verify retained Windows Codex profile custody without an application
+        if: runner.os == 'Windows' && matrix.app == 'chatgpt-desktop'
+        run: |
+          cargo clippy --locked -p nan-harness-desktop-check --all-features --all-targets -- -D warnings
+          cargo test --locked -p nan-harness-desktop-check --lib probe::codex_windows_profile
+          cargo test --locked -p nan-harness-desktop-check --lib windows_codex_actual_prepared_command_admits_only_original_private_roots
+      - name: Verify retained macOS Codex profile custody without an application
+        if: runner.os == 'macOS' && matrix.app == 'chatgpt-desktop'
+        run: |
+          cargo clippy --locked -p nan-harness-desktop-check --all-features --all-targets -- -D warnings
+          cargo test --locked -p nan-harness-desktop-check --lib probe::codex_macos_profile
+          python3 scripts/desktop-feasibility/test-codex-macos-state.py
+          node scripts/desktop-feasibility/test-codex-macos-profile-state.cjs
+      - name: Verify bounded Linux Claude native Chat receipts without an application
+        if: runner.os == 'Linux' && matrix.app == 'claude-desktop'
+        run: |
+          cargo test --locked -p nan-harness-desktop-check --lib gui::claude_linux_chat
+          cargo test --locked -p nan-harness-desktop-check --lib probe::claude_linux_profile
+      - name: Verify private Windows verbatim directory creation before installation
+        if: runner.os == 'Windows' && matrix.app == 'claude-desktop'
+        run: cargo test --locked -p nan-harness-private-fs --test private_fs windows_private_verbatim_directory_tree
+      - name: Verify Windows Claude acquisition policy without an application
+        if: runner.os == 'Windows' && matrix.app == 'claude-desktop'
+        run: cargo test --locked -p nan-harness-desktop-check --lib gui::claude_windows
+      - name: Verify exclusive Windows Claude profile and private Chat protocol
+        if: runner.os == 'Windows' && matrix.app == 'claude-desktop'
+        env:
+          RUST_TEST_THREADS: 1
+        run: |
+          cargo test --locked -p nan-harness-cli --features desktop-qualification --lib commands::claude_desktop::qualification_config::tests
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test --locked -p nan-harness-cli --features desktop-qualification --lib commands::claude_desktop::session::configuration_persist_tests
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test --locked -p nan-harness-private-fs --lib
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test --locked -p nan-harness-desktop-check --lib probe::claude_windows_profile::tests
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test --locked -p nan-harness-desktop-check --lib probe::read_fixture_http::tests
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test --locked -p nan-harness-cli --features desktop-qualification --lib commands::claude_desktop::qualification_mcp::tests
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test --locked -p nan-harness-desktop-check --lib native::windows_chat_turn::tests
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Verify bounded Windows UIA receipt protocol without an application
+        if: runner.os == 'Windows' && matrix.app == 'claude-desktop'
+        run: cargo test --locked -p nan-harness-desktop-check --lib native::windows_uia
+      - name: Verify Windows qualification directory isolation
+        if: runner.os == 'Windows' && matrix.app == 'claude-desktop'
+        run: cargo test --locked -p nan-harness-desktop-check --lib gui::qualification_directory::tests
+      - name: Verify isolated Linux input environment with a synthetic helper
+        if: runner.os == 'Linux' && matrix.app == 'zed-desktop'
+        run: cargo test --locked -p nan-harness-desktop-check --lib neutral_input_preserves_delivery_policy_without_provider_credentials
+      - name: Verify native Windows clipboard contract
+        if: runner.os == 'Windows' && matrix.app == 'zed-desktop'
+        run: cargo test --locked -p nan-harness-desktop-check gui::clipboard::tests::hosted_native_clipboard_contract -- --ignored --exact
+      - name: Install pinned observation client
+        if: matrix.app != 'zed-desktop'
+        run: npm ci --prefix .github/web-check --ignore-scripts
+      - name: Remove Linux debug symbols before bounded identity hashing
+        if: runner.os == 'Linux'
+        run: strip --strip-debug target/debug/nan-harness target/debug/nanh-desktop-check
+      - name: Export exact native checker and launcher paths
+        shell: bash
+        run: |
+          suffix=''
+          if [[ "$RUNNER_OS" == Windows ]]; then suffix='.exe'; fi
+          echo "FEASIBILITY_REAL_NANH=$GITHUB_WORKSPACE/target/debug/nan-harness$suffix" >> "$GITHUB_ENV"
+          echo "FEASIBILITY_CHECKER=$GITHUB_WORKSPACE/target/debug/nanh-desktop-check$suffix" >> "$GITHUB_ENV"
+          if [[ "$RUNNER_OS" != Windows ]]; then
+            echo "XDG_STATE_HOME=$RUNNER_TEMP/semantic-feasibility/checker-state" >> "$GITHUB_ENV"
+          fi
+      - name: Stage exact attested release launcher
+        if: inputs.release_tag != '' && inputs.release_tag != null
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          RELEASE_COMMIT: ${{ inputs.release_commit }}
+        run: |
+          python3 canary/actions/desktop_release.py --repository "$GITHUB_REPOSITORY" \
+            --tag "$RELEASE_TAG" --commit "$RELEASE_COMMIT" \
+            --platform '${{ matrix.platform }}' --architecture '${{ matrix.architecture }}' \
+            --directory "$RUNNER_TEMP/desktop-release"
+          suffix=''
+          target='unknown-linux-musl'
+          if [[ "$RUNNER_OS" == macOS ]]; then target='apple-darwin'; fi
+          if [[ "$RUNNER_OS" == Windows ]]; then target='pc-windows-msvc'; suffix='.exe'; fi
+          echo "FEASIBILITY_REAL_NANH=$RUNNER_TEMP/desktop-release/nan-harness-${{ matrix.architecture }}-$target$suffix" >> "$GITHUB_ENV"
+      - name: Build fixed Windows Hermes launcher
+        if: runner.os == 'Windows' && matrix.app != 'zed-desktop'
+        shell: bash
+        run: |
+          rustc --edition 2024 scripts/desktop-feasibility/nanh-shim.rs -o "$RUNNER_TEMP/nanh-hermes-launcher.exe"
+          echo "FEASIBILITY_HERMES_LAUNCHER=$RUNNER_TEMP/nanh-hermes-launcher.exe" >> "$GITHUB_ENV"
+      - name: Observe synthetic Windows configuration lifecycle before vendor installation
+        if: always() && runner.os == 'Windows' && matrix.app == 'claude-desktop' && inputs.experiment == 'deterministic-full'
+        env:
+          RUST_TEST_THREADS: 1
+          NANH_CONFIGURATION_POSTINSTALL_OBSERVATION: '0'
+          NANH_CONFIGURATION_FIXTURE_PHASE: before-installation
+        run: python scripts/desktop-feasibility/windows-config-fixture.py
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always() && runner.os == 'Windows' && matrix.app == 'claude-desktop' && inputs.experiment == 'deterministic-full'
+        with:
+          name: deterministic-qualification-windows-preinstall-fixture
+          path: ${{ runner.temp }}/configuration-fixture-driver-before-installation.json
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Restore inspected public Codex Windows package
+        if: matrix.app == 'chatgpt-desktop' && runner.os == 'Windows' && inputs.experiment == 'deterministic-full'
+        id: inspected-package
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ${{ runner.temp }}/semantic-feasibility/artifacts
+          key: inspected-codex-windows-v1-${{ hashFiles('scripts/desktop-feasibility/codex_release.py') }}
+      - name: Freeze authenticated public official metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset NAN_API_KEY
+          python3 -c 'import os, sys; from pathlib import Path; sys.path.insert(0, "canary/actions"); from cell import ensure_private_directory; ensure_private_directory(Path(os.environ["RUNNER_TEMP"]) / "semantic-feasibility", reusable=True)'
+          freeze_args=(--tag v1.22.0)
+          if [[ '${{ matrix.app }}' == hermes-desktop ]]; then
+            freeze_args=(--tag v2026.9.24 --expected-revision f97608f178d1ffeca59860195ab7da295f7c8e5f)
+          fi
+          if [[ '${{ matrix.app }}' == zed-desktop || '${{ matrix.app }}' == hermes-desktop ]]; then
+            python3 scripts/desktop-feasibility/freeze-official.py "${freeze_args[@]}" --app '${{ matrix.app }}' --platform '${{ matrix.platform }}' --output "$RUNNER_TEMP/semantic-feasibility/frozen.json"
+          elif [[ '${{ inputs.experiment }}' == deterministic-full && ( '${{ matrix.app }}' == chatgpt-desktop || '${{ matrix.app }}' == claude-desktop ) ]]; then
+            python3 scripts/desktop-feasibility/freeze-inspected.py --app '${{ matrix.app }}' --platform '${{ matrix.platform }}' --artifacts "$RUNNER_TEMP/semantic-feasibility/artifacts" --output "$RUNNER_TEMP/semantic-feasibility/frozen.json"
+          else
+            "$FEASIBILITY_CHECKER" resolve --app '${{ matrix.app }}' --model qwen3.6 --artifacts "$RUNNER_TEMP/semantic-feasibility/artifacts" --output "$RUNNER_TEMP/semantic-feasibility/frozen.json"
+          fi
+      - name: Verify inspected baseline identity before installation
+        if: inputs.experiment == 'deterministic-full'
+        env:
+          BASELINE_APP: ${{ matrix.app }}
+          BASELINE_PLATFORM: ${{ matrix.platform }}
+        shell: bash
+        run: |
+          python3 - <<'PYTHON'
+          import json, os, sys
+          from pathlib import Path
+          sys.path.insert(0, 'canary/actions')
+          from desktop_maintenance import baseline, same_release
+          value = json.loads((Path(os.environ['RUNNER_TEMP']) / 'semantic-feasibility/frozen.json').read_text())
+          app, platform = os.environ['BASELINE_APP'], os.environ['BASELINE_PLATFORM']
+          if len(value['apps']) != 1 or not same_release(value['apps'][0], baseline(platform)[app]):
+              raise SystemExit('Official package differs from the inspected desktop baseline')
+          PYTHON
+      - name: Preserve verified public package before GUI qualification
+        if: matrix.app == 'chatgpt-desktop' && runner.os == 'Windows' && inputs.experiment == 'deterministic-full' && steps.inspected-package.outputs.cache-hit != 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ${{ runner.temp }}/semantic-feasibility/artifacts
+          key: ${{ steps.inspected-package.outputs.cache-primary-key }}
+      - name: Install exact frozen application without credentials
+        env:
+          FEASIBILITY_FACTS: ${{ runner.temp }}/semantic-feasibility/facts
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset NAN_API_KEY GH_TOKEN GITHUB_TOKEN
+          python3 -c 'import os, sys; from pathlib import Path; sys.path.insert(0, "canary/actions"); from cell import ensure_private_directory; ensure_private_directory(Path(os.environ["FEASIBILITY_FACTS"]))'
+          python3 canary/actions/desktop_diagnostics.py --source-sha "$QUALIFICATION_SOURCE_SHA" --platform '${{ matrix.platform }}' --output "$RUNNER_TEMP/semantic-feasibility/installation-diagnostics.json" --timeout 2400 -- python3 canary/actions/desktop_install.py --manifest "$RUNNER_TEMP/semantic-feasibility/frozen.json" --artifacts "$RUNNER_TEMP/semantic-feasibility/artifacts" --platform '${{ matrix.platform }}' --architecture '${{ matrix.architecture }}' --model qwen3.6 --harnesses '${{ matrix.app }}'
+      - name: Verify synthetic Windows configuration lifecycle after installation
+        if: runner.os == 'Windows' && matrix.app == 'claude-desktop' && inputs.experiment == 'deterministic-full'
+        env:
+          RUST_TEST_THREADS: 1
+          NANH_CONFIGURATION_POSTINSTALL_OBSERVATION: '1'
+        # Distinguish installer/environment effects from the passing preinstall fixture.
+        # The child writer creates only its own temporary profile and launches no app.
+        run: python scripts/desktop-feasibility/windows-config-fixture.py
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always() && runner.os == 'Windows' && matrix.app == 'claude-desktop' && inputs.experiment == 'deterministic-full'
+        with:
+          name: deterministic-qualification-windows-config-fixture
+          path: ${{ runner.temp }}/configuration-fixture*.json
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Prepare private receipt after installation environment exports
+        env:
+          FEASIBILITY_FACTS: ${{ runner.temp }}/semantic-feasibility/facts
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset NAN_API_KEY GH_TOKEN GITHUB_TOKEN
+          nanh="$FEASIBILITY_REAL_NANH"
+          if [[ '${{ matrix.app }}' != zed-desktop ]]; then
+            nanh="${FEASIBILITY_HERMES_LAUNCHER:-$GITHUB_WORKSPACE/scripts/desktop-feasibility/nanh-shim.py}"
+          fi
+          "$FEASIBILITY_CHECKER" prepare --app '${{ matrix.app }}' --model qwen3.6 --yes --non-interactive --ephemeral --nan-harness "$nanh" --frozen "$RUNNER_TEMP/semantic-feasibility/frozen.json" --artifacts "$RUNNER_TEMP/semantic-feasibility/artifacts" --output "$RUNNER_TEMP/semantic-feasibility/prepared.json"
+      - name: Prepare executable-scoped Electron namespace sandbox
+        if: runner.os == 'Linux' && matrix.app != 'zed-desktop'
+        shell: bash
+        run: |
+          python3 scripts/desktop-feasibility/hermes-namespace.py prepare --app '${{ matrix.app }}' --prepared "$RUNNER_TEMP/semantic-feasibility/prepared.json" --state "$RUNNER_TEMP/semantic-feasibility/namespace-policy.json"
+          echo 'FEASIBILITY_HERMES_NAMESPACE_POLICY=scoped-apparmor-userns' >> "$GITHUB_ENV"
+          echo 'NANH_DESKTOP_QUALIFICATION_NAMESPACE_POLICY=scoped-apparmor-userns' >> "$GITHUB_ENV"
+      - name: Run bounded native-copy or renderer DOM experiment
+        if: ${{ !contains(fromJSON('["deterministic-full","startup-baseline"]'), inputs.experiment) }}
+        shell: bash
+        env:
+          SELECTED_EXPERIMENT: ${{ inputs.experiment }}
+        run: |
+          set -euo pipefail
+          unset NAN_API_KEY GH_TOKEN GITHUB_TOKEN
+          tag=v1.22.0
+          if [[ '${{ matrix.app }}' == hermes-desktop ]]; then tag=v2026.9.24; fi
+          bash scripts/run-desktop-check-session.sh python3 scripts/desktop-feasibility/run-experiments.py \
+            --app '${{ matrix.app }}' --platform '${{ matrix.platform }}' --source-sha "$QUALIFICATION_SOURCE_SHA" --release-tag "$tag" \
+            --experiment "$SELECTED_EXPERIMENT" \
+            --checker "$FEASIBILITY_CHECKER" --real-nanh "$FEASIBILITY_REAL_NANH" \
+            --prepared "$RUNNER_TEMP/semantic-feasibility/prepared.json" --frozen "$RUNNER_TEMP/semantic-feasibility/frozen.json" \
+            --directory "$RUNNER_TEMP/semantic-feasibility"
+      - name: Initialize explicit unqualified result
+        if: always() && contains(fromJSON('["deterministic-full","startup-baseline"]'), inputs.experiment)
+        shell: bash
+        run: python3 canary/actions/desktop_qualification.py pending --app '${{ matrix.app }}' --platform '${{ matrix.platform }}' --architecture '${{ matrix.architecture }}' --source-sha "$QUALIFICATION_SOURCE_SHA" --output "$RUNNER_TEMP/semantic-feasibility/qualification.json"
+      - name: Observe closed Windows desktop session facts
+        if: runner.os == 'Windows' && contains(fromJSON('["deterministic-full","startup-baseline"]'), inputs.experiment)
+        # Advisory inventory has no input authority; qualification retains its
+        # own mandatory process, profile and session ownership checks.
+        continue-on-error: true
+        shell: bash
+        run: python3 scripts/desktop-feasibility/windows-session.py "$RUNNER_TEMP/semantic-feasibility/windows-session.json"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always() && runner.os == 'Windows'
+        with:
+          name: windows-session-${{ matrix.app }}
+          path: ${{ runner.temp }}/semantic-feasibility/windows-session.json
+          if-no-files-found: ignore
+          retention-days: 30
+      - name: Enable public Codex work-preferences diagnostic
+        if: matrix.app == 'chatgpt-desktop' && inputs.experiment == 'deterministic-full'
+        shell: bash
+        run: |
+          echo 'NANH_CODEX_PUBLIC_ONBOARDING=engineering' >> "$GITHUB_ENV"
+          echo 'NANH_CODEX_INPUT_CHANNEL=cdp-dom' >> "$GITHUB_ENV"
+      - name: Enable inspected native Codex project entry
+        if: matrix.app == 'chatgpt-desktop' && inputs.experiment == 'deterministic-full'
+        shell: bash
+        run: echo 'NANH_CODEX_PROJECT_POLICY=open-project' >> "$GITHUB_ENV"
+      - name: Enable source-point owned Codex window movement observation
+        if: runner.os == 'macOS' && matrix.app == 'chatgpt-desktop' && inputs.experiment == 'deterministic-full'
+        shell: bash
+        run: echo 'NANH_CODEX_OWNED_MOVE=source-point' >> "$GITHUB_ENV"
+      - name: Enable passive owned-client Zed event delivery observation
+        if: runner.os == 'Linux' && matrix.app == 'zed-desktop' && inputs.experiment == 'deterministic-full'
+        shell: bash
+        run: |
+          echo 'NANH_ZED_CURSOR_HIT=1' >> "$GITHUB_ENV"
+          echo 'NANH_ZED_RETRY_HIT_POLICY=accessibility' >> "$GITHUB_ENV"
+          echo 'NANH_ZED_XRECORD=1' >> "$GITHUB_ENV"
+          echo 'NANH_ZED_XI2_PAYLOAD=1' >> "$GITHUB_ENV"
+          test -r /usr/share/icons/Adwaita/cursors/hand2
+          test -r /usr/share/icons/Adwaita/cursors/left_ptr
+          echo 'NANH_ZED_CURSOR_THEME=adwaita-24' >> "$GITHUB_ENV"
+          echo 'NANH_ZED_ENTER_POLICY=owned-decoration-crossing' >> "$GITHUB_ENV"
+          echo 'NANH_ZED_PANEL_LAYOUT=fixed-wide' >> "$GITHUB_ENV"
+          echo 'NANH_ZED_SCREEN_POLICY=height-1536' >> "$GITHUB_ENV"
+      - name: Enable Hermes Windows current-catalog readiness
+        if: runner.os == 'Windows' && matrix.app == 'hermes-desktop' && inputs.experiment == 'deterministic-full'
+        shell: bash
+        run: echo 'FEASIBILITY_HERMES_READINESS_POLICY=current-catalog' >> "$GITHUB_ENV"
+      - name: Enable Claude macOS official native-folder acquisition trial
+        if: runner.os == 'macOS' && matrix.app == 'claude-desktop' && contains(fromJSON('["startup-baseline","deterministic-full"]'), inputs.experiment)
+        shell: bash
+        run: |
+          echo 'NANH_CLAUDE_MAC_PROFILE_POLICY=native-known-folders' >> "$GITHUB_ENV"
+          echo 'NANH_CLAUDE_MAC_CHAT_NAVIGATION=1' >> "$GITHUB_ENV"
+          echo 'NANH_CLAUDE_MCP_FIXTURE=read-only' >> "$GITHUB_ENV"
+          if [ '${{ inputs.experiment }}' = 'deterministic-full' ]; then
+            echo 'NANH_CLAUDE_MAC_NATIVE_CHAT=1' >> "$GITHUB_ENV"
+          fi
+      - name: Enable source-pinned Claude Linux Chat-only trial
+        if: runner.os == 'Linux' && matrix.app == 'claude-desktop' && contains(fromJSON('["startup-baseline","deterministic-full"]'), inputs.experiment)
+        shell: bash
+        run: |
+          echo 'NANH_CLAUDE_LINUX_CHAT_ONLY=1' >> "$GITHUB_ENV"
+          echo 'NANH_CLAUDE_LINUX_MCP_FIXTURE=read-only' >> "$GITHUB_ENV"
+          if [ '${{ inputs.experiment }}' = 'deterministic-full' ]; then
+            echo 'NANH_CLAUDE_LINUX_NATIVE_CHAT=first-turn' >> "$GITHUB_ENV"
+          fi
+      - name: Enable Claude Windows private-profile observations
+        if: runner.os == 'Windows' && matrix.app == 'claude-desktop' && contains(fromJSON('["startup-baseline","deterministic-full"]'), inputs.experiment)
+        shell: bash
+        run: |
+          echo 'NANH_CLAUDE_WINDOWS_PROFILE_POLICY=private-env' >> "$GITHUB_ENV"
+          echo 'NANH_CLAUDE_WINDOWS_CHAT_ONLY=1' >> "$GITHUB_ENV"
+          echo 'NANH_CLAUDE_PRELAUNCH_DIAGNOSTICS=1' >> "$GITHUB_ENV"
+          echo 'NANH_CLAUDE_PERSIST_OWNERS=1' >> "$GITHUB_ENV"
+          if [ '${{ inputs.experiment }}' = 'deterministic-full' ]; then
+            echo 'NANH_CLAUDE_WINDOWS_FRESH_PROFILE=1' >> "$GITHUB_ENV"
+            echo 'NANH_CLAUDE_WINDOWS_PERSIST_POLICY=std-rename' >> "$GITHUB_ENV"
+            echo 'NANH_CLAUDE_WINDOWS_NATIVE_CHAT=1' >> "$GITHUB_ENV"
+            echo 'NANH_CLAUDE_WINDOWS_MCP_FIXTURE=read-only' >> "$GITHUB_ENV"
+          fi
+      - name: Run full deterministic semantic qualification
+        env:
+          NANH_DESKTOP_QUALIFICATION_MODE: ${{ inputs.experiment == 'startup-baseline' && 'startup-baseline' || 'renderer' }}
+        if: contains(fromJSON('["deterministic-full","startup-baseline"]'), inputs.experiment)
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset NAN_API_KEY GH_TOKEN GITHUB_TOKEN
+          if [[ '${{ matrix.platform }}' == linux && '${{ matrix.app }}' == chatgpt-desktop ]]; then
+            umask 077
+          fi
+          bash scripts/run-desktop-check-session.sh python3 scripts/desktop-feasibility/run-qualification.py --app '${{ matrix.app }}' --platform '${{ matrix.platform }}' --source-sha "$QUALIFICATION_SOURCE_SHA" --checker "$FEASIBILITY_CHECKER" --real-nanh "$FEASIBILITY_REAL_NANH" --prepared "$RUNNER_TEMP/semantic-feasibility/prepared.json" --frozen "$RUNNER_TEMP/semantic-feasibility/frozen.json" --directory "$RUNNER_TEMP/semantic-feasibility"
+      - name: Reduce full deterministic qualification
+        if: always() && contains(fromJSON('["deterministic-full","startup-baseline"]'), inputs.experiment)
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f "$RUNNER_TEMP/semantic-feasibility/report.json" ]]; then
+            launcher="$FEASIBILITY_REAL_NANH"
+            if [[ '${{ matrix.app }}' != zed-desktop ]]; then
+              launcher="${FEASIBILITY_HERMES_LAUNCHER:-$GITHUB_WORKSPACE/scripts/desktop-feasibility/nanh-shim.py}"
+            fi
+            python3 canary/actions/desktop_qualification.py reduce --app '${{ matrix.app }}' --platform '${{ matrix.platform }}' --architecture '${{ matrix.architecture }}' --source-sha "$QUALIFICATION_SOURCE_SHA" --model qwen3.6 --checker "$FEASIBILITY_CHECKER" --launcher "$launcher" --real-nanh "$FEASIBILITY_REAL_NANH" --prepared "$RUNNER_TEMP/semantic-feasibility/prepared.json" --frozen "$RUNNER_TEMP/semantic-feasibility/frozen.json" --report "$RUNNER_TEMP/semantic-feasibility/report.json" --facts "$RUNNER_TEMP/semantic-feasibility/qualification-facts" --output "$RUNNER_TEMP/semantic-feasibility/qualification.json"
+          else
+            python3 canary/actions/desktop_qualification.py diagnose-pending --app '${{ matrix.app }}' --platform '${{ matrix.platform }}' --architecture '${{ matrix.architecture }}' --source-sha "$QUALIFICATION_SOURCE_SHA" --facts "$RUNNER_TEMP/semantic-feasibility/qualification-facts" --output "$RUNNER_TEMP/semantic-feasibility/qualification.json"
+          fi
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always() && contains(fromJSON('["deterministic-full","startup-baseline"]'), inputs.experiment)
+        with:
+          name: deterministic-qualification-${{ matrix.app }}-${{ matrix.platform }}
+          path: ${{ runner.temp }}/semantic-feasibility/qualification.json
+          if-no-files-found: error
+          retention-days: 30
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: desktop-installation-${{ matrix.app }}-${{ matrix.platform }}
+          path: ${{ runner.temp }}/semantic-feasibility/installation-diagnostics.json
+          if-no-files-found: ignore
+          retention-days: 30
+      - name: Remove owned Electron namespace policy
+        if: always() && runner.os == 'Linux' && matrix.app != 'zed-desktop'
+        shell: bash
+        run: python3 scripts/desktop-feasibility/hermes-namespace.py cleanup --state "$RUNNER_TEMP/semantic-feasibility/namespace-policy.json"
+      - name: Present completed closed observations
+        if: always()
+        shell: bash
+        run: |
+          if [[ -f "$RUNNER_TEMP/semantic-feasibility/summary.json" ]]; then
+            cat "$RUNNER_TEMP/semantic-feasibility/summary.json" >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always() && !contains(fromJSON('["deterministic-full","startup-baseline"]'), inputs.experiment)
+        with:
+          name: semantic-feasibility-${{ matrix.app }}-${{ matrix.platform }}
+          path: ${{ runner.temp }}/semantic-feasibility/summary.json
+          if-no-files-found: error
+          retention-days: 30
+  qualification-matrix:
+    name: Aggregate the twelve-cell desktop qualification
+    needs: [select, native]
+    if: always() && !cancelled() && needs.select.result == 'success' && inputs.app == 'all' && inputs.platform == 'all' && inputs.experiment == 'deterministic-full' && (inputs.cells == '' || inputs.cells == null)
+    permissions:
+      contents: read
+      actions: read
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Download exact latest closed cell artifacts across attempts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" > "$RUNNER_TEMP/qualification-artifacts.json"
+          python3 scripts/desktop-feasibility/select-qualification-artifacts.py \
+            --metadata "$RUNNER_TEMP/qualification-artifacts.json" \
+            --run-id "$GITHUB_RUN_ID" --source-sha "$GITHUB_SHA" \
+            --repository "$GITHUB_REPOSITORY" --directory "$RUNNER_TEMP/qualification-cells"
+      - name: Require all active cells from this commit
+        shell: bash
+        run: |
+          python3 canary/actions/desktop_qualification.py aggregate \
+            --directory "$RUNNER_TEMP/qualification-cells" \
+            --source-sha "$QUALIFICATION_SOURCE_SHA" --exclude-app pen-desktop \
+            --output "$RUNNER_TEMP/qualification-matrix.json"
+      - name: Bind all twelve passing cells to the attested release bytes
+        if: inputs.release_tag != '' && inputs.release_tag != null
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          RELEASE_COMMIT: ${{ inputs.release_commit }}
+        run: |
+          python3 canary/actions/desktop_release_binding.py bind \
+            --matrix "$RUNNER_TEMP/qualification-matrix.json" \
+            --directory "$RUNNER_TEMP/release-binding"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: deterministic-qualification-matrix
+          path: ${{ runner.temp }}/qualification-matrix.json
+          if-no-files-found: error
+          retention-days: 30
+  integration-quality:
+    if: inputs.native_only != true
+    name: Verify integrated main and desktop tooling
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - run: rustup show
+      - name: Install native and interactive test dependencies
+        timeout-minutes: 8
+        shell: bash
+        run: |
+          apt_options=(-o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
+          sudo apt-get "${apt_options[@]}" update
+          sudo apt-get "${apt_options[@]}" install --no-install-recommends -y cmake libx11-dev libxkbcommon-dev expect
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: desktop-integration-quality
+          cache-bin: true
+          cache-on-failure: true
+      - name: Install pinned dependency policy checker
+        run: |
+          if ! command -v cargo-deny >/dev/null 2>&1; then
+            cargo install cargo-deny --version 0.19.9 --locked
+          fi
+      - name: Verify final integration tree
+        run: cargo check-all
+      - name: Verify semantic experiment contracts
+        run: |
+          for test in scripts/desktop-feasibility/test-*.py; do python3 "$test"; done
+          node --check scripts/desktop-feasibility/observe-hermes.cjs
+          for test in scripts/desktop-feasibility/test-*.cjs; do node "$test"; done
+          rustc --edition 2024 --test scripts/desktop-feasibility/nanh-shim.rs -o "$RUNNER_TEMP/nanh-shim-contract"
+          "$RUNNER_TEMP/nanh-shim-contract"

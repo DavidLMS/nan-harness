@@ -1,7 +1,9 @@
 mod desktop;
+mod desktop_checks;
 mod environment;
 mod error;
 mod evidence;
+mod hosted_checks;
 mod manifest;
 mod network;
 mod refresh;
@@ -15,8 +17,9 @@ pub use environment::{
 };
 pub use error::CompatibilityError;
 pub use manifest::{
-    DesktopVerificationEntry, LEGACY_FEED_SCHEMA_VERSION, UNIFIED_FEED_SCHEMA_VERSION,
-    VerificationEntry, VerificationManifest, VerificationRelease,
+    DesktopVerificationEntry, HOSTED_FEED_SCHEMA_VERSION, LEGACY_FEED_SCHEMA_VERSION,
+    UNIFIED_FEED_SCHEMA_VERSION, VERSIONED_FEED_SCHEMA_VERSION, VerificationEntry,
+    VerificationManifest, VerificationRelease,
 };
 pub use refresh::{RefreshOutcome, refresh_compatibility_manifest};
 pub(crate) use refresh::{apply_cached_desktop_verifications, apply_cached_verifications};

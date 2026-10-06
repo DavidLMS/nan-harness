@@ -1,4 +1,5 @@
 mod lifecycle;
+mod polling;
 mod protocol;
 mod state;
 
@@ -17,6 +18,7 @@ pub struct ScriptedToolCall {
 pub struct ProviderScenario {
     pub tool_calls: Vec<ScriptedToolCall>,
     pub final_marker: String,
+    poll_exec: bool,
 }
 
 impl ProviderScenario {
@@ -25,6 +27,7 @@ impl ProviderScenario {
         Self {
             tool_calls: Vec::new(),
             final_marker: final_marker.into(),
+            poll_exec: false,
         }
     }
 
@@ -44,6 +47,14 @@ impl ProviderScenario {
         )
     }
 
+    /// Read through unified exec, polling only the session returned by that call.
+    #[must_use]
+    pub fn exec_read(input: Value, final_marker: impl Into<String>) -> Self {
+        let mut scenario = Self::tool("exec_command", input, final_marker);
+        scenario.poll_exec = true;
+        scenario
+    }
+
     #[must_use]
     pub fn sequence(
         tool_calls: impl IntoIterator<Item = ScriptedToolCall>,
@@ -52,6 +63,7 @@ impl ProviderScenario {
         Self {
             tool_calls: tool_calls.into_iter().collect(),
             final_marker: final_marker.into(),
+            poll_exec: false,
         }
     }
 }

@@ -8,9 +8,16 @@ case "$trigger" in
   *) printf 'usage: %s <daily|weekly>\n' "$0" >&2; exit 2 ;;
 esac
 
+if [ "${NAN_CANARY_WRITER:-}" != tart-emergency ]; then
+  printf 'Scheduled Tart publication is retired; select coverage manually in Actions.\n'
+  exit 0
+fi
+
 repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$repository_root/canary/host/lib.sh"
 release_repository="${NAN_CANARY_RELEASE_REPOSITORY:-DavidLMS/nan-harness}"
+source "$repository_root/canary/host/publication-writer.sh"
+require_publication_writer
 state_directory="${NAN_CANARY_STATE_DIR:-$HOME/Library/Application Support/nan-harness-canary}"
 "$repository_root/canary/host/prune-state.sh"
 tag="$(gh release view --repo "$release_repository" --json tagName --jq '.tagName')"

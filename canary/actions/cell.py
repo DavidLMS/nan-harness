@@ -693,6 +693,7 @@ def private_command(command, directory, timeout=900, output=None, live=False, al
                                      env=env, cwd=directory, start_new_session=os.name != "nt",
                                      creationflags=creationflags)
             job = None
+            status = None
             try:
                 # Keep resume inside this try: setup failures must close the job
                 # before any child can run outside its kill-on-close boundary.
@@ -707,7 +708,7 @@ def private_command(command, directory, timeout=900, output=None, live=False, al
                     finish_stage(child, job)
                 finally:
                     if diagnostic_callback is not None:
-                        diagnostic_callback(log, status)
+                        diagnostic_callback(log, status if status is not None else child.returncode)
             if status and not allow_failure:
                 raise RuntimeError("stage did not pass")
             return status

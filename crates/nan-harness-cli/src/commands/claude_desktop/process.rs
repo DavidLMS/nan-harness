@@ -1,5 +1,7 @@
 #[allow(clippy::wildcard_imports)]
 use super::*;
+#[cfg(target_os = "macos")]
+use std::cell::Cell;
 
 #[cfg(test)]
 mod tests;
@@ -44,6 +46,10 @@ impl DesktopPlatform {
 pub(super) struct SystemDesktopProcess {
     platform: DesktopPlatform,
     executable: Option<PathBuf>,
+    #[cfg(target_os = "macos")]
+    ever_observed_present: Cell<bool>,
+    #[cfg(target_os = "macos")]
+    observation_started: Cell<bool>,
 }
 
 impl SystemDesktopProcess {
@@ -51,6 +57,10 @@ impl SystemDesktopProcess {
         Self {
             platform,
             executable,
+            #[cfg(target_os = "macos")]
+            ever_observed_present: Cell::new(false),
+            #[cfg(target_os = "macos")]
+            observation_started: Cell::new(false),
         }
     }
 }
@@ -58,10 +68,30 @@ impl SystemDesktopProcess {
 impl DesktopProcess for SystemDesktopProcess {
     fn is_running(&self) -> Result<bool, ClaudeDesktopError> {
         match self.platform {
-            DesktopPlatform::Macos => process_matches(
-                "/usr/bin/pgrep",
-                &["-f", "Claude.app/Contents/MacOS/Claude"],
-            ),
+            DesktopPlatform::Macos => {
+                let result = process_matches(
+                    "/usr/bin/pgrep",
+                    &["-f", "Claude.app/Contents/MacOS/Claude"],
+                );
+                #[cfg(target_os = "macos")]
+                if std::env::var_os(crate::native_diagnostic::PROCESS_OBSERVATION_ENV_PATH)
+                    .is_some()
+                    && self.observation_started.get()
+                {
+                    let result = result.as_ref().map(|present| *present).map_err(|_| ());
+                    let (observation, ever_observed_present) =
+                        crate::native_diagnostic::accumulate_process_observation(
+                            self.ever_observed_present.get(),
+                            result,
+                        );
+                    self.ever_observed_present.set(ever_observed_present);
+                    crate::native_diagnostic::record_process_observation(
+                        observation,
+                        ever_observed_present,
+                    );
+                }
+                result
+            }
             DesktopPlatform::Linux => linux_desktop_running(),
             DesktopPlatform::Windows => windows_desktop_running(),
         }
@@ -97,17 +127,32 @@ impl DesktopProcess for SystemDesktopProcess {
     }
 
     fn launch(&self) -> Result<(), ClaudeDesktopError> {
+        #[cfg(target_os = "macos")]
+        if std::env::var_os(crate::native_diagnostic::PROCESS_OBSERVATION_ENV_PATH).is_some() {
+            self.observation_started.set(true);
+        }
+        #[cfg(feature = "desktop-qualification")]
+        let profile_arguments =
+            crate::commands::desktop::claude_profile_arguments(self.executable.as_deref())
+                .map_err(ClaudeDesktopError::Launch)?;
         if let Some(executable) = &self.executable {
             if self.platform == DesktopPlatform::Macos && executable.is_dir() {
                 return run_launcher("/usr/bin/open", &[executable.as_os_str()]);
             }
-            return Command::new(executable)
+            let mut command = Command::new(executable);
+            command
+                .args(crate::commands::desktop::qualification_renderer_arguments(
+                    DesktopHarnessKind::Claude,
+                ))
                 .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn()
-                .map(|_| ())
-                .map_err(ClaudeDesktopError::Launch);
+                .stdout(Stdio::null());
+            #[cfg(feature = "desktop-qualification")]
+            command.args(profile_arguments);
+            return crate::commands::desktop::spawn_observed_desktop(
+                &mut command,
+                "claude-desktop",
+            )
+            .map_err(ClaudeDesktopError::Launch);
         }
         match self.platform {
             DesktopPlatform::Macos => {

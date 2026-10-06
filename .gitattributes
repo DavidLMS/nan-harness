@@ -1,2 +1,6 @@
 # The canary specification is hashed as raw bytes across native runners.
 canary/actions/cell.py text eol=lf
+
+# Qualification validates this helper against a fixed source-byte digest.
+scripts/desktop-feasibility/claude-persist-owners.py text eol=lf
+scripts/desktop-feasibility/claude-read-fixture.py text eol=lf

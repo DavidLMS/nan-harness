@@ -1,4 +1,13 @@
 {
+  "doctor_desktop_exact_checks": "  Exact-version checks from the remote feed ({architecture}):",
+  "help_zed_separate_data_directory": "Use a separate Zed data and settings directory",
+  "doctor_desktop_checks_missing": "    No deterministic or NaN checks recorded for this architecture",
+  "doctor_desktop_check": "    App {app} / runtime {runtime}: deterministic {deterministic}; NaN {live}",
+  "doctor_desktop_runtime_none": "none",
+  "doctor_desktop_not_verified": "not verified",
+  "error_hermes_desktop_invalid_desktop_executable": "the selected Hermes Desktop executable must be an absolute executable file",
+  "error_compatibility_invalid_hosted_checks": "compatibility manifest contains invalid hosted checks: {reason}",
+  "error_compatibility_invalid_desktop_checks": "compatibility manifest contains invalid exact-version Desktop checks: {reason}",
   "error_persistence_rollback_incomplete": "Native configuration failed and {failures} restorations remain incomplete. Private recovery copies were retained in the nan-harness state directory.",
   "cache_connection": "connection failed",
   "cache_empty": "no usable models returned",

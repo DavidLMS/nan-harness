@@ -1,0 +1,48 @@
+#include "../codex_activation_identity.hpp"
+#include <cassert>
+#include <cstring>
+#include <limits>
+int main() {
+    assert(codex_hit_is_held_window(true,true,false));
+    assert(codex_hit_is_held_window(true,false,true));
+    assert(!codex_hit_is_held_window(true,false,false));
+    assert(!codex_hit_is_held_window(false,true,false));
+    assert(!codex_hit_is_held_window(false,false,true));
+    assert(!codex_hit_is_held_window(false,true,true));
+
+    const CodexMainIdentity held{42,100,500,0,10,20,600,400};
+    assert(same_codex_main(held,held));
+    assert(codex_inventory_admitted(true,1,true,false,false,true));
+    assert(!codex_inventory_admitted(false,1,true,false,false,true));
+    assert(!codex_inventory_admitted(true,0,false,false,false,true));
+    assert(!codex_inventory_admitted(true,2,true,false,false,true));
+    assert(!codex_inventory_admitted(true,1,false,false,false,true));
+    assert(!codex_inventory_admitted(true,1,true,true,false,true));
+    assert(!codex_inventory_admitted(true,1,true,false,true,true));
+    assert(!codex_inventory_admitted(true,1,true,false,false,false));
+    auto changed=held;changed.id++;assert(!same_codex_main(held,changed));
+    changed=held;changed.pid++;assert(!same_codex_main(held,changed));
+    changed=held;changed.seconds++;assert(!same_codex_main(held,changed));
+    changed=held;changed.micros++;assert(!same_codex_main(held,changed));
+    changed=held;changed.width++;assert(!same_codex_main(held,changed));
+    changed=held;changed.x++;assert(!same_codex_main(held,changed));
+    changed=held;changed.height=0;assert(!same_codex_main(changed,changed));
+    changed=held;changed.x=std::numeric_limits<double>::quiet_NaN();assert(!same_codex_main(changed,changed));
+    changed=held;changed.width=std::numeric_limits<double>::infinity();assert(!same_codex_main(changed,changed));
+    changed=held;changed.micros=1000000;assert(!same_codex_main(changed,changed));
+    assert(std::strcmp(codex_inventory_failure_reason("geometry",false,true,true,false,true),"geometry")==0);
+    assert(std::strcmp(codex_inventory_failure_reason("metadata",false,false,false,true,false),"deadline")==0);
+    assert(std::strcmp(codex_inventory_failure_reason("identity",true,true,true,false,true),"other-owned-normal")==0);
+    assert(std::strcmp(codex_inventory_failure_reason("identity",true,false,true,false,true),"overlapping-ahead")==0);
+    assert(std::strcmp(codex_inventory_failure_reason("identity",true,false,false,false,true),"off-display")==0);
+    // Activation raises a retained native window rather than clicking through
+    // an external occluder. Owned overlays and all verification stay blocking.
+    assert(codex_inventory_admitted(true,1,true,false,true,true,true,false));
+    assert(!codex_inventory_admitted(true,1,true,false,true,true,false,false));
+    assert(!codex_inventory_admitted(true,1,true,false,true,true,true,true));
+    assert(!codex_inventory_admitted(true,1,true,true,true,true,true,false));
+    assert(!codex_inventory_admitted(true,2,true,false,true,true,true,false));
+    assert(!codex_inventory_admitted(true,1,true,false,true,false,true,false));
+    assert(!codex_inventory_admitted(false,1,true,false,true,true,true,false));
+
+}

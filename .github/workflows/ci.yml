@@ -49,6 +49,8 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install pinned Rust toolchain
         run: rustup show
+      - name: Install native Desktop checker build dependency
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y cmake libx11-dev libxkbcommon-dev
       - name: Cache Rust dependencies and build artifacts
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:

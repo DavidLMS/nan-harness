@@ -78,6 +78,12 @@ means only `nan-harness-cli`. It is useful for CLI iteration but is not a
 workspace-wide check. Use `--workspace --all-features` when you need to run
 the deterministic suite across every member.
 
+The Desktop checker builds a bundled offline OCR helper on its native target.
+Workspace checks therefore require Python 3, CMake and a C++17 toolchain; Linux
+also needs `libx11-dev` and `libxkbcommon-dev`. See the
+[native helper build contract](crates/nan-harness-desktop-check/native/README.md)
+for pinned inputs, build-tool overrides and runtime privacy boundaries.
+
 Before opening a pull request, run the repository gate:
 
 ```sh
@@ -163,12 +169,40 @@ an internal state machine. Their `expect` attributes include reasons and become
 unfulfilled if the lint no longer applies; the exceptions do not waive other
 quality requirements.
 
+`OwnedInputObservation` in
+`crates/nan-harness-desktop-check/src/gui/claude_linux_chat.rs` contains six
+boolean fields, above the `struct_excessive_bools` threshold of three. They
+report independent native text coverage, root topology, placeholder comparisons
+and known-prompt equality in a closed, flat diagnostic protocol. Keep these
+observations directly named; they grant no input capability, and explicit
+validation rejects contradictory facts. Reassess if this wire schema gains
+another boolean or starts encoding action states. The scoped `expect` preserves
+the external contract and does not waive privacy, validation or other gates.
+
 `run_node_native_plugins` in
 `crates/nan-harness-cli/src/commands/configuration/tests/plugin_syntax.rs` has
 102 lines, mostly a three-entry table of generated JavaScript fixtures. Keep
 each plugin's import stubs and invocation beside the shared lifecycle assertions
 so the test remains reviewable as one contract. Reassess if another plugin or
 independent behavior is added; the scoped `expect` does not waive test coverage.
+
+`isolated_command` in `nan-harness-desktop-check/src/probe.rs` has 102 lines.
+Keep the launch environment, private profile creation and platform custody in
+one ordered preparation path. The hosted Zed receipt requires its private root
+before the child starts. Reassess if another preparation phase is added; this
+scoped exception does not waive tests or other quality gates.
+
+`complete_scenario` in `nan-harness-desktop-check/src/probe/semantic.rs` has
+101 lines. Keep the ordered UI/provider lifecycle and retained tool failure
+beside independent recovery collection, so recovery cannot accidentally erase
+the earlier acceptance failure. Reassess if another scenario phase is added;
+this scoped exception does not waive tests or other quality gates.
+
+`scenario_owned` in `nan-harness-desktop-check/src/probe.rs` has 103 lines.
+Keep preparation of the exact launch command, platform profile custody,
+conversation and cleanup in one ordered lifecycle so retained authority cannot
+outlive its launch. Reassess if another lifecycle phase or harness-specific
+branch is added; this scoped exception does not waive other quality gates.
 
 `CompatibilityError::terminal_message` in
 `crates/nan-harness-runtime/src/compatibility/error.rs` has 139 lines. Its
@@ -265,7 +299,8 @@ verifies the draft before publication.
       and the trusted workflow
       source rather than executing tag-controlled code.
 - [ ] Keep the draft unpublished until the live hosted gate reports all 49
-      unique cells passed (17 Linux, 17 macOS, 15 Windows) and emits its complete provenance
+      unique CLI cells passed (17 Linux, 17 macOS, 15 Windows), all twelve Desktop
+      cells passed against the exact attested release binaries, and emits its complete provenance
       handoff. A deterministic verification-only run is useful evidence but
       does not satisfy the live release criterion and cannot publish.
       Prime Agent and FX are skipped only on Windows until official native

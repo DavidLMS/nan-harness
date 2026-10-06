@@ -94,9 +94,15 @@ You can use NaN models in these desktop apps with a special configuration:
 | `nanh hermes-desktop` | [Hermes](https://hermes-agent.nousresearch.com/) | macOS, Windows, and Linux |
 | `nanh pen` (`nanh pen-desktop`) | [Pen](https://www.pen.dev/) | macOS, Windows, and Linux |
 
-These integrations are experimental. Zed, ChatGPT, Claude, Hermes, and Pen have
-been tested on macOS; their other platform combinations are covered by automated
-compatibility tests.
+These integrations are experimental. Hosted qualification covers Zed,
+Codex, Claude and Hermes on Linux x64, macOS ARM64 and Windows x64, with three
+complete sessions per cell. Pen remains deferred.
+
+The [Desktop checker and automation](canary/desktop-check.md) provide daily
+upstream detection, weekly full qualification and exact-binary release checks.
+Release binaries include explicitly activated hosted test hooks. Publication
+requires exact-binary Desktop qualification alongside the live CLI gate.
+Desktop qualification reports do not publish to the compatibility feed automatically.
 
 ## Installation
 
@@ -400,8 +406,9 @@ failure status when it contains an actual error. Missing optional harnesses are
 informational and do not make the command fail.
 Managed configurations report `active`, `missing`, `changed`, `invalid`, or
 `unreadable`. Missing or changed documents produce warnings; invalid or unreadable
-documents produce errors without exposing their contents. JSON schema version 8
-retains the `active` field as a compatibility projection of the configuration state.
+documents produce errors without exposing their contents. JSON schema version 9
+retains the `active` field as a compatibility projection of the configuration state
+and includes separate deterministic and NaN Desktop checks for the current architecture.
 
 Check one harness installation and its compatibility status in detail:
 

@@ -33,11 +33,43 @@ pub(super) fn restore_command(
     paths: &DesktopPaths,
     process: &SystemDesktopProcess,
 ) -> Result<i32, CliError> {
-    let _lock = SessionLock::acquire(&paths.lock)?;
-    if process.is_running()? {
+    let _lock = SessionLock::acquire(&paths.lock).inspect_err(|error| {
+        #[cfg(feature = "desktop-qualification")]
+        qualification_restore::record(
+            paths,
+            qualification_restore::Stage::SessionLock,
+            Some(error),
+        );
+        #[cfg(not(feature = "desktop-qualification"))]
+        let _ = error;
+    })?;
+    let running = process.is_running().inspect_err(|error| {
+        #[cfg(feature = "desktop-qualification")]
+        qualification_restore::record(
+            paths,
+            qualification_restore::Stage::ProcessCheck,
+            Some(error),
+        );
+        #[cfg(not(feature = "desktop-qualification"))]
+        let _ = error;
+    })?;
+    if running {
+        #[cfg(feature = "desktop-qualification")]
+        qualification_restore::record(
+            paths,
+            qualification_restore::Stage::ProcessCheck,
+            Some(&ClaudeDesktopError::AlreadyRunning),
+        );
         return Err(ClaudeDesktopError::AlreadyRunning.into());
     }
-    match restore_receipt(paths) {
+    let restoration = restore_receipt(paths);
+    #[cfg(feature = "desktop-qualification")]
+    qualification_restore::record(
+        paths,
+        qualification_restore::Stage::Receipt,
+        restoration.as_ref().err(),
+    );
+    match restoration {
         Ok(()) => eprintln!(
             "{}",
             nan_harness_i18n::messages::orchestration_claude_desktop_configuration_restored(
@@ -74,23 +106,66 @@ pub(super) async fn run_ready_session(
     bridge: &RunningClaudeDesktopBridge,
     show_auto: bool,
 ) -> Result<i32, ClaudeDesktopError> {
-    let receipt = Receipt::capture(paths)?;
-    if let Err(error) = receipt.write(&paths.receipt) {
+    let receipt = qualification_prelaunch::observe(
+        Receipt::capture(paths),
+        qualification_prelaunch::Stage::Snapshot,
+    )?;
+    if let Err(error) = qualification_prelaunch::observe(
+        receipt.write(&paths.receipt),
+        qualification_prelaunch::Stage::ReceiptWrite,
+    ) {
         Receipt::remove_backups(paths);
         return Err(error);
     }
-    let apply = bridge.with_session_token(|token| apply_gateway(paths, bridge.base_url(), token));
+    let apply = qualification_prelaunch::observe(
+        bridge.with_session_token(|token| apply_gateway(paths, bridge.base_url(), token)),
+        qualification_prelaunch::Stage::Configuration,
+    );
     if let Err(error) = apply {
         return restore_after(paths, Err(error));
     }
+    #[cfg(feature = "desktop-qualification")]
+    if let Err(error) = bridge.with_session_token(|token| {
+        qualification_config::write_bridge_receipt(paths, bridge.base_url(), token)
+    }) {
+        return restore_after(paths, Err(error));
+    }
+    #[cfg(feature = "desktop-qualification")]
+    {
+        let token = zeroize::Zeroizing::new(bridge.with_session_token(str::to_owned));
+        qualification_config::record(paths, bridge.base_url(), &token).await;
+    }
+    #[cfg(feature = "desktop-qualification")]
+    let storage = qualification_storage::Snapshot::capture(paths);
+    #[cfg(feature = "desktop-qualification")]
+    let models = qualification_models::Observation::start(paths, bridge);
     let activities = show_auto.then(|| bridge.subscribe_activities());
-    if let Err(error) = process.launch() {
+    if let Err(error) = qualification_prelaunch::observe(
+        process.launch(),
+        qualification_prelaunch::Stage::VendorLaunch,
+    ) {
+        #[cfg(feature = "desktop-qualification")]
+        if let Some(storage) = &storage {
+            storage.record();
+        }
+        #[cfg(feature = "desktop-qualification")]
+        if let Some(models) = models {
+            models.finish().await;
+        }
         return complete_and_restore(paths, process, Err(error)).await;
     }
     eprintln!("{}", launch_message(show_auto));
     let activity_logger =
         activities.map(|activities| tokio::spawn(log_bridge_activities(activities)));
     let completion = wait_for_exit_or_signal(process).await;
+    #[cfg(feature = "desktop-qualification")]
+    if let Some(storage) = &storage {
+        storage.record();
+    }
+    #[cfg(feature = "desktop-qualification")]
+    if let Some(models) = models {
+        models.finish().await;
+    }
     if let Some(activity_logger) = activity_logger {
         activity_logger.abort();
     }
@@ -110,6 +185,8 @@ pub(super) fn launch_message(show_auto: bool) -> &'static str {
 async fn log_bridge_activities(mut activities: tokio::sync::broadcast::Receiver<BridgeActivity>) {
     loop {
         match activities.recv().await {
+            #[cfg(feature = "desktop-qualification")]
+            Ok(BridgeActivity::AuthenticatedModels) => {}
             Ok(activity) => eprintln!("{}", render_bridge_activity(&activity)),
             Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
                 eprintln!("{}", nan_harness_i18n::messages::orchestration_auto_permission_review_events_were_omitted(nan_harness_i18n::locale(), &(skipped)));
@@ -121,6 +198,8 @@ async fn log_bridge_activities(mut activities: tokio::sync::broadcast::Receiver<
 
 pub(super) fn render_bridge_activity(activity: &BridgeActivity) -> String {
     match activity {
+        #[cfg(feature = "desktop-qualification")]
+        BridgeActivity::AuthenticatedModels => String::new(),
         BridgeActivity::AuthenticatedClient => {
             nan_harness_i18n::messages::terminal_bridge_claude_desktop_authenticated_to_the_isolated_nan_bridge_text(nan_harness_i18n::locale()).to_owned()
         }

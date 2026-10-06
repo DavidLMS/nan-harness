@@ -55,7 +55,7 @@ pub(super) async fn run_managed_session(
         "{}", nan_harness_i18n::messages::session_zed_launched_through_nan_with_model_and_available_text_models_quit_zed_to_r(nan_harness_i18n::locale(), &(launch.selected_model), &(launch.models.len())));
 
     let mut signals = supervision::termination_signals();
-    let lifecycle = supervision::supervise(&mut child, process, gateway, &mut signals).await;
+    let lifecycle = supervision::supervise(&mut child.child, process, gateway, &mut signals).await;
     match lifecycle {
         Ok(code) => restoration::restore_after(paths, Ok(code)),
         Err(error) => match process.is_running() {

@@ -10,6 +10,16 @@ use nan_harness_core::{DetectedHarness, HarnessCapability, HarnessKind, VersionS
 use semver::Version;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
+#[cfg(unix)]
+fn exit_signal(status: std::process::ExitStatus) -> Option<i32> {
+    use std::os::unix::process::ExitStatusExt;
+    status.signal()
+}
+
+#[cfg(not(unix))]
+fn exit_signal(_: std::process::ExitStatus) -> Option<i32> {
+    None
+}
 use thiserror::Error;
 
 pub use executable::{is_executable_file, locate_harness_executable};
@@ -78,6 +88,7 @@ pub fn inspect_harness(
         return Err(DiscoveryError::VersionCommandFailed {
             command: version_command,
             exit_code: output.status.code(),
+            signal: exit_signal(output.status),
         });
     }
 
@@ -236,6 +247,7 @@ pub enum DiscoveryError {
     VersionCommandFailed {
         command: String,
         exit_code: Option<i32>,
+        signal: Option<i32>,
     },
     #[error(
         "harness version probe exceeded 30 seconds; check the executable installation or select a working executable with --executable"
@@ -308,13 +320,13 @@ impl TerminalMessage for DiscoveryError {
             Self::VersionCommand { command, source } => {
                 m::error_discovery_version_command(locale, &(command), &(source))
             }
-            Self::VersionCommandFailed { command, exit_code } => {
-                m::error_discovery_version_command_failed(
-                    locale,
-                    &(command),
-                    &(exit_code.map_or_else(String::new, |code| m::error_exit_code(locale, &code))),
-                )
-            }
+            Self::VersionCommandFailed {
+                command, exit_code, ..
+            } => m::error_discovery_version_command_failed(
+                locale,
+                &(command),
+                &(exit_code.map_or_else(String::new, |code| m::error_exit_code(locale, &code))),
+            ),
             Self::VersionProbeTimeout => m::error_discovery_version_probe_timeout(locale),
             Self::VersionProbeOutputLimit => m::error_discovery_version_probe_output_limit(locale),
             Self::UnsupportedVersion { harness, detected } => {

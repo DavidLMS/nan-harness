@@ -89,3 +89,51 @@ async fn bridge_rejects_models_outside_the_discovered_catalog() {
     );
     servers.shutdown().await;
 }
+
+#[cfg(feature = "desktop-qualification")]
+#[tokio::test]
+async fn discovery_activity_requires_successful_authenticated_models_route() {
+    use nan_harness_bridge::BridgeActivity;
+    let servers = start_servers().await;
+    let mut events = servers.bridge.subscribe_activities();
+    let endpoint = format!("{}/v1/models", servers.bridge.base_url());
+    let client = reqwest::Client::new();
+    assert_eq!(
+        client.get(&endpoint).send().await.unwrap().status(),
+        StatusCode::UNAUTHORIZED
+    );
+    assert!(events.try_recv().is_err());
+    assert_eq!(
+        client
+            .get(&endpoint)
+            .bearer_auth(SESSION_TOKEN)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::OK
+    );
+    assert_eq!(
+        events.try_recv().unwrap(),
+        BridgeActivity::AuthenticatedClient
+    );
+    assert_eq!(
+        events.try_recv().unwrap(),
+        BridgeActivity::AuthenticatedModels
+    );
+    assert!(events.try_recv().is_err());
+    // A separately authenticated route cannot certify model discovery.
+    let response = post_messages(
+        &servers,
+        "/v1/messages/count_tokens",
+        &json!({
+            "model":"anthropic/nan/qwen3.6", "messages":[{"role":"user","content":"synthetic"}]
+        }),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    while let Ok(event) = events.try_recv() {
+        assert_ne!(event, BridgeActivity::AuthenticatedModels);
+    }
+    servers.shutdown().await;
+}

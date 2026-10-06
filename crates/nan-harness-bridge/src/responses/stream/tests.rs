@@ -535,3 +535,38 @@ async fn committed_text_is_followed_by_failure_without_becoming_recoverable() {
     }
     assert!(failed);
 }
+
+#[tokio::test]
+async fn preserves_stream_overload_code_without_private_message() {
+    for envelope in [
+        r#"{"error":{"code":"server_is_overloaded","message":"PRIVATE_PROVIDER_TEXT"}}"#,
+        r#"{"choices":[],"error":{"code":"server_is_overloaded","message":"PRIVATE_PROVIDER_TEXT"}}"#,
+    ] {
+        let events = translate(
+            response(&format!("data: {envelope}\n\n")),
+            ToolCatalog::default(),
+            usage_guard(),
+        )
+        .collect::<Vec<_>>()
+        .await;
+        let rendered = format!("{events:?}");
+        assert!(rendered.contains("event: response.failed"), "{rendered}");
+        assert!(rendered.contains("server_is_overloaded"), "{rendered}");
+        assert!(!rendered.contains("PRIVATE_PROVIDER_TEXT"));
+        assert!(!rendered.contains("event: response.created"));
+    }
+}
+
+#[tokio::test]
+async fn stream_message_mention_does_not_become_overload() {
+    let events = translate(
+        response("data: {\"error\":{\"message\":\"server_is_overloaded\",\"code\":\"other\"}}\n\n"),
+        ToolCatalog::default(),
+        usage_guard(),
+    )
+    .collect::<Vec<_>>()
+    .await;
+    let rendered = format!("{events:?}");
+    assert!(rendered.contains("server_error"));
+    assert!(rendered.contains("NH-BRIDGE-105"));
+}

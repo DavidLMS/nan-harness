@@ -7,6 +7,40 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.15] - 2026-10-06
+
+### Changed
+
+- Include explicitly activated hosted Desktop qualification hooks in release binaries and require twelve exact-binary Desktop cells before publication.
+
+### Added
+
+- Daily Desktop upstream detection, weekly twelve-cell source qualification and
+  an exact-binary Desktop prerequisite for releases. New upstream bytes remain
+  pending adapter review; hosted test hooks require explicit runtime activation.
+- Independent `nanh-desktop-check` tooling for opt-in Desktop checks, private
+  recovery state, sanitized reports and separately confirmed issue submission.
+  Twelve inspected app/platform cells have completed native qualification.
+- `nanh zed --provider-base-url` selects an explicit provider endpoint, matching
+  the other Desktop integrations and enabling bounded local probe routing.
+- Architecture-scoped Desktop evidence in compatibility feed v4, retaining
+  independent deterministic and NaN checks while preserving v2/v3 consumers.
+- Manual Desktop checks and digest-bound report approval tooling. Preserve the
+  current hosted CLI gates and quarantine the earlier publication queue while
+  source qualification remains distinct from published-binary evidence.
+- Offline visual fallback for Desktop checks, using a bundled digest-pinned OCR
+  helper and owned-window guards. Report schema v2 distinguishes accessibility
+  and visual evidence while retaining legacy report validation.
+- Credential-free Desktop preparation with exact executable identities and
+  separate deterministic/live execution. Hosted installation includes official
+  Windows packages, Claude Linux DEBs and Hermes source builds.
+
+### Fixed
+
+- Preserve explicitly typed provider overload failures in local HTTP and
+  Responses streaming errors, allowing Codex to expose its native recovery UI.
+  Other error classifications and retry policies remain unchanged.
+
 ## [0.1.14] - 2026-10-03
 
 ### Added
@@ -127,6 +161,11 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Recover model discovery from a private, credential-bound cache when the NaN
   model endpoint is unavailable or returns an unusable catalog.
 
+### Changed
+
+- `nanh doctor` JSON uses schema version 9 and includes exact-version Desktop
+  checks without treating deterministic evidence as a live NaN verification.
+
 ### Fixed
 
 - Omit empty tool lists in the Chat Completions gateway so Pi can continue
@@ -192,11 +231,12 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Managed Zed launches preserve their temporary provider credential when run
+  without a terminal, preventing native login-shell loading from replacing it.
 - Provider 429s without retry hints now wait 15–20, 30–40, then 45–60 seconds,
   including when the coordinator is unavailable. Retry pauses allow up to
   120 seconds combined while non-429 pauses remain limited to 45 seconds;
   send limits, provider hints and shared cooldowns are preserved.
-
 - Windows Desktop sessions can create private state and reuse session locks
   without access-denied errors. CI reports each Desktop suite independently
   and runs the complete Claude and Hermes Desktop contracts on Windows.
@@ -871,7 +911,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   startup update prompts, daily compatibility canaries, and a monotonic remote
   verification feed.
 
-[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.1.14...HEAD
+[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.1.15...HEAD
+[0.1.15]: https://github.com/DavidLMS/nan-harness/compare/v0.1.14...v0.1.15
 [0.1.14]: https://github.com/DavidLMS/nan-harness/compare/v0.1.13...v0.1.14
 [0.1.13]: https://github.com/DavidLMS/nan-harness/compare/v0.1.12...v0.1.13
 [0.1.12]: https://github.com/DavidLMS/nan-harness/compare/v0.1.11...v0.1.12

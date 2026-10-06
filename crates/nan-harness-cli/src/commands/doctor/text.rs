@@ -125,6 +125,9 @@ pub(crate) fn print_experimental_report(kind: DesktopHarnessKind) -> i32 {
         "{}",
         messages::text_transport(locale(), &(report.transport))
     );
+    let mut checks = String::new();
+    render_exact_checks(&mut checks, &report.checks);
+    print!("{checks}");
     print_optional_version(
         messages::terminal_minimum_app_version_text(locale()),
         report.minimum_supported_version.as_deref(),
@@ -344,6 +347,7 @@ fn render_experimental_health(report: &mut String, harnesses: Vec<ExperimentalTe
     for harness in harnesses {
         match harness {
             ExperimentalTextReport::Available {
+                checks,
                 harness,
                 platform,
                 evidence,
@@ -364,6 +368,7 @@ fn render_experimental_health(report: &mut String, harnesses: Vec<ExperimentalTe
                         &(evidence_source_label(evidence_source))
                     )
                 );
+                render_exact_checks(report, &checks);
             }
             ExperimentalTextReport::Failed { harness, error } => {
                 append_report_line!(
@@ -373,6 +378,46 @@ fn render_experimental_health(report: &mut String, harnesses: Vec<ExperimentalTe
                 );
             }
         }
+    }
+}
+
+fn render_exact_checks(report: &mut String, checks: &[nan_harness_core::DesktopCheck]) {
+    append_report_line!(
+        report,
+        "{}",
+        messages::doctor_desktop_exact_checks(locale(), std::env::consts::ARCH)
+    );
+    if checks.is_empty() {
+        append_report_line!(
+            report,
+            "{}",
+            messages::doctor_desktop_checks_missing(locale())
+        );
+    }
+    for check in checks {
+        let runtime = check.runtime_version.as_ref().map_or_else(
+            || messages::doctor_desktop_runtime_none(locale()),
+            ToString::to_string,
+        );
+        let deterministic = check
+            .deterministic_at
+            .clone()
+            .unwrap_or_else(|| messages::doctor_desktop_not_verified(locale()));
+        let live = check
+            .live_verified_at
+            .clone()
+            .unwrap_or_else(|| messages::doctor_desktop_not_verified(locale()));
+        append_report_line!(
+            report,
+            "{}",
+            messages::doctor_desktop_check(
+                locale(),
+                &check.app_version,
+                &deterministic,
+                &live,
+                &runtime
+            )
+        );
     }
 }
 

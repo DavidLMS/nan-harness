@@ -360,6 +360,8 @@ async fn auto_mode_trace_reports_only_complete_error_bodies_as_responses() {
                     assert_eq!(error_code, "NH-BRIDGE-104");
                 }
                 BridgeActivity::AuthenticatedClient => {}
+                #[cfg(feature = "desktop-qualification")]
+                BridgeActivity::AuthenticatedModels => {}
             }
         }
         assert!(saw_review);

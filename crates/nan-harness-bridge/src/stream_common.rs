@@ -23,7 +23,7 @@ where
 {
     if let Ok(chunk) = serde_json::from_str::<T>(data) {
         if let Some(error) = chunk.stream_error() {
-            return Err(ApiError::InvalidUpstream(upstream_error_detail(error)));
+            return Err(upstream_error(error));
         }
         return Ok(chunk);
     }
@@ -31,10 +31,21 @@ where
     let value: Value = serde_json::from_str(data)
         .map_err(|error| ApiError::InvalidUpstream(format!("invalid streaming JSON: {error}")))?;
     if let Some(error) = value.get("error") {
-        return Err(ApiError::InvalidUpstream(upstream_error_detail(error)));
+        return Err(upstream_error(error));
     }
     serde_json::from_value(value)
         .map_err(|error| ApiError::InvalidUpstream(format!("invalid streaming chunk: {error}")))
+}
+
+fn upstream_error(error: &Value) -> ApiError {
+    if ApiError::is_overload(error) {
+        ApiError::ServerOverloaded(
+            crate::error::OverloadSource::Stream,
+            crate::error::RetryHint::Default,
+        )
+    } else {
+        ApiError::InvalidUpstream(upstream_error_detail(error))
+    }
 }
 
 fn upstream_error_detail(error: &Value) -> String {

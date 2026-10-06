@@ -2,8 +2,11 @@
 
 pub mod adapter;
 pub mod desktop;
+pub mod desktop_check;
+pub mod desktop_metadata;
 pub mod error;
 pub mod harness;
+pub mod hosted_check;
 pub mod launch_plan;
 pub mod media;
 pub mod model;
@@ -13,11 +16,13 @@ pub use adapter::{HarnessAdapter, PlanContext, build_validated_plan};
 pub use desktop::{
     DesktopHarnessKind, DesktopLaunchPlan, DesktopTransport, ParseDesktopHarnessKindError,
 };
+pub use desktop_check::DesktopCheck;
 pub use error::{ErrorCategory, PlanError};
 pub use harness::{
     CompatibilityManifest, DetectedHarness, HarnessCapability, HarnessCompatibility, HarnessKind,
     RuntimeCompatibility, VersionStatus,
 };
+pub use hosted_check::{HostedCheck, HostedOutcome, HostedSuite};
 pub use launch_plan::{
     ContextLimit, LaunchPlan, LaunchPlanValidator, NativeContextLimit, TransportKind,
     WebSearchPolicy,

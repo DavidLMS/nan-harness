@@ -416,3 +416,80 @@ async fn advance_with_io() {
         tokio::time::advance(Duration::from_secs(1)).await;
     }
 }
+
+#[tokio::test]
+async fn explicit_no_retry_preserves_downstream_error_and_attempt_count() {
+    use axum::response::IntoResponse;
+    if run_in_isolated_child("explicit_no_retry_preserves_downstream_error_and_attempt_count").await
+    {
+        return;
+    }
+    for (hint, expected_attempts) in [
+        (Some("false"), 1),
+        (None, 3),
+        (Some("true"), 3),
+        (Some("False"), 3),
+    ] {
+        let sends = Arc::new(AtomicUsize::new(0));
+        let attempts = Arc::clone(&sends);
+        let upstream = Router::new().route(
+            "/",
+            post(move || {
+                attempts.fetch_add(1, Ordering::SeqCst);
+                async move {
+                    let mut response = Response::builder().status(503);
+                    if let Some(hint) = hint {
+                        response = response.header("x-should-retry", hint);
+                    }
+                    response
+                        .body(Body::from(
+                            r#"{"error":{"type":"desktop_check","message":"FIXED_FAILURE"}}"#,
+                        ))
+                        .unwrap()
+                }
+            }),
+        );
+        let (client, upstream_task) = provider_app(upstream).await;
+        let downstream = Router::new().route(
+            "/",
+            post(move || {
+                let client = client.clone();
+                async move {
+                    let response = client.send(&Value::Null, b"{}").await.unwrap();
+                    let retry_hint = response.retry_hint();
+                    let status = response.status();
+                    let FinalErrorBody::Complete(body) = response.read_final_error_body().await
+                    else {
+                        panic!("complete fixed error")
+                    };
+                    ApiError::from_provider_response(status, &body, None)
+                        .with_retry_hint(retry_hint)
+                        .into_response()
+                }
+            }),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/", listener.local_addr().unwrap());
+        let downstream_task =
+            tokio::spawn(async move { axum::serve(listener, downstream).await.unwrap() });
+        let response = reqwest::Client::new().post(url).send().await.unwrap();
+        assert_eq!(response.status().as_u16(), 502);
+        assert_eq!(
+            response
+                .headers()
+                .get("x-should-retry")
+                .map(axum::http::HeaderValue::as_bytes),
+            (hint == Some("false")).then_some(b"false".as_slice())
+        );
+        let expected = ApiError::from_provider_response(
+            reqwest::StatusCode::SERVICE_UNAVAILABLE,
+            r#"{"error":{"type":"desktop_check","message":"FIXED_FAILURE"}}"#,
+            None,
+        )
+        .event_data();
+        assert_eq!(response.json::<Value>().await.unwrap(), expected);
+        assert_eq!(sends.load(Ordering::SeqCst), expected_attempts);
+        downstream_task.abort();
+        upstream_task.abort();
+    }
+}

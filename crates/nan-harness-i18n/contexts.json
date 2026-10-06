@@ -1,4 +1,13 @@
 {
+  "doctor_desktop_exact_checks": {"description": "Architecture for exact Desktop evidence.", "section": "desktop", "sources": ["crates/nan-harness-cli/src/commands/doctor/text.rs"]},
+  "help_zed_separate_data_directory": {"description": "Architecture-scoped Desktop compatibility evidence and launch setup.", "section": "desktop", "sources": ["crates/nan-harness-cli/src/app/args/desktop.rs"]},
+  "doctor_desktop_checks_missing": {"description": "Architecture-scoped Desktop compatibility evidence and launch setup.", "section": "desktop", "sources": ["crates/nan-harness-cli/src/commands/doctor/text.rs"]},
+  "doctor_desktop_check": {"description": "Architecture-scoped Desktop compatibility evidence and launch setup.", "section": "desktop", "sources": ["crates/nan-harness-cli/src/commands/doctor/text.rs"]},
+  "doctor_desktop_runtime_none": {"description": "Architecture-scoped Desktop compatibility evidence and launch setup.", "section": "desktop", "sources": ["crates/nan-harness-cli/src/commands/doctor/text.rs"]},
+  "doctor_desktop_not_verified": {"description": "Architecture-scoped Desktop compatibility evidence and launch setup.", "section": "desktop", "sources": ["crates/nan-harness-cli/src/commands/doctor/text.rs"]},
+  "error_hermes_desktop_invalid_desktop_executable": {"description": "Prepared Desktop executable validation; no user paths.", "section": "errors", "sources": ["crates/nan-harness-cli/src/commands/hermes_desktop/diagnostics.rs"]},
+  "error_compatibility_invalid_hosted_checks": {"description": "Compatibility evidence validation; reason is a closed schema failure category.", "section": "errors", "sources": ["crates/nan-harness-runtime/src/compatibility/error.rs"]},
+  "error_compatibility_invalid_desktop_checks": {"description": "Compatibility evidence validation; reason is a closed schema failure category.", "section": "errors", "sources": ["crates/nan-harness-runtime/src/compatibility/error.rs"]},
   "error_persistence_rollback_incomplete": {"description": "Native configuration rollback failed; count only, no paths or secret contents.", "section": "errors", "sources": ["crates/nan-harness-cli/src/commands/persistence/error.rs"]},
   "cache_connection": {
     "description": "Harness compatibility and provider model discovery. Preserve command names, paths, provider identifiers and diagnostic codes.",

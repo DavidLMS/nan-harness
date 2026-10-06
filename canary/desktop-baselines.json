@@ -1,0 +1,91 @@
+{
+  "schemaVersion": 1,
+  "qualificationSourceSha": "4b201c8e4151960050fc4011e0d06b502fdb5ebf",
+  "qualificationRun": 37494497343,
+  "cells": [
+    {
+      "app": "chatgpt-desktop",
+      "platform": "linux",
+      "architecture": "x86_64",
+      "version": "26.930.41038",
+      "digest": "sha256:ee7854145554718d7239d01ea37d44f6ba1e0ba4a93f47ac097d6e0f964da47c"
+    },
+    {
+      "app": "claude-desktop",
+      "platform": "linux",
+      "architecture": "x86_64",
+      "version": "2.9939.4",
+      "digest": "sha256:3cfddb23bf2911e05e27b4ed3856b8e795df94643b2c35b59deb317cf995bca0"
+    },
+    {
+      "app": "hermes-desktop",
+      "platform": "linux",
+      "architecture": "x86_64",
+      "version": "0.17.6",
+      "revision": "f97608f178d1ffeca59860195ab7da295f7c8e5f"
+    },
+    {
+      "app": "zed-desktop",
+      "platform": "linux",
+      "architecture": "x86_64",
+      "version": "1.22.0",
+      "digest": "sha256:5ce3991b34a8fad0a23625f5821cda601c7150a6cc69683c097b8d1b083abc50"
+    },
+    {
+      "app": "chatgpt-desktop",
+      "platform": "macos",
+      "architecture": "aarch64",
+      "version": "26.930.41038",
+      "digest": "sha256:f6cf4d2e9b69aeefa33adda4bcd1a2d306357f5253a1ac6049700870c28dd0c7"
+    },
+    {
+      "app": "claude-desktop",
+      "platform": "macos",
+      "architecture": "aarch64",
+      "version": "2.19675.0",
+      "digest": "sha256:86f1460ca694313223a0b524da4f411bbccf6531c2271698d1ffc29a2131e392"
+    },
+    {
+      "app": "hermes-desktop",
+      "platform": "macos",
+      "architecture": "aarch64",
+      "version": "0.17.6",
+      "revision": "f97608f178d1ffeca59860195ab7da295f7c8e5f"
+    },
+    {
+      "app": "zed-desktop",
+      "platform": "macos",
+      "architecture": "aarch64",
+      "version": "1.22.0",
+      "digest": "sha256:b5a5a6984f31fef1387268a076b0919544a28850c5cf7cd7f6bf69e601197fdd"
+    },
+    {
+      "app": "chatgpt-desktop",
+      "platform": "windows",
+      "architecture": "x86_64",
+      "version": "26.930.61225",
+      "digest": "sha256:0fcd11295dfd239ef8b6a2cb088a4ead18316b80a87e0c0e1abbad9d830edef3"
+    },
+    {
+      "app": "claude-desktop",
+      "platform": "windows",
+      "architecture": "x86_64",
+      "version": "2.19675.0",
+      "digest": "sha256:8355c3d28aa08d2e8d841596b41abce0a4fc3805cc9d74f6836d42176ab6b0f9"
+    },
+    {
+      "app": "hermes-desktop",
+      "platform": "windows",
+      "architecture": "x86_64",
+      "version": "0.17.6",
+      "revision": "f97608f178d1ffeca59860195ab7da295f7c8e5f"
+    },
+    {
+      "app": "zed-desktop",
+      "platform": "windows",
+      "architecture": "x86_64",
+      "version": "1.22.0",
+      "digest": "sha256:8565827fd93034875cadc1e72b7242d41759f019f5b9e97efbbe6f1f84c429d1"
+    }
+  ]
+}

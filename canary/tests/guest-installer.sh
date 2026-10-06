@@ -179,3 +179,46 @@ for deepseek_version in 0.1.5-rc.2 0.1.5-rc.3 latest; do
   fi
   grep -F -- "@deepseek-ai/dsh@$deepseek_version" "$temporary_directory/npm-args" >/dev/null
 done
+
+# Hermes exact versions install the frozen release commit with the installer
+# from that same commit; the forced pin survives a fresh main clone.
+cat >"$bin_directory/curl" <<'EOF_CURL'
+#!/usr/bin/env bash
+set -euo pipefail
+destination=''
+url=''
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --output|-o) destination="$2"; shift 2 ;;
+    https://*) url="$1"; shift ;;
+    *) shift ;;
+  esac
+done
+printf '%s\n' "$url" >"$HERMES_TEST_URL_FILE"
+cat >"$destination" <<'INSTALLER'
+printf '%s\n' "$@" >"$HERMES_TEST_ARGUMENTS_FILE"
+INSTALLER
+EOF_CURL
+chmod 755 "$bin_directory/curl"
+
+hermes_commit='939e45c91d751fadd94dcd1b873ac3cb44846213'
+hermes_env=(HOME="$temporary_directory/hermes-home" PATH="$bin_directory:/usr/bin:/bin"
+  HERMES_TEST_URL_FILE="$temporary_directory/hermes-url"
+  HERMES_TEST_ARGUMENTS_FILE="$temporary_directory/hermes-arguments")
+env "${hermes_env[@]}" bash "$repository_root/canary/guest/install-harness.sh" hermes 0.21.2 "$hermes_commit"
+test "$(cat "$temporary_directory/hermes-url")" = \
+  "https://raw.githubusercontent.com/NousResearch/hermes-agent/$hermes_commit/scripts/install.sh"
+test "$(tr '\n' ' ' <"$temporary_directory/hermes-arguments")" = \
+  "--skip-setup --skip-browser --non-interactive --commit $hermes_commit --force-commit "
+
+for rejected in "hermes 0.21.2" "hermes 0.21.2 v2026.9.11" "hermes 0.21.2 ${hermes_commit:0:12}" \
+  "codex 1.2.3 $hermes_commit"; do
+  rm -f "$temporary_directory/hermes-url"
+  # shellcheck disable=SC2086 # the case deliberately splits into installer arguments
+  if env "${hermes_env[@]}" bash "$repository_root/canary/guest/install-harness.sh" $rejected \
+      >/dev/null 2>&1; then
+    printf 'installer accepted an unfrozen Hermes source: %s\n' "$rejected" >&2
+    exit 1
+  fi
+  test ! -e "$temporary_directory/hermes-url"
+done

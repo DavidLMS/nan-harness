@@ -29,8 +29,17 @@ pub(super) async fn chat_completions(
     state.record_chat_request(&body);
 
     let mut progress = state.progress();
+    let polled = if state.scenario().poll_exec && progress.emitted {
+        match super::polling::advance(&body, &mut progress.exec_poll) {
+            super::polling::PollResult::Pending(response) => return event_response(response),
+            super::polling::PollResult::Complete(content) => Some(content),
+        }
+    } else {
+        None
+    };
     if progress.emitted {
-        if let Some(content) = tool_result(&body, &tool_call_id(progress.index)) {
+        if let Some(content) = polled.or_else(|| tool_result(&body, &tool_call_id(progress.index)))
+        {
             progress
                 .result_identifiers
                 .push(result_identifier(&content).unwrap_or_default());
@@ -73,6 +82,10 @@ pub(super) async fn chat_completions(
         }
         Some(_) => text_response("CONFORMANCE_HELPER_OK"),
     };
+    event_response(response)
+}
+
+fn event_response(response: String) -> ([(axum::http::HeaderName, &'static str); 1], String) {
     (
         [(axum::http::header::CONTENT_TYPE, "text/event-stream")],
         response,
@@ -147,7 +160,7 @@ fn expand_result_identifiers(value: &mut Value, identifiers: &[String]) {
     }
 }
 
-fn exposes_tool(body: &Value, tool_name: &str) -> bool {
+pub(super) fn exposes_tool(body: &Value, tool_name: &str) -> bool {
     body.get("tools")
         .and_then(Value::as_array)
         .is_some_and(|tools| {
@@ -157,7 +170,7 @@ fn exposes_tool(body: &Value, tool_name: &str) -> bool {
         })
 }
 
-fn tool_result(body: &Value, tool_call_id: &str) -> Option<String> {
+pub(super) fn tool_result(body: &Value, tool_call_id: &str) -> Option<String> {
     body.get("messages")
         .and_then(Value::as_array)
         .and_then(|messages| {
@@ -255,7 +268,7 @@ fn tool_call_id(index: usize) -> String {
     format!("{CONFORMANCE_TOOL_CALL_ID_PREFIX}_{index}")
 }
 
-fn tool_response(tool_call_id: &str, tool_name: &str, input: &Value) -> String {
+pub(super) fn tool_response(tool_call_id: &str, tool_name: &str, input: &Value) -> String {
     let chunk = json!({
         "id": "chatcmpl_nan_harness_conformance",
         "model": "qwen3.6",
@@ -285,7 +298,7 @@ fn tool_response(tool_call_id: &str, tool_name: &str, input: &Value) -> String {
     sse(&[chunk, stop, usage])
 }
 
-fn text_response(text: &str) -> String {
+pub(super) fn text_response(text: &str) -> String {
     let chunk = json!({
         "id": "chatcmpl_nan_harness_conformance",
         "model": "qwen3.6",

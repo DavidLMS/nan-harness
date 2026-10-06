@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# wave12-fake-driver
+# Fake `killall Dock`: never signals a process. Logs and exits with the optional
+# fixture exit code (default 0 = a Dock process was signalled).
+set -u
+printf 'killall %s\n' "$*" >> "${WAVE12_FIXTURE_LOG:?}"
+[ "$*" = Dock ] || exit 64
+exit "${WAVE12_FIXTURE_KILLALL_EXIT:-0}"

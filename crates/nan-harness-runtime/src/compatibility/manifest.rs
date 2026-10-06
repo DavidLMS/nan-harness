@@ -9,6 +9,10 @@ use serde::{Deserialize, Serialize};
 pub const LEGACY_FEED_SCHEMA_VERSION: u8 = 2;
 /// Schema version of the unified feed carrying CLI and Desktop evidence.
 pub const UNIFIED_FEED_SCHEMA_VERSION: u8 = 3;
+/// Independent exact-version Desktop checks, without changing older feed contracts.
+pub const VERSIONED_FEED_SCHEMA_VERSION: u8 = 4;
+/// Native CLI and Desktop observations scoped to exact versions and live models.
+pub const HOSTED_FEED_SCHEMA_VERSION: u8 = 5;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -26,6 +30,10 @@ pub struct VerificationRelease {
     /// Desktop evidence, present only in the unified schema-v3 feed.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub desktop_verifications: Vec<DesktopVerificationEntry>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub desktop_checks: Vec<nan_harness_core::DesktopCheck>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hosted_checks: Vec<nan_harness_core::HostedCheck>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

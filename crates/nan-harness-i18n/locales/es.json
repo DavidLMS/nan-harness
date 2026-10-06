@@ -1,4 +1,13 @@
 {
+  "doctor_desktop_exact_checks": "  Comprobaciones de versión exacta del feed remoto ({architecture}):",
+  "help_zed_separate_data_directory": "Usar un directorio separado de datos y ajustes de Zed",
+  "doctor_desktop_checks_missing": "    No hay comprobaciones deterministas ni de NaN registradas para esta arquitectura",
+  "doctor_desktop_check": "    Aplicación {app} / runtime {runtime}: determinista {deterministic}; NaN {live}",
+  "doctor_desktop_runtime_none": "ninguno",
+  "doctor_desktop_not_verified": "sin verificar",
+  "error_hermes_desktop_invalid_desktop_executable": "el ejecutable seleccionado de Hermes Desktop debe ser un archivo ejecutable con ruta absoluta",
+  "error_compatibility_invalid_hosted_checks": "el manifiesto de compatibilidad contiene comprobaciones alojadas no válidas: {reason}",
+  "error_compatibility_invalid_desktop_checks": "el manifiesto de compatibilidad contiene comprobaciones Desktop de versión exacta no válidas: {reason}",
   "error_persistence_rollback_incomplete": "La configuración nativa falló y quedan {failures} restauraciones incompletas. Se conservaron copias privadas de recuperación en el directorio de estado de nan-harness.",
   "cache_connection": "fallo de conexión",
   "cache_empty": "no se han recibido modelos utilizables",

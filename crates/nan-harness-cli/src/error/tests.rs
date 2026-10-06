@@ -115,6 +115,7 @@ fn real_discovery_failures_remain_reportable_during_dry_run() {
     let error = CliError::Discovery(DiscoveryError::VersionCommandFailed {
         command: "kimi --version".to_owned(),
         exit_code: Some(1),
+        signal: None,
     });
 
     assert!(error.should_report_telemetry(&cli));

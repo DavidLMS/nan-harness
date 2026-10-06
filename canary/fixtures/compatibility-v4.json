@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 4,
+  "releases": [
+    {
+      "nanHarnessVersion": "0.1.0",
+      "verifications": [],
+      "desktopChecks": [
+        {
+          "id": "zed-desktop",
+          "platform": "macos",
+          "architecture": "aarch64",
+          "appVersion": "1.19.0",
+          "deterministicAt": "2026-09-08T12:00:00Z",
+          "liveVerifiedAt": "2026-09-08T12:05:00Z"
+        },
+        {
+          "id": "zed-desktop",
+          "platform": "windows",
+          "architecture": "x86_64",
+          "appVersion": "1.19.0",
+          "deterministicAt": "2026-09-08T12:00:00Z"
+        }
+      ]
+    }
+  ]
+}

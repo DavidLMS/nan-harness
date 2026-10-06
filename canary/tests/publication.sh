@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export NAN_CANARY_WRITER=actions GITHUB_ACTIONS=true
 
 repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$repository_root/canary/tests/host-lock-fixture.sh"
@@ -489,6 +490,23 @@ invoke_publish \
   --reports "$reports_directory" --output-dir "$unified_output" --state-dir "$temporary_directory/unified-state" --publish-feed
 jq -e '.schemaVersion == 2' "$remote_assets/compatibility.json" >/dev/null
 jq -e '.schemaVersion == 3' "$remote_assets/compatibility-v3.json" >/dev/null
+
+# Candidate generation may read recovery backups but must not restore remote
+# assets: dry runs do not hold the central writer authorization.
+for dry_run_asset in compatibility.json compatibility-v3.json compatibility-v4.json; do
+  cp "$remote_assets/$dry_run_asset" "$remote_assets/$dry_run_asset.backup.dry-run-fixture"
+done
+rm -f "$remote_assets/compatibility.json" "$remote_assets/compatibility-v3.json" "$remote_assets/compatibility-v4.json"
+dry_run_output="$temporary_directory/backup-dry-run-output"
+mkdir -p "$dry_run_output"
+invoke_publish \
+  --trigger daily --nan-harness-version 0.0.6 --release-tag v0.0.6 \
+  --reports "$reports_directory" --output-dir "$dry_run_output" --state-dir "$temporary_directory/backup-dry-run-state"
+for dry_run_asset in compatibility.json compatibility-v3.json compatibility-v4.json; do
+  [ ! -f "$remote_assets/$dry_run_asset" ]
+  [ -s "$dry_run_output/$dry_run_asset" ]
+  cp "$remote_assets/$dry_run_asset.backup.dry-run-fixture" "$remote_assets/$dry_run_asset"
+done
 # The unified asset inherits the history the legacy feed already proved.
 jq -e '[.releases[].nanHarnessVersion] | index("0.0.5") != null' "$remote_assets/compatibility-v3.json" >/dev/null
 # It carries the same CLI evidence. Desktop evidence is only ever recorded for the release this

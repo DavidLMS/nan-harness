@@ -27,6 +27,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: release-channel-${{ github.repository }}
@@ -275,10 +276,23 @@ jobs:
             echo 'The exact 49-cell deterministic evidence passed; no publication is permitted for deterministic mode.'
           } >> "$GITHUB_STEP_SUMMARY"
 
+  desktop:
+    name: Qualify exact release binaries on native desktops
+    needs: prepare
+    uses: ./.github/workflows/desktop-automation-feasibility.yml
+    with:
+      release_tag: ${{ inputs.tag }}
+      release_commit: ${{ needs.prepare.outputs.tag_commit }}
+      app: all
+      platform: all
+      experiment: deterministic-full
+      native_only: true
+      quality_only: false
+
   publish:
     name: Publish validated release (trusted publisher)
-    needs: [prepare, aggregate]
-    if: inputs.mode == 'live' && inputs.verification_only == false && needs.aggregate.result == 'success' && github.ref_name == github.event.repository.default_branch
+    needs: [prepare, aggregate, desktop]
+    if: inputs.mode == 'live' && inputs.verification_only == false && needs.aggregate.result == 'success' && needs.desktop.result == 'success' && github.ref_name == github.event.repository.default_branch
     runs-on: ubuntu-24.04
     environment: release-publication
     permissions:
@@ -308,6 +322,7 @@ jobs:
         run: test "$(git rev-parse HEAD)" = "$EXPECTED_WORKFLOW_COMMIT"
       - name: Invoke trusted publisher
         env:
+          NAN_CANARY_WRITER: actions
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.prepare.outputs.tag }}
           TAG_COMMIT: ${{ needs.prepare.outputs.tag_commit }}

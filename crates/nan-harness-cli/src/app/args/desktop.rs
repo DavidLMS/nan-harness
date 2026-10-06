@@ -106,12 +106,15 @@ pub(crate) struct ClaudeDesktopArgs {
 pub(crate) struct HermesDesktopArgs {
     #[command(flatten)]
     pub(crate) run: HarnessRunArgs,
+    /// Select the prepared Desktop executable without changing CLI discovery.
+    #[arg(long, value_name = "PATH", hide = true)]
+    pub(crate) desktop_executable: Option<PathBuf>,
     #[arg(long, help = nan_harness_i18n::messages::help_bypass_the_local_gateway_in_a_diagnostic_profile(nan_harness_i18n::locale()))]
     pub(crate) no_chat_gateway: bool,
     #[arg(
         long,
         help = nan_harness_i18n::messages::help_restore_receipt_backed_state_from_an_interrupted_launch(nan_harness_i18n::locale()),
-        conflicts_with_all = ["model", "executable", "provider_base_url", "allow_unsupported", "allow_untested", "no_search", "force_search", "dry_run", "session_max_tokens", "context", "no_chat_gateway", "arguments"]
+        conflicts_with_all = ["model", "executable", "desktop_executable", "provider_base_url", "allow_unsupported", "allow_untested", "no_search", "force_search", "dry_run", "session_max_tokens", "context", "no_chat_gateway", "arguments"]
     )]
     pub(crate) restore: bool,
 }
@@ -159,8 +162,16 @@ pub(crate) struct PenDesktopArgs {
 #[derive(Debug, Args)]
 #[allow(clippy::struct_excessive_bools)]
 pub(crate) struct ZedDesktopArgs {
+    #[arg(
+        long,
+        value_name = "PATH",
+        help = nan_harness_i18n::messages::help_zed_separate_data_directory(nan_harness_i18n::locale())
+    )]
+    pub(crate) user_data_dir: Option<PathBuf>,
     #[arg(long)]
     pub(crate) model: Option<String>,
+    #[arg(long, value_name = "URL")]
+    pub(crate) provider_base_url: Option<String>,
     #[arg(long, value_name = "PATH")]
     pub(crate) executable: Option<PathBuf>,
     #[arg(long)]
@@ -189,7 +200,7 @@ pub(crate) struct ZedDesktopArgs {
     #[arg(
         long,
         help = nan_harness_i18n::messages::help_restore_receipt_backed_state_from_an_interrupted_launch(nan_harness_i18n::locale()),
-        conflicts_with_all = ["model", "executable", "allow_unsupported", "allow_untested", "dry_run", "session_max_tokens", "context", "workspace", "arguments"]
+        conflicts_with_all = ["model", "provider_base_url", "executable", "allow_unsupported", "allow_untested", "dry_run", "session_max_tokens", "context", "workspace", "arguments"]
     )]
     pub(crate) restore: bool,
     #[arg(value_name = "WORKSPACE", conflicts_with = "restore")]

@@ -4,6 +4,19 @@ use super::super::versioning::{
 use std::fs;
 
 #[test]
+fn checker_version_is_independent_but_local_dependencies_follow_nanh() {
+    assert!(CARGO_MANIFEST_FILES.contains(&"crates/nan-harness-desktop-check/Cargo.toml"));
+    assert!(!LOCAL_PACKAGE_NAMES.contains(&"nan-harness-desktop-check"));
+    let directory = tempfile::tempdir().unwrap();
+    let manifest = directory.path().join("Cargo.toml");
+    fs::write(&manifest, "[package]\nname = \"nan-harness-desktop-check\"\nversion = \"0.0.1\"\n[dependencies]\nnan-harness-core = { path = \"../core\", version = \"0.0.1\" }\n").unwrap();
+    replace_manifest_version(&manifest, "0.0.1", "0.0.2").unwrap();
+    let updated = fs::read_to_string(manifest).unwrap();
+    assert!(updated.contains("name = \"nan-harness-desktop-check\"\nversion = \"0.0.1\""));
+    assert!(updated.contains("nan-harness-core = { path = \"../core\", version = \"0.0.2\" }"));
+}
+
+#[test]
 fn version_updates_only_touch_workspace_and_local_packages() {
     assert!(CARGO_MANIFEST_FILES.contains(&"crates/nan-harness-private-fs/Cargo.toml"));
     assert!(LOCAL_PACKAGE_NAMES.contains(&"nan-harness-private-fs"));

@@ -136,7 +136,10 @@ async fn models(
     let diagnostics = state.diagnostics.clone();
     let result: Result<Json<crate::models::AnthropicModelsResponse>, ApiError> = async {
         authorize(&headers, &state)?;
-        Ok(Json(state.models.api_response()))
+        let response = Json(state.models.api_response());
+        #[cfg(feature = "desktop-qualification")]
+        let _ = state.activities.send(BridgeActivity::AuthenticatedModels);
+        Ok(response)
     }
     .await;
     emit_diagnostic(&diagnostics, &result, BridgeEndpoint::Models);
@@ -339,15 +342,18 @@ async fn ensure_success(
     if status.is_success() {
         return Ok(response);
     }
+    let retry_hint = response.retry_hint();
     match response.read_final_error_body().await {
         FinalErrorBody::Complete(body) => {
             if let Some(trace) = trace {
                 trace.emit_response(status.as_u16(), body.clone());
             }
-            Err(ApiError::from_provider_response(status, &body, Some(model)))
+            Err(ApiError::from_provider_response(status, &body, Some(model))
+                .with_retry_hint(retry_hint))
         }
         FinalErrorBody::Incomplete => {
             let error = ApiError::UpstreamStatus {
+                retry_hint,
                 status,
                 message: FINAL_ERROR_FALLBACK_MESSAGE.to_owned(),
             };

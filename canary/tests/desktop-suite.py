@@ -1,0 +1,364 @@
+#!/usr/bin/env python3
+"""Deterministic contracts for the modular desktop suite runner."""
+
+import importlib.util
+import json
+from pathlib import Path
+import tempfile
+import unittest
+import os
+import sys
+import subprocess
+import textwrap
+from unittest.mock import patch
+
+ROOT = Path(__file__).resolve().parents[2]
+SPEC = importlib.util.spec_from_file_location("desktop_suite", ROOT / "canary/actions/desktop_suite.py")
+SUITE = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(SUITE)
+
+
+def selection(apps=None):
+    requested = apps or list(SUITE.DESKTOP_HARNESSES)
+    apps = [app for app in SUITE.DESKTOP_HARNESSES if app in requested]
+    return {"suite": "desktop", "mode": "deterministic", "harnesses": apps,
+            "platforms": [{"system": system, "runner": "runner", "architecture": "x86_64",
+                           "target": "target", "harnesses": apps} for system in ("linux", "macos", "windows")]}
+
+
+class DesktopSuiteTests(unittest.TestCase):
+    def test_resolution_workflow_removes_even_an_empty_provider_variable(self):
+        workflow = (ROOT / ".github/workflows/desktop-check-suite.yml").read_text()
+        resolve = workflow.split("- name: Resolve exact frozen Desktop releases before preparation\n", 1)[1].split("      - name:", 1)[0]
+        script = resolve.split("        run: |\n", 1)[1]
+        prelude = script.split('          mkdir -p ', 1)[0]
+        self.assertIn("unset NAN_API_KEY", prelude)
+        # Exercise the actual shell prelude against both empty and nonempty values.
+        for value in ("", "synthetic"):
+            result = subprocess.run(["bash", "-c", prelude + '\ntest "${NAN_API_KEY+x}" != x'],
+                                    env={**os.environ, "NAN_API_KEY": value}, check=False)
+            self.assertEqual(result.returncode, 0)
+
+    def test_split_execution_binds_report_and_selects_only_passing_app(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name in ("checker", "nanh", "prepared"):
+                (root / name).write_bytes(name.encode())
+            selected = selection(["chatgpt-desktop", "zed-desktop"])
+            (root / "selection").write_text(json.dumps(selected))
+            report = {"schemaVersion": 3, "platform": "linux", "architecture": "x86_64",
+                      "model": "model", "cleanup": "passed",
+                      "nanHarness": {"version": "1.2.3", "sha256": SUITE.digest(root / "nanh")},
+                      "results": [{"app": app, "appVersion": "1.2.3", "cleanup": "passed",
+                                   "deterministic": [{"status": status}] * 3}
+                                  for app, status in (("chatgpt-desktop", "failed"), ("zed-desktop", "passed"))]}
+            base = ["desktop_suite", "--selection", str(root / "selection"), "--platform", "linux",
+                    "--source", "branch", "--source-sha", "a" * 40, "--model", "model"]
+            for option, name in (("checker", "checker"), ("nan-harness", "nanh"),
+                                 ("prepared", "prepared"), ("output", "state")):
+                base.extend(("--" + option, str(root / name)))
+            calls = []
+
+            def stage(command, **kwargs):
+                if command[1] == "validate-report":
+                    self.assertEqual(json.loads(Path(command[2]).read_bytes()), report)
+                    self.assertFalse(kwargs.get("live", False))
+                    return True
+                calls.append(command)
+                if command[command.index("--mode") + 1] == "deterministic":
+                    Path(command[command.index("--output") + 1]).write_text(json.dumps(report))
+                    return False
+                return True
+
+            with patch.object(SUITE, "run_stage", side_effect=stage):
+                with patch.object(sys, "argv", base + ["--stage", "deterministic", "--report", str(root / "det")]):
+                    self.assertEqual(SUITE.main(), 1)
+                live = base + ["--stage", "live", "--report", str(root / "live"),
+                               "--deterministic-report", str(root / "det")]
+                original_state = (root / "state").read_bytes()
+                with patch.object(sys, "argv", live), patch.dict(os.environ, {"NAN_API_KEY": "synthetic"}):
+                    self.assertEqual(SUITE.main(), 0)
+                self.assertEqual([calls[-1][i + 1] for i, item in enumerate(calls[-1]) if item == "--app"], ["zed-desktop"])
+                (root / "state").write_bytes(original_state)
+                (root / "det").write_text(json.dumps(report) + "\n")
+                with patch.object(sys, "argv", live), patch.dict(os.environ, {"NAN_API_KEY": "synthetic"}):
+                    self.assertEqual(SUITE.main(), 2)
+                self.assertEqual(len(calls), 2)
+
+    def frozen_manifest(self, app="zed-desktop", platform="linux", architecture="x86_64", model="model"):
+        return {"schemaVersion": 1, "suite": "desktop", "platform": platform,
+                "architecture": architecture, "model": model, "apps": [{
+                    "status": "frozen", "app": app, "version": "1.2.3",
+                    "channel": "github-release:zed-industries/zed", "url": "https://github.com/zed-industries/zed/releases/download/v1.2.3/zed-linux-x86_64.tar.gz",
+                    "format": "tar-gz", "digest": "sha256:" + "a" * 64,
+                    "staged": False, "installer": "checker"}]}
+
+    def test_read_frozen_manifest_returns_exact_requested_order(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "manifest.json"
+            value = self.frozen_manifest()
+            value["apps"] = [self.frozen_manifest("zed-desktop")["apps"][0],
+                             {"status": "blocked", "app": "chatgpt-desktop", "reason": "resolution-failed",
+                              "evidence": "https://persistent.oaistatic.com/codex-app-prod/linux/deb/"}]
+            value["apps"][0]["app"] = "zed-desktop"
+            path.write_text(json.dumps(value))
+            result = SUITE.read_frozen_manifest(path, ["chatgpt-desktop", "zed-desktop"], "linux", "x86_64", "model")
+            self.assertEqual([entry["app"] for entry in result["apps"]], ["chatgpt-desktop", "zed-desktop"])
+
+    def test_read_frozen_manifest_rejects_drift_and_unknown_fields(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "manifest.json"
+            value = self.frozen_manifest()
+            value["apps"][0]["staged"] = True
+            path.write_text(json.dumps(value))
+            with self.assertRaises(ValueError):
+                SUITE.read_frozen_manifest(path, ["zed-desktop"], "linux", "x86_64", "model")
+
+    def test_manifest_rejects_same_host_attacker_url_and_allows_runtime_prerelease(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "manifest.json"
+            value = self.frozen_manifest()
+            value["apps"][0]["runtimeVersion"] = "0.154.0-alpha.6.2"
+            value["apps"][0]["url"] = "https://github.com/attacker/zed/releases/download/v1.2.3/zed-linux-x86_64.tar.gz"
+            path.write_text(json.dumps(value))
+            with self.assertRaises(ValueError):
+                SUITE.read_frozen_manifest(path, ["zed-desktop"], "linux", "x86_64", "model")
+
+    def test_claude_windows_manifest_requires_exact_documented_redirect(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "manifest.json"
+            value = {"schemaVersion": 1, "suite": "desktop", "platform": "windows",
+                     "architecture": "x86_64", "model": "model", "apps": [{
+                         "status": "frozen", "app": "claude-desktop", "version": "1.2.3",
+                         "channel": "official-latest:https://claude.ai/api/desktop/win32/x64/msix/latest/redirect",
+                         "url": "https://claude.ai/api/desktop/win32/x64/msix/latest/redirect",
+                         "format": "msix", "digest": "sha256:" + "a" * 64,
+                         "staged": True, "installer": "external"}]}
+            path.write_text(json.dumps(value))
+            SUITE.read_frozen_manifest(path, ["claude-desktop"], "windows", "x86_64", "model")
+            for url in ("https://claude.ai/api/desktop/win32/x64/msix",
+                        "https://claude.ai/api/desktop/win32/x64/msix/latest/redirect/extra",
+                        "https://claude.ai.attacker.example/api/desktop/win32/x64/msix/latest/redirect"):
+                value["apps"][0]["url"] = url
+                path.write_text(json.dumps(value))
+                with self.assertRaises(ValueError):
+                    SUITE.read_frozen_manifest(path, ["claude-desktop"], "windows", "x86_64", "model")
+
+    def test_claude_windows_immutable_url_binds_version_architecture_and_revision(self):
+        url = 'https://downloads.claude.ai/releases/win32/x64/2.19675.0/Claude-5706e5524dba58b23e105c31c358df8ab0a95852.msix'
+        def allowed(candidate):
+            return SUITE._expected_url({'app': 'claude-desktop', 'version': '2.19675.0', 'url': candidate}, 'windows', 'x86_64')
+        self.assertTrue(allowed(url))
+        for invalid in (url.replace('2.19675.0', '2.19675.1'),
+                        url.replace('x64', 'arm64'),
+                        url.replace('downloads.claude.ai', 'downloads.claude.ai.attacker.example'),
+                        url.replace('5706e', '5706G'), url.replace('.msix', '.zip'),
+                        url + '?download=1', url + '#fragment'):
+            self.assertFalse(allowed(invalid))
+
+    def test_manifest_rejects_extra_frozen_reason_and_bad_types(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "manifest.json"
+            value = self.frozen_manifest()
+            value["apps"][0]["reason"] = "resolution-failed"
+            path.write_text(json.dumps(value))
+            with self.assertRaises(ValueError):
+                SUITE.read_frozen_manifest(path, ["zed-desktop"], "linux", "x86_64", "model")
+            value = self.frozen_manifest()
+            value["apps"][0]["staged"] = "false"
+            path.write_text(json.dumps(value))
+            with self.assertRaises(ValueError):
+                SUITE.read_frozen_manifest(path, ["zed-desktop"], "linux", "x86_64", "model")
+            value = self.frozen_manifest()
+            value["unexpected"] = True
+            path.write_text(json.dumps(value))
+            with self.assertRaises(ValueError):
+                SUITE.read_frozen_manifest(path, ["zed-desktop"], "linux", "x86_64", "model")
+
+    def test_one_cell_keeps_apps_sequential_and_canonical(self):
+        cell = SUITE.suite_cell(selection(["zed-desktop", "chatgpt-desktop"]), "linux",
+                                "branch", "a" * 40, "selected-model")
+        self.assertEqual(cell["apps"], ["chatgpt-desktop", "zed-desktop"])
+        self.assertEqual(cell["sourceSha"], "a" * 40)
+
+    def test_branch_and_release_identity_are_distinct(self):
+        with self.assertRaises(ValueError):
+            SUITE.validate_identity("release", "a" * 39, "model", ["zed-desktop"], "linux", "v0.1.0")
+        self.assertEqual(SUITE.validate_identity("release", "b" * 40, "model",
+                                                  ["zed-desktop"], "linux", "v0.1.0"), ("zed-desktop",))
+
+    def test_release_manifest_rejects_tag_or_digest_mismatch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            asset = root / "nanh"
+            asset.write_bytes(b"verified")
+            manifest = root / "SHA256SUMS"
+            manifest.write_text(f"{SUITE.digest(asset)}  nanh\n")
+            command = SUITE.validate_release_assets(manifest, {"nanh": asset}, "v1.2.3", "a" * 40)
+            self.assertEqual(command[-4:], ["--source-ref", "refs/tags/v1.2.3", "--source-digest", "a" * 40])
+            with self.assertRaises(ValueError):
+                SUITE.validate_release_assets(manifest, {"nanh": asset}, "v1.2.4", "a" * 39)
+            asset.write_bytes(b"tampered")
+            with self.assertRaises(ValueError):
+                SUITE.validate_release_assets(manifest, {"nanh": asset}, "v1.2.3", "a" * 40)
+
+    def test_workflow_has_reusable_attestation_gate_before_preparation(self):
+        workflow = (ROOT / ".github/workflows/desktop-check-suite.yml").read_text()
+        self.assertIn("workflow_call:", workflow)
+        self.assertIn("type: choice\n        options: [branch, release]", workflow)
+        self.assertIn("python3 canary/actions/desktop_release.py", workflow)
+        self.assertLess(workflow.index("python3 canary/actions/desktop_release.py"),
+                        workflow.index("Prepare apps and private receipt"))
+        self.assertIn("fail-fast: false", workflow)
+        self.assertIn("hosted_evidence:", workflow)
+        self.assertIn("hosted evidence requires release source", workflow)
+        self.assertIn("python3 canary/actions/detector.py feed", workflow)
+        self.assertIn("python3 canary/actions/evidence.py select-desktop", workflow)
+        self.assertLess(workflow.index("Resolve exact frozen Desktop releases"),
+                        workflow.index("Install exact external Desktop applications"))
+        self.assertIn("--model '${{ needs.select.outputs.model }}'", workflow)
+        self.assertIn("--platform '${{ matrix.system }}'", workflow)
+        self.assertIn("if: steps.pending.outputs.harnesses != '' || !inputs.hosted_evidence", workflow)
+        self.assertIn("name: hosted-evidence-desktop-${{ matrix.system }}", workflow)
+        self.assertNotIn("prepare-hermes-desktop.sh", workflow)
+
+    def test_macOS_fixture_is_before_desktop_probes_and_secret_free(self):
+        workflow = (ROOT / ".github/workflows/desktop-check-suite.yml").read_text()
+        step = self.fixture_step(workflow)
+        self.assertIn("if: runner.os == 'macOS' && inputs.diagnostics && (inputs.source || 'branch') == 'branch'", step)
+        self.assertLess(workflow.index("Run standalone Claude inventory fixture"),
+                        workflow.index("Resolve exact frozen Desktop releases"))
+        for fragment in (
+            "set -euo pipefail",
+            'fixture_dir="$(mktemp -d "${RUNNER_TEMP}/claude-inventory.XXXXXX")"',
+            "clang++ -std=c++17 -x objective-c++",
+            "crates/nan-harness-desktop-check/native/tests/claude_inventory.mm",
+            "crates/nan-harness-desktop-check/native/windows.cpp",
+            "-framework CoreGraphics -framework AppKit",
+            '"$fixture_dir/fixture"',
+        ):
+            self.assertIn(fragment, step)
+        self.assertNotIn("NAN_API_KEY", step)
+        self.assertNotIn("continue-on-error", step)
+
+    @staticmethod
+    def fixture_step(workflow):
+        step = workflow.split("      - name: Run standalone Claude inventory fixture\n", 1)[1]
+        return step.split("      - name:", 1)[0]
+
+    def assert_fixture_gate(self, workflow):
+        step = self.fixture_step(workflow)
+        condition = next(line.strip() for line in step.splitlines() if line.strip().startswith("if:"))
+        self.assertEqual(condition,
+                         "if: runner.os == 'macOS' && inputs.diagnostics && (inputs.source || 'branch') == 'branch'")
+
+    def test_macOS_fixture_gate_covers_only_diagnostic_branch_cells(self):
+        workflow = (ROOT / ".github/workflows/desktop-check-suite.yml").read_text()
+        self.assert_fixture_gate(workflow)
+        # Keep the accepted matrix explicit: ordinary and release cells never
+        # compile the branch fixture, and non-macOS diagnostic cells skip it.
+        cases = (
+            ("macOS", False, "branch", False),
+            ("macOS", True, "release", False),
+            ("macOS", True, "branch", True),
+            ("Linux", True, "branch", False),
+            ("Windows", True, "branch", False),
+        )
+        for runner_os, diagnostics, source, expected in cases:
+            actual = runner_os == "macOS" and diagnostics and source == "branch"
+            self.assertEqual(actual, expected, (runner_os, diagnostics, source))
+
+    def test_macOS_fixture_gate_rejects_each_missing_required_condition(self):
+        workflow = (ROOT / ".github/workflows/desktop-check-suite.yml").read_text()
+        condition = "if: runner.os == 'macOS' && inputs.diagnostics && (inputs.source || 'branch') == 'branch'"
+        for fragment in (
+            " && inputs.diagnostics",
+            " && (inputs.source || 'branch') == 'branch'",
+            "runner.os == 'macOS'",
+        ):
+            mutated = workflow.replace(condition, condition.replace(fragment, ""), 1)
+            with self.assertRaises(AssertionError):
+                self.assert_fixture_gate(mutated)
+
+    def test_macOS_fixture_compiler_failure_is_not_swallowed(self):
+        workflow = (ROOT / ".github/workflows/desktop-check-suite.yml").read_text()
+        step = workflow.split("      - name: Run standalone Claude inventory fixture\n", 1)[1]
+        step = step.split("      - name:", 1)[0]
+        script = textwrap.dedent(step.split("        run: |\n", 1)[1])
+        with tempfile.TemporaryDirectory() as directory:
+            fake_bin = Path(directory) / "bin"
+            fake_bin.mkdir()
+            compiler = fake_bin / "clang++"
+            compiler.write_text("#!/bin/sh\nexit 23\n")
+            compiler.chmod(0o700)
+            result = subprocess.run(
+                ["bash", "-c", script],
+                env={**os.environ, "PATH": str(fake_bin) + os.pathsep + os.environ.get("PATH", ""),
+                     "RUNNER_TEMP": directory},
+                check=False,
+            )
+        self.assertEqual(result.returncode, 23)
+
+    def test_standalone_uses_exact_installer_after_resolve_on_every_platform(self):
+        workflow = (ROOT / ".github/workflows/desktop-check.yml").read_text()
+        self.assertIn("name: Install exact Desktop application from frozen manifest", workflow)
+        self.assertNotIn("prepare-hermes-desktop.sh", workflow)
+        self.assertLess(workflow.index("Freeze official Desktop release inputs"),
+                        workflow.index("Install exact Desktop application from frozen manifest"))
+
+    def test_command_passes_model_and_all_apps_without_shell(self):
+        cell = SUITE.suite_cell(selection(), "windows", "branch", "a" * 40, "model/x")
+        command = SUITE.checker_command("checker", "live", cell, "receipt", "report", "nanh")
+        self.assertEqual(command[0:7], ["checker", "run", "--yes", "--non-interactive", "--ephemeral", "--mode", "live"])
+        self.assertIn("--model", command)
+        self.assertIn("model/x", command)
+        self.assertEqual(command[-2:], ["--session", "github-hosted"])
+
+    def test_initial_state_contains_only_hashes_for_binaries(self):
+        with tempfile.TemporaryDirectory() as directory:
+            checker = Path(directory) / "checker"
+            nanh = Path(directory) / "nanh"
+            checker.write_bytes(b"checker")
+            nanh.write_bytes(b"nanh")
+            cell = SUITE.suite_cell(selection(["zed-desktop"]), "linux", "branch", "a" * 40, "model")
+            prepared = Path(directory) / "prepared"
+            prepared.write_bytes(b"receipt")
+            state = SUITE.initial_state(cell, checker, nanh, prepared)
+            self.assertEqual(state["checkerSha256"], SUITE.digest(checker))
+            self.assertNotIn("output", state)
+            self.assertEqual(state["outcome"], "blocked")
+
+    def test_fake_stage_is_bounded_and_drops_key_for_deterministic(self):
+        with tempfile.TemporaryDirectory() as directory:
+            marker = Path(directory) / "marker"
+            fake = Path(directory) / "checker"
+            fake.write_text("#!/bin/sh\nprintf '%s' \"${NAN_API_KEY-unset}\" > \"$MARKER\"\nexit 0\n")
+            fake.chmod(0o700)
+            old = os.environ.get("MARKER")
+            os.environ["MARKER"] = str(marker)
+            try:
+                with patch.dict(os.environ, {"NAN_API_KEY": "synthetic"}):
+                    self.assertTrue(SUITE.run_stage(["/bin/sh", str(fake)], live=False, timeout=5))
+                self.assertEqual(marker.read_text(), "unset")
+            finally:
+                if old is None:
+                    os.environ.pop("MARKER", None)
+                else:
+                    os.environ["MARKER"] = old
+
+    def test_state_identity_mismatch_refuses_before_fake_checker(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            checker = root / "checker"
+            nanh = root / "nanh"
+            prepared = root / "prepared"
+            for path in (checker, nanh, prepared):
+                path.write_bytes(path.name.encode())
+            cell = SUITE.suite_cell(selection(["zed-desktop"]), "linux", "branch", "a" * 40, "model")
+            state = SUITE.initial_state(cell, checker, nanh, prepared)
+            state["model"] = "different-model"
+            self.assertNotEqual(state["model"], cell["model"])
+
+
+if __name__ == "__main__":
+    unittest.main()

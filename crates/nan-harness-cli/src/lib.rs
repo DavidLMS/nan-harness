@@ -4,12 +4,14 @@
 mod app;
 mod commands;
 mod error;
+mod native_diagnostic;
 mod observability;
 mod runner;
 mod usage_evidence;
 mod usage_summary;
 
 use app::{Cli, Command};
+use nan_harness_runtime::DiscoveryError;
 use nan_harness_telemetry::TelemetryReporter;
 use nan_harness_telemetry::glitchtip::{ErrorReportExporter, GlitchTipExporter};
 use nan_harness_telemetry::panic::install_panic_hook;
@@ -326,6 +328,15 @@ async fn report_run_result(
         }
         Err(run_error) => {
             let error = run_error.error();
+            let failure = native_failure(error);
+            let setup_cause = matches!(failure, native_diagnostic::Failure::LaunchSetup)
+                .then(|| native_setup_cause(error));
+            native_diagnostic::emit_with_discovery_cause(
+                failure,
+                setup_cause,
+                discovery_cause(error),
+                discovery_exit(error),
+            );
             let message = error.user_message(cli);
             eprintln!("{}", error.render_terminal(cli));
             let mut contexts = bridge_diagnostic_contexts(&bridge_diagnostics, cli, interactive);
@@ -336,6 +347,155 @@ async fn report_run_result(
             ExitCode::FAILURE
         }
     }
+}
+
+fn native_failure(error: &error::CliError) -> native_diagnostic::Failure {
+    use crate::commands::chatgpt_desktop::ChatGptDesktopError;
+    use crate::commands::claude_desktop::ClaudeDesktopError;
+    use crate::commands::hermes_desktop::HermesDesktopError;
+    use crate::commands::pen_desktop::PenDesktopError;
+    use crate::commands::zed_desktop::ZedDesktopError;
+    use native_diagnostic::Failure;
+    match error {
+        error::CliError::Credential(_) => Failure::CredentialUnavailable,
+        error::CliError::HermesDesktop(HermesDesktopError::UnsupportedDesktopArgument(_)) => {
+            Failure::NativeArgument
+        }
+        error::CliError::HermesDesktop(
+            HermesDesktopError::CapabilityProbe(_) | HermesDesktopError::CapabilityProbeFailed(_),
+        ) => Failure::NativeCapabilityProbe,
+        error::CliError::HermesDesktop(HermesDesktopError::MissingDesktopCapabilities(_)) => {
+            Failure::NativeCapabilityMissing
+        }
+        error::CliError::HermesDesktop(
+            HermesDesktopError::Compatibility(_)
+            | HermesDesktopError::DesktopVersionUnsupported { .. },
+        )
+        | error::CliError::ChatGptDesktop(
+            ChatGptDesktopError::Compatibility(_) | ChatGptDesktopError::OlderUnsupported { .. },
+        ) => Failure::NativeCompatibility,
+        error::CliError::ChatGptDesktop(
+            ChatGptDesktopError::VersionCommand(_) | ChatGptDesktopError::VersionCommandFailed,
+        ) => Failure::NativeVersionProbe,
+        error::CliError::ChatGptDesktop(ChatGptDesktopError::UnparseableVersion) => {
+            Failure::NativeVersionUnparseable
+        }
+        error::CliError::HermesDesktop(
+            HermesDesktopError::ProcessCheck(_) | HermesDesktopError::ProcessCheckFailed(_),
+        )
+        | error::CliError::ChatGptDesktop(
+            ChatGptDesktopError::InspectProcess(_) | ChatGptDesktopError::ProcessInspectionFailed,
+        ) => Failure::NativeProcessInspection,
+        error::CliError::ChatGptDesktop(
+            ChatGptDesktopError::AppNotFound | ChatGptDesktopError::InvalidInstallation,
+        )
+        | error::CliError::HermesDesktop(HermesDesktopError::DesktopUnavailable) => {
+            Failure::NativeInstallation
+        }
+        error::CliError::ChatGptDesktop(
+            ChatGptDesktopError::AppAlreadyRunning | ChatGptDesktopError::SingletonRace,
+        )
+        | error::CliError::HermesDesktop(
+            HermesDesktopError::AlreadyRunning | HermesDesktopError::ConcurrentSession,
+        ) => Failure::NativeAlreadyRunning,
+        error::CliError::ChatGptDesktop(ChatGptDesktopError::State(_))
+        | error::CliError::HermesDesktop(
+            HermesDesktopError::InvalidStateDirectory
+            | HermesDesktopError::InvalidHermesHome
+            | HermesDesktopError::UnmanagedNanProfile
+            | HermesDesktopError::ManagedProfileConflict
+            | HermesDesktopError::PendingRecovery
+            | HermesDesktopError::CreateProfile(_)
+            | HermesDesktopError::ProtectProfile(_),
+        ) => Failure::NativeProfile,
+        error::CliError::HermesDesktop(
+            HermesDesktopError::ModelUnavailable { .. } | HermesDesktopError::EmptyModelCatalog,
+        ) => Failure::NativeModelCatalog,
+        error::CliError::ChatGptDesktop(ChatGptDesktopError::BridgeHandshakeTimeout) => {
+            Failure::NativeBridgeHandshake
+        }
+        error::CliError::ChatGptDesktop(ChatGptDesktopError::AppExitedDuringStartup) => {
+            Failure::NativeAppExited
+        }
+        error::CliError::ChatGptDesktop(ChatGptDesktopError::StartApp(_))
+        | error::CliError::ClaudeDesktop(ClaudeDesktopError::Launch(_))
+        | error::CliError::HermesDesktop(HermesDesktopError::Launch(_))
+        | error::CliError::PenDesktop(PenDesktopError::Launch(_))
+        | error::CliError::ZedDesktop(ZedDesktopError::Launch(_)) => Failure::NativeAppSpawn,
+        error::CliError::ChatGptDesktop(ChatGptDesktopError::Bridge(_))
+        | error::CliError::ClaudeDesktop(ClaudeDesktopError::Bridge(_))
+        | error::CliError::HermesDesktop(HermesDesktopError::Gateway(_))
+        | error::CliError::PenDesktop(PenDesktopError::Gateway(_))
+        | error::CliError::ZedDesktop(ZedDesktopError::Gateway(_)) => Failure::ProviderRouting,
+        error::CliError::ChatGptDesktop(_)
+        | error::CliError::ClaudeDesktop(_)
+        | error::CliError::HermesDesktop(_)
+        | error::CliError::PenDesktop(_)
+        | error::CliError::ZedDesktop(_) => Failure::ChildCli,
+        _ => Failure::LaunchSetup,
+    }
+}
+
+fn native_setup_cause(error: &error::CliError) -> native_diagnostic::SetupCause {
+    use error::CliError;
+    use native_diagnostic::SetupCause;
+    // Keep the fallback fixed and opaque: newly added top-level variants must
+    // never leak inner data or make the private record schema unbounded.
+    match error {
+        CliError::Discovery(_) => SetupCause::Discovery,
+        CliError::Install(_) => SetupCause::Install,
+        CliError::Configuration(_) => SetupCause::Configuration,
+        CliError::Runtime(_) => SetupCause::Runtime,
+        CliError::CurrentDirectory(_) => SetupCause::CurrentDirectory,
+        CliError::CredentialInvariant => SetupCause::CredentialInvariant,
+        CliError::PreflightTaskFailed(_) => SetupCause::Preflight,
+        CliError::InvalidPlan(_) => SetupCause::InvalidPlan,
+        CliError::SerializePlan(_) => SetupCause::SerializePlan,
+        CliError::TelemetrySettings(_) => SetupCause::TelemetrySettings,
+        CliError::Update(_) => SetupCause::Update,
+        CliError::Persistence(_) => SetupCause::Persistence,
+        CliError::Search(_) => SetupCause::Search,
+        CliError::Uninstall(_) => SetupCause::Uninstall,
+        CliError::UsageEvidence(_) => SetupCause::UsageEvidence,
+        _ => SetupCause::Other,
+    }
+}
+
+fn discovery_cause(error: &error::CliError) -> Option<native_diagnostic::DiscoveryCause> {
+    use native_diagnostic::DiscoveryCause;
+    let error::CliError::Discovery(error) = error else {
+        return None;
+    };
+    Some(match error {
+        DiscoveryError::ExecutableNotFound(_) => DiscoveryCause::MissingExecutable,
+        DiscoveryError::InvalidExecutable(_) => DiscoveryCause::InvalidExecutable,
+        DiscoveryError::InvalidManifest(_) | DiscoveryError::InvalidManifestContract(_) => {
+            DiscoveryCause::InvalidManifest
+        }
+        DiscoveryError::MissingCompatibilityEntry(_) => DiscoveryCause::MissingCompatibilityEntry,
+        DiscoveryError::InvalidVersionCommand { .. } => DiscoveryCause::InvalidVersionCommand,
+        DiscoveryError::VersionCommand { .. } => DiscoveryCause::VersionCommand,
+        DiscoveryError::VersionCommandFailed { .. } => DiscoveryCause::VersionCommandFailed,
+        DiscoveryError::VersionProbeTimeout => DiscoveryCause::VersionProbeTimeout,
+        DiscoveryError::VersionProbeOutputLimit => DiscoveryCause::VersionProbeOutputLimit,
+        DiscoveryError::UnsupportedVersion { .. } => DiscoveryCause::UnsupportedVersion,
+        DiscoveryError::UnparseableVersion { .. } => DiscoveryCause::UnparseableVersion,
+    })
+}
+
+fn discovery_exit(error: &error::CliError) -> Option<native_diagnostic::DiscoveryExit> {
+    let error::CliError::Discovery(error) = error else {
+        return None;
+    };
+    let DiscoveryError::VersionCommandFailed {
+        exit_code, signal, ..
+    } = error
+    else {
+        return None;
+    };
+    exit_code
+        .map(native_diagnostic::DiscoveryExit::Code)
+        .or_else(|| signal.map(native_diagnostic::DiscoveryExit::Signal))
 }
 
 async fn report_contexts<E>(
@@ -361,7 +521,11 @@ fn exit_code_from_i32(value: i32) -> ExitCode {
 
 #[cfg(test)]
 mod tests {
-    use super::{Cli, Command, report_startup_update_error};
+    use super::{
+        Cli, Command, discovery_cause, native_failure, native_setup_cause,
+        report_startup_update_error,
+    };
+    use crate::native_diagnostic;
     use clap::Parser as _;
     use nan_harness_runtime::update::UpdateError;
     use nan_harness_telemetry::TelemetryReporter;
@@ -370,6 +534,87 @@ mod tests {
     use nan_harness_telemetry::panic::PendingReportStore;
     use nan_harness_telemetry::redaction::SanitizedErrorReport;
     use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn setup_cause_maps_real_top_level_errors_without_inner_data() {
+        use crate::commands::configuration::ConfigurationError;
+        use nan_harness_runtime::RuntimeError;
+        let cases = [
+            (
+                crate::error::CliError::CurrentDirectory(std::io::Error::from(
+                    std::io::ErrorKind::NotFound,
+                )),
+                native_diagnostic::SetupCause::CurrentDirectory,
+            ),
+            (
+                crate::error::CliError::Runtime(RuntimeError::MissingProcessId),
+                native_diagnostic::SetupCause::Runtime,
+            ),
+            (
+                crate::error::CliError::Configuration(ConfigurationError::HarnessRequired),
+                native_diagnostic::SetupCause::Configuration,
+            ),
+            (
+                crate::error::CliError::CredentialInvariant,
+                native_diagnostic::SetupCause::CredentialInvariant,
+            ),
+        ];
+        for (error, expected) in cases {
+            assert!(matches!(
+                native_failure(&error),
+                native_diagnostic::Failure::LaunchSetup
+            ));
+            assert_eq!(native_setup_cause(&error), expected);
+        }
+    }
+
+    #[test]
+    fn discovery_cause_maps_real_variants_without_inner_data() {
+        use nan_harness_runtime::DiscoveryError;
+        let cases = [
+            (
+                DiscoveryError::ExecutableNotFound("hermes".to_owned()),
+                native_diagnostic::DiscoveryCause::MissingExecutable,
+            ),
+            (
+                DiscoveryError::VersionCommandFailed {
+                    command: "hermes --version".to_owned(),
+                    exit_code: Some(1),
+                    signal: None,
+                },
+                native_diagnostic::DiscoveryCause::VersionCommandFailed,
+            ),
+            (
+                DiscoveryError::VersionProbeTimeout,
+                native_diagnostic::DiscoveryCause::VersionProbeTimeout,
+            ),
+            (
+                DiscoveryError::InvalidManifestContract("fixture".to_owned()),
+                native_diagnostic::DiscoveryCause::InvalidManifest,
+            ),
+        ];
+        for (inner, expected) in cases {
+            let error = crate::error::CliError::Discovery(inner);
+            assert_eq!(discovery_cause(&error), Some(expected));
+        }
+        let non_discovery = crate::error::CliError::CredentialInvariant;
+        assert_eq!(discovery_cause(&non_discovery), None);
+    }
+
+    #[test]
+    fn discovery_exit_maps_the_actual_signal_without_using_wrapper_status() {
+        let error = crate::error::CliError::Discovery(
+            nan_harness_runtime::DiscoveryError::VersionCommandFailed {
+                command: "hermes --version".to_owned(),
+                exit_code: None,
+                signal: Some(9),
+            },
+        );
+        assert_eq!(
+            super::discovery_exit(&error),
+            Some(native_diagnostic::DiscoveryExit::Signal(9))
+        );
+    }
 
     #[tokio::test]
     async fn offline_doctor_startup_never_calls_network_or_observability_services() {

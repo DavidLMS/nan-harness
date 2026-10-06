@@ -52,6 +52,7 @@ fn map_search_error(error: SearchError) -> ApiError {
         | SearchError::QueryTooLarge
         | SearchError::InvalidDomainFilter => ApiError::InvalidRequest(error.to_string()),
         SearchError::HttpStatus(status) => ApiError::UpstreamStatus {
+            retry_hint: crate::error::RetryHint::Default,
             status: reqwest::StatusCode::from_u16(status)
                 .unwrap_or(reqwest::StatusCode::BAD_GATEWAY),
             message: "SearXNG search failed".to_owned(),

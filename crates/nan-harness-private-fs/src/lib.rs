@@ -2,7 +2,7 @@
 
 use std::fs::{self, File};
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 #[cfg(unix)]
 mod unix;
@@ -68,8 +68,16 @@ pub fn create_private_dir(path: &Path) -> io::Result<()> {
 /// later failure may remain.
 pub fn create_private_dir_all(path: &Path) -> io::Result<()> {
     let mut current = PathBuf::new();
-    for component in path.components() {
+    let mut components = path.components().peekable();
+    while let Some(component) = components.next() {
         current.push(component.as_os_str());
+        // A Windows verbatim drive/UNC prefix is not a filesystem object until
+        // its root separator is appended. Never query or create a partial root.
+        if matches!(component, Component::Prefix(_))
+            && matches!(components.peek(), Some(Component::RootDir))
+        {
+            continue;
+        }
         process_directory_component(&current)?;
     }
     Ok(())
@@ -181,6 +189,40 @@ pub fn open_private_read(path: &Path) -> io::Result<(File, PrivateFileReadStatus
     {
         unsupported::open_private_read(path)
     }
+}
+
+/// Verify the private Windows file DACL on an already retained handle without repair.
+///
+/// # Errors
+/// Returns the existing private-DACL inspection or verification error.
+#[cfg(windows)]
+pub fn verify_private_file(file: &File) -> io::Result<()> {
+    windows::verify_handle(file, PrivatePathKind::File)
+}
+
+/// Exact Windows handle DACL shapes for owned disposable configuration only.
+/// This classification never repairs permissions or authorizes a file read.
+#[cfg(windows)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OwnedWindowsDacl {
+    /// Existing protected private-filesystem contract.
+    Protected,
+    /// Exactly inherited current-user and SYSTEM FullAccess entries.
+    Inherited,
+    /// Readable descriptor outside either exact contract.
+    Unexpected,
+    /// Descriptor could not be inspected.
+    Unavailable,
+}
+
+/// Inspect a retained handle without modifying its descriptor.
+///
+/// Inherited admission requires the caller to continuously retain and verify
+/// the original protected parent and its fixed child path. This function is a
+/// classifier; general credential-file readers retain their protected policy.
+#[cfg(windows)]
+pub fn classify_owned_windows_dacl(file: &File, kind: PrivatePathKind) -> OwnedWindowsDacl {
+    windows::classify_owned_handle(file, kind)
 }
 
 fn finish_private_read(

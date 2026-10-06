@@ -14,6 +14,7 @@ pub(super) enum WaitOutcome {
 }
 
 const STARTUP_POLL_LIMIT: u8 = 40;
+const OWNED_APP_LAUNCH_ENV: &str = "NAN_NATIVE_OWNED_APP_LAUNCH";
 
 /// Interprets a sequence of liveness polls. Pen is only considered finished
 /// once it has actually been seen running, so a slow start is reported as a
@@ -180,11 +181,11 @@ impl SystemPenProcess {
             .flatten()
     }
 
-    pub(super) fn launch(&self) -> Result<(), PenDesktopError> {
+    fn launch_command(&self, owned_app: bool) -> Result<Command, PenDesktopError> {
         let executable = self
             .resolve_executable()
             .ok_or(PenDesktopError::AppNotFound)?;
-        let mut command = if self.platform == PenPlatform::Macos {
+        let mut command = if self.platform == PenPlatform::Macos && !owned_app {
             let app = executable
                 .parent()
                 .and_then(Path::parent)
@@ -196,12 +197,20 @@ impl SystemPenProcess {
         } else {
             Command::new(executable)
         };
-        command
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .map(|_| ())
+        if self.platform != PenPlatform::Macos || owned_app {
+            command.args(crate::commands::desktop::qualification_renderer_arguments(
+                nan_harness_core::DesktopHarnessKind::Pen,
+            ));
+        }
+        Ok(command)
+    }
+
+    pub(super) fn launch(&self) -> Result<(), PenDesktopError> {
+        let owned_app = self.platform == PenPlatform::Macos
+            && env::var(OWNED_APP_LAUNCH_ENV).ok().as_deref() == Some("1");
+        let mut command = self.launch_command(owned_app)?;
+        command.stdin(Stdio::null()).stdout(Stdio::null());
+        crate::commands::desktop::spawn_observed_desktop(&mut command, "pen-desktop")
             .map_err(PenDesktopError::Launch)
     }
 

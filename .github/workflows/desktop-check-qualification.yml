@@ -1,0 +1,50 @@
+name: Desktop full qualification
+on:
+  schedule:
+    - cron: '43 7 * * 1'
+      timezone: Europe/Madrid
+  pull_request:
+    paths:
+      - '.github/workflows/desktop-*.yml'
+      - 'canary/actions/desktop_*.py'
+      - 'canary/desktop-baselines.json'
+      - 'crates/nan-harness-cli/Cargo.toml'
+      - 'crates/nan-harness-runtime/**'
+      - 'crates/nan-harness-bridge/**'
+      - 'canary/tests/desktop-*.py'
+      - 'scripts/desktop-feasibility/**'
+      - 'crates/nan-harness-desktop-check/**'
+      - 'crates/nan-harness-cli/src/commands/*desktop*/**'
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: desktop-qualification-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  contracts:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Verify maintenance selection and closed diagnostics without vendor apps
+        run: |
+          python3 -B canary/tests/desktop-maintenance.py
+          python3 -B canary/tests/desktop-release-binding.py
+          python3 -B canary/tests/desktop-diagnostic-workflow.py
+          python3 -B canary/tests/desktop-qualification.py
+          for test in scripts/desktop-feasibility/test-*.py; do python3 -B "$test"; done
+          for test in scripts/desktop-feasibility/test-*.cjs; do node "$test"; done
+  qualify:
+    if: github.event_name != 'pull_request'
+    uses: ./.github/workflows/desktop-automation-feasibility.yml
+    with:
+      app: all
+      platform: all
+      experiment: deterministic-full
+      native_only: false
+      quality_only: false

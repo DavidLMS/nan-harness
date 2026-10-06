@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export NAN_CANARY_WRITER=actions GITHUB_ACTIONS=true
 
 repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$repository_root/canary/tests/host-lock-fixture.sh"
@@ -21,6 +22,10 @@ cat >"$bin_directory/gh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$*" >>"$GH_LOG"
+if [ "${1:-}" = api ]; then
+  printf 'commit\t%s\n' "${REMOTE_TAG_COMMIT:-0123456789abcdef}"
+  exit 0
+fi
 if [ "${1:-}" = release ] && [ "${2:-}" = view ]; then
   printf '{"tagName":"%s","isDraft":%s}\n' "$GATE_TAG" "${GH_DRAFT:-true}"
   exit 0
@@ -263,6 +268,13 @@ jq -e '.phases.availableFeedPublished == true' \
 GH_DRAFT=false run_gate "$feed_recovery_state"
 [ ! -s "$temporary_directory/promotion.log" ]
 
+set +e
+REMOTE_TAG_COMMIT=changed GH_DRAFT=false run_gate "$feed_recovery_state" >/dev/null 2>&1
+changed_tag_status="$?"
+set -e
+[ "$changed_tag_status" -ne 0 ]
+[ ! -s "$temporary_directory/promotion.log" ]
+
 # A receipt whose phases are not consistent booleans never resumes, however it was damaged.
 receipt_state="$temporary_directory/state-receipt"
 for mutation in '.phases.suitePassed = "true"' \
@@ -372,6 +384,7 @@ set -e
 worktree_repository="$temporary_directory/worktree-repository"
 mkdir -p "$worktree_repository/canary/host" "$temporary_directory/worktree-bin"
 cp "$repository_root/canary/host/lib.sh" "$worktree_repository/canary/host/lib.sh"
+cp "$repository_root/canary/host/publication-writer.sh" "$worktree_repository/canary/host/publication-writer.sh"
 cp "$repository_root/canary/host/release-channel.sh" \
   "$worktree_repository/canary/host/release-channel.sh"
 cp "$repository_root/canary/host/host-lock.sh" "$worktree_repository/canary/host/host-lock.sh"

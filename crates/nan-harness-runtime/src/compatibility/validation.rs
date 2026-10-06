@@ -1,5 +1,8 @@
 use super::desktop::{desktop_surfaces, validate_desktop_verifications};
-use super::manifest::{LEGACY_FEED_SCHEMA_VERSION, UNIFIED_FEED_SCHEMA_VERSION};
+use super::manifest::{
+    HOSTED_FEED_SCHEMA_VERSION, LEGACY_FEED_SCHEMA_VERSION, UNIFIED_FEED_SCHEMA_VERSION,
+    VERSIONED_FEED_SCHEMA_VERSION,
+};
 use super::{CompatibilityError, VerificationEntry, VerificationManifest};
 use nan_harness_core::{CompatibilityManifest, HarnessKind};
 use std::collections::BTreeSet;
@@ -7,14 +10,16 @@ use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
 /// Validates a downloaded or cached feed.
 ///
-/// Both the unified schema-v3 feed and the legacy CLI-only schema-v2 feed are accepted: a legacy
-/// feed carries no Desktop evidence and leaves the embedded Desktop registry in effect.
+/// The current v5 feed and older v2/v3/v4 feeds are accepted. Older feeds cannot
+/// carry exact-version checks; v2 also leaves the embedded Desktop registry in effect.
 pub(super) fn validate_manifest(
     manifest: &VerificationManifest,
     base: &CompatibilityManifest,
 ) -> Result<(), CompatibilityError> {
     let unified = match manifest.schema_version {
-        UNIFIED_FEED_SCHEMA_VERSION => true,
+        UNIFIED_FEED_SCHEMA_VERSION
+        | VERSIONED_FEED_SCHEMA_VERSION
+        | HOSTED_FEED_SCHEMA_VERSION => true,
         LEGACY_FEED_SCHEMA_VERSION => false,
         version => return Err(CompatibilityError::UnsupportedManifestSchema(version)),
     };
@@ -31,6 +36,30 @@ pub(super) fn validate_manifest(
     let running_version = semver::Version::parse(env!("CARGO_PKG_VERSION")).ok();
     let mut release_versions = BTreeSet::new();
     for release in &manifest.releases {
+        if manifest.schema_version < VERSIONED_FEED_SCHEMA_VERSION
+            && !release.desktop_checks.is_empty()
+        {
+            return Err(CompatibilityError::InvalidDesktopChecks(
+                "checks require schema v4",
+            ));
+        }
+        if manifest.schema_version != HOSTED_FEED_SCHEMA_VERSION
+            && !release.hosted_checks.is_empty()
+        {
+            return Err(CompatibilityError::InvalidHostedChecks(
+                "checks require schema v5",
+            ));
+        }
+        super::hosted_checks::validate_checks(
+            release,
+            surfaces.as_deref().unwrap_or_default(),
+            running_version.as_ref() == Some(&release.nan_harness_version),
+        )?;
+        super::desktop_checks::validate_checks(
+            release,
+            surfaces.as_deref().unwrap_or_default(),
+            running_version.as_ref() == Some(&release.nan_harness_version),
+        )?;
         if !release_versions.insert(release.nan_harness_version.clone()) {
             return Err(CompatibilityError::DuplicateRelease(
                 release.nan_harness_version.clone(),

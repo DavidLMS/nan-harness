@@ -277,6 +277,16 @@ class DailyEvidenceTests(unittest.TestCase):
         self.assertFalse((ROOT / ".github/scripts/run-source-main-detector.sh").exists())
 
 
+    def test_daily_workflow_designates_only_the_trusted_publication_step(self):
+        workflow = (ROOT / ".github/workflows/harness-canary.yml").read_text()
+        step = workflow.split("      - name: Publish independent complete harness results\n", 1)[1]
+        step = step.split("      - uses:", 1)[0]
+        self.assertIn("          NAN_CANARY_WRITER: actions\n", step)
+        self.assertEqual(workflow.count("NAN_CANARY_WRITER:"), 1)
+        self.assertIn("group: release-channel-${{ github.repository }}", workflow)
+        self.assertIn("cancel-in-progress: false", workflow)
+
+
 class DailyPublicationTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -294,7 +304,8 @@ class DailyPublicationTests(unittest.TestCase):
         (bin_dir / "gh").write_text(module.FAKE_GH)
         (bin_dir / "gh").chmod(0o755)
         self.env = {**os.environ, "PATH": str(bin_dir) + os.pathsep + os.environ["PATH"],
-                    "FAKE_GH_STATE": str(self.remote), "NAN_CANARY_RETRY_DELAY_SECONDS": "0"}
+                    "FAKE_GH_STATE": str(self.remote), "NAN_CANARY_RETRY_DELAY_SECONDS": "0",
+                    "NAN_CANARY_WRITER": "actions", "GITHUB_ACTIONS": "true"}
         self.version = tomllib.loads((ROOT / "Cargo.toml").read_text())["workspace"]["package"]["version"]
         self.updates = self.root / "updates"
         self.updates.mkdir()
@@ -325,6 +336,13 @@ class DailyPublicationTests(unittest.TestCase):
 
     def calls(self):
         return [json.loads(line) for line in (self.remote / "calls.jsonl").read_text().splitlines()]
+
+    def test_publication_requires_explicit_actions_writer_before_remote_access(self):
+        for context in ({"NAN_CANARY_WRITER": ""}, {"GITHUB_ACTIONS": "false"}):
+            with self.subTest(context=context):
+                result, _output = self.run_publisher(publish=True, **context)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertFalse((self.remote / "calls.jsonl").exists())
 
     def test_partial_publication_preserves_unobserved_history_and_absent_desktop(self):
         result, _ = self.run_publisher(True)

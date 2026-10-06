@@ -4,6 +4,10 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum CompatibilityError {
+    #[error("compatibility manifest contains invalid hosted checks: {0}")]
+    InvalidHostedChecks(&'static str),
+    #[error("compatibility manifest contains invalid exact-version Desktop checks: {0}")]
+    InvalidDesktopChecks(&'static str),
     #[error("could not determine the nan-harness configuration directory")]
     MissingConfigDirectory,
     #[error("could not build the compatibility metadata client: {0}")]
@@ -143,6 +147,8 @@ impl CompatibilityError {
                 "NH-COMPATIBILITY-002"
             }
             Self::InvalidUrl { .. }
+            | Self::InvalidDesktopChecks(_)
+            | Self::InvalidHostedChecks(_)
             | Self::InsecureUrl
             | Self::ManifestTooLarge
             | Self::ParseManifest(_)
@@ -181,6 +187,12 @@ impl nan_harness_i18n::TerminalMessage for CompatibilityError {
             return self.to_string();
         }
         match self {
+            Self::InvalidHostedChecks(reason) => {
+                m::error_compatibility_invalid_hosted_checks(locale, reason)
+            }
+            Self::InvalidDesktopChecks(reason) => {
+                m::error_compatibility_invalid_desktop_checks(locale, reason)
+            }
             Self::MissingConfigDirectory => m::error_compatibility_missing_config_directory(locale),
             Self::BuildClient(field_0) => m::error_compatibility_build_client(locale, &(field_0)),
             Self::InvalidUrl { source } => m::error_compatibility_invalid_url(locale, &(source)),

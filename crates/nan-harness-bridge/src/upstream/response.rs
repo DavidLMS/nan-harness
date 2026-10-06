@@ -151,6 +151,10 @@ impl Drop for FinalErrorCapture {
 }
 
 impl UpstreamResponse {
+    pub(crate) fn retry_hint(&self) -> crate::error::RetryHint {
+        crate::error::RetryHint::from_headers(self.response.headers())
+    }
+
     pub(crate) fn new(
         response: reqwest::Response,
         lease: Option<RequestLease>,
