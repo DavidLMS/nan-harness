@@ -374,8 +374,7 @@ impl ClaudeWindowsChatSession<'_> {
                     // Disclosure never authorizes Retry; retain the raw marker proof.
                 }
                 stage
-                    if stage
-                        .recovery_preinvoke_pending(self.facts.failure_scope_counts.as_ref()) => {}
+                    if stage.retry_readiness_pending(self.facts.failure_scope_counts.as_ref()) => {}
                 _ => return Err(Reason::ActionUnsupported),
             }
             if Instant::now() >= deadline {

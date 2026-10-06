@@ -3522,3 +3522,21 @@ other transport failures and exhausted deadlines still stop immediately;
 there is no cached ownership verdict or repeated input. Synthetic contracts
 cover transient and persistent timeouts, late results, deadline exhaustion,
 and a negative verdict after the first timeout.
+
+
+Run `37454337828` at `1b522b09` exposed two additional Windows timing cases.
+Claude completed two sessions, then rejected a read-only Retry readiness check:
+the failed turn and Retry counts were unique, but the retained control did not
+survive its fresh stability proof. Readiness may now reobserve that exact
+single-turn shape within the existing deadline. This allowance is not used
+for disclosure or Retry dispatch; uncertain input still stops immediately.
+
+Codex completed every semantic step in two sessions but exhausted its isolated
+two-second process-absence query after the second stop, correctly preventing
+the third session and failing cleanup. Its post-stop path now shares Claude's
+five-second settlement deadline and retained native helper across accessibility,
+window and process absence checks. Only positive presence may settle; query
+errors, persistent presence and late success still fail. No unrelated process
+is terminated. The focused protocol and settlement tests and desktop Clippy
+pass. Hermes Windows failed before installation in official metadata acquisition;
+that failure does not establish a desktop compatibility result.

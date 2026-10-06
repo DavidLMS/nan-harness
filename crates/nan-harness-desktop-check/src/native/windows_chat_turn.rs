@@ -33,6 +33,16 @@ pub(crate) struct FailureScopeCounts {
     button_shape: Option<[u16; 6]>,
 }
 impl FailureScopeCounts {
+    #[cfg(any(windows, test))]
+    fn single_failed_turn(&self) -> bool {
+        self.server_errors == 1
+            && self.failed_user_headings == 1
+            && self.failed_prompt_texts == 1
+            && self.retry_buttons == 1
+            && self.retry_labels == 1
+            && self.exact_prompt_groups == 1
+    }
+
     // Keep the latest successful passive query when a later deadline prevents
     // observing it. These diagnostics never grant scope or action authority.
     pub(crate) fn retain_unfiltered(&mut self, previous: Option<&Self>) {
@@ -250,14 +260,16 @@ impl WindowsChatStage {
         // counts never authorize input. The action still proves the full scope.
         self.passive_pending()
             || (self == Self::ScopeHeadingAmbiguous
-                && counts.is_some_and(|counts| {
-                    counts.server_errors == 1
-                        && counts.failed_user_headings == 1
-                        && counts.failed_prompt_texts == 1
-                        && counts.retry_buttons == 1
-                        && counts.retry_labels == 1
-                        && counts.exact_prompt_groups == 1
-                }))
+                && counts.is_some_and(FailureScopeCounts::single_failed_turn))
+    }
+
+    #[cfg(any(windows, test))]
+    pub(crate) fn retry_readiness_pending(self, counts: Option<&FailureScopeCounts>) -> bool {
+        // Readiness performs no input. A unique failed turn can be observed
+        // again if its retained control changes during the fresh scope check.
+        // This does not permit repeating Copy, disclosure, or Retry actions.
+        self.recovery_preinvoke_pending(counts)
+            || (self == Self::Control && counts.is_some_and(FailureScopeCounts::single_failed_turn))
     }
 
     pub(super) fn parse(wire: &str) -> Option<Self> {
@@ -447,6 +459,44 @@ mod tests {
             S::Retried,
         ] {
             assert!(!stage.recovery_preinvoke_pending(Some(&counts)));
+        }
+    }
+
+    #[test]
+    fn readiness_control_change_requires_one_failed_turn_and_cannot_replay_input() {
+        use super::{WindowsChatReceipt, WindowsChatStage as S};
+        let receipt = WindowsChatReceipt::parse(
+            "turn control\nfailure-scope 1 1 1 1 0 1 0 0 1 0\n",
+            "retry-ready",
+        )
+        .unwrap();
+        let counts = receipt.failure_scope.unwrap();
+        assert!(receipt.stage.retry_readiness_pending(Some(&counts)));
+        assert!(!receipt.stage.recovery_preinvoke_pending(Some(&counts)));
+        assert!(!receipt.stage.retry_readiness_pending(None));
+        for field in 0..6 {
+            for value in [0, 2] {
+                let mut invalid = counts.clone();
+                *match field {
+                    0 => &mut invalid.server_errors,
+                    1 => &mut invalid.failed_user_headings,
+                    2 => &mut invalid.failed_prompt_texts,
+                    3 => &mut invalid.retry_buttons,
+                    4 => &mut invalid.retry_labels,
+                    _ => &mut invalid.exact_prompt_groups,
+                } = value;
+                assert!(!receipt.stage.retry_readiness_pending(Some(&invalid)));
+            }
+        }
+        for stage in [
+            S::ActionUncertain,
+            S::TreePid,
+            S::ScopeControlAmbiguous,
+            S::ScopePromptMismatch,
+            S::Retried,
+            S::Deadline,
+        ] {
+            assert!(!stage.retry_readiness_pending(Some(&counts)));
         }
     }
 

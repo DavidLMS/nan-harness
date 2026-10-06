@@ -415,7 +415,10 @@ impl Gui {
         #[cfg(windows)] holder: Option<crate::native::OwnedCleanupHolder>,
     ) -> Result<(), AbsenceFailure> {
         #[cfg(windows)]
-        if kind == DesktopHarnessKind::Claude {
+        if matches!(
+            kind,
+            DesktopHarnessKind::Claude | DesktopHarnessKind::ChatGpt
+        ) {
             let deadline = Instant::now() + Duration::from_secs(5);
             let prepared = if gui.is_none() {
                 Some(
@@ -430,24 +433,28 @@ impl Gui {
             let native = gui
                 .map(|held| held.visual.absence_native())
                 .or(prepared.as_ref());
-            let wire = correlation.and_then(|snapshot| {
-                native?
-                    .process_correlation_until(
-                        false,
-                        snapshot.request().as_bytes(),
-                        deadline.min(Instant::now() + Duration::from_secs(1)),
-                    )
-                    .ok()
-            });
-            crate::process::windows_correlation::record(
-                wire.as_deref().map(String::as_str),
-                Instant::now() >= deadline,
-            );
-            let cleanup = holder.map_or_else(
-                || crate::native::owned_cleanup_unavailable(),
-                |held| held.cleanup(deadline),
-            );
-            crate::process::windows_correlation::record_cleanup(&cleanup);
+            // Claude requires retained descendant cleanup; Codex's launcher
+            // owns its process group. Both need bounded post-stop settlement.
+            if kind == DesktopHarnessKind::Claude {
+                let wire = correlation.and_then(|snapshot| {
+                    native?
+                        .process_correlation_until(
+                            false,
+                            snapshot.request().as_bytes(),
+                            deadline.min(Instant::now() + Duration::from_secs(1)),
+                        )
+                        .ok()
+                });
+                crate::process::windows_correlation::record(
+                    wire.as_deref().map(String::as_str),
+                    Instant::now() >= deadline,
+                );
+                let cleanup = holder.map_or_else(
+                    || crate::native::owned_cleanup_unavailable(),
+                    |held| held.cleanup(deadline),
+                );
+                crate::process::windows_correlation::record_cleanup(&cleanup);
+            }
             let mut observed = false;
             let mut settlement = process_absence::ProcessSettlement::default();
             let outcome = settle_absence(
@@ -459,10 +466,11 @@ impl Gui {
                         false,
                         Some(&mut settlement),
                     );
-                    let ax_presence = result.as_ref().err().is_some_and(|failure| {
-                        failure.stage == AbsenceStage::AccessibilityEnumeration
-                            && failure.reason == Reason::AlreadyRunning
-                    });
+                    let ax_presence = kind == DesktopHarnessKind::Claude
+                        && result.as_ref().err().is_some_and(|failure| {
+                            failure.stage == AbsenceStage::AccessibilityEnumeration
+                                && failure.reason == Reason::AlreadyRunning
+                        });
                     if process_absence::mark_rejection_observation(
                         &mut observed,
                         ax_presence,
