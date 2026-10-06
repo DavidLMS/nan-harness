@@ -1547,7 +1547,7 @@ class RetryActionTests(unittest.TestCase):
 
 class NativeTreeDiagnosticTests(unittest.TestCase):
     def test_dbus_error_names_are_closed_without_exposing_messages_or_nodes(self):
-        for method in ('owner','children','identity'):
+        for method in ('owner','children','identity','parent','bounds'):
             for name, expected in [('org.freedesktop.DBus.Error.UnknownObject','object-unknown'),
                                    ('org.freedesktop.DBus.Error.NameHasNoOwner','name-unowned'),
                                    ('PRIVATE','other')]:

@@ -38,7 +38,7 @@ VERSION = re.compile(r'[0-9]+(?:\.[0-9]+){2}(?:[-+][A-Za-z0-9.-]+)?\Z')
 
 def claude_native_tree(value):
     fields = {'operation','reason','nodeScope','foreignBus','childCount','visitedCount'}
-    choices = {'operation': {'owner','children','identity'}, 'reason': {'wrong-owner','query-unavailable','deadline','null-reference','non-list','limit','duplicate'},
+    choices = {'operation': {'owner','children','identity','parent','bounds'}, 'reason': {'wrong-owner','query-unavailable','deadline','null-reference','non-list','limit','duplicate'},
                'nodeScope': {'frame','editor','other'}}
     if (type(value) is not dict or set(value) - {'transportReason'} != fields
             or any(type(value[k]) is not str or value[k] not in choices[k] for k in choices)

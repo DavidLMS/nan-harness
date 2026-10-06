@@ -119,7 +119,8 @@ type EmptyInputDrift = std::collections::BTreeMap<EmptyInputField, bool>;
 fn native_tree_observation(facts: &Value) -> Option<Value> {
     let value = facts.get("nativeTreeObservation")?;
     if value.as_object()?.len() != 6 + usize::from(value.get("transportReason").is_some())
-        || !["owner", "children", "identity"].contains(&value["operation"].as_str()?)
+        || !["owner", "children", "identity", "parent", "bounds"]
+            .contains(&value["operation"].as_str()?)
         || ![
             "wrong-owner",
             "query-unavailable",
