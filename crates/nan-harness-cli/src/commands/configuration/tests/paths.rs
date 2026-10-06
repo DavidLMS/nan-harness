@@ -13,7 +13,7 @@ fn confirmation_paths_include_native_credentials_catalogs_and_defaults() {
         (HarnessKind::QwenCode, vec![".env", "settings.json"]),
         (
             HarnessKind::DeepSeekHarness,
-            vec![".credentials.yaml", "settings.yaml"],
+            vec![".credentials.yaml", "cordis.patch.yml"],
         ),
         (
             HarnessKind::Aider,
@@ -29,6 +29,13 @@ fn confirmation_paths_include_native_credentials_catalogs_and_defaults() {
         let paths = manager
             .paths_for_search(harness, true)
             .expect("configuration paths should resolve");
+        if harness == HarnessKind::DeepSeekHarness {
+            for profile in ["acp", "web", "headless", "sdk"] {
+                assert!(
+                    paths.contains(&home.join(format!(".dsh/profiles/{profile}/cordis.patch.yml")))
+                );
+            }
+        }
         let names = paths
             .iter()
             .filter_map(|path| path.file_name())

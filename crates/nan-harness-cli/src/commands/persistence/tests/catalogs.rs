@@ -49,7 +49,11 @@ fn legacy_catalog_health_reports_parse_read_and_matching_failures() {
             std::fs::write(&path, "{}").expect("edited document");
             assert_eq!(
                 manager.inspect_integration(integration).expect("health"),
-                Some(ConfigurationHealth::Changed)
+                Some(if integration == PersistentIntegration::DeepSeekHarness {
+                    ConfigurationHealth::Invalid
+                } else {
+                    ConfigurationHealth::Changed
+                })
             );
             std::fs::write(&path, [0xff]).expect("invalid document");
             assert_eq!(

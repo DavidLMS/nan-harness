@@ -63,6 +63,8 @@ pub(crate) enum PersistenceError {
     ManagedProviderChanged(PathBuf),
     #[error("managed configuration section in '{}' is invalid", .0.display())]
     InvalidManagedSection(PathBuf),
+    #[error("DeepSeek Harness profile '{}' uses a bundle composition that cannot be safely configured persistently; use `nanh dsh -- --profile <name>` for a managed launch", .0.display())]
+    UnsupportedDeepSeekProfile(PathBuf),
     #[error("'{}' contains a provider section that is not managed by nan-harness", .0.display())]
     UnmanagedSectionConflict(PathBuf),
     #[error("managed provider section in '{}' was changed after nan-harness created it", .0.display())]
@@ -151,6 +153,7 @@ impl PersistenceError {
             | Self::ProviderIsNotObject(_)
             | Self::InvalidManagedProvider(_)
             | Self::InvalidManagedSection(_)
+            | Self::UnsupportedDeepSeekProfile(_)
             | Self::ParseOpenCodeConfig { .. }
             | Self::ParseHarnessConfig { .. }
             | Self::ConfigRootIsNotObject { .. }
@@ -241,6 +244,9 @@ impl nan_harness_i18n::TerminalMessage for PersistenceError {
             }
             Self::InvalidManagedSection(field_0) => {
                 m::error_persistence_invalid_managed_section(locale, &(field_0.display()))
+            }
+            Self::UnsupportedDeepSeekProfile(path) => {
+                m::error_persistence_unsupported_deepseek_profile(locale, &path.display())
             }
             Self::UnmanagedSectionConflict(field_0) => {
                 m::error_persistence_unmanaged_section_conflict(locale, &(field_0.display()))

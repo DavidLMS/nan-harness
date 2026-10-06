@@ -80,10 +80,7 @@ pub(crate) fn tune_for_qwen(stage: ClassifierStage, body: &mut Map<String, Value
     };
     body.insert("max_tokens".to_owned(), Value::Number(max_tokens.into()));
     body.insert("temperature".to_owned(), Value::Number(0.into()));
-    body.insert(
-        "chat_template_kwargs".to_owned(),
-        json!({"enable_thinking": false}),
-    );
+    body.insert("reasoning_effort".to_owned(), json!("none"));
 }
 
 pub(crate) const fn policy_markers() -> [&'static str; POLICY_MARKERS.len()] {
@@ -154,7 +151,7 @@ mod tests {
 
         assert_eq!(body["max_tokens"], 256);
         assert_eq!(body["temperature"], 0);
-        assert_eq!(body["chat_template_kwargs"]["enable_thinking"], false);
+        assert_eq!(body["reasoning_effort"], "none");
         assert!(!stage_one_marker().is_empty());
         assert!(!stage_two_marker().is_empty());
     }

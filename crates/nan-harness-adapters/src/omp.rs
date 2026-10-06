@@ -183,7 +183,9 @@ export default function registerNan(pi) {{
 
   const models = Object.entries(profiles).map(([id, profile]) => {{
     const effortPolicy = profile.reasoningPolicy.kind === "effort";
-    const reasoning = effortPolicy || profile.reasoningPolicy.kind === "toggle" || profile.reasoningPolicy.kind === "always-on";
+    // OMP infers an effort selector from this flag; response trace parsing is independent.
+    const togglePolicy = profile.reasoningPolicy.kind === "toggle";
+    const reasoning = effortPolicy || togglePolicy;
     const effortMap = effortPolicy
       ? Object.fromEntries(profile.reasoningPolicy.supported.map((level) => [level, level]))
       : undefined;
@@ -195,8 +197,9 @@ export default function registerNan(pi) {{
         mode: "effort",
         efforts: profile.reasoningPolicy.supported,
         defaultLevel: profile.reasoningPolicy.default,
+        requiresEffort: false,
         effortMap
-      }} }} : {{}}),
+      }} }} : togglePolicy ? {{ thinking: {{ mode: "effort", efforts: ["high"], defaultLevel: "high", requiresEffort: false }} }} : {{}}),
       input: profile.input,
       cost: {{ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }},
       contextWindow: profile.contextWindow,
@@ -205,7 +208,17 @@ export default function registerNan(pi) {{
         supportsDeveloperRole: false,
         supportsReasoningEffort: effortPolicy,
         maxTokensField: "max_tokens",
-        ...(effortMap ? {{ reasoningEffortMap: effortMap }} : {{}})
+        thinkingFormat: togglePolicy ? "qwen-chat-template" : "openai",
+        reasoningDisableMode: togglePolicy ? "qwen-template-false" : "omit",
+        omitReasoningEffort: !effortPolicy,
+        qwenPreserveThinking: false,
+        qwenTemplateReasoningEffort: false,
+        ...(effortMap ? {{
+          reasoningEffortMap: effortMap,
+          thinkingFormat: "openai",
+          omitReasoningEffort: false,
+          reasoningDisableMode: profile.reasoningPolicy.supportsDisabled ? "none-effort" : "omit"
+        }} : {{}})
       }}
     }};
   }});

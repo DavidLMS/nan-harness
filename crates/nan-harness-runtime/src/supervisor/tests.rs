@@ -124,11 +124,8 @@ fn codex_reasoning_state_uses_shared_policy_resolution() {
         parse_codex_reasoning(
             "medium",
             ReasoningPolicy::Effort {
-                supported: [
-                    ReasoningEffort::Low,
-                    ReasoningEffort::Medium,
-                    ReasoningEffort::High,
-                ],
+                supported: nan_harness_core::SupportedReasoningEfforts::STANDARD,
+                supports_disabled: false,
                 default: ReasoningEffort::Medium,
             }
         ),

@@ -51,7 +51,7 @@ async fn bridge_tunes_both_native_auto_classifier_stages_for_qwen() {
             assert_eq!(upstream["model"], "qwen3.6");
             assert_eq!(upstream["max_tokens"], expected_tokens);
             assert_eq!(upstream["temperature"], 0);
-            assert_eq!(upstream["chat_template_kwargs"]["enable_thinking"], false);
+            assert_eq!(upstream["reasoning_effort"], "none");
         }
     }
     servers.shutdown().await;

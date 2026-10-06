@@ -1,4 +1,5 @@
 use super::PersistenceError;
+use super::helpers::jsonc_input;
 use jsonc_parser::cst::CstInputValue;
 use nan_harness_core::model::ReasoningPolicy;
 use nan_harness_core::{CodingModelProfile, coding_models_from_provider_ids};
@@ -121,101 +122,33 @@ pub(super) fn qwen_code_provider(
     models: &[CodingModelProfile],
     provider_base_url: &str,
 ) -> CstInputValue {
-    CstInputValue::Array(
-        models
-            .iter()
-            .map(|model| {
-                let mut generation_config = vec![
-                    (
-                        "contextWindowSize".to_owned(),
-                        CstInputValue::Number(model.context_window.to_string()),
-                    ),
-                    (
-                        "modalities".to_owned(),
-                        CstInputValue::Object(vec![(
-                            "image".to_owned(),
-                            CstInputValue::Bool(model.image_input),
-                        )]),
-                    ),
-                    (
-                        "samplingParams".to_owned(),
-                        CstInputValue::Object(vec![(
-                            "max_tokens".to_owned(),
-                            CstInputValue::Number(model.max_output_tokens.to_string()),
-                        )]),
-                    ),
-                ];
-                if matches!(model.reasoning, ReasoningPolicy::Unsupported) {
-                    generation_config.push(("reasoning".to_owned(), CstInputValue::Bool(false)));
-                }
-                CstInputValue::Object(vec![
-                    (
-                        "baseUrl".to_owned(),
-                        CstInputValue::String(provider_base_url.to_owned()),
-                    ),
-                    (
-                        "description".to_owned(),
-                        CstInputValue::String(model.description.clone()),
-                    ),
-                    (
-                        "envKey".to_owned(),
-                        CstInputValue::String("NAN_API_KEY".to_owned()),
-                    ),
-                    (
-                        "generationConfig".to_owned(),
-                        CstInputValue::Object(generation_config),
-                    ),
-                    ("id".to_owned(), CstInputValue::String(model.id.clone())),
-                    (
-                        "name".to_owned(),
-                        CstInputValue::String(model.display_name.clone()),
-                    ),
-                ])
-            })
-            .collect(),
-    )
+    let mut models = nan_harness_runtime::qwen_code_model_catalog(models, provider_base_url);
+    if let Some(entries) = models.as_array_mut() {
+        for entry in entries {
+            entry["envKey"] = serde_json::json!("NAN_API_KEY");
+        }
+    }
+    jsonc_input(&models)
 }
 
 pub(super) fn deepseek_provider_settings(
     models: &[CodingModelProfile],
     provider_base_url: &str,
 ) -> Result<String, PersistenceError> {
-    let base_url =
-        serde_json::to_string(provider_base_url).map_err(PersistenceError::SerializeProvider)?;
-    let default_model = models
+    let selected = models
         .iter()
         .find(|model| model.id == "qwen3.6")
         .or_else(|| models.first())
-        .map(|model| model.id.as_str())
         .ok_or(PersistenceError::NoModels)?;
-    let default_model =
-        serde_json::to_string(default_model).map_err(PersistenceError::SerializeProvider)?;
-    let mut output = format!(
-        "agent-default-model:\n  provider: nan-harness\n  model: {default_model}\nllm-pi-ai:\n  providers:\n    nan-harness:\n      displayName: NaN\n      apiKeyEnv: NAN_API_KEY\n      api: openai-completions\n      baseURL: {base_url}\n      models:\n"
-    );
-    for model in models {
-        let id = serde_json::to_string(&model.id).map_err(PersistenceError::SerializeProvider)?;
-        let name = serde_json::to_string(&model.display_name)
-            .map_err(PersistenceError::SerializeProvider)?;
-        let input = if model.image_input {
-            "[text, image]"
-        } else {
-            "[text]"
-        };
-        write!(
-            output,
-            "        - id: {id}\n          name: {name}\n          reasoning: {}\n          contextWindow: {}\n          maxTokens: {}\n          input: {input}\n          compat:\n            supportsReasoningEffort: {}\n",
-            !matches!(
-                model.reasoning,
-                ReasoningPolicy::Unsupported | ReasoningPolicy::Unknown
-            ),
-            model.context_window,
-            model.max_output_tokens,
-            matches!(model.reasoning, ReasoningPolicy::Effort { .. })
-        )
-        .map_err(|error| PersistenceError::RenderConfiguration(error.to_string()))?;
-    }
-    Ok(output)
+    let patch = serde_json::json!([
+        {"id": "agent-default-model", "config": {
+            "provider": nan_harness_runtime::deepseek_provider_for(selected), "model": selected.id,
+        }},
+        {"id": "llm-pi-ai", "config": {"providers":
+            nan_harness_runtime::deepseek_provider_catalog(models, provider_base_url)}},
+    ]);
+    serde_yaml_ng::to_string(&patch)
+        .map_err(|error| PersistenceError::RenderConfiguration(error.to_string()))
 }
 
 pub(super) fn aider_model_settings(
@@ -235,6 +168,9 @@ pub(super) fn aider_model_settings(
             "- name: {name}\n  edit_format: diff\n  editor_model_name: {name}\n  use_repo_map: true\n  weak_model_name: {name}\n  extra_params:\n    model: {upstream}\n    api_key: os.environ/NAN_API_KEY\n    api_base: {api_base}\n"
         )
         .map_err(|error| PersistenceError::RenderConfiguration(error.to_string()))?;
+        if matches!(model.reasoning, ReasoningPolicy::Effort { .. }) {
+            output.push_str("  accepts_settings: [reasoning_effort]\n");
+        }
     }
     Ok(output)
 }
@@ -272,6 +208,13 @@ pub(super) fn aider_model_metadata(
                     (
                         "supports_vision".to_owned(),
                         CstInputValue::Bool(model.image_input),
+                    ),
+                    (
+                        "supports_reasoning".to_owned(),
+                        CstInputValue::Bool(!matches!(
+                            model.reasoning,
+                            ReasoningPolicy::Unknown | ReasoningPolicy::Unsupported
+                        )),
                     ),
                 ]),
             )

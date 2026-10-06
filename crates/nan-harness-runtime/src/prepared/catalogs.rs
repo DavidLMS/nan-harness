@@ -4,17 +4,20 @@ use nan_harness_core::launch_plan::{
     CLAUDE_MODEL_PICKER_PLACEHOLDER, CLAUDE_MODEL_PRESENTATIONS_PLACEHOLDER,
     CLINE_MODEL_CATALOG_PLACEHOLDER, DEEPSEEK_MODEL_CATALOG_PLACEHOLDER,
     GOOSE_MODEL_CATALOG_PLACEHOLDER, HERMES_MODEL_CATALOG_PLACEHOLDER,
-    KIMI_CODE_MODEL_CATALOG_PLACEHOLDER, OPENCLAW_MODEL_ALIASES_PLACEHOLDER,
-    OPENCLAW_MODEL_CATALOG_PLACEHOLDER, OPENCODE_MODEL_CATALOG_PLACEHOLDER,
-    PI_MODEL_CATALOG_PLACEHOLDER, QWEN_CODE_MODEL_CATALOG_PLACEHOLDER,
-    SELECTED_MODEL_CAPABILITIES_PLACEHOLDER, SELECTED_MODEL_CONTEXT_WINDOW_PLACEHOLDER,
-    SELECTED_MODEL_DISPLAY_NAME_PLACEHOLDER, SELECTED_MODEL_MAX_OUTPUT_TOKENS_PLACEHOLDER,
-    SELECTED_MODEL_REASONING_EFFORT_PLACEHOLDER, ZCODE_PROVIDER_CONFIG_PLACEHOLDER,
+    HERMES_REASONING_CATALOG_PLACEHOLDER, KIMI_CODE_MODEL_CATALOG_PLACEHOLDER,
+    OPENCLAW_MODEL_ALIASES_PLACEHOLDER, OPENCLAW_MODEL_CATALOG_PLACEHOLDER,
+    OPENCODE_MODEL_CATALOG_PLACEHOLDER, PI_MODEL_CATALOG_PLACEHOLDER,
+    QWEN_CODE_MODEL_CATALOG_PLACEHOLDER, SELECTED_MODEL_CAPABILITIES_PLACEHOLDER,
+    SELECTED_MODEL_CONTEXT_WINDOW_PLACEHOLDER, SELECTED_MODEL_DISPLAY_NAME_PLACEHOLDER,
+    SELECTED_MODEL_MAX_OUTPUT_TOKENS_PLACEHOLDER, SELECTED_MODEL_REASONING_EFFORT_PLACEHOLDER,
+    ZCODE_PROVIDER_CONFIG_PLACEHOLDER,
 };
 use nan_harness_i18n::DiagnosticText;
 use nan_harness_i18n::messages as detail_messages;
 
 mod claude;
+mod deepseek;
+pub use deepseek::{deepseek_provider_catalog, deepseek_provider_for};
 mod json;
 mod model;
 mod structured;
@@ -22,15 +25,15 @@ mod zcode;
 pub use zcode::zcode_provider_config;
 
 pub(super) use claude::{claude_model_picker, render_claude_model_presentations};
-pub use json::opencode_model_catalog;
 pub(super) use json::{
     aider_model_metadata, aider_model_settings, cline_model_catalog, goose_model_catalog,
     hermes_model_catalog, openclaw_model_aliases, openclaw_model_catalog, pi_model_catalog,
-    qwen_code_model_catalog, replace_json_placeholder,
+    replace_json_placeholder,
 };
+pub use json::{opencode_model_catalog, qwen_code_model_catalog};
 pub(super) use model::{
-    effort_name, model_input, reasoning_capable, render_reasoning_effort, render_selected_model,
-    selected_model_reasoning_effort, unique_models,
+    effort_name, model_input, model_reasoning_selection, reasoning_capable,
+    render_reasoning_effort, render_selected_model, selected_model_reasoning_effort, unique_models,
 };
 pub(super) use structured::{deepseek_model_catalog, kimi_code_model_catalog};
 
@@ -42,6 +45,7 @@ pub(super) fn contains_model_catalog_placeholder(value: &str) -> bool {
         DEEPSEEK_MODEL_CATALOG_PLACEHOLDER,
         GOOSE_MODEL_CATALOG_PLACEHOLDER,
         HERMES_MODEL_CATALOG_PLACEHOLDER,
+        HERMES_REASONING_CATALOG_PLACEHOLDER,
         OPENCODE_MODEL_CATALOG_PLACEHOLDER,
         ZCODE_PROVIDER_CONFIG_PLACEHOLDER,
         OPENCLAW_MODEL_ALIASES_PLACEHOLDER,
@@ -86,64 +90,63 @@ pub(super) fn render_model_catalogs(
     );
     zcode_config["config"]["defaultModelSelection"]["options"]["reasoningLevel"] =
         serde_json::json!(nan_harness_core::launch_plan::ZCODE_REASONING_LEVEL_PLACEHOLDER);
-    replace_json_placeholder(
-        &mut rendered,
-        ZCODE_PROVIDER_CONFIG_PLACEHOLDER,
-        &zcode_config,
-    )?;
-    replace_json_placeholder(
-        &mut rendered,
-        AIDER_MODEL_METADATA_PLACEHOLDER,
-        &aider_model_metadata(&models),
-    )?;
-    replace_json_placeholder(
-        &mut rendered,
-        AIDER_MODEL_SETTINGS_PLACEHOLDER,
-        &aider_model_settings(&models),
-    )?;
-    replace_json_placeholder(
-        &mut rendered,
-        CLINE_MODEL_CATALOG_PLACEHOLDER,
-        &cline_model_catalog(&models),
-    )?;
-    replace_json_placeholder(
-        &mut rendered,
-        GOOSE_MODEL_CATALOG_PLACEHOLDER,
-        &goose_model_catalog(&models),
-    )?;
-    replace_json_placeholder(
-        &mut rendered,
-        HERMES_MODEL_CATALOG_PLACEHOLDER,
-        &hermes_model_catalog(&models),
-    )?;
-    replace_json_placeholder(
-        &mut rendered,
-        PI_MODEL_CATALOG_PLACEHOLDER,
-        &pi_model_catalog(&models),
-    )?;
-    replace_json_placeholder(
-        &mut rendered,
-        OPENCODE_MODEL_CATALOG_PLACEHOLDER,
-        &opencode_model_catalog(&models),
-    )?;
-    replace_json_placeholder(
-        &mut rendered,
-        OPENCLAW_MODEL_ALIASES_PLACEHOLDER,
-        &openclaw_model_aliases(&models),
-    )?;
-    replace_json_placeholder(
-        &mut rendered,
-        OPENCLAW_MODEL_CATALOG_PLACEHOLDER,
-        &openclaw_model_catalog(&models),
-    )?;
-    replace_json_placeholder(
-        &mut rendered,
-        QWEN_CODE_MODEL_CATALOG_PLACEHOLDER,
-        &qwen_code_model_catalog(&models, provider_base_url),
-    )?;
+    for (placeholder, catalog) in [
+        (ZCODE_PROVIDER_CONFIG_PLACEHOLDER, zcode_config),
+        (
+            AIDER_MODEL_METADATA_PLACEHOLDER,
+            aider_model_metadata(&models),
+        ),
+        (
+            AIDER_MODEL_SETTINGS_PLACEHOLDER,
+            aider_model_settings(&models),
+        ),
+        (
+            CLINE_MODEL_CATALOG_PLACEHOLDER,
+            cline_model_catalog(&models),
+        ),
+        (
+            GOOSE_MODEL_CATALOG_PLACEHOLDER,
+            goose_model_catalog(&models),
+        ),
+        (
+            HERMES_MODEL_CATALOG_PLACEHOLDER,
+            hermes_model_catalog(&models),
+        ),
+        (PI_MODEL_CATALOG_PLACEHOLDER, pi_model_catalog(&models)),
+        (
+            OPENCODE_MODEL_CATALOG_PLACEHOLDER,
+            opencode_model_catalog(&models),
+        ),
+        (
+            OPENCLAW_MODEL_ALIASES_PLACEHOLDER,
+            openclaw_model_aliases(&models),
+        ),
+        (
+            OPENCLAW_MODEL_CATALOG_PLACEHOLDER,
+            openclaw_model_catalog(&models),
+        ),
+        (
+            QWEN_CODE_MODEL_CATALOG_PLACEHOLDER,
+            qwen_code_model_catalog(&models, provider_base_url),
+        ),
+    ] {
+        replace_json_placeholder(&mut rendered, placeholder, &catalog)?;
+    }
+    if rendered.contains(HERMES_REASONING_CATALOG_PLACEHOLDER) {
+        let profiles = serde_json::to_string(&pi_model_catalog(&models)).map_err(|error| {
+            DiagnosticText::new(|locale| {
+                detail_messages::detail_serialize_the_nan_model_catalog_failed(locale, &error)
+            })
+        })?;
+        replace_json_placeholder(
+            &mut rendered,
+            HERMES_REASONING_CATALOG_PLACEHOLDER,
+            &serde_json::Value::String(profiles),
+        )?;
+    }
     rendered = rendered.replace(
         DEEPSEEK_MODEL_CATALOG_PLACEHOLDER,
-        &deepseek_model_catalog(&models)?,
+        &deepseek_model_catalog(&models, provider_base_url)?,
     );
     rendered = rendered.replace(
         KIMI_CODE_MODEL_CATALOG_PLACEHOLDER,
@@ -259,7 +262,8 @@ mod tests {
         for (placeholder, expected) in [
             (
                 DEEPSEEK_MODEL_CATALOG_PLACEHOLDER,
-                deepseek_model_catalog(&unique).expect("DeepSeek catalog should render"),
+                deepseek_model_catalog(&unique, provider_base_url)
+                    .expect("DeepSeek catalog should render"),
             ),
             (
                 KIMI_CODE_MODEL_CATALOG_PLACEHOLDER,

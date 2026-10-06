@@ -7,6 +7,17 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Preserve model-aware reasoning levels, explicit off and automatic behavior across
+  bridges and native clients, including maximum effort and Gemma startup defaults.
+- Require Qwen Code 0.25.0 and DeepSeek Harness 0.2.0-rc.2 for the updated native
+  configuration contracts.
+- Keep saved OpenCode, Qwen, Aider, Pi, Prime Agent, OMP and Hermes configuration
+  aligned with managed launches; restore reasoning choices that clients discarded.
+- Configure modern DeepSeek Harness before first use and preserve native profile
+  providers and credentials through configuration refresh and removal.
+
 ## [0.1.15] - 2026-10-06
 
 ### Changed

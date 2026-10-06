@@ -18,6 +18,8 @@ pub(super) fn prepare(
     model_catalog: Option<&[CodingModelProfile]>,
     provider_secrets: &SecretStore,
 ) -> Result<PreparedLaunch, PreparedError> {
+    let deepseek_config =
+        super::deepseek::load_effective_config(plan).map_err(PreparedError::ModelCatalog)?;
     let bridge_base_url = bridge.as_ref().map(|values| values.base_url.as_str());
     let client_base_url = bridge
         .as_ref()
@@ -52,6 +54,13 @@ pub(super) fn prepare(
                 model_catalog,
             )
             .and_then(|rendered| {
+                if resource_id == "deepseek-harness-patch" {
+                    super::deepseek::compose_patch(&rendered, deepseek_config.as_ref())
+                } else {
+                    Ok(rendered)
+                }
+            })
+            .and_then(|rendered| {
                 render_secret_placeholders(
                     rendered,
                     bridge.as_ref(),
@@ -65,23 +74,22 @@ pub(super) fn prepare(
             })
         },
     )?;
-    let arguments = plan
-        .process
-        .arguments
-        .iter()
-        .map(|argument| {
-            values::resolve_argument(argument, &workspace).and_then(|argument| {
-                let argument = catalogs::render_model_catalogs(
-                    &argument,
-                    client_base_url,
-                    &plan.model.resolved_id,
-                    model_catalog,
-                )
-                .map_err(PreparedError::ModelCatalog)?;
-                values::render_runtime_value(&argument, &runtime_values)
+    let arguments =
+        reasoning_arguments(&plan.process.arguments, template_reasoning.effort.is_some())
+            .into_iter()
+            .map(|argument| {
+                values::resolve_argument(argument, &workspace).and_then(|argument| {
+                    let argument = catalogs::render_model_catalogs(
+                        &argument,
+                        client_base_url,
+                        &plan.model.resolved_id,
+                        model_catalog,
+                    )
+                    .map_err(PreparedError::ModelCatalog)?;
+                    values::render_runtime_value(&argument, &runtime_values)
+                })
             })
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+            .collect::<Result<Vec<_>, _>>()?;
     let public_environment = plan
         .environment
         .public
@@ -112,6 +120,27 @@ pub(super) fn prepare(
     })
 }
 
+fn reasoning_arguments(arguments: &[String], selected: bool) -> Vec<&String> {
+    let mut kept = Vec::with_capacity(arguments.len());
+    let mut iter = arguments.iter().peekable();
+    while let Some(argument) = iter.next() {
+        if !selected
+            && argument == "-c"
+            && iter.peek().is_some_and(|next| {
+                next.starts_with("model_reasoning_effort=")
+                    && next.contains(
+                        nan_harness_core::launch_plan::SELECTED_MODEL_REASONING_EFFORT_PLACEHOLDER,
+                    )
+            })
+        {
+            iter.next();
+        } else {
+            kept.push(argument);
+        }
+    }
+    kept
+}
+
 struct TemplateReasoning {
     effort: Option<String>,
     zcode_level: &'static str,
@@ -131,10 +160,21 @@ impl TemplateReasoning {
                 )
             })
             .transpose()
-            .map_err(PreparedError::ModelCatalog)?;
+            .map_err(PreparedError::ModelCatalog)?
+            .flatten();
         Ok(Self {
             effort,
-            zcode_level: zcode_reasoning_level(plan.model.reasoning_selection),
+            zcode_level: zcode_reasoning_level(models.and_then(|models| {
+                models
+                    .iter()
+                    .find(|model| model.id == plan.model.resolved_id)
+                    .map(|model| {
+                        catalogs::model_reasoning_selection(
+                            plan.model.reasoning_selection,
+                            model.reasoning,
+                        )
+                    })
+            })),
         })
     }
 }
@@ -273,6 +313,47 @@ pub(crate) fn requires_model_catalog(plan: &LaunchPlan) -> bool {
 mod tests {
     use super::render_template;
     use nan_harness_core::{SecretRef, SecretStore, SecretValue};
+
+    #[test]
+    fn stale_codex_preference_does_not_turn_automatic_reasoning_off() {
+        use nan_harness_core::launch_plan::SELECTED_MODEL_REASONING_EFFORT_PLACEHOLDER;
+        let models = [nan_harness_core::coding_model_profile("deepseek-v4-flash").unwrap()];
+        let effort = super::catalogs::selected_model_reasoning_effort(
+            "deepseek-v4-flash",
+            Some(nan_harness_core::ReasoningSelection::Effort(
+                nan_harness_core::ReasoningEffort::High,
+            )),
+            &models,
+        )
+        .unwrap();
+        let template = format!(
+            "model = \"deepseek-v4-flash\"\nmodel_reasoning_effort = \"{SELECTED_MODEL_REASONING_EFFORT_PLACEHOLDER}\"\n"
+        );
+        let rendered = render_template(
+            &template,
+            "http://127.0.0.1:1234/v1",
+            "https://nan.invalid/v1",
+            "deepseek-v4-flash",
+            &super::TemplateReasoning {
+                effort,
+                zcode_level: "auto",
+            },
+            None,
+            Some(&models),
+        )
+        .unwrap();
+        assert_eq!(rendered, "model = \"deepseek-v4-flash\"\n");
+        let arguments = [
+            "-c".to_owned(),
+            format!("model_reasoning_effort=\"{SELECTED_MODEL_REASONING_EFFORT_PLACEHOLDER}\""),
+            "-c".to_owned(),
+            "model_provider=\"nan_harness\"".to_owned(),
+        ];
+        assert_eq!(
+            super::reasoning_arguments(&arguments, false),
+            arguments[2..].iter().collect::<Vec<_>>()
+        );
+    }
 
     #[test]
     fn provider_secret_placeholders_are_materialized_without_a_bridge() {

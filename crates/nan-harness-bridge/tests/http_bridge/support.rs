@@ -95,6 +95,8 @@ pub(super) async fn start_servers() -> TestServers {
             models: ClaudeModelCatalog::from_provider_ids(
                 [
                     "qwen3.6".to_owned(),
+                    "glm5.2".to_owned(),
+                    "glm5.3-flash".to_owned(),
                     "deepseek-v4-flash".to_owned(),
                     "mimo-v2.6-flash".to_owned(),
                     "gemma4".to_owned(),

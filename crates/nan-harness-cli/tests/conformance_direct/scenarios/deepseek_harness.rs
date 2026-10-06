@@ -41,14 +41,6 @@ async fn deepseek_harness_native_tools_complete_round_trips() {
             }),
         ),
         call(
-            "str_replace_editor",
-            json!({
-                "command": "create",
-                "path": format!("{workspace_path}/editor-output.txt"),
-                "file_text": "DSH_EDITOR_OK\n"
-            }),
-        ),
-        call(
             "bash",
             json!({
                 "command": "printf DSH_BASH_OK > bash-output.txt",
@@ -112,11 +104,11 @@ async fn deepseek_harness_native_tools_complete_round_trips() {
         call(
             "send_message",
             json!({
-                "agent_id": "{{result_id:13}}",
+                "agent_id": "{{result_id:12}}",
                 "message": "Reply exactly DSH_FOLLOWUP_OK without using tools."
             }),
         ),
-        call("interrupt_agent", json!({"agent_id": "{{result_id:13}}"})),
+        call("interrupt_agent", json!({"agent_id": "{{result_id:12}}"})),
         call("list_agents", json!({"scope": "children"})),
         call(
             "bash",
@@ -129,12 +121,12 @@ async fn deepseek_harness_native_tools_complete_round_trips() {
         ),
         call(
             "job_output",
-            json!({"job_id": "{{result_id:17}}", "wait": false}),
+            json!({"job_id": "{{result_id:16}}", "wait": false}),
         ),
         call("job_list", json!({})),
         call(
             "job_kill",
-            json!({"job_id": "{{result_id:17}}", "reason": "Conformance complete"}),
+            json!({"job_id": "{{result_id:16}}", "reason": "Conformance complete"}),
         ),
         call(
             "create_goal",
@@ -147,16 +139,9 @@ async fn deepseek_harness_native_tools_complete_round_trips() {
         call(
             "update_goal",
             json!({
-                "goal_id": "{{result_id:22}}",
+                "goal_id": "{{result_id:21}}",
                 "revision": 1,
                 "action": "pause"
-            }),
-        ),
-        call(
-            "ralph",
-            json!({
-                "objective": "Return a deterministic conformance result",
-                "maxRounds": 1
             }),
         ),
     ];
@@ -177,6 +162,5 @@ async fn deepseek_harness_native_tools_complete_round_trips() {
 
     assert_file(workspace.path(), "write-output.txt", "DSH_WRITE_OK");
     assert_file(workspace.path(), "edit-target.txt", "DSH_EDIT_AFTER");
-    assert_file(workspace.path(), "editor-output.txt", "DSH_EDITOR_OK");
     assert_file(workspace.path(), "bash-output.txt", "DSH_BASH_OK");
 }

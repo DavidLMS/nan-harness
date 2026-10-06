@@ -93,7 +93,16 @@ pub(crate) fn prepare_removals(
         .map(|receipt| match receipt {
             DocumentReceipt::Json(receipt) => prepare_json_removal(receipt),
             DocumentReceipt::Yaml(receipt) => prepare_yaml_removal(receipt),
-            DocumentReceipt::TextBlock(receipt) => prepare_text_block_removal(receipt),
+            DocumentReceipt::TextBlock(receipt) => {
+                let upgraded = deepseek_credential_receipt(
+                    receipt,
+                    &read_optional(&receipt.path)?.unwrap_or_default(),
+                )?;
+                match upgraded {
+                    Some(receipt) => prepare_yaml_removal(&receipt),
+                    None => prepare_text_block_removal(receipt),
+                }
+            }
             DocumentReceipt::ExactFile(receipt) => prepare_exact_file_removal(receipt),
             DocumentReceipt::Toml(receipt) => prepare_kimi_removal(receipt),
         })

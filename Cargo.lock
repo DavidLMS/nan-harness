@@ -1769,6 +1769,7 @@ dependencies = [
 name = "nan-harness-cli"
 version = "0.1.15"
 dependencies = [
+ "axum",
  "base64",
  "clap",
  "clap_complete",

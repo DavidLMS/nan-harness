@@ -29,8 +29,15 @@ pub(super) struct ProbeChild {
 }
 
 impl ProbeChild {
-    pub(super) fn spawn(executable: &Path, arguments: &[&str]) -> io::Result<Self> {
+    pub(super) fn spawn(
+        executable: &Path,
+        arguments: &[&str],
+        directory: Option<&Path>,
+    ) -> io::Result<Self> {
         let mut command = command_for_executable(executable, arguments);
+        if let Some(directory) = directory {
+            command.current_dir(directory);
+        }
         command.stdin(Stdio::null());
         #[cfg(not(windows))]
         command.stdout(Stdio::piped()).stderr(Stdio::piped());

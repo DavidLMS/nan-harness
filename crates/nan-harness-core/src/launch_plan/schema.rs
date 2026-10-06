@@ -27,6 +27,7 @@ pub const DEEPSEEK_MODEL_CATALOG_PLACEHOLDER: &str = "{runtime:deepseek_model_ca
 pub const GOOSE_MODEL_CATALOG_PLACEHOLDER: &str = "{runtime:goose_model_catalog}";
 pub const GOOSE_ADDITIONAL_CONFIG_FILES_PLACEHOLDER: &str =
     "{runtime:goose_additional_config_files}";
+pub const HERMES_REASONING_CATALOG_PLACEHOLDER: &str = "{hermes-reasoning-catalog-json}";
 pub const HERMES_MODEL_CATALOG_PLACEHOLDER: &str = "{runtime:hermes_model_catalog}";
 pub const ZCODE_REASONING_LEVEL_PLACEHOLDER: &str = "{runtime:zcode_reasoning_level}";
 pub const ZCODE_PROVIDER_CONFIG_PLACEHOLDER: &str = "{runtime:zcode_provider_config}";

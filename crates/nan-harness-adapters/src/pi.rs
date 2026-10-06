@@ -13,6 +13,8 @@ use nan_harness_core::{
 };
 use std::collections::BTreeSet;
 
+const REASONING_EXTENSION: &str = include_str!("pi/reasoning.js");
+
 const CREDENTIAL_TARGET: &str = "NAN_API_KEY";
 const EXTENSION_ARTIFACT_ID: &str = "pi-provider-extension";
 const EXTENSION_PATH_PLACEHOLDER: &str = "{artifact:pi-provider-extension}";
@@ -106,7 +108,10 @@ fn pi_family_plan(context: &PlanContext) -> Result<LaunchPlan, PlanError> {
                 kind: TemporaryArtifactKind::File,
                 path_hint: "nan-provider.mjs".to_owned(),
                 mode: TemporaryArtifactMode::OwnerFile,
-                content_template: Some(provider_extension(context.web_search_policy)),
+                content_template: Some(provider_extension(
+                    context.web_search_policy,
+                    context.harness.kind == HarnessKind::PrimeAgent,
+                )),
                 lifecycle: ArtifactLifecycle::Launch,
             }],
             configuration_overlays,
@@ -114,7 +119,7 @@ fn pi_family_plan(context: &PlanContext) -> Result<LaunchPlan, PlanError> {
     )
 }
 
-fn provider_extension(search_policy: WebSearchPolicy) -> String {
+fn provider_extension(search_policy: WebSearchPolicy, preserve_native_defaults: bool) -> String {
     let search_registration = search_registration(
         &serde_json::Value::String(format!("{BRIDGE_BASE_URL_PLACEHOLDER}/v1/search")).to_string(),
         "apiKey",
@@ -129,6 +134,7 @@ fn provider_extension(search_policy: WebSearchPolicy) -> String {
 
 const baseUrl = "{PROVIDER_BASE_URL_PLACEHOLDER}".replace(/\/+$/, "");
 const profiles = {PI_MODEL_CATALOG_PLACEHOLDER};
+{REASONING_EXTENSION}
 
 export default function registerNan(pi) {{
   const apiKey = process.env.NAN_API_KEY;
@@ -138,6 +144,7 @@ export default function registerNan(pi) {{
     id,
     name: profile.name,
     reasoning: profile.reasoningPolicy.kind !== "unsupported" && profile.reasoningPolicy.kind !== "unknown",
+    thinkingLevelMap: nanThinkingLevels(profile.reasoningPolicy),
     input: profile.input,
     cost: {{ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }},
     contextWindow: profile.contextWindow,
@@ -145,8 +152,7 @@ export default function registerNan(pi) {{
     compat: {{
       supportsDeveloperRole: false,
       supportsReasoningEffort: profile.reasoningPolicy.kind === "effort",
-      maxTokensField: "max_tokens",
-      ...(profile.reasoningPolicy.kind === "effort" ? {{ thinkingLevelMap: {{ low: "low", medium: "medium", high: "high" }} }} : {{}})
+      maxTokensField: "max_tokens"
     }}
   }}));
 
@@ -157,6 +163,7 @@ export default function registerNan(pi) {{
     api: "openai-completions",
     models
   }});
+  registerNanReasoning(pi, profiles, {preserve_native_defaults});
 {NAN_SEARCH_BLOCK_BEGIN}
 {search_registration}
 {NAN_SEARCH_BLOCK_END}
@@ -178,6 +185,27 @@ export default function registerNanSearch(pi) {{
 "#,
         saved_search_javascript(),
         persistent_search_registration(mode),
+    )
+}
+
+/// Preserves native reasoning selection before Pi collapses off into omission.
+#[must_use]
+pub fn render_pi_reasoning_extension(
+    models: &[nan_harness_core::CodingModelProfile],
+    preserve_native_defaults: bool,
+) -> String {
+    let profiles = models
+        .iter()
+        .map(|model| {
+            (
+                model.id.clone(),
+                serde_json::json!({"reasoningPolicy": model.reasoning}),
+            )
+        })
+        .collect::<serde_json::Map<_, _>>();
+    format!(
+        "{REASONING_EXTENSION}\nexport default function register(pi) {{ registerNanReasoning(pi, {}, {preserve_native_defaults}); }}\n",
+        serde_json::Value::Object(profiles)
     )
 }
 

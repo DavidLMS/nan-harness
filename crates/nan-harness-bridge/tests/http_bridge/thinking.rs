@@ -12,18 +12,18 @@ async fn bridge_translates_anthropic_thinking_controls_without_changing_defaults
             "anthropic/nan/qwen3.6",
             json!({"type":"disabled"}),
             Value::Null,
-            "chat_template_kwargs",
-            json!({"enable_thinking":false}),
+            "reasoning_effort",
+            json!("none"),
         ),
         (
             "anthropic/nan/qwen3.6",
             json!({"type":"enabled","budget_tokens":1024}),
             Value::Null,
-            "chat_template_kwargs",
-            json!({"enable_thinking":true}),
+            "reasoning_effort",
+            json!("high"),
         ),
         (
-            "anthropic/nan/deepseek-v4-flash",
+            "anthropic/nan/glm5.2",
             json!({"type":"adaptive"}),
             json!({"effort":"high"}),
             "reasoning_effort",
@@ -33,8 +33,8 @@ async fn bridge_translates_anthropic_thinking_controls_without_changing_defaults
             "anthropic/nan/qwen3.6",
             json!({"type":"adaptive"}),
             json!({"effort":"high"}),
-            "chat_template_kwargs",
-            json!({"enable_thinking":true}),
+            "reasoning_effort",
+            json!("high"),
         ),
     ] {
         let mut request = json!({
@@ -86,7 +86,7 @@ async fn bridge_translates_anthropic_thinking_controls_without_changing_defaults
                 },
             ),
             (
-                "deepseek-v4-flash",
+                "glm5.2",
                 ModelUsageSnapshot {
                     responses_with_usage: 1,
                     input_tokens: 5,
@@ -114,5 +114,56 @@ async fn bridge_rejects_impossible_thinking_controls() {
     )
     .await;
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    servers.shutdown().await;
+}
+
+#[tokio::test]
+async fn bridge_preserves_graded_effort_off_and_automatic_defaults() {
+    let servers = start_servers().await;
+    for model in ["qwen3.6", "gemma4", "glm5.3-flash"] {
+        for (thinking, output, expected) in [
+            (Value::Null, Value::Null, None),
+            (
+                json!({"type":"adaptive"}),
+                json!({"effort":"low"}),
+                Some("low"),
+            ),
+            (
+                json!({"type":"adaptive"}),
+                json!({"effort":"medium"}),
+                Some("medium"),
+            ),
+            (
+                json!({"type":"adaptive"}),
+                json!({"effort":"high"}),
+                Some("high"),
+            ),
+            (
+                json!({"type":"adaptive"}),
+                json!({"effort":"max"}),
+                Some("max"),
+            ),
+        ] {
+            let mut request = json!({
+                "model": format!("anthropic/nan/{model}"), "max_tokens": 2048,
+                "messages": [{"role":"user","content":"think"}]
+            });
+            if !thinking.is_null() {
+                request["thinking"] = thinking;
+            }
+            if !output.is_null() {
+                request["output_config"] = output;
+            }
+            let response = post_messages(&servers, "/v1/messages", &request).await;
+            assert_eq!(response.status(), StatusCode::OK, "{model}: {expected:?}");
+            let requests = servers.state.requests.lock().unwrap();
+            let body = requests.last().unwrap();
+            assert_eq!(
+                body.get("reasoning_effort").and_then(Value::as_str),
+                expected
+            );
+            assert!(body.get("chat_template_kwargs").is_none());
+        }
+    }
     servers.shutdown().await;
 }

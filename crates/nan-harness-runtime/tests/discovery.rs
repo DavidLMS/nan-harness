@@ -64,7 +64,7 @@ fn bundled_manifest_is_typed_and_complete() {
             .expect("Qwen Code compatibility should exist")
             .last_compatible_version
             .to_string(),
-        "0.23.0"
+        "0.25.0"
     );
 
     let mut advanced = manifest;
@@ -168,7 +168,7 @@ fn split_discovery_matches_the_compatible_wrapper() {
 
 #[test]
 fn discovery_honors_each_harness_version_command() {
-    let executable = argument_sensitive_executable("--version", "dsh 0.1.0-rc.7");
+    let executable = argument_sensitive_executable("--version", "dsh 0.2.0-rc.2");
     let report = discover_harness(
         HarnessKind::DeepSeekHarness,
         Some(&executable),
@@ -184,7 +184,7 @@ fn discovery_honors_each_harness_version_command() {
         report.harness.version_status,
         VersionStatus::Tested | VersionStatus::Supported
     ));
-    assert_eq!(report.harness.detected_version, "dsh 0.1.0-rc.7");
+    assert_eq!(report.harness.detected_version, "dsh 0.2.0-rc.2");
 }
 
 #[test]

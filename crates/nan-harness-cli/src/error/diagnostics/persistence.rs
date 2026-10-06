@@ -74,6 +74,7 @@ pub(super) fn typed(error: &PersistenceError) -> Diagnostic {
         | PersistenceError::ProviderIsNotObject(_)
         | PersistenceError::InvalidManagedProvider(_)
         | PersistenceError::InvalidManagedSection(_)
+        | PersistenceError::UnsupportedDeepSeekProfile(_)
         | PersistenceError::InvalidManagedBlock
         | PersistenceError::ConfigRootIsNotObject { .. }
         | PersistenceError::ConfigFieldIsNotObject { .. }

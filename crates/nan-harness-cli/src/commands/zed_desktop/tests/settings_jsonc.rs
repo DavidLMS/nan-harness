@@ -28,11 +28,8 @@ fn jsonc_patch_preserves_user_content_and_builds_the_live_catalog() {
             32_768,
             true,
             ReasoningPolicy::Effort {
-                supported: [
-                    ReasoningEffort::Low,
-                    ReasoningEffort::Medium,
-                    ReasoningEffort::High,
-                ],
+                supported: nan_harness_core::SupportedReasoningEfforts::STANDARD,
+                supports_disabled: false,
                 default: ReasoningEffort::Medium,
             },
         ),
@@ -78,7 +75,7 @@ fn jsonc_patch_preserves_user_content_and_builds_the_live_catalog() {
     assert_eq!(available[0]["display_name"], "NaN Qwen");
     assert_eq!(available[0]["max_tokens"], 262_144);
     assert_eq!(available[0]["max_output_tokens"], 32_768);
-    assert_eq!(available[0]["reasoning_effort"], "medium");
+    assert!(available[0].get("reasoning_effort").is_none());
     // Zed 1.18 rejects partial capability objects even for documented defaults.
     assert_eq!(
         available[0]["capabilities"],

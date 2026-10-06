@@ -62,7 +62,10 @@ pub use discovery::{
     bundled_compatibility_manifest, discover_harness, inspect_harness, is_executable_file,
     locate_harness_executable,
 };
-pub use prepared::{PreparedError, opencode_model_catalog, zcode_provider_config};
+pub use prepared::{
+    PreparedError, deepseek_provider_catalog, deepseek_provider_for, opencode_model_catalog,
+    qwen_code_model_catalog, zcode_provider_config,
+};
 pub use process::ProcessError;
 pub use search_policy::{
     SearchAvailability, SearchBackend, SearchConfigError, SearchConfigStore,

@@ -30,7 +30,7 @@ fn direct_harness_dry_runs_build_safe_native_overlays() {
         ),
         (
             "dsh",
-            "0.1.0-rc.7",
+            "0.2.0-rc.2",
             "NAN_API_KEY",
             "{artifact:deepseek-harness-patch}",
         ),
@@ -46,7 +46,7 @@ fn direct_harness_dry_runs_build_safe_native_overlays() {
             "OPENAI_API_KEY",
             "{artifact:cline-config}",
         ),
-        ("qwen", "0.21.13", "OPENAI_API_KEY", "OPENAI_MODEL"),
+        ("qwen", "0.25.0", "OPENAI_API_KEY", "OPENAI_MODEL"),
         (
             "kimi",
             "0.36.1",
@@ -127,9 +127,9 @@ fn harness_aliases_remain_executable() {
         ("claude-code", "2.1.233 (Claude Code)", "claude-code"),
         ("oh-my-pi", "18.0.11", "omp"),
         ("prime", "0.7.2", "prime-agent"),
-        ("deepseek", "0.1.0-rc.7", "deepseek-harness"),
-        ("deepseek-harness", "0.1.0-rc.7", "deepseek-harness"),
-        ("qwen-code", "0.21.13", "qwen-code"),
+        ("deepseek", "0.2.0-rc.2", "deepseek-harness"),
+        ("deepseek-harness", "0.2.0-rc.2", "deepseek-harness"),
+        ("qwen-code", "0.25.0", "qwen-code"),
         ("kimi-code", "0.36.1", "kimi-code"),
     ];
 

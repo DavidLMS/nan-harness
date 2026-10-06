@@ -22,7 +22,32 @@ pub(crate) fn write_profile_config(
     let with_model = replace_top_level_block(&existing, "model", &model_block)?;
     let updated = replace_provider_entry(&with_model, "nan", &provider_block)?;
     write_private(&path, updated.as_bytes())?;
+    configure_profile_reasoning(profile, base_url, models)?;
     configure_profile_search(profile, base_url, web_search_enabled)
+}
+
+fn configure_profile_reasoning(
+    profile: &Path,
+    base_url: &str,
+    models: &[CodingModelProfile],
+) -> Result<(), HermesDesktopError> {
+    let source = nan_harness_adapters::render_hermes_model_provider(base_url, models);
+    for (relative, content) in [
+        ("plugins/model-providers/nan/__init__.py", source.as_str()),
+        (
+            "plugins/model-providers/nan/plugin.yaml",
+            "name: nan-provider\nkind: model-provider\nversion: 1.0.0\ndescription: NaN model access\nauthor: NaN\n",
+        ),
+    ] {
+        let path = checked_profile_path(profile, relative)?;
+        let parent = path
+            .parent()
+            .ok_or(HermesDesktopError::InvalidProfilePath)?;
+        nan_harness_private_fs::create_private_dir_all(parent)
+            .map_err(HermesDesktopError::ProtectProfile)?;
+        write_private(&path, content.as_bytes())?;
+    }
+    Ok(())
 }
 
 pub(crate) fn apply_context_override(

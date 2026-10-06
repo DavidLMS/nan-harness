@@ -80,6 +80,31 @@ pub(super) struct ManagedBlock {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(super) struct ManagedCordisEntry {
+    pub(super) id: String,
+    pub(super) key: Vec<String>,
+    pub(super) value: serde_yaml_ng::Value,
+    pub(super) previous: Option<serde_yaml_ng::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(super) struct ManagedCordisDocument {
+    pub(super) path: PathBuf,
+    pub(super) entries: Vec<ManagedCordisEntry>,
+    pub(super) created_entries: Vec<String>,
+    pub(super) original: Option<String>,
+    pub(super) rendered_sha256: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(super) struct ManagedDeepSeek {
+    pub(super) documents: Vec<ManagedCordisDocument>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct ManagedJsonEntries {
     pub(super) entries: BTreeMap<String, String>,
     pub(super) path: PathBuf,
@@ -137,6 +162,8 @@ pub(super) struct IntegrationState {
     pub(super) qwen_code: Option<ManagedQwenCode>,
     #[serde(default)]
     pub(super) deepseek_harness: Option<ManagedBlock>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) deepseek_cordis: Option<ManagedDeepSeek>,
     #[serde(default)]
     pub(super) aider: Option<ManagedAider>,
 }
@@ -151,6 +178,7 @@ impl Default for IntegrationState {
             opencode: None,
             qwen_code: None,
             deepseek_harness: None,
+            deepseek_cordis: None,
             aider: None,
         }
     }

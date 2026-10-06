@@ -24,6 +24,7 @@ pub use qualification::{
 };
 pub use reasoning::{
     ReasoningEffort, ReasoningHint, ReasoningParameter, ReasoningPolicy, ReasoningSelection,
+    SupportedReasoningEfforts,
 };
 pub use resolution::{
     ModelAvailability, ResolvedModel, claude_gateway_model_id, is_known_non_coding_model,

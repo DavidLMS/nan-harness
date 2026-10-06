@@ -185,6 +185,11 @@ fn configuration_path_cases() -> Vec<(PersistenceError, Diagnostic, &'static [&'
             &[FAKE_PATH][..],
         ),
         (
+            PersistenceError::UnsupportedDeepSeekProfile(fake_path()),
+            Diagnostic::general(DiagnosticReason::InvalidConfiguration),
+            &[FAKE_PATH][..],
+        ),
+        (
             PersistenceError::InvalidManagedSection(fake_path()),
             Diagnostic::general(DiagnosticReason::InvalidConfiguration),
             &[FAKE_PATH][..],

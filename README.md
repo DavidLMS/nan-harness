@@ -203,6 +203,39 @@ When supported, nan-harness prints provider-reported input and output token
 totals when the session ends. These are local figures, not estimates or
 telemetry; incomplete sessions are marked as partial.
 
+### Reasoning controls
+
+Reasoning controls follow the selected NaN model, independently of whether the
+model returns a reasoning trace. GLM 5.3 and GLM 5.3 Flash expose low, medium,
+high and max. Qwen 3.6 and Gemma 4 also allow explicit off. DeepSeek V4 Flash
+and Qwen 3.8 Flash retain automatic reasoning without an adjustable effort
+selector. MiMo keeps its separate thinking switch. Unknown discovered models
+remain available with conservative capabilities.
+
+Native controls use each client's format. Codex's `xhigh` maps to NaN `max`.
+Pi and Prime Agent include `/nan-reasoning auto|off|low|medium|high|max`;
+`auto` omits the provider control, while `off` explicitly disables reasoning on
+models that support it. The selection follows the model and session branch.
+Native Pi thinking changes also update that intent.
+
+Qwen Code 0.25.0 or later is required for its native capability mapping.
+Some clients require an explicit model default. Qwen Code's configured effort
+models start at high for Qwen/Gemma and medium for GLM; its MiMo thinking switch
+starts enabled. DeepSeek Harness uses a separate NaN reasoning-controls route for Qwen/Gemma with a high default; the
+original route remains available for existing session references. These are
+client budgets with explicit effort levels. OMP keeps MiMo thinking enabled by
+default; its native automatic setting uses that model default. Prime Agent
+retains its native initial effort; `/nan-reasoning auto` explicitly selects
+provider-auto behavior.
+
+DeepSeek Harness requires 0.2.0-rc.2 or later. Persistent setup supports its
+standard coding profiles; `sdk-minimal` is excluded. Profiles with additional
+unknown bundles require a managed launch, which composes their effective native
+configuration. DSH does not expose MiMo's separate thinking switch.
+
+After updating nan-harness, run `nanh config <harness> --refresh` for a saved
+native setup. A managed launch uses the current generated configuration directly.
+
 ### Session budgets and context targets
 
 You can set a launch-wide admission budget and, for supported harnesses, a

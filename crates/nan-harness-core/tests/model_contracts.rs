@@ -122,12 +122,9 @@ fn resolve_reasoning_preserves_defaults_and_rejects_unsupported_controls() {
     );
 
     let effort = ReasoningPolicy::Effort {
-        supported: [
-            ReasoningEffort::Low,
-            ReasoningEffort::Medium,
-            ReasoningEffort::High,
-        ],
+        supported: nan_harness_core::SupportedReasoningEfforts::STANDARD,
         default: ReasoningEffort::Medium,
+        supports_disabled: false,
     };
     assert_eq!(
         effort.default_selection(),

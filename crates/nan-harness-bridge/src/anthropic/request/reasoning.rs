@@ -4,7 +4,7 @@ use super::wire::{
 use crate::anthropic::auto_mode;
 use crate::error::ApiError;
 use nan_harness_core::model::{ReasoningEffort, ReasoningPolicy, ReasoningSelection};
-use serde_json::{Map, Value, json};
+use serde_json::{Map, Value};
 
 pub(super) fn translate_thinking(
     thinking: Option<ThinkingConfig>,
@@ -24,7 +24,10 @@ pub(super) fn translate_thinking(
                     "thinking.budget_tokens must be at least 1024".to_owned(),
                 ));
             }
-            ReasoningSelection::Toggle(true)
+            match policy {
+                ReasoningPolicy::Effort { .. } => policy.default_selection(),
+                _ => ReasoningSelection::Toggle(true),
+            }
         }
         (Some(ThinkingConfig::Disabled | ThinkingConfig::Enabled { .. }), Some(_)) => {
             return Err(ApiError::InvalidRequest(
@@ -41,21 +44,7 @@ pub(super) fn translate_thinking(
                 .to_owned(),
         ));
     }
-    match selection {
-        ReasoningSelection::Toggle(enabled) => {
-            body.insert(
-                "chat_template_kwargs".to_owned(),
-                json!({"enable_thinking": enabled}),
-            );
-        }
-        ReasoningSelection::Effort(effort) => {
-            body.insert(
-                "reasoning_effort".to_owned(),
-                serde_json::to_value(effort).expect("reasoning effort serializes"),
-            );
-        }
-        ReasoningSelection::Auto => {}
-    }
+    crate::reasoning::apply(body, policy, selection);
     Ok(())
 }
 

@@ -944,6 +944,13 @@
       "crates/nan-harness-core/src/launch_plan/validation/resources.rs"
     ]
   },
+  "detail_compose_deepseek_profile_failed": {
+    "description": "Actionable safe failure composing a native DeepSeek Harness profile. Preserve the command and version literal.",
+    "section": "launch",
+    "sources": [
+      "crates/nan-harness-runtime/src/prepared/deepseek.rs"
+    ]
+  },
   "detail_render_the_deepseek_model_catalog_failed": {
     "description": "Launch planning and session execution. Preserve command names, paths, provider identifiers and diagnostic codes.",
     "section": "launch",
@@ -4253,6 +4260,13 @@
   "error_persistence_invalid_managed_provider": {
     "description": "Persistent native configuration and its health. Preserve command names, paths, provider identifiers and diagnostic codes.",
     "section": "configuration",
+    "sources": [
+      "crates/nan-harness-cli/src/commands/persistence/error.rs"
+    ]
+  },
+  "error_persistence_unsupported_deepseek_profile": {
+    "description": "Persistent DSH configuration cannot safely merge unknown bundle composition. Path is a local profile directory. Preserve the managed-launch command.",
+    "section": "errors",
     "sources": [
       "crates/nan-harness-cli/src/commands/persistence/error.rs"
     ]

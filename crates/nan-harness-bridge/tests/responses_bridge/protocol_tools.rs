@@ -76,7 +76,7 @@ async fn responses_bridge_translates_namespaced_and_freeform_tools() {
             .expect("chat request lock");
         assert_eq!(requests.len(), 1);
         assert_eq!(requests[0]["model"], "qwen3.6");
-        assert_eq!(requests[0]["chat_template_kwargs"]["enable_thinking"], true);
+        assert_eq!(requests[0]["reasoning_effort"], "high");
         assert_eq!(requests[0]["tools"][0]["function"]["name"], "web__run");
         assert_eq!(requests[0]["tools"][1]["function"]["name"], "apply_patch");
     }

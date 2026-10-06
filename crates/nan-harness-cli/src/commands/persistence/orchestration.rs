@@ -135,12 +135,19 @@ impl PersistenceManager {
                 || self.qwen_directory.join("settings.json"),
                 |managed| managed.path.clone(),
             )],
-            PersistentIntegration::DeepSeekHarness => {
-                vec![state.deepseek_harness.as_ref().map_or_else(
-                    || self.deepseek_directory.join("settings.yaml"),
-                    |managed| managed.path.clone(),
-                )]
-            }
+            PersistentIntegration::DeepSeekHarness => state.deepseek_cordis.as_ref().map_or_else(
+                || {
+                    self.deepseek_profile_paths()
+                        .map(|paths| paths.into_iter().collect())
+                },
+                |managed| {
+                    Ok(managed
+                        .documents
+                        .iter()
+                        .map(|doc| doc.path.clone())
+                        .collect())
+                },
+            )?,
             PersistentIntegration::Aider => state.aider.as_ref().map_or_else(
                 || {
                     vec![
@@ -172,7 +179,7 @@ impl PersistenceManager {
         if state.qwen_code.is_some() {
             integrations.push(PersistentIntegration::QwenCode);
         }
-        if state.deepseek_harness.is_some() {
+        if state.deepseek_harness.is_some() || state.deepseek_cordis.is_some() {
             integrations.push(PersistentIntegration::DeepSeekHarness);
         }
         if state.aider.is_some() {

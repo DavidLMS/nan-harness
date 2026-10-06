@@ -32,6 +32,37 @@ fn profile_config_preserves_unrelated_settings_and_provider_entries() {
 }
 
 #[test]
+fn desktop_installs_the_shared_reasoning_provider_without_search() {
+    let (_root, paths) = paths();
+    fs::create_dir_all(&paths.managed_profile).expect("profile directory");
+    let models = [coding_model_profile("gemma4").unwrap()];
+    write_profile_config(
+        &paths.managed_profile,
+        "http://127.0.0.1:4321/v1",
+        &models,
+        "gemma4",
+        false,
+    )
+    .expect("profile update");
+    let source = fs::read_to_string(
+        paths
+            .managed_profile
+            .join("plugins/model-providers/nan/__init__.py"),
+    )
+    .expect("reasoning provider");
+    assert_eq!(
+        source,
+        nan_harness_adapters::render_hermes_model_provider("http://127.0.0.1:4321/v1", &models)
+    );
+    assert!(
+        paths
+            .managed_profile
+            .join("plugins/model-providers/nan/plugin.yaml")
+            .is_file()
+    );
+}
+
+#[test]
 fn profile_search_reuses_the_adapter_renderer_and_disables_only_owned_settings() {
     let (_root, paths) = paths();
     fs::create_dir_all(&paths.managed_profile).expect("profile directory");

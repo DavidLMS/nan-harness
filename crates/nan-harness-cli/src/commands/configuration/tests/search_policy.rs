@@ -165,6 +165,7 @@ fn pi_native_refresh_migrates_the_managed_search_mcp_to_an_extension() {
             policy: WebSearchPolicy::Auto,
             managed: false,
         },
+        false,
     );
     old_plans.truncate(3);
     old_plans.push(search_mcp_plan(mcp_path.clone(), true));

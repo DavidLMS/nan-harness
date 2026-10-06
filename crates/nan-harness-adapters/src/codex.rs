@@ -53,7 +53,10 @@ impl HarnessAdapter for CodexAdapter {
         })?;
         let configuration = launch_configuration(context, &model_config);
         let mut arguments = configuration.arguments;
-        arguments.extend(routing_arguments(&model_config));
+        arguments.extend(routing_arguments(
+            &model_config,
+            context.model.reasoning_selection,
+        ));
         if let Some(NativeContextLimit::CodexTokenLimit { tokens }) =
             context.context_limit.as_ref().map(|limit| &limit.native)
         {
@@ -141,7 +144,8 @@ fn launch_configuration(context: &PlanContext, model_config: &str) -> CodexLaunc
             _ => None,
         });
     let profile_content = format!(
-        "model = {model_config}\nmodel_reasoning_effort = \"{SELECTED_MODEL_REASONING_EFFORT_PLACEHOLDER}\"\n{}",
+        "model = {model_config}\n{}{}",
+        reasoning_configuration(context.model.reasoning_selection),
         compact_limit.map_or_else(String::new, |tokens| {
             format!("model_auto_compact_token_limit = {tokens}\n")
         })
@@ -190,7 +194,10 @@ fn launch_configuration(context: &PlanContext, model_config: &str) -> CodexLaunc
     }
 }
 
-fn routing_arguments(model_config: &str) -> Vec<String> {
+fn routing_arguments(
+    model_config: &str,
+    reasoning: Option<nan_harness_core::ReasoningSelection>,
+) -> Vec<String> {
     let provider = format!(
         concat!(
             "model_providers.nan_harness={{",
@@ -207,11 +214,9 @@ fn routing_arguments(model_config: &str) -> Vec<String> {
         ),
         BRIDGE_BASE_URL_PLACEHOLDER, SESSION_TOKEN_ENVIRONMENT
     );
-    let arguments = vec![
+    let mut arguments = vec![
         "-c".to_owned(),
         format!("model={model_config}"),
-        "-c".to_owned(),
-        format!("model_reasoning_effort=\"{SELECTED_MODEL_REASONING_EFFORT_PLACEHOLDER}\""),
         "-c".to_owned(),
         "model_provider=\"nan_harness\"".to_owned(),
         "-c".to_owned(),
@@ -229,7 +234,22 @@ fn routing_arguments(model_config: &str) -> Vec<String> {
         "-c".to_owned(),
         format!("model_catalog_json=\"{MODEL_CATALOG_PATH_PLACEHOLDER}\""),
     ];
+    if !reasoning_configuration(reasoning).is_empty() {
+        arguments.extend([
+            "-c".to_owned(),
+            format!("model_reasoning_effort=\"{SELECTED_MODEL_REASONING_EFFORT_PLACEHOLDER}\""),
+        ]);
+    }
     arguments
+}
+
+fn reasoning_configuration(selection: Option<nan_harness_core::ReasoningSelection>) -> String {
+    match selection {
+        None | Some(nan_harness_core::ReasoningSelection::Auto) => String::new(),
+        Some(_) => {
+            format!("model_reasoning_effort = \"{SELECTED_MODEL_REASONING_EFFORT_PLACEHOLDER}\"\n")
+        }
+    }
 }
 
 fn validate_user_arguments(arguments: &[String]) -> Result<(), PlanError> {

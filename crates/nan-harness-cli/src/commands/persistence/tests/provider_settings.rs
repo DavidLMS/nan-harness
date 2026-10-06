@@ -3,7 +3,7 @@ use jsonc_parser::cst::CstRootNode;
 use nan_harness_core::coding_models_from_provider_ids;
 
 #[test]
-fn qwen_reasoning_settings_are_model_aware_without_freezing_provider_defaults() {
+fn qwen_reasoning_settings_use_native_capabilities_and_explicit_defaults() {
     let models = coding_models_from_provider_ids(
         [
             "qwen3.6",
@@ -27,8 +27,19 @@ fn qwen_reasoning_settings_are_model_aware_without_freezing_provider_defaults() 
             .expect("requested model should be present")
     };
 
-    // GLM-5.2 supports reasoning effort, so it must use provider passthrough
-    // instead of freezing reasoning off when the user has not chosen explicitly.
+    assert_eq!(
+        by_id("qwen3.6")["capabilities"]["reasoning"]["defaultEffort"],
+        "high"
+    );
+    assert_eq!(
+        by_id("glm5.2")["generationConfig"]["thinkingMandatory"],
+        true
+    );
+    assert_eq!(
+        by_id("qwen3.6")["generationConfig"]["thinkingMandatory"],
+        false
+    );
+    // No fixed override may mask the native effort selector.
     for id in [
         "qwen3.6",
         "deepseek-v4-flash",
@@ -37,65 +48,43 @@ fn qwen_reasoning_settings_are_model_aware_without_freezing_provider_defaults() 
     ] {
         assert!(
             by_id(id)["generationConfig"].get("reasoning").is_none(),
-            "{id} must use provider passthrough until the user makes an explicit choice"
+            "{id} must not force a reasoning toggle"
         );
     }
 }
 
 #[test]
-fn deepseek_serializes_reasoning_capabilities_without_serializing_defaults() {
+fn deepseek_preserves_old_routes_and_exposes_budgeted_controls_separately() {
     let models = coding_models_from_provider_ids(
-        [
-            "qwen3.6",
-            "deepseek-v4-flash",
-            "glm5.2",
-            "future-stale-model",
-        ]
-        .map(str::to_owned),
+        ["qwen3.6", "gemma4", "deepseek-v4-flash", "glm5.3-flash"]
+            .into_iter()
+            .map(str::to_owned),
     );
-    let settings = deepseek_provider_settings(&models, "https://api.nan.test/v1")
-        .expect("DeepSeek settings should serialize");
-
-    let qwen = settings
-        .split("        - id: \"qwen3.6\"")
-        .nth(1)
-        .expect("Qwen block")
-        .split("        - id:")
-        .next()
-        .expect("bounded Qwen block");
-    assert!(qwen.contains("reasoning: true"));
-    assert!(qwen.contains("supportsReasoningEffort: false"));
-
-    let effort = settings
-        .split("        - id: \"deepseek-v4-flash\"")
-        .nth(1)
-        .expect("effort block")
-        .split("        - id:")
-        .next()
-        .expect("bounded effort block");
-    assert!(effort.contains("reasoning: true"));
-    assert!(effort.contains("supportsReasoningEffort: true"));
-
-    // GLM-5.2 supports reasoning effort, so it must not freeze reasoning off.
-    let glm = settings
-        .split("        - id: \"glm5.2\"")
-        .nth(1)
-        .expect("GLM block")
-        .split("        - id:")
-        .next()
-        .expect("bounded GLM block");
-    assert!(glm.contains("reasoning: true"));
-    assert!(glm.contains("supportsReasoningEffort: true"));
-
-    let stale = settings
-        .split("        - id: \"future-stale-model\"")
-        .nth(1)
-        .expect("fallback block")
-        .split("        - id:")
-        .next()
-        .expect("bounded fallback block");
-    assert!(stale.contains("reasoning: false"));
-    assert!(stale.contains("supportsReasoningEffort: false"));
-    assert!(!settings.contains("reasoningEffort:"));
-    assert!(!settings.contains("defaultEffort:"));
+    let settings = deepseek_provider_settings(&models, "https://api.nan.test/v1").unwrap();
+    let patch: serde_yaml_ng::Value = serde_yaml_ng::from_str(&settings).unwrap();
+    assert_eq!(patch[0]["config"]["provider"], "nan-harness-budgeted");
+    let providers = &patch[1]["config"]["providers"];
+    assert_eq!(providers["nan-harness-budgeted"]["reasoning"], "high");
+    assert_eq!(
+        providers["nan-harness"]["compat"]["maxTokensField"],
+        "max_tokens"
+    );
+    let budgeted = providers["nan-harness-budgeted"]["models"]
+        .as_sequence()
+        .unwrap();
+    assert_eq!(budgeted.len(), 2);
+    for model in budgeted {
+        assert_eq!(model["reasoningEfforts"]["off"], "none");
+        assert_eq!(model["reasoningEfforts"]["max"], "max");
+    }
+    let original = providers["nan-harness"]["models"].as_sequence().unwrap();
+    assert_eq!(original.len(), 4);
+    for model in original {
+        if model["id"] == "glm5.3-flash" {
+            assert_eq!(model["reasoningEfforts"]["max"], "max");
+            assert!(model["reasoningEfforts"].get("off").is_none());
+        } else {
+            assert_eq!(model["reasoningEfforts"], false);
+        }
+    }
 }

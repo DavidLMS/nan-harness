@@ -38,17 +38,16 @@ fn codex_catalog_reports_exact_reasoning_picker_contracts_in_stable_order() {
         (
             json!("qwen3.6"),
             json!("high"),
-            vec![json!("none"), json!("high")]
+            vec![
+                json!("none"),
+                json!("low"),
+                json!("medium"),
+                json!("high"),
+                json!("xhigh")
+            ]
         )
     );
-    assert_eq!(
-        values(1),
-        (
-            json!("deepseek-v4-flash"),
-            json!("medium"),
-            vec![json!("low"), json!("medium"), json!("high")]
-        )
-    );
+    assert_eq!(values(1), (json!("deepseek-v4-flash"), Value::Null, vec![]));
     assert_eq!(
         values(2),
         (
@@ -61,8 +60,14 @@ fn codex_catalog_reports_exact_reasoning_picker_contracts_in_stable_order() {
         values(3),
         (
             json!("gemma4"),
-            json!("none"),
-            vec![json!("none"), json!("high")]
+            json!("high"),
+            vec![
+                json!("none"),
+                json!("low"),
+                json!("medium"),
+                json!("high"),
+                json!("xhigh")
+            ]
         )
     );
     assert_eq!(

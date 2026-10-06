@@ -38,9 +38,10 @@ pub(crate) use orchestration::{
     IntegrationChange, PersistenceManager, PersistentIntegration, RemovalOutcome,
 };
 use state::{
-    IntegrationState, ManagedAider, ManagedBlock, ManagedFile, ManagedJsonEntries,
-    ManagedJsonProperty, ManagedOpenCode, ManagedOpenCodeModel, ManagedOpenCodeSearch,
-    ManagedQwenAuthSelection, ManagedQwenCode, ManagedQwenListDirectory, ManagedQwenModelSelection,
+    IntegrationState, ManagedAider, ManagedBlock, ManagedCordisDocument, ManagedCordisEntry,
+    ManagedDeepSeek, ManagedFile, ManagedJsonEntries, ManagedJsonProperty, ManagedOpenCode,
+    ManagedOpenCodeModel, ManagedOpenCodeSearch, ManagedQwenAuthSelection, ManagedQwenCode,
+    ManagedQwenListDirectory, ManagedQwenModelSelection,
 };
 pub(crate) use state::{LastSelection, PreferencesStore};
 

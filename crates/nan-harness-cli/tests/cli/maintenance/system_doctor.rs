@@ -282,7 +282,7 @@ fn whole_system_doctor_json_reports_sorted_model_capabilities_once() {
                 "contextWindow": 262_144,
                 "maxOutputTokens": 65_536,
                 "imageInput": true,
-                "reasoning": {"kind": "toggle", "defaultEnabled": false},
+                "reasoning": {"kind": "effort", "supported": ["low", "medium", "high", "max"], "default": "high", "supportsDisabled": true},
                 "source": "bundled"
             },
             {
@@ -290,7 +290,7 @@ fn whole_system_doctor_json_reports_sorted_model_capabilities_once() {
                 "contextWindow": 262_144,
                 "maxOutputTokens": 65_536,
                 "imageInput": true,
-                "reasoning": {"kind": "toggle", "defaultEnabled": true},
+                "reasoning": {"kind": "effort", "supported": ["low", "medium", "high", "max"], "default": "high", "supportsDisabled": true},
                 "source": "bundled"
             }
         ])

@@ -57,6 +57,13 @@ fn inspect_document_result(
         Err(Missing) if empty => return Ok(Active),
         result => result?,
     };
+    if let DocumentReceipt::TextBlock(legacy) = receipt {
+        match deepseek_credential_receipt(legacy, &contents) {
+            Ok(Some(upgraded)) => return inspect_document_result(&DocumentReceipt::Yaml(upgraded)),
+            Err(_) => return Ok(ConfigurationHealth::Changed),
+            Ok(None) => {}
+        }
+    }
     let matches = match receipt {
         DocumentReceipt::Json(receipt) => {
             let document = parse_json_document(&contents, &receipt.path, receipt.comments)

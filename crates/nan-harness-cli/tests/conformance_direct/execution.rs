@@ -96,7 +96,9 @@ pub(super) async fn run_round_trip<const N: usize>(
     let requests = provider.chat_requests();
     assert!(
         provider.completed(),
-        "{harness} should receive the final response"
+        "{harness} should receive the final response\n{}\nprovider progress: {:#?}",
+        output.diagnostic(),
+        request_tool_progress(&requests)
     );
     assert_tool_results(&requests, &calls, allowed_errors).unwrap_or_else(|error| {
         panic!(

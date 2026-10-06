@@ -16,7 +16,7 @@ const OUTPUT_LIMIT: usize = 1024 * 1024;
 const CLEANUP_TIMEOUT: Duration = Duration::from_secs(1);
 
 #[derive(Debug, Error)]
-pub(super) enum ProbeError {
+pub(crate) enum ProbeError {
     #[error("probe exceeded its 30-second deadline; check the executable installation")]
     Timeout,
     #[error("probe exceeded 1 MiB of combined output; check the executable installation")]
@@ -25,8 +25,22 @@ pub(super) enum ProbeError {
     Io(#[from] io::Error),
 }
 
-pub(super) fn run_command(executable: &Path, arguments: &[&str]) -> Result<Output, ProbeError> {
+pub(crate) fn run_command(executable: &Path, arguments: &[&str]) -> Result<Output, ProbeError> {
     run_bounded(executable, arguments, PROBE_TIMEOUT, OUTPUT_LIMIT)
+}
+
+pub(crate) fn run_config_command(
+    executable: &Path,
+    arguments: &[&str],
+    directory: &Path,
+) -> Result<Output, ProbeError> {
+    run_bounded_in(
+        executable,
+        arguments,
+        PROBE_TIMEOUT,
+        OUTPUT_LIMIT,
+        Some(directory),
+    )
 }
 
 fn run_bounded(
@@ -34,6 +48,16 @@ fn run_bounded(
     arguments: &[&str],
     timeout: Duration,
     output_limit: usize,
+) -> Result<Output, ProbeError> {
+    run_bounded_in(executable, arguments, timeout, output_limit, None)
+}
+
+fn run_bounded_in(
+    executable: &Path,
+    arguments: &[&str],
+    timeout: Duration,
+    output_limit: usize,
+    directory: Option<&Path>,
 ) -> Result<Output, ProbeError> {
     let deadline = Instant::now() + timeout;
     // Discovery has a synchronous API, including callers already inside a Tokio runtime. A scoped
@@ -45,7 +69,13 @@ fn run_bounded(
                 tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .build()?
-                    .block_on(run(executable, arguments, deadline, output_limit))
+                    .block_on(run(
+                        executable,
+                        arguments,
+                        deadline,
+                        output_limit,
+                        directory,
+                    ))
             })?
             .join()
             .map_err(|_| io::Error::other("probe worker panicked"))?
@@ -57,9 +87,12 @@ async fn run(
     arguments: &[&str],
     deadline: Instant,
     output_limit: usize,
+    directory: Option<&Path>,
 ) -> Result<Output, ProbeError> {
-    let mut child =
-        spawn_with_retry(deadline, || child::ProbeChild::spawn(executable, arguments)).await?;
+    let mut child = spawn_with_retry(deadline, || {
+        child::ProbeChild::spawn(executable, arguments, directory)
+    })
+    .await?;
     let result =
         tokio::time::timeout_at(deadline.into(), collect(&mut child, output_limit, deadline))
             .await

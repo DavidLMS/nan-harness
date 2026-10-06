@@ -1,3 +1,4 @@
+mod deepseek;
 mod documents;
 mod image_models;
 mod lifecycle;

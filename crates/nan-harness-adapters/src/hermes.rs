@@ -23,28 +23,10 @@ fn model_provider_files() -> Vec<OverlayFile> {
         OverlayFile {
             path: "plugins/model-providers/nan/__init__.py".to_owned(),
             mode: TemporaryArtifactMode::OwnerFile,
-            content_template: format!(
-                r#"from providers import register_provider
-from providers.base import ProviderProfile
-
-
-class NanProviderProfile(ProviderProfile):
-    def fetch_models(self, **_kwargs):
-        return list(self.fallback_models)
-
-
-nan = NanProviderProfile(
-    name="nan",
-    display_name="NaN",
-    description="NaN model access",
-    env_vars=("NAN_API_KEY",),
-    base_url="{PROVIDER_BASE_URL_PLACEHOLDER}",
-    auth_type="api_key",
-    fallback_models=tuple({HERMES_MODEL_CATALOG_PLACEHOLDER}),
-)
-
-register_provider(nan)
-"#
+            content_template: hermes_provider_source(
+                PROVIDER_BASE_URL_PLACEHOLDER,
+                HERMES_MODEL_CATALOG_PLACEHOLDER,
+                "{hermes-reasoning-catalog-json}",
             ),
             policy: OverlayFilePolicy::Replace,
         },
@@ -55,6 +37,71 @@ register_provider(nan)
             policy: OverlayFilePolicy::Replace,
         },
     ]
+}
+
+/// Generates the native Hermes provider, including model-aware reasoning controls.
+#[must_use]
+pub fn render_hermes_model_provider(base_url: &str, models: &[CodingModelProfile]) -> String {
+    let ids = serde_json::json!(models.iter().map(|model| &model.id).collect::<Vec<_>>());
+    let profiles = models
+        .iter()
+        .map(|model| {
+            (
+                model.id.clone(),
+                serde_json::json!({"reasoningPolicy": model.reasoning}),
+            )
+        })
+        .collect::<serde_json::Map<_, _>>();
+    let encoded = serde_json::Value::Object(profiles).to_string();
+    hermes_provider_source(
+        base_url,
+        &ids.to_string(),
+        &serde_json::json!(encoded).to_string(),
+    )
+}
+
+fn hermes_provider_source(base_url: &str, models: &str, profiles: &str) -> String {
+    format!(
+        r#"import json
+from providers import register_provider
+from providers.base import ProviderProfile
+
+PROFILES = json.loads({profiles})
+
+
+class NanProviderProfile(ProviderProfile):
+    def fetch_models(self, **_kwargs):
+        return list(self.fallback_models)
+
+    def build_api_kwargs_extras(self, *, reasoning_config=None, model=None, **_context):
+        if not isinstance(reasoning_config, dict):
+            return {{}}, {{}}
+        policy = PROFILES.get(model, {{}}).get("reasoningPolicy", {{}})
+        disabled = reasoning_config.get("enabled") is False
+        effort = reasoning_config.get("effort")
+        if policy.get("kind") == "effort":
+            if disabled:
+                return ({{}}, {{"reasoning_effort": "none"}}) if policy.get("supportsDisabled") else ({{}}, {{}})
+            if effort in policy.get("supported", []):
+                return {{}}, {{"reasoning_effort": effort}}
+        elif policy.get("kind") == "toggle" and (disabled or reasoning_config.get("enabled") is True or effort):
+            return {{"chat_template_kwargs": {{"enable_thinking": not disabled}}}}, {{}}
+        return {{}}, {{}}
+
+
+nan = NanProviderProfile(
+    name="nan",
+    display_name="NaN",
+    description="NaN model access",
+    env_vars=("NAN_API_KEY",),
+    base_url={base_url},
+    auth_type="api_key",
+    fallback_models=tuple({models}),
+)
+register_provider(nan)
+"#,
+        base_url = serde_json::json!(base_url),
+    )
 }
 
 /// Files used by both the stable Hermes adapter and the experimental Desktop profile.

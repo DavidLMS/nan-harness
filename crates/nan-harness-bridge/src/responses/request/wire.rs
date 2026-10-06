@@ -22,7 +22,7 @@ pub(crate) struct ResponsesRequest {
 
 #[derive(Debug, Deserialize)]
 pub(super) struct ResponsesReasoning {
-    pub(super) effort: String,
+    pub(super) effort: Option<String>,
 }
 
 fn default_tool_choice() -> Value {

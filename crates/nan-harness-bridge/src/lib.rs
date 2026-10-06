@@ -7,6 +7,7 @@ mod diagnostics;
 mod error;
 mod fx_gateway;
 mod models;
+mod reasoning;
 mod responses;
 mod responses_server;
 mod search_http;

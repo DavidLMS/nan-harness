@@ -24,10 +24,8 @@ fn deepseek_harness_uses_a_highest_precedence_patch_and_routes_conditional_searc
         plan.environment.public.get("DSH_TELEMETRY_DISABLED"),
         Some(&"1".to_owned())
     );
-    assert!(patch.contains("provider: nan-harness"));
-    assert!(patch.contains("api: openai-completions"));
-    assert!(patch.contains("baseURL: !!js process.env.NAN_HARNESS_PROVIDER_BASE_URL"));
-    assert!(patch.contains(DEEPSEEK_MODEL_CATALOG_PLACEHOLDER));
+    assert!(patch.contains("provider: nan-harness-budgeted\n"));
+    assert!(patch.contains(&format!("providers:\n{DEEPSEEK_MODEL_CATALOG_PLACEHOLDER}")));
     assert!(patch.contains("- id: web-search-deepseek\n  disabled: false"));
     assert!(patch.contains(&format!("baseURL: {BRIDGE_BASE_URL_PLACEHOLDER}/v1")));
     assert!(patch.contains(NAN_SEARCH_BLOCK_BEGIN));

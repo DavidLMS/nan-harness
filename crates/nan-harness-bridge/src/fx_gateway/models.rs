@@ -1,6 +1,6 @@
 use crate::error::BridgeError;
 use nan_harness_core::coding_models_from_provider_ids;
-use nan_harness_core::model::{CodingModelProfile, ReasoningPolicy};
+use nan_harness_core::model::{CodingModelProfile, ReasoningEffort, ReasoningPolicy};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 
@@ -62,13 +62,26 @@ fn api_model(model: &CodingModelProfile) -> Value {
             tags.push("reasoning");
             json!([{"type":"effort","values":["none","high"]}])
         }
-        ReasoningPolicy::Effort { .. } => {
+        ReasoningPolicy::Effort {
+            supported,
+            supports_disabled,
+            ..
+        } => {
             tags.push("reasoning");
-            json!([{"type":"effort","values":["low","medium","high"]}])
+            let values = std::iter::once("none")
+                .take(usize::from(supports_disabled))
+                .chain(supported.into_iter().map(|effort| match effort {
+                    ReasoningEffort::Low => "low",
+                    ReasoningEffort::Medium => "medium",
+                    ReasoningEffort::High => "high",
+                    ReasoningEffort::Max => "xhigh",
+                }))
+                .collect::<Vec<_>>();
+            json!([{"type":"effort","values":values}])
         }
         ReasoningPolicy::AlwaysOn => {
             tags.push("reasoning");
-            json!([{"type":"effort","values":["high"]}])
+            Value::Null
         }
         ReasoningPolicy::Unsupported | ReasoningPolicy::Unknown => Value::Null,
     };

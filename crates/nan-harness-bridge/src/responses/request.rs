@@ -40,7 +40,7 @@ pub(crate) fn translate(
             Value::Number(model.max_output_tokens.into()),
         ),
     ]);
-    reasoning::apply_reasoning_parameter(&mut body, &model.id, reasoning);
+    crate::reasoning::apply(&mut body, model.reasoning, reasoning);
     if !tools.is_empty() {
         body.insert("tools".to_owned(), Value::Array(tools));
         body.insert(

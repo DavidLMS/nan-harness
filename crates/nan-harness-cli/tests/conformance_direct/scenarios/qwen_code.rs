@@ -29,18 +29,12 @@ async fn qwen_code_native_tools_complete_round_trips() {
             json!({"pattern": "QWEN_READ_OK", "path": workspace_path}),
         ),
         call(
-            "todo_write",
-            json!({
-                "todos": [{
-                    "id": "qwen-conformance",
-                    "content": "Verify Qwen Code tools",
-                    "status": "completed"
-                }]
-            }),
-        ),
-        call(
             "tool_search",
             json!({"query": "select:read_file", "max_results": 3}),
+        ),
+        call(
+            "tool_call",
+            json!({"name":"read_file", "arguments":{"file_path":format!("{workspace_path}/read-target.txt")}}),
         ),
         call("skill", json!({"skill": "conformance"})),
         call(
@@ -66,7 +60,6 @@ async fn qwen_code_native_tools_complete_round_trips() {
     run_round_trip(
         "qwen-code",
         [
-            "--safe-mode",
             "--prompt",
             "Complete the deterministic native tool conformance sequence.",
             "--output-format",

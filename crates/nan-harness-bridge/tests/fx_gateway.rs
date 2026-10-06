@@ -40,8 +40,8 @@ async fn fx_gateway_translates_catalog_reasoning_tools_and_streaming() {
     let models: Value = models.json().await.expect("catalog should be JSON");
     assert_eq!(models["data"][0]["id"], "qwen3.6");
     assert_eq!(
-        models["data"][0]["reasoning_options"][0]["values"][1],
-        "high"
+        models["data"][0]["reasoning_options"][0]["values"],
+        json!(["none", "low", "medium", "high", "xhigh"])
     );
 
     let response = client
@@ -81,7 +81,7 @@ async fn fx_gateway_translates_catalog_reasoning_tools_and_streaming() {
         let requests = servers.state.requests.lock().expect("request lock");
         assert_eq!(requests.len(), 1);
         assert_eq!(requests[0]["model"], "qwen3.6");
-        assert_eq!(requests[0]["chat_template_kwargs"]["enable_thinking"], true);
+        assert_eq!(requests[0]["reasoning_effort"], "high");
         assert_eq!(requests[0]["tools"][0]["function"]["name"], "read_file");
         assert_eq!(requests[0]["max_tokens"], 1024);
     }

@@ -1,5 +1,5 @@
 use crate::error::ApiError;
-use nan_harness_core::model::{CodingModelProfile, ReasoningHint, ReasoningSelection};
+use nan_harness_core::model::{CodingModelProfile, ReasoningHint};
 use serde_json::{Value, json};
 
 const PERMISSION_REVIEW_TOOL: &str = "permission_decision";
@@ -284,7 +284,7 @@ fn apply_reasoning(
         "low" => ReasoningHint::Low,
         "medium" => ReasoningHint::Medium,
         "high" => ReasoningHint::High,
-        "xhigh" => ReasoningHint::ExtraHigh,
+        "xhigh" | "max" => ReasoningHint::ExtraHigh,
         other => {
             return Err(ApiError::InvalidRequest(format!(
                 "unsupported fx reasoning effort '{other}'"
@@ -296,19 +296,12 @@ fn apply_reasoning(
             "reasoning effort '{effort}' is incompatible with model policy"
         ))
     })?;
-    match selection {
-        ReasoningSelection::Toggle(enabled)
-            if model.id.starts_with("qwen")
-                || model.id.starts_with("gemma")
-                || model.id == "mimo-v2.6-flash" =>
-        {
-            body["chat_template_kwargs"] = json!({"enable_thinking": enabled});
-        }
-        ReasoningSelection::Effort(effort) => {
-            body["reasoning_effort"] = serde_json::to_value(effort).expect("effort serializes");
-        }
-        _ => {}
-    }
+    crate::reasoning::apply(
+        body.as_object_mut()
+            .expect("translated request is an object"),
+        model.reasoning,
+        selection,
+    );
     Ok(())
 }
 
@@ -324,13 +317,17 @@ mod tests {
         let mut qwen_body = json!({});
         apply_reasoning(&mut qwen_body, &qwen, "medium")
             .expect("positive effort should enable toggle reasoning");
-        assert_eq!(qwen_body["chat_template_kwargs"]["enable_thinking"], true);
+        assert_eq!(qwen_body["reasoning_effort"], "medium");
+        apply_reasoning(&mut qwen_body, &qwen, "xhigh").unwrap();
+        assert_eq!(qwen_body["reasoning_effort"], "max");
+        apply_reasoning(&mut qwen_body, &qwen, "none").unwrap();
+        assert_eq!(qwen_body["reasoning_effort"], "none");
 
         let qwen38 = nan_harness_core::coding_model_profile("qwen3.8-flash").expect("known model");
         let mut qwen38_body = json!({});
         apply_reasoning(&mut qwen38_body, &qwen38, "high")
             .expect("always-on reasoning should be accepted");
-        assert_eq!(qwen38_body["chat_template_kwargs"]["enable_thinking"], true);
+        assert_eq!(qwen38_body, json!({}));
         assert!(apply_reasoning(&mut qwen38_body, &qwen38, "none").is_err());
 
         let glm53 = nan_harness_core::coding_model_profile("glm5.3-flash").expect("known model");

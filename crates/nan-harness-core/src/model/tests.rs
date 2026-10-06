@@ -69,86 +69,44 @@ fn live_catalog_excludes_only_known_non_coding_models() {
 
 #[test]
 fn bundled_reasoning_policies_are_explicit_model_metadata() {
+    for id in ["qwen3.6", "gemma4"] {
+        assert_eq!(
+            known_coding_model(id).unwrap().reasoning,
+            ReasoningPolicy::Effort {
+                supported: super::reasoning::SupportedReasoningEfforts::ALL,
+                default: ReasoningEffort::High,
+                supports_disabled: true,
+            }
+        );
+    }
+    for id in ["glm5.3", "glm5.3-flash"] {
+        assert_eq!(
+            known_coding_model(id).unwrap().reasoning,
+            ReasoningPolicy::Effort {
+                supported: super::reasoning::SupportedReasoningEfforts::ALL,
+                default: ReasoningEffort::Medium,
+                supports_disabled: false,
+            }
+        );
+    }
+    for id in ["deepseek-v4-flash", "qwen3.8-flash"] {
+        assert_eq!(
+            known_coding_model(id).unwrap().reasoning,
+            ReasoningPolicy::AlwaysOn
+        );
+    }
     assert_eq!(
-        known_coding_model("qwen3.6")
-            .expect("known model")
-            .reasoning,
+        known_coding_model("mimo-v2.6-flash").unwrap().reasoning,
         ReasoningPolicy::Toggle {
             default_enabled: true
         }
     );
     assert_eq!(
-        known_coding_model("gemma4").expect("known model").reasoning,
-        ReasoningPolicy::Toggle {
-            default_enabled: false
-        }
-    );
-    assert_eq!(
-        known_coding_model("deepseek-v4-flash")
-            .expect("known model")
-            .reasoning,
+        known_coding_model("glm5.2").unwrap().reasoning,
         ReasoningPolicy::Effort {
-            supported: [
-                ReasoningEffort::Low,
-                ReasoningEffort::Medium,
-                ReasoningEffort::High,
-            ],
+            supported: super::reasoning::SupportedReasoningEfforts::STANDARD,
             default: ReasoningEffort::Medium,
-        }
-    );
-    assert_eq!(
-        known_coding_model("mimo-v2.6-flash")
-            .expect("known model")
-            .reasoning,
-        ReasoningPolicy::Toggle {
-            default_enabled: true
-        }
-    );
-    assert_eq!(
-        known_coding_model("glm5.2").expect("known model").reasoning,
-        ReasoningPolicy::Effort {
-            supported: [
-                ReasoningEffort::Low,
-                ReasoningEffort::Medium,
-                ReasoningEffort::High,
-            ],
-            default: ReasoningEffort::Medium,
-        }
-    );
-    assert!(
-        known_coding_model("glm5.2")
-            .expect("known model")
-            .description
-            .contains("reasoning")
-    );
-    assert_eq!(
-        known_coding_model("qwen3.8-flash")
-            .expect("known model")
-            .reasoning,
-        ReasoningPolicy::AlwaysOn
-    );
-    assert_eq!(
-        known_coding_model("glm5.3-flash")
-            .expect("known model")
-            .reasoning,
-        ReasoningPolicy::Effort {
-            supported: [
-                ReasoningEffort::Low,
-                ReasoningEffort::Medium,
-                ReasoningEffort::High,
-            ],
-            default: ReasoningEffort::Medium,
-        }
-    );
-    assert_eq!(
-        known_coding_model("glm5.3").expect("known model").reasoning,
-        ReasoningPolicy::Effort {
-            supported: [
-                ReasoningEffort::Low,
-                ReasoningEffort::Medium,
-                ReasoningEffort::High,
-            ],
-            default: ReasoningEffort::Medium,
+            supports_disabled: false,
         }
     );
 }
@@ -231,9 +189,7 @@ fn auto_is_distinct_from_an_explicit_reasoning_parameter() {
 
 #[test]
 fn reasoning_policy_validates_only_controls_the_model_declares() {
-    let effort = known_coding_model("deepseek-v4-flash")
-        .expect("known model")
-        .reasoning;
+    let effort = known_coding_model("glm5.2").expect("known model").reasoning;
     assert!(effort.accepts(ReasoningSelection::Auto));
     assert!(effort.accepts(ReasoningSelection::Effort(ReasoningEffort::Low)));
     assert!(!effort.accepts(ReasoningSelection::Toggle(true)));
@@ -259,9 +215,7 @@ fn reasoning_hints_resolve_against_model_capabilities() {
         Some(ReasoningSelection::Toggle(true))
     );
 
-    let effort = known_coding_model("deepseek-v4-flash")
-        .expect("known model")
-        .reasoning;
+    let effort = known_coding_model("glm5.2").expect("known model").reasoning;
     assert_eq!(effort.resolve_hint(ReasoningHint::Disabled), None);
     assert_eq!(
         effort.resolve_hint(ReasoningHint::Medium),
@@ -327,4 +281,38 @@ fn mimo_upgrade_preserves_discovery_for_the_retired_profile() {
     let models = coding_models_from_provider_ids(["mimo-v2.6-flash".to_owned()]);
     assert_eq!(models.len(), 1);
     assert_eq!(models[0].id, "mimo-v2.6-flash");
+}
+
+#[test]
+fn effort_policy_loads_legacy_state_and_round_trips_new_controls() {
+    let legacy: ReasoningPolicy = serde_json::from_value(serde_json::json!({
+        "kind": "effort", "supported": ["low", "medium", "high"], "default": "medium"
+    }))
+    .expect("legacy effort state remains readable");
+    assert!(!legacy.accepts(ReasoningSelection::Toggle(false)));
+    assert!(!legacy.accepts(ReasoningSelection::Effort(ReasoningEffort::Max)));
+    let current = known_coding_model("qwen3.6").unwrap().reasoning;
+    let value = serde_json::to_value(current).unwrap();
+    assert_eq!(
+        value["supported"],
+        serde_json::json!(["low", "medium", "high", "max"])
+    );
+    assert_eq!(value["supportsDisabled"], true);
+    assert_eq!(
+        serde_json::from_value::<ReasoningPolicy>(value).unwrap(),
+        current
+    );
+    assert_eq!(
+        current.resolve_hint(ReasoningHint::Disabled),
+        Some(ReasoningSelection::Toggle(false))
+    );
+    assert_eq!(
+        current.resolve_hint(ReasoningHint::ExtraHigh),
+        Some(ReasoningSelection::Effort(ReasoningEffort::Max))
+    );
+    for values in [serde_json::json!([]), serde_json::json!(["low", "low"])] {
+        assert!(
+            serde_json::from_value::<super::reasoning::SupportedReasoningEfforts>(values).is_err()
+        );
+    }
 }

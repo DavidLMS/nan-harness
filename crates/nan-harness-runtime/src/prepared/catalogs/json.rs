@@ -102,7 +102,7 @@ pub(in crate::prepared) fn goose_model_catalog(models: &[CodingModelProfile]) ->
 pub(in crate::prepared) fn hermes_model_catalog(
     models: &[CodingModelProfile],
 ) -> serde_json::Value {
-    // Hermes' provider schema accepts only model IDs. Reasoning remains upstream passthrough.
+    // Model IDs populate the picker; the native provider plugin projects reasoning separately.
     serde_json::Value::Array(models.iter().map(|model| model.id.clone().into()).collect())
 }
 
@@ -168,7 +168,12 @@ pub fn opencode_model_catalog(models: &[CodingModelProfile]) -> serde_json::Valu
                     "name": model.display_name,
                     "reasoning": reasoning_capable(model.reasoning),
                 });
-                if let ReasoningPolicy::Effort { supported, .. } = model.reasoning {
+                if let ReasoningPolicy::Effort {
+                    supported,
+                    supports_disabled,
+                    ..
+                } = model.reasoning
+                {
                     entry["variants"] = serde_json::Value::Object(
                         supported
                             .into_iter()
@@ -180,15 +185,13 @@ pub fn opencode_model_catalog(models: &[CodingModelProfile]) -> serde_json::Valu
                             })
                             .collect(),
                     );
-                } else if let ReasoningPolicy::Toggle { default_enabled } = model.reasoning {
+                    if supports_disabled {
+                        entry["variants"]["off"] = serde_json::json!({"reasoningEffort": "none"});
+                    }
+                } else if let ReasoningPolicy::Toggle { .. } = model.reasoning {
                     entry["variants"] = serde_json::json!({
-                        "thinking": {"enable_thinking": true},
-                        "no-thinking": {"enable_thinking": false},
-                    });
-                    entry["defaultVariant"] = serde_json::json!(if default_enabled {
-                        "thinking"
-                    } else {
-                        "no-thinking"
+                        "thinking": {"chat_template_kwargs": {"enable_thinking": true}},
+                        "no-thinking": {"chat_template_kwargs": {"enable_thinking": false}},
                     });
                 }
                 (model.id.clone(), entry)
@@ -233,7 +236,9 @@ pub(in crate::prepared) fn openclaw_model_catalog(
     )
 }
 
-pub(in crate::prepared) fn qwen_code_model_catalog(
+/// Render Qwen Code 0.25+ native capabilities, shared by managed and saved setup.
+#[must_use]
+pub fn qwen_code_model_catalog(
     models: &[CodingModelProfile],
     provider_base_url: &str,
 ) -> serde_json::Value {
@@ -253,9 +258,30 @@ pub(in crate::prepared) fn qwen_code_model_catalog(
                     "id": model.id,
                     "name": model.display_name,
                 });
-                if let ReasoningPolicy::Toggle { default_enabled } = model.reasoning {
-                    entry["generationConfig"]["samplingParams"]["enable_thinking"] =
-                        serde_json::json!(default_enabled);
+                match model.reasoning {
+                    ReasoningPolicy::Effort {
+                        supported,
+                        default,
+                        supports_disabled,
+                    } => {
+                        // Qwen requires a declared default for custom aliases. This is
+                        // an explicit client budget, not provider-auto omission.
+                        entry["capabilities"] = serde_json::json!({"reasoning": {
+                            "profile": "openai-effort",
+                            "efforts": supported.into_iter().map(effort_name).collect::<Vec<_>>(),
+                            "defaultEffort": effort_name(default),
+                        }});
+                        entry["generationConfig"]["thinkingMandatory"] =
+                            serde_json::json!(!supports_disabled);
+                    }
+                    ReasoningPolicy::Toggle { .. } => {
+                        entry["capabilities"] = serde_json::json!({"reasoning": {
+                            "profile": "qwen-chat-template",
+                        }});
+                    }
+                    ReasoningPolicy::AlwaysOn
+                    | ReasoningPolicy::Unsupported
+                    | ReasoningPolicy::Unknown => {}
                 }
                 entry
             })

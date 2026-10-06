@@ -41,6 +41,7 @@ fn model_recovery_fixture() -> ModelRecoveryFixture {
             "  printf '%s\\n' 'codex-cli 0.146.0'\n",
             "  exit 0\n",
             "fi\n",
+            "if grep -q '^model_reasoning_effort' \"$CODEX_HOME/config.toml\"; then exit 9; fi\n",
             "grep -Fq 'model = \"qwen3.6\"' \"$CODEX_HOME/config.toml\" && exit 0\n",
             "grep -Fq 'model = \"retired-model\"' \"$CODEX_HOME/config.toml\"\n",
         ),
@@ -115,11 +116,7 @@ async fn remembered_model_falls_back_and_explicit_absent_model_is_attempted() {
     assert!(output.status.success(), "{stderr}");
     assert!(stderr.contains("model 'retired-model' is no longer available"));
     assert!(stderr.contains("using 'qwen3.6'"));
-    assert_saved_codex_selection(
-        &fixture.config,
-        "qwen3.6",
-        &serde_json::json!({"kind": "toggle", "value": true}),
-    );
+    assert_saved_codex_selection(&fixture.config, "qwen3.6", &serde_json::Value::Null);
 
     let explicit =
         run_model_recovery_launch(&fixture, provider.base_url(), Some("retired-model")).await;
@@ -135,11 +132,7 @@ async fn remembered_model_falls_back_and_explicit_absent_model_is_attempted() {
     assert!(!explicit_stderr.contains(
         "warning: model 'retired-model' is no longer available for this credential; using 'qwen3.6'."
     ));
-    assert_saved_codex_selection(
-        &fixture.config,
-        "retired-model",
-        &serde_json::json!({"kind": "auto"}),
-    );
+    assert_saved_codex_selection(&fixture.config, "retired-model", &serde_json::Value::Null);
 }
 
 struct ScopedProfileFixture {

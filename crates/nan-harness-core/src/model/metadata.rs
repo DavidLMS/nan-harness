@@ -1,4 +1,4 @@
-use super::reasoning::{ReasoningEffort, ReasoningPolicy};
+use super::reasoning::{ReasoningEffort, ReasoningPolicy, SupportedReasoningEfforts};
 
 pub const CLAUDE_GATEWAY_MODEL_PREFIX: &str = "anthropic/nan/";
 pub const CLAUDE_AUTO_MODE_COMPATIBILITY_ALIAS: &str = "opus";
@@ -23,8 +23,10 @@ pub const KNOWN_CODING_MODELS: [CodingModelMetadata; 8] = [
         context_window: 262_144,
         max_output_tokens: 65_536,
         image_input: true,
-        reasoning: ReasoningPolicy::Toggle {
-            default_enabled: true,
+        reasoning: ReasoningPolicy::Effort {
+            supported: SupportedReasoningEfforts::ALL,
+            default: ReasoningEffort::High,
+            supports_disabled: true,
         },
     },
     CodingModelMetadata {
@@ -45,14 +47,7 @@ pub const KNOWN_CODING_MODELS: [CodingModelMetadata; 8] = [
         context_window: 1_000_000,
         max_output_tokens: 262_144,
         image_input: true,
-        reasoning: ReasoningPolicy::Effort {
-            supported: [
-                ReasoningEffort::Low,
-                ReasoningEffort::Medium,
-                ReasoningEffort::High,
-            ],
-            default: ReasoningEffort::Medium,
-        },
+        reasoning: ReasoningPolicy::AlwaysOn,
     },
     CodingModelMetadata {
         // Xiaomi documents 1M context and 128K output. NaN honors its shared
@@ -70,12 +65,14 @@ pub const KNOWN_CODING_MODELS: [CodingModelMetadata; 8] = [
     CodingModelMetadata {
         id: "gemma4",
         display_name: "NaN · Gemma 4",
-        description: "Opt-in reasoning · tools + vision · 256K",
+        description: "General reasoning · tools + vision · 256K",
         context_window: 262_144,
         max_output_tokens: 65_536,
         image_input: true,
-        reasoning: ReasoningPolicy::Toggle {
-            default_enabled: false,
+        reasoning: ReasoningPolicy::Effort {
+            supported: SupportedReasoningEfforts::ALL,
+            default: ReasoningEffort::High,
+            supports_disabled: true,
         },
     },
     CodingModelMetadata {
@@ -86,12 +83,9 @@ pub const KNOWN_CODING_MODELS: [CodingModelMetadata; 8] = [
         max_output_tokens: 65_536,
         image_input: false,
         reasoning: ReasoningPolicy::Effort {
-            supported: [
-                ReasoningEffort::Low,
-                ReasoningEffort::Medium,
-                ReasoningEffort::High,
-            ],
+            supported: SupportedReasoningEfforts::STANDARD,
             default: ReasoningEffort::Medium,
+            supports_disabled: false,
         },
     },
     CodingModelMetadata {
@@ -102,12 +96,9 @@ pub const KNOWN_CODING_MODELS: [CodingModelMetadata; 8] = [
         max_output_tokens: GENERIC_CODING_MODEL_MAX_OUTPUT_TOKENS,
         image_input: true,
         reasoning: ReasoningPolicy::Effort {
-            supported: [
-                ReasoningEffort::Low,
-                ReasoningEffort::Medium,
-                ReasoningEffort::High,
-            ],
+            supported: SupportedReasoningEfforts::ALL,
             default: ReasoningEffort::Medium,
+            supports_disabled: false,
         },
     },
     CodingModelMetadata {
@@ -118,12 +109,9 @@ pub const KNOWN_CODING_MODELS: [CodingModelMetadata; 8] = [
         max_output_tokens: GENERIC_CODING_MODEL_MAX_OUTPUT_TOKENS,
         image_input: true,
         reasoning: ReasoningPolicy::Effort {
-            supported: [
-                ReasoningEffort::Low,
-                ReasoningEffort::Medium,
-                ReasoningEffort::High,
-            ],
+            supported: SupportedReasoningEfforts::ALL,
             default: ReasoningEffort::Medium,
+            supports_disabled: false,
         },
     },
 ];

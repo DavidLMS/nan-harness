@@ -39,37 +39,7 @@ pub(super) fn opencode_provider(
     models: &[CodingModelProfile],
     provider_base_url: &str,
 ) -> CstInputValue {
-    let models = models
-        .iter()
-        .map(|model| {
-            (
-                model.id.clone(),
-                CstInputValue::Object(vec![
-                    (
-                        "name".to_owned(),
-                        CstInputValue::String(model.display_name.clone()),
-                    ),
-                    (
-                        "description".to_owned(),
-                        CstInputValue::String(model.description.clone()),
-                    ),
-                    (
-                        "limit".to_owned(),
-                        CstInputValue::Object(vec![
-                            (
-                                "context".to_owned(),
-                                CstInputValue::Number(model.context_window.to_string()),
-                            ),
-                            (
-                                "output".to_owned(),
-                                CstInputValue::Number(model.max_output_tokens.to_string()),
-                            ),
-                        ]),
-                    ),
-                ]),
-            )
-        })
-        .collect();
+    let models = jsonc_input(&nan_harness_runtime::opencode_model_catalog(models));
     CstInputValue::Object(vec![
         (
             "npm".to_owned(),
@@ -83,7 +53,7 @@ pub(super) fn opencode_provider(
                 CstInputValue::String(provider_base_url.to_owned()),
             )]),
         ),
-        ("models".to_owned(), CstInputValue::Object(models)),
+        ("models".to_owned(), models),
     ])
 }
 
@@ -150,5 +120,22 @@ pub(super) fn validate_opencode_file_name(value: &str) -> Result<(), Persistence
         Ok(())
     } else {
         Err(PersistenceError::InvalidReceiptPath(value.to_owned()))
+    }
+}
+
+pub(super) fn jsonc_input(value: &serde_json::Value) -> CstInputValue {
+    use serde_json::Value;
+    match value {
+        Value::Null => CstInputValue::Null,
+        Value::Bool(value) => CstInputValue::Bool(*value),
+        Value::Number(value) => CstInputValue::Number(value.to_string()),
+        Value::String(value) => CstInputValue::String(value.clone()),
+        Value::Array(values) => CstInputValue::Array(values.iter().map(jsonc_input).collect()),
+        Value::Object(values) => CstInputValue::Object(
+            values
+                .iter()
+                .map(|(name, value)| (name.clone(), jsonc_input(value)))
+                .collect(),
+        ),
     }
 }

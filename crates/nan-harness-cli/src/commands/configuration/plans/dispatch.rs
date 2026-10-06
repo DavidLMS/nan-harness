@@ -51,6 +51,7 @@ pub(crate) fn for_harness_with_media(
             models,
             default_model,
             search,
+            false,
         ),
         HarnessKind::Omp => omp_plans(
             &paths.omp_directory,
@@ -67,6 +68,7 @@ pub(crate) fn for_harness_with_media(
             models,
             default_model,
             search,
+            true,
         ),
         HarnessKind::QwenCode => {
             qwen_plans(&paths.qwen_directory, api_key, base_url, search.managed)
@@ -80,6 +82,7 @@ pub(crate) fn for_harness_with_media(
             api_key,
             base_url,
             default_model,
+            models,
             search.managed,
             media,
         )?,

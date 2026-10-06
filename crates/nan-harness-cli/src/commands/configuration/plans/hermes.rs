@@ -1,8 +1,9 @@
-use super::super::{ConfigurationError, MediaSelection, YamlValue, json};
+use super::super::{ConfigurationError, MediaSelection, YamlValue, dotenv_quote, json};
 use super::combinators::to_yaml_value;
 use super::search::hermes_search_provider;
 use super::types::{
-    DocumentPlan, ExactFilePlan, LegacyTextBlock, YamlEntryMode, YamlEntryPlan, YamlPlan,
+    DocumentPlan, ExactFilePlan, LegacyTextBlock, TextBlockPlan, YamlEntryMode, YamlEntryPlan,
+    YamlPlan,
 };
 use std::path::Path;
 
@@ -90,6 +91,7 @@ pub(crate) fn hermes_plans(
     api_key: &str,
     base_url: &str,
     default_model: &str,
+    models: &[nan_harness_core::CodingModelProfile],
     search_managed: bool,
     media: MediaSelection,
 ) -> Result<Vec<DocumentPlan>, ConfigurationError> {
@@ -97,9 +99,9 @@ pub(crate) fn hermes_plans(
         path: vec!["model".to_owned()],
         value: to_yaml_value(json!({
             "default": default_model,
-            "provider": "custom",
+            "provider": "nan",
             "base_url": base_url,
-            "api_key": api_key
+            "key_env": "NAN_API_KEY"
         }))?,
         mode: YamlEntryMode::Exclusive,
     }];
@@ -119,6 +121,21 @@ pub(crate) fn hermes_plans(
     }
     entries.extend(media_entries(base_url, media)?);
     Ok(vec![
+        DocumentPlan::TextBlock(TextBlockPlan {
+            path: directory.join(".env"),
+            begin: "# nan-harness:begin provider-credential".to_owned(),
+            end: "# nan-harness:end provider-credential".to_owned(),
+            body: Some(format!("NAN_API_KEY={}", dotenv_quote(api_key))),
+            conflicting_keys: vec!["NAN_API_KEY=".to_owned()],
+        }),
+        DocumentPlan::ExactFile(ExactFilePlan {
+            path: directory.join("plugins/model-providers/nan/__init__.py"),
+            payload: Some(nan_harness_adapters::render_hermes_model_provider(base_url, models).into_bytes()),
+        }),
+        DocumentPlan::ExactFile(ExactFilePlan {
+            path: directory.join("plugins/model-providers/nan/plugin.yaml"),
+            payload: Some(b"name: nan-provider\nkind: model-provider\nversion: 1.0.0\ndescription: NaN model access\nauthor: NaN\n".to_vec()),
+        }),
         DocumentPlan::Yaml(YamlPlan {
             path: directory.join("config.yaml"),
             entries,

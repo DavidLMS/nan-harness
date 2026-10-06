@@ -18,12 +18,9 @@ fn reasoning_policy_is_unknown_only_for_unknown_policy() {
         ),
         (
             ReasoningPolicy::Effort {
-                supported: [
-                    ReasoningEffort::Low,
-                    ReasoningEffort::Medium,
-                    ReasoningEffort::High,
-                ],
+                supported: nan_harness_core::SupportedReasoningEfforts::STANDARD,
                 default: ReasoningEffort::Medium,
+                supports_disabled: false,
             },
             false,
         ),

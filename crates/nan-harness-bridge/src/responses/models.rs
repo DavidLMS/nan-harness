@@ -151,7 +151,7 @@ fn api_model(model: &CodingModelProfile) -> Value {
     })
 }
 
-fn reasoning_levels(policy: ReasoningPolicy) -> (&'static str, Value) {
+fn reasoning_levels(policy: ReasoningPolicy) -> (Option<&'static str>, Value) {
     let level = |effort: &str, description: &str| {
         json!({
             "effort": effort,
@@ -160,37 +160,38 @@ fn reasoning_levels(policy: ReasoningPolicy) -> (&'static str, Value) {
     };
     match policy {
         ReasoningPolicy::Toggle { default_enabled } => (
-            if default_enabled { "high" } else { "none" },
+            Some(if default_enabled { "high" } else { "none" }),
             json!([
                 level("none", "Disable reasoning"),
                 level("high", "Enable reasoning")
             ]),
         ),
-        ReasoningPolicy::Effort { default, supported } => {
+        ReasoningPolicy::Effort {
+            default,
+            supported,
+            supports_disabled,
+        } => {
             let effort_name = |effort| match effort {
                 ReasoningEffort::Low => "low",
                 ReasoningEffort::Medium => "medium",
                 ReasoningEffort::High => "high",
+                ReasoningEffort::Max => "xhigh",
             };
             (
-                effort_name(default),
+                Some(effort_name(default)),
                 Value::Array(
-                    supported
-                        .into_iter()
-                        .map(|effort| {
+                    std::iter::once(level("none", "Disable reasoning"))
+                        .take(usize::from(supports_disabled))
+                        .chain(supported.into_iter().map(|effort| {
                             let name = effort_name(effort);
                             level(name, &format!("{name} reasoning effort"))
-                        })
+                        }))
                         .collect(),
                 ),
             )
         }
-        ReasoningPolicy::AlwaysOn => (
-            "high",
-            json!([level("high", "Model reasoning is always enabled")]),
-        ),
-        ReasoningPolicy::Unsupported | ReasoningPolicy::Unknown => {
-            ("none", json!([level("none", "No reasoning control")]))
+        ReasoningPolicy::AlwaysOn | ReasoningPolicy::Unsupported | ReasoningPolicy::Unknown => {
+            (None, json!([]))
         }
     }
 }
@@ -238,10 +239,10 @@ mod tests {
             response["models"][1]["description"],
             "NaN text model · capabilities not yet profiled"
         );
-        assert_eq!(response["models"][1]["default_reasoning_level"], "none");
+        assert!(response["models"][1]["default_reasoning_level"].is_null());
         assert_eq!(
-            response["models"][1]["supported_reasoning_levels"][0]["effort"],
-            "none"
+            response["models"][1]["supported_reasoning_levels"],
+            json!([])
         );
     }
 
@@ -275,22 +276,34 @@ mod tests {
         };
         assert_eq!(
             contract(0),
-            (json!("high"), vec![json!("none"), json!("high")])
-        );
-        assert_eq!(
-            contract(1),
             (
-                json!("medium"),
-                vec![json!("low"), json!("medium"), json!("high")]
+                json!("high"),
+                vec![
+                    json!("none"),
+                    json!("low"),
+                    json!("medium"),
+                    json!("high"),
+                    json!("xhigh")
+                ]
             )
         );
+        assert_eq!(contract(1), (serde_json::Value::Null, vec![]));
         assert_eq!(
             contract(2),
             (json!("high"), vec![json!("none"), json!("high")])
         );
         assert_eq!(
             contract(3),
-            (json!("none"), vec![json!("none"), json!("high")])
+            (
+                json!("high"),
+                vec![
+                    json!("none"),
+                    json!("low"),
+                    json!("medium"),
+                    json!("high"),
+                    json!("xhigh")
+                ]
+            )
         );
         assert_eq!(
             contract(4),
@@ -316,15 +329,12 @@ mod tests {
         assert_eq!(models[0]["slug"], "qwen3.8-flash");
         assert_eq!(models[0]["context_window"], 1_000_000);
         assert_eq!(models[0]["input_modalities"], json!(["text", "image"]));
-        assert_eq!(models[0]["default_reasoning_level"], "high");
+        assert!(models[0]["default_reasoning_level"].is_null());
         assert_eq!(
             models[0]["supported_reasoning_levels"]
                 .as_array()
                 .expect("reasoning levels"),
-            &[json!({
-                "effort": "high",
-                "description": "Model reasoning is always enabled"
-            })]
+            &Vec::<serde_json::Value>::new()
         );
 
         assert_eq!(models[1]["slug"], "glm5.3-flash");
@@ -336,7 +346,8 @@ mod tests {
             json!([
                 {"effort": "low", "description": "low reasoning effort"},
                 {"effort": "medium", "description": "medium reasoning effort"},
-                {"effort": "high", "description": "high reasoning effort"}
+                {"effort": "high", "description": "high reasoning effort"},
+                {"effort": "xhigh", "description": "xhigh reasoning effort"}
             ])
         );
 
@@ -349,7 +360,8 @@ mod tests {
             json!([
                 {"effort": "low", "description": "low reasoning effort"},
                 {"effort": "medium", "description": "medium reasoning effort"},
-                {"effort": "high", "description": "high reasoning effort"}
+                {"effort": "high", "description": "high reasoning effort"},
+                {"effort": "xhigh", "description": "xhigh reasoning effort"}
             ])
         );
     }

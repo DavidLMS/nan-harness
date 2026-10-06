@@ -3,9 +3,7 @@ use super::paths::SessionReceipt;
 use crate::commands::desktop::reject_symlink;
 use jsonc_parser::ParseOptions;
 use jsonc_parser::cst::{CstInputValue, CstRootNode};
-use nan_harness_core::{
-    CodingModelProfile, ContextLimit, NativeContextLimit, ReasoningEffort, ReasoningPolicy,
-};
+use nan_harness_core::{CodingModelProfile, ContextLimit, NativeContextLimit};
 use serde_json::Value;
 use sha2::{Digest as _, Sha256};
 use std::fs;
@@ -265,12 +263,6 @@ fn zed_model(
             CstInputValue::Number(threshold.to_string()),
         ));
     }
-    if let ReasoningPolicy::Effort { default, .. } = model.reasoning {
-        fields.push((
-            "reasoning_effort".to_owned(),
-            CstInputValue::String(reasoning_effort(default).to_owned()),
-        ));
-    }
     fields.push((
         "capabilities".to_owned(),
         CstInputValue::Object(vec![
@@ -300,14 +292,6 @@ fn zed_default_model(selected_model: &str) -> CstInputValue {
             CstInputValue::String(selected_model.to_owned()),
         ),
     ])
-}
-
-const fn reasoning_effort(effort: ReasoningEffort) -> &'static str {
-    match effort {
-        ReasoningEffort::Low => "low",
-        ReasoningEffort::Medium => "medium",
-        ReasoningEffort::High => "high",
-    }
 }
 
 fn parse_jsonc(source: &str) -> Result<CstRootNode, ZedDesktopError> {

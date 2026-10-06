@@ -10,7 +10,7 @@ impl ConfigurationManager {
         harness: HarnessKind,
         models: &[CodingModelProfile],
         provider_base_url: &str,
-        _api_key: &str,
+        prepared: &[super::PreparedDocument],
         search_managed: bool,
     ) -> Result<(Vec<PreparedFileChange>, Option<IntegrationChange>), ConfigurationError> {
         let change = match harness {
@@ -22,10 +22,17 @@ impl ConfigurationManager {
             HarnessKind::QwenCode => {
                 Some(self.legacy.prepare_qwen_code(models, provider_base_url)?)
             }
-            HarnessKind::DeepSeekHarness => Some(
-                self.legacy
-                    .prepare_deepseek_harness(models, provider_base_url)?,
-            ),
+            HarnessKind::DeepSeekHarness => {
+                let sources = prepared
+                    .iter()
+                    .map(|document| (document.path.clone(), document.replacement.clone()))
+                    .collect();
+                Some(self.legacy.prepare_deepseek_with_sources(
+                    models,
+                    provider_base_url,
+                    &sources,
+                )?)
+            }
             HarnessKind::Aider => Some(self.legacy.prepare_aider(models, provider_base_url)?),
             _ => None,
         };

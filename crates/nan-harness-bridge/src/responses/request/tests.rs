@@ -139,35 +139,40 @@ fn translates_and_validates_native_reasoning_effort() {
         .expect("request")
     };
 
-    let qwen = nan_harness_core::coding_model_profile("qwen3.6").expect("model");
-    let translated = translate(request("qwen3.6", "none"), &qwen).expect("toggle accepted");
-    assert_eq!(
-        translated.body["chat_template_kwargs"]["enable_thinking"],
-        false
-    );
-
-    let deepseek = nan_harness_core::coding_model_profile("deepseek-v4-flash").expect("model");
-    let translated =
-        translate(request("deepseek-v4-flash", "low"), &deepseek).expect("effort accepted");
-    assert_eq!(translated.body["reasoning_effort"], "low");
-    let translated = translate(request("deepseek-v4-flash", "xhigh"), &deepseek)
-        .expect("extended effort should use the strongest provider effort");
-    assert_eq!(translated.body["reasoning_effort"], "high");
+    for id in ["qwen3.6", "gemma4", "glm5.3", "glm5.3-flash"] {
+        let model = nan_harness_core::coding_model_profile(id).unwrap();
+        for (native, wire) in [
+            ("low", "low"),
+            ("medium", "medium"),
+            ("high", "high"),
+            ("xhigh", "max"),
+            ("max", "max"),
+        ] {
+            let translated = translate(request(id, native), &model).unwrap();
+            assert_eq!(translated.body["reasoning_effort"], wire);
+            assert!(translated.body.get("chat_template_kwargs").is_none());
+        }
+        let disabled = translate(request(id, "none"), &model);
+        if id == "qwen3.6" || id == "gemma4" {
+            assert_eq!(disabled.unwrap().body["reasoning_effort"], "none");
+        } else {
+            assert!(disabled.is_err());
+        }
+    }
+    let deepseek = nan_harness_core::coding_model_profile("deepseek-v4-flash").unwrap();
     assert!(translate(request("deepseek-v4-flash", "none"), &deepseek).is_err());
-
-    let translated =
-        translate(request("qwen3.6", "xhigh"), &qwen).expect("extended toggle accepted");
+    for hint in ["low", "xhigh"] {
+        let translated = translate(request("deepseek-v4-flash", hint), &deepseek).unwrap();
+        assert!(translated.body.get("reasoning_effort").is_none());
+    }
+    let mut renamed = nan_harness_core::coding_model_profile("qwen3.6").unwrap();
+    renamed.id = "future-effort-model".to_owned();
     assert_eq!(
-        translated.body["chat_template_kwargs"]["enable_thinking"],
-        true
+        translate(request(&renamed.id, "low"), &renamed)
+            .unwrap()
+            .body["reasoning_effort"],
+        "low"
     );
-    let translated = translate(request("qwen3.6", "medium"), &qwen)
-        .expect("positive plan-mode effort should enable toggle reasoning");
-    assert_eq!(
-        translated.body["chat_template_kwargs"]["enable_thinking"],
-        true
-    );
-
     let mimo = nan_harness_core::coding_model_profile("mimo-v2.6-flash").expect("model");
     for (effort, enabled) in [("high", true), ("medium", true), ("none", false)] {
         let translated = translate(request("mimo-v2.6-flash", effort), &mimo)
@@ -183,10 +188,7 @@ fn translates_and_validates_native_reasoning_effort() {
     assert!(translate(request("qwen3.8-flash", "none"), &qwen38).is_err());
     let translated = translate(request("qwen3.8-flash", "high"), &qwen38)
         .expect("always-on reasoning should be accepted");
-    assert_eq!(
-        translated.body["chat_template_kwargs"]["enable_thinking"],
-        true
-    );
+    assert!(translated.body.get("chat_template_kwargs").is_none());
 
     let glm53 = nan_harness_core::coding_model_profile("glm5.3-flash").expect("model");
     let translated = translate(request("glm5.3-flash", "low"), &glm53)
@@ -228,4 +230,19 @@ fn replays_reasoning_content_with_a_tool_call() {
         translated.body["messages"][1]["tool_calls"][0]["id"],
         "call_1"
     );
+}
+
+#[test]
+fn reasoning_summary_without_effort_preserves_provider_defaults() {
+    let model = nan_harness_core::coding_model_profile("deepseek-v4-flash").unwrap();
+    for reasoning in [json!({}), json!({"summary":"auto"}), json!({"effort":null})] {
+        let request = serde_json::from_value(json!({
+            "model": model.id, "stream": true, "reasoning": reasoning,
+            "input": [{"role":"user","content":[{"type":"input_text","text":"think"}]}]
+        }))
+        .unwrap();
+        let translated = translate(request, &model).unwrap();
+        assert!(translated.body.get("reasoning_effort").is_none());
+        assert!(translated.body.get("chat_template_kwargs").is_none());
+    }
 }

@@ -7,6 +7,81 @@ pub enum ReasoningEffort {
     Low,
     Medium,
     High,
+    Max,
+}
+
+/// Small, copyable capability set with an array-shaped persistence format.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SupportedReasoningEfforts {
+    values: [ReasoningEffort; 4],
+    len: usize,
+}
+
+impl SupportedReasoningEfforts {
+    pub const STANDARD: Self = Self {
+        values: [
+            ReasoningEffort::Low,
+            ReasoningEffort::Medium,
+            ReasoningEffort::High,
+            ReasoningEffort::High,
+        ],
+        len: 3,
+    };
+    pub const ALL: Self = Self {
+        values: [
+            ReasoningEffort::Low,
+            ReasoningEffort::Medium,
+            ReasoningEffort::High,
+            ReasoningEffort::Max,
+        ],
+        len: 4,
+    };
+
+    #[must_use]
+    pub fn contains(&self, effort: &ReasoningEffort) -> bool {
+        self.values[..self.len].contains(effort)
+    }
+
+    pub fn iter(self) -> impl Iterator<Item = ReasoningEffort> {
+        self.into_iter()
+    }
+}
+
+impl IntoIterator for SupportedReasoningEfforts {
+    type Item = ReasoningEffort;
+    type IntoIter = std::iter::Take<std::array::IntoIter<ReasoningEffort, 4>>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.values.into_iter().take(self.len)
+    }
+}
+
+impl Serialize for SupportedReasoningEfforts {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.values[..self.len].serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for SupportedReasoningEfforts {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let values = Vec::<ReasoningEffort>::deserialize(deserializer)?;
+        if values.is_empty() || values.len() > 4 {
+            return Err(serde::de::Error::custom(
+                "expected one to four supported reasoning efforts",
+            ));
+        }
+        let mut result = Self::STANDARD;
+        for (index, effort) in values.iter().enumerate() {
+            if values[..index].contains(effort) {
+                return Err(serde::de::Error::custom(
+                    "duplicate supported reasoning effort",
+                ));
+            }
+            result.values[index] = *effort;
+        }
+        result.len = values.len();
+        Ok(result)
+    }
 }
 
 /// Harness-provided reasoning preference before model capabilities are applied.
@@ -35,8 +110,10 @@ pub enum ReasoningPolicy {
         default_enabled: bool,
     },
     Effort {
-        supported: [ReasoningEffort; 3],
+        supported: SupportedReasoningEfforts,
         default: ReasoningEffort,
+        #[serde(default)]
+        supports_disabled: bool,
     },
     AlwaysOn,
     Unsupported,
@@ -70,7 +147,14 @@ impl ReasoningPolicy {
             (Self::Effort { supported, .. }, ReasoningSelection::Effort(effort)) => {
                 supported.contains(&effort)
             }
-            (Self::Toggle { .. }, ReasoningSelection::Toggle(_))
+            (
+                Self::Effort {
+                    supports_disabled: true,
+                    ..
+                },
+                ReasoningSelection::Toggle(false),
+            )
+            | (Self::Toggle { .. }, ReasoningSelection::Toggle(_))
             | (Self::AlwaysOn, ReasoningSelection::Toggle(true)) => true,
             _ => false,
         }
@@ -87,12 +171,17 @@ impl ReasoningPolicy {
                 | ReasoningHint::High
                 | ReasoningHint::ExtraHigh => ReasoningSelection::Toggle(true),
             },
-            Self::Effort { .. } => match hint {
-                ReasoningHint::Disabled => return None,
+            Self::Effort { supported, .. } => match hint {
+                ReasoningHint::Disabled => ReasoningSelection::Toggle(false),
                 ReasoningHint::Low => ReasoningSelection::Effort(ReasoningEffort::Low),
                 ReasoningHint::Medium => ReasoningSelection::Effort(ReasoningEffort::Medium),
-                ReasoningHint::High | ReasoningHint::ExtraHigh => {
-                    ReasoningSelection::Effort(ReasoningEffort::High)
+                ReasoningHint::High => ReasoningSelection::Effort(ReasoningEffort::High),
+                ReasoningHint::ExtraHigh => {
+                    ReasoningSelection::Effort(if supported.contains(&ReasoningEffort::Max) {
+                        ReasoningEffort::Max
+                    } else {
+                        ReasoningEffort::High
+                    })
                 }
             },
             Self::AlwaysOn => match hint {

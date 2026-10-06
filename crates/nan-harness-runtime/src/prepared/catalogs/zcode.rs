@@ -45,13 +45,17 @@ fn reasoning_options(policy: ReasoningPolicy) -> Value {
             "values": ["disabled", "enabled", "auto"],
             "map": "reasoningLevel == \"auto\" ? {} : {\"chat_template_kwargs\": {\"enable_thinking\": reasoningLevel == \"enabled\"}}"
         }),
-        ReasoningPolicy::Effort { supported, .. } => {
-            let mut values = supported
-                .iter()
-                .map(|effort| effort_name(*effort))
-                .collect::<Vec<_>>();
+        ReasoningPolicy::Effort {
+            supported,
+            supports_disabled,
+            ..
+        } => {
+            let mut values = supported.iter().map(effort_name).collect::<Vec<_>>();
+            if supports_disabled {
+                values.insert(0, "disabled");
+            }
             values.push("auto");
-            json!({"values": values, "map": "reasoningLevel == \"auto\" ? {} : {\"reasoning_effort\": reasoningLevel}"})
+            json!({"values": values, "map": "reasoningLevel == \"auto\" ? {} : {\"reasoning_effort\": reasoningLevel == \"disabled\" ? \"none\" : reasoningLevel}"})
         }
         ReasoningPolicy::AlwaysOn | ReasoningPolicy::Unsupported | ReasoningPolicy::Unknown => {
             json!({"values": ["auto"], "map": "{}"})

@@ -23,7 +23,7 @@ async fn bridge_lists_only_the_configured_claude_code_models() {
     assert_eq!(response.status(), StatusCode::OK);
     let response: Value = response.json().await.expect("model list should be JSON");
     assert_eq!(response["has_more"], false);
-    assert_eq!(response["data"].as_array().map(Vec::len), Some(4));
+    assert_eq!(response["data"].as_array().map(Vec::len), Some(6));
     assert_eq!(response["data"][0]["id"], "anthropic/nan/qwen3.6");
     assert_eq!(response["data"][0]["display_name"], "NaN · Qwen 3.6");
     assert_eq!(response["data"][1]["id"], "anthropic/nan/deepseek-v4-flash");

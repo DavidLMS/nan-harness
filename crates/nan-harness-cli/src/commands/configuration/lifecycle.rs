@@ -189,7 +189,7 @@ impl ConfigurationManager {
             harness,
             models,
             &config.provider_base_url,
-            &api_key,
+            &prepared,
             search_managed,
         )?;
         let changed = catalog_change.as_ref().is_some_and(|change| change.changed)
@@ -240,12 +240,21 @@ impl ConfigurationManager {
     ) -> Result<RemovalOutcome, ConfigurationError> {
         ensure_supported(harness)?;
         let (mut state, state_file) = self.prepare_state()?;
-        let (legacy_files, legacy_outcome) = self.prepare_remove_legacy(harness)?;
         let Some(receipt) = state.harnesses.get(&harness.to_string()) else {
+            let (legacy_files, legacy_outcome) = self.prepare_remove_legacy(harness)?;
             self.legacy.publish_configuration_files(&legacy_files)?;
             return Ok(legacy_outcome);
         };
         let prepared = prepare_removals(&receipt.documents)?;
+        let (legacy_files, _) = if harness == HarnessKind::DeepSeekHarness {
+            let sources = prepared
+                .iter()
+                .map(|document| (document.path.clone(), document.replacement.clone()))
+                .collect();
+            self.legacy.prepare_remove_deepseek_with_sources(&sources)?
+        } else {
+            self.prepare_remove_legacy(harness)?
+        };
         state.harnesses.remove(&harness.to_string());
         self.publish_operation(prepared, legacy_files, &state, state_file)?;
         Ok(RemovalOutcome::Removed)
@@ -452,7 +461,18 @@ impl ConfigurationManager {
                 replacement_permissions: None,
             })
             .collect::<Vec<_>>();
-        files.extend(catalogs);
+        // DSH's semantic catalog edits compose over the already prepared search block.
+        // Publish a shared path once, always checking the same pre-operation bytes.
+        for catalog in catalogs {
+            if let Some(index) = files.iter().position(|file| file.path == catalog.path) {
+                if files[index].original != catalog.original {
+                    return Err(ConfigurationError::ReceiptMismatch);
+                }
+                files[index] = catalog;
+            } else {
+                files.push(catalog);
+            }
+        }
         let payload =
             serde_json::to_vec_pretty(state).map_err(ConfigurationError::SerializeState)?;
         state_file.replacement = Some(payload);

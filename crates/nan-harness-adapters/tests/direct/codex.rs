@@ -35,10 +35,13 @@ fn codex_uses_a_launch_scoped_profile_without_replacing_user_state() {
             .iter()
             .any(|argument| argument == "model=\"qwen3.6\"")
     );
-    assert!(plan.process.arguments.iter().any(|argument| {
-        argument
-            == &format!("model_reasoning_effort=\"{SELECTED_MODEL_REASONING_EFFORT_PLACEHOLDER}\"")
-    }));
+    assert!(
+        !plan
+            .process
+            .arguments
+            .iter()
+            .any(|argument| { argument.starts_with("model_reasoning_effort=") })
+    );
     assert!(
         plan.process
             .arguments
@@ -64,9 +67,9 @@ fn codex_uses_a_launch_scoped_profile_without_replacing_user_state() {
         "nan-harness-launch_01directadapter.config.toml"
     );
     assert!(
-        plan.launch_scoped_files[0]
+        !plan.launch_scoped_files[0]
             .content_template
-            .contains(SELECTED_MODEL_REASONING_EFFORT_PLACEHOLDER)
+            .contains("model_reasoning_effort")
     );
     assert_eq!(
         plan.temporary_artifacts[0].content_template.as_deref(),
@@ -107,4 +110,31 @@ fn codex_without_profile_support_uses_the_legacy_isolated_home() {
         plan.configuration_overlays[0].files[0].policy,
         OverlayFilePolicy::MergeToml
     );
+}
+
+#[test]
+fn codex_only_injects_an_explicit_reasoning_selection() {
+    for selection in [
+        nan_harness_core::ReasoningSelection::Auto,
+        nan_harness_core::ReasoningSelection::Toggle(false),
+        nan_harness_core::ReasoningSelection::Effort(nan_harness_core::ReasoningEffort::Max),
+    ] {
+        let mut context = context(HarnessKind::Codex, Vec::new());
+        context.model.reasoning_selection = Some(selection);
+        let plan = plan(&CodexAdapter, &context);
+        let explicit = selection != nan_harness_core::ReasoningSelection::Auto;
+        assert_eq!(
+            plan.process
+                .arguments
+                .iter()
+                .any(|arg| arg.contains(SELECTED_MODEL_REASONING_EFFORT_PLACEHOLDER)),
+            explicit
+        );
+        assert_eq!(
+            plan.launch_scoped_files[0]
+                .content_template
+                .contains(SELECTED_MODEL_REASONING_EFFORT_PLACEHOLDER),
+            explicit
+        );
+    }
 }

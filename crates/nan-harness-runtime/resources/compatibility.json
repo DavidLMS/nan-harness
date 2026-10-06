@@ -115,11 +115,9 @@
     {
       "id": "deepseek-harness",
       "command": "dsh --version",
-      "lastCompatibleVersion": "0.1.2-rc.1",
-      "compatibleAt": "2026-09-07T02:53:11.876304Z",
-      "lastLiveVerifiedVersion": "0.1.2-rc.1",
-      "liveVerifiedAt": "2026-09-07T02:53:11.876304Z",
-      "minimumVersion": "0.1.0-rc.7",
+      "lastCompatibleVersion": "0.2.0-rc.2",
+      "compatibleAt": "2026-10-06T23:08:08Z",
+      "minimumVersion": "0.2.0-rc.2",
       "runtime": {
         "command": "node --version",
         "minimumVersion": "22.19.0"
@@ -152,11 +150,11 @@
     {
       "id": "qwen-code",
       "command": "qwen --version",
-      "lastCompatibleVersion": "0.23.0",
-      "compatibleAt": "2026-09-07T02:58:12.975864Z",
-      "lastLiveVerifiedVersion": "0.23.0",
-      "liveVerifiedAt": "2026-09-07T02:58:12.975864Z",
-      "minimumVersion": "0.21.13",
+      "lastCompatibleVersion": "0.25.0",
+      "compatibleAt": "2026-10-06T22:56:16Z",
+      "lastLiveVerifiedVersion": null,
+      "liveVerifiedAt": null,
+      "minimumVersion": "0.25.0",
       "transport": "direct-chat",
       "status": "verified"
     },

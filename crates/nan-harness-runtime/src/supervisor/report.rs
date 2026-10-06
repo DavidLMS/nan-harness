@@ -125,7 +125,7 @@ pub(super) fn parse_codex_reasoning(
         "low" => ReasoningHint::Low,
         "medium" => ReasoningHint::Medium,
         "high" => ReasoningHint::High,
-        "xhigh" => ReasoningHint::ExtraHigh,
+        "xhigh" | "max" => ReasoningHint::ExtraHigh,
         _ => return None,
     };
     policy.resolve_hint(hint)

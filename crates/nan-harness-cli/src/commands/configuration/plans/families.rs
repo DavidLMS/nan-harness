@@ -16,6 +16,7 @@ pub(crate) fn pi_family_plans(
     models: &[CodingModelProfile],
     default_model: &str,
     search: super::super::ManagedSearchStatus,
+    preserve_native_defaults: bool,
 ) -> Vec<DocumentPlan> {
     vec![
         DocumentPlan::Json(JsonPlan {
@@ -40,6 +41,16 @@ pub(crate) fn pi_family_plans(
             ],
         }),
         search_mcp_plan(directory.join("mcp.json"), false),
+        DocumentPlan::ExactFile(ExactFilePlan {
+            path: directory.join("extensions/nan-reasoning.js"),
+            payload: Some(
+                nan_harness_adapters::render_pi_reasoning_extension(
+                    models,
+                    preserve_native_defaults,
+                )
+                .into_bytes(),
+            ),
+        }),
         DocumentPlan::ExactFile(ExactFilePlan {
             path: directory.join(PI_SEARCH_EXTENSION_FILE),
             payload: search.managed.then(|| {

@@ -1,6 +1,5 @@
 use crate::direct::{
-    DirectLaunch, PROVIDER_URL_ENVIRONMENT, build_direct_plan, provider_environment,
-    validate_routing_arguments,
+    DirectLaunch, build_direct_plan, provider_environment, validate_routing_arguments,
 };
 use nan_harness_core::launch_plan::{
     ArtifactLifecycle, BRIDGE_BASE_URL_PLACEHOLDER, DEEPSEEK_MODEL_CATALOG_PLACEHOLDER,
@@ -57,6 +56,18 @@ impl HarnessAdapter for DeepSeekHarnessAdapter {
 fn deepseek_arguments(user_arguments: &[String]) -> Result<Vec<String>, PlanError> {
     if user_arguments
         .first()
+        .is_some_and(|argument| argument.starts_with("--profile="))
+    {
+        let mut arguments = vec![
+            user_arguments[0].clone(),
+            "--patch".to_owned(),
+            PATCH_PATH_PLACEHOLDER.to_owned(),
+        ];
+        arguments.extend(user_arguments[1..].iter().cloned());
+        return Ok(arguments);
+    }
+    if user_arguments
+        .first()
         .is_some_and(|argument| argument == "--profile")
     {
         if user_arguments.get(1).is_none_or(String::is_empty) {
@@ -82,9 +93,22 @@ fn deepseek_arguments(user_arguments: &[String]) -> Result<Vec<String>, PlanErro
 }
 
 fn provider_patch(model_id: &str) -> Result<String, PlanError> {
+    let provider = if nan_harness_core::coding_model_profile(model_id).is_some_and(|model| {
+        matches!(
+            model.reasoning,
+            nan_harness_core::ReasoningPolicy::Effort {
+                supports_disabled: true,
+                ..
+            }
+        )
+    }) {
+        "nan-harness-budgeted"
+    } else {
+        "nan-harness"
+    };
     let model_id = serde_json::to_string(model_id).map_err(|error| serialization_error(&error))?;
     Ok(format!(
-        "- id: agent-default-model\n  config:\n    provider: nan-harness\n    model: {model_id}\n\n- id: llm-deepseek\n  disabled: true\n\n- id: llm-pi-ai\n  config:\n    providers:\n      nan-harness:\n        displayName: NaN\n        apiKeyEnv: NAN_API_KEY\n        api: openai-completions\n        baseURL: !!js process.env.{PROVIDER_URL_ENVIRONMENT}\n        models:\n{DEEPSEEK_MODEL_CATALOG_PLACEHOLDER}{NAN_SEARCH_BLOCK_BEGIN}\n- id: web-search-deepseek\n  disabled: false\n  config:\n    apiKeyEnv: NAN_API_KEY\n    baseURL: {BRIDGE_BASE_URL_PLACEHOLDER}/v1\n    model: {model_id}\n\n- id: tool-web\n  disabled: false\n  config:\n    fetch: false\n{NAN_SEARCH_BLOCK_END}\n"
+        "- id: agent-default-model\n  config:\n    provider: {provider}\n    model: {model_id}\n\n- id: llm-deepseek\n  disabled: true\n\n- id: llm-pi-ai\n  config:\n    providers:\n{DEEPSEEK_MODEL_CATALOG_PLACEHOLDER}{NAN_SEARCH_BLOCK_BEGIN}\n- id: web-search-deepseek\n  disabled: false\n  config:\n    apiKeyEnv: NAN_API_KEY\n    baseURL: {BRIDGE_BASE_URL_PLACEHOLDER}/v1\n    model: {model_id}\n\n- id: tool-web\n  disabled: false\n  config:\n    fetch: false\n{NAN_SEARCH_BLOCK_END}\n"
     ))
 }
 

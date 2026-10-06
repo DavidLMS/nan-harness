@@ -1,7 +1,7 @@
 schema_version = 1
 harness = "qwen-code"
-profile = "Safe-mode headless tools"
-last_compatible_version = "0.23.0"
+profile = "Qwen 0.25 isolated headless tools and fixture skill"
+last_compatible_version = "0.25.0"
 inventory = [
   "agent",
   "get_goal",
@@ -11,7 +11,7 @@ inventory = [
   "list_directory",
   "read_file",
   "skill",
-  "todo_write",
+  "tool_call",
   "tool_search",
   "update_goal",
 ]

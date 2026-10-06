@@ -1,7 +1,7 @@
 schema_version = 1
 harness = "deepseek-harness"
 profile = "Headless profile native tools"
-last_verified_version = "0.1.2-rc.1"
+last_verified_version = "0.2.0-rc.2"
 inventory = [
   "bash",
   "create_goal",
@@ -15,12 +15,10 @@ inventory = [
   "job_list",
   "job_output",
   "list_agents",
-  "ralph",
   "read",
   "read_image",
   "send_message",
   "skill",
-  "str_replace_editor",
   "subagent",
   "subagent_fork",
   "todo_write",

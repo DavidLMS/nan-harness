@@ -68,6 +68,7 @@ pub(in crate::prepared) fn effort_name(effort: ReasoningEffort) -> &'static str 
         ReasoningEffort::Low => "low",
         ReasoningEffort::Medium => "medium",
         ReasoningEffort::High => "high",
+        ReasoningEffort::Max => "max",
     }
 }
 
@@ -75,22 +76,37 @@ pub(in crate::prepared) fn selected_model_reasoning_effort(
     selected_model_id: &str,
     requested: Option<ReasoningSelection>,
     models: &[CodingModelProfile],
-) -> Result<String, DiagnosticText> {
+) -> Result<Option<String>, DiagnosticText> {
     let model = models
         .iter()
         .find(|model| model.id == selected_model_id)
         .ok_or_else(|| {
             DiagnosticText::new(|locale| detail_messages::detail_selected_model_selected_model_id_is_not_present_in_the_discovered_nan_catalog(locale, &(selected_model_id)))
         })?;
-    let default = model.reasoning.default_selection();
-    let selection = requested
-        .filter(|selection| model.reasoning.accepts(*selection))
-        .unwrap_or(default);
+    let selection = model_reasoning_selection(requested, model.reasoning);
     Ok(match selection {
-        ReasoningSelection::Auto | ReasoningSelection::Toggle(false) => "none".to_owned(),
-        ReasoningSelection::Toggle(true) => "high".to_owned(),
-        ReasoningSelection::Effort(effort) => effort_name(effort).to_owned(),
+        ReasoningSelection::Auto => None,
+        ReasoningSelection::Toggle(false) => Some("none".to_owned()),
+        ReasoningSelection::Toggle(true) => Some("high".to_owned()),
+        ReasoningSelection::Effort(ReasoningEffort::Max) => Some("xhigh".to_owned()),
+        ReasoningSelection::Effort(effort) => Some(effort_name(effort).to_owned()),
     })
+}
+
+pub(in crate::prepared) fn model_reasoning_selection(
+    requested: Option<ReasoningSelection>,
+    policy: ReasoningPolicy,
+) -> ReasoningSelection {
+    // Saved binary-on preferences remain enabled when a model gains effort levels.
+    let requested = match (requested, policy) {
+        (Some(ReasoningSelection::Toggle(true)), ReasoningPolicy::Effort { default, .. }) => {
+            Some(ReasoningSelection::Effort(default))
+        }
+        (selection, _) => selection,
+    };
+    requested
+        .filter(|selection| policy.accepts(*selection))
+        .unwrap_or(ReasoningSelection::Auto)
 }
 
 pub(in crate::prepared) fn render_reasoning_effort(
@@ -100,10 +116,53 @@ pub(in crate::prepared) fn render_reasoning_effort(
     if !value.contains(SELECTED_MODEL_REASONING_EFFORT_PLACEHOLDER) {
         return Ok(value.to_owned());
     }
-    let effort = effort.ok_or_else(|| {
-        DiagnosticText::new(
-            detail_messages::detail_selected_model_reasoning_requires_live_nan_model_discovery,
-        )
-    })?;
-    Ok(value.replace(SELECTED_MODEL_REASONING_EFFORT_PLACEHOLDER, effort))
+    if let Some(effort) = effort {
+        return Ok(value.replace(SELECTED_MODEL_REASONING_EFFORT_PLACEHOLDER, effort));
+    }
+    // A saved preference may stop applying after a model capability refresh.
+    // Remove the owned Codex setting rather than turn omission into "none".
+    let mut rendered = String::new();
+    for line in value.split_inclusive('\n') {
+        if line.contains(SELECTED_MODEL_REASONING_EFFORT_PLACEHOLDER) {
+            if !line.trim_start().starts_with("model_reasoning_effort") {
+                return Err(DiagnosticText::new(
+                    detail_messages::detail_selected_model_reasoning_requires_live_nan_model_discovery,
+                ));
+            }
+        } else {
+            rendered.push_str(line);
+        }
+    }
+    Ok(rendered)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nan_harness_core::coding_model_profile;
+
+    #[test]
+    fn codex_preferences_preserve_omission_off_and_native_maximum() {
+        let models = [coding_model_profile("gemma4").unwrap()];
+        for (selection, expected) in [
+            (None, None),
+            (Some(ReasoningSelection::Auto), None),
+            (Some(ReasoningSelection::Toggle(false)), Some("none")),
+            (
+                Some(ReasoningSelection::Effort(ReasoningEffort::Low)),
+                Some("low"),
+            ),
+            (
+                Some(ReasoningSelection::Effort(ReasoningEffort::Max)),
+                Some("xhigh"),
+            ),
+        ] {
+            assert_eq!(
+                selected_model_reasoning_effort("gemma4", selection, &models)
+                    .unwrap()
+                    .as_deref(),
+                expected
+            );
+        }
+    }
 }

@@ -215,7 +215,7 @@ fn assert_stopped(marker: &std::path::Path) {
 #[cfg(unix)]
 #[tokio::test]
 async fn probe_cleanup_preserves_errors_when_group_absence_is_not_proven() {
-    let mut child = super::child::ProbeChild::spawn(&fixture(), &["sleep"]).unwrap();
+    let mut child = super::child::ProbeChild::spawn(&fixture(), &["sleep"], None).unwrap();
     let live_error = child.confirm_termination(Err(io::ErrorKind::PermissionDenied.into()));
     let terminated = child.terminate();
     tokio::time::timeout(Duration::from_secs(2), child.reap())

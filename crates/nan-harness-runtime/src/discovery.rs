@@ -1,6 +1,7 @@
 mod executable;
 mod manifest;
 mod probe;
+pub(crate) use probe::run_config_command as run_bounded_config_command;
 mod version_policy;
 mod warnings;
 use nan_harness_i18n::{Locale, TerminalMessage};

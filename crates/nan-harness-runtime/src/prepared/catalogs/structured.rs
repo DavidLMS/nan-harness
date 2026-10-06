@@ -1,40 +1,26 @@
 use nan_harness_core::CodingModelProfile;
 use nan_harness_i18n::DiagnosticText;
 use nan_harness_i18n::messages as detail_messages;
-use std::fmt::Write as _;
 
 use super::reasoning_capable;
 
 pub(in crate::prepared) fn deepseek_model_catalog(
     models: &[CodingModelProfile],
+    base_url: &str,
 ) -> Result<String, DiagnosticText> {
-    let mut output = String::new();
-    for model in models {
-        let id = serde_json::to_string(&model.id).map_err(|error| {
-            DiagnosticText::new(|locale| {
-                detail_messages::detail_serialize_a_nan_model_id_failed(locale, &(error))
-            })
-        })?;
-        let name = serde_json::to_string(&model.display_name).map_err(|error| {
-            DiagnosticText::new(|locale| {
-                detail_messages::detail_serialize_a_nan_model_name_failed(locale, &(error))
-            })
-        })?;
-        let input = if model.image_input {
-            "[text, image]"
-        } else {
-            "[text]"
-        };
-        write!(
-            output,
-            "          - id: {id}\n            name: {name}\n            contextWindow: {}\n            maxTokens: {}\n            input: {input}\n            reasoning: {}\n",
-            model.context_window,
-            model.max_output_tokens,
-            reasoning_capable(model.reasoning)
-        )
-        .map_err(|error| DiagnosticText::new(|locale| detail_messages::detail_render_the_deepseek_model_catalog_failed(locale, &(error))))?;
+    let providers = super::deepseek_provider_catalog(models, base_url);
+    let yaml = serde_yaml_ng::to_string(&providers).map_err(|error| {
+        DiagnosticText::new(|locale| {
+            detail_messages::detail_render_the_deepseek_model_catalog_failed(locale, &(error))
+        })
+    })?;
+    let mut rendered = String::new();
+    for line in yaml.lines() {
+        rendered.push_str("      ");
+        rendered.push_str(line);
+        rendered.push('\n');
     }
-    Ok(output)
+    Ok(rendered)
 }
 
 pub(in crate::prepared) fn kimi_code_model_catalog(

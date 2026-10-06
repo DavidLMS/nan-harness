@@ -81,12 +81,24 @@ pub(crate) fn deepseek_plans(
     search_managed: bool,
 ) -> Result<Vec<DocumentPlan>, ConfigurationError> {
     Ok(vec![
-        DocumentPlan::TextBlock(TextBlockPlan {
+        DocumentPlan::Yaml(YamlPlan {
             path: directory.join(".credentials.yaml"),
-            begin: "# nan-harness:begin provider-credential".to_owned(),
-            end: "# nan-harness:end provider-credential".to_owned(),
-            body: Some(format!("NAN_API_KEY: {}", yaml_quote(api_key)?)),
-            conflicting_keys: vec!["NAN_API_KEY:".to_owned()],
+            entries: vec![
+                YamlEntryPlan {
+                    path: vec!["version".to_owned()],
+                    value: to_yaml_value(json!(1))?,
+                    mode: YamlEntryMode::Override,
+                },
+                YamlEntryPlan {
+                    path: vec!["refs".to_owned(), "NAN_API_KEY".to_owned()],
+                    value: YamlValue::String(api_key.to_owned()),
+                    mode: YamlEntryMode::Exclusive,
+                },
+            ],
+            legacy_block: Some(super::types::LegacyTextBlock {
+                begin: "# nan-harness:begin provider-credential".to_owned(),
+                end: "# nan-harness:end provider-credential".to_owned(),
+            }),
         }),
         deepseek_search_plan(directory, search_managed),
     ])

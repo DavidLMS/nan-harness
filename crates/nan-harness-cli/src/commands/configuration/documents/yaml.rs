@@ -15,6 +15,14 @@ pub(crate) fn prepare_yaml(
             source,
         })?
         .unwrap_or_default();
+    let upgraded = match previous {
+        Some(PreviousYamlReceipt::TextBlock(receipt)) => {
+            deepseek_credential_receipt(receipt, original.as_deref().unwrap_or_default())?
+        }
+        _ => None,
+    };
+    let upgraded_ref = upgraded.as_ref().map(PreviousYamlReceipt::Yaml);
+    let previous = upgraded_ref.as_ref().or(previous);
     let (previous, created_file) = match previous {
         Some(PreviousYamlReceipt::Yaml(receipt)) => {
             if receipt.path != plan.path {
@@ -51,6 +59,8 @@ pub(crate) fn prepare_yaml(
     if !document.is_mapping() {
         return Err(ConfigurationError::YamlRootNotMapping(plan.path.clone()));
     }
+    let normalized = normalize_deepseek_credentials(&mut document, plan, previous)?;
+    let previous = normalized.as_ref().or(previous);
     let entries = prepare_yaml_entries(&mut document, plan, previous)?;
     let replacement = if entries.is_empty()
         && previous.is_none_or(|receipt| receipt.entries.is_empty())

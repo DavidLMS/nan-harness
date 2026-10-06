@@ -40,7 +40,7 @@ fn model_catalog_rendering_deduplicates_ids_stably() {
 }
 
 #[test]
-fn native_reasoning_catalogs_are_model_aware() {
+fn opencode_reasoning_variants_are_model_aware() {
     let mut models = known_models();
     models.extend([
         coding_model_profile("qwen3.8-flash").expect("known coding model"),
@@ -49,12 +49,13 @@ fn native_reasoning_catalogs_are_model_aware() {
     ]);
     let opencode = opencode_model_catalog(&models);
     assert_eq!(opencode["qwen3.6"]["reasoning"], true);
-    assert_eq!(opencode["qwen3.6"]["defaultVariant"], "thinking");
-    assert_eq!(opencode["gemma4"]["defaultVariant"], "no-thinking");
-    assert_eq!(
-        opencode["deepseek-v4-flash"]["variants"]["high"]["reasoningEffort"],
-        "high"
-    );
+    for id in ["qwen3.6", "gemma4"] {
+        assert!(opencode[id].get("defaultVariant").is_none());
+        assert_eq!(opencode[id]["variants"]["off"]["reasoningEffort"], "none");
+        assert_eq!(opencode[id]["variants"]["max"]["reasoningEffort"], "max");
+    }
+    assert!(opencode["deepseek-v4-flash"].get("variants").is_none());
+    assert!(opencode["glm5.3"]["variants"].get("off").is_none());
     assert_eq!(opencode["glm5.2"]["reasoning"], true);
     assert_eq!(
         opencode["glm5.2"]["variants"]["high"]["reasoningEffort"],
@@ -72,7 +73,16 @@ fn native_reasoning_catalogs_are_model_aware() {
         opencode["glm5.3"]["variants"]["high"]["reasoningEffort"],
         "high"
     );
+}
 
+#[test]
+fn qwen_reasoning_capabilities_are_model_aware() {
+    let mut models = known_models();
+    models.extend([
+        coding_model_profile("qwen3.8-flash").expect("known coding model"),
+        coding_model_profile("glm5.3-flash").expect("known coding model"),
+        coding_model_profile("glm5.3").expect("known coding model"),
+    ]);
     let qwen = qwen_code_model_catalog(&models, "https://nan.invalid/v1");
     let by_id = |id: &str| {
         qwen.as_array()
@@ -81,14 +91,30 @@ fn native_reasoning_catalogs_are_model_aware() {
             .find(|entry| entry["id"] == id)
             .expect("model")
     };
+    for id in ["qwen3.6", "gemma4", "glm5.3", "glm5.3-flash"] {
+        assert_eq!(
+            by_id(id)["capabilities"]["reasoning"]["profile"],
+            "openai-effort"
+        );
+        assert_eq!(
+            by_id(id)["capabilities"]["reasoning"]["efforts"],
+            serde_json::json!(["low", "medium", "high", "max"])
+        );
+        assert_eq!(
+            by_id(id)["generationConfig"]["thinkingMandatory"],
+            id.starts_with("glm")
+        );
+        assert!(
+            by_id(id)["generationConfig"]["samplingParams"]
+                .get("enable_thinking")
+                .is_none()
+        );
+    }
     assert_eq!(
-        by_id("qwen3.6")["generationConfig"]["samplingParams"]["enable_thinking"],
-        true
+        by_id("qwen3.6")["capabilities"]["reasoning"]["defaultEffort"],
+        "high"
     );
-    assert_eq!(
-        by_id("gemma4")["generationConfig"]["samplingParams"]["enable_thinking"],
-        false
-    );
+    assert!(by_id("deepseek-v4-flash").get("capabilities").is_none());
     assert!(
         by_id("deepseek-v4-flash")["generationConfig"]["samplingParams"]
             .get("reasoning_effort")
@@ -167,7 +193,7 @@ fn metadata_and_capabilities_do_not_claim_reasoning_for_every_model() {
     );
 
     let pi = pi_model_catalog(&models);
-    assert_eq!(pi["qwen3.6"]["reasoningPolicy"]["kind"], "toggle");
+    assert_eq!(pi["qwen3.6"]["reasoningPolicy"]["kind"], "effort");
     assert_eq!(pi["glm5.2"]["reasoningPolicy"]["kind"], "effort");
 
     let cline = cline_model_catalog(&models);
@@ -186,14 +212,30 @@ fn metadata_and_capabilities_do_not_claim_reasoning_for_every_model() {
             })
     );
 
-    let deepseek = deepseek_model_catalog(&models).expect("DeepSeek catalog");
-    assert!(deepseek.contains("id: \"mimo-v2.6-flash\""));
-    assert!(deepseek.contains("reasoning: true"));
-    let glm_section = deepseek
-        .split("id: \"glm5.2\"")
-        .nth(1)
-        .expect("DeepSeek GLM section");
-    assert!(glm_section.contains("reasoning: true"));
+    let deepseek =
+        deepseek_model_catalog(&models, "https://nan.invalid/v1").expect("DeepSeek catalog");
+    let deepseek: serde_yaml_ng::Value =
+        serde_yaml_ng::from_str(&deepseek).expect("provider mapping");
+    assert_eq!(deepseek["nan-harness-budgeted"]["reasoning"], "high");
+    for route in ["nan-harness", "nan-harness-budgeted"] {
+        assert_eq!(deepseek[route]["api"], "openai-completions");
+        assert_eq!(deepseek[route]["baseURL"], "https://nan.invalid/v1");
+        assert_eq!(deepseek[route]["apiKeyEnv"], "NAN_API_KEY");
+    }
+    let legacy = deepseek["nan-harness"]["models"]
+        .as_sequence()
+        .expect("legacy models");
+    let qwen = legacy
+        .iter()
+        .find(|model| model["id"] == "qwen3.6")
+        .expect("old session route");
+    assert_eq!(qwen["reasoningEfforts"], false);
+    let glm = legacy
+        .iter()
+        .find(|model| model["id"] == "glm5.2")
+        .expect("GLM route");
+    assert_eq!(glm["reasoningEfforts"]["high"], "high");
+    assert!(glm["reasoningEfforts"].get("off").is_none());
 
     let hermes = hermes_model_catalog(&models);
     assert!(
@@ -223,7 +265,8 @@ fn aider_declares_reasoning_effort_for_effort_capable_models() {
             .expect("model")
     };
     for model in [
-        "openai/deepseek-v4-flash",
+        "openai/qwen3.6",
+        "openai/gemma4",
         "openai/glm5.2",
         "openai/glm5.3-flash",
         "openai/glm5.3",
@@ -234,6 +277,11 @@ fn aider_declares_reasoning_effort_for_effort_capable_models() {
         );
         assert!(by_name(model).get("reasoning_effort").is_none());
     }
+    assert!(
+        by_name("openai/deepseek-v4-flash")
+            .get("accepts_settings")
+            .is_none()
+    );
     assert!(by_name("openai/qwen3.6").get("reasoning_effort").is_none());
     assert!(
         by_name("openai/mimo-v2.6-flash")
