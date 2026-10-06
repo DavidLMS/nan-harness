@@ -67,6 +67,12 @@ class MaintenanceTests(unittest.TestCase):
         self.assertIn("needs.desktop.result == 'success'", workflow)
         shared = (ROOT / '.github/workflows/desktop-automation-feasibility.yml').read_text()
         self.assertIn('QUALIFICATION_SOURCE_SHA: ${{ github.sha }}', shared)
+        self.assertIn('release_manifest_sha256: ${{ needs.prepare.outputs.desktop_manifest_sha256 }}', source)
+        self.assertIn('name: desktop-release-assets', workflow)
+        self.assertIn('--verified-manifest-sha256 "$RELEASE_MANIFEST_SHA"', shared)
+        native = shared.split('  native:', 1)[1].split('  qualification-matrix:', 1)[0]
+        self.assertIn('actions: read', native)
+        self.assertNotIn('contents: write', native)
         self.assertIn('desktop_release_binding.py bind', shared)
         self.assertIn('desktop_release.py --repository', shared)
         self.assertIn('--run-id "$GITHUB_RUN_ID" --source-sha "$GITHUB_SHA"', shared)

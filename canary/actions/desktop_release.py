@@ -7,7 +7,7 @@ from pathlib import Path
 import subprocess
 import sys
 
-from desktop_suite import validate_release_assets
+from desktop_suite import SHA256, digest, validate_release_assets
 from publication import remote_commit
 from selection import native_platform
 from state import Store, StateError
@@ -42,6 +42,28 @@ def stage(store, tag, commit, system, architecture, directory, command=execute, 
     return binary
 
 
+
+def verified_artifact(tag, commit, system, architecture, directory, manifest_sha256):
+    """Consume same-run assets whose manifest was attested by the trusted prepare job.
+
+    The anchor is a job output, never a value taken from the downloaded artifact.
+    Native application jobs retain read-only permissions and do not fetch drafts.
+    """
+    platform = native_platform("desktop", system)
+    if platform["architecture"] != architecture or not SHA256.fullmatch(manifest_sha256):
+        raise StateError("invalid verified artifact identity")
+    suffix = ".exe" if system == "windows" else ""
+    asset = f"nan-harness-{architecture}-{platform['target']}{suffix}"
+    manifest, binary = directory / "SHA256SUMS", directory / asset
+    if (directory.is_symlink() or manifest.is_symlink() or binary.is_symlink()
+            or not manifest.is_file() or not binary.is_file()
+            or digest(manifest) != manifest_sha256):
+        raise StateError("verified release manifest changed during transport")
+    validate_release_assets(manifest, {asset: binary}, tag, commit)
+    binary.chmod(0o700)
+    return binary
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repository", required=True)
@@ -51,10 +73,18 @@ def main():
     parser.add_argument("--architecture", required=True)
     parser.add_argument("--directory", type=Path, required=True)
     parser.add_argument("--suite", choices=("cli", "desktop"), default="desktop")
+    parser.add_argument("--verified-manifest-sha256")
     args = parser.parse_args()
     try:
-        binary = stage(Store(args.repository), args.tag, args.commit, args.platform,
-                       args.architecture, args.directory, suite=args.suite)
+        store = Store(args.repository)
+        if args.verified_manifest_sha256 is None:
+            binary = stage(store, args.tag, args.commit, args.platform,
+                           args.architecture, args.directory, suite=args.suite)
+        else:
+            if args.suite != "desktop" or remote_commit(store, args.tag) != args.commit:
+                raise StateError("verified release tag changed")
+            binary = verified_artifact(args.tag, args.commit, args.platform, args.architecture,
+                                       args.directory, args.verified_manifest_sha256)
         with Path(os.environ["GITHUB_ENV"]).open("a") as output:
             output.write(f"NANH_PATH={binary}\nSOURCE_SHA={args.commit}\n")
     except (StateError, OSError, ValueError, subprocess.SubprocessError):
