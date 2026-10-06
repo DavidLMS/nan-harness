@@ -24,10 +24,15 @@ fn envelope(content: &str) -> Option<ExecState> {
     if content.len() > 64 * 1024 {
         return None;
     }
-    let mut lines = content.lines();
-    let chunk = lines.next()?.strip_prefix("Chunk ID: ")?;
-    if chunk.is_empty() || !chunk.bytes().all(|c| c.is_ascii_hexdigit()) {
-        return None;
+    let mut lines = content.lines().peekable();
+    if lines
+        .peek()
+        .is_some_and(|line| line.starts_with("Chunk ID: "))
+    {
+        let chunk = lines.next()?.strip_prefix("Chunk ID: ")?;
+        if chunk.is_empty() || chunk.len() > 128 || chunk.chars().any(char::is_whitespace) {
+            return None;
+        }
     }
     let wall = lines
         .next()?
@@ -208,6 +213,15 @@ mod tests {
         assert!(matches!(advance(&body, &mut poll), PollResult::Pending(_)));
         assert_eq!(poll.count, 0);
         assert_eq!(envelope("Process running with session ID 17"), None);
+        assert_eq!(
+            envelope("Wall time: 1.0 seconds\nProcess running with session ID 17\nOutput:\n"),
+            Some(ExecState::Running(17))
+        );
+        assert_eq!(
+            envelope("Wall time: 1.0 seconds\nProcess exited with code 1\nOutput:\n"),
+            None
+        );
+
         let body = result(
             "call_nan_harness_conformance0",
             "Process exited with code 0",
