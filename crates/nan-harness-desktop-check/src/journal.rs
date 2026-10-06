@@ -75,6 +75,17 @@ pub(crate) struct SealObservation {
 pub(crate) struct FingerprintFailure {
     artifact_kind: FingerprintArtifact,
     stage: FingerprintStage,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    file_access: Option<FileAccessObservation>,
+}
+
+// Metadata only: never export a filename, numeric owner, mode or contents.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct FileAccessObservation {
+    owner_readable: bool,
+    owner_matches: bool,
+    multiple_links: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -116,6 +127,7 @@ fn fingerprint_failure(relative: &Path, stage: FingerprintStage) -> FingerprintF
     FingerprintFailure {
         artifact_kind,
         stage,
+        file_access: None,
     }
 }
 
@@ -408,7 +420,22 @@ fn tree_fingerprint_observed(
             use sha2::{Digest as _, Sha256};
             let mut hasher = Sha256::new();
             let mut file = File::open(&path).map_err(|error| {
-                fingerprint_io_failure(relative, FingerprintStage::FileOpen, error)
+                let (error, context) =
+                    fingerprint_io_failure(relative, FingerprintStage::FileOpen, error);
+                #[cfg(unix)]
+                let context = {
+                    let mut context = context;
+                    use std::os::unix::fs::MetadataExt as _;
+                    if let Some(context) = &mut context {
+                        context.file_access = Some(FileAccessObservation {
+                            owner_readable: metadata.mode() & 0o400 != 0,
+                            owner_matches: metadata.uid() == nix::unistd::Uid::effective().as_raw(),
+                            multiple_links: metadata.nlink() > 1,
+                        });
+                    }
+                    context
+                };
+                (error, context)
             })?;
             let mut buffer = vec![0u8; 64 * 1024];
             loop {
@@ -437,6 +464,37 @@ fn tree_fingerprint_observed(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn unreadable_owned_file_reports_access_without_changing_permissions() {
+        use std::os::unix::fs::PermissionsExt as _;
+        if nix::unistd::Uid::effective().is_root() {
+            return;
+        }
+        let root = tempfile::tempdir().unwrap();
+        let file = root.path().join("private-name");
+        fs::write(&file, "private contents").unwrap();
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o200)).unwrap();
+        let (_, context) = tree_fingerprint_observed(root.path()).unwrap_err();
+        let context = context.unwrap();
+        assert_eq!(context.stage, FingerprintStage::FileOpen);
+        assert_eq!(
+            context.file_access,
+            Some(FileAccessObservation {
+                owner_readable: false,
+                owner_matches: true,
+                multiple_links: false,
+            })
+        );
+        let receipt = serde_json::to_string(&context).unwrap();
+        assert!(!receipt.contains("private"));
+        assert_eq!(
+            fs::metadata(&file).unwrap().permissions().mode() & 0o777,
+            0o200
+        );
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o600)).unwrap();
+    }
 
     #[test]
     fn injected_permission_failure_keeps_source_and_closed_file_read_context() {

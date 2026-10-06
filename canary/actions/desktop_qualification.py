@@ -2963,7 +2963,7 @@ def semantic_observations(directory, app):
                 flags = {'identityUnchanged', 'mainScopeUnique', 'documentFocused'}
                 count_keys = set('roleLegend roleRadios engineering dialog quickChatComposer editable'.split())
                 if (app != 'chatgpt-desktop' or type(confirmation) is not dict
-                        or set(confirmation) - {'inputChannel'} != flags | {'status', 'counts'}
+                        or set(confirmation) - {'inputChannel', 'sourceScopes'} != flags | {'status', 'counts'}
                         or type(confirmation.get('inputChannel', 'native-focused')) is not str
                         or confirmation.get('inputChannel', 'native-focused') not in {'native-focused', 'cdp-dom'}
                         or any(confirmation[key] is not None and type(confirmation[key]) is not bool for key in flags)
@@ -2980,6 +2980,11 @@ def semantic_observations(directory, app):
                             or any(confirmation['counts'][key] != count for key, count in
                                 {'roleLegend': 1, 'roleRadios': 11, 'engineering': 1}.items()))):
                     raise ValueError('invalid Codex initial main confirmation')
+                if 'sourceScopes' in confirmation:
+                    scopes = confirmation['sourceScopes']
+                    if (type(scopes) is not dict or set(scopes) != {'coding', 'home'}
+                            or any(type(flag) is not bool for flag in scopes.values())):
+                        raise ValueError('invalid Codex passive source scopes')
                 record['initialMainConfirmation'] = confirmation
             if 'mainAuxCorrelation' in value:
                 record['mainAuxCorrelation'] = main_aux_correlation(value['mainAuxCorrelation'], app)

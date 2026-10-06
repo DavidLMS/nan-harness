@@ -165,7 +165,7 @@ function mainConfirmationFacts() {
   return {inputChannel:'native-focused',status:'unmeasured',identityUnchanged:null,mainScopeUnique:null,documentFocused:null,counts:null};
 }
 async function bindCorrelationMain(held,browser,guard,deadline,route,
-  identity=correlationIdentity,pause=ms=>new Promise(resolve=>setTimeout(resolve,ms)),diagnostic=null,settleGuard=null,requireDocumentFocus=true,progress=()=>{}) {
+  identity=correlationIdentity,pause=ms=>new Promise(resolve=>setTimeout(resolve,ms)),diagnostic=null,settleGuard=null,requireDocumentFocus=true,progress=()=>{},observeSource=null) {
   if(diagnostic)diagnostic.inputChannel=requireDocumentFocus?'native-focused':'cdp-dom';
   const publish=()=>{try {progress();}catch {}};
   const stop=status=>{if(diagnostic)diagnostic.status=status;publish();return null;};
@@ -182,6 +182,8 @@ async function bindCorrelationMain(held,browser,guard,deadline,route,
         diagnostic.mainScopeUnique=fresh.scope.mainScope;
         diagnostic.documentFocused=fresh.scope.focused;
         diagnostic.counts=fresh.scope.counts;
+        if(observeSource&&sameCorrelationIdentity(held,fresh)&&guard()&&Date.now()<deadline)
+          diagnostic.sourceScopes=await observeSource(held.page);
         publish();
       }
       if(Date.now()>=deadline)return stop('deadline');
@@ -688,7 +690,9 @@ async function run() {
       const heldMain=trial?await bindCorrelationMain(initialMain,browser,onboardingOwnerGuard,correlationDeadline,
         require('./codex-onboarding.cjs').sourceRoute,correlationIdentity,
         ms=>new Promise(resolve=>setTimeout(resolve,ms)),facts.initialMainConfirmation,
-        folderTrust?.status==='completed'?trustGuard:null,!directCDP,()=>save()):null;
+        folderTrust?.status==='completed'?trustGuard:null,!directCDP,()=>save(),async heldPage=>({
+          coding:await heldPage.evaluate(require('./codex-onboarding.cjs').codingScope),
+          home:await heldPage.evaluate(require('./codex-dom.cjs').homeComposerScope)})):null;
       trustGuard?.finishPassiveFolderSettle();
       // Trust consumes initial admission; preserve its original auxiliary binding.
       // Fresh role binding above must still succeed before subsequent input.

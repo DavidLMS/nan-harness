@@ -67,6 +67,13 @@ class DiagnosticTests(unittest.TestCase):
                       reason="cleanup-failed", ioKind="permission-denied", sealOperation="fingerprint")
         context = dict(artifactKind="managed-profile", stage="file-open")
         D.validate_parent({**record, "fingerprintFailure": context})
+        access = dict(ownerReadable=False, ownerMatches=True, multipleLinks=False)
+        D.validate_parent({**record, "fingerprintFailure": {**context, "fileAccess": access}})
+        for changed in ({**access, "ownerMatches": 1}, {**access, "path": "PRIVATE"}, {}):
+            with self.assertRaises(ValueError):
+                D.validate_parent({**record, "fingerprintFailure": {**context, "fileAccess": changed}})
+        with self.assertRaises(ValueError):
+            D.validate_parent({**record, "fingerprintFailure": {**context, "stage": "metadata", "fileAccess": access}})
         for value in (True, None, "PRIVATE", {}, {**context, "path": "PRIVATE"},
                       {**context, "stage": "PRIVATE"}, {**context, "artifactKind": True}):
             with self.assertRaises(ValueError):

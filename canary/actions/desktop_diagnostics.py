@@ -422,7 +422,12 @@ def validate_parent(record):
     if "fingerprintFailure" in record:
         require(record["failure"] == "io" and record.get("sealOperation") == "fingerprint")
         context = record["fingerprintFailure"]
-        fields(context, {"artifactKind", "stage"})
+        fields(context, {"artifactKind", "stage"}, {"fileAccess"})
+        if "fileAccess" in context:
+            require(context["stage"] == "file-open")
+            access = context["fileAccess"]
+            fields(access, {"ownerReadable", "ownerMatches", "multipleLinks"})
+            require(all(type(value) is bool for value in access.values()))
         enum(context["artifactKind"], {"probe-root", "workspace", "managed-profile", "probe-receipt", "probe-spec", "other-owned"})
         enum(context["stage"], {"metadata", "directory-enumeration", "directory-entry", "symlink-target", "file-open", "file-read"})
     if record["originalReason"] is not None:

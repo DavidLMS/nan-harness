@@ -136,8 +136,9 @@ assert.equal(roleSourceScope({foreignFieldset:true}).mainScope,false);
     const diagnostic=helper.mainConfirmationFacts(),saved=[];
     const result=await helper.bindCorrelationMain(sampled.held,sampled.browser,()=>true,300,
       ()=> 'avatarOverlay',sampled.identity,async ms=>{clock+=ms;},diagnostic,async()=>true,false,
-      ()=>saved.push(JSON.parse(JSON.stringify(diagnostic))));
+      ()=>saved.push(JSON.parse(JSON.stringify(diagnostic))),async()=>({coding:false,home:true}));
     assert.equal(result,null);assert.equal(diagnostic.status,'deadline');
+    assert.deepEqual(diagnostic.sourceScopes,{coding:false,home:true});
     assert.ok(saved.some(value=>value.status==='unmeasured'&&value.mainScopeUnique===false
       &&value.counts.roleRadios===11&&value.identityUnchanged===true));
     assert.equal(saved.at(-1).status,'deadline');assert.ok(!JSON.stringify(saved).includes('private-'));

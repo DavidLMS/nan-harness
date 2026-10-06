@@ -3390,7 +3390,8 @@ class QualificationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             path = root / 'main.json'
-            for item in (facts, facts | {'inputChannel': 'cdp-dom', 'documentFocused': False},
+            for item in (facts, facts | {'sourceScopes': {'coding': False, 'home': True}},
+                         facts | {'inputChannel': 'cdp-dom', 'documentFocused': False},
                          {**facts, 'status': 'document-unfocused', 'documentFocused': False},
                          dict(status='initial-missing', identityUnchanged=None, mainScopeUnique=None,
                               documentFocused=None, counts=None)):
@@ -3398,6 +3399,8 @@ class QualificationTests(unittest.TestCase):
                 self.assertEqual(q.semantic_observations(root, 'chatgpt-desktop')[0]['initialMainConfirmation'], item)
             for changed in (facts | {'inputChannel': 'native-focused', 'documentFocused': False},
                             facts | {'inputChannel': {}},
+                            facts | {'sourceScopes': {'coding': False, 'home': 'PRIVATE'}},
+                            facts | {'sourceScopes': {'coding': False, 'home': True, 'text': 'PRIVATE'}},
                             {**facts, 'status': 'PRIVATE'}, {**facts, 'targetId': 'PRIVATE'},
                             {**facts, 'identityUnchanged': False}, {**facts, 'documentFocused': 1},
                             {**facts, 'counts': {**counts, 'roleRadios': True}},
