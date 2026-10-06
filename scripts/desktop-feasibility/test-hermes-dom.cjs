@@ -19,7 +19,7 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
   let frames = 0;
   let fixtureDocument;
   let sampleCount = 0;
-  let retryHandles = 0;
+  let retryHandles = 0, latestHandleSamples = 0;
   let escapes = 0;
   let skips = 0;
   let onboardingVisible = scenario?.startsWith('onboarding-') ?? false;
@@ -89,7 +89,7 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
     async count() { return scenario === 'send-duplicate' ? 2 : 1; },
     async isEnabled() { return scenario !== 'send-disabled'; },
     async evaluate(callback, pointerRetry) {
-      if (callback.toString().includes('button === sampled')) return scenario !== 'retry-remounted';
+      if (callback.toString().includes('button === sampled')) return scenario !== 'retry-remounted' && !(scenario?.startsWith('onboarding-remount') && retryHandles===2 && latestHandleSamples>=2);
       if (callback.toString().includes('document.elementFromPoint')) return callback(hitButton);
       if (callback.toString().includes('button.scrollIntoView')) return callback(hitButton);
       if (scenario === 'retry-not-focusable' && !callback.toString().includes('document.activeElement')) {
@@ -100,10 +100,10 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
       return scenario === 'blocked-modal' ? 'modal' : scenario === 'blocked-menu' ? 'menu'
         : scenario === 'inert' ? 'inert' : null;
     },
-    async elementHandle() { retryHandles++; const generation = retryHandles; let handleSamples = 0; return {
+    async elementHandle() { retryHandles++; latestHandleSamples=0; const generation = retryHandles; let handleSamples = 0; return {
       async evaluate(callback) {
         if (callback.toString().includes('old.ownerDocument')) return scenario !== 'onboarding-remount-document';
-        handleSamples++; samplingChoice = false; sampleCount++; hitButton.isConnected = scenario !== 'retry-detached' && !(scenario === 'command-detached' && escapes > 0); if (scenario?.startsWith('onboarding-remount') && skips > 0 && generation >= 2 && handleSamples >= 3
+        handleSamples++; latestHandleSamples=handleSamples; samplingChoice = false; sampleCount++; hitButton.isConnected = scenario !== 'retry-detached' && !(scenario === 'command-detached' && escapes > 0); if (scenario?.startsWith('onboarding-remount') && skips > 0 && generation >= 2 && handleSamples >= 3
           && (generation === 2 || scenario === 'onboarding-remount-again')) hitButton.isConnected = false;
         hitButton.disabled = scenario === 'retry-disabled'; hitButton.offsetWidth = scenario === 'retry-transformed' ? 40 : 20; hitButton.type = scenario === 'retry-wrong-type' ? 'submit' : 'button'; hitButton.ownerDocument = scenario === 'retry-foreign-document' ? {} : fixtureDocument; return callback(hitButton); },
       async click(options) { return send.click(options); },

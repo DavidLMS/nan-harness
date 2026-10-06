@@ -27,6 +27,10 @@ enum Cause {
     ConfigInvalid,
     OrphanedSession,
     Io,
+    IoNotFound,
+    IoPermissionDenied,
+    IoSharingViolation,
+    IoInterrupted,
     Persistence,
     Unclassified,
 }
@@ -53,12 +57,24 @@ fn cause(error: &ChatGptDesktopError) -> Cause {
             Cause::ConfigInvalid
         }
         ChatGptDesktopError::OrphanedSessionFiles => Cause::OrphanedSession,
-        ChatGptDesktopError::InspectProfile(_)
-        | ChatGptDesktopError::ReadState(_)
-        | ChatGptDesktopError::WriteState(_)
-        | ChatGptDesktopError::State(DesktopStateError::Io(_)) => Cause::Io,
+        ChatGptDesktopError::InspectProfile(error)
+        | ChatGptDesktopError::ReadState(error)
+        | ChatGptDesktopError::WriteState(error)
+        | ChatGptDesktopError::State(DesktopStateError::Io(error)) => io_cause(error),
         ChatGptDesktopError::Persistence(_) => Cause::Persistence,
         _ => Cause::Unclassified,
+    }
+}
+
+fn io_cause(error: &std::io::Error) -> Cause {
+    if cfg!(windows) && matches!(error.raw_os_error(), Some(32 | 33)) {
+        return Cause::IoSharingViolation;
+    }
+    match error.kind() {
+        std::io::ErrorKind::NotFound => Cause::IoNotFound,
+        std::io::ErrorKind::PermissionDenied => Cause::IoPermissionDenied,
+        std::io::ErrorKind::Interrupted => Cause::IoInterrupted,
+        _ => Cause::Io,
     }
 }
 
@@ -142,6 +158,21 @@ fn write_fact(directory: &Path, stage: Stage, cause: Cause) -> std::io::Result<(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn io_categories_preserve_closed_error_kinds() {
+        for (kind, expected) in [
+            (std::io::ErrorKind::NotFound, Cause::IoNotFound),
+            (
+                std::io::ErrorKind::PermissionDenied,
+                Cause::IoPermissionDenied,
+            ),
+            (std::io::ErrorKind::Interrupted, Cause::IoInterrupted),
+            (std::io::ErrorKind::Other, Cause::Io),
+        ] {
+            let error = ChatGptDesktopError::ReadState(std::io::Error::new(kind, "PRIVATE"));
+            assert_eq!(cause(&error), expected);
+        }
+    }
     #[test]
     fn typed_causes_never_serialize_private_error_details() {
         let errors = [

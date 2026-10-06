@@ -1029,7 +1029,7 @@ def semantic_observations(directory, app):
             stages = {'lock', 'process', 'ownership', 'restore'}
             causes = {'session-busy', 'app-running', 'process-inspection', 'unsafe-path',
                       'profile-invalid', 'receipt-invalid', 'backup-missing', 'backup-mismatch',
-                      'config-invalid', 'orphaned-session', 'io', 'persistence', 'unclassified'}
+                      'config-invalid', 'orphaned-session', 'io', 'io-not-found', 'io-permission-denied', 'io-sharing-violation', 'io-interrupted', 'persistence', 'unclassified'}
             if (app != 'chatgpt-desktop' or set(value) != fields
                     or value['diagnosticsOnly'] is not True
                     or type(value['stage']) is not str or value['stage'] not in stages

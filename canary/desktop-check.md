@@ -3370,3 +3370,12 @@ The same run observed Hermes Windows first-run coverage disappearing before its
 choice could be queried. Readiness now handles that no-action transition by
 revalidating the original frame, editor, composer root and actionable model pill.
 It neither clicks a missing choice nor accepts a replaced or covered composer.
+
+Campaign `37421726262` completed setup on the revised Codex macOS and Hermes
+Windows paths, but did not qualify the full matrix. Codex Retry admission now
+waits read-only for the unique enabled control within its existing deadline,
+reproving the exact failed turn and custody each time. Hermes checks the final
+retained Retry identity after its already constrained onboarding-remount proof;
+it no longer rejects that remount before the proof can run. Neither change
+replays an attempted Retry. Codex restore diagnostics distinguish closed I/O
+categories without changing restoration behavior or exposing paths/messages.

@@ -486,7 +486,7 @@ async function driveDom() {
     if (!ownedEndpoint() || await send.count() !== 1 || !await send.isEnabled()
         || await retryUser.count() !== 1
         || !await retryUser.evaluate((e, prompt) => e.innerText.trim() === prompt, request.prompt)
-        || !await errorProof() || !await send.evaluate((button, sampled) => button === sampled, retryHandle)) {
+        || !await errorProof()) {
       facts.errorCategory = 'send-unavailable'; saveFacts(); return;
     }
     facts.sendBlocker = await readiness();
@@ -515,6 +515,9 @@ async function driveDom() {
       }
       facts.sendBlocker = await readiness();
       finalSample = await retryHandle.evaluate(sampleRetryInterior);
+    }
+    if (!await send.evaluate((button, sampled) => button === sampled, retryHandle)) {
+      facts.errorCategory = 'send-unavailable'; saveFacts(); return;
     }
     facts.retrySampleStatus = finalSample.closed.status;
     facts.retryHitTag = finalSample.closed.frontTag; facts.retryHitRegion = finalSample.closed.frontRegion;

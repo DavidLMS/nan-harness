@@ -91,3 +91,17 @@ for(const change of [{timeoutMs:45001},{action:'unknown'},{prompt:'arbitrary'},
   assert.equal(clicks,1);
   console.log('PASS: Codex source-bound turn oracle, immutable binding and single ordinary action');
 })().catch(error=>{console.error(error);process.exitCode=1;});
+
+(async()=>{
+ const {waitRetryReady}=require('./codex-dom.cjs');
+ for(const scenario of ['absent','disabled','ambiguous','ownership-lost','deadline']) {
+  let now=0,samples=0;
+  const retry={count:async()=>{samples++;return scenario==='ambiguous'?2:scenario==='absent'&&samples<3?0:1;},
+   isEnabled:async()=>scenario!=='deadline'&&(scenario!=='disabled'||samples>=3)};
+  const ready=await waitRetryReady(retry,async()=>scenario!=='ownership-lost',300,async ms=>{now+=ms;},()=>now);
+  assert.equal(ready,['absent','disabled'].includes(scenario));
+  if(scenario==='ambiguous')assert.equal(samples,1);
+  if(scenario==='ownership-lost')assert.equal(samples,0);
+ }
+ console.log('Codex Retry readiness waits without dispatch and rejects ambiguity or lost custody');
+})().catch(error=>{console.error(error);process.exitCode=1;});

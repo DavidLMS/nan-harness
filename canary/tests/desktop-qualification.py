@@ -3419,6 +3419,10 @@ class QualificationTests(unittest.TestCase):
             path = root / 'restore.json'
             path.write_text(json.dumps(value))
             self.assertEqual(q.semantic_observations(root, 'chatgpt-desktop'), [value])
+            for cause in ('io', 'io-not-found', 'io-permission-denied', 'io-sharing-violation', 'io-interrupted'):
+                closed = {**value, 'cause': cause}
+                path.write_text(json.dumps(closed))
+                self.assertEqual(q.semantic_observations(root, 'chatgpt-desktop'), [closed])
             for changed in ({**value, 'stage': 'PRIVATE'}, {**value, 'cause': []},
                             {**value, 'diagnosticsOnly': False}, {**value, 'schemaVersion': True},
                             {**value, 'rawError': 'PRIVATE'},

@@ -282,7 +282,9 @@ async function runTurn(page,guard,request,deadline=Date.now()+request.timeoutMs)
       if(await user.count()!==1||!await user.evaluate((e,prompt)=>e.querySelector('[data-user-message-bubble]')?.innerText.trim()===prompt,request.prompt))return stop('stale-turn');
       const turn=user.locator('xpath=ancestor::*[@data-turn-key][1]');
       const retry=turn.getByRole('button',{name:/^Retry(?: in [1-9][0-9]*s)?$/,exact:true});
-      facts.retryControl=await retry.count()===1&&await retry.isEnabled();
+      const retryTurnOwned=async()=>await owned()&&await user.count()===1
+        &&await user.evaluate((e,prompt)=>e.querySelector('[data-user-message-bubble]')?.innerText.trim()===prompt,request.prompt);
+      facts.retryControl=await waitRetryReady(retry,retryTurnOwned,deadline,pause);
       if(!facts.retryControl)return stop('retry-unavailable');
       retryWitness=await page.evaluateHandle(holdRetryContinuation,{prompt:request.prompt});
       const retryOwned=async()=>await owned()&&(await page.evaluate(retryContinuationObservation,{held:retryWitness,prompt:request.prompt,marker:request.expectedMarker})).userCount===1;
@@ -401,6 +403,17 @@ function validBinding(binding,request,connection) {
     &&identity(binding.main)&&(binding.auxiliary===null||identity(binding.auxiliary)
       &&sourceRoute(binding.auxiliary.url)==='avatarOverlay');
 }
+async function waitRetryReady(retry,guard,deadline,pause,now=Date.now) {
+  while(now()<deadline) {
+    if(!await guard())return false;
+    const count=await retry.count();
+    if(count>1)return false;
+    if(count===1&&await retry.isEnabled()&&await guard())return now()<deadline;
+    await pause(Math.min(100,Math.max(0,deadline-now())));
+  }
+  return false;
+}
+exports.waitRetryReady=waitRetryReady;
 async function main() {
   const fs=require('node:fs'),path=require('node:path');
   const output=process.argv[4];
