@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """Reruns must select fresh evidence, never an older successful outcome."""
 import copy
+import hashlib
+import io
+import tempfile
+import zipfile
 import importlib.util
 from pathlib import Path
 import unittest
@@ -47,6 +51,51 @@ class ArtifactSelectionTests(unittest.TestCase):
                 elif mutation == 'date': row['created_at'] = 'PRIVATE'
                 elif mutation == 'id': row['id'] = True
                 with self.assertRaises(ValueError): selection.select(pages, 20, SHA)
+
+
+class ExactDownloadTests(unittest.TestCase):
+    def archive(self, entries):
+        stream = io.BytesIO()
+        with zipfile.ZipFile(stream, 'w') as bundle:
+            for name, payload in entries:
+                bundle.writestr(name, payload)
+        return stream.getvalue()
+
+    def prepared(self, archive):
+        pages = fixture()
+        for page in pages:
+            for item in page['artifacts']:
+                item.update(digest='sha256:' + hashlib.sha256(archive).hexdigest(), size_in_bytes=len(archive))
+        return pages
+
+    def test_exact_ids_download_all_attempts_without_a_second_latest_filter(self):
+        archive = self.archive([('qualification.json', b'{"closed":true}')])
+        pages = self.prepared(archive)
+        new = {**pages[0]['artifacts'][0], 'id': 101, 'created_at': '2026-10-06T11:00:00Z'}
+        pages[1]['artifacts'].append(new)
+        fetched = []
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / 'cells'
+            selection.download(pages, 20, SHA, target, lambda identifier: fetched.append(identifier) or archive)
+            self.assertEqual(set(fetched), set(selection.select(pages, 20, SHA)))
+            self.assertEqual(len(list(target.glob('*/qualification.json'))), 12)
+            self.assertIn(101, fetched)
+            self.assertNotIn(1, fetched)
+
+    def test_rejects_changed_digest_size_and_unclosed_archive_members(self):
+        cases = [self.archive([('../qualification.json', b'{}')]),
+                 self.archive([('qualification.json', b'{}'), ('raw-log.txt', b'PRIVATE')])]
+        for archive in cases:
+            with tempfile.TemporaryDirectory() as tmp, self.assertRaises(ValueError):
+                selection.download(self.prepared(archive), 20, SHA, Path(tmp) / 'cells', lambda _: archive)
+        archive = self.archive([('qualification.json', b'{}')])
+        for field, value in [('digest', 'sha256:' + '0' * 64), ('size_in_bytes', len(archive) + 1),
+                             ('digest', None), ('size_in_bytes', True)]:
+            pages = self.prepared(archive)
+            for page in pages:
+                for item in page['artifacts']: item[field] = value
+            with tempfile.TemporaryDirectory() as tmp, self.assertRaises(ValueError):
+                selection.download(pages, 20, SHA, Path(tmp) / 'cells', lambda _: archive)
 
 
 if __name__ == '__main__':

@@ -3580,3 +3580,20 @@ qualification outcome and never falls back to an earlier successful receipt.
 Read-only Actions permission is confined to aggregation and its reusable caller.
 The selector has been exercised against the actual duplicate artifact inventory;
 the unchanged reducer accepts the resulting 12-cell, 36-session matrix.
+
+
+Run `37463015081` at `419f6e59` passed quality and ten cells initially. Its
+second attempt qualified Zed Linux and Hermes Windows after closed pre-input
+query failures on their first attempt; cleanup passed throughout. All twelve
+latest cell receipts qualify all 36 sessions on that source commit.
+
+The pinned download action performs another `latest: true` listing even when
+given exact artifact IDs, and only warns when some requested IDs are absent
+from that listing. After a rerun this omitted selected receipts and left the
+aggregate incomplete. Aggregation now downloads each selected ID directly from
+the run's GitHub artifact API. Each archive must match its recorded byte length
+and SHA-256 and contain exactly one bounded `qualification.json`; raw logs,
+extra members and path traversal are rejected. The exact API download and the
+unchanged reducer have been validated against all twelve actual latest receipts
+from `37463015081`, producing a complete matrix. Synthetic tests cover changed
+digests, sizes, archive membership, pagination and outcome-independent selection.
