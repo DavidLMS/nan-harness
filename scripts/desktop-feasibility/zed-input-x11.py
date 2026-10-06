@@ -450,15 +450,32 @@ def interior_points(bounds):
 
 def guarded_retry_proof(point, scope, hit, observation, deadline):
     try:
-        if time.monotonic() >= deadline:
-            raise RetryHitFailure('deadline')
-        if not scope():
-            raise RetryHitFailure('identity-rejected')
-        observation['guardBeforeVerified'] += 1
-        observation['accessibleChecks'] += 1
-        if not hit(point):
-            raise RetryHitFailure('identity-rejected')
-        observation['accessibleExactMatches'] += 1
+        while True:
+            if time.monotonic() >= deadline:
+                raise RetryHitFailure('deadline')
+            if not scope():
+                raise RetryHitFailure('identity-rejected')
+            observation['guardBeforeVerified'] += 1
+            observation['accessibleChecks'] += 1
+            try:
+                matched = hit(point)
+            except RetryHitFailure as error:
+                # AT-SPI may time out during a retained control's hover update.
+                # Repeat only a read, at most twice across the whole selection,
+                # with the same point, identity guards and original deadline.
+                unavailable = observation['accessibleChecks'] - observation['accessibleExactMatches']
+                if error.category != 'accessible-query-unavailable' or unavailable > 2:
+                    raise
+                if not scope():
+                    raise RetryHitFailure('identity-rejected')
+                if time.monotonic() >= deadline:
+                    raise RetryHitFailure('deadline')
+                time.sleep(min(.05, max(0, deadline - time.monotonic())))
+                continue
+            if not matched:
+                raise RetryHitFailure('identity-rejected')
+            observation['accessibleExactMatches'] += 1
+            break
         if time.monotonic() >= deadline:
             raise RetryHitFailure('deadline')
         if not scope():

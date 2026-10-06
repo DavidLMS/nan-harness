@@ -3868,8 +3868,8 @@ class HermesReadinessTests(unittest.TestCase):
             sampled = {**classified, 'pointerChecks': 9, 'pointerPositionMatches': 9, 'pointerChildMatches': 9}
             path.write_text(json.dumps({**value, 'cursorSelection': sampled}))
             self.assertEqual(q.semantic_observations(tmp, 'zed-desktop')[0]['cursorSelection'], sampled)
-            boundary = {**sampled, 'guardBeforeVerified': 56, 'guardAfterVerified': 56,
-                        'accessibleChecks': 56, 'accessibleExactMatches': 56,
+            boundary = {**sampled, 'guardBeforeVerified': 58, 'guardAfterVerified': 58,
+                        'accessibleChecks': 58, 'accessibleExactMatches': 58,
                         'pointerChecks': 45, 'pointerPositionMatches': 45, 'pointerChildMatches': 45,
                         'cursorChecks': 46,
                         'cursorClasses': dict(hand=0, arrow=46, notallowed=0, transparent=0, unknown=0)}

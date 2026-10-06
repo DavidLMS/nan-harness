@@ -3457,3 +3457,14 @@ read is unavailable or untyped, before any clipboard mutation or Invoke. Copy
 may now discard that incomplete snapshot and seek a fully typed, owned tree
 within the unchanged response deadline. Persistent failure still blocks the
 session; this waiting policy does not extend to input replacement or Retry.
+
+Claude Windows qualified three sessions and both cleanups in run `37444843159`
+at `a9c5dd25`, which also passed the full integration-quality job. The subsequent
+full-matrix run `37446193939` exposed an AT-SPI read failure in Zed Linux's first
+Retry: three exact retained-control checks succeeded, the fourth query was
+unavailable, and no button press was delivered. Both later sessions passed.
+The retained hit proof now permits at most two additional read-only queries
+across the entire selection, within its original deadline. Every attempt must
+re-prove ownership, the same control and geometry; mismatched hits, lost custody,
+persistent query failure and expired deadlines remain terminal. Tests cover
+transient recovery, shared query budgets, ownership loss and deadline expiry.

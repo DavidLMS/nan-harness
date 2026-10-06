@@ -257,7 +257,7 @@ class CursorTests(unittest.TestCase):
                 INPUT['guarded_retry_proof']((123, 456), lambda: True, reject,
                                             observed, time.monotonic() + 1)
             self.assertEqual(observed['failureReason'], category)
-            self.assertEqual(observed['accessibleChecks'], 1)
+            self.assertEqual(observed['accessibleChecks'], 3 if category == 'accessible-query-unavailable' else 1)
             self.assertEqual(observed['accessibleExactMatches'], 0)
             self.assertEqual(observed['guardAfterVerified'], 0)
             self.assertNotIn('123', str(observed))
@@ -269,6 +269,53 @@ class CursorTests(unittest.TestCase):
         self.assertEqual(observed['failureReason'], 'identity-rejected')
         self.assertEqual(observed['accessibleExactMatches'], 1)
         self.assertEqual(observed['guardAfterVerified'], 0)
+
+    def test_transient_accessible_read_requires_fresh_guard_and_exact_same_hit(self):
+        observed = dict(guardBeforeVerified=0, guardAfterVerified=0,
+                        accessibleChecks=0, accessibleExactMatches=0)
+        points = []
+        def hit(point):
+            points.append(point)
+            if len(points) == 1:
+                raise INPUT['RetryHitFailure']('accessible-query-unavailable')
+            return True
+        INPUT['guarded_retry_proof']((12, 34), lambda: True, hit, observed, time.monotonic() + 1)
+        self.assertEqual(points, [(12, 34), (12, 34)])
+        self.assertEqual(observed['accessibleChecks'], 2)
+        self.assertEqual(observed['accessibleExactMatches'], 1)
+        self.assertEqual(observed['guardAfterVerified'], 1)
+        # Losing custody after a query error must stop before another read.
+        guards = iter([True, False])
+        points.clear()
+        with self.assertRaises(ValueError):
+            INPUT['guarded_retry_proof']((12, 34), lambda: next(guards), hit,
+                                        observed, time.monotonic() + 1)
+        self.assertEqual(len(points), 1)
+        self.assertEqual(observed['failureReason'], 'identity-rejected')
+
+    def test_query_reobservations_share_budget_and_do_not_extend_deadline(self):
+        observed = dict(guardBeforeVerified=2, guardAfterVerified=0,
+                        accessibleChecks=2, accessibleExactMatches=0)
+        reads = []
+        def unavailable(point):
+            reads.append(point)
+            raise INPUT['RetryHitFailure']('accessible-query-unavailable')
+        with self.assertRaises(ValueError):
+            INPUT['guarded_retry_proof']((12, 34), lambda: True, unavailable,
+                                        observed, time.monotonic() + 1)
+        self.assertEqual(len(reads), 1)
+        self.assertEqual(observed['failureReason'], 'accessible-query-unavailable')
+        clock = [0]
+        observed = dict(guardBeforeVerified=0, guardAfterVerified=0,
+                        accessibleChecks=0, accessibleExactMatches=0)
+        def expires(point):
+            clock[0] = 2
+            return unavailable(point)
+        reads.clear()
+        with patch('time.monotonic', lambda: clock[0]), self.assertRaises(ValueError):
+            INPUT['guarded_retry_proof']((12, 34), lambda: True, expires, observed, 1)
+        self.assertEqual(len(reads), 1)
+        self.assertEqual(observed['failureReason'], 'deadline')
 
     def test_expired_guard_records_deadline_without_querying_or_moving(self):
         observed = dict(guardBeforeVerified=0, guardAfterVerified=0,

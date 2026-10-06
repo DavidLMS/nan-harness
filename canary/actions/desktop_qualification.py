@@ -2173,15 +2173,16 @@ def semantic_observations(directory, app):
             if 'cursorSelection' in value:
                 selection = value['cursorSelection']
                 fields = {'status', 'sampledPoints', 'exactPointerMatched', 'accessibleHitVerified'}
-                counts = {'guardBeforeVerified': 20, 'guardAfterVerified': 20, 'accessibleChecks': 20,
-                          'accessibleExactMatches': 20, 'cursorChecks': 19, 'cursorExactMatches': 19}
+                counts = {'guardBeforeVerified': 22, 'guardAfterVerified': 22, 'accessibleChecks': 22,
+                          'accessibleExactMatches': 22, 'cursorChecks': 19, 'cursorExactMatches': 19}
                 extended = fields | set(counts) | {'failureReason'}
                 classified = extended | {'cursorClasses', 'cursorSizeSource'}
                 pointer_fields = {'pointerChecks', 'pointerPositionMatches', 'pointerChildMatches'}
                 pointer_proved = type(selection) is dict and pointer_fields <= set(selection)
                 if pointer_proved:
                     # The click boundary repeats the cursor and AX proof once.
-                    counts = {key: 46 if key.startswith('cursor') else 56 for key in counts}
+                    # Two additional unavailable AX reads may be reobserved.
+                    counts = {key: 46 if key.startswith('cursor') else 58 for key in counts}
                 if (type(selection) is not dict or set(selection) not in (fields, extended, classified, extended | pointer_fields, classified | pointer_fields)
                         or type(selection['status']) is not str or selection['status'] not in {'matched', 'accessible-hit', 'unavailable', 'no-hit', 'deadline', 'identity-rejected'}
                         or type(selection['sampledPoints']) is not int or not 0 <= selection['sampledPoints'] <= 9
