@@ -3468,3 +3468,27 @@ across the entire selection, within its original deadline. Every attempt must
 re-prove ownership, the same control and geometry; mismatched hits, lost custody,
 persistent query failure and expired deadlines remain terminal. Tests cover
 transient recovery, shared query budgets, ownership loss and deadline expiry.
+
+Run `37446193939` closed with eight qualified cells. Claude passed all platforms;
+Zed Linux and Codex Linux/Windows plus Hermes Windows retained failed sessions.
+All cleanup checks passed. Zed Linux then qualified all three sessions in
+`37447108193` at `25e997ea`, alongside a successful full integration-quality job.
+
+Codex Linux failed initial endpoint admission once. Its `/proc` listener scan
+could discard an entire process when an unrelated descriptor closed; synthetic
+fixtures now reproduce and prevent that race while rejecting foreign, absent
+and inaccessible listeners. Startup uses the fresh successful proof directly,
+and failed admission records the existing closed ownership category.
+Codex Windows again reported an uncertain folder-trust click. Its single click
+now has up to eight seconds within the unchanged overall deadline; an explicit
+`click-timeout` receipt distinguishes timeout from other query/transport errors.
+An uncertain click is still terminal and never replayed.
+
+Hermes Windows failed a cold CDP attachment and, separately, lost its onboarding
+control before dispatch; its third session qualified. Read-only attachment now
+allows at most three attempts, each with fresh native custody and the original
+caller deadline. A disappearing onboarding choice can proceed without a click
+only when the retained button detached, the cover is absent, and the original
+composer and document are independently re-proved. Replacement buttons,
+remounted composers and uncertain input remain rejected. The complete synthetic
+Python/Node experiment contracts and 184 reducer tests pass for these changes.

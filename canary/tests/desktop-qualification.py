@@ -4390,6 +4390,10 @@ class CodexFolderTrustTests(unittest.TestCase):
         for stage in ('authority','guard','deadline','dialog','form','title','path','controls','hit','identity','query'):
             receipt=dict(status='blocked',clickAttempted=False,clickCompleted=False,rejectionStage=stage)
             self.assertEqual(q.public_onboarding({**setup,'folderTrust':receipt},'chatgpt-desktop'),{**setup,'folderTrust':receipt})
+        timed = dict(status='action-uncertain',clickAttempted=True,clickCompleted=False,rejectionStage='click-timeout')
+        self.assertEqual(q.public_onboarding({**setup,'folderTrust':timed},'chatgpt-desktop'),{**setup,'folderTrust':timed})
+        with self.assertRaises(ValueError):
+            q.public_onboarding({**setup,'folderTrust':{**timed,'status':'blocked'}},'chatgpt-desktop')
         receipt = dict(status='blocked',clickAttempted=False,clickCompleted=False,rejectionStage='guard')
         for failure in ('deadline','native-ownership','page-set','main-identity','main-focus','main-scope',
                         'auxiliary-route','auxiliary-identity','auxiliary-focus','auxiliary-controls','query-failed','unmeasured'):

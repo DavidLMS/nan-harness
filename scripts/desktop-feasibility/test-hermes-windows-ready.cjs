@@ -25,18 +25,18 @@ async function trial(scenario) {
  }else{pillClicks++;opened=true;if(scenario==='owner-loss')owner=false;}}};
  const control={count:async()=>scenario==='duplicate'?2:1,isEnabled:async()=>scenario!=='disabled',elementHandle:async()=>handle,evaluate:async()=>true};
  const heldCover={dispose:async()=>{}};
- const choiceHandle={dispose:async()=>{},evaluate:async()=>({sampleStatus:'owned',blocker:'none',point}),click:async()=>{
+ const choiceHandle={dispose:async()=>{},evaluate:async(fn,diagnostic)=>diagnostic?({sampleStatus:'owned',blocker:'none',point}):fn({isConnected:onboardingPresent}),click:async()=>{
    skipClicks++;if(scenario==='onboarding-uncertain')throw new Error('PRIVATE');
    if(scenario!=='onboarding-remains')onboardingPresent=false;
    if(scenario==='onboarding-owner-loss')owner=false;
  }};
- const choice={count:async()=>scenario.startsWith('onboarding-auto-dismiss')&&!onboardingPresent?0:scenario==='onboarding-missing-choice'?0:scenario==='onboarding-duplicate-choice'?2:1,
+ const choice={count:async()=>(scenario.startsWith('onboarding-auto-dismiss')||scenario.startsWith('onboarding-dismiss-before-click'))&&!onboardingPresent?0:scenario==='onboarding-missing-choice'?0:scenario==='onboarding-duplicate-choice'?2:1,
    isVisible:async()=>scenario!=='onboarding-pending-visible' || clock>=300,
-   isEnabled:async()=>scenario!=='onboarding-disabled' && (scenario!=='onboarding-pending-enabled' || clock>=300),elementHandle:async()=>choiceHandle,evaluate:async()=>true};
+   isEnabled:async()=>scenario!=='onboarding-disabled' && (scenario!=='onboarding-pending-enabled' || clock>=300),elementHandle:async()=>choiceHandle,evaluate:async()=>{if(scenario.startsWith('onboarding-dismiss-before-click')){onboardingPresent=false;return false;}return true;}};
  const cover={count:async()=>{if(scenario==='onboarding-cover-pending'&&++coverReads<3)return 0;if(scenario.startsWith('onboarding-auto-dismiss'))onboardingPresent=false;return onboardingPresent?(scenario==='onboarding-duplicate-cover'?2:1):0;},
    isVisible:async()=>onboardingPresent,getByRole:()=>choice,elementHandle:async()=>heldCover,
    evaluate:async()=>scenario!=='onboarding-replaced'};
- const editor={count:async()=>1,elementHandle:async()=>editorHandle,evaluate:async()=>!(scenario==='onboarding-auto-dismiss-remount'&&!onboardingPresent) && scenario!=='composer-changed' && !(scenario==='composer-remount' && clock>=100)};
+ const editor={count:async()=>1,elementHandle:async()=>editorHandle,evaluate:async()=>!(['onboarding-auto-dismiss-remount','onboarding-dismiss-before-click-remount'].includes(scenario)&&!onboardingPresent) && scenario!=='composer-changed' && !(scenario==='composer-remount' && clock>=100)};
  const row={...control,filter(){return this;},isVisible:async()=>true,
    evaluate:async()=>scenario!=='wrong-row-label',
    count:async()=>{rowReads++;return scenario==='wrong-row'?0:scenario==='duplicate-row'?2:
@@ -179,6 +179,12 @@ for(const element of [modelElement([text('Qwen3.6 27B'),meta]),modelElement([tex
   const rejected=await trial(scenario);assert.notEqual(rejected.facts.stage,'ready');
   assert.equal(rejected.skipClicks,0);assert.equal(rejected.pillClicks,0);
  }
+ const disappeared=await trial('onboarding-dismiss-before-click');
+ assert.equal(disappeared.facts.stage,'ready');assert.equal(disappeared.skipClicks,0);
+ assert.equal(disappeared.facts.onboardingSkipped,false);
+ const disappearedRemount=await trial('onboarding-dismiss-before-click-remount');
+ assert.notEqual(disappearedRemount.facts.stage,'ready');assert.equal(disappearedRemount.skipClicks,0);
+ assert.equal(disappearedRemount.pillClicks,0);
  const skipped=await trial('onboarding-success');
  assert.equal(skipped.facts.stage,'ready');assert.equal(skipped.facts.onboardingSkipped,true);
  assert.equal(skipped.skipClicks,1);assert.equal(skipped.pillClicks,1);assert.equal(skipped.refreshClicks,1);

@@ -142,8 +142,12 @@ async function run(page,guard,deadline,authority,seal=()=>{},progress=()=>{}) {
       // The source closes this portal before onboarding continues. Do not
       // conflate Playwright's post-click navigation wait with input delivery;
       // prove that transition ourselves on the retained dialog below.
-      await button.asElement().click({noWaitAfter:true,position:{x:final.width/2,y:final.height/2},
-        timeout:Math.max(1,Math.min(2000,deadline-Date.now()))});
+      try {
+        await button.asElement().click({noWaitAfter:true,position:{x:final.width/2,y:final.height/2},
+          timeout:Math.max(1,Math.min(8000,deadline-Date.now()))});
+      } catch(error) {
+        reject(error?.name==='TimeoutError'?'click-timeout':'query');return receipt;
+      }
       receipt.clickCompleted=true;receipt.status='blocked';checkpoint('post-dispatch');
       while(await owned()) {
         const closed=await held.evaluate(e=>!e.dialog.isConnected&&!e.form.isConnected&&!e.button.isConnected);

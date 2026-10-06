@@ -263,6 +263,7 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
       require(name) {
         if (name === 'node:fs') return mockFs;
         if (name === 'node:crypto') return require('node:crypto');
+        if (name === './owned-renderer-connection.cjs') return require(name);
         if (name.endsWith('/package.json')) return { version: '1.61.1' };
         return { chromium: { async connectOverCDP() { attaches++;
           if (!scenario) throw new Error('must not attach'); return browser; } } };

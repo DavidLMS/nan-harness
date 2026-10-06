@@ -359,8 +359,10 @@ def folder_trust_observation(trust):
         stage = trust['rejectionStage']
         if (type(stage) is not str or stage not in {
                 'authority', 'guard', 'deadline', 'dialog', 'form', 'title', 'path',
-                'controls', 'hit', 'identity', 'query'}
+                'controls', 'hit', 'identity', 'query', 'click-timeout'}
                 or trust['status'] not in {'blocked', 'action-uncertain'}):
+            raise ValueError('invalid folder trust rejection diagnostic')
+        if stage == 'click-timeout' and trust['status'] != 'action-uncertain':
             raise ValueError('invalid folder trust rejection diagnostic')
     if 'guardFailure' in trust:
         failure = trust['guardFailure']

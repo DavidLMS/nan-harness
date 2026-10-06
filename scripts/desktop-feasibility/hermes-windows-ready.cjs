@@ -205,7 +205,13 @@ exports.run = async function run(page, session, ownedEndpoint, deadline, expecte
       while (guard()) {
         await frame();
         if (await locator.count()!==1 || !await locator.evaluate((element,held)=>element===held,handle)) {
-          observation.sampleStatus='control-replaced';throw new Error('actionability');
+          observation.sampleStatus='control-replaced';
+          // First-run configuration can dismiss this cover while it is read.
+          // No click occurred. The caller must still prove cover absence and
+          // the original composer; a replacement button is never adopted.
+          if(action==='onboarding' && await locator.count()===0
+              && await handle.evaluate(element=>!element.isConnected))return false;
+          throw new Error('actionability');
         }
         const current=await inspect();
         if (!current) throw new Error('actionability');
@@ -219,6 +225,7 @@ exports.run = async function run(page, session, ownedEndpoint, deadline, expecte
       try {
         await handle.click({position:{x:last.x,y:last.y},timeout:Math.min(5000,Math.max(1,deadline-Date.now()))});
       } catch {observation.sampleStatus='click-failed';throw new Error('action');}
+      return true;
     }
     const pillHandle=await pill.elementHandle();
     const initialSample=await pillHandle.evaluate(sample,true);
@@ -275,7 +282,7 @@ exports.run = async function run(page, session, ownedEndpoint, deadline, expecte
             && await choice.count()===1 && await choice.isEnabled();
           // Frozen ChooseLaterLink only dismisses first-run provider selection.
           // It does not connect an account or change the managed provider.
-          await click(choice,'onboarding',coverProof);
+          const dispatched=await click(choice,'onboarding',coverProof);
           while (guard() && Date.now()<settleDeadline && await cover.count()!==0) await delay(20);
           if (!guard() || await cover.count()!==0 || await roots.count()!==1 || await editor.count()!==1
               || !await roots.evaluate((element,held)=>element===held,originalRoot)
@@ -283,7 +290,7 @@ exports.run = async function run(page, session, ownedEndpoint, deadline, expecte
           await frame();
           const counts=await observeComposer();
           if (counts.some(count=>count!==1) || facts.composerObservation.readyState!=='complete') throw new Error('composer');
-          facts.onboardingSkipped=true;
+          facts.onboardingSkipped=dispatched;
         } finally { await heldCover.dispose(); }
       }
     }

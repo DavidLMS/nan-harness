@@ -27,14 +27,14 @@ fixture({path:'/private/OTHER'});assert.equal(sample({workspace:'/private/owned/
 fixture({disabled:true});assert.equal(sample({workspace:'/private/owned/workspace',held:null}).rejectionStage,'controls');
 fixture();const proved=sample({workspace:'/private/owned/workspace',held:null});assert.equal(proved.status,'proved');
 fixture();assert.equal(sample({workspace:'/private/owned/workspace',held:proved}).rejectionStage,'identity');
-async function scenario({changed=false,guardLost=false,uncertain=false,expired=false,guardFailure=null,progressThrows=false,remains=false,postGuardLost=false}={}) {
+async function scenario({changed=false,guardLost=false,uncertain=false,expired=false,guardFailure=null,progressThrows=false,remains=false,postGuardLost=false,clickTimeout=false,budget=2000}={}) {
  const original=fixture();let clicks=0,proofs=0,disposed=0;const progress=[];
- const handle=value=>({evaluate:async fn=>fn(value),evaluateHandle:async fn=>handle(fn(value)),dispose:async()=>disposed++,asElement:()=>({click:async options=>{clicks++;assert.equal(options.noWaitAfter,true);if(uncertain)throw Error('private');if(!remains)for(const node of [original.dialog,original.form,original.button])node.isConnected=false;}})});
+ const handle=value=>({evaluate:async fn=>fn(value),evaluateHandle:async fn=>handle(fn(value)),dispose:async()=>disposed++,asElement:()=>({click:async options=>{clicks++;assert.equal(options.noWaitAfter,true);assert(options.timeout>0&&options.timeout<=Math.min(8000,budget));if(budget>8000)assert(options.timeout>2000);if(clickTimeout)throw Object.assign(Error('private'),{name:'TimeoutError'});if(uncertain)throw Error('private');if(!remains)for(const node of [original.dialog,original.form,original.button])node.isConnected=false;}})});
  const page={evaluateHandle:async(fn,arg)=>handle(fn(arg)),evaluate:async(fn,arg)=>{
   if(changed)fixture();return fn({...arg,held:arg.held?await arg.held.evaluate(x=>x):null});}};
  const guard=async()=>{proofs++;return !(postGuardLost&&clicks>0)&&(!guardLost||proofs<3);};
  guard.failure=()=>guardFailure;
- const result=await run(page,guard,expired?Date.now()-1:Date.now()+(remains?350:2000),
+ const result=await run(page,guard,expired?Date.now()-1:Date.now()+(remains?350:budget),
   {workspace:'/private/owned/workspace',verify:async()=>true},()=>{},value=>{progress.push(value);if(progressThrows)throw Error('PRIVATE');});
  return {result,clicks,disposed,progress};
 }
@@ -62,6 +62,8 @@ f.change();assert.equal(a.verify(),false);a.close();
 
 (async()=>{
  let r=await scenario();assert.equal(r.result.status,'completed');assert.equal(r.clicks,1);
+ const slow=await scenario({budget:10000});assert.equal(slow.result.status,'completed');assert.equal(slow.clicks,1);
+ const timed=await scenario({clickTimeout:true});assert.equal(timed.result.rejectionStage,'click-timeout');assert.equal(timed.result.status,'action-uncertain');assert.equal(timed.clicks,1);
  assert.ok(r.progress.some(e=>e.phase==='sample-held'));
  assert.ok(r.progress.some(e=>e.phase==='dispatch'&&e.clickAttempted&&!e.clickCompleted));
  assert.equal(r.progress.at(-1).phase,'finished');assert.ok(!JSON.stringify(r.progress).includes('/private/'));

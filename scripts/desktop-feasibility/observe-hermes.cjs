@@ -178,8 +178,9 @@ async function driveDom() {
   while (!ownedEndpoint() && Date.now() < deadline) await delay(100);
   if (!ownedEndpoint()) { facts.errorCategory = 'endpoint-unowned'; saveFacts(); return; }
   facts.endpointOwned = true;
-  const browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`,
-    { timeout: Math.max(1, Math.min(8000, deadline - Date.now())), noDefaults: true });
+  const browser = await require('./owned-renderer-connection.cjs').connect(
+    timeout=>chromium.connectOverCDP(`http://127.0.0.1:${port}`, {timeout,noDefaults:true}),
+    ownedEndpoint,deadline);
   facts.attached = true;
   const version = browser.version();
   if (/^(?:Chrome\/)?[0-9]+(?:\.[0-9]+){1,3}$/.test(version)) facts.observedRuntimeVersion = version.replace(/^Chrome\//, '');

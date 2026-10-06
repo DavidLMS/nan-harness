@@ -541,9 +541,18 @@ async function run() {
   save();
   if (!facts.launcherOwned) { facts.errorCategory = 'launcher-unowned'; save(); return; }
   const ownership = require('./endpoint-ownership.cjs').proof(String(connection.launcherPid), String(connection.port));
-  while (Date.now() < deadline && !ownership.ownedEndpoint(deadline)) await new Promise(r => setTimeout(r, 250));
-  facts.endpointOwned = ownership.ownedEndpoint(deadline);
-  if (!facts.endpointOwned) { facts.errorCategory = 'endpoint-unowned'; save(); return; }
+  while (Date.now() < deadline) {
+    facts.endpointOwned = ownership.ownedEndpoint(deadline);
+    if(facts.endpointOwned)break;
+    await new Promise(r => setTimeout(r, Math.min(250,Math.max(0,deadline-Date.now()))));
+  }
+  if (!facts.endpointOwned) {
+    facts.errorCategory = 'endpoint-unowned';
+    facts.nativeOwnershipFailure = ownership.failure();
+    const details=ownership.failureDetails();
+    if(details)facts.nativeListenerShape=details;
+    save(); return;
+  }
   checkpoint('attach');
   const browser = await chromium.connectOverCDP(`http://127.0.0.1:${connection.port}`, { timeout: 2000, noDefaults: true });
   try {

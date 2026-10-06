@@ -209,7 +209,13 @@ function ownedEndpoint(callerDeadline) {
     try {
       if (!descendant(Number(pid))) continue;
       for (const fd of fs.readdirSync(`/proc/${pid}/fd`)) {
-        if (fs.readlinkSync(`/proc/${pid}/fd/${fd}`) === inode) return true;
+        try {
+          if (fs.readlinkSync(`/proc/${pid}/fd/${fd}`) === inode) return true;
+        } catch(error) {
+          // An unrelated descriptor can close during enumeration. It cannot
+          // invalidate the still-live listener or prove ownership by itself.
+          if(error?.code !== 'ENOENT')throw error;
+        }
       }
     } catch { /* Processes can exit between enumeration and inspection. */ }
   }

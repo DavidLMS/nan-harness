@@ -344,3 +344,26 @@ console.log('Windows original caller deadline: clipped, invalid, expired and lat
  result='true';late=true;assert.equal(proof.ownedSession(20,1500),false);assert.equal(calls,3);
 }
 console.log('Windows session: one native transaction, both original claims, fresh deadline and no cache passed');
+
+// Closing an unrelated descriptor must not hide a retained owned listener.
+for(const scenario of ['closed-unrelated','closed-listener','foreign','permission','no-listener']) {
+ const context={exports:{},process:{platform:'linux'},require(name){
+  assert.equal(name,'node:fs');
+  return {
+   readFileSync(path){
+    if(path==='/proc/net/tcp')return 'header\n0: 0100007F:A8CA 00000000:0000 0A 0 0 0 0 0 900\n';
+    assert.equal(path,'/proc/30/stat');
+    return `30 (synthetic) S ${scenario==='foreign'?1:20}`;
+   },
+   readdirSync(path){return path==='/proc'?['30']:['1','2'];},
+   readlinkSync(path){
+    if(path.endsWith('/1'))throw Object.assign(new Error('synthetic'),{code:scenario==='permission'?'EACCES':'ENOENT'});
+    if(scenario==='closed-listener')throw Object.assign(new Error('synthetic'),{code:'ENOENT'});
+    return scenario==='no-listener'?'socket:[901]':'socket:[900]';
+   },
+  };
+ }};
+ vm.runInNewContext(source,context);
+ assert.equal(context.exports.proof('20','43210').ownedEndpoint(),scenario==='closed-unrelated',scenario);
+}
+console.log('Linux descriptor churn preserves exact owned listener proof and rejects absent or foreign sockets');
