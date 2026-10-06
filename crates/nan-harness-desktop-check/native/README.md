@@ -158,3 +158,13 @@ The original deadline is preserved and both full proofs must succeed before
 any action. Other stages/errors, changed windows and uncertain actions cannot
 use this path. Tests reproduce both receipts, lost identity/geometry/foreground,
 occlusion, successful fresh proof and expiry without input authorization.
+
+A same-identity initial resize can cross the display boundary between the CG
+candidate selection and the complete AX focus read. When the fresh candidate
+satisfies the existing guarded-fit preconditions, readiness returns pending
+and resets settling so the outer acquisition loop can perform its one allowed
+fit. This does not bind the resized rectangle or perform a fit from the stale
+snapshot. Runtime geometry changes, ambiguous candidates, missing focus and
+occlusion remain rejections. Initial-decision diagnostics include the same
+closed candidate-state enum used by final stability, without window identities
+or coordinates.

@@ -1580,7 +1580,7 @@ def semantic_observations(directory, app):
             elif value.get('phase') in {'initial-decision', 'runtime-rejection'}:
                 raise ValueError('missing Claude decision category')
             if 'candidateState' in value:
-                if (value.get('phase') != 'final-stability' or type(value['candidateState']) is not str
+                if (value.get('phase') not in {'final-stability', 'initial-decision'} or type(value['candidateState']) is not str
                         or value['candidateState'] not in {'absent', 'ambiguous', 'identity-changed', 'bounds-changed',
                                                           'focus-unproved', 'same-process-window', 'off-display', 'occluded', 'proved'}):
                     raise ValueError('invalid Claude acquisition candidate state')

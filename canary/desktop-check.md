@@ -3628,3 +3628,20 @@ an action target. No input is admitted until both independent full proofs pass;
 foreign identity, changed bounds, overlapping panels and unsupported queries
 remain terminal. Synthetic regression tests cover the actual receipts and the
 original deadline. New hosted evidence is required for this change.
+
+Run `37479328679` at `c003071b` passed integration quality and ten cells on its
+first attempt. Codex Linux timed out installing runner dependencies before
+compilation; a fresh runner passed that step. Claude macOS rejected initial
+geometry; its second attempt completed two full sessions before the same
+initial geometry rejection in session three. Application and global cleanup
+passed in both Claude attempts.
+
+A synthetic regression reproduces a gap when the same initial window enlarges
+beyond the display between candidate selection and its focus query: the fresh
+window satisfies the existing guarded-fit contract, but readiness rejects it
+before returning to the outer fit loop. Initial readiness now treats that exact
+case as pending and resets stability, preserving the original deadline and the
+single guarded fit. Established bindings remain strict. The regression failed
+before the change; it also rejects changed identity, overlapping/normal panels
+and duplicate candidates. Closed initial-decision diagnostics now preserve the
+candidate-state category to distinguish off-display geometry from other causes.

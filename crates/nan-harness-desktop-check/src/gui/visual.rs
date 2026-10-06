@@ -1962,6 +1962,7 @@ fn initial_geometry_pending(snapshot: &Snapshot, original: &Window) -> bool {
         && (snapshot.claude_initial_geometry_pending(current)
             || (current.bounds != original.bounds
                 && (final_initial_candidate(snapshot, original).is_ok()
+                    || mac_fit_precondition(snapshot, current)
                     || snapshot.claude_focus_pending(current))))
 }
 
@@ -2394,7 +2395,7 @@ fn record_claude_snapshot(snapshot: &Snapshot, held: &Window, phase: &str) {
             if matches!(phase, "initial-decision" | "runtime-rejection") {
                 facts["guardCategory"] = initial_decision_guard(snapshot, original).into();
             }
-            if phase == "final-stability" {
+            if matches!(phase, "final-stability" | "initial-decision") {
                 facts["candidateState"] = final_candidate_state(snapshot, original).into();
             }
             let _ = serde_json::to_writer(file, &facts);
@@ -2808,6 +2809,63 @@ mod tests {
             let unsafe_snapshot = Snapshot::parse(text).unwrap();
             assert!(!initial_geometry_pending(&unsafe_snapshot, &original));
         }
+    }
+
+    #[test]
+    fn initial_resize_beyond_display_returns_to_guarded_fit_before_binding() {
+        let header = "FG 7 0\nDISPLAY 0 0 1000 700\nWIN 99 7 950 5 10 10 436c61756465 3\n";
+        let proof = "FOCUS proved 1\nFOCUS_WINDOW proved 1\n";
+        let original = Snapshot::parse(&format!(
+            "{header}WIN 1 7 10 20 800 600 436c61756465 0\n{proof}"
+        ))
+        .unwrap()
+        .windows[1]
+            .clone();
+        let enlarged = Snapshot::parse(&format!(
+            "{header}WIN 1 7 10 20 1200 800 436c61756465 0\n{proof}"
+        ))
+        .unwrap();
+        assert!(mac_fit_precondition(&enlarged, &enlarged.windows[1]));
+        assert_eq!(
+            final_initial_candidate(&enlarged, &original),
+            Err(GuardFailure::OffDisplay)
+        );
+        assert_eq!(
+            enlarged.claude_focused_guard_failure(&original),
+            Err(GuardFailure::BoundsChanged)
+        );
+        let now = Instant::now();
+        assert_eq!(
+            initial_owned_focus(
+                &original,
+                now + Duration::from_secs(5),
+                || Some(enlarged.clone()),
+                || Ok(()),
+                || now
+            ),
+            Ok(InitialFocus::Pending)
+        );
+        for change in 0..4 {
+            let mut unsafe_snapshot = enlarged.clone();
+            match change {
+                0 => unsafe_snapshot.windows[1].id = 2,
+                1 => unsafe_snapshot.windows[0].bounds = original.bounds,
+                2 => unsafe_snapshot
+                    .windows
+                    .push(unsafe_snapshot.windows[1].clone()),
+                _ => unsafe_snapshot.windows[0].layer = 0,
+            }
+            assert!(!initial_geometry_pending(&unsafe_snapshot, &original));
+        }
+        let fitted = Snapshot::parse(&format!(
+            "{header}WIN 1 7 10 20 900 650 436c61756465 0\n{proof}"
+        ))
+        .unwrap();
+        assert!(final_initial_candidate(&fitted, &original).is_ok());
+        assert_eq!(
+            fitted.claude_focused_guard_failure(&original),
+            Err(GuardFailure::BoundsChanged)
+        );
     }
 
     #[test]

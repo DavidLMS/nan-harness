@@ -2243,11 +2243,16 @@ class QualificationTests(unittest.TestCase):
                          phase='final-stability', candidateState='off-display')
             for state in ('absent', 'ambiguous', 'identity-changed', 'bounds-changed', 'focus-unproved',
                           'same-process-window', 'off-display', 'occluded', 'proved'):
-                current = {**value, 'candidateState': state}
-                path.write_text(json.dumps(current))
-                self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [current])
+                for phase in ('final-stability', 'initial-decision'):
+                    current = {**value, 'candidateState': state, 'phase': phase}
+                    if phase == 'initial-decision':
+                        current['guardCategory'] = 'bounds-changed'
+                    path.write_text(json.dumps(current))
+                    self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [current])
             for changed in ({**value, 'candidateState': 'PRIVATE'}, {**value, 'candidateState': True},
-                            {**value, 'phase': 'initial'}, {**value, 'windowId': 45}):
+                            {**value, 'phase': 'initial'},
+                            {**value, 'phase': 'runtime-rejection', 'guardCategory': 'bounds-changed'},
+                            {**value, 'phase': 'initial-decision'}, {**value, 'windowId': 45}):
                 path.write_text(json.dumps(changed))
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'claude-desktop')
