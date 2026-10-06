@@ -16,7 +16,7 @@ async function trial(scenario) {
  };
  const point={x:5,y:5,left:0,top:0,width:20,height:20};
  const editorHandle={},rootHandle={};
- const handle={dispose:async()=>{},evaluate:async(_callback,diagnostic)=>{const covered=scenario==='covered'||onboardingPresent;const status=covered?'no-owned-point':scenario==='hidden-control'?'hidden':scenario==='outside-control'?'outside-viewport':'owned';const blocker=covered?'onboarding':status==='owned'?'none':'unmeasured';return diagnostic?{sampleStatus:status,blocker,point:status==='owned'?point:null}:status==='owned'?point:null;},click:async()=>{if(scenario==='menu-click-uncertain')throw new Error('PRIVATE');if(opened){refreshClicks++; if(scenario==='uncertain')throw new Error('PRIVATE');
+ const handle={dispose:async()=>{},evaluate:async(_callback,diagnostic)=>{const covered=scenario==='covered'||onboardingPresent||scenario==='onboarding-auto-dismiss-covered';const status=covered?'no-owned-point':scenario==='hidden-control'?'hidden':scenario==='outside-control'?'outside-viewport':'owned';const blocker=covered?'onboarding':status==='owned'?'none':'unmeasured';return diagnostic?{sampleStatus:status,blocker,point:status==='owned'?point:null}:status==='owned'?point:null;},click:async()=>{if(scenario==='menu-click-uncertain')throw new Error('PRIVATE');if(opened){refreshClicks++; if(scenario==='uncertain')throw new Error('PRIVATE');
  const send=(dir,obj)=>session.emit('Network.webSocketFrame'+dir,{requestId:'socket',response:{opcode:1,payloadData:JSON.stringify(obj)}});
  send('Sent',{jsonrpc:'2.0',id:1,method:'model.options',params:{profile:'default',explicit_only:true,refresh:true}});
  send('Received',{jsonrpc:'2.0',id:1,result:{providers:[{models:['qwen3.6']}]}});
@@ -28,13 +28,13 @@ async function trial(scenario) {
    if(scenario!=='onboarding-remains')onboardingPresent=false;
    if(scenario==='onboarding-owner-loss')owner=false;
  }};
- const choice={count:async()=>scenario==='onboarding-missing-choice'?0:scenario==='onboarding-duplicate-choice'?2:1,
+ const choice={count:async()=>scenario.startsWith('onboarding-auto-dismiss')&&!onboardingPresent?0:scenario==='onboarding-missing-choice'?0:scenario==='onboarding-duplicate-choice'?2:1,
    isVisible:async()=>scenario!=='onboarding-pending-visible' || clock>=300,
    isEnabled:async()=>scenario!=='onboarding-disabled' && (scenario!=='onboarding-pending-enabled' || clock>=300),elementHandle:async()=>choiceHandle,evaluate:async()=>true};
- const cover={count:async()=>onboardingPresent?(scenario==='onboarding-duplicate-cover'?2:1):0,
+ const cover={count:async()=>{if(scenario.startsWith('onboarding-auto-dismiss'))onboardingPresent=false;return onboardingPresent?(scenario==='onboarding-duplicate-cover'?2:1):0;},
    isVisible:async()=>onboardingPresent,getByRole:()=>choice,elementHandle:async()=>heldCover,
    evaluate:async()=>scenario!=='onboarding-replaced'};
- const editor={count:async()=>1,elementHandle:async()=>editorHandle,evaluate:async()=>scenario!=='composer-changed' && !(scenario==='composer-remount' && clock>=100)};
+ const editor={count:async()=>1,elementHandle:async()=>editorHandle,evaluate:async()=>!(scenario==='onboarding-auto-dismiss-remount'&&!onboardingPresent) && scenario!=='composer-changed' && !(scenario==='composer-remount' && clock>=100)};
  const row={...control,filter(){return this;},isVisible:async()=>true,
    evaluate:async()=>scenario!=='wrong-row-label',
    count:async()=>{rowReads++;return scenario==='wrong-row'?0:scenario==='duplicate-row'?2:
@@ -158,6 +158,13 @@ for(const element of [modelElement([text('Qwen3.6 27B'),meta]),modelElement([tex
  const covered=await trial('covered');
  assert.equal(covered.facts.stage,'onboarding');assert.equal(covered.facts.onboardingSkipped,false);
  assert.equal(covered.skipClicks,0);
+ const autoDismissed=await trial('onboarding-auto-dismiss');
+ assert.equal(autoDismissed.facts.stage,'ready');assert.equal(autoDismissed.skipClicks,0);
+ assert.equal(autoDismissed.facts.onboardingSkipped,false);
+ for(const scenario of ['onboarding-auto-dismiss-remount','onboarding-auto-dismiss-covered']) {
+  const rejected=await trial(scenario);assert.notEqual(rejected.facts.stage,'ready');
+  assert.equal(rejected.skipClicks,0);assert.equal(rejected.pillClicks,0);
+ }
  const skipped=await trial('onboarding-success');
  assert.equal(skipped.facts.stage,'ready');assert.equal(skipped.facts.onboardingSkipped,true);
  assert.equal(skipped.skipClicks,1);assert.equal(skipped.pillClicks,1);assert.equal(skipped.refreshClicks,1);

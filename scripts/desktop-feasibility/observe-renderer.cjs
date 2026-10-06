@@ -30,7 +30,7 @@ function onboardingDeadline(trial, startupDeadline, totalDeadline) {
   return trial ? totalDeadline : startupDeadline;
 }
 function onboardingBudget(trial, platform) {
-  return trial ? platform==='win32'?120000:60000 : 25000;
+  return trial ? platform==='win32'?120000:platform==='darwin'?90000:60000 : 25000;
 }
 function inventoryDeadlines(trial,platform,request,started) {
   const ownTotal=started+onboardingBudget(trial,platform);
@@ -693,7 +693,8 @@ async function run() {
         ||directCDP&&await page.evaluate(require('./codex-dom.cjs').homeComposerScope));
       facts.codexSession={inputChannel:directCDP?'cdp-dom':'native-focused',bindingVerified,codingComposerReady:!!codingComposerReady,auxiliaryInert:bindingVerified,
         pageCount:Math.min(32,browser.contexts().flatMap(context=>context.pages()).length)};
-      if(bindingVerified)publishCodexBinding(output,request.ownerPid,connection,mainGuard);
+      if(!bindingVerified||!codingComposerReady){facts.errorCategory='target-invalid';save();return;}
+      publishCodexBinding(output,request.ownerPid,connection,mainGuard);
       if(trial&&browser.contexts().flatMap(c=>c.pages()).length!==1) {
         facts.mainAuxCorrelation=await observeMainAux(heldMain,browser,onboardingOwnerGuard,correlationDeadline,
           require('./codex-onboarding.cjs').sourceRoute,correlationIdentity,ms=>new Promise(resolve=>setTimeout(resolve,ms)),!directCDP);

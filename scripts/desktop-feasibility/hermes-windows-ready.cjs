@@ -204,12 +204,13 @@ exports.run = async function run(page, session, ownedEndpoint, deadline, expecte
       // Native custody checks share the original readiness budget; a cold
       // Windows process query must not consume a separate five-second clock.
       const settleDeadline=deadline;
-      let choiceReady=false;
+      let choiceReady=false, coverGone=false;
       while (guard() && Date.now()<settleDeadline) {
         const covers=await cover.count(), choices=await choice.count();
         const observation={coverCount:Math.min(64,covers),choiceCount:Math.min(64,choices),
           coverVisible:null,choiceVisible:null,choiceEnabled:null};
         facts.onboardingObservation=observation;
+        if (covers===0 && choices===0) {coverGone=true;break;}
         if (covers!==1 || choices>1) throw new Error('onboarding');
         observation.coverVisible=await cover.isVisible();
         if (choices===1) {
@@ -221,25 +222,39 @@ exports.run = async function run(page, session, ownedEndpoint, deadline, expecte
         }
         await delay(Math.min(100,Math.max(0,settleDeadline-Date.now())));
       }
-      if (!choiceReady || !guard() || Date.now()>=settleDeadline || await cover.count()!==1 || !await cover.isVisible()
-          || await choice.count()!==1 || !await choice.isEnabled()) throw new Error('onboarding');
-      const heldCover=await cover.elementHandle();
-      try {
-        const coverProof=async()=>await cover.count()===1 && await cover.isVisible()
-          && await cover.evaluate((element,held)=>element===held,heldCover)
-          && await choice.count()===1 && await choice.isEnabled();
-        // Frozen ChooseLaterLink only dismisses first-run provider selection.
-        // It does not connect an account or change the managed provider.
-        await click(choice,'onboarding',coverProof);
-        while (guard() && Date.now()<settleDeadline && await cover.count()!==0) await delay(20);
+      if (coverGone) {
+        // First-run setup can disappear while its controls are queried. No
+        // click occurred; prove the original composer and its hit target afresh.
+        await frame();
         if (!guard() || await cover.count()!==0 || await roots.count()!==1 || await editor.count()!==1
             || !await roots.evaluate((element,held)=>element===held,originalRoot)
-            || !await editor.evaluate((element,held)=>element===held,original)) throw new Error('onboarding');
-        await frame();
-        const counts=await observeComposer();
-        if (counts.some(count=>count!==1) || facts.composerObservation.readyState!=='complete') throw new Error('composer');
-        facts.onboardingSkipped=true;
-      } finally { await heldCover.dispose(); }
+            || !await editor.evaluate((element,held)=>element===held,original)
+            || await pill.count()!==1 || !await pill.isEnabled()) throw new Error('onboarding');
+        const current=await pill.elementHandle();
+        try {
+          if ((await current.evaluate(sample,true)).sampleStatus!=='owned') throw new Error('onboarding');
+        } finally {await current.dispose();}
+      } else {
+        if (!choiceReady || !guard() || Date.now()>=settleDeadline || await cover.count()!==1 || !await cover.isVisible()
+            || await choice.count()!==1 || !await choice.isEnabled()) throw new Error('onboarding');
+        const heldCover=await cover.elementHandle();
+        try {
+          const coverProof=async()=>await cover.count()===1 && await cover.isVisible()
+            && await cover.evaluate((element,held)=>element===held,heldCover)
+            && await choice.count()===1 && await choice.isEnabled();
+          // Frozen ChooseLaterLink only dismisses first-run provider selection.
+          // It does not connect an account or change the managed provider.
+          await click(choice,'onboarding',coverProof);
+          while (guard() && Date.now()<settleDeadline && await cover.count()!==0) await delay(20);
+          if (!guard() || await cover.count()!==0 || await roots.count()!==1 || await editor.count()!==1
+              || !await roots.evaluate((element,held)=>element===held,originalRoot)
+              || !await editor.evaluate((element,held)=>element===held,original)) throw new Error('onboarding');
+          await frame();
+          const counts=await observeComposer();
+          if (counts.some(count=>count!==1) || facts.composerObservation.readyState!=='complete') throw new Error('composer');
+          facts.onboardingSkipped=true;
+        } finally { await heldCover.dispose(); }
+      }
     }
     facts.stage='menu'; facts.errorCategory='menu-unavailable';
     await click(pill,'menu'); facts.menuOpened=true;

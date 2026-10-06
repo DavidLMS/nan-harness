@@ -3358,3 +3358,15 @@ Campaign `37418781483` reproduced the same pre-dispatch Retry capture gap on
 Linux Zed (two sessions complete, one absent candidate after a unique count).
 The named Retry path now retains and revalidates its control on all platforms,
 using the existing deadline and rejecting replacement or ambiguous candidates.
+
+Campaign `37418781483` also measured a macOS Codex startup exhausting its
+60-second clock during coding readiness: the retained guard alone took 38 seconds,
+including 16 seconds of identity queries and 13 seconds of native proofs. The
+macOS trial now allocates 90 seconds once, with 15 seconds of parent teardown
+headroom. Incomplete binding/composer readiness remains a failed inventory and
+cannot be published as complete before the semantic driver reads its binding.
+
+The same run observed Hermes Windows first-run coverage disappearing before its
+choice could be queried. Readiness now handles that no-action transition by
+revalidating the original frame, editor, composer root and actionable model pill.
+It neither clicks a missing choice nor accepts a replaced or covered composer.

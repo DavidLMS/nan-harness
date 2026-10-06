@@ -25,8 +25,8 @@ for(const value of [undefined,1000,999,121001,Infinity,NaN,'100000',1000.5]) {
 assert.throws(()=>timing.inventoryDeadlines(true,'linux',prepared,1000));
 assert.throws(()=>timing.inventoryDeadlines(false,'win32',prepared,1000));
 for(const platform of ['linux','darwin']) {
- assert.equal(timing.inventoryDeadlines(true,platform,{},1000).total,61000);
- assert.equal(timing.inventoryDeadlines(true,platform,{},1000).startup,61000);
+ assert.equal(timing.inventoryDeadlines(true,platform,{},1000).total,platform==='darwin'?91000:61000);
+ assert.equal(timing.inventoryDeadlines(true,platform,{},1000).startup,platform==='darwin'?91000:61000);
 }
 assert.equal(timing.inventoryDeadlines(false,'darwin',{},1000).startup,26000);
 assert.equal(timing.inventoryDeadlines(true,'win32',{},1000).total,121000);
@@ -42,7 +42,7 @@ for(const now of [0,10000,35000,59000,61000]) {
 assert.equal(timing.onboardingDeadline(true, 35000, 60000, 61000), 60000);
 assert.equal(timing.onboardingDeadline(false, 25000, 25000, 26000), 25000);
 assert.equal(timing.onboardingBudget(true,'win32'),120000);
-for(const platform of ['linux','darwin'])assert.equal(timing.onboardingBudget(true,platform),60000);
+for(const platform of ['linux','darwin'])assert.equal(timing.onboardingBudget(true,platform),platform==='darwin'?90000:60000);
 for(const platform of ['win32','linux','darwin'])assert.equal(timing.onboardingBudget(false,platform),25000);
 assert.equal(timing.onboardingDeadline(true,35000,120000,121000),120000);
 const start = source.indexOf('const counts = await page.evaluate(') + 'const counts = await page.evaluate('.length;

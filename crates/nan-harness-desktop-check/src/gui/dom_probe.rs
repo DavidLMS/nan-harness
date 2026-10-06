@@ -748,7 +748,7 @@ impl<'a> RendererSession<'a> {
         workspace: &Path,
         executable: &Path,
     ) -> Result<(), Reason> {
-        if inventory_driver_limit() != Duration::from_secs(75) {
+        if inventory_driver_limit() != Duration::from_secs(105) {
             return self.inventory_with_workspace(workspace);
         }
         let canonical = workspace
@@ -819,7 +819,7 @@ impl<'a> RendererSession<'a> {
                         .ok()
                         .and_then(|nanos| value.checked_add(nanos))
                 })
-                .and_then(|value| value.checked_add(75_000_000_000))
+                .and_then(|value| value.checked_add(105_000_000_000))
                 .ok_or(Reason::IsolationUnavailable)?;
             let helper = native
                 .executable()
@@ -994,7 +994,11 @@ fn inventory_driver_limit_for(
     // Windows cold setup retains slower native ownership checks across every
     // action. Allocate its 120s clock once; the parent adds teardown headroom.
     Duration::from_secs(if public_setup_trial {
-        if platform == "windows" { 135 } else { 75 }
+        match platform {
+            "windows" => 135,
+            "macos" => 105,
+            _ => 75,
+        }
     } else {
         35
     })
@@ -1304,7 +1308,11 @@ mod tests {
             let read = |key: &str| environment.get(key).map(|value| (*value).to_owned());
             assert_eq!(
                 inventory_driver_limit_for(platform, read),
-                Duration::from_secs(if platform == "windows" { 135 } else { 75 })
+                Duration::from_secs(match platform {
+                    "windows" => 135,
+                    "macos" => 105,
+                    _ => 75,
+                })
             );
             assert_eq!(
                 inventory_driver_limit_for("freebsd", read),
