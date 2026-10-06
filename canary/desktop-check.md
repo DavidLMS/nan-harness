@@ -3353,3 +3353,8 @@ dispatched in that session; the other two sessions completed, and cleanup passed
 macOS now uses the same bounded capture and retained-control revalidation already
 used on Windows. Only absence may settle within the original deadline; ambiguity,
 changed identity, failed custody and uncertain dispatch still fail immediately.
+
+Campaign `37418781483` reproduced the same pre-dispatch Retry capture gap on
+Linux Zed (two sessions complete, one absent candidate after a unique count).
+The named Retry path now retains and revalidates its control on all platforms,
+using the existing deadline and rejecting replacement or ambiguous candidates.

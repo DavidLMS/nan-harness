@@ -1054,10 +1054,6 @@ impl NativeClipboardSession<'_> {
                 retry
                     .wait_visible(deadline.saturating_duration_since(Instant::now()).min(WAIT))
                     .map_err(map_error)?;
-                if !cfg!(any(target_os = "windows", target_os = "macos")) {
-                    self.retry_ready = true;
-                    return Ok(());
-                }
                 let captured = wait_unique_retry(deadline, || {
                     self.gui
                         .native_copy_guard(&mut self.facts, "retry-element-capture")?;
