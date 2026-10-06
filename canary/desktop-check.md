@@ -3433,3 +3433,19 @@ Hermes now retains frame and loader identity while its initial page/frame reads
 settle across the known root-fragment transition. Reloads and foreign routes
 remain rejected. Closed query-phase diagnostics distinguish future ownership,
 page-set and frame-query failures without exporting identifiers or URLs.
+
+Run `37440542326` at `2aa29f7c` passed integration quality, Zed Windows and
+Hermes Windows, including three sessions and both cleanups. Claude Windows
+still rejected a unique-count heading snapshot before Invoke in one session;
+its other two sessions passed. The failure-details and Retry request paths now
+wait only on typed pre-Invoke scope/query receipts within their original
+deadlines. An uncertain Invoke or transport result remains terminal. The closed
+`nativeAction` diagnostic distinguishes these request paths without UI content.
+
+Codex Windows passed two sessions; the first reported an uncertain Retry click
+while the provider had already produced the recovery response. This does not
+prove a successful UI recovery and remains a failed session. Its ordinary click
+now opts out of Playwright's implicit post-click wait, as folder trust already
+does. The existing owned-turn response loop must independently verify the
+recovery; lost custody or uncertain dispatch fails without repeating input.
+Synthetic tests cover post-click custody loss and a single uncertain dispatch.

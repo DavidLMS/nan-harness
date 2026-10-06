@@ -1337,13 +1337,19 @@ def semantic_observations(directory, app):
             stages.update('tree-depth tree-nodes tree-name-limit tree-text-limit tree-window-limit tree-process-limit'.split())
             stages.update('clipboard-owner clipboard-allocation clipboard-lock clipboard-empty clipboard-set clipboard-close clipboard-guard-before clipboard-guard-after clipboard-deadline-before clipboard-deadline-after clipboard-open-deadline'.split())
             phase_fields = {'actionPhase', 'transportFailure'}
-            if (app != 'claude-desktop' or set(value) - {'providerObservation', 'guardRejection', 'rowShape', 'scopeShape', 'failureAuthority', 'failureScopeCounts', 'operationTiming'} not in (fields, fields | phase_fields) or value['diagnosticsOnly'] is not True
+            if (app != 'claude-desktop' or set(value) - {'providerObservation', 'guardRejection', 'rowShape', 'scopeShape', 'failureAuthority', 'failureScopeCounts', 'operationTiming', 'nativeAction'} not in (fields, fields | phase_fields) or value['diagnosticsOnly'] is not True
                     or type(value['stage']) is not str or value['stage'] not in stages
                     or any(type(value[key]) is not bool for key in flags)
                     or any(type(value[key]) is not int or not 0 <= value[key] <= 3 for key in counts)
                     or value['submittedTurns'] > value['inputVerifiedTurns']
                     or value['copiedResponses'] > value['submittedTurns'] + int(value['retryAttempted'])):
                 raise ValueError('invalid Claude native Chat observation')
+            if 'nativeAction' in value:
+                action = value['nativeAction']
+                if (mechanism != 'claude-windows-native-chat' or type(action) is not str
+                        or action not in {'input-replace-owned', 'copy', 'retry-ready', 'retry', 'failure-details'}):
+                    raise ValueError('invalid Claude native action diagnostic')
+                record['nativeAction'] = action
             if 'operationTiming' in value:
                 timing = value['operationTiming']
                 required = {'budgetMs', 'elapsedMs'}

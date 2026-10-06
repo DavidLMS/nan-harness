@@ -160,7 +160,9 @@ async function ordinaryClick(locator,guard,deadline,attempt,after=guard,observe=
     if(!await guard()||Date.now()>=deadline)return false;
     phase('dispatch');
     attempt();
-    await handle.click({position:point,timeout:Math.max(1,Math.min(2000,deadline-Date.now()))});
+    // The response loop owns transition verification. Do not let Playwright's
+    // implicit post-click navigation wait obscure a delivered single action.
+    await handle.click({noWaitAfter:true,position:point,timeout:Math.max(1,Math.min(2000,deadline-Date.now()))});
     phase('post-guard');
     if(!await after()||Date.now()>=deadline)return false;
     phase('complete');return true;

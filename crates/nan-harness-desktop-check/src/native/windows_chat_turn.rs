@@ -241,7 +241,7 @@ impl WindowsChatStage {
     }
 
     #[cfg(any(windows, test))]
-    pub(crate) fn retry_pending(self, counts: Option<&FailureScopeCounts>) -> bool {
+    pub(crate) fn recovery_preinvoke_pending(self, counts: Option<&FailureScopeCounts>) -> bool {
         // UIA can expose earlier headings before the fresh error row has its
         // final ancestry. Only reobserve a single failed turn and Retry; these
         // counts never authorize input. The action still proves the full scope.
@@ -418,9 +418,9 @@ mod tests {
         let wire = "turn scope-heading-ambiguous\nfailure-scope 1 1 1 1 0 1 0 0 1 0\n";
         let receipt = WindowsChatReceipt::parse(wire, "retry-ready").unwrap();
         let counts = receipt.failure_scope.unwrap();
-        assert!(receipt.stage.retry_pending(Some(&counts)));
+        assert!(receipt.stage.recovery_preinvoke_pending(Some(&counts)));
         assert!(!receipt.stage.copy_pending());
-        assert!(!receipt.stage.retry_pending(None));
+        assert!(!receipt.stage.recovery_preinvoke_pending(None));
         for field in 0..6 {
             for value in [0, 2] {
                 let mut invalid = counts.clone();
@@ -432,7 +432,7 @@ mod tests {
                     4 => &mut invalid.retry_labels,
                     _ => &mut invalid.exact_prompt_groups,
                 } = value;
-                assert!(!receipt.stage.retry_pending(Some(&invalid)));
+                assert!(!receipt.stage.recovery_preinvoke_pending(Some(&invalid)));
             }
         }
         for stage in [
@@ -442,7 +442,7 @@ mod tests {
             S::ScopePromptMismatch,
             S::Retried,
         ] {
-            assert!(!stage.retry_pending(Some(&counts)));
+            assert!(!stage.recovery_preinvoke_pending(Some(&counts)));
         }
     }
 

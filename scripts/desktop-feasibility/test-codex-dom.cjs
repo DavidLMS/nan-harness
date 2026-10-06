@@ -73,7 +73,7 @@ for(const change of [{timeoutMs:45001},{action:'unknown'},{prompt:'arbitrary'},
   let clicks=0,attempts=0,disposed=0,guards=0;
   const element={};
   const handle={evaluate:async()=>({rect:[0,0,10,10],points:[{x:5,y:5}]}),
-    click:async options=>{assert.equal(options.force,undefined);clicks++;},dispose:async()=>{disposed++;}};
+    click:async options=>{assert.equal(options.force,undefined);assert.equal(options.noWaitAfter,true);clicks++;},dispose:async()=>{disposed++;}};
   const locator={count:async()=>1,isEnabled:async()=>true,elementHandle:async()=>handle,
     evaluate:async()=>true};
   const guard=async()=>{guards++;return true;};
@@ -89,6 +89,11 @@ for(const change of [{timeoutMs:45001},{action:'unknown'},{prompt:'arbitrary'},
     value=>{phase=value;throw Error('observer failed');}),false);
   assert.equal(phase,'sample-first');
   assert.equal(clicks,1);
+  assert.equal(await ordinaryClick(locator,guard,Date.now()+1000,()=>{attempts++;},async()=>false),false);
+  assert.equal(clicks,2);assert.equal(attempts,2);
+  const uncertain={...locator,elementHandle:async()=>({...handle,click:async()=>{clicks++;throw Error('uncertain dispatch');}})};
+  await assert.rejects(ordinaryClick(uncertain,guard,Date.now()+1000,()=>{attempts++;}),/uncertain dispatch/);
+  assert.equal(clicks,3);assert.equal(attempts,3);
   console.log('PASS: Codex source-bound turn oracle, immutable binding and single ordinary action');
 })().catch(error=>{console.error(error);process.exitCode=1;});
 

@@ -2660,6 +2660,22 @@ class QualificationTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'zed-desktop')
 
+    def test_windows_native_action_identifies_only_the_closed_operation(self):
+        value = dict(schemaVersion=1, mechanism='claude-windows-native-chat', diagnosticsOnly=True,
+                     stage='scope-heading-ambiguous', submittedTurns=3, inputVerifiedTurns=3,
+                     copiedResponses=2, retryAttempted=False, clipboardCleared=True)
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'action.json'
+            for action in ('input-replace-owned', 'copy', 'retry-ready', 'retry', 'failure-details'):
+                item = {**value, 'nativeAction': action}
+                path.write_text(json.dumps(item))
+                self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [item])
+            for change in ({'nativeAction': 'PRIVATE'}, {'nativeAction': None},
+                           {'mechanism': 'claude-native-chat'}):
+                path.write_text(json.dumps({**item, **change}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'claude-desktop')
+
     def test_windows_tree_limits_remain_nonaccepting_and_closed(self):
         value = dict(schemaVersion=1, mechanism='claude-windows-native-chat', diagnosticsOnly=True,
                      stage='tree-depth', submittedTurns=1, inputVerifiedTurns=1, copiedResponses=0,

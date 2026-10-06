@@ -58,6 +58,8 @@ struct Facts {
     diagnostics_only: bool,
     stage: WindowsChatStage,
     action_phase: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    native_action: Option<&'static str>,
     transport_failure: Option<&'static str>,
     operation_timing: OperationTiming,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -79,6 +81,7 @@ impl Default for Facts {
             diagnostics_only: true,
             stage: WindowsChatStage::Request,
             action_phase: None,
+            native_action: None,
             transport_failure: None,
             operation_timing: OperationTiming::default(),
             guard_rejection: None,
@@ -159,13 +162,14 @@ impl ClaudeWindowsChatSession<'_> {
     }
     fn action(
         &mut self,
-        mode: &str,
+        mode: &'static str,
         marker: &str,
         deadline: Instant,
     ) -> Result<WindowsChatStage, Reason> {
         if Instant::now() >= deadline {
             return Err(Reason::Timeout);
         }
+        self.facts.native_action = Some(mode);
         let started = Instant::now();
         self.facts.operation_timing = OperationTiming {
             budget_ms: deadline.saturating_duration_since(started).as_millis(),
@@ -346,22 +350,32 @@ impl ClaudeWindowsChatSession<'_> {
                 WindowsChatStage::ScopeAnchorAbsent
                     if gate.failure_observed() && !self.failure_details_attempted =>
                 {
-                    // Consume the only disclosure before entering an uncertain Invoke.
+                    // Reserve the disclosure before the request. Release it only
+                    // for a typed receipt emitted before the helper's Invoke.
                     self.failure_details_attempted = true;
-                    if self.action(
+                    match self.action(
                         "failure-details",
                         "NAN_CHECK_EXPECTED_FAILURE",
                         deadline.min(
                             Instant::now()
                                 + Duration::from_millis(u64::from(WINDOWS_CHAT_MAX_MILLIS)),
                         ),
-                    )? != WindowsChatStage::FailureDetailsOpened
-                    {
-                        return Err(Reason::ActionUnsupported);
+                    )? {
+                        WindowsChatStage::FailureDetailsOpened => {}
+                        stage
+                            if stage.recovery_preinvoke_pending(
+                                self.facts.failure_scope_counts.as_ref(),
+                            ) =>
+                        {
+                            self.failure_details_attempted = false;
+                        }
+                        _ => return Err(Reason::ActionUnsupported),
                     }
                     // Disclosure never authorizes Retry; retain the raw marker proof.
                 }
-                stage if stage.retry_pending(self.facts.failure_scope_counts.as_ref()) => {}
+                stage
+                    if stage
+                        .recovery_preinvoke_pending(self.facts.failure_scope_counts.as_ref()) => {}
                 _ => return Err(Reason::ActionUnsupported),
             }
             if Instant::now() >= deadline {
@@ -376,27 +390,38 @@ impl ClaudeWindowsChatSession<'_> {
         if !std::mem::take(&mut self.retry_ready) || self.facts.retry_attempted {
             return Err(Reason::ActionUnsupported);
         }
-        match self.action(
-            "retry",
-            "NAN_CHECK_EXPECTED_FAILURE",
-            Instant::now() + Duration::from_millis(u64::from(WINDOWS_CHAT_MAX_MILLIS)),
-        ) {
-            Ok(WindowsChatStage::Retried) => {
-                self.facts.retry_attempted = true;
-                Ok(())
+        let deadline = Instant::now() + Duration::from_millis(u64::from(WINDOWS_CHAT_MAX_MILLIS));
+        loop {
+            if Instant::now() >= deadline {
+                return Err(Reason::Timeout);
             }
-            Ok(WindowsChatStage::ActionUncertain) => {
-                self.facts.retry_attempted = true;
-                Err(Reason::ActionUnsupported)
+            match self.action("retry", "NAN_CHECK_EXPECTED_FAILURE", deadline) {
+                Ok(WindowsChatStage::Retried) => {
+                    self.facts.retry_attempted = true;
+                    return Ok(());
+                }
+                Ok(WindowsChatStage::ActionUncertain) => {
+                    self.facts.retry_attempted = true;
+                    return Err(Reason::ActionUnsupported);
+                }
+                // Scope/query receipts precede Invoke in the native helper.
+                // A fresh full proof may settle; input itself is never replayed.
+                Ok(stage)
+                    if stage
+                        .recovery_preinvoke_pending(self.facts.failure_scope_counts.as_ref()) => {}
+                Ok(_) => return Err(Reason::ActionUnsupported),
+                Err(reason) => {
+                    self.facts.retry_attempted = true;
+                    self.facts.stage = WindowsChatStage::ActionUncertain;
+                    return Err(reason);
+                }
             }
-            Ok(_) => Err(Reason::ActionUnsupported),
-            Err(reason) => {
-                self.facts.retry_attempted = true;
-                self.facts.stage = WindowsChatStage::ActionUncertain;
-                Err(reason)
-            }
+            std::thread::sleep(
+                Duration::from_millis(100).min(deadline.saturating_duration_since(Instant::now())),
+            );
         }
     }
+
     pub(crate) fn finish(
         mut self,
         gate: &ProviderGate,
