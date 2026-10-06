@@ -18,6 +18,30 @@ COMMIT = "a" * 40
 
 
 class DesktopReleaseTests(unittest.TestCase):
+    def test_verified_transport_is_bound_to_the_prepare_job_manifest(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            asset = directory / "nan-harness-x86_64-unknown-linux-musl"
+            manifest = directory / "SHA256SUMS"
+            asset.write_bytes(b"attested-release")
+            manifest.write_text(hashlib.sha256(asset.read_bytes()).hexdigest() + "  " + asset.name + "\n")
+            anchor = hashlib.sha256(manifest.read_bytes()).hexdigest()
+            def verify(expected=anchor):
+                return desktop_release.verified_artifact("v0.1.15", COMMIT, "linux", "x86_64", directory, expected)
+            self.assertEqual(verify(), asset)
+            for invalid in ("", "0" * 64, "main"):
+                with self.assertRaises((StateError, ValueError)):
+                    verify(invalid)
+            asset.write_bytes(b"different-build")
+            with self.assertRaises(ValueError):
+                verify()
+            # A replaced artifact cannot authorize its own forged manifest.
+            manifest.write_text(hashlib.sha256(asset.read_bytes()).hexdigest() + "  " + asset.name + "\n")
+            with self.assertRaises(StateError):
+                verify()
+            with self.assertRaises(StateError):
+                desktop_release.verified_artifact("v0.1.15", COMMIT, "linux", "aarch64", directory, anchor)
+
     def run_stage(self, system="windows", architecture="x86_64", corrupt=False, attest=False, suite="desktop"):
         calls = []
         def command(argv):

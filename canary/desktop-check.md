@@ -92,8 +92,11 @@ required. Normal launches do not activate these fixtures.
 
 The checker and workflow execute from the trusted caller commit. Each closed
 cell records that source SHA and the tested binary's SHA-256. The aggregate
-independently downloads and verifies the release assets, then requires all
-twelve passing cells to match those exact bytes. Its `release` field records
+independently verifies the transported release assets, then requires all
+twelve passing cells to match those exact bytes. The trusted prepare job verifies
+the draft checksum attestation and passes its digest as a job output. Native
+jobs consume same-run artifacts with read-only credentials; changed manifests
+or binary bytes fail before application launch. Its `release` field records
 the tag, immutable release commit and per-platform asset hashes.
 
 Publication requires both this deterministic Desktop gate and the existing

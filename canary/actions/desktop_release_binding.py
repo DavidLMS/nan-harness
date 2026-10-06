@@ -9,8 +9,9 @@ import subprocess
 
 from desktop_maintenance import APPS, TARGETS, accepted, baseline
 from desktop_qualification import bounded_json, digest
-from desktop_release import stage
-from desktop_suite import COMMIT, TAG
+from desktop_release import verified_artifact
+from publication import remote_commit
+from desktop_suite import COMMIT, TAG, SHA256
 from state import Store, StateError
 
 
@@ -54,14 +55,18 @@ def main():
     tag, commit = os.environ.get('RELEASE_TAG', ''), os.environ.get('RELEASE_COMMIT', '')
     try:
         selected = validate_selection(tag, commit)
+        anchor = os.environ.get('RELEASE_MANIFEST_SHA', '')
+        if selected and not SHA256.fullmatch(anchor):
+            raise ValueError('missing trusted attested manifest identity')
         if args.command == 'validate-selection':
             return 0
         if not selected or args.matrix is None or args.directory is None:
             raise ValueError('missing release binding inputs')
         store = Store(os.environ['GITHUB_REPOSITORY'])
-        binaries = {platform: stage(store, tag, commit, platform,
-                                    'aarch64' if platform == 'macos' else 'x86_64',
-                                    args.directory / platform)
+        if remote_commit(store, tag) != commit:
+            raise ValueError('release tag changed before aggregation')
+        binaries = {platform: verified_artifact(tag, commit, platform, TARGETS[platform][0],
+                                                args.directory, anchor)
                     for platform in TARGETS}
         result = bind(bounded_json(args.matrix), os.environ['GITHUB_SHA'], tag, commit, binaries)
         args.matrix.write_text(json.dumps(result, indent=2) + '\n')
