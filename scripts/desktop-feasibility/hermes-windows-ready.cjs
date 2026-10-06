@@ -201,7 +201,9 @@ exports.run = async function run(page, session, ownedEndpoint, deadline, expecte
       facts.onboardingSkipped=false;
       const cover=page.locator('[data-glass-opaque][class~="z-(--z-onboarding)"]');
       const choice=cover.getByRole('button',{name:"I'll choose a provider later",exact:true});
-      const settleDeadline=Math.min(deadline,Date.now()+5000);
+      // Native custody checks share the original readiness budget; a cold
+      // Windows process query must not consume a separate five-second clock.
+      const settleDeadline=deadline;
       let choiceReady=false;
       while (guard() && Date.now()<settleDeadline) {
         const covers=await cover.count(), choices=await choice.count();

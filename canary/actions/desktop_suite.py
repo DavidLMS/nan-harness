@@ -191,7 +191,8 @@ def _expected_url(entry, platform, architecture):
             deb_arch = "amd64" if architecture == "x86_64" else "arm64"
             return url == f"https://downloads.claude.ai/claude-desktop/apt/stable/pool/main/c/claude-desktop/claude-desktop_{version}_{deb_arch}.deb"
         if platform == "windows":
-            return url == "https://claude.ai/api/desktop/win32/x64/msix/latest/redirect"
+            return (url == "https://claude.ai/api/desktop/win32/x64/msix/latest/redirect"
+                    or bool(re.fullmatch(rf"https://downloads\.claude\.ai/releases/win32/x64/{re.escape(version)}/Claude-[0-9a-f]{{40}}\.msix", url)))
         return bool(re.fullmatch(rf"https://downloads\.claude\.ai/releases/darwin/universal/{re.escape(version)}/Claude-[0-9a-f]{{40}}\.zip", url))
     return False
 

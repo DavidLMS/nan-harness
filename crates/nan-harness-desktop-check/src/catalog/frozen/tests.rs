@@ -707,3 +707,30 @@ fn staged_artifact_metadata_is_bounded_and_single() {
     std::fs::write(&path, truncated).unwrap();
     assert!(inspect::pe::product_version(&path).is_none());
 }
+
+#[test]
+fn claude_windows_immutable_url_binds_version_architecture_and_revision() {
+    let expected = "https://claude.ai/api/desktop/win32/x64/msix/latest/redirect";
+    let version = Version::new(2, 19675, 0);
+    let url = "https://downloads.claude.ai/releases/win32/x64/2.19675.0/Claude-5706e5524dba58b23e105c31c358df8ab0a95852.msix";
+    assert!(moving_url(expected, &version, url));
+    assert!(!moving_url(
+        "https://www.pen.dev/download/Pen-windows",
+        &version,
+        url
+    ));
+    for invalid in [
+        url.replace("2.19675.0", "2.19675.1"),
+        url.replace("x64", "arm64"),
+        url.replace(
+            "downloads.claude.ai",
+            "downloads.claude.ai.attacker.example",
+        ),
+        url.replace("5706e", "5706G"),
+        url.replace(".msix", ".zip"),
+        format!("{url}?download=1"),
+        format!("{url}#fragment"),
+    ] {
+        assert!(!moving_url(expected, &version, &invalid));
+    }
+}

@@ -501,7 +501,13 @@ fn verify_entry(entry: &Entry, policy: Policy) -> Result<(), ManifestError> {
             url,
             format,
             installer,
-        } => (release.url == url, format, installer, true, false),
+        } => (
+            moving_url(url, &version, &release.url),
+            format,
+            installer,
+            true,
+            false,
+        ),
         Policy::Blocked { .. } => return Err(ManifestError::Untrusted),
     };
     let identity_ok = if source {
@@ -527,6 +533,19 @@ fn verify_entry(entry: &Entry, policy: Policy) -> Result<(), ManifestError> {
 pub(crate) fn apt_url(base: &str, package: &str, version: &Version, architecture: &str) -> String {
     let initial = &package[..1];
     format!("{base}pool/main/{initial}/{package}/{package}_{version}_{architecture}.deb")
+}
+
+fn moving_url(expected: &str, version: &Version, url: &str) -> bool {
+    if url == expected {
+        return true;
+    }
+    expected == "https://claude.ai/api/desktop/win32/x64/msix/latest/redirect"
+        && url
+            .strip_prefix(&format!(
+                "https://downloads.claude.ai/releases/win32/x64/{version}/Claude-"
+            ))
+            .and_then(|rest| rest.strip_suffix(".msix"))
+            .is_some_and(|hash| lower_hex(hash, 40))
 }
 
 pub(crate) fn squirrel_mac_url(prefix: &str, version: &Version, url: &str) -> bool {

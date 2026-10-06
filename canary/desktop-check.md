@@ -3324,3 +3324,25 @@ startup now shares the original 120-second qualification cutoff instead of
 shorter 35-second startup and 10-second document clocks. This does not extend
 the parent cutoff or permit input without fresh ownership and document proof.
 The full local `cargo check-all` passed at `b5058dbd` before this timing change.
+
+The qualification baseline freezes the inspected official Claude releases on
+all three platforms: Linux `2.9939.4`, macOS and Windows `2.19675.0`. Immutable
+vendor URLs and SHA-256 checks bind those downloads to the existing source
+admission. The ordinary latest-version resolver still follows upstream releases;
+a newer release requires inspection before joining this deterministic baseline.
+Campaign `37415300226` exposed the mismatch between that admission and mutable
+latest downloads. The previous official packages remain available and match
+all three admitted artifact hashes.
+
+The same campaign observed a macOS Codex ownership failure during document
+readiness, while the following two sessions completed. Its separate 10-second
+document cutoff could exhaust the proof budget before the total deadline. Every
+Codex onboarding trial now shares its original total startup deadline across
+document readiness and onboarding (60 seconds on Unix, 120 on Windows). No
+ownership proof or acceptance step is skipped, and actions never renew the clock.
+
+Hermes Windows in that campaign completed sessions two and three; session one
+stopped before clicking its unique visible, enabled onboarding choice, with
+ownership still verified. Its separate five-second readiness cutoff also included
+native custody queries. Onboarding now shares the existing overall readiness
+cutoff, retaining the same unique-control, stable-point and custody proofs.

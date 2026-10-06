@@ -144,6 +144,18 @@ class DesktopSuiteTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     SUITE.read_frozen_manifest(path, ["claude-desktop"], "windows", "x86_64", "model")
 
+    def test_claude_windows_immutable_url_binds_version_architecture_and_revision(self):
+        url = 'https://downloads.claude.ai/releases/win32/x64/2.19675.0/Claude-5706e5524dba58b23e105c31c358df8ab0a95852.msix'
+        def allowed(candidate):
+            return SUITE._expected_url({'app': 'claude-desktop', 'version': '2.19675.0', 'url': candidate}, 'windows', 'x86_64')
+        self.assertTrue(allowed(url))
+        for invalid in (url.replace('2.19675.0', '2.19675.1'),
+                        url.replace('x64', 'arm64'),
+                        url.replace('downloads.claude.ai', 'downloads.claude.ai.attacker.example'),
+                        url.replace('5706e', '5706G'), url.replace('.msix', '.zip'),
+                        url + '?download=1', url + '#fragment'):
+            self.assertFalse(allowed(invalid))
+
     def test_manifest_rejects_extra_frozen_reason_and_bad_types(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "manifest.json"

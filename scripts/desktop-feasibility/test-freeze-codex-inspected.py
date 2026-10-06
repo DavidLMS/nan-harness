@@ -6,7 +6,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-spec = importlib.util.spec_from_file_location('freeze_codex', Path(__file__).with_name('freeze-codex-inspected.py'))
+spec = importlib.util.spec_from_file_location('freeze_codex', Path(__file__).with_name('freeze-inspected.py'))
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 
@@ -23,6 +23,19 @@ class InspectedCodex(unittest.TestCase):
             entry = value['apps'][0]
             self.assertEqual(entry['version'], module.CODEX_PROJECT_VERSIONS[platform])
             self.assertEqual(entry['digest'], 'sha256:' + module.CODEX_PROJECT_RELEASES[platform][0])
+
+    def test_claude_manifests_use_the_admitted_immutable_releases(self):
+        runner = Path(__file__).with_name('run-qualification.py').read_text()
+        for platform in ('linux', 'macos', 'windows'):
+            value = module.claude_manifest(platform)
+            with tempfile.TemporaryDirectory() as temporary:
+                path = Path(temporary) / 'manifest.json'
+                module.write_json(path, value)
+                self.assertEqual(module.read_frozen_manifest(path, ['claude-desktop'], platform,
+                                                            value['architecture'], 'qwen3.6'), value)
+            self.assertIn(value['apps'][0]['version'], runner)
+            self.assertIn(value['apps'][0]['digest'], runner)
+            self.assertIn(value['apps'][0]['version'], value['apps'][0]['url'])
 
     def test_staging_requires_exact_bytes_and_never_reuses_existing_file(self):
         content = b'synthetic inspected package'

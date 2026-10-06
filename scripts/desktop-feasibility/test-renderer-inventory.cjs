@@ -24,7 +24,11 @@ for(const value of [undefined,1000,999,121001,Infinity,NaN,'100000',1000.5]) {
 }
 assert.throws(()=>timing.inventoryDeadlines(true,'linux',prepared,1000));
 assert.throws(()=>timing.inventoryDeadlines(false,'win32',prepared,1000));
-assert.equal(timing.inventoryDeadlines(true,'linux',{},1000).total,61000);
+for(const platform of ['linux','darwin']) {
+ assert.equal(timing.inventoryDeadlines(true,platform,{},1000).total,61000);
+ assert.equal(timing.inventoryDeadlines(true,platform,{},1000).startup,61000);
+}
+assert.equal(timing.inventoryDeadlines(false,'darwin',{},1000).startup,26000);
 assert.equal(timing.inventoryDeadlines(true,'win32',{},1000).total,121000);
 // Every setup stage keeps the original total deadline, including early Trust.
 // Repeated calls after actions cannot reset or add to the original allocation.
