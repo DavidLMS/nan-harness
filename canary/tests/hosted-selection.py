@@ -12,7 +12,7 @@ import selection
 
 class SelectionTests(unittest.TestCase):
     def test_complete_suites_have_three_sequential_platform_jobs(self):
-        for suite, count in (("cli", 15), ("desktop", 5)):
+        for suite, count in (("cli", 17), ("desktop", 5)):
             result = selection.select_suite(suite)
             self.assertEqual([job["system"] for job in result["platforms"]],
                              ["linux", "macos", "windows"])
