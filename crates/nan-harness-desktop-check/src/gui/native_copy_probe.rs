@@ -1076,25 +1076,7 @@ impl NativeClipboardSession<'_> {
                         .native_copy_guard(&mut self.facts, "retry-element-capture")?;
                     Ok(candidates)
                 })?;
-                let mismatch = std::cell::Cell::new(None);
-                let retained_result = wait_retained_retry(
-                    &captured,
-                    deadline,
-                    || {
-                        self.gui
-                            .native_copy_guard(&mut self.facts, "retry-revalidate")?;
-                        let candidates = retry_elements(&retry)?;
-                        self.gui
-                            .native_copy_guard(&mut self.facts, "retry-revalidate")?;
-                        Ok(candidates)
-                    },
-                    |before, after| {
-                        mismatch.set(named_retry_mismatch(before.data(), after.data()));
-                        same_named_retry_element(before.data(), after.data())
-                    },
-                );
-                self.facts.retry_identity_mismatch = mismatch.get();
-                let retained = retained_result?;
+                let retained = self.revalidate_named_retry(&captured, &retry, deadline)?;
                 self.retry_element = Some(retained);
                 self.retry_deadline = Some(deadline);
                 self.retry_ready = true;
@@ -1652,6 +1634,34 @@ impl NativeClipboardSession<'_> {
         result
     }
 
+    fn revalidate_named_retry(
+        &mut self,
+        captured: &xa11y::Element,
+        retry: &xa11y::Locator,
+        deadline: Instant,
+    ) -> Result<xa11y::Element, Reason> {
+        let mismatch = std::cell::Cell::new(None);
+        let result = wait_retained_retry(
+            captured,
+            deadline,
+            || {
+                self.gui
+                    .native_copy_guard(&mut self.facts, "retry-revalidate")?;
+                let candidates = retry_elements(retry)?;
+                self.facts.retry_control_count = Some(candidates.len());
+                self.gui
+                    .native_copy_guard(&mut self.facts, "retry-revalidate")?;
+                Ok(candidates)
+            },
+            |before, after| {
+                mismatch.set(named_retry_mismatch(before.data(), after.data()));
+                same_named_retry_element(before.data(), after.data())
+            },
+        );
+        self.facts.retry_identity_mismatch = mismatch.get();
+        result
+    }
+
     fn dispatch_retry_once(&mut self) -> Result<(), Reason> {
         if !std::mem::take(&mut self.retry_ready) {
             return Err(Reason::ActionUnsupported);
@@ -1665,26 +1675,7 @@ impl NativeClipboardSession<'_> {
                 let deadline = retained_deadline.ok_or(Reason::ActionUnsupported)?;
                 let app = self.gui.app.as_ref().ok_or(Reason::SelectorNotMatched)?;
                 let retry = app.locator(RETRY_CONTROL);
-                let mismatch = std::cell::Cell::new(None);
-                let button_result = wait_retained_retry(
-                    &captured,
-                    deadline,
-                    || {
-                        self.gui
-                            .native_copy_guard(&mut self.facts, "retry-revalidate")?;
-                        let candidates = retry_elements(&retry)?;
-                        self.facts.retry_control_count = Some(candidates.len());
-                        self.gui
-                            .native_copy_guard(&mut self.facts, "retry-revalidate")?;
-                        Ok(candidates)
-                    },
-                    |before, after| {
-                        mismatch.set(named_retry_mismatch(before.data(), after.data()));
-                        same_named_retry_element(before.data(), after.data())
-                    },
-                );
-                self.facts.retry_identity_mismatch = mismatch.get();
-                let button = button_result?;
+                let button = self.revalidate_named_retry(&captured, &retry, deadline)?;
                 self.gui
                     .native_copy_guard(&mut self.facts, "retry-before")?;
                 if Instant::now() >= deadline {
