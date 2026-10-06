@@ -11,7 +11,7 @@
 #   5. the staged/working tree performs `git diff --check` cleanly.
 set -euo pipefail
 
-workflow=".github/workflows/desktop-check-macos-wave9.yml"
+workflow="canary/archive/desktop-workflows/desktop-check-macos-wave9.yml"
 tmpdir="$(mktemp -d)"
 trap 'rm -rf "$tmpdir"' EXIT
 

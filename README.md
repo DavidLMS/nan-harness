@@ -94,13 +94,15 @@ You can use NaN models in these desktop apps with a special configuration:
 | `nanh hermes-desktop` | [Hermes](https://hermes-agent.nousresearch.com/) | macOS, Windows, and Linux |
 | `nanh pen` (`nanh pen-desktop`) | [Pen](https://www.pen.dev/) | macOS, Windows, and Linux |
 
-These integrations are experimental. Zed, ChatGPT, Claude, Hermes, and Pen have
-been tested on macOS; their other platform combinations are covered by automated
-compatibility tests.
+These integrations are experimental. Hosted qualification covers Zed,
+Codex, Claude and Hermes on Linux x64, macOS ARM64 and Windows x64, with three
+complete sessions per cell. Pen remains deferred.
 
-The independent [Desktop checker](canary/desktop-check.md) collects opt-in GUI
-evidence and sanitized reports. Its native runner qualification is tracked
-separately from the harness contract tests; reports never publish automatically.
+The [Desktop checker and automation](canary/desktop-check.md) provide daily
+upstream detection, weekly full qualification and exact-binary release checks.
+Release binaries include explicitly activated hosted test hooks. Publication
+requires exact-binary Desktop qualification alongside the live CLI gate.
+Desktop qualification reports do not publish to the compatibility feed automatically.
 
 ## Installation
 

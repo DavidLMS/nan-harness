@@ -130,8 +130,30 @@ pub enum VerificationPolicy {
     SemanticOnly,
 }
 
+/// Metadata resolution targets; these never authorize cross-platform installation.
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+pub enum ResolveTarget {
+    LinuxX64,
+    MacosArm64,
+    WindowsX64,
+}
+
+impl ResolveTarget {
+    const fn identity(self) -> (crate::report::Platform, crate::report::Architecture) {
+        use crate::report::{Architecture, Platform};
+        match self {
+            Self::LinuxX64 => (Platform::Linux, Architecture::X86_64),
+            Self::MacosArm64 => (Platform::Macos, Architecture::Aarch64),
+            Self::WindowsX64 => (Platform::Windows, Architecture::X86_64),
+        }
+    }
+}
+
 #[derive(Debug, Args)]
 pub struct ResolveArgs {
+    /// Inspect official metadata for this target without installing or launching it.
+    #[arg(long, value_enum)]
+    pub target: Option<ResolveTarget>,
     /// Resolve only these Desktop integrations (repeatable); defaults to all five.
     #[arg(long = "app")]
     pub apps: Vec<DesktopHarnessKind>,
@@ -251,10 +273,14 @@ async fn resolve(args: ResolveArgs) -> Result<i32, String> {
     };
     nan_harness_private_fs::create_private_dir(&args.artifacts)
         .map_err(|_| "cannot create the private artifact directory")?;
+    let (platform, architecture) = args.target.map_or_else(
+        || (Platform::current(), Architecture::current()),
+        ResolveTarget::identity,
+    );
     let manifest = frozen::resolve(
         &apps,
-        Platform::current(),
-        Architecture::current(),
+        platform,
+        architecture,
         &args.model,
         &args.artifacts,
         &mut frozen::OfficialFetch,
@@ -537,6 +563,36 @@ mod tests {
         );
         let normal = Cli::try_parse_from(["nanh-desktop-check", "--yes"]).unwrap();
         assert!(normal.run.launch_wrapper.is_none());
+    }
+
+    #[test]
+    fn metadata_target_is_explicit_and_does_not_extend_run_authority() {
+        for (target, expected) in [
+            ("linux-x64", ResolveTarget::LinuxX64),
+            ("macos-arm64", ResolveTarget::MacosArm64),
+            ("windows-x64", ResolveTarget::WindowsX64),
+        ] {
+            let cli = Cli::try_parse_from([
+                "nanh-desktop-check",
+                "resolve",
+                "--target",
+                target,
+                "--model",
+                "fixture",
+                "--artifacts",
+                "/artifacts",
+                "--output",
+                "/manifest",
+            ])
+            .unwrap();
+            let Some(Command::Resolve(args)) = cli.command else {
+                panic!("resolve required")
+            };
+            assert_eq!(args.target.unwrap().identity(), expected.identity());
+            assert!(
+                Cli::try_parse_from(["nanh-desktop-check", "run", "--target", target]).is_err()
+            );
+        }
     }
 
     fn passing_report() -> Report {

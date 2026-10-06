@@ -118,7 +118,7 @@ jobs:
           NAN_COMPATIBILITY_MANIFEST_URL: https://github.com/${{ github.repository }}/releases/download/compatibility/compatibility-v3.json
           NAN_UPDATE_MANIFEST_URL: https://github.com/${{ github.repository }}/releases/latest/download/update-manifest.json
           NAN_UPDATE_AVAILABLE_MANIFEST_URL: https://github.com/${{ github.repository }}/releases/download/available/update-manifest.json
-        run: cargo build --locked --release --package nan-harness-cli --bin nan-harness --target ${{ matrix.target }}
+        run: cargo build --locked --release --package nan-harness-cli --features desktop-qualification --bin nan-harness --target ${{ matrix.target }}
 
       - name: Build release conformance binary
         if: matrix.canary
@@ -253,4 +253,4 @@ jobs:
           gh workflow run release-gate.yml --repo "$GITHUB_REPOSITORY" \
             --ref "$DEFAULT_BRANCH" -f tag="$GITHUB_REF_NAME" \
             -f tag_commit="$GITHUB_SHA" -f mode=live -f verification_only=true
-          echo 'Live verification dispatched for 49 cells. The release remains a draft; publication requires an explicit gate dispatch.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'CLI live verification dispatched for 49 cells, with twelve-cell Desktop release-binary qualification. The release remains a draft; publication requires an explicit gate dispatch.' >> "$GITHUB_STEP_SUMMARY"

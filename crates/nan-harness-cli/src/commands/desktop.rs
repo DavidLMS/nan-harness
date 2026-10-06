@@ -238,7 +238,7 @@ mod warning_tests {
     }
 }
 
-/// Fixed loopback renderer instrumentation, absent from normal CLI builds.
+/// Fixed loopback renderer instrumentation, inactive without hosted opt-in.
 pub(crate) fn qualification_renderer_arguments(
     kind: nan_harness_core::DesktopHarnessKind,
 ) -> Vec<String> {

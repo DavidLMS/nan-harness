@@ -59,7 +59,7 @@ jobs:
           import pathlib
           import sys
           import yaml
-          path = pathlib.Path(".github/workflows/desktop-check-chatgpt-wave9.yml")
+          path = pathlib.Path("canary/archive/desktop-workflows/desktop-check-chatgpt-wave9.yml")
           document = yaml.safe_load(path.read_text(encoding="utf-8"))
           if len(document["jobs"]) != 1:
               sys.exit("the experiment must stay a single hosted job")

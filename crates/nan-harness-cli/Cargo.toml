@@ -17,7 +17,7 @@ name = "nanh"
 path = "src/bin/nanh.rs"
 
 [features]
-# Disposable hosted desktop qualification only; omitted from released builds.
+# Included in release binaries; runtime activation requires explicit hosted qualification settings.
 desktop-qualification = ["nan-harness-runtime/desktop-qualification", "dep:same-file"]
 
 [dependencies]
@@ -28,13 +28,13 @@ clap_complete.workspace = true
 getrandom.workspace = true
 jsonc-parser.workspace = true
 keyring.workspace = true
-nan-harness-adapters = { path = "../nan-harness-adapters", version = "0.1.14" }
-nan-harness-core = { path = "../nan-harness-core", version = "0.1.14" }
-nan-harness-coordinator = { path = "../nan-harness-coordinator", version = "0.1.14" }
-nan-harness-diagnostics = { path = "../nan-harness-diagnostics", version = "0.1.14" }
-nan-harness-private-fs = { path = "../nan-harness-private-fs", version = "0.1.14" }
-nan-harness-runtime = { path = "../nan-harness-runtime", version = "0.1.14" }
-nan-harness-telemetry = { path = "../nan-harness-telemetry", version = "0.1.14" }
+nan-harness-adapters = { path = "../nan-harness-adapters", version = "0.1.15" }
+nan-harness-core = { path = "../nan-harness-core", version = "0.1.15" }
+nan-harness-coordinator = { path = "../nan-harness-coordinator", version = "0.1.15" }
+nan-harness-diagnostics = { path = "../nan-harness-diagnostics", version = "0.1.15" }
+nan-harness-private-fs = { path = "../nan-harness-private-fs", version = "0.1.15" }
+nan-harness-runtime = { path = "../nan-harness-runtime", version = "0.1.15" }
+nan-harness-telemetry = { path = "../nan-harness-telemetry", version = "0.1.15" }
 reqwest.workspace = true
 rpassword.workspace = true
 serde.workspace = true
@@ -51,7 +51,7 @@ url.workspace = true
 zeroize.workspace = true
 
 [dev-dependencies]
-nan-harness-test-support = { path = "../nan-harness-test-support", version = "0.1.14" }
+nan-harness-test-support = { path = "../nan-harness-test-support", version = "0.1.15" }
 # Paused virtual time keeps startup-wait tests deterministic and instant.
 tokio = { workspace = true, features = ["test-util"] }
 

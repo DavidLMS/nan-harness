@@ -39,7 +39,7 @@ recorded honestly rather than made to pass.
   workflow summary also reads staged metadata only.
 - `tests/test_staging.py` — isolated publication regressions using a mocked
   validator; this suite never invokes environment drivers or a native checker.
-- `.github/workflows/desktop-check-macos-wave12.yml` — the single-job disposable
+- `canary/archive/desktop-workflows/desktop-check-macos-wave12.yml` — the single-job disposable
   run, triggered only by the approved wave14 experiment branch.
 - `scripts/desktop-check-macos-wave12-contract.sh` — static contract: YAML and
   run-block syntax, whitespace, staged-only uploads, static fake-backend

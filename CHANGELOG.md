@@ -7,18 +7,27 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.15] - 2026-10-06
+
+### Changed
+
+- Include explicitly activated hosted Desktop qualification hooks in release binaries and require twelve exact-binary Desktop cells before publication.
+
 ### Added
 
+- Daily Desktop upstream detection, weekly twelve-cell source qualification and
+  an exact-binary Desktop prerequisite for releases. New upstream bytes remain
+  pending adapter review; hosted test hooks require explicit runtime activation.
 - Independent `nanh-desktop-check` tooling for opt-in Desktop checks, private
   recovery state, sanitized reports and separately confirmed issue submission.
-  Native app/platform qualification remains required before operational rollout.
+  Twelve inspected app/platform cells have completed native qualification.
 - `nanh zed --provider-base-url` selects an explicit provider endpoint, matching
   the other Desktop integrations and enabling bounded local probe routing.
 - Architecture-scoped Desktop evidence in compatibility feed v4, retaining
   independent deterministic and NaN checks while preserving v2/v3 consumers.
 - Manual Desktop checks and digest-bound report approval tooling. Preserve the
   current hosted CLI gates and quarantine the earlier publication queue while
-  native Desktop qualification remains pending.
+  source qualification remains distinct from published-binary evidence.
 - Offline visual fallback for Desktop checks, using a bundled digest-pinned OCR
   helper and owned-window guards. Report schema v2 distinguishes accessibility
   and visual evidence while retaining legacy report validation.
@@ -902,7 +911,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   startup update prompts, daily compatibility canaries, and a monotonic remote
   verification feed.
 
-[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.1.14...HEAD
+[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.1.15...HEAD
+[0.1.15]: https://github.com/DavidLMS/nan-harness/compare/v0.1.14...v0.1.15
 [0.1.14]: https://github.com/DavidLMS/nan-harness/compare/v0.1.13...v0.1.14
 [0.1.13]: https://github.com/DavidLMS/nan-harness/compare/v0.1.12...v0.1.13
 [0.1.12]: https://github.com/DavidLMS/nan-harness/compare/v0.1.11...v0.1.12

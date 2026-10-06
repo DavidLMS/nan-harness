@@ -54,6 +54,20 @@ Desktop schema v3 assets. Daily publication requires every supported native
 platform to pass for the same upstream version and exact nan-harness release.
 Release-gate publication remains all-or-nothing for its full matrix.
 
+## Desktop maintenance
+
+Desktop has its own [daily planner and weekly qualification](desktop-check.md).
+The daily workflow runs at 06:23 Europe/Madrid, selects only supported current
+versions lacking valid evidence, and marks unknown upstream bytes for adapter
+review. Monday's full qualification rechecks the twelve pinned cells. Pen is
+excluded. Neither workflow publishes the compatibility feed.
+
+The release gate additionally qualifies the exact attested release binaries in
+all twelve Desktop cells. Test hooks ship in the binary but require explicit
+hosted activation and disposable profiles. The aggregate binds every tested
+binary hash to the release tag and commit. These deterministic Desktop probes
+complement the existing 49-cell live CLI gate; both must pass before publication.
+
 ## Daily hosted compatibility
 
 `.github/workflows/harness-canary.yml` runs at 05:00 `Europe/Madrid`, including

@@ -1,7 +1,19 @@
-name: Desktop semantic automation feasibility
+name: Desktop native qualification and diagnostics
 on:
   workflow_call:
     inputs:
+      release_tag:
+        description: Exact attested release to test instead of a branch build
+        type: string
+        default: ''
+      release_commit:
+        description: Immutable commit of the release assets
+        type: string
+        default: ''
+      cells:
+        description: Optional canonical app/platform pairs selected by daily maintenance
+        type: string
+        default: ''
       app:
         type: string
         default: all
@@ -44,6 +56,8 @@ on:
         options: [native-copy-dom, strict-semantic, deterministic-full, startup-baseline, x11-motion-fixture, preinstall-only]
 permissions:
   contents: read
+env:
+  QUALIFICATION_SOURCE_SHA: ${{ github.sha }}
 concurrency:
   group: desktop-semantic-feasibility-${{ github.ref }}-${{ inputs.app }}-${{ inputs.platform }}
   cancel-in-progress: false
@@ -57,9 +71,21 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.sha }}
           persist-credentials: false
+      - name: Verify exact qualification source
+        shell: bash
+        run: |
+          [[ "$QUALIFICATION_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$QUALIFICATION_SOURCE_SHA"
+      - name: Validate release selection
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          RELEASE_COMMIT: ${{ inputs.release_commit }}
+        run: python3 canary/actions/desktop_release_binding.py validate-selection
       - id: selection
         env:
+          SELECTED_CELLS: ${{ inputs.cells || '' }}
           SELECTED_APP: ${{ inputs.app || 'all' }}
           SELECTED_PLATFORM: ${{ inputs.platform || 'pilots' }}
           SELECTED_EXPERIMENT: ${{ inputs.experiment }}
@@ -88,6 +114,15 @@ jobs:
                         or platform == 'remaining' and c['app'] in {'chatgpt-desktop', 'claude-desktop', 'pen-desktop'}
                         or platform == 'expansion' and (c['app'], c['platform']) not in
                         {('zed-desktop', 'macos'), ('hermes-desktop', 'linux')})]
+          requested = os.environ.get('SELECTED_CELLS', '')
+          if requested:
+              requested = json.loads(requested)
+              allowed = {c['app'] + '/' + c['platform'] for c in cells}
+              if (type(requested) is not list or not requested
+                      or any(type(item) is not str or item not in allowed for item in requested)
+                      or len(requested) != len(set(requested))):
+                  raise SystemExit('Invalid maintenance cell selection')
+              cells = [c for c in cells if c['app'] + '/' + c['platform'] in requested]
           if not cells:
               raise SystemExit('No implemented native target selected')
           print('matrix=' + json.dumps({'include': cells}, separators=(',', ':')))
@@ -101,6 +136,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.sha }}
           persist-credentials: false
       - name: Prepare neutral X11 fixture dependencies
         run: sudo apt-get update && sudo apt-get install -y xvfb xauth libxi6 libxtst6
@@ -126,6 +162,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.sha }}
           persist-credentials: false
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
@@ -162,6 +199,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.sha }}
           persist-credentials: false
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
@@ -368,6 +406,23 @@ jobs:
           if [[ "$RUNNER_OS" != Windows ]]; then
             echo "XDG_STATE_HOME=$RUNNER_TEMP/semantic-feasibility/checker-state" >> "$GITHUB_ENV"
           fi
+      - name: Stage exact attested release launcher
+        if: inputs.release_tag != '' && inputs.release_tag != null
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          RELEASE_COMMIT: ${{ inputs.release_commit }}
+        run: |
+          python3 canary/actions/desktop_release.py --repository "$GITHUB_REPOSITORY" \
+            --tag "$RELEASE_TAG" --commit "$RELEASE_COMMIT" \
+            --platform '${{ matrix.platform }}' --architecture '${{ matrix.architecture }}' \
+            --directory "$RUNNER_TEMP/desktop-release"
+          suffix=''
+          target='unknown-linux-musl'
+          if [[ "$RUNNER_OS" == macOS ]]; then target='apple-darwin'; fi
+          if [[ "$RUNNER_OS" == Windows ]]; then target='pc-windows-msvc'; suffix='.exe'; fi
+          echo "FEASIBILITY_REAL_NANH=$RUNNER_TEMP/desktop-release/nan-harness-${{ matrix.architecture }}-$target$suffix" >> "$GITHUB_ENV"
       - name: Build fixed Windows Hermes launcher
         if: runner.os == 'Windows' && matrix.app != 'zed-desktop'
         shell: bash
@@ -414,6 +469,23 @@ jobs:
           else
             "$FEASIBILITY_CHECKER" resolve --app '${{ matrix.app }}' --model qwen3.6 --artifacts "$RUNNER_TEMP/semantic-feasibility/artifacts" --output "$RUNNER_TEMP/semantic-feasibility/frozen.json"
           fi
+      - name: Verify inspected baseline identity before installation
+        if: inputs.experiment == 'deterministic-full'
+        env:
+          BASELINE_APP: ${{ matrix.app }}
+          BASELINE_PLATFORM: ${{ matrix.platform }}
+        shell: bash
+        run: |
+          python3 - <<'PYTHON'
+          import json, os, sys
+          from pathlib import Path
+          sys.path.insert(0, 'canary/actions')
+          from desktop_maintenance import baseline, same_release
+          value = json.loads((Path(os.environ['RUNNER_TEMP']) / 'semantic-feasibility/frozen.json').read_text())
+          app, platform = os.environ['BASELINE_APP'], os.environ['BASELINE_PLATFORM']
+          if len(value['apps']) != 1 or not same_release(value['apps'][0], baseline(platform)[app]):
+              raise SystemExit('Official package differs from the inspected desktop baseline')
+          PYTHON
       - name: Preserve verified public package before GUI qualification
         if: matrix.app == 'chatgpt-desktop' && runner.os == 'Windows' && inputs.experiment == 'deterministic-full' && steps.inspected-package.outputs.cache-hit != 'true'
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
@@ -428,7 +500,7 @@ jobs:
           set -euo pipefail
           unset NAN_API_KEY GH_TOKEN GITHUB_TOKEN
           python3 -c 'import os, sys; from pathlib import Path; sys.path.insert(0, "canary/actions"); from cell import ensure_private_directory; ensure_private_directory(Path(os.environ["FEASIBILITY_FACTS"]))'
-          python3 canary/actions/desktop_diagnostics.py --source-sha "$GITHUB_SHA" --platform '${{ matrix.platform }}' --output "$RUNNER_TEMP/semantic-feasibility/installation-diagnostics.json" --timeout 2400 -- python3 canary/actions/desktop_install.py --manifest "$RUNNER_TEMP/semantic-feasibility/frozen.json" --artifacts "$RUNNER_TEMP/semantic-feasibility/artifacts" --platform '${{ matrix.platform }}' --architecture '${{ matrix.architecture }}' --model qwen3.6 --harnesses '${{ matrix.app }}'
+          python3 canary/actions/desktop_diagnostics.py --source-sha "$QUALIFICATION_SOURCE_SHA" --platform '${{ matrix.platform }}' --output "$RUNNER_TEMP/semantic-feasibility/installation-diagnostics.json" --timeout 2400 -- python3 canary/actions/desktop_install.py --manifest "$RUNNER_TEMP/semantic-feasibility/frozen.json" --artifacts "$RUNNER_TEMP/semantic-feasibility/artifacts" --platform '${{ matrix.platform }}' --architecture '${{ matrix.architecture }}' --model qwen3.6 --harnesses '${{ matrix.app }}'
       - name: Verify synthetic Windows configuration lifecycle after installation
         if: runner.os == 'Windows' && matrix.app == 'claude-desktop' && inputs.experiment == 'deterministic-full'
         env:
@@ -474,7 +546,7 @@ jobs:
           tag=v1.22.0
           if [[ '${{ matrix.app }}' == hermes-desktop ]]; then tag=v2026.9.24; fi
           bash scripts/run-desktop-check-session.sh python3 scripts/desktop-feasibility/run-experiments.py \
-            --app '${{ matrix.app }}' --platform '${{ matrix.platform }}' --source-sha "$GITHUB_SHA" --release-tag "$tag" \
+            --app '${{ matrix.app }}' --platform '${{ matrix.platform }}' --source-sha "$QUALIFICATION_SOURCE_SHA" --release-tag "$tag" \
             --experiment "$SELECTED_EXPERIMENT" \
             --checker "$FEASIBILITY_CHECKER" --real-nanh "$FEASIBILITY_REAL_NANH" \
             --prepared "$RUNNER_TEMP/semantic-feasibility/prepared.json" --frozen "$RUNNER_TEMP/semantic-feasibility/frozen.json" \
@@ -482,7 +554,7 @@ jobs:
       - name: Initialize explicit unqualified result
         if: always() && contains(fromJSON('["deterministic-full","startup-baseline"]'), inputs.experiment)
         shell: bash
-        run: python3 canary/actions/desktop_qualification.py pending --app '${{ matrix.app }}' --platform '${{ matrix.platform }}' --architecture '${{ matrix.architecture }}' --source-sha "$GITHUB_SHA" --output "$RUNNER_TEMP/semantic-feasibility/qualification.json"
+        run: python3 canary/actions/desktop_qualification.py pending --app '${{ matrix.app }}' --platform '${{ matrix.platform }}' --architecture '${{ matrix.architecture }}' --source-sha "$QUALIFICATION_SOURCE_SHA" --output "$RUNNER_TEMP/semantic-feasibility/qualification.json"
       - name: Observe closed Windows desktop session facts
         if: runner.os == 'Windows' && contains(fromJSON('["deterministic-full","startup-baseline"]'), inputs.experiment)
         # Advisory inventory has no input authority; qualification retains its
@@ -573,7 +645,7 @@ jobs:
           if [[ '${{ matrix.platform }}' == linux && '${{ matrix.app }}' == chatgpt-desktop ]]; then
             umask 077
           fi
-          bash scripts/run-desktop-check-session.sh python3 scripts/desktop-feasibility/run-qualification.py --app '${{ matrix.app }}' --platform '${{ matrix.platform }}' --source-sha "$GITHUB_SHA" --checker "$FEASIBILITY_CHECKER" --real-nanh "$FEASIBILITY_REAL_NANH" --prepared "$RUNNER_TEMP/semantic-feasibility/prepared.json" --frozen "$RUNNER_TEMP/semantic-feasibility/frozen.json" --directory "$RUNNER_TEMP/semantic-feasibility"
+          bash scripts/run-desktop-check-session.sh python3 scripts/desktop-feasibility/run-qualification.py --app '${{ matrix.app }}' --platform '${{ matrix.platform }}' --source-sha "$QUALIFICATION_SOURCE_SHA" --checker "$FEASIBILITY_CHECKER" --real-nanh "$FEASIBILITY_REAL_NANH" --prepared "$RUNNER_TEMP/semantic-feasibility/prepared.json" --frozen "$RUNNER_TEMP/semantic-feasibility/frozen.json" --directory "$RUNNER_TEMP/semantic-feasibility"
       - name: Reduce full deterministic qualification
         if: always() && contains(fromJSON('["deterministic-full","startup-baseline"]'), inputs.experiment)
         shell: bash
@@ -584,9 +656,9 @@ jobs:
             if [[ '${{ matrix.app }}' != zed-desktop ]]; then
               launcher="${FEASIBILITY_HERMES_LAUNCHER:-$GITHUB_WORKSPACE/scripts/desktop-feasibility/nanh-shim.py}"
             fi
-            python3 canary/actions/desktop_qualification.py reduce --app '${{ matrix.app }}' --platform '${{ matrix.platform }}' --architecture '${{ matrix.architecture }}' --source-sha "$GITHUB_SHA" --model qwen3.6 --checker "$FEASIBILITY_CHECKER" --launcher "$launcher" --real-nanh "$FEASIBILITY_REAL_NANH" --prepared "$RUNNER_TEMP/semantic-feasibility/prepared.json" --frozen "$RUNNER_TEMP/semantic-feasibility/frozen.json" --report "$RUNNER_TEMP/semantic-feasibility/report.json" --facts "$RUNNER_TEMP/semantic-feasibility/qualification-facts" --output "$RUNNER_TEMP/semantic-feasibility/qualification.json"
+            python3 canary/actions/desktop_qualification.py reduce --app '${{ matrix.app }}' --platform '${{ matrix.platform }}' --architecture '${{ matrix.architecture }}' --source-sha "$QUALIFICATION_SOURCE_SHA" --model qwen3.6 --checker "$FEASIBILITY_CHECKER" --launcher "$launcher" --real-nanh "$FEASIBILITY_REAL_NANH" --prepared "$RUNNER_TEMP/semantic-feasibility/prepared.json" --frozen "$RUNNER_TEMP/semantic-feasibility/frozen.json" --report "$RUNNER_TEMP/semantic-feasibility/report.json" --facts "$RUNNER_TEMP/semantic-feasibility/qualification-facts" --output "$RUNNER_TEMP/semantic-feasibility/qualification.json"
           else
-            python3 canary/actions/desktop_qualification.py diagnose-pending --app '${{ matrix.app }}' --platform '${{ matrix.platform }}' --architecture '${{ matrix.architecture }}' --source-sha "$GITHUB_SHA" --facts "$RUNNER_TEMP/semantic-feasibility/qualification-facts" --output "$RUNNER_TEMP/semantic-feasibility/qualification.json"
+            python3 canary/actions/desktop_qualification.py diagnose-pending --app '${{ matrix.app }}' --platform '${{ matrix.platform }}' --architecture '${{ matrix.architecture }}' --source-sha "$QUALIFICATION_SOURCE_SHA" --facts "$RUNNER_TEMP/semantic-feasibility/qualification-facts" --output "$RUNNER_TEMP/semantic-feasibility/qualification.json"
           fi
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always() && contains(fromJSON('["deterministic-full","startup-baseline"]'), inputs.experiment)
@@ -623,7 +695,7 @@ jobs:
   qualification-matrix:
     name: Aggregate the twelve-cell desktop qualification
     needs: [select, native]
-    if: always() && !cancelled() && needs.select.result == 'success' && inputs.app == 'all' && inputs.platform == 'all' && inputs.experiment == 'deterministic-full'
+    if: always() && !cancelled() && needs.select.result == 'success' && inputs.app == 'all' && inputs.platform == 'all' && inputs.experiment == 'deterministic-full' && (inputs.cells == '' || inputs.cells == null)
     permissions:
       contents: read
       actions: read
@@ -632,6 +704,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.sha }}
           persist-credentials: false
       - name: Download exact latest closed cell artifacts across attempts
         env:
@@ -648,8 +721,18 @@ jobs:
         run: |
           python3 canary/actions/desktop_qualification.py aggregate \
             --directory "$RUNNER_TEMP/qualification-cells" \
-            --source-sha "$GITHUB_SHA" --exclude-app pen-desktop \
+            --source-sha "$QUALIFICATION_SOURCE_SHA" --exclude-app pen-desktop \
             --output "$RUNNER_TEMP/qualification-matrix.json"
+      - name: Bind all twelve passing cells to the attested release bytes
+        if: inputs.release_tag != '' && inputs.release_tag != null
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          RELEASE_COMMIT: ${{ inputs.release_commit }}
+        run: |
+          python3 canary/actions/desktop_release_binding.py bind \
+            --matrix "$RUNNER_TEMP/qualification-matrix.json" \
+            --directory "$RUNNER_TEMP/release-binding"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
@@ -665,6 +748,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.sha }}
           persist-credentials: false
       - run: rustup show
       - name: Install native and interactive test dependencies

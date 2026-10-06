@@ -11,7 +11,7 @@
 #   5. the tracked/untracked owned files pass whitespace checks.
 set -euo pipefail
 
-workflow=".github/workflows/desktop-check-macos-wave10.yml"
+workflow="canary/archive/desktop-workflows/desktop-check-macos-wave10.yml"
 tmpdir="$(mktemp -d)"
 trap 'rm -rf "$tmpdir"' EXIT
 

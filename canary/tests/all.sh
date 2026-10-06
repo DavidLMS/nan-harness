@@ -34,6 +34,7 @@ done
 cargo build --locked --package nan-harness-canary --bin nan-harness-canary
 for test_script in \
   desktop-qualification.py \
+  desktop-maintenance.py desktop-release-binding.py \
   hosted-cli-selection.py \
   hosted-cli-workflow.py \
   daily-compatibility.py \

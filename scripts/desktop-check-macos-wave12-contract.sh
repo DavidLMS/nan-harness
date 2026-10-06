@@ -11,7 +11,7 @@
 # It never runs the experiment and never touches a real macOS preference.
 set -euo pipefail
 
-workflow=".github/workflows/desktop-check-macos-wave12.yml"
+workflow="canary/archive/desktop-workflows/desktop-check-macos-wave12.yml"
 tmpdir="$(mktemp -d)"
 trap 'rm -rf "$tmpdir"' EXIT
 

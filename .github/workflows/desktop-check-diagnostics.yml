@@ -55,4 +55,4 @@ jobs:
 
   chatgpt-sandbox-synthetic:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.chatgpt_sandbox_synthetic_only }}
-    uses: ./.github/workflows/desktop-check-chatgpt-wave29-synthetic.yml
+    uses: ./.github/workflows/desktop-check-sandbox-contracts.yml

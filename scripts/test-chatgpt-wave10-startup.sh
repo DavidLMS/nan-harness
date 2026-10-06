@@ -1053,7 +1053,7 @@ check 1 'unknown flag' run_contract run --receipt "$receipt" --report "$report" 
 # (an action input) stay covered by the real file alone. The audit is skipped
 # when no python3 with a YAML parser exists, and reported loudly when it does.
 # ---------------------------------------------------------------------------
-workflow_yml=".github/workflows/desktop-check-chatgpt-wave10.yml"
+workflow_yml="canary/archive/desktop-workflows/desktop-check-chatgpt-wave10.yml"
 if command -v python3 > /dev/null 2>&1 && python3 -c 'import yaml' > /dev/null 2>&1; then
     python3 - "$workflow_yml" "$workspace/audit.py" <<'PY'
 import pathlib, re, sys, textwrap
@@ -1062,7 +1062,7 @@ match = re.search(r"python3 - <<'PY'\n(.*?)\n[ ]{10}PY\n", text, re.S)
 assert match, "the invariant audit step is missing from the workflow"
 audit = textwrap.dedent(match.group(1))
 audit = audit.replace(
-    'pathlib.Path(".github/workflows/desktop-check-chatgpt-wave10.yml")',
+    'pathlib.Path("canary/archive/desktop-workflows/desktop-check-chatgpt-wave10.yml")',
     'pathlib.Path(sys.argv[1])')
 pathlib.Path(sys.argv[2]).write_text(audit)
 PY
