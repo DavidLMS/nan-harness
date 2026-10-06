@@ -3346,3 +3346,10 @@ stopped before clicking its unique visible, enabled onboarding choice, with
 ownership still verified. Its separate five-second readiness cutoff also included
 native custody queries. Onboarding now shares the existing overall readiness
 cutoff, retaining the same unique-control, stable-point and custody proofs.
+
+Campaign `37416555321` observed one macOS Zed Retry control in the accessibility
+count, followed by no matching element during immediate capture. No Retry was
+dispatched in that session; the other two sessions completed, and cleanup passed.
+macOS now uses the same bounded capture and retained-control revalidation already
+used on Windows. Only absence may settle within the original deadline; ambiguity,
+changed identity, failed custody and uncertain dispatch still fail immediately.

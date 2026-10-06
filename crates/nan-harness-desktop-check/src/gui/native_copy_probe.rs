@@ -702,8 +702,8 @@ fn same_retry_element(before: &xa11y::Element, after: &xa11y::Element) -> bool {
 }
 
 fn same_named_retry_element(before: &xa11y::ElementData, after: &xa11y::ElementData) -> bool {
-    // GPUI's element ID is not a UIA AutomationId. Preserve the existing
-    // semantic identity boundary even when that optional property is absent.
+    // GPUI may omit a stable accessibility ID. Preserve semantic identity
+    // across native tree refreshes even when that optional property is absent.
     before.pid.is_some()
         && before.pid == after.pid
         && before.bounds.is_some()
@@ -1054,7 +1054,7 @@ impl NativeClipboardSession<'_> {
                 retry
                     .wait_visible(deadline.saturating_duration_since(Instant::now()).min(WAIT))
                     .map_err(map_error)?;
-                if !cfg!(target_os = "windows") {
+                if !cfg!(any(target_os = "windows", target_os = "macos")) {
                     self.retry_ready = true;
                     return Ok(());
                 }
