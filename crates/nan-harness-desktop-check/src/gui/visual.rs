@@ -2426,9 +2426,15 @@ mod tests {
         let pending = runtime_focus_fixture(
             "FOCUS proved 1\nFOCUS_WINDOW query-error 0\nFOCUS_WINDOW_QUERY before main-window cannot-complete\n",
         );
+        let missing_input = runtime_focus_fixture(
+            "FOCUS query-error 0\nFOCUS_QUERY before focused-element no-value\nFOCUS_WINDOW query-error 0\nFOCUS_WINDOW_QUERY before focused-window cannot-complete\n",
+        );
+        let stale_input = runtime_focus_fixture(
+            "FOCUS query-error 0\nFOCUS_QUERY before input-window invalid-element\nFOCUS_WINDOW proved 1\n",
+        );
         let held = pending.windows[1].clone();
         let ready = runtime_focus_fixture("FOCUS proved 1\nFOCUS_WINDOW proved 1\n");
-        let mut snapshots = VecDeque::from([pending, ready]);
+        let mut snapshots = VecDeque::from([pending, missing_input, stale_input, ready]);
         let start = Instant::now();
         let elapsed = Cell::new(Duration::ZERO);
         let calls = Cell::new(0);
@@ -2448,7 +2454,7 @@ mod tests {
             |_, failure| rejected.push(failure),
         );
         assert_eq!(result, Ok(()));
-        assert_eq!(calls.get(), 2);
+        assert_eq!(calls.get(), 4);
         assert!(rejected.is_empty());
         assert_eq!(held.bounds.width, 800);
     }
@@ -2457,7 +2463,7 @@ mod tests {
     fn runtime_pending_expiry_records_once_and_never_authorizes_input() {
         use std::cell::Cell;
         let pending = runtime_focus_fixture(
-            "FOCUS proved 1\nFOCUS_WINDOW query-error 0\nFOCUS_WINDOW_QUERY before main-window cannot-complete\n",
+            "FOCUS query-error 0\nFOCUS_QUERY before input-window invalid-element\nFOCUS_WINDOW proved 1\n",
         );
         let held = pending.windows[1].clone();
         let start = Instant::now();

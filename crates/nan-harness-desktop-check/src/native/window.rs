@@ -114,6 +114,27 @@ enum FocusQueryError {
 }
 
 #[cfg(any(test, target_os = "macos"))]
+impl FocusQuery {
+    fn input_read_pending(self) -> bool {
+        // AX may expose no focused editor during startup, or invalidate the
+        // input reference before its window attribute is read. Only resample:
+        // neither observation proves focus or changes the retained CG window.
+        matches!(
+            (self.phase, self.stage, self.error),
+            (
+                FocusQueryPhase::Before,
+                FocusQueryStage::FocusedElement,
+                FocusQueryError::NoValue
+            ) | (
+                FocusQueryPhase::Before,
+                FocusQueryStage::InputWindow,
+                FocusQueryError::InvalidElement
+            )
+        )
+    }
+}
+
+#[cfg(any(test, target_os = "macos"))]
 #[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum FocusAgreement {
@@ -556,27 +577,31 @@ impl Snapshot {
     /// complete window stack remain safe. It is never a focus proof.
     #[cfg(any(test, target_os = "macos"))]
     pub(crate) fn claude_focus_pending(&self, expected: &Window) -> bool {
-        let pending_status = |proof: &Option<FocusProof>, query: Option<FocusQuery>| {
-            proof.as_ref().is_some_and(|proof| {
-                (proof.status == FocusStatus::Proved && proof.window == expected.id)
-                    || (matches!(
-                        proof.status,
-                        FocusStatus::QueryError | FocusStatus::IdentityChanged
-                    ) && query
-                        .is_some_and(|query| query.error == FocusQueryError::CannotComplete))
-            })
-        };
+        let pending_status =
+            |proof: &Option<FocusProof>, query: Option<FocusQuery>, input: bool| {
+                proof.as_ref().is_some_and(|proof| {
+                    (proof.status == FocusStatus::Proved && proof.window == expected.id)
+                        || (matches!(
+                            proof.status,
+                            FocusStatus::QueryError | FocusStatus::IdentityChanged
+                        ) && query.is_some_and(|query| {
+                            query.error == FocusQueryError::CannotComplete
+                                || (input && query.input_read_pending())
+                        }))
+                })
+            };
         self.windows
             .iter()
             .filter(|window| window.id == expected.id && window.pid == expected.pid)
             .count()
             == 1
-            && [self.focus_query, self.window_focus_query]
+            && ([self.focus_query, self.window_focus_query]
                 .into_iter()
                 .flatten()
                 .any(|query| query.error == FocusQueryError::CannotComplete)
-            && pending_status(&self.focus, self.focus_query)
-            && pending_status(&self.window_focus, self.window_focus_query)
+                || self.focus_query.is_some_and(FocusQuery::input_read_pending))
+            && pending_status(&self.focus, self.focus_query, true)
+            && pending_status(&self.window_focus, self.window_focus_query, false)
             && matches!(
                 self.guard_failure(expected),
                 Ok(()) | Err(GuardFailure::SameProcessWindow)
@@ -1233,6 +1258,52 @@ mod tests {
             Snapshot::parse(&format!("{base}FOCUS proved 1\nFOCUS_WINDOW proved 1\n")).unwrap();
         assert!(!proved.claude_focus_pending(&held));
         assert!(proved.claude_focused_guard_failure(&held).is_ok());
+    }
+
+    #[test]
+    fn stale_input_focus_queries_wait_only_with_safe_window_identity() {
+        let base = "FG 7 0\nDISPLAY 0 0 2000 2000\nWIN 99 7 1500 1500 10 10 50616e656c 3\nWIN 1 7 10 20 800 600 436c61756465 0\n";
+        for query in ["focused-element no-value", "input-window invalid-element"] {
+            for window_proof in [
+                "FOCUS_WINDOW proved 1\n",
+                "FOCUS_WINDOW query-error 0\nFOCUS_WINDOW_QUERY before focused-window cannot-complete\n",
+            ] {
+                let receipt = format!(
+                    "{base}FOCUS query-error 0\nFOCUS_QUERY before {query}\n{window_proof}"
+                );
+                let snapshot = Snapshot::parse(&receipt).unwrap();
+                let held = snapshot.windows[1].clone();
+                assert!(snapshot.claude_focus_pending(&held));
+                assert!(snapshot.claude_focused_guard_failure(&held).is_err());
+                for unsafe_receipt in [
+                    receipt.replace("FG 7 0", "FG 8 0"),
+                    receipt.replace("1500 1500 10 10", "10 20 10 10"),
+                    receipt.replace("50616e656c 3", "50616e656c 0"),
+                    receipt.replace("WIN 1 7 10 20", "WIN 1 7 11 20"),
+                    receipt.replace("WIN 1 7", "WIN 2 7"),
+                ] {
+                    assert!(
+                        !Snapshot::parse(&unsafe_receipt)
+                            .unwrap()
+                            .claude_focus_pending(&held)
+                    );
+                }
+            }
+        }
+        for query in [
+            "focused-window no-value",
+            "main-window invalid-element",
+            "input-window no-value",
+            "focused-element invalid-element",
+            "input-window attribute-unsupported",
+            "input-window owner-mismatch",
+        ] {
+            let receipt = format!(
+                "{base}FOCUS query-error 0\nFOCUS_QUERY before {query}\nFOCUS_WINDOW proved 1\n"
+            );
+            let snapshot = Snapshot::parse(&receipt).unwrap();
+            assert!(!snapshot.claude_focus_pending(&snapshot.windows[1]));
+        }
     }
 
     #[test]

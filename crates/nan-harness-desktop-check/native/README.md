@@ -147,3 +147,14 @@ duplicate controls and crossed Document/Pane/Window boundaries are rejected.
 The failed user heading joins the control, failure anchor and shared ancestor
 in the retained identity checks immediately before Invoke. Earlier conversation
 headings do not make the final failed turn ambiguous by themselves.
+
+Claude macOS focus polling also treats `no-value` while first reading the
+focused input and `invalid-element` while first reading that input's window as
+pending public AX observations. The temporary input reference can disappear
+between those reads. Only the complete focus proof may be refreshed: the
+retained native window, geometry, foreground owner, display and clear stack
+must still match, and the independent window proof must be valid or incomplete.
+The original deadline is preserved and both full proofs must succeed before
+any action. Other stages/errors, changed windows and uncertain actions cannot
+use this path. Tests reproduce both receipts, lost identity/geometry/foreground,
+occlusion, successful fresh proof and expiry without input authorization.

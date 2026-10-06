@@ -3613,3 +3613,18 @@ ownership, focus, bounds, exact Value/clipboard readback and cleanup remain
 required. Portable tests cover pending readiness, rejection, persistent absence
 and an observation crossing its deadline. Hosted qualification is still required
 for this change; prior passing cells do not qualify a new source commit.
+
+Commit `5a9b9bea` passed integration quality and all three Windows Claude
+sessions in run `37472986823`. Its full matrix `37475326695` also passed Windows
+Claude, giving six complete sessions after the draft-first fix. The matrix
+exposed two distinct macOS focus reads before input: `focused-element/no-value`
+and `input-window/invalid-element`. The latter occurs after the initial focus
+proof and window fit, while the separate window proof still matches.
+
+The existing bounded read-only focus wait now recognizes only those two input
+read failures in its before phase, in addition to incomplete AX messages.
+It reacquires the public focus observation, not the retained native window or
+an action target. No input is admitted until both independent full proofs pass;
+foreign identity, changed bounds, overlapping panels and unsupported queries
+remain terminal. Synthetic regression tests cover the actual receipts and the
+original deadline. New hosted evidence is required for this change.
