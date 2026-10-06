@@ -23,7 +23,7 @@ class OfficialIdentity(unittest.TestCase):
     def test_workflow_freeze_arguments_work_with_runner_bash_and_nounset(self):
         workflow = (Path(__file__).resolve().parents[2] / '.github/workflows/desktop-automation-feasibility.yml').read_text()
         start = workflow.index('          freeze_args=')
-        fragment = textwrap.dedent(workflow[start:workflow.index('\n      - name: Install exact', start)])
+        fragment = textwrap.dedent(workflow[start:workflow.index('\n      - ', start)])
         for app, tag in [('zed-desktop', 'v1.22.0'), ('hermes-desktop', 'v2026.9.24')]:
             command = 'python3() { shift; printf "%s\\n" "$@"; }; RUNNER_TEMP=/tmp/fixture; '\
                 + fragment.replace('${{ matrix.app }}', app)
