@@ -28,3 +28,17 @@ assert.equal(trial().responseVerified,true,'new empty source turn follows retain
 for(const key of ['staleKey','foreign','disconnected','before','userInside','wrong','duplicate','duplicatePrompt','overflow','interveningUser','replacedUser','replacedConversation','changedDocument'])assert.equal(trial({[key]:true}).responseVerified,false,key);
 assert(!JSON.stringify(trial()).includes('new-recovery-turn-unit'));
 console.log('PASS: retained Retry continuation, fresh source unit, exact nonce, no intervening user or foreign conversation');
+
+{
+ const {retryTargetOwned}=require('./codex-dom.cjs');
+ const original=global.document;global.document={};
+ const conversation={contains:()=>true};
+ const held={document:global.document,conversation,user:{compareDocumentPosition:()=>4}};
+ const button={isConnected:true,closest:selector=>selector.includes('conversation')?conversation:{}};
+ assert.equal(retryTargetOwned(button,held),true);
+ assert.equal(retryTargetOwned({...button,isConnected:false},held),false);
+ assert.equal(retryTargetOwned({...button,closest:()=>({})},held),false);
+ for(const order of [1,2,5])assert.equal(retryTargetOwned(button,{...held,user:{compareDocumentPosition:()=>order}}),false);
+ assert.equal(retryTargetOwned(button,{...held,document:{}}),false);
+ global.document=original;
+}

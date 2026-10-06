@@ -18,6 +18,7 @@ mod claude_windows_fit;
 mod claude_windows_ready;
 mod clipboard;
 mod codex_dom_probe;
+mod codex_recovery_barrier;
 mod dom_probe;
 mod native_copy_probe;
 mod native_icon_probe;

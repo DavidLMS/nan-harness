@@ -3492,3 +3492,22 @@ only when the retained button detached, the cover is absent, and the original
 composer and document are independently re-proved. Replacement buttons,
 remounted composers and uncertain input remain rejected. The complete synthetic
 Python/Node experiment contracts and 184 reducer tests pass for these changes.
+
+### Synchronize Codex's explicit recovery with the fixture provider
+
+At `78fd02b7`, run `37448697664` passed Codex macOS/Windows and integration
+quality; run `37448701987` passed Hermes Windows. Codex Linux passed two sessions
+but lost Retry before dispatch in the first, while the provider had already
+returned a recovery response. The inspected official renderer's capacity Retry
+can automatically retry after 10, 30, 120 and 300 seconds. Releasing the fixture
+before starting another controller therefore races that countdown.
+
+Codex now keeps the injected overload active until the controller has proved
+its retained latest user/conversation, unique current Retry, and actionability.
+A one-shot private file handoff releases the fixture immediately before the
+single click; partial signals wait, invalid or non-private signals fail, and
+uncertain input is never replayed. Automatic failed continuations may precede
+that click but cannot qualify recovery. A countdown must still have at least
+15 seconds available (or be absent), within the unchanged 45-second turn budget.
+The recovered marker still requires independent provider and new assistant-unit
+verification, with no intervening user message or foreign conversation.

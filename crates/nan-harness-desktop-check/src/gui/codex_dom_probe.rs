@@ -374,7 +374,8 @@ fn execute_turn(
             file.write_all(&bytes)
         })
         .map_err(|_| Reason::IsolationUnavailable)?;
-    let outcome = run_driver(&driver, &request_path, &output_path, guard);
+    let recovery = matches!(turn.action, DomAction::Retry).then_some(provider);
+    let outcome = run_driver(&driver, &request_path, &output_path, recovery, guard);
     std::fs::remove_file(request_path).map_err(|_| Reason::IsolationUnavailable)?;
     let mut facts = read_facts(&output_path).map_err(|reason| outcome.err().unwrap_or(reason))?;
     facts.provider_response_verified = provider.fixture_response_verified().into();
@@ -437,6 +438,7 @@ fn run_driver(
     driver: &Path,
     request: &Path,
     output: &Path,
+    recovery: Option<&ProviderGate>,
     mut guard: impl FnMut() -> Result<(), Reason>,
 ) -> Result<(), Reason> {
     guard()?;
@@ -450,6 +452,7 @@ fn run_driver(
         .stderr(Stdio::null())
         .spawn()
         .map_err(|_| Reason::ActionUnsupported)?;
+    let mut barrier = super::codex_recovery_barrier::RecoveryBarrier::new(request);
     let deadline = Instant::now() + Duration::from_secs(50);
     let result = loop {
         match child.try_wait() {
@@ -462,6 +465,11 @@ fn run_driver(
         }
         if Instant::now() >= deadline {
             break Err(Reason::Timeout);
+        }
+        if let Some(provider) = recovery
+            && let Err(reason) = barrier.poll(|| provider.fail_recoverable_scenario(false))
+        {
+            break Err(reason);
         }
         std::thread::sleep(Duration::from_millis(100));
     };

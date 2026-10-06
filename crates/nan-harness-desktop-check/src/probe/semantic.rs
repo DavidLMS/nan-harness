@@ -578,7 +578,11 @@ async fn complete_scenario(
     gate.use_upstream(recovered.base_url());
     gate.arm_fixture_response(&recovered_marker)
         .map_err(|()| Reason::ProviderFailed)?;
-    gate.fail_recoverable_scenario(false);
+    // Codex's capacity countdown can retry while its next controller attaches.
+    // Keep those requests failing until the retained UI action is ready.
+    if !matches!(ui, SemanticUi::Codex(_)) {
+        gate.fail_recoverable_scenario(false);
+    }
     let recovery = ui.retry(&recovered_marker, gate);
     // Preserve the provider side even when UI readback fails after dispatch.
     record_provider_oracle(directory, "recovery", &tool, gate, None)?;

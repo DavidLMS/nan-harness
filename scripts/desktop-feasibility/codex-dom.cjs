@@ -66,6 +66,12 @@ function holdRetryContinuation({prompt}) {
   if(laterUsers)return null;
   return {document,user,conversation,unitKeys};
 }
+function retryTargetOwned(button,held) {
+  return !!held&&held.document===document&&button.isConnected
+    &&button.closest('[data-thread-find-target="conversation"]')===held.conversation
+    &&held.conversation.contains(button)&&!!button.closest('[data-turn-key]')
+    &&(held.user.compareDocumentPosition(button)&5)===4;
+}
 function retryContinuationObservation({held,prompt,marker}) {
   const empty={userCount:0,assistantCount:0,responseVerified:false};
   if(!held||held.document!==document||!held.user.isConnected||!held.conversation.isConnected
@@ -159,7 +165,7 @@ async function ordinaryClick(locator,guard,deadline,attempt,after=guard,observe=
     if(!candidate(first,final)||!final.points.some(p=>p.x===point.x&&p.y===point.y))return false;
     if(!await guard()||Date.now()>=deadline)return false;
     phase('dispatch');
-    attempt();
+    await attempt();
     // The response loop owns transition verification. Do not let Playwright's
     // implicit post-click navigation wait obscure a delivered single action.
     await handle.click({noWaitAfter:true,position:point,timeout:Math.max(1,Math.min(2000,deadline-Date.now()))});
@@ -191,7 +197,7 @@ function homeComposerScope() {
       ||e.getAttribute('aria-modal')==='true'||e.getAttribute('data-thread-find-target')==='conversation');
 }
 
-async function runTurn(page,guard,request,deadline=Date.now()+request.timeoutMs) {
+async function runTurn(page,guard,request,deadline=Date.now()+request.timeoutMs,releaseRecovery=async()=>{throw Error('recovery barrier required');}) {
   const facts={schemaVersion:1,mechanism:'codex-renderer-qualification',diagnosticsOnly:true,
     endpointOwned:false,targetVerified:false,attached:true,bindingVerified:false,auxiliaryInert:false,
     codingComposerReady:false,uniqueComposer:false,inputReadback:false,inputSubmitted:false,
@@ -282,16 +288,20 @@ async function runTurn(page,guard,request,deadline=Date.now()+request.timeoutMs)
       const user=page.locator('[data-local-conversation-user-anchor]:visible')
         .filter({has:page.locator('[data-user-message-bubble]').filter({hasText:request.prompt})});
       if(await user.count()!==1||!await user.evaluate((e,prompt)=>e.querySelector('[data-user-message-bubble]')?.innerText.trim()===prompt,request.prompt))return stop('stale-turn');
-      const turn=user.locator('xpath=ancestor::*[@data-turn-key][1]');
-      const retry=turn.getByRole('button',{name:/^Retry(?: in [1-9][0-9]*s)?$/,exact:true});
-      const retryTurnOwned=async()=>await owned()&&await user.count()===1
-        &&await user.evaluate((e,prompt)=>e.querySelector('[data-user-message-bubble]')?.innerText.trim()===prompt,request.prompt);
-      facts.retryControl=await waitRetryReady(retry,retryTurnOwned,deadline,pause);
-      if(!facts.retryControl)return stop('retry-unavailable');
       retryWitness=await page.evaluateHandle(holdRetryContinuation,{prompt:request.prompt});
+      const conversation=user.locator('xpath=ancestor::*[@data-thread-find-target="conversation"][1]');
+      // Automatic failed capacity continuations have no new user bubble. Only
+      // the unique latest Retry after this retained last user is eligible.
+      const retry=conversation.getByRole('button',{name:/^Retry(?: in [1-9][0-9]*s)?$/,exact:true});
       const retryOwned=async()=>await owned()&&(await page.evaluate(retryContinuationObservation,{held:retryWitness,prompt:request.prompt,marker:request.expectedMarker})).userCount===1;
-      if(!await ordinaryClick(retry,retryOwned,deadline,()=>{facts.retryAttempted=true;},retryOwned,
-        phase=>{facts.retryClickPhase=phase;}))return stop('action-uncertain');
+      const targetOwned=async()=>await retryOwned()&&await retry.count()===1
+        &&await retry.evaluate(retryTargetOwned,retryWitness);
+      facts.retryControl=await waitRetryReady(retry,retryOwned,deadline,pause);
+      if(!facts.retryControl)return stop('retry-unavailable');
+      if(!await ordinaryClick(retry,targetOwned,deadline,async()=>{
+        await releaseRecovery(deadline,targetOwned);
+        facts.retryAttempted=true;
+      },retryOwned,phase=>{facts.retryClickPhase=phase;}))return stop('action-uncertain');
       facts.retryCompleted=true;
     }
     while(Date.now()<deadline) {
@@ -321,6 +331,7 @@ exports.directCDPPolicy=directCDPPolicy;
 exports.homeComposerScope=homeComposerScope;
 exports.turnObservation=turnObservation;
 exports.holdRetryContinuation=holdRetryContinuation;
+exports.retryTargetOwned=retryTargetOwned;
 exports.retryContinuationObservation=retryContinuationObservation;
 exports.ordinaryClick=ordinaryClick;
 exports.runTurn=runTurn;
@@ -410,7 +421,11 @@ async function waitRetryReady(retry,guard,deadline,pause,now=Date.now) {
     if(!await guard())return false;
     const count=await retry.count();
     if(count>1)return false;
-    if(count===1&&await retry.isEnabled()&&await guard())return now()<deadline;
+    if(count===1&&await retry.isEnabled()) {
+      const label=await retry.innerText();
+      const countdown=/^Retry in ([1-9][0-9]*)s$/.exec(label);
+      if((label==='Retry'||countdown&&Number(countdown[1])>=15)&&await guard())return now()<deadline;
+    }
     await pause(Math.min(100,Math.max(0,deadline-now())));
   }
   return false;
@@ -453,7 +468,7 @@ async function main() {
     const directCDP=directCDPPolicy();
     const page=await bindRecordedMain(browser,binding,owner,deadline,pageIdentity,directCDP);
     if(!page)throw Error('main');
-    facts=await runTurn(page,async until=>await bindRecordedMain(browser,binding,owner,until,pageIdentity,directCDP)===page,request,deadline);
+    facts=await runTurn(page,async until=>await bindRecordedMain(browser,binding,owner,until,pageIdentity,directCDP)===page,request,deadline,(until,guard)=>require('./codex-recovery-barrier.cjs').release(process.argv[3],until,guard));
   } catch {
     if(facts.errorCategory==='invalid-request')facts.preAttachFailure=preAttachFailure;
     if(facts.errorCategory===null)facts.errorCategory='query-failed';
