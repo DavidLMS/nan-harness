@@ -70,20 +70,30 @@ function ownedSession(checker, callerDeadline) {
       || !Number.isSafeInteger(Number(owner)) || Number(owner) <= 1
       || Number(owner) > 2147483647 || !Number.isSafeInteger(Number(port))
       || Number(port) <= 1 || Number(port) > 65535) return false;
-  try {
-    const deadline = proofDeadline(callerDeadline),remaining=deadline-Date.now();
-    const python = process.env?.FEASIBILITY_WINDOWS_PROOF_PYTHON;
-    if (remaining <= 0) {saveWindowsProof('transport-timeout');return false;}
-    if (process.env?.GITHUB_ACTIONS !== 'true' || process.env?.RUNNER_ENVIRONMENT !== 'github-hosted'
-        || typeof python !== 'string' || !/^[A-Za-z]:[\\/]/.test(python)) return false;
-    const result = require('node:child_process').execFileSync(python,
-      [`${__dirname}/endpoint-owner-windows.py`, 'session', String(port), String(owner), String(checker)],
-      {encoding:'utf8',timeout:Math.min(8000,remaining),maxBuffer:4096,windowsHide:true,
-        stdio:['ignore','pipe','ignore']});
-    if (Date.now() >= deadline) {saveWindowsProof('transport-timeout');return false;}
-    saveWindowsProof(result==='true'?'owned':Object.hasOwn(windowsProofCategoryCounts,result)?result:'unclassified');
-    return result === 'true';
-  } catch(error) {saveWindowsProof(error?.code==='ETIMEDOUT'?'transport-timeout':'transport-failed');return false;}
+  for(let attempt=0;attempt<2;attempt++) {
+    try {
+      const deadline = proofDeadline(callerDeadline),remaining=deadline-Date.now();
+      const python = process.env?.FEASIBILITY_WINDOWS_PROOF_PYTHON;
+      if (remaining <= 0) {saveWindowsProof('transport-timeout');return false;}
+      if (process.env?.GITHUB_ACTIONS !== 'true' || process.env?.RUNNER_ENVIRONMENT !== 'github-hosted'
+          || typeof python !== 'string' || !/^[A-Za-z]:[\\/]/.test(python)) return false;
+      const result = require('node:child_process').execFileSync(python,
+        [`${__dirname}/endpoint-owner-windows.py`, 'session', String(port), String(owner), String(checker)],
+        {encoding:'utf8',timeout:Math.min(8000,remaining),maxBuffer:4096,windowsHide:true,
+          stdio:['ignore','pipe','ignore']});
+      if (Date.now() >= deadline) throw Object.assign(new Error('proof deadline'),{code:'ETIMEDOUT'});
+      saveWindowsProof(result==='true'?'owned':Object.hasOwn(windowsProofCategoryCounts,result)?result:'unclassified');
+      return result === 'true';
+    } catch(error) {
+      const timeout=error?.code==='ETIMEDOUT';
+      saveWindowsProof(timeout?'transport-timeout':'transport-failed');
+      // A timed-out read has no ownership verdict and performs no UI input.
+      // Discard it and allow one fresh transaction within the caller's clock.
+      if(!timeout || attempt!==0 || !Number.isSafeInteger(callerDeadline)
+          || Date.now()>=callerDeadline)return false;
+    }
+  }
+  return false;
 }
 function proofDeadline(callerDeadline) {
   const now = Date.now();

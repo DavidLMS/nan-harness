@@ -3511,3 +3511,14 @@ that click but cannot qualify recovery. A countdown must still have at least
 15 seconds available (or be absent), within the unchanged 45-second turn budget.
 The recovered marker still requires independent provider and new assistant-unit
 verification, with no intervening user message or foreign conversation.
+
+
+At `1178c413`, run `37451500183` qualified all three Codex sessions on Linux
+and macOS, plus two on Windows; integration quality and all cleanup checks
+passed. The remaining Windows session failed before onboarding input because
+a native ownership query timed out. A timed-out read now permits one fresh
+transaction within the original caller deadline. Negative ownership verdicts,
+other transport failures and exhausted deadlines still stop immediately;
+there is no cached ownership verdict or repeated input. Synthetic contracts
+cover transient and persistent timeouts, late results, deadline exhaustion,
+and a negative verdict after the first timeout.

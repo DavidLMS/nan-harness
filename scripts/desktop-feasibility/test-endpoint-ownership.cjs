@@ -367,3 +367,26 @@ for(const scenario of ['closed-unrelated','closed-listener','foreign','permissio
  assert.equal(context.exports.proof('20','43210').ownedEndpoint(),scenario==='closed-unrelated',scenario);
 }
 console.log('Linux descriptor churn preserves exact owned listener proof and rejects absent or foreign sockets');
+
+for(const scenario of ['transient-timeout','persistent-timeout','late-read','expired','negative','transport','changed-after-timeout']) {
+ let calls=0,clock=1000;const budgets=[];
+ const sandbox={exports:{},__dirname:'/owned',Date:{now:()=>clock},process:{platform:'win32',
+  env:{GITHUB_ACTIONS:'true',RUNNER_ENVIRONMENT:'github-hosted',FEASIBILITY_WINDOWS_PROOF_PYTHON:'C:\\Python\\python.exe'}},
+  require(name){if(name==='node:fs')return {};assert.equal(name,'node:child_process');return {
+   execFileSync(_program,_args,options){calls++;budgets.push(options.timeout);
+    if(scenario==='negative'||scenario==='changed-after-timeout'&&calls===2)return 'parent-reused';
+    if(scenario==='transport')throw Object.assign(Error('PRIVATE'),{code:'EIO'});
+    if(calls===1||scenario==='persistent-timeout') {
+     clock+=options.timeout;
+     if(scenario==='late-read')return 'true';
+     throw Object.assign(Error('PRIVATE'),{code:'ETIMEDOUT'});
+    }
+    return 'true';}};}};
+ vm.runInNewContext(source,sandbox);
+ const deadline=scenario==='expired'?9000:12000;
+ const accepted=sandbox.exports.proof('30',43210).ownedSession(20,deadline);
+ assert.equal(accepted,['transient-timeout','late-read'].includes(scenario),scenario);
+ assert.equal(calls,['expired','negative','transport'].includes(scenario)?1:2,scenario);
+ if(calls===2)assert.deepEqual(budgets,[8000,3000]);
+}
+console.log('Windows ownership timeout: one fresh read within the original caller deadline; negative verdicts never retried');
