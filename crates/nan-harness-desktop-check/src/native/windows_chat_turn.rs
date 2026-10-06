@@ -226,7 +226,10 @@ impl WindowsChatStage {
         // In the helper's copy path, Control is returned before Invoke. The
         // response may still be rendering between the two owned-tree checks.
         // Input replacement and Retry do not inherit this waiting policy.
-        self == Self::Control || self.passive_pending()
+        // TreeType means the initial read could not obtain a typed heading
+        // property. No Copy or clipboard mutation has happened; discard that
+        // snapshot and require a complete fresh one within the response budget.
+        matches!(self, Self::Control | Self::TreeType) || self.passive_pending()
     }
 
     #[cfg(any(windows, test))]
@@ -390,6 +393,7 @@ mod tests {
         for stage in [
             S::Control,
             S::TreeQuery,
+            S::TreeType,
             S::ScopeAnchorAbsent,
             S::ScopeControlAbsent,
         ] {

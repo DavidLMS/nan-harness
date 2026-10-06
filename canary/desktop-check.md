@@ -3449,3 +3449,11 @@ now opts out of Playwright's implicit post-click wait, as folder trust already
 does. The existing owned-turn response loop must independently verify the
 recovery; lost custody or uncertain dispatch fails without repeating input.
 Synthetic tests cover post-click custody loss and a single uncertain dispatch.
+
+In run `37443232501` at `40dd4c36`, Claude Windows completed recovery in two
+sessions; the remaining session stopped on `tree-type` while seeking its first
+Copy action. The helper emits this receipt when the initial heading-property
+read is unavailable or untyped, before any clipboard mutation or Invoke. Copy
+may now discard that incomplete snapshot and seek a fully typed, owned tree
+within the unchanged response deadline. Persistent failure still blocks the
+session; this waiting policy does not extend to input replacement or Retry.
