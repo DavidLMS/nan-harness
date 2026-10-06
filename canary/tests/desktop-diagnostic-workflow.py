@@ -60,7 +60,8 @@ class DiagnosticWorkflowTests(unittest.TestCase):
         for condition in ("inputs.app == 'all'", "inputs.platform == 'all'",
                           "inputs.experiment == 'deterministic-full'", 'needs: [select, native]'):
             self.assertIn(condition, job)
-        script = textwrap.dedent(job.split('        run: |\n', 1)[1].split('      - uses:', 1)[0])
+        aggregate = job.split('      - name: Require all active cells from this commit\n', 1)[1]
+        script = textwrap.dedent(aggregate.split('        run: |\n', 1)[1].split('      - uses:', 1)[0])
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             for index, cell in enumerate(qualification.matrix(['pen-desktop'])['include']):
