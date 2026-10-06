@@ -461,7 +461,7 @@ async function run(page, ownerGuard, deadline, rejected, mainGuard, folderTrust,
   const stop = category => { facts.errorCategory=category; checkpoint(); return facts; };
   checkpoint();
   const sessionFailure = typeof ownerGuard !== 'function' ? 'guard-missing'
-    : !Number.isFinite(deadline) || !Number.isFinite(maxWaitMs) || maxWaitMs > (process.platform==='win32'?120000:60000) ? 'deadline-invalid'
+    : !Number.isFinite(deadline) || !Number.isFinite(maxWaitMs) || maxWaitMs > (process.platform==='win32'?120000:process.platform==='darwin'?90000:60000) ? 'deadline-invalid'
     : maxWaitMs < 1 ? 'deadline-expired'
     : !['win32','linux','darwin'].includes(process.platform) ? 'platform'
     : process.env.GITHUB_ACTIONS !== 'true' || process.env.RUNNER_ENVIRONMENT !== 'github-hosted'

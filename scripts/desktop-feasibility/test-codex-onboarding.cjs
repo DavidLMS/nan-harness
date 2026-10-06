@@ -2,6 +2,9 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const vm=require('node:vm');
 const source=fs.readFileSync(`${__dirname}/codex-onboarding.cjs`,'utf8');
+const inventorySource=fs.readFileSync(__dirname+'/observe-renderer.cjs','utf8');
+const inventoryBudget=vm.runInNewContext('('+inventorySource.slice(
+ inventorySource.indexOf('function onboardingBudget('),inventorySource.indexOf('function inventoryDeadlines(')).trim()+')');
 async function trial(options={}) {
  let inventoryOwnerLost=false,homeReads=0;
  let now=0,checked=false,absent=false,roleClicks=0,continueClicks=0,taskClicks=0,samples=0,overlayReads=0,legendReads=0;
@@ -97,7 +100,7 @@ async function trial(options={}) {
  vm.runInNewContext(source,sandbox);
  let guards=0,mainProofs=0,sealed=0;
  const guard=()=>{guards++;if(options.guardThrows)throw Error('PRIVATE');if(options.guardExhaustsBudget&&guards>=3||options.overlayBudgetExpired&&overlayReads>0)now=1201;return !(options.homeOwnerLoss&&homeReads)&&!inventoryOwnerLost&&!(options.overlayOwnerDuringProof&&legendReads>=3)&&!(options.overlayOwnerLoss&&overlayReads>0)&&!options.initialOwnerLoss&&!(options.ownerLossBeforeRole&&guards>=3)&&!(options.ownerLoss&&roleClicks>0)&&!(options.finalLoss&&guards>=2);};
- const maximum=options.platform==='linux'||options.platform==='darwin'?60000:120000;
+ const maximum=inventoryBudget(true,options.platform??'win32');
  const budget=options.expired?0:options.invalidDeadline?NaN:options.excessBudget?maximum+1:options.fullBudget?maximum:1200;
  let mainGuard=options.admitAux?async()=>{
   mainProofs++;
@@ -220,7 +223,11 @@ async function trial(options={}) {
   if(opts.guardExhaustsBudget||opts.ownerLossBeforeRole)assert.equal(r.facts.conversationalScope,true);
  }
  const mac=await trial({platform:'darwin',runnerOs:'macOS'});assert.equal(mac.facts.codingComposerReady,true);
- const fullBudget=await trial({fullBudget:true});assert.equal(fullBudget.facts.codingComposerReady,true);
+ for(const [platform,runnerOs] of [['win32','Windows'],['darwin','macOS'],['linux','Linux']]) {
+  const full=await trial({platform,runnerOs,fullBudget:true});assert.equal(full.facts.codingComposerReady,true);
+  const excess=await trial({platform,runnerOs,excessBudget:true});assert.equal(excess.facts.sessionProofFailure,'deadline-invalid');
+  assert.equal(excess.roleClicks,0);
+ }
  const linux=await trial({platform:'linux',runnerOs:'Linux'});assert.equal(linux.facts.codingComposerReady,true);
  const loaded=await trial({loading:true});assert.equal(loaded.roleClicks,1);assert.equal(loaded.continueClicks,1);
  for(const [url,kind] of [['about:blank','blank'],['app://codex/PRIVATE','app'],['devtools://PRIVATE','devtools'],['https://PRIVATE','other']]){
