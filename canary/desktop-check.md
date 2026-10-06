@@ -3403,3 +3403,15 @@ work. Restored bytes must match the committed digest; symlinks and corrupt
 cache entries fail closed. No credentials, profiles or GUI output enter that
 cache. Cache eviction still requires the exact official package to be available.
 These targeted results do not qualify the remaining cells or a full matrix.
+
+Run `37433125564` passed Zed, Claude and Hermes Windows (three sessions and
+both cleanups each); run `37433129018` passed Zed macOS. Codex Windows passed
+sessions one and three with complete cleanup, but session two reported an
+uncertain folder-trust click followed by the owned onboarding form. Playwright
+1.61.1 waits for post-click navigation and hit-interceptor evaluation by default
+([pinned implementation](https://github.com/microsoft/playwright/blob/v1.61.1/packages/playwright-core/src/server/dom.ts)).
+Folder trust now opts out of that implicit post-click wait and independently
+requires the retained dialog, form and button to detach within the existing
+deadline, with directory and window custody re-proved. A remaining dialog, lost
+custody or uncertain dispatch fails; input is never replayed. Synthetic tests
+cover the successful transition, a remaining dialog and post-click custody loss.

@@ -139,11 +139,21 @@ async function run(page,guard,deadline,authority,seal=()=>{},progress=()=>{}) {
       seal();
       receipt.clickAttempted=true;receipt.status='action-uncertain';
       checkpoint('dispatch');
-      await button.asElement().click({position:{x:final.width/2,y:final.height/2},
+      // The source closes this portal before onboarding continues. Do not
+      // conflate Playwright's post-click navigation wait with input delivery;
+      // prove that transition ourselves on the retained dialog below.
+      await button.asElement().click({noWaitAfter:true,position:{x:final.width/2,y:final.height/2},
         timeout:Math.max(1,Math.min(2000,deadline-Date.now()))});
       receipt.clickCompleted=true;receipt.status='blocked';checkpoint('post-dispatch');
-      if(!await owned()){receipt.status='blocked';return receipt;}
-      receipt.status='completed';return receipt;
+      while(await owned()) {
+        const closed=await held.evaluate(e=>!e.dialog.isConnected&&!e.form.isConnected&&!e.button.isConnected);
+        if(closed) {
+          if(!await owned())return receipt;
+          receipt.status='completed';return receipt;
+        }
+        await new Promise(resolve=>setTimeout(resolve,Math.min(100,Math.max(0,deadline-Date.now()))));
+      }
+      return receipt;
     } finally {await button.dispose();}
   } catch {
     if(receipt.status==='completed')receipt.status='blocked';

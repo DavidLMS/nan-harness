@@ -27,14 +27,14 @@ fixture({path:'/private/OTHER'});assert.equal(sample({workspace:'/private/owned/
 fixture({disabled:true});assert.equal(sample({workspace:'/private/owned/workspace',held:null}).rejectionStage,'controls');
 fixture();const proved=sample({workspace:'/private/owned/workspace',held:null});assert.equal(proved.status,'proved');
 fixture();assert.equal(sample({workspace:'/private/owned/workspace',held:proved}).rejectionStage,'identity');
-async function scenario({changed=false,guardLost=false,uncertain=false,expired=false,guardFailure=null,progressThrows=false}={}) {
- fixture();let clicks=0,proofs=0,disposed=0;const progress=[];
- const handle=value=>({evaluate:async fn=>fn(value),evaluateHandle:async fn=>handle(fn(value)),dispose:async()=>disposed++,asElement:()=>({click:async()=>{clicks++;if(uncertain)throw Error('private');}})});
+async function scenario({changed=false,guardLost=false,uncertain=false,expired=false,guardFailure=null,progressThrows=false,remains=false,postGuardLost=false}={}) {
+ const original=fixture();let clicks=0,proofs=0,disposed=0;const progress=[];
+ const handle=value=>({evaluate:async fn=>fn(value),evaluateHandle:async fn=>handle(fn(value)),dispose:async()=>disposed++,asElement:()=>({click:async options=>{clicks++;assert.equal(options.noWaitAfter,true);if(uncertain)throw Error('private');if(!remains)for(const node of [original.dialog,original.form,original.button])node.isConnected=false;}})});
  const page={evaluateHandle:async(fn,arg)=>handle(fn(arg)),evaluate:async(fn,arg)=>{
   if(changed)fixture();return fn({...arg,held:arg.held?await arg.held.evaluate(x=>x):null});}};
- const guard=async()=>{proofs++;return !guardLost||proofs<3;};
+ const guard=async()=>{proofs++;return !(postGuardLost&&clicks>0)&&(!guardLost||proofs<3);};
  guard.failure=()=>guardFailure;
- const result=await run(page,guard,expired?Date.now()-1:Date.now()+2000,
+ const result=await run(page,guard,expired?Date.now()-1:Date.now()+(remains?350:2000),
   {workspace:'/private/owned/workspace',verify:async()=>true},()=>{},value=>{progress.push(value);if(progressThrows)throw Error('PRIVATE');});
  return {result,clicks,disposed,progress};
 }
@@ -65,6 +65,9 @@ f.change();assert.equal(a.verify(),false);a.close();
  assert.ok(r.progress.some(e=>e.phase==='sample-held'));
  assert.ok(r.progress.some(e=>e.phase==='dispatch'&&e.clickAttempted&&!e.clickCompleted));
  assert.equal(r.progress.at(-1).phase,'finished');assert.ok(!JSON.stringify(r.progress).includes('/private/'));
+ for(const options of [{remains:true},{postGuardLost:true}]) {
+  r=await scenario(options);assert.equal(r.clicks,1);assert.equal(r.result.clickCompleted,true);assert.equal(r.result.status,'blocked');
+ }
  r=await scenario({progressThrows:true});assert.equal(r.result.status,'completed');assert.equal(r.clicks,1);
  r=await scenario({uncertain:true});assert.equal(r.progress.at(-1).phase,'dispatch');assert.equal(r.progress.at(-1).clickAttempted,true);assert.equal(r.clicks,1);
  for(const [o,stage] of [[{changed:true},'identity'],[{guardLost:true},'guard'],[{expired:true},'deadline']]){r=await scenario(o);assert.equal(r.clicks,0);assert.equal(r.result.rejectionStage,stage);}
