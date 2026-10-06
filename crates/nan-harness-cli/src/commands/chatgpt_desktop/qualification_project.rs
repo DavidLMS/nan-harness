@@ -9,11 +9,12 @@ use std::io::{Error, ErrorKind, Read as _};
 use std::path::{Path, PathBuf};
 use tokio::process::Command;
 
-const WINDOWS_ARTIFACT: &str = "e03019134d729c6416173b0712aa5c51d079966253f77077f4bf105d29d8fce7";
-const WINDOWS_EXECUTABLE: &str = "784300980f00a4ebd3bd978fb01c99b6da72bd4cab4d4bfdfc7085db4c60fe74";
+const WINDOWS_ARTIFACT: &str = "12070c9dd6cca622d043abdaf2225406abe6de19e8061024d93b93255478603e";
+const WINDOWS_EXECUTABLE: &str = "669f7e6f49e4c3ac7fc02f830741df8353aca28a17c57069d399e55bedebcabb";
 const LINUX_ARTIFACT: &str = "ee7854145554718d7239d01ea37d44f6ba1e0ba4a93f47ac097d6e0f964da47c";
 const LINUX_EXECUTABLE: &str = "207c4fbff7e2fcc1b0789448351ac6eed206206d94c5a0835e5f07c7cd73d6e3";
-const VERSION: &str = "26.930.41038";
+const UNIX_VERSION: &str = "26.930.41038";
+const WINDOWS_VERSION: &str = "26.930.51102";
 const MACOS_ARTIFACT: &str = "f6cf4d2e9b69aeefa33adda4bcd1a2d306357f5253a1ac6049700870c28dd0c7";
 const MACOS_EXECUTABLE: &str = "418a460276b195f5642e43b320ec2821d6c34c646cb316ed2c0285546298243f";
 const POLICY_KEYS: [&str; 7] = [
@@ -35,9 +36,17 @@ fn inspected_target(platform: &str) -> Option<(&'static str, &'static str, &'sta
     }
 }
 
+fn inspected_version(platform: &str) -> &'static str {
+    if platform == "windows" {
+        WINDOWS_VERSION
+    } else {
+        UNIX_VERSION
+    }
+}
+
 fn inspected_release(platform: &str, version: &str, artifact: &str) -> Option<&'static str> {
     let (_, expected_artifact, executable) = inspected_target(platform)?;
-    (version == VERSION && artifact == expected_artifact).then_some(executable)
+    (version == inspected_version(platform) && artifact == expected_artifact).then_some(executable)
 }
 
 fn admitted(platform: &str, debug: bool, environment: &BTreeMap<&str, String>) -> bool {
@@ -413,16 +422,25 @@ mod tests {
             ("macos", MACOS_ARTIFACT, MACOS_EXECUTABLE, WINDOWS_ARTIFACT),
         ] {
             assert_eq!(
-                inspected_release(platform, VERSION, artifact),
+                inspected_release(platform, inspected_version(platform), artifact),
                 Some(executable)
             );
+            let foreign_version = if platform == "windows" {
+                UNIX_VERSION
+            } else {
+                WINDOWS_VERSION
+            };
+            assert_eq!(inspected_release(platform, foreign_version, artifact), None);
             for version in ["", "26.930.21537", "26.930.31731", "26.930.31730"] {
                 assert_eq!(inspected_release(platform, version, artifact), None);
             }
             for artifact in ["", "unknown", foreign_artifact] {
-                assert_eq!(inspected_release(platform, VERSION, artifact), None);
+                assert_eq!(
+                    inspected_release(platform, inspected_version(platform), artifact),
+                    None
+                );
             }
-            assert_eq!(inspected_release("freebsd", VERSION, artifact), None);
+            assert_eq!(inspected_release("freebsd", UNIX_VERSION, artifact), None);
         }
     }
     #[test]

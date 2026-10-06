@@ -3979,7 +3979,7 @@ class CodexLinuxInitialDialogTests(unittest.TestCase):
 
 class CodexStaticDialogTitleTests(unittest.TestCase):
     def test_folder_consent_variants_are_closed_passive_identities(self):
-        for platform, version, artifact, wrapper, digest in [('windows', '26.930.41038', 'e03019134d729c6416173b0712aa5c51d079966253f77077f4bf105d29d8fce7', 'ddb65d8470cdb5b3a44e9f53777b805b263c37441b07367fccd144df6c9ce92b', '0da9cf33a60a14a892c76c09219548d80e41eac46a5362fff215b8aa85083c51'), ('linux', '26.930.41038', 'ee7854145554718d7239d01ea37d44f6ba1e0ba4a93f47ac097d6e0f964da47c', 'c3c9a86a6d9c3a2a8cecaf0a6a22527c69f89949cb0d8958896bc86131e9c6c9', 'b6566a8d50edd58ed59e29eb2c9ef9de10d72f6e650f3ee0ec0a50a927106ee0'), ('macos', '26.930.41038', 'f6cf4d2e9b69aeefa33adda4bcd1a2d306357f5253a1ac6049700870c28dd0c7', '0703d0aa97450d6d21346e1c79c887a5bf9062cd0069e8251ec03748a33b6dd0', '82df6ff119bf98beba8ffe1a593aca671119decdbb8f4f3d39e5378e39b02c48')]:
+        for platform, version, artifact, wrapper, digest in [('windows', '26.930.51102', '12070c9dd6cca622d043abdaf2225406abe6de19e8061024d93b93255478603e', '229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd', 'a2ebf9ee2a78930256ea089e1458fb0856e62bf25f1ec459dc701b17c24e3c1e'), ('linux', '26.930.41038', 'ee7854145554718d7239d01ea37d44f6ba1e0ba4a93f47ac097d6e0f964da47c', 'c3c9a86a6d9c3a2a8cecaf0a6a22527c69f89949cb0d8958896bc86131e9c6c9', 'b6566a8d50edd58ed59e29eb2c9ef9de10d72f6e650f3ee0ec0a50a927106ee0'), ('macos', '26.930.41038', 'f6cf4d2e9b69aeefa33adda4bcd1a2d306357f5253a1ac6049700870c28dd0c7', '0703d0aa97450d6d21346e1c79c887a5bf9062cd0069e8251ec03748a33b6dd0', '82df6ff119bf98beba8ffe1a593aca671119decdbb8f4f3d39e5378e39b02c48')]:
             value = dict(schemaVersion=1, mechanism='codex-static-dialog-title', diagnosticsOnly=True,
                          sourceVersion=version, platform=platform, artifactSha256=artifact,
                          wrapperSourceSha256=wrapper, catalogSha256=digest, status='matched',
@@ -3996,10 +3996,10 @@ class CodexStaticDialogTitleTests(unittest.TestCase):
 
     def test_catalog_rejection_is_closed_and_does_not_publish_title_identity(self):
         value = dict(schemaVersion=1, mechanism='codex-static-dialog-title', diagnosticsOnly=True,
-                     sourceVersion='26.930.41038', platform='windows',
-                     artifactSha256='e03019134d729c6416173b0712aa5c51d079966253f77077f4bf105d29d8fce7',
-                     wrapperSourceSha256='ddb65d8470cdb5b3a44e9f53777b805b263c37441b07367fccd144df6c9ce92b',
-                     catalogSha256='0da9cf33a60a14a892c76c09219548d80e41eac46a5362fff215b8aa85083c51',
+                     sourceVersion='26.930.51102', platform='windows',
+                     artifactSha256='12070c9dd6cca622d043abdaf2225406abe6de19e8061024d93b93255478603e',
+                     wrapperSourceSha256='229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd',
+                     catalogSha256='a2ebf9ee2a78930256ea089e1458fb0856e62bf25f1ec459dc701b17c24e3c1e',
                      status='guard-rejected', titleReferenceCount=None, matchCount=None,
                      sourceTitleIds=[], sourceTitleEmpty=None, rejectionStage='title-tag')
         with tempfile.TemporaryDirectory() as root:
@@ -4055,10 +4055,10 @@ class CodexStaticDialogTitleTests(unittest.TestCase):
             path = Path(root) / 'title.json'
             path.write_text(json.dumps(value))
             self.assertEqual(q.semantic_observations(root, 'chatgpt-desktop')[0]['sourceTitleIds'], value['sourceTitleIds'])
-            windows = {**value, 'platform': 'windows', 'sourceVersion': '26.930.41038',
-                       'artifactSha256': 'e03019134d729c6416173b0712aa5c51d079966253f77077f4bf105d29d8fce7',
-                       'wrapperSourceSha256': 'ddb65d8470cdb5b3a44e9f53777b805b263c37441b07367fccd144df6c9ce92b',
-                       'catalogSha256': '0da9cf33a60a14a892c76c09219548d80e41eac46a5362fff215b8aa85083c51'}
+            windows = {**value, 'platform': 'windows', 'sourceVersion': '26.930.51102',
+                       'artifactSha256': '12070c9dd6cca622d043abdaf2225406abe6de19e8061024d93b93255478603e',
+                       'wrapperSourceSha256': '229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd',
+                       'catalogSha256': 'a2ebf9ee2a78930256ea089e1458fb0856e62bf25f1ec459dc701b17c24e3c1e'}
             path.write_text(json.dumps(windows))
             self.assertEqual(q.semantic_observations(root, 'chatgpt-desktop')[0]['platform'], 'windows')
             for key in ('artifactSha256', 'wrapperSourceSha256', 'catalogSha256'):
@@ -4113,7 +4113,7 @@ class CodexStaticDialogTitleTests(unittest.TestCase):
 
 class CodexCommandMenuShapeTests(unittest.TestCase):
     def test_only_closed_counts_and_exact_platform_catalog_can_be_recorded(self):
-        pins = {'windows': ('26.930.41038', 'e03019134d729c6416173b0712aa5c51d079966253f77077f4bf105d29d8fce7', 'ddb65d8470cdb5b3a44e9f53777b805b263c37441b07367fccd144df6c9ce92b', '0da9cf33a60a14a892c76c09219548d80e41eac46a5362fff215b8aa85083c51'), 'linux': ('26.930.41038', 'ee7854145554718d7239d01ea37d44f6ba1e0ba4a93f47ac097d6e0f964da47c', 'c3c9a86a6d9c3a2a8cecaf0a6a22527c69f89949cb0d8958896bc86131e9c6c9', 'b6566a8d50edd58ed59e29eb2c9ef9de10d72f6e650f3ee0ec0a50a927106ee0'), 'macos': ('26.930.41038', 'f6cf4d2e9b69aeefa33adda4bcd1a2d306357f5253a1ac6049700870c28dd0c7', '0703d0aa97450d6d21346e1c79c887a5bf9062cd0069e8251ec03748a33b6dd0', '82df6ff119bf98beba8ffe1a593aca671119decdbb8f4f3d39e5378e39b02c48')}
+        pins = {'windows': ('26.930.51102', '12070c9dd6cca622d043abdaf2225406abe6de19e8061024d93b93255478603e', '229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd', 'a2ebf9ee2a78930256ea089e1458fb0856e62bf25f1ec459dc701b17c24e3c1e'), 'linux': ('26.930.41038', 'ee7854145554718d7239d01ea37d44f6ba1e0ba4a93f47ac097d6e0f964da47c', 'c3c9a86a6d9c3a2a8cecaf0a6a22527c69f89949cb0d8958896bc86131e9c6c9', 'b6566a8d50edd58ed59e29eb2c9ef9de10d72f6e650f3ee0ec0a50a927106ee0'), 'macos': ('26.930.41038', 'f6cf4d2e9b69aeefa33adda4bcd1a2d306357f5253a1ac6049700870c28dd0c7', '0703d0aa97450d6d21346e1c79c887a5bf9062cd0069e8251ec03748a33b6dd0', '82df6ff119bf98beba8ffe1a593aca671119decdbb8f4f3d39e5378e39b02c48')}
         for platform, (version, artifact, wrapper, catalog) in pins.items():
             value = dict(schemaVersion=1, mechanism='codex-static-dialog-title', diagnosticsOnly=True,
                          sourceVersion=version, platform=platform, artifactSha256=artifact,

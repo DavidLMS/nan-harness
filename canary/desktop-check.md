@@ -3288,3 +3288,21 @@ contracts passed when run serially. Use `RUST_TEST_THREADS=1` for the next full
 local gate, preserving production deadlines. The hosted full Cargo gate passed;
 its subsequent automation contracts exposed a stale diagnostic expectation,
 which is corrected separately.
+
+### Windows Codex release refresh after the startup corrections
+
+Run `37408890481` at `bca2ec8a` stopped at official metadata freezing:
+the mutable Windows download had changed before any qualification session.
+The replacement was inspected statically: package version `26.930.51102`,
+MSIX identity version `26.930.6422.0`, artifact SHA-256
+`12070c9dd6cca622d043abdaf2225406abe6de19e8061024d93b93255478603e`,
+and executable SHA-256
+`669f7e6f49e4c3ac7fc02f830741df8353aca28a17c57069d399e55bedebcabb`.
+Windows admission, installer policy, onboarding policy and the passive title
+catalog now use this release together; Linux and macOS retain `26.930.41038`.
+The cross-language policy contract checks the platform-specific versions.
+The 202 title entries retain their source hashes, including refreshed wrapper
+imports and the derived update, folder-consent and browser-import titles.
+This refresh grants no new UI actions and is not runtime acceptance evidence.
+The startup settlement and fixture-read corrections still require a complete
+Windows run before the final twelve-cell, same-commit campaign.

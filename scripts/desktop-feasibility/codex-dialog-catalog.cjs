@@ -5,9 +5,9 @@ const linuxCatalog=require('./codex-dialog-title-catalog-linux.json');
 const linuxCatalogSha256='b6566a8d50edd58ed59e29eb2c9ef9de10d72f6e650f3ee0ec0a50a927106ee0';
 const catalog=require('./codex-dialog-title-catalog.json');
 const windowsCatalog=require('./codex-dialog-title-catalog-windows.json');
-const windowsCatalogSha256='0da9cf33a60a14a892c76c09219548d80e41eac46a5362fff215b8aa85083c51';
+const windowsCatalogSha256='a2ebf9ee2a78930256ea089e1458fb0856e62bf25f1ec459dc701b17c24e3c1e';
 const pins={
- win32:{artifact:'e03019134d729c6416173b0712aa5c51d079966253f77077f4bf105d29d8fce7',wrapper:'ddb65d8470cdb5b3a44e9f53777b805b263c37441b07367fccd144df6c9ce92b',runner:'Windows'},
+ win32:{artifact:'12070c9dd6cca622d043abdaf2225406abe6de19e8061024d93b93255478603e',wrapper:'229a6d36b32d5f610199794dd61ace9cdd1a6c91853119e50d4e5212e6f771cd',runner:'Windows'},
  linux:{artifact:'ee7854145554718d7239d01ea37d44f6ba1e0ba4a93f47ac097d6e0f964da47c',wrapper:'c3c9a86a6d9c3a2a8cecaf0a6a22527c69f89949cb0d8958896bc86131e9c6c9',runner:'Linux'},
  darwin:{artifact:'f6cf4d2e9b69aeefa33adda4bcd1a2d306357f5253a1ac6049700870c28dd0c7',wrapper:'0703d0aa97450d6d21346e1c79c887a5bf9062cd0069e8251ec03748a33b6dd0',runner:'macOS'}
 };
