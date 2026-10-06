@@ -211,6 +211,10 @@ exports.run = async function run(page, session, ownedEndpoint, deadline, expecte
           coverVisible:null,choiceVisible:null,choiceEnabled:null};
         facts.onboardingObservation=observation;
         if (covers===0 && choices===0) {coverGone=true;break;}
+        if (covers===0 && choices===1) {
+          await delay(Math.min(100,Math.max(0,settleDeadline-Date.now())));
+          continue; // The cover appeared between the two read-only queries.
+        }
         if (covers!==1 || choices>1) throw new Error('onboarding');
         observation.coverVisible=await cover.isVisible();
         if (choices===1) {

@@ -3,6 +3,7 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('nod
 const {EventEmitter}=require('node:events');
 async function trial(scenario) {
  let clock=0,opened=false,owner=true,refreshClicks=0,pillClicks=0,escapes=0,skipClicks=0,rowReads=0;
+ let coverReads=0;
  let onboardingPresent=scenario.startsWith('onboarding-');
  let pageReplacedByOwner=false;
  const session=new EventEmitter(); session.send=async method=>{
@@ -31,7 +32,7 @@ async function trial(scenario) {
  const choice={count:async()=>scenario.startsWith('onboarding-auto-dismiss')&&!onboardingPresent?0:scenario==='onboarding-missing-choice'?0:scenario==='onboarding-duplicate-choice'?2:1,
    isVisible:async()=>scenario!=='onboarding-pending-visible' || clock>=300,
    isEnabled:async()=>scenario!=='onboarding-disabled' && (scenario!=='onboarding-pending-enabled' || clock>=300),elementHandle:async()=>choiceHandle,evaluate:async()=>true};
- const cover={count:async()=>{if(scenario.startsWith('onboarding-auto-dismiss'))onboardingPresent=false;return onboardingPresent?(scenario==='onboarding-duplicate-cover'?2:1):0;},
+ const cover={count:async()=>{if(scenario==='onboarding-cover-pending'&&++coverReads<3)return 0;if(scenario.startsWith('onboarding-auto-dismiss'))onboardingPresent=false;return onboardingPresent?(scenario==='onboarding-duplicate-cover'?2:1):0;},
    isVisible:async()=>onboardingPresent,getByRole:()=>choice,elementHandle:async()=>heldCover,
    evaluate:async()=>scenario!=='onboarding-replaced'};
  const editor={count:async()=>1,elementHandle:async()=>editorHandle,evaluate:async()=>!(scenario==='onboarding-auto-dismiss-remount'&&!onboardingPresent) && scenario!=='composer-changed' && !(scenario==='composer-remount' && clock>=100)};
@@ -168,7 +169,7 @@ for(const element of [modelElement([text('Qwen3.6 27B'),meta]),modelElement([tex
  const skipped=await trial('onboarding-success');
  assert.equal(skipped.facts.stage,'ready');assert.equal(skipped.facts.onboardingSkipped,true);
  assert.equal(skipped.skipClicks,1);assert.equal(skipped.pillClicks,1);assert.equal(skipped.refreshClicks,1);
- for(const scenario of ['onboarding-pending-enabled','onboarding-pending-visible']) {
+ for(const scenario of ['onboarding-pending-enabled','onboarding-pending-visible','onboarding-cover-pending']) {
    const result=await trial(scenario);
    assert.equal(result.facts.stage,'ready',scenario);
    assert.equal(result.skipClicks,1);assert.equal(result.pillClicks,1);assert.equal(result.refreshClicks,1);
