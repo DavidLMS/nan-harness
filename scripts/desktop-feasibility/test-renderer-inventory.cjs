@@ -296,6 +296,30 @@ assert.equal(roleSourceScope({foreignFieldset:true}).mainScope,false);
     assert.equal(await settle(),accepted);
     if(accepted){assert(settle.binding().auxiliary);assert.equal(await settle(),true);}
   }
+  // One target appearance may first be observed mid-sample, then still blank
+  // on the fresh sample. Navigation must settle on that exact target only.
+  for(const failure of ['none','hydrating','foreign','replacement','main-identity','owner','deadline','controls']) {
+    f=fixture();f.setPages([f.main]);let appeared=false,url='';
+    f.aux.url=()=>url;
+    const guard=helper.heldMainGuard(f.held,f.browser,()=>failure!=='owner'||!appeared,1000,
+      value=>value==='app://-/avatar-overlay'?'avatarOverlay':'unknown',f.identity,
+      async ms=>{clock+=ms;url=failure==='foreign'?'https://foreign.invalid':'app://-/avatar-overlay';
+        if(failure==='replacement')f.setPages([f.main,{url:()=>url}]);
+        if(failure==='deadline')clock=1001;},false,false,false,true);
+    assert.equal(await guard(),true);guard.sealInitialActions();
+    f.setAlter(r=>{
+      if(!appeared){appeared=true;f.setPages([f.main,f.aux]);}
+      if(r.page===f.main&&failure==='hydrating'&&clock===0)r.scope.mainScope=false;
+      if(r.page===f.main&&failure==='main-identity')r.loader='replacement';
+      if(r.page===f.aux&&failure==='controls')r.scope.counts.editable=1;
+    });
+    assert.equal(await guard(),['none','hydrating'].includes(failure),failure);
+    if(['none','hydrating'].includes(failure)) {
+      assert(guard.binding().auxiliary);
+      f.setPages([f.main,{url:()=>url}]);
+      assert.equal(await guard(),false,'the admitted auxiliary cannot be replaced');
+    } else assert.equal(guard.binding().auxiliary,null);
+  }
   // Startup focus acceptance stays capped at35s; its SAME held guard remains
   // valid for Trust and role proofs until the original60s total, with no rebinding.
   f=fixture();f.setPages([f.main]);

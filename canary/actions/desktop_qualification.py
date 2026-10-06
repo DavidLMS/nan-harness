@@ -1522,7 +1522,7 @@ def semantic_observations(directory, app):
             fields = set('schemaVersion mechanism diagnosticsOnly firstState lastState queryCount'.split())
             states = {'present', 'absent', 'query-failed', 'not-queried'}
             first, last, count = value.get('firstState'), value.get('lastState'), value.get('queryCount')
-            if (set(value) != fields or app != 'claude-desktop' or value['diagnosticsOnly'] is not True
+            if (set(value) != fields or app not in {'claude-desktop', 'chatgpt-desktop'} or value['diagnosticsOnly'] is not True
                     or type(first) is not str or first not in states or type(last) is not str or last not in states
                     or count is not None and (type(count) is not int or not 0 <= count <= 128)
                     or count == 0 and (first != 'not-queried' or last != 'not-queried')

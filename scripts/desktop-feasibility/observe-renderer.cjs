@@ -261,12 +261,15 @@ async function settleFolderAuxiliary(held,extra,pages,valid,deadline,route,ident
     const before=pages();
     if(before.length!==2||!before.includes(held.page)||!before.includes(extra))return false;
     const main=await identity(held.page,deadline);
-    if(!valid()||!sameCorrelationIdentity(held,main)||!main.scope.mainScope||(requireDocumentFocus?!main.scope.focused:main.scope.visibleDocument!==true))return false;
+    if(!valid()||!sameCorrelationIdentity(held,main)||(requireDocumentFocus?!main.scope.focused:main.scope.visibleDocument!==true))return false;
     const after=pages();
     if(after.length!==2||!after.includes(held.page)||!after.includes(extra))return false;
     const url=extra.url();
-    if(route(url)==='avatarOverlay')return valid();
-    if(url!==''&&url!=='about:blank')return false;
+    const known=route(url)==='avatarOverlay';
+    if(known&&main.scope.mainScope)return valid();
+    if(!known&&url!==''&&url!=='about:blank')return false;
+    // The original main may still be hydrating after Trust; no action is
+    // admitted until its source controls and the auxiliary route both settle.
     await pause(Math.min(100,Math.max(0,deadline-Date.now())));
   }
   return false;

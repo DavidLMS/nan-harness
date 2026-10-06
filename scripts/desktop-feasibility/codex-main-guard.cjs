@@ -83,10 +83,21 @@ function createHeldMainGuard(held, browser, owner, deadline, route,
   };
   const prove=async()=>{
     if(await measure())return true;
-    // Scoped DOM input retains the main target even when the first auxiliary
-    // appears after Trust's ticket expires. Wait only for that same blank page;
-    // no input is authorized until fresh main and inert auxiliary proofs pass.
-    if((folderSettleTicket||requireVisibleDocument)&&!appearanceRetried&&!auxiliary&&failure==='auxiliary-route') {
+    const canSettleBlank=folderSettleTicket||requireVisibleDocument;
+    const changed=failureDetails;
+    const appeared=(requireVisibleDocument||allowInitialAppearance&&!actionsStarted||folderSettleTicket||activationSettleTicket)
+      &&!appearanceRetried&&!auxiliary&&failure==='page-set'
+      &&changed&&changed.initialCount===1&&changed.currentCount===2&&changed.heldPresent
+      &&['before-sample-changed','after-sample-changed'].includes(changed.reason);
+    if(appeared) {
+      // One appearance can have two observation phases: target creation followed
+      // by its first navigation. They share the original deadline and target.
+      appearanceRetried=true;folderSettleTicket=false;
+      if(await measure())return true;
+    }
+    // An appearing blank page grants no input. Keep the main target and wait
+    // only for that same page to commit the inspected inert avatar route.
+    if(canSettleBlank&&(!appearanceRetried||appeared)&&!auxiliary&&failure==='auxiliary-route') {
       const current=pages(),extra=current.find(page=>page!==held.page);
       if(current.length!==2||!current.includes(held.page)||!extra
         ||!['','about:blank'].includes(extra.url()))return false;
@@ -95,16 +106,7 @@ function createHeldMainGuard(held, browser, owner, deadline, route,
       // Establish two NEW inert auxiliary proofs only after the committed route.
       return measure();
     }
-    const changed=failureDetails;
-    if(!(requireVisibleDocument||allowInitialAppearance&&!actionsStarted||folderSettleTicket||activationSettleTicket)||appearanceRetried||auxiliary||failure!=='page-set'
-      ||!changed||changed.initialCount!==1||changed.currentCount!==2||!changed.heldPresent
-      ||!['before-sample-changed','after-sample-changed'].includes(changed.reason))return false;
-    // Scoped CDP input retains its original target when the inert avatar appears
-    // after an earlier onboarding action. No OS key/input target is selected.
-    // Discard the incomplete observation. A single fresh measurement must prove
-    // both immutable main and newly appearing source auxiliary twice before subsequent input.
-    appearanceRetried=true;folderSettleTicket=false;
-    return measure();
+    return false;
   };
   // Issue only after native prepare in the initial focus caller. The latest
   // complete native-bracketed main sample must already prove the role source.

@@ -2320,14 +2320,19 @@ class QualificationTests(unittest.TestCase):
                           {**base, 'firstState': 'absent', 'lastState': 'absent', 'queryCount': 1},
                           {**base, 'queryCount': None}):
                 path.write_text(json.dumps(value))
-                self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [value])
+                for app in ('claude-desktop', 'chatgpt-desktop'):
+                    self.assertEqual(q.semantic_observations(root, app), [value])
+                for app in ('zed-desktop', 'hermes-desktop'):
+                    with self.assertRaises(ValueError):
+                        q.semantic_observations(root, app)
             for changed in ({**base, 'queryCount': True}, {**base, 'queryCount': 129},
                             {**base, 'queryCount': 0}, {**base, 'queryCount': 1},
                             {**base, 'firstState': 'not-queried'}, {**base, 'lastState': 'PRIVATE'},
                             {**base, 'pid': 99}, {**base, 'diagnosticsOnly': False}):
                 path.write_text(json.dumps(changed))
-                with self.assertRaises(ValueError):
-                    q.semantic_observations(root, 'claude-desktop')
+                for app in ('claude-desktop', 'chatgpt-desktop'):
+                    with self.assertRaises(ValueError):
+                        q.semantic_observations(root, app)
 
     def test_claude_window_fit_stages_reject_unclosed_identity_and_success_claims(self):
         with tempfile.TemporaryDirectory() as tmp:

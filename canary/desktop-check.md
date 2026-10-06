@@ -3540,3 +3540,21 @@ errors, persistent presence and late success still fail. No unrelated process
 is terminated. The focused protocol and settlement tests and desktop Clippy
 pass. Hermes Windows failed before installation in official metadata acquisition;
 that failure does not establish a desktop compatibility result.
+
+
+At `0411c9db`, run `37456479793` qualified ten cells and the independent quality
+job in `37456064092` passed. Codex Linux completed two sessions, then rejected
+its third session before onboarding when the auxiliary appeared during a main
+sample and had not committed its first route. The guard previously handled
+appearance and blank-page settlement separately, consuming the appearance
+allowance before reaching the blank-page path. Those two observation phases now
+share one allowance and the original deadline. The same retained auxiliary must
+commit the inspected avatar route; fresh main source and two inert auxiliary
+proofs are still required before input. Main hydration may settle read-only.
+Replacement pages, foreign routes, ownership loss and expired deadlines fail.
+
+Both Windows Codex jobs emitted reports but reduction rejected the new process
+settlement receipt: the validator still restricted that existing schema to
+Claude. The closed diagnostic contract now admits Codex too, with the same
+field, enum, count and privacy restrictions; unrelated harnesses remain rejected.
+The complete Node contract suite and 184 qualification reducer tests pass.
