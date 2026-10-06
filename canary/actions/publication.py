@@ -12,14 +12,12 @@ import sys
 import tempfile
 
 from state import Store, StateError, canonical, receipt_identity
-from selection import select_suite, resolve_model
+from selection import CLI_HARNESSES as HARNESSES, select_suite, resolve_model
 
 ROOT = Path(__file__).resolve().parents[2]
 TAG = re.compile(r"v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?\Z")
 PHASES = ("assetsVerified", "suitePassed", "compatibilityFeedPublished",
           "releasePublished", "availableFeedPublished")
-HARNESSES = ("claude-code", "codex", "opencode", "hermes", "pi", "omp", "prime-agent",
-             "deepseek-harness", "openclaw", "cline", "qwen-code", "kimi-code", "aider", "goose", "fx")
 BINARIES = {"linux": "nan-harness-aarch64-unknown-linux-musl", "macos": "nan-harness-aarch64-apple-darwin",
             "windows": "nan-harness-x86_64-pc-windows-msvc.exe"}
 

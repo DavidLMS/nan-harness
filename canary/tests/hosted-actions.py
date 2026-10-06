@@ -228,7 +228,7 @@ class GateEvidenceTests(unittest.TestCase):
     def test_complete_matrix_is_persisted_once(self):
         self.enqueue(release_reports())
         self.assertEqual(len(self.pending), 1)
-        self.assertEqual(len(self.pending[0][1]["reports"]), 30)
+        self.assertEqual(len(self.pending[0][1]["reports"]), 34)
 
     def test_incomplete_matrix_cannot_be_enqueued(self):
         self.assert_refused(release_reports()[:-1])
@@ -342,13 +342,13 @@ class RecoveryTests(unittest.TestCase):
         store = MemoryStore()
         self.store_receipt(store, self.receipt())
         self.assertTrue(self.resume(store))
-        self.assertEqual(self.reused, 30)
+        self.assertEqual(self.reused, 34)
 
     def test_resume_reuses_evidence_persisted_before_an_interrupted_writer_receipted_it(self):
         store = MemoryStore()
         store.enqueue(gate_request())
         self.assertTrue(self.resume(store))
-        self.assertEqual(self.reused, 30)
+        self.assertEqual(self.reused, 34)
 
     def test_completed_or_other_release_requests_are_not_reused(self):
         store = MemoryStore()
@@ -406,7 +406,7 @@ class RecoveryTests(unittest.TestCase):
             publication.checkpoint(argparse.Namespace(receipt=path), store)
         raw = store.get(f"receipts/{receipt_identity('Acme/Fork', 'v0.9.0')}.json")
         self.assertNotIn(b"/private/local/path", raw)
-        self.assertEqual(len(json.loads(raw)["reports"]), 30)
+        self.assertEqual(len(json.loads(raw)["reports"]), 34)
 
 
 class WriterTests(unittest.TestCase):
@@ -485,7 +485,7 @@ class CoverageTests(unittest.TestCase):
 
     def test_release_runs_every_live_cell_from_the_release_commit(self):
         selected = self.select("release")
-        self.assertEqual(len(selected["cells"]), 30)
+        self.assertEqual(len(selected["cells"]), 34)
         self.assertTrue(all(item["live"] for item in selected["cells"]))
         self.assertEqual((selected["trigger"], selected["source"]), ("release", COMMIT))
         with self.assertRaises(ValueError):
@@ -496,7 +496,7 @@ class CoverageTests(unittest.TestCase):
         self.assertEqual({item["system"] for item in daily["cells"]}, {"linux"})
         self.assertEqual(sum(item["live"] for item in daily["cells"]), 2)
         weekly = self.select("weekly")
-        self.assertEqual(len(weekly["cells"]), 30)
+        self.assertEqual(len(weekly["cells"]), 34)
         self.assertEqual({daily["source"], weekly["source"]}, {"c" * 40})
         self.assertEqual({item["architecture"] for item in weekly["cells"]}, {"aarch64"})
         release = self.select("release")
@@ -698,14 +698,16 @@ if stage == 'report':
         self.assertIn("child.wait(timeout=10)", source)
         self.assertIn("job.close()", source)
 
-    def test_release_requires_thirty_matching_cells(self):
+    def test_release_requires_complete_matching_cells(self):
         reports = release_reports()
         publication.validate_reports(reports, "0.9.0")
         with self.assertRaises(StateError):
             publication.validate_reports(reports[:-1], "0.9.0")
-        reports[-1]["harness"]["version"] = "1.0.1"
-        with self.assertRaises(StateError):
-            publication.validate_reports(reports, "0.9.0")
+        for harness in ("fx", "mimo-code", "zcode"):
+            mismatched = copy.deepcopy(reports)
+            next(r for r in mismatched if r["harness"]["id"] == harness)["harness"]["version"] = "1.0.1"
+            with self.assertRaises(StateError):
+                publication.validate_reports(mismatched, "0.9.0")
 
     def report(self, trigger):
         with tempfile.TemporaryDirectory() as temporary:
