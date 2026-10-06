@@ -10,12 +10,14 @@ mod fx;
 mod goose;
 mod hermes;
 mod kimi_code;
+mod mimo_code;
 mod omp;
 mod openclaw;
 mod opencode;
 mod pi;
 mod qwen_code;
 mod search;
+mod zcode;
 
 pub use aider::AiderAdapter;
 pub use claude_code::ClaudeCodeAdapter;
@@ -31,8 +33,10 @@ pub use hermes::{
     render_hermes_search_provider,
 };
 pub use kimi_code::KimiCodeAdapter;
+pub use mimo_code::MimoCodeAdapter;
 pub use omp::{OmpAdapter, OmpSearchMode, render_omp_search_extension};
 pub use openclaw::{OpenClawAdapter, render_openclaw_media_plugin, render_openclaw_search_plugin};
 pub use opencode::OpenCodeAdapter;
 pub use pi::{PiAdapter, PiSearchMode, PrimeAgentAdapter, render_pi_search_extension};
 pub use qwen_code::QwenCodeAdapter;
+pub use zcode::ZCodeAdapter;

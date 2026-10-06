@@ -315,9 +315,9 @@ class WindowsProbeContracts(unittest.TestCase):
         # inventory drift is an observation on an otherwise passed report.
         self.assertIn("conformance-inventory-operational-failed", source)
 
-    def test_all_fifteen_variants_have_real_launcher_and_tool_contracts(self):
+    def test_all_sixteen_variants_have_real_launcher_and_tool_contracts(self):
         source = PROBE.read_text(encoding="utf-8")
-        for launcher in ("claude", "codex", "opencode", "hermes", "pi", "omp", "prime", "dsh",
+        for launcher in ("claude", "codex", "opencode", "mimo", "hermes", "pi", "omp", "prime", "dsh",
                          "openclaw", "cline", "qwen", "kimi", "aider", "goose", "fx"):
             with self.subTest(launcher=launcher):
                 self.assertIn("'" + launcher + "'", source)

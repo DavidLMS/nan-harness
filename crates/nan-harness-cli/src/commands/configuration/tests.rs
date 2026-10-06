@@ -1,10 +1,12 @@
 mod documents;
 mod image_models;
 mod lifecycle;
+mod mimo;
 mod paths;
 mod plugin_syntax;
 mod recovery;
 mod search_policy;
+mod zcode;
 
 use super::documents::{
     get_yaml_path, prepare_exact_file, prepare_exact_file_removal, prepare_json,
@@ -38,6 +40,8 @@ fn test_config() -> ResolvedConfig {
 fn assert_persistent_search_contract(harness: HarnessKind, home: &Path) {
     let paths = match harness {
         HarnessKind::OpenCode => vec![home.join(".config/opencode/opencode.json")],
+        HarnessKind::MimoCode => vec![home.join(".config/mimocode/mimocode.jsonc")],
+        HarnessKind::ZCode => vec![home.join(".zcode/cli/config.json")],
         HarnessKind::Hermes => vec![
             home.join(".hermes/config.yaml"),
             home.join(".hermes/plugins/web/nan_harness/provider.py"),
@@ -64,7 +68,9 @@ fn assert_persistent_search_contract(harness: HarnessKind, home: &Path) {
             assert!(!config.contains("nan-search"));
             return;
         }
-        HarnessKind::ClaudeCode | HarnessKind::Codex | HarnessKind::Fx => unreachable!(),
+        HarnessKind::ClaudeCode | HarnessKind::Codex | HarnessKind::Fx => {
+            unreachable!()
+        }
     };
     let combined = paths
         .iter()

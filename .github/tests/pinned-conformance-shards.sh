@@ -5,7 +5,7 @@ repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 temporary_directory="$(mktemp -d)"
 trap 'rm -rf "$temporary_directory"' EXIT
 bin_directory="$temporary_directory/bin"
-mkdir -p "$bin_directory"
+mkdir -p "$bin_directory" "$temporary_directory/home"
 
 cat >"$temporary_directory/installer" <<'EOF'
 #!/usr/bin/env bash
@@ -16,12 +16,20 @@ cat >"$bin_directory/cargo" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 printf '%s|%s\n' "${CLINE_NO_AUTO_UPDATE:-unset}" "$*" >>"$PINNED_CARGO_LOG"
+if [ "${PINNED_FAIL_NATIVE:-false}" = true ] && [ "$*" = 'test --locked -p nan-harness-cli --test cli configuration::mimo -- --include-ignored' ]; then
+  exit 23
+fi
 EOF
-chmod 755 "$temporary_directory/installer" "$bin_directory/cargo"
+cat >"$bin_directory/python3" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >>"$PINNED_CARGO_LOG"
+EOF
+chmod 755 "$temporary_directory/installer" "$bin_directory/cargo" "$bin_directory/python3"
 
 expected=(
-  aider claude-code cline codex deepseek-harness fx goose hermes kimi-code
-  omp openclaw opencode pi prime-agent qwen-code
+  aider claude-code cline codex deepseek-harness fx goose hermes kimi-code mimo-code
+  omp openclaw opencode pi prime-agent qwen-code zcode
 )
 configured="$(
   sed -n 's/^[[:space:]]*harnesses: //p' "$repository_root/.github/workflows/pinned-conformance.yml" \
@@ -34,6 +42,7 @@ configured="$(
   exit 1
 }
 
+HOME="$temporary_directory/home" \
 PINNED_INSTALL_LOG="$temporary_directory/install.log" \
 PINNED_CARGO_LOG="$temporary_directory/cargo.log" \
 NAN_PINNED_INSTALLER="$temporary_directory/installer" \
@@ -44,11 +53,25 @@ diff -u <(printf '%s\n' "${expected[@]}") "$temporary_directory/install.log"
 grep -Fq 'conformance_claude claude_code_tools_complete_their_conformance_scenarios' "$temporary_directory/cargo.log"
 grep -Fq 'conformance_codex codex_native_inventory_crosses_the_responses_bridge' "$temporary_directory/cargo.log"
 grep -Fq 'conformance_fx fx_' "$temporary_directory/cargo.log"
+grep -Fq 'conformance_direct zcode_' "$temporary_directory/cargo.log"
+grep -Fq 'zcode-source.py check' "$temporary_directory/cargo.log"
+grep -Fq 'conformance_direct mimo_' "$temporary_directory/cargo.log"
+grep -Fxq 'unset|test --locked -p nan-harness-cli --test cli configuration::mimo -- --include-ignored' "$temporary_directory/cargo.log"
+grep -Fq 'unset|run --locked --quiet -- doctor mimo' "$temporary_directory/cargo.log"
 grep -Fq 'conformance_direct deepseek_harness_' "$temporary_directory/cargo.log"
 grep -Fq '1|run --locked --quiet -- doctor cline' "$temporary_directory/cargo.log"
 grep -Fq '1|test --locked -p nan-harness-cli --test conformance_direct cline_' "$temporary_directory/cargo.log"
 grep -Fq 'unset|run --locked --quiet -- doctor qwen' "$temporary_directory/cargo.log"
-if grep -Ev '^[^|]+\|(run|test) --locked( |$)' "$temporary_directory/cargo.log"; then
+if grep -Ev '(^[^|]+\|(run|test) --locked( |$)|zcode-source.py check)' "$temporary_directory/cargo.log"; then
   printf 'pinned conformance invoked Cargo without the committed lockfile\n' >&2
+  exit 1
+fi
+
+if PINNED_INSTALL_LOG="$temporary_directory/failure-install.log" \
+  PINNED_CARGO_LOG="$temporary_directory/failure-cargo.log" \
+  NAN_PINNED_INSTALLER="$temporary_directory/installer" \
+  PINNED_FAIL_NATIVE=true PATH="$bin_directory:$PATH" \
+  bash "$repository_root/.github/scripts/run-pinned-conformance.sh" mimo-code; then
+  printf 'pinned conformance ignored a failed MiMo native configuration check\n' >&2
   exit 1
 fi

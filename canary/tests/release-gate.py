@@ -71,7 +71,7 @@ class ReleaseGateTests(unittest.TestCase):
         original = dict(selection.HARNESS_PLATFORMS)
         original_windows_asset = dict(selection.PLATFORM_ASSETS["windows"])
         try:
-            self.assertEqual(len(release_gate.expected_identities()), 43)
+            self.assertEqual(len(release_gate.expected_identities()), 49)
             self.assertEqual(len(release_gate.ASSETS), 6)
             self.assertIn("windows-codex", release_gate.expected_identities())
             self.assertNotIn("windows-prime-agent", release_gate.expected_identities())
@@ -154,7 +154,7 @@ class ReleaseGateTests(unittest.TestCase):
             '--repository Acme/Fork --tag v1.2.3 --tag-commit ' + 'a' * 40
             + ' --workflow-commit ' + 'b' * 40 + ' --run-id current-1 --recommend'))
 
-    def _fixture(self, count=43):
+    def _fixture(self, count=49):
         directory = Path(tempfile.mkdtemp())
         reports = directory / "reports"
         assets = directory / "assets"
@@ -190,11 +190,11 @@ class ReleaseGateTests(unittest.TestCase):
                                workflow_commit="b" * 40, run_id="run-1", reports_dir=reports,
                                assets_dir=assets, output=root / "handoff.json")
 
-    def test_manifest_contains_exact_full43_and_asset_provenance(self):
+    def test_manifest_contains_exact_full49_and_asset_provenance(self):
         root, reports, assets = self._fixture()
         manifest = release_gate.build_manifest(self._args(root, reports, assets))
-        self.assertEqual(manifest["reportCount"], 43)
-        self.assertEqual(len(manifest["reports"]), 43)
+        self.assertEqual(manifest["reportCount"], 49)
+        self.assertEqual(len(manifest["reports"]), 49)
         self.assertEqual(len(manifest["assets"]), 6)
         self.assertEqual(manifest["attestation"]["sourceRef"], "refs/tags/v1.2.3")
 
@@ -204,11 +204,11 @@ class ReleaseGateTests(unittest.TestCase):
         release_gate.build_manifest(args)
         value = publisher.validate_handoff(args.output, assets, reports)
         self.assertEqual(value["tagCommit"], args.tag_commit)
-        self.assertEqual(value["reportCount"], 43)
+        self.assertEqual(value["reportCount"], 49)
 
     def test_missing_or_cross_source_report_is_rejected(self):
         root, reports, assets = self._fixture(42)
-        with self.assertRaisesRegex(ValueError, "exactly 43"):
+        with self.assertRaisesRegex(ValueError, "exactly 49"):
             release_gate.build_manifest(self._args(root, reports, assets))
         root, reports, assets = self._fixture()
         path = next(reports.glob("*.json"))
@@ -226,7 +226,7 @@ class ReleaseGateTests(unittest.TestCase):
 
     def test_linux_macos_only_cannot_qualify_a_release(self):
         root, reports, assets = self._fixture(30)
-        with self.assertRaisesRegex(ValueError, "exactly 43"):
+        with self.assertRaisesRegex(ValueError, "exactly 49"):
             release_gate.build_manifest(self._args(root, reports, assets))
 
     def test_windows_architecture_and_binary_digest_are_required(self):
@@ -253,7 +253,7 @@ class ReleaseGateTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "live-tool"):
             release_gate.build_manifest(args)
         args.mode = "deterministic"
-        self.assertEqual(release_gate.build_manifest(args)["reportCount"], 43)
+        self.assertEqual(release_gate.build_manifest(args)["reportCount"], 49)
         with self.assertRaises(publisher.ContractError):
             publisher.validate_handoff(args.output, assets, reports)
 

@@ -43,6 +43,24 @@ suite = load("cli_suite_resolution", "cli-suite.py")
 
 
 class CliResolutionTests(unittest.TestCase):
+    def test_zcode_freezes_main_and_reads_agent_version_from_that_commit(self):
+        commit = "a" * 40
+        fetch = Mock(return_value={"sha": commit})
+        document = Mock(return_value='{"version":"0.16.9"}')
+        resolved, unresolved = suite.resolve_manifest(["zcode"], "windows", "x86_64", "qwen3.6",
+                                                     fetch_json=fetch, fetch_document=document)
+        self.assertEqual(unresolved, [])
+        self.assertEqual((resolved[0].version, resolved[0].ref), ("0.16.9", commit))
+        fetch.assert_called_once_with("https://api.github.com/repos/zai-org/ZCode/commits/main")
+        document.assert_called_once_with("https://raw.githubusercontent.com/zai-org/ZCode/" + commit
+                                         + "/apps/zcode-cli/package.json")
+        for value in ("main", "../private", "b" * 39):
+            bad, unresolved = suite.resolve_manifest(["zcode"], "linux", "aarch64", "qwen3.6",
+                                                     fetch_json=lambda url: {"sha": value},
+                                                     fetch_document=document)
+            self.assertEqual(bad, [])
+            self.assertEqual(unresolved[0].harness, "zcode")
+
     def test_hermes_recovers_from_throttling_at_each_official_endpoint(self):
         commit = "a" * 40
         urls = [

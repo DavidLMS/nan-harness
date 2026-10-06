@@ -2,6 +2,7 @@
 """Offline selection, provenance and real feed publication contracts."""
 
 import copy
+import base64
 import datetime
 import importlib.util
 import json
@@ -172,9 +173,28 @@ class DailyEvidenceTests(unittest.TestCase):
         self.assertTrue(all(c["harness"] == "codex" for c in plan["cells"]))
         self.assertTrue(any(r["status"] == "unresolved" for r in plan["results"]))
 
+    def test_zcode_checks_new_commits_even_when_agent_semver_is_already_verified(self):
+        plan, release, _ = fixture()
+        plan["cells"], plan["results"] = [], []
+        release["harnesses"] = ["zcode"]
+        versions = {system: {"zcode": {"harness": "zcode", "system": system,
+                    "version": "0.16.9", "ref": "a" * 40}} for system in PLATFORMS}
+        feed = {"releases": [{"nanHarnessVersion": release["version"], "verifications": [
+                {"id": "zcode", "lastLiveVerifiedVersion": "0.16.9"}]}]}
+        daily.select_cells(plan, release, versions, feed, False)
+        self.assertEqual({cell["system"] for cell in plan["cells"]}, set(PLATFORMS))
+        self.assertTrue(all(cell["harness"] == "zcode" for cell in plan["cells"]))
+        self.assertTrue(all(row["status"] == "unavailable-in-release" for row in plan["results"]))
+        release["harnesses"] = ["codex"]
+        plan["cells"], plan["results"] = [], []
+        daily.select_cells(plan, release, versions, feed, False)
+        self.assertFalse(plan["cells"])
+        self.assertIn({"tag": release["tag"], "harness": "zcode", "status": "unavailable-in-release"}, plan["results"])
+
     def test_signed_asset_verification_requires_exact_commit(self):
         with tempfile.TemporaryDirectory() as tmp, patch.object(daily, "release_identity", return_value="a" * 40), \
-                patch.object(daily, "download"), patch.object(daily, "gh") as gh, \
+                patch.object(daily, "download"), patch.object(daily, "gh", return_value=json.dumps({
+                    "content": base64.b64encode(b'{"harnesses":[{"id":"codex"}]}').decode()})) as gh, \
                 patch.object(daily, "_asset_entries", return_value=([], "b" * 64)):
             daily.release_assets("Acme/Fork", "v1.2.3", Path(tmp))
             call = gh.call_args.args
@@ -213,7 +233,7 @@ class DailyEvidenceTests(unittest.TestCase):
             self.assertEqual(plan["releases"], [release])
             self.assertEqual(plan["results"][0]["status"], "assets-unavailable")
 
-    def test_no_pending_versions_selects_no_cells(self):
+    def test_current_feeds_only_recheck_source_tracked_zcode(self):
         plan, release, _ = fixture()
         plan["cells"] = []
         versions = {s: {h: {"system": s, "harness": h, "version": "9999.0.0"}
@@ -221,7 +241,8 @@ class DailyEvidenceTests(unittest.TestCase):
         feed = {"releases": [{"nanHarnessVersion": release["version"], "verifications": [
             {"id": h, "lastLiveVerifiedVersion": "9999.0.0"} for h in daily.CLI_HARNESSES]}]}
         daily.select_cells(plan, release, versions, feed, False)
-        self.assertEqual(plan["cells"], [])
+        self.assertEqual({c["harness"] for c in plan["cells"]}, {"zcode"})
+        self.assertEqual(len(plan["cells"]), 3)
         self.assertEqual({r["status"] for r in plan["results"]}, {"current"})
 
     def test_aggregate_publishes_independent_success_then_reports_failure(self):

@@ -118,7 +118,8 @@ class CliExecutionTests(unittest.TestCase):
                 environment = cell.cell_environment(directory)
             paths = environment["PATH"].split(os.pathsep)
             for relative in ("bin", "hermes/bin", "home/.nan-harness-canary-venv/Scripts",
-                             "home/.kimi-code/bin", "home/.local", "home/AppData/Roaming/npm"):
+                             "home/.mimocode/bin", "home/.kimi-code/bin", "home/.local",
+                             "home/AppData/Roaming/npm"):
                 self.assertIn(str(directory / relative), paths)
             self.assertEqual(environment["HERMES_HOME"], str(directory / "hermes"))
             for name in ("NAN_HARNESS_GIT_BASH", "KIMI_SHELL_PATH", "KIMI_CLI_GIT_BASH_PATH"):
@@ -346,6 +347,11 @@ class CliExecutionTests(unittest.TestCase):
             filtered_path = environment["PATH"].split(os.pathsep)
             self.assertIn(str(runtime_bin.resolve()), filtered_path)
             self.assertNotIn(str(arbitrary_bin.resolve()), filtered_path)
+            mimo = directory / "home/.mimocode/bin/mimo"
+            mimo.parent.mkdir(parents=True)
+            mimo.write_text("#!/bin/sh\nprintf '0.1.15\\n'\n")
+            mimo.chmod(0o755)
+            self.assertEqual(cell.shutil.which("mimo", path=environment["PATH"]), str(mimo))
             npm_args = root / "npm-args"
             environment["NPM_TEST_ARGS"] = str(npm_args)
             result = cell.subprocess.run(

@@ -15,6 +15,8 @@ pub(crate) fn harness_run_arguments(cli: &Cli) -> Option<(HarnessKind, &HarnessR
         Command::Claude(arguments) => Some((HarnessKind::ClaudeCode, &arguments.run)),
         Command::Codex(arguments) => Some((HarnessKind::Codex, &arguments.run)),
         Command::OpenCode(arguments) => Some((HarnessKind::OpenCode, &arguments.run)),
+        Command::Mimo(arguments) => Some((HarnessKind::MimoCode, &arguments.run)),
+        Command::ZCode(arguments) => Some((HarnessKind::ZCode, &arguments.run)),
         Command::Hermes(arguments) => Some((HarnessKind::Hermes, &arguments.run)),
         Command::HermesDesktop(arguments) => Some((HarnessKind::Hermes, &arguments.run)),
         Command::Pi(arguments) => Some((HarnessKind::Pi, &arguments.run)),
@@ -70,12 +72,13 @@ fn non_interactive_mode(kind: HarnessKind, arguments: &HarnessRunArgs) -> bool {
                 && has_any_flag(&arguments.arguments, &["-m", "--message"])
         }
         HarnessKind::Cline => has_any_flag(&arguments.arguments, &["--json"]),
+        HarnessKind::ZCode => has_any_flag(&arguments.arguments, &["-p", "--prompt", "--target"]),
         HarnessKind::QwenCode | HarnessKind::KimiCode => {
             has_any_flag(&arguments.arguments, &["-p", "--prompt"])
         }
         HarnessKind::Aider => has_any_flag(&arguments.arguments, &["-m", "--message"]),
         HarnessKind::Codex => has_subcommand(&arguments.arguments, &["exec", "review"]),
-        HarnessKind::OpenCode | HarnessKind::Goose => {
+        HarnessKind::OpenCode | HarnessKind::MimoCode | HarnessKind::Goose => {
             has_subcommand(&arguments.arguments, &["run"])
         }
         HarnessKind::Fx => has_subcommand(&arguments.arguments, &["ask"]),
@@ -111,6 +114,8 @@ fn has_option_value(arguments: &[String], option: &str, value: &str) -> bool {
 pub(crate) const fn direct_chat_gateway_disabled(cli: &Cli) -> bool {
     match &cli.command {
         Command::OpenCode(arguments)
+        | Command::Mimo(arguments)
+        | Command::ZCode(arguments)
         | Command::Hermes(arguments)
         | Command::Pi(arguments)
         | Command::Omp(arguments)
@@ -153,6 +158,14 @@ pub(crate) fn validate_limit_request(
     context: Option<u64>,
     no_chat_gateway: bool,
 ) -> Result<(), CliError> {
+    if kind == HarnessKind::ZCode && no_chat_gateway {
+        return Err(CliError::InvalidPlan(PlanError::InvalidField {
+            field: "transport",
+            message: nan_harness_i18n::DiagnosticText::new(
+                nan_harness_i18n::messages::detail_zcode_requires_chat_gateway,
+            ),
+        }));
+    }
     if let Some(tokens) = session_max_tokens
         && tokens == 0
     {
@@ -185,6 +198,7 @@ pub(crate) fn validate_limit_request(
             HarnessKind::ClaudeCode
                 | HarnessKind::Codex
                 | HarnessKind::OpenCode
+                | HarnessKind::MimoCode
                 | HarnessKind::Hermes
                 | HarnessKind::Pi
                 | HarnessKind::Omp
@@ -241,11 +255,14 @@ mod tests {
             ("cline", ["--json", "Hello"].as_slice()),
             ("qwen", ["--prompt=Hello"].as_slice()),
             ("kimi", ["--prompt", "Hello"].as_slice()),
+            ("zcode", ["--prompt", "Hello"].as_slice()),
+            ("zai", ["--target", "synthetic-target"].as_slice()),
             ("aider", ["--message", "Hello"].as_slice()),
             ("goose", ["run", "--text", "Hello"].as_slice()),
             ("codex", ["exec", "Hello"].as_slice()),
             ("codex", ["review", "HEAD~1"].as_slice()),
             ("opencode", ["run", "Hello"].as_slice()),
+            ("mimo", ["run", "Hello"].as_slice()),
             ("fx", ["ask", "Hello"].as_slice()),
         ] {
             let mut argv = vec!["nanh", harness, "--"];

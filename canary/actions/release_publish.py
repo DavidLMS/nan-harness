@@ -33,7 +33,21 @@ REQUIRED_CHECKS = ("install-and-diagnose", "deterministic-conformance", "live-to
 REQUIRED_IDENTITIES = qualified_identities()
 REPORT_COUNT = len(REQUIRED_IDENTITIES)
 ASSET_NAMES = required_assets()
-HISTORICAL_IDENTITIES = {f"{platform}/{harness}" for platform in ("linux", "macos") for harness in HARNESSES}
+# Preserve the matrices of already published receipts.
+HISTORICAL_HARNESSES = (
+    "claude-code", "codex", "opencode", "hermes", "pi", "omp", "prime-agent",
+    "deepseek-harness", "openclaw", "cline", "qwen-code", "kimi-code", "aider",
+    "goose", "fx",
+)
+HISTORICAL_IDENTITIES = {f"{platform}/{harness}" for platform in ("linux", "macos")
+                         for harness in HISTORICAL_HARNESSES}
+HISTORICAL_WINDOWS_IDENTITIES = HISTORICAL_IDENTITIES | {
+    f"windows/{harness}" for harness in HISTORICAL_HARNESSES
+    if harness not in ("prime-agent", "fx")
+}
+HISTORICAL_MIMO_IDENTITIES = HISTORICAL_WINDOWS_IDENTITIES | {
+    f"{platform}/mimo-code" for platform in PLATFORMS
+}
 HISTORICAL_ASSETS = {name for platform in ("linux", "macos") for name in PLATFORM_ASSETS[platform].values()}
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
@@ -141,6 +155,10 @@ def _matrix_policy(handoff: dict[str, Any], recommendation: bool):
     # requires a bound, completed publication receipt and a public stable release.
     if recommendation and handoff.get("reportCount") == len(HISTORICAL_IDENTITIES):
         return HISTORICAL_IDENTITIES, HISTORICAL_ASSETS
+    if recommendation and handoff.get("reportCount") == len(HISTORICAL_WINDOWS_IDENTITIES):
+        return HISTORICAL_WINDOWS_IDENTITIES, set(ASSET_NAMES)
+    if recommendation and handoff.get("reportCount") == len(HISTORICAL_MIMO_IDENTITIES):
+        return HISTORICAL_MIMO_IDENTITIES, set(ASSET_NAMES)
     return REQUIRED_IDENTITIES, set(ASSET_NAMES)
 
 

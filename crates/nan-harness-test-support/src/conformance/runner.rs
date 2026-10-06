@@ -76,7 +76,7 @@ impl PublishedConformanceRunner {
             scenarios::run_inventory(&self, registration).await;
         let scenarios = vec![
             inventory,
-            scenarios::run_tool_round_trip(&self, registration).await,
+            self.run_tool_contracts(registration).await,
             scenarios::run_sentinel(&self, registration).await,
             scenarios::run_external_prerequisite(&self, registration).await,
         ];
@@ -104,6 +104,22 @@ impl PublishedConformanceRunner {
             .validate_shape()
             .map_err(ConformanceError::ReportShape)?;
         Ok(report)
+    }
+
+    async fn run_tool_contracts(
+        &self,
+        registration: HarnessRegistration,
+    ) -> super::report::ConformanceScenario {
+        let mut scenario = scenarios::run_tool_round_trip(self, registration).await;
+        if registration.kind == HarnessKind::MimoCode {
+            let check = super::mimo::mimo_native_configuration_check(&self.nan_harness).await;
+            if check.status != ConformanceStatus::Passed {
+                scenario.status = ConformanceStatus::Failed;
+            }
+            scenario.duration_milliseconds += check.duration_milliseconds;
+            scenario.checks.push(check);
+        }
+        scenario
     }
 
     async fn run_process(
@@ -159,6 +175,16 @@ impl PublishedConformanceRunner {
             command = command
                 .env("CLAUDE_CONFIG_DIR", workspace.claude_config_path())
                 .env("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1");
+        }
+        if registration.kind == HarnessKind::MimoCode {
+            command = command.env("MIMOCODE_HOME", home.join("mimo"));
+        }
+        if registration.kind == HarnessKind::ZCode {
+            command = command
+                .env("ZCODE_DATA_BASE_DIR", home.join("zcode"))
+                .env("ZCODE_ENDPOINT_ORIGIN", provider.base_url())
+                .env("ZCODE_MODEL_TELEMETRY_ENABLED", "0")
+                .env("ZCODE_TELEMETRY_REPORT_ENDPOINT", "");
         }
         if registration.kind == HarnessKind::OpenCode {
             command = command

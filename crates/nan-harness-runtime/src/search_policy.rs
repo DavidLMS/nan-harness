@@ -105,6 +105,34 @@ mod tests {
     }
 
     #[test]
+    fn zcode_nested_mcp_search_is_detected_and_collisions_fail_closed() {
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join("config.json");
+        for (server, command, expected) in [
+            (
+                "brave-search",
+                "brave-search",
+                Some(SearchResolution::Existing),
+            ),
+            (
+                "nan-search",
+                "nan-harness __search-mcp",
+                Some(SearchResolution::Existing),
+            ),
+            ("nan-search", "foreign-command", None),
+        ] {
+            fs::write(&path, serde_json::json!({"mcp": {"servers": {server: {"type": "stdio", "command": command}}}}).to_string()).unwrap();
+            let result =
+                resolve_from_candidates(WebSearchPolicy::Auto, std::slice::from_ref(&path));
+            if let Some(expected) = expected {
+                assert_eq!(result.unwrap(), expected);
+            } else {
+                assert!(result.is_err());
+            }
+        }
+    }
+
+    #[test]
     fn exact_nan_search_collision_fails_without_starting_the_server() {
         let home = tempfile::tempdir().expect("temporary home");
         let config = home.path().join("config.json");

@@ -8,7 +8,7 @@ fi
 
 repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 installer="${NAN_PINNED_INSTALLER:-$repository_root/.github/scripts/install-pinned-harness.sh}"
-export PATH="$HOME/.local/bin:$HOME/.kimi-code/bin:$HOME/.hermes/bin:$PATH"
+export PATH="$HOME/.mimocode/bin:$HOME/.local/bin:$HOME/.kimi-code/bin:$HOME/.hermes/bin:$PATH"
 
 for harness in "$@"; do
   bash "$installer" "$harness"
@@ -23,8 +23,9 @@ for harness in "$@"; do
       cargo run --locked --quiet -- doctor codex
       cargo test --locked -p nan-harness-cli --test conformance_codex codex_native_inventory_crosses_the_responses_bridge -- --ignored --exact
       ;;
-    opencode|pi|omp|openclaw|cline|qwen-code|deepseek-harness|hermes|kimi-code|aider|prime-agent|goose)
+    mimo-code|opencode|pi|omp|openclaw|cline|qwen-code|deepseek-harness|hermes|kimi-code|aider|prime-agent|goose)
       case "$harness" in
+        mimo-code) command_name=mimo; test_filter=mimo_ ;;
         qwen-code) command_name=qwen; test_filter=qwen_code_ ;;
         deepseek-harness) command_name=deepseek; test_filter=deepseek_harness_ ;;
         kimi-code) command_name=kimi; test_filter=kimi_code_ ;;
@@ -38,7 +39,16 @@ for harness in "$@"; do
         fi
         cargo run --locked --quiet -- doctor "$command_name"
         cargo test --locked -p nan-harness-cli --test conformance_direct "$test_filter" -- --ignored
+        if [ "$harness" = 'mimo-code' ]; then
+          cargo test --locked -p nan-harness-cli --test cli configuration::mimo -- --include-ignored
+        fi
       )
+      ;;
+    zcode)
+      cargo run --locked --quiet -- doctor zcode
+      cargo test --locked -p nan-harness-cli --test conformance_direct zcode_ -- --ignored
+      source_directory="$HOME/.local/share/nan-harness-canary/zcode"
+      python3 "$repository_root/canary/guest/zcode-source.py" check --directory "$source_directory" --binary "$repository_root/target/debug/nan-harness"
       ;;
     fx)
       cargo run --locked --quiet -- doctor fx

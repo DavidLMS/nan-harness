@@ -32,6 +32,28 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Responses streaming errors, allowing Codex to expose its native recovery UI.
   Other error classifications and retry policies remain unchanged.
 
+## [0.1.14] - 2026-10-03
+
+### Added
+
+- Launch ZCode through NaN with `nanh zcode` (aliases `zai` and `zai-code`),
+  private provider routing, live model discovery, native tools and managed search.
+- Offer an independent ZCode installation from verified official sources on
+  Linux, macOS and Windows, with dependency checks and a private configuration
+  entrypoint binding.
+- Configure ZCode for direct use with `nanh config zcode`, including reversible
+  defaults, provider preservation, credential rotation and model catalog refresh.
+
+## [0.1.13] - 2026-10-01
+
+### Added
+
+- Launch MiMo Code through NaN with `nanh mimo` (alias `mimo-code`), including
+  dynamic model discovery, context limits, search, and selected-model routing
+  for auxiliary requests. Provider configuration is scoped to the managed launch.
+- Configure MiMo Code for direct use with `nanh config mimo`, including reversible
+  defaults, copied credentials, catalog refresh, search, and JSONC preservation.
+
 ## [0.1.12] - 2026-09-26
 
 ### Added
@@ -880,7 +902,9 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   startup update prompts, daily compatibility canaries, and a monotonic remote
   verification feed.
 
-[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.1.12...HEAD
+[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.1.14...HEAD
+[0.1.14]: https://github.com/DavidLMS/nan-harness/compare/v0.1.13...v0.1.14
+[0.1.13]: https://github.com/DavidLMS/nan-harness/compare/v0.1.12...v0.1.13
 [0.1.12]: https://github.com/DavidLMS/nan-harness/compare/v0.1.11...v0.1.12
 [0.1.11]: https://github.com/DavidLMS/nan-harness/compare/v0.1.10...v0.1.11
 [0.1.10]: https://github.com/DavidLMS/nan-harness/compare/v0.1.9...v0.1.10

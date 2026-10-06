@@ -83,6 +83,8 @@
             "claude-code",
             "codex",
             "opencode",
+            "mimo-code",
+            "zcode",
             "hermes",
             "pi",
             "omp",

@@ -30,6 +30,8 @@ mod goose;
 mod hermes;
 #[path = "scenarios/kimi_code.rs"]
 mod kimi_code;
+#[path = "scenarios/mimo_code.rs"]
+mod mimo_code;
 #[path = "scenarios/omp.rs"]
 mod omp;
 #[path = "scenarios/openclaw.rs"]
@@ -42,3 +44,6 @@ mod pi;
 mod prime_agent;
 #[path = "scenarios/qwen_code.rs"]
 mod qwen_code;
+
+#[path = "scenarios/zcode.rs"]
+mod zcode;

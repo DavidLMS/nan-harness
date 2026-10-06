@@ -137,7 +137,10 @@ fn whole_system_doctor_json_is_machine_readable_and_safe_to_share() {
     assert!(report.get("nanVersion").is_none());
     assert_eq!(report["provider"]["credential"], "not-configured");
     assert_eq!(report["provider"]["codingModels"], serde_json::json!([]));
-    assert_eq!(report["harnesses"].as_array().map(Vec::len), Some(15));
+    assert_eq!(
+        report["harnesses"].as_array().map(Vec::len),
+        Some(nan_harness_core::HarnessKind::ALL.len())
+    );
     assert_eq!(
         report["experimentalHarnesses"].as_array().map(Vec::len),
         Some(5)

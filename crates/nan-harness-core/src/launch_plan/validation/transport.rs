@@ -15,6 +15,8 @@ pub(super) fn validate(plan: &LaunchPlan) -> Result<(), PlanError> {
         HarnessKind::Codex => TransportKind::ResponsesBridge,
         HarnessKind::Fx => TransportKind::FxGatewayBridge,
         HarnessKind::OpenCode
+        | HarnessKind::MimoCode
+        | HarnessKind::ZCode
         | HarnessKind::Hermes
         | HarnessKind::Pi
         | HarnessKind::Omp

@@ -50,7 +50,8 @@ pub(super) async fn inventory<const N: usize>(
     let requests = provider.chat_requests();
     let tools = requests
         .iter()
-        .find_map(tool_names)
+        .filter_map(tool_names)
+        .max_by_key(BTreeSet::len)
         .expect("the harness should advertise at least one tool");
     provider
         .shutdown()
@@ -67,7 +68,7 @@ pub(super) async fn run_round_trip<const N: usize>(
     calls: Vec<ScriptedToolCall>,
     allowed_errors: &[&str],
     final_marker: &str,
-) {
+) -> Vec<Value> {
     let _prime_daemon = PrimeDaemonGuard::for_harness(harness, workspace.path());
     let provider = ScriptedProvider::start(ProviderScenario::sequence(
         calls.iter().cloned(),
@@ -112,6 +113,7 @@ pub(super) async fn run_round_trip<const N: usize>(
         .shutdown()
         .await
         .expect("scripted provider should stop");
+    requests
 }
 
 pub(super) async fn run_controlled_tool(
@@ -259,6 +261,20 @@ pub(super) fn harness_command(
     .timeout(Duration::from_mins(2));
     let isolated_home = workspace.join(".conformance-home");
     match harness {
+        "mimo-code" => {
+            let binary_directory = Path::new(env!("CARGO_BIN_EXE_nan-harness"))
+                .parent()
+                .expect("conformance binary should have a parent directory");
+            let parent_path = std::env::var_os("PATH").unwrap_or_default();
+            let paths = std::iter::once(binary_directory.to_path_buf())
+                .chain(std::env::split_paths(&parent_path));
+            command = command
+                .env("MIMOCODE_HOME", isolated_home.join("mimo"))
+                .env(
+                    "PATH",
+                    std::env::join_paths(paths).expect("conformance PATH"),
+                );
+        }
         "opencode" => {
             command = command
                 .env("XDG_CONFIG_HOME", isolated_home.join("config"))

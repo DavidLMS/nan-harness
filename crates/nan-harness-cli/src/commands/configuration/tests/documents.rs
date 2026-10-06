@@ -90,6 +90,7 @@ fn disabled_document_health_preserves_empty_and_inactive_semantics() {
     let root = tempdir().expect("temporary directory");
     let path = root.path().join("optional");
     let json = DocumentReceipt::Json(JsonReceipt {
+        comments: false,
         path: path.clone(),
         created_file: false,
         entries: Vec::new(),

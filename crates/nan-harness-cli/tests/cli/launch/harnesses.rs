@@ -7,6 +7,8 @@ use std::process::Command;
 fn direct_harness_dry_runs_build_safe_native_overlays() {
     let cases = [
         ("opencode", "1.18.4", "NAN_API_KEY", "nan/qwen3.6"),
+        ("mimo", "0.1.14", "NAN_API_KEY", "MIMOCODE_CONFIG_CONTENT"),
+        ("mimo-code", "0.1.14", "NAN_API_KEY", "nan/qwen3.6"),
         ("hermes", "0.20.2", "NAN_API_KEY", "{artifact:hermes-home}"),
         (
             "pi",
@@ -236,5 +238,36 @@ fn image_model_alone_activates_native_images_in_dry_run() {
         let config: serde_json::Value =
             serde_json::from_str(&template).expect("native JSON template");
         assert_eq!(config.pointer(pointer).unwrap(), expected);
+    }
+}
+
+#[test]
+fn zcode_refuses_bypassing_the_gateway_before_discovery_or_onboarding() {
+    let output = run_with_embedded_compatibility(&["zcode", "--dry-run", "--no-chat-gateway"]);
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("Remove --no-chat-gateway"));
+}
+
+#[cfg(unix)]
+#[test]
+fn zcode_aliases_share_the_private_provider_dry_run_contract() {
+    let directory = tempfile::tempdir().unwrap();
+    let executable = fake_harness(directory.path(), "0.16.9");
+    for alias in ["zcode", "zai", "zai-code"] {
+        let output = run_with_embedded_compatibility(&[
+            alias,
+            "--executable",
+            executable.to_str().unwrap(),
+            "--dry-run",
+        ]);
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8(output.stdout).unwrap();
+        assert!(stdout.contains("ZCODE_NAN_API_KEY"));
+        assert!(stdout.contains("{artifact:zcode-provider}"));
+        assert!(!stdout.contains("nan-secret-value"));
     }
 }

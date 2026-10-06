@@ -85,7 +85,7 @@ jobs:
             echo "workflow_commit=$(git rev-parse HEAD)"
           } >> "$GITHUB_OUTPUT"
       - id: matrix
-        name: Expand the mandatory 43-cell matrix
+        name: Expand the mandatory 49-cell matrix
         run: |
           echo "matrix=$(python3 canary/actions/release_gate.py matrix)" >> "$GITHUB_OUTPUT"
           echo 'Windows skips: Prime Agent and FX (official-windows-distribution-unavailable); skips do not count as passes.' >> "$GITHUB_STEP_SUMMARY"
@@ -223,7 +223,7 @@ jobs:
           retention-days: 7
 
   aggregate:
-    name: Validate full 43-cell evidence
+    name: Validate full 49-cell evidence
     needs: [prepare, cell]
     if: always() && needs.prepare.result == 'success' && needs.cell.result == 'success'
     runs-on: ubuntu-24.04
@@ -272,7 +272,7 @@ jobs:
         run: |
           {
             echo '## Verification-only result'
-            echo 'The exact 43-cell deterministic evidence passed; no publication is permitted for deterministic mode.'
+            echo 'The exact 49-cell deterministic evidence passed; no publication is permitted for deterministic mode.'
           } >> "$GITHUB_STEP_SUMMARY"
 
   publish:

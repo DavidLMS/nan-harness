@@ -24,6 +24,7 @@ pub use schema::{
     SELECTED_MODEL_DISPLAY_NAME_PLACEHOLDER, SELECTED_MODEL_MAX_OUTPUT_TOKENS_PLACEHOLDER,
     SELECTED_MODEL_REASONING_EFFORT_PLACEHOLDER, TemporaryArtifact, TemporaryArtifactKind,
     TemporaryArtifactMode, TerminalMode, USER_HOME_PLACEHOLDER, WebSearchPolicy,
+    ZCODE_PROVIDER_CONFIG_PLACEHOLDER, ZCODE_REASONING_LEVEL_PLACEHOLDER,
 };
 pub use transport::{ListenAddress, Protocol, Transport, TransportKind};
 

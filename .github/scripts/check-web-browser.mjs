@@ -98,6 +98,21 @@ async function checkPages(origin, viewport, javaScriptEnabled) {
           await page.locator('[data-picker-control]').press('End');
           assert.equal(await page.locator('[data-picker-command-text]').innerText(), 'nanh fx');
           assert.equal(await page.locator('[data-picker-option][aria-selected="true"]').count(), 1);
+          for (const harness of ['mimo', 'zcode']) {
+            const control = page.locator('[data-picker-control]');
+            await control.press('Home');
+            const index = Number(await page.locator(`#picker-option-${harness}`).getAttribute('data-logical-index'));
+            for (let step = 0; step < index; step++) await control.press('ArrowDown');
+            assert.equal(await control.getAttribute('aria-activedescendant'), `picker-option-${harness}`);
+            assert.equal(await page.locator('[data-picker-command-text]').innerText(), `nanh ${harness}`);
+            const logo = page.locator(`[data-picker-item].is-active .picker-logo-${harness} img`);
+            await logo.waitFor();
+            assert.ok(await logo.evaluate((image) => image.complete && image.naturalWidth > 0));
+            if (process.env.WEB_SCREENSHOT_DIR) {
+              await page.screenshot({ path: path.join(process.env.WEB_SCREENSHOT_DIR,
+                `${harness}-${viewport.width}.png`), fullPage: true });
+            }
+          }
         } else {
           assert.match(await page.locator('.install-fallback').innerText(), /install\.sh[\s\S]*install\.ps1/);
           assert.equal(await page.locator('.picker-fallback a').getAttribute('href'), 'docs.html#harnesses');

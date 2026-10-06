@@ -41,7 +41,7 @@ pub(crate) fn round_trip_probe(
     let read_path = workspace.join("read-target.txt");
     let read_path_string = read_path.to_string_lossy().into_owned();
     let (name, input, filesystem) = match kind {
-        HarnessKind::ClaudeCode => (
+        HarnessKind::ZCode | HarnessKind::ClaudeCode => (
             "Write",
             json!({
                 "file_path": workspace.join("tool-output.txt"),
@@ -52,6 +52,15 @@ pub(crate) fn round_trip_probe(
         HarnessKind::Codex => (
             "exec_command",
             json!({"cmd": "printf NAN_HARNESS_TOOL_OK > tool-output.txt"}),
+            filesystem_contract(
+                workspace.join("tool-output.txt"),
+                "NAN_HARNESS_TOOL_OK",
+                true,
+            ),
+        ),
+        HarnessKind::MimoCode => (
+            "bash",
+            json!({"command": "printf NAN_HARNESS_TOOL_OK > tool-output.txt", "description": "Write a deterministic conformance marker file"}),
             filesystem_contract(
                 workspace.join("tool-output.txt"),
                 "NAN_HARNESS_TOOL_OK",

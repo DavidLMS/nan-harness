@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from cell import HERMES_INSTALL_STAGES, WindowsJob, finish_stage, protect_private
 from selection import WINDOWS_UNAVAILABLE, WINDOWS_SKIP_REASON
 
-HARNESSES = ("claude-code", "codex", "opencode", "hermes", "pi", "omp", "prime-agent",
+HARNESSES = ("claude-code", "codex", "mimo-code", "zcode", "opencode", "hermes", "pi", "omp", "prime-agent",
              "deepseek-harness", "openclaw", "cline", "qwen-code", "kimi-code", "aider", "goose", "fx")
 PYTHON_VERSION = "3.12"
 PHASES = ("metadata", "prerequisites", "install", "version-doctor", "deterministic-contract", "live-tool")

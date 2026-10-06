@@ -75,10 +75,13 @@ _WINDOWS_PYPI_PACKAGES = {"aider": "aider-chat"}
 _GITHUB_REPOS = {
     "omp": "can1357/oh-my-pi", "goose": "aaif-goose/goose",
     "hermes": "NousResearch/hermes-agent",
+    "mimo-code": "XiaomiMiMo/MiMo-Code",
+    "zcode": "zai-org/ZCode",
 }
 # Hermes tags releases by date (v2026.9.11) while `hermes --version` reports the
-# pyproject version (0.21.2). Freeze the tag's commit and read the version there.
-_COMMIT_PINNED = frozenset({"hermes"})
+# pyproject version (0.21.2). ZCode tracks main and has a separate agent version.
+# Freeze a commit before reading either project version.
+_COMMIT_PINNED = frozenset({"hermes", "zcode"})
 FX_SOURCE = "https://releases.fx.sh/latest.txt"
 _TEXT_SOURCES = {
     "fx": FX_SOURCE,
@@ -275,6 +278,14 @@ def _resolve_one(harness, system, architecture, model, fetch_json, fetch_text, f
         version = _pypi_version(fetch_json("https://pypi.org/pypi/" + package + "/json"))
     elif harness in _GITHUB_REPOS:
         repo = _GITHUB_REPOS[harness]
+        if harness == "zcode":
+            ref = fetch_json("https://api.github.com/repos/" + repo + "/commits/main")["sha"]
+            if not isinstance(ref, str) or not _COMMIT.fullmatch(ref):
+                raise ValueError("official source did not resolve to an immutable commit")
+            project = json.loads(fetch_document("https://raw.githubusercontent.com/" + repo + "/" + ref
+                                                + "/apps/zcode-cli/package.json"))
+            version = _version(project["version"])
+            return FrozenHarness(harness, version, system, architecture, source, package, model, ref)
         release = fetch_json("https://api.github.com/repos/" + repo + "/releases/latest")
         try:
             tag = release["tag_name"]

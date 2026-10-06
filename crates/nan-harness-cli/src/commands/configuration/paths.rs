@@ -11,6 +11,9 @@ pub(crate) struct ConfigurationPaths {
     pub(crate) kimi_directory: PathBuf,
     pub(crate) opencode_auth_path: PathBuf,
     pub(crate) goose_directory: PathBuf,
+    pub(crate) mimo_config_directory: PathBuf,
+    pub(crate) mimo_auth_path: PathBuf,
+    pub(crate) zcode_provider_path: PathBuf,
 }
 
 impl ConfigurationPaths {
@@ -30,6 +33,7 @@ impl ConfigurationPaths {
             .map_or_else(|| home_directory.join(".kimi-code"), PathBuf::from);
         let opencode_auth_path = opencode_auth_path(&home_directory);
         let goose_directory = goose_config_directory(&home_directory);
+        let (mimo_config_directory, mimo_auth_path) = mimo_paths(&home_directory);
         Ok(Self {
             state_path: state_directory.join(STATE_FILE_NAME),
             prime_directory,
@@ -39,6 +43,9 @@ impl ConfigurationPaths {
             kimi_directory,
             opencode_auth_path,
             goose_directory,
+            mimo_config_directory,
+            mimo_auth_path,
+            zcode_provider_path: zcode_provider_path(&home_directory),
             home_directory,
         })
     }
@@ -55,6 +62,9 @@ impl ConfigurationPaths {
             kimi_directory: home_directory.join(".kimi-code"),
             opencode_auth_path: home_directory.join(".local/share/opencode/auth.json"),
             goose_directory: home_directory.join(".config/goose"),
+            mimo_config_directory: home_directory.join(".config/mimocode"),
+            mimo_auth_path: home_directory.join(".local/share/mimocode/auth.json"),
+            zcode_provider_path: home_directory.join(".zcode/v2/provider_config.json"),
         }
     }
 }
@@ -100,4 +110,32 @@ fn home_directory() -> Option<PathBuf> {
     {
         env::var_os("HOME").map(PathBuf::from)
     }
+}
+
+fn mimo_paths(home: &Path) -> (PathBuf, PathBuf) {
+    if let Some(root) = env::var_os("MIMOCODE_HOME").filter(|root| !root.is_empty()) {
+        let root = PathBuf::from(root);
+        return (root.join("config"), root.join("data/auth.json"));
+    }
+    let config = env::var_os("XDG_CONFIG_HOME")
+        .map_or_else(|| home.join(".config"), PathBuf::from)
+        .join("mimocode");
+    let auth = env::var_os("XDG_DATA_HOME")
+        .map_or_else(|| home.join(".local/share"), PathBuf::from)
+        .join("mimocode/auth.json");
+    (config, auth)
+}
+
+fn zcode_provider_path(home: &Path) -> PathBuf {
+    env::var_os("ZCODE_PERSONAL_PROVIDER_CONFIG_FILE")
+        .filter(|value| !value.is_empty())
+        .map_or_else(
+            || {
+                env::var_os("ZCODE_DATA_BASE_DIR")
+                    .filter(|value| !value.is_empty())
+                    .map_or_else(|| home.to_path_buf(), PathBuf::from)
+                    .join(".zcode/v2/provider_config.json")
+            },
+            PathBuf::from,
+        )
 }

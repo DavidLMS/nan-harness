@@ -14,7 +14,8 @@ use crate::launch_plan::{
     QWEN_CODE_MODEL_CATALOG_PLACEHOLDER, SELECTED_MODEL_CAPABILITIES_PLACEHOLDER,
     SELECTED_MODEL_CONTEXT_WINDOW_PLACEHOLDER, SELECTED_MODEL_DISPLAY_NAME_PLACEHOLDER,
     SELECTED_MODEL_MAX_OUTPUT_TOKENS_PLACEHOLDER, SELECTED_MODEL_REASONING_EFFORT_PLACEHOLDER,
-    Transport, USER_HOME_PLACEHOLDER,
+    Transport, USER_HOME_PLACEHOLDER, ZCODE_PROVIDER_CONFIG_PLACEHOLDER,
+    ZCODE_REASONING_LEVEL_PLACEHOLDER,
 };
 use crate::secret::SecretRef;
 use nan_harness_i18n::DiagnosticText;
@@ -46,6 +47,8 @@ pub(super) fn validate_template_placeholders(
         .replace(GOOSE_ADDITIONAL_CONFIG_FILES_PLACEHOLDER, "")
         .replace(HERMES_MODEL_CATALOG_PLACEHOLDER, "")
         .replace(OPENCODE_MODEL_CATALOG_PLACEHOLDER, "")
+        .replace(ZCODE_PROVIDER_CONFIG_PLACEHOLDER, "")
+        .replace(ZCODE_REASONING_LEVEL_PLACEHOLDER, "")
         .replace(OPENCLAW_MODEL_ALIASES_PLACEHOLDER, "")
         .replace(OPENCLAW_MODEL_CATALOG_PLACEHOLDER, "")
         .replace(PI_MODEL_CATALOG_PLACEHOLDER, "")
@@ -64,10 +67,15 @@ pub(super) fn validate_template_placeholders(
         remainder = remainder.replace(&format!("{{secret:{}}}", session_token_ref.as_str()), "");
     }
     for reference in plan.environment.secrets.values() {
-        remainder = remainder.replace(&format!("{{secret:{}}}", reference.as_str()), "");
+        remainder = remainder
+            .replace(&format!("{{secret:{}}}", reference.as_str()), "")
+            .replace(&format!("\"{{secret-json:{}}}\"", reference.as_str()), "");
     }
 
-    if remainder.contains("{runtime:") || remainder.contains("{secret:") {
+    if remainder.contains("{runtime:")
+        || remainder.contains("{secret:")
+        || remainder.contains("{secret-json:")
+    {
         unsafe_resource(
             resource_id,
             DiagnosticText::new(detail_messages::detail_contenttemplate_contains_an_unknown_runtime_or_secret_placeholder),

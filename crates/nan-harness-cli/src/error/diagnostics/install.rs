@@ -14,7 +14,8 @@ pub(super) fn typed(error: &InstallError) -> Diagnostic {
                 error_kind: IoErrorKind::from_std(source.kind()),
             },
         ),
-        InstallError::UnsupportedPlatform(_)
+        InstallError::SourcePrerequisite { .. }
+        | InstallError::UnsupportedPlatform(_)
         | InstallError::UnsupportedHarness(_)
         | InstallError::CompatibilityManifest(_)
         | InstallError::InvalidRuntimeCommand { .. } => {

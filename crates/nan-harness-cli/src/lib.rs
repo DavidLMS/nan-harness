@@ -727,6 +727,7 @@ mod tests {
     fn direct_chat_commands_accept_the_gateway_escape_hatch() {
         for harness in [
             "opencode",
+            "mimo",
             "hermes",
             "pi",
             "prime-agent",

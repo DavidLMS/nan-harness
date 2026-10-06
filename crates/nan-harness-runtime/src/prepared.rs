@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 mod catalogs;
+pub use catalogs::{opencode_model_catalog, zcode_provider_config};
 mod pipeline;
 mod values;
 

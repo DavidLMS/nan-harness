@@ -10,13 +10,13 @@ harness="$1"
 version="${2:-latest}"
 ref="${3:-}"
 if [ -n "$ref" ]; then
-  if [ "$harness" != hermes ] || [ "$version" = latest ] \
+  if { [ "$harness" != hermes ] && [ "$harness" != zcode ]; } || [ "$version" = latest ] \
     || ! printf '%s' "$ref" | grep -Eqx '[0-9a-f]{40}'; then
-    printf 'an installer ref must be a frozen Hermes source commit\n' >&2
+    printf 'an installer ref must be a frozen Hermes or ZCode source commit\n' >&2
     exit 2
   fi
-elif [ "$harness" = hermes ] && [ "$version" != latest ]; then
-  printf 'an exact Hermes version requires its frozen source commit\n' >&2
+elif { [ "$harness" = hermes ] || [ "$harness" = zcode ]; } && [ "$version" != latest ]; then
+  printf 'an exact source version requires its frozen source commit\n' >&2
   exit 2
 fi
 temporary_directory="$(mktemp -d)"
@@ -111,11 +111,24 @@ omp_binary_asset() {
 }
 
 case "$harness" in
+  zcode)
+    python3 "$(dirname "${BASH_SOURCE[0]}")/zcode-source.py" install --version "$version" --ref "$ref"
+    ;;
   claude-code)
     global_npm_install "@anthropic-ai/claude-code@$version"
     ;;
   codex)
     global_npm_install "@openai/codex@$version"
+    ;;
+  mimo-code)
+    installer="$temporary_directory/mimo-install.sh"
+    download "https://mimo.xiaomi.com/install" "$installer"
+    if [ "$version" = latest ]; then
+      run_with_bounded_curl bash "$installer"
+    else
+      run_with_bounded_curl bash "$installer" --version "$version"
+    fi
+    export PATH="$HOME/.mimocode/bin:$PATH"
     ;;
   opencode)
     global_npm_install "opencode-ai@$version"

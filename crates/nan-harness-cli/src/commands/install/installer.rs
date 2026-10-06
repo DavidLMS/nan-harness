@@ -10,6 +10,9 @@ use std::process::{Command, Stdio};
 use tempfile::NamedTempFile;
 
 pub(super) fn check_install_prerequisites(spec: &InstallSpec) -> Result<(), InstallError> {
+    if matches!(spec.method()?, InstallMethod::SourceBuild) {
+        return super::source::check_prerequisites();
+    }
     check_install_prerequisites_with(spec, |program| {
         run_command(OsStr::new(program), &["--version"], Command::output)
             .map(|output| output.status)
@@ -41,12 +44,17 @@ pub(super) fn install(spec: &InstallSpec) -> Result<(), InstallError> {
     let method = spec.method()?;
     eprintln!(
         "{}",
-        nan_harness_i18n::messages::installer_installing_with_the_official_installer(
-            nan_harness_i18n::locale(),
-            &(spec.display_name())
-        )
+        if matches!(method, InstallMethod::SourceBuild) {
+            nan_harness_i18n::messages::installer_building_source(nan_harness_i18n::locale())
+        } else {
+            nan_harness_i18n::messages::installer_installing_with_the_official_installer(
+                nan_harness_i18n::locale(),
+                &(spec.display_name()),
+            )
+        }
     );
     match method {
+        InstallMethod::SourceBuild => super::source::install(),
         InstallMethod::ShellScript {
             url,
             interpreter,

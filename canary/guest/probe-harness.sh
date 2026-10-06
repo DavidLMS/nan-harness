@@ -9,9 +9,9 @@ fi
 harness="$1"
 original_home="$HOME"
 if [ "${NAN_CANARY_HOSTED:-}" = 1 ]; then
-  export PATH="$original_home/.local/bin:$original_home/.kimi-code/bin:$original_home/.hermes/bin:$PATH"
+  export PATH="$original_home/.mimocode/bin:$original_home/.local/bin:$original_home/.kimi-code/bin:$original_home/.hermes/bin:$PATH"
 else
-  export PATH="$original_home/.local/bin:$original_home/.kimi-code/bin:$original_home/.hermes/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+  export PATH="$original_home/.mimocode/bin:$original_home/.local/bin:$original_home/.kimi-code/bin:$original_home/.hermes/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 fi
 nan_command="${NAN_CANARY_NAN_COMMAND:-nanh}"
 model="${NAN_CANARY_MODEL:-qwen3.6}"
@@ -86,6 +86,9 @@ trap cleanup EXIT
 cd "$workspace"
 mkdir -p "$workspace/home"
 export HOME="$workspace/home"
+if [ "$harness" = mimo-code ]; then
+  export MIMOCODE_HOME="$workspace/mimo"
+fi
 export NAN_HARNESS_CONFIG_DIR="$workspace/nan-state"
 usage_evidence="$workspace/usage-evidence.json"
 export NAN_HARNESS_INTERNAL_CANARY_USAGE_FILE="$usage_evidence"
@@ -115,6 +118,22 @@ case "$harness" in
       >"$output" 2>"$stderr_output"
     probe_stage='tool-evidence'
     grep -Fx 'NAN_CODEX_TOOL_OK' "$target" >/dev/null
+    ;;
+  zcode)
+    target="$workspace/zcode-tool.txt"
+    zcode_prompt="Use Write to create '$target' with exactly NAN_ZCODE_TOOL_OK. Then use Read to read '$workspace/read-target.txt'. After both tools succeed, reply with the file content and NAN_CANARY_OK."
+    export ZCODE_DATA_BASE_DIR="$workspace/zcode" ZCODE_MODEL_TELEMETRY_ENABLED=0 ZCODE_TELEMETRY_REPORT_ENDPOINT=''
+    "$nan_command" zcode --model "$model" -- \
+      --locale en-US --no-color --prompt "$zcode_prompt" >"$output" 2>"$stderr_output"
+    probe_stage='tool-evidence'
+    grep -Fx 'NAN_ZCODE_TOOL_OK' "$target" >/dev/null
+    ;;
+  mimo-code)
+    "$nan_command" mimo --model "$model" -- \
+      run --pure --format json --dangerously-skip-permissions "$prompt" >"$output" 2>"$stderr_output"
+    probe_stage='tool-evidence'
+    grep -F '"tool":"read"' "$output" "$stderr_output" >/dev/null \
+      || grep -F '"read"' "$output" "$stderr_output" >/dev/null
     ;;
   opencode)
     "$nan_command" opencode --model "$model" -- \

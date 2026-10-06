@@ -110,6 +110,18 @@ pub(super) async fn fixture() -> &'static str {
     "NAN_HARNESS_WEB_FETCH_FIXTURE"
 }
 
+pub(super) async fn searxng(
+    State(state): State<Arc<ProviderState>>,
+    axum::extract::Query(query): axum::extract::Query<std::collections::BTreeMap<String, String>>,
+) -> Json<Value> {
+    state.record_search_request(json!(query));
+    Json(json!({"results": [{
+        "title": "MiMo conformance search fixture",
+        "url": "https://example.test/mimo-conformance",
+        "content": "MIMO_SEARCH_OK"
+    }]}))
+}
+
 fn expand_fixture_url(value: &mut Value, fixture_url: &str) {
     match value {
         Value::String(text) => *text = text.replace("{{fixture_url}}", fixture_url),

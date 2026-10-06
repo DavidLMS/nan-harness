@@ -7,10 +7,12 @@ use nan_harness_core::harness::{
 use nan_harness_core::{HarnessKind, VersionStatus};
 use semver::Version;
 
-const KIND_CONTRACTS: [(HarnessKind, &str, &str); 15] = [
+const KIND_CONTRACTS: [(HarnessKind, &str, &str); 17] = [
     (HarnessKind::ClaudeCode, "claude-code", "claude"),
     (HarnessKind::Codex, "codex", "codex"),
     (HarnessKind::OpenCode, "opencode", "opencode"),
+    (HarnessKind::MimoCode, "mimo-code", "mimo"),
+    (HarnessKind::ZCode, "zcode", "zcode"),
     (HarnessKind::Hermes, "hermes", "hermes"),
     (HarnessKind::Pi, "pi", "pi"),
     (HarnessKind::Omp, "omp", "omp"),
@@ -25,10 +27,12 @@ const KIND_CONTRACTS: [(HarnessKind, &str, &str); 15] = [
     (HarnessKind::Fx, "fx", "fx"),
 ];
 
-const ALIAS_CONTRACTS: [(HarnessKind, &[&str]); 15] = [
+const ALIAS_CONTRACTS: [(HarnessKind, &[&str]); 17] = [
     (HarnessKind::ClaudeCode, &["claude-code", "claude"]),
     (HarnessKind::Codex, &["codex"]),
     (HarnessKind::OpenCode, &["opencode"]),
+    (HarnessKind::MimoCode, &["mimo-code", "mimo"]),
+    (HarnessKind::ZCode, &["zcode", "zai", "zai-code"]),
     (HarnessKind::Hermes, &["hermes"]),
     (HarnessKind::Pi, &["pi"]),
     (HarnessKind::Omp, &["omp", "oh-my-pi"]),
@@ -46,10 +50,12 @@ const ALIAS_CONTRACTS: [(HarnessKind, &[&str]); 15] = [
     (HarnessKind::Fx, &["fx"]),
 ];
 
-const JSON_CONTRACTS: [(HarnessKind, &str); 15] = [
+const JSON_CONTRACTS: [(HarnessKind, &str); 17] = [
     (HarnessKind::ClaudeCode, "\"claude-code\""),
     (HarnessKind::Codex, "\"codex\""),
     (HarnessKind::OpenCode, "\"opencode\""),
+    (HarnessKind::MimoCode, "\"mimo-code\""),
+    (HarnessKind::ZCode, "\"zcode\""),
     (HarnessKind::Hermes, "\"hermes\""),
     (HarnessKind::Pi, "\"pi\""),
     (HarnessKind::Omp, "\"omp\""),

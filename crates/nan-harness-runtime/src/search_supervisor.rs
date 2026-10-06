@@ -1764,7 +1764,8 @@ mod tests {
         drop(lease);
     }
 
-    #[tokio::test]
+    // A delayed runner must not advance past the grace deadline before the assertion.
+    #[tokio::test(start_paused = true)]
     async fn discovered_interest_prevents_owner_shutdown_until_its_grace() {
         let root = tempfile::tempdir().expect("temporary directory");
         let owner_factory = FakeFactory::new();

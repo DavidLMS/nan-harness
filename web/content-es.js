@@ -77,6 +77,8 @@ function nanHarnessContentEs({ harnessLink, nanLink, unixInstallCommand, windows
       ['codex.png', '<a href="https://marketplace.visualstudio.com/items?itemName=OpenAI.chatgpt" target="_blank" rel="noreferrer">Extensión oficial de Codex para VS Code 26.5818.31338</a>, usando su <a href="https://openai.gallerycdn.vsassets.io/extensions/openai/chatgpt/26.5818.31338/1787264961823/Microsoft.VisualStudio.Services.Icons.Default" target="_blank" rel="noreferrer">icono publicado</a>', '<a href="https://openai.com/brand/" target="_blank" rel="noreferrer">Directrices de marca de OpenAI</a>; el fondo negro se convirtió en transparente sin cambiar la geometría de la marca'],
       ['hermes.png', '<a href="https://github.com/NousResearch/hermes-agent/blob/06b9141109fbd320b14b8c88645ab37fc4f42c9d/apps/desktop/assets/icon.png" target="_blank" rel="noreferrer"><code>NousResearch/hermes-agent</code> en <code>06b9141</code></a>', 'MIT; extraído de la aplicación de escritorio instalada localmente y redimensionado a 256 px sin cambios visuales'],
       ['omp.svg', 'La marca de la cabecera oficial de <a href="https://omp.sh/" target="_blank" rel="noreferrer"><code>omp.sh</code></a>, recuperada el 2026-08-31', 'Usada únicamente para identificar el producto; copiada del SVG publicado en la cabecera sin cambiar su geometría ni sus colores'],
+      ['mimo.png', 'El favicon de la <a href="https://mimo.xiaomi.com/mimocode" target="_blank" rel="noreferrer">web oficial de MiMo Code</a>, obtenido el 2026-10-03', 'Se usa únicamente para identificar el producto; convertido de ICO a PNG sin cambiar la marca'],
+      ['zcode.svg', 'La marca de la cabecera de la <a href="https://zcode.z.ai/en" target="_blank" rel="noreferrer">web oficial de ZCode</a>, obtenida el 2026-10-03', 'Se usa únicamente para identificar el producto; copiada del SVG publicado en la cabecera sin cambiar su geometría'],
       ['prime.svg', '<a href="https://github.com/PrimeIntellect-ai/prime-agent/blob/c75a637b00d3b52762841e72efe92289a0d55b49/assets/brand/prime-butterfly.svg" target="_blank" rel="noreferrer"><code>PrimeIntellect-ai/prime-agent</code> en <code>c75a637</code></a>', 'MIT'],
       ['openclaw.svg', '<a href="https://github.com/openclaw/openclaw/blob/73ff2d2f45b26856882423d9ae87a76a727ac7cd/ui/public/favicon.svg" target="_blank" rel="noreferrer"><code>openclaw/openclaw</code> en <code>73ff2d2</code></a>', 'MIT'],
       ['aider.svg', '<a href="https://github.com/Aider-AI/aider/blob/5dc9490bb35f9729ef2c95d00a19ccd30c26339c/aider/website/assets/logo.svg" target="_blank" rel="noreferrer"><code>Aider-AI/aider</code> en <code>5dc9490</code></a>', 'Apache-2.0'],
@@ -134,6 +136,8 @@ function nanHarnessContentEs({ harnessLink, nanLink, unixInstallCommand, windows
           ['nanh openclaw', harnessLink('OpenClaw', 'openclaw'), 'opcional'],
           ['nanh hermes', harnessLink('Hermes Agent', 'hermes'), 'opcional'],
           ['nanh omp', harnessLink('Oh My Pi', 'omp'), 'opcional'],
+          ['nanh mimo', harnessLink('MiMo Code', 'mimo'), 'opcional'],
+          ['nanh zcode', harnessLink('ZCode', 'zcode'), 'opcional'],
           ['nanh prime-agent', harnessLink('Prime Agent', 'prime'), 'opcional'],
           ['nanh dsh', harnessLink('DeepSeek Harness', 'deepseek'), 'opcional'],
           ['nanh fx', harnessLink('fx', 'fx'), 'no disponible']

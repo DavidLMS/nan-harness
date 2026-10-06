@@ -1,9 +1,12 @@
 use super::*;
 
+mod array;
 mod common;
+use array::{get_json_entry, restore_json_entry, set_json_entry};
 mod coordinator;
 mod exact;
 mod json;
+mod jsonc;
 mod kimi;
 mod lifecycle;
 mod paths;
@@ -14,6 +17,7 @@ pub(super) use common::*;
 pub(super) use coordinator::*;
 pub(super) use exact::*;
 pub(super) use json::*;
+pub(super) use jsonc::*;
 pub(super) use kimi::*;
 pub(super) use lifecycle::*;
 pub(super) use paths::*;

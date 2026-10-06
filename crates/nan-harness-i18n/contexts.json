@@ -1070,6 +1070,13 @@
       "crates/nan-harness-adapters/src/openclaw.rs"
     ]
   },
+  "detail_serialize_mimo_configuration_failed": {
+    "description": "Persistent native configuration and its health. Preserve command names, paths, provider identifiers and diagnostic codes.",
+    "section": "configuration",
+    "sources": [
+      "crates/nan-harness-adapters/src/mimo_code.rs"
+    ]
+  },
   "detail_serialize_opencode_configuration_failed": {
     "description": "Persistent native configuration and its health. Preserve command names, paths, provider identifiers and diagnostic codes.",
     "section": "configuration",
@@ -6364,6 +6371,13 @@
       "crates/nan-harness-cli/src/app/commands.rs"
     ]
   },
+  "help_run_mimo_code_through_nan_chat_completions": {
+    "description": "Command help and argument validation. Preserve command names, paths, provider identifiers and diagnostic codes.",
+    "section": "help",
+    "sources": [
+      "crates/nan-harness-cli/src/app/commands.rs"
+    ]
+  },
   "help_run_opencode_through_nan_chat_completions": {
     "description": "Command help and argument validation. Preserve command names, paths, provider identifiers and diagnostic codes.",
     "section": "help",
@@ -6558,7 +6572,21 @@
       "crates/nan-harness-cli/src/commands/install.rs"
     ]
   },
+  "install_runtime_homebrew": {
+    "description": "Installation, updates and removal. Preserve command names, paths, provider identifiers and diagnostic codes.",
+    "section": "install",
+    "sources": [
+      "crates/nan-harness-cli/src/commands/install/runtime.rs"
+    ]
+  },
   "install_runtime_nvm": {
+    "description": "Installation, updates and removal. Preserve command names, paths, provider identifiers and diagnostic codes.",
+    "section": "install",
+    "sources": [
+      "crates/nan-harness-cli/src/commands/install/runtime.rs"
+    ]
+  },
+  "install_runtime_official": {
     "description": "Installation, updates and removal. Preserve command names, paths, provider identifiers and diagnostic codes.",
     "section": "install",
     "sources": [
@@ -8975,5 +9003,47 @@
     "description": "Desktop application setup and session lifecycle. Preserve command names, paths, provider identifiers and diagnostic codes.",
     "section": "desktop",
     "sources": []
-  }
+  },
+  "help_run_zcode_through_nan_chat_completions": {
+    "description": "ZCode source installation and launch. Preserve command names, URLs and pinned dependency versions.",
+    "section": "installation",
+    "sources": [
+      "crates/nan-harness-cli/src/commands/install/source.rs",
+      "crates/nan-harness-cli/src/app/commands.rs"
+    ]
+  },
+  "install_source_dependency": {
+    "description": "ZCode source installation and launch. Preserve command names, URLs and pinned dependency versions.",
+    "section": "installation",
+    "sources": [
+      "crates/nan-harness-cli/src/commands/install/source.rs",
+      "crates/nan-harness-cli/src/app/commands.rs"
+    ]
+  },
+  "install_source_offer": {
+    "description": "ZCode source installation and launch. Preserve command names, URLs and pinned dependency versions.",
+    "section": "installation",
+    "sources": [
+      "crates/nan-harness-cli/src/commands/install/source.rs",
+      "crates/nan-harness-cli/src/app/commands.rs"
+    ]
+  },
+  "install_source_commands": {
+    "description": "ZCode source installation and launch. Preserve command names, URLs and pinned dependency versions.",
+    "section": "installation",
+    "sources": [
+      "crates/nan-harness-cli/src/commands/install/source.rs",
+      "crates/nan-harness-cli/src/app/commands.rs"
+    ]
+  },
+  "installer_building_source": {
+    "description": "ZCode source installation and launch. Preserve command names, URLs and pinned dependency versions.",
+    "section": "installation",
+    "sources": [
+      "crates/nan-harness-cli/src/commands/install/source.rs",
+      "crates/nan-harness-cli/src/app/commands.rs"
+    ]
+  },
+  "detail_zcode_private_configuration_required": {"section": "adapters", "description": "Explain the missing ZCode source binding and keep --no-search literal.", "sources": ["crates/nan-harness-adapters/src/zcode.rs"]},
+  "detail_zcode_requires_chat_gateway": {"section": "adapters", "description": "Explain why managed ZCode requires a launch token. Keep --no-chat-gateway literal.", "sources": ["crates/nan-harness-cli/src/runner/arguments.rs"]}
 }

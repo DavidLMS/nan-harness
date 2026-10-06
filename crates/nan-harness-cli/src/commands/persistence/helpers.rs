@@ -96,7 +96,7 @@ pub(super) fn parse_jsonc(source: &str, path: &Path) -> Result<CstRootNode, Pers
     })
 }
 
-pub(super) fn parse_named_jsonc(
+pub(crate) fn parse_named_jsonc(
     source: &str,
     path: &Path,
     harness: &'static str,

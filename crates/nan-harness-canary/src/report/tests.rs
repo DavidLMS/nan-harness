@@ -214,9 +214,12 @@ fn serialized_report_matches_the_documented_json_schema() {
     )
     .expect("canary report schema should be JSON");
     let validator = jsonschema::validator_for(&schema).expect("schema should compile");
-    let value = serde_json::to_value(report()).expect("report should serialize");
-
-    if let Err(error) = validator.validate(&value) {
-        panic!("canary report should match its schema: {error}");
+    for harness in HarnessKind::ALL {
+        let mut report = report();
+        report.harness.id = harness;
+        let value = serde_json::to_value(report).expect("report should serialize");
+        if let Err(error) = validator.validate(&value) {
+            panic!("{harness} report should match its schema: {error}");
+        }
     }
 }

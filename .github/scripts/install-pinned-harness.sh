@@ -136,11 +136,27 @@ omp_binary_asset() {
 }
 
 case "$harness_id" in
+  zcode)
+    source_directory="$HOME/.local/share/nan-harness-canary/zcode"
+    mkdir -p "$source_directory"
+    python3 "$repository_root/canary/guest/zcode-source.py" install --version "$(package_version)" --directory "$source_directory"
+    append_path "$HOME/.local/bin"
+    ;;
   claude-code)
     npm install --global "@anthropic-ai/claude-code@$(package_version)"
     ;;
   codex)
     npm install --global "@openai/codex@$(package_version)"
+    ;;
+  mimo-code)
+    installer="$temporary_directory/mimo-install.sh"
+    download 'https://mimo.xiaomi.com/install' "$installer"
+    if [ "$install_mode" = '--latest' ]; then
+      bash "$installer"
+    else
+      bash "$installer" --version "$version"
+    fi
+    append_path "$HOME/.mimocode/bin"
     ;;
   opencode)
     npm install --global "opencode-ai@$(package_version)"

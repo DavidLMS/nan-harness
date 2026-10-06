@@ -42,6 +42,10 @@ pub(crate) enum Command {
     Codex(BridgedHarnessRunArgs),
     #[command(name = "opencode", about = nan_harness_i18n::messages::help_run_opencode_through_nan_chat_completions(nan_harness_i18n::locale()))]
     OpenCode(DirectHarnessRunArgs),
+    #[command(name = "mimo", visible_alias = "mimo-code", about = nan_harness_i18n::messages::help_run_mimo_code_through_nan_chat_completions(nan_harness_i18n::locale()))]
+    Mimo(DirectHarnessRunArgs),
+    #[command(name = "zcode", visible_aliases = ["zai", "zai-code"], about = nan_harness_i18n::messages::help_run_zcode_through_nan_chat_completions(nan_harness_i18n::locale()))]
+    ZCode(DirectHarnessRunArgs),
     #[command(about = nan_harness_i18n::messages::help_run_hermes_agent_through_nan_chat_completions(nan_harness_i18n::locale()))]
     Hermes(DirectHarnessRunArgs),
     #[command(

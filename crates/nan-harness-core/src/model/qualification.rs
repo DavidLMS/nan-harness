@@ -32,6 +32,10 @@ pub struct QualificationMatrix {
     pub claude_code: ModelQualification,
     pub codex: ModelQualification,
     pub opencode: ModelQualification,
+    #[serde(rename = "mimo-code", default = "unknown_direct_qualification")]
+    pub mimo_code: ModelQualification,
+    #[serde(default = "unknown_direct_qualification")]
+    pub zcode: ModelQualification,
     pub hermes: ModelQualification,
     pub pi: ModelQualification,
     pub omp: ModelQualification,
@@ -58,6 +62,8 @@ impl QualificationMatrix {
             HarnessKind::ClaudeCode => &self.claude_code,
             HarnessKind::Codex => &self.codex,
             HarnessKind::OpenCode => &self.opencode,
+            HarnessKind::MimoCode => &self.mimo_code,
+            HarnessKind::ZCode => &self.zcode,
             HarnessKind::Hermes => &self.hermes,
             HarnessKind::Pi => &self.pi,
             HarnessKind::Omp => &self.omp,
@@ -71,5 +77,13 @@ impl QualificationMatrix {
             HarnessKind::Goose => &self.goose,
             HarnessKind::Fx => &self.fx,
         }
+    }
+}
+
+fn unknown_direct_qualification() -> ModelQualification {
+    ModelQualification {
+        status: QualificationStatus::Unknown,
+        transport: QualificationTransport::DirectChat,
+        tested_at: None,
     }
 }

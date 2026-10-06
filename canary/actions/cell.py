@@ -130,6 +130,9 @@ INSTALL_FAILURE_CODES = {
     "hosted-node-missing", "hosted-node-version-mismatch", "hosted-npm-missing",
     "diagnostic-unknown", "unknown",
 }
+ZCODE_INSTALL_STAGES = frozenset({"git-init", "git-fetch", "git-checkout", "node-install", "pnpm-install",
+                                  "runtime-verify", "dependencies", "build", "command-verify", "terminal-driver"})
+INSTALL_FAILURE_CODES.update("zcode-source-" + stage for stage in ZCODE_INSTALL_STAGES)
 WINDOWS_INSTALL_CATEGORIES = frozenset({
     "git-ownership", "git-path-length", "git-config", "git-checkout", "git-download",
     "installer-argument", "installer-path", "git-native-error",
@@ -644,7 +647,7 @@ def cell_environment(directory):
     hidden.append(directory.resolve().parent)
     inherited = [entry for entry in env.get("PATH", "").split(os.pathsep)
                  if entry and not any(Path(entry).resolve().is_relative_to(old) for old in hidden)]
-    bins = [home / ".local/bin", home / ".local", home / ".kimi-code/bin",
+    bins = [home / ".local/bin", home / ".local", home / ".mimocode/bin", home / ".kimi-code/bin",
             home / ".hermes/bin", home / ".local/share/nan-harness-canary-uv/bin"]
     if os.name == "nt":
         bins = [directory / "bin", directory / "hermes/bin",
@@ -931,6 +934,16 @@ def install(args, state):
     if status:
         if os.name == "nt":
             installer_code = windows_install_failure(installer_marker, installer_code)
+        if args.harness == "zcode":
+            marker = args.directory / "zcode-source-failure.json"
+            try:
+                stage = json.loads(marker.read_bytes()).get("stage")
+                if isinstance(stage, str) and stage in ZCODE_INSTALL_STAGES:
+                    installer_code = "zcode-source-" + stage
+            except (OSError, ValueError, AttributeError):
+                pass
+            finally:
+                marker.unlink(missing_ok=True)
         raise InstallFailure(INSTALLER_FAILURE_PHASE, installer_code)
     doctor = args.directory / "doctor.json"
     try:
@@ -996,6 +1009,10 @@ def conformance(args, state):
     """
     report = args.directory / "conformance-private.json"
     environment = cell_environment(args.directory)
+    if args.harness == "zcode":
+        private_command([sys.executable, str(ROOT / "canary/guest/zcode-source.py"), "check",
+                         "--directory", str(args.directory), "--binary", str(args.binary)],
+                        args.directory, timeout=1200, environment=environment)
     for attempt in range(1, CONFORMANCE_ATTEMPTS + 1):
         try:
             private_command([str(args.canary), "conformance", "--nan-harness", str(args.binary),

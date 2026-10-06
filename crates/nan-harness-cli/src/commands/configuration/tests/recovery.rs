@@ -103,6 +103,9 @@ fn seed(root: &Path, harness: HarnessKind, operation: Operation) -> Configuratio
     // Existing native credentials/settings and catalog content must survive recovery.
     let existing = match harness {
         HarnessKind::OpenCode => Some((".config/opencode/opencode.json", "{\"theme\":\"user\"}\n")),
+        HarnessKind::MimoCode => {
+            Some((".config/mimocode/mimocode.jsonc", "{\"theme\":\"user\"}\n"))
+        }
         HarnessKind::QwenCode => Some((".qwen/settings.json", "{\"userSetting\":true}\n")),
         HarnessKind::DeepSeekHarness => Some((".dsh/settings.yaml", "user-setting: true\n")),
         HarnessKind::Aider => Some((".aider.conf.yml", "# user settings\n")),

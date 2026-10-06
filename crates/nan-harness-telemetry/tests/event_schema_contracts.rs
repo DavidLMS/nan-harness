@@ -10,6 +10,7 @@ const HARNESS_KINDS: &[(HarnessKind, &str)] = &[
     (HarnessKind::ClaudeDesktop, "claude-desktop"),
     (HarnessKind::Codex, "codex"),
     (HarnessKind::OpenCode, "opencode"),
+    (HarnessKind::MimoCode, "mimo-code"),
     (HarnessKind::Hermes, "hermes"),
     (HarnessKind::HermesDesktop, "hermes-desktop"),
     (HarnessKind::PenDesktop, "pen-desktop"),

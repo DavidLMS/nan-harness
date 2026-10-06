@@ -1,0 +1,6 @@
+schema_version = 1
+harness = "mimo-code"
+profile = "Headless JSON mode built-ins"
+last_compatible_version = "0.1.14"
+inventory = ["actor", "bash", "cron", "edit", "glob", "grep", "history", "memory", "notebook_edit", "read", "skill", "skill_search", "task", "webfetch", "write"]
+optional_inventory = ["nan-search_web_search", "StructuredOutput"]

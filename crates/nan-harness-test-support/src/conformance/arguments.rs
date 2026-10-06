@@ -57,9 +57,24 @@ fn headless_base_arguments(
     workspace: &Path,
 ) -> Vec<OsString> {
     match kind {
+        HarnessKind::ZCode => vec![
+            "--locale".into(),
+            "en-US".into(),
+            "--no-color".into(),
+            "--prompt".into(),
+            prompt.into(),
+        ],
         HarnessKind::ClaudeCode => claude_base_arguments(prompt),
         HarnessKind::Codex => codex_base_arguments(prompt),
         HarnessKind::OpenCode => opencode_base_arguments(prompt),
+        HarnessKind::MimoCode => vec![
+            "run".into(),
+            "--pure".into(),
+            "--format".into(),
+            "json".into(),
+            "--dangerously-skip-permissions".into(),
+            prompt.into(),
+        ],
         HarnessKind::Hermes => hermes_base_arguments(prompt),
         HarnessKind::Pi => pi_base_arguments(prompt),
         HarnessKind::PrimeAgent => prime_base_arguments(prompt),

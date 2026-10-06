@@ -32,6 +32,8 @@ pub(super) async fn run_simple_harness(
         Command::Claude(arguments) => (HarnessKind::ClaudeCode, &arguments.run, &ClaudeCodeAdapter),
         Command::Codex(arguments) => (HarnessKind::Codex, &arguments.run, &CodexAdapter),
         Command::OpenCode(arguments) => (HarnessKind::OpenCode, &arguments.run, &OpenCodeAdapter),
+        Command::Mimo(arguments) => (HarnessKind::MimoCode, &arguments.run, &MimoCodeAdapter),
+        Command::ZCode(arguments) => (HarnessKind::ZCode, &arguments.run, &ZCodeAdapter),
         Command::Hermes(arguments) => (HarnessKind::Hermes, &arguments.run, &HermesAdapter),
         Command::Pi(arguments) => (HarnessKind::Pi, &arguments.run, &PiAdapter),
         Command::Omp(arguments) => (HarnessKind::Omp, &arguments.run, &OmpAdapter),

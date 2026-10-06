@@ -39,7 +39,8 @@ pub(super) fn classify_install(error: &InstallError) -> Classification {
         InstallError::RuntimeUnsupported { .. } | InstallError::RuntimeUnparseable { .. } => {
             (FailureCause::UnsupportedVersion, None)
         }
-        InstallError::CompatibilityManifest(_)
+        InstallError::SourcePrerequisite { .. }
+        | InstallError::CompatibilityManifest(_)
         | InstallError::InvalidRuntimeCommand { .. }
         | InstallError::UnsupportedPlatform(_)
         | InstallError::UnsupportedHarness(_) => (FailureCause::InvalidConfiguration, None),

@@ -10,11 +10,23 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 
 #[test]
+fn mimo_compatibility_records_conformance_without_live_qualification() {
+    let manifest = bundled_compatibility_manifest().expect("manifest should parse");
+    let mimo = manifest
+        .entry(HarnessKind::MimoCode)
+        .expect("MiMo Code compatibility should exist");
+    assert_eq!(mimo.minimum_version.to_string(), "0.1.14");
+    assert_eq!(mimo.last_compatible_version.to_string(), "0.1.14");
+    assert!(mimo.last_live_verified_version.is_none());
+    assert!(mimo.live_verified_at.is_none());
+}
+
+#[test]
 fn bundled_manifest_is_typed_and_complete() {
     let manifest = bundled_compatibility_manifest().expect("manifest should parse");
 
     assert_eq!(manifest.schema_version, 3);
-    assert_eq!(manifest.harnesses.len(), 15);
+    assert_eq!(manifest.harnesses.len(), HarnessKind::ALL.len());
     let claude = manifest
         .entry(HarnessKind::ClaudeCode)
         .expect("Claude Code compatibility should exist");

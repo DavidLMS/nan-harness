@@ -1,6 +1,6 @@
 {
   "schemaVersion": 3,
-  "testedAt": "2026-09-07T03:05:35.251572Z",
+  "testedAt": "2026-10-01T05:33:15Z",
   "policy": {
     "newer": "allow-with-warning",
     "older": "require-allow-unsupported",
@@ -37,6 +37,30 @@
       "lastLiveVerifiedVersion": "1.18.29",
       "liveVerifiedAt": "2026-09-07T02:43:12.479085Z",
       "minimumVersion": "1.18.4",
+      "transport": "direct-chat",
+      "status": "verified"
+    },
+    {
+      "id": "mimo-code",
+      "command": "mimo --version",
+      "lastCompatibleVersion": "0.1.14",
+      "compatibleAt": "2026-10-01T05:33:15Z",
+      "minimumVersion": "0.1.14",
+      "transport": "direct-chat",
+      "status": "verified"
+    },
+    {
+      "id": "zcode",
+      "command": "zcode version",
+      "runtime": {
+        "command": "node --version",
+        "minimumVersion": "24.14.0"
+      },
+      "lastCompatibleVersion": "0.16.9",
+      "compatibleAt": "2026-10-02T10:31:09Z",
+      "lastLiveVerifiedVersion": "0.16.9",
+      "liveVerifiedAt": "2026-10-02T21:38:43Z",
+      "minimumVersion": "0.16.9",
       "transport": "direct-chat",
       "status": "verified"
     },

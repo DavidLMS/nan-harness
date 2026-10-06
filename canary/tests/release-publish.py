@@ -69,7 +69,7 @@ class ReleasePublishTests(unittest.TestCase):
         self.handoff.write_text(json.dumps({
             "schemaVersion": 1, "repository": "Acme/Fork", "tag": "v1.2.3",
             "tagCommit": self.tag_commit, "workflowCommit": self.workflow_commit,
-            "runId": self.run_id, "reportCount": 43, "reports": reports,
+            "runId": self.run_id, "reportCount": 49, "reports": reports,
             "assets": asset_entries, "assetManifest": self.manifest.name,
             "assetManifestSha256": publisher.digest(self.manifest),
             "attestation": {"workflow": "Acme/Fork/.github/workflows/release.yml",
@@ -81,11 +81,25 @@ class ReleasePublishTests(unittest.TestCase):
 
     def test_valid_handoff_has_complete_matrix_and_assets(self):
         value = publisher.validate_handoff(self.handoff)
-        self.assertEqual(value["reportCount"], 43)
+        self.assertEqual(value["reportCount"], 49)
+
+    def test_mimo_release_receipt_remains_valid_only_for_recommendation(self):
+        raw = json.loads(self.handoff.read_text())
+        raw["reports"] = [item for item in raw["reports"]
+                          if item["identity"].replace("-", "/", 1) in publisher.HISTORICAL_MIMO_IDENTITIES]
+        raw["reportCount"] = 46
+        self.handoff.write_text(json.dumps(raw))
+        with self.assertRaises(publisher.ContractError):
+            publisher.validate_handoff(self.handoff)
+        handoff = publisher.validate_handoff(self.handoff, recommendation=True)
+        evidence = publisher.build_evidence(self.handoff, handoff)
+        publisher.validate_evidence(evidence, "Acme/Fork", "v1.2.3", recommendation=True)
+        with self.assertRaises(publisher.ContractError):
+            publisher.validate_evidence(evidence, "Acme/Fork", "v1.2.3")
 
     def historical_handoff(self):
         raw = json.loads(self.handoff.read_text())
-        raw["reports"] = [item for item in raw["reports"] if not item["identity"].startswith("windows-")]
+        raw["reports"] = [item for item in raw["reports"] if item["identity"].replace("-", "/", 1) in publisher.HISTORICAL_IDENTITIES]
         raw["assets"] = [item for item in raw["assets"] if item["name"] in publisher.HISTORICAL_ASSETS]
         raw["reportCount"] = 30
         self.handoff.write_text(json.dumps(raw))
@@ -102,6 +116,21 @@ class ReleasePublishTests(unittest.TestCase):
         evidence["reports"].pop(next(iter(evidence["reports"])))
         with self.assertRaises(publisher.ContractError):
             publisher.validate_evidence(evidence, "Acme/Fork", "v1.2.3", recommendation=True)
+
+    def test_previous_windows_matrix_only_qualifies_recommendation(self):
+        raw = json.loads(self.handoff.read_text())
+        raw["reports"] = [item for item in raw["reports"]
+                          if item["identity"].replace("-", "/", 1)
+                          in publisher.HISTORICAL_WINDOWS_IDENTITIES]
+        raw["reportCount"] = 43
+        self.handoff.write_text(json.dumps(raw))
+        with self.assertRaises(publisher.ContractError):
+            publisher.validate_handoff(self.handoff)
+        handoff = publisher.validate_handoff(self.handoff, recommendation=True)
+        evidence = publisher.build_evidence(self.handoff, handoff)
+        with self.assertRaises(publisher.ContractError):
+            publisher.validate_evidence(evidence, "Acme/Fork", "v1.2.3")
+        publisher.validate_evidence(evidence, "Acme/Fork", "v1.2.3", recommendation=True)
 
     def test_publication_cannot_enable_recommendation_matrix_policy(self):
         args = publisher.parser().parse_args(["--repository", "Acme/Fork", "--tag", "v1.2.3",
@@ -206,7 +235,7 @@ class ReleasePublishTests(unittest.TestCase):
         for path in self.assets.iterdir():
             path.unlink()
         value = publisher.validate_handoff(self.handoff, self.assets, require_evidence=False)
-        self.assertEqual(value["reportCount"], 43)
+        self.assertEqual(value["reportCount"], 49)
 
     def test_durable_evidence_is_strict_and_binds_all_reports(self):
         handoff = publisher.validate_handoff(self.handoff)

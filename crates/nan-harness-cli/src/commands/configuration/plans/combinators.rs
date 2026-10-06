@@ -29,6 +29,7 @@ pub(crate) fn preferred_model(models: &[CodingModelProfile]) -> &str {
 
 pub(crate) fn exclusive_json(path: &[&str], value: Value) -> JsonEntryPlan {
     JsonEntryPlan {
+        selector: None,
         path: path.iter().map(|segment| (*segment).to_owned()).collect(),
         value,
         mode: JsonEntryMode::Exclusive,
@@ -37,6 +38,7 @@ pub(crate) fn exclusive_json(path: &[&str], value: Value) -> JsonEntryPlan {
 
 pub(crate) fn override_json(path: &[&str], value: Value) -> JsonEntryPlan {
     JsonEntryPlan {
+        selector: None,
         path: path.iter().map(|segment| (*segment).to_owned()).collect(),
         value,
         mode: JsonEntryMode::Override,
@@ -45,6 +47,7 @@ pub(crate) fn override_json(path: &[&str], value: Value) -> JsonEntryPlan {
 
 pub(crate) fn append_unique_json(path: &[&str], value: Value) -> JsonEntryPlan {
     JsonEntryPlan {
+        selector: None,
         path: path.iter().map(|segment| (*segment).to_owned()).collect(),
         value,
         mode: JsonEntryMode::AppendUnique,
