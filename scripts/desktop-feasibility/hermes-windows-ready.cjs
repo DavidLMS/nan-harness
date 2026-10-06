@@ -72,10 +72,13 @@ exports.run = async function run(page, session, ownedEndpoint, deadline, expecte
     return false;
   }
   const guard=()=>{
+    let query='ownership';
     try {
       const owned=Date.now()<deadline && ownedEndpoint();
       // The native proof can block; read page identity only after it returns.
+      query='page-set';
       const pages=page.context().browser().contexts().flatMap(context=>context.pages());
+      query='url';
       const failure = Date.now()>=deadline ? 'deadline-expired'
         : !owned ? 'ownership-lost'
         : !urlValid() ? 'url-changed'
@@ -86,33 +89,55 @@ exports.run = async function run(page, session, ownedEndpoint, deadline, expecte
       facts.guardFailure=failure;
       return failure===null;
     } catch {
-      facts.guardFailure='query-failed';
+      facts.guardFailure='query-failed';facts.queryFailure=query;
       return false;
     }
   };
   let evidence, documentIdentity;
   async function frame() {
-    if (!guard()) throw new Error('guard');
-    let timer;
-    try {
-      const reply=await Promise.race([session.send('Page.getFrameTree'), new Promise((_,reject)=>{
-        timer=setTimeout(()=>reject(new Error('frame deadline')),Math.min(5000,Math.max(1,deadline-Date.now())));
-      })]);
-      const current=reply?.frameTree?.frame;
-      // CDP separates the document URL from its fragment, including the '#'.
-      const fragment=current?.urlFragment===undefined?'':current.urlFragment;
-      if (!current || current.url!==base || !['','#/'].includes(fragment)
-          || current.url+fragment!==page.url() || !['id','loaderId'].every(key=>typeof current[key]==='string'
-          && current[key].length>0 && current[key].length<=256)) throw new Error('frame');
-      if (documentIdentity && (current.id!==documentIdentity.id || current.loaderId!==documentIdentity.loaderId)) {
-        facts.guardFailure='url-changed'; throw new Error('document changed');
-      }
+    let pendingIdentity=null;
+    for (;;) {
       if (!guard()) throw new Error('guard');
-      return {id:current.id,loaderId:current.loaderId};
-    } catch {
-      if (facts.guardFailure===null) facts.guardFailure=Date.now()>=deadline?'deadline-expired':'query-failed';
-      throw new Error('frame');
-    } finally { clearTimeout(timer); }
+      let timer,query='frame-request';
+      try {
+        const reply=await Promise.race([session.send('Page.getFrameTree'), new Promise((_,reject)=>{
+          timer=setTimeout(()=>reject(new Error('frame deadline')),Math.min(5000,Math.max(1,deadline-Date.now())));
+        })]);
+        query='frame-shape';
+        const current=reply?.frameTree?.frame;
+        if (!current) throw new Error('frame');
+        query='frame-url';
+        if (current.url!==base) throw new Error('frame');
+        // CDP separates the URL fragment. The page and frame reads can straddle
+        // the known first HashRouter transition; no input is admitted meanwhile.
+        query='frame-fragment';
+        const fragment=current.urlFragment===undefined?'':current.urlFragment;
+        if (!['','#/'].includes(fragment)) throw new Error('frame');
+        query='frame-identity';
+        if (!['id','loaderId'].every(key=>typeof current[key]==='string'
+            && current[key].length>0 && current[key].length<=256)) throw new Error('frame');
+        const retained=documentIdentity||pendingIdentity;
+        if (retained && (current.id!==retained.id || current.loaderId!==retained.loaderId)) {
+          facts.guardFailure='url-changed';throw new Error('document changed');
+        }
+        if (!guard()) throw new Error('guard');
+        query='frame-transition';
+        if (current.url+fragment!==page.url()) {
+          if (!startup) throw new Error('frame');
+          pendingIdentity={id:current.id,loaderId:current.loaderId};
+          facts.frameTransitionWaited=true;
+          await delay(Math.min(100,Math.max(0,deadline-Date.now())));
+          continue;
+        }
+        return {id:current.id,loaderId:current.loaderId};
+      } catch {
+        if (facts.guardFailure===null) {
+          facts.guardFailure=Date.now()>=deadline?'deadline-expired':'query-failed';
+          if (facts.guardFailure==='query-failed') facts.queryFailure=query;
+        }
+        throw new Error('frame');
+      } finally { clearTimeout(timer); }
+    }
   }
   try {
     documentIdentity=await frame();

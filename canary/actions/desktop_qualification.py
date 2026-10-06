@@ -965,7 +965,7 @@ def semantic_observations(directory, app):
                         'menuDismissed', 'composerReverified'}
             fields = booleans | {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'stage', 'errorCategory'}
             diagnostics = {'composerObservation', 'guardFailure'}
-            optional = {'actionObservation', 'onboardingSkipped', 'onboardingObservation'}
+            optional = {'actionObservation', 'onboardingSkipped', 'onboardingObservation', 'queryFailure', 'frameTransitionWaited'}
             stages = {'policy', 'onboarding', 'menu', 'refresh', 'catalog', 'dismiss', 'composer', 'ready'}
             errors = {None, 'policy-rejected', 'onboarding-unavailable', 'menu-unavailable', 'refresh-uncertain',
                       'catalog-unavailable', 'dismiss-uncertain', 'composer-changed', 'composer-unavailable'}
@@ -996,6 +996,18 @@ def semantic_observations(directory, app):
                 if value['stage'] == 'ready' and (failure is not None or observation is None):
                     raise ValueError('unmeasured Hermes readiness success')
                 record.update(composerObservation=observation, guardFailure=failure)
+            if 'queryFailure' in value:
+                query = value['queryFailure']
+                if (type(query) is not str or query not in {
+                        'ownership', 'page-set', 'url', 'frame-request', 'frame-shape',
+                        'frame-url', 'frame-fragment', 'frame-identity', 'frame-transition'}
+                        or value.get('guardFailure') != 'query-failed'):
+                    raise ValueError('invalid Hermes readiness query phase')
+                record['queryFailure'] = query
+            if 'frameTransitionWaited' in value:
+                if type(value['frameTransitionWaited']) is not bool:
+                    raise ValueError('invalid Hermes frame transition observation')
+                record['frameTransitionWaited'] = value['frameTransitionWaited']
             if 'actionObservation' in value:
                 action = value['actionObservation']
                 if (type(action) is not dict or set(action) != {'action', 'sampleStatus', 'blocker'}

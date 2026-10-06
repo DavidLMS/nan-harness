@@ -240,6 +240,23 @@ impl WindowsChatStage {
         )
     }
 
+    #[cfg(any(windows, test))]
+    pub(crate) fn retry_pending(self, counts: Option<&FailureScopeCounts>) -> bool {
+        // UIA can expose earlier headings before the fresh error row has its
+        // final ancestry. Only reobserve a single failed turn and Retry; these
+        // counts never authorize input. The action still proves the full scope.
+        self.passive_pending()
+            || (self == Self::ScopeHeadingAmbiguous
+                && counts.is_some_and(|counts| {
+                    counts.server_errors == 1
+                        && counts.failed_user_headings == 1
+                        && counts.failed_prompt_texts == 1
+                        && counts.retry_buttons == 1
+                        && counts.retry_labels == 1
+                        && counts.exact_prompt_groups == 1
+                }))
+    }
+
     pub(super) fn parse(wire: &str) -> Option<Self> {
         Some(match wire {
             "turn window\n" => Self::Window,
@@ -392,6 +409,40 @@ mod tests {
             S::Retried,
         ] {
             assert!(!stage.copy_pending());
+        }
+    }
+
+    #[test]
+    fn retry_readiness_can_reobserve_one_failed_turn_without_admitting_ambiguity() {
+        use super::{WindowsChatReceipt, WindowsChatStage as S};
+        let wire = "turn scope-heading-ambiguous\nfailure-scope 1 1 1 1 0 1 0 0 1 0\n";
+        let receipt = WindowsChatReceipt::parse(wire, "retry-ready").unwrap();
+        let counts = receipt.failure_scope.unwrap();
+        assert!(receipt.stage.retry_pending(Some(&counts)));
+        assert!(!receipt.stage.copy_pending());
+        assert!(!receipt.stage.retry_pending(None));
+        for field in 0..6 {
+            for value in [0, 2] {
+                let mut invalid = counts.clone();
+                *match field {
+                    0 => &mut invalid.server_errors,
+                    1 => &mut invalid.failed_user_headings,
+                    2 => &mut invalid.failed_prompt_texts,
+                    3 => &mut invalid.retry_buttons,
+                    4 => &mut invalid.retry_labels,
+                    _ => &mut invalid.exact_prompt_groups,
+                } = value;
+                assert!(!receipt.stage.retry_pending(Some(&invalid)));
+            }
+        }
+        for stage in [
+            S::ActionUncertain,
+            S::TreePid,
+            S::ScopeControlAmbiguous,
+            S::ScopePromptMismatch,
+            S::Retried,
+        ] {
+            assert!(!stage.retry_pending(Some(&counts)));
         }
     }
 

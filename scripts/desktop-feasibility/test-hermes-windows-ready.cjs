@@ -3,17 +3,18 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('nod
 const {EventEmitter}=require('node:events');
 async function trial(scenario) {
  let clock=0,opened=false,owner=true,refreshClicks=0,pillClicks=0,escapes=0,skipClicks=0,rowReads=0;
- let coverReads=0, actionSamples=0;
+ let coverReads=0, actionSamples=0, frameReads=0;
  let onboardingPresent=scenario.startsWith('onboarding-');
  let pageReplacedByOwner=false;
  const session=new EventEmitter(); session.send=async method=>{
    if(method!=='Page.getFrameTree')return;
+   frameReads++;if(scenario==='frame-request-error')throw new Error('PRIVATE');
    if(scenario==='stalled-frame')return new Promise(()=>{});
    const url=new URL(page.url());
    return {frameTree:{frame:{id:scenario==='frame-replaced' && clock>=100?'other':'main',
-     loaderId:scenario==='reload' && clock>=100?'new':'original',
+     loaderId:(scenario==='reload' && clock>=100)||(scenario==='frame-transition-reload'&&frameReads>1)?'new':'original',
      url:scenario==='frame-url-mismatch'?'file:///foreign/index.html':url.href.slice(0,url.href.length-url.hash.length),
-     urlFragment:scenario==='frame-fragment-mismatch'?'#/foreign':scenario==='frame-fragment-invalid'?null:scenario==='frame-fragment-missing'?undefined:url.hash}}};
+     urlFragment:scenario.startsWith('frame-transition-')&&frameReads===1?'':scenario==='frame-fragment-mismatch'?'#/foreign':scenario==='frame-fragment-invalid'?null:scenario==='frame-fragment-missing'?undefined:url.hash}}};
  };
  const point={x:5,y:5,left:0,top:0,width:20,height:20};
  const editorHandle={},rootHandle={};
@@ -52,7 +53,7 @@ async function trial(scenario) {
  const page={evaluate:async()=>['startup-owner-loss','startup-url-change','startup-page-count'].includes(scenario) || scenario==='loading' || scenario==='document-pending' && clock<200?'loading':'complete',url:()=>{
  const base='file:///synthetic/resources/app.asar/dist/index.html';
  if(scenario==='startup-url-change' && clock>=200)return 'file:///synthetic/other.html';
- if(scenario==='warm-root'||scenario==='frame-fragment-missing')return base+'#/';
+ if((scenario==='warm-root'||scenario.startsWith('frame-transition-'))||scenario==='frame-fragment-missing')return base+'#/';
  if(scenario==='root-transition' && clock>=100)return base+'#/';
  if(scenario==='second-transition' && clock>=100 && clock<200)return base+'#/';
  if(scenario==='query-transition' && clock>=100)return base+'?profile=nan#/';
@@ -69,6 +70,7 @@ async function trial(scenario) {
  Date:{now:()=>clock},setTimeout:(fn,ms)=>{if(ms<=100 || scenario==='stalled-frame'){clock+=ms;fn();return null;}return setTimeout(fn,ms);},clearTimeout,URL,JSON,Number,Error};
  vm.runInNewContext(fs.readFileSync(__dirname+'/hermes-windows-ready.cjs','utf8'),context);
  const facts=await exports.run(page,session,()=>{
+   if(scenario==='owner-query-error')throw new Error('PRIVATE');
    if(scenario==='owner-query-exhausts-budget')clock=3001;
    if(scenario==='owner-query-replaces-page')pageReplacedByOwner=true;
    return owner && !(scenario==='startup-owner-loss' && clock>=200) && !(scenario==='stability-owner-loss' && clock>=100);
@@ -113,6 +115,12 @@ for(const element of [modelElement([text('Qwen3.6 27B'),meta]),modelElement([tex
   const result=await trial(scenario);
   assert.equal(result.refreshClicks,scenario==='moving-refresh'?1:0);
   assert.equal(result.facts.stage==='ready',scenario==='moving-refresh');
+ }
+ const transitioned=await trial('frame-transition-race');
+ assert.equal(transitioned.facts.stage,'ready');assert.equal(transitioned.facts.frameTransitionWaited,true);
+ const reloaded=await trial('frame-transition-reload');assert.notEqual(reloaded.facts.stage,'ready');assert.equal(reloaded.pillClicks,0);
+ for(const [scenario,phase]of [['frame-request-error','frame-request'],['owner-query-error','ownership']]) {
+  const result=await trial(scenario);assert.equal(result.facts.queryFailure,phase);assert.equal(result.pillClicks,0);
  }
  const good=await trial('good');assert.equal(good.facts.stage,'ready');assert.equal(good.pillClicks,1);assert.equal(good.refreshClicks,1);assert.equal(good.escapes,1);
  const pending=await trial('row-pending');assert.equal(pending.facts.stage,'ready');assert.equal(pending.rowReads,3);

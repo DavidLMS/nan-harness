@@ -3415,3 +3415,21 @@ requires the retained dialog, form and button to detach within the existing
 deadline, with directory and window custody re-proved. A remaining dialog, lost
 custody or uncertain dispatch fails; input is never replayed. Synthetic tests
 cover the successful transition, a remaining dialog and post-click custody loss.
+
+### Windows readiness follow-up after the ten-cell pass
+
+Run `37437734044` at `be3ca350` passed ten of twelve cells and the complete
+integration-quality job. Codex and Zed passed all platforms. Claude Windows
+passed two sessions, then rejected an ambiguous heading snapshot before Retry;
+Hermes Windows rejected its first document query, then passed both subsequent
+sessions. All cleanup checks passed. These failures keep the aggregate unqualified.
+
+Claude's read-only Retry readiness loop may now reobserve heading ambiguity only
+when the closed counts identify exactly one server error, failed user heading,
+failed prompt, prompt group, Retry button and Retry label. The native action
+continues to require its complete unambiguous scope; duplicated controls, lost
+ownership and uncertain input remain terminal. The original deadline is unchanged.
+Hermes now retains frame and loader identity while its initial page/frame reads
+settle across the known root-fragment transition. Reloads and foreign routes
+remain rejected. Closed query-phase diagnostics distinguish future ownership,
+page-set and frame-query failures without exporting identifiers or URLs.

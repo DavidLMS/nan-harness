@@ -2023,6 +2023,17 @@ class QualificationTests(unittest.TestCase):
                 item = {**value, 'composerObservation': snapshot, 'guardFailure': 'deadline-expired'}
                 path.write_text(json.dumps(item))
                 self.assertEqual(q.semantic_observations(root, 'hermes-desktop'), [item])
+            for phase in ('ownership', 'page-set', 'url', 'frame-request', 'frame-shape',
+                          'frame-url', 'frame-fragment', 'frame-identity', 'frame-transition'):
+                item = {**value, 'composerObservation': None, 'guardFailure': 'query-failed',
+                        'queryFailure': phase, 'frameTransitionWaited': True}
+                path.write_text(json.dumps(item))
+                self.assertEqual(q.semantic_observations(root, 'hermes-desktop'), [item])
+            for change in ({'queryFailure': 'PRIVATE'}, {'frameTransitionWaited': 1},
+                           {'guardFailure': 'ownership-lost'}):
+                path.write_text(json.dumps({**item, **change}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'hermes-desktop')
             item = {**value, 'composerObservation': observation, 'guardFailure': 'ownership-lost'}
             invalid = [{**item, 'guardFailure': 'PRIVATE'},
                        {**item, 'composerObservation': {**observation, 'label': 'PRIVATE'}},
