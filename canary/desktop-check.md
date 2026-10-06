@@ -3306,3 +3306,13 @@ imports and the derived update, folder-consent and browser-import titles.
 This refresh grants no new UI actions and is not runtime acceptance evidence.
 The startup settlement and fixture-read corrections still require a complete
 Windows run before the final twelve-cell, same-commit campaign.
+
+Run `37410841843` at `27dc0ab0` admitted Windows Codex `26.930.51102`.
+All three sessions verified response and explicit recovery; both cleanup scopes
+passed. One session verified the fixture read, while two returned a running
+unified-exec session before producing the file content. The deterministic
+provider now follows that exact returned session with at most three empty
+`write_stdin` calls. It requires an exit-zero envelope before completing the
+script, preserves the existing turn deadline, and refuses missing tools,
+changed sessions and exhausted polling. No session identifiers enter reports.
+This continuation is opt-in for the desktop fixture-read scenario.

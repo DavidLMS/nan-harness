@@ -524,7 +524,12 @@ async fn complete_scenario(
     let (name, arguments) = selected.ok_or(Reason::ToolMismatch)?;
     let selected_tool = SelectedTool::from_name(&name).ok_or(Reason::ToolMismatch)?;
     let tool_marker = semantic_marker("NAN CHECK TOOL")?;
-    let tool = ScriptedProvider::start(ProviderScenario::tool(name, arguments, &tool_marker))
+    let scenario = if matches!(selected_tool, SelectedTool::ExecCommand) {
+        ProviderScenario::exec_read(arguments, &tool_marker)
+    } else {
+        ProviderScenario::tool(name, arguments, &tool_marker)
+    };
+    let tool = ScriptedProvider::start(scenario)
         .await
         .map_err(|_| Reason::ProviderFailed)?;
     gate.use_upstream(tool.base_url());
