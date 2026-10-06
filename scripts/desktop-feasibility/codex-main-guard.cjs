@@ -83,7 +83,10 @@ function createHeldMainGuard(held, browser, owner, deadline, route,
   };
   const prove=async()=>{
     if(await measure())return true;
-    if(folderSettleTicket&&!appearanceRetried&&!auxiliary&&failure==='auxiliary-route') {
+    // Scoped DOM input retains the main target even when the first auxiliary
+    // appears after Trust's ticket expires. Wait only for that same blank page;
+    // no input is authorized until fresh main and inert auxiliary proofs pass.
+    if((folderSettleTicket||requireVisibleDocument)&&!appearanceRetried&&!auxiliary&&failure==='auxiliary-route') {
       const current=pages(),extra=current.find(page=>page!==held.page);
       if(current.length!==2||!current.includes(held.page)||!extra
         ||!['','about:blank'].includes(extra.url()))return false;

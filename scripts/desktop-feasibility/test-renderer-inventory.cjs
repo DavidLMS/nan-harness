@@ -117,7 +117,7 @@ assert.equal(roleSourceScope({foreignFieldset:true}).mainScope,false);
     let current=[main,aux],owned=true,queries=0;
     const state=page=>({page,url:page.url(),target:page===main?'private-main':'private-aux',
       frame:page===main?'frame-main':'frame-aux',loader:'private-loader',frameUrl:page.url(),fragment:'',
-      scope:{mainScope:page===main,focused:page===main,
+      scope:{mainScope:page===main,focused:page===main,visibleDocument:true,
         counts:page===main?{...empty,roleLegend:1,roleRadios:11,engineering:1,dialog:1}: {...empty}}});
     const held=state(main),browser={contexts:()=>[{pages:()=>current}]};
     let alter=()=>{};
@@ -273,22 +273,24 @@ assert.equal(roleSourceScope({foreignFieldset:true}).mainScope,false);
       assert.equal(await cold(),false);assert.equal(cold.failure(),'auxiliary-identity');
     } else assert.equal(cold.binding().auxiliary,null);
   }
-  // A completed Trust grants only passive settlement of one retained blank auxiliary.
-  for(const failure of ['none','replacement','foreign-route','main-focus','main-identity','controls','deadline','no-ticket']) {
+  // Native input requires a Trust ticket; scoped DOM may settle the same
+  // late blank auxiliary while retaining main identity and rejecting foreign pages.
+  for(const scopedDOM of [false,true]) for(const failure of ['none','replacement','foreign-route','main-focus','main-identity','controls','deadline','no-ticket']) {
     f=fixture();f.setPages([f.main]);let url='about:blank';f.aux.url=()=>url;
     const route=value=>value.includes('avatar-overlay')?'avatarOverlay':'unknown';
     const settle=helper.heldMainGuard(f.held,f.browser,()=>true,1000,route,f.identity,
       async ms=>{clock+=ms;url=failure==='foreign-route'?'https://foreign.invalid':'app://-/index.html?initialRoute=%2Favatar-overlay';
         if(failure==='replacement')f.setPages([f.main,{url:()=>url}]);
-        if(failure==='deadline')clock=1001;});
+        if(failure==='deadline')clock=1001;},false,false,!scopedDOM,scopedDOM);
     assert.equal(await settle(),true);settle.sealInitialActions();
     if(failure!=='no-ticket')assert.equal(settle.allowPassiveFolderSettle(),true);
     f.setPages([f.main,f.aux]);
     f.setAlter(r=>{if(r.page===f.main&&failure==='main-focus')r.scope.focused=false;
       if(r.page===f.main&&failure==='main-identity')r.loader='replaced';
       if(r.page===f.aux&&failure==='controls')r.scope.counts.editable=1;});
-    assert.equal(await settle(),failure==='none');
-    if(failure==='none'){assert(settle.binding().auxiliary);assert.equal(await settle(),true);}
+    const accepted=failure==='none'||scopedDOM&&['main-focus','no-ticket'].includes(failure);
+    assert.equal(await settle(),accepted);
+    if(accepted){assert(settle.binding().auxiliary);assert.equal(await settle(),true);}
   }
   // Startup focus acceptance stays capped at35s; its SAME held guard remains
   // valid for Trust and role proofs until the original60s total, with no rebinding.

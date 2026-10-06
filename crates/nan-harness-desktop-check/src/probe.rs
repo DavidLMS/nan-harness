@@ -1693,7 +1693,10 @@ fn select_read_tool(requests: &[Value], fixture: &Path) -> Option<(String, Value
                 "read_file" => json!({"path":fixture}),
                 "read_files" => json!({"paths":[fixture]}),
                 "exec_command" => {
-                    json!({"cmd":format!("cat -- '{}'", fixture.to_string_lossy().replace('\'', "'\\''"))})
+                    // A cold shell can outlive the tool's default short yield.
+                    // Require its completed read within the existing turn budget.
+                    json!({"cmd":format!("cat -- '{}'", fixture.to_string_lossy().replace('\'', "'\\''")),
+                        "yield_time_ms":10_000})
                 }
                 _ => continue,
             };
@@ -3857,6 +3860,17 @@ mod tests {
             select_read_tool(&[json!({"tools":[{"function":{"name":"Read"}}]})], fixture).unwrap();
         assert_eq!(name, "Read");
         assert_eq!(input["file_path"], fixture.to_str().unwrap());
+        let (name, input) = select_read_tool(
+            &[json!({"tools":[{"function":{"name":"exec_command"}}]})],
+            Path::new("/private/fixture/quote'target.txt"),
+        )
+        .unwrap();
+        assert_eq!(name, "exec_command");
+        assert_eq!(
+            input["cmd"],
+            "cat -- '/private/fixture/quote'\\''target.txt'"
+        );
+        assert_eq!(input["yield_time_ms"], 10_000);
     }
 
     #[test]
