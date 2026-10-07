@@ -1,4 +1,5 @@
 mod compatibility;
+mod historical_compatibility;
 mod hosted_compatibility;
 mod metadata;
 mod unified_compatibility;

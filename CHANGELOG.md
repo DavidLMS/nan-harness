@@ -7,6 +7,15 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.17] - 2026-10-07
+
+### Fixed
+
+- Preserve historical CLI compatibility evidence when a newer release raises a
+  harness minimum; enforce current minimums only for the current release.
+- Include the reasoning and native configuration fixes from the unpublished
+  v0.1.16 draft, whose publication exposed this historical-feed validation bug.
+
 ## [0.1.16] - 2026-10-07
 
 ### Fixed
@@ -924,7 +933,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   startup update prompts, daily compatibility canaries, and a monotonic remote
   verification feed.
 
-[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.1.16...HEAD
+[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.1.17...HEAD
+[0.1.17]: https://github.com/DavidLMS/nan-harness/compare/v0.1.16...v0.1.17
 [0.1.16]: https://github.com/DavidLMS/nan-harness/compare/v0.1.15...v0.1.16
 [0.1.15]: https://github.com/DavidLMS/nan-harness/compare/v0.1.14...v0.1.15
 [0.1.14]: https://github.com/DavidLMS/nan-harness/compare/v0.1.13...v0.1.14

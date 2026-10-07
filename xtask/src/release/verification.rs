@@ -196,7 +196,13 @@ pub(super) fn validate_releases(
         }
         let mut ids = BTreeSet::new();
         for entry in &release.verifications {
-            let id = validate_verification_entry(entry, requirements, None, source)?;
+            let id = validate_verification_entry(
+                entry,
+                requirements,
+                None,
+                release.nan_harness_version == current_release_version(),
+                source,
+            )?;
             if let Some(id) = id
                 && !ids.insert(id)
             {
@@ -273,7 +279,13 @@ pub(super) fn apply_release_update(
                 .find(|existing| existing.id.parse::<HarnessKind>().ok() == Some(id))
                 .and_then(|existing| existing.last_compatible_version.as_ref())
         });
-        let id = validate_verification_entry(entry, requirements, existing_compatible, source)?;
+        let id = validate_verification_entry(
+            entry,
+            requirements,
+            existing_compatible,
+            update.nan_harness_version == current_release_version(),
+            source,
+        )?;
         if let Some(id) = id
             && !ids.insert(id)
         {
@@ -329,6 +341,7 @@ fn validate_verification_entry(
     entry: &VerificationEntry,
     requirements: &BTreeMap<HarnessKind, HarnessRequirement>,
     compatible_fallback: Option<&Version>,
+    enforce_current_minimum: bool,
     source: &str,
 ) -> Result<Option<HarnessKind>, String> {
     let compatible_at = validate_evidence_pair(
@@ -354,7 +367,10 @@ fn validate_verification_entry(
     let Some(requirement) = requirements.get(&id) else {
         return Ok(None);
     };
-    if let Some(version) = &entry.last_compatible_version
+    // The embedded minimum belongs to this release, not to preserved evidence
+    // for older releases that supported earlier harness versions.
+    if enforce_current_minimum
+        && let Some(version) = &entry.last_compatible_version
         && version < &requirement.minimum_version
     {
         return Err(format!(
@@ -362,7 +378,8 @@ fn validate_verification_entry(
             requirement.minimum_version
         ));
     }
-    if let Some(version) = &entry.last_live_verified_version
+    if enforce_current_minimum
+        && let Some(version) = &entry.last_live_verified_version
         && version < &requirement.minimum_version
     {
         return Err(format!(
