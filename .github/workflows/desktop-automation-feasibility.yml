@@ -35,6 +35,18 @@ on:
         default: false
   workflow_dispatch:
     inputs:
+      release_tag:
+        description: Optional exact attested release to diagnose instead of a branch build
+        type: string
+        default: ''
+      release_commit:
+        description: Immutable commit of the selected release assets
+        type: string
+        default: ''
+      release_manifest_sha256:
+        description: SHA-256 of the selected release checksum manifest
+        type: string
+        default: ''
       app:
         description: One bounded native experiment
         type: choice
