@@ -268,7 +268,13 @@ impl ClaudeNativeChatSession<'_> {
                 | ChatTurnStage::InputInitialUnavailable
                 | ChatTurnStage::InputInitialNonempty
                 | ChatTurnStage::InputClipboardMismatch
-                | ChatTurnStage::InputValueMismatch,
+                | ChatTurnStage::InputValueMismatch
+                | ChatTurnStage::InputPasteUnsettled
+                | ChatTurnStage::InputPasteFocusBefore
+                | ChatTurnStage::InputPasteValueUnavailable
+                | ChatTurnStage::InputPasteQueryFailed
+                | ChatTurnStage::InputPasteFocusAfter
+                | ChatTurnStage::InputPasteUnexpectedValue,
             ) => Err(Reason::InputMismatch),
             Ok(_) => Err(Reason::ActionUnsupported),
             Err(reason) => {

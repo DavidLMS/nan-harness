@@ -2947,7 +2947,10 @@ class QualificationTests(unittest.TestCase):
                           'scope-marker-heading-absent', 'scope-anchor-ambiguous',
                           'scope-control-absent', 'scope-control-ambiguous', 'scope-heading-ambiguous', 'scope-prompt-mismatch',
                           'input-initial-unavailable', 'input-initial-nonempty',
-                          'input-clipboard-mismatch', 'input-value-mismatch'):
+                          'input-clipboard-mismatch', 'input-value-mismatch',
+                          'input-paste-unsettled', 'input-paste-focus-before',
+                          'input-paste-value-unavailable', 'input-paste-query-failed',
+                          'input-paste-focus-after', 'input-paste-unexpected-value'):
                 item = {**value, 'stage': stage, 'submittedTurns': 0, 'inputVerifiedTurns': 0,
                         'copiedResponses': 0, 'retryAttempted': False}
                 path.write_text(json.dumps(item))

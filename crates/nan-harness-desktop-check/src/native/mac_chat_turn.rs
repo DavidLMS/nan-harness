@@ -67,6 +67,12 @@ pub(crate) enum ChatTurnStage {
     InputInitialNonempty,
     InputClipboardMismatch,
     InputValueMismatch,
+    InputPasteUnsettled,
+    InputPasteFocusBefore,
+    InputPasteValueUnavailable,
+    InputPasteQueryFailed,
+    InputPasteFocusAfter,
+    InputPasteUnexpectedValue,
     Control,
     Scope,
     ScopeAnchorAbsent,
@@ -169,6 +175,12 @@ impl ChatTurnStage {
             "turn input-initial-nonempty\n" => Some(Self::InputInitialNonempty),
             "turn input-clipboard-mismatch\n" => Some(Self::InputClipboardMismatch),
             "turn input-value-mismatch\n" => Some(Self::InputValueMismatch),
+            "turn input-paste-unsettled\n" => Some(Self::InputPasteUnsettled),
+            "turn input-paste-focus-before\n" => Some(Self::InputPasteFocusBefore),
+            "turn input-paste-value-unavailable\n" => Some(Self::InputPasteValueUnavailable),
+            "turn input-paste-query-failed\n" => Some(Self::InputPasteQueryFailed),
+            "turn input-paste-focus-after\n" => Some(Self::InputPasteFocusAfter),
+            "turn input-paste-unexpected-value\n" => Some(Self::InputPasteUnexpectedValue),
             "turn control\n" => Some(Self::Control),
             "turn scope\n" => Some(Self::Scope),
             "turn scope-anchor-absent\n" => Some(Self::ScopeAnchorAbsent),
@@ -724,6 +736,27 @@ mod tests {
                 ChatTurnStage::InputClipboardMismatch,
             ),
             ("input-value-mismatch", ChatTurnStage::InputValueMismatch),
+            ("input-paste-unsettled", ChatTurnStage::InputPasteUnsettled),
+            (
+                "input-paste-focus-before",
+                ChatTurnStage::InputPasteFocusBefore,
+            ),
+            (
+                "input-paste-value-unavailable",
+                ChatTurnStage::InputPasteValueUnavailable,
+            ),
+            (
+                "input-paste-query-failed",
+                ChatTurnStage::InputPasteQueryFailed,
+            ),
+            (
+                "input-paste-focus-after",
+                ChatTurnStage::InputPasteFocusAfter,
+            ),
+            (
+                "input-paste-unexpected-value",
+                ChatTurnStage::InputPasteUnexpectedValue,
+            ),
         ] {
             assert_eq!(ChatTurnStage::parse(&format!("turn {name}\n")), Some(stage));
             assert_eq!(ChatTurnStage::parse(&format!("turn {name}\nPRIVATE")), None);

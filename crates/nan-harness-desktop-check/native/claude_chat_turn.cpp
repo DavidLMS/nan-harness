@@ -27,6 +27,7 @@ struct Request {
     CGRect bounds = CGRectZero;
     Clock::time_point deadline;
     mutable const char* deadline_phase = "deadline-window";
+    mutable const char* paste_failure = "input-paste-unsettled";
     ~Request() { for (auto value : {&prompt, &marker, &sentinel}) std::fill(value->begin(), value->end(), '\0'); }
 };
 static bool decode(const std::string& hex, std::string& result) {
@@ -414,16 +415,25 @@ static PastedValue pasted_value_state(const std::string& value, const std::strin
 }
 static PastedValue pasted_composer_value(const Request& request, const Node& control, const std::string& initial) {
     const auto before=focused_composer(request,control);
-    if (before==ComposerFocus::Rejected) return PastedValue::Rejected;
+    if (before==ComposerFocus::Rejected) {
+        request.paste_failure="input-paste-focus-before";
+        return PastedValue::Rejected;
+    }
     if (before==ComposerFocus::PendingIdentity) return PastedValue::Pending;
     auto value=attribute(control.element,kAXValueAttribute);
     PrivateInputValue observed;
     const bool valid=private_input_value(value,observed.value);
     if (value) CFRelease(value);
     const auto after=focused_composer(request,control);
-    if (!valid || ax_query_failed || after==ComposerFocus::Rejected) return PastedValue::Rejected;
+    if (!valid || ax_query_failed || after==ComposerFocus::Rejected) {
+        request.paste_failure = !valid ? "input-paste-value-unavailable"
+            : ax_query_failed ? "input-paste-query-failed" : "input-paste-focus-after";
+        return PastedValue::Rejected;
+    }
     if (after==ComposerFocus::PendingIdentity) return PastedValue::Pending;
-    return pasted_value_state(observed.value,request.prompt,true,true,initial);
+    const auto state=pasted_value_state(observed.value,request.prompt,true,true,initial);
+    if (state==PastedValue::Rejected) request.paste_failure="input-paste-unexpected-value";
+    return state;
 }
 template<class Query, class Within, class Pause>
 static bool settle_pasted_value(Query query, Within within_deadline, Pause pause) {
@@ -479,7 +489,7 @@ static const char* input(const Request& request, const Tree& tree) {
     if (!owned(request)) return "input-prompt-after-guard";
     if (!wait_focused_composer(request, control)) return "input-focused-identity";
     if (!key(9, true)) return "input-paste-key";
-    if (!wait_pasted_value(request,control,initial.value)) return "input-value-mismatch";
+    if (!wait_pasted_value(request,control,initial.value)) return request.paste_failure;
     request.deadline_phase="deadline-input-readback";
     if (!owned(request)) return "input-readback-before-guard";
     if (!clipboard_write(request.sentinel)) return "input-sentinel-clipboard";
