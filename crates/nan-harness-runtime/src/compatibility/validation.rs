@@ -67,7 +67,11 @@ pub(super) fn validate_manifest(
         }
         let mut ids = BTreeSet::new();
         for verification in &release.verifications {
-            let id = validate_verification(verification, base)?;
+            let id = validate_verification(
+                verification,
+                base,
+                running_version.as_ref() == Some(&release.nan_harness_version),
+            )?;
             if let Some(id) = id
                 && !ids.insert(id)
             {
@@ -92,6 +96,7 @@ pub(super) fn validate_manifest(
 fn validate_verification(
     verification: &VerificationEntry,
     base: &CompatibilityManifest,
+    enforce_current_requirements: bool,
 ) -> Result<Option<HarnessKind>, CompatibilityError> {
     let compatible_at = validate_evidence_pair(
         &verification.id,
@@ -118,6 +123,7 @@ fn validate_verification(
         return Ok(None);
     };
     if let Some(version) = &verification.last_compatible_version
+        && enforce_current_requirements
         && version < &entry.minimum_version
     {
         return Err(CompatibilityError::VersionBelowMinimum {
@@ -127,6 +133,7 @@ fn validate_verification(
         });
     }
     if let Some(version) = &verification.last_live_verified_version
+        && enforce_current_requirements
         && version < &entry.minimum_version
     {
         return Err(CompatibilityError::LiveVersionBelowMinimum {
@@ -135,18 +142,19 @@ fn validate_verification(
             minimum: entry.minimum_version.clone(),
         });
     }
-    if let Some(live_version) = &verification.last_live_verified_version {
-        let compatible_version = verification
-            .last_compatible_version
-            .as_ref()
-            .unwrap_or(&entry.last_compatible_version);
-        if live_version > compatible_version {
-            return Err(CompatibilityError::LiveEvidenceAhead {
-                harness: id,
-                live: live_version.clone(),
-                compatible: compatible_version.clone(),
-            });
-        }
+    let compatible_version = verification
+        .last_compatible_version
+        .as_ref()
+        .or_else(|| enforce_current_requirements.then_some(&entry.last_compatible_version));
+    if let (Some(live_version), Some(compatible_version)) =
+        (&verification.last_live_verified_version, compatible_version)
+        && live_version > compatible_version
+    {
+        return Err(CompatibilityError::LiveEvidenceAhead {
+            harness: id,
+            live: live_version.clone(),
+            compatible: compatible_version.clone(),
+        });
     }
     Ok(Some(id))
 }

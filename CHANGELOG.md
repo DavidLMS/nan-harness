@@ -7,6 +7,15 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.18] - 2026-10-07
+
+### Fixed
+
+- Fix startup compatibility refresh warnings when the downloaded history contains
+  older DeepSeek Harness versions. The runtime now checks embedded minimums and
+  fallback versions only for the running NaN release, while retaining evidence
+  integrity checks for every release.
+
 ## [0.1.17] - 2026-10-07
 
 ### Fixed
@@ -933,7 +942,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   startup update prompts, daily compatibility canaries, and a monotonic remote
   verification feed.
 
-[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.1.17...HEAD
+[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.1.18...HEAD
+[0.1.18]: https://github.com/DavidLMS/nan-harness/compare/v0.1.17...v0.1.18
 [0.1.17]: https://github.com/DavidLMS/nan-harness/compare/v0.1.16...v0.1.17
 [0.1.16]: https://github.com/DavidLMS/nan-harness/compare/v0.1.15...v0.1.16
 [0.1.15]: https://github.com/DavidLMS/nan-harness/compare/v0.1.14...v0.1.15
