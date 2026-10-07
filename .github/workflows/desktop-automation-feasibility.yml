@@ -47,6 +47,10 @@ on:
         description: SHA-256 of the selected release checksum manifest
         type: string
         default: ''
+      release_assets_run_id:
+        description: Completed release gate run containing desktop-release-assets
+        type: string
+        default: ''
       app:
         description: One bounded native experiment
         type: choice
@@ -100,6 +104,36 @@ jobs:
           RELEASE_TAG: ${{ inputs.release_tag }}
           RELEASE_COMMIT: ${{ inputs.release_commit }}
         run: python3 canary/actions/desktop_release_binding.py validate-selection
+      - name: Download diagnostic release subjects
+        if: github.event_name == 'workflow_dispatch' && inputs.release_tag != '' && inputs.release_tag != null
+        uses: actions/download-artifact@v4
+        with:
+          name: desktop-release-assets
+          path: ${{ runner.temp }}/diagnostic-release
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.release_assets_run_id }}
+      - name: Verify diagnostic release provenance
+        if: github.event_name == 'workflow_dispatch' && inputs.release_tag != '' && inputs.release_tag != null
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          RELEASE_COMMIT: ${{ inputs.release_commit }}
+        run: |
+          gh attestation verify "$RUNNER_TEMP/diagnostic-release/SHA256SUMS" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+            --source-ref "refs/tags/$RELEASE_TAG" --source-digest "$RELEASE_COMMIT" \
+            --deny-self-hosted-runners
+          python3 - <<'PYTHON'
+          import os, sys
+          from pathlib import Path
+          sys.path.insert(0, 'canary/actions')
+          from desktop_release import verified_artifact
+          for system, arch in [('linux', 'x86_64'), ('macos', 'aarch64'), ('windows', 'x86_64')]:
+              verified_artifact(os.environ['RELEASE_TAG'], os.environ['RELEASE_COMMIT'],
+                  system, arch, Path(os.environ['RUNNER_TEMP']) / 'diagnostic-release',
+                  os.environ['RELEASE_MANIFEST_SHA'])
+          PYTHON
       - id: selection
         env:
           SELECTED_CELLS: ${{ inputs.cells || '' }}
@@ -432,6 +466,8 @@ jobs:
         with:
           name: desktop-release-assets
           path: ${{ runner.temp }}/desktop-release
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.release_assets_run_id || github.run_id }}
       - name: Stage exact attested release launcher
         if: inputs.release_tag != '' && inputs.release_tag != null
         shell: bash
@@ -756,6 +792,8 @@ jobs:
         with:
           name: desktop-release-assets
           path: ${{ runner.temp }}/release-binding
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.release_assets_run_id || github.run_id }}
       - name: Bind all twelve passing cells to the attested release bytes
         if: inputs.release_tag != '' && inputs.release_tag != null
         env:
