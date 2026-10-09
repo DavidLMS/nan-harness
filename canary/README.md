@@ -30,6 +30,17 @@ against local fixtures. Failure of this `native-configuration` check fails
 conformance in daily and release cells. Published assets acquire this check only
 when they include the updated canary binary; daily never substitutes a source build.
 
+Hermes resolution binds the official release tag to an immutable commit. Older
+date-tagged releases use their `pyproject.toml` product version; current releases
+use a stable SemVer tag because their packaging version is the `0.0.0` placeholder.
+Both native installers receive the frozen commit without the removed
+`ForceCommit` option. Placeholder versions never count as current feed evidence.
+Conformance borrows only installed dependency directories from the Hermes home;
+credentials and user configuration stay outside the isolated test home. Managed
+launches copy PM facts into the overlay so upstream still recognizes the original
+dependency owner and keeps shared launchers valid after overlay cleanup. These
+runtime changes require updated release binaries before daily can exercise them.
+
 ZCode freezes the official `zai-org/ZCode` main commit and reads the agent
 version from `apps/zcode-cli/package.json` at that commit. It never uses the
 desktop product version. Every daily run rechecks the source commit, even when

@@ -1,5 +1,6 @@
 use nan_harness_i18n::DiagnosticText;
 mod formats;
+mod hermes;
 mod lifecycle;
 mod overlays;
 mod paths;

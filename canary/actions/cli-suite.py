@@ -78,8 +78,8 @@ _GITHUB_REPOS = {
     "mimo-code": "XiaomiMiMo/MiMo-Code",
     "zcode": "zai-org/ZCode",
 }
-# Hermes tags releases by date (v2026.9.11) while `hermes --version` reports the
-# pyproject version (0.21.2). ZCode tracks main and has a separate agent version.
+# Older Hermes releases use date tags and a pyproject version; newer releases
+# use SemVer tags with a 0.0.0 packaging placeholder. ZCode tracks main.
 # Freeze a commit before reading either project version.
 _COMMIT_PINNED = frozenset({"hermes", "zcode"})
 FX_SOURCE = "https://releases.fx.sh/latest.txt"
@@ -266,7 +266,17 @@ def _pinned_project_version(repo, tag, fetch_json, fetch_document):
         raise ValueError("official release tag did not resolve to a commit")
     project = tomllib.loads(fetch_document(
         "https://raw.githubusercontent.com/" + repo + "/" + commit + "/pyproject.toml"))["project"]
-    return _version(project["version"]), commit
+    version = _version(project["version"])
+    if version == "0.0.0":
+        # Current Hermes derives its runtime identity from release tags, not
+        # the packaging placeholder. Match upstream's stable-tag grammar, which
+        # excludes four-digit CalVer majors. Never compare the placeholder to the feed.
+        if not re.fullmatch(r"v(?:0|[1-9][0-9]{0,2})\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)", tag):
+            raise _InvalidVersion("placeholder metadata requires a stable product release tag")
+        version = _version(tag)
+        if version == "0.0.0":
+            raise _InvalidVersion("release version is still a placeholder")
+    return version, commit
 
 
 def _resolve_one(harness, system, architecture, model, fetch_json, fetch_text, fetch_document):

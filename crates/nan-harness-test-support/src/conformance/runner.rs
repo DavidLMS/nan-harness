@@ -1,8 +1,7 @@
 use super::arguments::{RunKind, headless_arguments};
 use super::constants::{
-    CONFORMANCE_SCHEMA_VERSION, HERMES_OPTIONAL_CREDENTIALS_CLEARED, KIMI_TIMEOUT,
-    OPENCLAW_MEDIA_CREDENTIALS_CLEARED, PROVIDER_CLEANUP_MARGIN, PUBLISHED_SCENARIO_NAMES,
-    TEST_CREDENTIAL, WRAPPER_TIMEOUT,
+    CONFORMANCE_SCHEMA_VERSION, KIMI_TIMEOUT, OPENCLAW_MEDIA_CREDENTIALS_CLEARED,
+    PROVIDER_CLEANUP_MARGIN, PUBLISHED_SCENARIO_NAMES, TEST_CREDENTIAL, WRAPPER_TIMEOUT,
 };
 use super::helpers::duration_milliseconds;
 use super::prime_cleanup::prime_status_path;
@@ -206,9 +205,8 @@ impl PublishedConformanceRunner {
                 .env("DSH_PERMISSION_MODE", "danger-full-access");
         }
         if registration.kind == HarnessKind::Hermes {
-            for (name, value) in HERMES_OPTIONAL_CREDENTIALS_CLEARED {
-                command = command.env(*name, *value);
-            }
+            command =
+                super::hermes::configure(command, &home).map_err(ConformanceError::Environment)?;
         }
         if registration.kind == HarnessKind::OpenClaw {
             for (name, value) in OPENCLAW_MEDIA_CREDENTIALS_CLEARED {

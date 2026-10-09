@@ -140,7 +140,7 @@ case "$harness" in
       download 'https://hermes-agent.nousresearch.com/install.sh' "$installer"
     else
       download "https://raw.githubusercontent.com/NousResearch/hermes-agent/$ref/scripts/install.sh" "$installer"
-      arguments+=(--commit "$ref" --force-commit)
+      arguments+=(--commit "$ref")
     fi
     bash "$installer" "${arguments[@]}"
     ;;

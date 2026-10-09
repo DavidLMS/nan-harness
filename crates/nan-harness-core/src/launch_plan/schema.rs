@@ -45,6 +45,7 @@ pub const SELECTED_MODEL_MAX_OUTPUT_TOKENS_PLACEHOLDER: &str =
 pub const SELECTED_MODEL_CAPABILITIES_PLACEHOLDER: &str = "{runtime:selected_model_capabilities}";
 pub const USER_HOME_PLACEHOLDER: &str = "{runtime:user_home}";
 pub const CODEX_HOME_PLACEHOLDER: &str = "{runtime:codex_home}";
+pub const HERMES_HOME_PLACEHOLDER: &str = "{runtime:hermes_home}";
 pub const CODEX_HOME_OVERLAY_ID: &str = "codex-home";
 pub const CODEX_HOME_ARTIFACT_PLACEHOLDER: &str = "{artifact:codex-home}";
 pub const CODEX_PROFILE_ARTIFACT_ID: &str = "codex-profile";

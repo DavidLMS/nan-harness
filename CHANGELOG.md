@@ -7,6 +7,13 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Restore Hermes daily version resolution and installation after upstream removed
+  `ForceCommit` and switched to a placeholder packaging version.
+- Honor custom Hermes homes and preserve installed dependencies during isolated
+  launches without republishing shared launchers with temporary interpreter paths.
+
 ## [0.1.18] - 2026-10-07
 
 ### Fixed

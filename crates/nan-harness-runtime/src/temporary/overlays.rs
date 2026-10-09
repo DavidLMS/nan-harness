@@ -23,9 +23,12 @@ pub(super) fn materialize_overlay(
     render: &impl Fn(&str, &str) -> Result<String, TemporaryError>,
     user_home: &Path,
 ) -> Result<(), TemporaryError> {
+    let dependency_files = super::hermes::dependency_files(overlay, source)
+        .map_err(|error| overlay_error(&overlay.id, error))?;
     let replacements = overlay
         .files
         .iter()
+        .chain(&dependency_files)
         .filter(|file| {
             file.policy != OverlayFilePolicy::Preserve || !path_exists(&source.join(&file.path))
         })
@@ -33,7 +36,7 @@ pub(super) fn materialize_overlay(
         .collect::<BTreeSet<_>>();
     mirror_directory(source, target, Path::new(""), &replacements, &overlay.id)?;
 
-    for file in &overlay.files {
+    for file in overlay.files.iter().chain(&dependency_files) {
         let path = target.join(&file.path);
         if file.policy == OverlayFilePolicy::Preserve && path_exists(&path) {
             continue;
