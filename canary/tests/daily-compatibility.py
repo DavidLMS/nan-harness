@@ -5,6 +5,7 @@ import copy
 import base64
 import datetime
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -276,6 +277,26 @@ class DailyEvidenceTests(unittest.TestCase):
         self.assertNotIn("run-source-main-detector", workflow)
         self.assertFalse((ROOT / ".github/scripts/run-source-main-detector.sh").exists())
 
+    def test_aggregate_identifies_failure_stage_without_child_output(self):
+        plan, release, _ = fixture()
+        for failed_call, stage in (("release_identity", "release-identity"),
+                                   ("collect_release", "report-validation"),
+                                   ("publish_release", "feed-publication")):
+            with self.subTest(stage=stage), tempfile.TemporaryDirectory() as tmp:
+                directory = Path(tmp)
+                args = SimpleNamespace(directory=directory, reports=directory,
+                                       repository="Acme/Fork", validator="fixture-validator", publish=True)
+                with patch.object(daily, "load_plan", return_value=plan), \
+                        patch.object(daily, "release_identity", return_value=release["commit"]), \
+                        patch.object(daily, "collect_release", return_value=([{}], [])), \
+                        patch.object(daily, "publish_release"), \
+                        patch.object(daily, failed_call, side_effect=ValueError("private-child-output")), \
+                        patch.object(sys, "stderr", new_callable=io.StringIO) as stderr, \
+                        patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": str(directory / "summary.md")}):
+                    self.assertEqual(daily.aggregate(args), 1)
+                    self.assertIn(stage, stderr.getvalue())
+                    self.assertNotIn("private-child-output", stderr.getvalue())
+
 
     def test_daily_workflow_designates_only_the_trusted_publication_step(self):
         workflow = (ROOT / ".github/workflows/harness-canary.yml").read_text()
@@ -358,6 +379,34 @@ class DailyPublicationTests(unittest.TestCase):
         repeated, _ = self.run_publisher(True)
         self.assertEqual(repeated.returncode, 0, repeated.stderr)
         self.assertFalse(any(c["write"] for c in self.calls()[before:]))
+
+    def test_every_selected_cli_can_publish_without_changing_history(self):
+        template = json.loads((self.updates / "codex.json").read_bytes())
+        for harness in daily.CLI_HARNESSES:
+            (self.updates / (harness + ".json")).write_text(json.dumps({**template, "id": harness}))
+        result, _ = self.run_publisher(True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for name in ("compatibility.json", "compatibility-v3.json", "compatibility-v4.json"):
+            feed = json.loads((self.assets / name).read_bytes())
+            current = next(r for r in feed["releases"] if r["nanHarnessVersion"] == self.version)
+            self.assertEqual({entry["id"] for entry in current["verifications"]}, set(daily.CLI_HARNESSES))
+            for entry in current["verifications"]:
+                self.assertEqual(entry["lastLiveVerifiedVersion"], template["lastLiveVerifiedVersion"])
+            if name != "compatibility-v4.json":
+                self.assertEqual(feed["releases"][1], self.base["releases"][1])
+
+    def test_rejected_updates_have_safe_diagnostics_and_no_remote_writes(self):
+        path = self.updates / "codex.json"
+        template = json.loads(path.read_bytes())
+        for update, harness in (({**template, "id": "private-untrusted-id"}, "unknown"),
+                                ({**template, "nanHarnessVersion": "99.0.0"}, "codex")):
+            with self.subTest(harness=harness):
+                path.write_text(json.dumps(update))
+                result, _ = self.run_publisher(True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(f"daily update validation failed (harness: {harness})", result.stderr)
+                self.assertNotIn("private-untrusted-id", result.stderr)
+                self.assertFalse((self.remote / "calls.jsonl").exists())
 
     def test_dry_run_recovers_backup_locally_without_writing_remote(self):
         for name in ("compatibility.json", "compatibility-v3.json"):

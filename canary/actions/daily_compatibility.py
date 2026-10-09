@@ -233,19 +233,24 @@ def aggregate(args):
     results = list(plan["results"])
     args.reports.mkdir(parents=True, exist_ok=True)
     for release in plan["releases"]:
+        stage = "release-identity"
         try:
             if release_identity(args.repository, release["tag"]) != release["commit"]:
                 raise ValueError("release identity changed since selection")
+            stage = "report-validation"
             updates, statuses = collect_release(
                 plan, release, args.reports,
                 lambda path: command([args.validator, "validate-report", path]))
             if updates:
+                stage = "feed-publication"
                 publish_release(args, release, updates)
             for status in statuses:
                 if status["status"] == "verified" and args.publish:
                     status["status"] = "published"
             results.extend(statuses)
         except (subprocess.SubprocessError, ValueError, KeyError, TypeError, OSError, StopIteration):
+            print(f"Daily compatibility failed during {stage}; private child output is withheld.",
+                  file=sys.stderr)
             results.append({"tag": release["tag"], "harness": "all", "status": "validation-or-publication-failed"})
     write_json(args.directory / "summary.json", results)
     with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as output:
