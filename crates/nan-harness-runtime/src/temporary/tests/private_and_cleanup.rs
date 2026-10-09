@@ -1,6 +1,6 @@
 use crate::temporary::lifecycle::ensure_configuration_directory;
 use crate::temporary::paths::resolve_overlay_source;
-use nan_harness_core::launch_plan::CODEX_HOME_PLACEHOLDER;
+use nan_harness_core::launch_plan::{CODEX_HOME_PLACEHOLDER, HERMES_HOME_PLACEHOLDER};
 use std::fs;
 
 #[cfg(unix)]
@@ -58,11 +58,33 @@ fn codex_overlay_source_prefers_the_configured_home() {
             CODEX_HOME_PLACEHOLDER,
             user_home.path(),
             Some(codex_home.path().as_os_str()),
+            None,
         ),
         codex_home.path()
     );
     assert_eq!(
-        resolve_overlay_source(CODEX_HOME_PLACEHOLDER, user_home.path(), None),
+        resolve_overlay_source(CODEX_HOME_PLACEHOLDER, user_home.path(), None, None),
         user_home.path().join(".codex")
     );
+}
+
+#[test]
+fn hermes_overlay_source_preserves_the_configured_dependency_home() {
+    let user_home = tempfile::tempdir().unwrap();
+    let configured = tempfile::tempdir().unwrap();
+    assert_eq!(
+        resolve_overlay_source(
+            HERMES_HOME_PLACEHOLDER,
+            user_home.path(),
+            None,
+            Some(configured.path().as_os_str())
+        ),
+        configured.path()
+    );
+    for value in [None, Some(std::ffi::OsStr::new(""))] {
+        assert_eq!(
+            resolve_overlay_source(HERMES_HOME_PLACEHOLDER, user_home.path(), None, value),
+            user_home.path().join(".hermes")
+        );
+    }
 }

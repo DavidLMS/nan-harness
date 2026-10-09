@@ -107,14 +107,24 @@ impl TemporaryWorkspace {
         restrict_directory(root.path())?;
         let user_home = user_home.to_path_buf();
         let codex_home = std::env::var_os("CODEX_HOME");
+        let hermes_home = std::env::var_os("HERMES_HOME").filter(|value| !value.is_empty());
+        #[cfg(windows)]
+        let hermes_home = hermes_home.or_else(|| {
+            std::env::var_os("LOCALAPPDATA")
+                .map(|root| PathBuf::from(root).join("hermes").into_os_string())
+        });
         let mut paths = BTreeMap::new();
         let mut scoped_files = Vec::new();
 
         for overlay in overlays {
             validate_path_hint(&overlay.id, &overlay.path_hint)?;
             let path = root.path().join(&overlay.path_hint);
-            let source =
-                resolve_overlay_source(&overlay.source_path, &user_home, codex_home.as_deref());
+            let source = resolve_overlay_source(
+                &overlay.source_path,
+                &user_home,
+                codex_home.as_deref(),
+                hermes_home.as_deref(),
+            );
             materialize_overlay(overlay, &source, &path, &render, &user_home)?;
             paths.insert(overlay.id.clone(), path);
         }
@@ -163,8 +173,12 @@ impl TemporaryWorkspace {
             paths.insert(artifact.id.clone(), path);
         }
         for scoped_file in scoped_file_specs {
-            let directory =
-                resolve_overlay_source(&scoped_file.directory, &user_home, codex_home.as_deref());
+            let directory = resolve_overlay_source(
+                &scoped_file.directory,
+                &user_home,
+                codex_home.as_deref(),
+                hermes_home.as_deref(),
+            );
             let content = render(&scoped_file.id, &scoped_file.content_template)?;
             let guard = materialize_launch_scoped_file(
                 scoped_file,

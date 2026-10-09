@@ -2,8 +2,9 @@ use super::placeholders::validate_template_placeholders;
 use super::{invalid, unsafe_resource};
 use crate::error::PlanError;
 use crate::launch_plan::{
-    ARTIFACT_PLACEHOLDER_PREFIX, CODEX_HOME_PLACEHOLDER, ConfigurationOverlay, LaunchPlan,
-    TemporaryArtifact, TemporaryArtifactKind, TemporaryArtifactMode, USER_HOME_PLACEHOLDER,
+    ARTIFACT_PLACEHOLDER_PREFIX, CODEX_HOME_PLACEHOLDER, ConfigurationOverlay,
+    HERMES_HOME_PLACEHOLDER, LaunchPlan, TemporaryArtifact, TemporaryArtifactKind,
+    TemporaryArtifactMode, USER_HOME_PLACEHOLDER,
 };
 use nan_harness_i18n::DiagnosticText;
 use nan_harness_i18n::messages as detail_messages;
@@ -305,7 +306,10 @@ fn is_valid_artifact_id(value: &str) -> bool {
 }
 
 fn is_safe_user_home_path(value: &str) -> bool {
-    if matches!(value, USER_HOME_PLACEHOLDER | CODEX_HOME_PLACEHOLDER) {
+    if matches!(
+        value,
+        USER_HOME_PLACEHOLDER | CODEX_HOME_PLACEHOLDER | HERMES_HOME_PLACEHOLDER
+    ) {
         return true;
     }
     value

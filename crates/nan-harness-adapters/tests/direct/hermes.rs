@@ -38,7 +38,7 @@ fn hermes_loads_a_launch_scoped_nan_provider_without_hiding_user_state() {
         .iter()
         .find(|file| file.path == "config.yaml")
         .expect("Hermes search config should exist");
-    assert_eq!(overlay.source_path, "{runtime:user_home}/.hermes");
+    assert_eq!(overlay.source_path, "{runtime:hermes_home}");
     assert_eq!(
         plan.environment.public.get("HERMES_HOME"),
         Some(&"{artifact:hermes-home}".to_owned())

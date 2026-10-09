@@ -3,10 +3,10 @@ use crate::direct::{
 };
 use nan_harness_core::MediaSelection;
 use nan_harness_core::launch_plan::{
-    ArtifactLifecycle, BRIDGE_BASE_URL_PLACEHOLDER, ConfigurationOverlay,
+    ArtifactLifecycle, BRIDGE_BASE_URL_PLACEHOLDER, ConfigurationOverlay, HERMES_HOME_PLACEHOLDER,
     HERMES_MODEL_CATALOG_PLACEHOLDER, MEDIA_PROVIDER_BASE_URL_PLACEHOLDER, NAN_SEARCH_BLOCK_BEGIN,
     NAN_SEARCH_BLOCK_END, OverlayFile, OverlayFilePolicy, PROVIDER_BASE_URL_PLACEHOLDER,
-    TemporaryArtifactMode, USER_HOME_PLACEHOLDER,
+    TemporaryArtifactMode,
 };
 use nan_harness_core::{
     CodingModelProfile, HarnessAdapter, HarnessKind, LaunchPlan, NativeContextLimit, PlanContext,
@@ -715,7 +715,7 @@ impl HarnessAdapter for HermesAdapter {
                 configuration_overlays: vec![ConfigurationOverlay {
                     id: CONFIG_OVERLAY_ID.to_owned(),
                     path_hint: "hermes".to_owned(),
-                    source_path: format!("{USER_HOME_PLACEHOLDER}/.hermes"),
+                    source_path: HERMES_HOME_PLACEHOLDER.to_owned(),
                     files: model_provider_files()
                         .into_iter()
                         .chain(hermes_search_provider_files_with_context(
