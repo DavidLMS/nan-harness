@@ -196,6 +196,9 @@ while [ "$#" -gt 0 ]; do
 done
 printf '%s\n' "$url" >"$HERMES_TEST_URL_FILE"
 cat >"$destination" <<'INSTALLER'
+for argument in "$@"; do
+  case "$argument" in --force-commit) exit 1 ;; esac
+done
 printf '%s\n' "$@" >"$HERMES_TEST_ARGUMENTS_FILE"
 INSTALLER
 EOF_CURL
@@ -209,7 +212,7 @@ env "${hermes_env[@]}" bash "$repository_root/canary/guest/install-harness.sh" h
 test "$(cat "$temporary_directory/hermes-url")" = \
   "https://raw.githubusercontent.com/NousResearch/hermes-agent/$hermes_commit/scripts/install.sh"
 test "$(tr '\n' ' ' <"$temporary_directory/hermes-arguments")" = \
-  "--skip-setup --skip-browser --non-interactive --commit $hermes_commit --force-commit "
+  "--skip-setup --skip-browser --non-interactive --commit $hermes_commit "
 
 for rejected in "hermes 0.21.2" "hermes 0.21.2 v2026.9.11" "hermes 0.21.2 ${hermes_commit:0:12}" \
   "codex 1.2.3 $hermes_commit"; do

@@ -29,7 +29,8 @@ class WindowsInstallerTests(unittest.TestCase):
         # the cell must not skip it.
         self.assertNotIn("'-NoVenv'", SCRIPT)
         self.assertIn("@('-SkipSetup','-HermesHome',$hermesHome,'-InstallDir',$hermesInstall", SCRIPT)
-        self.assertIn("'-ForceCommit','-NonInteractive','-Json'", SCRIPT)
+        self.assertIn("'-Commit',$Ref,'-NonInteractive','-Json','-SkipBrowser'", SCRIPT)
+        self.assertNotIn("'-ForceCommit'", SCRIPT)
         self.assertIn("'fetch','--depth','1','origin',$Ref", SCRIPT)
         self.assertIn("'checkout','--detach',$Ref", SCRIPT)
         self.assertIn("Hermes checkout is not a retryable Git repository", SCRIPT)

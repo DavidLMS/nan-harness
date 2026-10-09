@@ -285,9 +285,9 @@ try {
       # The installer stages its launchers into <HermesHome>\bin only when it manages the
       # virtual environment, and -NoVenv skips that staging entirely: without it the cell
       # has no `hermes` to run at all. <cell>\hermes\bin is already on the cell PATH.
-      # The interactive installer catches errors without a failing exit status.
-      # Its JSON mode preserves failures; all emitted frames stay private.
-      Invoke-HermesPinned "https://raw.githubusercontent.com/NousResearch/hermes-agent/$Ref/scripts/install.ps1" @('-SkipSetup','-HermesHome',$hermesHome,'-InstallDir',$hermesInstall,'-Commit',$Ref,'-ForceCommit','-NonInteractive','-Json')
+      # Execute the downloaded script as a file so upstream returns failing exit
+      # codes. All emitted frames remain private; deprecated ForceCommit is gone.
+      Invoke-HermesPinned "https://raw.githubusercontent.com/NousResearch/hermes-agent/$Ref/scripts/install.ps1" @('-SkipSetup','-HermesHome',$hermesHome,'-InstallDir',$hermesInstall,'-Commit',$Ref,'-NonInteractive','-Json','-SkipBrowser')
       # The installer stages its launchers into <HermesHome>\bin and verifies them there, so a
       # missing launcher afterwards is an installer failure worth reporting as such instead of
       # letting the product's doctor discover it later as an uninstalled harness.

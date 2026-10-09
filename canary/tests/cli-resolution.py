@@ -43,6 +43,29 @@ suite = load("cli_suite_resolution", "cli-suite.py")
 
 
 class CliResolutionTests(unittest.TestCase):
+    def test_hermes_resolves_tag_version_when_packaging_is_a_placeholder(self):
+        commit = "a" * 40
+        fetch = Mock(side_effect=[{"tag_name": "v0.21.6"}, {"sha": commit}])
+        document = Mock(return_value='[project]\nversion = "0.0.0"\n')
+        resolved, unresolved = suite.resolve_manifest(["hermes"], "linux", "aarch64", "qwen3.6",
+                                                     fetch_json=fetch, fetch_document=document)
+        self.assertEqual(unresolved, [])
+        self.assertEqual((resolved[0].version, resolved[0].ref), ("0.21.6", commit))
+        document.assert_called_once_with("https://raw.githubusercontent.com/NousResearch/hermes-agent/"
+                                         + commit + "/pyproject.toml")
+        self.assertEqual(fetch.call_args.args[0],
+                         "https://api.github.com/repos/NousResearch/hermes-agent/commits/v0.21.6")
+
+    def test_hermes_never_resolves_a_placeholder_or_calver_as_the_product_version(self):
+        for tag in ("v0.0.0", "v2026.9.11", "v0.21.6-rc.1", "v00.21.6"):
+            with self.subTest(tag=tag):
+                fetch = Mock(side_effect=[{"tag_name": tag}, {"sha": "a" * 40}])
+                resolved, unresolved = suite.resolve_manifest(
+                    ["hermes"], "windows", "x86_64", "qwen3.6", fetch_json=fetch,
+                    fetch_document=lambda url: '[project]\nversion = "0.0.0"\n')
+                self.assertEqual(resolved, [])
+                self.assertEqual(unresolved[0].diagnostic["category"], "invalid-version")
+
     def test_zcode_freezes_main_and_reads_agent_version_from_that_commit(self):
         commit = "a" * 40
         fetch = Mock(return_value={"sha": commit})
