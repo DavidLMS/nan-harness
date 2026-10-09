@@ -70,7 +70,7 @@ cargo_xtask() {
   "$cargo_command" xtask "$@"
 }
 harnesses=(
-  claude-code codex mimo-code opencode hermes pi omp prime-agent deepseek-harness
+  claude-code codex mimo-code zcode opencode hermes pi omp prime-agent deepseek-harness
   openclaw cline qwen-code kimi-code aider goose fx
 )
 [ -n "$release_repository" ] || usage
@@ -115,12 +115,18 @@ if [ -n "$verified_updates" ]; then
   fi
   for update in "$verified_updates"/*.json; do
     [ -f "$update" ] || continue
-    jq -e --arg version "$nan_harness_version" '
+    if ! jq -e --arg version "$nan_harness_version" --args '
       (keys | sort) == (["nanHarnessVersion", "id", "lastCompatibleVersion", "compatibleAt", "lastLiveVerifiedVersion", "liveVerifiedAt"] | sort) and
       .nanHarnessVersion == $version and
-      (.id as $id | ["claude-code","codex","mimo-code","opencode","hermes","pi","omp","prime-agent","deepseek-harness","openclaw","cline","qwen-code","kimi-code","aider","goose","fx"] | index($id) != null) and
+      (.id as $id | $ARGS.positional | index($id) != null) and
       .lastCompatibleVersion == .lastLiveVerifiedVersion and .compatibleAt == .liveVerifiedAt
-    ' "$update" >/dev/null
+    ' "${harnesses[@]}" <"$update" >/dev/null 2>&1; then
+      # Only emit identifiers from the trusted catalog, never rejected input.
+      rejected_harness="$(jq -r --args '.id as $id | $ARGS.positional[] | select(. == $id)' \
+        "${harnesses[@]}" <"$update" 2>/dev/null || true)"
+      printf 'daily update validation failed (harness: %s)\n' "${rejected_harness:-unknown}" >&2
+      exit 1
+    fi
     update_target="$updates_directory/$(jq -r .id "$update").json"
     [ ! -e "$update_target" ] || { printf 'duplicate daily harness update\n' >&2; exit 1; }
     cp "$update" "$update_target"

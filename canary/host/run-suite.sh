@@ -41,6 +41,10 @@ case "$trigger" in
   daily|weekly|release|manual) ;;
   *) usage ;;
 esac
+if [ "$harness_filter" = zcode ]; then
+  printf 'ZCode source qualification requires the hosted CLI workflow; the retired Tart runner does not stage its source helpers.\n' >&2
+  exit 2
+fi
 [ -n "$nan_harness_version" ] && [ -n "$release_tag" ] && [ -n "$output_directory" ] || usage
 [ -n "$release_repository" ] || usage
 [ "$release_tag" = "v$nan_harness_version" ] || {

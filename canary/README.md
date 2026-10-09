@@ -224,6 +224,11 @@ the release publication path and must not be re-enabled without explicit
 operational review. The shared Tart binary remains installed because ownership
 is not exclusive to this repository.
 
+The retired Tart runner retains its pre-ZCode matrix. ZCode requires the hosted
+CLI workflow, which freezes the upstream commit and stages its source installer
+and contract probes. Adding its name to the Tart matrix alone would not provide
+that coverage. Use the daily hosted workflow for current compatibility evidence.
+
 Before installing schedules, run the automated Linux VM spike:
 
 ```sh

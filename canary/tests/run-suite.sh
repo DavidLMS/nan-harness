@@ -230,6 +230,8 @@ run_rejected_case() {
 }
 
 run_rejected_case missing --macos-binary "$assets_directory/missing"
+run_rejected_case zcode --harness zcode 2>"$temporary_directory/zcode-error"
+grep -Fq 'ZCode source qualification requires the hosted CLI workflow' "$temporary_directory/zcode-error"
 
 renamed_asset="$temporary_directory/renamed-canary"
 cp "$assets_directory/nan-harness-canary-aarch64-apple-darwin" "$renamed_asset"
