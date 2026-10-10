@@ -7,6 +7,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.21] - 2026-10-10
+
 ### Fixed
 
 - Refresh the inspected Codex Desktop Windows baseline after the official MSIX
@@ -966,7 +968,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   startup update prompts, daily compatibility canaries, and a monotonic remote
   verification feed.
 
-[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.1.20...HEAD
+[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.1.21...HEAD
+[0.1.21]: https://github.com/DavidLMS/nan-harness/compare/v0.1.20...v0.1.21
 [0.1.20]: https://github.com/DavidLMS/nan-harness/compare/v0.1.19...v0.1.20
 [0.1.19]: https://github.com/DavidLMS/nan-harness/compare/v0.1.18...v0.1.19
 [0.1.18]: https://github.com/DavidLMS/nan-harness/compare/v0.1.17...v0.1.18

@@ -3674,3 +3674,12 @@ than arbitrary runtime text. Linux and macOS baselines are unchanged.
 The launcher and hosted checker continue to require exact version, artifact,
 executable and source identities. Source inspection and offline contracts do
 not qualify the new package; native hosted evidence remains required.
+
+Native run `38071655742` at `fd01c916` installed the exact replacement package.
+Attempt one completed the first session's response, tool and recovery checks,
+but failed the native Windows absence query during cleanup (`action-unsupported`).
+Attempt two passed application and global cleanup and completed two sessions;
+the third failed tool-turn response verification (`response-mismatch`). Its
+renderer observation retained the submitted user turn but no assistant response
+or provider marker. These distinct failures do not establish a shared cause or
+qualify the package. No acceptance rule or timeout was relaxed for these retries.
