@@ -370,10 +370,7 @@ impl ConfigurationManager {
                 Ok(false)
             };
         }
-        if matches!(
-            harness,
-            HarnessKind::Pi | HarnessKind::Omp | HarnessKind::PrimeAgent
-        ) {
+        if matches!(harness, HarnessKind::Pi | HarnessKind::Omp) {
             return Ok(true);
         }
         let working_directory = env::current_dir().map_err(ConfigurationError::CurrentDirectory)?;

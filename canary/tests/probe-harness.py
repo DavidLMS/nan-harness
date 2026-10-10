@@ -53,6 +53,8 @@ if os.environ.get("NAN_CANARY_FAKE_MODE") == "providerfailure":
     print("synthetic secret should be redacted", file=sys.stderr)
     raise SystemExit(17)
 subcommand = args[0]
+if subcommand == "prime" and any(flag in args for flag in ("--extension", "--no-extensions", "--tools")):
+    raise SystemExit("Prime Rust rejects legacy extension and tool flags")
 if subcommand == "aider":
     Path("edit-target.txt").write_text("AIDER_CANARY_TOOL_OK\n", encoding="utf-8")
     if os.environ.get("NAN_CANARY_FAKE_MODE", "").startswith("aidercategory-stdout-nonempty"):

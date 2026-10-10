@@ -23,13 +23,19 @@ fn search_mcp_stays_off_network_until_a_tool_call() {
     let mut child = Command::new(env!("CARGO_BIN_EXE_nan-harness"))
         .args([
             "__search-mcp",
+            "--config",
+            config_directory
+                .path()
+                .join("search.json")
+                .to_str()
+                .unwrap(),
             "--endpoint",
             &endpoint,
             "--token-env",
             "NAN_TEST_SESSION_TOKEN",
         ])
         .env("NAN_TEST_SESSION_TOKEN", "local-session-token")
-        .env("NAN_HARNESS_CONFIG_DIR", config_directory.path())
+        .env_remove("NAN_HARNESS_CONFIG_DIR")
         .env("HOME", config_directory.path())
         .env("USERPROFILE", config_directory.path())
         .env("APPDATA", config_directory.path())

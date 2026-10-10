@@ -10,7 +10,7 @@ use std::sync::Arc;
 mod catalogs;
 pub use catalogs::{
     deepseek_provider_catalog, deepseek_provider_for, opencode_model_catalog,
-    qwen_code_model_catalog, zcode_provider_config,
+    prime_provider_catalog, qwen_code_model_catalog, zcode_provider_config,
 };
 mod deepseek;
 mod pipeline;

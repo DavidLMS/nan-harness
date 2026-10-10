@@ -59,11 +59,12 @@ fn codex_overlay_source_prefers_the_configured_home() {
             user_home.path(),
             Some(codex_home.path().as_os_str()),
             None,
+            None,
         ),
         codex_home.path()
     );
     assert_eq!(
-        resolve_overlay_source(CODEX_HOME_PLACEHOLDER, user_home.path(), None, None),
+        resolve_overlay_source(CODEX_HOME_PLACEHOLDER, user_home.path(), None, None, None),
         user_home.path().join(".codex")
     );
 }
@@ -77,14 +78,38 @@ fn hermes_overlay_source_preserves_the_configured_dependency_home() {
             HERMES_HOME_PLACEHOLDER,
             user_home.path(),
             None,
+            Some(configured.path().as_os_str()),
+            None,
+        ),
+        configured.path()
+    );
+    for value in [None, Some(std::ffi::OsStr::new(""))] {
+        assert_eq!(
+            resolve_overlay_source(HERMES_HOME_PLACEHOLDER, user_home.path(), None, value, None),
+            user_home.path().join(".hermes")
+        );
+    }
+}
+
+#[test]
+fn prime_overlay_source_preserves_the_configured_agent_directory() {
+    use nan_harness_core::launch_plan::PRIME_HOME_PLACEHOLDER;
+    let home = tempfile::tempdir().unwrap();
+    let configured = tempfile::tempdir().unwrap();
+    assert_eq!(
+        resolve_overlay_source(
+            PRIME_HOME_PLACEHOLDER,
+            home.path(),
+            None,
+            None,
             Some(configured.path().as_os_str())
         ),
         configured.path()
     );
     for value in [None, Some(std::ffi::OsStr::new(""))] {
         assert_eq!(
-            resolve_overlay_source(HERMES_HOME_PLACEHOLDER, user_home.path(), None, value),
-            user_home.path().join(".hermes")
+            resolve_overlay_source(PRIME_HOME_PLACEHOLDER, home.path(), None, None, value),
+            home.path().join(".prime/agent")
         );
     }
 }

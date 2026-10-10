@@ -16,29 +16,56 @@ pub(crate) fn pi_family_plans(
     models: &[CodingModelProfile],
     default_model: &str,
     search: super::super::ManagedSearchStatus,
-    preserve_native_defaults: bool,
+    prime_search_config: Option<&Path>,
 ) -> Vec<DocumentPlan> {
+    let preserve_native_defaults = prime_search_config.is_some();
+    let providers = if preserve_native_defaults {
+        nan_harness_runtime::prime_provider_catalog(models, base_url)
+    } else {
+        serde_json::Map::from_iter([("nan".into(), pi_provider(base_url, models))])
+    };
+    let provider_id = if preserve_native_defaults
+        && models.iter().any(|model| {
+            model.id == default_model
+                && matches!(
+                    model.reasoning,
+                    nan_harness_core::ReasoningPolicy::Toggle { .. }
+                )
+        }) {
+        "nan-thinking"
+    } else {
+        "nan"
+    };
+    let mut settings = vec![
+        override_json(&["defaultProvider"], Value::String(provider_id.to_owned())),
+        override_json(&["defaultModel"], Value::String(default_model.to_owned())),
+    ];
+    if let Some(search_config) = prime_search_config.filter(|_| search.managed) {
+        settings.push(exclusive_json(
+            &["mcpServers", "nan-search"],
+            json!({
+                "type": "stdio", "command": "nan-harness", "args": ["__search-mcp", "--config", search_config], "enabled": true
+            }),
+        ));
+    }
     vec![
         DocumentPlan::Json(JsonPlan {
             path: directory.join("models.json"),
-            entries: vec![exclusive_json(
-                &["providers", "nan"],
-                pi_provider(base_url, models),
-            )],
+            entries: providers
+                .iter()
+                .map(|(id, provider)| exclusive_json(&["providers", id], provider.clone()))
+                .collect(),
         }),
         DocumentPlan::Json(JsonPlan {
             path: directory.join("auth.json"),
-            entries: vec![exclusive_json(
-                &["nan"],
-                json!({"type": "api_key", "key": api_key}),
-            )],
+            entries: providers
+                .keys()
+                .map(|id| exclusive_json(&[id], json!({"type": "api_key", "key": api_key})))
+                .collect(),
         }),
         DocumentPlan::Json(JsonPlan {
             path: directory.join("settings.json"),
-            entries: vec![
-                override_json(&["defaultProvider"], Value::String("nan".to_owned())),
-                override_json(&["defaultModel"], Value::String(default_model.to_owned())),
-            ],
+            entries: settings,
         }),
         search_mcp_plan(directory.join("mcp.json"), false),
         DocumentPlan::ExactFile(ExactFilePlan {

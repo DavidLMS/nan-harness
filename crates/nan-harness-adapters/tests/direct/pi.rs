@@ -65,3 +65,75 @@ fn pi_force_search_registers_a_precedence_override_at_runtime() {
     assert!(extension.contains("const forceNanSearch = true"));
     assert!(extension.contains("pi.getAllTools()"));
 }
+
+#[test]
+fn prime_rust_uses_native_configuration_and_preserves_user_arguments() {
+    use nan_harness_core::launch_plan::{
+        PRIME_HOME_PLACEHOLDER, PRIME_PROVIDER_CATALOG_PLACEHOLDER,
+    };
+    for version in ["0.10.0", "0.11.0", "1.0.0"] {
+        let mut context = context(
+            HarnessKind::PrimeAgent,
+            vec!["--thinking".into(), "high".into()],
+        );
+        context.harness.detected_version = version.into();
+        let plan = plan(&PrimeAgentAdapter, &context);
+        assert!(!plan.process.arguments.contains(&"--extension".into()));
+        assert!(
+            plan.process
+                .arguments
+                .ends_with(&["--thinking".into(), "high".into()])
+        );
+        assert!(plan.temporary_artifacts.is_empty());
+        assert_direct_secret(&plan, "NAN_API_KEY");
+        let overlay = &plan.configuration_overlays[0];
+        assert_eq!(overlay.source_path, PRIME_HOME_PLACEHOLDER);
+        assert!(
+            overlay
+                .files
+                .iter()
+                .find(|file| file.path == "models.json")
+                .unwrap()
+                .content_template
+                .contains(PRIME_PROVIDER_CATALOG_PLACEHOLDER)
+        );
+        let settings = overlay
+            .files
+            .iter()
+            .find(|file| file.path == "settings.json")
+            .unwrap()
+            .content_template
+            .replace(NAN_SEARCH_BLOCK_BEGIN, "")
+            .replace(nan_harness_core::launch_plan::NAN_SEARCH_BLOCK_END, "");
+        let settings: serde_json::Value = serde_json::from_str(&settings).unwrap();
+        assert_eq!(settings["mcpServers"]["nan-search"]["type"], "stdio");
+        assert_eq!(settings["mcpServers"]["nan-search"]["args"][1], "--config");
+        assert!(settings["mcpServers"]["nan-search"].get("env").is_none());
+    }
+}
+
+#[test]
+fn prime_legacy_keeps_its_provider_extension() {
+    let mut context = context(HarnessKind::PrimeAgent, Vec::new());
+    context.harness.detected_version = "0.9.3".into();
+    assert!(
+        plan(&PrimeAgentAdapter, &context)
+            .process
+            .arguments
+            .contains(&"--extension".into())
+    );
+}
+
+#[test]
+fn prime_native_selects_the_toggle_provider_for_mimo() {
+    let mut context = context(HarnessKind::PrimeAgent, Vec::new());
+    context.harness.detected_version = "0.10.0".into();
+    context.model.resolved_id = "mimo-v2.6-flash".into();
+    let plan = plan(&PrimeAgentAdapter, &context);
+    assert_eq!(plan.process.arguments[1], "nan-thinking");
+    assert!(
+        plan.process
+            .arguments
+            .contains(&"nan/*,nan-thinking/*".into())
+    );
+}

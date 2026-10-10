@@ -47,7 +47,7 @@ to use either model for an individual image. See [image generation](#image-gener
 | `nanh dsh` | [DeepSeek Harness](https://deepseek.com/harness/en/) | OpenAI Chat Completions | Optional |
 | `nanh fx` | [fx](https://fx.sh/) | fx AI Gateway bridge | Not available |
 
-Prime Agent and fx do not yet support Windows upstream. On Windows,
+The Prime Agent and fx integrations do not yet support Windows. On Windows,
 `nanh prime` and `nanh fx` explain this before searching for an executable or
 trying to install one. When a Windows build becomes available, you can try it
 with `nanh <harness> --executable <path>`; the usual version and launch checks
@@ -213,7 +213,7 @@ selector. MiMo keeps its separate thinking switch. Unknown discovered models
 remain available with conservative capabilities.
 
 Native controls use each client's format. Codex's `xhigh` maps to NaN `max`.
-Pi and Prime Agent include `/nan-reasoning auto|off|low|medium|high|max`;
+Pi and Prime Agent before 0.10 include `/nan-reasoning auto|off|low|medium|high|max`;
 `auto` omits the provider control, while `off` explicitly disables reasoning on
 models that support it. The selection follows the model and session branch.
 Native Pi thinking changes also update that intent.
@@ -225,8 +225,11 @@ starts enabled. DeepSeek Harness uses a separate NaN reasoning-controls route fo
 original route remains available for existing session references. These are
 client budgets with explicit effort levels. OMP keeps MiMo thinking enabled by
 default; its native automatic setting uses that model default. Prime Agent
-retains its native initial effort; `/nan-reasoning auto` explicitly selects
-provider-auto behavior.
+0.10 and later use native model configuration and thinking controls, retaining
+the native initial effort. Search uses a native MCP server accessible through
+`rlm.mcp`. Toggle models such as MiMo appear under `nan-thinking`; effort
+and automatic models remain under `nan`. Older Prime versions retain the JavaScript extension and
+`/nan-reasoning auto` for provider-auto behavior.
 
 DeepSeek Harness requires 0.2.0-rc.2 or later. Persistent setup supports its
 standard coding profiles; `sdk-minimal` is excluded. Profiles with additional

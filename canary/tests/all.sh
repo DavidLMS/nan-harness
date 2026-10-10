@@ -4,6 +4,7 @@ set -euo pipefail
 tests_directory="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 for test_script in \
   guest-installer.sh \
+  prime-installer.sh \
   bootstrap-cache.sh \
   prepare-suite-image.sh \
   operations.sh \

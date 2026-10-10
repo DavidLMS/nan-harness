@@ -5,12 +5,14 @@ use std::ffi::OsString;
 
 #[derive(Debug)]
 pub(super) struct Arguments {
+    pub(super) config: Option<std::path::PathBuf>,
     pub(super) endpoint: Option<Url>,
     pub(super) token_environment: Option<String>,
 }
 
 impl Arguments {
     pub(super) fn parse(values: impl Iterator<Item = OsString>) -> Result<Self, SearchMcpError> {
+        let mut config = None;
         let mut endpoint = None;
         let mut provider_base_url = None;
         let mut token_environment = None;
@@ -25,6 +27,7 @@ impl Arguments {
                 .into_string()
                 .map_err(|_| SearchMcpError::InvalidArguments)?;
             match option.as_str() {
+                "--config" if config.is_none() && !value.is_empty() => config = Some(value.into()),
                 "--endpoint" if endpoint.is_none() => {
                     endpoint = Some(Url::parse(&value).map_err(SearchMcpError::InvalidEndpoint)?);
                 }
@@ -51,6 +54,7 @@ impl Arguments {
             return Err(SearchMcpError::InvalidArguments);
         }
         Ok(Self {
+            config,
             endpoint,
             token_environment,
         })

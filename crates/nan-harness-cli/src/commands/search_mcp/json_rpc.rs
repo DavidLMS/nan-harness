@@ -16,7 +16,11 @@ pub(super) struct SearchMcp {
 
 impl SearchMcp {
     pub(super) fn new(arguments: Arguments) -> Result<Self, SearchMcpError> {
-        let transport = SearchTransport::new(arguments.endpoint, arguments.token_environment)?;
+        let transport = SearchTransport::new(
+            arguments.endpoint,
+            arguments.token_environment,
+            arguments.config,
+        )?;
         Ok(Self { transport })
     }
 

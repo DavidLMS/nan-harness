@@ -106,6 +106,7 @@ impl TemporaryWorkspace {
             .map_err(TemporaryError::CreateWorkspace)?;
         restrict_directory(root.path())?;
         let user_home = user_home.to_path_buf();
+        let prime_home = std::env::var_os("PRIME_AGENT_CODING_AGENT_DIR");
         let codex_home = std::env::var_os("CODEX_HOME");
         let hermes_home = std::env::var_os("HERMES_HOME").filter(|value| !value.is_empty());
         #[cfg(windows)]
@@ -124,6 +125,7 @@ impl TemporaryWorkspace {
                 &user_home,
                 codex_home.as_deref(),
                 hermes_home.as_deref(),
+                prime_home.as_deref(),
             );
             materialize_overlay(overlay, &source, &path, &render, &user_home)?;
             paths.insert(overlay.id.clone(), path);
@@ -178,6 +180,7 @@ impl TemporaryWorkspace {
                 &user_home,
                 codex_home.as_deref(),
                 hermes_home.as_deref(),
+                prime_home.as_deref(),
             );
             let content = render(&scoped_file.id, &scoped_file.content_template)?;
             let guard = materialize_launch_scoped_file(
