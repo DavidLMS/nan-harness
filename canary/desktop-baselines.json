@@ -63,8 +63,8 @@
       "app": "chatgpt-desktop",
       "platform": "windows",
       "architecture": "x86_64",
-      "version": "26.930.61225",
-      "digest": "sha256:0fcd11295dfd239ef8b6a2cb088a4ead18316b80a87e0c0e1abbad9d830edef3"
+      "version": "26.1007.21434",
+      "digest": "sha256:36770adda59f71027e94d3d18ff7087da45a41990d1a1575080cd3149dcab30a"
     },
     {
       "app": "claude-desktop",

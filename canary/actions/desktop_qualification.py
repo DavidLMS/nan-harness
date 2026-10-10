@@ -2589,8 +2589,8 @@ def semantic_observations(directory, app):
                           candidate=value['candidate'], sourceCount=dict(counts), **hashes)
         elif mechanism == 'codex-static-dialog-title':
             pins = {
-                'windows': ('0fcd11295dfd239ef8b6a2cb088a4ead18316b80a87e0c0e1abbad9d830edef3',
-                            'b9468897f9c8a96395322ae4b2a2446914f50670403466c0c8889a40eb23f3cf'),
+                'windows': ('36770adda59f71027e94d3d18ff7087da45a41990d1a1575080cd3149dcab30a',
+                            'a1daa891e89a395b8db399ff6eaa365f12a86880c3d8cf891caf4ccbcb9eebf5'),
                 'macos': ('f6cf4d2e9b69aeefa33adda4bcd1a2d306357f5253a1ac6049700870c28dd0c7',
                           '0703d0aa97450d6d21346e1c79c887a5bf9062cd0069e8251ec03748a33b6dd0'),
                 'linux': ('ee7854145554718d7239d01ea37d44f6ba1e0ba4a93f47ac097d6e0f964da47c',
@@ -2623,9 +2623,9 @@ def semantic_observations(directory, app):
                 fields.add('rejectionStage')
             platform = value.get('platform')
             if (app != 'chatgpt-desktop' or set(value) != fields or value['diagnosticsOnly'] is not True
-                    or value['sourceVersion'] != ('26.930.61225' if platform == 'windows' else '26.930.41038') or type(platform) is not str or platform not in pins
+                    or value['sourceVersion'] != ('26.1007.21434' if platform == 'windows' else '26.930.41038') or type(platform) is not str or platform not in pins
                     or (value['artifactSha256'], value['wrapperSourceSha256']) != pins[platform]
-                    or value['catalogSha256'] != ('b51a711968b83bbe33c4ba18a73b00c575bdfaef29737c52e4c796b27a53e2b0' if platform == 'windows' else 'b6566a8d50edd58ed59e29eb2c9ef9de10d72f6e650f3ee0ec0a50a927106ee0' if platform == 'linux' else '82df6ff119bf98beba8ffe1a593aca671119decdbb8f4f3d39e5378e39b02c48')
+                    or value['catalogSha256'] != ('617c94534ff816da4c332d7e0ee74addeddae9c3d5412ea7d5102e3fa0a5592c' if platform == 'windows' else 'b6566a8d50edd58ed59e29eb2c9ef9de10d72f6e650f3ee0ec0a50a927106ee0' if platform == 'linux' else '82df6ff119bf98beba8ffe1a593aca671119decdbb8f4f3d39e5378e39b02c48')
                     or type(value['status']) is not str or value['status'] not in {'matched', 'unknown', 'ambiguous', 'guard-rejected'}
                     or type(value['sourceTitleIds']) is not list or len(value['sourceTitleIds']) > (195 if platform == 'linux' else 195 if platform == 'macos' else 200)
                     or any(type(identity) is not str or identity not in allowed[platform] for identity in value['sourceTitleIds'])):

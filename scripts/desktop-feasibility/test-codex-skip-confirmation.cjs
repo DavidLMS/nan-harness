@@ -36,7 +36,7 @@ assert.equal(admitted('darwin',macPin),true);
 for(const [platform,digest] of [['linux',macPin],['win32',macPin],['darwin',undefined],['darwin',macPin+'0'],['darwin',macPin.toUpperCase()]])
  assert.equal(admitted(platform,digest),false);
 assert.equal(admitted('linux','ee7854145554718d7239d01ea37d44f6ba1e0ba4a93f47ac097d6e0f964da47c'),true);
-assert.equal(admitted('win32','0fcd11295dfd239ef8b6a2cb088a4ead18316b80a87e0c0e1abbad9d830edef3'),true);
+assert.equal(admitted('win32','36770adda59f71027e94d3d18ff7087da45a41990d1a1575080cd3149dcab30a'),true);
 console.log('PASS: exact platform-bound macOS Skip release, other release admission preserved');
 
 assert.equal(fixture({subtitle:'PRIVATE',diagnostic:true}).rejection,'subtitle');

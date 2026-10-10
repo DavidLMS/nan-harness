@@ -26,13 +26,13 @@ class ProjectPolicy(unittest.TestCase):
         targets = {
             'macos': ('f6cf4d2e9b69aeefa33adda4bcd1a2d306357f5253a1ac6049700870c28dd0c7',
                       '418a460276b195f5642e43b320ec2821d6c34c646cb316ed2c0285546298243f'),
-            'windows': ('0fcd11295dfd239ef8b6a2cb088a4ead18316b80a87e0c0e1abbad9d830edef3',
-                        '746fc8e491616076dad7ae3348bc73748d27ee8471dc589844390d08f4fba25d'),
+            'windows': ('36770adda59f71027e94d3d18ff7087da45a41990d1a1575080cd3149dcab30a',
+                        '13d7ee588d7ae20f04f7aa25a65ae82917ada81501304ac8f5e679d0b3306601'),
             'linux': ('ee7854145554718d7239d01ea37d44f6ba1e0ba4a93f47ac097d6e0f964da47c',
                       '207c4fbff7e2fcc1b0789448351ac6eed206206d94c5a0835e5f07c7cd73d6e3'),
         }
         for platform, (artifact, executable) in targets.items():
-            release = dict(version='26.930.61225' if platform == 'windows' else '26.930.41038', digest='sha256:' + artifact)
+            release = dict(version='26.1007.21434' if platform == 'windows' else '26.930.41038', digest='sha256:' + artifact)
             module.validate_codex_project_release(release, executable, platform)
             foreign = targets['linux' if platform == 'windows' else 'windows']
             for changed, binary in (({**release, 'version': '26.930.2377.0'}, executable),
