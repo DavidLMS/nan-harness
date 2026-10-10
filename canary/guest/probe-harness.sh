@@ -177,8 +177,8 @@ case "$harness" in
     target="$workspace/prime-tool.txt"
     prime_prompt="Use the ipython tool to write exactly NAN_PRIME_TOOL_OK to '$target'. After it succeeds, reply exactly NAN_CANARY_OK."
     "$nan_command" prime --model "$model" -- \
-      --mode json --print --no-session --no-extensions --no-skills \
-      --no-prompt-templates --no-themes --no-context-files --tools ipython "$prime_prompt" \
+      --mode json --print --no-session --no-skills \
+      --no-prompt-templates --no-themes --no-context-files "$prime_prompt" \
       >"$output" 2>"$stderr_output"
     probe_stage='tool-evidence'
     grep -Fx 'NAN_PRIME_TOOL_OK' "$target" >/dev/null
