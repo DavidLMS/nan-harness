@@ -3683,3 +3683,23 @@ the third failed tool-turn response verification (`response-mismatch`). Its
 renderer observation retained the submitted user turn but no assistant response
 or provider marker. These distinct failures do not establish a shared cause or
 qualify the package. No acceptance rule or timeout was relaxed for these retries.
+
+Attempt three passed cleanup and two complete sessions; the second session
+passed its tool check but failed observer attachment before the injected-error
+turn. The closed `ownership-lost` category does not distinguish the initial
+connection and binding causes, so it does not establish an ownership change.
+Artifacts from reruns share names; the attempt-three record was retrieved by
+artifact ID `11677288603`, rather than the name-based download that selected
+attempt two's older record.
+
+Final-metadata run `38074572524` passed cleanup and two complete sessions. Its
+second startup retained the sole visible main identity with one dialog and no
+role controls. Folder consent failed its guard's `main-scope` requirement before
+sampling the source dialog. The DOM-scoped Windows folder guard now uses the
+same visible-document requirement as the other DOM-scoped folder paths, rather
+than requiring the later role form. Native ownership, retained document identity,
+auxiliary restrictions and the independent exact folder/path/action proof remain
+required. Subsequent role binding is unchanged. A regression executing the actual
+guard wiring fails before the fix and passes afterward; hidden documents, changed
+identity, lost ownership and foreign auxiliary pages remain rejected. Native
+qualification is still required before tagging.
