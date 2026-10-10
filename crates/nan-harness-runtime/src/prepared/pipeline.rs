@@ -234,6 +234,8 @@ fn render_template(
     } else {
         rendered
     };
+    let mut rendered = rendered;
+    values::render_search_config(&mut rendered)?;
     if rendered.contains("{runtime:") {
         Err(nan_harness_i18n::DiagnosticText::new(
             nan_harness_i18n::messages::detail_content_contains_an_unresolved_runtime_placeholder,

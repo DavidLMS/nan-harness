@@ -64,7 +64,7 @@ pub use discovery::{
 };
 pub use prepared::{
     PreparedError, deepseek_provider_catalog, deepseek_provider_for, opencode_model_catalog,
-    qwen_code_model_catalog, zcode_provider_config,
+    prime_provider_catalog, qwen_code_model_catalog, zcode_provider_config,
 };
 pub use process::ProcessError;
 pub use search_policy::{

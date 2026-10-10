@@ -165,7 +165,7 @@ fn pi_native_refresh_migrates_the_managed_search_mcp_to_an_extension() {
             policy: WebSearchPolicy::Auto,
             managed: false,
         },
-        false,
+        None,
     );
     old_plans.truncate(3);
     old_plans.push(search_mcp_plan(mcp_path.clone(), true));
@@ -262,4 +262,44 @@ fn force_search_rejects_aider_without_writing_configuration() {
         ))
     ));
     assert!(!state.join(STATE_FILE_NAME).exists());
+}
+
+#[test]
+fn prime_native_mcp_search_preserves_external_servers_and_removes_only_owned_settings() {
+    let root = tempdir().unwrap();
+    let home = root.path().join("home");
+    let directory = home.join(".prime/agent");
+    fs::create_dir_all(&directory).unwrap();
+    let settings_path = directory.join("settings.json");
+    let original = json!({"theme": "dark", "mcpServers": {"brave-search": {"type": "stdio", "command": "brave-search"}}});
+    fs::write(&settings_path, original.to_string()).unwrap();
+    let manager = ConfigurationManager::new(&root.path().join("state"), &home);
+    let config = test_config();
+    let models = test_models();
+    let read_settings =
+        || serde_json::from_slice::<Value>(&fs::read(&settings_path).unwrap()).unwrap();
+    manager
+        .configure(HarnessKind::PrimeAgent, &config, &models, None)
+        .unwrap();
+    assert!(read_settings()["mcpServers"].get("nan-search").is_none());
+    manager
+        .configure(
+            HarnessKind::PrimeAgent,
+            &config,
+            &models,
+            Some(WebSearchPolicy::Force),
+        )
+        .unwrap();
+    assert_eq!(read_settings()["mcpServers"]["nan-search"]["type"], "stdio");
+    manager
+        .configure(
+            HarnessKind::PrimeAgent,
+            &config,
+            &models,
+            Some(WebSearchPolicy::Disabled),
+        )
+        .unwrap();
+    let settings = read_settings();
+    assert_eq!(settings["theme"], original["theme"]);
+    assert_eq!(settings["mcpServers"], original["mcpServers"]);
 }

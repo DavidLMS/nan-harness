@@ -50,7 +50,11 @@ impl HarnessAdapter for PrimeAgentAdapter {
     }
 
     fn plan(&self, context: &PlanContext) -> Result<LaunchPlan, PlanError> {
-        pi_family_plan(context)
+        if super::prime::uses_native_configuration(&context.harness.detected_version) {
+            super::prime::native_plan(context)
+        } else {
+            pi_family_plan(context)
+        }
     }
 }
 

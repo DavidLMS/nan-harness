@@ -10,6 +10,8 @@ mod bridged;
 mod deepseek;
 #[path = "conformance_reasoning/opencode.rs"]
 mod opencode;
+#[path = "conformance_reasoning/prime.rs"]
+mod prime;
 #[path = "conformance_reasoning/qwen.rs"]
 mod qwen;
 #[path = "conformance_reasoning/support.rs"]

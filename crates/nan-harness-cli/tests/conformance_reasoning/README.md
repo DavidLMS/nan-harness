@@ -6,6 +6,7 @@ Run with the required executables on PATH, or set any of:
 
 - `NAN_REASONING_DSH_EXECUTABLE`
 - `NAN_REASONING_QWEN_EXECUTABLE`
+- `NAN_REASONING_PRIME_AGENT_EXECUTABLE` (Prime >=0.10)
 - `NAN_REASONING_OPENCODE_EXECUTABLE`
 - `NAN_REASONING_MIMO_EXECUTABLE`
 - `NAN_REASONING_AIDER_EXECUTABLE`
@@ -63,3 +64,15 @@ regressions for session intent, model boundaries, native defaults and provider
 extras. Published sources at the existing minima (Pi 0.84.2, Prime 0.7.2 and
 Hermes 0.20.0) contain the required hooks; the actual native runs above used the
 listed newer versions.
+
+## Prime Agent Rust compatibility, 2026-10-10
+
+Prime 0.10 uses native models and MCP rather than TypeScript extensions. Its custom
+model loader ignores per-model compatibility settings, so `nan-thinking` carries
+MiMo with provider-level `qwen-chat-template` compatibility. The reasoning test
+covers managed and persistent launches, effort/off, MiMo on/off, automatic models,
+and preservation of existing credentials. Native controls retain Prime's defaults.
+
+Local conformance also passed with Prime 0.9.3 and 0.10.0. A synthetic MCP probe
+completed `rlm.mcp.list_tools` and `call_tool` against a local search fixture using
+an explicitly selected private search configuration, without forwarding credentials.

@@ -9,8 +9,9 @@ publish = false
 
 [dependencies]
 nan-harness-i18n = { path = "../nan-harness-i18n", version = "0.1.6" }
-nan-harness-core = { path = "../nan-harness-core", version = "0.1.19" }
+nan-harness-core = { path = "../nan-harness-core", version = "0.1.20" }
 serde_json.workspace = true
+semver.workspace = true
 
 [lints]
 workspace = true

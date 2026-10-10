@@ -7,6 +7,14 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.20] - 2026-10-10
+
+### Fixed
+
+- Support Prime Agent 0.10's Rust rewrite through native model configuration,
+  reasoning controls and MCP search, while retaining extensions for older versions.
+- Install frozen Prime Agent versions using the correct generation of its installer.
+
 ## [0.1.19] - 2026-10-10
 
 ### Fixed
@@ -951,7 +959,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   startup update prompts, daily compatibility canaries, and a monotonic remote
   verification feed.
 
-[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.1.19...HEAD
+[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.1.20...HEAD
+[0.1.20]: https://github.com/DavidLMS/nan-harness/compare/v0.1.19...v0.1.20
 [0.1.19]: https://github.com/DavidLMS/nan-harness/compare/v0.1.18...v0.1.19
 [0.1.18]: https://github.com/DavidLMS/nan-harness/compare/v0.1.17...v0.1.18
 [0.1.17]: https://github.com/DavidLMS/nan-harness/compare/v0.1.16...v0.1.17

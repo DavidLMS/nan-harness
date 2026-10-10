@@ -7,10 +7,10 @@ use nan_harness_core::launch_plan::{
     HERMES_REASONING_CATALOG_PLACEHOLDER, KIMI_CODE_MODEL_CATALOG_PLACEHOLDER,
     OPENCLAW_MODEL_ALIASES_PLACEHOLDER, OPENCLAW_MODEL_CATALOG_PLACEHOLDER,
     OPENCODE_MODEL_CATALOG_PLACEHOLDER, PI_MODEL_CATALOG_PLACEHOLDER,
-    QWEN_CODE_MODEL_CATALOG_PLACEHOLDER, SELECTED_MODEL_CAPABILITIES_PLACEHOLDER,
-    SELECTED_MODEL_CONTEXT_WINDOW_PLACEHOLDER, SELECTED_MODEL_DISPLAY_NAME_PLACEHOLDER,
-    SELECTED_MODEL_MAX_OUTPUT_TOKENS_PLACEHOLDER, SELECTED_MODEL_REASONING_EFFORT_PLACEHOLDER,
-    ZCODE_PROVIDER_CONFIG_PLACEHOLDER,
+    PRIME_PROVIDER_CATALOG_PLACEHOLDER, QWEN_CODE_MODEL_CATALOG_PLACEHOLDER,
+    SELECTED_MODEL_CAPABILITIES_PLACEHOLDER, SELECTED_MODEL_CONTEXT_WINDOW_PLACEHOLDER,
+    SELECTED_MODEL_DISPLAY_NAME_PLACEHOLDER, SELECTED_MODEL_MAX_OUTPUT_TOKENS_PLACEHOLDER,
+    SELECTED_MODEL_REASONING_EFFORT_PLACEHOLDER, ZCODE_PROVIDER_CONFIG_PLACEHOLDER,
 };
 use nan_harness_i18n::DiagnosticText;
 use nan_harness_i18n::messages as detail_messages;
@@ -19,6 +19,8 @@ mod claude;
 mod deepseek;
 pub use deepseek::{deepseek_provider_catalog, deepseek_provider_for};
 mod json;
+mod prime;
+pub use prime::prime_provider_catalog;
 mod model;
 mod structured;
 mod zcode;
@@ -51,6 +53,7 @@ pub(super) fn contains_model_catalog_placeholder(value: &str) -> bool {
         OPENCLAW_MODEL_ALIASES_PLACEHOLDER,
         OPENCLAW_MODEL_CATALOG_PLACEHOLDER,
         PI_MODEL_CATALOG_PLACEHOLDER,
+        PRIME_PROVIDER_CATALOG_PLACEHOLDER,
         QWEN_CODE_MODEL_CATALOG_PLACEHOLDER,
         KIMI_CODE_MODEL_CATALOG_PLACEHOLDER,
         CLAUDE_MODEL_PICKER_PLACEHOLDER,
@@ -113,6 +116,10 @@ pub(super) fn render_model_catalogs(
             hermes_model_catalog(&models),
         ),
         (PI_MODEL_CATALOG_PLACEHOLDER, pi_model_catalog(&models)),
+        (
+            PRIME_PROVIDER_CATALOG_PLACEHOLDER,
+            serde_json::Value::Object(prime_provider_catalog(&models, provider_base_url)),
+        ),
         (
             OPENCODE_MODEL_CATALOG_PLACEHOLDER,
             opencode_model_catalog(&models),

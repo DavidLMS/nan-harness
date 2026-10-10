@@ -15,6 +15,7 @@ mod omp;
 mod openclaw;
 mod opencode;
 mod pi;
+mod prime;
 mod qwen_code;
 mod search;
 mod zcode;

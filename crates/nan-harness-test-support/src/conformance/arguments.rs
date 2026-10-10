@@ -147,7 +147,17 @@ fn pi_base_arguments(prompt: &str) -> Vec<OsString> {
 }
 
 fn prime_base_arguments(prompt: &str) -> Vec<OsString> {
-    pi_family_base_arguments("ipython", prompt)
+    vec![
+        "--mode".into(),
+        "json".into(),
+        "--print".into(),
+        "--no-session".into(),
+        "--no-skills".into(),
+        "--no-prompt-templates".into(),
+        "--no-themes".into(),
+        "--no-context-files".into(),
+        prompt.into(),
+    ]
 }
 
 fn pi_family_base_arguments(tools: &str, prompt: &str) -> Vec<OsString> {

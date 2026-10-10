@@ -27,8 +27,10 @@ impl SearchTransport {
     pub(super) fn new(
         _endpoint: Option<Url>,
         _token_environment: Option<String>,
+        config_path: Option<PathBuf>,
     ) -> Result<Self, SearchMcpError> {
-        let config = search_config_path()
+        let config = config_path
+            .or_else(search_config_path)
             .map(load_search_config)
             .transpose()
             .map_err(SearchMcpError::LoadConfig)?

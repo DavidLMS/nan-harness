@@ -14,7 +14,7 @@ function registerNanReasoning(pi, profiles, preserveNativeDefaults = false) {
   const entryType = "nan-reasoning";
   const intents = new Map();
   let activeModel;
-  const policyFor = model => model?.provider === "nan" ? profiles[model.id]?.reasoningPolicy : undefined;
+  const policyFor = model => ["nan", "nan-thinking"].includes(model?.provider) ? profiles[model.id]?.reasoningPolicy : undefined;
   const display = ctx => {
     if (policyFor(ctx.model)) ctx.ui.setStatus(entryType, `NaN reasoning: ${intents.get(ctx.model.id) ?? "auto"}`);
     else ctx.ui.setStatus(entryType, undefined);

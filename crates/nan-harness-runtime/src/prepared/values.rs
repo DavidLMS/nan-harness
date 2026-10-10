@@ -3,8 +3,8 @@ use nan_harness_core::CodingModelProfile;
 use nan_harness_core::launch_plan::{
     ARTIFACT_PLACEHOLDER_PREFIX, BRIDGE_BASE_URL_PLACEHOLDER, FX_GATEWAY_CHAT_URL_PLACEHOLDER,
     GOOSE_ADDITIONAL_CONFIG_FILES_PLACEHOLDER, MEDIA_PROVIDER_BASE_URL_PLACEHOLDER,
-    NAN_SEARCH_BLOCK_BEGIN, NAN_SEARCH_BLOCK_END, PROVIDER_BASE_URL_PLACEHOLDER,
-    USER_HOME_PLACEHOLDER,
+    NAN_SEARCH_BLOCK_BEGIN, NAN_SEARCH_BLOCK_END, NAN_SEARCH_CONFIG_PLACEHOLDER,
+    PROVIDER_BASE_URL_PLACEHOLDER, USER_HOME_PLACEHOLDER,
 };
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
@@ -97,6 +97,7 @@ pub(super) fn render_runtime_value(
         })?;
         rendered = rendered.replace(FX_GATEWAY_CHAT_URL_PLACEHOLDER, bridge_chat_url);
     }
+    render_search_config(&mut rendered).map_err(PreparedError::ModelCatalog)?;
     if rendered.contains("{runtime:") || rendered.contains("{secret:") {
         Err(PreparedError::UnresolvedPlaceholder(rendered.into()))
     } else {
@@ -166,4 +167,22 @@ pub(super) fn resolve_argument(
 
 fn path_to_string(path: &Path) -> String {
     path.to_string_lossy().into_owned()
+}
+
+pub(super) fn render_search_config(
+    rendered: &mut String,
+) -> Result<(), nan_harness_i18n::DiagnosticText> {
+    if !rendered.contains(NAN_SEARCH_CONFIG_PLACEHOLDER) {
+        return Ok(());
+    }
+    let directory = crate::search_policy::config_directory().ok_or_else(|| {
+        nan_harness_i18n::DiagnosticText::new(
+            nan_harness_i18n::messages::detail_content_contains_an_unresolved_runtime_placeholder,
+        )
+    })?;
+    catalogs::replace_json_placeholder(
+        rendered,
+        NAN_SEARCH_CONFIG_PLACEHOLDER,
+        &serde_json::json!(directory.join("search.json")),
+    )
 }

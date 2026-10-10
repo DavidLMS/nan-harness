@@ -163,12 +163,20 @@ case "$harness" in
     ;;
   prime-agent)
     installer="$temporary_directory/prime-agent-install.sh"
-    download 'https://app.primeintellect.ai/prime-agent/install.sh' "$installer"
-    if [ "$version" = latest ]; then
-      PRIME_AGENT_INSTALLER_NONINTERACTIVE=1 run_with_bounded_curl sh "$installer"
-    else
-      PRIME_AGENT_INSTALLER_NONINTERACTIVE=1 run_with_bounded_curl sh "$installer" "$version"
-    fi
+    installer_url='https://app.primeintellect.ai/prime-agent/install.sh'
+    case "$version" in
+      0.[0-9].*)
+        # The Rust installer cannot install the historical TypeScript payloads.
+        installer_url='https://raw.githubusercontent.com/PrimeIntellect-ai/prime-agent/cf07c5a3f5eca98e7744f2df83050044c920252a/install.sh'
+        ;;
+    esac
+    download "$installer_url" "$installer"
+    exact_version="$version"
+    if [ "$exact_version" = latest ]; then exact_version=''; fi
+    PRIME_AGENT_DOWNLOAD_BASE_URL='https://pub-728493de92a943e2a9b2d17b4719f318.r2.dev' \
+      PRIME_AGENT_VERSION="$exact_version" PRIME_AGENT_INSTALLER_NONINTERACTIVE=1 \
+      run_with_bounded_curl sh "$installer"
+
     ;;
   deepseek-harness)
     arguments=(--allow-scripts='@deepseek-ai/dsh-subprocess-local,koffi,node-pty,@google/genai,protobufjs')
