@@ -3648,3 +3648,29 @@ single guarded fit. Established bindings remain strict. The regression failed
 before the change; it also rejects changed identity, overlapping/normal panels
 and duplicate candidates. Closed initial-decision diagnostics now preserve the
 candidate-state category to distinguish off-display geometry from other causes.
+### Codex Windows release gate refresh on 2026-10-10
+
+Release gate `38054682160` qualified all 49 CLI cells and eleven Desktop cells,
+but Codex Windows failed before installation. The cache for the inspected
+`26.930.61225` package had been evicted, and the moving official MSIX URL now
+served application `26.1007.21434` (MSIX identity `26.1007.2314.0`).
+
+The replacement was downloaded from the official HTTPS endpoint and inspected
+without executing it. Its artifact SHA-256 is
+`36770adda59f71027e94d3d18ff7087da45a41990d1a1575080cd3149dcab30a`, and
+`app/ChatGPT.exe` has SHA-256
+`13d7ee588d7ae20f04f7aa25a65ae82917ada81501304ac8f5e679d0b3306601`.
+The ASAR bootstrap still recognizes `--open-project`. Its shared renderer
+chunk `app-shared-737655e1fb23.js` exports `zT` as the title wrapper, which
+forwards to Radix's `h2` with the retained dialog title identity.
+
+The Windows catalog retains only previously admitted literal titles present in
+the new source, with refreshed callsite and wrapper hashes. Moved callsites
+were traced through their title children; six retired identifiers were removed.
+The four finite folder-count titles remain literal ICU branches. The update
+title still binds the shared `ChatGPT` branding constant (`UW` / `G0r`) rather
+than arbitrary runtime text. Linux and macOS baselines are unchanged.
+
+The launcher and hosted checker continue to require exact version, artifact,
+executable and source identities. Source inspection and offline contracts do
+not qualify the new package; native hosted evidence remains required.

@@ -7,6 +7,13 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Refresh the inspected Codex Desktop Windows baseline after the official MSIX
+  download replaced the previously qualified package.
+- Include the Hermes daily and native Prime Agent fixes from the unpublished
+  v0.1.19 and v0.1.20 release attempts.
+
 ## [0.1.20] - 2026-10-10
 
 ### Fixed
