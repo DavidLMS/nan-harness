@@ -678,7 +678,10 @@ async function run() {
         const folderAuthority=require('./codex-folder-trust.cjs').authority(request.ownedWorkspace);
         trustGuard=(!profileAuthority&&focusGuard)||heldMainGuard(initialMain,browser,onboardingOwnerGuard,correlationDeadline,
           require('./codex-onboarding.cjs').sourceRoute,correlationIdentity,
-          ms=>new Promise(resolve=>setTimeout(resolve,ms)),false,process.platform==='win32',!directCDP,directCDP,
+          // DOM-scoped folder consent can precede role onboarding. Its own
+          // source/path proof authorizes input; the guard retains the visible
+          // main identity and native ownership, including auxiliary settling.
+          ms=>new Promise(resolve=>setTimeout(resolve,ms)),false,process.platform==='win32'&&!directCDP,!directCDP,directCDP,
           receipt=>{facts.mainGuardObservation=receipt;save();});
         folderTrust=await require('./codex-folder-trust.cjs').run(page,trustGuard,
           correlationDeadline,folderAuthority,()=>trustGuard.sealInitialActions(),

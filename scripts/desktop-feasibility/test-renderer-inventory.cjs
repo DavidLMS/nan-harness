@@ -151,6 +151,26 @@ assert.equal(roleSourceScope({foreignFieldset:true}).mainScope,false);
     assert.equal(progress.at(-1).status,'ownership-lost');
     assert.equal(progress.at(-1).counts.roleRadios,11);
   }
+  // Exercise the actual folder-guard wiring: the consent dialog may be visible
+  // before any role controls exist. Source/path admission remains in folder trust.
+  for(const failure of [null,'hidden','identity','owner','auxiliary']) {
+    const pending=fixture();pending.setPages([pending.main]);
+    pending.setAlter(value=>{
+      value.scope.mainScope=false;value.scope.visibleDocument=failure!=='hidden';
+      value.scope.counts={...empty,dialog:1};
+      if(failure==='identity')value.loader='changed';
+    });
+    if(failure==='auxiliary')pending.setPages([pending.main,{url:()=> 'app://-/foreign'}]);
+    const guardStart=source.indexOf('trustGuard=(!profileAuthority');
+    const guardEnd=source.indexOf('folderTrust=await',guardStart);
+    const proof=vm.runInNewContext(`let trustGuard;${source.slice(guardStart,guardEnd)} trustGuard;`,{
+      profileAuthority:true,focusGuard:null,heldMainGuard:helper.heldMainGuard,
+      initialMain:pending.held,browser:pending.browser,onboardingOwnerGuard:()=>failure!=='owner',
+      correlationDeadline:1000,correlationIdentity:pending.identity,
+      process:{platform:'win32'},directCDP:true,facts:{},save:()=>{},require,setTimeout,
+    });
+    assert.equal(await proof(),failure===null,failure??'folder before role');
+  }
   let f=fixture(),result=await f.run();
   assert.equal(result.status,'observed');assert.equal(result.stableSamples,2);
   assert.equal(result.main.roleRadios,11);assert.equal(result.auxComposerAbsent,true);
