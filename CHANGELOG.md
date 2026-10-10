@@ -7,6 +7,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.19] - 2026-10-10
+
 ### Fixed
 
 - Restore Hermes daily version resolution and installation after upstream removed
@@ -949,7 +951,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   startup update prompts, daily compatibility canaries, and a monotonic remote
   verification feed.
 
-[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.1.18...HEAD
+[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.1.19...HEAD
+[0.1.19]: https://github.com/DavidLMS/nan-harness/compare/v0.1.18...v0.1.19
 [0.1.18]: https://github.com/DavidLMS/nan-harness/compare/v0.1.17...v0.1.18
 [0.1.17]: https://github.com/DavidLMS/nan-harness/compare/v0.1.16...v0.1.17
 [0.1.16]: https://github.com/DavidLMS/nan-harness/compare/v0.1.15...v0.1.16
