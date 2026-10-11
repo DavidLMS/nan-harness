@@ -2,6 +2,7 @@
 import importlib.util
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -32,7 +33,20 @@ def diagnose(arguments, cwd, environment=None, stage="probe"):
                               "symlinkMentioned": "symlink" in raw.lower(),
                               "junctionMentioned": "junction" in raw.lower(),
                               "outOfMemory": "heap out of memory" in raw.lower(),
-                              "tooLong": "too long" in raw.lower()}), flush=True)
+                              "tooLong": "too long" in raw.lower(),
+                              "missingOperations": sorted(set(re.findall(r"ENOENT[^\n]{0,160}?\b(open|stat|lstat|scandir|rename|unlink|readlink|spawn|mkdir|copyfile)\b", raw))),
+                              "missingPathKinds": [name for name, pattern in {
+                                  "pnpm-store": r"(?:pnpm|[.]pnpm)[/\\].*store|[/\\]store[/\\]",
+                                  "virtual-store": r"node_modules[/\\][.]pnpm",
+                                  "manifest": r"package[.]json",
+                                  "lockfile": r"pnpm-lock[.]yaml",
+                                  "patch": r"[.]patch",
+                                  "git": r"[/\\][.]git",
+                                  "node-executable": r"node[.]exe",
+                                  "pnpm-executable": r"pnpm[.]cjs",
+                                  "temporary": r"[/\\]tmp[/\\]|[/\\]temp[/\\]",
+                              }.items() if any(re.search(pattern, line, re.I) for line in raw.splitlines() if "ENOENT" in line)],
+                              "workspaceRootMentioned": any("workspace" in line.lower() for line in raw.splitlines() if "ENOENT" in line)}), flush=True)
             raise source.SourceFailure(stage)
         print(json.dumps({"stage": stage, "status": "passed"}), flush=True)
         return raw.strip()
