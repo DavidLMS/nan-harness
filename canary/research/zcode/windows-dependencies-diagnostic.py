@@ -21,6 +21,23 @@ CODES = ("EPERM", "ENOENT", "ENOSPC", "EACCES", "ENAMETOOLONG", "EINVAL", "ECONN
          "ERR_PNPM_FETCH_502", "ERR_PNPM_FETCH_503", "ERR_PNPM_LINKING_FAILED",
          "ERR_PNPM_UNEXPECTED_STORE", "ERR_PNPM_UNSUPPORTED_ENGINE")
 
+def rename_details(raw, cwd):
+    text = re.sub(r"\x1b\[[0-9;]*m", "", raw)
+    pairs = re.findall(r"rename ['\"]([^'\"]+)['\"]\s*->\s*['\"]([^'\"]+)['\"]", text)
+    known = {"node_modules", ".pnpm", ".ignored", ".bin", "pnpm", "node", ".tools", ".nanh-tools",
+             "package.json", "pnpm-lock.yaml", "lock.yaml", ".modules.yaml", "store", "v10", "v3",
+             "tmp", "temp", "cache", ".cache", "bin", "dist", "npm", "home", "zcode-source",
+             "pnpm.cjs", "node.exe", "pnpm.exe", "pnpm.cmd", "pnpm.ps1", "pnpx.cmd", "pnpx.ps1"}
+    def shape(value):
+        parts = value.replace("\\", "/").split("/")
+        return [part.lower() if part.lower() in known else
+                "temporary-name" if "tmp" in part.lower() else "version" if re.fullmatch(r"v?\d+\.\d+\.\d+", part)
+                else "other" for part in parts[-8:]]
+    return [{"sourceShape": shape(a), "destinationShape": shape(b),
+             "sourceExists": Path(a).exists(), "destinationExists": Path(b).exists(),
+             "sameParent": Path(a).parent == Path(b).parent,
+             "parentExists": Path(a).parent.exists()} for a,b in pairs[:4]]
+
 def diagnose(arguments, cwd, environment=None, stage="probe"):
     with tempfile.TemporaryFile() as output:
         result = subprocess.run([str(a) for a in arguments], cwd=cwd, env=environment,
@@ -30,6 +47,7 @@ def diagnose(arguments, cwd, environment=None, stage="probe"):
         if result.returncode:
             print(json.dumps({"stage": stage, "exitCode": result.returncode,
                               "codes": [code for code in CODES if code in raw],
+                              "renameDetails": rename_details(raw, cwd),
                               "symlinkMentioned": "symlink" in raw.lower(),
                               "junctionMentioned": "junction" in raw.lower(),
                               "outOfMemory": "heap out of memory" in raw.lower(),
