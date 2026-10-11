@@ -628,6 +628,41 @@ async fn unsupported_official_pairs_are_closed_blockers_without_versions() {
 }
 
 #[test]
+fn sparkle_selects_unique_latest_despite_historical_rebuilds_in_any_order() {
+    let prefix = "https://persistent.oaistatic.com/codex-app-prod/ChatGPT-darwin-arm64-";
+    for versions in [
+        ["26.1007.30912", "26.930.61225", "26.930.61225"],
+        ["26.930.61225", "26.1007.30912", "26.930.61225"],
+        ["26.930.61225", "26.930.61225", "26.1007.30912"],
+    ] {
+        let feed = String::from_utf8(appcast(&versions)).unwrap();
+        assert_eq!(
+            resolve::newest_sparkle(&feed, prefix, "arm64"),
+            exact_version("26.1007.30912")
+        );
+    }
+}
+
+#[test]
+fn sparkle_never_falls_back_from_an_ambiguous_latest_or_untrusted_history() {
+    let prefix = "https://persistent.oaistatic.com/codex-app-prod/ChatGPT-darwin-arm64-";
+    for versions in [
+        ["26.1007.30912", "26.930.61225", "26.1007.30912"],
+        ["26.930.61225", "26.1007.30912", "26.1007.30912"],
+    ] {
+        let feed = String::from_utf8(appcast(&versions)).unwrap();
+        assert!(resolve::newest_sparkle(&feed, prefix, "arm64").is_none());
+    }
+    let feed = String::from_utf8(appcast(&["26.1007.30912", "26.930.61225"]))
+        .unwrap()
+        .replace(
+            &format!("{prefix}26.930.61225.zip"),
+            "https://example.com/older.zip",
+        );
+    assert!(resolve::newest_sparkle(&feed, prefix, "arm64").is_none());
+}
+
+#[test]
 fn metadata_parsers_reject_ambiguous_or_untrusted_records() {
     let prefix = "https://persistent.oaistatic.com/codex-app-prod/ChatGPT-darwin-arm64-";
     let duplicated = appcast(&["26.908.40834", "26.908.40834"]);

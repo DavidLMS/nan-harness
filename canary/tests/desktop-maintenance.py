@@ -5,6 +5,8 @@ import io
 import json
 from pathlib import Path
 import sys
+import subprocess
+import tempfile
 import unittest
 from unittest.mock import patch
 import zipfile
@@ -50,6 +52,47 @@ class MaintenanceTests(unittest.TestCase):
                         dict(upstreamArtifactSha256='c' * 64), dict(probes=receipt()['probes'][:2]),
                         dict(probes=[dict(status='passed', steps=['launched'])] * 3)]:
             self.assertEqual(state(EXPECTED, {**receipt(), **changed}), 'qualification-pending')
+
+    def test_resolution_keeps_only_valid_closed_per_app_diagnostics(self):
+        event = dict(schemaVersion=1, app='chatgpt-desktop', stage='frozen-resolution',
+                     errorCategory='artifact-selection', reason='version-unknown')
+        transport = {**event, 'app': 'claude-desktop', 'errorCategory': 'resolution-transport',
+                     'transportCategory': 'http-status', 'operation': 'metadata', 'httpStatus': 503}
+        records = [event, transport, {**event, 'path': 'private-secret'},
+                   {**event, 'errorCategory': 'private-secret'}]
+        raw = b'private stderr must be discarded\n' + b''.join(
+            b'DESKTOP_PREPARE_DIAGNOSTIC:' + json.dumps(record).encode() + b'\n' for record in records)
+        def execute(argv, **kwargs):
+            self.assertFalse({'GH_TOKEN', 'GITHUB_TOKEN', 'NAN_API_KEY'} & kwargs['env'].keys())
+            kwargs['stderr'].write(raw)
+            return subprocess.CompletedProcess(argv, 0)
+        diagnostics = {}
+        with tempfile.TemporaryDirectory() as tmp, patch.object(d.subprocess, 'run', side_effect=execute), \
+                patch.object(d, 'read_frozen_manifest', return_value={'apps': []}):
+            self.assertEqual(d.resolve(Path('checker'), 'macos', Path(tmp), diagnostics), [])
+        self.assertEqual(diagnostics, {
+            'chatgpt-desktop': {'errorCategory': 'artifact-selection'},
+            'claude-desktop': {'errorCategory': 'resolution-transport', 'transportCategory': 'http-status',
+                               'operation': 'metadata', 'httpStatus': 503}})
+        failed = d.plan_cell(None, EXPECTED, 'macos', SHA, diagnostic=diagnostics['chatgpt-desktop'])
+        self.assertEqual(failed['resolutionDiagnostic'], {'errorCategory': 'artifact-selection'})
+        self.assertNotIn('private', json.dumps(failed))
+        self.assertNotIn('resolutionDiagnostic', d.plan_cell(EXPECTED, EXPECTED, 'macos', SHA,
+                                                           diagnostic=diagnostics['chatgpt-desktop']))
+
+    def test_failed_resolver_preserves_diagnostic_before_propagating_exit(self):
+        event = dict(schemaVersion=1, app='chatgpt-desktop', stage='frozen-resolution',
+                     errorCategory='cleanup-uncertain', reason='cleanup-failed')
+        def execute(argv, **kwargs):
+            kwargs['stderr'].write(b'DESKTOP_PREPARE_DIAGNOSTIC:' + json.dumps(event).encode() + b'\n')
+            raise subprocess.CalledProcessError(1, argv)
+        diagnostics = {}
+        with tempfile.TemporaryDirectory() as tmp, patch.object(d.subprocess, 'run', side_effect=execute):
+            with self.assertRaises(subprocess.CalledProcessError):
+                d.resolve(Path('checker'), 'macos', Path(tmp), diagnostics)
+        self.assertEqual(diagnostics, {'chatgpt-desktop': {'errorCategory': 'cleanup-uncertain'}})
+        self.assertEqual(d.plan_cell(None, EXPECTED, 'macos', SHA)['resolutionDiagnostic'],
+                         {'errorCategory': 'resolution-failed'})
 
     def test_baseline_catalog_covers_exactly_the_twelve_qualified_cells(self):
         for platform in d.TARGETS:

@@ -10,7 +10,7 @@ use crate::install::FetchFailure;
 use crate::report::{Architecture, Platform};
 use nan_harness_core::DesktopHarnessKind;
 use semver::Version;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::future::Future;
 use std::path::Path;
 
@@ -545,9 +545,10 @@ fn element<'a>(text: &'a str, name: &str) -> Result<Option<&'a str>, ()> {
     Ok(Some(rest[..end].trim()))
 }
 
-/// Parse Sparkle items conservatively: one version, one full enclosure, no deltas.
+/// Require one full enclosure per item and an unambiguous newest version.
+/// Historical rebuilds may share a display version; they are never selected.
 pub(crate) fn newest_sparkle(text: &str, archive_prefix: &str, hardware: &str) -> Option<Version> {
-    let mut versions = BTreeSet::new();
+    let mut versions = BTreeMap::new();
     let mut remaining = text;
     while let Some(start) = remaining.find("<item>") {
         let after = &remaining[start + "<item>".len()..];
@@ -571,11 +572,16 @@ pub(crate) fn newest_sparkle(text: &str, archive_prefix: &str, hardware: &str) -
             return None;
         }
         let url = item[position..].split_once("url=\"")?.1.split_once('"')?.0;
-        if url != format!("{archive_prefix}{version}.zip") || !versions.insert(version) {
+        if url != format!("{archive_prefix}{version}.zip") {
             return None;
         }
+        versions
+            .entry(version)
+            .and_modify(|unique| *unique = false)
+            .or_insert(true);
     }
-    versions.pop_last()
+    let (version, unique) = versions.pop_last()?;
+    unique.then_some(version)
 }
 
 pub(crate) fn squirrel_mac(body: &[u8], archive_prefix: &str) -> Option<(Version, String)> {
