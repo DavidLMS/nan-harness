@@ -14,6 +14,7 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'canary/actions'))
+from desktop_diagnostics import Capture
 from desktop_qualification import matrix
 from desktop_suite import read_frozen_manifest
 
@@ -70,7 +71,7 @@ def accepted(receipt, expected, platform, source_sha):
                     and type(p.get('steps')) is list and len(p['steps']) == 5 and set(p['steps']) == STEPS for p in receipt['probes']))
 
 
-def plan_cell(entry, expected, platform, source_sha, receipt=None, force=False):
+def plan_cell(entry, expected, platform, source_sha, receipt=None, force=False, diagnostic=None):
     if entry is None or entry.get('status') != 'frozen':
         state = 'resolution-failed'
     elif not same_release(entry, expected):
@@ -80,9 +81,12 @@ def plan_cell(entry, expected, platform, source_sha, receipt=None, force=False):
     else:
         state = 'qualification-pending'
     # Only bounded versions from the validated manifest leave private staging.
-    return dict(app=expected['app'], platform=platform, architecture=TARGETS[platform][0],
-                baselineVersion=expected['version'], observedVersion=entry.get('version') if entry else None,
-                state=state)
+    result = dict(app=expected['app'], platform=platform, architecture=TARGETS[platform][0],
+                  baselineVersion=expected['version'], observedVersion=entry.get('version') if entry else None,
+                  state=state)
+    if state == 'resolution-failed':
+        result['resolutionDiagnostic'] = diagnostic or {'errorCategory': 'resolution-failed'}
+    return result
 
 
 def command(argv, limit=4 * 1024 * 1024):
@@ -155,7 +159,7 @@ def previous(repository, branch, source_sha, fetch=api, download=read_artifact):
     return records
 
 
-def resolve(checker, platform, directory):
+def resolve(checker, platform, directory, diagnostics):
     architecture, target = TARGETS[platform]
     manifest = directory / (platform + '.json')
     argv = [str(checker), 'resolve', '--target', target, '--model', 'qwen3.6',
@@ -164,8 +168,18 @@ def resolve(checker, platform, directory):
         argv += ['--app', app]
     # No GitHub or provider credentials enter the resolver or staged vendor bytes.
     env = {k: v for k, v in os.environ.items() if k not in {'GH_TOKEN', 'GITHUB_TOKEN', 'NAN_API_KEY'}}
-    subprocess.run(argv, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                   check=True, timeout=900)
+    capture = Capture(platform)
+    with tempfile.TemporaryFile() as log:
+        try:
+            subprocess.run(argv, env=env, stdout=subprocess.DEVNULL, stderr=log,
+                           check=True, timeout=900)
+        finally:
+            capture.observe(log)
+            for event in capture.events:
+                record = event['record']
+                if event['kind'] == 'prepare' and record['stage'] == 'frozen-resolution':
+                    diagnostics[record['app']] = {key: record[key] for key in
+                        ('errorCategory', 'transportCategory', 'operation', 'httpStatus') if key in record}
     return read_frozen_manifest(manifest, APPS, platform, architecture, 'qwen3.6')['apps']
 
 
@@ -187,12 +201,13 @@ def main():
     with tempfile.TemporaryDirectory(prefix='desktop-daily-') as temporary:
         for platform in TARGETS:
             expected = baseline(platform)
+            diagnostics = {}
             try:
-                entries = {item['app']: item for item in resolve(args.checker, platform, Path(temporary))}
+                entries = {item['app']: item for item in resolve(args.checker, platform, Path(temporary), diagnostics)}
             except (ValueError, OSError, subprocess.SubprocessError):
                 entries = {}
             cells.extend(plan_cell(entries.get(app), expected[app], platform, source_sha,
-                                   receipts.get((app, platform)), args.force) for app in APPS)
+                                   receipts.get((app, platform)), args.force, diagnostics.get(app)) for app in APPS)
     selected = [c['app'] + '/' + c['platform'] for c in cells if c['state'] == 'qualification-pending']
     report = dict(schemaVersion=1, sourceSha=source_sha, evidenceMode='source-deterministic',
                   excludedApps=['pen-desktop'], cells=cells)
@@ -203,10 +218,11 @@ def main():
         output.write(f"resolution_failed={str(any(c['state']=='resolution-failed' for c in cells)).lower()}\n")
     with Path(os.environ['GITHUB_STEP_SUMMARY']).open('a') as output:
         output.write('Desktop source qualification; no release/feed publication. Pen excluded.\n\n')
-        output.write('| App | Platform | Baseline | Observed | State |\n|---|---|---|---|---|\n')
+        output.write('| App | Platform | Baseline | Observed | State | Diagnostic |\n|---|---|---|---|---|---|\n')
         for cell in cells:
             output.write('| ' + ' | '.join(str(cell[k] or 'unknown') for k in
-                         ('app', 'platform', 'baselineVersion', 'observedVersion', 'state')) + ' |\n')
+                         ('app', 'platform', 'baselineVersion', 'observedVersion', 'state')) + ' | ' +
+                         json.dumps(cell.get('resolutionDiagnostic', {}), sort_keys=True) + ' |\n')
 
 
 if __name__ == '__main__':

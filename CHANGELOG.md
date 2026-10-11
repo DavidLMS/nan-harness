@@ -7,6 +7,12 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Resolve the latest macOS Codex Desktop release when older Sparkle entries share
+  a version, while still rejecting an ambiguous latest release. Preserve closed
+  resolution diagnostics in the Desktop daily report.
+
 ## [0.1.21] - 2026-10-10
 
 ### Fixed
