@@ -1,15 +1,15 @@
 import { readFile, readdir, mkdir } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { createRequire } from "node:module";
 
 const sourceRoot = process.env.ZCODE_SOURCE_ROOT;
 if (!sourceRoot || !process.argv[2]) {
   throw new Error("Set ZCODE_SOURCE_ROOT and provide a temporary output directory.");
 }
 const output = resolve(process.argv[2]);
-const cliRequire = createRequire(join(sourceRoot, "apps/zcode-cli/package.json"));
-const { build } = await import(pathToFileURL(cliRequire.resolve("esbuild")).href);
+const { build } = await import(
+  pathToFileURL(join(sourceRoot, "node_modules/esbuild/lib/main.js")).href
+);
 const packages = new Map();
 for (const directory of ["packages", "apps/zcode-cli/packages", "apps/zcode-cli/tools"]) {
   for (const name of await readdir(join(sourceRoot, directory))) {

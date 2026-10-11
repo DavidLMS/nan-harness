@@ -17,6 +17,28 @@ import hosted
 
 
 class CellIsolationTests(unittest.TestCase):
+    def test_zcode_install_failure_exports_only_known_marker_categories(self):
+        cases = [({"stage": "dependencies", "reason": "rename-missing"},
+                  "zcode-source-dependencies-rename-missing"),
+                 ({"stage": "dependencies", "reason": "private-secret"},
+                  "zcode-source-dependencies"),
+                 ({"stage": "build", "reason": "rename-missing"}, "zcode-source-build"),
+                 ({"stage": "private-secret"}, "unknown"), ([], "unknown")]
+        for details, expected in cases:
+            with self.subTest(details=details), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                marker = root / "zcode-source-failure.json"
+                marker.write_text(json.dumps(details))
+                args = argparse.Namespace(directory=root, harness="zcode", harness_version="0.16.9")
+                with patch.object(cell, "installer_command", return_value=["synthetic-installer"]), \
+                        patch.object(cell, "private_command", return_value=1), \
+                        patch.object(cell, "windows_install_failure", return_value="unknown"):
+                    with self.assertRaises(cell.InstallFailure) as caught:
+                        cell.install(args, {})
+                self.assertEqual(caught.exception.code, expected)
+                self.assertNotIn("private-secret", str(caught.exception))
+                self.assertFalse(marker.exists())
+
     def test_harness_cells_cannot_inherit_each_others_installation_or_configuration(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

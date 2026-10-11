@@ -88,6 +88,57 @@ class SourceContracts(unittest.TestCase):
                     source.install(version, ref, Path(tmp))
                 run.assert_not_called()
 
+    def test_failed_dependency_output_retains_only_the_rename_category(self):
+        import sys
+        private = "ENOENT: no such file or directory, rename '/private/secret-a' -> '/private/secret-b'"
+        command = [sys.executable, "-c", f"print({private!r}); raise SystemExit(1)"]
+        with tempfile.TemporaryDirectory() as tmp:
+            for stage, reason in (("dependencies", "rename-missing"), ("build", "exit-nonzero")):
+                with self.assertRaises(source.SourceFailure) as caught:
+                    source.run(command, Path(tmp), stage=stage)
+                self.assertEqual(caught.exception.reason, reason)
+                self.assertNotIn("secret", str(caught.exception))
+            # Unrelated output must not become an accepted diagnostic category.
+            with self.assertRaises(source.SourceFailure) as caught:
+                source.run([sys.executable, "-c", "print('private-secret'); raise SystemExit(1)"],
+                           Path(tmp), stage="dependencies")
+            self.assertEqual(caught.exception.reason, "exit-nonzero")
+
+    def test_install_serializes_imports_without_changing_frozen_source_or_layout(self):
+        ref = "a" * 40
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            def command(arguments, cwd, environment=None, stage="probe"):
+                args = [str(arg) for arg in arguments]
+                if stage == "git-checkout":
+                    project = cwd / "apps/zcode-cli/package.json"
+                    project.parent.mkdir(parents=True)
+                    project.write_text(json.dumps({"version": "0.16.9", "engines": {"node": "24.14.0"},
+                                                   "packageManager": "pnpm@10.33.2"}))
+                    (cwd / ".npmrc").write_text("node-linker=hoisted\n")
+                    (cwd / "pnpm-lock.yaml").write_text("synthetic frozen lockfile\n")
+                if args[-2:] == ["rev-parse", "HEAD"]:
+                    return ref
+                if stage == "runtime-verify":
+                    return "v24.14.0"
+                if stage == "dependencies":
+                    if environment.get("PNPM_MAX_WORKERS") != "1":
+                        raise source.SourceFailure(stage, "rename-missing")
+                    self.assertIn("--frozen-lockfile", args)
+                    self.assertIn("--ignore-scripts", args)
+                    self.assertFalse(any("node-linker" in arg for arg in args))
+                if stage == "build":
+                    self.assertNotIn("PNPM_MAX_WORKERS", environment)
+                if stage == "command-verify":
+                    return "0.16.9" if args[-1] == "version" else "nanh-zcode-config-v1"
+                return ""
+            with patch.object(source, "run", side_effect=command), patch.object(source, "bind"), \
+                    patch.dict(source.os.environ, {"HOME": str(root / "home")}):
+                source.install("0.16.9", ref, root)
+            self.assertEqual((root / "zcode-source/.npmrc").read_text(), "node-linker=hoisted\n")
+            self.assertEqual((root / "zcode-source/pnpm-lock.yaml").read_text(), "synthetic frozen lockfile\n")
+            self.assertEqual(json.loads((root / "zcode-source.json").read_text())["ref"], ref)
+
     def test_declared_version_and_checked_out_commit_must_match(self):
         with tempfile.TemporaryDirectory() as tmp, patch.object(source, 'run', return_value='b' * 40) as run:
             with self.assertRaises(ValueError):

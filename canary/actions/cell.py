@@ -133,6 +133,7 @@ INSTALL_FAILURE_CODES = {
 ZCODE_INSTALL_STAGES = frozenset({"git-init", "git-fetch", "git-checkout", "node-install", "pnpm-install",
                                   "runtime-verify", "dependencies", "build", "command-verify", "terminal-driver"})
 INSTALL_FAILURE_CODES.update("zcode-source-" + stage for stage in ZCODE_INSTALL_STAGES)
+INSTALL_FAILURE_CODES.add("zcode-source-dependencies-rename-missing")
 WINDOWS_INSTALL_CATEGORIES = frozenset({
     "git-ownership", "git-path-length", "git-config", "git-checkout", "git-download",
     "installer-argument", "installer-path", "git-native-error",
@@ -937,9 +938,12 @@ def install(args, state):
         if args.harness == "zcode":
             marker = args.directory / "zcode-source-failure.json"
             try:
-                stage = json.loads(marker.read_bytes()).get("stage")
+                details = json.loads(marker.read_bytes())
+                stage = details.get("stage")
                 if isinstance(stage, str) and stage in ZCODE_INSTALL_STAGES:
                     installer_code = "zcode-source-" + stage
+                    if stage == "dependencies" and details.get("reason") == "rename-missing":
+                        installer_code += "-rename-missing"
             except (OSError, ValueError, AttributeError):
                 pass
             finally:
