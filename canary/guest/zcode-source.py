@@ -39,12 +39,18 @@ def run(arguments, cwd, environment=None, stage="probe"):
         # Windows descendants can retain inherited pipe handles after the direct
         # child exits. A private file lets the owner finish and close its job tree.
         with tempfile.TemporaryFile() as output:
-            subprocess.run([str(a) for a in arguments], cwd=cwd, env=environment,
-                           check=True, timeout=1200, stdout=output, stderr=output)
+            result = subprocess.run([str(a) for a in arguments], cwd=cwd, env=environment,
+                                    check=False, timeout=1200, stdout=output, stderr=output)
             output.seek(0)
             raw = output.read(8 * 1024 * 1024 + 1)
             if len(raw) > 8 * 1024 * 1024:
                 raise SourceFailure(stage, "output-limit")
+            if result.returncode:
+                # Preserve only the known failure category, never package paths
+                # or child output from the private installation log.
+                rename_missing = (stage == "dependencies" and
+                                  re.search(rb"\bENOENT\b[^\r\n]*\brename\b", raw))
+                raise SourceFailure(stage, "rename-missing" if rename_missing else "exit-nonzero")
             return raw.decode("utf-8", "replace").strip()
     except (OSError, subprocess.SubprocessError) as error:
         reason = ("stage-timeout" if isinstance(error, subprocess.TimeoutExpired) else
@@ -110,7 +116,11 @@ def install(version, ref, destination):
     environment = dict(os.environ, PATH=str(node.parent) + os.pathsep + os.environ.get("PATH", ""))
     if run([node, "--version"], source, environment, stage="runtime-verify") != "v" + node_version:
         raise ValueError("ZCode source runtime could not be verified")
-    run([node, pnpm, "--filter", "@zcode/cli...", "install", "--ignore-scripts", "--frozen-lockfile"], source, environment, stage="dependencies")
+    # Concurrent hoisted imports can lose nested package directories during rename.
+    # Serialize this disposable installation while preserving the upstream layout.
+    install_environment = dict(environment, PNPM_MAX_WORKERS="1")
+    run([node, pnpm, "--filter", "@zcode/cli...", "install", "--ignore-scripts",
+         "--frozen-lockfile"], source, install_environment, stage="dependencies")
     bind(source)
     run([node, pnpm, "--filter", "@zcode/cli...", "build"], source, environment, stage="build")
     for argument, expected in (("version", version), ("--nanh-source-info", "nanh-zcode-config-v1")):
