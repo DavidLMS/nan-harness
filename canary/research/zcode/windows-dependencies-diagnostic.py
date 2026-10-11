@@ -39,6 +39,8 @@ def rename_details(raw, cwd):
              "parentExists": Path(a).parent.exists()} for a,b in pairs[:4]]
 
 def diagnose(arguments, cwd, environment=None, stage="probe"):
+    if stage == "dependencies":
+        environment = dict(environment, PNPM_MAX_WORKERS="1")
     with tempfile.TemporaryFile() as output:
         result = subprocess.run([str(a) for a in arguments], cwd=cwd, env=environment,
                                 stdout=output, stderr=output, timeout=1200)
