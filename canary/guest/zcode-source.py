@@ -110,7 +110,10 @@ def install(version, ref, destination):
     environment = dict(os.environ, PATH=str(node.parent) + os.pathsep + os.environ.get("PATH", ""))
     if run([node, "--version"], source, environment, stage="runtime-verify") != "v" + node_version:
         raise ValueError("ZCode source runtime could not be verified")
-    run([node, pnpm, "--filter", "@zcode/cli...", "install", "--ignore-scripts", "--frozen-lockfile"], source, environment, stage="dependencies")
+    # The upstream hoisted workspace installer races while moving nested package
+    # directories. Keep CLI dependencies isolated in this disposable checkout.
+    run([node, pnpm, "--filter", "@zcode/cli...", "install", "--ignore-scripts",
+         "--frozen-lockfile", "--config.node-linker=isolated"], source, environment, stage="dependencies")
     bind(source)
     run([node, pnpm, "--filter", "@zcode/cli...", "build"], source, environment, stage="build")
     for argument, expected in (("version", version), ("--nanh-source-info", "nanh-zcode-config-v1")):
