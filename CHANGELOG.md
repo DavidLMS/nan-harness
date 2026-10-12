@@ -7,6 +7,12 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Keep the macOS Desktop checker waiting through incomplete accessibility focus
+  reads while independent window ownership checks remain valid. Preserve the
+  original deadline and reject changed ownership without replaying input.
+
 ## [0.1.22] - 2026-10-12
 
 ### Added

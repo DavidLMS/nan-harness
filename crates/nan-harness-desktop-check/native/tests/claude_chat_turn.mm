@@ -7,6 +7,27 @@ static Node fixture(int parent, const char* role, const char* label, const char*
     return {nullptr, parent, role, label, current, CGRectZero, true};
 }
 int main() {
+    unsigned window_queries = 0, window_pauses = 0;
+    assert(settle_owned_window([&] {
+        return ++window_queries == 1 ? MacOwnedWindowState::PendingFocus : MacOwnedWindowState::Ready;
+    }, [] { return true; }, [&] { ++window_pauses; }));
+    assert(window_queries == 2 && window_pauses == 1);
+    window_queries = window_pauses = 0;
+    assert(!settle_owned_window([&] { ++window_queries; return MacOwnedWindowState::Rejected; },
+        [] { return true; }, [&] { ++window_pauses; }));
+    assert(window_queries == 1 && window_pauses == 0);
+    window_queries = window_pauses = 0;
+    assert(!settle_owned_window([&] { ++window_queries; return MacOwnedWindowState::PendingFocus; },
+        [&] { return window_queries < 2; }, [&] { ++window_pauses; }));
+    assert(window_queries == 2 && window_pauses == 1);
+    window_queries = window_pauses = 0;
+    assert(!settle_owned_window([&] { ++window_queries; return MacOwnedWindowState::Ready; },
+        [&] { return window_queries == 0; }, [&] { ++window_pauses; }));
+    assert(window_queries == 1 && window_pauses == 0);
+    window_queries = 0;
+    assert(!settle_owned_window([&] { ++window_queries; return MacOwnedWindowState::Ready; },
+        [] { return false; }, [] {}));
+    assert(window_queries == 0);
     const MacWindowSafety safe{true,true,true,true,true,true,true};
     assert(classify_mac_owned_window(MacFocusRead::ReadyHeld,safe)==MacOwnedWindowState::Ready);
     assert(classify_mac_owned_window(MacFocusRead::CannotComplete,safe)==MacOwnedWindowState::PendingFocus);
