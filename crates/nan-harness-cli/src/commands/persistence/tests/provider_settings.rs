@@ -61,7 +61,7 @@ fn deepseek_preserves_old_routes_and_exposes_budgeted_controls_separately() {
             .map(str::to_owned),
     );
     let settings = deepseek_provider_settings(&models, "https://api.nan.test/v1").unwrap();
-    let patch: serde_yaml_ng::Value = serde_yaml_ng::from_str(&settings).unwrap();
+    let patch: yaml_serde::Value = yaml_serde::from_str(&settings).unwrap();
     assert_eq!(patch[0]["config"]["provider"], "nan-harness-budgeted");
     let providers = &patch[1]["config"]["providers"];
     assert_eq!(providers["nan-harness-budgeted"]["reasoning"], "high");

@@ -26,7 +26,6 @@ self-replace.workspace = true
 semver.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-serde_yaml_ng.workspace = true
 sha2.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
@@ -35,6 +34,7 @@ toml.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 url.workspace = true
+yaml_serde.workspace = true
 
 [dev-dependencies]
 axum.workspace = true

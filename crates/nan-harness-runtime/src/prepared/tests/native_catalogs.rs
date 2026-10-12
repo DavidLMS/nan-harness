@@ -214,8 +214,7 @@ fn metadata_and_capabilities_do_not_claim_reasoning_for_every_model() {
 
     let deepseek =
         deepseek_model_catalog(&models, "https://nan.invalid/v1").expect("DeepSeek catalog");
-    let deepseek: serde_yaml_ng::Value =
-        serde_yaml_ng::from_str(&deepseek).expect("provider mapping");
+    let deepseek: yaml_serde::Value = yaml_serde::from_str(&deepseek).expect("provider mapping");
     assert_eq!(deepseek["nan-harness-budgeted"]["reasoning"], "high");
     for route in ["nan-harness", "nan-harness-budgeted"] {
         assert_eq!(deepseek[route]["api"], "openai-completions");

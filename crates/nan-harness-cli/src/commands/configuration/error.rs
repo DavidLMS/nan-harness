@@ -63,10 +63,10 @@ pub(crate) enum ConfigurationError {
     #[error("configuration document '{}' is not valid YAML: {source}", path.display())]
     ParseYaml {
         path: PathBuf,
-        source: serde_yaml_ng::Error,
+        source: yaml_serde::Error,
     },
     #[error("could not serialize a YAML configuration document: {0}")]
-    SerializeYaml(serde_yaml_ng::Error),
+    SerializeYaml(yaml_serde::Error),
     #[error("configuration document '{}' must contain a YAML mapping", .0.display())]
     YamlRootNotMapping(PathBuf),
     #[error("configuration field '{field}' in '{}' must contain a YAML mapping", path.display())]

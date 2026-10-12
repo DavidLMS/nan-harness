@@ -66,9 +66,9 @@ async fn bounded<T>(operation: impl Future<Output = T>) -> T {
         .expect("profile preparation should complete within the test deadline")
 }
 
-fn parse_yaml(path: &Path) -> serde_yaml_ng::Value {
+fn parse_yaml(path: &Path) -> yaml_serde::Value {
     let contents = fs::read_to_string(path).expect("profile configuration");
-    serde_yaml_ng::from_str(&contents).expect("profile configuration should be valid YAML")
+    yaml_serde::from_str(&contents).expect("profile configuration should be valid YAML")
 }
 
 fn session_receipt(paths: &DesktopPaths) -> SessionReceipt {

@@ -272,7 +272,7 @@ fn yaml_refresh_merges_lists_and_restores_user_search() {
     };
     apply_prepared(&[prepared]).expect("YAML merge should apply");
     let active: YamlValue =
-        serde_yaml_ng::from_slice(&fs::read(&path).expect("managed YAML should remain readable"))
+        yaml_serde::from_slice(&fs::read(&path).expect("managed YAML should remain readable"))
             .expect("managed YAML should parse");
     assert_eq!(
         get_yaml_path(&active, &["plugins".to_owned(), "enabled".to_owned()]),
@@ -285,11 +285,11 @@ fn yaml_refresh_merges_lists_and_restores_user_search() {
     let removal = prepare_yaml_removal(&receipt).expect("YAML removal should prepare");
     apply_prepared(&[removal]).expect("YAML removal should apply");
     let restored: YamlValue =
-        serde_yaml_ng::from_slice(&fs::read(path).expect("user YAML should remain readable"))
+        yaml_serde::from_slice(&fs::read(path).expect("user YAML should remain readable"))
             .expect("restored YAML should parse");
     assert_eq!(
         restored,
-        serde_yaml_ng::from_str::<YamlValue>(
+        yaml_serde::from_str::<YamlValue>(
             "plugins:\n  enabled: [web/tavily]\nweb:\n  search_backend: tavily\n"
         )
         .expect("fixture YAML should parse")
@@ -311,8 +311,8 @@ fn yaml_plan_migrates_a_managed_text_block() {
     let receipt = prepared.receipt.clone();
     apply_prepared(&[prepared]).expect("legacy block should apply");
 
-    let model = serde_yaml_ng::from_str::<YamlValue>("provider: custom\n")
-        .expect("model YAML should parse");
+    let model =
+        yaml_serde::from_str::<YamlValue>("provider: custom\n").expect("model YAML should parse");
     let migrated = YamlPlan {
         path: path.clone(),
         entries: vec![YamlEntryPlan {

@@ -10,9 +10,9 @@ use super::super::{
 };
 use crate::commands::persistence::ConfigurationHealth;
 use nan_harness_core::CodingModelProfile;
-use serde_yaml_ng::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+use yaml_serde::Value;
 
 type Sources = BTreeMap<PathBuf, Option<Vec<u8>>>;
 
@@ -193,7 +193,7 @@ impl PersistenceManager {
             .find(DEEPSEEK_BLOCK_END)
             .ok_or(PersistenceError::InvalidManagedBlock)?
             + start;
-        let imported = serde_yaml_ng::from_str(&source[start..end])
+        let imported = yaml_serde::from_str(&source[start..end])
             .map_err(|_| PersistenceError::InvalidManagedSection(managed.path.clone()))?;
         Ok((vec![change], Some(imported)))
     }

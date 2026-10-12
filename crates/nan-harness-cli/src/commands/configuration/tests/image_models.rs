@@ -37,7 +37,7 @@ fn image_model_configuration_survives_refresh_and_restores_user_settings() {
             assert_eq!(change.media.image_model, Some(ImageModel::QwenImage21));
             let content = fs::read_to_string(&path).expect("native config");
             if harness == HarnessKind::Hermes {
-                let value: YamlValue = serde_yaml_ng::from_str(&content).expect("YAML");
+                let value: YamlValue = yaml_serde::from_str(&content).expect("YAML");
                 assert_eq!(value["image_gen"]["model"], "qwen-image-2.1");
                 assert_eq!(
                     value["plugins"]["entries"]["image_gen/nan_harness"]["allow_tool_override"],
@@ -57,8 +57,8 @@ fn image_model_configuration_survives_refresh_and_restores_user_settings() {
         let restored = fs::read_to_string(&path).expect("restored config");
         if harness == HarnessKind::Hermes {
             assert_eq!(
-                serde_yaml_ng::from_str::<YamlValue>(&restored).unwrap(),
-                serde_yaml_ng::from_str::<YamlValue>(original).unwrap()
+                yaml_serde::from_str::<YamlValue>(&restored).unwrap(),
+                yaml_serde::from_str::<YamlValue>(original).unwrap()
             );
         } else {
             assert_eq!(

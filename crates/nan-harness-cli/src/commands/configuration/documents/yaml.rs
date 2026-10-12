@@ -47,9 +47,9 @@ pub(crate) fn prepare_yaml(
         None => (None, original.is_none()),
     };
     let mut document = if source.trim().is_empty() {
-        YamlValue::Mapping(serde_yaml_ng::Mapping::default())
+        YamlValue::Mapping(yaml_serde::Mapping::default())
     } else {
-        serde_yaml_ng::from_str::<YamlValue>(&source).map_err(|source| {
+        yaml_serde::from_str::<YamlValue>(&source).map_err(|source| {
             ConfigurationError::ParseYaml {
                 path: plan.path.clone(),
                 source,
@@ -70,12 +70,12 @@ pub(crate) fn prepare_yaml(
     } else if created_file
         && document
             .as_mapping()
-            .is_some_and(serde_yaml_ng::Mapping::is_empty)
+            .is_some_and(yaml_serde::Mapping::is_empty)
     {
         None
     } else {
         Some(
-            serde_yaml_ng::to_string(&document)
+            yaml_serde::to_string(&document)
                 .map_err(ConfigurationError::SerializeYaml)?
                 .into_bytes(),
         )
@@ -212,7 +212,7 @@ pub(crate) fn prepare_yaml_removal(
             receipt.path.clone(),
         ));
     };
-    let mut document = serde_yaml_ng::from_slice::<YamlValue>(contents).map_err(|source| {
+    let mut document = yaml_serde::from_slice::<YamlValue>(contents).map_err(|source| {
         ConfigurationError::ParseYaml {
             path: receipt.path.clone(),
             source,
@@ -238,12 +238,12 @@ pub(crate) fn prepare_yaml_removal(
     let replacement = if receipt.created_file
         && document
             .as_mapping()
-            .is_some_and(serde_yaml_ng::Mapping::is_empty)
+            .is_some_and(yaml_serde::Mapping::is_empty)
     {
         None
     } else {
         Some(
-            serde_yaml_ng::to_string(&document)
+            yaml_serde::to_string(&document)
                 .map_err(ConfigurationError::SerializeYaml)?
                 .into_bytes(),
         )

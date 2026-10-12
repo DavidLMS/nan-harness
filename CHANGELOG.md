@@ -19,6 +19,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Replace the unmaintained YAML parser dependency with YAML.org's maintained
+  `yaml_serde` implementation, preserving native configuration values and tags.
 - Keep bounded conformance output draining after truncation, avoiding artificial
   broken-pipe failures in verbose Pi sessions.
 - Read Pi's runtime version from Gentle Shell's multi-line version output.

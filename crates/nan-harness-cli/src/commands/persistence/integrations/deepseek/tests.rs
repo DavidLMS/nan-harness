@@ -54,7 +54,7 @@ fn profiles_refresh_semantically_and_restore_unrelated_fields() {
 fn imported_ownership_keeps_user_siblings_in_the_rollback_baseline() {
     let path = Path::new("cordis.patch.yml");
     let source = "- id: llm-pi-ai\n  name: plugin\n  config:\n    providers:\n      nan-harness: {models: [{id: old}]}\n      personal: {models: [{id: user}]}\n- id: agent-default-model\n  config: {provider: nan-harness, model: old, userSetting: keep}\n";
-    let legacy: Value = serde_yaml_ng::from_str("llm-pi-ai:\n  providers:\n    nan-harness: {models: [{id: old}]}\nagent-default-model: {provider: nan-harness, model: old}\n").unwrap();
+    let legacy: Value = yaml_serde::from_str("llm-pi-ai:\n  providers:\n    nan-harness: {models: [{id: old}]}\nagent-default-model: {provider: nan-harness, model: old}\n").unwrap();
     let document = cordis::parse(source, path).unwrap();
     let mut receipt = cordis::receipt(path, Some(source), None);
     adopt_imported(&document, &mut receipt, &legacy, source).unwrap();

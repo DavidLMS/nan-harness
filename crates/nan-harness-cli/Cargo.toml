@@ -39,7 +39,6 @@ reqwest.workspace = true
 rpassword.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-serde_yaml_ng.workspace = true
 semver.workspace = true
 sha2.workspace = true
 tempfile.workspace = true
@@ -48,6 +47,7 @@ time.workspace = true
 tokio.workspace = true
 toml_edit.workspace = true
 url.workspace = true
+yaml_serde.workspace = true
 zeroize.workspace = true
 
 [dev-dependencies]

@@ -176,9 +176,9 @@ pub(crate) enum HermesDesktopError {
     #[error("the managed Hermes profile uses an unsupported YAML form for '{0}'")]
     UnsupportedProfileConfig(String),
     #[error("the managed Hermes profile configuration is invalid YAML: {0}")]
-    ParseProfileConfig(serde_yaml_ng::Error),
+    ParseProfileConfig(yaml_serde::Error),
     #[error("could not serialize the managed Hermes profile configuration: {0}")]
-    SerializeProfileConfig(serde_yaml_ng::Error),
+    SerializeProfileConfig(yaml_serde::Error),
     #[error("the managed Hermes profile contains an unsafe symbolic link")]
     UnsafePluginPath,
     #[error("the shared Hermes search renderer did not provide config.yaml")]

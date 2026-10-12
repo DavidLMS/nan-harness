@@ -2,10 +2,10 @@ use super::STATE_SCHEMA_VERSION;
 use nan_harness_core::{MediaSelection, WebSearchPolicy};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use serde_yaml_ng::Value as YamlValue;
 use std::collections::BTreeMap;
 use std::fs::Permissions;
 use std::path::PathBuf;
+use yaml_serde::Value as YamlValue;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

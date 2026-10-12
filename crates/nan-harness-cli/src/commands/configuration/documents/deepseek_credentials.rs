@@ -20,7 +20,7 @@ pub(super) fn deepseek_credential_receipt(
         return Ok(None);
     }
     let document: YamlValue =
-        serde_yaml_ng::from_slice(contents).map_err(|source| ConfigurationError::ParseYaml {
+        yaml_serde::from_slice(contents).map_err(|source| ConfigurationError::ParseYaml {
             path: receipt.path.clone(),
             source,
         })?;

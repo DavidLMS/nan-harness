@@ -83,8 +83,8 @@ pub(super) struct ManagedBlock {
 pub(super) struct ManagedCordisEntry {
     pub(super) id: String,
     pub(super) key: Vec<String>,
-    pub(super) value: serde_yaml_ng::Value,
-    pub(super) previous: Option<serde_yaml_ng::Value>,
+    pub(super) value: yaml_serde::Value,
+    pub(super) previous: Option<yaml_serde::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

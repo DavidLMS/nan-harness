@@ -1,7 +1,7 @@
 use nan_harness_core::{HarnessKind, LaunchPlan};
 use nan_harness_i18n::DiagnosticText;
-use serde_yaml_ng::{Mapping, Value};
 use std::path::Path;
+use yaml_serde::{Mapping, Value};
 
 fn error() -> DiagnosticText {
     // Never include the private dump, its parser diagnostics, or the child's stderr.
@@ -29,7 +29,7 @@ pub(super) fn load_effective_config(plan: &LaunchPlan) -> Result<Option<Value>, 
     if !output.status.success() {
         return Err(error());
     }
-    let document: Value = serde_yaml_ng::from_slice(&output.stdout).map_err(|_| error())?;
+    let document: Value = yaml_serde::from_slice(&output.stdout).map_err(|_| error())?;
     if !document.is_sequence() {
         return Err(error());
     }
@@ -41,7 +41,7 @@ pub(super) fn compose_patch(
     effective: Option<&Value>,
 ) -> Result<String, DiagnosticText> {
     let effective = effective.and_then(Value::as_sequence).ok_or_else(error)?;
-    let mut patch: Value = serde_yaml_ng::from_str(source).map_err(|_| error())?;
+    let mut patch: Value = yaml_serde::from_str(source).map_err(|_| error())?;
     for row in patch.as_sequence_mut().ok_or_else(error)? {
         let Some(id) = row.get("id").and_then(Value::as_str).map(str::to_owned) else {
             continue;
@@ -74,7 +74,7 @@ pub(super) fn compose_patch(
         }
         row["config"] = config;
     }
-    serde_yaml_ng::to_string(&patch).map_err(|_| error())
+    yaml_serde::to_string(&patch).map_err(|_| error())
 }
 
 #[cfg(test)]
@@ -83,9 +83,9 @@ mod tests {
 
     #[test]
     fn patch_preserves_effective_provider_siblings_and_replaces_owned_routes() {
-        let effective = serde_yaml_ng::from_str("- id: llm-pi-ai\n  config:\n    other: keep\n    providers:\n      custom: {apiKeyEnv: CUSTOM_KEY, models: [{id: user-model}]}\n      nan-harness: {models: [{id: old}]}\n- id: agent-default-model\n  config: {provider: custom, model: user-model, userOption: true}\n").unwrap();
+        let effective = yaml_serde::from_str("- id: llm-pi-ai\n  config:\n    other: keep\n    providers:\n      custom: {apiKeyEnv: CUSTOM_KEY, models: [{id: user-model}]}\n      nan-harness: {models: [{id: old}]}\n- id: agent-default-model\n  config: {provider: custom, model: user-model, userOption: true}\n").unwrap();
         let rendered = compose_patch("- id: llm-pi-ai\n  config:\n    providers:\n      nan-harness: {models: [{id: new}]}\n- id: agent-default-model\n  config: {provider: nan-harness, model: new}\n", Some(&effective)).unwrap();
-        let result: Value = serde_yaml_ng::from_str(&rendered).unwrap();
+        let result: Value = yaml_serde::from_str(&rendered).unwrap();
         assert_eq!(result[0]["config"]["other"], "keep");
         assert_eq!(
             result[0]["config"]["providers"]["custom"]["apiKeyEnv"],
@@ -101,7 +101,7 @@ mod tests {
     #[test]
     fn unknown_or_dynamic_entries_fail_without_exposing_their_contents() {
         let effective =
-            serde_yaml_ng::from_str("- id: llm-pi-ai\n  config: !js PRIVATE_CONFIG\n").unwrap();
+            yaml_serde::from_str("- id: llm-pi-ai\n  config: !js PRIVATE_CONFIG\n").unwrap();
         let error = compose_patch(
             "- id: llm-pi-ai\n  config: {providers: {}}",
             Some(&effective),
