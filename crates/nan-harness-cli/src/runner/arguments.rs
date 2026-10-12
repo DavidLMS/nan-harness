@@ -19,7 +19,9 @@ pub(crate) fn harness_run_arguments(cli: &Cli) -> Option<(HarnessKind, &HarnessR
         Command::ZCode(arguments) => Some((HarnessKind::ZCode, &arguments.run)),
         Command::Hermes(arguments) => Some((HarnessKind::Hermes, &arguments.run)),
         Command::HermesDesktop(arguments) => Some((HarnessKind::Hermes, &arguments.run)),
-        Command::Pi(arguments) => Some((HarnessKind::Pi, &arguments.run)),
+        Command::Pi(arguments) | Command::GentleShell(arguments) => {
+            Some((HarnessKind::Pi, &arguments.run))
+        }
         Command::Omp(arguments) => Some((HarnessKind::Omp, &arguments.run)),
         Command::Prime(arguments) => Some((HarnessKind::PrimeAgent, &arguments.run)),
         Command::DeepSeek(arguments) => Some((HarnessKind::DeepSeekHarness, &arguments.run)),
@@ -118,6 +120,7 @@ pub(crate) const fn direct_chat_gateway_disabled(cli: &Cli) -> bool {
         | Command::ZCode(arguments)
         | Command::Hermes(arguments)
         | Command::Pi(arguments)
+        | Command::GentleShell(arguments)
         | Command::Omp(arguments)
         | Command::Prime(arguments)
         | Command::DeepSeek(arguments)

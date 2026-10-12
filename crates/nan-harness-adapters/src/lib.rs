@@ -7,6 +7,7 @@ mod codex;
 mod deepseek_harness;
 mod direct;
 mod fx;
+mod gentle_shell;
 mod goose;
 mod hermes;
 mod kimi_code;
@@ -27,6 +28,7 @@ pub use codex::CodexAdapter;
 pub use deepseek_harness::DeepSeekHarnessAdapter;
 pub use direct::{ModelDescription, describe_model};
 pub use fx::FxAdapter;
+pub use gentle_shell::GentleShellAdapter;
 pub use goose::GooseAdapter;
 pub use hermes::{
     HermesAdapter, hermes_command_provider_config, hermes_search_provider_files,

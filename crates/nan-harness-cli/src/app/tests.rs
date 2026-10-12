@@ -220,3 +220,27 @@ fn image_model_is_scoped_to_native_image_integrations() {
         assert!(Cli::try_parse_checked_from(args).is_err());
     }
 }
+
+#[test]
+fn gentle_shell_accepts_shared_flags_and_preserves_launcher_arguments() {
+    let cli = Cli::try_parse_from([
+        "nanh",
+        "gentle-shell",
+        "--no-chat-gateway",
+        "--force-search",
+        "--",
+        "--link",
+        "--continue",
+    ])
+    .unwrap();
+    let Command::GentleShell(args) = cli.command else {
+        panic!("Gentle Shell command");
+    };
+    assert!(args.no_chat_gateway);
+    assert!(args.run.search.force_search);
+    assert_eq!(args.run.arguments, ["--link", "--continue"]);
+    assert_eq!(
+        "gentle-shell".parse::<DoctorTarget>().unwrap(),
+        DoctorTarget::GentleShell
+    );
+}

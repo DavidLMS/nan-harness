@@ -2,6 +2,7 @@ mod aider;
 mod cline;
 mod codex;
 mod deepseek_harness;
+mod gentle_shell;
 mod goose;
 mod hermes;
 mod kimi_code;

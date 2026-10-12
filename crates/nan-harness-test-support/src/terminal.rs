@@ -202,18 +202,32 @@ async fn reap_capture_bounded(mut task: tokio::task::JoinHandle<Result<String, s
     }
 }
 
-async fn capture_output<R>(reader: R) -> Result<String, std::io::Error>
+async fn capture_output<R>(mut reader: R) -> Result<String, std::io::Error>
 where
     R: AsyncRead + Unpin,
 {
     let mut bytes = Vec::new();
-    reader
-        .take((MAX_CAPTURE_BYTES + 1) as u64)
-        .read_to_end(&mut bytes)
-        .await?;
-    if bytes.len() > MAX_CAPTURE_BYTES {
-        bytes.truncate(MAX_CAPTURE_BYTES);
+    let mut buffer = [0_u8; 8192];
+    let mut truncated = false;
+    loop {
+        let count = reader.read(&mut buffer).await?;
+        if count == 0 {
+            break;
+        }
+        bytes.extend_from_slice(&buffer[..count]);
+        if bytes.len() > MAX_CAPTURE_BYTES {
+            let end = MAX_CAPTURE_BYTES / 2 + bytes.len() - MAX_CAPTURE_BYTES;
+            bytes.drain(MAX_CAPTURE_BYTES / 2..end);
+            truncated = true;
+        }
     }
+    if truncated {
+        let marker = b"\n[output truncated; head and tail retained]\n";
+        let start = MAX_CAPTURE_BYTES / 2;
+        bytes[start..start + marker.len()].copy_from_slice(marker);
+    }
+    // Keep draining after reaching the retention bound: closing a live pipe
+    // causes EPIPE in verbose harnesses and changes the result being tested.
     Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
@@ -583,10 +597,13 @@ mod tests {
     async fn captured_output_is_bounded() {
         let workspace = tempfile::tempdir().expect("workspace should exist");
         let output = TerminalCommand::new("/bin/sh", workspace.path())
-            .args(["-c", "head -c 100000 /dev/zero"])
+            .args(["-c", "head -c 100000 /dev/zero && printf CAPTURE_TAIL_OK"])
             .run()
             .await
             .expect("command should complete");
+        assert!(output.status.success());
+        assert!(output.stdout.ends_with("CAPTURE_TAIL_OK"));
+        assert!(output.stdout.contains("output truncated"));
         assert!(output.stdout.len() <= super::MAX_CAPTURE_BYTES);
     }
 

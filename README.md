@@ -82,6 +82,52 @@ supported in this version.
 Harnesses that use OpenAI Chat Completions use an authenticated local gateway by
 default. This enables features such as reporting token usage when a session ends.
 
+### Gentle Shell (Pi launcher)
+
+`nanh gentle-shell` launches your existing Gentle Shell environment through NaN.
+It requires gentle-pi 4.1 or newer and Pi 1.1 or newer. Install Gentle Shell with
+its upstream installer first; use `--executable <path>` if it is not on `PATH`.
+
+```sh
+nanh gentle-shell
+nanh gentle-shell --model qwen3.6
+nanh gentle-shell --no-chat-gateway
+nanh gentle-shell --force-search
+nanh gentle-shell -- --link
+nanh gentle-shell -- --home /path/to/agent
+nanh doctor gentle-shell --offline
+```
+
+By default, nanh replaces only the launch-local `nan` provider connection with
+its authenticated gateway. Gentle Shell's home selection, packages, sessions,
+Engram and other providers remain under Gentle Shell's control. Owned
+subagents inherit the same NaN connection, and their gateway requests contribute
+to session usage. No installed package or persistent provider file is patched.
+
+With `--no-chat-gateway`, an already configured native NaN provider is retained.
+If it has no credential, nanh prepares its direct NaN provider using the normal
+nanh credential workflow. A malformed or rejected native credential is an
+error, not permission to silently switch accounts. Native API-key credentials
+support literal values, Pi's `$NAME`/`${NAME}` templates and bounded `!command`
+resolution. An explicit `NAN_API_KEY` takes precedence in gateway mode; direct
+native mode retains the native credential precedence. An explicit
+`--provider-base-url` requests nanh-managed routing even without the gateway.
+
+`--model` selects the main agent's model. Otherwise an available native NaN
+model default is preserved, including project settings, with nanh's default
+used when no available native NaN default exists. Subagent model profiles remain
+independent; other providers are not restricted from the picker.
+
+Search uses the ordinary automatic, `--no-search` and `--force-search` policy.
+A loaded native search tool takes precedence in automatic mode. NaN search still
+requires an explicitly configured SearXNG backend; launching Gentle Shell does
+not install one. `--context` is not yet supported for this launcher: configure
+compaction in Gentle Shell's own settings. Native persistent setup through
+`nanh config gentle-shell` is not provided.
+
+See the [Gentle Shell qualification](canary/gentle-shell/README.md) for the pinned
+contract probe and the limits of the initial evidence.
+
 ### Desktop app integrations
 
 You can use NaN models in these desktop apps with a special configuration:

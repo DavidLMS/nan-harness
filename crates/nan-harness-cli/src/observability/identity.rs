@@ -123,6 +123,7 @@ const fn telemetry_harness_for_doctor(
     target: Option<crate::app::DoctorTarget>,
 ) -> Option<TelemetryHarnessKind> {
     match target {
+        Some(crate::app::DoctorTarget::GentleShell) => Some(TelemetryHarnessKind::Pi),
         Some(crate::app::DoctorTarget::Stable(kind)) => Some(telemetry_harness_kind(kind)),
         Some(crate::app::DoctorTarget::Experimental(kind)) => Some(match kind {
             nan_harness_core::DesktopHarnessKind::ChatGpt => TelemetryHarnessKind::ChatGptDesktop,
@@ -170,7 +171,7 @@ const fn telemetry_harness_for_command(command: &Command) -> Option<TelemetryHar
         Command::HermesDesktop(_) => Some(TelemetryHarnessKind::HermesDesktop),
         Command::PenDesktop(_) => Some(TelemetryHarnessKind::PenDesktop),
         Command::ZedDesktop(_) => Some(TelemetryHarnessKind::ZedDesktop),
-        Command::Pi(_) => Some(TelemetryHarnessKind::Pi),
+        Command::Pi(_) | Command::GentleShell(_) => Some(TelemetryHarnessKind::Pi),
         Command::Omp(_) => Some(TelemetryHarnessKind::Omp),
         Command::Prime(_) => Some(TelemetryHarnessKind::PrimeAgent),
         Command::DeepSeek(_) => Some(TelemetryHarnessKind::DeepSeekHarness),

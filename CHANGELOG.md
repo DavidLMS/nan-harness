@@ -7,8 +7,22 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.22] - 2026-10-12
+
+### Added
+
+- Add `nanh gentle-shell` and `nanh doctor gentle-shell` as Pi launcher
+  integrations. Preserve the selected Gentle Shell environment, native search,
+  Engram and other providers while routing NaN parent and subagent requests
+  through the authenticated gateway. Direct mode retains configured native NaN
+  credentials or falls back to nanh credentials when none exist.
+
 ### Fixed
 
+- Keep bounded conformance output draining after truncation, avoiding artificial
+  broken-pipe failures in verbose Pi sessions.
+- Read Pi's runtime version from Gentle Shell's multi-line version output.
+  Keep saved native provider URLs and headers from bypassing managed routing.
 - Resolve the latest macOS Codex Desktop release when older Sparkle entries share
   a version, while still rejecting an ambiguous latest release. Preserve closed
   resolution diagnostics in the Desktop daily report.
@@ -974,7 +988,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   startup update prompts, daily compatibility canaries, and a monotonic remote
   verification feed.
 
-[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.1.21...HEAD
+[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.1.22...HEAD
+[0.1.22]: https://github.com/DavidLMS/nan-harness/compare/v0.1.21...v0.1.22
 [0.1.21]: https://github.com/DavidLMS/nan-harness/compare/v0.1.20...v0.1.21
 [0.1.20]: https://github.com/DavidLMS/nan-harness/compare/v0.1.19...v0.1.20
 [0.1.19]: https://github.com/DavidLMS/nan-harness/compare/v0.1.18...v0.1.19

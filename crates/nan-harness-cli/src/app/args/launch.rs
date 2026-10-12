@@ -1,7 +1,7 @@
 use clap::Args;
 use std::path::PathBuf;
 
-#[derive(Debug, Args)]
+#[derive(Debug, Clone, Args)]
 pub(crate) struct HarnessRunArgs {
     #[arg(long)]
     pub(crate) model: Option<String>,
@@ -40,7 +40,7 @@ pub(crate) struct HarnessRunArgs {
     pub(crate) arguments: Vec<String>,
 }
 
-#[derive(Debug, Default, Args)]
+#[derive(Debug, Clone, Default, Args)]
 #[allow(clippy::struct_excessive_bools)]
 pub(crate) struct MediaArgs {
     #[arg(
@@ -64,7 +64,7 @@ pub(crate) struct MediaArgs {
     pub(crate) image_model: Option<String>,
 }
 
-#[derive(Debug, Default, Args)]
+#[derive(Debug, Clone, Default, Args)]
 pub(crate) struct WebSearchArgs {
     #[arg(
         long,
@@ -80,7 +80,7 @@ pub(crate) struct WebSearchArgs {
     pub(crate) force_search: bool,
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Clone, Args)]
 pub(crate) struct DirectHarnessRunArgs {
     #[command(flatten)]
     pub(crate) run: HarnessRunArgs,
@@ -91,7 +91,7 @@ pub(crate) struct DirectHarnessRunArgs {
     pub(crate) no_chat_gateway: bool,
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Clone, Args)]
 pub(crate) struct BridgedHarnessRunArgs {
     #[command(flatten)]
     pub(crate) run: HarnessRunArgs,

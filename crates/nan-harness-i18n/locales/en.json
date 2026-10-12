@@ -1349,5 +1349,11 @@
   "install_source_commands": "Source build: {value_1}",
   "installer_building_source": "Building ZCode from official sources...",
   "detail_zcode_private_configuration_required": "This ZCode installation does not support private launch configuration. Use the source installation offered by nanh, or run with --no-search.",
-  "detail_zcode_requires_chat_gateway": "ZCode requires the local chat gateway to keep the NaN credential out of its launch files. Remove --no-chat-gateway."
+  "detail_zcode_requires_chat_gateway": "ZCode requires the local chat gateway to keep the NaN credential out of its launch files. Remove --no-chat-gateway.",
+  "detail_gentle_shell_arguments": "Use native Gentle Shell for package management; nanh gentle-shell launches agent sessions only",
+  "detail_gentle_shell_config": "Could not read a valid Gentle Shell configuration; repair its JSON before launching",
+  "detail_gentle_shell_context": "Gentle Shell does not yet support --context; configure compaction in its own settings",
+  "detail_gentle_shell_contract": "Gentle Shell requires gentle-pi 4.1 or newer and Pi 1.1 or newer",
+  "detail_gentle_shell_credential": "The native NaN credential cannot be resolved safely; provide NAN_API_KEY explicitly",
+  "help_run_gentle_shell": "Run Gentle Shell with NaN while preserving its Pi environment"
 }

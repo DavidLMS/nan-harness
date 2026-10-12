@@ -113,6 +113,7 @@ pub(super) async fn dispatch(
         | Command::PenDesktop(_)
         | Command::ZedDesktop(_)
         | Command::Pi(_)
+        | Command::GentleShell(_)
         | Command::Omp(_)
         | Command::Prime(_)
         | Command::DeepSeek(_)

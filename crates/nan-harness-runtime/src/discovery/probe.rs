@@ -202,3 +202,21 @@ impl nan_harness_i18n::TerminalMessage for ProbeError {
         }
     }
 }
+
+// Native Pi credentials may be user-owned shell commands. Bound their process
+// tree and output, and never include the command or its output in diagnostics.
+pub(super) fn secret_command(command: &str) -> Option<nan_harness_core::SecretValue> {
+    #[cfg(windows)]
+    let (shell, args) = (
+        std::path::PathBuf::from("cmd.exe"),
+        vec!["/D", "/S", "/C", command],
+    );
+    #[cfg(not(windows))]
+    let (shell, args) = (std::path::PathBuf::from("/bin/sh"), vec!["-c", command]);
+    let output = run_bounded(&shell, &args, Duration::from_secs(10), 16 * 1024).ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let value = String::from_utf8(output.stdout).ok()?;
+    nan_harness_core::SecretValue::new(value.trim().to_owned()).ok()
+}

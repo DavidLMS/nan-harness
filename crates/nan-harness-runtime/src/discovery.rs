@@ -1,4 +1,8 @@
 mod executable;
+mod gentle_shell;
+pub use gentle_shell::{
+    GentleShellEnvironment, inspect_gentle_shell, resolve_gentle_shell_command,
+};
 mod manifest;
 mod probe;
 pub(crate) use probe::run_config_command as run_bounded_config_command;
@@ -93,7 +97,7 @@ pub fn inspect_harness(
         });
     }
 
-    let detected_version = executable::first_non_empty_line(&output.stdout, &output.stderr);
+    let detected_version = executable::harness_version(kind, &output.stdout, &output.stderr);
     let parsed_version = version_policy::parse_version(&detected_version);
     let version_status = match parsed_version.as_ref() {
         Some(version) => manifest
@@ -338,4 +342,13 @@ impl TerminalMessage for DiscoveryError {
             }
         }
     }
+}
+
+/// Locate a launcher by its actual executable name using platform PATH rules.
+///
+/// # Errors
+/// Returns a discovery error when no executable is available.
+pub fn locate_launcher(name: &str) -> Result<PathBuf, DiscoveryError> {
+    executable::find_executable(name)
+        .ok_or_else(|| DiscoveryError::ExecutableNotFound(name.to_owned()))
 }

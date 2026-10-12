@@ -1,5 +1,5 @@
 schema_version = 1
 harness = "pi"
 profile = "Print mode core tools"
-last_verified_version = "0.85.1"
+last_verified_version = "1.1.0"
 inventory = ["bash", "edit", "find", "grep", "ls", "read", "write"]

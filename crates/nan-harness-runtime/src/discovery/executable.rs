@@ -64,7 +64,7 @@ pub fn is_executable_file(path: &Path) -> bool {
     }
 }
 
-fn find_executable(binary_name: &str) -> Option<PathBuf> {
+pub(super) fn find_executable(binary_name: &str) -> Option<PathBuf> {
     let path = env::var_os("PATH");
     find_executable_in_path(binary_name, path.as_deref())
 }
@@ -175,6 +175,42 @@ mod tests {
         assert_eq!(
             find_executable_in_path("harness", Some(path.as_os_str())),
             Some(selected)
+        );
+    }
+}
+
+/// Gentle Shell prints its launcher version before the actual Pi runtime version.
+pub(super) fn harness_version(kind: HarnessKind, stdout: &[u8], stderr: &[u8]) -> String {
+    let first = first_non_empty_line(stdout, stderr);
+    if kind == HarnessKind::Pi && first.starts_with("gentle-shell ") {
+        return String::from_utf8_lossy(stdout)
+            .lines()
+            .chain(String::from_utf8_lossy(stderr).lines())
+            .map(str::trim)
+            .find(|line| line.starts_with("pi "))
+            .unwrap_or("unknown")
+            .to_owned();
+    }
+    first
+}
+
+#[cfg(test)]
+mod launcher_tests {
+    use super::*;
+
+    #[test]
+    fn gentle_shell_uses_pi_runtime_version_and_never_the_launcher_version() {
+        let stdout =
+            b"gentle-shell 4.1.0\npi 1.1.0\nhome isolated /home/user/.gentle-shell/agent\n";
+        assert_eq!(harness_version(HarnessKind::Pi, stdout, b""), "pi 1.1.0");
+        assert_eq!(
+            harness_version(HarnessKind::Pi, b"gentle-shell 4.1.0\n", b""),
+            "unknown"
+        );
+        assert_eq!(harness_version(HarnessKind::Pi, b"1.1.0\n", b""), "1.1.0");
+        assert_eq!(
+            harness_version(HarnessKind::Codex, stdout, b""),
+            "gentle-shell 4.1.0"
         );
     }
 }

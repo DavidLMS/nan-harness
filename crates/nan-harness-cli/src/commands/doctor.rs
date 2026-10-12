@@ -13,6 +13,23 @@ pub(crate) async fn run(arguments: &DoctorArgs) -> Result<i32, DiscoveryError> {
             "{}", nan_harness_i18n::messages::doctor_info_offline_nan_harness_network_activity_and_credential_resolution_skipped(nan_harness_i18n::locale()));
         println!("{}", nan_harness_i18n::messages::doctor_info_compatibility_data_local_cached_or_embedded_evidence_not_refreshed(nan_harness_i18n::locale()));
     }
+    let gentle_arguments;
+    let arguments = if arguments.harness == Some(DoctorTarget::GentleShell) {
+        gentle_arguments = DoctorArgs {
+            harness: Some(DoctorTarget::Stable(nan_harness_core::HarnessKind::Pi)),
+            executable: Some(match &arguments.executable {
+                Some(path) => path.clone(),
+                None => nan_harness_runtime::locate_launcher("gentle-shell")?,
+            }),
+            json: arguments.json,
+            offline: arguments.offline,
+            allow_unsupported: arguments.allow_unsupported,
+            allow_untested: arguments.allow_untested,
+        };
+        &gentle_arguments
+    } else {
+        arguments
+    };
     match arguments.harness {
         Some(DoctorTarget::Stable(harness)) if arguments.json => {
             Ok(json::print_harness_report(harness, arguments))
@@ -28,6 +45,7 @@ pub(crate) async fn run(arguments: &DoctorArgs) -> Result<i32, DiscoveryError> {
                 Ok(text::print_experimental_report(kind))
             }
         }
+        Some(DoctorTarget::GentleShell) => unreachable!("normalized launcher target"),
         None if arguments.json => Ok(json::print_system_report(&report::system_json_report(
             discovery::system(arguments.offline).await,
         ))),
