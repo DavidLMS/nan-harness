@@ -84,7 +84,7 @@ fn inspect_document_result(
             })
         }
         DocumentReceipt::Yaml(receipt) => {
-            let document: YamlValue = serde_yaml_ng::from_slice(&contents).map_err(|_| Invalid)?;
+            let document: YamlValue = yaml_serde::from_slice(&contents).map_err(|_| Invalid)?;
             if !document.is_mapping() {
                 return Err(Invalid);
             }

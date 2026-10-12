@@ -61,17 +61,17 @@ pub(crate) fn apply_context_override(
     };
     let path = profile.join("config.yaml");
     let contents = fs::read_to_string(&path).map_err(HermesDesktopError::ReadProfileConfig)?;
-    let mut document: serde_yaml_ng::Value =
-        serde_yaml_ng::from_str(&contents).map_err(HermesDesktopError::ParseProfileConfig)?;
+    let mut document: yaml_serde::Value =
+        yaml_serde::from_str(&contents).map_err(HermesDesktopError::ParseProfileConfig)?;
     merge_yaml_value(
         &mut document,
-        serde_yaml_ng::from_str(&format!(
+        yaml_serde::from_str(&format!(
             "compression:\n  enabled: true\n  threshold_tokens: {threshold_tokens}\n"
         ))
         .map_err(HermesDesktopError::ParseProfileConfig)?,
     );
     let rendered =
-        serde_yaml_ng::to_string(&document).map_err(HermesDesktopError::SerializeProfileConfig)?;
+        yaml_serde::to_string(&document).map_err(HermesDesktopError::SerializeProfileConfig)?;
     write_private(&path, rendered.as_bytes())
 }
 
@@ -105,8 +105,8 @@ pub(crate) fn configure_profile_search(
     let config_path = profile.join("config.yaml");
     let contents =
         fs::read_to_string(&config_path).map_err(HermesDesktopError::ReadProfileConfig)?;
-    let mut document: serde_yaml_ng::Value =
-        serde_yaml_ng::from_str(&contents).map_err(HermesDesktopError::ParseProfileConfig)?;
+    let mut document: yaml_serde::Value =
+        yaml_serde::from_str(&contents).map_err(HermesDesktopError::ParseProfileConfig)?;
     let original = document.clone();
     if enabled {
         let template = files
@@ -116,8 +116,8 @@ pub(crate) fn configure_profile_search(
             .content_template
             .replace(nan_harness_core::launch_plan::NAN_SEARCH_BLOCK_BEGIN, "")
             .replace(nan_harness_core::launch_plan::NAN_SEARCH_BLOCK_END, "");
-        let template_patch: serde_yaml_ng::Value =
-            serde_yaml_ng::from_str(&template).map_err(HermesDesktopError::ParseProfileConfig)?;
+        let template_patch: yaml_serde::Value =
+            yaml_serde::from_str(&template).map_err(HermesDesktopError::ParseProfileConfig)?;
         merge_yaml_value(&mut document, template_patch);
     } else {
         remove_managed_search(&mut document);
@@ -126,13 +126,13 @@ pub(crate) fn configure_profile_search(
         return Ok(());
     }
     let rendered =
-        serde_yaml_ng::to_string(&document).map_err(HermesDesktopError::SerializeProfileConfig)?;
+        yaml_serde::to_string(&document).map_err(HermesDesktopError::SerializeProfileConfig)?;
     write_private(&config_path, rendered.as_bytes())
 }
 
-pub(crate) fn merge_yaml_value(base: &mut serde_yaml_ng::Value, patch: serde_yaml_ng::Value) {
+pub(crate) fn merge_yaml_value(base: &mut yaml_serde::Value, patch: yaml_serde::Value) {
     match (base, patch) {
-        (serde_yaml_ng::Value::Mapping(base), serde_yaml_ng::Value::Mapping(patch)) => {
+        (yaml_serde::Value::Mapping(base), yaml_serde::Value::Mapping(patch)) => {
             for (key, value) in patch {
                 if let Some(existing) = base.get_mut(&key) {
                     merge_yaml_value(existing, value);
@@ -141,7 +141,7 @@ pub(crate) fn merge_yaml_value(base: &mut serde_yaml_ng::Value, patch: serde_yam
                 }
             }
         }
-        (serde_yaml_ng::Value::Sequence(base), serde_yaml_ng::Value::Sequence(patch)) => {
+        (yaml_serde::Value::Sequence(base), yaml_serde::Value::Sequence(patch)) => {
             for value in patch {
                 if !base.contains(&value) {
                     base.push(value);
@@ -152,21 +152,21 @@ pub(crate) fn merge_yaml_value(base: &mut serde_yaml_ng::Value, patch: serde_yam
     }
 }
 
-pub(crate) fn remove_managed_search(document: &mut serde_yaml_ng::Value) {
-    let serde_yaml_ng::Value::Mapping(root) = document else {
+pub(crate) fn remove_managed_search(document: &mut yaml_serde::Value) {
+    let yaml_serde::Value::Mapping(root) = document else {
         return;
     };
-    let plugins = serde_yaml_ng::Value::String("plugins".to_owned());
-    let enabled = serde_yaml_ng::Value::String("enabled".to_owned());
-    if let Some(serde_yaml_ng::Value::Mapping(plugins)) = root.get_mut(&plugins)
-        && let Some(serde_yaml_ng::Value::Sequence(values)) = plugins.get_mut(&enabled)
+    let plugins = yaml_serde::Value::String("plugins".to_owned());
+    let enabled = yaml_serde::Value::String("enabled".to_owned());
+    if let Some(yaml_serde::Value::Mapping(plugins)) = root.get_mut(&plugins)
+        && let Some(yaml_serde::Value::Sequence(values)) = plugins.get_mut(&enabled)
     {
         values.retain(|value| value.as_str() != Some("web/nan_harness"));
     }
-    let web = serde_yaml_ng::Value::String("web".to_owned());
-    let backend = serde_yaml_ng::Value::String("search_backend".to_owned());
-    if let Some(serde_yaml_ng::Value::Mapping(web)) = root.get_mut(&web)
-        && web.get(&backend).and_then(serde_yaml_ng::Value::as_str) == Some("nan-harness")
+    let web = yaml_serde::Value::String("web".to_owned());
+    let backend = yaml_serde::Value::String("search_backend".to_owned());
+    if let Some(yaml_serde::Value::Mapping(web)) = root.get_mut(&web)
+        && web.get(&backend).and_then(yaml_serde::Value::as_str) == Some("nan-harness")
     {
         web.remove(&backend);
     }

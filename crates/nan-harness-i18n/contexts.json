@@ -1,4 +1,10 @@
 {
+  "detail_gentle_shell_arguments": {"description": "Gentle Shell launcher integration. Preserve command names, flags and provider identifiers.", "section": "launch", "sources": ["crates/nan-harness-cli/src/runner/harness/gentle_shell.rs"]},
+  "detail_gentle_shell_config": {"description": "Gentle Shell launcher integration. Preserve command names, flags and provider identifiers.", "section": "launch", "sources": ["crates/nan-harness-cli/src/runner/harness/gentle_shell.rs"]},
+  "detail_gentle_shell_context": {"description": "Gentle Shell launcher integration. Preserve command names, flags and provider identifiers.", "section": "launch", "sources": ["crates/nan-harness-cli/src/runner/harness/gentle_shell.rs"]},
+  "detail_gentle_shell_contract": {"description": "Gentle Shell launcher integration. Preserve command names, flags and provider identifiers.", "section": "launch", "sources": ["crates/nan-harness-cli/src/runner/harness/gentle_shell.rs"]},
+  "detail_gentle_shell_credential": {"description": "Gentle Shell launcher integration. Preserve command names, flags and provider identifiers.", "section": "launch", "sources": ["crates/nan-harness-cli/src/runner/harness/gentle_shell.rs"]},
+  "help_run_gentle_shell": {"description": "Gentle Shell launcher integration. Preserve command names, flags and provider identifiers.", "section": "help", "sources": ["crates/nan-harness-cli/src/app/commands.rs"]},
   "doctor_desktop_exact_checks": {"description": "Architecture for exact Desktop evidence.", "section": "desktop", "sources": ["crates/nan-harness-cli/src/commands/doctor/text.rs"]},
   "help_zed_separate_data_directory": {"description": "Architecture-scoped Desktop compatibility evidence and launch setup.", "section": "desktop", "sources": ["crates/nan-harness-cli/src/app/args/desktop.rs"]},
   "doctor_desktop_checks_missing": {"description": "Architecture-scoped Desktop compatibility evidence and launch setup.", "section": "desktop", "sources": ["crates/nan-harness-cli/src/commands/doctor/text.rs"]},

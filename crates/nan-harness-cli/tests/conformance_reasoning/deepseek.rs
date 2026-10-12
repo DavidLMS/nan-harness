@@ -1,6 +1,6 @@
 use super::support::{Fixture, MARKER, executable};
 use nan_harness_test_support::conformance::assert_success;
-use serde_yaml_ng::Value;
+use yaml_serde::Value;
 
 #[tokio::test]
 #[ignore = "requires DSH 0.2.0-rc.2; NAN_REASONING_DSH_EXECUTABLE selects the binary"]
@@ -64,8 +64,7 @@ async fn deepseek_native_effort_map_reaches_wire_and_keeps_adaptive_models_unset
         let fixture = Fixture::new().await;
         fixture.configure("dsh").await;
         let path = fixture.home.join(".dsh/profiles/headless/cordis.patch.yml");
-        let mut document: Value =
-            serde_yaml_ng::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        let mut document: Value = yaml_serde::from_slice(&std::fs::read(&path).unwrap()).unwrap();
         let provider = if ["qwen3.6", "gemma4"].contains(&model) {
             "nan-harness-budgeted"
         } else {
@@ -80,7 +79,7 @@ async fn deepseek_native_effort_map_reaches_wire_and_keeps_adaptive_models_unset
                     Value::String(effort.to_owned());
             }
         }
-        std::fs::write(path, serde_yaml_ng::to_string(&document).unwrap()).unwrap();
+        std::fs::write(path, yaml_serde::to_string(&document).unwrap()).unwrap();
         let output = fixture
             .command(executable("dsh"))
             .env("DSH_HOME", fixture.home.join(".dsh"))
@@ -125,8 +124,7 @@ async fn deepseek_native_legacy_import_and_credential_rewrite_migrate_safely() {
     assert_success(&output);
     assert!(output.stdout.contains(MARKER));
     let credentials = fixture.home.join(".dsh/.credentials.yaml");
-    let normalized: Value =
-        serde_yaml_ng::from_slice(&std::fs::read(&credentials).unwrap()).unwrap();
+    let normalized: Value = yaml_serde::from_slice(&std::fs::read(&credentials).unwrap()).unwrap();
     assert_eq!(normalized["version"], 1);
     assert!(normalized["refs"].get("NAN_API_KEY").is_some());
     for operation in ["--refresh", "--status", "--remove"] {
@@ -146,8 +144,7 @@ async fn deepseek_native_legacy_import_and_credential_rewrite_migrate_safely() {
             .unwrap();
     assert!(document.contains("personal"));
     assert!(!document.contains("nan-harness"));
-    let normalized: Value =
-        serde_yaml_ng::from_slice(&std::fs::read(credentials).unwrap()).unwrap();
+    let normalized: Value = yaml_serde::from_slice(&std::fs::read(credentials).unwrap()).unwrap();
     assert_eq!(normalized["refs"]["PERSONAL_API_KEY"], "synthetic-personal");
     assert!(normalized["refs"].get("NAN_API_KEY").is_none());
 }
@@ -165,11 +162,11 @@ fn install_legacy_fixture(fixture: &Fixture) {
             })
     };
     let directory = fixture.home.join(".dsh");
-    let document: Value = serde_yaml_ng::from_slice(
+    let document: Value = yaml_serde::from_slice(
         &std::fs::read(directory.join("profiles/headless/cordis.patch.yml")).unwrap(),
     )
     .unwrap();
-    let mut legacy = serde_yaml_ng::Mapping::new();
+    let mut legacy = yaml_serde::Mapping::new();
     for row in document.as_sequence().unwrap() {
         legacy.insert(row["id"].clone(), row["config"].clone());
     }
@@ -181,13 +178,13 @@ fn install_legacy_fixture(fixture: &Fixture) {
         .remove(Value::String("nan-harness-budgeted".to_owned()));
     let mut personal = legacy["llm-pi-ai"]["providers"]["nan-harness"].clone();
     personal["apiKeyEnv"] = Value::String("PERSONAL_API_KEY".to_owned());
-    personal["models"] = serde_yaml_ng::from_str("[{id: personal-model}]").unwrap();
+    personal["models"] = yaml_serde::from_str("[{id: personal-model}]").unwrap();
     legacy["llm-pi-ai"]["providers"]["personal"] = personal;
     let begin = "# nan-harness:begin deepseek-provider";
     let end = "# nan-harness:end deepseek-provider";
     let body = format!(
         "{begin}\n{}{end}\n",
-        serde_yaml_ng::to_string(&legacy).unwrap()
+        yaml_serde::to_string(&legacy).unwrap()
     );
     let settings = directory.join("settings.yaml");
     std::fs::write(&settings, &body).unwrap();

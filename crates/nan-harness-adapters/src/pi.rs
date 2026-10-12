@@ -123,7 +123,10 @@ fn pi_family_plan(context: &PlanContext) -> Result<LaunchPlan, PlanError> {
     )
 }
 
-fn provider_extension(search_policy: WebSearchPolicy, preserve_native_defaults: bool) -> String {
+pub(crate) fn provider_extension(
+    search_policy: WebSearchPolicy,
+    preserve_native_defaults: bool,
+) -> String {
     let search_registration = search_registration(
         &serde_json::Value::String(format!("{BRIDGE_BASE_URL_PLACEHOLDER}/v1/search")).to_string(),
         "apiKey",

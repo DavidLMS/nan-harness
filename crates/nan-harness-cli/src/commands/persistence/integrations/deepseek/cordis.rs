@@ -1,12 +1,12 @@
 use super::super::super::{ManagedCordisDocument, ManagedCordisEntry, PersistenceError, sha256};
-use serde_yaml_ng::{Mapping, Value};
 use std::path::Path;
+use yaml_serde::{Mapping, Value};
 
 pub(super) fn parse(source: &str, path: &Path) -> Result<Value, PersistenceError> {
     let document = if source.trim().is_empty() {
         Value::Sequence(Vec::new())
     } else {
-        serde_yaml_ng::from_str(source)
+        yaml_serde::from_str(source)
             .map_err(|_| PersistenceError::InvalidManagedSection(path.to_owned()))?
     };
     if !document.is_sequence() {
@@ -16,7 +16,7 @@ pub(super) fn parse(source: &str, path: &Path) -> Result<Value, PersistenceError
 }
 
 pub(super) fn render(document: &Value) -> Result<String, PersistenceError> {
-    serde_yaml_ng::to_string(document)
+    yaml_serde::to_string(document)
         .map_err(|error| PersistenceError::RenderConfiguration(error.to_string()))
 }
 

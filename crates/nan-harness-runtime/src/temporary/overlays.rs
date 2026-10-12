@@ -180,11 +180,11 @@ fn overlay_file_content(
                     .map_err(|source| overlay_error(&overlay.id, source))?;
                 parse_yaml_mapping(&overlay.id, &content)?
             } else {
-                serde_yaml_ng::Mapping::new()
+                yaml_serde::Mapping::new()
             };
             let patch = parse_yaml_mapping(&overlay.id, &rendered)?;
             merge_yaml_mappings(&mut base, patch);
-            serde_yaml_ng::to_string(&serde_yaml_ng::Value::Mapping(base))
+            yaml_serde::to_string(&yaml_serde::Value::Mapping(base))
                 .map_err(|_| invalid_artifact(&overlay.id, "NH-TEMP-YAML-002"))
         }
         OverlayFilePolicy::Replace

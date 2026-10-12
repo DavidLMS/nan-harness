@@ -206,8 +206,8 @@ fn value_contains_search(value: &Value) -> bool {
 }
 
 fn inspect_yaml(contents: &str, path: &Path) -> Result<DetectionSignal, SearchPolicyError> {
-    let value: serde_yaml_ng::Value =
-        serde_yaml_ng::from_str(contents).map_err(|source| SearchPolicyError::ParseYaml {
+    let value: yaml_serde::Value =
+        yaml_serde::from_str(contents).map_err(|source| SearchPolicyError::ParseYaml {
             path: path.to_path_buf(),
             source,
         })?;
@@ -216,8 +216,8 @@ fn inspect_yaml(contents: &str, path: &Path) -> Result<DetectionSignal, SearchPo
 
 // Keep search-relevant scalar types and string keys. YAML tags (including DeepSeek's
 // !!js values) are data here; inspection must never evaluate them.
-fn yaml_search_value(value: serde_yaml_ng::Value) -> Value {
-    use serde_yaml_ng::Value as Yaml;
+fn yaml_search_value(value: yaml_serde::Value) -> Value {
+    use yaml_serde::Value as Yaml;
     match value {
         Yaml::String(value) => Value::String(value),
         Yaml::Bool(value) => Value::Bool(value),

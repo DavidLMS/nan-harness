@@ -193,7 +193,7 @@ fn every_constructible_search_policy_error_has_a_safe_configuration_diagnostic()
         },
         SearchPolicyError::ParseYaml {
             path: PathBuf::from(FAKE_PATH),
-            source: serde_yaml_ng::from_str::<serde_yaml_ng::Value>(&format!("{FAKE_TOKEN}: ["))
+            source: yaml_serde::from_str::<yaml_serde::Value>(&format!("{FAKE_TOKEN}: ["))
                 .expect_err("fixture must be invalid YAML"),
         },
         SearchPolicyError::ParseToml {

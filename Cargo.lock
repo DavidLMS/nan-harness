@@ -1584,6 +1584,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3eaf3ede3fee6db1a4c2ee091bf8a8b4dccdc6d17f656fb07896ee72867612f2"
 
 [[package]]
+name = "libyaml-rs"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2e126dda6f34391ab7b444f9922055facc83c07a910da3eb16f1e4d9c45dc777"
+
+[[package]]
 name = "linux-raw-sys"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1707,7 +1713,7 @@ dependencies = [
 
 [[package]]
 name = "nan-harness-adapters"
-version = "0.1.21"
+version = "0.1.22"
 dependencies = [
  "nan-harness-core",
  "nan-harness-i18n",
@@ -1717,7 +1723,7 @@ dependencies = [
 
 [[package]]
 name = "nan-harness-bridge"
-version = "0.1.21"
+version = "0.1.22"
 dependencies = [
  "async-stream",
  "axum",
@@ -1743,7 +1749,7 @@ dependencies = [
 
 [[package]]
 name = "nan-harness-canary"
-version = "0.1.21"
+version = "0.1.22"
 dependencies = [
  "clap",
  "jsonschema",
@@ -1768,7 +1774,7 @@ dependencies = [
 
 [[package]]
 name = "nan-harness-cli"
-version = "0.1.21"
+version = "0.1.22"
 dependencies = [
  "axum",
  "base64",
@@ -1793,7 +1799,6 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
- "serde_yaml_ng",
  "sha2 0.11.0",
  "tempfile",
  "thiserror",
@@ -1801,12 +1806,13 @@ dependencies = [
  "tokio",
  "toml_edit",
  "url",
+ "yaml_serde",
  "zeroize",
 ]
 
 [[package]]
 name = "nan-harness-coordinator"
-version = "0.1.21"
+version = "0.1.22"
 dependencies = [
  "base64",
  "getrandom 0.4.3",
@@ -1827,7 +1833,7 @@ dependencies = [
 
 [[package]]
 name = "nan-harness-core"
-version = "0.1.21"
+version = "0.1.22"
 dependencies = [
  "nan-harness-i18n",
  "semver",
@@ -1871,21 +1877,21 @@ dependencies = [
 
 [[package]]
 name = "nan-harness-detach"
-version = "0.1.21"
+version = "0.1.22"
 dependencies = [
  "windows-sys 0.61.2",
 ]
 
 [[package]]
 name = "nan-harness-diagnostics"
-version = "0.1.21"
+version = "0.1.22"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "nan-harness-i18n"
-version = "0.1.21"
+version = "0.1.22"
 dependencies = [
  "serde",
  "serde_json",
@@ -1893,7 +1899,7 @@ dependencies = [
 
 [[package]]
 name = "nan-harness-private-fs"
-version = "0.1.21"
+version = "0.1.22"
 dependencies = [
  "nan-harness-test-support",
  "tempfile",
@@ -1903,7 +1909,7 @@ dependencies = [
 
 [[package]]
 name = "nan-harness-runtime"
-version = "0.1.21"
+version = "0.1.22"
 dependencies = [
  "axum",
  "futures-util",
@@ -1923,7 +1929,6 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
- "serde_yaml_ng",
  "sha2 0.11.0",
  "tempfile",
  "thiserror",
@@ -1932,11 +1937,12 @@ dependencies = [
  "tokio-util",
  "toml",
  "url",
+ "yaml_serde",
 ]
 
 [[package]]
 name = "nan-harness-search"
-version = "0.1.21"
+version = "0.1.22"
 dependencies = [
  "axum",
  "nan-harness-i18n",
@@ -1952,7 +1958,7 @@ dependencies = [
 
 [[package]]
 name = "nan-harness-telemetry"
-version = "0.1.21"
+version = "0.1.22"
 dependencies = [
  "axum",
  "getrandom 0.4.3",
@@ -1972,7 +1978,7 @@ dependencies = [
 
 [[package]]
 name = "nan-harness-test-support"
-version = "0.1.21"
+version = "0.1.22"
 dependencies = [
  "axum",
  "nan-harness-core",
@@ -2851,19 +2857,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "serde_yaml_ng"
-version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b4db627b98b36d4203a7b458cf3573730f2bb591b28871d916dfa9efabfd41f"
-dependencies = [
- "indexmap",
- "itoa",
- "ryu",
- "serde",
- "unsafe-libyaml",
-]
-
-[[package]]
 name = "sha2"
 version = "0.10.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3370,12 +3363,6 @@ name = "unicode-ident"
 version = "1.0.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
-
-[[package]]
-name = "unsafe-libyaml"
-version = "0.2.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "673aac59facbab8a9007c7f6108d11f63b603f7cabff99fabf650fea5c32b861"
 
 [[package]]
 name = "untrusted"
@@ -4029,7 +4016,7 @@ checksum = "b9cc00251562a284751c9973bace760d86c0276c471b4be569fe6b068ee97a56"
 
 [[package]]
 name = "xtask"
-version = "0.1.21"
+version = "0.1.22"
 dependencies = [
  "nan-harness-core",
  "semver",
@@ -4039,6 +4026,19 @@ dependencies = [
  "syn 2.0.119",
  "tempfile",
  "time",
+]
+
+[[package]]
+name = "yaml_serde"
+version = "0.10.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "33b729a08a9a6be689bbad3e2bf8015926db54b6622cc89c3a5f7dc174b9e918"
+dependencies = [
+ "indexmap",
+ "itoa",
+ "libyaml-rs",
+ "ryu",
+ "serde",
 ]
 
 [[package]]

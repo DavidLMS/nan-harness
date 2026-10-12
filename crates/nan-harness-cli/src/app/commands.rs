@@ -67,6 +67,8 @@ pub(crate) enum Command {
     ZedDesktop(ZedDesktopArgs),
     #[command(about = nan_harness_i18n::messages::help_run_pi_through_a_nan_provider_extension(nan_harness_i18n::locale()))]
     Pi(DirectHarnessRunArgs),
+    #[command(name = "gentle-shell", about = nan_harness_i18n::messages::help_run_gentle_shell(nan_harness_i18n::locale()))]
+    GentleShell(DirectHarnessRunArgs),
     #[command(
         name = "omp",
         visible_alias = "oh-my-pi",

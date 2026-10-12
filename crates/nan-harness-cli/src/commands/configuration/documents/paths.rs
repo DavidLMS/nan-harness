@@ -79,7 +79,7 @@ pub(crate) fn set_yaml_path(
                 })?;
         current = mapping
             .entry(YamlValue::String(segment.clone()))
-            .or_insert_with(|| YamlValue::Mapping(serde_yaml_ng::Mapping::default()));
+            .or_insert_with(|| YamlValue::Mapping(yaml_serde::Mapping::default()));
     }
     current
         .as_mapping_mut()
@@ -166,7 +166,7 @@ pub(crate) fn append_unique_json_value(
 }
 
 pub(crate) fn hash_yaml(value: &YamlValue) -> Result<String, ConfigurationError> {
-    serde_yaml_ng::to_string(value)
+    yaml_serde::to_string(value)
         .map(|rendered| sha256(rendered.as_bytes()))
         .map_err(ConfigurationError::SerializeYaml)
 }

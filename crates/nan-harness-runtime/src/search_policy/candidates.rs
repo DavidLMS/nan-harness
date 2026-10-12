@@ -7,7 +7,18 @@ pub(super) fn candidate_paths(plan: &LaunchPlan, home: &Path) -> Vec<PathBuf> {
     let working = Path::new(&plan.process.working_directory);
     let mut paths = BTreeSet::new();
     paths.insert(working.join(".mcp.json"));
-    add_harness_candidates(plan.harness.kind, home, working, &mut paths);
+    if plan.harness.kind == HarnessKind::Pi
+        && let Some(agent_home) = plan.environment.public.get("NAN_HARNESS_GENTLE_SHELL_HOME")
+    {
+        let agent_home = Path::new(agent_home);
+        paths.extend([
+            agent_home.join("settings.json"),
+            agent_home.join("mcp.json"),
+            working.join(".pi/settings.json"),
+        ]);
+    } else {
+        add_harness_candidates(plan.harness.kind, home, working, &mut paths);
+    }
     paths.into_iter().collect()
 }
 
@@ -194,5 +205,27 @@ fn add_mimo_candidates(home: &Path, working: &Path, paths: &mut BTreeSet<PathBuf
             directory.join("mimocode.json"),
             directory.join("mimocode.jsonc"),
         ]);
+    }
+}
+
+#[cfg(test)]
+mod gentle_shell_tests {
+    use super::*;
+
+    #[test]
+    fn gentle_shell_search_uses_the_selected_home_not_an_unrelated_pi_home() {
+        let mut plan: LaunchPlan = serde_json::from_str(include_str!(
+            "../../../nan-harness-core/tests/fixtures/launch-plan.bridge.json"
+        ))
+        .unwrap();
+        plan.harness.kind = HarnessKind::Pi;
+        plan.environment.public.insert(
+            "NAN_HARNESS_GENTLE_SHELL_HOME".into(),
+            "/gentle/agent".into(),
+        );
+        let paths = candidate_paths(&plan, Path::new("/user"));
+        assert!(paths.contains(&PathBuf::from("/gentle/agent/settings.json")));
+        assert!(paths.contains(&PathBuf::from("/gentle/agent/mcp.json")));
+        assert!(!paths.contains(&PathBuf::from("/user/.pi/agent/settings.json")));
     }
 }

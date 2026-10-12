@@ -79,3 +79,7 @@ pub use search_supervisor::{
 };
 pub use signals::{CancellationToken, SignalKind};
 pub use supervisor::{ExecutionOutcome, ExecutionReport, LaunchSession, RuntimeError, Supervisor};
+
+pub use discovery::{
+    GentleShellEnvironment, inspect_gentle_shell, locate_launcher, resolve_gentle_shell_command,
+};

@@ -16,7 +16,7 @@ pub(crate) fn preferred_yaml_path(directory: &Path, canonical: &str, compatible:
 }
 
 pub(crate) fn to_yaml_value(value: Value) -> Result<YamlValue, ConfigurationError> {
-    serde_yaml_ng::to_value(value).map_err(ConfigurationError::SerializeYaml)
+    yaml_serde::to_value(value).map_err(ConfigurationError::SerializeYaml)
 }
 
 pub(crate) fn preferred_model(models: &[CodingModelProfile]) -> &str {

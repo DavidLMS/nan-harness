@@ -1349,5 +1349,11 @@
   "install_source_commands": "Compilación desde fuentes: {value_1}",
   "installer_building_source": "Compilando ZCode desde las fuentes oficiales...",
   "detail_zcode_private_configuration_required": "Esta instalación de ZCode no permite una configuración privada por ejecución. Usa la instalación desde fuentes que ofrece nanh o ejecuta con --no-search.",
-  "detail_zcode_requires_chat_gateway": "ZCode necesita la pasarela local para mantener la credencial de NaN fuera de sus archivos de ejecución. Quita --no-chat-gateway."
+  "detail_zcode_requires_chat_gateway": "ZCode necesita la pasarela local para mantener la credencial de NaN fuera de sus archivos de ejecución. Quita --no-chat-gateway.",
+  "detail_gentle_shell_arguments": "Usa Gentle Shell directamente para gestionar paquetes; nanh gentle-shell solo inicia sesiones del agente",
+  "detail_gentle_shell_config": "No se pudo leer una configuración válida de Gentle Shell; corrige su JSON antes de iniciar",
+  "detail_gentle_shell_context": "Gentle Shell todavía no admite --context; configura la compactación en sus ajustes",
+  "detail_gentle_shell_contract": "Gentle Shell requiere gentle-pi 4.1 o posterior y Pi 1.1 o posterior",
+  "detail_gentle_shell_credential": "No se puede resolver de forma segura la credencial NaN nativa; indica NAN_API_KEY explícitamente",
+  "help_run_gentle_shell": "Ejecutar Gentle Shell con NaN conservando su entorno de Pi"
 }

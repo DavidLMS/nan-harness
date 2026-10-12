@@ -9,29 +9,23 @@ use std::path::Path;
 pub(super) fn parse_yaml_mapping(
     artifact_id: &str,
     content: &str,
-) -> Result<serde_yaml_ng::Mapping, TemporaryError> {
-    serde_yaml_ng::from_str::<serde_yaml_ng::Value>(content)
+) -> Result<yaml_serde::Mapping, TemporaryError> {
+    yaml_serde::from_str::<yaml_serde::Value>(content)
         .map_err(|_| invalid_artifact(artifact_id, "NH-TEMP-YAML-001"))?
         .as_mapping()
         .cloned()
         .ok_or_else(|| invalid_artifact(artifact_id, "NH-TEMP-YAML-003"))
 }
 
-pub(super) fn merge_yaml_mappings(
-    base: &mut serde_yaml_ng::Mapping,
-    patch: serde_yaml_ng::Mapping,
-) {
+pub(super) fn merge_yaml_mappings(base: &mut yaml_serde::Mapping, patch: yaml_serde::Mapping) {
     for (key, patch_value) in patch {
         match (base.get_mut(&key), patch_value) {
-            (
-                Some(serde_yaml_ng::Value::Mapping(base_map)),
-                serde_yaml_ng::Value::Mapping(patch_map),
-            ) => {
+            (Some(yaml_serde::Value::Mapping(base_map)), yaml_serde::Value::Mapping(patch_map)) => {
                 merge_yaml_mappings(base_map, patch_map);
             }
             (
-                Some(serde_yaml_ng::Value::Sequence(base_items)),
-                serde_yaml_ng::Value::Sequence(patch_items),
+                Some(yaml_serde::Value::Sequence(base_items)),
+                yaml_serde::Value::Sequence(patch_items),
             ) => {
                 for item in patch_items {
                     if !base_items.contains(&item) {

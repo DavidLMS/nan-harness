@@ -1419,7 +1419,7 @@ mod tests {
         assert_eq!(command.current_directory, paths.active().join("source"));
         let settings_path = command.settings_path.expect("managed settings");
         let original = fs::read(&settings_path).expect("settings");
-        let settings: serde_yaml_ng::Value = serde_yaml_ng::from_slice(&original).expect("YAML");
+        let settings: yaml_serde::Value = yaml_serde::from_slice(&original).expect("YAML");
         assert_eq!(
             settings["server"]["bind_address"].as_str(),
             Some("127.0.0.1")

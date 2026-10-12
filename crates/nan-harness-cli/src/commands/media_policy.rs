@@ -1,9 +1,9 @@
 use crate::app::{HarnessRunArgs, MediaArgs};
 use nan_harness_core::{HarnessKind, ImageModel, MediaSelection};
 use serde_json::Value;
-use serde_yaml_ng::Value as YamlValue;
 use std::fs;
 use std::path::{Path, PathBuf};
+use yaml_serde::Value as YamlValue;
 
 const MAX_CONFIGURATION_BYTES: usize = 2 * 1024 * 1024;
 
@@ -142,7 +142,7 @@ fn detect_hermes(home: &Path) -> DetectedMedia {
             image_model: None,
         };
     };
-    let Ok(value) = serde_yaml_ng::from_slice::<YamlValue>(&contents) else {
+    let Ok(value) = yaml_serde::from_slice::<YamlValue>(&contents) else {
         return external_media();
     };
     DetectedMedia {

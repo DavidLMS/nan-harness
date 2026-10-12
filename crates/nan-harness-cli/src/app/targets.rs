@@ -4,6 +4,7 @@ use std::str::FromStr;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DoctorTarget {
+    GentleShell,
     Stable(HarnessKind),
     Experimental(DesktopHarnessKind),
 }
@@ -12,6 +13,9 @@ impl FromStr for DoctorTarget {
     type Err = nan_harness_i18n::DiagnosticText;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
+        if value == "gentle-shell" {
+            return Ok(Self::GentleShell);
+        }
         if let Ok(kind) = DesktopHarnessKind::from_str(value) {
             return Ok(Self::Experimental(kind));
         }
@@ -28,6 +32,7 @@ impl FromStr for DoctorTarget {
 impl fmt::Display for DoctorTarget {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::GentleShell => formatter.write_str("gentle-shell"),
             Self::Stable(kind) => kind.fmt(formatter),
             Self::Experimental(kind) => kind.fmt(formatter),
         }

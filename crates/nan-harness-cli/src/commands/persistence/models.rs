@@ -147,7 +147,7 @@ pub(super) fn deepseek_provider_settings(
         {"id": "llm-pi-ai", "config": {"providers":
             nan_harness_runtime::deepseek_provider_catalog(models, provider_base_url)}},
     ]);
-    serde_yaml_ng::to_string(&patch)
+    yaml_serde::to_string(&patch)
         .map_err(|error| PersistenceError::RenderConfiguration(error.to_string()))
 }
 

@@ -52,13 +52,13 @@ use nan_harness_runtime::{
     ResolvedConfig, SearchConfiguration, SearchPolicyError, inspect_search_configuration,
 };
 use serde_json::{Map, Value, json};
-use serde_yaml_ng::Value as YamlValue;
 use sha2::{Digest as _, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fs::{self, Permissions};
 use std::path::{Path, PathBuf};
 use toml_edit::{DocumentMut, Item, Table, value};
+use yaml_serde::Value as YamlValue;
 
 const STATE_SCHEMA_VERSION: u8 = 1;
 const STATE_FILE_NAME: &str = "configurations.json";

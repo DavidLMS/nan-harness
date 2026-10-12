@@ -9,7 +9,7 @@ pub(in crate::prepared) fn deepseek_model_catalog(
     base_url: &str,
 ) -> Result<String, DiagnosticText> {
     let providers = super::deepseek_provider_catalog(models, base_url);
-    let yaml = serde_yaml_ng::to_string(&providers).map_err(|error| {
+    let yaml = yaml_serde::to_string(&providers).map_err(|error| {
         DiagnosticText::new(|locale| {
             detail_messages::detail_render_the_deepseek_model_catalog_failed(locale, &(error))
         })

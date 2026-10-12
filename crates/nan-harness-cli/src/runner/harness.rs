@@ -20,12 +20,25 @@ pub(super) struct HarnessRunMode {
     interactive: bool,
 }
 
+mod gentle_shell;
+
 pub(super) async fn run_simple_harness(
     cli: &Cli,
     interactive: bool,
     working_directory: &Path,
     bridge_diagnostics: &mut Vec<BridgeDiagnostic>,
 ) -> Option<Result<i32, RunError>> {
+    if let Command::GentleShell(arguments) = &cli.command {
+        return Some(
+            gentle_shell::run(
+                arguments,
+                interactive,
+                working_directory,
+                bridge_diagnostics,
+            )
+            .await,
+        );
+    }
     let (kind, arguments, adapter): (HarnessKind, &HarnessRunArgs, &dyn HarnessAdapter) = match &cli
         .command
     {

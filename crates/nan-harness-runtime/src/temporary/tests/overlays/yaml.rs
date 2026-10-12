@@ -12,7 +12,7 @@ fn yaml_overlay_merges_maps_and_unions_plugin_lists() {
     fs::create_dir_all(&source).expect("Hermes source should exist");
     fs::write(
         source.join("config.yaml"),
-        "plugins:\n  enabled:\n    - user/plugin\n  disabled:\n    - blocked/plugin\nweb:\n  extract_backend: tavily\n",
+        "plugins:\n  enabled:\n    - user/plugin\n  disabled:\n    - blocked/plugin\nweb:\n  extract_backend: tavily\ncustom:\n  tagged: !native user-value\n  literal: '00123'\n  template: '${USER_SETTING}'\n  original: &user_list [one, two]\n  alias: *user_list\n  multiline: |\n    first\n    second\n",
     )
     .expect("Hermes config fixture should exist");
     let overlays = [ConfigurationOverlay {
@@ -34,7 +34,7 @@ fn yaml_overlay_merges_maps_and_unions_plugin_lists() {
             Ok(content.to_owned())
         })
         .expect("Hermes overlay should materialize");
-    let merged: serde_yaml_ng::Value = serde_yaml_ng::from_str(
+    let merged: yaml_serde::Value = yaml_serde::from_str(
         &fs::read_to_string(
             workspace
                 .path("hermes-home")
@@ -49,12 +49,21 @@ fn yaml_overlay_merges_maps_and_unions_plugin_lists() {
         .expect("enabled plugins should be a list");
 
     assert_eq!(enabled.len(), 3);
-    assert!(enabled.contains(&serde_yaml_ng::Value::String("user/plugin".to_owned())));
-    assert!(enabled.contains(&serde_yaml_ng::Value::String(
-        "model-providers/nan".to_owned()
-    )));
-    assert!(enabled.contains(&serde_yaml_ng::Value::String("web/nan".to_owned())));
+    assert!(enabled.contains(&yaml_serde::Value::String("user/plugin".to_owned())));
+    assert!(enabled.contains(&yaml_serde::Value::String("model-providers/nan".to_owned())));
+    assert!(enabled.contains(&yaml_serde::Value::String("web/nan".to_owned())));
     assert_eq!(merged["plugins"]["disabled"][0], "blocked/plugin");
     assert_eq!(merged["web"]["extract_backend"], "tavily");
     assert_eq!(merged["web"]["search_backend"], "nan");
+    let custom = &merged["custom"];
+    let yaml_serde::Value::Tagged(tagged) = &custom["tagged"] else {
+        panic!("native tags must survive managed overlays");
+    };
+    assert_eq!(tagged.tag.to_string(), "!native");
+    assert_eq!(tagged.value, "user-value");
+    assert_eq!(custom["literal"], "00123");
+    assert_eq!(custom["template"], "${USER_SETTING}");
+    assert_eq!(custom["alias"], custom["original"]);
+    assert_eq!(custom["alias"][1], "two");
+    assert_eq!(custom["multiline"], "first\nsecond\n");
 }

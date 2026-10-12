@@ -89,7 +89,7 @@ fn profile_search_reuses_the_adapter_renderer_and_disables_only_owned_settings()
     )
     .expect("shared provider renderer should be installed");
     assert!(provider.contains("http://127.0.0.1:4321/v1/search"));
-    let enabled: serde_yaml_ng::Value = serde_yaml_ng::from_str(
+    let enabled: yaml_serde::Value = yaml_serde::from_str(
         &fs::read_to_string(paths.managed_profile.join("config.yaml")).expect("enabled config"),
     )
     .expect("enabled YAML");
@@ -104,7 +104,7 @@ fn profile_search_reuses_the_adapter_renderer_and_disables_only_owned_settings()
         false,
     )
     .expect("search-disabled config update");
-    let disabled: serde_yaml_ng::Value = serde_yaml_ng::from_str(
+    let disabled: yaml_serde::Value = yaml_serde::from_str(
         &fs::read_to_string(paths.managed_profile.join("config.yaml")).expect("disabled config"),
     )
     .expect("disabled YAML");

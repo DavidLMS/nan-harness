@@ -46,7 +46,7 @@ pub enum SearchPolicyError {
     ParseYaml {
         path: PathBuf,
         #[source]
-        source: serde_yaml_ng::Error,
+        source: yaml_serde::Error,
     },
     #[error("could not inspect TOML web search configuration '{}': {source}", path.display())]
     ConvertToml {

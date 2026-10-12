@@ -454,20 +454,15 @@ fn combined_media_and_search_keep_one_plugin_receipt_and_restore_user_plugins() 
         Operation::RefreshWithEmptyMediaOverride,
     )
     .unwrap();
-    let yaml: YamlValue = serde_yaml_ng::from_slice(&fs::read(&path).unwrap()).unwrap();
+    let yaml: YamlValue = yaml_serde::from_slice(&fs::read(&path).unwrap()).unwrap();
     assert_eq!(
         yaml["plugins"]["enabled"],
-        serde_yaml_ng::from_str::<YamlValue>(
-            "[user/local, web/nan_harness, image_gen/nan_harness]"
-        )
-        .unwrap()
+        yaml_serde::from_str::<YamlValue>("[user/local, web/nan_harness, image_gen/nan_harness]")
+            .unwrap()
     );
     manager.remove(HarnessKind::Hermes).unwrap();
-    let yaml: YamlValue = serde_yaml_ng::from_slice(&fs::read(&path).unwrap()).unwrap();
-    assert_eq!(
-        yaml,
-        serde_yaml_ng::from_str::<YamlValue>(original).unwrap()
-    );
+    let yaml: YamlValue = yaml_serde::from_slice(&fs::read(&path).unwrap()).unwrap();
+    assert_eq!(yaml, yaml_serde::from_str::<YamlValue>(original).unwrap());
 }
 
 #[cfg(unix)]
