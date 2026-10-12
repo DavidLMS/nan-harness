@@ -67,6 +67,24 @@ static bool within(const Request& request) {
 static bool owned(const Request& request) {
     return within(request) && claude_owned_mac_window(request.window, request.pid, request.bounds) && within(request);
 }
+// An incomplete AX focus read is waitable only while all independent native
+// ownership checks still hold. Never refocus, retry an action or renew its budget.
+template<class Query, class Within, class Pause>
+static bool settle_owned_window(Query query, Within within_deadline, Pause pause) {
+    while (within_deadline()) {
+        const auto state = query();
+        if (!within_deadline() || state == MacOwnedWindowState::Rejected) return false;
+        if (state == MacOwnedWindowState::Ready) return true;
+        pause();
+    }
+    return false;
+}
+static bool wait_owned_window(const Request& request) {
+    return settle_owned_window(
+        [&] { return claude_mac_window_state(request.window, request.pid, request.bounds); },
+        [&] { return within(request); },
+        [] { std::this_thread::sleep_for(std::chrono::milliseconds(20)); });
+}
 static std::string text(CFTypeRef value) {
     if (!value || CFGetTypeID(value) != CFStringGetTypeID()) return {};
     char buffer[4097];
@@ -188,7 +206,7 @@ struct Tree {
     bool collect(const Request& request) {
         ax_query_failed = false;
         failure = nullptr;
-        if (!owned(request)) return reject("tree-window");
+        if (!wait_owned_window(request)) return reject("tree-window");
         auto app = AXUIElementCreateApplication(request.pid);
         if (!app) return reject("tree-query");
         if (AXUIElementSetMessagingTimeout(app, .1F) != kAXErrorSuccess) {
@@ -204,7 +222,7 @@ struct Tree {
         else valid = append(static_cast<AXUIElementRef>(window), -1, 0, request);
         if (window) CFRelease(window);
         if (ax_query_failed) return reject("tree-query");
-        if (!owned(request)) return reject("tree-window");
+        if (!wait_owned_window(request)) return reject("tree-window");
         return valid;
     }
 };
@@ -832,7 +850,7 @@ int claude_chat_turn() {
         ScopeShape scope_shape{}; bool scope_shape_observed = false;
         if (request(value)) {
             Tree tree;
-            if (!owned(value)) stage = "window";
+            if (!wait_owned_window(value)) stage = "window";
             else {
                 value.deadline_phase = "deadline-tree";
                 if (!tree.collect(value)) stage = tree.failure ? tree.failure : "tree-query";
