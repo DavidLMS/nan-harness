@@ -23,8 +23,8 @@ may provision native companions. The probe creates its own disposable home and
 project. It checks native saved credentials, direct native routing, mandatory
 gateway routing despite saved URL overrides, provider-file preservation,
 direct fallback to nanh credentials and failure rather than account switching
-for malformed native credentials. It also verifies that the parsed Pi version
-does not produce a launcher-version warning. The scripted provider also drives a
+for malformed native credentials. Hosted doctor evidence verifies the actual Pi runtime version separately from
+the launcher. An advisory about a newer Pi version is not a contract failure. The scripted provider also drives a
 real child agent to read a fresh random fixture through the gateway. Native search
 and Engram-shaped memory fixtures verify preservation; forced search uses a local
 SearXNG-protocol fixture. This does not certify every Engram release.

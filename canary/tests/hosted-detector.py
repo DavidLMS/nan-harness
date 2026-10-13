@@ -21,7 +21,7 @@ class DetectorTests(unittest.TestCase):
         self.assertEqual(selected["model"], "chosen-model")
         jobs = json.loads(selected["matrix"])["include"]
         self.assertEqual([(job["system"], job["architecture"], len(job["harnesses"])) for job in jobs],
-                         [("linux", "aarch64", 17), ("macos", "aarch64", 17), ("windows", "x86_64", 15)])
+                         [("linux", "aarch64", 18), ("macos", "aarch64", 18), ("windows", "x86_64", 16)])
         self.assertEqual(selected["desktop_platforms"], "linux,macos,windows")
         self.assertEqual(len(selected["desktop_harnesses"].split(",")), 5)
 

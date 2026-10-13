@@ -166,7 +166,6 @@ def check_routing(args, home, server):
         assert "GENTLE_ROUTING_OK" in result.stdout, "fixture-response"
         assert ("13 tokens" in result.stderr) == (not flags), "gateway-accounting"
         assert all((agent / name).read_bytes() == value for name, value in original.items())
-        assert "newer than" not in result.stderr, "gateway-accounting"
     assert len(server.requests) == 2
     assert all(path == "/v1/chat/completions" and model == "qwen3.6" for path, model in server.requests)
     print("PASS native credentials, native direct routing, gateway routing and accounting, immutable native provider files")
