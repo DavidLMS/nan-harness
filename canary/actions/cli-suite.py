@@ -41,7 +41,10 @@ class FrozenHarness:
     runtime_version: str = ""
 
     def as_dict(self):
-        return asdict(self)
+        value = asdict(self)
+        if not self.runtime_version:
+            value.pop("runtime_version")
+        return value
 
 
 @dataclass(frozen=True)
