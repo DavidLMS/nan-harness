@@ -1,4 +1,5 @@
 {
+  "install_gentle_shell_go": "Gentle Shell en Windows requiere Go local >=1.25.10. Instala Go desde https://go.dev/dl/, abre de nuevo la terminal, comprueba 'go version' y vuelve a ejecutar 'nanh gentle-shell'. La descarga automática de versiones de Go está desactivada.",
   "install_gentle_shell_missing": "No se encontró Gentle Shell. Instala Node.js >=22.19 y npm y ejecuta:\n  npm install --global gentle-pi@latest\n  nanh gentle-shell\nTambién puedes usar --executable RUTA para una instalación existente.",
   "doctor_desktop_exact_checks": "  Comprobaciones de versión exacta del feed remoto ({architecture}):",
   "help_zed_separate_data_directory": "Usar un directorio separado de datos y ajustes de Zed",

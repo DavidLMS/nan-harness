@@ -27,16 +27,20 @@ pub(crate) enum InstallDecision {
 
 pub(crate) fn offer_install(kind: HarnessKind) -> Result<InstallDecision, InstallError> {
     let spec = install_spec(kind).ok_or(InstallError::UnsupportedHarness(kind))?;
-    offer_install_spec(spec)
+    offer_install_spec(spec, || Ok(()))
 }
 
-fn offer_install_spec(spec: &catalog::InstallSpec) -> Result<InstallDecision, InstallError> {
+fn offer_install_spec(
+    spec: &catalog::InstallSpec,
+    extra_prerequisites: impl FnOnce() -> Result<(), InstallError>,
+) -> Result<InstallDecision, InstallError> {
     let kind = spec.kind();
     if !io::stdin().is_terminal() || !io::stderr().is_terminal() {
         return Ok(InstallDecision::NotInteractive);
     }
     check_required_runtime(kind)?;
     installer::check_install_prerequisites(spec)?;
+    extra_prerequisites()?;
 
     let mut input = io::stdin().lock();
     let mut output = io::stderr().lock();

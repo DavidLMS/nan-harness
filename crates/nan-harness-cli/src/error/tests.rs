@@ -306,3 +306,12 @@ fn missing_harness_is_setup_not_a_reportable_failure() {
     assert!(!error.user_message(&cli).is_reportable());
     assert!(!error.should_report_telemetry(&cli));
 }
+
+#[test]
+fn gentle_shell_missing_go_is_nonreportable_setup() {
+    let cli = <Cli as clap::Parser>::try_parse_from(["nanh", "gentle-shell"]).unwrap();
+    let error = CliError::Install(InstallError::GentleShellGoPrerequisite);
+    assert!(!error.user_message(&cli).is_reportable());
+    assert!(!error.should_report_telemetry(&cli));
+    assert!(error.render_terminal(&cli).contains("nanh gentle-shell"));
+}

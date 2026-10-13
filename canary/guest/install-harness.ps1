@@ -88,6 +88,12 @@ function Invoke-Native([string]$File, [string[]]$Arguments, [string]$Executable 
         }
       } elseif ($errTask.Result -match "(?im)'?npm(?:\.cmd)?'? is not recognized|cannot find the path.*npm(?:\.cmd)?") {
         'npm-command-missing'
+      } elseif ($errTask.Result -match 'GENTLE_AI_GO_TOOLCHAIN_UNAVAILABLE') {
+        $processCategory = 'gentle-go-missing'; 'npm-script-failure'
+      } elseif ($errTask.Result -match 'GENTLE_AI_GO_TOOLCHAIN_TOO_OLD') {
+        $processCategory = 'gentle-go-old'; 'npm-script-failure'
+      } elseif ($errTask.Result -match 'GENTLE_AI_GO_INSTALL_FAILED') {
+        $processCategory = 'gentle-go-build'; 'npm-script-failure'
       } else { 'npm-unknown' }
     } elseif ($Executable -eq 'python') {
       $pipCategory = if ($errTask.Result -match '(?i)Temporary failure in name resolution|Name or service not known') { 'network-dns' }

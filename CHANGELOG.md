@@ -9,7 +9,7 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- Offer guided Gentle Shell installation with Node/npm prerequisites and clear
+- Offer guided Gentle Shell installation with Node/npm and Windows Go prerequisites and clear
   noninteractive instructions. Discover launchers in known npm locations.
 - Qualify Gentle Shell independently on all three hosted CLI platforms, recording
   its launcher/Pi runtime pair and requiring native configuration, parent/child

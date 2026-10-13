@@ -6,6 +6,9 @@ on macOS ARM64. Gentle Shell now has its own daily and release cells on Linux
 ARM64, macOS ARM64 and Windows x64. The Pi cell cannot qualify Gentle Shell.
 Each cell freezes and records both the gentle-pi package and Pi runtime version,
 with the hosted Node runtime; a changed pair must be requalified.
+On Windows, the official installer builds its Gentle AI companion from source
+and requires Go 1.25.10 or later. Hosted Windows cells provision that toolchain;
+the CLI checks it before offering installation and explains how to install it.
 
 The local synthetic probe runs the real launcher and runtime against an
 in-process authenticated provider. No real API key is needed or used:

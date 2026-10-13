@@ -139,6 +139,7 @@ WINDOWS_INSTALL_CATEGORIES = frozenset({
     "installer-argument", "installer-path", "git-native-error",
     "network-dns", "network-timeout", "network-connection", "tls-certificate", "permission",
     "disk-space", "tool-missing", "package-not-found", "installer-refused",
+    "gentle-go-missing", "gentle-go-old", "gentle-go-build",
 })
 HERMES_INSTALL_STAGES = frozenset({
     "uv", "git", "node", "system-packages", "repository", "python", "venv", "dependencies",

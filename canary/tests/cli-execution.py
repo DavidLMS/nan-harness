@@ -48,10 +48,12 @@ class CliExecutionTests(unittest.TestCase):
     def test_windows_installer_marker_exposes_only_closed_category(self):
         with tempfile.TemporaryDirectory() as temporary:
             marker = Path(temporary) / "installer-result.json"
-            for category in ("network-dns", "PRIVATE_SENTINEL", ["permission"], None):
+            for category in ("network-dns", "gentle-go-missing", "gentle-go-old", "gentle-go-build", "PRIVATE_SENTINEL", ["permission"], None):
                 marker.write_text(json.dumps({"schemaVersion": 2, "status": "failed",
                                               "diagnostic": {"processCategory": category}}))
-                expected = "windows-installer-network-dns" if category == "network-dns" else "unknown"
+                expected = ("windows-installer-" + category if isinstance(category, str) and
+                            category in {"network-dns", "gentle-go-missing", "gentle-go-old", "gentle-go-build"}
+                            else "unknown")
                 self.assertEqual(cell.windows_install_failure(marker, "unknown"), expected)
                 self.assertFalse(marker.exists())
 

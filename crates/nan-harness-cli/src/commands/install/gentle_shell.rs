@@ -1,3 +1,5 @@
+mod windows_go;
+
 use super::catalog::{InstallSpec, command};
 use super::{InstallDecision, discovery, offer_install_spec};
 use crate::app::HarnessRunArgs;
@@ -34,7 +36,7 @@ pub(crate) fn locate_or_install_gentle_shell(
             .map_err(CliError::from);
     }
     locate_or_install(arguments.dry_run, locate_gentle_shell, || {
-        offer_install_spec(&SPEC)
+        offer_install_spec(&SPEC, windows_go::check)
     })
 }
 
@@ -52,6 +54,12 @@ fn locate_or_install(
         "{}",
         nan_harness_i18n::messages::install_gentle_shell_missing(nan_harness_i18n::locale())
     );
+    if cfg!(windows) {
+        eprintln!(
+            "{}",
+            nan_harness_i18n::messages::install_gentle_shell_go(nan_harness_i18n::locale())
+        );
+    }
     if dry_run {
         return Ok(None);
     }

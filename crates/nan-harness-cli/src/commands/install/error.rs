@@ -5,6 +5,10 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub(crate) enum InstallError {
+    #[error(
+        "Gentle Shell on Windows requires local Go >=1.25.10. Install Go from https://go.dev/dl/, reopen the terminal, verify 'go version', then retry 'nanh gentle-shell'. Automatic Go toolchain download is disabled."
+    )]
+    GentleShellGoPrerequisite,
     #[error("ZCode requires {program}; install Git and pnpm 10.33.2, then retry 'nanh zcode'")]
     SourcePrerequisite { program: &'static str },
     #[error("could not prompt for installation: {0}")]
@@ -210,7 +214,8 @@ impl InstallError {
         self.missing_npm().is_some()
             || matches!(
                 self,
-                Self::SourcePrerequisite { .. }
+                Self::GentleShellGoPrerequisite
+                    | Self::SourcePrerequisite { .. }
                     | Self::RuntimeCommandStart { .. }
                     | Self::RuntimeCommandFailed { .. }
                     | Self::RuntimeUnsupported { .. }
@@ -237,10 +242,14 @@ impl nan_harness_i18n::TerminalMessage for InstallError {
         if let Some(harness) = self.missing_npm() {
             return super::runtime::npm_hint_for(harness, locale);
         }
+        if matches!(self, Self::GentleShellGoPrerequisite) {
+            return m::install_gentle_shell_go(locale);
+        }
         if locale == nan_harness_i18n::Locale::En {
             return self.to_string();
         }
         match self {
+            Self::GentleShellGoPrerequisite => m::install_gentle_shell_go(locale),
             Self::SourcePrerequisite { program } => m::install_source_dependency(locale, program),
             Self::Prompt(field_0) => m::error_install_prompt(locale, &(field_0)),
             Self::UnsupportedPlatform(field_0) => {
