@@ -296,3 +296,13 @@ fn other_installer_start_failures_remain_reportable() {
         assert!(error.should_report_telemetry(&dry_run_cli()));
     }
 }
+
+#[test]
+fn missing_harness_is_setup_not_a_reportable_failure() {
+    let error = CliError::Discovery(DiscoveryError::ExecutableNotFound(
+        "gentle-shell".to_owned(),
+    ));
+    let cli = <Cli as clap::Parser>::try_parse_from(["nanh", "gentle-shell"]).unwrap();
+    assert!(!error.user_message(&cli).is_reportable());
+    assert!(!error.should_report_telemetry(&cli));
+}

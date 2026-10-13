@@ -80,7 +80,13 @@ def cli_checks(report, digest, spec, run):
     failure_class = failure.get("class")
     failure_phase = failure.get("phase")
     failed = "failed" if failure_class == "harness" else "blocked"
-    common = (identity, version, None)
+    runtime = None
+    if identity[2] == "gentle-shell":
+        paired = [r["version"] for r in environment.get("runtimes", []) if r.get("name") == "pi"]
+        if len(paired) != 1 or not VERSION.fullmatch(paired[0]):
+            raise ValueError("Gentle Shell evidence requires one exact Pi version")
+        runtime = paired[0]
+    common = (identity, version, runtime)
     at, binary = report["completedAt"], report["nanHarness"]["sha256"]
     # A live-stage provider/auth failure occurs after the deterministic contract
     # has already been closed and may retain that earlier evidence.  Every other

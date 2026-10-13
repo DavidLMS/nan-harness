@@ -20,9 +20,8 @@ pub(super) async fn run(
 ) -> Result<i32, RunError> {
     let mut args = input.run.clone();
     validate_session_arguments(&args.arguments)?;
-    let executable = match &args.executable {
-        Some(path) => path.clone(),
-        None => nan_harness_runtime::locate_launcher("gentle-shell").map_err(CliError::from)?,
+    let Some(executable) = crate::commands::install::locate_or_install_gentle_shell(&args)? else {
+        return Ok(0);
     };
     let discovery = inspect_harness(HarnessKind::Pi, &executable, discovery_options(&args))
         .map_err(CliError::from)?;

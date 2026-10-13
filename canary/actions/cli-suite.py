@@ -38,6 +38,7 @@ class FrozenHarness:
     package: str = ""
     model: str = ""
     ref: str = ""
+    runtime_version: str = ""
 
     def as_dict(self):
         return asdict(self)
@@ -64,7 +65,7 @@ class UnresolvedHarness:
 
 _NPM_PACKAGES = {
     "claude-code": "@anthropic-ai/claude-code", "codex": "@openai/codex",
-    "opencode": "opencode-ai", "pi": "@earendil-works/pi-coding-agent",
+    "opencode": "opencode-ai", "pi": "@earendil-works/pi-coding-agent", "gentle-shell": "gentle-pi",
     "deepseek-harness": "@deepseek-ai/dsh", "openclaw": "openclaw",
     "cline": "cline", "qwen-code": "@qwen-code/qwen-code",
 }
@@ -282,8 +283,11 @@ def _pinned_project_version(repo, tag, fetch_json, fetch_document):
 def _resolve_one(harness, system, architecture, model, fetch_json, fetch_text, fetch_document):
     source, package = _source(harness, system)
     ref = ""
+    runtime_version = ""
     if harness in _NPM_PACKAGES:
         version = _version(fetch_json("https://registry.npmjs.org/" + package + "/latest")["version"])
+        if harness == "gentle-shell":
+            runtime_version = _version(fetch_json("https://registry.npmjs.org/@earendil-works/pi-coding-agent/latest")["version"])
     elif source.startswith("pypi:"):
         version = _pypi_version(fetch_json("https://pypi.org/pypi/" + package + "/json"))
     elif harness in _GITHUB_REPOS:
@@ -309,7 +313,7 @@ def _resolve_one(harness, system, architecture, model, fetch_json, fetch_text, f
             version = _version(tag)
     else:
         version = _version(fetch_text(source))
-    return FrozenHarness(harness, version, system, architecture, source, package, model, ref)
+    return FrozenHarness(harness, version, system, architecture, source, package, model, ref, runtime_version)
 
 
 def resolve_manifest(harnesses, system, architecture, model, fetch_json=_official_json,
@@ -379,6 +383,8 @@ def _load_manifest(path, harnesses, system, architecture, model):
         if (item.source, item.package) != _source(item.harness, system):
             raise ValueError("frozen manifest has an untrusted installer source")
     for item in resolved:
+        if (item.harness == "gentle-shell" and (not item.runtime_version or _version(item.runtime_version) != item.runtime_version)) or (item.harness != "gentle-shell" and item.runtime_version):
+            raise ValueError("frozen manifest has an invalid paired runtime")
         if _version(item.version) != item.version:
             raise ValueError("frozen manifest has a noncanonical version")
         if not isinstance(item.ref, str) or not (
@@ -536,6 +542,8 @@ def main():
         else:
             frozen_item = frozen_by_name[harness]
             base_command += ["--harness-version", frozen_item.version]
+            if frozen_item.runtime_version:
+                base_command += ["--runtime-version", frozen_item.runtime_version]
             if frozen_item.ref:
                 base_command += ["--harness-ref", frozen_item.ref]
             stages = ["install", "conformance"] + (["live"] if args.mode == "live" else []) + ["report"]

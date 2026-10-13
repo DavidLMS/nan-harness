@@ -41,17 +41,21 @@ pub(super) fn runtime_hint_for(
     minimum: &Version,
     locale: nan_harness_i18n::Locale,
 ) -> String {
+    runtime_hint_for_launcher(kind.binary_name(), minimum, locale)
+}
+
+pub(super) fn runtime_hint_for_launcher(
+    binary: &str,
+    minimum: &Version,
+    locale: nan_harness_i18n::Locale,
+) -> String {
     if cfg!(windows) {
-        return nan_harness_i18n::messages::install_runtime_windows(
-            locale,
-            kind.binary_name(),
-            minimum,
-        );
+        return nan_harness_i18n::messages::install_runtime_windows(locale, binary, minimum);
     }
     let nvm_dir = std::env::var_os("NVM_DIR");
     let path = std::env::var_os("PATH");
     unix_runtime_hint(
-        kind,
+        binary,
         minimum,
         locale,
         nvm_dir.as_deref(),
@@ -61,7 +65,7 @@ pub(super) fn runtime_hint_for(
 }
 
 fn unix_runtime_hint(
-    kind: HarnessKind,
+    binary: &str,
     minimum: &Version,
     locale: nan_harness_i18n::Locale,
     nvm_dir: Option<&std::ffi::OsStr>,
@@ -72,12 +76,7 @@ fn unix_runtime_hint(
         let directory = std::path::Path::new(path);
         directory.is_absolute() && directory.join("nvm.sh").is_file()
     }) {
-        nan_harness_i18n::messages::install_runtime_nvm(
-            locale,
-            kind.binary_name(),
-            &minimum.major,
-            minimum,
-        )
+        nan_harness_i18n::messages::install_runtime_nvm(locale, binary, &minimum.major, minimum)
     } else if macos
         && path.is_some_and(|path| {
             std::env::split_paths(path)
@@ -86,12 +85,12 @@ fn unix_runtime_hint(
     {
         nan_harness_i18n::messages::install_runtime_homebrew(
             locale,
-            kind.binary_name(),
+            binary,
             &minimum.major,
             minimum,
         )
     } else {
-        nan_harness_i18n::messages::install_runtime_official(locale, kind.binary_name(), minimum)
+        nan_harness_i18n::messages::install_runtime_official(locale, binary, minimum)
     }
 }
 
@@ -174,7 +173,7 @@ mod tests {
         let minimum = semver::Version::new(24, 14, 0);
         let hint = |nvm, path, macos| {
             super::unix_runtime_hint(
-                HarnessKind::ZCode,
+                "zcode",
                 &minimum,
                 nan_harness_i18n::Locale::En,
                 nvm,

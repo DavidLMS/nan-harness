@@ -48,11 +48,23 @@ impl HostedCheck {
     /// Returns a fixed diagnostic when a field cannot describe hosted evidence.
     pub fn validate_identity(&self) -> Result<(), &'static str> {
         let known = match self.suite {
-            HostedSuite::Cli => self.id.parse::<crate::HarnessKind>().is_ok(),
+            HostedSuite::Cli => {
+                self.id == "gentle-shell" || self.id.parse::<crate::HarnessKind>().is_ok()
+            }
             HostedSuite::Desktop => self.id.parse::<crate::DesktopHarnessKind>().is_ok(),
         };
-        if !known || (self.suite == HostedSuite::Cli && self.runtime_version.is_some()) {
+        if !known
+            || (self.suite == HostedSuite::Cli
+                && self.id != "gentle-shell"
+                && self.runtime_version.is_some())
+        {
             return Err("unknown harness or unexpected bundled runtime");
+        }
+        if self.suite == HostedSuite::Cli
+            && self.id == "gentle-shell"
+            && self.runtime_version.is_none()
+        {
+            return Err("Gentle Shell requires its paired Pi runtime");
         }
         if !matches!(self.platform.as_str(), "linux" | "macos" | "windows")
             || !matches!(self.architecture.as_str(), "aarch64" | "x86_64")

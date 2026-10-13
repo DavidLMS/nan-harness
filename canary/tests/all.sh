@@ -44,6 +44,7 @@ for test_script in \
   zcode-source.py \
   cli-execution.py \
   deepseek-install-diagnostic.py \
+  gentle-shell.py \
   release-gate.py \
   release-publish.py \
   release-publish-integration.py \

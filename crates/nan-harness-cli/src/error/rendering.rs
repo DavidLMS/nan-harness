@@ -17,7 +17,13 @@ impl CliError {
             return message;
         }
         if requires_setup(self) {
-            return UserMessage::setup_required(self.terminal_message(locale));
+            let summary = match (self, &cli.command) {
+                (Self::Install(error), crate::app::Command::GentleShell(_)) => error
+                    .gentle_shell_message(locale)
+                    .unwrap_or_else(|| self.terminal_message(locale)),
+                _ => self.terminal_message(locale),
+            };
+            return UserMessage::setup_required(summary);
         }
         UserMessage::error(self.code(), self.terminal_message(locale))
     }
@@ -78,7 +84,8 @@ fn requires_setup(error: &CliError) -> bool {
     matches!(error, CliError::Install(error) if error.is_runtime_precondition())
         || matches!(
             error,
-            CliError::HarnessWindowsUnavailable(_)
+            CliError::Discovery(nan_harness_runtime::DiscoveryError::ExecutableNotFound(_))
+                | CliError::HarnessWindowsUnavailable(_)
                 | CliError::Credential(_)
                 | CliError::Configuration(_)
         )

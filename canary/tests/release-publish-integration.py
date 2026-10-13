@@ -190,9 +190,9 @@ class ReleasePublishIntegrationTests(unittest.TestCase):
             "completedAt": "2026-09-14T00:00:01Z", "durationMilliseconds": 1000,
             "nanHarness": {"version": "1.2.3", "source": f"commit:{self.tag_commit}",
                            "sha256": gate.digest(self.assets / asset)},
-            "environment": {"operatingSystem": system,
+            "environment": {"runtimes": [{"name":"pi","version":"1.1.0"},{"name":"node","version":"24.20.0"}], "operatingSystem": system,
                              "architecture": gate.PLATFORMS[system]["architecture"], "image": "synthetic",
-                             "profile": "release", "runtimes": []},
+                             "profile": "release"},
             "harness": {"id": harness, "version": "9999.0.0"},
             "checks": [{"name": name, "status": "passed", "durationMilliseconds": 1, "attempts": 1}
                        for name in ("install-and-diagnose", "deterministic-conformance", "live-tool")],

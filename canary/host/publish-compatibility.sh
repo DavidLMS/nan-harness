@@ -70,7 +70,7 @@ cargo_xtask() {
   "$cargo_command" xtask "$@"
 }
 harnesses=(
-  claude-code codex mimo-code zcode opencode hermes pi omp prime-agent deepseek-harness
+  claude-code codex mimo-code zcode opencode hermes pi gentle-shell omp prime-agent deepseek-harness
   openclaw cline qwen-code kimi-code aider goose fx
 )
 [ -n "$release_repository" ] || usage

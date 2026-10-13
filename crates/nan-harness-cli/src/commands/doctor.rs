@@ -19,7 +19,7 @@ pub(crate) async fn run(arguments: &DoctorArgs) -> Result<i32, DiscoveryError> {
             harness: Some(DoctorTarget::Stable(nan_harness_core::HarnessKind::Pi)),
             executable: Some(match &arguments.executable {
                 Some(path) => path.clone(),
-                None => nan_harness_runtime::locate_launcher("gentle-shell")?,
+                None => crate::commands::install::locate_gentle_shell()?,
             }),
             json: arguments.json,
             offline: arguments.offline,

@@ -2,8 +2,10 @@
 
 Gentle Shell is a managed launcher variant of Pi, not a new provider protocol.
 The initial qualified pairing is gentle-pi 4.1.0 with Pi 1.1.0 and Node 22.23.1
-on macOS ARM64. The existing hosted Pi cell does not by itself qualify Gentle
-Shell. Do not infer full upstream-version or platform coverage from that cell.
+on macOS ARM64. Gentle Shell now has its own daily and release cells on Linux
+ARM64, macOS ARM64 and Windows x64. The Pi cell cannot qualify Gentle Shell.
+Each cell freezes and records both the gentle-pi package and Pi runtime version,
+with the hosted Node runtime; a changed pair must be requalified.
 
 The local synthetic probe runs the real launcher and runtime against an
 in-process authenticated provider. No real API key is needed or used:
@@ -22,7 +24,10 @@ project. It checks native saved credentials, direct native routing, mandatory
 gateway routing despite saved URL overrides, provider-file preservation,
 direct fallback to nanh credentials and failure rather than account switching
 for malformed native credentials. It also verifies that the parsed Pi version
-does not produce a launcher-version warning.
+does not produce a launcher-version warning. The scripted provider also drives a
+real child agent to read a fresh random fixture through the gateway. Native search
+and Engram-shaped memory fixtures verify preservation; forced search uses a local
+SearXNG-protocol fixture. This does not certify every Engram release.
 
 ## Initial evidence: 2026-10-12
 
@@ -46,3 +51,17 @@ These tests do not qualify native review workflows, every third-party extension,
 or the user's remote Orca deployment. Compaction overrides are explicitly
 unsupported for this launcher. The ordinary release gate still qualifies the
 other harnesses and desktop assets independently.
+
+## Hosted contract
+
+`check.py --output <path>` emits only closed check names and a passed status.
+`--live --model qwen3.6` additionally requires `NAN_API_KEY` and observes a real
+parent tool call, the child's actual NaN model/read transcript, and gateway usage.
+The marker is generated fresh and is never supplied to the model in the prompt.
+No prompts, responses, credentials or transcripts are published as evidence.
+
+The daily selector checks the launcher capability manifest in the immutable
+release commit; old canary binaries without the independent report identity
+remain unavailable for this cell. New publication requires all 52 CLI cells
+plus the existing twelve Desktop cells. Historical 49-cell receipts remain
+valid for recommending their already-published version, not for new publication.

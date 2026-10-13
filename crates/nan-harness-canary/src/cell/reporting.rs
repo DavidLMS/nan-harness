@@ -111,7 +111,7 @@ pub(crate) fn build_report(
             runtimes: loaded.value.runtimes,
         },
         harness: HarnessEvidence {
-            id: loaded.value.harness,
+            id: loaded.value.harness.into(),
             version: harness_version,
         },
         model,

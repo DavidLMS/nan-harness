@@ -143,6 +143,69 @@ impl InstallError {
         }
     }
 
+    pub(crate) fn gentle_shell_message(&self, locale: nan_harness_i18n::Locale) -> Option<String> {
+        use nan_harness_i18n::messages as m;
+        let hint =
+            |minimum| super::runtime::runtime_hint_for_launcher("gentle-shell", minimum, locale);
+        let name = "Gentle Shell";
+        Some(match self {
+            Self::RuntimeCommandStart {
+                command,
+                minimum,
+                source,
+                ..
+            } => m::error_install_runtime_command_start(
+                locale,
+                command,
+                name,
+                &hint(minimum),
+                minimum,
+                source,
+            ),
+            Self::RuntimeCommandFailed {
+                command,
+                minimum,
+                exit_code,
+                ..
+            } => m::error_install_runtime_command_failed(
+                locale,
+                command,
+                name,
+                &hint(minimum),
+                minimum,
+                &exit_code.map_or_else(String::new, |code| m::error_exit_code(locale, &code)),
+            ),
+            Self::RuntimeUnsupported {
+                detected, minimum, ..
+            } => m::error_install_runtime_unsupported(
+                locale,
+                detected,
+                name,
+                &hint(minimum),
+                minimum,
+            ),
+            Self::RuntimeUnparseable {
+                detected, minimum, ..
+            } => m::error_install_runtime_unparseable(
+                locale,
+                detected,
+                name,
+                &hint(minimum),
+                minimum,
+            ),
+            _ if self.missing_npm().is_some() => {
+                if cfg!(windows) {
+                    m::install_npm_windows(locale, "gentle-shell", name)
+                } else if cfg!(target_os = "macos") {
+                    m::install_npm_macos(locale, "gentle-shell", name)
+                } else {
+                    m::install_npm_linux(locale, "gentle-shell", name)
+                }
+            }
+            _ => return None,
+        })
+    }
+
     pub(crate) fn is_runtime_precondition(&self) -> bool {
         self.missing_npm().is_some()
             || matches!(

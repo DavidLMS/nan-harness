@@ -1,4 +1,5 @@
 {
+  "install_gentle_shell_missing": "No se encontró Gentle Shell. Instala Node.js >=22.19 y npm y ejecuta:\n  npm install --global gentle-pi@latest\n  nanh gentle-shell\nTambién puedes usar --executable RUTA para una instalación existente.",
   "doctor_desktop_exact_checks": "  Comprobaciones de versión exacta del feed remoto ({architecture}):",
   "help_zed_separate_data_directory": "Usar un directorio separado de datos y ajustes de Zed",
   "doctor_desktop_checks_missing": "    No hay comprobaciones deterministas ni de NaN registradas para esta arquitectura",

@@ -1,6 +1,7 @@
 mod catalog;
 mod discovery;
 mod error;
+mod gentle_shell;
 mod installer;
 mod output;
 mod post_install;
@@ -10,6 +11,7 @@ mod source;
 pub(crate) use catalog::install_spec;
 pub(crate) use discovery::executable_from_known_locations;
 pub(crate) use error::InstallError;
+pub(crate) use gentle_shell::{locate_gentle_shell, locate_or_install_gentle_shell};
 pub(crate) use runtime::check_required_runtime;
 
 use crate::commands::install::catalog::official_install_command;
@@ -25,11 +27,16 @@ pub(crate) enum InstallDecision {
 
 pub(crate) fn offer_install(kind: HarnessKind) -> Result<InstallDecision, InstallError> {
     let spec = install_spec(kind).ok_or(InstallError::UnsupportedHarness(kind))?;
-    installer::check_install_prerequisites(spec)?;
+    offer_install_spec(spec)
+}
+
+fn offer_install_spec(spec: &catalog::InstallSpec) -> Result<InstallDecision, InstallError> {
+    let kind = spec.kind();
     if !io::stdin().is_terminal() || !io::stderr().is_terminal() {
         return Ok(InstallDecision::NotInteractive);
     }
     check_required_runtime(kind)?;
+    installer::check_install_prerequisites(spec)?;
 
     let mut input = io::stdin().lock();
     let mut output = io::stderr().lock();

@@ -60,6 +60,7 @@ pub(super) fn validate(report: &CanaryReport) -> Result<(), ReportError> {
         semver::Version::parse(&report.harness.version)
             .map_err(|_| ReportError::InvalidSemanticVersion("harness.version"))?;
     }
+    validate_launcher_runtimes(report)?;
     for (field, value) in [
         ("specSha256", report.spec_sha256.as_str()),
         ("nanHarness.sha256", report.nan_harness.sha256.as_str()),
@@ -105,4 +106,21 @@ pub(super) fn validate(report: &CanaryReport) -> Result<(), ReportError> {
 
 fn valid_sha256(value: &str) -> bool {
     value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn validate_launcher_runtimes(report: &CanaryReport) -> Result<(), ReportError> {
+    if report.harness.id.to_string() == "gentle-shell" && report.outcome == CanaryOutcome::Passed {
+        for name in ["pi", "node"] {
+            let versions: Vec<_> = report
+                .environment
+                .runtimes
+                .iter()
+                .filter(|runtime| runtime.name == name)
+                .collect();
+            if versions.len() != 1 || semver::Version::parse(&versions[0].version).is_err() {
+                return Err(ReportError::InvalidSemanticVersion("environment.runtimes"));
+            }
+        }
+    }
+    Ok(())
 }

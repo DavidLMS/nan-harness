@@ -13,6 +13,17 @@ pub(crate) fn executable_from_known_locations(kind: HarnessKind) -> Option<PathB
     find_executable(kind, &PathBuf::from(home))
 }
 
+pub(super) fn npm_launcher_from_known_locations(binary: &str) -> Option<PathBuf> {
+    let home = env::var_os("HOME").or_else(|| env::var_os("USERPROFILE"))?;
+    let extensions = env::var_os("PATHEXT");
+    let names = executable_names(binary, cfg!(windows), extensions.as_deref());
+    executable_candidates(HarnessKind::Pi, Path::new(&home))
+        .into_iter()
+        .filter_map(|candidate| candidate.parent().map(Path::to_path_buf))
+        .flat_map(|directory| names.iter().map(move |name| directory.join(name)))
+        .find(|candidate| is_executable_file(candidate))
+}
+
 fn find_executable(kind: HarnessKind, home: &Path) -> Option<PathBuf> {
     executable_candidates(kind, home)
         .into_iter()

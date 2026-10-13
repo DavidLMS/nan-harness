@@ -8,7 +8,7 @@ import re
 
 
 CLI_HARNESSES = (
-    "claude-code", "codex", "mimo-code", "zcode", "opencode", "hermes", "pi", "omp", "prime-agent",
+    "claude-code", "codex", "mimo-code", "zcode", "opencode", "hermes", "pi", "gentle-shell", "omp", "prime-agent",
     "deepseek-harness", "openclaw", "cline", "qwen-code", "kimi-code", "aider",
     "goose", "fx",
 )
@@ -198,6 +198,20 @@ def select_suite(suite, platforms="all", harnesses="all", mode="deterministic", 
         raise ValueError("selected harnesses have no upstream-supported native platform")
     return {"suite": suite, "mode": mode, "model": resolve_model(model),
             "harnesses": selected, "platforms": jobs, "unsupported": unsupported}
+
+
+def gentle_runtime(report):
+    """Require independently observed launcher and paired runtime provenance."""
+    if report.get("harness", {}).get("id") != "gentle-shell":
+        return None
+    runtimes = report.get("environment", {}).get("runtimes", [])
+    versions = {}
+    for name in ("pi", "node"):
+        matches = [item.get("version") for item in runtimes if isinstance(item, dict) and item.get("name") == name]
+        if len(matches) != 1 or not isinstance(matches[0], str) or not re.fullmatch(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:[-+][0-9A-Za-z.-]+)?", matches[0]):
+            raise ValueError("Gentle Shell requires exact unique Pi and Node runtime evidence")
+        versions[name] = matches[0]
+    return versions["pi"]
 
 
 def main():

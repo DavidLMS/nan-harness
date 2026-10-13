@@ -30,7 +30,7 @@ fn report() -> CanaryReport {
             runtimes: Vec::new(),
         },
         harness: HarnessEvidence {
-            id: HarnessKind::ClaudeCode,
+            id: HarnessKind::ClaudeCode.into(),
             version: "2.1.233".to_owned(),
         },
         model: Some("qwen3.6".to_owned()),
@@ -216,10 +216,27 @@ fn serialized_report_matches_the_documented_json_schema() {
     let validator = jsonschema::validator_for(&schema).expect("schema should compile");
     for harness in HarnessKind::ALL {
         let mut report = report();
-        report.harness.id = harness;
+        report.harness.id = harness.into();
         let value = serde_json::to_value(report).expect("report should serialize");
         if let Err(error) = validator.validate(&value) {
             panic!("{harness} report should match its schema: {error}");
         }
     }
+}
+
+#[test]
+fn gentle_shell_evidence_is_distinct_and_requires_paired_versions() {
+    let mut value = serde_json::to_value(report()).unwrap();
+    value["harness"]["id"] = "gentle-shell".into();
+    let parsed: CanaryReport = serde_json::from_value(value.clone()).unwrap();
+    assert_ne!(parsed.harness.id, HarnessKind::Pi);
+    assert!(parsed.validate().is_err());
+    value["environment"]["runtimes"] = serde_json::json!([
+        {"name": "pi", "version": "1.1.0"},
+        {"name": "node", "version": "24.20.0"}
+    ]);
+    let parsed: CanaryReport = serde_json::from_value(value.clone()).unwrap();
+    parsed.validate().unwrap();
+    value["harness"]["id"] = "unknown-launcher".into();
+    assert!(serde_json::from_value::<CanaryReport>(value).is_err());
 }

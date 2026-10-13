@@ -194,6 +194,17 @@ pub(super) fn validate_releases(
                 release.nan_harness_version
             ));
         }
+        if release
+            .verifications
+            .iter()
+            .filter(|entry| entry.id == "gentle-shell")
+            .count()
+            > 1
+        {
+            return Err(format!(
+                "{source} contains duplicate entry for gentle-shell"
+            ));
+        }
         let mut ids = BTreeSet::new();
         for entry in &release.verifications {
             let id = validate_verification_entry(
@@ -270,8 +281,18 @@ pub(super) fn apply_release_update(
         releases.last_mut().expect("the release was just appended")
     };
     validate_release_desktop_evidence(&update, desktop, source)?;
+    apply_gentle_shell_update(
+        &mut release.verifications,
+        &update.verifications,
+        requirements,
+        update.nan_harness_version == current_release_version(),
+        source,
+    )?;
     let mut ids = BTreeSet::new();
     for entry in &update.verifications {
+        if entry.id == "gentle-shell" {
+            continue;
+        }
         let existing_compatible = entry.id.parse::<HarnessKind>().ok().and_then(|id| {
             release
                 .verifications
@@ -360,6 +381,30 @@ fn validate_verification_entry(
     )?;
     if compatible_at.is_none() && live_at.is_none() {
         return Err(format!("{source} entry {} contains no evidence", entry.id));
+    }
+    if entry.id == "gentle-shell" {
+        if let Some(live) = &entry.last_live_verified_version
+            && entry
+                .last_compatible_version
+                .as_ref()
+                .or(compatible_fallback)
+                .is_none_or(|version| live > version)
+        {
+            return Err(format!(
+                "{source} reports gentle-shell live evidence without compatible evidence"
+            ));
+        }
+        if enforce_current_minimum
+            && entry
+                .last_compatible_version
+                .as_ref()
+                .is_some_and(|version| version < &Version::new(4, 1, 0))
+        {
+            return Err(format!(
+                "{source} reports gentle-shell below its minimum version"
+            ));
+        }
+        return Ok(None);
     }
     let Ok(id) = entry.id.parse::<HarnessKind>() else {
         return Ok(None);
@@ -589,4 +634,57 @@ fn parse_timestamp(value: &str, field: &str) -> Result<OffsetDateTime, String> {
 
 pub(super) fn current_release_version() -> Version {
     Version::parse(env!("CARGO_PKG_VERSION")).expect("workspace package version should be valid")
+}
+
+fn merge_gentle_shell_entry(
+    entries: &mut Vec<VerificationEntry>,
+    entry: VerificationEntry,
+    source: &str,
+) -> Result<(), String> {
+    let existing = entries.iter_mut().find(|existing| existing.id == entry.id);
+    let compatible = entry.last_compatible_version.as_ref().or_else(|| {
+        existing
+            .as_ref()
+            .and_then(|existing| existing.last_compatible_version.as_ref())
+    });
+    if entry
+        .last_live_verified_version
+        .as_ref()
+        .is_some_and(|live| compatible.is_none_or(|version| live > version))
+    {
+        return Err(format!(
+            "{source} reports gentle-shell live evidence without compatible evidence"
+        ));
+    }
+    if let Some(existing) = existing {
+        merge_verification_entry(existing, &entry, source)
+    } else {
+        entries.push(entry);
+        Ok(())
+    }
+}
+
+/// Launcher evidence has its own identity and cannot inherit Pi's version bounds.
+fn apply_gentle_shell_update(
+    existing: &mut Vec<VerificationEntry>,
+    updates: &[VerificationEntry],
+    requirements: &BTreeMap<HarnessKind, HarnessRequirement>,
+    current_release: bool,
+    source: &str,
+) -> Result<(), String> {
+    let mut launchers = updates.iter().filter(|entry| entry.id == "gentle-shell");
+    let Some(entry) = launchers.next() else {
+        return Ok(());
+    };
+    if launchers.next().is_some() {
+        return Err(format!(
+            "{source} contains duplicate entry for gentle-shell"
+        ));
+    }
+    let compatible = existing
+        .iter()
+        .find(|previous| previous.id == entry.id)
+        .and_then(|previous| previous.last_compatible_version.as_ref());
+    validate_verification_entry(entry, requirements, compatible, current_release, source)?;
+    merge_gentle_shell_entry(existing, entry.clone(), source)
 }

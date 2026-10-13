@@ -63,7 +63,7 @@ pub(crate) fn run(arguments: &RecordArgs) -> Result<(), RecordError> {
             runtimes: Vec::new(),
         },
         harness: HarnessEvidence {
-            id: arguments.harness,
+            id: arguments.harness.into(),
             version: arguments.harness_version.clone(),
         },
         model: arguments.model.clone(),

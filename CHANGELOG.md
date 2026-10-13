@@ -7,6 +7,14 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Offer guided Gentle Shell installation with Node/npm prerequisites and clear
+  noninteractive instructions. Discover launchers in known npm locations.
+- Qualify Gentle Shell independently on all three hosted CLI platforms, recording
+  its launcher/Pi runtime pair and requiring native configuration, parent/child
+  gateway, search, memory fixture and live tool evidence.
+
 ### Fixed
 
 - Keep the macOS Desktop checker waiting through incomplete accessibility focus

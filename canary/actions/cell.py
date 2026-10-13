@@ -915,6 +915,8 @@ def windows_install_failure(marker, fallback):
 def install(args, state):
     command = installer_command(args.harness, args.harness_version, getattr(args, "harness_ref", "") or "")
     environment = cell_environment(args.directory)
+    if args.harness == "gentle-shell":
+        environment["NAN_CANARY_PI_VERSION"] = args.runtime_version
     installer_marker = args.directory / "installer-result.json"
     if os.name == "nt":
         installer_marker.unlink(missing_ok=True)
@@ -962,6 +964,18 @@ def install(args, state):
         raise InstallFailure(DOCTOR_FAILURE_PHASE, "exit-nonzero")
     try:
         version = json.loads(doctor.read_bytes())["version"]
+        if args.harness == "gentle-shell":
+            if version != args.runtime_version:
+                raise ValueError("paired Pi version differs")
+            executable = shutil.which("gentle-shell", path=environment["PATH"])
+            if executable is None:
+                raise ValueError("launcher missing")
+            state["environment"]["runtimes"].append({"name": "pi", "version": version})
+            package = Path(environment["NPM_CONFIG_PREFIX"])
+            if os.name != "nt":
+                package /= "lib"
+            package /= "node_modules/gentle-pi/package.json"
+            version = json.loads(package.read_bytes())["version"]
         if not isinstance(version, str) or not SEMVER.fullmatch(version) or version != args.harness_version:
             raise ValueError()
         state["harness"]["version"] = version
@@ -1003,6 +1017,34 @@ def conformance_result(value, harness):
     return failed
 
 
+def gentle_probe(args, *, live=False):
+    environment = cell_environment(args.directory)
+    executable = shutil.which("gentle-shell", path=environment["PATH"])
+    if executable is None:
+        raise RuntimeError("Gentle Shell launcher is unavailable")
+    report = args.directory / "gentle-probe-private.json"
+    command = [sys.executable, str(ROOT / "canary/gentle-shell/check.py"),
+               "--nanh", str(args.binary), "--gentle-shell", executable, "--output", str(report)]
+    if live:
+        command += ["--live", "--model", args.model]
+    expected_checks = (["live-parent-tool", "live-child-read", "live-gateway-accounting"] if live else
+                       ["native-routing", "gateway-routing", "native-preservation", "direct-fallback",
+                        "invalid-native-credential", "child-gateway-routing", "native-search-memory", "forced-search"])
+    try:
+        status = private_command(command, args.directory, timeout=1200,
+                                 live=live, allow_failure=True, environment=environment)
+        if report.stat().st_size > 4096:
+            raise RuntimeError("Gentle Shell probe report exceeds its bound")
+        result = json.loads(report.read_bytes())
+        if (not isinstance(result, dict) or set(result) != {"schemaVersion", "status", "checks"}
+                or status != 0 or result.get("schemaVersion") != 1 or result.get("status") != "passed"
+                or result.get("checks") != expected_checks):
+            raise RuntimeError("Gentle Shell probe did not prove its contract")
+    finally:
+        report.unlink(missing_ok=True)
+    return 1
+
+
 def conformance(args, state):
     """Deterministic conformance only certifies success; its failures stay blocked.
 
@@ -1011,6 +1053,8 @@ def conformance(args, state):
     duration nor repetition separates those, so a failure is never a mismatch.
     A second attempt can still produce positive evidence after a transient error.
     """
+    if args.harness == "gentle-shell":
+        return gentle_probe(args)
     report = args.directory / "conformance-private.json"
     environment = cell_environment(args.directory)
     if args.harness == "zcode":
@@ -1078,6 +1122,8 @@ def windows_probe_result(path):
 def live(args, _state):
     if not os.environ.get("NAN_API_KEY"):
         raise RuntimeError("live stage requires an explicitly supplied key")
+    if args.harness == "gentle-shell":
+        return gentle_probe(args, live=True)
     environment = cell_environment(args.directory)
     environment["NAN_CANARY_NAN_COMMAND"] = str(args.binary)
     environment["NAN_CANARY_MODEL"] = args.model
@@ -1309,6 +1355,7 @@ def main():
     parser.add_argument("--nan-version", default=None)
     parser.add_argument("--harness-version", default=None)
     parser.add_argument("--harness-ref", default="")
+    parser.add_argument("--runtime-version", default="")
     args = parser.parse_args()
     try:
         args.model = resolve_model(args.model)
@@ -1325,6 +1372,8 @@ def main():
             parser.error("an unresolved harness has no frozen version or ref")
     elif not args.harness_version or not SEMVER.fullmatch(args.harness_version):
         parser.error("harness-version must be an exact semantic version from the frozen manifest")
+    if args.harness == "gentle-shell" and args.stage != "unresolved" and not SEMVER.fullmatch(args.runtime_version):
+        parser.error("gentle-shell requires its frozen Pi runtime version")
     if args.harness_ref and not SHA256.fullmatch(args.harness_ref):
         parser.error("harness-ref must be a frozen 40-character lowercase commit SHA")
     for field in ("binary", "canary", "directory", "output"):
