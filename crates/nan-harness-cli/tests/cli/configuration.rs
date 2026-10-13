@@ -188,7 +188,8 @@ fn missing_harness_is_reported_before_api_key_non_interactively() {
     let stderr = String::from_utf8(output.stderr).expect("error should be UTF-8");
 
     assert!(!output.status.success());
-    assert!(stderr.contains("NH-DISCOVERY-002"));
+    assert!(stderr.contains("setup required:"), "{stderr}");
+    assert!(!stderr.contains("anonymous error report"));
     assert!(stderr.contains("kimi-code was not found"));
     assert!(stderr.contains("installation requires an interactive terminal"));
     assert!(!stderr.contains("no NaN API key is configured"));

@@ -135,7 +135,11 @@ fn dry_run_and_missing_harness_do_not_contact_model_discovery() {
     let missing_stderr = String::from_utf8_lossy(&missing.stderr);
     assert!(dry_run.status.success(), "{dry_run_stderr}");
     assert!(!missing.status.success(), "{missing_stderr}");
-    assert!(missing_stderr.contains("NH-DISCOVERY-002"));
+    assert!(
+        missing_stderr.contains("setup required:"),
+        "{missing_stderr}"
+    );
+    assert!(!missing_stderr.contains("anonymous error report"));
     assert!(
         requests.is_empty(),
         "unexpected model requests: {requests:?}"
