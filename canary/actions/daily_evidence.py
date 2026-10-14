@@ -6,7 +6,7 @@ import json
 import re
 from pathlib import Path
 
-from selection import CLI_HARNESSES, PLATFORM_ASSETS, PLATFORMS, supported_platforms
+from selection import gentle_runtime, CLI_HARNESSES, PLATFORM_ASSETS, PLATFORMS, supported_platforms
 
 
 STABLE = re.compile(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\Z")
@@ -77,6 +77,9 @@ def validate_report(report, cell, release, plan):
         raise ValueError("daily report time is outside this run")
     if report["outcome"] != "passed":
         return False
+    runtime = gentle_runtime(report)
+    if cell["harness"] == "gentle-shell" and runtime != cell["frozen"].get("runtime_version"):
+        raise ValueError("daily paired runtime differs from frozen version")
     checks = report["checks"]
     if (report["tier"] != "live-core" or report.get("model") != plan["model"]
             or report["harness"]["version"] != cell["version"]

@@ -144,6 +144,9 @@ case "$harness" in
     fi
     bash "$installer" "${arguments[@]}"
     ;;
+  gentle-shell)
+    global_npm_install "gentle-pi@$version" "@earendil-works/pi-coding-agent@${NAN_CANARY_PI_VERSION:?frozen Pi version required}"
+    ;;
   pi)
     global_npm_install --ignore-scripts "@earendil-works/pi-coding-agent@$version"
     ;;

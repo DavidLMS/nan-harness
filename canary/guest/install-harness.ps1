@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-  [Parameter(Mandatory=$true)][ValidateSet('claude-code','codex','mimo-code','zcode','opencode','hermes','pi','omp','prime-agent','deepseek-harness','openclaw','cline','qwen-code','kimi-code','aider','goose','fx')][string]$Harness,
+  [Parameter(Mandatory=$true)][ValidateSet('claude-code','codex','mimo-code','zcode','opencode','hermes','pi','gentle-shell','omp','prime-agent','deepseek-harness','openclaw','cline','qwen-code','kimi-code','aider','goose','fx')][string]$Harness,
   [Parameter(Mandatory=$true)][string]$Version,
   [ValidatePattern('^[0-9]+\.[0-9]+$')][string]$PythonVersion = '3.12',
   [string]$Ref = ''
@@ -88,6 +88,12 @@ function Invoke-Native([string]$File, [string[]]$Arguments, [string]$Executable 
         }
       } elseif ($errTask.Result -match "(?im)'?npm(?:\.cmd)?'? is not recognized|cannot find the path.*npm(?:\.cmd)?") {
         'npm-command-missing'
+      } elseif ($errTask.Result -match 'GENTLE_AI_GO_TOOLCHAIN_UNAVAILABLE') {
+        $processCategory = 'gentle-go-missing'; 'npm-script-failure'
+      } elseif ($errTask.Result -match 'GENTLE_AI_GO_TOOLCHAIN_TOO_OLD') {
+        $processCategory = 'gentle-go-old'; 'npm-script-failure'
+      } elseif ($errTask.Result -match 'GENTLE_AI_GO_INSTALL_FAILED') {
+        $processCategory = 'gentle-go-build'; 'npm-script-failure'
       } else { 'npm-unknown' }
     } elseif ($Executable -eq 'python') {
       $pipCategory = if ($errTask.Result -match '(?i)Temporary failure in name resolution|Name or service not known') { 'network-dns' }
@@ -154,7 +160,7 @@ function Invoke-Download([string]$Uri, [string]$Destination) {
     throw 'official download was empty'
   }
 }
-function Npm([string]$Package) {
+function Npm([string[]]$Package) {
   # npm.cmd is a shell shim. Resolve its adjacent npm-cli.js and invoke the
   # verified node.exe directly, preserving ArgumentList boundaries and the
   # isolated prefix/cache environment without cmd.exe serialization.
@@ -167,7 +173,7 @@ function Npm([string]$Package) {
   }
   $arguments = @($npmCli,'install','--global','--no-fund','--no-audit')
   # rc.2 ranges admit the incomplete rc.3 publication. Do not constrain other versions.
-  if ($Package -ceq '@deepseek-ai/dsh@0.1.5-rc.2') {
+  if ($Package.Count -eq 1 -and $Package[0] -ceq '@deepseek-ai/dsh@0.1.5-rc.2') {
     $arguments += '--before=2026-09-22T00:00:00Z'
   }
   Invoke-Native $node ($arguments + @($Package)) 'npm-node' 'install'
@@ -257,6 +263,10 @@ try {
       Install-ArchiveAsset "https://github.com/XiaomiMiMo/MiMo-Code/releases/download/v$assetVersion/mimocode-windows-$architecture.zip" '(^|[\\/])mimo\.exe$' 'mimo.exe'
     }
     'opencode' { Npm "opencode-ai@$Version" }
+    'gentle-shell' {
+      if ($env:NAN_CANARY_PI_VERSION -notmatch '^\d+\.\d+\.\d+([+-][0-9A-Za-z.-]+)?$') { throw 'frozen Pi version required' }
+      Npm @("gentle-pi@$Version","@earendil-works/pi-coding-agent@$env:NAN_CANARY_PI_VERSION")
+    }
     'pi' { Npm "@earendil-works/pi-coding-agent@$Version" }
     'deepseek-harness' { Npm "@deepseek-ai/dsh@$Version" }
     'openclaw' {

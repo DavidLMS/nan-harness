@@ -39,7 +39,8 @@ pub(super) fn classify_install(error: &InstallError) -> Classification {
         InstallError::RuntimeUnsupported { .. } | InstallError::RuntimeUnparseable { .. } => {
             (FailureCause::UnsupportedVersion, None)
         }
-        InstallError::SourcePrerequisite { .. }
+        InstallError::GentleShellGoPrerequisite
+        | InstallError::SourcePrerequisite { .. }
         | InstallError::CompatibilityManifest(_)
         | InstallError::InvalidRuntimeCommand { .. }
         | InstallError::UnsupportedPlatform(_)

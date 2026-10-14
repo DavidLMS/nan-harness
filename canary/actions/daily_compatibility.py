@@ -87,6 +87,16 @@ def release_assets(repository, tag, directory):
     metadata = json.loads(gh("api", f"repos/{repository}/contents/crates/nan-harness-runtime/resources/compatibility.json?ref={commit}"))
     embedded = json.loads(base64.b64decode(metadata["content"], validate=False))
     harnesses = [entry["id"] for entry in embedded["harnesses"]]
+    # Query the immutable release tree: absence is a supported historical state,
+    # while API/network failures cannot silently remove a required cell.
+    tree = json.loads(gh("api", f"repos/{repository}/git/trees/{commit}?recursive=1"))
+    if tree.get("truncated"):
+        raise ValueError("release capability tree was truncated")
+    if any(entry["path"] == "canary/gentle-shell/manifest.json" for entry in tree["tree"]):
+        capability = json.loads(gh("api", f"repos/{repository}/contents/canary/gentle-shell/manifest.json?ref={commit}"))
+        if json.loads(base64.b64decode(capability["content"])) != {"schemaVersion": 1, "harness": "gentle-shell"}:
+            raise ValueError("unknown Gentle Shell capability manifest")
+        harnesses.append("gentle-shell")
     if len(harnesses) != len(set(harnesses)) or any(not isinstance(h, str) for h in harnesses):
         raise ValueError("release harness registry is invalid")
     for name in ("SHA256SUMS", *(n for pair in PLATFORM_ASSETS.values() for n in pair.values())):
@@ -123,11 +133,11 @@ def select_cells(plan, release, versions, feed, force):
         platforms = supported_platforms(harness)
         frozen = [versions[system].get(harness) for system in platforms]
         status = None
-        if any(item is None for item in frozen) or len({(v["version"], v.get("ref", "")) for v in frozen if v}) != 1:
+        if any(item is None for item in frozen) or len({(v["version"], v.get("ref", ""), v.get("runtime_version", "")) for v in frozen if v}) != 1:
             status = "unresolved"
         # Source commits can change without changing the agent semver. The feed
         # does not store commits, so ZCode must be checked on every daily run.
-        elif not pending(feed, release["version"], harness, frozen[0]["version"], force or harness == "zcode"):
+        elif not pending(feed, release["version"], harness, frozen[0]["version"], force or harness in ("zcode", "gentle-shell")):
             status = "current"
         if status:
             plan["results"].append({"tag": release["tag"], "harness": harness, "status": status})

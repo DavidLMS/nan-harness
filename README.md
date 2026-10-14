@@ -85,8 +85,13 @@ default. This enables features such as reporting token usage when a session ends
 ### Gentle Shell (Pi launcher)
 
 `nanh gentle-shell` launches your existing Gentle Shell environment through NaN.
-It requires gentle-pi 4.1 or newer and Pi 1.1 or newer. Install Gentle Shell with
-its upstream installer first; use `--executable <path>` if it is not on `PATH`.
+It requires gentle-pi 4.1 or newer, Pi 1.1 or newer, and Node 22.19 or newer.
+On Windows the upstream installer also requires Go 1.25.10 or newer to build its
+Gentle AI companion.
+If the launcher is missing, an interactive terminal offers to install the official
+`gentle-pi` npm package. Noninteractive and dry-run commands print installation
+instructions without installing. You can also install it yourself with
+`npm install --global gentle-pi`. Use `--executable <path>` for an explicit launcher.
 
 ```sh
 nanh gentle-shell

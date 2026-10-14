@@ -104,7 +104,7 @@ pub(crate) struct RuntimeEvidence {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct HarnessEvidence {
-    pub id: HarnessKind,
+    pub id: CanaryHarness,
     pub version: String,
 }
 
@@ -154,4 +154,39 @@ pub(crate) struct CanaryReport {
     pub outcome: CanaryOutcome,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub failure: Option<FailureReport>,
+}
+
+/// Evidence identifies the launcher separately from the adapter protocol it uses.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(untagged)]
+pub(crate) enum CanaryHarness {
+    Adapter(HarnessKind),
+    Launcher(GentleShellIdentity),
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) enum GentleShellIdentity {
+    #[serde(rename = "gentle-shell")]
+    GentleShell,
+}
+
+impl From<HarnessKind> for CanaryHarness {
+    fn from(value: HarnessKind) -> Self {
+        Self::Adapter(value)
+    }
+}
+
+impl std::fmt::Display for CanaryHarness {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Adapter(kind) => kind.fmt(formatter),
+            Self::Launcher(_) => formatter.write_str("gentle-shell"),
+        }
+    }
+}
+
+impl PartialEq<HarnessKind> for CanaryHarness {
+    fn eq(&self, other: &HarnessKind) -> bool {
+        matches!(self, Self::Adapter(kind) if kind == other)
+    }
 }

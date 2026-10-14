@@ -1,4 +1,6 @@
 {
+  "install_gentle_shell_go": {"description": "Windows-only Gentle Shell local Go prerequisite. Preserve commands, URL and minimum version.", "section": "install", "sources": ["crates/nan-harness-cli/src/commands/install/error.rs"]},
+  "install_gentle_shell_missing": {"description": "Recovery when the Gentle Shell launcher is absent. Preserve command names, flags and npm package.", "section": "install", "sources": ["crates/nan-harness-cli/src/commands/install/gentle_shell.rs"]},
   "detail_gentle_shell_arguments": {"description": "Gentle Shell launcher integration. Preserve command names, flags and provider identifiers.", "section": "launch", "sources": ["crates/nan-harness-cli/src/runner/harness/gentle_shell.rs"]},
   "detail_gentle_shell_config": {"description": "Gentle Shell launcher integration. Preserve command names, flags and provider identifiers.", "section": "launch", "sources": ["crates/nan-harness-cli/src/runner/harness/gentle_shell.rs"]},
   "detail_gentle_shell_context": {"description": "Gentle Shell launcher integration. Preserve command names, flags and provider identifiers.", "section": "launch", "sources": ["crates/nan-harness-cli/src/runner/harness/gentle_shell.rs"]},

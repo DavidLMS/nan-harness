@@ -6,3 +6,10 @@ mod doctor;
 mod system_doctor;
 #[path = "maintenance/uninstall.rs"]
 mod uninstall;
+
+#[path = "maintenance/gentle_shell.rs"]
+mod gentle_shell;
+
+#[cfg(unix)]
+#[path = "maintenance/gentle_shell_pty.rs"]
+mod gentle_shell_pty;

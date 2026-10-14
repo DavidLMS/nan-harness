@@ -48,6 +48,9 @@ HISTORICAL_WINDOWS_IDENTITIES = HISTORICAL_IDENTITIES | {
 HISTORICAL_MIMO_IDENTITIES = HISTORICAL_WINDOWS_IDENTITIES | {
     f"{platform}/mimo-code" for platform in PLATFORMS
 }
+HISTORICAL_ZCODE_IDENTITIES = HISTORICAL_MIMO_IDENTITIES | {
+    f"{platform}/zcode" for platform in PLATFORMS
+}
 HISTORICAL_ASSETS = {name for platform in ("linux", "macos") for name in PLATFORM_ASSETS[platform].values()}
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
@@ -134,6 +137,11 @@ def _evidence_path(value: str, preferred_root: Path, fallback_root: Path, name: 
 
 
 def _validate_release_report(report: dict[str, Any], version: str, name: str) -> None:
+    from selection import gentle_runtime
+    try:
+        gentle_runtime(report)
+    except ValueError as error:
+        raise ContractError(str(error)) from error
     if (report.get("schemaVersion") != 2 or report.get("outcome") != "passed"
             or report.get("trigger") != "release" or report.get("tier") != "release-gate"):
         raise ContractError(f"report is not a passing release-gate report: {name}")
@@ -159,6 +167,8 @@ def _matrix_policy(handoff: dict[str, Any], recommendation: bool):
         return HISTORICAL_WINDOWS_IDENTITIES, set(ASSET_NAMES)
     if recommendation and handoff.get("reportCount") == len(HISTORICAL_MIMO_IDENTITIES):
         return HISTORICAL_MIMO_IDENTITIES, set(ASSET_NAMES)
+    if recommendation and handoff.get("reportCount") == len(HISTORICAL_ZCODE_IDENTITIES):
+        return HISTORICAL_ZCODE_IDENTITIES, set(ASSET_NAMES)
     return REQUIRED_IDENTITIES, set(ASSET_NAMES)
 
 
@@ -325,6 +335,7 @@ def validate_evidence(evidence: dict[str, Any], repository: str, tag: str, *,
     asset_digests = {item.get("name"): item.get("sha256") for item in handoff.get("assets", []) if isinstance(item, dict)}
     if set(asset_digests) != expected_assets:
         raise ContractError("evidence handoff assets are incomplete")
+    gentle_pairs = set()
     for identity in sorted(expected):
         report = reports[identity]
         if not isinstance(report, dict) or len(json.dumps(report)) > MAX_REPORT_BYTES:
@@ -344,9 +355,14 @@ def validate_evidence(evidence: dict[str, Any], repository: str, tag: str, *,
                 or report.get("environment", {}).get("architecture")
                 != PLATFORMS[platform]["architecture"]):
             raise ContractError(f"report content/provenance mismatch: {identity}")
+        if harness == "gentle-shell":
+            from selection import gentle_runtime
+            gentle_pairs.add((report["harness"].get("version"), gentle_runtime(report)))
         binary = PLATFORM_ASSETS[platform]["harness"]
         if report.get("nanHarness", {}).get("sha256") != asset_digests[binary]:
             raise ContractError(f"report binary binding mismatch: {identity}")
+    if len(gentle_pairs) > 1:
+        raise ContractError("Gentle Shell platforms observed different launcher/runtime pairs")
     return handoff
 
 

@@ -346,3 +346,26 @@ fn entry(id: &str, version: &str, timestamp: &str) -> VerificationEntry {
         live_verified_at: None,
     }
 }
+
+#[test]
+fn gentle_shell_feed_evidence_keeps_its_own_version_contract() {
+    let requirements = requirements();
+    assert!(
+        validate_single(
+            &requirements,
+            entry("gentle-shell", "4.1.0", "2026-10-13T00:00:00Z")
+        )
+        .is_ok()
+    );
+    assert!(
+        validate_single(
+            &requirements,
+            entry("gentle-shell", "1.1.0", "2026-10-13T00:00:00Z")
+        )
+        .is_err()
+    );
+    let mut live_ahead = entry("gentle-shell", "4.1.0", "2026-10-13T00:00:00Z");
+    live_ahead.last_live_verified_version = Some(Version::new(4, 2, 0));
+    live_ahead.live_verified_at = Some("2026-10-13T00:00:00Z".to_owned());
+    assert!(validate_single(&requirements, live_ahead).is_err());
+}

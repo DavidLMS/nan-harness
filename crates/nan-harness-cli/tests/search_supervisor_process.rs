@@ -8,6 +8,12 @@ use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _, BufReader};
 use tokio::process::{Child, Command};
 
 const CHILD_ENVIRONMENT: &str = "NAN_HARNESS_SEARCH_TEST_CHILD";
+// These exercise native process startup, not timeout policy. The second client
+// waits behind a lock held through the first client's host/Python readiness.
+// Allow startup contention on hosted runners while keeping every wait bounded.
+const READINESS_TIMEOUT: Duration = Duration::from_secs(15);
+const COORDINATION_TIMEOUT: Duration = Duration::from_secs(20);
+const CLIENT_READY_TIMEOUT: Duration = Duration::from_secs(40);
 
 #[cfg(windows)]
 #[tokio::test]
@@ -15,7 +21,7 @@ async fn restricted_job_search_host_does_not_inherit_the_client_console() {
     let directory = tempfile::tempdir().expect("coordination directory");
     let port = free_port();
     let output = tokio::time::timeout(
-        Duration::from_secs(30),
+        CLIENT_READY_TIMEOUT + Duration::from_secs(15),
         Command::new("python.exe")
             .arg("-c")
             .arg(include_str!("search_supervisor_process/windows_console.py"))
@@ -107,12 +113,12 @@ async fn child_session() {
     let supervisor = SearchSupervisor::with_timings(
         Some(LocalSearxngSpec::new(directory, endpoint, command).expect("spec")),
         SearchSupervisorTimings {
-            readiness_timeout: Duration::from_secs(5),
+            readiness_timeout: READINESS_TIMEOUT,
             readiness_retry: Duration::from_millis(10),
             recovery_backoff: Duration::from_millis(25),
             shutdown_grace: Duration::from_millis(100),
             grace_recheck: Duration::from_millis(10),
-            coordination_timeout: Duration::from_secs(5),
+            coordination_timeout: COORDINATION_TIMEOUT,
         },
     )
     .expect("supervisor")
@@ -176,7 +182,7 @@ async fn inherited_single_thread_runner_does_not_block_readiness() {
 async fn wait_ready(child: &mut Child) {
     let stdout = child.stdout.take().expect("child stdout");
     let mut lines = BufReader::new(stdout).lines();
-    tokio::time::timeout(Duration::from_secs(10), async {
+    tokio::time::timeout(CLIENT_READY_TIMEOUT, async {
         while let Some(line) = lines.next_line().await.expect("child output") {
             if line == "READY" {
                 tokio::spawn(

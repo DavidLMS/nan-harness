@@ -49,7 +49,7 @@ fn report(run: u8, outcome: CanaryOutcome) -> CanaryReport {
             runtimes: Vec::new(),
         },
         harness: HarnessEvidence {
-            id: HarnessKind::KimiCode,
+            id: HarnessKind::KimiCode.into(),
             version: "1.2.3".to_owned(),
         },
         model: Some("qwen3.6".to_owned()),

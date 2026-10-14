@@ -12,7 +12,8 @@ pub(super) fn should_report(error: &CliError, cli: &Cli) -> bool {
 
     if matches!(
         error,
-        CliError::HarnessWindowsUnavailable(_)
+        CliError::Discovery(DiscoveryError::ExecutableNotFound(_))
+            | CliError::HarnessWindowsUnavailable(_)
             | CliError::Update(UpdateError::UpdateChannelUnavailable)
             | CliError::UsageEvidence(_)
     ) {

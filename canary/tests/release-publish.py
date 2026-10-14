@@ -55,7 +55,7 @@ class ReleasePublishTests(unittest.TestCase):
                                     "sha256": next(item["sha256"] for item in asset_entries
                                                   if item["name"] == publisher.PLATFORM_ASSETS[platform]["harness"])},
                     "harness": {"id": harness},
-                    "environment": {"operatingSystem": platform,
+                    "environment": {"runtimes": [{"name":"pi","version":"1.1.0"},{"name":"node","version":"24.20.0"}], "operatingSystem": platform,
                                     "architecture": publisher.PLATFORMS[platform]["architecture"]},
                     "checks": [{"name": name, "status": "passed"} for name in publisher.REQUIRED_CHECKS],
                     "outcome": "passed",
@@ -69,7 +69,7 @@ class ReleasePublishTests(unittest.TestCase):
         self.handoff.write_text(json.dumps({
             "schemaVersion": 1, "repository": "Acme/Fork", "tag": "v1.2.3",
             "tagCommit": self.tag_commit, "workflowCommit": self.workflow_commit,
-            "runId": self.run_id, "reportCount": 49, "reports": reports,
+            "runId": self.run_id, "reportCount": 52, "reports": reports,
             "assets": asset_entries, "assetManifest": self.manifest.name,
             "assetManifestSha256": publisher.digest(self.manifest),
             "attestation": {"workflow": "Acme/Fork/.github/workflows/release.yml",
@@ -81,13 +81,27 @@ class ReleasePublishTests(unittest.TestCase):
 
     def test_valid_handoff_has_complete_matrix_and_assets(self):
         value = publisher.validate_handoff(self.handoff)
-        self.assertEqual(value["reportCount"], 49)
+        self.assertEqual(value["reportCount"], 52)
 
     def test_mimo_release_receipt_remains_valid_only_for_recommendation(self):
         raw = json.loads(self.handoff.read_text())
         raw["reports"] = [item for item in raw["reports"]
                           if item["identity"].replace("-", "/", 1) in publisher.HISTORICAL_MIMO_IDENTITIES]
         raw["reportCount"] = 46
+        self.handoff.write_text(json.dumps(raw))
+        with self.assertRaises(publisher.ContractError):
+            publisher.validate_handoff(self.handoff)
+        handoff = publisher.validate_handoff(self.handoff, recommendation=True)
+        evidence = publisher.build_evidence(self.handoff, handoff)
+        publisher.validate_evidence(evidence, "Acme/Fork", "v1.2.3", recommendation=True)
+        with self.assertRaises(publisher.ContractError):
+            publisher.validate_evidence(evidence, "Acme/Fork", "v1.2.3")
+
+    def test_zcode_release_receipt_remains_valid_only_for_recommendation(self):
+        raw = json.loads(self.handoff.read_text())
+        raw["reports"] = [item for item in raw["reports"]
+                          if item["identity"].replace("-", "/", 1) in publisher.HISTORICAL_ZCODE_IDENTITIES]
+        raw["reportCount"] = 49
         self.handoff.write_text(json.dumps(raw))
         with self.assertRaises(publisher.ContractError):
             publisher.validate_handoff(self.handoff)
@@ -214,6 +228,23 @@ class ReleasePublishTests(unittest.TestCase):
         with self.assertRaises(publisher.ContractError):
             publisher.validate_receipt(receipt, handoff)
 
+    def test_historical_49_cells_only_authorize_recommendation(self):
+        identities, _ = publisher._matrix_policy({"reportCount": 49}, True)
+        self.assertEqual(len(identities), 49)
+        self.assertFalse(any("gentle-shell" in identity for identity in identities))
+        required, _ = publisher._matrix_policy({"reportCount": 49}, False)
+        self.assertEqual(len(required), 52)
+        self.assertEqual(len(required - identities), 3)
+
+    def test_gentle_report_requires_unique_paired_runtime_evidence(self):
+        report = json.loads((self.root / "macos-gentle-shell.json").read_text())
+        publisher._validate_release_report(report, "1.2.3", "fixture")
+        for runtimes in ([], [{"name": "pi", "version": "1.1.0"}],
+                         report["environment"]["runtimes"] * 2):
+            report["environment"]["runtimes"] = runtimes
+            with self.assertRaises(publisher.ContractError):
+                publisher._validate_release_report(report, "1.2.3", "fixture")
+
     def test_receipt_accepts_monotonic_resume_state(self):
         handoff = json.loads(self.handoff.read_text())
         handoff["_handoffSha256"] = publisher._canonical_digest(handoff)
@@ -235,7 +266,7 @@ class ReleasePublishTests(unittest.TestCase):
         for path in self.assets.iterdir():
             path.unlink()
         value = publisher.validate_handoff(self.handoff, self.assets, require_evidence=False)
-        self.assertEqual(value["reportCount"], 49)
+        self.assertEqual(value["reportCount"], 52)
 
     def test_durable_evidence_is_strict_and_binds_all_reports(self):
         handoff = publisher.validate_handoff(self.handoff)

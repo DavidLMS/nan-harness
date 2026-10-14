@@ -68,7 +68,7 @@ mod tests {
                 runtimes: Vec::new(),
             },
             harness: HarnessEvidence {
-                id: HarnessKind::KimiCode,
+                id: HarnessKind::KimiCode.into(),
                 version: "1.2.3".to_owned(),
             },
             model: None,

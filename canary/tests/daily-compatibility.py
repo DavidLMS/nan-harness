@@ -195,7 +195,7 @@ class DailyEvidenceTests(unittest.TestCase):
     def test_signed_asset_verification_requires_exact_commit(self):
         with tempfile.TemporaryDirectory() as tmp, patch.object(daily, "release_identity", return_value="a" * 40), \
                 patch.object(daily, "download"), patch.object(daily, "gh", return_value=json.dumps({
-                    "content": base64.b64encode(b'{"harnesses":[{"id":"codex"}]}').decode()})) as gh, \
+                    "tree": [], "content": base64.b64encode(b'{"harnesses":[{"id":"codex"}]}').decode()})) as gh, \
                 patch.object(daily, "_asset_entries", return_value=([], "b" * 64)):
             daily.release_assets("Acme/Fork", "v1.2.3", Path(tmp))
             call = gh.call_args.args
@@ -242,8 +242,8 @@ class DailyEvidenceTests(unittest.TestCase):
         feed = {"releases": [{"nanHarnessVersion": release["version"], "verifications": [
             {"id": h, "lastLiveVerifiedVersion": "9999.0.0"} for h in daily.CLI_HARNESSES]}]}
         daily.select_cells(plan, release, versions, feed, False)
-        self.assertEqual({c["harness"] for c in plan["cells"]}, {"zcode"})
-        self.assertEqual(len(plan["cells"]), 3)
+        self.assertEqual({c["harness"] for c in plan["cells"]}, {"zcode", "gentle-shell"})
+        self.assertEqual(len(plan["cells"]), 6)
         self.assertEqual({r["status"] for r in plan["results"]}, {"current"})
 
     def test_aggregate_publishes_independent_success_then_reports_failure(self):

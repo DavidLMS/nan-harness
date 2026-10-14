@@ -77,6 +77,11 @@ def _asset_entries(directory: Path):
 
 
 def _require_passing_release_report(report, version, path, mode):
+    from selection import gentle_runtime
+    try:
+        gentle_runtime(report)
+    except ValueError as error:
+        raise ValueError(str(error)) from error
     if (report.get("schemaVersion") != 2 or report.get("outcome") != "passed"
             or report.get("trigger") != "release" or report.get("tier") != "release-gate"):
         raise ValueError(f"report is not a passing release-gate report: {path.name}")
@@ -102,6 +107,7 @@ def build_manifest(args):
         _require(value, COMMIT, label)
     assets, asset_manifest = _asset_entries(args.assets_dir)
     reports = []
+    gentle_pairs = set()
     seen = set()
     for path in sorted(args.reports_dir.glob("*.json")):
         report = json.loads(path.read_text())
@@ -109,6 +115,9 @@ def build_manifest(args):
         environment = report.get("environment", {})
         harness_evidence = report.get("harness", {})
         nan_harness = report.get("nanHarness", {})
+        if harness_evidence.get("id") == "gentle-shell":
+            from selection import gentle_runtime
+            gentle_pairs.add((harness_evidence.get("version"), gentle_runtime(report)))
         identity = f"{environment.get('operatingSystem')}-{harness_evidence.get('id')}"
         if identity not in expected_identities() or identity in seen:
             raise ValueError(f"duplicate or unknown report identity: {identity}")
@@ -136,6 +145,8 @@ def build_manifest(args):
     if seen != expected or len(reports) != len(expected):
         raise ValueError(
             f"expected exactly {len(expected)} unique passing reports, found {len(reports)}")
+    if len(gentle_pairs) > 1:
+        raise ValueError("Gentle Shell platforms observed different launcher/runtime pairs")
     manifest = {
         "schemaVersion": 1,
         "repository": args.repository,
