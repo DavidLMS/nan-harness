@@ -181,7 +181,7 @@ for deepseek_version in 0.1.5-rc.2 0.1.5-rc.3 latest; do
 done
 
 # Hermes exact versions install the frozen release commit with the installer
-# from that same commit; the forced pin survives a fresh main clone.
+# from that same commit, including stable branches outside main.
 cat >"$bin_directory/curl" <<'EOF_CURL'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -204,6 +204,21 @@ INSTALLER
 EOF_CURL
 chmod 755 "$bin_directory/curl"
 
+cat >"$bin_directory/git" <<'EOF_GIT'
+#!/usr/bin/env bash
+set -euo pipefail
+test "$1" = ls-remote && test "$2" = --heads
+test "$3" = https://github.com/NousResearch/hermes-agent.git
+test "$4" = refs/heads/release/0.21.2
+case "${HERMES_TEST_BRANCH:-absent}" in
+  present) printf '%s\t%s\n' 939e45c91d751fadd94dcd1b873ac3cb44846213 "$4" ;;
+  absent) ;;
+  unrelated) printf '%s\t%s\n' 939e45c91d751fadd94dcd1b873ac3cb44846213 refs/heads/release/0.21.20 ;;
+  unavailable) exit 128 ;;
+  *) exit 2 ;;
+esac
+EOF_GIT
+chmod 755 "$bin_directory/git"
 hermes_commit='939e45c91d751fadd94dcd1b873ac3cb44846213'
 hermes_env=(HOME="$temporary_directory/hermes-home" PATH="$bin_directory:/usr/bin:/bin"
   HERMES_TEST_URL_FILE="$temporary_directory/hermes-url"
@@ -212,7 +227,22 @@ env "${hermes_env[@]}" bash "$repository_root/canary/guest/install-harness.sh" h
 test "$(cat "$temporary_directory/hermes-url")" = \
   "https://raw.githubusercontent.com/NousResearch/hermes-agent/$hermes_commit/scripts/install.sh"
 test "$(tr '\n' ' ' <"$temporary_directory/hermes-arguments")" = \
-  "--skip-setup --skip-browser --non-interactive --commit $hermes_commit "
+  "--skip-setup --skip-browser --non-interactive --commit $hermes_commit --branch main "
+
+# The selected branch never replaces the immutable commit. Prefix matches
+# are not release refs, and a network failure must never fall back to main.
+env "${hermes_env[@]}" HERMES_TEST_BRANCH=present bash "$repository_root/canary/guest/install-harness.sh" hermes 0.21.2 "$hermes_commit"
+test "$(tr '\n' ' ' <"$temporary_directory/hermes-arguments")" = \
+  "--skip-setup --skip-browser --non-interactive --commit $hermes_commit --branch release/0.21.2 "
+for branch_case in unavailable unrelated; do
+  rm -f "$temporary_directory/hermes-arguments"
+  if env "${hermes_env[@]}" HERMES_TEST_BRANCH="$branch_case" bash "$repository_root/canary/guest/install-harness.sh" hermes 0.21.2 "$hermes_commit"; then
+    printf 'installer accepted an unproven branch lookup\n' >&2
+    exit 1
+  fi
+  test ! -e "$temporary_directory/hermes-arguments"
+done
+rm "$bin_directory/git"
 
 for rejected in "hermes 0.21.2" "hermes 0.21.2 v2026.9.11" "hermes 0.21.2 ${hermes_commit:0:12}" \
   "codex 1.2.3 $hermes_commit"; do

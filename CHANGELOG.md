@@ -7,6 +7,11 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Install frozen Hermes releases from their official release branch when present,
+  preserving the exact commit instead of requiring it to belong to `main`.
+
 ## [0.1.23] - 2026-10-15
 
 ### Added

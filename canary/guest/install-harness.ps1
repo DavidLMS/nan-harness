@@ -284,6 +284,16 @@ try {
         Set-InstallDiagnostic 'metadata' 'official-metadata' $null $null $null 'invalid-ref'
         throw 'hermes requires an immutable source ref'
       }
+      # Stable releases can be outside main. A failed lookup must stop rather
+      # than silently selecting main; the official installer still checks Ref.
+      $releaseBranch = "release/$Version"
+      Invoke-Native 'git.exe' @('ls-remote','--heads','https://github.com/NousResearch/hermes-agent.git',"refs/heads/$releaseBranch") 'git' 'metadata'
+      $releaseRefs = [IO.File]::ReadAllText($stdoutLog)
+      $branch = 'main'
+      if ($releaseRefs.Trim()) {
+        if ($releaseRefs -notmatch ('(?m)^[0-9a-f]{40}\t' + [regex]::Escape("refs/heads/$releaseBranch") + '\r?$')) { throw 'release branch lookup returned an unexpected ref' }
+        $branch = $releaseBranch
+      }
       $hermesHome = Join-Path $cell 'hermes'; $hermesInstall = Join-Path $hermesHome 'hermes-agent'
       # Start with the frozen revision, never a checkout of the moving main
       # branch. The official installer can then update/verify this exact clone
@@ -300,7 +310,7 @@ try {
       # has no `hermes` to run at all. <cell>\hermes\bin is already on the cell PATH.
       # Execute the downloaded script as a file so upstream returns failing exit
       # codes. All emitted frames remain private; deprecated ForceCommit is gone.
-      Invoke-HermesPinned "https://raw.githubusercontent.com/NousResearch/hermes-agent/$Ref/scripts/install.ps1" @('-SkipSetup','-HermesHome',$hermesHome,'-InstallDir',$hermesInstall,'-Commit',$Ref,'-NonInteractive','-Json','-SkipBrowser')
+      Invoke-HermesPinned "https://raw.githubusercontent.com/NousResearch/hermes-agent/$Ref/scripts/install.ps1" @('-SkipSetup','-HermesHome',$hermesHome,'-InstallDir',$hermesInstall,'-Commit',$Ref,'-Branch',$branch,'-NonInteractive','-Json','-SkipBrowser')
       # The installer stages its launchers into <HermesHome>\bin and verifies them there, so a
       # missing launcher afterwards is an installer failure worth reporting as such instead of
       # letting the product's doctor discover it later as an uninstalled harness.

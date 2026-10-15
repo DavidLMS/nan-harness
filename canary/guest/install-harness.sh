@@ -144,7 +144,16 @@ case "$harness" in
       download 'https://hermes-agent.nousresearch.com/install.sh' "$installer"
     else
       download "https://raw.githubusercontent.com/NousResearch/hermes-agent/$ref/scripts/install.sh" "$installer"
-      arguments+=(--commit "$ref")
+      # Stable releases can live on a release branch outside main. Keep the
+      # immutable commit and let upstream verify its ancestry on that branch.
+      release_branch="release/$version"
+      release_refs="$(git ls-remote --heads https://github.com/NousResearch/hermes-agent.git "refs/heads/$release_branch")"
+      branch=main
+      if [ -n "$release_refs" ]; then
+        printf '%s\n' "$release_refs" | awk -v ref="refs/heads/$release_branch" '$2 == ref { found=1 } END { exit !found }'
+        branch="$release_branch"
+      fi
+      arguments+=(--commit "$ref" --branch "$branch")
     fi
     bash "$installer" "${arguments[@]}"
     ;;

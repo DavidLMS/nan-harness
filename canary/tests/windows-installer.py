@@ -29,7 +29,10 @@ class WindowsInstallerTests(unittest.TestCase):
         # the cell must not skip it.
         self.assertNotIn("'-NoVenv'", SCRIPT)
         self.assertIn("@('-SkipSetup','-HermesHome',$hermesHome,'-InstallDir',$hermesInstall", SCRIPT)
-        self.assertIn("'-Commit',$Ref,'-NonInteractive','-Json','-SkipBrowser'", SCRIPT)
+        self.assertIn("'-Commit',$Ref,'-Branch',$branch,'-NonInteractive','-Json','-SkipBrowser'", SCRIPT)
+        self.assertIn("'ls-remote','--heads'", SCRIPT)
+        self.assertIn('$releaseBranch = "release/$Version"', SCRIPT)
+        self.assertIn('[regex]::Escape("refs/heads/$releaseBranch")', SCRIPT)
         self.assertNotIn("'-ForceCommit'", SCRIPT)
         self.assertIn("'fetch','--depth','1','origin',$Ref", SCRIPT)
         self.assertIn("'checkout','--detach',$Ref", SCRIPT)
