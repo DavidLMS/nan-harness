@@ -46,6 +46,7 @@ for test_script in \
   deepseek-install-diagnostic.py \
   gentle-shell.py \
   release-gate.py \
+  opencode-v2-release.py \
   release-publish.py \
   release-publish-integration.py \
   windows-installer.py \

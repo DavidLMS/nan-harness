@@ -14,7 +14,9 @@ pub(crate) fn harness_run_arguments(cli: &Cli) -> Option<(HarnessKind, &HarnessR
     match &cli.command {
         Command::Claude(arguments) => Some((HarnessKind::ClaudeCode, &arguments.run)),
         Command::Codex(arguments) => Some((HarnessKind::Codex, &arguments.run)),
-        Command::OpenCode(arguments) => Some((HarnessKind::OpenCode, &arguments.run)),
+        Command::OpenCode(arguments) | Command::OpenCode2(arguments) => {
+            Some((HarnessKind::OpenCode, &arguments.run))
+        }
         Command::Mimo(arguments) => Some((HarnessKind::MimoCode, &arguments.run)),
         Command::ZCode(arguments) => Some((HarnessKind::ZCode, &arguments.run)),
         Command::Hermes(arguments) => Some((HarnessKind::Hermes, &arguments.run)),
@@ -115,8 +117,8 @@ fn has_option_value(arguments: &[String], option: &str, value: &str) -> bool {
 
 pub(crate) const fn direct_chat_gateway_disabled(cli: &Cli) -> bool {
     match &cli.command {
-        Command::OpenCode(arguments)
-        | Command::Mimo(arguments)
+        Command::OpenCode(arguments) | Command::OpenCode2(arguments) => arguments.no_chat_gateway,
+        Command::Mimo(arguments)
         | Command::ZCode(arguments)
         | Command::Hermes(arguments)
         | Command::Pi(arguments)

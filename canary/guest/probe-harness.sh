@@ -136,8 +136,12 @@ case "$harness" in
       || grep -F '"read"' "$output" "$stderr_output" >/dev/null
     ;;
   opencode)
+    opencode_args=(run --format json --auto)
+    if ! opencode --version | grep -Eq '(^|[[:space:]v])2\.'; then
+      opencode_args+=(--pure)
+    fi
     "$nan_command" opencode --model "$model" -- \
-      run --pure --format json --auto "$prompt" >"$output" 2>"$stderr_output"
+      "${opencode_args[@]}" "$prompt" >"$output" 2>"$stderr_output"
     probe_stage='tool-evidence'
     grep -F '"tool":"read"' "$output" "$stderr_output" >/dev/null \
       || grep -F '"read"' "$output" "$stderr_output" >/dev/null

@@ -8,7 +8,7 @@ fn confirmation_paths_include_native_credentials_catalogs_and_defaults() {
     let manager = ConfigurationManager::new(&state, &home);
 
     let cases = [
-        (HarnessKind::OpenCode, vec!["auth.json", "opencode.json"]),
+        (HarnessKind::OpenCode, vec!["opencode.key", "opencode.json"]),
         (HarnessKind::MimoCode, vec!["auth.json", "mimocode.jsonc"]),
         (HarnessKind::QwenCode, vec![".env", "settings.json"]),
         (

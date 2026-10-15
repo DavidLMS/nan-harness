@@ -131,7 +131,11 @@ case "$harness" in
     export PATH="$HOME/.mimocode/bin:$PATH"
     ;;
   opencode)
-    global_npm_install "opencode-ai@$version"
+    if [[ "$version" == 2.* ]]; then
+      global_npm_install "@opencode/cli@$version"
+    else
+      global_npm_install "opencode-ai@$version"
+    fi
     ;;
   hermes)
     installer="$temporary_directory/hermes-install.sh"

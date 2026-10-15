@@ -24,14 +24,29 @@ pub(super) async fn models(State(state): State<Arc<ProviderState>>) -> Json<Valu
 
 pub(super) async fn chat_completions(
     State(state): State<Arc<ProviderState>>,
+    headers: axum::http::HeaderMap,
     Json(body): Json<Value>,
 ) -> impl IntoResponse {
+    if let Some(key) = &state.scenario().api_key
+        && headers
+            .get(axum::http::header::AUTHORIZATION)
+            .and_then(|value| value.to_str().ok())
+            != Some(format!("Bearer {key}").as_str())
+    {
+        return (
+            axum::http::StatusCode::UNAUTHORIZED,
+            "Synthetic credential required",
+        )
+            .into_response();
+    }
     state.record_chat_request(&body);
 
     let mut progress = state.progress();
     let polled = if state.scenario().poll_exec && progress.emitted {
         match super::polling::advance(&body, &mut progress.exec_poll) {
-            super::polling::PollResult::Pending(response) => return event_response(response),
+            super::polling::PollResult::Pending(response) => {
+                return event_response(response).into_response();
+            }
             super::polling::PollResult::Complete(content) => Some(content),
         }
     } else {
@@ -82,7 +97,7 @@ pub(super) async fn chat_completions(
         }
         Some(_) => text_response("CONFORMANCE_HELPER_OK"),
     };
-    event_response(response)
+    event_response(response).into_response()
 }
 
 fn event_response(response: String) -> ([(axum::http::HeaderName, &'static str); 1], String) {

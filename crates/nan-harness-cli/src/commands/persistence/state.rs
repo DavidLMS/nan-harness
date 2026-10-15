@@ -6,7 +6,7 @@ use std::fs;
 use std::path::PathBuf;
 
 const STATE_SCHEMA_VERSION: u8 = 1;
-const PREFERENCES_SCHEMA_VERSION: u8 = 4;
+const PREFERENCES_SCHEMA_VERSION: u8 = 5;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -212,6 +212,8 @@ struct UserPreferencesV3 {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct UserPreferences {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) opencode_installation: Option<OpenCodeInstallation>,
     pub(super) schema_version: u8,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) language: Option<String>,
@@ -230,6 +232,7 @@ impl Default for UserPreferences {
         Self {
             schema_version: PREFERENCES_SCHEMA_VERSION,
             language: None,
+            opencode_installation: None,
             last_selection_by_harness: BTreeMap::new(),
             last_selection_by_desktop: BTreeMap::new(),
         }
@@ -264,6 +267,7 @@ impl From<UserPreferencesV2> for UserPreferences {
         Self {
             schema_version: PREFERENCES_SCHEMA_VERSION,
             language: None,
+            opencode_installation: None,
             last_selection_by_harness: preferences.last_selection_by_harness,
             last_selection_by_desktop: BTreeMap::new(),
         }
@@ -281,6 +285,13 @@ impl From<UserPreferencesV3> for UserPreferences {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct OpenCodeInstallation {
+    pub(crate) major: u8,
+    pub(crate) executable: PathBuf,
+}
+
 pub(crate) struct PreferencesStore {
     directory: PathBuf,
     path: PathBuf,
@@ -296,6 +307,19 @@ impl PreferencesStore {
         super::config_directory()
             .map(Self::new)
             .ok_or(PersistenceError::MissingConfigDirectory)
+    }
+
+    pub(crate) fn opencode_installation(
+        &self,
+    ) -> Result<Option<OpenCodeInstallation>, PersistenceError> {
+        Ok(self.load()?.opencode_installation)
+    }
+
+    pub(crate) fn set_opencode_installation(
+        &self,
+        installation: OpenCodeInstallation,
+    ) -> Result<(), PersistenceError> {
+        self.update(|preferences| preferences.opencode_installation = Some(installation))
     }
 
     pub(crate) fn language(&self) -> Result<Option<String>, PersistenceError> {
@@ -396,8 +420,12 @@ impl PreferencesStore {
                     3 => serde_json::from_slice::<UserPreferencesV3>(&contents)
                         .map(UserPreferences::from)
                         .map_err(PersistenceError::ParsePreferences),
-                    PREFERENCES_SCHEMA_VERSION => {
+                    4 | PREFERENCES_SCHEMA_VERSION => {
                         serde_json::from_slice::<UserPreferences>(&contents)
+                            .map(|mut preferences| {
+                                preferences.schema_version = PREFERENCES_SCHEMA_VERSION;
+                                preferences
+                            })
                             .map_err(PersistenceError::ParsePreferences)
                     }
                     version => Err(PersistenceError::UnsupportedPreferencesSchema(version)),

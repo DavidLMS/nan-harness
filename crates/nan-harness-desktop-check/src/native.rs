@@ -799,13 +799,14 @@ mod tests {
         let helper = directory.path().join("uia-protocol");
         std::fs::write(&helper, "#!/bin/sh\nIFS= read -r line || exit 2\n[ \"$line\" = \"1 7 10 20 810 620 3000\" ] || exit 3\nIFS= read -r extra && exit 4\nprintf 'uia query - - - - - - -\\n'\n").unwrap();
         std::fs::set_permissions(&helper, std::fs::Permissions::from_mode(0o700)).unwrap();
+        // This tests framing, not startup latency under parallel workspace load.
         let run = |payload: &str| {
             process::run_once_until(
                 &helper,
                 std::ffi::OsStr::new("--windows-claude-uia-inventory"),
                 None,
                 payload.as_bytes(),
-                Some(std::time::Instant::now() + std::time::Duration::from_secs(1)),
+                Some(std::time::Instant::now() + std::time::Duration::from_secs(5)),
             )
         };
         assert_eq!(run(&input).unwrap().as_str(), "uia query - - - - - - -\n");

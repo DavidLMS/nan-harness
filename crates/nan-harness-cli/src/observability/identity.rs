@@ -102,6 +102,7 @@ pub(super) const fn telemetry_harness(cli: &Cli) -> Option<TelemetryHarnessKind>
         Command::Doctor(arguments) => telemetry_harness_for_doctor(arguments.harness),
         Command::Config(arguments) => match arguments.harness {
             Some(crate::app::ConfigTarget::Stable(kind)) => Some(telemetry_harness_kind(kind)),
+            Some(crate::app::ConfigTarget::OpenCode2) => Some(TelemetryHarnessKind::OpenCode),
             Some(crate::app::ConfigTarget::Pen) => Some(TelemetryHarnessKind::PenDesktop),
             None => None,
         },
@@ -164,7 +165,7 @@ const fn telemetry_harness_for_command(command: &Command) -> Option<TelemetryHar
         Command::ChatGptDesktop(_) => Some(TelemetryHarnessKind::ChatGptDesktop),
         Command::ClaudeDesktop(_) => Some(TelemetryHarnessKind::ClaudeDesktop),
         Command::Codex(_) => Some(TelemetryHarnessKind::Codex),
-        Command::OpenCode(_) => Some(TelemetryHarnessKind::OpenCode),
+        Command::OpenCode(_) | Command::OpenCode2(_) => Some(TelemetryHarnessKind::OpenCode),
         Command::Mimo(_) => Some(TelemetryHarnessKind::MimoCode),
         Command::ZCode(_) => Some(TelemetryHarnessKind::ZCode),
         Command::Hermes(_) => Some(TelemetryHarnessKind::Hermes),

@@ -19,6 +19,7 @@ pub struct ProviderScenario {
     pub tool_calls: Vec<ScriptedToolCall>,
     pub final_marker: String,
     poll_exec: bool,
+    api_key: Option<String>,
 }
 
 impl ProviderScenario {
@@ -28,6 +29,7 @@ impl ProviderScenario {
             tool_calls: Vec::new(),
             final_marker: final_marker.into(),
             poll_exec: false,
+            api_key: None,
         }
     }
 
@@ -64,6 +66,14 @@ impl ProviderScenario {
             tool_calls: tool_calls.into_iter().collect(),
             final_marker: final_marker.into(),
             poll_exec: false,
+            api_key: None,
         }
+    }
+
+    /// Requires the supplied synthetic bearer credential on chat requests.
+    #[must_use]
+    pub fn with_api_key(mut self, api_key: impl Into<String>) -> Self {
+        self.api_key = Some(api_key.into());
+        self
     }
 }

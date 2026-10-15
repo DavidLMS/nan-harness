@@ -3,13 +3,14 @@ mod discovery;
 mod error;
 mod gentle_shell;
 mod installer;
+pub(crate) mod opencode;
 mod output;
 mod post_install;
 mod runtime;
 mod source;
 
 pub(crate) use catalog::install_spec;
-pub(crate) use discovery::executable_from_known_locations;
+pub(crate) use discovery::{executable_from_known_locations, opencode_known_locations};
 pub(crate) use error::InstallError;
 pub(crate) use gentle_shell::{locate_gentle_shell, locate_or_install_gentle_shell};
 pub(crate) use runtime::check_required_runtime;

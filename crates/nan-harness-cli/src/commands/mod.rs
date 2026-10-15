@@ -12,6 +12,7 @@ pub(crate) mod local_diagnostics;
 pub(crate) mod media;
 pub(crate) mod media_audio;
 pub(crate) mod media_policy;
+pub(crate) mod opencode_selection;
 pub(crate) mod pen_desktop;
 pub(crate) mod persistence;
 pub(crate) mod search;

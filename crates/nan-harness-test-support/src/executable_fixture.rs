@@ -19,7 +19,8 @@ use std::{
 /// Returns non-publication spawn errors immediately, persistent busy-file errors,
 /// wait errors, or a timeout if the fixture does not exit within the budget.
 pub fn wait_until_ready(executable: &Path) -> io::Result<()> {
-    ready_until(executable, Instant::now() + Duration::from_secs(2))
+    // Preparation must tolerate host scheduling before the tested deadline starts.
+    ready_until(executable, Instant::now() + Duration::from_secs(10))
 }
 
 fn ready_until(executable: &Path, deadline: Instant) -> io::Result<()> {

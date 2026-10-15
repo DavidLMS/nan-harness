@@ -277,3 +277,20 @@ mod mimo_tests {
         assert!(windows.contains(&app_data.join("npm/mimo.CMD")));
     }
 }
+
+pub(crate) fn opencode_known_locations() -> Vec<PathBuf> {
+    let Some(home) = env::var_os("HOME").or_else(|| env::var_os("USERPROFILE")) else {
+        return Vec::new();
+    };
+    executable_candidates(HarnessKind::OpenCode, Path::new(&home))
+        .into_iter()
+        .flat_map(|path| {
+            let alternate = path.with_file_name(if cfg!(windows) {
+                "opencode2.cmd"
+            } else {
+                "opencode2"
+            });
+            [path, alternate]
+        })
+        .collect()
+}

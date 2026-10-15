@@ -3,6 +3,7 @@ mod command;
 mod documents;
 mod error;
 mod lifecycle;
+mod opencode_reload;
 mod paths;
 mod plans;
 mod state;

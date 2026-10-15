@@ -98,3 +98,13 @@ pub(crate) struct BridgedHarnessRunArgs {
     #[arg(long, hide = true)]
     pub(crate) no_chat_gateway: bool,
 }
+
+#[derive(Debug, Clone, Args)]
+pub(crate) struct OpenCodeRunArgs {
+    #[command(flatten)]
+    pub(crate) run: HarnessRunArgs,
+    #[arg(long, value_parser = clap::value_parser!(u8).range(1..=2), help = nan_harness_i18n::messages::opencode_selection_help_major(nan_harness_i18n::locale()))]
+    pub(crate) major: Option<u8>,
+    #[arg(long, help = nan_harness_i18n::messages::help_bypass_the_local_chat_completions_gateway_for_this_launch(nan_harness_i18n::locale()))]
+    pub(crate) no_chat_gateway: bool,
+}

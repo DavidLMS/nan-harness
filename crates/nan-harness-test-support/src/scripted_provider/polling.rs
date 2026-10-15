@@ -112,6 +112,7 @@ mod tests {
         use axum::response::IntoResponse as _;
         let response = super::super::protocol::chat_completions(
             axum::extract::State(std::sync::Arc::clone(state)),
+            axum::http::HeaderMap::new(),
             axum::Json(body),
         )
         .await

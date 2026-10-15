@@ -1,15 +1,14 @@
 use super::super::{
     CodingModelProfile, ConfigurationError, ConfigurationPaths, HarnessKind, ManagedSearchStatus,
-    MediaSelection, json, yaml_quote,
+    MediaSelection, yaml_quote,
 };
-use super::combinators::exclusive_json;
 use super::families::{omp_plans, pi_family_plans};
 use super::hermes::hermes_plans;
 use super::mimo::mimo_plans;
 use super::openclaw::openclaw_plans;
 use super::search::search_mcp_plan;
 use super::specific::{cline_plans, deepseek_plans, goose_plans, qwen_plans};
-use super::types::{DocumentPlan, JsonPlan, KimiPlan, TextBlockPlan};
+use super::types::{DocumentPlan, ExactFilePlan, KimiPlan, TextBlockPlan};
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct PlanRequest<'a> {
@@ -35,12 +34,9 @@ pub(crate) fn for_harness_with_media(
         media,
     } = request;
     let plans = match harness {
-        HarnessKind::OpenCode => vec![DocumentPlan::Json(JsonPlan {
-            path: paths.opencode_auth_path.clone(),
-            entries: vec![exclusive_json(
-                &["nan"],
-                json!({"type": "api", "key": api_key}),
-            )],
+        HarnessKind::OpenCode => vec![DocumentPlan::ExactFile(ExactFilePlan {
+            path: paths.opencode_key_path(),
+            payload: Some(api_key.as_bytes().to_vec()),
         })],
         HarnessKind::MimoCode => mimo_plans(paths, request)?,
         HarnessKind::ZCode => super::zcode::zcode_plans(paths, request)?,

@@ -44,7 +44,9 @@ pub(super) async fn run_simple_harness(
     {
         Command::Claude(arguments) => (HarnessKind::ClaudeCode, &arguments.run, &ClaudeCodeAdapter),
         Command::Codex(arguments) => (HarnessKind::Codex, &arguments.run, &CodexAdapter),
-        Command::OpenCode(arguments) => (HarnessKind::OpenCode, &arguments.run, &OpenCodeAdapter),
+        Command::OpenCode(arguments) | Command::OpenCode2(arguments) => {
+            (HarnessKind::OpenCode, &arguments.run, &OpenCodeAdapter)
+        }
         Command::Mimo(arguments) => (HarnessKind::MimoCode, &arguments.run, &MimoCodeAdapter),
         Command::ZCode(arguments) => (HarnessKind::ZCode, &arguments.run, &ZCodeAdapter),
         Command::Hermes(arguments) => (HarnessKind::Hermes, &arguments.run, &HermesAdapter),
@@ -77,6 +79,31 @@ pub(super) async fn run_simple_harness(
     ) {
         return Some(Err(error.into()));
     }
+    let selected;
+    let arguments = if let Command::OpenCode(options) | Command::OpenCode2(options) = &cli.command {
+        let alias = matches!(cli.command, Command::OpenCode2(_));
+        if alias && options.major == Some(1) {
+            return Some(Err(commands::opencode_selection::selection_error().into()));
+        }
+        let major = if alias { Some(2) } else { options.major };
+        let path = match commands::opencode_selection::resolve(
+            arguments.executable.as_deref(),
+            major,
+            arguments.dry_run,
+            interactive,
+        ) {
+            Ok(Some(path)) => path,
+            Ok(None) => return Some(Ok(0)),
+            Err(error) => return Some(Err(error.into())),
+        };
+        selected = HarnessRunArgs {
+            executable: Some(path),
+            ..arguments.clone()
+        };
+        &selected
+    } else {
+        arguments
+    };
     Some(
         run_harness(
             kind,

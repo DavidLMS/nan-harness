@@ -41,6 +41,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: bash .github/scripts/require-green-ci.sh "$GITHUB_REPOSITORY" "$GITHUB_SHA"
 
+  opencode-v2:
+    name: OpenCode V2 qualification
+    uses: ./.github/workflows/opencode-v2-conformance.yml
+
   pinned-conformance:
     name: Pinned harness conformance
     uses: ./.github/workflows/pinned-conformance.yml
@@ -168,6 +172,7 @@ jobs:
     needs:
       - build
       - pinned-conformance
+      - opencode-v2
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:

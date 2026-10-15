@@ -7,8 +7,17 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.23] - 2026-10-15
+
 ### Added
 
+- Support OpenCode 2 alongside OpenCode 1 with `--major`, the `opencode2` shortcut,
+  remembered installation selection and separate managed npm installations.
+- Run OpenCode 2 with a private server and native provider/model configuration;
+  share transactional persistent key-file configuration across both generations.
+- Add independent OpenCode 2 native conformance on Linux, macOS and Windows
+  against an authenticated synthetic provider, and require separate live V2
+  qualification against attested release binaries before publication.
 - Offer guided Gentle Shell installation with Node/npm and Windows Go prerequisites and clear
   noninteractive instructions. Discover launchers in known npm locations.
 - Qualify Gentle Shell independently on all three hosted CLI platforms, recording
@@ -16,6 +25,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   gateway, search, memory fixture and live tool evidence.
 
 ### Fixed
+
+- Update rustls to 0.23.46 to address RUSTSEC-2026-0346 through RUSTSEC-2026-0349.
 
 - Keep the macOS Desktop checker waiting through incomplete accessibility focus
   reads while independent window ownership checks remain valid. Preserve the
@@ -1004,7 +1015,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   startup update prompts, daily compatibility canaries, and a monotonic remote
   verification feed.
 
-[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.1.22...HEAD
+[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.1.23...HEAD
+[0.1.23]: https://github.com/DavidLMS/nan-harness/compare/v0.1.22...v0.1.23
 [0.1.22]: https://github.com/DavidLMS/nan-harness/compare/v0.1.21...v0.1.22
 [0.1.21]: https://github.com/DavidLMS/nan-harness/compare/v0.1.20...v0.1.21
 [0.1.20]: https://github.com/DavidLMS/nan-harness/compare/v0.1.19...v0.1.20

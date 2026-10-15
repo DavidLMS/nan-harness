@@ -1,0 +1,35 @@
+name: OpenCode V2 conformance
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    name: OpenCode 2.0.27 / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-2025]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - name: Install pinned Rust toolchain
+        run: rustup show
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Install exact official V2 package
+        shell: bash
+        run: |
+          npm install --global @opencode/cli@2.0.27
+          root="$(npm root --global)"
+          node -e 'const fs = require("fs"); const p = require("path"); fs.appendFileSync(process.env.GITHUB_ENV, "NAN_OPENCODE_V2_EXECUTABLE=" + p.join(process.argv[1], "@opencode/cli/bin/opencode.exe") + "\n")' "$root"
+      - name: Qualify against synthetic authenticated provider
+        shell: bash
+        run: cargo test --locked -p nan-harness-cli --test conformance_opencode_v2 --test conformance_opencode_v2_lifecycle -- --ignored --test-threads=1

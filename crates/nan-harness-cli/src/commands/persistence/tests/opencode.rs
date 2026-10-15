@@ -33,7 +33,7 @@ fn opencode_merge_preserves_comments_and_removes_only_nan() {
         .expect("providers should exist");
     let models =
         coding_models_from_provider_ids(["qwen3.6".to_owned(), "mimo-v2.6-flash".to_owned()]);
-    let provider = opencode_provider(&models, "https://api.nan.builders/v1");
+    let provider = opencode_provider(&models, "https://api.nan.builders/v1", None);
     let hash = hash_input_value(&provider).expect("provider should hash");
     providers.append("nan", provider);
     let rendered = root_node.to_string();

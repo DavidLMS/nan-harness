@@ -38,7 +38,7 @@ fn last_codex_model_is_persisted_separately_from_codex_home() {
 }
 
 #[test]
-fn preferences_migrate_strict_v1_in_memory_and_write_v4_only_after_save() {
+fn preferences_migrate_strict_v1_in_memory_and_write_v5_only_after_save() {
     let root = tempfile::tempdir().expect("temporary root should exist");
     let state_directory = root.path().join("state");
     std::fs::create_dir_all(&state_directory).expect("state directory should exist");
@@ -73,7 +73,7 @@ fn preferences_migrate_strict_v1_in_memory_and_write_v4_only_after_save() {
         &std::fs::read(&preferences_path).expect("v4 preferences should be readable"),
     )
     .expect("v4 preferences should be JSON");
-    assert_eq!(written["schemaVersion"], 4);
+    assert_eq!(written["schemaVersion"], 5);
     assert_eq!(
         written["lastSelectionByHarness"]["codex"]["model"],
         "glm5.2"
@@ -161,12 +161,12 @@ fn preferences_v4_round_trip_stable_and_desktop_harnesses_and_reject_future_sche
 
     std::fs::write(
         state_directory.join("preferences.json"),
-        r#"{"schemaVersion":5,"lastSelectionByHarness":{},"lastSelectionByDesktop":{}}"#,
+        r#"{"schemaVersion":6,"lastSelectionByHarness":{},"lastSelectionByDesktop":{}}"#,
     )
     .expect("future preferences should write");
     assert!(matches!(
         manager.last_selection(HarnessKind::Codex),
-        Err(PersistenceError::UnsupportedPreferencesSchema(5))
+        Err(PersistenceError::UnsupportedPreferencesSchema(6))
     ));
 }
 
@@ -370,5 +370,33 @@ fn failed_language_lock_preserves_preferences_and_other_configuration() {
     assert_eq!(
         std::fs::read(root.path().join("integrations.json")).expect("read other state"),
         b"user-owned"
+    );
+}
+
+#[test]
+fn opencode_choice_migrates_v4_without_losing_language_or_model_preferences() {
+    use super::super::{OpenCodeInstallation, PreferencesStore};
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("preferences.json");
+    let original = br#"{"schemaVersion":4,"language":"es","lastSelectionByHarness":{"opencode":{"model":"qwen3.6","reasoning":null}},"lastSelectionByDesktop":{}}"#;
+    std::fs::write(&path, original).unwrap();
+    let store = PreferencesStore::new(root.path().to_path_buf());
+    assert_eq!(store.opencode_installation().unwrap(), None);
+    assert_eq!(std::fs::read(&path).unwrap(), original);
+    let installation = OpenCodeInstallation {
+        major: 2,
+        executable: root.path().join("opencode"),
+    };
+    store
+        .set_opencode_installation(installation.clone())
+        .unwrap();
+    store.set_language("en").unwrap();
+    assert_eq!(store.opencode_installation().unwrap(), Some(installation));
+    let saved: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    assert_eq!(saved["schemaVersion"], 5);
+    assert_eq!(saved["language"], "en");
+    assert_eq!(
+        saved["lastSelectionByHarness"]["opencode"]["model"],
+        "qwen3.6"
     );
 }

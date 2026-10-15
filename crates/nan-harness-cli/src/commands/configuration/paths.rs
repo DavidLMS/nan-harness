@@ -9,7 +9,6 @@ pub(crate) struct ConfigurationPaths {
     pub(crate) qwen_directory: PathBuf,
     pub(crate) deepseek_directory: PathBuf,
     pub(crate) kimi_directory: PathBuf,
-    pub(crate) opencode_auth_path: PathBuf,
     pub(crate) goose_directory: PathBuf,
     pub(crate) mimo_config_directory: PathBuf,
     pub(crate) mimo_auth_path: PathBuf,
@@ -17,6 +16,12 @@ pub(crate) struct ConfigurationPaths {
 }
 
 impl ConfigurationPaths {
+    pub(crate) fn opencode_key_path(&self) -> PathBuf {
+        self.state_path
+            .with_file_name("credentials")
+            .join("opencode.key")
+    }
+
     pub(crate) fn from_environment() -> Result<Self, ConfigurationError> {
         let state_directory =
             config_directory().ok_or(ConfigurationError::MissingStateDirectory)?;
@@ -31,7 +36,6 @@ impl ConfigurationPaths {
             env::var_os("DSH_HOME").map_or_else(|| home_directory.join(".dsh"), PathBuf::from);
         let kimi_directory = env::var_os("KIMI_CODE_HOME")
             .map_or_else(|| home_directory.join(".kimi-code"), PathBuf::from);
-        let opencode_auth_path = opencode_auth_path(&home_directory);
         let goose_directory = goose_config_directory(&home_directory);
         let (mimo_config_directory, mimo_auth_path) = mimo_paths(&home_directory);
         Ok(Self {
@@ -41,7 +45,6 @@ impl ConfigurationPaths {
             qwen_directory,
             deepseek_directory,
             kimi_directory,
-            opencode_auth_path,
             goose_directory,
             mimo_config_directory,
             mimo_auth_path,
@@ -60,28 +63,11 @@ impl ConfigurationPaths {
             qwen_directory: home_directory.join(".qwen"),
             deepseek_directory: home_directory.join(".dsh"),
             kimi_directory: home_directory.join(".kimi-code"),
-            opencode_auth_path: home_directory.join(".local/share/opencode/auth.json"),
             goose_directory: home_directory.join(".config/goose"),
             mimo_config_directory: home_directory.join(".config/mimocode"),
             mimo_auth_path: home_directory.join(".local/share/mimocode/auth.json"),
             zcode_provider_path: home_directory.join(".zcode/v2/provider_config.json"),
         }
-    }
-}
-
-fn opencode_auth_path(home: &Path) -> PathBuf {
-    #[cfg(windows)]
-    {
-        env::var_os("LOCALAPPDATA")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| home.join("AppData/Local"))
-            .join("opencode/auth.json")
-    }
-    #[cfg(not(windows))]
-    {
-        env::var_os("XDG_DATA_HOME")
-            .map_or_else(|| home.join(".local/share"), PathBuf::from)
-            .join("opencode/auth.json")
     }
 }
 

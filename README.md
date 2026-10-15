@@ -242,6 +242,27 @@ On each launch, nan-harness checks compatibility, discovers available NaN
 models, prepares any required bridge, and supervises the harness without
 changing its persistent provider configuration.
 
+OpenCode 1 and 2 share `nanh opencode`. Use `--major 1` or `--major 2` to
+select a generation explicitly; `nanh opencode2` is the V2 shortcut. These
+explicit choices do not change the installation preference saved by the picker.
+With both generations installed, the first interactive launch asks which to
+use and remembers the executable. With only one installed, it uses that one.
+Discovery checks the actual version, so an executable named `opencode` can be V2.
+
+When neither generation is installed, NaN offers V2. Missing explicit generations
+are installed into separate NaN-owned npm prefixes after the usual installation
+confirmation, without replacing global OpenCode commands. Noninteractive launches
+require an unambiguous installed executable; `--executable PATH` selects one
+directly and must agree with an explicit generation.
+
+V2 managed launches use a private server, preserving the user's shared service.
+For scripts, use `nanh opencode2 -- run --format json "Your prompt"`; NaN supplies
+the model and standalone flags. V1-only `--pure` and `--variant` flags are rejected.
+See [generation behavior and qualification evidence](canary/OPENCODE.md).
+`nanh config opencode2` manages the same persistent NaN provider as
+`nanh config opencode`, using a private key-file reference compatible with both
+generations. Removing that shared configuration removes NaN's setup for both.
+
 
 To pass arguments to the harness itself, place `--` before them:
 

@@ -1,4 +1,13 @@
 {
+  "opencode_selection_install_location": "Instala el paquete npm oficial en un directorio separado gestionado por NaN sin sustituir los comandos existentes de OpenCode.",
+  "opencode_selection_help_major": "Selecciona la generación 1 o 2 de OpenCode para este comando",
+  "opencode_selection_help_alias": "Ejecuta OpenCode 2 a través de NaN",
+  "opencode_config_reload_pending": "La configuración de OpenCode se ha guardado, pero su servicio en ejecución no ha podido recargarla. Ejecuta `opencode reload` cuando el servicio esté disponible.",
+  "opencode_config_shared": "Esta configuración nativa se comparte entre OpenCode 1 y 2.",
+  "opencode_config_shared_removed": "Se ha retirado la configuración compartida de NaN para OpenCode 1 y 2.",
+  "opencode_config_major_help": "Seleccionar la generación de OpenCode (1 o 2); ambas comparten la configuración nativa",
+  "opencode_selection_error": "Selecciona una generación instalada de OpenCode con --major 1 o --major 2, o usa --executable RUTA de esa generación. Ejecuta interactivamente para seleccionar o instalar OpenCode.",
+  "opencode_selection_prompt": "Elige la instalación de OpenCode que quieres recordar:",
   "install_gentle_shell_go": "Gentle Shell en Windows requiere Go local >=1.25.10. Instala Go desde https://go.dev/dl/, abre de nuevo la terminal, comprueba 'go version' y vuelve a ejecutar 'nanh gentle-shell'. La descarga automática de versiones de Go está desactivada.",
   "install_gentle_shell_missing": "No se encontró Gentle Shell. Instala Node.js >=22.19 y npm y ejecuta:\n  npm install --global gentle-pi@latest\n  nanh gentle-shell\nTambién puedes usar --executable RUTA para una instalación existente.",
   "doctor_desktop_exact_checks": "  Comprobaciones de versión exacta del feed remoto ({architecture}):",

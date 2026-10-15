@@ -78,7 +78,7 @@ fn language_preserves_old_preferences_and_machine_status() {
     let saved: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&path).expect("read preferences"))
             .expect("valid preferences");
-    assert_eq!(saved["schemaVersion"], 4);
+    assert_eq!(saved["schemaVersion"], 5);
     assert_eq!(saved["language"], "es");
     for key in ["lastSelectionByHarness", "lastSelectionByDesktop"] {
         assert_eq!(

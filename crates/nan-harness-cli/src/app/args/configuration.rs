@@ -11,6 +11,8 @@ pub(crate) struct ConfigArgs {
         value_parser = parse_config_harness
     )]
     pub(crate) harness: Option<ConfigTarget>,
+    #[arg(long, value_parser = clap::value_parser!(u8).range(1..=2), requires = "harness", help = nan_harness_i18n::messages::opencode_config_major_help(nan_harness_i18n::locale()))]
+    pub(crate) major: Option<u8>,
     #[command(flatten)]
     pub(crate) search: WebSearchArgs,
     #[command(flatten)]

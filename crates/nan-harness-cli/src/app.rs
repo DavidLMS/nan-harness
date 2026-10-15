@@ -10,9 +10,9 @@ mod tests;
 #[allow(unused_imports)]
 pub(crate) use args::{
     AuthLogoutArgs, BridgedHarnessRunArgs, ChatGptDesktopArgs, ClaudeDesktopArgs, ConfigArgs,
-    DirectHarnessRunArgs, DoctorArgs, HarnessRunArgs, HermesDesktopArgs, MediaArgs, PenDesktopArgs,
-    RecordInstallationArgs, SearchCommand, SearchSetupArgs, SearchStatusArgs, UninstallArgs,
-    WebSearchArgs, ZedDesktopArgs,
+    DirectHarnessRunArgs, DoctorArgs, HarnessRunArgs, HermesDesktopArgs, MediaArgs,
+    OpenCodeRunArgs, PenDesktopArgs, RecordInstallationArgs, SearchCommand, SearchSetupArgs,
+    SearchStatusArgs, UninstallArgs, WebSearchArgs, ZedDesktopArgs,
 };
 pub(crate) use commands::{
     AuthCommand, Command, CompletionShell, LocalDiagnosticsCommand, TelemetryCommand,

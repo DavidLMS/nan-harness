@@ -43,7 +43,7 @@ use state::{
     ManagedOpenCodeModel, ManagedOpenCodeSearch, ManagedQwenAuthSelection, ManagedQwenCode,
     ManagedQwenListDirectory, ManagedQwenModelSelection,
 };
-pub(crate) use state::{LastSelection, PreferencesStore};
+pub(crate) use state::{LastSelection, OpenCodeInstallation, PreferencesStore};
 
 #[cfg(test)]
 mod tests;

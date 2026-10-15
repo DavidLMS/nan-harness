@@ -256,10 +256,59 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  opencode-v2:
+    name: OpenCode V2 live / ${{ matrix.system }}
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {system: linux, runner: ubuntu-24.04-arm}
+          - {system: macos, runner: macos-15}
+          - {system: windows, runner: windows-2025}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    environment: ${{ inputs.mode == 'live' && 'canary-live' || '' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-gate-assets
+          path: ${{ runner.temp }}/release-assets
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.20.0
+      - name: Qualify exact release binary with OpenCode V2
+        shell: bash
+        env:
+          NAN_API_KEY: ${{ inputs.mode == 'live' && secrets.NAN_API_KEY || '' }}
+          TAG_COMMIT: ${{ needs.prepare.outputs.tag_commit }}
+          WORKFLOW_COMMIT: ${{ needs.prepare.outputs.workflow_commit }}
+          MODEL: ${{ inputs.model }}
+          MODE: ${{ inputs.mode }}
+          SYSTEM: ${{ matrix.system }}
+          PYTHON: ${{ matrix.system == 'windows' && 'python' || 'python3' }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$WORKFLOW_COMMIT"
+          "$PYTHON" canary/actions/opencode_v2_release.py \
+            --assets "$RUNNER_TEMP/release-assets" --directory "$RUNNER_TEMP/opencode-v2-cell" \
+            --output "$RUNNER_TEMP/opencode-v2-evidence/report.json" \
+            --tag-commit "$TAG_COMMIT" --workflow-commit "$WORKFLOW_COMMIT" \
+            --model "$MODEL" --system "$SYSTEM" --mode "$MODE"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: opencode-v2-release-${{ matrix.system }}
+          path: ${{ runner.temp }}/opencode-v2-evidence/report.json
+          if-no-files-found: error
+          retention-days: 7
+
   aggregate:
     name: Validate full 52-cell evidence
-    needs: [prepare, cell]
-    if: always() && needs.prepare.result == 'success' && needs.cell.result == 'success'
+    needs: [prepare, cell, opencode-v2]
+    if: always() && needs.prepare.result == 'success' && needs.cell.result == 'success' && needs.opencode-v2.result == 'success'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -325,8 +374,8 @@ jobs:
 
   publish:
     name: Publish validated release (trusted publisher)
-    needs: [prepare, aggregate, desktop]
-    if: inputs.mode == 'live' && inputs.verification_only == false && needs.aggregate.result == 'success' && needs.desktop.result == 'success' && github.ref_name == github.event.repository.default_branch
+    needs: [prepare, aggregate, desktop, opencode-v2]
+    if: inputs.mode == 'live' && inputs.verification_only == false && needs.aggregate.result == 'success' && needs.desktop.result == 'success' && needs.opencode-v2.result == 'success' && github.ref_name == github.event.repository.default_branch
     runs-on: ubuntu-24.04
     environment: release-publication
     permissions:

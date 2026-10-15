@@ -41,6 +41,7 @@ impl fmt::Display for DoctorTarget {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ConfigTarget {
+    OpenCode2,
     Stable(HarnessKind),
     Pen,
 }
@@ -50,6 +51,7 @@ impl ConfigTarget {
         match self {
             Self::Stable(kind) => Some(kind),
             Self::Pen => None,
+            Self::OpenCode2 => Some(HarnessKind::OpenCode),
         }
     }
 }
@@ -59,6 +61,7 @@ impl fmt::Display for ConfigTarget {
         match self {
             Self::Stable(kind) => kind.fmt(formatter),
             Self::Pen => formatter.write_str("pen"),
+            Self::OpenCode2 => formatter.write_str("opencode2"),
         }
     }
 }
@@ -66,6 +69,9 @@ impl fmt::Display for ConfigTarget {
 pub(super) fn parse_config_harness(
     value: &str,
 ) -> Result<ConfigTarget, nan_harness_i18n::DiagnosticText> {
+    if value == "opencode2" {
+        return Ok(ConfigTarget::OpenCode2);
+    }
     if matches!(value, "pen" | "pen-desktop") {
         return Ok(ConfigTarget::Pen);
     }

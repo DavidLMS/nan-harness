@@ -25,13 +25,24 @@ impl PersistenceManager {
         Ok(change)
     }
 
+    #[cfg(test)]
     pub(crate) fn prepare_opencode(
         &self,
         models: &[CodingModelProfile],
         provider_base_url: &str,
         search_enabled: bool,
     ) -> Result<(Vec<PreparedFileChange>, IntegrationChange), PersistenceError> {
-        let provider = opencode_provider(models, provider_base_url);
+        self.prepare_opencode_with_key(models, provider_base_url, search_enabled, None)
+    }
+
+    pub(crate) fn prepare_opencode_with_key(
+        &self,
+        models: &[CodingModelProfile],
+        provider_base_url: &str,
+        search_enabled: bool,
+        credential_path: Option<&Path>,
+    ) -> Result<(Vec<PreparedFileChange>, IntegrationChange), PersistenceError> {
+        let provider = opencode_provider(models, provider_base_url, credential_path);
         let provider_hash = hash_input_value(&provider)?;
         let (mut state, receipt) = self.prepare_state()?;
         let path = self.opencode_config_path(state.opencode.as_ref())?;
@@ -46,6 +57,11 @@ impl PersistenceManager {
         let root_object = root
             .object_value_or_create()
             .ok_or_else(|| PersistenceError::RootIsNotObject(path.clone()))?;
+        // V2 canonical entries override normalized V1 entries. Never publish a
+        // configuration whose effective provider could belong to another owner.
+        if canonical_provider_conflicts(&root_object) {
+            return Err(PersistenceError::UnmanagedProviderConflict(path));
+        }
         let provider_property = root_object.get("provider");
         let created_provider_object = provider_property.is_none();
         let providers = match provider_property {
@@ -230,12 +246,13 @@ impl PersistenceManager {
             Ok(object) => object,
             Err(health) => return Ok(Some(health)),
         };
-        let provider_active = object
-            .object_value("provider")
-            .and_then(|providers| providers.get("nan"))
-            .and_then(|provider| provider.to_serde_value())
-            .and_then(|provider| hash_json_value(&provider).ok())
-            .is_some_and(|hash| hash == managed.provider_sha256);
+        let provider_active = !canonical_provider_conflicts(&object)
+            && object
+                .object_value("provider")
+                .and_then(|providers| providers.get("nan"))
+                .and_then(|provider| provider.to_serde_value())
+                .and_then(|provider| hash_json_value(&provider).ok())
+                .is_some_and(|hash| hash == managed.provider_sha256);
         Ok(Some(ConfigurationHealth::from_matches(
             provider_active
                 && managed
@@ -266,6 +283,14 @@ impl PersistenceManager {
             (false, true) => Ok(jsonc),
         }
     }
+}
+
+fn canonical_provider_conflicts(root: &CstObject) -> bool {
+    root.get("providers").is_some_and(|property| {
+        property
+            .object_value()
+            .is_none_or(|providers| providers.get("nan").is_some())
+    })
 }
 
 fn configure_opencode_model(
@@ -361,6 +386,15 @@ fn configure_opencode_search(
         return Ok(None);
     };
     let value_sha256 = hash_input_value(&desired)?;
+    if root
+        .object_value("mcp")
+        .and_then(|mcp| mcp.object_value("servers"))
+        .is_some_and(|servers| servers.get("nan-search").is_some())
+    {
+        return Err(PersistenceError::UnmanagedSectionConflict(
+            path.to_path_buf(),
+        ));
+    }
     let mcp_property = root.get("mcp");
     let created_mcp_object =
         managed.is_some_and(|managed| managed.created_mcp_object) || mcp_property.is_none();
@@ -424,6 +458,13 @@ fn remove_opencode_search(
 }
 
 fn opencode_search_is_active(root: Option<&CstObject>, managed: &ManagedOpenCodeSearch) -> bool {
+    if root
+        .and_then(|root| root.object_value("mcp"))
+        .and_then(|mcp| mcp.object_value("servers"))
+        .is_some_and(|servers| servers.get("nan-search").is_some())
+    {
+        return false;
+    }
     root.and_then(|root| root.object_value("mcp"))
         .and_then(|servers| servers.get("nan-search"))
         .and_then(|search| search.to_serde_value())

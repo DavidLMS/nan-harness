@@ -262,7 +262,10 @@ try {
       $architecture = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'x64' }
       Install-ArchiveAsset "https://github.com/XiaomiMiMo/MiMo-Code/releases/download/v$assetVersion/mimocode-windows-$architecture.zip" '(^|[\\/])mimo\.exe$' 'mimo.exe'
     }
-    'opencode' { Npm "opencode-ai@$Version" }
+    'opencode' {
+      if ($Version -match '^2\.') { Npm "@opencode/cli@$Version" }
+      else { Npm "opencode-ai@$Version" }
+    }
     'gentle-shell' {
       if ($env:NAN_CANARY_PI_VERSION -notmatch '^\d+\.\d+\.\d+([+-][0-9A-Za-z.-]+)?$') { throw 'frozen Pi version required' }
       Npm @("gentle-pi@$Version","@earendil-works/pi-coding-agent@$env:NAN_CANARY_PI_VERSION")

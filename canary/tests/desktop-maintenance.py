@@ -106,7 +106,7 @@ class MaintenanceTests(unittest.TestCase):
         workflow = (ROOT / '.github/workflows/release-gate.yml').read_text()
         source = workflow.split('  desktop:', 1)[1].split('  publish:', 1)[0]
         self.assertIn('release_commit: ${{ needs.prepare.outputs.tag_commit }}', source)
-        self.assertIn('needs: [prepare, aggregate, desktop]', workflow)
+        self.assertIn('needs: [prepare, aggregate, desktop, opencode-v2]', workflow)
         self.assertIn("needs.desktop.result == 'success'", workflow)
         shared = (ROOT / '.github/workflows/desktop-automation-feasibility.yml').read_text()
         self.assertIn('QUALIFICATION_SOURCE_SHA: ${{ github.sha }}', shared)

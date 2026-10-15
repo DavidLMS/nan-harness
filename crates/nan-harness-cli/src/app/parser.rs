@@ -49,6 +49,7 @@ impl Cli {
             }
             Err(error) => return Err(error),
         };
+        validate_opencode_major(&parsed.command)?;
         let invalid = match &parsed.command {
             Command::Claude(arguments) | Command::Codex(arguments) | Command::Fx(arguments) => {
                 arguments.no_chat_gateway
@@ -94,5 +95,25 @@ fn validate_image_model_harness(matches: &clap::ArgMatches) -> Result<(), clap::
                 nan_harness_i18n::locale(),
             ),
         ))
+    }
+}
+
+fn validate_opencode_major(command: &Command) -> Result<(), clap::Error> {
+    let invalid = match command {
+        Command::OpenCode2(arguments) => arguments.major == Some(1),
+        Command::Config(arguments) => match arguments.harness {
+            Some(super::ConfigTarget::OpenCode2) => arguments.major == Some(1),
+            Some(super::ConfigTarget::Stable(nan_harness_core::HarnessKind::OpenCode)) => false,
+            _ => arguments.major.is_some(),
+        },
+        _ => false,
+    };
+    if invalid {
+        Err(Cli::command().error(
+            clap::error::ErrorKind::ArgumentConflict,
+            nan_harness_i18n::messages::opencode_selection_error(nan_harness_i18n::locale()),
+        ))
+    } else {
+        Ok(())
     }
 }

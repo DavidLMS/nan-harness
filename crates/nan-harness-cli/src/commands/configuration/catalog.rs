@@ -14,11 +14,17 @@ impl ConfigurationManager {
         search_managed: bool,
     ) -> Result<(Vec<PreparedFileChange>, Option<IntegrationChange>), ConfigurationError> {
         let change = match harness {
-            HarnessKind::OpenCode => Some(self.legacy.prepare_opencode(
-                models,
-                provider_base_url,
-                search_managed,
-            )?),
+            HarnessKind::OpenCode => Some(
+                self.legacy.prepare_opencode_with_key(
+                    models,
+                    provider_base_url,
+                    search_managed,
+                    Some(
+                        &std::path::absolute(self.paths.opencode_key_path())
+                            .map_err(ConfigurationError::CurrentDirectory)?,
+                    ),
+                )?,
+            ),
             HarnessKind::QwenCode => {
                 Some(self.legacy.prepare_qwen_code(models, provider_base_url)?)
             }

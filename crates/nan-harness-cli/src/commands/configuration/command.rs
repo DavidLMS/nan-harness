@@ -24,10 +24,21 @@ pub(crate) async fn run(
         return run_status(&manager, harness);
     }
     if arguments.remove_all {
-        return run_remove_all(&manager, arguments.yes, interactive);
+        let had_opencode = manager.is_configured(HarnessKind::OpenCode)?;
+        run_remove_all(&manager, arguments.yes, interactive)?;
+        if had_opencode && !manager.is_configured(HarnessKind::OpenCode)? {
+            opencode_reload::notify(&manager.paths.home_directory).await;
+        }
+        return Ok(());
     }
     if arguments.remove {
-        return run_remove(&manager, harness);
+        let was_configured = harness == Some(HarnessKind::OpenCode)
+            && manager.is_configured(HarnessKind::OpenCode)?;
+        run_remove(&manager, harness)?;
+        if was_configured {
+            opencode_reload::notify(&manager.paths.home_directory).await;
+        }
+        return Ok(());
     }
     if arguments.refresh_all {
         return run_refresh_all(&manager, interactive).await;
@@ -106,6 +117,9 @@ async fn run_refresh_all(
     for harness in configured {
         let change = manager.configure_with_media(harness, &config, &models, None, None)?;
         print_change(harness, &change, true);
+        if harness == HarnessKind::OpenCode && change.changed {
+            opencode_reload::notify(&manager.paths.home_directory).await;
+        }
     }
     if pen_configured {
         pen_desktop::refresh_persistent_with_config(&config, &models)?;
@@ -169,6 +183,9 @@ async fn configure_harness(
         requested_media,
     )?;
     print_change(harness, &change, arguments.refresh || already_configured);
+    if harness == HarnessKind::OpenCode && change.changed {
+        opencode_reload::notify(&manager.paths.home_directory).await;
+    }
     Ok(())
 }
 
@@ -300,6 +317,12 @@ fn prompt_yes_no(prompt: &str) -> Result<bool, ConfigurationError> {
 
 fn print_change(harness: HarnessKind, change: &ConfigurationChange, refreshed: bool) {
     let locale = nan_harness_i18n::locale();
+    if harness == HarnessKind::OpenCode {
+        println!(
+            "{}",
+            nan_harness_i18n::messages::opencode_config_shared(locale)
+        );
+    }
     let count = change.model_count;
     let quantity = u64::try_from(count).unwrap_or(u64::MAX);
     let message = if !change.changed {
@@ -361,6 +384,12 @@ fn print_change(harness: HarnessKind, change: &ConfigurationChange, refreshed: b
 }
 
 fn print_removal(harness: HarnessKind, outcome: RemovalOutcome) {
+    if harness == HarnessKind::OpenCode && outcome == RemovalOutcome::Removed {
+        println!(
+            "{}",
+            nan_harness_i18n::messages::opencode_config_shared_removed(nan_harness_i18n::locale())
+        );
+    }
     match outcome {
         RemovalOutcome::Removed => println!(
             "{}",

@@ -183,8 +183,7 @@ impl ConfigurationManager {
                 media,
             },
         )?;
-        let prepared =
-            prepare_documents(&plans, previous.map(|receipt| receipt.documents.as_slice()))?;
+        let prepared = prepare_harness_documents(harness, plans, previous)?;
         let (catalog_files, catalog_change) = self.prepare_catalogs(
             harness,
             models,
@@ -217,6 +216,10 @@ impl ConfigurationManager {
                 media,
                 documents: prepared
                     .iter()
+                    .filter(|document| {
+                        harness != HarnessKind::OpenCode
+                            || receipt_manages_content(&document.receipt)
+                    })
                     .map(|document| document.receipt.clone())
                     .collect(),
             },
@@ -448,6 +451,23 @@ impl ConfigurationManager {
         mut state_file: crate::commands::persistence::PreparedFileChange,
     ) -> Result<(), ConfigurationError> {
         use crate::commands::persistence::PreparedFileChange;
+        let key_path = self.paths.opencode_key_path();
+        if documents
+            .iter()
+            .any(|document| document.path == key_path && document.replacement.is_some())
+        {
+            let directory = key_path
+                .parent()
+                .ok_or(ConfigurationError::ReceiptMismatch)?;
+            nan_harness_private_fs::create_private_dir_all(directory)
+                .and_then(|()| {
+                    nan_harness_private_fs::restrict_path(
+                        directory,
+                        nan_harness_private_fs::PrivatePathKind::Directory,
+                    )
+                })
+                .map_err(PersistenceError::CreateStateDirectory)?;
+        }
         let mut files = documents
             .into_iter()
             .map(|document| PreparedFileChange {
@@ -477,4 +497,24 @@ impl ConfigurationManager {
         self.legacy.publish_configuration_files(&files)?;
         Ok(())
     }
+}
+
+fn prepare_harness_documents(
+    harness: HarnessKind,
+    mut plans: Vec<DocumentPlan>,
+    previous: Option<&HarnessReceipt>,
+) -> Result<Vec<super::PreparedDocument>, ConfigurationError> {
+    // Older OpenCode receipts own auth.json entries. Retire only those entries
+    // in the same transaction that publishes the private key and provider.
+    if harness == HarnessKind::OpenCode {
+        for document in previous.into_iter().flat_map(|receipt| &receipt.documents) {
+            if let super::DocumentReceipt::Json(receipt) = document {
+                plans.push(DocumentPlan::Json(super::JsonPlan {
+                    path: receipt.path.clone(),
+                    entries: Vec::new(),
+                }));
+            }
+        }
+    }
+    prepare_documents(&plans, previous.map(|receipt| receipt.documents.as_slice()))
 }

@@ -14,6 +14,8 @@ use nan_harness_i18n::messages as detail_messages;
 use serde_json::json;
 use std::collections::BTreeSet;
 
+mod v2;
+
 const CREDENTIAL_TARGET: &str = "NAN_API_KEY";
 
 #[derive(Debug, Default)]
@@ -25,6 +27,17 @@ impl HarnessAdapter for OpenCodeAdapter {
     }
 
     fn plan(&self, context: &PlanContext) -> Result<LaunchPlan, PlanError> {
+        if context
+            .harness
+            .detected_version
+            .split_whitespace()
+            .any(|part| {
+                semver::Version::parse(part.trim_start_matches('v'))
+                    .is_ok_and(|version| version.major == 2)
+            })
+        {
+            return v2::plan(context);
+        }
         validate_routing_arguments(&context.user_arguments, &["--model", "-m"])?;
         let model_id = &context.model.resolved_id;
         let compaction = context

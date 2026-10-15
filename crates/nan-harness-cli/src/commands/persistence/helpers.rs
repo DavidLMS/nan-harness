@@ -38,21 +38,26 @@ pub(crate) struct PreparedFileChange {
 pub(super) fn opencode_provider(
     models: &[CodingModelProfile],
     provider_base_url: &str,
+    credential_path: Option<&Path>,
 ) -> CstInputValue {
     let models = jsonc_input(&nan_harness_runtime::opencode_model_catalog(models));
+    let mut options = vec![(
+        "baseURL".to_owned(),
+        CstInputValue::String(provider_base_url.to_owned()),
+    )];
+    if let Some(path) = credential_path {
+        options.push((
+            "apiKey".to_owned(),
+            CstInputValue::String(format!("{{file:{}}}", path.display())),
+        ));
+    }
     CstInputValue::Object(vec![
         (
             "npm".to_owned(),
             CstInputValue::String("@ai-sdk/openai-compatible".to_owned()),
         ),
         ("name".to_owned(), CstInputValue::String("NaN".to_owned())),
-        (
-            "options".to_owned(),
-            CstInputValue::Object(vec![(
-                "baseURL".to_owned(),
-                CstInputValue::String(provider_base_url.to_owned()),
-            )]),
-        ),
+        ("options".to_owned(), CstInputValue::Object(options)),
         ("models".to_owned(), models),
     ])
 }

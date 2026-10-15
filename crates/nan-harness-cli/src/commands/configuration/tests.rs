@@ -3,6 +3,7 @@ mod documents;
 mod image_models;
 mod lifecycle;
 mod mimo;
+mod opencode;
 mod paths;
 mod plugin_syntax;
 mod recovery;

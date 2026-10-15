@@ -41,6 +41,10 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  opencode-v2:
+    name: OpenCode V2 qualification
+    uses: ./.github/workflows/opencode-v2-conformance.yml
+
   quality:
     name: Rust quality gates
     runs-on: ubuntu-latest

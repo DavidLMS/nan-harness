@@ -5,8 +5,8 @@ mod telemetry;
 
 use super::args::{
     BridgedHarnessRunArgs, ChatGptDesktopArgs, ClaudeDesktopArgs, ConfigArgs, DirectHarnessRunArgs,
-    DoctorArgs, HermesDesktopArgs, PenDesktopArgs, RecordInstallationArgs, SearchCommand,
-    UninstallArgs, ZedDesktopArgs,
+    DoctorArgs, HermesDesktopArgs, OpenCodeRunArgs, PenDesktopArgs, RecordInstallationArgs,
+    SearchCommand, UninstallArgs, ZedDesktopArgs,
 };
 pub(crate) use auth::AuthCommand;
 use clap::Subcommand;
@@ -41,7 +41,9 @@ pub(crate) enum Command {
     #[command(about = nan_harness_i18n::messages::help_run_codex_through_the_local_nan_harness_responses_bridge(nan_harness_i18n::locale()))]
     Codex(BridgedHarnessRunArgs),
     #[command(name = "opencode", about = nan_harness_i18n::messages::help_run_opencode_through_nan_chat_completions(nan_harness_i18n::locale()))]
-    OpenCode(DirectHarnessRunArgs),
+    OpenCode(OpenCodeRunArgs),
+    #[command(name = "opencode2", about = nan_harness_i18n::messages::opencode_selection_help_alias(nan_harness_i18n::locale()))]
+    OpenCode2(OpenCodeRunArgs),
     #[command(name = "mimo", visible_alias = "mimo-code", about = nan_harness_i18n::messages::help_run_mimo_code_through_nan_chat_completions(nan_harness_i18n::locale()))]
     Mimo(DirectHarnessRunArgs),
     #[command(name = "zcode", visible_aliases = ["zai", "zai-code"], about = nan_harness_i18n::messages::help_run_zcode_through_nan_chat_completions(nan_harness_i18n::locale()))]

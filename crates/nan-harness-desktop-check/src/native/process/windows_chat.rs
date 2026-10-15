@@ -183,10 +183,12 @@ mod tests {
                 Instant::now() + budget,
             )
         };
+        // Successful protocol cases allow interpreter startup; the timeout case
+        // below retains its deliberately short action deadline.
         assert_eq!(
             scripted(
                 "print('turn sent',flush=True)",
-                Duration::from_secs(2),
+                Duration::from_secs(10),
                 "input-replace-owned"
             )
             .unwrap()
@@ -196,7 +198,7 @@ mod tests {
         assert_eq!(
             scripted(
                 "print('turn sent\\nPRIVATE',flush=True)",
-                Duration::from_secs(2),
+                Duration::from_secs(10),
                 "input-replace-owned"
             )
             .unwrap_err(),
@@ -215,7 +217,7 @@ mod tests {
             "print('turn scope-control-absent\\nfailure-scope 1 1 1 1 0 1 1 0 1 0',flush=True)";
         for mode in ["retry-ready", "retry", "failure-details"] {
             assert_eq!(
-                scripted(diagnostic, Duration::from_secs(2), mode)
+                scripted(diagnostic, Duration::from_secs(10), mode)
                     .unwrap()
                     .as_str(),
                 "turn scope-control-absent\nfailure-scope 1 1 1 1 0 1 1 0 1 0\n"
@@ -234,7 +236,7 @@ mod tests {
             ("print('X'*257,flush=True)", "retry"),
         ] {
             assert_eq!(
-                scripted(suffix, Duration::from_secs(2), mode).unwrap_err(),
+                scripted(suffix, Duration::from_secs(10), mode).unwrap_err(),
                 FailureCategory::Output
             );
         }
