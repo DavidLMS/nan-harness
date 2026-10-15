@@ -105,6 +105,11 @@ missing, malformed and duplicate IDs fail closed. IDs never leave the helper
 and are never reused across scans. Retained action controls still undergo fresh
 native identity, attachment, ownership and geometry checks before input.
 
+The named Zed Retry control is captured only after three consecutive unique
+accessibility snapshots agree, allowing its initial layout to settle within the
+original deadline. Once captured, changed identity or geometry still rejects
+the action; no retry input is replayed.
+
 During Windows Retry readiness, earlier conversation headings may coexist with
 an error row before the exact failed user heading and text appear in UIA. When
 both are absent, `scope-prompt-absent` permits bounded read-only reobservation;

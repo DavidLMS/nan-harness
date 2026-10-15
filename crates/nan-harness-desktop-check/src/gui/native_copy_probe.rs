@@ -757,6 +757,48 @@ fn wait_unique_retry<T>(
     }
 }
 
+// Let layout settle before capturing an action identity. No input is admitted
+// until three consecutive unique snapshots agree, under the original deadline.
+fn wait_stable_retry<T>(
+    deadline: Instant,
+    mut sample: impl FnMut() -> Result<Vec<T>, Reason>,
+    same: impl Fn(&T, &T) -> bool,
+) -> Result<T, Reason> {
+    let mut previous = None;
+    let mut stable = 0;
+    loop {
+        if Instant::now() >= deadline {
+            return Err(Reason::Timeout);
+        }
+        let mut candidates = sample()?;
+        if Instant::now() >= deadline {
+            return Err(Reason::Timeout);
+        }
+        match candidates.len() {
+            0 => {
+                previous = None;
+                stable = 0;
+            }
+            1 => {
+                let current = candidates.pop().ok_or(Reason::SelectorNotMatched)?;
+                stable = if previous.as_ref().is_some_and(|last| same(last, &current)) {
+                    stable + 1
+                } else {
+                    1
+                };
+                if stable == 3 {
+                    return Ok(current);
+                }
+                previous = Some(current);
+            }
+            _ => return Err(Reason::SelectorNotMatched),
+        }
+        std::thread::sleep(
+            Duration::from_millis(100).min(deadline.saturating_duration_since(Instant::now())),
+        );
+    }
+}
+
 // Once captured, a different control never replaces the retained Retry action.
 fn wait_retained_retry<T>(
     captured: &T,
@@ -1067,15 +1109,19 @@ impl NativeClipboardSession<'_> {
                 retry
                     .wait_visible(deadline.saturating_duration_since(Instant::now()).min(WAIT))
                     .map_err(map_error)?;
-                let captured = wait_unique_retry(deadline, || {
-                    self.gui
-                        .native_copy_guard(&mut self.facts, "retry-element-capture")?;
-                    let candidates = retry_elements(&retry)?;
-                    self.facts.retry_control_count = Some(candidates.len());
-                    self.gui
-                        .native_copy_guard(&mut self.facts, "retry-element-capture")?;
-                    Ok(candidates)
-                })?;
+                let captured = wait_stable_retry(
+                    deadline,
+                    || {
+                        self.gui
+                            .native_copy_guard(&mut self.facts, "retry-element-capture")?;
+                        let candidates = retry_elements(&retry)?;
+                        self.facts.retry_control_count = Some(candidates.len());
+                        self.gui
+                            .native_copy_guard(&mut self.facts, "retry-element-capture")?;
+                        Ok(candidates)
+                    },
+                    |before, after| same_named_retry_element(before.data(), after.data()),
+                )?;
                 let retained = self.revalidate_named_retry(&captured, &retry, deadline)?;
                 self.retry_element = Some(retained);
                 self.retry_deadline = Some(deadline);
@@ -2350,6 +2396,54 @@ mod tests {
         });
         assert_eq!(result, Err(Reason::SelectorNotMatched));
         assert_eq!(samples, 1);
+    }
+
+    #[test]
+    fn initial_retry_capture_waits_for_stable_geometry_and_resets_after_absence() {
+        let mut observations =
+            vec![vec![7], vec![8], vec![8], vec![], vec![8], vec![8], vec![8]].into_iter();
+        let mut samples = 0;
+        let result = wait_stable_retry(
+            Instant::now() + Duration::from_secs(2),
+            || {
+                samples += 1;
+                Ok(observations
+                    .next()
+                    .expect("capture must finish after stability"))
+            },
+            |before, after| before == after,
+        );
+        assert_eq!(result, Ok(8));
+        assert_eq!(samples, 7);
+    }
+
+    #[test]
+    fn unstable_retry_capture_rejects_ambiguity_owner_loss_and_expiration() {
+        for observed in [Ok(vec![7, 8]), Err(Reason::FocusChanged)] {
+            let expected = if observed.is_ok() {
+                Reason::SelectorNotMatched
+            } else {
+                Reason::FocusChanged
+            };
+            let result = wait_stable_retry(
+                Instant::now() + Duration::from_secs(1),
+                || observed.clone(),
+                |before, after| before == after,
+            );
+            assert_eq!(result, Err(expected));
+        }
+        let result = wait_stable_retry(
+            Instant::now(),
+            || -> Result<Vec<u8>, Reason> { panic!("expired capture cannot query") },
+            |before, after| before == after,
+        );
+        assert_eq!(result, Err(Reason::Timeout));
+        let result = wait_stable_retry(
+            Instant::now() + Duration::from_millis(20),
+            || Ok(vec![7]),
+            |before, after| before == after,
+        );
+        assert_eq!(result, Err(Reason::Timeout));
     }
 
     #[test]
