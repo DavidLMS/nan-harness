@@ -5,7 +5,7 @@ const { monitor } = require('./hermes-catalog-readiness.cjs');
 const session = new EventEmitter(); let owned = true, ownershipChecks = 0;
 let evidence = monitor(session, () => { ownershipChecks++; return owned; }, 'qwen3.6', 'nan');
 function emit(direction, socket, value) { session.emit('Network.webSocketFrame' + direction, {requestId: socket, response:{opcode:1,payloadData:JSON.stringify(value)}}); }
-const request = {jsonrpc:'2.0',id:1,method:'model.options',params:{profile:'nan',explicit_only:true}};
+const request = {jsonrpc:'2.0',id:1,method:'model.options',params:{profile:'nan',explicit_only:true,refresh:true}};
 const response = {jsonrpc:'2.0',id:1,result:{providers:[{models:['qwen3.6']}]}};
 emit('Sent','A',request); emit('Received','A',response);
 assert.equal(ownershipChecks,0); // Unarmed startup traffic cannot prove readiness.
@@ -24,12 +24,14 @@ owned=true; evidence.dispose();
 evidence = monitor(session, () => owned, 'qwen3.6', 'nan');
 emit('Sent','A',request); emit('Received','A',response); assert(!evidence.verified()); // pre-activation request/result
 evidence.arm();
+emit('Sent','A',{...request,params:{profile:'nan',explicit_only:true}});
+emit('Received','A',response); assert(!evidence.verified()); // Ordinary startup reads are not Refresh acknowledgements.
 emit('Received','A',response); assert(!evidence.verified()); // cached/unobserved result
 emit('Sent','A',request); emit('Received','B',response); assert(!evidence.verified());
 emit('Received','A',{...response,error:{message:'PRIVATE'}}); assert(!evidence.verified());
 evidence.arm(); emit('Sent','A',request); emit('Received','A',response); assert(evidence.verified());
 session.emit('Network.webSocketClosed',{requestId:'A'}); assert(!evidence.verified());
-emit('Sent','A',{...request,params:{profile:'foreign',explicit_only:true}}); emit('Received','A',response); assert(!evidence.verified());
+emit('Sent','A',{...request,params:{profile:'foreign',explicit_only:true,refresh:true}}); emit('Received','A',response); assert(!evidence.verified());
 evidence.arm(); emit('Sent','A',request); emit('Received','A',{...response,result:{providers:[{models:['wrong']}]}}); assert(!evidence.verified());
 emit('Sent','A',request); owned=false; emit('Received','A',response); assert(!evidence.verified());
 owned=true; evidence.arm(); emit('Sent','A',request); emit('Received','A',response); assert(evidence.verified());

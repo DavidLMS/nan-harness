@@ -182,7 +182,7 @@ exports.run = async function run(page, session, ownedEndpoint, deadline, expecte
     }
     if (!guard() || await roots.count()!==1 || await editor.count()!==1 || await pill.count()!==1) throw new Error('composer');
     if (startup || !original || !originalRoot) throw new Error('unstable composer');
-    async function click(locator,action,additionalProof=async()=>true) {
+    async function click(locator,action,additionalProof=async()=>true,beforeDispatch=()=>{}) {
       const observation={action,sampleStatus:'guard-rejected',blocker:'unmeasured'};
       facts.actionObservation=observation;
       await frame();
@@ -229,6 +229,7 @@ exports.run = async function run(page, session, ownedEndpoint, deadline, expecte
       }
       if (!last || !guard()) {observation.sampleStatus='guard-rejected';throw new Error('guard');}
       try {
+        beforeDispatch();
         await handle.click({position:{x:last.x,y:last.y},timeout:Math.min(5000,Math.max(1,deadline-Date.now()))});
       } catch {observation.sampleStatus='click-failed';throw new Error('action');}
       return true;
@@ -312,8 +313,10 @@ exports.run = async function run(page, session, ownedEndpoint, deadline, expecte
     // An explicit ordinary refresh, armed only after this unique menu opened,
     // avoids treating startup traffic or a cached row as fresh readiness.
     facts.stage='refresh'; facts.errorCategory='refresh-uncertain';
-    evidence.arm(); facts.refreshAttempted=true;
-    await click(menu.getByRole('menuitem',{name:'Refresh models',exact:true}),'refresh');
+    // Native pre-click proofs can outlast startup RPCs; arm only at dispatch.
+    await click(menu.getByRole('menuitem',{name:'Refresh models',exact:true}),'refresh',async()=>true,()=>{
+      evidence.arm(); facts.refreshAttempted=true;
+    });
     facts.stage='catalog'; facts.errorCategory='catalog-unavailable';
     while (guard() && !evidence.verified()) await delay(Math.min(100,Math.max(0,deadline-Date.now())));
     if (!evidence.verified()) throw new Error('catalog');
@@ -355,7 +358,7 @@ exports.run = async function run(page, session, ownedEndpoint, deadline, expecte
         || facts.composerObservation.readyState!=='complete') throw new Error('composer');
     facts.composerReverified=true; facts.stage='ready'; facts.errorCategory=null;
   } catch { /* Closed stage/category only; never retain raw error or app text. */ }
-  finally { evidence?.dispose(); }
+  finally { facts.catalogState=evidence?.state()||'unarmed'; evidence?.dispose(); }
   return facts;
 };
 exports.sample=sample;

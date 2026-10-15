@@ -967,7 +967,7 @@ def semantic_observations(directory, app):
                         'menuDismissed', 'composerReverified'}
             fields = booleans | {'schemaVersion', 'mechanism', 'diagnosticsOnly', 'stage', 'errorCategory'}
             diagnostics = {'composerObservation', 'guardFailure'}
-            optional = {'actionObservation', 'onboardingSkipped', 'onboardingObservation', 'queryFailure', 'frameTransitionWaited'}
+            optional = {'actionObservation', 'onboardingSkipped', 'onboardingObservation', 'queryFailure', 'frameTransitionWaited', 'catalogState'}
             stages = {'policy', 'onboarding', 'menu', 'refresh', 'catalog', 'dismiss', 'composer', 'ready'}
             errors = {None, 'policy-rejected', 'onboarding-unavailable', 'menu-unavailable', 'refresh-uncertain',
                       'catalog-unavailable', 'dismiss-uncertain', 'composer-changed', 'composer-unavailable'}
@@ -998,6 +998,13 @@ def semantic_observations(directory, app):
                 if value['stage'] == 'ready' and (failure is not None or observation is None):
                     raise ValueError('unmeasured Hermes readiness success')
                 record.update(composerObservation=observation, guardFailure=failure)
+            if 'catalogState' in value:
+                state = value['catalogState']
+                if type(state) is not str or state not in {
+                        'unarmed', 'awaiting-request', 'awaiting-response', 'guard-rejected',
+                        'ambiguous', 'response-rejected', 'model-mismatch', 'verified', 'socket-closed'}:
+                    raise ValueError('invalid Hermes catalog state')
+                record['catalogState'] = state
             if 'queryFailure' in value:
                 query = value['queryFailure']
                 if (type(query) is not str or query not in {

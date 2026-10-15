@@ -2029,6 +2029,15 @@ class QualificationTests(unittest.TestCase):
                         'queryFailure': phase, 'frameTransitionWaited': True}
                 path.write_text(json.dumps(item))
                 self.assertEqual(q.semantic_observations(root, 'hermes-desktop'), [item])
+            for state in ('unarmed', 'awaiting-request', 'awaiting-response', 'guard-rejected',
+                          'ambiguous', 'response-rejected', 'model-mismatch', 'verified', 'socket-closed'):
+                catalog = {**item, 'catalogState': state}
+                path.write_text(json.dumps(catalog))
+                self.assertEqual(q.semantic_observations(root, 'hermes-desktop'), [catalog])
+            for state in ('PRIVATE', None, 1, {'label': 'PRIVATE'}):
+                path.write_text(json.dumps({**item, 'catalogState': state}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'hermes-desktop')
             for change in ({'queryFailure': 'PRIVATE'}, {'frameTransitionWaited': 1},
                            {'guardFailure': 'ownership-lost'}):
                 path.write_text(json.dumps({**item, **change}))

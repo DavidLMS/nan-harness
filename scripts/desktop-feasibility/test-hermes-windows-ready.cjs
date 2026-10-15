@@ -20,12 +20,22 @@ async function trial(scenario) {
  const editorHandle={},rootHandle={};
  const handle={dispose:async()=>{},evaluate:async(_callback,diagnostic)=>{
  pillSamples++;
+ if(opened && ['catalog-during-preclick','startup-only-catalog'].includes(scenario)) {
+   for(const [direction,value] of [['Sent',{jsonrpc:'2.0',id:90,method:'model.options',params:{profile:'default',explicit_only:true}}],
+       ['Received',{jsonrpc:'2.0',id:90,result:{providers:[{models:['qwen3.6']}]}}]])
+     session.emit('Network.webSocketFrame'+direction,{requestId:'socket',response:{opcode:1,payloadData:JSON.stringify(value)}});
+ }
+
  if ((scenario.startsWith('onboarding-late-') && pillSamples===2)
      || (scenario==='onboarding-auto-dismiss-reappears' && pillSamples===3)
      || (scenario==='onboarding-return-after-skip' && skipClicks===1)) onboardingPresent=true;
  if(scenario==='onboarding-late-owner-loss' && pillSamples===2)owner=false;
- const covered=scenario==='covered'||onboardingPresent||scenario==='onboarding-auto-dismiss-covered';const status=covered?'no-owned-point':scenario==='hidden-control'?'hidden':scenario==='outside-control'?'outside-viewport':'owned';const blocker=covered?'onboarding':status==='owned'?'none':'unmeasured';const sampledPoint=opened&&scenario==='moving-refresh'?{...point,left:++actionSamples<3?actionSamples:3}:opened&&scenario==='never-stable-refresh'?{...point,left:++actionSamples}:point;return diagnostic?{sampleStatus:status,blocker,point:status==='owned'?sampledPoint:null}:status==='owned'?sampledPoint:null;},click:async()=>{if(scenario==='menu-click-uncertain')throw new Error('PRIVATE');if(opened){refreshClicks++; if(scenario==='uncertain')throw new Error('PRIVATE');
+ const covered=scenario==='covered'||onboardingPresent||scenario==='onboarding-auto-dismiss-covered';const status=covered?'no-owned-point':scenario==='hidden-control'?'hidden':scenario==='outside-control'?'outside-viewport':'owned';const blocker=covered?'onboarding':status==='owned'?'none':'unmeasured';const sampledPoint=opened&&scenario==='moving-refresh'?{...point,left:++actionSamples<3?actionSamples:3}:opened&&scenario==='never-stable-refresh'?{...point,left:++actionSamples}:point;return diagnostic?{sampleStatus:status,blocker,point:status==='owned'?sampledPoint:null}:status==='owned'?sampledPoint:null;},click:async()=>{if(scenario==='menu-click-uncertain')throw new Error('PRIVATE');if(opened){refreshClicks++; if(scenario==='startup-only-catalog')return; if(scenario==='uncertain')throw new Error('PRIVATE');
  const send=(dir,obj)=>session.emit('Network.webSocketFrame'+dir,{requestId:'socket',response:{opcode:1,payloadData:JSON.stringify(obj)}});
+ if(scenario==='catalog-during-dispatch') {
+   send('Sent',{jsonrpc:'2.0',id:90,method:'model.options',params:{profile:'default',explicit_only:true}});
+   send('Received',{jsonrpc:'2.0',id:90,result:{providers:[{models:['qwen3.6']}]}});
+ }
  send('Sent',{jsonrpc:'2.0',id:1,method:'model.options',params:{profile:'default',explicit_only:true,refresh:true}});
  send('Received',{jsonrpc:'2.0',id:1,result:{providers:[{models:['qwen3.6']}]}});
  }else{pillClicks++;opened=true;if(scenario==='owner-loss')owner=false;}}};
@@ -128,6 +138,14 @@ for(const element of [modelElement([text('Qwen3.6 27B'),meta]),modelElement([tex
  for(const [scenario,phase]of [['frame-request-error','frame-request'],['owner-query-error','ownership']]) {
   const result=await trial(scenario);assert.equal(result.facts.queryFailure,phase);assert.equal(result.pillClicks,0);
  }
+ assert.equal((await trial('catalog-during-dispatch')).facts.stage,'ready');
+ const startupTraffic=await trial('catalog-during-preclick');
+ assert.equal(startupTraffic.facts.stage,'ready','catalog-during-preclick');assert.equal(startupTraffic.refreshClicks,1);
+ assert.equal(startupTraffic.facts.catalogState,'verified');
+ const staleCatalog=await trial('startup-only-catalog');
+ assert.notEqual(staleCatalog.facts.stage,'ready');assert.equal(staleCatalog.refreshClicks,1);
+ assert.equal(staleCatalog.facts.catalogVerified,false);
+ assert.equal(staleCatalog.facts.catalogState,'awaiting-request');
  const good=await trial('good');assert.equal(good.facts.stage,'ready');assert.equal(good.pillClicks,1);assert.equal(good.refreshClicks,1);assert.equal(good.escapes,1);
  const pending=await trial('row-pending');assert.equal(pending.facts.stage,'ready');assert.equal(pending.rowReads,3);
  assert.equal(pending.refreshClicks,1);assert.equal(pending.escapes,1);

@@ -4,6 +4,7 @@ exports.monitor = function monitor(session, guard, expectedModel, expectedProfil
   if (expectedModel !== 'qwen3.6' || typeof expectedProfile !== 'string'
       || !/^[A-Za-z0-9_-]{1,64}$/.test(expectedProfile)) throw new TypeError('Invalid readiness identity');
   let armed = false;
+  let state = 'unarmed';
   let ambiguous = false;
   let socket = null;
   let verified = false;
@@ -15,32 +16,39 @@ exports.monitor = function monitor(session, guard, expectedModel, expectedProfil
   };
   const sent = event => {
     const value = parse(event);
-    if (!armed || !value || value.method !== 'model.options') return;
+    // The frozen ModelMenuPanel marks explicit Refresh Models with refresh:true.
+    // Startup/cache queries cannot acknowledge that action, even on this socket.
+    if (!armed || !value || value.method !== 'model.options' || value.params?.refresh !== true) return;
     // Native ownership proofs spawn processes on Windows. Only catalog traffic
     // can contribute evidence; unrelated startup frames must not spend its budget.
-    if (!guard()) { pending.clear(); verified = false; return; }
+    if (!guard()) { pending.clear(); verified = false; state = 'guard-rejected'; return; }
     if (!['number', 'string'].includes(typeof value.id) || value.params?.profile !== expectedProfile
         || value.params?.explicit_only !== true || (socket !== null && socket !== event.requestId)
-        || pending.size !== 0 || verified) { ambiguous = true; verified = false; return; }
+        || pending.size !== 0 || verified) { ambiguous = true; verified = false; state = 'ambiguous'; return; }
     socket = event.requestId;
     if (pending.size >= 32) { pending.clear(); return; }
     pending.set(value.id, socket);
+    state = ambiguous ? 'ambiguous' : 'awaiting-response';
   };
   const received = event => {
     const value = parse(event);
     if (!value || event.requestId !== socket || pending.get(value.id) !== socket) return;
-    if (!guard()) { pending.clear(); verified = false; return; }
+    if (!guard()) { pending.clear(); verified = false; state = 'guard-rejected'; return; }
     pending.delete(value.id);
     const result = value.result;
-    if (value.error || !result || !Array.isArray(result.providers) || result.providers.length > 4096) return;
+    if (value.error || !result || !Array.isArray(result.providers) || result.providers.length > 4096) {
+      state = ambiguous ? 'ambiguous' : 'response-rejected'; return;
+    }
     verified = !ambiguous && result.providers.filter(provider => provider && Array.isArray(provider.models)
       && provider.models.length <= 4096 && provider.models.includes(expectedModel)).length === 1;
+    state = ambiguous ? 'ambiguous' : verified ? 'verified' : 'model-mismatch';
   };
-  const closed = event => { if (event.requestId === socket) { pending.clear(); verified = false; socket = null; ambiguous = true; } };
+  const closed = event => { if (event.requestId === socket) { pending.clear(); verified = false; socket = null; ambiguous = true; state = 'socket-closed'; } };
   session.on('Network.webSocketFrameSent', sent);
   session.on('Network.webSocketFrameReceived', received);
   session.on('Network.webSocketClosed', closed);
-  return { arm() { armed = true; pending.clear(); socket = null; verified = false; ambiguous = false; },
+  return { arm() { armed = true; pending.clear(); socket = null; verified = false; ambiguous = false; state = 'awaiting-request'; },
+    state: () => state,
     verified: () => Boolean(guard() && verified && !ambiguous), dispose() {
     session.off('Network.webSocketFrameSent', sent); session.off('Network.webSocketFrameReceived', received);
     session.off('Network.webSocketClosed', closed); pending.clear(); verified = false;
