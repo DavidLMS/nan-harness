@@ -5,6 +5,7 @@
 #include "uia_attachment.hpp"
 #include "uia_process_identity.hpp"
 #include "uia_process_ancestry.hpp"
+#include "uia_runtime_ids.hpp"
 
 // Passive source-labelled UIA counts from one freshly guarded owned window.
 #ifdef _WIN32
@@ -42,12 +43,34 @@ bool live_creation(HANDLE process, std::uint64_t& time) {
     time = (static_cast<std::uint64_t>(created.dwHighDateTime) << 32) | created.dwLowDateTime;
     return time != 0 && WaitForSingleObject(process, 0) == WAIT_TIMEOUT;
 }
+std::optional<std::vector<std::int32_t>> runtime_id(IUIAutomationElement* element) {
+    struct Array {
+        SAFEARRAY* value=nullptr;
+        ~Array() { if(value)SafeArrayDestroy(value); }
+    } array;
+    if(FAILED(element->GetRuntimeId(&array.value)) || !array.value
+        || SafeArrayGetDim(array.value)!=1)return std::nullopt;
+    VARTYPE type=VT_EMPTY;LONG lower=0,upper=0;
+    if(FAILED(SafeArrayGetVartype(array.value,&type)) || type!=VT_I4
+        || FAILED(SafeArrayGetLBound(array.value,1,&lower))
+        || FAILED(SafeArrayGetUBound(array.value,1,&upper)))return std::nullopt;
+    const auto count=static_cast<std::int64_t>(upper)-lower+1;
+    if(count<=0 || count>64)return std::nullopt;
+    std::vector<std::int32_t> id;
+    for(std::int64_t offset=0;offset<count;++offset) {
+        LONG index=static_cast<LONG>(static_cast<std::int64_t>(lower)+offset),value=0;
+        if(FAILED(SafeArrayGetElement(array.value,&index,&value)))return std::nullopt;
+        id.push_back(value);
+    }
+    return id;
+}
 struct Collection {
     Request request;
     Clock::time_point deadline;
     ComPtr<IUIAutomation> automation;
     ComPtr<IUIAutomationTreeWalker> walker;
     std::vector<ComPtr<IUIAutomationElement>> held;
+    UiaRuntimeIds runtime_ids;
     unsigned classic{}, modern{}, sends{}, starts{}, headings{}, copies{}, nodes{};
     bool collect_chat=false;
     std::size_t chat_text_units=0;
@@ -369,11 +392,14 @@ struct Collection {
         if(!within()) {stage="deadline";return false;}
         if(depth>32) {stage="limit-depth";return false;}
         if(++nodes>1024) {stage="limit-nodes";return false;}
-        for(const auto& prior:held) {
-            BOOL same=FALSE;
-            if(FAILED(automation->CompareElements(prior.Get(),element,&same))) return false;
-            if(same) {stage="duplicate";return false;}
-        }
+        // GetRuntimeId identifies elements on this desktop. One native query
+        // per node avoids quadratic cross-process CompareElements calls as a
+        // conversation grows, while still rejecting repeated nodes/cycles.
+        auto id=runtime_id(element);
+        if(!id || !within())return false;
+        const auto identity=runtime_ids.insert(std::move(*id));
+        if(identity==UiaRuntimeIdResult::Duplicate) {stage="duplicate";return false;}
+        if(identity!=UiaRuntimeIdResult::Unique)return false;
         int pid=0,type=0; BSTR name=nullptr;
         if(FAILED(element->get_CurrentProcessId(&pid))) {
             stage=depth==0?"root-process-query":"descendant-process-query";return false;

@@ -96,6 +96,15 @@ The retained button is revalidated and invoked once. Neither paste nor submissio
 is replayed on timeout or uncertain delivery. The supervisor then verifies
 profile ownership as for every native action.
 
+Complete Windows UIA scans reject duplicate elements using their opaque
+[runtime IDs](https://learn.microsoft.com/en-us/windows/win32/api/uiautomationclient/nf-uiautomationclient-iuiautomationelement-getruntimeid).
+The helper queries each ID once and indexes it locally instead of comparing
+every pair of native elements as the conversation grows. The index is limited
+to one scan of at most 1024 retained elements and 64 integer components per ID;
+missing, malformed and duplicate IDs fail closed. IDs never leave the helper
+and are never reused across scans. Retained action controls still undergo fresh
+native identity, attachment, ownership and geometry checks before input.
+
 During Windows Retry readiness, earlier conversation headings may coexist with
 an error row before the exact failed user heading and text appear in UIA. When
 both are absent, `scope-prompt-absent` permits bounded read-only reobservation;

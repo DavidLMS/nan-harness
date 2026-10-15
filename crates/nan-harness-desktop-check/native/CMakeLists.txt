@@ -49,6 +49,12 @@ add_custom_target(nanh-uia-process-identity-contract ALL
   DEPENDS nanh-uia-process-identity-test
   COMMENT "Verify closed UIA process identity rejection")
 
+add_executable(nanh-uia-runtime-ids-test tests/uia_runtime_ids.cpp)
+add_custom_target(nanh-uia-runtime-ids-contract ALL
+  COMMAND $<TARGET_FILE:nanh-uia-runtime-ids-test>
+  DEPENDS nanh-uia-runtime-ids-test
+  COMMENT "Verify bounded snapshot-local UIA duplicate detection")
+
 add_executable(nanh-uia-process-ancestry-test uia_process_ancestry_test.cpp)
 add_custom_target(nanh-uia-process-ancestry-contract ALL
   COMMAND $<TARGET_FILE:nanh-uia-process-ancestry-test>
@@ -76,7 +82,7 @@ add_custom_target(nanh-uia-attachment-contract ALL
 
 # Contracts use assert; release builds must execute their checks as well.
 foreach(contract_target IN ITEMS nanh-process-correlation-test nanh-uia-request-frame-test
-    nanh-uia-process-identity-test nanh-uia-process-ancestry-test nanh-uia-current-mode-test
+    nanh-uia-process-identity-test nanh-uia-runtime-ids-test nanh-uia-process-ancestry-test nanh-uia-current-mode-test
     nanh-uia-attachment-test nanh-uia-chat-capability-test)
   if(MSVC)
     target_compile_options(${contract_target} PRIVATE /UNDEBUG)
