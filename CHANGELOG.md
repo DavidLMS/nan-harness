@@ -7,8 +7,17 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.24] - 2026-10-15
+
+### Added
+
+- Include the OpenCode 2 support, Gentle Shell integration and cross-platform
+  qualification prepared in the unpublished 0.1.23 draft.
+
 ### Fixed
 
+- Release the OpenCode installation lock explicitly so a concurrent process
+  launch cannot leave a completed installation temporarily locked.
 - Install frozen Hermes releases from their official release branch when present,
   preserving the exact commit instead of requiring it to belong to `main`.
 
@@ -1021,7 +1030,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   startup update prompts, daily compatibility canaries, and a monotonic remote
   verification feed.
 
-[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.1.23...HEAD
+[Unreleased]: https://github.com/DavidLMS/nan-harness/compare/v0.1.24...HEAD
+[0.1.24]: https://github.com/DavidLMS/nan-harness/compare/v0.1.23...v0.1.24
 [0.1.23]: https://github.com/DavidLMS/nan-harness/compare/v0.1.22...v0.1.23
 [0.1.22]: https://github.com/DavidLMS/nan-harness/compare/v0.1.21...v0.1.22
 [0.1.21]: https://github.com/DavidLMS/nan-harness/compare/v0.1.20...v0.1.21
