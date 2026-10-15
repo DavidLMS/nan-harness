@@ -3,8 +3,8 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('nod
 const {EventEmitter}=require('node:events');
 async function trial(scenario) {
  let clock=0,opened=false,owner=true,refreshClicks=0,pillClicks=0,escapes=0,skipClicks=0,rowReads=0;
- let coverReads=0, actionSamples=0, frameReads=0;
- let onboardingPresent=scenario.startsWith('onboarding-');
+ let coverReads=0, actionSamples=0, frameReads=0, pillSamples=0, coverDismissed=false;
+ let onboardingPresent=scenario.startsWith('onboarding-') && !scenario.startsWith('onboarding-late-');
  let pageReplacedByOwner=false;
  const session=new EventEmitter(); session.send=async method=>{
    if(method!=='Page.getFrameTree')return;
@@ -18,7 +18,13 @@ async function trial(scenario) {
  };
  const point={x:5,y:5,left:0,top:0,width:20,height:20};
  const editorHandle={},rootHandle={};
- const handle={dispose:async()=>{},evaluate:async(_callback,diagnostic)=>{const covered=scenario==='covered'||onboardingPresent||scenario==='onboarding-auto-dismiss-covered';const status=covered?'no-owned-point':scenario==='hidden-control'?'hidden':scenario==='outside-control'?'outside-viewport':'owned';const blocker=covered?'onboarding':status==='owned'?'none':'unmeasured';const sampledPoint=opened&&scenario==='moving-refresh'?{...point,left:++actionSamples<3?actionSamples:3}:opened&&scenario==='never-stable-refresh'?{...point,left:++actionSamples}:point;return diagnostic?{sampleStatus:status,blocker,point:status==='owned'?sampledPoint:null}:status==='owned'?sampledPoint:null;},click:async()=>{if(scenario==='menu-click-uncertain')throw new Error('PRIVATE');if(opened){refreshClicks++; if(scenario==='uncertain')throw new Error('PRIVATE');
+ const handle={dispose:async()=>{},evaluate:async(_callback,diagnostic)=>{
+ pillSamples++;
+ if ((scenario.startsWith('onboarding-late-') && pillSamples===2)
+     || (scenario==='onboarding-auto-dismiss-reappears' && pillSamples===3)
+     || (scenario==='onboarding-return-after-skip' && skipClicks===1)) onboardingPresent=true;
+ if(scenario==='onboarding-late-owner-loss' && pillSamples===2)owner=false;
+ const covered=scenario==='covered'||onboardingPresent||scenario==='onboarding-auto-dismiss-covered';const status=covered?'no-owned-point':scenario==='hidden-control'?'hidden':scenario==='outside-control'?'outside-viewport':'owned';const blocker=covered?'onboarding':status==='owned'?'none':'unmeasured';const sampledPoint=opened&&scenario==='moving-refresh'?{...point,left:++actionSamples<3?actionSamples:3}:opened&&scenario==='never-stable-refresh'?{...point,left:++actionSamples}:point;return diagnostic?{sampleStatus:status,blocker,point:status==='owned'?sampledPoint:null}:status==='owned'?sampledPoint:null;},click:async()=>{if(scenario==='menu-click-uncertain')throw new Error('PRIVATE');if(opened){refreshClicks++; if(scenario==='uncertain')throw new Error('PRIVATE');
  const send=(dir,obj)=>session.emit('Network.webSocketFrame'+dir,{requestId:'socket',response:{opcode:1,payloadData:JSON.stringify(obj)}});
  send('Sent',{jsonrpc:'2.0',id:1,method:'model.options',params:{profile:'default',explicit_only:true,refresh:true}});
  send('Received',{jsonrpc:'2.0',id:1,result:{providers:[{models:['qwen3.6']}]}});
@@ -33,7 +39,7 @@ async function trial(scenario) {
  const choice={count:async()=>(scenario.startsWith('onboarding-auto-dismiss')||scenario.startsWith('onboarding-dismiss-before-click'))&&!onboardingPresent?0:scenario==='onboarding-missing-choice'?0:scenario==='onboarding-duplicate-choice'?2:1,
    isVisible:async()=>scenario!=='onboarding-pending-visible' || clock>=300,
    isEnabled:async()=>scenario!=='onboarding-disabled' && (scenario!=='onboarding-pending-enabled' || clock>=300),elementHandle:async()=>choiceHandle,evaluate:async()=>{if(scenario.startsWith('onboarding-dismiss-before-click')){onboardingPresent=false;return false;}return true;}};
- const cover={count:async()=>{if(scenario==='onboarding-cover-pending'&&++coverReads<3)return 0;if(scenario.startsWith('onboarding-auto-dismiss'))onboardingPresent=false;return onboardingPresent?(scenario==='onboarding-duplicate-cover'?2:1):0;},
+ const cover={count:async()=>{if(scenario==='onboarding-cover-pending'&&++coverReads<3)return 0;if(scenario.startsWith('onboarding-auto-dismiss') && !coverDismissed){onboardingPresent=false;coverDismissed=true;}return onboardingPresent?(scenario==='onboarding-duplicate-cover'?2:1):0;},
    isVisible:async()=>onboardingPresent,getByRole:()=>choice,elementHandle:async()=>heldCover,
    evaluate:async()=>scenario!=='onboarding-replaced'};
  const editor={count:async()=>1,elementHandle:async()=>editorHandle,evaluate:async()=>!(['onboarding-auto-dismiss-remount','onboarding-dismiss-before-click-remount'].includes(scenario)&&!onboardingPresent) && scenario!=='composer-changed' && !(scenario==='composer-remount' && clock>=100)};
@@ -172,6 +178,15 @@ for(const element of [modelElement([text('Qwen3.6 27B'),meta]),modelElement([tex
  const covered=await trial('covered');
  assert.equal(covered.facts.stage,'onboarding');assert.equal(covered.facts.onboardingSkipped,false);
  assert.equal(covered.skipClicks,0);
+ for(const scenario of ['onboarding-late-cover','onboarding-auto-dismiss-reappears']) {
+  const result=await trial(scenario);
+  assert.equal(result.facts.stage,'ready',scenario);
+  assert.equal(result.skipClicks,1);assert.equal(result.pillClicks,1);assert.equal(result.refreshClicks,1);
+ }
+ const lateLost=await trial('onboarding-late-owner-loss');
+ assert.notEqual(lateLost.facts.stage,'ready');assert.equal(lateLost.skipClicks,0);assert.equal(lateLost.pillClicks,0);
+ const returned=await trial('onboarding-return-after-skip');
+ assert.notEqual(returned.facts.stage,'ready');assert.equal(returned.skipClicks,1);assert.equal(returned.pillClicks,0);
  const autoDismissed=await trial('onboarding-auto-dismiss');
  assert.equal(autoDismissed.facts.stage,'ready');assert.equal(autoDismissed.skipClicks,0);
  assert.equal(autoDismissed.facts.onboardingSkipped,false);

@@ -214,7 +214,13 @@ exports.run = async function run(page, session, ownedEndpoint, deadline, expecte
           throw new Error('actionability');
         }
         const current=await inspect();
-        if (!current) throw new Error('actionability');
+        if (!current) {
+          // The known first-run cover may appear after the initial sample.
+          // No input has been dispatched: settle that cover before trying again.
+          if (action==='menu' && observation.sampleStatus==='no-owned-point'
+              && observation.blocker==='onboarding') return false;
+          throw new Error('actionability');
+        }
         stableSamples=JSON.stringify(previous)===JSON.stringify(current)?stableSamples+1:1;
         previous=current;
         if (stableSamples===3) {last=current;break;}
@@ -227,75 +233,80 @@ exports.run = async function run(page, session, ownedEndpoint, deadline, expecte
       } catch {observation.sampleStatus='click-failed';throw new Error('action');}
       return true;
     }
-    const pillHandle=await pill.elementHandle();
-    const initialSample=await pillHandle.evaluate(sample,true);
-    await pillHandle.dispose();
-    if (initialSample.sampleStatus==='no-owned-point' && initialSample.blocker==='onboarding') {
-      facts.stage='onboarding'; facts.errorCategory='onboarding-unavailable';
-      facts.onboardingSkipped=false;
-      const cover=page.locator('[data-glass-opaque][class~="z-(--z-onboarding)"]');
-      const choice=cover.getByRole('button',{name:"I'll choose a provider later",exact:true});
-      // Native custody checks share the original readiness budget; a cold
-      // Windows process query must not consume a separate five-second clock.
-      const settleDeadline=deadline;
-      let choiceReady=false, coverGone=false;
-      while (guard() && Date.now()<settleDeadline) {
-        const covers=await cover.count(), choices=await choice.count();
-        const observation={coverCount:Math.min(64,covers),choiceCount:Math.min(64,choices),
-          coverVisible:null,choiceVisible:null,choiceEnabled:null};
-        facts.onboardingObservation=observation;
-        if (covers===0 && choices===0) {coverGone=true;break;}
-        if (covers===0 && choices===1) {
+    for (;;) {
+      if (!guard()) throw new Error('guard');
+      const pillHandle=await pill.elementHandle();
+      const initialSample=await pillHandle.evaluate(sample,true);
+      await pillHandle.dispose();
+      if (initialSample.sampleStatus==='no-owned-point' && initialSample.blocker==='onboarding') {
+        facts.stage='onboarding'; facts.errorCategory='onboarding-unavailable';
+        if (facts.onboardingSkipped) throw new Error('onboarding returned');
+        facts.onboardingSkipped=false;
+        const cover=page.locator('[data-glass-opaque][class~="z-(--z-onboarding)"]');
+        const choice=cover.getByRole('button',{name:"I'll choose a provider later",exact:true});
+        // Native custody checks share the original readiness budget; a cold
+        // Windows process query must not consume a separate five-second clock.
+        const settleDeadline=deadline;
+        let choiceReady=false, coverGone=false;
+        while (guard() && Date.now()<settleDeadline) {
+          const covers=await cover.count(), choices=await choice.count();
+          const observation={coverCount:Math.min(64,covers),choiceCount:Math.min(64,choices),
+            coverVisible:null,choiceVisible:null,choiceEnabled:null};
+          facts.onboardingObservation=observation;
+          if (covers===0 && choices===0) {coverGone=true;break;}
+          if (covers===0 && choices===1) {
+            await delay(Math.min(100,Math.max(0,settleDeadline-Date.now())));
+            continue; // The cover appeared between the two read-only queries.
+          }
+          if (covers!==1 || choices>1) throw new Error('onboarding');
+          observation.coverVisible=await cover.isVisible();
+          if (choices===1) {
+            observation.choiceVisible=await choice.isVisible();
+            observation.choiceEnabled=await choice.isEnabled();
+          }
+          if (choices===1 && observation.coverVisible && observation.choiceVisible && observation.choiceEnabled) {
+            choiceReady=true; break;
+          }
           await delay(Math.min(100,Math.max(0,settleDeadline-Date.now())));
-          continue; // The cover appeared between the two read-only queries.
         }
-        if (covers!==1 || choices>1) throw new Error('onboarding');
-        observation.coverVisible=await cover.isVisible();
-        if (choices===1) {
-          observation.choiceVisible=await choice.isVisible();
-          observation.choiceEnabled=await choice.isEnabled();
-        }
-        if (choices===1 && observation.coverVisible && observation.choiceVisible && observation.choiceEnabled) {
-          choiceReady=true; break;
-        }
-        await delay(Math.min(100,Math.max(0,settleDeadline-Date.now())));
-      }
-      if (coverGone) {
-        // First-run setup can disappear while its controls are queried. No
-        // click occurred; prove the original composer and its hit target afresh.
-        await frame();
-        if (!guard() || await cover.count()!==0 || await roots.count()!==1 || await editor.count()!==1
-            || !await roots.evaluate((element,held)=>element===held,originalRoot)
-            || !await editor.evaluate((element,held)=>element===held,original)
-            || await pill.count()!==1 || !await pill.isEnabled()) throw new Error('onboarding');
-        const current=await pill.elementHandle();
-        try {
-          if ((await current.evaluate(sample,true)).sampleStatus!=='owned') throw new Error('onboarding');
-        } finally {await current.dispose();}
-      } else {
-        if (!choiceReady || !guard() || Date.now()>=settleDeadline || await cover.count()!==1 || !await cover.isVisible()
-            || await choice.count()!==1 || !await choice.isEnabled()) throw new Error('onboarding');
-        const heldCover=await cover.elementHandle();
-        try {
-          const coverProof=async()=>await cover.count()===1 && await cover.isVisible()
-            && await cover.evaluate((element,held)=>element===held,heldCover)
-            && await choice.count()===1 && await choice.isEnabled();
-          // Frozen ChooseLaterLink only dismisses first-run provider selection.
-          // It does not connect an account or change the managed provider.
-          const dispatched=await click(choice,'onboarding',coverProof);
-          while (guard() && Date.now()<settleDeadline && await cover.count()!==0) await delay(20);
+        if (coverGone) {
+          // First-run setup can disappear while its controls are queried. No
+          // click occurred; prove the original composer and its hit target afresh.
+          await frame();
           if (!guard() || await cover.count()!==0 || await roots.count()!==1 || await editor.count()!==1
               || !await roots.evaluate((element,held)=>element===held,originalRoot)
-              || !await editor.evaluate((element,held)=>element===held,original)) throw new Error('onboarding');
-          await frame();
-          const counts=await observeComposer();
-          if (counts.some(count=>count!==1) || facts.composerObservation.readyState!=='complete') throw new Error('composer');
-          facts.onboardingSkipped=dispatched;
-        } finally { await heldCover.dispose(); }
+              || !await editor.evaluate((element,held)=>element===held,original)
+              || await pill.count()!==1 || !await pill.isEnabled()) throw new Error('onboarding');
+          const current=await pill.elementHandle();
+          try {
+            if ((await current.evaluate(sample,true)).sampleStatus!=='owned') throw new Error('onboarding');
+          } finally {await current.dispose();}
+        } else {
+          if (!choiceReady || !guard() || Date.now()>=settleDeadline || await cover.count()!==1 || !await cover.isVisible()
+              || await choice.count()!==1 || !await choice.isEnabled()) throw new Error('onboarding');
+          const heldCover=await cover.elementHandle();
+          try {
+            const coverProof=async()=>await cover.count()===1 && await cover.isVisible()
+              && await cover.evaluate((element,held)=>element===held,heldCover)
+              && await choice.count()===1 && await choice.isEnabled();
+            // Frozen ChooseLaterLink only dismisses first-run provider selection.
+            // It does not connect an account or change the managed provider.
+            const dispatched=await click(choice,'onboarding',coverProof);
+            while (guard() && Date.now()<settleDeadline && await cover.count()!==0) await delay(20);
+            if (!guard() || await cover.count()!==0 || await roots.count()!==1 || await editor.count()!==1
+                || !await roots.evaluate((element,held)=>element===held,originalRoot)
+                || !await editor.evaluate((element,held)=>element===held,original)) throw new Error('onboarding');
+            await frame();
+            const counts=await observeComposer();
+            if (counts.some(count=>count!==1) || facts.composerObservation.readyState!=='complete') throw new Error('composer');
+            facts.onboardingSkipped=dispatched;
+          } finally { await heldCover.dispose(); }
+        }
       }
+      facts.stage='menu'; facts.errorCategory='menu-unavailable';
+      if (await click(pill,'menu')) { facts.menuOpened=true; break; }
+      await delay(Math.min(100,Math.max(0,deadline-Date.now())));
     }
-    facts.stage='menu'; facts.errorCategory='menu-unavailable';
-    await click(pill,'menu'); facts.menuOpened=true;
     const menu=page.getByRole('menu').filter({has:page.getByRole('menuitem',{name:'Refresh models',exact:true})});
     if (!guard() || await menu.count()!==1) throw new Error('menu');
     // An explicit ordinary refresh, armed only after this unique menu opened,
