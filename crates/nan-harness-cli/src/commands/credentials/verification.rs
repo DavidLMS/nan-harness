@@ -1,15 +1,16 @@
 use super::CredentialError;
 use super::receipts::open_private_file_for_read;
 use crate::commands::persistence::{
-    config_directory, discover_models_live as discover_models, write_private_file,
+    PersistenceError, config_directory, discover_models_live as discover_models, write_private_file,
 };
 use nan_harness_core::CodingModelProfile;
 use nan_harness_runtime::ResolvedConfig;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
-use std::io::Read as _;
+use std::fs::{File, TryLockError};
+use std::io::{self, Read as _};
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const VERIFICATION_TIMEOUT: Duration = Duration::from_secs(10);
 pub(super) const VERIFICATION_CACHE_TTL: Duration = Duration::from_hours(1);
@@ -99,6 +100,9 @@ pub(super) async fn verify_cached_at(
     };
     let payload = serde_json::to_vec_pretty(&receipt)
         .map_err(CredentialError::SerializeVerificationReceipt)?;
+    // Network verification never holds the filesystem lock. Readers and publishers
+    // share it so Windows cannot replace a receipt while another launch has it open.
+    let _lock = lock_verification_cache(cache_path)?;
     write_private_file(cache_path, &payload, None)?;
     Ok(Some(models))
 }
@@ -124,6 +128,7 @@ pub(super) fn verification_cache_is_current(
     provider_base_url: &str,
     fingerprint: &str,
 ) -> Result<bool, CredentialError> {
+    let _lock = lock_verification_cache(path)?;
     let Some(mut file) = open_private_file_for_read(path, VERIFICATION_RECEIPT_REPAIR_WARNING)?
     else {
         return Ok(false);
@@ -155,9 +160,7 @@ pub(super) fn unix_time() -> Result<u64, CredentialError> {
 pub(super) fn is_rejected(error: &CredentialError) -> bool {
     matches!(
         error,
-        CredentialError::Verification(
-            crate::commands::persistence::PersistenceError::ModelDiscoveryStatus(401 | 403)
-        )
+        CredentialError::Verification(PersistenceError::ModelDiscoveryStatus(401 | 403))
     )
 }
 
@@ -169,4 +172,33 @@ fn hex(bytes: &[u8]) -> String {
         output.push(char::from(HEX[usize::from(byte & 0x0f)]));
     }
     output
+}
+
+fn lock_verification_cache(cache_path: &Path) -> Result<File, CredentialError> {
+    if let Some(parent) = cache_path.parent() {
+        nan_harness_private_fs::create_private_dir_all(parent)
+            .map_err(PersistenceError::CreateStateDirectory)?;
+    }
+    let path = cache_path.with_extension("lock");
+    acquire_cache_lock(&path).map_err(|source| PersistenceError::WriteFile { path, source }.into())
+}
+
+fn acquire_cache_lock(path: &Path) -> io::Result<File> {
+    let file = nan_harness_private_fs::open_private_read_write(path)?;
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        match file.try_lock() {
+            Ok(()) => return Ok(file),
+            Err(TryLockError::Error(error)) => return Err(error),
+            Err(TryLockError::WouldBlock) if Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            Err(TryLockError::WouldBlock) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "verification cache is busy",
+                ));
+            }
+        }
+    }
 }

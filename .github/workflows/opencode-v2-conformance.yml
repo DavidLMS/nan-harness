@@ -30,6 +30,8 @@ jobs:
           npm install --global @opencode/cli@2.0.27
           root="$(npm root --global)"
           node -e 'const fs = require("fs"); const p = require("path"); fs.appendFileSync(process.env.GITHUB_ENV, "NAN_OPENCODE_V2_EXECUTABLE=" + p.join(process.argv[1], "@opencode/cli/bin/opencode.exe") + "\n")' "$root"
+      - name: Verify shared credential cache concurrency
+        run: cargo test --locked -p nan-harness-cli --lib credentials::tests::concurrent_verification_preserves_complete_private_receipts
       - name: Qualify against synthetic authenticated provider
         shell: bash
         run: cargo test --locked -p nan-harness-cli --test conformance_opencode_v2 --test conformance_opencode_v2_lifecycle -- --ignored --test-threads=1

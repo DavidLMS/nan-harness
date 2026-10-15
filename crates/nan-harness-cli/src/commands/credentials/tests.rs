@@ -402,3 +402,59 @@ fn verification_errors_offer_key_replacement_only_for_authentication_failures() 
             .contains("nanh auth login")
     );
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn concurrent_verification_preserves_complete_private_receipts() {
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let cache_path = directory.path().join("credential-verification.json");
+    let mut tasks = tokio::task::JoinSet::new();
+    for index in 0..8 {
+        let cache_path = cache_path.clone();
+        tasks.spawn(async move {
+            let provider = ScriptedProvider::start(ProviderScenario::inventory("unused"))
+                .await
+                .expect("provider should start");
+            for round in 0..8 {
+                let key = format!("nan-test-{index}-{round}");
+                let config = ConfigResolver::resolve(
+                    &TestEnvironment::default(),
+                    ConfigOverrides {
+                        provider_base_url: Some(provider.base_url().to_owned()),
+                        nan_api_key: Some(SecretValue::new(&key).expect("synthetic key")),
+                    },
+                )
+                .expect("configuration should resolve");
+                let fingerprint = super::credential_fingerprint(&config).expect("fingerprint");
+                assert!(
+                    verify_cached_at(&config, &cache_path, &fingerprint)
+                        .await
+                        .expect("concurrent verification should succeed")
+                        .is_some()
+                );
+                // Another writer may already have replaced this endpoint's receipt.
+                // Reading must still see a complete receipt, never a sharing error.
+                verification_cache_is_current(&cache_path, &config.provider_base_url, &fingerprint)
+                    .expect("concurrent receipt read should succeed");
+            }
+            provider.shutdown().await.expect("provider should stop");
+        });
+    }
+    while let Some(result) = tasks.join_next().await {
+        result.expect("verification task should finish");
+    }
+    let receipt: VerificationReceipt =
+        serde_json::from_slice(&std::fs::read(&cache_path).expect("final receipt should exist"))
+            .expect("final receipt should be complete");
+    assert_eq!(receipt.schema_version, VERIFICATION_CACHE_SCHEMA_VERSION);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        assert_eq!(
+            std::fs::metadata(&cache_path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+    }
+    #[cfg(windows)]
+    nan_harness_test_support::windows_acl::assert_private_file(&cache_path)
+        .expect("concurrent publication should preserve private ACL");
+}

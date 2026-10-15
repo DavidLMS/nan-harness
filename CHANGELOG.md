@@ -27,7 +27,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Fixed
 
 - Update rustls to 0.23.46 to address RUSTSEC-2026-0346 through RUSTSEC-2026-0349.
-
+- Coordinate credential verification cache reads and writes so concurrent Windows
+  launches do not fail when replacing a receipt.
 - Keep the macOS Desktop checker waiting through incomplete accessibility focus
   reads while independent window ownership checks remain valid. Preserve the
   original deadline and reject changed ownership without replaying input.
