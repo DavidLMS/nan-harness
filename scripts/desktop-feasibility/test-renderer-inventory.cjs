@@ -3,6 +3,47 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const source = fs.readFileSync(`${__dirname}/observe-renderer.cjs`, 'utf8');
+// Exercise the inventory's actual attachment boundary with a delayed debugger.
+// Retrying a read-only handshake must not admit an unowned or late connection.
+(async()=>{
+  const start=source.indexOf("  checkpoint('attach');");
+  const end=source.indexOf('\n  try {',start);
+  for(const scenario of ['ready','transient','persistent','ancestor-lost','endpoint-lost','late']) {
+    let now=0,opens=0,ancestors=0,endpoints=0;
+    const browser={},timeouts=[];
+    const context={deadline:1000,connection:{port:12345,launcherPid:42},checkpoint:()=>{},
+      rootProof:{descendant(pid,deadline){
+        assert.equal(pid,42);assert.equal(deadline,1000);ancestors++;
+        return scenario!=='ancestor-lost'||opens===0;
+      }},
+      ownership:{ownedEndpoint(deadline){
+        assert.equal(deadline,1000);endpoints++;
+        return scenario!=='endpoint-lost'||opens===0;
+      }},
+      chromium:{async connectOverCDP(url,options){
+        opens++;timeouts.push(options.timeout);
+        assert.equal(url,'http://127.0.0.1:12345');assert.equal(options.noDefaults,true);
+        if(scenario==='late')now=1001;
+        if(scenario==='persistent'||scenario==='transient'&&opens===1
+          ||scenario.endsWith('-lost'))throw Error('PRIVATE');
+        return browser;
+      }},
+      require(name){
+        assert.equal(name,'./owned-renderer-connection.cjs');
+        return {connect:(open,owned,deadline)=>require(name).connect(open,owned,deadline,
+          async ms=>{now+=ms;},()=>now)};
+      }};
+    const operation=vm.runInNewContext(`(async()=>{${source.slice(start,end)};return browser;})`,context);
+    if(['ready','transient'].includes(scenario))assert.equal(await operation(),browser);
+    else await assert.rejects(operation());
+    assert.equal(opens,{ready:1,transient:2,persistent:3,'ancestor-lost':1,'endpoint-lost':1,late:1}[scenario]);
+    if(scenario==='transient') {
+      assert.deepEqual(timeouts,[1000,900]);
+      assert.equal(ancestors,4);assert.equal(endpoints,4);
+    }
+  }
+  console.log('Renderer attachment retries preserve custody and the original startup deadline');
+})().catch(error=>{console.error(error);process.exitCode=1;});
 const timingStart = source.indexOf('function onboardingTrial(');
 const timingEnd = source.indexOf('async function run()', timingStart);
 const timing = vm.runInNewContext(`(() => { ${source.slice(timingStart, timingEnd)}

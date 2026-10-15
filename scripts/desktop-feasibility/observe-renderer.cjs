@@ -559,7 +559,10 @@ async function run() {
     save(); return;
   }
   checkpoint('attach');
-  const browser = await chromium.connectOverCDP(`http://127.0.0.1:${connection.port}`, { timeout: 2000, noDefaults: true });
+  const browser = await require('./owned-renderer-connection.cjs').connect(
+    timeout => chromium.connectOverCDP(`http://127.0.0.1:${connection.port}`, { timeout, noDefaults: true }),
+    () => rootProof.descendant(connection.launcherPid, deadline) && ownership.ownedEndpoint(deadline),
+    deadline);
   try {
     facts.attached = true;
     let pages = browser.contexts().flatMap(context => context.pages());
