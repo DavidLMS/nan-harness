@@ -15,12 +15,14 @@ fn executable() -> PathBuf {
 
 fn isolated(program: impl Into<PathBuf>, workspace: &Path) -> TerminalCommand {
     let home = workspace.join("home");
-    std::fs::create_dir_all(&home).unwrap();
-    TerminalCommand::new(program, workspace)
+    std::fs::create_dir_all(home.join("tmp")).unwrap();
+    let mut command = TerminalCommand::new(program, workspace)
         .clear_environment()
         .env("PATH", std::env::var_os("PATH").unwrap_or_default())
         .env("HOME", &home)
         .env("USERPROFILE", &home)
+        .env("TEMP", home.join("tmp"))
+        .env("TMP", home.join("tmp"))
         .env("OPENCODE_TEST_HOME", &home)
         .env("XDG_CONFIG_HOME", home.join(".config"))
         .env("XDG_DATA_HOME", home.join(".local/share"))
@@ -35,7 +37,14 @@ fn isolated(program: impl Into<PathBuf>, workspace: &Path) -> TerminalCommand {
         .env("OPENCODE_DISABLE_AUTOUPDATE", "1")
         .env("NO_COLOR", "1")
         .env("CI", "1")
-        .timeout(Duration::from_mins(1))
+        .timeout(Duration::from_mins(1));
+    // Windows networking and subprocess loading require these OS locations.
+    for name in ["SystemRoot", "WINDIR", "COMSPEC", "PATHEXT"] {
+        if let Some(value) = std::env::var_os(name) {
+            command = command.env(name, value);
+        }
+    }
+    command
 }
 
 #[tokio::test]
