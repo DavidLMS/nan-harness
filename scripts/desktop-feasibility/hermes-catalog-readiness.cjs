@@ -14,9 +14,11 @@ exports.monitor = function monitor(session, guard, expectedModel, expectedProfil
     try { const value = JSON.parse(text); return value && !Array.isArray(value) && value.jsonrpc === '2.0' ? value : null; } catch { return null; }
   };
   const sent = event => {
-    if (!guard()) { pending.clear(); verified = false; return; }
     const value = parse(event);
     if (!armed || !value || value.method !== 'model.options') return;
+    // Native ownership proofs spawn processes on Windows. Only catalog traffic
+    // can contribute evidence; unrelated startup frames must not spend its budget.
+    if (!guard()) { pending.clear(); verified = false; return; }
     if (!['number', 'string'].includes(typeof value.id) || value.params?.profile !== expectedProfile
         || value.params?.explicit_only !== true || (socket !== null && socket !== event.requestId)
         || pending.size !== 0 || verified) { ambiguous = true; verified = false; return; }
@@ -25,9 +27,9 @@ exports.monitor = function monitor(session, guard, expectedModel, expectedProfil
     pending.set(value.id, socket);
   };
   const received = event => {
-    if (!guard()) { pending.clear(); verified = false; return; }
     const value = parse(event);
     if (!value || event.requestId !== socket || pending.get(value.id) !== socket) return;
+    if (!guard()) { pending.clear(); verified = false; return; }
     pending.delete(value.id);
     const result = value.result;
     if (value.error || !result || !Array.isArray(result.providers) || result.providers.length > 4096) return;

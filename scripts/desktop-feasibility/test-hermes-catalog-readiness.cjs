@@ -2,11 +2,26 @@
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const { monitor } = require('./hermes-catalog-readiness.cjs');
-const session = new EventEmitter(); let owned = true;
-const evidence = monitor(session, () => owned, 'qwen3.6', 'nan');
+const session = new EventEmitter(); let owned = true, ownershipChecks = 0;
+let evidence = monitor(session, () => { ownershipChecks++; return owned; }, 'qwen3.6', 'nan');
 function emit(direction, socket, value) { session.emit('Network.webSocketFrame' + direction, {requestId: socket, response:{opcode:1,payloadData:JSON.stringify(value)}}); }
 const request = {jsonrpc:'2.0',id:1,method:'model.options',params:{profile:'nan',explicit_only:true}};
 const response = {jsonrpc:'2.0',id:1,result:{providers:[{models:['qwen3.6']}]}};
+emit('Sent','A',request); emit('Received','A',response);
+assert.equal(ownershipChecks,0); // Unarmed startup traffic cannot prove readiness.
+evidence.arm();
+for(let i=0;i<1000;i++) {
+  emit('Sent','A',{jsonrpc:'2.0',id:i,method:'session.list'});
+  emit('Received','A',{jsonrpc:'2.0',id:i,result:{}});
+}
+assert.equal(ownershipChecks,0); // Unrelated traffic cannot exhaust native proof time.
+emit('Sent','A',request); assert.equal(ownershipChecks,1);
+emit('Received','B',response); assert.equal(ownershipChecks,1);
+emit('Received','A',response); assert.equal(ownershipChecks,2);
+assert(evidence.verified()); assert.equal(ownershipChecks,3);
+owned=false; assert(!evidence.verified()); // A final fresh ownership proof remains mandatory.
+owned=true; evidence.dispose();
+evidence = monitor(session, () => owned, 'qwen3.6', 'nan');
 emit('Sent','A',request); emit('Received','A',response); assert(!evidence.verified()); // pre-activation request/result
 evidence.arm();
 emit('Received','A',response); assert(!evidence.verified()); // cached/unobserved result
