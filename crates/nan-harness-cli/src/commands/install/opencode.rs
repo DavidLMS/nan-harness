@@ -8,6 +8,16 @@ use std::process::Command;
 
 const RECEIPT: &str = ".nanh-opencode-installation";
 
+struct InstallationLock(fs::File);
+
+impl Drop for InstallationLock {
+    fn drop(&mut self) {
+        // A concurrent fork can retain the open file description until exec.
+        // Closing our descriptor alone would keep that inherited lock alive.
+        let _ = self.0.unlock();
+    }
+}
+
 fn root() -> Option<PathBuf> {
     super::super::persistence::config_directory().map(|path| path.join("installations/opencode"))
 }
@@ -92,6 +102,7 @@ fn install_with(
     let lock = nan_harness_private_fs::open_private_truncate(&lock_path).map_err(prepare)?;
     lock.try_lock()
         .map_err(|error| prepare(io::Error::other(error)))?;
+    let _lock = InstallationLock(lock);
     let destination = root.join(major.to_string());
     reject_symlink(&destination)?;
     if destination.exists() {
@@ -189,6 +200,26 @@ mod tests {
         )
         .map_err(prepare)?;
         fs::set_permissions(executable, fs::Permissions::from_mode(0o700)).map_err(prepare)
+    }
+
+    #[test]
+    fn completed_installation_releases_lock_with_an_inherited_descriptor() {
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().join("install.lock");
+        let file = nan_harness_private_fs::open_private_truncate(&path).unwrap();
+        file.try_lock().unwrap();
+        let lock = InstallationLock(file);
+        // A duplicate shares the lock's open file description, as fork does.
+        let inherited = lock.0.try_clone().unwrap();
+        let contender = nan_harness_private_fs::open_private_truncate(&path).unwrap();
+        assert!(matches!(
+            contender.try_lock(),
+            Err(fs::TryLockError::WouldBlock)
+        ));
+        drop(lock);
+        contender.try_lock().unwrap();
+        contender.unlock().unwrap();
+        drop(inherited);
     }
 
     #[test]
