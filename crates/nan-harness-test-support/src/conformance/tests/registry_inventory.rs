@@ -141,8 +141,13 @@ fn published_round_trip_probes_are_declared_by_embedded_manifests() {
     let workspace = tempfile::tempdir().expect("workspace should exist");
     for registration in harness_registry() {
         let manifest = registration.manifest().expect("embedded manifest");
-        let probe = round_trip_probe(registration.kind, workspace.path(), &manifest)
-            .expect("published probe should satisfy the manifest contract");
+        let probe = round_trip_probe(
+            registration.kind,
+            workspace.path(),
+            &manifest,
+            &manifest.inventory.iter().cloned().collect(),
+        )
+        .expect("published probe should satisfy the manifest contract");
         assert!(manifest.tool_names().contains(&probe.call.name));
     }
 }
@@ -155,8 +160,13 @@ fn cline_round_trip_probe_writes_the_marker_with_the_native_shell() {
         .expect("workspace should exist");
     let manifest =
         embedded_manifest(HarnessKind::Cline).expect("Cline manifest should be embedded");
-    let probe = round_trip_probe(HarnessKind::Cline, workspace.path(), &manifest)
-        .expect("Cline probe should satisfy the manifest contract");
+    let probe = round_trip_probe(
+        HarnessKind::Cline,
+        workspace.path(),
+        &manifest,
+        &manifest.tool_names(),
+    )
+    .expect("Cline probe should satisfy the manifest contract");
     assert_eq!(probe.call.name, "run_commands");
     assert!(crate::conformance::inventory::verify_probe_side_effect(&probe).is_err());
     let command = probe.call.input["commands"][0]
@@ -188,17 +198,44 @@ fn prime_round_trip_probe_uses_an_absolute_json_python_path() {
     let workspace = tempfile::tempdir().expect("workspace should exist");
     let manifest =
         embedded_manifest(HarnessKind::PrimeAgent).expect("Prime manifest should be embedded");
-    let probe = round_trip_probe(HarnessKind::PrimeAgent, workspace.path(), &manifest)
-        .expect("Prime probe should satisfy the manifest contract");
-    let output_path = workspace.path().join("tool-output.txt");
-    let literal = serde_json::to_string(&output_path.to_string_lossy())
-        .expect("output path should serialize");
-    let code = probe.call.input["code"]
-        .as_str()
-        .expect("Prime probe should contain Python code");
-    assert!(output_path.is_absolute());
-    assert!(code.contains(&format!("output_path = Path({literal})")));
-    assert_eq!(probe.filesystem.path, output_path);
+    for tool in ["ipython", "python_repl"] {
+        let available = std::collections::BTreeSet::from([tool.to_owned()]);
+        let probe = round_trip_probe(
+            HarnessKind::PrimeAgent,
+            workspace.path(),
+            &manifest,
+            &available,
+        )
+        .expect("both supported Prime Python tools should satisfy the same contract");
+        let output_path = workspace.path().join("tool-output.txt");
+        let literal = serde_json::to_string(&output_path.to_string_lossy())
+            .expect("output path should serialize");
+        let code = probe.call.input["code"]
+            .as_str()
+            .expect("Prime probe should contain Python code");
+        assert_eq!(probe.call.name, tool);
+        assert!(output_path.is_absolute());
+        assert!(code.contains(&format!("output_path = Path({literal})")));
+        assert_eq!(probe.filesystem.path, output_path);
+    }
+}
+
+#[test]
+fn prime_probe_rejects_missing_or_ambiguous_python_tools() {
+    let workspace = tempfile::tempdir().expect("workspace should exist");
+    let manifest = embedded_manifest(HarnessKind::PrimeAgent).expect("Prime manifest should exist");
+    for names in [vec![], vec!["unrecognized"], vec!["ipython", "python_repl"]] {
+        let available = names.into_iter().map(str::to_owned).collect();
+        assert!(
+            round_trip_probe(
+                HarnessKind::PrimeAgent,
+                workspace.path(),
+                &manifest,
+                &available
+            )
+            .is_err()
+        );
+    }
 }
 
 #[cfg(unix)]

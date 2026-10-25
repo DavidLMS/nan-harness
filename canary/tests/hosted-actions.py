@@ -654,7 +654,7 @@ if stage == 'report':
                 cell.sys, "platform", "win32"), patch.dict("os.environ", {
                     "PROCESSOR_ARCHITECTURE": "AMD64"}), patch.object(cell.subprocess, "run") as run, \
                 patch.object(cell, "Path", PosixPath):
-            run.return_value.stdout = b"24.20.0\n"
+            run.return_value.stdout = b"24.22.1\n"
             state = cell.initial_state(args)
         self.assertEqual(state["environment"]["operatingSystem"], "windows")
         self.assertEqual(state["environment"]["architecture"], "x86_64")

@@ -50,7 +50,7 @@ class WindowsDiagnosticWorkflowTests(unittest.TestCase):
 
     def test_setup_is_advisory_and_versions_are_fixed(self):
         self.assertIn("continue-on-error: true", WORKFLOW)
-        self.assertIn("node-version: 24.20.0", WORKFLOW)
+        self.assertIn("node-version: 24.22.1", WORKFLOW)
         self.assertIn("python-version: '3.12'", WORKFLOW)
         self.assertIn("rustup show", WORKFLOW)
         self.assertIn("cargo build --locked --release --package nan-harness-cli", WORKFLOW)

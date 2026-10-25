@@ -34,6 +34,13 @@ fn prepare_redirected(command: &mut Command) -> io::Result<OutputDrain> {
         fcntl(descriptor, FcntlArg::F_SETFD(FdFlag::FD_CLOEXEC))?;
     }
     fcntl(&terminal.master, FcntlArg::F_SETFL(OFlag::O_NONBLOCK))?;
+    // Tokio's replacement requires unsafe registration for arbitrary AsRawFd.
+    // Here the owned File never escapes, changes descriptor or closes before
+    // AsyncFd deregisters it; retain the safe constructor under our unsafe ban.
+    #[expect(
+        deprecated,
+        reason = "AsyncFd exclusively owns the File for its complete registration lifetime"
+    )]
     let reader = AsyncFd::new(File::from(terminal.master))?;
     command
         .stdout(Stdio::from(terminal.slave))

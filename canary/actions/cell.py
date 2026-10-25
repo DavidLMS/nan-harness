@@ -87,6 +87,15 @@ class StageTimeout(RuntimeError):
     """A stage limit says nothing about compatibility; it remains retryable."""
 
 
+class ConformanceFailure(RuntimeError):
+    """Closed conformance observations; never proof of a compatibility mismatch."""
+
+    def __init__(self, code, attempts):
+        super().__init__("conformance did not produce positive contract evidence")
+        self.code = code
+        self.attempts = attempts
+
+
 class CompatibilityMismatch(RuntimeError):
     """A closed, positively evidenced contract failure; the only failed-compatibility source.
 
@@ -132,6 +141,8 @@ INSTALL_FAILURE_CODES = {
 }
 ZCODE_INSTALL_STAGES = frozenset({"git-init", "git-fetch", "git-checkout", "node-install", "pnpm-install",
                                   "runtime-verify", "dependencies", "build", "command-verify", "terminal-driver"})
+ZCODE_CONFORMANCE_STAGES = frozenset({"probe-build", "probe-config", "probe-protocol", "probe-native",
+                                     "probe-sessions", "probe-tui", "probe-integration"})
 INSTALL_FAILURE_CODES.update("zcode-source-" + stage for stage in ZCODE_INSTALL_STAGES)
 INSTALL_FAILURE_CODES.add("zcode-source-dependencies-rename-missing")
 WINDOWS_INSTALL_CATEGORIES = frozenset({
@@ -1059,16 +1070,49 @@ def conformance(args, state):
     report = args.directory / "conformance-private.json"
     environment = cell_environment(args.directory)
     if args.harness == "zcode":
-        private_command([sys.executable, str(ROOT / "canary/guest/zcode-source.py"), "check",
-                         "--directory", str(args.directory), "--binary", str(args.binary)],
-                        args.directory, timeout=1200, environment=environment)
+        marker = args.directory / "zcode-source-failure.json"
+        marker.unlink(missing_ok=True)
+        try:
+            status = private_command([sys.executable, str(ROOT / "canary/guest/zcode-source.py"), "check",
+                                      "--directory", str(args.directory), "--binary", str(args.binary)],
+                                     args.directory, timeout=1200, environment=environment,
+                                     allow_failure=True)
+        except StageTimeout:
+            raise ConformanceFailure("conformance-source-timeout", 1) from None
+        except OSError:
+            raise ConformanceFailure("conformance-source-unavailable", 1) from None
+        if status:
+            code = "conformance-source-exit-nonzero"
+            try:
+                if marker.stat().st_size <= 4096:
+                    details = json.loads(marker.read_bytes())
+                    stage, reason = details.get("stage"), details.get("reason")
+                    if (stage in ZCODE_CONFORMANCE_STAGES
+                            and reason in {"exit-nonzero", "stage-timeout", "tool-missing", "output-limit"}):
+                        code = f"conformance-source-{stage}-{reason}"
+            except (OSError, ValueError, AttributeError, TypeError):
+                pass
+            finally:
+                marker.unlink(missing_ok=True)
+            raise ConformanceFailure(code, 1)
     for attempt in range(1, CONFORMANCE_ATTEMPTS + 1):
         try:
-            private_command([str(args.canary), "conformance", "--nan-harness", str(args.binary),
-                             "--harness", args.harness, "--json"], args.directory, output=report,
-                            allow_failure=True, environment=environment)
+            try:
+                status = private_command([str(args.canary), "conformance", "--nan-harness", str(args.binary),
+                                          "--harness", args.harness, "--json"], args.directory, output=report,
+                                         allow_failure=True, environment=environment)
+            except OSError:
+                raise ConformanceFailure("conformance-process-unavailable", attempt) from None
             result = json.loads(report.read_bytes())
             failed = conformance_result(result, args.harness)
+        except StageTimeout:
+            raise ConformanceFailure("conformance-process-timeout", attempt) from None
+        except FileNotFoundError:
+            raise ConformanceFailure("conformance-report-missing", attempt) from None
+        except (ValueError, TypeError, KeyError):
+            raise ConformanceFailure("conformance-report-invalid", attempt) from None
+        except OSError:
+            raise ConformanceFailure("conformance-process-unavailable", attempt) from None
         finally:
             report.unlink(missing_ok=True)
         if not failed:
@@ -1078,7 +1122,11 @@ def conformance(args, state):
                 state["observations"] = [{"kind": "inventory-drift",
                                           "fingerprint": hashlib.sha256(identity.encode()).hexdigest()}]
             return attempt
-    raise RuntimeError("conformance did not produce positive contract evidence")
+    # Names have passed the exhaustive scenario validator. Do not include checks,
+    # report text or exception messages, which can contain private child output.
+    scenarios = "+".join(name for name in CONFORMANCE_SCENARIOS if name in failed)
+    termination = "signal" if status < 0 else "exit-nonzero" if status else "exit-zero"
+    raise ConformanceFailure(f"conformance-scenarios:{scenarios}:{termination}", attempt)
 
 
 def probe_result(path):
@@ -1183,7 +1231,7 @@ def initial_state(args):
         raise RuntimeError("requested hosted identity does not match the native runner")
     node = subprocess.run(["node", "-p", "process.versions.node"], check=True,
                           capture_output=True, timeout=10).stdout.decode().strip()
-    if node != "24.20.0":
+    if node != "24.22.1":
         raise RuntimeError("hosted Node runtime does not match the pinned version")
     tier = {"release": "release-gate", "weekly": "live-extended",
             "daily": "deterministic", "manual": "deterministic"}[args.trigger]
@@ -1295,6 +1343,8 @@ def failed_report(args, mismatch=None):
     summary = "Hosted check did not complete successfully."
     if isinstance(mismatch, InstallFailure):
         code = mismatch.code
+    if isinstance(mismatch, ConformanceFailure) and args.stage == "conformance":
+        code = mismatch.code
     if isinstance(mismatch, ProbeFailure):
         code = (PROBE_DIAGNOSTIC_CODES.get(mismatch.diagnostic)
                 if args.harness == "aider" and mismatch.stage == "completion-marker"
@@ -1312,9 +1362,11 @@ def failed_report(args, mismatch=None):
     elapsed = (datetime.datetime.fromisoformat(state["completedAt"].replace("Z", "+00:00"))
                - datetime.datetime.fromisoformat(state["startedAt"].replace("Z", "+00:00")))
     total = max(state["durationMilliseconds"], int(elapsed.total_seconds() * 1000))
+    attempts = (mismatch.attempts if isinstance(mismatch, ConformanceFailure)
+                else CONFORMANCE_ATTEMPTS if code and args.stage == "conformance" else 1)
     state["checks"].append({"name": phase, "status": "failed",
                             "durationMilliseconds": total - state["durationMilliseconds"],
-                            "attempts": CONFORMANCE_ATTEMPTS if code and args.stage == "conformance" else 1})
+                            "attempts": attempts})
     state["durationMilliseconds"] = total
     state["outcome"] = "infrastructure-failure" if failure_class == "infrastructure" else "failed"
     if args.stage == "live" or any(check["name"] == "live-tool" for check in state["checks"]):

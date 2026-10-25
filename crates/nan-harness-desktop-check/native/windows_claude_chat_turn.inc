@@ -186,7 +186,14 @@ struct ChatInput {
         return owned()?nullptr:time_left()?"clipboard-guard-after":"clipboard-deadline-after";
     }
     std::optional<bool> clipboard_matches(const std::wstring& expected) {
-        if(!owned() || !OpenClipboard(nullptr))return std::nullopt;
+        if(!owned())return std::nullopt;
+        // Copy is invoked once. Only acquisition of its result lock can settle,
+        // using the same request deadline and retained window ownership.
+        const bool opened=uia_chat_acquire_clipboard([]{return OpenClipboard(nullptr)!=FALSE;},
+            [&]{return within();},[&]{return collection.guard();},
+            []{std::this_thread::sleep_for(std::chrono::milliseconds(20));});
+        if(!opened)return std::nullopt;
+        if(!within() || !collection.guard()){CloseClipboard();return std::nullopt;}
         bool matched=false,valid=false;
         HANDLE memory=GetClipboardData(CF_UNICODETEXT);
         const auto bytes=memory?GlobalSize(memory):0;

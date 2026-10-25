@@ -18,8 +18,10 @@ SEMVER = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+\Z")
 COMMIT = re.compile(r"[0-9a-f]{40}\Z")
 
 
+CHECK_STAGES = frozenset({"probe-build", "probe-config", "probe-protocol", "probe-native",
+                          "probe-sessions", "probe-tui", "probe-integration"})
 STAGES = frozenset({"git-init", "git-fetch", "git-checkout", "node-install", "pnpm-install",
-                    "runtime-verify", "dependencies", "build", "command-verify", "terminal-driver", "probe"})
+                    "runtime-verify", "dependencies", "build", "command-verify", "terminal-driver", "probe"}) | CHECK_STAGES
 
 
 class SourceFailure(ValueError):
@@ -152,14 +154,14 @@ def check(destination, binary):
     environment["PYTHONPATH"] = str(source / ".python-tools")
     output = destination / "zcode-contracts"
     output.mkdir(exist_ok=False)
-    run([node, probes / "build-probes.mjs", output], ROOT, environment)
+    run([node, probes / "build-probes.mjs", output], ROOT, environment, stage="probe-build")
     for script in ("config-probe.mjs", "protocol-probe.mjs"):
-        run([node, output / script], ROOT, environment)
-    run([sys.executable, probes / "native_probe.py", "--source", source, "--node", node], ROOT, environment)
+        run([node, output / script], ROOT, environment, stage="probe-" + script.split("-")[0])
+    run([sys.executable, probes / "native_probe.py", "--source", source, "--node", node], ROOT, environment, stage="probe-native")
     for case in ("sessions", "tui"):
         run([sys.executable, probes / "runtime_probe.py", "--source", source, "--node", node,
-             "--case", case], ROOT, environment)
-    run([sys.executable, probes / "integration_probe.py", "--binary", binary, "--source", source], ROOT, environment)
+             "--case", case], ROOT, environment, stage="probe-" + case)
+    run([sys.executable, probes / "integration_probe.py", "--binary", binary, "--source", source], ROOT, environment, stage="probe-integration")
 
 
 def main():

@@ -71,11 +71,12 @@ impl PublishedConformanceRunner {
             ConformanceError::Registry(RegistryError::Missing(self.harness)),
         )?;
         let started = Instant::now();
-        let (inventory, observation, inventory_failure_reasons, inventory_process) =
+        let (inventory, observation, inventory_failure_reasons, inventory_process, available_tools) =
             scenarios::run_inventory(&self, registration).await;
         let scenarios = vec![
             inventory,
-            self.run_tool_contracts(registration).await,
+            self.run_tool_contracts(registration, &available_tools)
+                .await,
             scenarios::run_sentinel(&self, registration).await,
             scenarios::run_external_prerequisite(&self, registration).await,
         ];
@@ -108,8 +109,10 @@ impl PublishedConformanceRunner {
     async fn run_tool_contracts(
         &self,
         registration: HarnessRegistration,
+        available_tools: &std::collections::BTreeSet<String>,
     ) -> super::report::ConformanceScenario {
-        let mut scenario = scenarios::run_tool_round_trip(self, registration).await;
+        let mut scenario =
+            scenarios::run_tool_round_trip(self, registration, available_tools).await;
         if registration.kind == HarnessKind::MimoCode {
             let check = super::mimo::mimo_native_configuration_check(&self.nan_harness).await;
             if check.status != ConformanceStatus::Passed {

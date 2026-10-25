@@ -35,7 +35,20 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
     matches(selector) { assert.equal(selector, ':disabled'); return scenario === 'retry-fieldset-disabled'; } };
   const reclaimedComposer = { tagName: 'DIV', privateText: 'PRIVATE_SYNTHETIC_VALUE',
     closest(selector) { return selector === '[data-slot="composer-root"]' ? {} : null; } };
-  const turnPair = {};
+  const turnPair = { isConnected: true, closest() { return {}; },
+    querySelectorAll(selector) { assert.equal(selector, '[data-role="user"]');
+      return [scenario === 'sampling-remount-user' && sampleCount >= 2 ? { ...boundUser } : boundUser]; } };
+  const boundUser = { isConnected: true, closest() { return turnPair; }, get innerText() {
+    return (['foreign-error-turn', 'delayed-foreign-error'].includes(scenario)
+      || scenario === 'foreign-card-after-settle' && frames === 2
+      || scenario === 'foreign-card-during-wait' && sampleCount >= 2
+      || scenario === 'onboarding-foreign-pair' && skips > 0
+      || scenario === 'onboarding-remount-foreign-pair' && retryHandles >= 3)
+      ? 'Older unrelated user turn' : request.prompt;
+  } };
+  const boundAlert = { isConnected: true, get ownerDocument() { return fixtureDocument; },
+    closest(selector) { return selector.includes('assistant-message-root')
+      ? { closest() { return turnPair; } } : scenario === 'sampling-remount-pair' && sampleCount >= 2 ? { ...turnPair } : turnPair; } };
   const ancestorFront = { tagName: 'DIV', privateValue: 'PRIVATE_SYNTHETIC_VALUE',
     contains(element) { return element === hitButton || scenario === 'retry-composer-cover'; },
     closest(selector) { return selector === '[data-slot="aui_turn-pair"]' ? turnPair : null; } };
@@ -61,7 +74,7 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
   const hitButton = {
     tagName: 'BUTTON', type: 'button', isConnected: true, disabled: false, offsetWidth: 20, offsetHeight: 20, clientWidth: 20, clientHeight: 20, clientLeft: 0, clientTop: 0,
     getAttribute() { return null; }, matches() { return false; }, checkVisibility(options) { assert.equal(options.contentVisibilityAuto, true); return scenario !== 'retry-hidden-render'; }, parentElement: scenario === 'retry-clipped' ? clippedParent : ['retry-source-clipped', 'retry-frame-settle'].includes(scenario) ? sourceClipParent : null,
-    closest(selector) { return selector === '[data-slot="aui_turn-pair"]' ? turnPair : selector === '[data-slot="aui_thread-viewport"]' ? {} : null; },
+    closest(selector) { return selector === '[role="alert"]' ? boundAlert : selector === '[data-slot="aui_turn-pair"]' ? turnPair : selector === '[data-slot="aui_thread-viewport"]' ? {} : null; },
     getBoundingClientRect() { const left = scenario === 'retry-offviewport' ? 200 : scenario === 'retry-unstable' && sampleCount > 1 ? 11 : 10; return { left, right: left + 20, top: 10, bottom: 30, width: 20, height: 20 }; },
     contains(element) { return element === hitChild; },
     scrollIntoView(options) {
@@ -101,10 +114,17 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
         : scenario === 'inert' ? 'inert' : null;
     },
     async elementHandle() { retryHandles++; latestHandleSamples=0; const generation = retryHandles; let handleSamples = 0; return {
-      async evaluate(callback) {
+      async evaluate(callback, argument) {
         if (callback.toString().includes('old.ownerDocument')) return scenario !== 'onboarding-remount-document';
+        if (callback.toString().includes('held.document')) {
+          hitButton.ownerDocument = fixtureDocument;
+          if (scenario === 'sampling-remount-document') hitButton.ownerDocument = {};
+          return callback(hitButton, argument);
+        }
         handleSamples++; latestHandleSamples=handleSamples; samplingChoice = false; sampleCount++; hitButton.isConnected = scenario !== 'retry-detached' && !(scenario === 'command-detached' && escapes > 0); if (scenario?.startsWith('onboarding-remount') && skips > 0 && generation >= 2 && handleSamples >= 3
           && (generation === 2 || scenario === 'onboarding-remount-again')) hitButton.isConnected = false;
+        if (scenario?.startsWith('sampling-remount') && handleSamples >= 2
+            && (generation === 1 || scenario === 'sampling-remount-again')) hitButton.isConnected = false;
         hitButton.disabled = scenario === 'retry-disabled'; hitButton.offsetWidth = scenario === 'retry-transformed' ? 40 : 20; hitButton.type = scenario === 'retry-wrong-type' ? 'submit' : 'button'; hitButton.ownerDocument = scenario === 'retry-foreign-document' ? {} : fixtureDocument; return callback(hitButton); },
       async click(options) { return send.click(options); },
     }; },
@@ -132,13 +152,10 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
     },
   };
   const errorCards = {
-    async evaluate(callback, prompt) {
-      const user = { innerText: (['foreign-error-turn', 'delayed-foreign-error'].includes(scenario) || scenario === 'foreign-card-after-settle' && frames === 2 || scenario === 'foreign-card-during-wait' && sampleCount >= 2 || scenario === 'onboarding-foreign-pair' && skips > 0 || scenario === 'onboarding-remount-foreign-pair' && retryHandles >= 3) ? 'Older unrelated user turn' : request.prompt,
-        closest() { return pair; } };
-      const pair = { querySelectorAll(selector) { assert.equal(selector, '[data-role="user"]'); return [user]; },
-        closest() { return {}; } };
-      const assistantRoot = { closest() { return pair; } };
-      return callback({ closest(selector) { return selector.includes('assistant-message-root') ? assistantRoot : pair; } }, prompt);
+    async evaluateHandle(callback) { return callback(boundAlert); },
+    async evaluate(callback, argument) {
+      if (scenario === 'sampling-remount-alert' && sampleCount >= 2) return callback({ ...boundAlert }, argument);
+      return callback(boundAlert, argument);
     },
     async count() { return ['failure-appears', 'delayed-foreign-error'].includes(scenario) && submits === 0 ? 0 : scenario === 'missing-error' ? 0 : scenario === 'duplicate-error' ? 2 : 1; },
     getByRole(role, options) { assert.equal(role, 'button'); assert.equal(options.name, 'Retry'); return { ...send, async count() { return scenario === 'missing-retry' ? 0 : scenario === 'duplicate-retry' ? 2 : 1; } }; },
@@ -377,6 +394,18 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
   assert.equal(retry.facts.retryPointStable, true);
   assert.equal(retry.facts.retryHitOwnedPoints, 9);
   assert.equal(retry.facts.retryRectInViewport, true);
+  const remount = await trial({ ...retryRequest, timeoutMs: 900 }, {}, 'sampling-remount', true);
+  assert.equal(remount.clicks, 1);
+  assert.equal(remount.retryHandles, 2);
+  assert.equal(remount.keys, 0);
+  assert.equal(remount.fills, 0);
+  for (const scenario of ['sampling-remount-again', 'sampling-remount-alert', 'sampling-remount-document', 'sampling-remount-pair', 'sampling-remount-user']) {
+    const rejected = await trial({ ...retryRequest, timeoutMs: 900 }, {}, scenario, true);
+    assert.equal(rejected.clicks, 0, scenario);
+    assert.equal(rejected.keys, 0, scenario);
+  }
+  const expiredRemount = await trial({ ...retryRequest, timeoutMs: 150 }, {}, 'sampling-remount', true);
+  assert.equal(expiredRemount.clicks, 0);
   const edge = await trial(retryRequest, {}, 'retry-center-covered', true);
   assert.equal(edge.clicks, 1);
   assert.equal(edge.keys, 0);

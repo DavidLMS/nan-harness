@@ -116,7 +116,7 @@ class CliExecutionTests(unittest.TestCase):
                 return str(root / "git/cmd/git.exe") if name == "git.exe" else str(root / "node")
             with patch.object(cell, "os", proxy), patch.object(cell, "protect_private"), \
                     patch.object(cell.shutil, "which", side_effect=which), \
-                    patch.object(cell.subprocess, "run", return_value=SimpleNamespace(stdout="24.20.0")):
+                    patch.object(cell.subprocess, "run", return_value=SimpleNamespace(stdout="24.22.1")):
                 environment = cell.cell_environment(directory)
             paths = environment["PATH"].split(os.pathsep)
             for relative in ("bin", "hermes/bin", "home/.nan-harness-canary-venv/Scripts",
@@ -132,7 +132,7 @@ class CliExecutionTests(unittest.TestCase):
             root = Path(temporary) / "cell"
             with patch.dict(os.environ, {"NAN_API_KEY": "synthetic-provider-key"}), \
                     patch.object(cell.subprocess, "run", return_value=type(
-                        "Result", (), {"stdout": "24.20.0"})()):
+                        "Result", (), {"stdout": "24.22.1"})()):
                 environment = cell.cell_environment(root)
             self.assertEqual(environment["NAN_API_KEY"], "synthetic-provider-key")
             self.assertTrue(Path(environment["NAN_HARNESS_CONFIG_DIR"]).is_relative_to(root))
@@ -171,7 +171,7 @@ class CliExecutionTests(unittest.TestCase):
             with patch.object(cell.sys, "platform", "linux"), \
                     patch.object(cell.os, "uname", return_value=type("Uname", (), {"machine": "aarch64"})()), \
                     patch.object(cell.subprocess, "run", return_value=type("Result", (), {
-                        "stdout": b"24.20.0\n"})()):
+                        "stdout": b"24.22.1\n"})()):
                 state = cell.initial_state(args)
             self.assertEqual(state["environment"]["operatingSystem"], "linux")
             self.assertEqual(state["environment"]["architecture"], "aarch64")
@@ -325,16 +325,16 @@ class CliExecutionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             runner_home = root / "runner-home"
-            runtime_bin = runner_home / "hostedtoolcache/node/24.20.0/arm64/bin"
+            runtime_bin = runner_home / "hostedtoolcache/node/24.22.1/arm64/bin"
             arbitrary_bin = runner_home / "user-tools"
             runtime_bin.mkdir(parents=True)
             arbitrary_bin.mkdir()
             (runtime_bin / "node").write_text(
-                "#!/bin/sh\nprintf '24.20.0\\n'\n")
+                "#!/bin/sh\nprintf '24.22.1\\n'\n")
             npm = runtime_bin / "npm"
             npm.write_text(
                 "#!/bin/sh\n"
-                "test \"$(node -p process.versions.node)\" = 24.20.0\n"
+                "test \"$(node -p process.versions.node)\" = 24.22.1\n"
                 "printf '%s\\n' \"$*\" > \"$NPM_TEST_ARGS\"\n")
             for executable in (runtime_bin / "node", npm):
                 executable.chmod(0o755)
@@ -373,7 +373,7 @@ class CliExecutionTests(unittest.TestCase):
             self.assertIn("hosted npm runtime could not be found", result.stderr)
             npm.write_text(
                 "#!/bin/sh\n"
-                "test \"$(node -p process.versions.node)\" = 24.20.0\n"
+                "test \"$(node -p process.versions.node)\" = 24.22.1\n"
                 "printf '%s\\n' \"$*\" > \"$NPM_TEST_ARGS\"\n")
             npm.chmod(0o755)
 

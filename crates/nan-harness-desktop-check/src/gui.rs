@@ -320,6 +320,22 @@ impl Gui {
         Self::absence_snapshot(kind, None, None, false, None)
     }
 
+    pub(crate) fn ensure_absent_after_restore(
+        kind: DesktopHarnessKind,
+        gui: Option<&Self>,
+    ) -> Result<(), AbsenceFailure> {
+        // Retain the prepared helper across restoration. Preparing another copy
+        // can consume the process-query budget before its first observation.
+        #[cfg(windows)]
+        let native = gui.map(|held| held.visual.absence_native());
+        #[cfg(not(windows))]
+        let native = {
+            let _ = gui;
+            None
+        };
+        Self::absence_snapshot(kind, None, native, false, None)
+    }
+
     pub(crate) fn ensure_absent_before_launch(
         kind: DesktopHarnessKind,
     ) -> Result<(), AbsenceFailure> {

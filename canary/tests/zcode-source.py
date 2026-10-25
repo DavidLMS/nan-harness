@@ -154,6 +154,9 @@ class SourceContracts(unittest.TestCase):
             source.check(root, root / 'nanh')
             calls = run.call_args_list
             self.assertEqual(len(calls), 7)
+            self.assertEqual([call.kwargs['stage'] for call in calls],
+                             ['probe-build', 'probe-config', 'probe-protocol', 'probe-native',
+                              'probe-sessions', 'probe-tui', 'probe-integration'])
             commands = [[str(arg) for arg in call.args[0]] for call in calls]
             self.assertEqual([command[-1] for command in commands[4:6]], ['sessions', 'tui'])
             self.assertIn('integration_probe.py', ' '.join(commands[-1]))

@@ -7,6 +7,12 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Update TLS certificate validation and bundled roots to address
+  RUSTSEC-2026-0382 and RUSTSEC-2026-0383.
+- Update Tokio to address the AsyncFd I/O safety advisory RUSTSEC-2026-0386.
+
 ## [0.1.24] - 2026-10-15
 
 ### Added

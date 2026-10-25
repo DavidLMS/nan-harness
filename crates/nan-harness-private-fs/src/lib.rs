@@ -207,7 +207,7 @@ pub fn verify_private_file(file: &File) -> io::Result<()> {
 pub enum OwnedWindowsDacl {
     /// Existing protected private-filesystem contract.
     Protected,
-    /// Exactly inherited current-user and SYSTEM FullAccess entries.
+    /// Exactly inherited current-user and SYSTEM `FullAccess` entries.
     Inherited,
     /// Readable descriptor outside either exact contract.
     Unexpected,
@@ -221,6 +221,7 @@ pub enum OwnedWindowsDacl {
 /// the original protected parent and its fixed child path. This function is a
 /// classifier; general credential-file readers retain their protected policy.
 #[cfg(windows)]
+#[must_use]
 pub fn classify_owned_windows_dacl(file: &File, kind: PrivatePathKind) -> OwnedWindowsDacl {
     windows::classify_owned_handle(file, kind)
 }

@@ -359,22 +359,57 @@ async function driveDom() {
   let retryHandle;
   let retryPosition;
   let secondCandidate;
+  let retainedScope;
+  let samplingRemountUsed = false;
   const settleDeadline = Math.min(deadline, Date.now() + 5000);
   if (retryAction) {
     retryHandle = await send.elementHandle({ timeout: Math.max(1, deadline - Date.now()) });
     if (!retryHandle) { facts.errorCategory = 'send-unavailable'; saveFacts(); return; }
+    const retryScope = await errorCards.evaluateHandle(alert => {
+      const pair = alert.closest('[data-slot="aui_turn-pair"]');
+      const users = pair?.querySelectorAll('[data-role="user"]');
+      return { alert, pair, user: users?.length === 1 ? users[0] : null, document: alert.ownerDocument };
+    });
+    retainedScope = async () => await errorCards.count() === 1
+      && await errorCards.evaluate((alert, held) => {
+        const pair = alert.closest('[data-slot="aui_turn-pair"]');
+        const users = pair?.querySelectorAll('[data-role="user"]');
+        return alert === held.alert && alert.isConnected && pair?.isConnected
+          && alert.ownerDocument === held.document && held.document === document && pair === held.pair
+          && users?.length === 1 && users[0] === held.user && held.user.isConnected;
+      }, retryScope);
     let first;
     let second;
     let revealAttempted = false;
     const reprove = async () => ownedEndpoint() && await send.count() === 1 && await send.isEnabled()
       && await retryUser.count() === 1
       && await retryUser.evaluate((e, prompt) => e.innerText.trim() === prompt, request.prompt)
-      && await errorProof() && await send.evaluate((button, sampled) => button === sampled, retryHandle);
+      && await errorProof() && await retainedScope()
+      && await send.evaluate((button, sampled) => button === sampled, retryHandle);
     while (Date.now() < settleDeadline) {
       if (!await reprove()) { facts.errorCategory = 'send-unavailable'; saveFacts(); return; }
       first = await retryHandle.evaluate(sampleRetryInterior);
       await delay(Math.min(100, Math.max(0, settleDeadline - Date.now())));
       second = await retryHandle.evaluate(sampleRetryInterior);
+      // A child Retry may remount while its original error/turn remains owned.
+      // Reserve one replacement before any input and take a fresh stable pair.
+      if (first.closed.status === 'owned' && second.closed.status === 'detached'
+          && !samplingRemountUsed && Date.now() < settleDeadline) {
+        samplingRemountUsed = true;
+        if (!ownedEndpoint() || !await retainedScope() || !await errorProof()
+            || await send.count() !== 1 || !await send.isEnabled()) {
+          facts.errorCategory = 'send-unavailable'; saveFacts(); return;
+        }
+        const replacement = await send.elementHandle({ timeout: Math.max(1, settleDeadline - Date.now()) });
+        if (!replacement || !await replacement.evaluate((button, held) =>
+          button.ownerDocument === held.document && held.document === document
+            && button.closest('[role="alert"]') === held.alert
+            && button.closest('[data-slot="aui_turn-pair"]') === held.pair, retryScope)) {
+          facts.errorCategory = 'send-unavailable'; saveFacts(); return;
+        }
+        retryHandle = replacement;
+        continue;
+      }
       retryPosition = stableCandidate(first, second);
       secondCandidate = second.candidate;
       if (retryPosition || second.closed.status !== 'no-owned-point') break;
@@ -487,20 +522,22 @@ async function driveDom() {
     if (!ownedEndpoint() || await send.count() !== 1 || !await send.isEnabled()
         || await retryUser.count() !== 1
         || !await retryUser.evaluate((e, prompt) => e.innerText.trim() === prompt, request.prompt)
-        || !await errorProof()) {
+        || !await errorProof() || !await retainedScope()) {
       facts.errorCategory = 'send-unavailable'; saveFacts(); return;
     }
     facts.sendBlocker = await readiness();
     let finalSample = await retryHandle.evaluate(sampleRetryInterior);
     // Closing owned onboarding can remount Retry after the first stable sample.
     // Reacquire once before any Retry input, in the same document and budget.
-    if (finalSample.closed.status === 'detached' && facts.retryReveal === 'onboarding-skipped'
+    if (finalSample.closed.status === 'detached' && facts.retryReveal === 'onboarding-skipped' && !samplingRemountUsed
         && facts.sendBlocker === null && Date.now() < settleDeadline) {
+      samplingRemountUsed = true;
       const replacement = await send.elementHandle({ timeout: Math.max(1, settleDeadline - Date.now()) });
       const current = async () => ownedEndpoint() && Date.now() < settleDeadline
         && await send.count() === 1 && await send.isEnabled() && await retryUser.count() === 1
         && await retryUser.evaluate((e, prompt) => e.innerText.trim() === prompt, request.prompt)
-        && await errorProof() && await send.evaluate((button, sampled) => button === sampled, replacement);
+        && await errorProof() && await retainedScope()
+        && await send.evaluate((button, sampled) => button === sampled, replacement);
       if (!replacement || !await current()
           || !await retryHandle.evaluate((old, next) => old.ownerDocument === next.ownerDocument, replacement)) {
         facts.errorCategory = 'send-unavailable'; saveFacts(); return;

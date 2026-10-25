@@ -1,5 +1,9 @@
 [advisories]
-ignore = []
+# zbus 5 consumers (xa11y-linux and keyring's secret-service store) still require
+# these crates, now merged into zbus 6. These advisories report maintenance only.
+# Review by 2026-11-25; remove when both consumers support zbus 6. Vulnerability
+# advisories remain enforced, including any new advisories for these packages.
+ignore = ["RUSTSEC-2026-0370", "RUSTSEC-2026-0371", "RUSTSEC-2026-0372"]
 
 [bans]
 multiple-versions = "warn"
