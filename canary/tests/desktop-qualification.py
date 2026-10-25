@@ -2687,10 +2687,11 @@ class QualificationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             path = Path(root) / 'action.json'
             for action in ('input-replace-owned', 'copy', 'retry-ready', 'retry', 'failure-details'):
-                item = {**value, 'nativeAction': action}
+                item = {**value, 'nativeAction': action, 'nativeStage': 'sent'}
                 path.write_text(json.dumps(item))
                 self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [item])
             for change in ({'nativeAction': 'PRIVATE'}, {'nativeAction': None},
+                           {'nativeStage': 'PRIVATE'}, {'nativeStage': None},
                            {'mechanism': 'claude-native-chat'}):
                 path.write_text(json.dumps({**item, **change}))
                 with self.assertRaises(ValueError):

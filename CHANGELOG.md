@@ -9,6 +9,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Reserve time for the Windows Claude post-action ownership checks within the
+  original deadline, and retain the native action stage in closed diagnostics.
 - Keep Hermes canonical-gateway conversations in a separate persistent NaN
   profile, supervise its foreground gateway through cleanup, and preserve
   continuation across fresh bridge endpoints without changing native user state.
