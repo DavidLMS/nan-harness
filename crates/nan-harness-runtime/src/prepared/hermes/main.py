@@ -180,7 +180,8 @@ def main(arguments):
 if __name__ == "__main__":
     try:
         main(sys.argv[1:])
-    except Exception:
+    except Exception as error:
         # Fixed phase only. Native exceptions can contain private configuration.
-        print("NH-HERMES-SUPERVISOR", file=sys.stderr)
+        category = "IMPORT" if isinstance(error, ImportError) else "IO" if isinstance(error, OSError) else "CONTRACT" if isinstance(error, RuntimeError) else "INTERNAL"
+        print("NH-HERMES-SUPERVISOR-" + category, file=sys.stderr)
         raise SystemExit(125) from None

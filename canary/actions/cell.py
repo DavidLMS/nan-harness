@@ -1062,8 +1062,15 @@ def gentle_probe(args, *, live=False):
 HERMES_PROFILE_CHECKS = ["native-state-preserved", "same-session-resume", "bridge-route-rotation",
                          "reasoning-effort", "reasoning-disabled", "reasoning-toggle",
                          "gateway-cleanup", "automation-isolated"]
-HERMES_PROFILE_PHASES = frozenset({"history-create", "history-resume", "reasoning-effort",
+HERMES_PROFILE_PHASES = frozenset({"history-create", "history-created-state", "history-resume", "history-resumed-state", "reasoning-effort",
                                   "reasoning-disabled", "reasoning-toggle", "native-state", "cleanup"})
+HERMES_PROFILE_DIAGNOSTICS = {
+    "NH-HERMES-" + name: name.lower()
+    for name in ("LAUNCHER", "PROFILE", "READINESS", "HISTORY", "CLEANUP", "GATEWAY-EXIT", "GATEWAY-DRAIN",
+                 "SUPERVISOR", "SUPERVISOR-IMPORT", "SUPERVISOR-IO", "SUPERVISOR-CONTRACT", "SUPERVISOR-INTERNAL",
+                 "FRONTEND-EXIT-1", "FRONTEND-EXIT-2", "FRONTEND-EXIT-125")
+}
+HERMES_PROFILE_DIAGNOSTICS.update({"NH-DISCOVERY-00" + str(index): "discovery-00" + str(index) for index in range(1, 8)})
 
 
 def hermes_profile_probe(args, environment):
@@ -1086,6 +1093,9 @@ def hermes_profile_probe(args, environment):
         if (isinstance(result, dict) and type(result.get("schemaVersion")) is int and result.get("schemaVersion") == 1 and result.get("status") == "failed"
                 and result.get("phase") in HERMES_PROFILE_PHASES):
             phase = "cleanup" if result.get("cleanup") == "unproven" else result["phase"]
+            diagnostics = result.get("diagnostics", [])
+            if isinstance(diagnostics, list):
+                phase += next(("-" + suffix for code, suffix in HERMES_PROFILE_DIAGNOSTICS.items() if code in diagnostics), "")
             raise ConformanceFailure("conformance-hermes-" + phase + "-exit-nonzero", 1)
         raise ValueError()
     except StageTimeout:

@@ -58,6 +58,10 @@ class Qualification(unittest.TestCase):
         with self.assertRaises(cell.ConformanceFailure) as caught:
             self.probe({"schemaVersion": 1, "status": "failed", "phase": "private synthetic payload"}, 1)
         self.assertEqual(caught.exception.code, "conformance-hermes-report-invalid")
+        with self.assertRaises(cell.ConformanceFailure) as caught:
+            self.probe({"schemaVersion": 1, "status": "failed", "phase": "history-create", "cleanup": "proven",
+                        "diagnostics": ["NH-HERMES-READINESS", "private synthetic payload"]}, 1)
+        self.assertEqual(caught.exception.code, "conformance-hermes-history-create-readiness-exit-nonzero")
 
     def test_missing_and_timed_out_probes_cannot_qualify(self):
         for failure, code in [(OSError(), "unavailable"), (cell.StageTimeout(), "timeout")]:

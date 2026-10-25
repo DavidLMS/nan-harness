@@ -156,22 +156,27 @@ def run(args):
         def closed_diagnostic(log, _status):
             log.seek(0)
             text = log.read().decode(errors="replace")
-            allowed = {"NH-HERMES-" + item for item in ("LAUNCHER", "PROFILE", "READINESS", "HISTORY", "CLEANUP", "GATEWAY-EXIT", "GATEWAY-DRAIN")}
+            allowed = {"NH-HERMES-" + item for item in ("LAUNCHER", "PROFILE", "READINESS", "HISTORY", "CLEANUP", "GATEWAY-EXIT", "GATEWAY-DRAIN",
+                                                         "SUPERVISOR", "SUPERVISOR-IMPORT", "SUPERVISOR-IO", "SUPERVISOR-CONTRACT", "SUPERVISOR-INTERNAL")}
             allowed |= {"NH-DISCOVERY-00" + str(index) for index in range(1, 8)}
             diagnostics.extend(sorted(set(re.findall(r"NH-[A-Z0-9-]+", text)) & allowed))
         status = private_command([sys.executable, "-c", wrapper, *arguments], root, timeout=150,
                                  environment=environment, allow_failure=True, diagnostic_callback=closed_diagnostic)
         if status != 0:
+            if status in {1, 2, 125}:
+                diagnostics.append("NH-HERMES-FRONTEND-EXIT-" + str(status))
             raise RuntimeError()
 
     try:
         launch(servers[0], "NANH_FIRST_TURN", continuation=True)
+        phase = "history-created-state"
         first = session_ids(config)
         if len(first) != 1:
             raise RuntimeError()
         count = len(servers[0].requests)
         phase = "history-resume"
         launch(servers[1], "NANH_SECOND_TURN", continuation=True)
+        phase = "history-resumed-state"
         if session_ids(config) != first or not any(
                 "NANH_FIRST_TURN" in json.dumps(body) and "NANH_SECOND_TURN" in json.dumps(body)
                 for body in servers[1].requests):
