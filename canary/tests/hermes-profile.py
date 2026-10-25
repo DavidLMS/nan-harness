@@ -4,6 +4,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import subprocess
 import sys
 import tempfile
 from types import SimpleNamespace
@@ -21,9 +22,25 @@ spec.loader.exec_module(profile)
 spec = importlib.util.spec_from_file_location("managed_hermes_main", ROOT / "crates/nan-harness-runtime/src/prepared/hermes/main.py")
 runtime = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(runtime)
+sys.path.insert(0, str(ROOT / "canary/hermes"))
+spec = importlib.util.spec_from_file_location("native_hermes_qualification", ROOT / "canary/hermes/check.py")
+native = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(native)
 
 
 class Qualification(unittest.TestCase):
+    def test_launch_wrapper_waits_for_the_child_and_preserves_its_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            marker = Path(directory) / "child-completed"
+            child = ("import os,sys,time; from pathlib import Path; time.sleep(0.1); "
+                     "assert os.environ['NAN_API_KEY']==sys.argv[2]; "
+                     "Path(sys.argv[1]).write_text('completed'); sys.exit(7)")
+            result = subprocess.run([sys.executable, "-c", native.LAUNCH_WRAPPER,
+                                     sys.executable, "-c", child, str(marker), native.KEY],
+                                    capture_output=True, timeout=10, check=False)
+            self.assertEqual(result.returncode, 7)
+            self.assertEqual(marker.read_text(), "completed")
+
     def probe(self, value, status=0, failure=None):
         with tempfile.TemporaryDirectory() as directory:
             args = SimpleNamespace(directory=Path(directory), binary=Path("synthetic-nanh"))

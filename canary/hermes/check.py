@@ -21,6 +21,8 @@ from cell import ensure_private_directory, private_command, protect_private
 from processes import Gateways
 
 KEY = "synthetic-hermes-native-key"
+LAUNCH_WRAPPER = ("import os,subprocess,sys; os.environ['NAN_API_KEY']='" + KEY
+                  + "'; sys.exit(subprocess.call(sys.argv[1:]))")
 CHECKS = ["native-state-preserved", "same-session-resume", "bridge-route-rotation",
           "reasoning-effort", "reasoning-disabled", "reasoning-toggle",
           "gateway-cleanup", "automation-isolated"]
@@ -153,7 +155,8 @@ def run(args):
             arguments += ["--continue", "nanh", "history", "proof", "--create-if-missing"]
         # The runner strips real credentials. Only this child supplies the fixture
         # credential, and its provider base URL is the synthetic loopback server.
-        wrapper = "import os,sys; os.environ['NAN_API_KEY']='" + KEY + "'; os.execv(sys.argv[1],sys.argv[1:])"
+        # Windows exec starts a different PID and exits the wrapper. Keep this
+        # foreground process alive so its Job is not closed around a live nanh.
         launches += 1
         def closed_diagnostic(log, _status):
             log.seek(0)
@@ -162,7 +165,7 @@ def run(args):
                                                          "SUPERVISOR", "SUPERVISOR-IMPORT", "SUPERVISOR-IO", "SUPERVISOR-CONTRACT", "SUPERVISOR-INTERNAL")}
             allowed |= {"NH-DISCOVERY-00" + str(index) for index in range(1, 8)}
             diagnostics.extend(sorted(set(re.findall(r"NH-[A-Z0-9-]+", text)) & allowed))
-        status = private_command([sys.executable, "-c", wrapper, *arguments], root, timeout=150,
+        status = private_command([sys.executable, "-c", LAUNCH_WRAPPER, *arguments], root, timeout=150,
                                  environment=environment, allow_failure=True, diagnostic_callback=closed_diagnostic)
         if status != 0:
             if status in {1, 2, 125}:

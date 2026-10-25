@@ -124,6 +124,8 @@ jobs:
         run: cargo clippy --locked -p nan-harness-private-fs --all-features --all-targets -- -D warnings
       - name: Verify Hermes command providers on Windows
         run: cargo test --locked -p nan-harness-adapters --all-features --lib --test direct hermes
+      - name: Verify Hermes qualification process lifetime on Windows
+        run: python.exe -B canary/tests/hermes-profile.py
       - name: Verify Windows local search installation and lifecycle
         shell: pwsh
         run: |
