@@ -66,6 +66,24 @@ class Qualification(unittest.TestCase):
             with self.subTest(expected=expected):
                 self.assertEqual(native.frontend_phase(output), "NH-HERMES-FRONTEND-" + expected)
 
+    def test_cleanup_priority_retains_every_closed_cause_without_private_values(self):
+        codes = ["NH-HERMES-CLEANUP", "NH-HERMES-FRONTEND-WINERROR-2", "private synthetic payload"]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            args = SimpleNamespace(directory=root, binary=root / "nanh", canary=root / "canary", harness="hermes",
+                                   stage="conformance", trigger="manual", output=root / "report.json")
+            (root / "state.json").write_text(json.dumps({"startedAt": cell.timestamp(),
+                "durationMilliseconds": 0, "checks": [], "outcome": "passed"}))
+            failure = cell.HermesConformanceFailure("conformance-hermes-history-create-cleanup-exit-nonzero", codes, "proven")
+            with patch.object(cell, "private_command", return_value=0):
+                cell.failed_report(args, failure)
+            value = json.loads(args.output.read_text())["failure"]
+            self.assertEqual(value["code"], failure.code)
+            for code in codes[:-1]:
+                self.assertIn(code, value["summary"])
+            self.assertNotIn("private synthetic", args.output.read_text())
+            self.assertEqual(cell.HermesConformanceFailure(failure.code, codes, {"private": "value"}).cleanup, "unknown")
+
     def test_machine_frontend_is_selected_from_the_installed_version(self):
         for version, modern in [("0.21.0", False), ("0.22.0", True),
                                 ("Hermes 0.22.5", True), ("unknown", False)]:

@@ -1080,6 +1080,14 @@ HERMES_PROFILE_DIAGNOSTICS.update({"NH-HERMES-FRONTEND-EXIT-" + str(code): "fron
                                   for code in (1, 2, 125)})
 
 
+class HermesConformanceFailure(ConformanceFailure):
+    """Retain all closed causes even when cleanup owns the primary failure code."""
+    def __init__(self, code, diagnostics, cleanup):
+        super().__init__(code, 1)
+        self.diagnostics = tuple(code for code in HERMES_PROFILE_DIAGNOSTICS if code in diagnostics)
+        self.cleanup = cleanup if isinstance(cleanup, str) and cleanup in {"proven", "unproven"} else "unknown"
+
+
 def hermes_profile_probe(args, environment):
     report = args.directory / "hermes-profile-private.json"
     report.unlink(missing_ok=True)
@@ -1103,7 +1111,9 @@ def hermes_profile_probe(args, environment):
             diagnostics = result.get("diagnostics", [])
             if isinstance(diagnostics, list):
                 phase += next(("-" + suffix for code, suffix in HERMES_PROFILE_DIAGNOSTICS.items() if code in diagnostics), "")
-            raise ConformanceFailure("conformance-hermes-" + phase + "-exit-nonzero", 1)
+            else:
+                diagnostics = []
+            raise HermesConformanceFailure("conformance-hermes-" + phase + "-exit-nonzero", diagnostics, result.get("cleanup"))
         raise ValueError()
     except StageTimeout:
         raise ConformanceFailure("conformance-hermes-timeout", 1) from None
@@ -1417,6 +1427,9 @@ def failed_report(args, mismatch=None):
         code = mismatch.code
     if isinstance(mismatch, ConformanceFailure) and args.stage == "conformance":
         code = mismatch.code
+        if isinstance(mismatch, HermesConformanceFailure):
+            summary = "Hermes fixture cleanup observation: " + mismatch.cleanup + ". Closed diagnostics: " \
+                + (", ".join(mismatch.diagnostics) or "none") + "."
     if isinstance(mismatch, ProbeFailure):
         code = (PROBE_DIAGNOSTIC_CODES.get(mismatch.diagnostic)
                 if args.harness == "aider" and mismatch.stage == "completion-marker"

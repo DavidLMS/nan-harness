@@ -35,7 +35,13 @@ SIGNATURES = {
     "CREDENTIALS": ("Error: credentials or agent init failed",),
     "TURN-FAILED": ("The admitted turn failed.",),
     "WORKER-UNKNOWN": ("Worker execution is unknown.",),
+    "SQLITE-OPEN": ("unable to open database file",),
+    "SQLITE-READONLY": ("attempt to write a readonly database",),
+    "SQLITE-LOCKED": ("database is locked",),
+    "SQLITE-SCHEMA": ("no such table:", "no such column:"),
 }
+for module in ("fcntl", "pwd", "termios", "resource", "hermes_yaml", "pydantic", "websockets", "openai", "rich"):
+    SIGNATURES["IMPORT-" + module.replace("_", "-").upper()] = ("No module named '" + module + "'",)
 PHASES = ("RESULT-BOUND", "RESULT-UNBOUND", "INIT-ONLY", "NO-INIT", "PROVIDER-OBSERVED", "PROVIDER-ABSENT")
 PREFIX = "NH-HERMES-FRONTEND-"
 # Specific native causes precede generic turn failures and progress facts.
