@@ -1,5 +1,6 @@
 """Exercise native TUI exit choreography without weakening process-exit proof."""
 
+import errno
 import importlib.util
 import itertools
 import json
@@ -96,6 +97,46 @@ class TuiExitContracts(unittest.TestCase):
         self.assertEqual(self.terminal.exit_keys, 2)
         self.assertTrue(self.terminal.waited)
         self.assertTrue(self.terminal.closed)
+
+
+class TerminalEofContracts(unittest.TestCase):
+    def terminal(self, windows=False):
+        terminal = runtime.Terminal.__new__(runtime.Terminal)
+        terminal.windows, terminal.handle = windows, 123
+        terminal.process = SimpleNamespace(read=lambda _size: '', poll=lambda: None)
+        return terminal
+
+    def test_linux_eio_is_terminal_eof(self):
+        terminal = self.terminal()
+        module = sys.modules[type(terminal).__module__]
+        with patch.object(module.select, 'select', return_value=([123], [], [])), \
+                patch.object(module.os, 'read', side_effect=OSError(errno.EIO, 'synthetic closed slave')):
+            self.assertEqual(terminal.read(), b'')
+
+    def test_other_terminal_errors_remain_errors(self):
+        terminal = self.terminal()
+        module = sys.modules[type(terminal).__module__]
+        with patch.object(module.select, 'select', return_value=([123], [], [])), \
+                patch.object(module.os, 'read', side_effect=PermissionError(errno.EACCES, 'synthetic denial')):
+            with self.assertRaises(PermissionError):
+                terminal.read()
+
+    def test_windows_terminal_eof_is_not_a_transport_failure(self):
+        terminal = self.terminal(windows=True)
+        terminal.process.read = lambda _size: (_ for _ in ()).throw(EOFError())
+        module = sys.modules[type(terminal).__module__]
+        with patch.object(module.select, 'select', return_value=([123], [], [])):
+            self.assertEqual(terminal.read(), b'')
+
+    def test_terminal_eof_does_not_certify_a_live_process_as_exited(self):
+        terminal = self.terminal()
+        module = sys.modules[type(terminal).__module__]
+        clock = itertools.count()
+        with patch.object(terminal, 'read', return_value=b''), \
+                patch.object(module.time, 'monotonic', side_effect=lambda: next(clock)), \
+                patch.object(module.time, 'sleep'):
+            with self.assertRaisesRegex(AssertionError, 'did not exit'):
+                terminal.wait_exit(timeout=2)
 
 
 if __name__ == '__main__':

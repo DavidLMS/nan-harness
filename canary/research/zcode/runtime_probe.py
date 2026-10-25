@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -224,12 +225,14 @@ class Runtime:
         )
 
     def tui(self):
+        self.tui_phase = "startup"
         terminal = Terminal(
             [self.node, str(self.cli), "tui", "--locale", "en-US"], self.workspace, self.env
         )
         output = bytearray()
 
-        def wait_for(condition, timeout=20):
+        def wait_for(condition, *, phase, timeout=20):
+            self.tui_phase = phase
             deadline = time.monotonic() + timeout
             while time.monotonic() < deadline:
                 if condition():
@@ -244,15 +247,15 @@ class Runtime:
             raise AssertionError("TUI observation timed out")
 
         try:
-            wait_for(lambda: b"synthetic-model" in output)
+            wait_for(lambda: b"synthetic-model" in output, phase="model-ready")
             terminal.write(b"/model nan/synthetic-second\r")
             wait_for(
                 lambda: json.loads(self.personal.read_text())["config"]["defaultModelSelection"][
                     "modelId"
                 ]
-                == "synthetic-second"
+                == "synthetic-second", phase="model-persist"
             )
-            wait_for(lambda: b"Model switched" in output)
+            wait_for(lambda: b"Model switched" in output, phase="model-notice")
             time.sleep(0.5)
             terminal.write(b"\x1b")
             time.sleep(0.2)
@@ -261,14 +264,15 @@ class Runtime:
             terminal.write(b"TUI_NATIVE_PROBE\r")
             wait_for(
                 lambda: self.scenario.requests
-                and self.scenario.requests[-1]["model"] == "synthetic-second"
+                and self.scenario.requests[-1]["model"] == "synthetic-second", phase="provider-request"
             )
-            wait_for(lambda: b"NATIVE_PROBE_OK" in output)
+            wait_for(lambda: b"NATIVE_PROBE_OK" in output, phase="answer")
             # ZCode can retain the submitted draft. Its first Ctrl-C then clears
             # input instead of arming exit; use the native clear command first.
             clear_boundary = len(output)
             terminal.write(b"\x15")
-            wait_for(lambda: b"Type a prompt" in output[clear_boundary:])
+            wait_for(lambda: b"Type a prompt" in output[clear_boundary:], phase="clear-input")
+            self.tui_phase = "exit"
             terminal.write(b"\x03")
             time.sleep(0.2)
             if terminal.alive():
@@ -293,9 +297,15 @@ def main():
     )
     try:
         getattr(runtime, args.case)()
+    except (AssertionError, OSError, EOFError):
+        if args.case != "tui":
+            raise
+        # This closed phase belongs to the probe, never to terminal output.
+        print("NAN_ZCODE_TUI_FAILURE=" + json.dumps({"phase": runtime.tui_phase}))
+        return 1
     finally:
         runtime.close()
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

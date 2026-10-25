@@ -142,6 +142,7 @@ class ConformanceClassificationTests(unittest.TestCase):
 
     def test_source_marker_projects_only_known_substages_and_reasons(self):
         for stage, reason, expected in (("probe-tui", "exit-nonzero", "probe-tui-exit-nonzero"),
+                                        ("probe-tui-exit", "exit-nonzero", "probe-tui-exit-exit-nonzero"),
                                         ("PRIVATE_STAGE", "exit-nonzero", "exit-nonzero"),
                                         ("probe-native", "PRIVATE_REASON", "exit-nonzero")):
             with self.subTest(stage=stage, reason=reason), tempfile.TemporaryDirectory() as temporary:

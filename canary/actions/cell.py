@@ -142,7 +142,9 @@ INSTALL_FAILURE_CODES = {
 ZCODE_INSTALL_STAGES = frozenset({"git-init", "git-fetch", "git-checkout", "node-install", "pnpm-install",
                                   "runtime-verify", "dependencies", "build", "command-verify", "terminal-driver"})
 ZCODE_CONFORMANCE_STAGES = frozenset({"probe-build", "probe-config", "probe-protocol", "probe-native",
-                                     "probe-sessions", "probe-tui", "probe-integration"})
+                                     "probe-sessions", "probe-tui", "probe-integration"}) | {
+    "probe-tui-" + phase for phase in ("startup", "model-ready", "model-persist", "model-notice",
+                                      "provider-request", "answer", "clear-input", "exit")}
 INSTALL_FAILURE_CODES.update("zcode-source-" + stage for stage in ZCODE_INSTALL_STAGES)
 INSTALL_FAILURE_CODES.add("zcode-source-dependencies-rename-missing")
 WINDOWS_INSTALL_CATEGORIES = frozenset({
