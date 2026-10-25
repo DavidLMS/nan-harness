@@ -58,6 +58,7 @@ if os.name == "nt":
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from selection import CLI_HARNESSES, PLATFORMS as HOSTED_PLATFORMS, resolve_model
+from hermes_diagnostics import DIAGNOSTIC_CODES
 
 HARNESSES = CLI_HARNESSES
 SEMVER = re.compile(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?\Z")
@@ -1067,15 +1068,16 @@ HERMES_PROFILE_PHASES = frozenset({"history-create", "history-created-state", "h
 HERMES_PROFILE_DIAGNOSTICS = {
     "NH-HERMES-" + name: name.lower()
     for name in ("LAUNCHER", "PROFILE", "READINESS", "HISTORY", "CLEANUP", "GATEWAY-EXIT", "GATEWAY-DRAIN",
-                 "SUPERVISOR", "SUPERVISOR-IMPORT", "SUPERVISOR-IO", "SUPERVISOR-CONTRACT", "SUPERVISOR-INTERNAL",
-                 "FRONTEND-CONSOLE", "FRONTEND-URI", "FRONTEND-CONNECTION", "FRONTEND-PROTOCOL", "FRONTEND-CREDENTIALS",
-                 "FRONTEND-EXIT-1", "FRONTEND-EXIT-2", "FRONTEND-EXIT-125")
+                 "SUPERVISOR", "SUPERVISOR-IMPORT", "SUPERVISOR-IO", "SUPERVISOR-CONTRACT", "SUPERVISOR-INTERNAL")
 }
 HERMES_PROFILE_DIAGNOSTICS.update({"NH-DISCOVERY-00" + str(index): "discovery-00" + str(index) for index in range(1, 8)})
 HERMES_PROFILE_DIAGNOSTICS.update({"NH-HERMES-READINESS-" + reason.upper(): "readiness-" + reason
     for reason in ("control-absent", "control-access", "control-timeout", "control-protocol", "identity-pid",
                    "identity-home", "identity-supervisor", "runtime-protocol", "runtime-profile", "runtime-authority",
                    "runtime-endpoint", "runtime-state")})
+HERMES_PROFILE_DIAGNOSTICS.update({code: code.removeprefix("NH-HERMES-").lower() for code in DIAGNOSTIC_CODES})
+HERMES_PROFILE_DIAGNOSTICS.update({"NH-HERMES-FRONTEND-EXIT-" + str(code): "frontend-exit-" + str(code)
+                                  for code in (1, 2, 125)})
 
 
 def hermes_profile_probe(args, environment):

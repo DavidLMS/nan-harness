@@ -36,6 +36,35 @@ class Qualification(unittest.TestCase):
             ["NH-HERMES-FRONTEND-CONSOLE", "NH-HERMES-FRONTEND-URI"])
         self.assertTrue(set(native.closed_frontend_diagnostics("Gateway bootstrap timed out"))
                         <= set(cell.HERMES_PROFILE_DIAGNOSTICS))
+        self.assertEqual(native.closed_frontend_diagnostics("[WinError 9999] PrivateError: private value"), [])
+        codes = native.closed_frontend_diagnostics("FileNotFoundError: [WinError 2] private path; managed_worker_hello_timeout")
+        self.assertEqual(codes, ["NH-HERMES-FRONTEND-WINERROR-2", "NH-HERMES-FRONTEND-EXCEPTION-PATH",
+                                 "NH-HERMES-FRONTEND-RPC-MANAGED-WORKER-HELLO-TIMEOUT"])
+        self.assertTrue(set(codes) <= set(cell.HERMES_PROFILE_DIAGNOSTICS))
+
+    def test_only_bounded_declared_managed_profile_logs_are_classified(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory) / "config"
+            logs = config / "hermes-profiles/owned/logs"
+            logs.mkdir(parents=True)
+            # The diagnostic at the head exceeds the read budget and must be absent.
+            (logs / "managed-worker.log").write_bytes(b"AttributeError: private\n" + b"x" * 65536 + b"\n[WinError 2] private path")
+            (logs / "undeclared.log").write_text("PermissionError: private path")
+            foreign = Path(directory) / "native-errors.log"
+            foreign.write_text("[WinError 6] private native state")
+            if os.name != "nt":
+                (logs / "errors.log").symlink_to(foreign)
+            codes = native.managed_profile_diagnostics(config)
+            self.assertEqual(codes, ["NH-HERMES-FRONTEND-WINERROR-2"])
+            self.assertTrue(set(codes) <= set(cell.HERMES_PROFILE_DIAGNOSTICS))
+
+    def test_machine_frontend_progress_is_a_closed_fact(self):
+        for output, expected in [("private synthetic text", "NO-INIT"),
+                                 ('{"type":"system","subtype":"init"}', "INIT-ONLY"),
+                                 ('{"type":"result","session_id":""}', "RESULT-UNBOUND"),
+                                 ('{"type":"result","session_id":"private synthetic id"}', "RESULT-BOUND")]:
+            with self.subTest(expected=expected):
+                self.assertEqual(native.frontend_phase(output), "NH-HERMES-FRONTEND-" + expected)
 
     def test_machine_frontend_is_selected_from_the_installed_version(self):
         for version, modern in [("0.21.0", False), ("0.22.0", True),

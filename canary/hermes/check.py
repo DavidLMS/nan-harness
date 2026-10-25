@@ -17,7 +17,8 @@ import threading
 sys.dont_write_bytecode = True
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "actions"))
-from cell import HERMES_PROFILE_DIAGNOSTICS, PRIVATE_DIAGNOSTIC_LIMIT, ensure_private_directory, private_command, protect_private
+from cell import HERMES_PROFILE_DIAGNOSTICS, ensure_private_directory, private_command, protect_private
+from hermes_diagnostics import PREFIX, bounded_tail, closed_frontend_diagnostics, frontend_phase, managed_profile_diagnostics
 from processes import Gateways
 
 KEY = "synthetic-hermes-native-key"
@@ -26,20 +27,6 @@ LAUNCH_WRAPPER = ("import os,subprocess,sys; os.environ['NAN_API_KEY']='" + KEY
 CHECKS = ["native-state-preserved", "same-session-resume", "bridge-route-rotation",
           "reasoning-effort", "reasoning-disabled", "reasoning-toggle",
           "gateway-cleanup", "automation-isolated"]
-
-
-def closed_frontend_diagnostics(text):
-    """Project known native failures without retaining paths or native messages."""
-    signatures = {
-        "CONSOLE": ("NoConsoleScreenBufferError", "No Windows console found. Are you running cmd.exe?"),
-        "URI": ("invalid uri authority:",),
-        "CONNECTION": ("Gateway connection failed; no local fallback", "Gateway connection/read failed; no local fallback"),
-        "PROTOCOL": ("Gateway bootstrap timed out", "Invalid gateway bootstrap response",
-                     "Gateway bootstrap identity changed; retry launch", "Gateway protocol mismatch; update/restart required"),
-        "CREDENTIALS": ("Error: credentials or agent init failed",),
-    }
-    return ["NH-HERMES-FRONTEND-" + code for code, patterns in signatures.items()
-            if any(pattern in text for pattern in patterns)]
 
 
 class Provider(BaseHTTPRequestHandler):
@@ -172,15 +159,18 @@ def run(args):
         # Windows exec starts a different PID and exits the wrapper. Keep this
         # foreground process alive so its Job is not closed around a live nanh.
         launches += 1
-        def closed_diagnostic(log, _status):
-            log.seek(0)
-            text = log.read(PRIVATE_DIAGNOSTIC_LIMIT).decode(errors="replace")
+        def closed_diagnostic(log, status):
+            text = bounded_tail(log)
             allowed = set(HERMES_PROFILE_DIAGNOSTICS)
             diagnostics.extend(sorted(set(re.findall(r"NH-[A-Z0-9-]+", text)) & allowed))
             diagnostics.extend(closed_frontend_diagnostics(text))
+            if status:
+                diagnostics.append(frontend_phase(text))
         status = private_command([sys.executable, "-c", LAUNCH_WRAPPER, *arguments], root, timeout=150,
                                  environment=environment, allow_failure=True, diagnostic_callback=closed_diagnostic)
         if status != 0:
+            diagnostics.extend(managed_profile_diagnostics(config))
+            diagnostics.append(PREFIX + ("PROVIDER-OBSERVED" if server.requests else "PROVIDER-ABSENT"))
             if status in {1, 2, 125}:
                 diagnostics.append("NH-HERMES-FRONTEND-EXIT-" + str(status))
             raise RuntimeError()
@@ -233,7 +223,8 @@ def run(args):
             shutil.rmtree(root)
     success = set(checks) == set(CHECKS)
     result = {"schemaVersion": 1, "status": "passed" if success else "failed", "checks": CHECKS if success else [],
-              **({} if success else {"phase": phase, "cleanup": "proven" if gone else "unproven", "diagnostics": diagnostics})}
+              **({} if success else {"phase": phase, "cleanup": "proven" if gone else "unproven",
+                                    "diagnostics": list(dict.fromkeys(diagnostics))})}
     write(args.output, json.dumps(result) + "\n")
     return 0 if success else 1
 
