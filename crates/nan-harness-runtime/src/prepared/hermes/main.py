@@ -12,6 +12,18 @@ import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+READINESS_EXIT_CODES = {reason: 90 + index for index, reason in enumerate((
+    "control-absent", "control-access", "control-timeout", "control-protocol",
+    "identity-pid", "identity-home", "identity-supervisor", "runtime-protocol",
+    "runtime-profile", "runtime-authority", "runtime-endpoint", "runtime-state",
+))}
+
+
+class ReadinessFailure(RuntimeError):
+    def __init__(self, reason):
+        self.exit_code = READINESS_EXIT_CODES[reason]
+        super().__init__("NH-HERMES-READINESS-" + reason.upper())
+
 
 def require_absent(home):
     from hermes_cli.gateway_runtime import discover_gateway_endpoint
@@ -23,21 +35,38 @@ def ready(home, pid):
     from hermes_cli.gateway_runtime import discover_gateway_endpoint
     from hermes_cli.gateway_runtime_discovery import query_identify
     deadline = time.monotonic() + 60
+    reason = "control-absent"
     while time.monotonic() < deadline:
         try:
             identity = query_identify(home, timeout=0.2)
-        except (OSError, ValueError):
+        except (OSError, ValueError) as error:
+            if isinstance(error, FileNotFoundError):
+                reason = "control-absent"
+            elif isinstance(error, PermissionError):
+                reason = "control-access"
+            elif isinstance(error, TimeoutError):
+                reason = "control-timeout"
+            else:
+                reason = "control-protocol"
             time.sleep(0.05)
             continue
-        if (identity.get("pid") != pid
-                or Path(identity.get("hermes_home", "")).resolve() != home
-                or identity.get("supervisor") != "external"):
-            raise RuntimeError("owner_identity")
+        if identity.get("pid") != pid:
+            raise ReadinessFailure("identity-pid")
+        if Path(identity.get("hermes_home", "")).resolve() != home:
+            raise ReadinessFailure("identity-home")
+        if identity.get("supervisor") != "external":
+            raise ReadinessFailure("identity-supervisor")
         discovery = discover_gateway_endpoint(home, timeout=0.2)
         if discovery.state == "ready" and discovery.endpoint is not None:
             return discovery.endpoint
+        reason = {
+            "runtime_protocol": "runtime-protocol", "profile_mismatch": "runtime-profile",
+            "session_authority_unavailable": "runtime-authority", "invalid_api_origin": "runtime-endpoint",
+            "invalid_runtime_identity": "runtime-endpoint", "invalid_supervisor": "runtime-endpoint",
+            "control_timeout": "control-timeout", "invalid_control_peer": "control-protocol",
+        }.get(discovery.reason_code, "runtime-state")
         time.sleep(0.05)
-    raise RuntimeError("owner_readiness")
+    raise ReadinessFailure(reason)
 
 
 def require_owned_session(home, session_id):
@@ -180,6 +209,8 @@ def main(arguments):
 if __name__ == "__main__":
     try:
         main(sys.argv[1:])
+    except ReadinessFailure as error:
+        raise SystemExit(error.exit_code) from None
     except Exception as error:
         # Fixed phase only. Native exceptions can contain private configuration.
         category = "IMPORT" if isinstance(error, ImportError) else "IO" if isinstance(error, OSError) else "CONTRACT" if isinstance(error, RuntimeError) else "INTERNAL"

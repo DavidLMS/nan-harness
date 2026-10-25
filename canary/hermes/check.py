@@ -17,7 +17,7 @@ import threading
 sys.dont_write_bytecode = True
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "actions"))
-from cell import ensure_private_directory, private_command, protect_private
+from cell import HERMES_PROFILE_DIAGNOSTICS, ensure_private_directory, private_command, protect_private
 from processes import Gateways
 
 KEY = "synthetic-hermes-native-key"
@@ -161,9 +161,7 @@ def run(args):
         def closed_diagnostic(log, _status):
             log.seek(0)
             text = log.read().decode(errors="replace")
-            allowed = {"NH-HERMES-" + item for item in ("LAUNCHER", "PROFILE", "READINESS", "HISTORY", "CLEANUP", "GATEWAY-EXIT", "GATEWAY-DRAIN",
-                                                         "SUPERVISOR", "SUPERVISOR-IMPORT", "SUPERVISOR-IO", "SUPERVISOR-CONTRACT", "SUPERVISOR-INTERNAL")}
-            allowed |= {"NH-DISCOVERY-00" + str(index) for index in range(1, 8)}
+            allowed = set(HERMES_PROFILE_DIAGNOSTICS)
             diagnostics.extend(sorted(set(re.findall(r"NH-[A-Z0-9-]+", text)) & allowed))
         status = private_command([sys.executable, "-c", LAUNCH_WRAPPER, *arguments], root, timeout=150,
                                  environment=environment, allow_failure=True, diagnostic_callback=closed_diagnostic)

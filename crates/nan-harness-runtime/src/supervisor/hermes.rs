@@ -67,7 +67,7 @@ impl HermesGateway {
         }
         let mut owner = native_command(&command, "owner", &[], plan, prepared, secrets)?;
         owner
-            .env("HERMES_HOME", &profile.home)
+            .env("HERMES_HOME", &profile.native_home)
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
@@ -234,7 +234,7 @@ fn native_command(
     }
     if let Some(profile) = prepared.hermes() {
         let home = if action == "owner" || action == "frontend" {
-            &profile.home
+            &profile.native_home
         } else {
             &profile.bootstrap
         };
@@ -289,6 +289,7 @@ async fn wait_helper(
             }
         } => None,
     };
+    let exit_code = result.as_ref().and_then(ExitStatus::code);
     if result.is_some_and(|status| status.success()) {
         return Ok(());
     }
@@ -298,11 +299,24 @@ async fn wait_helper(
         prepared.retain_workspace();
         return Err(failure("NH-HERMES-HELPER-CLEANUP"));
     }
-    Err(failure(match action {
-        "stage" => "NH-HERMES-PROFILE",
-        "ready" => "NH-HERMES-READINESS",
-        "refresh" => "NH-HERMES-HISTORY",
-        "cleanup" => "NH-HERMES-CLEANUP",
+    // Closed exit codes match READINESS_EXIT_CODES in the embedded native helper.
+    Err(failure(match (action, exit_code) {
+        ("ready", Some(90)) => "NH-HERMES-READINESS-CONTROL-ABSENT",
+        ("ready", Some(91)) => "NH-HERMES-READINESS-CONTROL-ACCESS",
+        ("ready", Some(92)) => "NH-HERMES-READINESS-CONTROL-TIMEOUT",
+        ("ready", Some(93)) => "NH-HERMES-READINESS-CONTROL-PROTOCOL",
+        ("ready", Some(94)) => "NH-HERMES-READINESS-IDENTITY-PID",
+        ("ready", Some(95)) => "NH-HERMES-READINESS-IDENTITY-HOME",
+        ("ready", Some(96)) => "NH-HERMES-READINESS-IDENTITY-SUPERVISOR",
+        ("ready", Some(97)) => "NH-HERMES-READINESS-RUNTIME-PROTOCOL",
+        ("ready", Some(98)) => "NH-HERMES-READINESS-RUNTIME-PROFILE",
+        ("ready", Some(99)) => "NH-HERMES-READINESS-RUNTIME-AUTHORITY",
+        ("ready", Some(100)) => "NH-HERMES-READINESS-RUNTIME-ENDPOINT",
+        ("ready", Some(101)) => "NH-HERMES-READINESS-RUNTIME-STATE",
+        ("stage", _) => "NH-HERMES-PROFILE",
+        ("ready", _) => "NH-HERMES-READINESS",
+        ("refresh", _) => "NH-HERMES-HISTORY",
+        ("cleanup", _) => "NH-HERMES-CLEANUP",
         _ => "NH-HERMES-HELPER",
     }))
 }

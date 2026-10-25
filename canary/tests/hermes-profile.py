@@ -7,7 +7,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -88,6 +88,31 @@ class Qualification(unittest.TestCase):
 
 
 class PrivateFiles(unittest.TestCase):
+    def test_readiness_preserves_closed_control_and_runtime_failure_categories(self):
+        gateway = ModuleType("hermes_cli.gateway_runtime")
+        discovery = ModuleType("hermes_cli.gateway_runtime_discovery")
+        gateway.discover_gateway_endpoint = lambda *_args, **_kwargs: SimpleNamespace(
+            state="incompatible", endpoint=None, reason_code="runtime_protocol")
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory).resolve()
+            discovery.query_identify = lambda *_args, **_kwargs: dict(
+                pid=123, hermes_home=str(home), supervisor="external")
+            modules = {"hermes_cli": ModuleType("hermes_cli"),
+                       "hermes_cli.gateway_runtime": gateway,
+                       "hermes_cli.gateway_runtime_discovery": discovery}
+            with patch.dict(sys.modules, modules), patch.object(runtime.time, "monotonic", side_effect=[0, 1, 61]), patch.object(runtime.time, "sleep"):
+                with self.assertRaises(runtime.ReadinessFailure) as caught:
+                    runtime.ready(home, 123)
+                self.assertEqual(caught.exception.exit_code, runtime.READINESS_EXIT_CODES["runtime-protocol"])
+            def absent(*_args, **_kwargs):
+                raise FileNotFoundError("private synthetic path")
+            discovery.query_identify = absent
+            with patch.dict(sys.modules, modules), patch.object(runtime.time, "monotonic", side_effect=[0, 1, 61]), patch.object(runtime.time, "sleep"):
+                with self.assertRaises(runtime.ReadinessFailure) as caught:
+                    runtime.ready(home, 123)
+                self.assertEqual(caught.exception.exit_code, runtime.READINESS_EXIT_CODES["control-absent"])
+                self.assertNotIn("private", str(caught.exception))
+
     def test_routing_cannot_be_overridden_or_bypassed_after_native_parsing(self):
         runtime.require_creation_routing(SimpleNamespace(reasoning="high"))
         for field, value in [("provider", "other"), ("model", "other"), ("api_key", "synthetic"),

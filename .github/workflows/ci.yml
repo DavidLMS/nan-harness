@@ -126,6 +126,8 @@ jobs:
         run: cargo test --locked -p nan-harness-adapters --all-features --lib --test direct hermes
       - name: Verify Hermes qualification process lifetime on Windows
         run: python.exe -B canary/tests/hermes-profile.py
+      - name: Verify Hermes native profile path interoperability on Windows
+        run: cargo test --locked -p nan-harness-runtime --all-features --lib prepared::hermes::native_path
       - name: Verify Windows local search installation and lifecycle
         shell: pwsh
         run: |

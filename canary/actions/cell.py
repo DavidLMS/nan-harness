@@ -1071,6 +1071,10 @@ HERMES_PROFILE_DIAGNOSTICS = {
                  "FRONTEND-EXIT-1", "FRONTEND-EXIT-2", "FRONTEND-EXIT-125")
 }
 HERMES_PROFILE_DIAGNOSTICS.update({"NH-DISCOVERY-00" + str(index): "discovery-00" + str(index) for index in range(1, 8)})
+HERMES_PROFILE_DIAGNOSTICS.update({"NH-HERMES-READINESS-" + reason.upper(): "readiness-" + reason
+    for reason in ("control-absent", "control-access", "control-timeout", "control-protocol", "identity-pid",
+                   "identity-home", "identity-supervisor", "runtime-protocol", "runtime-profile", "runtime-authority",
+                   "runtime-endpoint", "runtime-state")})
 
 
 def hermes_profile_probe(args, environment):

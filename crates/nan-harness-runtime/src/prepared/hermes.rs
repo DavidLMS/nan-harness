@@ -11,6 +11,8 @@ use std::fs::{self, File};
 use std::io::{self, Read as _, Write as _};
 use std::path::{Path, PathBuf};
 mod files;
+#[cfg(windows)]
+mod native_path;
 
 /// Even --version can normalize native configuration. Borrow dependencies into
 /// an empty home before invoking it, so discovery cannot rewrite the user's home.
@@ -46,6 +48,7 @@ fn borrow_dependencies(source: &Path, home: &Path) -> io::Result<()> {
 pub(crate) struct ManagedProfile {
     _lease: File,
     pub(crate) home: PathBuf,
+    pub(crate) native_home: PathBuf,
     pub(crate) scripts: PathBuf,
     pub(crate) bootstrap: PathBuf,
     overlay: PathBuf,
@@ -61,6 +64,7 @@ impl ManagedProfile {
         Self {
             _lease: File::create(home.join("lease")).expect("fixture lease"),
             bootstrap: home.clone(),
+            native_home: home.clone(),
             home,
             scripts,
             overlay,
@@ -168,9 +172,13 @@ fn prepare_gateway(
         open_private_new(&scripts.join(name))?.write_all(content.as_bytes())?;
     }
     let home = fs::canonicalize(home)?;
+    #[cfg(windows)]
+    let native_home = native_path::for_sdk(&home)?;
+    #[cfg(not(windows))]
+    let native_home = home.clone();
     environment.insert(
         "NAN_HARNESS_HERMES_MANAGED_HOME".into(),
-        home.to_string_lossy().into(),
+        native_home.to_string_lossy().into(),
     );
     environment.insert("PYTHONDONTWRITEBYTECODE".into(), "1".into());
     let bootstrap = workspace.root().join("hermes-bootstrap");
@@ -187,6 +195,7 @@ fn prepare_gateway(
     Ok(ManagedProfile {
         _lease: lease,
         home,
+        native_home,
         scripts,
         overlay,
         bootstrap,
