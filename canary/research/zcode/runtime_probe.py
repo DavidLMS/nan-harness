@@ -264,6 +264,11 @@ class Runtime:
                 and self.scenario.requests[-1]["model"] == "synthetic-second"
             )
             wait_for(lambda: b"NATIVE_PROBE_OK" in output)
+            # ZCode can retain the submitted draft. Its first Ctrl-C then clears
+            # input instead of arming exit; use the native clear command first.
+            clear_boundary = len(output)
+            terminal.write(b"\x15")
+            wait_for(lambda: b"Type a prompt" in output[clear_boundary:])
             terminal.write(b"\x03")
             time.sleep(0.2)
             if terminal.alive():

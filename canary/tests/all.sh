@@ -41,7 +41,7 @@ for test_script in \
   daily-compatibility.py \
   omp-usage-comparison.py \
   cli-resolution.py \
-  zcode-source.py \
+  zcode-source.py zcode-runtime.py \
   cli-execution.py \
   deepseek-install-diagnostic.py \
   gentle-shell.py \
