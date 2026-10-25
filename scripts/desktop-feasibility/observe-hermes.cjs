@@ -142,7 +142,7 @@ async function driveDom() {
     retryPointerEventsNone: false, retryHitTag: 'unmeasured', retryHitRegion: 'unmeasured',
     retryFocusAfterAcquire: false, retryFocusBeforeAction: false, retryButtonConnected: false,
     retryAncestorHidden: false, retryAncestorInert: false, retryFieldsetDisabled: false,
-    retryDocumentFocused: false, retryActiveTag: 'unmeasured', retryActiveRegion: 'unmeasured', retryHitOwnedPoints: 0, retryPointStable: false, retrySampleStatus: 'unmeasured', retryHitAncestor: false, retryHitSharesTurnPair: false, retryHitContainsComposer: false, retryReveal: 'none' });
+    retryDocumentFocused: false, retryActiveTag: 'unmeasured', retryActiveRegion: 'unmeasured', retryHitOwnedPoints: 0, retryPointStable: false, retrySampleStatus: 'unmeasured', retryScopeFailure: null, retryHitAncestor: false, retryHitSharesTurnPair: false, retryHitContainsComposer: false, retryReveal: 'none' });
   saveFacts();
   const exactKeys = (value, keys) => value && typeof value === 'object' && !Array.isArray(value) &&
     Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
@@ -370,22 +370,34 @@ async function driveDom() {
       const users = pair?.querySelectorAll('[data-role="user"]');
       return { alert, pair, user: users?.length === 1 ? users[0] : null, document: alert.ownerDocument };
     });
-    retainedScope = async () => await errorCards.count() === 1
-      && await errorCards.evaluate((alert, held) => {
+    const scopeFailure = reason => { facts.retryScopeFailure = reason; return false; };
+    retainedScope = async () => {
+      if (await errorCards.count() !== 1) return scopeFailure('error-turn');
+      const reason = await errorCards.evaluate((alert, held) => {
         const pair = alert.closest('[data-slot="aui_turn-pair"]');
         const users = pair?.querySelectorAll('[data-role="user"]');
-        return alert === held.alert && alert.isConnected && pair?.isConnected
-          && alert.ownerDocument === held.document && held.document === document && pair === held.pair
-          && users?.length === 1 && users[0] === held.user && held.user.isConnected;
+        if (alert.ownerDocument !== held.document || held.document !== document) return 'document-changed';
+        if (pair !== held.pair || !pair?.isConnected) return 'pair-changed';
+        if (users?.length !== 1 || users[0] !== held.user || !held.user.isConnected) return 'user-changed';
+        if (alert !== held.alert || !alert.isConnected) return 'alert-changed';
+        return null;
       }, retryScope);
+      return reason === null || scopeFailure(reason);
+    };
     let first;
     let second;
     let revealAttempted = false;
-    const reprove = async () => ownedEndpoint() && await send.count() === 1 && await send.isEnabled()
-      && await retryUser.count() === 1
-      && await retryUser.evaluate((e, prompt) => e.innerText.trim() === prompt, request.prompt)
-      && await errorProof() && await retainedScope()
-      && await send.evaluate((button, sampled) => button === sampled, retryHandle);
+    const reprove = async () => {
+      if (!ownedEndpoint()) return scopeFailure('endpoint');
+      if (await send.count() !== 1) return scopeFailure('retry-count');
+      if (!await send.isEnabled()) return scopeFailure('retry-disabled');
+      if (await retryUser.count() !== 1) return scopeFailure('user-count');
+      if (!await retryUser.evaluate((e, prompt) => e.innerText.trim() === prompt, request.prompt)) return scopeFailure('user-text');
+      if (!await errorProof()) return scopeFailure('error-turn');
+      if (!await retainedScope()) return false;
+      if (!await send.evaluate((button, sampled) => button === sampled, retryHandle)) return scopeFailure('retry-changed');
+      return true;
+    };
     while (Date.now() < settleDeadline) {
       if (!await reprove()) { facts.errorCategory = 'send-unavailable'; saveFacts(); return; }
       first = await retryHandle.evaluate(sampleRetryInterior);
@@ -453,7 +465,7 @@ async function driveDom() {
         }
         facts.retryReveal = 'onboarding-skipped';
         retryHandle = await send.elementHandle();
-        if (!retryHandle) { facts.errorCategory = 'send-unavailable'; saveFacts(); return; }
+        if (!retryHandle) { scopeFailure('retry-missing'); facts.errorCategory = 'send-unavailable'; saveFacts(); return; }
         continue;
       }
       if (second.closed.frontRegion === 'command-backdrop' && !revealAttempted) {

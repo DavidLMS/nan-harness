@@ -268,7 +268,10 @@ impl WindowsChatStage {
         // Readiness performs no input. A unique failed turn can be observed
         // again if its retained control changes during the fresh scope check.
         // This does not permit repeating Copy, disclosure, or Retry actions.
-        self.recovery_preinvoke_pending(counts)
+        // TreeType is an incomplete heading-property read before action selection.
+        // Discard it only in this input-free query; Retry still proves a fresh scope.
+        self == Self::TreeType
+            || self.recovery_preinvoke_pending(counts)
             || (self == Self::Control && counts.is_some_and(FailureScopeCounts::single_failed_turn))
     }
 
@@ -474,6 +477,9 @@ mod tests {
         assert!(receipt.stage.retry_readiness_pending(Some(&counts)));
         assert!(!receipt.stage.recovery_preinvoke_pending(Some(&counts)));
         assert!(!receipt.stage.retry_readiness_pending(None));
+        assert!(S::TreeType.retry_readiness_pending(None));
+        assert!(!S::TreeType.passive_pending());
+        assert!(!S::TreeType.recovery_preinvoke_pending(Some(&counts)));
         for field in 0..6 {
             for value in [0, 2] {
                 let mut invalid = counts.clone();

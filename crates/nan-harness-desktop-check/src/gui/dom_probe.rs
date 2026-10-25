@@ -345,9 +345,32 @@ enum RetryReveal {
     OnboardingSkipped,
 }
 
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum RetryScopeFailure {
+    Endpoint,
+    RetryCount,
+    RetryDisabled,
+    RetryMissing,
+    RetryChanged,
+    UserCount,
+    UserText,
+    ErrorTurn,
+    DocumentChanged,
+    PairChanged,
+    UserChanged,
+    AlertChanged,
+}
+
 #[derive(Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct RetrySampleFacts {
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "retryScopeFailure"
+    )]
+    scope_failure: Option<RetryScopeFailure>,
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
@@ -559,10 +582,13 @@ fn read_facts(path: &Path, qualification: bool) -> Result<Facts, Reason> {
         0
     };
     let count = (24 + extra)..=(26 + extra);
-    if !count.contains(&object.len())
+    let optional_scope = usize::from(object.contains_key("retryScopeFailure"));
+    if (!qualification && optional_scope != 0)
+        || !count.contains(&(object.len() - optional_scope))
         || object.keys().any(|key| {
             !DOM_FACT_KEYS.contains(&key.as_str())
                 && !DOM_QUALIFICATION_KEYS.contains(&key.as_str())
+                && key != "retryScopeFailure"
         })
     {
         return Err(Reason::IsolationUnavailable);
@@ -1474,6 +1500,16 @@ mod tests {
         focus_facts(&mut qualifier);
         assert!(read(&qualifier, true).is_ok());
         assert!(read(&qualifier, false).is_err());
+        qualifier["retryScopeFailure"] = json!(null);
+        assert!(read(&qualifier, true).is_ok());
+        qualifier["retryScopeFailure"] = json!("alert-changed");
+        assert!(read(&qualifier, true).is_ok());
+        qualifier["retryScopeFailure"] = json!("PRIVATE");
+        assert!(read(&qualifier, true).is_err());
+        qualifier
+            .as_object_mut()
+            .unwrap()
+            .remove("retryScopeFailure");
         qualifier["retryControl"] = serde_json::Value::Null;
         assert!(read(&qualifier, true).is_err());
     }

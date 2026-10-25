@@ -399,10 +399,12 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
   assert.equal(remount.retryHandles, 2);
   assert.equal(remount.keys, 0);
   assert.equal(remount.fills, 0);
+  const scopeReasons = { 'sampling-remount-alert': 'alert-changed', 'sampling-remount-pair': 'pair-changed', 'sampling-remount-user': 'user-changed' };
   for (const scenario of ['sampling-remount-again', 'sampling-remount-alert', 'sampling-remount-document', 'sampling-remount-pair', 'sampling-remount-user']) {
     const rejected = await trial({ ...retryRequest, timeoutMs: 900 }, {}, scenario, true);
     assert.equal(rejected.clicks, 0, scenario);
     assert.equal(rejected.keys, 0, scenario);
+    if (scopeReasons[scenario]) assert.equal(rejected.facts.retryScopeFailure, scopeReasons[scenario], scenario);
   }
   const expiredRemount = await trial({ ...retryRequest, timeoutMs: 150 }, {}, 'sampling-remount', true);
   assert.equal(expiredRemount.clicks, 0);
