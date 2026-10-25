@@ -128,13 +128,14 @@ fn opencode_base_arguments(prompt: &str) -> Vec<OsString> {
 }
 
 fn hermes_base_arguments(prompt: &str) -> Vec<OsString> {
+    // The runner supplies an isolated home with only the staged NaN integration.
+    // Hermes safe mode disables provider plugins in its managed workers.
     vec![
         "chat".into(),
         "--query".into(),
         prompt.to_owned().into(),
         "--quiet".into(),
         "--yolo".into(),
-        "--safe-mode".into(),
         "--source".into(),
         "tool".into(),
         "--max-turns".into(),

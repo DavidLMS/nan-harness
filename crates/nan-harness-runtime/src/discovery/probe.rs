@@ -29,6 +29,25 @@ pub(crate) fn run_command(executable: &Path, arguments: &[&str]) -> Result<Outpu
     run_bounded(executable, arguments, PROBE_TIMEOUT, OUTPUT_LIMIT)
 }
 
+pub(super) fn run_hermes_version(
+    executable: &Path,
+    arguments: &[&str],
+) -> Result<Output, ProbeError> {
+    let mut home = crate::prepared::hermes_version_home()?;
+    let result = run_scoped(
+        executable,
+        arguments,
+        PROBE_TIMEOUT,
+        OUTPUT_LIMIT,
+        None,
+        Some(home.path()),
+    );
+    if result.is_err() {
+        home.disable_cleanup(true);
+    }
+    result
+}
+
 pub(crate) fn run_config_command(
     executable: &Path,
     arguments: &[&str],
@@ -59,6 +78,24 @@ fn run_bounded_in(
     output_limit: usize,
     directory: Option<&Path>,
 ) -> Result<Output, ProbeError> {
+    run_scoped(
+        executable,
+        arguments,
+        timeout,
+        output_limit,
+        directory,
+        None,
+    )
+}
+
+fn run_scoped(
+    executable: &Path,
+    arguments: &[&str],
+    timeout: Duration,
+    output_limit: usize,
+    directory: Option<&Path>,
+    hermes_home: Option<&Path>,
+) -> Result<Output, ProbeError> {
     let deadline = Instant::now() + timeout;
     // Discovery has a synchronous API, including callers already inside a Tokio runtime. A scoped
     // worker owns this small runtime; there are no blocking pipe readers to outlive the deadline.
@@ -75,6 +112,7 @@ fn run_bounded_in(
                         deadline,
                         output_limit,
                         directory,
+                        hermes_home,
                     ))
             })?
             .join()
@@ -88,9 +126,11 @@ async fn run(
     deadline: Instant,
     output_limit: usize,
     directory: Option<&Path>,
+    hermes_home: Option<&Path>,
 ) -> Result<Output, ProbeError> {
-    let mut child = spawn_with_retry(deadline, || {
-        child::ProbeChild::spawn(executable, arguments, directory)
+    let mut child = spawn_with_retry(deadline, || match hermes_home {
+        Some(home) => child::ProbeChild::spawn_hermes(executable, arguments, home),
+        None => child::ProbeChild::spawn(executable, arguments, directory),
     })
     .await?;
     let result =

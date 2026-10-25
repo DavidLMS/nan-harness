@@ -14,6 +14,9 @@ pub use catalogs::{
     zcode_provider_config,
 };
 mod deepseek;
+mod hermes;
+pub(crate) use hermes::ManagedProfile;
+pub(crate) use hermes::version_home as hermes_version_home;
 mod pipeline;
 mod values;
 
@@ -33,6 +36,7 @@ pub(crate) struct PreparedLaunch {
     public_environment: BTreeMap<String, String>,
     runtime_secrets: BTreeMap<SecretRef, Arc<SecretValue>>,
     workspace: TemporaryWorkspace,
+    hermes: Option<ManagedProfile>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -57,13 +61,25 @@ impl PreparedLaunch {
         model_catalog: Option<&[CodingModelProfile]>,
         provider_secrets: &SecretStore,
     ) -> Result<Self, PreparedError> {
-        pipeline::prepare(
+        let client_base_url = bridge
+            .as_ref()
+            .and_then(|value| value.client_base_url.as_deref())
+            .unwrap_or(provider_base_url)
+            .to_owned();
+        let mut prepared = pipeline::prepare(
             plan,
             provider_base_url,
             bridge,
             model_catalog,
             provider_secrets,
-        )
+        )?;
+        prepared.hermes = hermes::prepare(
+            plan,
+            &prepared.workspace,
+            &mut prepared.public_environment,
+            &client_base_url,
+        )?;
+        Ok(prepared)
     }
 
     pub(crate) fn arguments(&self) -> &[String] {
@@ -93,6 +109,41 @@ impl PreparedLaunch {
 
     pub(crate) fn artifact_path(&self, artifact_id: &str) -> Option<PathBuf> {
         self.workspace.path(artifact_id).map(Path::to_path_buf)
+    }
+
+    pub(crate) fn hermes(&self) -> Option<&ManagedProfile> {
+        self.hermes.as_ref()
+    }
+
+    pub(crate) fn retain_workspace(&self) {
+        self.workspace.mark_uncertain();
+    }
+
+    pub(crate) fn arm_cleanup(&self) {
+        self.workspace.retain();
+    }
+
+    pub(crate) fn cleanup_uncertain(&self) -> bool {
+        self.workspace.cleanup_uncertain()
+    }
+
+    pub(crate) fn release_workspace(&self) {
+        self.workspace.release();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_hermes_fixture(mut self, home: PathBuf) -> Self {
+        let scripts = self.workspace.root().to_owned();
+        self.public_environment.insert(
+            "NAN_HARNESS_HERMES_MANAGED_HOME".into(),
+            home.to_string_lossy().into(),
+        );
+        self.public_environment.insert(
+            "NAN_HARNESS_HERMES_SCRIPTS".into(),
+            scripts.to_string_lossy().into(),
+        );
+        self.hermes = Some(ManagedProfile::fixture(home, scripts));
+        self
     }
 }
 

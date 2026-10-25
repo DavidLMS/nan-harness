@@ -3,6 +3,9 @@ mod bridge_setup;
 mod direct;
 mod error;
 mod fx;
+mod hermes;
+#[cfg(all(test, unix))]
+mod hermes_tests;
 mod lifecycle;
 mod preparation;
 mod report;

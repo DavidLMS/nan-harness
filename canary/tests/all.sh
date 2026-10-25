@@ -42,6 +42,7 @@ for test_script in \
   omp-usage-comparison.py \
   cli-resolution.py \
   zcode-source.py zcode-runtime.py \
+  hermes-profile.py \
   cli-execution.py \
   deepseek-install-diagnostic.py \
   gentle-shell.py \

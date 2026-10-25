@@ -117,6 +117,7 @@ pub(super) fn prepare(
         public_environment,
         runtime_secrets,
         workspace,
+        hermes: None,
     })
 }
 

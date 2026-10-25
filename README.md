@@ -53,6 +53,12 @@ trying to install one. When a Windows build becomes available, you can try it
 with `nanh <harness> --executable <path>`; the usual version and launch checks
 still apply. Linux and macOS launches are unchanged.
 
+With Hermes 0.22 or newer, `nanh hermes` keeps conversations in a separate,
+persistent NaN profile. Native resume and continue commands reopen that profile's
+history. Your usual Hermes conversations, settings and automation remain in
+their original home. Each launch refreshes the NaN connection and closes its
+owned foreground gateway before removing the temporary connection settings.
+
 `nanh mimo` (alias `nanh mimo-code`) launches MiMo Code with the selected NaN
 model for the main agent, model tiers and auxiliary requests. It injects the
 provider configuration for that process and keeps MiMo's existing session home.

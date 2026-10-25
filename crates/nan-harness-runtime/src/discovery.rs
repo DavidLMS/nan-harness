@@ -7,6 +7,7 @@ mod manifest;
 mod probe;
 pub(crate) use probe::run_config_command as run_bounded_config_command;
 mod version_policy;
+pub(crate) use version_policy::parse_version;
 mod warnings;
 use nan_harness_i18n::{Locale, TerminalMessage};
 pub use warnings::DiscoveryWarning;
@@ -80,15 +81,19 @@ pub fn inspect_harness(
     let version_arguments = executable::version_arguments(entry)?;
 
     let version_command = format!("{} {}", executable.display(), version_arguments.join(" "));
-    let output =
-        executable::run_command(executable, &version_arguments).map_err(|error| match error {
-            probe::ProbeError::Timeout => DiscoveryError::VersionProbeTimeout,
-            probe::ProbeError::OutputLimit => DiscoveryError::VersionProbeOutputLimit,
-            probe::ProbeError::Io(source) => DiscoveryError::VersionCommand {
-                command: version_command.clone(),
-                source,
-            },
-        })?;
+    let probe = if kind == HarnessKind::Hermes {
+        probe::run_hermes_version(executable, &version_arguments)
+    } else {
+        executable::run_command(executable, &version_arguments)
+    };
+    let output = probe.map_err(|error| match error {
+        probe::ProbeError::Timeout => DiscoveryError::VersionProbeTimeout,
+        probe::ProbeError::OutputLimit => DiscoveryError::VersionProbeOutputLimit,
+        probe::ProbeError::Io(source) => DiscoveryError::VersionCommand {
+            command: version_command.clone(),
+            source,
+        },
+    })?;
     if !output.status.success() {
         return Err(DiscoveryError::VersionCommandFailed {
             command: version_command,
@@ -98,7 +103,7 @@ pub fn inspect_harness(
     }
 
     let detected_version = executable::harness_version(kind, &output.stdout, &output.stderr);
-    let parsed_version = version_policy::parse_version(&detected_version);
+    let parsed_version = parse_version(&detected_version);
     let version_status = match parsed_version.as_ref() {
         Some(version) => manifest
             .classify(kind, version)

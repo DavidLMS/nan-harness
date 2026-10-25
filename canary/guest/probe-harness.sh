@@ -152,7 +152,7 @@ case "$harness" in
     hermes_prompt="You must call write_file exactly once to create '$target' with exactly NAN_HERMES_TOOL_OK. Do not reply before the tool succeeds. Then reply exactly NAN_CANARY_OK."
     export BFL_API_KEY='' ELEVENLABS_API_KEY='' FAL_KEY='' OPENAI_API_KEY='' XAI_API_KEY=''
     "$nan_command" hermes --model "$model" -- \
-      chat --query "$hermes_prompt" --toolsets file --quiet --yolo --safe-mode \
+      chat --query "$hermes_prompt" --toolsets file --quiet --yolo \
       --source tool --max-turns 5 \
       >"$output" 2>"$stderr_output"
     probe_stage='tool-evidence'

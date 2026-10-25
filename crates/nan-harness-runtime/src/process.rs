@@ -40,6 +40,26 @@ pub(crate) struct ManagedChild {
 }
 
 impl ManagedChild {
+    pub(crate) fn take_stdout(&mut self) -> Option<tokio::process::ChildStdout> {
+        #[cfg(not(windows))]
+        {
+            self.inner.stdout.take()
+        }
+        #[cfg(windows)]
+        {
+            self.inner.stdout().take()
+        }
+    }
+    pub(crate) fn take_stdin(&mut self) -> Option<tokio::process::ChildStdin> {
+        #[cfg(not(windows))]
+        {
+            self.inner.stdin.take()
+        }
+        #[cfg(windows)]
+        {
+            self.inner.stdin().take()
+        }
+    }
     pub(crate) fn id(&self) -> Option<u32> {
         self.inner.id()
     }
@@ -96,7 +116,7 @@ impl From<Child> for ManagedChild {
     }
 }
 
-fn spawn_managed(command: Command) -> io::Result<ManagedChild> {
+pub(crate) fn spawn_managed(command: Command) -> io::Result<ManagedChild> {
     #[cfg(not(windows))]
     {
         let mut command = command;
@@ -237,7 +257,7 @@ impl HostedChild {
     }
 }
 
-fn prepare_command(
+pub(crate) fn prepare_command(
     plan: &LaunchPlan,
     prepared: &PreparedLaunch,
     secrets: &SecretStore,

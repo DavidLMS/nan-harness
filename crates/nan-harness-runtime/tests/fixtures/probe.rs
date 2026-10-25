@@ -30,6 +30,16 @@ fn main() {
         }
     }
     match mode {
+        "hermes-version-home" => {
+            let home = std::path::PathBuf::from(env::var_os("HERMES_HOME").unwrap());
+            assert!(home.file_name().unwrap().to_string_lossy().starts_with("nan-harness-hermes-version-"));
+            assert_eq!(env::var("HERMES_PROFILE").unwrap(), "default");
+            assert!(env::var_os("NAN_API_KEY").is_none());
+            assert!(fs::read_to_string(home.join("config.yaml")).unwrap().contains("check: false"));
+            fs::write(home.join("normalized-config"), "synthetic").unwrap();
+            println!("Hermes Agent v0.22.5");
+            println!("{}", home.display());
+        }
         "success" => println!("codex 0.153.4"),
         "stderr" => eprintln!("codex 0.153.4"),
         "nonzero" => process::exit(17),

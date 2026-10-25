@@ -1,12 +1,11 @@
 use super::bridge_setup::{BoundBridgeEndpoint, generate_session_token};
-use super::lifecycle::{run_bridged_child, wait_for_child};
+use super::lifecycle::{run_bridged_child, run_plain_child};
 use super::preparation::PreparedHarnessLaunch;
 use super::report::{bridged_report, report};
 use super::session::copy_secret;
 use super::{ExecutionReport, RuntimeError};
 use crate::config::ResolvedConfig;
 use crate::prepared::BridgePreparation;
-use crate::process::spawn_child;
 use crate::search_supervisor::SearchSupervisor;
 use crate::signals::CancellationToken;
 use nan_harness_bridge::{ChatCompletionsBridgeConfig, spawn_chat_completions};
@@ -98,8 +97,7 @@ pub(super) async fn execute_direct_without_gateway(
         discovered_models,
         &config.secrets,
     )?;
-    let mut child = spawn_child(plan, &launch.prepared, &config.secrets)?;
-    let completion = wait_for_child(&mut child, plan, cancellation).await?;
+    let completion = run_plain_child(plan, &launch.prepared, &config.secrets, cancellation).await?;
     Ok(report(
         plan,
         completion,

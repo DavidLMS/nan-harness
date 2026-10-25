@@ -688,7 +688,18 @@ impl HarnessAdapter for HermesAdapter {
     }
 
     fn plan(&self, context: &PlanContext) -> Result<LaunchPlan, PlanError> {
-        validate_routing_arguments(&context.user_arguments, &["--model", "-m", "--provider"])?;
+        validate_routing_arguments(
+            &context.user_arguments,
+            &[
+                "--model",
+                "-m",
+                "--provider",
+                "--profile",
+                "-p",
+                "--base-url",
+                "--api-key",
+            ],
+        )?;
         let mut public_environment = provider_environment();
         public_environment.insert("HERMES_HOME".to_owned(), CONFIG_PATH.to_owned());
         let mut arguments = vec![
@@ -723,6 +734,17 @@ impl HarnessAdapter for HermesAdapter {
                             context.media,
                         ))
                         .chain(hermes_media_overlay_files(context.media))
+                        .chain(std::iter::once(OverlayFile {
+                            // Canonical profiles consume only this owned patch,
+                            // never the overlay's merged native configuration.
+                            path: ".nanh-launch.yaml".to_owned(),
+                            mode: TemporaryArtifactMode::OwnerFile,
+                            content_template: hermes_config_template(
+                                context.context_limit.as_ref(),
+                                context.media,
+                            ),
+                            policy: OverlayFilePolicy::Replace,
+                        }))
                         .collect(),
                     lifecycle: ArtifactLifecycle::Launch,
                 }],

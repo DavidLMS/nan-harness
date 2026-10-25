@@ -1059,6 +1059,45 @@ def gentle_probe(args, *, live=False):
     return 1
 
 
+HERMES_PROFILE_CHECKS = ["native-state-preserved", "same-session-resume", "bridge-route-rotation",
+                         "reasoning-effort", "reasoning-disabled", "reasoning-toggle",
+                         "gateway-cleanup", "automation-isolated"]
+HERMES_PROFILE_PHASES = frozenset({"history-create", "history-resume", "reasoning-effort",
+                                  "reasoning-disabled", "reasoning-toggle", "native-state", "cleanup"})
+
+
+def hermes_profile_probe(args, environment):
+    report = args.directory / "hermes-profile-private.json"
+    report.unlink(missing_ok=True)
+    executable = shutil.which("hermes", path=environment["PATH"])
+    if executable is None:
+        raise ConformanceFailure("conformance-hermes-unavailable", 1)
+    try:
+        status = private_command([
+            sys.executable, "-B", str(ROOT / "canary/hermes/check.py"), "--nanh", str(args.binary),
+            "--hermes", executable, "--output", str(report),
+        ], args.directory, timeout=900, environment=environment, allow_failure=True)
+        if report.stat().st_size > 4096:
+            raise ValueError()
+        result = json.loads(report.read_bytes())
+        if (status == 0 and isinstance(result, dict) and type(result.get("schemaVersion")) is int
+                and result == {"schemaVersion": 1, "status": "passed", "checks": HERMES_PROFILE_CHECKS}):
+            return
+        if (isinstance(result, dict) and type(result.get("schemaVersion")) is int and result.get("schemaVersion") == 1 and result.get("status") == "failed"
+                and result.get("phase") in HERMES_PROFILE_PHASES):
+            phase = "cleanup" if result.get("cleanup") == "unproven" else result["phase"]
+            raise ConformanceFailure("conformance-hermes-" + phase + "-exit-nonzero", 1)
+        raise ValueError()
+    except StageTimeout:
+        raise ConformanceFailure("conformance-hermes-timeout", 1) from None
+    except OSError:
+        raise ConformanceFailure("conformance-hermes-unavailable", 1) from None
+    except (ValueError, TypeError, AttributeError):
+        raise ConformanceFailure("conformance-hermes-report-invalid", 1) from None
+    finally:
+        report.unlink(missing_ok=True)
+
+
 def conformance(args, state):
     """Deterministic conformance only certifies success; its failures stay blocked.
 
@@ -1071,6 +1110,10 @@ def conformance(args, state):
         return gentle_probe(args)
     report = args.directory / "conformance-private.json"
     environment = cell_environment(args.directory)
+    if args.harness == "hermes":
+        version = re.search(r"\b(\d+)\.(\d+)\.(\d+)\b", str(state.get("harness", {}).get("version", "")))
+        if version and tuple(map(int, version.groups())) >= (0, 22, 0):
+            hermes_profile_probe(args, environment)
     if args.harness == "zcode":
         marker = args.directory / "zcode-source-failure.json"
         marker.unlink(missing_ok=True)

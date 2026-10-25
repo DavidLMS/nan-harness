@@ -9,6 +9,9 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Keep Hermes canonical-gateway conversations in a separate persistent NaN
+  profile, supervise its foreground gateway through cleanup, and preserve
+  continuation across fresh bridge endpoints without changing native user state.
 - Fix the ZCode source compatibility probe's exit sequence when the TUI retains
   submitted input, and handle terminal EOF without skipping process-exit checks.
 - Update TLS certificate validation and bundled roots to address
