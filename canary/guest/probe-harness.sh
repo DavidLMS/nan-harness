@@ -151,9 +151,11 @@ case "$harness" in
     target="$workspace/hermes-tool.txt"
     hermes_prompt="You must call write_file exactly once to create '$target' with exactly NAN_HERMES_TOOL_OK. Do not reply before the tool succeeds. Then reply exactly NAN_CANARY_OK."
     export BFL_API_KEY='' ELEVENLABS_API_KEY='' FAL_KEY='' OPENAI_API_KEY='' XAI_API_KEY=''
-    "$nan_command" hermes --model "$model" -- \
-      chat --query "$hermes_prompt" --toolsets file --quiet --yolo \
-      --source tool --max-turns 5 \
+    hermes_arguments=(chat --query "$hermes_prompt" --toolsets file --quiet --yolo --source tool --max-turns 5)
+    if [ "${NAN_CANARY_HERMES_STREAM_JSON:-}" = 1 ]; then
+      hermes_arguments+=(--format stream-json)
+    fi
+    "$nan_command" hermes --model "$model" -- "${hermes_arguments[@]}" \
       >"$output" 2>"$stderr_output"
     probe_stage='tool-evidence'
     grep -Fx 'NAN_HERMES_TOOL_OK' "$target" >/dev/null

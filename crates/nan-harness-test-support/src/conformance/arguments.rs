@@ -20,9 +20,13 @@ pub(crate) fn headless_arguments(
     run_kind: &RunKind,
     marker: &str,
     workspace: &Path,
+    hermes_stream_json: bool,
 ) -> Vec<OsString> {
     let prompt = headless_prompt(run_kind, marker);
     let mut arguments = headless_base_arguments(kind, run_kind, &prompt, workspace);
+    if kind == HarnessKind::Hermes && hermes_stream_json {
+        arguments.extend(["--format".into(), "stream-json".into()]);
+    }
     if kind == HarnessKind::ClaudeCode {
         append_claude_arguments(&mut arguments, run_kind);
     }

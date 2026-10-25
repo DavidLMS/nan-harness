@@ -41,6 +41,7 @@ pub enum ConformanceError {
 pub struct PublishedConformanceRunner {
     nan_harness: PathBuf,
     harness: HarnessKind,
+    hermes_stream_json: bool,
 }
 
 impl PublishedConformanceRunner {
@@ -56,7 +57,15 @@ impl PublishedConformanceRunner {
         Self {
             nan_harness,
             harness,
+            hermes_stream_json: false,
         }
+    }
+
+    /// Select Hermes 0.22's native machine frontend instead of its console UI.
+    #[must_use]
+    pub fn with_hermes_stream_json(mut self, enabled: bool) -> Self {
+        self.hermes_stream_json = enabled;
+        self
     }
 
     /// Runs the deterministic published-release contracts.
@@ -143,6 +152,7 @@ impl PublishedConformanceRunner {
             &kind,
             marker,
             workspace.path(),
+            self.hermes_stream_json,
         ));
         let home = workspace.path().join("home");
         fs::create_dir_all(&home).map_err(ConformanceError::Environment)?;

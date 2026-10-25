@@ -58,7 +58,13 @@ fn cline_headless_arguments_are_exact_for_every_run_kind() {
         };
 
         assert_eq!(
-            headless_arguments(HarnessKind::Cline, &run_kind, marker, workspace.path()),
+            headless_arguments(
+                HarnessKind::Cline,
+                &run_kind,
+                marker,
+                workspace.path(),
+                false
+            ),
             cline_expected_arguments(&prompt, workspace.path())
         );
     }
@@ -147,7 +153,13 @@ fn claude_headless_arguments_are_exact_for_every_run_kind() {
             RunKind::External { .. } => "EXTERNAL",
         };
         assert_eq!(
-            headless_arguments(HarnessKind::ClaudeCode, &run_kind, marker, workspace.path()),
+            headless_arguments(
+                HarnessKind::ClaudeCode,
+                &run_kind,
+                marker,
+                workspace.path(),
+                false
+            ),
             expected
         );
     }
@@ -208,7 +220,13 @@ fn qwen_headless_arguments_are_exact_for_every_run_kind() {
             RunKind::External { .. } => "EXTERNAL",
         };
         assert_eq!(
-            headless_arguments(HarnessKind::QwenCode, &run_kind, marker, workspace.path()),
+            headless_arguments(
+                HarnessKind::QwenCode,
+                &run_kind,
+                marker,
+                workspace.path(),
+                false
+            ),
             expected
         );
     }
@@ -289,7 +307,13 @@ fn prime_headless_arguments_are_exact_for_every_run_kind() {
         };
         expected.push(socket.clone().into_os_string());
         assert_eq!(
-            headless_arguments(HarnessKind::PrimeAgent, &run_kind, marker, workspace.path()),
+            headless_arguments(
+                HarnessKind::PrimeAgent,
+                &run_kind,
+                marker,
+                workspace.path(),
+                false
+            ),
             expected
         );
     }

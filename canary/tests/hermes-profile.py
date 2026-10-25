@@ -29,6 +29,34 @@ spec.loader.exec_module(native)
 
 
 class Qualification(unittest.TestCase):
+    def test_native_frontend_diagnostics_never_export_private_text(self):
+        self.assertEqual(native.closed_frontend_diagnostics("private synthetic payload"), [])
+        self.assertEqual(native.closed_frontend_diagnostics(
+            "invalid uri authority: private synthetic path\nNoConsoleScreenBufferError: private synthetic payload"),
+            ["NH-HERMES-FRONTEND-CONSOLE", "NH-HERMES-FRONTEND-URI"])
+        self.assertTrue(set(native.closed_frontend_diagnostics("Gateway bootstrap timed out"))
+                        <= set(cell.HERMES_PROFILE_DIAGNOSTICS))
+
+    def test_machine_frontend_is_selected_from_the_installed_version(self):
+        for version, modern in [("0.21.0", False), ("0.22.0", True),
+                                ("Hermes 0.22.5", True), ("unknown", False)]:
+            with self.subTest(version=version), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                args = SimpleNamespace(directory=root, binary=root / "nanh",
+                                       canary=root / "canary", harness="hermes")
+                def command(arguments, _directory, *, output, **_kwargs):
+                    self.assertEqual("--hermes-stream-json" in arguments, modern)
+                    output.write_text(json.dumps({"schemaVersion": 2, "harness": "hermes", "outcome": "passed",
+                        "scenarios": [{"name": name, "status": "passed", "checks": ["synthetic"],
+                                       "durationMilliseconds": 0} for name in cell.CONFORMANCE_SCENARIOS]}))
+                    return 0
+                with patch.object(cell, "cell_environment", return_value={}), \
+                        patch.object(cell, "hermes_profile_probe") as profile_probe, \
+                        patch.object(cell, "private_command", side_effect=command):
+                    self.assertEqual(cell.conformance(args, {"harness": {"version": version}}), 1)
+                    self.assertEqual(profile_probe.call_count, int(modern))
+                self.assertFalse((root / "conformance-private.json").exists())
+
     def test_launch_wrapper_waits_for_the_child_and_preserves_its_failure(self):
         with tempfile.TemporaryDirectory() as directory:
             marker = Path(directory) / "child-completed"

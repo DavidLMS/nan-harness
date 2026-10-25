@@ -8,6 +8,12 @@ param(
 $ErrorActionPreference = 'Stop'; $stageNow = $Stage; $workspace = $null; $stdout = $null; $stderr = $null; $completed = $false; $markerPath = $env:NAN_CANARY_PROBE_RESULT; $diagnostics = New-Object System.Collections.Generic.List[string]; $exitCode = $null; $doctorVersion = $null; $doctorExpectedVersion = $null; $doctorReason = $null; $doctorSchemaReason = $null; $discoveryCode = $null; $inventoryFailureReasons = $null; $inventoryProcess = $null; $failedScenarios = $null
 $knownDiagnostics = @('doctor-child-launch','doctor-exit-nonzero','doctor-output-invalid','doctor-schema-invalid','doctor-version-missing','doctor-version-invalid','doctor-version-mismatch','doctor-exit-missing','conformance-child-launch','conformance-exit-nonzero','conformance-output-invalid','conformance-schema-invalid','conformance-scenario-missing','conformance-scenario-failed','conformance-inventory-failed','conformance-inventory-operational-failed','conformance-check-invalid','conformance-exit-missing','live-child-launch','live-exit-nonzero','live-exit-missing','live-credential-missing','live-tool-evidence-missing','live-read-marker-missing','live-completion-marker-missing','live-bridge-sentinel','live-usage-invalid', 'live-usage-missing', 'live-usage-unreadable', 'live-usage-malformed', 'live-usage-schema-invalid', 'live-usage-not-observed', 'live-usage-unsupported','live-usage-summary-missing','probe-unexpected-failure')
 $knownDiagnostics += @('live-error-auth','live-error-network','live-error-arguments','live-error-permission','live-error-provider','live-error-config')
+$hermesMachineFrontend = $false
+if ($Harness -eq 'hermes') {
+  $versionMatch = [regex]::Match($Version, '\b[0-9]+\.[0-9]+\.[0-9]+\b')
+  $nativeVersion = [version]'0.0.0'
+  $hermesMachineFrontend = $versionMatch.Success -and [version]::TryParse($versionMatch.Value, [ref]$nativeVersion) -and $nativeVersion -ge [version]'0.22.0'
+}
 function Add-Diagnostic([string]$Code) { if ($knownDiagnostics -contains $Code -and -not $diagnostics.Contains($Code)) { [void]$diagnostics.Add($Code) } }
 function Native-FailureCode {
   # Project only fixed categories from private capture; never copy matching text.
@@ -182,7 +188,9 @@ try {
     if ($diagnostics.Count -eq 0) { $completed = $true; return }; exit 1
   }
   if ($Stage -eq 'deterministic-contract') {
-    try { & $Canary 'conformance' '--nan-harness' $NanBinary '--harness' $Harness '--json' 1> $stdout 2> $stderr; $exitCode = $LASTEXITCODE } catch { Add-Diagnostic 'conformance-child-launch'; $exitCode = -1 }
+    $conformanceArguments = @('conformance','--nan-harness',$NanBinary,'--harness',$Harness,'--json')
+    if ($hermesMachineFrontend) { $conformanceArguments += '--hermes-stream-json' }
+    try { & $Canary @conformanceArguments 1> $stdout 2> $stderr; $exitCode = $LASTEXITCODE } catch { Add-Diagnostic 'conformance-child-launch'; $exitCode = -1 }
     if ($exitCode -ne 0) { Add-Diagnostic 'conformance-exit-nonzero' }
     try { $value = Get-Content -Raw $stdout | ConvertFrom-Json } catch { Add-Diagnostic 'conformance-output-invalid'; $value = $null }
     if ($null -eq $value) { Add-Diagnostic 'conformance-schema-invalid' } else {
@@ -221,7 +229,15 @@ try {
       Run-Native ($nativeArguments + @($prompt))
       if (-not (Has-Regex '"tool"\s*:\s*"read"|"read"')) { Fail 'tool evidence missing' }
     }
-    'hermes' { $target=Join-Path $workspace 'hermes-tool.txt'; $p="You must call write_file exactly once to create '$target' with exactly NAN_HERMES_TOOL_OK. Do not reply before the tool succeeds. Then reply exactly NAN_CANARY_OK."; $env:BFL_API_KEY='';$env:ELEVENLABS_API_KEY='';$env:FAL_KEY='';$env:OPENAI_API_KEY='';$env:XAI_API_KEY=''; Run-Native @('hermes','--model',$Model,'--','chat','--query',$p,'--toolsets','file','--quiet','--yolo','--source','tool','--max-turns','5'); Read-Exact $target 'NAN_HERMES_TOOL_OK' }
+    'hermes' {
+      $target=Join-Path $workspace 'hermes-tool.txt'
+      $p="You must call write_file exactly once to create '$target' with exactly NAN_HERMES_TOOL_OK. Do not reply before the tool succeeds. Then reply exactly NAN_CANARY_OK."
+      $env:BFL_API_KEY='';$env:ELEVENLABS_API_KEY='';$env:FAL_KEY='';$env:OPENAI_API_KEY='';$env:XAI_API_KEY=''
+      $hermesArguments = @('hermes','--model',$Model,'--','chat','--query',$p,'--toolsets','file','--quiet','--yolo','--source','tool','--max-turns','5')
+      if ($hermesMachineFrontend) { $hermesArguments += @('--format','stream-json') }
+      Run-Native $hermesArguments
+      Read-Exact $target 'NAN_HERMES_TOOL_OK'
+    }
     'pi' { Run-Native @('pi','--model',$Model,'--','--mode','json','--print','--no-session','--no-extensions','--no-skills','--no-prompt-templates','--no-themes','--no-context-files','--tools','read',$prompt); if (-not (Has-Regex '"toolName"\s*:\s*"read"|"read"')) { Fail 'tool evidence missing' } }
     'omp' { Run-Native @('omp','--model',$Model,'--','--mode','json','--print','--no-session','--no-extensions','--no-skills','--no-rules','--no-lsp','--no-title','--tools','read',$prompt); if (-not (Has-Regex '"toolName"\s*:\s*"read"|"read"')) { Fail 'tool evidence missing' } }
     'prime-agent' { $target=Join-Path $workspace 'prime-tool.txt'; $p="Use the ipython tool to write exactly NAN_PRIME_TOOL_OK to '$target'. After it succeeds, reply exactly NAN_CANARY_OK."; Run-Native @('prime','--model',$Model,'--','--mode','json','--print','--no-session','--no-skills','--no-prompt-templates','--no-themes','--no-context-files',$p); Read-Exact $target 'NAN_PRIME_TOOL_OK' }

@@ -1068,6 +1068,7 @@ HERMES_PROFILE_DIAGNOSTICS = {
     "NH-HERMES-" + name: name.lower()
     for name in ("LAUNCHER", "PROFILE", "READINESS", "HISTORY", "CLEANUP", "GATEWAY-EXIT", "GATEWAY-DRAIN",
                  "SUPERVISOR", "SUPERVISOR-IMPORT", "SUPERVISOR-IO", "SUPERVISOR-CONTRACT", "SUPERVISOR-INTERNAL",
+                 "FRONTEND-CONSOLE", "FRONTEND-URI", "FRONTEND-CONNECTION", "FRONTEND-PROTOCOL", "FRONTEND-CREDENTIALS",
                  "FRONTEND-EXIT-1", "FRONTEND-EXIT-2", "FRONTEND-EXIT-125")
 }
 HERMES_PROFILE_DIAGNOSTICS.update({"NH-DISCOVERY-00" + str(index): "discovery-00" + str(index) for index in range(1, 8)})
@@ -1112,6 +1113,11 @@ def hermes_profile_probe(args, environment):
         report.unlink(missing_ok=True)
 
 
+def hermes_machine_frontend(version):
+    parsed = re.search(r"\b(\d+)\.(\d+)\.(\d+)\b", str(version))
+    return bool(parsed and tuple(map(int, parsed.groups())) >= (0, 22, 0))
+
+
 def conformance(args, state):
     """Deterministic conformance only certifies success; its failures stay blocked.
 
@@ -1124,10 +1130,9 @@ def conformance(args, state):
         return gentle_probe(args)
     report = args.directory / "conformance-private.json"
     environment = cell_environment(args.directory)
-    if args.harness == "hermes":
-        version = re.search(r"\b(\d+)\.(\d+)\.(\d+)\b", str(state.get("harness", {}).get("version", "")))
-        if version and tuple(map(int, version.groups())) >= (0, 22, 0):
-            hermes_profile_probe(args, environment)
+    hermes_stream_json = args.harness == "hermes" and hermes_machine_frontend(state.get("harness", {}).get("version", ""))
+    if hermes_stream_json:
+        hermes_profile_probe(args, environment)
     if args.harness == "zcode":
         marker = args.directory / "zcode-source-failure.json"
         marker.unlink(missing_ok=True)
@@ -1157,8 +1162,11 @@ def conformance(args, state):
     for attempt in range(1, CONFORMANCE_ATTEMPTS + 1):
         try:
             try:
-                status = private_command([str(args.canary), "conformance", "--nan-harness", str(args.binary),
-                                          "--harness", args.harness, "--json"], args.directory, output=report,
+                command = [str(args.canary), "conformance", "--nan-harness", str(args.binary),
+                           "--harness", args.harness, "--json"]
+                if hermes_stream_json:
+                    command.append("--hermes-stream-json")
+                status = private_command(command, args.directory, output=report,
                                          allow_failure=True, environment=environment)
             except OSError:
                 raise ConformanceFailure("conformance-process-unavailable", attempt) from None
@@ -1233,6 +1241,9 @@ def live(args, _state):
     if args.harness == "gentle-shell":
         return gentle_probe(args, live=True)
     environment = cell_environment(args.directory)
+    environment.pop("NAN_CANARY_HERMES_STREAM_JSON", None)
+    if args.harness == "hermes" and hermes_machine_frontend(getattr(args, "harness_version", "")):
+        environment["NAN_CANARY_HERMES_STREAM_JSON"] = "1"
     environment["NAN_CANARY_NAN_COMMAND"] = str(args.binary)
     environment["NAN_CANARY_MODEL"] = args.model
     environment["NAN_CANARY_MEDIA_MODE"] = getattr(args, "trigger", "manual")

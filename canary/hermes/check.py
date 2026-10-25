@@ -17,7 +17,7 @@ import threading
 sys.dont_write_bytecode = True
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "actions"))
-from cell import HERMES_PROFILE_DIAGNOSTICS, ensure_private_directory, private_command, protect_private
+from cell import HERMES_PROFILE_DIAGNOSTICS, PRIVATE_DIAGNOSTIC_LIMIT, ensure_private_directory, private_command, protect_private
 from processes import Gateways
 
 KEY = "synthetic-hermes-native-key"
@@ -26,6 +26,20 @@ LAUNCH_WRAPPER = ("import os,subprocess,sys; os.environ['NAN_API_KEY']='" + KEY
 CHECKS = ["native-state-preserved", "same-session-resume", "bridge-route-rotation",
           "reasoning-effort", "reasoning-disabled", "reasoning-toggle",
           "gateway-cleanup", "automation-isolated"]
+
+
+def closed_frontend_diagnostics(text):
+    """Project known native failures without retaining paths or native messages."""
+    signatures = {
+        "CONSOLE": ("NoConsoleScreenBufferError", "No Windows console found. Are you running cmd.exe?"),
+        "URI": ("invalid uri authority:",),
+        "CONNECTION": ("Gateway connection failed; no local fallback", "Gateway connection/read failed; no local fallback"),
+        "PROTOCOL": ("Gateway bootstrap timed out", "Invalid gateway bootstrap response",
+                     "Gateway bootstrap identity changed; retry launch", "Gateway protocol mismatch; update/restart required"),
+        "CREDENTIALS": ("Error: credentials or agent init failed",),
+    }
+    return ["NH-HERMES-FRONTEND-" + code for code, patterns in signatures.items()
+            if any(pattern in text for pattern in patterns)]
 
 
 class Provider(BaseHTTPRequestHandler):
@@ -150,7 +164,7 @@ def run(args):
                      "--provider-base-url", f"http://127.0.0.1:{server.server_port}/v1", "--"]
         if reasoning:
             arguments += ["--reasoning", reasoning]
-        arguments += ["chat", "--query", prompt, "--quiet", "--yolo", "--source", "cli"]
+        arguments += ["chat", "--query", prompt, "--format", "stream-json", "--quiet", "--yolo", "--source", "cli"]
         if continuation:
             arguments += ["--continue", "nanh", "history", "proof", "--create-if-missing"]
         # The runner strips real credentials. Only this child supplies the fixture
@@ -160,9 +174,10 @@ def run(args):
         launches += 1
         def closed_diagnostic(log, _status):
             log.seek(0)
-            text = log.read().decode(errors="replace")
+            text = log.read(PRIVATE_DIAGNOSTIC_LIMIT).decode(errors="replace")
             allowed = set(HERMES_PROFILE_DIAGNOSTICS)
             diagnostics.extend(sorted(set(re.findall(r"NH-[A-Z0-9-]+", text)) & allowed))
+            diagnostics.extend(closed_frontend_diagnostics(text))
         status = private_command([sys.executable, "-c", LAUNCH_WRAPPER, *arguments], root, timeout=150,
                                  environment=environment, allow_failure=True, diagnostic_callback=closed_diagnostic)
         if status != 0:
