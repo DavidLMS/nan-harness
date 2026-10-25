@@ -47,7 +47,7 @@ impl ProcessSettlement {
 
     #[cfg(windows)]
     pub(super) fn record(&self) {
-        save_facts(self.facts());
+        save_facts(&self.facts());
     }
 }
 
@@ -77,12 +77,11 @@ pub(super) fn ensure_absent(
     };
     let deadline = Instant::now() + Duration::from_secs(2);
     let prepared;
-    let native = match native {
-        Some(native) => native,
-        None => {
-            prepared = crate::native::Native::new()?;
-            &prepared
-        }
+    let native = if let Some(native) = native {
+        native
+    } else {
+        prepared = crate::native::Native::new()?;
+        &prepared
     };
     let mut observed = false;
     wait_absent(
@@ -91,7 +90,7 @@ pub(super) fn ensure_absent(
                 || inspect(native, deadline, image),
                 &mut observed,
                 before_launch && kind == DesktopHarnessKind::Claude,
-                |state| save_facts(before_launch_facts(state)),
+                |state| save_facts(&before_launch_facts(state)),
             )
         },
         Instant::now,
@@ -136,12 +135,11 @@ pub(super) fn inspect_absent(
         return Err(Reason::DesktopUnavailable);
     }
     let prepared;
-    let native = match native {
-        Some(native) => native,
-        None => {
-            prepared = crate::native::Native::new()?;
-            &prepared
-        }
+    let native = if let Some(native) = native {
+        native
+    } else {
+        prepared = crate::native::Native::new()?;
+        &prepared
     };
     if observed_query(|| inspect(native, deadline, image), observer)? {
         Err(Reason::AlreadyRunning)
@@ -199,12 +197,11 @@ pub(super) fn observe_after_accessibility_rejection(
         return;
     }
     let prepared;
-    let native = match native {
-        Some(native) => Some(native),
-        None => {
-            prepared = crate::native::Native::new().ok();
-            prepared.as_ref()
-        }
+    let native = if let Some(native) = native {
+        Some(native)
+    } else {
+        prepared = crate::native::Native::new().ok();
+        prepared.as_ref()
     };
     let result = native
         .ok_or(Reason::DesktopUnavailable)
@@ -214,7 +211,7 @@ pub(super) fn observe_after_accessibility_rejection(
         Ok(false) => PostStopState::Absent,
         Err(_) => PostStopState::QueryFailed,
     };
-    save_facts(post_stop_facts(state));
+    save_facts(&post_stop_facts(state));
 }
 
 #[cfg(any(windows, test))]
@@ -265,7 +262,7 @@ fn failure_facts(image: &[u8], stage: InspectionStage) -> Option<serde_json::Val
 }
 
 #[cfg(windows)]
-fn save_facts(value: serde_json::Value) {
+fn save_facts(value: &serde_json::Value) {
     use std::io::Write as _;
     if std::env::var("GITHUB_ACTIONS").as_deref() != Ok("true")
         || std::env::var("RUNNER_ENVIRONMENT").as_deref() != Ok("github-hosted")
@@ -293,17 +290,17 @@ fn save_facts(value: serde_json::Value) {
         "windows-process-absence-{}.json",
         u64::from_le_bytes(nonce)
     ));
-    if let Ok(mut file) = nan_harness_private_fs::open_private_new(&path) {
-        if serde_json::to_writer(&mut file, &value).is_ok() {
-            let _ = file.flush();
-        }
+    if let Ok(mut file) = nan_harness_private_fs::open_private_new(&path)
+        && serde_json::to_writer(&mut file, value).is_ok()
+    {
+        let _ = file.flush();
     }
 }
 
 #[cfg(windows)]
 fn save_failure(image: &[u8], stage: InspectionStage) {
     if let Some(value) = failure_facts(image, stage) {
-        save_facts(value);
+        save_facts(&value);
     }
 }
 

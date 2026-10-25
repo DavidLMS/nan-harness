@@ -387,6 +387,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo test --locked -p nan-harness-desktop-check --lib native::windows_chat_turn::tests
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test --locked -p nan-harness-desktop-check --lib gui::claude_windows_chat::tests
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Verify bounded Windows UIA receipt protocol without an application
         if: runner.os == 'Windows' && matrix.app == 'claude-desktop'
         run: cargo test --locked -p nan-harness-desktop-check --lib native::windows_uia

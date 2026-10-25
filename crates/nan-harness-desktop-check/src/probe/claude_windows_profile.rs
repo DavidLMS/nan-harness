@@ -217,7 +217,7 @@ fn bridge_process_owned(
                 });
             }
             Ok(None) if Instant::now() < deadline => {
-                std::thread::sleep(std::time::Duration::from_millis(5))
+                std::thread::sleep(std::time::Duration::from_millis(5));
             }
             _ => {
                 let _ = child.kill();
@@ -297,6 +297,7 @@ fn retained_directory_regular(file: &File) -> bool {
 }
 
 fn lock_directory(path: &Path) -> std::io::Result<File> {
+    use std::os::windows::fs::MetadataExt as _;
     use std::os::windows::fs::OpenOptionsExt as _;
     // Share reads/writes so child files can be atomically renamed. Withhold
     // DELETE sharing to prevent deletion or renaming of this retained directory.
@@ -307,7 +308,6 @@ fn lock_directory(path: &Path) -> std::io::Result<File> {
         .custom_flags(0x0200_0000 | 0x0020_0000)
         .open(path)?;
     let metadata = file.metadata()?;
-    use std::os::windows::fs::MetadataExt as _;
     if !metadata.is_dir() || metadata.file_attributes() & 0x400 != 0 {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
@@ -333,7 +333,7 @@ fn document(file: &mut File) -> Option<serde_json::Value> {
     file.rewind().ok()?;
     let mut bytes = zeroize::Zeroizing::new(Vec::new());
     file.take(MAX_CONFIG + 1).read_to_end(&mut bytes).ok()?;
-    (bytes.len() <= MAX_CONFIG as usize)
+    (bytes.len() <= usize::try_from(MAX_CONFIG).ok()?)
         .then(|| serde_json::from_slice(&bytes).ok())
         .flatten()
 }
@@ -1199,7 +1199,7 @@ mod tests {
         assert!(document(&mut File::open(&path).unwrap()).is_some());
         std::fs::write(&path, b"not-json").unwrap();
         assert!(document(&mut File::open(&path).unwrap()).is_none());
-        std::fs::write(&path, vec![b' '; MAX_CONFIG as usize + 1]).unwrap();
+        std::fs::write(&path, vec![b' '; usize::try_from(MAX_CONFIG).unwrap() + 1]).unwrap();
         assert!(document(&mut File::open(&path).unwrap()).is_none());
     }
     #[test]

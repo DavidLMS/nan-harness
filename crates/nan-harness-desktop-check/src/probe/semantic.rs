@@ -188,11 +188,11 @@ impl SemanticBackend {
                 .fixture
                 .parent()
                 .ok_or(Reason::IsolationUnavailable)?;
-            let mut ui = SemanticUi::ClaudeWindows(gui.claude_windows_chat_session(
+            let mut ui = SemanticUi::ClaudeWindows(Box::new(gui.claude_windows_chat_session(
                 &self.directory,
                 profile,
                 workspace,
-            )?);
+            )?));
             let outcome = complete_scenario(&mut ui, &scenario, &self.directory, result).await;
             return ui.finish(scenario.gate, outcome);
         }
@@ -212,15 +212,19 @@ impl SemanticBackend {
         }
 
         let mut ui = match self.kind {
-            DesktopHarnessKind::Zed => SemanticUi::Zed(Box::new(gui.native_clipboard_session(
-                &self.directory,
-                cfg!(target_os = "linux").then(|| {
-                    self.workspace
-                        .join("profile")
-                        .join("zed")
-                        .join("nanh-retry-events.private")
-                }),
-            )?)),
+            DesktopHarnessKind::Zed => SemanticUi::Zed(Box::new(
+                gui.native_clipboard_session(
+                    &self.directory,
+                    cfg!(target_os = "linux")
+                        .then(|| {
+                            self.workspace
+                                .join("profile")
+                                .join("zed")
+                                .join("nanh-retry-events.private")
+                        })
+                        .as_deref(),
+                )?,
+            )),
             DesktopHarnessKind::Hermes => return Err(Reason::IsolationUnavailable),
             DesktopHarnessKind::Claude | DesktopHarnessKind::ChatGpt | DesktopHarnessKind::Pen => {
                 return gui.inventory_renderer(
@@ -240,7 +244,7 @@ enum SemanticUi<'a> {
     #[cfg(target_os = "macos")]
     Claude(Box<ClaudeNativeChatSession<'a>>),
     #[cfg(windows)]
-    ClaudeWindows(ClaudeWindowsChatSession<'a>),
+    ClaudeWindows(Box<ClaudeWindowsChatSession<'a>>),
     #[cfg(target_os = "linux")]
     ClaudeLinux(Box<ClaudeLinuxChatSession<'a>>),
     Renderer(RendererSession<'a>),

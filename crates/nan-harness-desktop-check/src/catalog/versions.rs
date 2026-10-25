@@ -327,13 +327,16 @@ fn runtime_image_header(path: &Path) -> diagnostic::RuntimeImageHeader {
 fn host_runtime_machine() -> Option<u16> {
     #[cfg(all(windows, target_arch = "x86_64"))]
     {
-        return Some(X64_MACHINE);
+        Some(X64_MACHINE)
     }
     #[cfg(all(windows, target_arch = "aarch64"))]
     {
-        return Some(ARM64_MACHINE);
+        Some(ARM64_MACHINE)
     }
-    None
+    #[cfg(not(all(windows, any(target_arch = "x86_64", target_arch = "aarch64"))))]
+    {
+        None
+    }
 }
 
 fn classify_runtime_machine(

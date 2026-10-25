@@ -616,7 +616,7 @@ impl Native {
         if !output.trim().is_empty() {
             return Err(FitWindowError::Diagnostic(
                 FitFailure::parse(&output)
-                    .map_err(|_| FitWindowError::Transport(FailureCategory::Output))?,
+                    .map_err(|()| FitWindowError::Transport(FailureCategory::Output))?,
             ));
         }
         Ok(())
@@ -653,7 +653,7 @@ impl Native {
         }
         Err(FitWindowError::Diagnostic(
             FitFailure::parse(&output)
-                .map_err(|_| FitWindowError::Transport(FailureCategory::Output))?,
+                .map_err(|()| FitWindowError::Transport(FailureCategory::Output))?,
         ))
     }
 
@@ -678,7 +678,7 @@ impl Native {
         } else {
             Err(FitWindowError::Diagnostic(
                 FitFailure::parse(&output)
-                    .map_err(|_| FitWindowError::Transport(FailureCategory::Output))?,
+                    .map_err(|()| FitWindowError::Transport(FailureCategory::Output))?,
             ))
         };
         if std::time::Instant::now() >= deadline {
@@ -757,7 +757,7 @@ pub(crate) fn claude_focus_policy() -> bool {
         && std::env::var("NANH_CLAUDE_MAC_PROFILE_POLICY").as_deref() == Ok("native-known-folders")
 }
 
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(target_os = "macos", all(test, unix)))]
 fn chat_press_request(window: &Window, millis: u32) -> String {
     let bounds = window.bounds;
     // The native transport adds the single line terminator.

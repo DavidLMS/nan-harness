@@ -152,7 +152,7 @@ fn require_process_absence() -> Result<(), Failure> {
 }
 
 impl NativeRoots {
-    #[cfg(any(test, target_os = "macos"))]
+    #[cfg(any(target_os = "macos", all(test, unix)))]
     pub(crate) fn verifies_created_roots(&self) -> bool {
         self.roots.len() == 2
             && self

@@ -1864,7 +1864,7 @@ impl Gui {
     pub(crate) fn native_clipboard_session<'a>(
         &'a self,
         directory: &'a Path,
-        retry_log_path: Option<PathBuf>,
+        retry_log_path: Option<&Path>,
     ) -> Result<NativeClipboardSession<'a>, Reason> {
         if !cfg!(any(target_os = "macos", target_os = "linux", windows))
             || self.kind != nan_harness_core::DesktopHarnessKind::Zed
@@ -1885,7 +1885,7 @@ impl Gui {
         let _ = retry_log_path;
         Ok(NativeClipboardSession {
             #[cfg(unix)]
-            retry_log_path,
+            retry_log_path: retry_log_path.map(Path::to_path_buf),
             #[cfg(unix)]
             retry_log_capture: None,
             gui: self,
