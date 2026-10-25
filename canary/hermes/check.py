@@ -116,7 +116,9 @@ def run(args):
     write(native / "state.db", "synthetic native history must not be opened or imported\n")
     before = fingerprints(native)
     environment = dict(os.environ, HOME=str(home), HERMES_HOME=str(native), NAN_HARNESS_CONFIG_DIR=str(config),
-                       NAN_NO_COMPATIBILITY_CHECK="1", NAN_NO_UPDATE_CHECK="1")
+                       NAN_NO_COMPATIBILITY_CHECK="1", NAN_NO_UPDATE_CHECK="1",
+                       INVOCATION_ID="synthetic-ancestor-service", HERMES_DESKTOP_MANAGED="1",
+                       HERMES_LAUNCHD_LABEL="ai.hermes.synthetic-ancestor", XPC_SERVICE_NAME="ai.hermes.synthetic-ancestor")
     environment.pop("NAN_API_KEY", None)
     environment.pop("NAN_MEDIA_API_KEY", None)
     environment["PYTHONDONTWRITEBYTECODE"] = "1"

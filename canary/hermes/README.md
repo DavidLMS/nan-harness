@@ -9,6 +9,8 @@ The fixture borrows only installed dependencies. Its synthetic native home has
 unrelated configuration, history, control files and automation sentinels. All of
 those files must remain byte-identical, with no new native files. A local IRC
 listener also proves that inherited platform activation cannot start a bot.
+Synthetic ancestor-service markers verify that the owned gateway identifies its
+external supervisor independently of systemd, launchd or Desktop ancestry.
 
 Two launches reopen the same multiword-titled conversation. The second must keep
 the original session ID and first-turn context while using a fresh authenticated

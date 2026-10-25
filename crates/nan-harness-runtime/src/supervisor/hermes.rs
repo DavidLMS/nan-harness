@@ -218,6 +218,20 @@ fn native_command(
             command.env_remove(name);
         }
     }
+    // Native identify otherwise attributes an inherited systemd/launchd/Desktop
+    // marker to this new gateway instead of its actual external Rust owner.
+    for name in [
+        "INVOCATION_ID",
+        "HERMES_SUPERVISED_CHILD",
+        "HERMES_S6_SUPERVISED_CHILD",
+        "HERMES_GATEWAY_EXTERNAL_SUPERVISOR",
+        "HERMES_DESKTOP_MANAGED",
+        "HERMES_LAUNCHD_LABEL",
+        "LAUNCHD_SOCKET",
+        "XPC_SERVICE_NAME",
+    ] {
+        command.env_remove(name);
+    }
     if let Some(profile) = prepared.hermes() {
         let home = if action == "owner" || action == "frontend" {
             &profile.home
