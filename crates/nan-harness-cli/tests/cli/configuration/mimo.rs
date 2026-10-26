@@ -172,7 +172,8 @@ fn uninstall_removes_mimo_configuration_and_preserves_user_preferences() {
         .unwrap(),
     )
     .unwrap();
-    let result = std::process::Command::new(&executable)
+    let mut uninstall = std::process::Command::new(&executable);
+    uninstall
         .args(["uninstall", "--yes"])
         .env("HOME", &home)
         .env("USERPROFILE", &home)
@@ -181,8 +182,27 @@ fn uninstall_removes_mimo_configuration_and_preserves_user_preferences() {
         .env("NAN_HARNESS_CONFIG_DIR", &state)
         .env("NAN_HARNESS_CREDENTIAL_BACKEND", "file")
         .env("NAN_NO_COMPATIBILITY_CHECK", "1")
-        .output()
-        .unwrap();
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let child = loop {
+        match uninstall.spawn() {
+            // Linux may still reject exec of the test-owned copy. No uninstall
+            // action has started when spawn returns this publication error.
+            Err(error)
+                if error.kind() == std::io::ErrorKind::ExecutableFileBusy
+                    && std::time::Instant::now() < deadline =>
+            {
+                std::thread::sleep(
+                    std::time::Duration::from_millis(5)
+                        .min(deadline.saturating_duration_since(std::time::Instant::now())),
+                );
+            }
+            result => break result.unwrap(),
+        }
+    };
+    let result = child.wait_with_output().unwrap();
     assert!(
         result.status.success(),
         "{}",
