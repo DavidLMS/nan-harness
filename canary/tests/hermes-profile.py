@@ -32,6 +32,27 @@ spec.loader.exec_module(frame_diagnostics)
 
 
 class Qualification(unittest.TestCase):
+    def test_expiry_preserves_owner_stack_before_cleanup_can_replace_it(self):
+        from hermes_diagnostics import managed_profile_frames
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory)
+            home = config / "hermes-profiles/owned"
+            home.mkdir(parents=True)
+            identity = "f" * 32
+            value = {"schemaVersion": 1, "identity": identity, "action": "owner", "sequence": 4,
+                     "stacks": [[{"module": "gateway_bootstrap", "line": 814}]]}
+            frame_diagnostics.private_receipt(home, ".nanh-frames-owner.json", value)
+            with patch.dict(os.environ, {"NAN_HARNESS_HERMES_DIAGNOSTICS": identity}):
+                frame_diagnostics.readiness_state(home, "waiting")
+                self.assertEqual(frame_diagnostics.current_readiness_state(home, identity), "waiting")
+                frame_diagnostics.readiness_state(home, "expired")
+                frame_diagnostics.readiness_state(home, "host-closed")
+                self.assertEqual(frame_diagnostics.current_readiness_state(home, identity), "host-closed")
+                self.assertEqual(frame_diagnostics.current_readiness_state(home, "a" * 32), "unobserved")
+            frame_diagnostics.private_receipt(home, ".nanh-frames-owner.json", {**value, "sequence": 9})
+            records = managed_profile_frames(config, identity)
+            self.assertEqual(records, [{key: value[key] for key in ("action", "sequence", "stacks")}])
+
     def test_namespace_observation_preserves_native_names_without_exporting_home(self):
         from hermes_diagnostics import managed_namespace_diagnostics
         with tempfile.TemporaryDirectory() as directory:
@@ -72,7 +93,8 @@ class Qualification(unittest.TestCase):
             home.mkdir(parents=True)
             identity = "e" * 32
             base = {"schemaVersion": 1, "identity": identity, "matchesManagedName": True,
-                    "samePhysicalHome": True, "verbatimHome": False, "observedNs": 100_000_000_000}
+                    "samePhysicalHome": True, "verbatimHome": False, "observedNs": 100_000_000_000,
+                    "readinessState": "expired"}
             for action, role, digest in (("owner", "server", "a" * 64), ("ready", "client", "b" * 64)):
                 (home / (".nanh-namespace-" + action + "-" + role + ".json")).write_text(json.dumps(
                     {**base, "action": action, "role": role, "digest": digest}))

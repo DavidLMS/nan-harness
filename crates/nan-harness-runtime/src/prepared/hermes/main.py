@@ -34,9 +34,10 @@ def require_absent(home):
 
 
 def ready(home, pid):
-    from frame_diagnostics import clear_exception, record_exception
+    from frame_diagnostics import clear_exception, record_exception, readiness_state
     from hermes_cli.gateway_runtime import discover_gateway_endpoint
     from hermes_cli.gateway_runtime_discovery import query_identify
+    readiness_state(home, "waiting")
     deadline = time.monotonic() + READINESS_TIMEOUT_SECONDS
     reason = "control-absent"
     while time.monotonic() < deadline:
@@ -164,6 +165,8 @@ def owner():
         # shutdown is cooperative on Windows, unlike TerminateProcess/SIGTERM.
         while sys.stdin.buffer.read(1):
             pass
+        from frame_diagnostics import readiness_state
+        readiness_state(Path(os.environ["NAN_HARNESS_HERMES_MANAGED_HOME"]), "host-closed")
         from gateway.status import write_planned_stop_marker
         if not write_planned_stop_marker(os.getpid()):
             os._exit(125)
@@ -220,6 +223,8 @@ if __name__ == "__main__":
         with watch(sys.argv[1]):
             main(sys.argv[1:])
     except ReadinessFailure as error:
+        from frame_diagnostics import readiness_state
+        readiness_state(Path(os.environ["NAN_HARNESS_HERMES_MANAGED_HOME"]), "expired")
         raise SystemExit(error.exit_code) from None
     except Exception as error:
         # Fixed phase only. Native exceptions can contain private configuration.

@@ -118,6 +118,35 @@ def clear_exception():
         pass
 
 
+def readiness_state(home, state):
+    identity = os.environ.get("NAN_HARNESS_HERMES_DIAGNOSTICS", "")
+    if not re.fullmatch(r"[0-9a-f]{32}", identity):
+        return
+    try:
+        private_receipt(home, ".nanh-readiness-state.json", {"identity": identity, "state": state})
+        if state == "expired":
+            path = home / ".nanh-frames-owner.json"
+            if not path.is_symlink() and path.stat().st_size <= 16384:
+                value = json.loads(path.read_bytes())
+                if value.get("identity") == identity and value.get("action") == "owner":
+                    private_receipt(home, ".nanh-frames-owner-expired.json", value)
+    except Exception:
+        pass  # Observation cannot change readiness or shutdown.
+
+
+def current_readiness_state(home, identity):
+    try:
+        path = home / ".nanh-readiness-state.json"
+        if not path.is_symlink() and path.stat().st_size <= 256:
+            value = json.loads(path.read_bytes())
+            if (set(value) == {"identity", "state"} and value["identity"] == identity
+                    and value["state"] in {"waiting", "expired", "host-closed"}):
+                return value["state"]
+    except Exception:
+        pass
+    return "unobserved"
+
+
 def trace_control_namespace(managed_home, action):
     """Observe name calculations without changing the native name or inspecting locals."""
     identity = os.environ.get("NAN_HARNESS_HERMES_DIAGNOSTICS", "")
@@ -128,6 +157,7 @@ def trace_control_namespace(managed_home, action):
     if getattr(original, "_nanh_namespace_trace", False):
         return
     seen = set()
+    lock = threading.Lock()
 
     def observed(home):
         name = original(home)
@@ -138,7 +168,9 @@ def trace_control_namespace(managed_home, action):
                 return name
             digest = hashlib.sha256(name.encode("utf-8")).hexdigest()
             key = (role, digest)
-            if key not in seen:
+            with lock:
+                if key in seen:
+                    return name
                 # Supported SDK Python3.11+ shares this monotonic clock across processes.
                 observed_ns = time.monotonic_ns()
                 try:
@@ -149,7 +181,8 @@ def trace_control_namespace(managed_home, action):
                          "digest": digest, "matchesManagedName": name == original(managed_home),
                          "samePhysicalHome": physical_match,
                          "verbatimHome": str(home).replace(chr(92), "/").startswith("//?/"),
-                         "observedNs": observed_ns}
+                         "observedNs": observed_ns,
+                         "readinessState": current_readiness_state(managed_home, identity)}
                 private_receipt(managed_home, ".nanh-namespace-" + action + "-" + role + ".json", value)
                 seen.add(key)
         except Exception:

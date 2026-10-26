@@ -63,6 +63,7 @@ DIAGNOSTIC_CODES += tuple("NH-HERMES-CONTROL-" + code for code in (
     "FRONTEND-NAME-MATCH", "FRONTEND-NAME-MISMATCH",
     "READY-NAMESPACE-MATCH", "READY-NAMESPACE-MISMATCH", "FRONTEND-NAMESPACE-MATCH", "FRONTEND-NAMESPACE-MISMATCH",
     "SERVER-NAME-BEFORE-DEADLINE", "SERVER-NAME-LATE-UNDER-5S", "SERVER-NAME-LATE-UNDER-10S", "SERVER-NAME-LATE-OVER-10S",
+    "SERVER-NAME-READY-WAITING", "SERVER-NAME-READY-EXPIRED", "SERVER-NAME-HOST-CLOSED", "SERVER-NAME-PHASE-UNOBSERVED",
 ))
 
 
@@ -157,6 +158,8 @@ def managed_profile_frames(config, identity):
     records = []
     for action in ("owner", "ready", "frontend"):
         path = profile / (".nanh-frames-" + action + ".json")
+        if action == "owner" and (profile / ".nanh-frames-owner-expired.json").is_file():
+            path = profile / ".nanh-frames-owner-expired.json"
         try:
             if path.is_symlink() or not path.resolve().is_relative_to(profile) or path.stat().st_size > 16384:
                 continue
@@ -203,12 +206,14 @@ def managed_namespace_diagnostics(config, identity):
         return None
 
     names, codes = {}, []
-    fields = {"schemaVersion", "identity", "action", "role", "digest", "matchesManagedName", "samePhysicalHome", "verbatimHome", "observedNs"}
+    fields = {"schemaVersion", "identity", "action", "role", "digest", "matchesManagedName", "samePhysicalHome", "verbatimHome", "observedNs", "readinessState"}
     for action, role in (("owner", "server"), ("ready", "client"), ("frontend", "client")):
         value = read(".nanh-namespace-" + action + "-" + role + ".json")
         if (not value or set(value) != fields or value["action"] != action or value["role"] != role
                 or not isinstance(value["digest"], str) or not re.fullmatch(r"[0-9a-f]{64}", value["digest"])
                 or type(value["matchesManagedName"]) is not bool or type(value["verbatimHome"]) is not bool
+                or not isinstance(value["readinessState"], str)
+                or value["readinessState"] not in {"waiting", "expired", "host-closed", "unobserved"}
                 or value["samePhysicalHome"] is not None and type(value["samePhysicalHome"]) is not bool
                 or type(value["observedNs"]) is not int or not 0 <= value["observedNs"] < 2**63):
             continue
@@ -220,6 +225,9 @@ def managed_namespace_diagnostics(config, identity):
         if value["verbatimHome"]:
             codes.append("NH-HERMES-CONTROL-" + action.upper() + "-VERBATIM")
     if "owner" in names:
+        phase = {"waiting": "READY-WAITING", "expired": "READY-EXPIRED",
+                 "host-closed": "HOST-CLOSED", "unobserved": "PHASE-UNOBSERVED"}[names["owner"]["readinessState"]]
+        codes.append("NH-HERMES-CONTROL-SERVER-NAME-" + phase)
         for action in ("ready", "frontend"):
             if action in names:
                 match = "MATCH" if names["owner"]["digest"] == names[action]["digest"] else "MISMATCH"
