@@ -8,6 +8,7 @@ const inventoryBudget=vm.runInNewContext('('+inventorySource.slice(
 async function trial(options={}) {
  let inventoryOwnerLost=false,homeReads=0;
  let now=0,checked=false,absent=false,roleClicks=0,continueClicks=0,taskClicks=0,samples=0,overlayReads=0,legendReads=0;
+ const roleClickBudgets=[];
  const root={parentElement:null};
  const fieldset={parentElement:root};
  const label={kind:'label',tagName:'LABEL',parentElement:fieldset,innerText:'Engineering'};
@@ -70,7 +71,10 @@ async function trial(options={}) {
  class Handle {
   constructor(e){this.element=e;this.disposed=false;}
   async evaluate(fn,arg){if(this.disposed)throw Error('PRIVATE disposed handle');return evaluate(fn,this.element,arg);}
-  async click(params){assert.equal(params.force,undefined);assert.ok(params.position);if(this.element===label){roleClicks++;if(options.uncertain==='role')throw Error('private');checked=!options.readbackFail;}
+  async click(params){assert.equal(params.force,undefined);assert.ok(params.position);if(this.element===label){roleClicks++;roleClickBudgets.push({budget:params.timeout,remaining:budget-now});if(options.uncertain==='role'){
+    now+=options.roleFailureElapsedMs??0;checked=!!options.roleDeliveredBeforeFailure;
+    const error=Error('PRIVATE role click payload');error.name=options.roleFailureName??'Error';throw error;
+   }checked=!options.readbackFail;}
    else if(this.element.kind==='task'){taskClicks++;if(options.uncertain==='task')throw Error('private');}
    else {continueClicks++;if(options.uncertain==='continue')throw Error('private');absent=!options.remain;if(options.scopeReplaced)root.isConnected=false;}}
   async evaluateHandle(fn){return {value:evaluate(fn,this.element),dispose:async()=>{}};}
@@ -96,7 +100,7 @@ async function trial(options={}) {
  const page={getByRole:(_role,options)=>new Locator(['Get Started','Skip'].includes(options.name)?'task':'login'),evaluate:async(fn,diagnostic)=>fn.name==='homeComposerScope'?(++homeReads,options.homeDeadline&&homeReads===1?(now=1201,true):options.directHome&&!options.homeLost&&!options.homeDuplicate&&!options.homeModal&&!(options.homeChanged&&homeReads>1)):fn.name==='codingScope'?diagnostic?{ready:taskClicks===1&&!options.noCodingScope,publicDOM:{navigation:{status:'observed'},editable:{status:'observed'},home:{status:'observed'}},observation:{status:'observed',composerCount:options.noCodingScope?0:1,conversationCount:options.noCodingScope?0:1,modalCount:0,roleRadioCount:0,exactAckLeafCount:0,exactGetStartedCount:0,exactSkipCount:0}}:taskClicks===1&&!options.noCodingScope:'visible',mainFrame:()=>options.overlayFrameChange&&overlayReads||options.homeFrameChanged&&homeReads?{}:mainFrame,locator:s=>new Locator(s.startsWith('fieldset > legend')?'legend':'radios'),
   url:()=>options.urlChange&&roleClicks>0?'app://codex/index.html?PRIVATE_ROUTE':'app://codex/index.html',
   context:()=>({browser:()=>({contexts:()=>[{pages:()=>options.foreignPage?[page,extraPage]:options.replacedPage?[{}]:[page]}]})})};
- const sandbox={exports:{},URL,require:name=>name==='./codex-dom.cjs'?{directCDPPolicy:()=>!!options.directCDP,homeComposerScope:function homeComposerScope(){}}:require(name),process:{platform:options.platform??'win32',env:{GITHUB_ACTIONS:options.noHost?'false':'true',RUNNER_ENVIRONMENT:'github-hosted',RUNNER_OS:options.runnerOs??'Windows',NANH_CODEX_PROJECT_ARTIFACT_SHA256:options.artifactHash??(options.skipPin?'ee7854145554718d7239d01ea37d44f6ba1e0ba4a93f47ac097d6e0f964da47c':undefined),NANH_CODEX_PUBLIC_ONBOARDING:options.noOptin?undefined:'engineering'}},Date:{now:()=>now},clearTimeout:()=>{},setTimeout:(f,ms)=>{if(ms<=100){now+=100;f();}}};
+ const sandbox={exports:{},URL,require:name=>name==='./codex-dom.cjs'?{directCDPPolicy:()=>!!options.directCDP,homeComposerScope:function homeComposerScope(){}}:require(name),process:{hrtime:{bigint:()=>{if(options.roleTimingUnavailable)throw Error('PRIVATE clock');return BigInt(now)*1000000n;}},platform:options.platform??'win32',env:{GITHUB_ACTIONS:options.noHost?'false':'true',RUNNER_ENVIRONMENT:'github-hosted',RUNNER_OS:options.runnerOs??'Windows',NANH_CODEX_PROJECT_ARTIFACT_SHA256:options.artifactHash??(options.skipPin?'ee7854145554718d7239d01ea37d44f6ba1e0ba4a93f47ac097d6e0f964da47c':undefined),NANH_CODEX_PUBLIC_ONBOARDING:options.noOptin?undefined:'engineering'}},Date:{now:()=>now},clearTimeout:()=>{},setTimeout:(f,ms)=>{if(ms<=100){now+=100;f();}}};
  vm.runInNewContext(source,sandbox);
  let guards=0,mainProofs=0,sealed=0;
  const guard=()=>{guards++;if(options.guardThrows)throw Error('PRIVATE');if(options.guardExhaustsBudget&&guards>=3||options.overlayBudgetExpired&&overlayReads>0)now=1201;return !(options.homeOwnerLoss&&homeReads)&&!inventoryOwnerLost&&!(options.overlayOwnerDuringProof&&legendReads>=3)&&!(options.overlayOwnerLoss&&overlayReads>0)&&!options.initialOwnerLoss&&!(options.ownerLossBeforeRole&&guards>=3)&&!(options.ownerLoss&&roleClicks>0)&&!(options.finalLoss&&guards>=2);};
@@ -129,13 +133,33 @@ async function trial(options={}) {
  const facts=await sandbox.exports.run(page,options.noGuard?undefined:guard,budget,mainGuard,undefined,undefined,!!options.directCDP,
    receipt=>{progress.push(JSON.parse(JSON.stringify(receipt)));if(options.progressThrows)throw Error('PRIVATE');});
  assert(!JSON.stringify(facts).includes('PRIVATE'));
- return {facts,roleClicks,continueClicks,taskClicks,mainProofs,legendReads,sealed,guards,progress};
+ return {facts,roleClicks,continueClicks,taskClicks,mainProofs,legendReads,sealed,guards,progress,roleClickBudgets};
 }
 (async()=>{
  const observed=await trial({});
  assert(observed.progress.some(value=>value.roleClickAttempted&&!value.roleClickCompleted));
  assert(observed.progress.some(value=>value.roleClickCompleted));
  assert(!JSON.stringify(observed.progress).includes('PRIVATE'));
+ for(const [name,kind] of [['TimeoutError','timeout'],['Error','other'],['PRIVATE error class','other']]) {
+  for(const delivered of [false,true]) {
+   const result=await trial({uncertain:'role',roleFailureName:name,roleFailureElapsedMs:37,roleDeliveredBeforeFailure:delivered});
+   assert.equal(result.roleClicks,1);assert.equal(result.continueClicks,0);assert.equal(result.taskClicks,0);
+   assert.equal(result.facts.stage,'role-action');assert.equal(result.facts.errorCategory,'action-uncertain');
+   assert.equal(result.facts.roleClickAttempted,true);assert.equal(result.facts.roleClickCompleted,false);
+   assert.equal(result.facts.engineeringChecked,false);assert.equal(result.facts.codingComposerReady,false);
+   assert.equal(result.facts.roleClickFailure.kind,kind);assert.equal(result.facts.roleClickFailure.elapsedMs,37);
+   const sent=result.roleClickBudgets[0];
+   assert.equal(result.facts.roleClickFailure.budgetMs,sent.budget);
+   assert.equal(sent.budget,Math.max(1,Math.min(2000,sent.remaining)));
+   assert(!JSON.stringify(result.progress).includes('PRIVATE'));
+  }
+ }
+ const noTiming=await trial({uncertain:'role',roleTimingUnavailable:true});
+ assert.equal(noTiming.roleClicks,1);assert.equal(noTiming.continueClicks,0);
+ assert.equal(noTiming.facts.errorCategory,'action-uncertain');assert.equal(noTiming.facts.roleClickFailure,undefined);
+ const capped=await trial({uncertain:'role',roleFailureElapsedMs:600001,fullBudget:true});
+ assert.equal(capped.facts.roleClickFailure.elapsedMs,600000);assert.equal(capped.facts.roleClickFailure.budgetMs,2000);
+ assert.equal(capped.roleClicks,1);assert.equal(capped.continueClicks,0);
  const brokenObserver=await trial({progressThrows:true});
  assert.equal(JSON.stringify(brokenObserver.facts),JSON.stringify(observed.facts));
  assert.equal(brokenObserver.roleClicks,observed.roleClicks);

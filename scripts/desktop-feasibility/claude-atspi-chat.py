@@ -24,7 +24,7 @@ def inside(rect, outer):
 # AT-SPI roles differ from ATK: section=85, grouping=99, comment=97.
 RESPONSE_CONTAINER_ROLES = frozenset((39, 85, 99))
 
-BOUNDARIES = frozenset(('request','policy','native-window','source-owner','tree','tree-cycle','tree-depth','tree-limit','tree-identity','tree-children','response-heading','response-row','response-row-role-limit','response-row-copy-absent','response-row-copy-ambiguous','response-row-headings','response-row-attachment','state',
+BOUNDARIES = frozenset(('request','policy','native-window','source-owner','tree','tree-cycle','tree-depth','tree-limit','tree-identity','tree-children','response-heading','response-row','response-row-role-limit','response-row-copy-absent','response-row-copy-ambiguous','response-row-headings','response-row-attachment','copy-already-attempted','copy-scope-changed','copy-control-state','copy-control-changed','copy-control-outside-frame','copy-control-hit','copy-final-reproof','copy-invoke','state',
     'frame','frame-active','frame-state','frame-identity','frame-bounds','frame-ancestry-cycle','frame-ancestry-depth','frame-nested-dialog','frame-nested-frame','frame-nested-window','frame-editor-outside','frame-count','frame-client','client','mode','focus','input','input-mapping-state','input-mapping-changed','input-empty-state','input-empty-witness','clipboard','action','action-count','action-name','action-hit','response','transport'))
 QUERY_BOUNDARIES = dict(owner='source-owner', identity='tree-identity', children='tree-children', parent='frame',
     state='state', bounds='frame', guard='native-window', client_bounds='client',
@@ -1260,7 +1260,7 @@ class Controller:
     def copy_response(self, marker):
         try:
             if self.copy_attempted:
-                raise Rejected()
+                raise Rejected('copy-already-attempted')
             self.proof()
             self.current_chat(self.tree(self.frame))
             scope = self.response_scope(marker)
@@ -1274,35 +1274,35 @@ class Controller:
             for _ in range(2):
                 self.proof()
                 if self.response_scope(marker) != scope:
-                    raise Rejected()
+                    raise Rejected('copy-scope-changed')
                 self.state(button)
                 bits = self.query('state',button)
                 if not bits & (1<<8) or not bits & (1<<24):
-                    raise Rejected()
+                    raise Rejected('copy-control-state')
                 if (self.query('identity',button),self.query('bounds',button)) != sealed:
-                    raise Rejected()
+                    raise Rejected('copy-control-changed')
                 if not inside(sealed[1],self.sealed_frame[1]):
-                    raise Rejected()
+                    raise Rejected('copy-control-outside-frame')
                 actions=self.query('actions',button)
                 selected_index=unique_activation_index(actions)
                 if selected_index is None or sealed_actions is not None and actions != sealed_actions:
                     raise Rejected('action-name')
                 sealed_actions=actions
                 if not self.query('hit',button,self.frame):
-                    raise Rejected()
+                    raise Rejected('copy-control-hit')
             self.query('clipboard_sentinel')
             self.proof()
             if (self.response_scope(marker) != scope
                     or (self.query('identity',button),self.query('bounds',button)) != sealed
                     or self.query('actions',button) != sealed_actions
                     or not self.query('hit',button,self.frame)):
-                raise Rejected()
+                raise Rejected('copy-final-reproof')
             bits=self.state(button)
             if not bits & (1<<8) or not bits & (1<<24):
                 raise Rejected('state')
             self.copy_attempted = True
             if self.query('invoke_once',button,selected_index) is not True:
-                raise Rejected()
+                raise Rejected('copy-invoke')
             self.proof()
             value = self.query('clipboard_read')
             if value != marker:

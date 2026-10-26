@@ -11,6 +11,8 @@ mod mac_chat_turn;
 mod mac_fit;
 mod ocr;
 mod process;
+#[cfg(windows)]
+pub(crate) use process::windows_chat::WindowsChatProgress;
 mod window;
 #[cfg(any(windows, test))]
 mod windows_chat_turn;
@@ -450,7 +452,7 @@ impl Native {
         mode: &str,
         values: [&str; 3],
         deadline: std::time::Instant,
-        progress: &mut Option<&'static str>,
+        progress: &mut WindowsChatProgress,
     ) -> Result<WindowsChatReceipt, FailureCategory> {
         if std::env::var("GITHUB_ACTIONS").as_deref() != Ok("true")
             || std::env::var("RUNNER_ENVIRONMENT").as_deref() != Ok("github-hosted")
