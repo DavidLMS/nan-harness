@@ -27,10 +27,20 @@ permissions:
   contents: read
 
 jobs:
+  approve-live:
+    name: Approve the selected live Desktop checks
+    if: inputs.live && github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/live-check-approval.yml
+    with:
+      subject: Verify selected Desktop applications on ${{ inputs.platform }} at ${{ github.sha }}.
+
   check:
-    if: ${{ !inputs.live || github.ref == 'refs/heads/main' }}
+    needs: approve-live
+    if: ${{ always() && !cancelled() && (!inputs.live || (github.ref == 'refs/heads/main' && needs.approve-live.result == 'success')) }}
     runs-on: ${{ inputs.platform == 'linux' && 'ubuntu-24.04' || inputs.platform == 'macos' && 'macos-15' || 'windows-2025' }}
-    environment: ${{ inputs.live && 'canary-live' || 'desktop-deterministic' }}
+    environment:
+      name: ${{ inputs.live && 'canary-live-workers' || 'desktop-deterministic' }}
+      deployment: false
     timeout-minutes: 90
     strategy:
       fail-fast: false
@@ -136,7 +146,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test -n "$NAN_API_KEY" || { echo 'Live checks require the canary-live NAN_API_KEY secret.' >&2; exit 1; }
+          test -n "$NAN_API_KEY" || { echo 'Live checks require the canary-live-workers NAN_API_KEY secret.' >&2; exit 1; }
           session=()
           if [[ "$RUNNER_OS" == Windows ]]; then session+=(--session github-hosted); fi
           bash scripts/run-desktop-check-session.sh "$CHECKER" run --yes --non-interactive --ephemeral "${session[@]}" --mode live --prepared "$RUNNER_TEMP/desktop-prepared.json" --model "$MODEL" --app "$SELECTED_APP" --output "$RUNNER_TEMP/desktop-report/live.json"

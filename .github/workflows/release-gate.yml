@@ -150,16 +150,27 @@ jobs:
           path: ${{ runner.temp }}/release-assets/*
           retention-days: 7
 
+  approve-live:
+    name: Approve live release qualification
+    needs: prepare
+    if: inputs.mode == 'live' && github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/live-check-approval.yml
+    with:
+      subject: Verify ${{ inputs.tag }} at ${{ inputs.tag_commit }} with all 52 CLI cells and three OpenCode V2 cells; publication remains a separate protected operation.
+
   cell:
     name: ${{ matrix.system }} / ${{ matrix.harness }}
-    needs: prepare
+    needs: [prepare, approve-live]
+    if: ${{ always() && !cancelled() && needs.prepare.result == 'success' && (inputs.mode != 'live' || (github.ref == 'refs/heads/main' && needs.approve-live.result == 'success')) }}
     strategy:
       fail-fast: false
       max-parallel: 3
       matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 180
-    environment: ${{ inputs.mode == 'live' && 'canary-live' || '' }}
+    environment:
+      name: ${{ inputs.mode == 'live' && 'canary-live-workers' || '' }}
+      deployment: false
     defaults:
       run:
         shell: bash
@@ -258,7 +269,8 @@ jobs:
 
   opencode-v2:
     name: OpenCode V2 live / ${{ matrix.system }}
-    needs: prepare
+    needs: [prepare, approve-live]
+    if: ${{ always() && !cancelled() && needs.prepare.result == 'success' && (inputs.mode != 'live' || (github.ref == 'refs/heads/main' && needs.approve-live.result == 'success')) }}
     strategy:
       fail-fast: false
       matrix:
@@ -268,7 +280,9 @@ jobs:
           - {system: windows, runner: windows-2025}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
-    environment: ${{ inputs.mode == 'live' && 'canary-live' || '' }}
+    environment:
+      name: ${{ inputs.mode == 'live' && 'canary-live-workers' || '' }}
+      deployment: false
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

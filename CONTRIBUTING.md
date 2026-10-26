@@ -300,11 +300,16 @@ verifies the draft before publication.
       tag-based downloads can select an obsolete draft. Resolve duplicates before
       retrying verification, and require the checksum attestation's source digest
       to match the exact tag commit, not only the tag name.
-- [ ] Confirm the protected `canary-live` environment exists with
-      `NAN_API_KEY` configured and appropriate required reviewers. Confirm the
-      protected `release-publication` environment exists for the publisher;
-      this checklist does not configure either environment or assert that it
-      is already present.
+- [ ] Confirm `canary-live` has appropriate required reviewers for the single
+      live-qualification approval job. Configure `NAN_API_KEY` in the separate
+      `canary-live-workers` environment, restricted to `main`; every live worker
+      must depend on that successful approval. Keep the existing `canary-live`
+      protection and credentials intact for historical workflow refs and reruns.
+      Provision the workers credential through trusted secret settings, never
+      through workflow outputs or artifacts. Confirm the protected
+      `release-publication` environment exists for the separate publisher.
+      This checklist does not configure these environments or assert that they
+      are already present.
 - [ ] Confirm draft creation automatically dispatches verification-only live
       checks from the default branch. For a manual retry or publication, dispatch
       [`.github/workflows/release-gate.yml`](.github/workflows/release-gate.yml)

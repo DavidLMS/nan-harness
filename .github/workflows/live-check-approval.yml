@@ -1,0 +1,25 @@
+name: Approve one live qualification
+
+on:
+  workflow_call:
+    inputs:
+      subject:
+        description: Exact live operation awaiting maintainer review
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  approve:
+    name: Review the complete live qualification
+    runs-on: ubuntu-24.04
+    environment:
+      name: canary-live
+      deployment: false
+    steps:
+      - name: Record the approved scope
+        env:
+          REVIEW_SUBJECT: ${{ inputs.subject }}
+        run: printf '%s\n' "$REVIEW_SUBJECT" >> "$GITHUB_STEP_SUMMARY"
