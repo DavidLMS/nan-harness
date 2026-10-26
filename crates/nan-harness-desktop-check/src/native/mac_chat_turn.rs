@@ -45,6 +45,7 @@ pub(crate) enum ChatTurnStage {
     TreeWindow,
     Mode,
     Composer,
+    ComposerAmbiguous,
     Focus,
     InputFocusGuard,
     InputFocusSetting,
@@ -146,6 +147,7 @@ impl ChatTurnStage {
             "turn tree-window\n" => Some(Self::TreeWindow),
             "turn mode\n" => Some(Self::Mode),
             "turn composer\n" => Some(Self::Composer),
+            "turn composer-ambiguous\n" => Some(Self::ComposerAmbiguous),
             "turn focus\n" => Some(Self::Focus),
             "turn input-focus-guard\n" => Some(Self::InputFocusGuard),
             "turn input-focus-setting\n" => Some(Self::InputFocusSetting),
@@ -299,11 +301,49 @@ impl FailureScopeShape {
         })
     }
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ComposerShape {
+    editors: u16,
+    start_tasks: u16,
+    send_messages: u16,
+}
+impl ComposerShape {
+    fn parse(line: &str) -> Option<Self> {
+        let fields: Vec<_> = line.strip_prefix("composer ")?.split(' ').collect();
+        if fields.len() != 3 {
+            return None;
+        }
+        let mut counts = [0_u16; 3];
+        for (index, field) in fields.iter().enumerate() {
+            if field.is_empty()
+                || field.len() > 4
+                || !field.bytes().all(|value| value.is_ascii_digit())
+                || (field.len() > 1 && field.starts_with('0'))
+            {
+                return None;
+            }
+            counts[index] = field.parse().ok()?;
+            if counts[index] > 1024 {
+                return None;
+            }
+        }
+        if counts.into_iter().map(u32::from).sum::<u32>() > 1024 {
+            return None;
+        }
+        Some(Self {
+            editors: counts[0],
+            start_tasks: counts[1],
+            send_messages: counts[2],
+        })
+    }
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ChatTurnReceipt {
     pub(crate) stage: ChatTurnStage,
     pub(crate) row_shape: Option<FailureRowShape>,
     pub(crate) scope_shape: Option<FailureScopeShape>,
+    pub(crate) composer_shape: Option<ComposerShape>,
 }
 impl ChatTurnReceipt {
     pub(crate) fn parse(output: &str, mode: &str) -> Option<Self> {
@@ -317,6 +357,18 @@ impl ChatTurnReceipt {
                 stage,
                 row_shape: None,
                 scope_shape: None,
+                composer_shape: None,
+            });
+        }
+        if matches!(
+            mode,
+            "input" | "input-replace-owned" | "input-failure-owned"
+        ) {
+            return Some(Self {
+                stage,
+                row_shape: None,
+                scope_shape: None,
+                composer_shape: Some(ComposerShape::parse(remainder.strip_suffix('\n')?)?),
             });
         }
         if !matches!(
@@ -365,6 +417,7 @@ impl ChatTurnReceipt {
         Some(Self {
             stage,
             scope_shape,
+            composer_shape: None,
             row_shape: Some(FailureRowShape {
                 source_version: "2.19675.0",
                 source_sha256: "87e6b710a540352fcd4f9a1f0f6a8f9f9b6377ca676fd99c3e4d8bc87653dceb",
@@ -457,6 +510,36 @@ pub(super) fn request(
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn composer_counts_are_closed_and_do_not_grant_action_readiness() {
+        let receipt = ChatTurnReceipt::parse(
+            "turn composer-ambiguous\ncomposer 2 0 1\n",
+            "input-failure-owned",
+        )
+        .unwrap();
+        assert_eq!(receipt.stage, ChatTurnStage::ComposerAmbiguous);
+        assert!(!receipt.stage.pre_action_pending());
+        assert_eq!(receipt.composer_shape.unwrap().editors, 2);
+        for counts in ["1 0 0", "0 0 1", "1024 0 0", "1 1 0"] {
+            let receipt = format!("turn deadline-input\ncomposer {counts}\n");
+            assert!(ChatTurnReceipt::parse(&receipt, "input").is_some());
+            assert!(ChatTurnReceipt::parse(&receipt, "copy").is_none());
+        }
+        for counts in [
+            "01 0 1",
+            "-1 0 1",
+            "1 0 1024",
+            "1025 0 0",
+            "1 0 1 PRIVATE",
+            "1 0",
+            "1\n0 1",
+        ] {
+            assert!(
+                ChatTurnReceipt::parse(&format!("turn sent\ncomposer {counts}\n"), "input")
+                    .is_none()
+            );
+        }
+    }
     #[test]
     fn optional_scope_shape_is_bounded_and_never_changes_stage() {
         let legacy = "turn scope-control-absent\nrows 0 0 0 0 1 1 1 0 0 0 0 0 0\n";

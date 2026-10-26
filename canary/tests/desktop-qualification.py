@@ -2765,6 +2765,29 @@ class QualificationTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 q.semantic_observations(tmp, 'chatgpt-desktop')
 
+    def test_native_composer_shape_is_bounded_and_cannot_qualify_a_probe(self):
+        value = dict(schemaVersion=1, mechanism='claude-native-chat', diagnosticsOnly=True,
+                     stage='composer-ambiguous', submittedTurns=2, inputVerifiedTurns=2, copiedResponses=2,
+                     retryAttempted=False, clipboardCleared=True,
+                     composerShape=dict(editors=2, startTasks=0, sendMessages=1))
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'composer.json'
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [value])
+            self.assertEqual(q.envelope('claude-desktop', 'macos', 'aarch64', 'a' * 40)['qualification'], 'unqualified')
+            for shape in (dict(editors=True, startTasks=0, sendMessages=1),
+                          dict(editors=-1, startTasks=0, sendMessages=1),
+                          dict(editors=1024, startTasks=0, sendMessages=1),
+                          dict(editors=1, startTasks=0, sendMessages=1025),
+                          dict(editors=1, sendMessages=1),
+                          dict(editors=1, startTasks=0, sendMessages=1, label='PRIVATE')):
+                path.write_text(json.dumps({**value, 'composerShape': shape}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'claude-desktop')
+            path.write_text(json.dumps({**value, 'mechanism': 'claude-windows-native-chat'}))
+            with self.assertRaises(ValueError):
+                q.semantic_observations(root, 'claude-desktop')
+
     def test_native_input_boundaries_preserve_terminal_failure_and_privacy(self):
         facts = dict(schemaVersion=1, mechanism='claude-native-chat', diagnosticsOnly=True,
                      submittedTurns=1, inputVerifiedTurns=1, copiedResponses=1,
