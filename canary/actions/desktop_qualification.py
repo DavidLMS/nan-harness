@@ -373,7 +373,7 @@ def folder_trust_observation(trust):
 
 
 def public_onboarding(setup, app):
-    shape = set(setup) - {'transitionPublicDOMObservation', 'transitionReadinessObservation', 'homeAfterContinueReady', 'folderTrust', 'rejectedPageInventory', 'taskScopeProved', 'taskClickAttempted', 'taskClickCompleted', 'codingComposerReady', 'taskScopeObservation', 'taskControlKind', 'codingReadinessObservation', 'codingNavigationObservation', 'codingPublicDOMObservation', 'codingHomeObservation', 'codingEditableObservation', 'codingHomeStateObservation', 'workspaceMenuObservation', 'macHomeStateObservation', 'taskSkipConfirmationAttempted', 'taskSkipConfirmationCompleted', 'taskSkipConfirmationProof', 'mainGuardFailure', 'pageSetFailure', 'foreignOverlayImportSetup', 'foreignOverlaySourceCounts', 'foreignOverlayActionability'} if type(setup) is dict else set()
+    shape = set(setup) - {'roleClickFailure', 'transitionPublicDOMObservation', 'transitionReadinessObservation', 'homeAfterContinueReady', 'folderTrust', 'rejectedPageInventory', 'taskScopeProved', 'taskClickAttempted', 'taskClickCompleted', 'codingComposerReady', 'taskScopeObservation', 'taskControlKind', 'codingReadinessObservation', 'codingNavigationObservation', 'codingPublicDOMObservation', 'codingHomeObservation', 'codingEditableObservation', 'codingHomeStateObservation', 'workspaceMenuObservation', 'macHomeStateObservation', 'taskSkipConfirmationAttempted', 'taskSkipConfirmationCompleted', 'taskSkipConfirmationProof', 'mainGuardFailure', 'pageSetFailure', 'foreignOverlayImportSetup', 'foreignOverlaySourceCounts', 'foreignOverlayActionability'} if type(setup) is dict else set()
     booleans = {'conversationalScope', 'engineeringControl', 'roleClickAttempted',
                 'roleClickCompleted', 'engineeringChecked', 'continueControl',
                 'continueClickAttempted', 'continueClickCompleted', 'roleScopeAbsent'}
@@ -397,6 +397,15 @@ def public_onboarding(setup, app):
             or type(setup['sessionProofFailure']) is not str or setup['sessionProofFailure'] not in sessions
             or any(type(setup[key]) is not bool for key in booleans)):
         raise ValueError('invalid public onboarding diagnostic')
+    if 'roleClickFailure' in setup:
+        failure = setup['roleClickFailure']
+        if (type(failure) is not dict or set(failure) != {'kind', 'elapsedMs', 'budgetMs'}
+                or type(failure['kind']) is not str or failure['kind'] not in {'timeout', 'other'}
+                or type(failure['elapsedMs']) is not int or not 0 <= failure['elapsedMs'] <= 600000
+                or type(failure['budgetMs']) is not int or not 1 <= failure['budgetMs'] <= 2000
+                or setup['roleClickAttempted'] is not True or setup['roleClickCompleted'] is not False
+                or setup['stage'] != 'role-action' or setup['errorCategory'] != 'action-uncertain'):
+            raise ValueError('invalid Codex role click failure diagnostic')
     transition_fields = {'transitionPublicDOMObservation','transitionReadinessObservation'}
     if transition_fields & set(setup):
         if (not transition_fields <= set(setup) or setup['continueClickCompleted'] is not True

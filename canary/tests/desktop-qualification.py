@@ -3695,6 +3695,29 @@ class QualificationTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     q.public_onboarding({**setup,'workspaceMenuObservation':{**menu,'profileStateObservation':{**value,**change}}},'chatgpt-desktop')
 
+    def test_codex_role_click_failure_is_closed_and_never_proves_delivery(self):
+        setup = dict(schemaVersion=1, mechanism='codex-public-onboarding', diagnosticsOnly=True,
+                     stage='role-action', errorCategory='action-uncertain', conversationalScope=True,
+                     engineeringControl=True, roleClickAttempted=True, roleClickCompleted=False,
+                     engineeringChecked=False, continueControl=False, continueClickAttempted=False,
+                     continueClickCompleted=False, roleScopeAbsent=False,
+                     roleProofFailure='unmeasured', sessionProofFailure='unmeasured')
+        for kind in ('timeout', 'other'):
+            failure = dict(kind=kind, elapsedMs=2001, budgetMs=2000)
+            value = setup | {'roleClickFailure': failure}
+            self.assertEqual(q.public_onboarding(value, 'chatgpt-desktop'), value)
+            for change in ({'kind': 'PRIVATE'}, {'kind': []}, {'elapsedMs': True},
+                           {'elapsedMs': -1}, {'elapsedMs': 600001}, {'budgetMs': 0},
+                           {'budgetMs': 2001}, {'budgetMs': True}, {'message': 'PRIVATE'}):
+                with self.assertRaises(ValueError):
+                    q.public_onboarding(value | {'roleClickFailure': failure | change}, 'chatgpt-desktop')
+            for change in ({'roleClickAttempted': False}, {'roleClickCompleted': True},
+                           {'stage': 'coding-readiness'}, {'errorCategory': None}):
+                with self.assertRaises(ValueError):
+                    q.public_onboarding(value | change, 'chatgpt-desktop')
+            with self.assertRaises(ValueError):
+                q.public_onboarding(value, 'claude-desktop')
+
     def test_public_onboarding_receipts_reject_private_and_untyped_data(self):
         setup = dict(schemaVersion=1, mechanism='codex-public-onboarding', diagnosticsOnly=True,
                      stage='stopped-after-role', errorCategory=None, conversationalScope=True,

@@ -581,7 +581,23 @@ async function run(page, ownerGuard, deadline, rejected, mainGuard, folderTrust,
         mainGuard.sealInitialActions();
       facts[before]=true;
       checkpoint();
-      await handle.click({position:point,timeout:Math.max(1,Math.min(2000,deadline-Date.now()))});
+      const clickBudgetMs=Math.max(1,Math.min(2000,deadline-Date.now()));
+      let roleStarted=null;
+      if(before==='roleClickAttempted') {
+        try {roleStarted=process.hrtime.bigint();} catch { /* Timing never admits or prevents input. */ }
+      }
+      try {
+        await handle.click({position:point,timeout:clickBudgetMs});
+      } catch(error) {
+        if(roleStarted!==null) {
+          try {
+            facts.roleClickFailure={kind:error?.name==='TimeoutError'?'timeout':'other',
+              elapsedMs:Math.min(600000,Math.max(0,Number((process.hrtime.bigint()-roleStarted)/1000000n))),
+              budgetMs:clickBudgetMs};
+          } catch { /* Diagnostic failure cannot replace the uncertain click result. */ }
+        }
+        throw error;
+      }
       facts[after]=true;
       checkpoint();
       if (!await ownedEndpoint()) return false;
