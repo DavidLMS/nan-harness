@@ -365,7 +365,7 @@ assert.equal(roleSourceScope({foreignFieldset:true}).mainScope,false);
       profileAuthority:true,focusGuard:null,heldMainGuard:helper.heldMainGuard,
       initialMain:pending.held,browser:pending.browser,onboardingOwnerGuard:()=>failure!=='owner',
       correlationDeadline:1000,correlationIdentity:pending.identity,
-      process:{platform:'win32'},directCDP:true,facts:{},save:()=>{},require,setTimeout,
+      process:{platform:'win32'},directCDP:true,spotlightPolicy:false,facts:{},save:()=>{},require,setTimeout,
     });
     assert.equal(await proof(),failure===null,failure??'folder before role');
   }
