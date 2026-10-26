@@ -520,11 +520,18 @@ struct LaunchObservation {
 }
 
 impl LaunchObservation {
-    fn capture(process: &mut ProbeProcess, spec: &ProbeSpec, failed_acquisition: bool) -> Self {
+    fn capture(
+        process: &mut impl crate::process::Observation,
+        spec: &ProbeSpec,
+        failed_acquisition: bool,
+    ) -> Self {
+        // A completed launcher has finished publishing its failure receipt.
+        // Reading before polling exit can lose a still-absent or partial record.
+        let exit = process.try_wait().ok().flatten().map(launcher_exit);
         let record = read_child_launch_diagnostic(spec);
         let claude_identity = read_claude_identity_observation(spec, failed_acquisition);
         Self {
-            exit: process.try_wait().ok().flatten().map(launcher_exit),
+            exit,
             child_exit: record.as_ref().and_then(|record| record.child_exit),
             discovery_exit: record.as_ref().and_then(|record| record.discovery_exit),
             failure: record.as_ref().map(|record| record.failure),
@@ -2873,6 +2880,64 @@ mod tests {
                 read_child_launch_diagnostic(spec).map(|record| record.failure),
                 Some(expected)
             );
+        }
+    }
+
+    #[test]
+    fn exited_launcher_publishes_its_receipt_before_the_failure_snapshot() {
+        struct PublishingExit<'a>(&'a Path);
+        impl crate::process::Observation for PublishingExit<'_> {
+            fn id(&self) -> Option<u32> {
+                None
+            }
+
+            fn try_wait(&mut self) -> std::io::Result<Option<std::process::ExitStatus>> {
+                #[cfg(unix)]
+                use std::os::unix::process::ExitStatusExt as _;
+                #[cfg(windows)]
+                use std::os::windows::process::ExitStatusExt as _;
+
+                // The child completes its receipt between the initial read and
+                // the exit observation. Polling completion must precede the read.
+                std::fs::write(
+                    self.0,
+                    br#"{"schemaVersion":1,"failure":"launch-setup-failed","setupCause":"runtime"}"#,
+                )?;
+                let raw = if cfg!(unix) { 1 << 8 } else { 1 };
+                Ok(Some(std::process::ExitStatus::from_raw(raw)))
+            }
+        }
+
+        let directory = tempfile::tempdir().unwrap();
+        let spec = ProbeSpec {
+            kind: DesktopHarnessKind::ChatGpt,
+            nan_harness: PathBuf::from("/nanh"),
+            nan_harness_sha256: "a".repeat(64),
+            executable: PathBuf::from("/app"),
+            workspace: directory.path().to_path_buf(),
+            model: "model".into(),
+            live: false,
+            probe_index: Some(0),
+            session: crate::cli::SessionMode::PrivateProfile,
+            verification: crate::cli::VerificationPolicy::default(),
+            launch_wrapper: None,
+        };
+        let path = spec.workspace.join("native-launch-diagnostic.json");
+        for pending in [None, Some(br#"{"schemaVersion":1,"failure":"#.as_slice())] {
+            if let Some(bytes) = pending {
+                std::fs::write(&path, bytes).unwrap();
+            }
+            let observation = LaunchObservation::capture(&mut PublishingExit(&path), &spec, false);
+            assert_eq!(observation.exit, Some(LaunchExit::Code(1)));
+            assert_eq!(
+                observation.failure,
+                Some(crate::diagnostics::LaunchFailure::LaunchSetup)
+            );
+            assert_eq!(
+                observation.setup_cause,
+                Some(crate::diagnostics::SetupCause::Runtime)
+            );
+            std::fs::remove_file(&path).unwrap();
         }
     }
 

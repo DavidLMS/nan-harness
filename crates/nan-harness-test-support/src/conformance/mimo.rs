@@ -7,6 +7,7 @@ use crate::terminal::TerminalCommand;
 use crate::workspace::ConformanceWorkspace;
 use nan_harness_private_fs::{create_private_dir_all, open_private_truncate};
 use serde_json::{Value, json};
+use std::collections::BTreeSet;
 use std::fs;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -14,6 +15,26 @@ use std::time::Instant;
 
 const CHECK_NAME: &str = "native-configuration";
 const ROTATED_CREDENTIAL: &str = "nan-harness-conformance-rotated-credential";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum NativeMcpRoute {
+    Direct,
+    Search,
+    Dispatch,
+}
+
+fn native_mcp_route(tools: &BTreeSet<String>) -> Result<NativeMcpRoute, ()> {
+    if tools.contains("mcp_tool_use") {
+        require(tools.contains("mcp_tool_search"))?;
+        Ok(NativeMcpRoute::Dispatch)
+    } else if tools.contains("mcp_tool_search") {
+        Ok(NativeMcpRoute::Search)
+    } else if tools.contains("nan-search_web_search") {
+        Ok(NativeMcpRoute::Direct)
+    } else {
+        Err(())
+    }
+}
 
 /// Checks the published binary's complete `MiMo` native configuration lifecycle.
 ///
@@ -44,8 +65,8 @@ pub async fn mimo_native_configuration_check(nan_harness: &Path) -> ConformanceC
 async fn verify(nan_harness: &Path) -> Result<(), ()> {
     let workspace = ConformanceWorkspace::create().map_err(|_| ())?;
     let binary = prepare(nan_harness, workspace.path()).map_err(|_| ())?;
-    let discovery = discover_native_tools(&binary, workspace.path()).await?;
-    let calls = native_calls(workspace.path(), discovery);
+    let route = discover_native_tools(&binary, workspace.path()).await?;
+    let calls = native_calls(workspace.path(), route);
     let provider =
         ScriptedProvider::start(ProviderScenario::sequence(calls.clone(), ROUND_TRIP_MARKER))
             .await
@@ -57,7 +78,7 @@ async fn verify(nan_harness: &Path) -> Result<(), ()> {
     require(bounded && shutdown.is_ok())
 }
 
-async fn discover_native_tools(binary: &Path, root: &Path) -> Result<bool, ()> {
+async fn discover_native_tools(binary: &Path, root: &Path) -> Result<NativeMcpRoute, ()> {
     let provider = ScriptedProvider::start(ProviderScenario::inventory(ROUND_TRIP_MARKER))
         .await
         .map_err(|_| ())?;
@@ -71,7 +92,7 @@ async fn configure_and_inventory(
     binary: &Path,
     root: &Path,
     provider: &ScriptedProvider,
-) -> Result<bool, ()> {
+) -> Result<NativeMcpRoute, ()> {
     save_search_backend(root, provider.base_url()).map_err(|_| ())?;
     configure(
         binary,
@@ -95,13 +116,12 @@ async fn configure_and_inventory(
         .iter()
         .filter_map(tool_names)
         .flatten()
-        .collect::<std::collections::BTreeSet<_>>();
-    if !tools.contains("nan-search_web_search") && !tools.contains("mcp_tool_search") {
+        .collect::<BTreeSet<_>>();
+    let route = native_mcp_route(&tools);
+    if route.is_err() {
         eprintln!("MiMo native MCP discovery unavailable: tools={tools:?}");
     }
-    // MiMo 0.1.15 defers MCP schemas until its discovery tool is called.
-    require(tools.contains("nan-search_web_search") || tools.contains("mcp_tool_search"))?;
-    Ok(tools.contains("mcp_tool_search"))
+    route
 }
 
 fn prepare(nan_harness: &Path, root: &Path) -> std::io::Result<PathBuf> {
@@ -259,7 +279,16 @@ fn isolated_command(binary: &Path, root: &Path) -> Result<TerminalCommand, ()> {
     Ok(command)
 }
 
-fn native_calls(root: &Path, discovery: bool) -> Vec<ScriptedToolCall> {
+fn native_calls(root: &Path, route: NativeMcpRoute) -> Vec<ScriptedToolCall> {
+    let search_arguments = json!({"query": "mimo conformance", "max_results": 1});
+    let search = if route == NativeMcpRoute::Dispatch {
+        call(
+            "mcp_tool_use",
+            json!({"name": "nan-search_web_search", "arguments": search_arguments}),
+        )
+    } else {
+        call("nan-search_web_search", search_arguments)
+    };
     let mut calls = vec![
         call("read", json!({"file_path": root.join("read-target.txt")})),
         call(
@@ -280,20 +309,20 @@ fn native_calls(root: &Path, discovery: bool) -> Vec<ScriptedToolCall> {
             "grep",
             json!({"pattern": "READ_TARGET_CONTENT", "path": root.join("read-target.txt")}),
         ),
-        call(
-            "nan-search_web_search",
-            json!({"query": "mimo conformance", "max_results": 1}),
-        ),
+        search,
         call(
             "actor",
             json!({"operation": {"action": "run", "subagent_type": "general", "description": "Verify auxiliary routing", "prompt": "Reply with the helper marker without tools.", "model": "lite", "context": "none", "timeout_ms": 30000}}),
         ),
     ];
-    if discovery {
-        calls.insert(
-            7,
-            call("mcp_tool_search", json!({"query":"web_search", "limit":1})),
-        );
+    if route != NativeMcpRoute::Direct {
+        // Older search loads the named tool; native dispatch keeps schemas deferred.
+        let arguments = if route == NativeMcpRoute::Dispatch {
+            json!({"query":"web_search", "max_results":1})
+        } else {
+            json!({"query":"web_search", "limit":1})
+        };
+        calls.insert(7, call("mcp_tool_search", arguments));
     }
     calls
 }
@@ -322,4 +351,103 @@ fn read_json(path: &Path) -> Result<Value, ()> {
 
 fn require(condition: bool) -> Result<(), ()> {
     condition.then_some(()).ok_or(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::assertions::{
+        ProbeAssertionError, assert_provider_tool_round_trip, expected_tool_call_id,
+    };
+
+    fn catalog(names: &[&str]) -> BTreeSet<String> {
+        names.iter().map(|name| (*name).to_owned()).collect()
+    }
+
+    #[test]
+    fn advertised_mcp_contract_selects_native_dispatch_and_preserves_legacy_routes() {
+        for (tools, route) in [
+            (vec!["nan-search_web_search"], NativeMcpRoute::Direct),
+            (vec!["mcp_tool_search"], NativeMcpRoute::Search),
+            (
+                vec!["mcp_tool_search", "mcp_tool_use"],
+                NativeMcpRoute::Dispatch,
+            ),
+        ] {
+            assert_eq!(native_mcp_route(&catalog(&tools)), Ok(route));
+            let calls = native_calls(Path::new("fixture"), route);
+            let search_index = usize::from(route != NativeMcpRoute::Direct) + 7;
+            let search = &calls[search_index];
+            let arguments = json!({"query":"mimo conformance", "max_results":1});
+            if route == NativeMcpRoute::Dispatch {
+                assert_eq!(search.name, "mcp_tool_use");
+                assert_eq!(
+                    search.input,
+                    json!({"name":"nan-search_web_search", "arguments":arguments})
+                );
+            } else {
+                assert_eq!(search.name, "nan-search_web_search");
+                assert_eq!(search.input, arguments);
+            }
+            if route != NativeMcpRoute::Direct {
+                assert_eq!(calls[7].name, "mcp_tool_search");
+                assert_eq!(
+                    calls[7].input,
+                    if route == NativeMcpRoute::Dispatch {
+                        json!({"query":"web_search", "max_results":1})
+                    } else {
+                        json!({"query":"web_search", "limit":1})
+                    }
+                );
+            }
+            assert_eq!(calls.last().unwrap().name, "actor");
+        }
+        assert!(native_mcp_route(&catalog(&[])).is_err());
+        assert!(native_mcp_route(&catalog(&["mcp_tool_use"])).is_err());
+    }
+
+    fn exchange(calls: &[ScriptedToolCall]) -> Vec<Value> {
+        let messages = calls
+            .iter()
+            .enumerate()
+            .flat_map(|(index, call)| {
+                let id = expected_tool_call_id(index);
+                [
+                    json!({"role":"assistant", "tool_calls":[{"id":id,"function":{
+                "name":call.name,"arguments":call.input.to_string()}}]}),
+                    json!({"role":"tool","tool_call_id":id,"content":"native result"}),
+                ]
+            })
+            .collect::<Vec<_>>();
+        vec![json!({"messages":messages})]
+    }
+
+    #[test]
+    fn every_mcp_route_requires_the_native_search_result_and_rejects_tool_errors() {
+        for route in [
+            NativeMcpRoute::Direct,
+            NativeMcpRoute::Search,
+            NativeMcpRoute::Dispatch,
+        ] {
+            let calls = native_calls(Path::new("fixture"), route);
+            let request = exchange(&calls);
+            assert!(assert_provider_tool_round_trip(&request, &calls).is_ok());
+            let search_index = usize::from(route != NativeMcpRoute::Direct) + 7;
+            let mut missing = request.clone();
+            missing[0]["messages"]
+                .as_array_mut()
+                .unwrap()
+                .remove(2 * search_index + 1);
+            assert!(matches!(
+                assert_provider_tool_round_trip(&missing, &calls),
+                Err(ProbeAssertionError::UnexpectedToolResults { .. })
+            ));
+            let mut failed = request;
+            failed[0]["messages"][2 * search_index + 1]["content"] = json!({"isError":true});
+            assert!(matches!(
+                assert_provider_tool_round_trip(&failed, &calls),
+                Err(ProbeAssertionError::ToolResultError)
+            ));
+        }
+    }
 }

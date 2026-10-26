@@ -5094,5 +5094,108 @@ class WindowsCleanupProgressTests(unittest.TestCase):
                     path.write_text(json.dumps(good))
                     with self.assertRaises(ValueError):q.semantic_observations(root,'zed-desktop')
 
+class CodexFreshLinuxHomeTests(unittest.TestCase):
+    def test_renderer_fact_keeps_platform_and_parent_confirmation_context(self):
+        value = dict(schemaVersion=1, mechanism='renderer-inventory', diagnosticsOnly=True,
+            app='chatgpt-desktop', endpointOwned=True, launcherOwned=True, attached=True,
+            pageCount=1, textareaCount=0, editableCount=1, sendCount=0, retryCount=0,
+            newThreadCount=0, loginCount=0, dialogCount=0, errorCategory=None,
+            initialMainConfirmation=self.confirmation(), publicOnboarding=self.receipt())
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'renderer-inventory-1.json'
+            path.write_text(json.dumps(value))
+            records = q.semantic_observations(root, 'chatgpt-desktop', 'linux')
+            self.assertEqual(len(records), 1)
+            self.assertEqual(records[0]['initialMainConfirmation'], self.confirmation())
+            self.assertEqual(records[0]['publicOnboarding'], self.receipt())
+            self.assertNotIn('probeSteps', records[0])
+            self.assertTrue(records[0]['diagnosticsOnly'])
+            for platform in (None, 'macos', 'windows'):
+                with self.subTest(platform=platform), self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'chatgpt-desktop', platform)
+            del value['initialMainConfirmation']
+            path.write_text(json.dumps(value))
+            with self.assertRaises(ValueError):
+                q.semantic_observations(root, 'chatgpt-desktop', 'linux')
+
+    def confirmation(self):
+        proof = dict(sourceVersion='26.930.41038',
+            bootstrapSourceSha256='28c6096af241a37a9a33a2e5601f0aa05426910d5c84d08824d852342a2b4d5d',
+            composerSourceSha256='7198ee078e78a748d03c3cc96f5c041d056584d762728fd0be23e695bc394da0',
+            profileRetained=True, nativeOwnerVerified=True, mainIdentityRetained=True,
+            documentRetained=True, documentFocused=True, composerRetained=True,
+            uniqueHomeComposer=True, stableSamples=2)
+        return dict(status='confirmed', identityUnchanged=True, mainScopeUnique=False,
+            documentFocused=True, inputChannel='cdp-dom', sourceKind='fresh-linux-home',
+            sourceScopes=dict(coding=False, home=True), freshHomeProof=proof,
+            counts=dict(roleLegend=0, roleRadios=0, engineering=0, dialog=0,
+                        quickChatComposer=0, editable=1))
+
+    def receipt(self):
+        return dict(schemaVersion=1, mechanism='codex-public-onboarding', diagnosticsOnly=True,
+            stage='fresh-linux-home', errorCategory=None, roleProofFailure='unmeasured',
+            sessionProofFailure='unmeasured', conversationalScope=False, engineeringControl=False,
+            roleClickAttempted=False, roleClickCompleted=False, engineeringChecked=False,
+            continueControl=False, continueClickAttempted=False, continueClickCompleted=False,
+            roleScopeAbsent=True, taskScopeProved=False, taskClickAttempted=False,
+            taskClickCompleted=False, codingComposerReady=True)
+
+    def test_fresh_home_confirmation_requires_every_source_and_ownership_witness(self):
+        value = self.confirmation()
+        self.assertEqual(q.codex_initial_confirmation(value, 'chatgpt-desktop', 'linux'), value)
+        for platform in (None, 'macos', 'windows'):
+            with self.assertRaises(ValueError):
+                q.codex_initial_confirmation(value, 'chatgpt-desktop', platform)
+        proof = value['freshHomeProof']
+        changes = [dict(sourceVersion='OTHER'), dict(bootstrapSourceSha256='0' * 64),
+                   dict(composerSourceSha256='0' * 64), dict(stableSamples=True),
+                   dict(stableSamples=1), dict(stableSamples=3), dict(windowTitle='PRIVATE')]
+        changes += [{key: False} for key in proof if type(proof[key]) is bool]
+        for change in changes:
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                q.codex_initial_confirmation(value | {'freshHomeProof': proof | change},
+                                             'chatgpt-desktop', 'linux')
+        changes = [dict(mainScopeUnique=True), dict(identityUnchanged=False),
+                   dict(documentFocused=False), dict(inputChannel='native-focused'),
+                   dict(status='deadline'), dict(sourceKind='role'), dict(sourceKind=[]),
+                   dict(sourceScopes=dict(coding=True, home=True)), dict(windowId=7)]
+        changes += [dict(counts=value['counts'] | {key: count}) for key, count in (
+            ('dialog', 1), ('roleLegend', 1), ('roleRadios', 11), ('engineering', 1),
+            ('quickChatComposer', 1), ('editable', 0), ('editable', 2), ('editable', True))]
+        for change in changes:
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                q.codex_initial_confirmation(value | change, 'chatgpt-desktop', 'linux')
+        with self.assertRaises(ValueError):
+            q.codex_initial_confirmation(value, 'claude-desktop', 'linux')
+
+    def test_home_receipt_cannot_invent_onboarding_actions_or_borrow_role_confirmation(self):
+        confirmation, value = self.confirmation(), self.receipt()
+        def validate(receipt, context=confirmation, platform='linux'):
+            return q.public_onboarding(receipt, 'chatgpt-desktop', platform=platform,
+                                       initial_confirmation=context)
+        self.assertEqual(validate(value), value)
+        with self.assertRaises(ValueError):
+            q.public_onboarding(value, 'chatgpt-desktop')
+        with self.assertRaises(ValueError):
+            validate(value, platform='windows')
+        role = dict(status='confirmed', identityUnchanged=True, mainScopeUnique=True,
+                    documentFocused=True, counts=dict(roleLegend=1, roleRadios=11,
+                        engineering=1, dialog=0, quickChatComposer=0, editable=1))
+        with self.assertRaises(ValueError):
+            validate(value, context=role)
+        for key in ('roleClickAttempted', 'roleClickCompleted', 'engineeringChecked',
+                    'engineeringControl', 'conversationalScope', 'continueControl',
+                    'continueClickAttempted', 'continueClickCompleted', 'taskScopeProved',
+                    'taskClickAttempted', 'taskClickCompleted'):
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                validate(value | {key: True})
+        for change in (dict(roleScopeAbsent=False), dict(codingComposerReady=False),
+                       dict(errorCategory='action-uncertain'), dict(roleProofFailure='query-failed'),
+                       dict(sessionProofFailure='deadline-expired'), dict(rawBody='PRIVATE'),
+                       dict(folderTrust=None), dict(folderTrust=[])):
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                validate(value | change)
+
+
 if __name__ == '__main__':
     unittest.main()
