@@ -14,21 +14,26 @@ function inlineStyle(raw) {
     const name=declaration.slice(0,colon).trim(),text=declaration.slice(colon+1).trim();
     const priority=/!important$/.test(text)?'important':'',value=text.replace(/\s*!important$/,'');
     // Real Chromium enumerates the outline shorthand as these three longhands.
-    for(const [key,item] of name==='outline'?[['outline-color','initial'],['outline-style',value],['outline-width','initial']]:[[name,value]]) {
+    const expanded=name==='outline'?[['outline-color','initial'],['outline-style',value],['outline-width','initial']]:
+      name==='inset'?['top','right','bottom','left'].map(key=>[key,value]):[[name,value]];
+    for(const [key,item] of expanded) {
       values.set(key,item);priorities.set(key,priority);
     }
   }
   return {[Symbol.iterator]:()=>values.keys(),getPropertyPriority:name=>priorities.get(name)??'',
     getPropertyValue:name=>name==='outline'?(values.get('outline-style')==='none'
-      &&values.get('outline-color')==='initial'&&values.get('outline-width')==='initial'?'none':'other'):values.get(name)??''};
+      &&values.get('outline-color')==='initial'&&values.get('outline-width')==='initial'?'none':'other'):
+      name==='inset'?(['top','right','bottom','left'].every(key=>values.get(key)===values.get('top'))?values.get('top')??'':'other'):values.get(name)??''};
 }
 function dom() {
-  const node=(attributes={},parent=null)=>{const n={attributes,parentElement:parent,children:[],isConnected:true,
+  const node=(attributes={},parent=null)=>{const n={attributes,parentElement:parent,children:[],isConnected:true,tagName:'DIV',isContentEditable:false,
     style:{opacity:'1',pointerEvents:'none',display:'block',visibility:'visible'},animations:[],
     getAttribute(k){return this.attributes[k]??null;},hasAttribute(k){return Object.hasOwn(this.attributes,k);},
     getAttributeNames(){return Object.keys(this.attributes);},
     contains(e){for(;e;e=e.parentElement)if(e===this)return true;return false;},
     getBoundingClientRect:()=>({width:30,height:20}),getAnimations(){return this.animations;}};
+    Object.defineProperty(n,'childNodes',{get:()=>n.children});
+    Object.defineProperty(n,'classList',{get:()=>{const tokens=(n.attributes.class??'').split(/\s+/).filter(Boolean);return {length:tokens.length,contains:x=>tokens.includes(x)};}});
     parent?.children.push(n);return n;};
   const html=node(),body=node({tabindex:'0',style:'outline: none'},html);
   Object.assign(body,{tagName:'BODY',tabIndex:0,isContentEditable:false});
@@ -36,17 +41,26 @@ function dom() {
   const root=node({},body),motion=node({'data-open':'false'},root),command=node({},motion);
   motion.style.opacity='0';
   const input=node({},command),list=node({},command),option=node({},list);
-  input.type='text';
-  const state={root,motion,command,input,list,option,foreign:[],foreignEditables:[],frames:[],legends:[],ready:'complete',focus:false};
+  input.type='text';input.tagName='INPUT';
+  const cssom=node=>{node.computed=node.style;Object.defineProperty(node,'style',{get:()=>inlineStyle(node.attributes.style??'')});};
+  const makeToast=()=>{
+    const portal=node({class:'codex-toast-area pointer-events-none fixed z-[60]',style:'inset: 0px;'},body);cssom(portal);
+    const outer=node({class:'absolute inset-y-0 start-0 my-2 flex flex-col items-end justify-start px-2 md:pb-5',style:'inset-inline-end: 0px;'},portal);outer.tagName='SPAN';cssom(outer);
+    const spacer=node({class:'h-10 shrink-0'},outer),inner=node({class:'relative w-full'},outer);spacer.tagName=inner.tagName='SPAN';
+    const section=node({'aria-label':'SYNTHETIC_PRIVATE_NOTIFICATION_LABEL','tabindex':'-1','aria-live':'polite','aria-relevant':'additions text','aria-atomic':'false'},inner);
+    section.tagName='SECTION';section.tabIndex=-1;return {portal,outer,spacer,inner,section};
+  };
+  const state={root,motion,command,input,list,option,toast:makeToast(),extraPortals:[],foreign:[],foreignEditables:[],frames:[],legends:[],ready:'complete',focus:false};
   const document={body,documentElement:html,hasFocus:()=>state.focus,visibilityState:'visible',get readyState(){return state.ready;},
     querySelectorAll(selector){
       switch(selector) {
         case '.command-menu-dialog.global-command-menu-dialog':return state.root?[state.root]:[];
+        case '.codex-toast-area':return [state.toast?.portal,...state.extraPortals].filter(Boolean);
         case '[cmdk-root][data-command-menu-variant="standalone"]':return state.command?[state.command]:[];
         case 'input[cmdk-input][role="combobox"]':return state.input?[state.input]:[];
         case '[cmdk-list][role="listbox"]':return state.list?[state.list]:[];
         case 'textarea,[contenteditable="true"],input:not([type="radio"]):not([type="checkbox"]):not([type="hidden"])':return [state.input,...state.foreignEditables].filter(Boolean);
-        case 'input,textarea,[contenteditable="true"],button,a[href],select,[tabindex],[role="button"],[role="option"],[role="combobox"],[role="listbox"]':return [document.body,state.command,state.input,state.list,state.option,...state.foreign,...state.foreignEditables].filter(Boolean);
+        case 'input,textarea,[contenteditable="true"],button,a[href],select,[tabindex],[role="button"],[role="option"],[role="combobox"],[role="listbox"]':return [document.body,state.command,state.input,state.list,state.option,state.toast?.section,...state.foreign,...state.foreignEditables].filter(Boolean);
         case 'iframe,frame,object,embed,textarea,[contenteditable="true"],[role="dialog"],[role="alertdialog"],[aria-modal="true"],[role="menu"]':return [...state.frames,...state.foreignEditables];
         case 'fieldset > legend':return state.legends;
         case 'input[type="radio"][name="conversational-onboarding-inline-role"]':
@@ -54,7 +68,7 @@ function dom() {
         default:throw Error('unexpected selector');
       }
     }};
-  return {state,document,node,context:{document,getComputedStyle:e=>e.style}};
+  return {state,document,node,makeToast,context:{document,getComputedStyle:e=>e.computed??e.style}};
 }
 class Handle {
   constructor(value){this.value=value;this.disposed=false;}
@@ -93,7 +107,7 @@ function fixture(options={}) {
     'app://-/index.html?initialRoute=%2Fspotlight&initialRoute=%2Fspotlight'])assert(!source.route(value));
   let f=fixture();assert(await f.guard());assert.equal(f.readCount(),2);
   assert.deepEqual(f.guard.spotlightAuxiliary(),{sourceVersion:source.VERSION,rendererSha256:source.RENDERER,
-    status:'verified',failure:null,stableSamples:2,inputCount:1,listCount:1,editableCount:1});
+    status:'verified',failure:null,stableSamples:2,inputCount:1,listCount:1,editableCount:1,toastAnnouncerCount:1});
   assert(await f.guard());assert.equal(f.readCount(),3,'later proof uses the retained source tuple');
   const folderTrust=await require('./codex-folder-trust.cjs').run(f.main,f.guard,Date.now()+1000,{workspace:'synthetic',verify:async()=>true});
   assert.equal(folderTrust.status,'absent');assert.equal(folderTrust.spotlightAuxiliary.status,'verified');
@@ -145,6 +159,7 @@ function fixture(options={}) {
   f.dom().document.body.attributes.style+='; '+providerNames.map(name=>`${name}: SYNTHETIC_PRIVATE_VALUE`).join('; ');
   assert(await f.guard(),'the source theme/font provider may update BODY cosmetic variables');
   assert(!JSON.stringify(f.guard.spotlightAuxiliary()).includes('SYNTHETIC_PRIVATE_VALUE'));
+  assert(!JSON.stringify(f.guard.spotlightAuxiliary()).includes('SYNTHETIC_PRIVATE_NOTIFICATION_LABEL'));
   await f.guard.close();
   const cases=[
     ['source-open',d=>{d.state.motion.attributes['data-open']='true';}],
@@ -201,6 +216,67 @@ function fixture(options={}) {
     assert.equal(receipt.rejectionCheck,'control-pointer');assert.equal(receipt.controlKind,expected);rejectionFixtures.push(receipt);
     assert.equal(f.readCount(),1);await f.guard.close();
   }
+  f=fixture({beforeRead:({dom:d})=>{
+    const guard=d.node({'data-radix-focus-guard':'',tabindex:'0'},d.document.body);
+    guard.tagName='SPAN';guard.tabIndex=0;d.state.foreign=[guard];
+  }});
+  assert.equal(await f.guard(),false,'source Radix markers remain refusals, never an outside-control exception');
+  assert.equal(f.guard.spotlightAuxiliary().rejectionCheck,'control-location');
+  assert.equal(f.guard.spotlightAuxiliary().controlKind,'radix-focus-guard');rejectionFixtures.push(f.guard.spotlightAuxiliary());
+  await f.guard.close();
+  for(const change of [
+    d=>{d.state.toast.section.children.push({nodeType:3});},
+    d=>{d.node({},d.state.toast.section).tagName='OL';},
+    d=>{d.node({},d.state.toast.spacer).tagName='BUTTON';},
+    d=>{d.state.toast.section.attributes.role='button';},
+    d=>{d.state.toast.section.attributes.tabindex='0';d.state.toast.section.tabIndex=0;},
+    d=>{d.state.toast.section.attributes['aria-live']='assertive';},
+    d=>{d.state.toast.section.attributes['aria-relevant']='all';},
+    d=>{d.state.toast.section.attributes['aria-atomic']='true';},
+    d=>{d.state.toast.portal.attributes.class+=' pointer-events-auto';},
+    d=>{d.state.toast.outer.attributes.class+=' extra';},
+    d=>{d.state.toast.portal.attributes.style='inset: 1px;';},
+    d=>{d.state.toast.portal.attributes.style+=' opacity: 0;';},
+    d=>{d.state.toast.outer.attributes.style='inset-inline-end: 1px;';},
+    d=>{d.state.toast.outer.attributes.style+=' transform: none;';},
+    d=>{d.state.toast.portal.attributes.style='inset: 0px !important;';},
+    d=>{d.state.toast.portal.computed.pointerEvents='auto';},
+    d=>{d.state.toast.section.style.pointerEvents='auto';},
+    d=>{d.state.toast.inner.shadowRoot={};},
+    d=>{d.state.toast.outer.attributes.tabindex='-1';},
+    d=>{d.state.toast.inner.attributes.onclick='private';},
+    d=>{d.state.toast.portal.parentElement=d.node({},d.document.body);},
+    d=>{d.state.extraPortals=[d.makeToast().portal];},
+  ]) {
+    f=fixture({beforeRead:({dom:d})=>change(d)});assert.equal(await f.guard(),false,'only the exact empty passive source announcer is allowed');
+    const receipt=f.guard.spotlightAuxiliary();assert.equal(receipt.failure,'foreign-controls');assert.equal(receipt.rejectionCheck,'toast-announcer');
+    assert.equal(receipt.toastAnnouncerCount,null);assert.equal(receipt.controlKind,undefined);assert.equal(f.readCount(),1);
+    rejectionFixtures.push(receipt);assert.equal(await f.guard(),false);assert.equal(f.readCount(),1);await f.guard.close();
+  }
+  for(const replace of ['portal','section','label','disappear']) {
+    f=fixture({beforeRead:({reads,dom:d})=>{
+      if(reads!==2)return;
+      if(replace==='portal')d.state.toast=d.makeToast();
+      if(replace==='section'){const t=d.state.toast,old=t.section,next=d.node({...old.attributes},t.inner);next.tagName='SECTION';next.tabIndex=-1;t.inner.children=[next];t.section=next;}
+      if(replace==='label')d.state.toast.section.attributes['aria-label']='DIFFERENT_PRIVATE_NOTIFICATION_LABEL';
+      if(replace==='disappear')d.state.toast=null;
+    }});
+    assert.equal(await f.guard(),false,replace);const receipt=f.guard.spotlightAuxiliary();
+    assert.equal(receipt.rejectionCheck,'toast-announcer');assert.equal(f.readCount(),2);rejectionFixtures.push(receipt);
+    assert.equal(await f.guard(),false);assert.equal(f.readCount(),2);await f.guard.close();
+  }
+  {
+    let original;
+    f=fixture({beforeRead:({reads,dom:d})=>{if(reads===1){original=d.state.toast;d.state.toast=null;}if(reads===3)d.state.toast=original;}});
+    assert(await f.guard(),'mandatory source announcer may appear only during original initial admission');
+    assert.equal(f.readCount(),4,'two initial passive waits are followed by two fresh complete source samples');
+    assert.equal(f.clock(),300);assert.equal(f.guard.spotlightAuxiliary().toastAnnouncerCount,1);await f.guard.close();
+  }
+  f=fixture();f.dom().state.toast=null;f.guard.sealInitialActions();
+  assert.equal(await f.guard(),false,'announcer absence cannot wait after any main action');assert.equal(f.readCount(),1);await f.guard.close();
+  f=fixture();assert(await f.guard());f.dom().state.toast=null;
+  assert.equal(await f.guard(),false);const afterRemoval=f.readCount();f.dom().state.toast=f.dom().makeToast();
+  assert.equal(await f.guard(),false,'a captured announcer cannot be replaced after admission');assert.equal(f.readCount(),afterRemoval);await f.guard.close();
   if(process.argv[3])fs.writeFileSync(process.argv[3],JSON.stringify(rejectionFixtures)+'\n',{mode:0o600});
   for(const change of ['document','root','input','main-focus','owner','deadline']) {
     f=fixture({beforeRead:({reads,dom:d,setDocument,setFocus})=>{

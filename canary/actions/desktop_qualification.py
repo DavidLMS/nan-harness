@@ -397,7 +397,8 @@ def spotlight_auxiliary(value, platform):
     fields = counts | {'sourceVersion', 'rendererSha256', 'status', 'failure', 'stableSamples'}
     failures = {'main-focus', 'auxiliary-focus', 'initial-scope', 'scope-changed', 'source-open',
                 'source-transition', 'foreign-controls', 'identity', 'ownership', 'deadline', 'query'}
-    if (platform != 'windows' or type(value) is not dict or set(value) - {'rejectionCheck', 'controlKind'} != fields
+    optional = {'rejectionCheck', 'controlKind', 'toastAnnouncerCount'}
+    if (platform != 'windows' or type(value) is not dict or set(value) - optional != fields
             or value['sourceVersion'] != '26.1007.21434'
             or value['rendererSha256'] != '2b78662247051c8b0905e1afbe0839187b8267e9181e179bc422322e4010433b'
             or type(value['status']) is not str or value['status'] not in {'verified', 'rejected'}
@@ -410,15 +411,20 @@ def spotlight_auxiliary(value, platform):
                 or value['failure'] not in failures)):
         raise ValueError('invalid closed Spotlight auxiliary observation')
     checks = {'body-anchor', 'body-style', 'initial-controls', 'forbidden-nodes',
-              'control-location', 'control-pointer', 'editable-scope', 'main-controls'}
+              'control-location', 'control-pointer', 'editable-scope', 'main-controls', 'toast-announcer'}
     if 'rejectionCheck' in value and (value['status'] != 'rejected'
             or value['failure'] != 'foreign-controls'
             or type(value['rejectionCheck']) is not str or value['rejectionCheck'] not in checks):
         raise ValueError('invalid closed Spotlight rejection check')
-    kinds = {'command', 'input', 'list', 'disabled-button', 'button', 'anchor', 'select', 'other'}
+    kinds = {'command', 'input', 'list', 'disabled-button', 'button', 'anchor', 'select', 'other', 'radix-focus-guard'}
     if 'controlKind' in value and (value.get('rejectionCheck') not in {'control-location', 'control-pointer'}
             or type(value['controlKind']) is not str or value['controlKind'] not in kinds):
         raise ValueError('invalid closed Spotlight rejected control kind')
+    if 'toastAnnouncerCount' in value:
+        count = value['toastAnnouncerCount']
+        if (count is not None and (type(count) is not int or count not in {0, 1})
+                or value['status'] == 'verified' and count != 1):
+            raise ValueError('invalid closed Spotlight toast announcer count')
 
 
 def codex_unknown_route_shapes(shapes, routes):

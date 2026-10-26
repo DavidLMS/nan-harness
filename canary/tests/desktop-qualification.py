@@ -189,7 +189,7 @@ class SpotlightAuxiliaryContractTests(unittest.TestCase):
     def test_rejection_check_is_closed_optional_and_never_certifies_admission(self):
         rejected = self.observation() | dict(status='rejected', failure='foreign-controls', stableSamples=0)
         checks = ['body-anchor', 'body-style', 'initial-controls', 'forbidden-nodes',
-                  'control-location', 'control-pointer', 'editable-scope', 'main-controls']
+                  'control-location', 'control-pointer', 'editable-scope', 'main-controls', 'toast-announcer']
         for check in checks:
             q.spotlight_auxiliary(rejected | dict(rejectionCheck=check), 'windows')
         for check in [None, True, [], {}, 'PRIVATE']:
@@ -202,13 +202,27 @@ class SpotlightAuxiliaryContractTests(unittest.TestCase):
     def test_control_kind_is_closed_and_bound_to_the_rejecting_control_predicate(self):
         rejected = self.observation() | dict(status='rejected', failure='foreign-controls', stableSamples=0)
         for check in ['control-location', 'control-pointer']:
-            for kind in ['command', 'input', 'list', 'disabled-button', 'button', 'anchor', 'select', 'other']:
+            for kind in ['command', 'input', 'list', 'disabled-button', 'button', 'anchor', 'select', 'other', 'radix-focus-guard']:
                 q.spotlight_auxiliary(rejected | dict(rejectionCheck=check, controlKind=kind), 'windows')
         for change in [dict(controlKind='button'), dict(rejectionCheck='body-style', controlKind='button'),
                        *[dict(rejectionCheck='control-pointer', controlKind=kind)
                          for kind in [None, True, [], {}, 'PRIVATE']]]:
             with self.assertRaises(ValueError):
                 q.spotlight_auxiliary(rejected | change, 'windows')
+
+    def test_toast_count_is_optional_descriptive_and_cannot_certify_an_empty_region(self):
+        witness = self.observation()
+        q.spotlight_auxiliary(witness | dict(toastAnnouncerCount=1), 'windows')
+        rejected = witness | dict(status='rejected', failure='foreign-controls', stableSamples=0,
+                                  rejectionCheck='toast-announcer')
+        for count in [None, 0, 1]:
+            q.spotlight_auxiliary(rejected | dict(toastAnnouncerCount=count), 'windows')
+        for count in [None, 0, True, -1, 2, 'PRIVATE', []]:
+            with self.assertRaises(ValueError):
+                q.spotlight_auxiliary(witness | dict(toastAnnouncerCount=count), 'windows')
+        for count in [True, -1, 2, 'PRIVATE', []]:
+            with self.assertRaises(ValueError):
+                q.spotlight_auxiliary(rejected | dict(toastAnnouncerCount=count), 'windows')
 
 
 class RendererCheckpointTests(unittest.TestCase):

@@ -31,9 +31,9 @@ function sample(held) {
     dialog:cap(live('[role="dialog"],[role="alertdialog"]')),
     quickChatComposer:cap(live('textarea[data-avatar-overlay-composition-autofocus]')),editable:cap(editables)},
     mainScope:false,visibleDocument:document.visibilityState==='visible',focused:document.hasFocus(),
-    spotlight:{failure:null,pending:false,inputCount:cap(inputs),listCount:cap(lists),editableCount:cap(editables)}};
+    spotlight:{failure:null,pending:false,inputCount:cap(inputs),listCount:cap(lists),editableCount:cap(editables),toastAnnouncerCount:null}};
   const body=document.body;
-  const result={document,body,root:null,motion:null,command:null,input:null,list:null,scope};
+  const result={document,body,root:null,motion:null,command:null,input:null,list:null,toast:null,scope};
   const fail=(reason,check,kind)=>{scope.spotlight.failure=reason;
     if(check)scope.spotlight.rejectionCheck=check;
     if(kind)scope.spotlight.controlKind=kind;return result;};
@@ -59,10 +59,54 @@ function sample(held) {
     ||[...inline].some(name=>!sourceStyleNames.includes(name)||inline.getPropertyPriority(name)!==''))return fail('foreign-controls','body-style');
   const controls=all('input,textarea,[contenteditable="true"],button,a[href],select,[tabindex],[role="button"],[role="option"],[role="combobox"],[role="listbox"]');
   const forbidden=all('iframe,frame,object,embed,textarea,[contenteditable="true"],[role="dialog"],[role="alertdialog"],[aria-modal="true"],[role="menu"]');
+  // GPc/oDi always mounts this source Sonner portal, including its empty
+  // tabindex=-1 announcement SECTION. It is a passive sibling of the palette,
+  // not an input target. Retain the complete source tuple, never a generic
+  // outside tabindex exemption or a populated notification surface.
+  const portals=all('.codex-toast-area');
+  if(portals.length>1)return fail('foreign-controls','toast-announcer');
+  if(portals.length===0) {
+    scope.spotlight.toastAnnouncerCount=0;
+    if(held?.toast)return fail('foreign-controls','toast-announcer');
+  } else {
+    const portal=portals[0],outer=portal.children[0],spacer=outer?.children[0],inner=outer?.children[1],section=inner?.children[0];
+    const tuple={portal,outer,spacer,inner,section,label:section?.getAttribute('aria-label')};
+    const classes=(node,tokens)=>!!node&&node.classList.length===tokens.length&&tokens.every(token=>node.classList.contains(token));
+    const attributes=(node,names)=>!!node&&node.getAttributeNames().length===names.length
+      &&node.getAttributeNames().every(name=>names.includes(name));
+    const inset=(node,property,names)=>{
+      if(!node)return false;const inline=node.style,declared=[...inline];
+      return /^0(?:px)?$/.test(inline.getPropertyValue(property))&&declared.length===names.length
+        &&declared.every(name=>names.includes(name)&&inline.getPropertyPriority(name)==='');
+    };
+    const children=(node,expected)=>!!node&&node.childNodes.length===expected.length
+      &&expected.every((child,index)=>node.childNodes[index]===child);
+    const passive=node=>!!node&&node.isConnected&&!node.isContentEditable&&!node.shadowRoot
+      &&!['contenteditable','role','aria-modal','popover'].some(name=>node.hasAttribute(name))
+      &&getComputedStyle(node).pointerEvents==='none';
+    if(portal.tagName!=='DIV'||portal.parentElement!==body
+      ||!classes(portal,['codex-toast-area','pointer-events-none','fixed','z-[60]'])
+      ||!classes(outer,['absolute','inset-y-0','start-0','my-2','flex','flex-col','items-end','justify-start','px-2','md:pb-5'])
+      ||!classes(spacer,['h-10','shrink-0'])||!classes(inner,['relative','w-full'])
+      ||!attributes(portal,['class','style'])||!attributes(outer,['class','style'])
+      ||!attributes(spacer,['class'])||!attributes(inner,['class'])
+      ||!inset(portal,'inset',['top','right','bottom','left'])||!inset(outer,'inset-inline-end',['inset-inline-end'])
+      ||outer?.tagName!=='SPAN'||spacer?.tagName!=='SPAN'||inner?.tagName!=='SPAN'||section?.tagName!=='SECTION'
+      ||!children(portal,[outer])||!children(outer,[spacer,inner])||!children(spacer,[])||!children(inner,[section])||!children(section,[])
+      ||![portal,outer,spacer,inner,section].every(passive)
+      ||[portal,outer,spacer,inner].some(node=>node.hasAttribute('tabindex'))
+      ||section.getAttributeNames().length!==5
+      ||section.getAttributeNames().some(name=>!['aria-label','tabindex','aria-live','aria-relevant','aria-atomic'].includes(name))
+      ||section.tabIndex!==-1||section.getAttribute('tabindex')!=='-1'
+      ||section.getAttribute('aria-live')!=='polite'||section.getAttribute('aria-relevant')!=='additions text'
+      ||section.getAttribute('aria-atomic')!=='false'||typeof tuple.label!=='string'||!tuple.label||tuple.label.length>4096
+      ||held?.toast&&Object.keys(tuple).some(key=>held.toast[key]!==tuple[key]))return fail('foreign-controls','toast-announcer');
+    result.toast=tuple;scope.spotlight.toastAnnouncerCount=1;
+  }
   const roots=all('.command-menu-dialog.global-command-menu-dialog');
   if(roots.length===0) {
     if(held?.root)return fail('scope-changed');
-    if(controls.some(e=>e!==body)||forbidden.length)return fail('foreign-controls','initial-controls');
+    if(controls.some(e=>e!==body&&e!==result.toast?.section)||forbidden.length)return fail('foreign-controls','initial-controls');
     scope.spotlight.pending=true;return result;
   }
   if(roots.length!==1)return fail('initial-scope');
@@ -86,13 +130,15 @@ function sample(held) {
   const kind=control=>{
     try {
       if(control===command)return 'command';if(control===input)return 'input';if(control===list)return 'list';
+      if(control.tagName==='SPAN'&&control.getAttribute('data-radix-focus-guard')===''
+        &&control.getAttribute('tabindex')==='0'&&control.tabIndex===0)return 'radix-focus-guard';
       return control.tagName==='BUTTON'?(control.disabled?'disabled-button':'button'):
         control.tagName==='A'?'anchor':control.tagName==='SELECT'?'select':'other';
     } catch {return 'other';}
   };
   if(forbidden.length)return fail('foreign-controls','forbidden-nodes');
   for(const control of controls) {
-    if(control===body)continue;
+    if(control===body||control===result.toast?.section)continue;
     if(!command.contains(control))return fail('foreign-controls','control-location',kind(control));
     if(getComputedStyle(control).pointerEvents!=='none')return fail('foreign-controls','control-pointer',kind(control));
   }
@@ -100,12 +146,12 @@ function sample(held) {
   if(['roleLegend','roleRadios','engineering','dialog','quickChatComposer'].some(key=>scope.counts[key]!==0))return fail('foreign-controls','main-controls');
   // Hydration grants no exception to an observed open/transitioning palette.
   // Once its closed root exists, retain that tuple even while readiness waits.
-  scope.spotlight.pending=document.readyState!=='complete';
+  scope.spotlight.pending=document.readyState!=='complete'||!result.toast;
   return result;
 }
 function create({deadline,now=Date.now}) {
   let held=null,identity=null,failed=null,closed=false,stableSamples=0,rejectionCheck=null,controlKind=null;
-  let counts={inputCount:null,listCount:null,editableCount:null};
+  let counts={inputCount:null,listCount:null,editableCount:null,toastAnnouncerCount:null};
   const fail=reason=>{failed??=reason;return false;};
   const timely=()=>!closed&&!failed&&(now()<deadline||fail('deadline'));
   const dispose=async handle=>{if(handle)await handle.dispose().catch(()=>{});};
