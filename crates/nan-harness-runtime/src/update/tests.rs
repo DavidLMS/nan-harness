@@ -172,6 +172,8 @@ async fn downloads_and_verifies_an_executable_candidate() {
             & 0o777,
         0o700
     );
+    nan_harness_test_support::executable_fixture::wait_until_ready(candidate_path)
+        .expect("synthetic candidate should be executable");
     verify_candidate(candidate_path, &release.version)
         .expect("candidate should report the expected version");
 }
@@ -223,6 +225,8 @@ async fn artifact_downloads_can_take_longer_than_metadata_requests() {
     let candidate = super::artifact::download(&manager.artifact_client, &release.artifacts[0])
         .await
         .expect("slow candidate should download");
+    nan_harness_test_support::executable_fixture::wait_until_ready(candidate.as_ref())
+        .expect("synthetic candidate should be executable");
     verify_candidate(candidate.as_ref(), &release.version)
         .expect("slow candidate should report the expected version");
 }
