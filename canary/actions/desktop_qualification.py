@@ -1346,7 +1346,7 @@ def semantic_observations(directory, app):
             stages.update('tree-depth tree-nodes tree-name-limit tree-text-limit tree-window-limit tree-process-limit'.split())
             stages.update('clipboard-owner clipboard-allocation clipboard-lock clipboard-empty clipboard-set clipboard-close clipboard-guard-before clipboard-guard-after clipboard-deadline-before clipboard-deadline-after clipboard-open-deadline'.split())
             phase_fields = {'actionPhase', 'transportFailure'}
-            if (app != 'claude-desktop' or set(value) - {'providerObservation', 'guardRejection', 'rowShape', 'scopeShape', 'failureAuthority', 'failureScopeCounts', 'operationTiming', 'nativeAction', 'nativeStage', 'composerShape', 'nativeWindowGuard'} not in (fields, fields | phase_fields) or value['diagnosticsOnly'] is not True
+            if (app != 'claude-desktop' or set(value) - {'providerObservation', 'guardRejection', 'rowShape', 'scopeShape', 'failureAuthority', 'failureScopeCounts', 'operationTiming', 'nativeAction', 'nativeStage', 'nativeProgress', 'composerShape', 'nativeWindowGuard'} not in (fields, fields | phase_fields) or value['diagnosticsOnly'] is not True
                     or type(value['stage']) is not str or value['stage'] not in stages
                     or any(type(value[key]) is not bool for key in flags)
                     or any(type(value[key]) is not int or not 0 <= value[key] <= 3 for key in counts)
@@ -1386,6 +1386,12 @@ def semantic_observations(directory, app):
                 if mechanism not in {'claude-native-chat', 'claude-windows-native-chat'} or type(stage) is not str or stage not in stages:
                     raise ValueError('invalid Claude native receipt stage')
                 record['nativeStage'] = stage
+            if 'nativeProgress' in value:
+                progress = value['nativeProgress']
+                if (mechanism != 'claude-windows-native-chat' or type(progress) is not str
+                        or progress not in {'setup', 'tree', 'composer', 'action', 'target', 'focus', 'select', 'paste', 'pasted', 'readback', 'copy', 'copied', 'send', 'submit', 'invoke', 'finish'}):
+                    raise ValueError('invalid Claude native progress diagnostic')
+                record['nativeProgress'] = progress
             if 'operationTiming' in value:
                 timing = value['operationTiming']
                 required = {'budgetMs', 'elapsedMs'}

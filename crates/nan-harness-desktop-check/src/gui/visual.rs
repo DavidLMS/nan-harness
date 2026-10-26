@@ -737,6 +737,7 @@ impl Visual {
         values: [&str; 3],
         deadline: Instant,
         native_stage: &mut Option<crate::native::WindowsChatStage>,
+        progress: &mut Option<&'static str>,
         mut observe: impl FnMut(&'static str, Option<FailureCategory>, Option<GuardFailure>),
     ) -> Result<crate::native::WindowsChatReceipt, Reason> {
         let expected = self.window.borrow().clone();
@@ -765,7 +766,7 @@ impl Visual {
         observe("transport", None, None);
         let result = self
             .native
-            .claude_windows_chat_turn(&expected, mode, values, transport_deadline)
+            .claude_windows_chat_turn(&expected, mode, values, transport_deadline, progress)
             .map_err(|failure| {
                 observe("transport", Some(failure), None);
                 failure.reason()

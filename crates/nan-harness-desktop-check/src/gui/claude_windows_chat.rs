@@ -66,6 +66,8 @@ struct Facts {
     native_action: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     native_stage: Option<WindowsChatStage>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    native_progress: Option<&'static str>,
     transport_failure: Option<&'static str>,
     operation_timing: OperationTiming,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -89,6 +91,7 @@ impl Default for Facts {
             action_phase: None,
             native_action: None,
             native_stage: None,
+            native_progress: None,
             transport_failure: None,
             operation_timing: OperationTiming::default(),
             guard_rejection: None,
@@ -186,6 +189,7 @@ impl ClaudeWindowsChatSession<'_> {
         self.facts.transport_failure = None;
         self.facts.guard_rejection = None;
         self.facts.native_stage = None;
+        self.facts.native_progress = None;
         let sentinel = Zeroizing::new(nonce()?);
         if !self.profile.verifies_owned(self.workspace, deadline) {
             return Err(Reason::IsolationUnavailable);
@@ -193,11 +197,13 @@ impl ClaudeWindowsChatSession<'_> {
         self.facts.action_phase = Some("transport");
         let facts = &mut self.facts;
         let mut native_stage = None;
+        let mut progress = None;
         let result = self.gui.visual.claude_windows_chat_turn_until(
             mode,
             [&self.prompt, marker, &sentinel],
             deadline,
             &mut native_stage,
+            &mut progress,
             |phase, failure, rejection| {
                 facts.action_phase = Some(phase);
                 let remaining = deadline
@@ -233,6 +239,7 @@ impl ClaudeWindowsChatSession<'_> {
             },
         );
         self.facts.native_stage = native_stage;
+        self.facts.native_progress = progress;
         self.facts.operation_timing.elapsed = started.elapsed().as_millis();
         let stage = match result {
             Ok(receipt) => {

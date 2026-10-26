@@ -450,6 +450,7 @@ impl Native {
         mode: &str,
         values: [&str; 3],
         deadline: std::time::Instant,
+        progress: &mut Option<&'static str>,
     ) -> Result<WindowsChatReceipt, FailureCategory> {
         if std::env::var("GITHUB_ACTIONS").as_deref() != Ok("true")
             || std::env::var("RUNNER_ENVIRONMENT").as_deref() != Ok("github-hosted")
@@ -459,7 +460,8 @@ impl Native {
         {
             return Err(FailureCategory::InvalidInput);
         }
-        let output = process::windows_chat::run(&self.executable, window, mode, values, deadline)?;
+        let output =
+            process::windows_chat::run(&self.executable, window, mode, values, deadline, progress)?;
         WindowsChatReceipt::parse(&output, mode).ok_or(FailureCategory::Output)
     }
 

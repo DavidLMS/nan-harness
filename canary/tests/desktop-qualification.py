@@ -2697,6 +2697,23 @@ class QualificationTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'claude-desktop')
 
+    def test_windows_native_progress_is_closed_and_cannot_certify_an_action(self):
+        value = dict(schemaVersion=1, mechanism='claude-windows-native-chat', diagnosticsOnly=True,
+                     stage='action-uncertain', actionPhase='transport', transportFailure='timeout',
+                     submittedTurns=2, inputVerifiedTurns=2, copiedResponses=2,
+                     retryAttempted=False, clipboardCleared=True)
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'progress.json'
+            for progress in ('tree', 'paste', 'send', 'invoke', 'finish'):
+                item = {**value, 'nativeProgress': progress}
+                path.write_text(json.dumps(item))
+                self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [item])
+            for changes in ({'nativeProgress': 'PRIVATE'}, {'nativeProgress': None},
+                            {'nativeProgress': 4}, {'mechanism': 'claude-native-chat'}):
+                path.write_text(json.dumps({**item, **changes}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'claude-desktop')
+
     def test_windows_tree_limits_remain_nonaccepting_and_closed(self):
         value = dict(schemaVersion=1, mechanism='claude-windows-native-chat', diagnosticsOnly=True,
                      stage='tree-depth', submittedTurns=1, inputVerifiedTurns=1, copiedResponses=0,

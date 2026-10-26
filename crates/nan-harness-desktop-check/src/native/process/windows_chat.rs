@@ -58,12 +58,45 @@ fn receipt(input: &mut impl Read) -> Result<Zeroizing<String>, FailureCategory> 
         .map(Zeroizing::new)
         .map_err(|_| FailureCategory::Output)
 }
+const PROGRESS: [&str; 16] = [
+    "setup", "tree", "composer", "action", "target", "focus", "select", "paste", "pasted",
+    "readback", "copy", "copied", "send", "submit", "invoke", "finish",
+];
+
+fn progress(line: &str) -> Option<usize> {
+    let label = line.strip_prefix("progress ")?.strip_suffix('\n')?;
+    PROGRESS.iter().position(|allowed| *allowed == label)
+}
+
+fn read_result(
+    input: &mut impl Read,
+    sender: &mpsc::SyncSender<Result<Zeroizing<String>, FailureCategory>>,
+) -> Result<Zeroizing<String>, FailureCategory> {
+    let mut previous = None;
+    loop {
+        let mut line = frame(input)?;
+        if line.starts_with("progress ") {
+            let stage = progress(&line).ok_or(FailureCategory::Output)?;
+            if previous.is_some_and(|previous| stage <= previous) {
+                return Err(FailureCategory::Output);
+            }
+            previous = Some(stage);
+            sender.send(Ok(line)).map_err(|_| FailureCategory::Pipe)?;
+        } else {
+            line.push_str(&receipt(input)?);
+            return (line.len() <= 256)
+                .then_some(line)
+                .ok_or(FailureCategory::Output);
+        }
+    }
+}
 pub(in crate::native) fn run(
     executable: &Path,
     window: &Window,
     mode: &str,
     values: [&str; 3],
     deadline: Instant,
+    observed_progress: &mut Option<&'static str>,
 ) -> Result<Zeroizing<String>, FailureCategory> {
     if Instant::now() >= deadline {
         return Err(FailureCategory::Timeout);
@@ -100,7 +133,7 @@ pub(in crate::native) fn run(
         if sender.send(ready).is_err() || failed {
             return;
         }
-        let result = receipt(&mut output);
+        let result = read_result(&mut output, &sender);
         let _ = sender.send(result);
     }));
     let receive = || {
@@ -126,7 +159,14 @@ pub(in crate::native) fn run(
         input.write_all(wire.as_bytes())?;
         input.write_all(b"\n")
     }));
-    let result = receive()?;
+    let result = loop {
+        let line = receive()?;
+        if let Some(stage) = progress(&line) {
+            *observed_progress = Some(PROGRESS[stage]);
+        } else {
+            break line;
+        }
+    };
     if windows_chat_turn::WindowsChatReceipt::parse(&result, mode).is_none() {
         return Err(FailureCategory::Output);
     }
@@ -155,8 +195,12 @@ pub(in crate::native) fn run(
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
-    #[test]
-    fn readiness_transport_rejects_trailing_data_and_expires_without_replay() {
+    fn scripted(
+        suffix: &str,
+        budget: Duration,
+        mode: &str,
+        progress: &mut Option<&'static str>,
+    ) -> Result<Zeroizing<String>, FailureCategory> {
         use std::os::unix::fs::PermissionsExt as _;
         let temp = tempfile::tempdir().unwrap();
         let executable = temp.path().join("helper");
@@ -172,18 +216,21 @@ mod tests {
             name: String::new(),
             layer: 0,
         };
-        let scripted = |suffix: &str, budget, mode| {
-            std::fs::write(&executable,format!("#!/usr/bin/env python3\nimport sys\nif '--version' in sys.argv: raise SystemExit(0)\nprint('ready 1000',flush=True)\nwire=sys.stdin.buffer.read()\nassert wire.count(b'\\n')==1\nassert len(wire)<8192\nassert len(wire.split())==13\nassert int(wire.split()[7])<=16000\n{suffix}\n")).unwrap();
-            std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
-            nan_harness_test_support::executable_fixture::wait_until_ready(&executable).unwrap();
-            run(
-                &executable,
-                &window,
-                mode,
-                ["prompt", "marker", "sentinel"],
-                Instant::now() + budget,
-            )
-        };
+        std::fs::write(&executable,format!("#!/usr/bin/env python3\nimport sys\nif '--version' in sys.argv: raise SystemExit(0)\nprint('ready 1000',flush=True)\nwire=sys.stdin.buffer.read()\nassert wire.count(b'\\n')==1\nassert len(wire)<8192\nassert len(wire.split())==13\nassert int(wire.split()[7])<=16000\n{suffix}\n")).unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+        nan_harness_test_support::executable_fixture::wait_until_ready(&executable).unwrap();
+        run(
+            &executable,
+            &window,
+            mode,
+            ["prompt", "marker", "sentinel"],
+            Instant::now() + budget,
+            progress,
+        )
+    }
+    #[test]
+    fn readiness_transport_rejects_trailing_data_and_expires_without_replay() {
+        let scripted = |suffix: &str, budget, mode: &str| scripted(suffix, budget, mode, &mut None);
         // Successful protocol cases allow interpreter startup; the timeout case
         // below retains its deliberately short action deadline.
         assert_eq!(
@@ -225,6 +272,18 @@ mod tests {
             );
         }
         for (suffix, mode) in [
+            (
+                "print('progress PRIVATE\\nturn sent',flush=True)",
+                "input-replace-owned",
+            ),
+            (
+                "print('progress tree\\nprogress setup\\nturn sent',flush=True)",
+                "input-replace-owned",
+            ),
+            (
+                "print('progress tree\\nprogress tree\\nturn sent',flush=True)",
+                "input-replace-owned",
+            ),
             (diagnostic, "input-replace-owned"),
             (
                 "print('turn sent\\nfailure-scope 1 1 1 0 0 1 1 0 1 0',flush=True)",
@@ -241,5 +300,34 @@ mod tests {
                 FailureCategory::Output
             );
         }
+    }
+
+    #[test]
+    fn progress_survives_timeout_without_substituting_for_receipt_or_helper_exit() {
+        let mut observed = None;
+        assert_eq!(
+            scripted(
+                "print('progress setup\\nprogress tree\\nprogress finish\\nturn sent',flush=True)",
+                Duration::from_secs(10),
+                "input-replace-owned",
+                &mut observed
+            )
+            .unwrap()
+            .as_str(),
+            "turn sent\n"
+        );
+        assert_eq!(observed, Some("finish"));
+        observed = None;
+        assert_eq!(
+            scripted(
+                "import time; print('progress finish\\nturn sent',flush=True); time.sleep(2)",
+                Duration::from_millis(500),
+                "input-replace-owned",
+                &mut observed
+            )
+            .unwrap_err(),
+            FailureCategory::Timeout
+        );
+        assert_eq!(observed, Some("finish"));
     }
 }
