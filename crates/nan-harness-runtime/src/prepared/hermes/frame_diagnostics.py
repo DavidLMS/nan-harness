@@ -65,7 +65,7 @@ def private_receipt(home, name, value):
             pass
 
 
-def record_exception(error, deadline=None):
+def record_exception(error, deadline=None, filename=".nanh-control-error.json"):
     """Keep only public throw sites and bounded OS codes; never retain the error."""
     global _last_error
     identity = os.environ.get("NAN_HARNESS_HERMES_DIAGNOSTICS", "")
@@ -101,7 +101,7 @@ def record_exception(error, deadline=None):
         signature = (identity, str(home), json.dumps(value, sort_keys=True))
         if signature != _last_error:
             value["observedNs"] = time.monotonic_ns()
-            private_receipt(home, ".nanh-control-error.json", value)
+            private_receipt(home, filename, value)
             _last_error = signature
     except Exception:
         pass  # Advisory evidence cannot mask the original failure or cleanup.
@@ -132,6 +132,17 @@ def readiness_state(home, state):
                     private_receipt(home, ".nanh-frames-owner-expired.json", value)
     except Exception:
         pass  # Observation cannot change readiness or shutdown.
+
+
+def readiness_failure(home, exit_code):
+    identity = os.environ.get("NAN_HARNESS_HERMES_DIAGNOSTICS", "")
+    if not re.fullmatch(r"[0-9a-f]{32}", identity):
+        return
+    try:
+        private_receipt(home, ".nanh-readiness-failure.json", {
+            "schemaVersion": 1, "identity": identity, "exitCode": exit_code})
+    except Exception:
+        pass
 
 
 def current_readiness_state(home, identity):

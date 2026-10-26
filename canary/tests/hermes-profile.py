@@ -34,6 +34,23 @@ spec.loader.exec_module(frame_diagnostics)
 
 
 class Qualification(unittest.TestCase):
+    def test_readiness_failure_survives_missing_control_and_cleanup_context(self):
+        from hermes_diagnostics import managed_namespace_diagnostics
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory)
+            home = config / "hermes-profiles/owned"
+            home.mkdir(parents=True)
+            identity = "b" * 32
+            with patch.dict(os.environ, {"NAN_HARNESS_HERMES_DIAGNOSTICS": identity}):
+                frame_diagnostics.readiness_failure(home, runtime.READINESS_EXIT_CODES["identity-supervisor"])
+            self.assertEqual(managed_namespace_diagnostics(config, identity),
+                             ["NH-HERMES-READINESS-IDENTITY-SUPERVISOR"])
+            self.assertEqual(managed_namespace_diagnostics(config, "a" * 32), [])
+            path = home / ".nanh-readiness-failure.json"
+            value = json.loads(path.read_text())
+            path.write_text(json.dumps({**value, "exitCode": "private payload"}))
+            self.assertEqual(managed_namespace_diagnostics(config, identity), [])
+
     def test_expiry_preserves_owner_stack_before_cleanup_can_replace_it(self):
         from hermes_diagnostics import managed_profile_frames
         with tempfile.TemporaryDirectory() as directory:

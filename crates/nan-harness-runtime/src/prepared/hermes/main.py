@@ -233,10 +233,14 @@ if __name__ == "__main__":
         with watch(sys.argv[1]):
             main(sys.argv[1:])
     except ReadinessFailure as error:
-        from frame_diagnostics import readiness_state
+        from frame_diagnostics import readiness_state, readiness_failure
+        readiness_failure(Path(os.environ["NAN_HARNESS_HERMES_MANAGED_HOME"]), error.exit_code)
         readiness_state(Path(os.environ["NAN_HARNESS_HERMES_MANAGED_HOME"]), "expired")
         raise SystemExit(error.exit_code) from None
     except Exception as error:
+        if sys.argv[1] in {"ready", "refresh"}:
+            from frame_diagnostics import record_exception
+            record_exception(error, filename=".nanh-startup-error.json")
         # Fixed phase only. Native exceptions can contain private configuration.
         category = "IMPORT" if isinstance(error, ImportError) else "IO" if isinstance(error, OSError) else "CONTRACT" if isinstance(error, RuntimeError) else "INTERNAL"
         print("NH-HERMES-SUPERVISOR-" + category, file=sys.stderr)

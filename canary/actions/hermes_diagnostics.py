@@ -171,7 +171,8 @@ def managed_profile_frames(config, identity):
             records.extend(safe_frames([{key: value[key] for key in ("action", "sequence", "stacks")}]))
         except (OSError, ValueError, TypeError):
             continue
-    path = profile / ".nanh-control-error.json"
+    startup = profile / ".nanh-startup-error.json"
+    path = startup if startup.is_file() else profile / ".nanh-control-error.json"
     try:
         if not path.is_symlink() and path.resolve().is_relative_to(profile) and path.stat().st_size <= 16384:
             value = json.loads(path.read_bytes())
@@ -206,6 +207,13 @@ def managed_namespace_diagnostics(config, identity):
         return None
 
     names, codes = {}, []
+    failure = read(".nanh-readiness-failure.json")
+    reasons = ("CONTROL-ABSENT", "CONTROL-ACCESS", "CONTROL-TIMEOUT", "CONTROL-PROTOCOL",
+               "IDENTITY-PID", "IDENTITY-HOME", "IDENTITY-SUPERVISOR", "RUNTIME-PROTOCOL",
+               "RUNTIME-PROFILE", "RUNTIME-AUTHORITY", "RUNTIME-ENDPOINT", "RUNTIME-STATE")
+    if (failure and set(failure) == {"schemaVersion", "identity", "exitCode"}
+            and type(failure["exitCode"]) is int and 90 <= failure["exitCode"] < 90 + len(reasons)):
+        codes.append("NH-HERMES-READINESS-" + reasons[failure["exitCode"] - 90])
     fields = {"schemaVersion", "identity", "action", "role", "digest", "matchesManagedName", "samePhysicalHome", "verbatimHome", "observedNs", "readinessState"}
     for action, role in (("owner", "server"), ("ready", "client"), ("frontend", "client")):
         value = read(".nanh-namespace-" + action + "-" + role + ".json")
