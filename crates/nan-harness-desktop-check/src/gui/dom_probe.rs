@@ -348,6 +348,8 @@ enum RetryReveal {
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 enum RetryScopeFailure {
+    InitialScopeIncomplete,
+    InitialScopeInvalid,
     Endpoint,
     RetryCount,
     RetryDisabled,
@@ -1502,8 +1504,14 @@ mod tests {
         assert!(read(&qualifier, false).is_err());
         qualifier["retryScopeFailure"] = json!(null);
         assert!(read(&qualifier, true).is_ok());
-        qualifier["retryScopeFailure"] = json!("alert-changed");
-        assert!(read(&qualifier, true).is_ok());
+        for reason in [
+            "alert-changed",
+            "initial-scope-incomplete",
+            "initial-scope-invalid",
+        ] {
+            qualifier["retryScopeFailure"] = json!(reason);
+            assert!(read(&qualifier, true).is_ok());
+        }
         qualifier["retryScopeFailure"] = json!("PRIVATE");
         assert!(read(&qualifier, true).is_err());
         qualifier

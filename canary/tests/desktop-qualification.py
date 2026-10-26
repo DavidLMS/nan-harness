@@ -1654,6 +1654,9 @@ class QualificationTests(unittest.TestCase):
             self.assertEqual(public['retryScopeFailure'], 'alert-changed')
             self.assertNotIn('PRIVATE', str(public))
             self.assertNotIn('rectangle', public)
+            for reason in ('initial-scope-incomplete', 'initial-scope-invalid'):
+                path.write_text(json.dumps({**value, 'retryScopeFailure': reason}))
+                self.assertEqual(q.semantic_observations(root, 'hermes-desktop')[0]['retryScopeFailure'], reason)
             for key, invalid in [('retryRectInViewport', 1), ('retryAncestorClipped', 'true'),
                                  ('retryPointerEventsNone', None), ('retryHitTag', 'custom-private-tag'),
                                  ('retryHitRegion', 'PRIVATE'), ('retryPointStable', 1),

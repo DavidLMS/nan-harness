@@ -29,16 +29,28 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
   let focused = false;
   let focuses = 0;
   let settleTimerObserved = false;
+  let scopeCaptures = 0, capturingScope = false;
+  const unwrap = value => value && Object.hasOwn(value, 'scopeValue') ? value.scopeValue : value;
+  const scopeHandle = value => ({ scopeValue: value,
+    async evaluate(callback, argument) { return callback(value, unwrap(argument)); }, async dispose() {} });
+  const scopeIncomplete = kind => capturingScope && (scenario === 'initial-scope-' + kind
+    || scenario === 'initial-scope-' + kind + '-settles' && scopeCaptures === 1);
+  const messageGroup = { isConnected: true };
   const focusButton = { tagName: 'BUTTON', tabIndex: scenario === 'retry-not-focusable' ? -1 : 0,
     isConnected: scenario !== 'retry-disconnected', parentElement: null,
     closest(selector) { return selector === '[inert]' && scenario === 'retry-ancestor-inert' ? {} : null; },
     matches(selector) { assert.equal(selector, ':disabled'); return scenario === 'retry-fieldset-disabled'; } };
   const reclaimedComposer = { tagName: 'DIV', privateText: 'PRIVATE_SYNTHETIC_VALUE',
     closest(selector) { return selector === '[data-slot="composer-root"]' ? {} : null; } };
-  const turnPair = { isConnected: true, closest() { return {}; },
+  const turnPair = { isConnected: true, closest() { return messageGroup; },
     querySelectorAll(selector) { assert.equal(selector, '[data-role="user"]');
+      if (scopeIncomplete('missing-user')) return [];
+      if (capturingScope && scenario === 'initial-scope-duplicate-user') return [boundUser, { ...boundUser }];
       return [scenario === 'sampling-remount-user' && sampleCount >= 2 ? { ...boundUser } : boundUser]; } };
-  const boundUser = { isConnected: true, closest() { return turnPair; }, get innerText() {
+  const replacementPair = { ...turnPair };
+  const currentPair = () => scenario === 'initial-scope-valid-pair-changed' && scopeCaptures > 0 && !capturingScope ? replacementPair : turnPair;
+  const boundUser = { get isConnected() { return !scopeIncomplete('disconnected-user'); }, closest() { return currentPair(); }, get innerText() {
+    if (capturingScope && scenario === 'initial-scope-foreign-user') return 'Foreign synthetic prompt';
     return (['foreign-error-turn', 'delayed-foreign-error'].includes(scenario)
       || scenario === 'foreign-card-after-settle' && frames === 2
       || scenario === 'foreign-card-during-wait' && sampleCount >= 2
@@ -46,9 +58,11 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
       || scenario === 'onboarding-remount-foreign-pair' && retryHandles >= 3)
       ? 'Older unrelated user turn' : request.prompt;
   } };
-  const boundAlert = { isConnected: true, get ownerDocument() { return fixtureDocument; },
+  const assistantRoot = { isConnected: true, closest() { return scopeIncomplete('missing-pair') ? null : currentPair(); } };
+  const boundAlert = { isConnected: true, get ownerDocument() { return capturingScope && scenario === 'initial-scope-foreign-document' ? {} : fixtureDocument; },
     closest(selector) { return selector.includes('assistant-message-root')
-      ? { closest() { return turnPair; } } : scenario === 'sampling-remount-pair' && sampleCount >= 2 ? { ...turnPair } : turnPair; } };
+      ? assistantRoot : scopeIncomplete('missing-pair') ? null
+        : scenario === 'sampling-remount-pair' && sampleCount >= 2 ? { ...turnPair } : currentPair(); } };
   const ancestorFront = { tagName: 'DIV', privateValue: 'PRIVATE_SYNTHETIC_VALUE',
     contains(element) { return element === hitButton || scenario === 'retry-composer-cover'; },
     closest(selector) { return selector === '[data-slot="aui_turn-pair"]' ? turnPair : null; } };
@@ -74,7 +88,7 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
   const hitButton = {
     tagName: 'BUTTON', type: 'button', isConnected: true, disabled: false, offsetWidth: 20, offsetHeight: 20, clientWidth: 20, clientHeight: 20, clientLeft: 0, clientTop: 0,
     getAttribute() { return null; }, matches() { return false; }, checkVisibility(options) { assert.equal(options.contentVisibilityAuto, true); return scenario !== 'retry-hidden-render'; }, parentElement: scenario === 'retry-clipped' ? clippedParent : ['retry-source-clipped', 'retry-frame-settle'].includes(scenario) ? sourceClipParent : null,
-    closest(selector) { return selector === '[role="alert"]' ? boundAlert : selector === '[data-slot="aui_turn-pair"]' ? turnPair : selector === '[data-slot="aui_thread-viewport"]' ? {} : null; },
+    closest(selector) { return selector === '[role="alert"]' ? capturingScope && scenario === 'initial-scope-foreign-retry' ? {} : boundAlert : selector === '[data-slot="aui_turn-pair"]' ? turnPair : selector === '[data-slot="aui_thread-viewport"]' ? {} : null; },
     getBoundingClientRect() { const left = scenario === 'retry-offviewport' ? 200 : scenario === 'retry-unstable' && sampleCount > 1 ? 11 : 10; return { left, right: left + 20, top: 10, bottom: 30, width: 20, height: 20 }; },
     contains(element) { return element === hitChild; },
     scrollIntoView(options) {
@@ -113,13 +127,14 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
       return scenario === 'blocked-modal' ? 'modal' : scenario === 'blocked-menu' ? 'menu'
         : scenario === 'inert' ? 'inert' : null;
     },
-    async elementHandle() { retryHandles++; latestHandleSamples=0; const generation = retryHandles; let handleSamples = 0; return {
+    async elementHandle() { retryHandles++; latestHandleSamples=0; const generation = retryHandles; let handleSamples = 0; hitButton.ownerDocument = fixtureDocument; return {
+      scopeValue: hitButton, async dispose() {},
       async evaluate(callback, argument) {
         if (callback.toString().includes('old.ownerDocument')) return scenario !== 'onboarding-remount-document';
         if (callback.toString().includes('held.document')) {
           hitButton.ownerDocument = fixtureDocument;
           if (scenario === 'sampling-remount-document') hitButton.ownerDocument = {};
-          return callback(hitButton, argument);
+          return callback(hitButton, unwrap(argument));
         }
         handleSamples++; latestHandleSamples=handleSamples; samplingChoice = false; sampleCount++; hitButton.isConnected = scenario !== 'retry-detached' && !(scenario === 'command-detached' && escapes > 0); if (scenario?.startsWith('onboarding-remount') && skips > 0 && generation >= 2 && handleSamples >= 3
           && (generation === 2 || scenario === 'onboarding-remount-again')) hitButton.isConnected = false;
@@ -152,10 +167,15 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
     },
   };
   const errorCards = {
-    async evaluateHandle(callback) { return callback(boundAlert); },
+    async evaluateHandle(callback, argument) {
+      scopeCaptures++; capturingScope = true;
+      try { return scopeHandle(callback(boundAlert, { ...argument,
+        button: unwrap(argument.button), originalDocument: unwrap(argument.originalDocument) })); }
+      finally { capturingScope = false; }
+    },
     async evaluate(callback, argument) {
-      if (scenario === 'sampling-remount-alert' && sampleCount >= 2) return callback({ ...boundAlert }, argument);
-      return callback(boundAlert, argument);
+      if (scenario === 'sampling-remount-alert' && sampleCount >= 2) return callback({ ...boundAlert }, unwrap(argument));
+      return callback(boundAlert, unwrap(argument));
     },
     async count() { return ['failure-appears', 'delayed-foreign-error'].includes(scenario) && submits === 0 ? 0 : scenario === 'missing-error' ? 0 : scenario === 'duplicate-error' ? 2 : 1; },
     getByRole(role, options) { assert.equal(role, 'button'); assert.equal(options.name, 'Retry'); return { ...send, async count() { return scenario === 'missing-retry' ? 0 : scenario === 'duplicate-retry' ? 2 : 1; } }; },
@@ -216,6 +236,7 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
     }
   }
   const page = {
+    async evaluateHandle(callback) { return scopeHandle(callback()); },
     keyboard: { async press(key) { assert.equal(key, 'Escape'); escapes++;
       if (scenario === 'command-escape-failed') throw new Error('PRIVATE_SYNTHETIC_VALUE');
       if (scenario !== 'command-remaining') commandVisible = false;
@@ -394,6 +415,29 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
   assert.equal(retry.facts.retryPointStable, true);
   assert.equal(retry.facts.retryHitOwnedPoints, 9);
   assert.equal(retry.facts.retryRectInViewport, true);
+  for (const scenario of ['initial-scope-missing-pair-settles', 'initial-scope-missing-user-settles', 'initial-scope-disconnected-user-settles']) {
+    const settled = await trial({ ...retryRequest, timeoutMs: 700 }, {}, scenario, true);
+    assert.equal(settled.clicks, 1, scenario);
+    assert.equal(settled.keys, 0, scenario);
+    assert.equal(settled.fills, 0, scenario);
+    assert.equal(settled.facts.responseVerified, true, scenario);
+  }
+  for (const scenario of ['initial-scope-missing-pair', 'initial-scope-missing-user', 'initial-scope-disconnected-user']) {
+    const incomplete = await trial({ ...retryRequest, timeoutMs: 150 }, {}, scenario, true);
+    assert.equal(incomplete.clicks, 0, scenario);
+    assert.equal(incomplete.keys, 0, scenario);
+    assert.equal(incomplete.facts.retryScopeFailure, 'initial-scope-incomplete', scenario);
+  }
+  for (const scenario of ['initial-scope-duplicate-user', 'initial-scope-foreign-user', 'initial-scope-foreign-retry', 'initial-scope-foreign-document']) {
+    const invalid = await trial(retryRequest, {}, scenario, true);
+    assert.equal(invalid.clicks, 0, scenario);
+    assert.equal(invalid.keys, 0, scenario);
+    assert.equal(invalid.facts.retryScopeFailure, 'initial-scope-invalid', scenario);
+  }
+  const changedCandidate = await trial(retryRequest, {}, 'initial-scope-valid-pair-changed', true);
+  assert.equal(changedCandidate.clicks, 0);
+  assert.equal(changedCandidate.keys, 0);
+  assert.equal(changedCandidate.facts.retryScopeFailure, 'pair-changed');
   const remount = await trial({ ...retryRequest, timeoutMs: 900 }, {}, 'sampling-remount', true);
   assert.equal(remount.clicks, 1);
   assert.equal(remount.retryHandles, 2);
@@ -550,4 +594,4 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
   const invalid = await trial({ ...phase, action: 'retry' }, {}, null, true);
   assert.equal(invalid.facts.errorCategory, 'invalid-request');
   console.log('Hermes DOM feasibility and qualification guards: synthetic cases passed');
-})().catch(error => { console.error(error.message); process.exitCode = 1; });
+})().catch(error => { console.error(error.stack); process.exitCode = 1; });
