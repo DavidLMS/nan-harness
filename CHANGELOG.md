@@ -9,6 +9,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Isolate Windows Desktop probe artifacts so reused process IDs cannot collide
+  with connection or renderer records from earlier probes.
 - Keep the MiMo native-configuration canary compatible with deferred MCP dispatch
   in MiMo Code 0.1.16 while retaining the previous tool-discovery routes.
 - Recognize the inspected Linux Codex fresh-profile home startup during Desktop

@@ -10,7 +10,7 @@ use crate::{
     },
 };
 use nan_harness_core::DesktopHarnessKind;
-use nan_harness_private_fs::open_private_new;
+use nan_harness_private_fs::{create_private_dir, open_private_new};
 use semver::Version;
 use serde::Deserialize;
 use std::{
@@ -619,6 +619,150 @@ fn report_seal_failure(
         .emit();
 }
 
+struct WorkerFacts {
+    directory: PathBuf,
+    // Keep the original private roots alive until this worker has completed.
+    _root: std::fs::File,
+    _namespace: std::fs::File,
+}
+
+impl WorkerFacts {
+    fn bind(&self, command: &mut tokio::process::Command) {
+        command
+            .env("FEASIBILITY_FACTS", &self.directory)
+            .env("NANH_DESKTOP_QUALIFICATION_FACTS", &self.directory);
+    }
+}
+
+fn retain_facts_directory(path: &Path) -> Result<std::fs::File, Reason> {
+    if !path.is_absolute()
+        || !std::fs::symlink_metadata(path).is_ok_and(|metadata| metadata.file_type().is_dir())
+    {
+        return Err(Reason::IsolationUnavailable);
+    }
+    #[cfg(windows)]
+    let file = {
+        use std::os::windows::fs::OpenOptionsExt as _;
+        // Directory identity must not be replaced while the worker uses its path.
+        std::fs::OpenOptions::new()
+            .read(true)
+            .access_mode(0x8002_0000)
+            .share_mode(3)
+            .custom_flags(0x0200_0000 | 0x0020_0000)
+            .open(path)
+    };
+    #[cfg(not(windows))]
+    let file = std::fs::File::open(path);
+    let file = file.map_err(|_| Reason::IsolationUnavailable)?;
+    let metadata = file.metadata().map_err(|_| Reason::IsolationUnavailable)?;
+    if !metadata.is_dir() {
+        return Err(Reason::IsolationUnavailable);
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        if metadata.permissions().mode() & 0o7777 != 0o700 {
+            return Err(Reason::IsolationUnavailable);
+        }
+    }
+    #[cfg(windows)]
+    {
+        use nan_harness_private_fs::{
+            OwnedWindowsDacl, PrivatePathKind, classify_owned_windows_dacl,
+        };
+        use std::os::windows::fs::MetadataExt as _;
+        if metadata.file_attributes() & 0x400 != 0
+            || classify_owned_windows_dacl(&file, PrivatePathKind::Directory)
+                != OwnedWindowsDacl::Protected
+        {
+            return Err(Reason::IsolationUnavailable);
+        }
+    }
+    Ok(file)
+}
+
+fn prepare_worker_facts(
+    spec: &ProbeSpec,
+    root: &Path,
+    platform: &str,
+    facts: Option<&Path>,
+    qualification_facts: Option<&Path>,
+) -> Result<Option<WorkerFacts>, Reason> {
+    if platform != "windows"
+        || spec.kind == DesktopHarnessKind::Zed
+        || spec.live
+        || spec.session != crate::cli::SessionMode::GithubHosted
+        || spec.verification != crate::cli::VerificationPolicy::SemanticOnly
+    {
+        return Ok(None);
+    }
+    let index = spec
+        .probe_index
+        .filter(|index| *index < 3)
+        .ok_or(Reason::IsolationUnavailable)?;
+    let name = format!("{}-deterministic-{index}", spec.kind);
+    if !root.is_absolute()
+        || root.file_name() != Some(std::ffi::OsStr::new(&name))
+        || !std::fs::symlink_metadata(root).is_ok_and(|metadata| metadata.file_type().is_dir())
+        || spec.workspace != root.join("workspace")
+    {
+        return Err(Reason::IsolationUnavailable);
+    }
+    let facts = facts
+        .filter(|facts| Some(*facts) == qualification_facts)
+        .ok_or(Reason::IsolationUnavailable)?;
+    let held_root = retain_facts_directory(facts)?;
+    let directory = facts.join(name);
+    // The existing factory probe name is unique inside this fresh facts root.
+    // A reused namespace is evidence of stale state, never permission to adopt it.
+    create_private_dir(&directory).map_err(|_| Reason::IsolationUnavailable)?;
+    let namespace = retain_facts_directory(&directory)?;
+    Ok(Some(WorkerFacts {
+        directory,
+        _root: held_root,
+        _namespace: namespace,
+    }))
+}
+
+// Command assembly owns its child-only environment and the facts leases;
+// asynchronous supervision below retains both until the worker completes.
+fn probe_worker_command(
+    spec: &ProbeSpec,
+    root: &Path,
+    spec_path: &Path,
+    output: &Path,
+) -> Result<(tokio::process::Command, Option<WorkerFacts>), Reason> {
+    let executable = std::env::current_exe().map_err(|_| Reason::NotRun)?;
+    let mut command = tokio::process::Command::new(executable);
+    command
+        .arg("probe")
+        .arg(spec_path)
+        .arg(output)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .kill_on_drop(true);
+    if !spec.live {
+        command.env_remove("NAN_API_KEY");
+    }
+    let facts = std::env::var_os("FEASIBILITY_FACTS").map(PathBuf::from);
+    let qualification_facts =
+        std::env::var_os("NANH_DESKTOP_QUALIFICATION_FACTS").map(PathBuf::from);
+    let worker_facts = prepare_worker_facts(
+        spec,
+        root,
+        std::env::consts::OS,
+        facts.as_deref(),
+        qualification_facts.as_deref(),
+    )?;
+    if let Some(facts) = &worker_facts {
+        facts.bind(&mut command);
+    }
+    #[cfg(unix)]
+    command.process_group(0);
+    Ok((command, worker_facts))
+}
+
 async fn execute_probe(spec: &ProbeSpec, root: &Path) -> ProbeResult {
     let spec_path = root.join("spec.json");
     let output = root.join("probe.json");
@@ -634,30 +778,19 @@ async fn execute_probe(spec: &ProbeSpec, root: &Path) -> ProbeResult {
         );
         return ProbeResult::blocked(Reason::IsolationUnavailable);
     }
-    let Ok(executable) = std::env::current_exe() else {
-        emit_probe_diagnostic(
-            spec,
-            None,
-            crate::diagnostics::LaunchStage::NotStarted,
-            Some(Reason::NotRun),
-            None,
-        );
-        return ProbeResult::blocked(Reason::NotRun);
+    let (mut command, _worker_facts) = match probe_worker_command(spec, root, &spec_path, &output) {
+        Ok(command) => command,
+        Err(reason) => {
+            emit_probe_diagnostic(
+                spec,
+                None,
+                crate::diagnostics::LaunchStage::NotStarted,
+                Some(reason),
+                None,
+            );
+            return ProbeResult::blocked(reason);
+        }
     };
-    let mut command = tokio::process::Command::new(executable);
-    command
-        .arg("probe")
-        .arg(&spec_path)
-        .arg(&output)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .kill_on_drop(true);
-    if !spec.live {
-        command.env_remove("NAN_API_KEY");
-    }
-    #[cfg(unix)]
-    command.process_group(0);
     let Ok(mut child) = command.spawn() else {
         emit_probe_diagnostic(
             spec,
@@ -711,6 +844,10 @@ async fn execute_probe(spec: &ProbeSpec, root: &Path) -> ProbeResult {
         .and_then(|status| status.code());
     read_and_emit_worker_result(spec, &output, exit_code)
 }
+
+#[cfg(test)]
+#[path = "runner/facts_namespace_tests.rs"]
+mod facts_namespace_tests;
 
 fn read_and_emit_worker_result(
     spec: &ProbeSpec,

@@ -1049,13 +1049,48 @@ def validate_occlusion_profile(item):
         raise ValueError('invalid occluding hitbox')
 
 
+def semantic_fact_paths(directory, app, platform):
+    """Read one controlled run root and its three exact Windows probe roots."""
+    scoped = platform == 'windows' and app in APPS and app != 'zed-desktop'
+    if not scoped:
+        return sorted(directory.glob('*.json'))
+    names = {f'{app}-deterministic-{index}' for index in range(3)}
+    paths = []
+    entries = 0
+    for entry in directory.iterdir():
+        entries += 1
+        if entries > 1024:
+            raise ValueError('too many semantic directory entries')
+        if (entry.is_symlink() or getattr(entry, 'is_junction', lambda: False)()
+                or getattr(entry.lstat(), 'st_file_attributes', 0) & 0x400):
+            raise ValueError('semantic namespace links are forbidden')
+        if entry.is_dir():
+            if entry.name not in names:
+                raise ValueError('unknown semantic probe namespace')
+            for child in entry.iterdir():
+                entries += 1
+                if entries > 1024:
+                    raise ValueError('too many semantic directory entries')
+                if (child.is_symlink() or child.is_dir()
+                        or getattr(child, 'is_junction', lambda: False)()
+                        or getattr(child.lstat(), 'st_file_attributes', 0) & 0x400 or not child.is_file()):
+                    raise ValueError('invalid semantic probe entry')
+                if child.suffix == '.json':
+                    if child.name == 'native-diagnostics.json':
+                        raise ValueError('native diagnostic bundle belongs to the run root')
+                    paths.append(child)
+        elif entry.suffix == '.json':
+            paths.append(entry)
+    return sorted(paths)
+
+
 def semantic_observations(directory, app, platform=None):
     if directory is None:
         return []
     directory = Path(directory)
     if directory.is_symlink() or not directory.is_dir():
         raise ValueError('semantic facts directory is invalid')
-    all_paths = sorted(directory.glob('*.json'))
+    all_paths = semantic_fact_paths(directory, app, platform)
     private = [path for path in all_paths if path.name.startswith(('connection-', 'startup-', 'closed-startup-'))]
     # Three fresh profiles produce connection/startup metadata. Bound those
     # separately so they cannot consume or bypass the closed-record budget.
@@ -3652,7 +3687,14 @@ def publish_reduction_failure(args, category):
             facts = Path(args.facts)
             if not facts.is_symlink() and facts.is_dir():
                 ordinary = metadata = 0
-                for index, path in enumerate(facts.glob('*.json')):
+                try:
+                    fact_paths = semantic_fact_paths(facts, args.app, args.platform)
+                except (OSError, ValueError):
+                    # Keep the original rejection; root-only counts are
+                    # explicitly incomplete when a namespace is unsafe.
+                    fact_paths = facts.glob('*.json')
+                    capped = True
+                for index, path in enumerate(fact_paths):
                     if index == 1024:
                         capped = True
                         break

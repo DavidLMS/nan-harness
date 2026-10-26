@@ -5094,6 +5094,51 @@ class WindowsCleanupProgressTests(unittest.TestCase):
                     path.write_text(json.dumps(good))
                     with self.assertRaises(ValueError):q.semantic_observations(root,'zed-desktop')
 
+class WindowsProbeNamespaceTests(unittest.TestCase):
+    def test_same_pid_in_separate_probe_namespaces_keeps_all_closed_records(self):
+        value = json.loads((ROOT / 'canary/tests/fixtures/hermes-retry-scope.json').read_text())
+        with tempfile.TemporaryDirectory() as root:
+            for index in range(3):
+                directory = Path(root) / f'hermes-desktop-deterministic-{index}'
+                directory.mkdir()
+                (directory / 'connection-17.json').write_text('PRIVATE_NOT_A_PUBLIC_RECORD')
+                (directory / 'dom-17.json').write_text(json.dumps(value))
+            records = q.semantic_observations(root, 'hermes-desktop', 'windows')
+            self.assertEqual(len(records), 3)
+            self.assertTrue(all(record['retryScopeFailure'] == 'pair-changed' for record in records))
+            bad = Path(root) / 'hermes-desktop-deterministic-3'
+            bad.mkdir()
+            with self.assertRaises(ValueError):
+                q.semantic_observations(root, 'hermes-desktop', 'windows')
+
+    def test_namespace_budgets_are_global_and_links_nesting_and_foreign_apps_fail(self):
+        value = json.loads((ROOT / 'canary/tests/fixtures/hermes-retry-scope.json').read_text())
+        with tempfile.TemporaryDirectory() as root:
+            for index in range(3):
+                directory = Path(root) / f'hermes-desktop-deterministic-{index}'
+                directory.mkdir()
+                for item in range(22):
+                    (directory / f'dom-{item}.json').write_text(json.dumps(value))
+            with self.assertRaisesRegex(ValueError, 'too many semantic observations'):
+                q.semantic_observations(root, 'hermes-desktop', 'windows')
+            with self.assertRaisesRegex(ValueError, 'unknown semantic probe namespace'):
+                q.semantic_observations(root, 'chatgpt-desktop', 'windows')
+        with tempfile.TemporaryDirectory() as root:
+            directory = Path(root) / 'hermes-desktop-deterministic-0'
+            directory.mkdir()
+            (directory / 'nested').mkdir()
+            with self.assertRaises(ValueError):
+                q.semantic_observations(root, 'hermes-desktop', 'windows')
+            (directory / 'nested').rmdir()
+            (directory / 'native-diagnostics.json').write_text('{}')
+            with self.assertRaises(ValueError):
+                q.semantic_observations(root, 'hermes-desktop', 'windows')
+            (directory / 'native-diagnostics.json').unlink()
+            (directory / 'connection-17.json').symlink_to(Path(root) / 'private')
+            with self.assertRaises(ValueError):
+                q.semantic_observations(root, 'hermes-desktop', 'windows')
+
+
 class WindowsLauncherObservationTests(unittest.TestCase):
     def test_wrapper_failure_and_child_exit_are_distinct_closed_records(self):
         value = dict(schemaVersion=1, mechanism='windows-launcher', diagnosticsOnly=True,
