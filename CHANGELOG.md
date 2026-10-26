@@ -9,6 +9,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Verify Codex's preloaded Spotlight palette stays closed and unfocused while
+  Desktop qualification uses the retained main window.
 - Reprove the same owned Codex auxiliary window when its avatar route commits
   between startup observations.
 - Verify the native Hermes catalog menu transition directly during Windows

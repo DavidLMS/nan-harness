@@ -102,7 +102,9 @@ async function run(page,guard,deadline,authority,seal=()=>{},progress=()=>{}) {
     checkpoint('authority-before');
     if(await authority.verify()!==true)return reject('authority');
     checkpoint('guard');
-    if(await guard()!==true) {
+    const guarded=await guard();
+    try {const spotlight=guard.spotlightAuxiliary?.();if(spotlight)receipt.spotlightAuxiliary=spotlight;}catch {}
+    if(guarded!==true) {
       const failure=typeof guard.failure==='function'?guard.failure():null;
       if(['deadline','native-ownership','page-set','main-identity','main-focus','main-scope',
         'auxiliary-route','auxiliary-identity','auxiliary-focus','auxiliary-controls','query-failed','unmeasured'].includes(failure))
@@ -111,7 +113,7 @@ async function run(page,guard,deadline,authority,seal=()=>{},progress=()=>{}) {
         try {
           const detail=guard.auxiliaryRouteFailure();
           const routes=['blank','avatarOverlay','hotkeyWindow','quickChat','quickChatPrewarm',
-            'globalDictation','debug','detachedWindow','unknown'];
+            'globalDictation','debug','detachedWindow','spotlight','unknown'];
           if(detail&&Object.keys(detail).sort().join(',')==='initialRoute,samePage,settleRoute'
             &&detail.initialRoute!=='avatarOverlay'&&routes.includes(detail.initialRoute)
             &&(detail.settleRoute===null?detail.samePage===null:

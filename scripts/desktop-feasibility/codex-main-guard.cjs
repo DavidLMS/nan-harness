@@ -2,21 +2,23 @@
 // samples always have fresh native ownership proofs before and after the reads.
 const guards=new WeakSet(),owners=new WeakMap();
 const unknownRoutes=require('./codex-unknown-route-shapes.cjs');
+const spotlightSource=require('./codex-spotlight.cjs');
 // Classify only the string already consumed by a guard read. This closed
 // diagnostic vocabulary never participates in admission or reads a page.
 function closedAuxiliaryRoute(raw,kind) {
   if(raw===''||raw==='about:blank')return 'blank';
   return ['avatarOverlay','hotkeyWindow','quickChat','quickChatPrewarm','globalDictation',
-    'debug','detachedWindow'].includes(kind)?kind:'unknown';
+    'debug','detachedWindow','spotlight'].includes(kind)?kind:'unknown';
 }
 function createHeldMainGuard(held, browser, owner, deadline, route,
   identity,pause,requireMainScope,allowInitialAppearance,requireDocumentFocus,
-  {sameCorrelationIdentity,settleFolderAuxiliary,now,requireVisibleDocument=false,progress=()=>{}}) {
+  {sameCorrelationIdentity,settleFolderAuxiliary,now,requireVisibleDocument=false,progress=()=>{},spotlightPolicy=false}) {
   let actionsStarted=false,appearanceRetried=false,folderSettleTicket=false,folderSettleGranted=false;
   let activationSettleTicket=false,activationSettleGranted=false,mainScopeProved=false;
   let auxiliary=null, auxiliaryIdentity=null, failure='unmeasured', failureDetails=null;
   let rejectedAuxiliary=null, rejectedAuxiliaryBlank=false, auxiliaryRouteFailure=null;
   let unknownRouteShapes=null,unknownShapesFailed=false;
+  let spotlight=null;
   const recordUnknown=(phase,raw,kind)=>{
     if(kind!=='unknown'||unknownShapesFailed)return;
     try {
@@ -32,10 +34,13 @@ function createHeldMainGuard(held, browser, owner, deadline, route,
       nativeProofCount:Math.min(4096,nativeProofCount),nativeProofMs:bounded(nativeProofMs),
       identityCount:Math.min(4096,identityCount),identityMs:bounded(identityMs)});}catch {}
   };
-  const reject=reason=>{failure=reason;checkpoint('rejected');return false;};
-  const identify=async(page,phase)=>{
+  const reject=reason=>{failure=reason;
+    if(spotlight)spotlight.fail(({deadline:'deadline','native-ownership':'ownership','main-focus':'main-focus',
+      'auxiliary-focus':'auxiliary-focus','auxiliary-controls':'foreign-controls','query-failed':'query'})[reason]??'identity');
+    checkpoint('rejected');return false;};
+  const identify=async(page,phase,lease=null)=>{
     checkpoint(phase);const begin=now();identityCount++;
-    try {return await identity(page,deadline);}
+    try {return await identity(page,deadline,true,null,lease);}
     finally {identityMs+=now()-begin;checkpoint(phase);}
   };
   const rejectPageSet=(reason,initial,current)=>{
@@ -70,7 +75,9 @@ function createHeldMainGuard(held, browser, owner, deadline, route,
       if(extra) {
         const url=extra.url();
         const kind=route(url);
-        if(kind!=='avatarOverlay') {
+        if(kind==='spotlight'&&spotlightPolicy&&spotlightSource.route(url))
+          spotlight??=spotlightSource.create({deadline,now});
+        if(kind!=='avatarOverlay'&&!(kind==='spotlight'&&spotlight)) {
           rejectedAuxiliary=extra;
           rejectedAuxiliaryBlank=url===''||url==='about:blank';
           auxiliaryRouteFailure={initialRoute:closedAuxiliaryRoute(url,kind),settleRoute:null,samePage:null};
@@ -87,26 +94,45 @@ function createHeldMainGuard(held, browser, owner, deadline, route,
         const main=await identify(held.page,'main-identity');
         if(!timely())return false;
         if(!sameCorrelationIdentity(held,main))return reject('main-identity');
-        if(requireDocumentFocus&&!main.scope.focused)return reject('main-focus');
+        if((requireDocumentFocus||spotlight)&&!main.scope.focused)return reject('main-focus');
         if(requireVisibleDocument&&main.scope.visibleDocument!==true)return reject('main-scope');
         if((requireMainScope||(allowInitialAppearance&&!actionsStarted)||activationSettleTicket)&&!main.scope.mainScope)return reject('main-scope');
         if(extra) {
-          const aux=await identify(extra,'auxiliary-identity');
+          const aux=await identify(extra,'auxiliary-identity',spotlight);
           const expected=auxiliaryIdentity??candidateAux;
           if(!timely())return false;
           if(expectedExtra&&aux.page!==expectedExtra)return reject('auxiliary-identity');
-          if(expectedExtra&&(route(aux.url)!=='avatarOverlay'||route(aux.frameUrl)!=='avatarOverlay'))
+          if(expectedExtra&&(route(aux.url)!==(spotlight?'spotlight':'avatarOverlay')||route(aux.frameUrl)!==(spotlight?'spotlight':'avatarOverlay')))
             return reject('auxiliary-route');
           if(expected&&!sameCorrelationIdentity(expected,aux))return reject('auxiliary-identity');
           const counts=aux.scope.counts;
           if(aux.scope.focused)return reject('auxiliary-focus');
-          if(['roleLegend','roleRadios','engineering','dialog','quickChatComposer','editable']
+          if(spotlight) {
+            if(aux.scope.spotlight?.pending) {
+              // Only initial passive hydration may wait. Keep its original
+              // document/target, clock and unconsumed main action boundary.
+              if(actionsStarted||auxiliary||!(allowInitialAppearance||requireVisibleDocument))return reject('auxiliary-controls');
+              const pendingPages=pages();
+              if(!valid())return false;
+              if(pendingPages.length!==initial.length||!pendingPages.every(page=>initial.includes(page)))return rejectPageSet('after-sample-changed',initial,pendingPages);
+              await pause(Math.min(100,Math.max(0,deadline-now())));
+              sample--;continue;
+            }
+            if(!aux.scope.spotlight||aux.scope.spotlight.failure)return reject('auxiliary-controls');
+          } else if(['roleLegend','roleRadios','engineering','dialog','quickChatComposer','editable']
               .some(key=>counts[key]!==0))return reject('auxiliary-controls');
           candidateAux=aux;
+        }
+        if(spotlight) {
+          const afterMain=await identify(held.page,'main-identity');
+          if(!sameCorrelationIdentity(held,afterMain))return reject('main-identity');
+          if(!afterMain.scope.focused)return reject('main-focus');
+          if(afterMain.scope.visibleDocument!==true)return reject('main-scope');
         }
         const after=pages();
         if(!valid())return false;
         if(after.length!==initial.length||!after.every(page=>initial.includes(page)))return rejectPageSet('after-sample-changed',initial,after);
+        spotlight?.commit();
         mainScopeProved=main.scope.mainScope===true;
         if(sample+1<samples)await pause(Math.min(100,Math.max(0,deadline-now())));
       }
@@ -115,6 +141,7 @@ function createHeldMainGuard(held, browser, owner, deadline, route,
     } catch {return reject(now()>=deadline?'deadline':'query-failed');}
   };
   const prove=async()=>{
+    if(spotlight?.failed())return false;
     if(await measure())return true;
     const canSettleBlank=folderSettleTicket||requireVisibleDocument;
     const changed=failureDetails;
@@ -181,6 +208,8 @@ function createHeldMainGuard(held, browser, owner, deadline, route,
     ?unknownRoutes.copyPair(unknownRouteShapes):null;
   const privateIdentity=value=>value&&Object.fromEntries(['url','target','frame','loader','frameUrl','fragment'].map(key=>[key,value[key]]));
   prove.binding=()=>({schemaVersion:1,main:privateIdentity(held),auxiliary:privateIdentity(auxiliaryIdentity)});
+  prove.spotlightAuxiliary=()=>spotlight?.receipt()??null;
+  prove.close=async()=>{await spotlight?.close();};
   guards.add(prove);owners.set(prove,owner);
   return prove;
 }

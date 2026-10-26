@@ -785,6 +785,7 @@ function sourceRoute(raw) {
     const route=url.searchParams.get('initialRoute');
     if(url.pathname==='/detached-window.html'&&route==='/detached-window')return 'detachedWindow';
     if(url.pathname!=='/index.html')return 'unknown';
+    if(route==='/spotlight')return require('./codex-spotlight.cjs').route(raw)?'spotlight':'unknown';
     return new Map([['/avatar-overlay','avatarOverlay'],['/hotkey-window','hotkeyWindow'],
       ['/chatgpt/quick-chat','quickChat'],['/chatgpt/quick-chat-prewarm','quickChatPrewarm'],
       ['/global-dictation','globalDictation'],['/debug','debug']]).get(route)??'unknown';
@@ -803,7 +804,7 @@ exports.run=async function(page, ownerGuard, deadline, mainGuard, folderTrust, p
   try {
     if(!stable())return unavailable();
     const routes=Object.fromEntries(['avatarOverlay','hotkeyWindow','quickChat','quickChatPrewarm',
-      'detachedWindow','globalDictation','debug','unknown'].map(key=>[key,0]));
+      'detachedWindow','globalDictation','debug','spotlight','unknown'].map(key=>[key,0]));
     const visibility={visible:0,hidden:0,unavailable:0};
     for(const candidate of rejectedPages){
       if(!stable())return unavailable();

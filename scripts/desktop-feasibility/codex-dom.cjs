@@ -365,25 +365,51 @@ function auxiliaryScope() {
   const controls=[...document.querySelectorAll('textarea,[contenteditable="true"],input:not([type="hidden"]),[role="dialog"],[aria-modal="true"],[role="alertdialog"],[role="menu"]')].filter(visible);
   return !document.hasFocus()&&controls.length===0;
 }
-async function bindRecordedMain(browser,binding,owner,deadline,identity=pageIdentity,directCDP=false) {
-  if(Date.now()>=deadline||!owner())return null;
+async function bindRecordedMain(browser,binding,owner,deadline,identity=pageIdentity,directCDP=false,spotlight=null) {
+  try {
+  if(spotlight?.failed())return null;
+  const reject=reason=>{spotlight?.fail(reason);return null;};
+  if(Date.now()>=deadline||!owner())return reject(Date.now()>=deadline?'deadline':'ownership');
   const pages=browser.contexts().flatMap(context=>context.pages());
-  if(pages.length!==1+(binding.auxiliary?1:0))return null;
+  if(pages.length!==1+(binding.auxiliary?1:0))return reject('identity');
   const identities=await Promise.all(pages.map(page=>identity(page,deadline)));
-  if(Date.now()>=deadline||!owner())return null;
+  if(Date.now()>=deadline||!owner())return reject(Date.now()>=deadline?'deadline':'ownership');
   const mainMatches=identities.map((value,index)=>sameIdentity(binding.main,value)?index:-1).filter(index=>index>=0);
-  if(mainMatches.length!==1)return null;
+  if(mainMatches.length!==1)return reject('identity');
   const main=pages[mainMatches[0]];
   const auxiliary=pages.find(page=>page!==main);
   if(auxiliary) {
     const aux=identities[pages.indexOf(auxiliary)];
-    if(!sameIdentity(binding.auxiliary,aux)||sourceRoute(aux.url)!=='avatarOverlay'
-      ||!await auxiliary.evaluate(auxiliaryScope))return null;
+    if(!sameIdentity(binding.auxiliary,aux))return reject('identity');
+    if(spotlight) {
+      // Each controller re-admits the original serialized document, then owns
+      // one private DOM tuple for its complete action window. Handles are never
+      // serialized between controllers and Spotlight never receives input.
+      const count=spotlight.receipt().stableSamples===2?1:2;
+      for(let sample=0;sample<count;sample++) {
+        if(Date.now()>=deadline||!owner())return reject(Date.now()>=deadline?'deadline':'ownership');
+        if(!sameIdentity(binding.main,await identity(main,deadline)))return reject('identity');
+        if(!await spotlight.within(main.evaluate(()=>document.visibilityState==='visible'&&document.hasFocus())))return reject('main-focus');
+        const current=sample===0?aux:await identity(auxiliary,deadline);
+        if(!sameIdentity(binding.auxiliary,current))return reject('identity');
+        const scope=await spotlight.read(auxiliary,current);
+        if(scope.spotlight.pending)return reject('initial-scope');
+        if(!sameIdentity(binding.main,await identity(main,deadline)))return reject('identity');
+        if(!await spotlight.within(main.evaluate(()=>document.visibilityState==='visible'&&document.hasFocus())))return reject('main-focus');
+        const currentPages=browser.contexts().flatMap(context=>context.pages());
+        if(Date.now()>=deadline||!owner())return reject(Date.now()>=deadline?'deadline':'ownership');
+        if(currentPages.length!==pages.length||!currentPages.every(page=>pages.includes(page)))return reject('identity');
+        spotlight.commit();
+        if(sample+1<count)await spotlight.within(new Promise(resolve=>setTimeout(resolve,Math.min(100,Math.max(0,deadline-Date.now())))));
+      }
+    } else if(sourceRoute(aux.url)!=='avatarOverlay'||!await auxiliary.evaluate(auxiliaryScope))return null;
   }
-  if(!await main.evaluate(scoped=>document.visibilityState==='visible'&&(scoped||document.hasFocus()),directCDP))return null;
+  const finalScope=main.evaluate(scoped=>document.visibilityState==='visible'&&(scoped||document.hasFocus()),directCDP&&!spotlight);
+  if(!await (spotlight?spotlight.within(finalScope):finalScope))return reject('main-focus');
   const after=browser.contexts().flatMap(context=>context.pages());
-  if(Date.now()>=deadline||!owner()||after.length!==pages.length||!after.every(page=>pages.includes(page)))return null;
+  if(Date.now()>=deadline||!owner()||after.length!==pages.length||!after.every(page=>pages.includes(page)))return reject(Date.now()>=deadline?'deadline':'identity');
   return main;
+  } catch(error) {spotlight?.fail(Date.now()>=deadline?'deadline':'query');throw error;}
 }
 function validRequest(request) {
   const keys=['connectionPath','ownerPid','prompt','expectedMarker','timeoutMs','action','purpose','mainBindingPath'];
@@ -414,7 +440,9 @@ function validBinding(binding,request,connection) {
     &&binding.schemaVersion===1&&binding.ownerPid===request.ownerPid
     &&binding.launcherPid===connection.launcherPid&&binding.port===connection.port
     &&identity(binding.main)&&(binding.auxiliary===null||identity(binding.auxiliary)
-      &&sourceRoute(binding.auxiliary.url)==='avatarOverlay');
+      &&(sourceRoute(binding.auxiliary.url)==='avatarOverlay'
+        ||require('./codex-spotlight.cjs').policy()&&require('./codex-spotlight.cjs').route(binding.auxiliary.url)
+          &&require('./codex-spotlight.cjs').route(binding.auxiliary.frameUrl)&&binding.auxiliary.fragment===''));
 }
 async function waitRetryReady(retry,guard,deadline,pause,now=Date.now) {
   while(now()<deadline) {
@@ -434,7 +462,7 @@ exports.waitRetryReady=waitRetryReady;
 async function main() {
   const fs=require('node:fs'),path=require('node:path');
   const output=process.argv[4];
-  let browser,facts={schemaVersion:1,mechanism:'codex-renderer-qualification',diagnosticsOnly:true,
+  let browser,spotlight,facts={schemaVersion:1,mechanism:'codex-renderer-qualification',diagnosticsOnly:true,
     endpointOwned:false,targetVerified:false,attached:false,bindingVerified:false,auxiliaryInert:false,
     codingComposerReady:false,uniqueComposer:false,inputReadback:false,inputSubmitted:false,
     userTurnObserved:false,assistantTurnCount:0,responseVerified:false,errorObserved:false,
@@ -466,14 +494,17 @@ async function main() {
     const deadline=Date.now()+request.timeoutMs;
     browser=await chromium.connectOverCDP(`http://127.0.0.1:${connection.port}`,{timeout:2000,noDefaults:true});
     const directCDP=directCDPPolicy();
-    const page=await bindRecordedMain(browser,binding,owner,deadline,pageIdentity,directCDP);
+    if(directCDP&&require('./codex-spotlight.cjs').policy()&&binding.auxiliary
+      &&require('./codex-spotlight.cjs').route(binding.auxiliary.url))
+      spotlight=require('./codex-spotlight.cjs').create({deadline});
+    const page=await bindRecordedMain(browser,binding,owner,deadline,pageIdentity,directCDP,spotlight);
     if(!page)throw Error('main');
-    facts=await runTurn(page,async until=>await bindRecordedMain(browser,binding,owner,until,pageIdentity,directCDP)===page,request,deadline,(until,guard)=>require('./codex-recovery-barrier.cjs').release(process.argv[3],until,guard));
+    facts=await runTurn(page,async until=>await bindRecordedMain(browser,binding,owner,until,pageIdentity,directCDP,spotlight)===page,request,deadline,(until,guard)=>require('./codex-recovery-barrier.cjs').release(process.argv[3],until,guard));
   } catch {
     if(facts.errorCategory==='invalid-request')facts.preAttachFailure=preAttachFailure;
     if(facts.errorCategory===null)facts.errorCategory='query-failed';
   }
-  finally {if(browser)await browser.close().catch(()=>{});}
+  finally {await spotlight?.close();if(browser)await browser.close().catch(()=>{});}
   fs.writeFileSync(output,JSON.stringify(facts)+'\n',{mode:0o600,flag:'wx'});
   process.exitCode=facts.errorCategory===null?0:1;
 }

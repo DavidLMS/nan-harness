@@ -76,7 +76,7 @@ function correlationScope() {
       editable:cap(all('textarea,[contenteditable="true"],input:not([type="radio"]):not([type="checkbox"]):not([type="hidden"])'))},
     mainScope,visibleDocument:document.visibilityState==='visible',focused:document.hasFocus()};
 }
-async function correlationIdentity(page, deadline, includeScope=true, diagnostic=null) {
+async function correlationIdentity(page, deadline, includeScope=true, diagnostic=null,spotlight=null) {
   let session;
   const bounded=async promise=>{
     const remaining=deadline-Date.now();if(remaining<=0)throw new Error('deadline');
@@ -96,9 +96,10 @@ async function correlationIdentity(page, deadline, includeScope=true, diagnostic
     if(typeof target.targetInfo?.targetId!=='string'||!target.targetInfo.targetId
       ||!frame||typeof frame.id!=='string'||!frame.id||typeof frame.url!=='string'
       ||typeof frame.loaderId!=='string'||!frame.loaderId)throw new Error('identity');
-    const scope=includeScope?await bounded(page.evaluate(correlationScope)):null;
-    return {page,url:page.url(),target:target.targetInfo.targetId,frame:frame.id,
-      loader:frame.loaderId,frameUrl:frame.url,fragment:frame.urlFragment??'',scope};
+    const value={page,url:page.url(),target:target.targetInfo.targetId,frame:frame.id,
+      loader:frame.loaderId,frameUrl:frame.url,fragment:frame.urlFragment??''};
+    const scope=includeScope?(spotlight?await spotlight.read(page,value):await bounded(page.evaluate(correlationScope))):null;
+    return {...value,scope};
   } finally {if(session)await session.detach().catch(()=>{});}
 }
 function sameCorrelationIdentity(a,b) {
@@ -294,10 +295,10 @@ async function settleFolderAuxiliary(held,extra,pages,valid,deadline,route,ident
 // Later source-known inert avatar pages never become selectable input targets.
 function heldMainGuard(held, browser, owner, deadline, route,
   identity=correlationIdentity,pause=ms=>new Promise(resolve=>setTimeout(resolve,ms)),
-  requireMainScope=false,allowInitialAppearance=false,requireDocumentFocus=true,scopedDOM=false,progress=()=>{}) {
+  requireMainScope=false,allowInitialAppearance=false,requireDocumentFocus=true,scopedDOM=false,progress=()=>{},spotlightPolicy=false) {
   return require('./codex-main-guard.cjs').createHeldMainGuard(held,browser,owner,deadline,route,
     identity,pause,requireMainScope,allowInitialAppearance,requireDocumentFocus,
-    {sameCorrelationIdentity,settleFolderAuxiliary,now:()=>Date.now(),requireVisibleDocument:scopedDOM,progress});
+    {sameCorrelationIdentity,settleFolderAuxiliary,now:()=>Date.now(),requireVisibleDocument:scopedDOM,progress,spotlightPolicy});
 }
 // One public page activation; it never substitutes for fresh focus/owner proof.
 async function focusCapturedMain(held,proof,deadline,identity=correlationIdentity,
@@ -687,9 +688,10 @@ async function run() {
       if(request.codexProfileLoan!==undefined&&(!profileAuthority||request.codexProfileLoan.directories[0].path!==request.ownedWorkspace)){profileAuthority?.close();facts.errorCategory='invalid-request';save();return;}
       const onboardingOwnerGuard=profileAuthority?()=>ownerGuard()===true&&profileAuthority.verify()
         &&(!macProfileCustody||ownerGuard()===true):ownerGuard;
-      let initialHome;
+      let initialHome,trustGuard,mainGuard;
       try {
-      let folderTrust,trustGuard;
+      let folderTrust;
+      const spotlightPolicy=!!profileAuthority&&require('./codex-spotlight.cjs').policy();
       checkpoint('folder-trust');
       if(trial&&request.ownedWorkspace!==undefined) {
         const folderAuthority=require('./codex-folder-trust.cjs').authority(request.ownedWorkspace);
@@ -699,7 +701,7 @@ async function run() {
           // source/path proof authorizes input; the guard retains the visible
           // main identity and native ownership, including auxiliary settling.
           ms=>new Promise(resolve=>setTimeout(resolve,ms)),false,process.platform==='win32'&&!directCDP,!directCDP,directCDP,
-          receipt=>{facts.mainGuardObservation=receipt;save();});
+          receipt=>{facts.mainGuardObservation=receipt;save();},spotlightPolicy);
         folderTrust=await require('./codex-folder-trust.cjs').run(page,trustGuard,
           correlationDeadline,folderAuthority,()=>trustGuard.sealInitialActions(),
           receipt=>{facts.folderTrustObservation=receipt;save();});
@@ -718,15 +720,15 @@ async function run() {
       const heldMain=trial?await bindCorrelationMain(initialMain,browser,onboardingOwnerGuard,correlationDeadline,
         require('./codex-onboarding.cjs').sourceRoute,correlationIdentity,
         ms=>new Promise(resolve=>setTimeout(resolve,ms)),facts.initialMainConfirmation,
-        folderTrust?.status==='completed'?trustGuard:null,!directCDP,()=>save(),async heldPage=>({
+        folderTrust?.status==='completed'||trustGuard?.spotlightAuxiliary()?trustGuard:null,!directCDP,()=>save(),async heldPage=>({
           coding:await heldPage.evaluate(require('./codex-onboarding.cjs').codingScope),
           home:await heldPage.evaluate(require('./codex-dom.cjs').homeComposerScope)}),initialHome):null;
       trustGuard?.finishPassiveFolderSettle();
       // Trust consumes initial admission; preserve its original auxiliary binding.
       // Initial source binding above must still succeed before subsequent input.
-      const mainGuard=heldMain?.initialHomeBinding?.guard??(folderTrust?.clickAttempted?(heldMain?trustGuard:undefined):trial&&heldMain?heldMainGuard(heldMain,browser,onboardingOwnerGuard,correlationDeadline,
+      mainGuard=heldMain?.initialHomeBinding?.guard??(folderTrust?.clickAttempted||trustGuard?.spotlightAuxiliary()?(heldMain?trustGuard:undefined):trial&&heldMain?heldMainGuard(heldMain,browser,onboardingOwnerGuard,correlationDeadline,
         require('./codex-onboarding.cjs').sourceRoute,correlationIdentity,
-        ms=>new Promise(resolve=>setTimeout(resolve,ms)),false,true,!directCDP,directCDP):undefined);
+        ms=>new Promise(resolve=>setTimeout(resolve,ms)),false,true,!directCDP,directCDP,()=>{},spotlightPolicy):undefined);
       checkpoint('onboarding');
       facts.publicOnboarding = heldMain?.initialHomeBinding
         ?initialHomeSource.onboardingReceipt(folderTrust):await require('./codex-onboarding.cjs').run(page,
@@ -739,13 +741,16 @@ async function run() {
         ||directCDP&&await page.evaluate(require('./codex-dom.cjs').homeComposerScope));
       facts.codexSession={inputChannel:directCDP?'cdp-dom':'native-focused',bindingVerified,codingComposerReady:!!codingComposerReady,auxiliaryInert:bindingVerified,
         pageCount:Math.min(32,browser.contexts().flatMap(context=>context.pages()).length)};
+      const spotlight=mainGuard?.spotlightAuxiliary();
+      if(spotlight)facts.codexSession.spotlightAuxiliary=spotlight;
       if(!bindingVerified||!codingComposerReady){facts.errorCategory='target-invalid';save();return;}
       publishCodexBinding(output,request.ownerPid,connection,mainGuard);
       if(trial&&browser.contexts().flatMap(c=>c.pages()).length!==1) {
         facts.mainAuxCorrelation=await observeMainAux(heldMain,browser,onboardingOwnerGuard,correlationDeadline,
           require('./codex-onboarding.cjs').sourceRoute,correlationIdentity,ms=>new Promise(resolve=>setTimeout(resolve,ms)),!directCDP);
       }
-      } finally {await initialHome?.close();profileAuthority?.close();}
+      } finally {await initialHome?.close();await mainGuard?.close?.();
+        if(trustGuard!==mainGuard)await trustGuard?.close?.();profileAuthority?.close();}
     }
     checkpoint('final-inventory');
     const counts = await page.evaluate(appName => {

@@ -136,6 +136,57 @@ class CodexRetainedCustodyTests(unittest.TestCase):
                 with self.assertRaises(ValueError):q.semantic_observations(tmp, 'chatgpt-desktop')
 
 
+class SpotlightAuxiliaryContractTests(unittest.TestCase):
+    @staticmethod
+    def observation():
+        return dict(sourceVersion='26.1007.21434',
+            rendererSha256='2b78662247051c8b0905e1afbe0839187b8267e9181e179bc422322e4010433b',
+            status='verified', failure=None, stableSamples=2, inputCount=1, listCount=1, editableCount=1)
+
+    def test_closed_source_witness_is_optional_and_does_not_prove_main_binding(self):
+        witness = self.observation()
+        base = dict(schemaVersion=1, mechanism='renderer-inventory', diagnosticsOnly=True,
+            app='chatgpt-desktop', endpointOwned=True, launcherOwned=True, attached=True,
+            pageCount=1, textareaCount=0, editableCount=0, sendCount=0, retryCount=0,
+            newThreadCount=0, loginCount=0, dialogCount=0, errorCategory='target-invalid')
+        session = dict(pageCount=2, bindingVerified=False, codingComposerReady=False,
+                       auxiliaryInert=False, inputChannel='cdp-dom', spotlightAuxiliary=witness)
+        trust = dict(phase='guard', status='absent', clickAttempted=False, clickCompleted=False,
+                     spotlightAuxiliary=witness)
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'fact.json'
+            for field, detail in [('codexSession', session), ('folderTrustObservation', trust)]:
+                item = base | {field: detail}
+                path.write_text(json.dumps(item))
+                record = q.semantic_observations(root, 'chatgpt-desktop', 'windows')[0]
+                self.assertEqual(record, item)
+                self.assertEqual(record['errorCategory'], 'target-invalid')
+                for platform in [None, 'linux', 'macos']:
+                    with self.assertRaises(ValueError):
+                        q.semantic_observations(root, 'chatgpt-desktop', platform)
+            rejected = witness | dict(status='rejected', failure='source-open', stableSamples=0,
+                                      inputCount=None, listCount=None, editableCount=None)
+            item = base | {'codexSession': session | {'spotlightAuxiliary': rejected}}
+            path.write_text(json.dumps(item))
+            self.assertEqual(q.semantic_observations(root, 'chatgpt-desktop', 'windows'), [item])
+            item['errorCategory'] = None
+            path.write_text(json.dumps(item))
+            with self.assertRaises(ValueError):
+                q.semantic_observations(root, 'chatgpt-desktop', 'windows')
+
+    def test_source_witness_rejects_untyped_private_or_contradictory_facts(self):
+        witness = self.observation()
+        for change in [{'sourceVersion': 'PRIVATE'}, {'rendererSha256': 'a' * 64}, {'url': 'PRIVATE'},
+                       {'status': True}, {'failure': 'query'}, {'stableSamples': True}, {'stableSamples': 3},
+                       {'inputCount': True}, {'inputCount': None}, {'listCount': 0}, {'editableCount': 2},
+                       {'status': 'rejected', 'failure': None}, {'status': 'rejected', 'failure': 'PRIVATE'}]:
+            with self.assertRaises(ValueError):
+                q.spotlight_auxiliary(witness | change, 'windows')
+        for failure in ['main-focus', 'auxiliary-focus', 'initial-scope', 'scope-changed', 'source-open',
+                        'source-transition', 'foreign-controls', 'identity', 'ownership', 'deadline', 'query']:
+            q.spotlight_auxiliary(witness | dict(status='rejected', failure=failure), 'windows')
+
+
 class RendererCheckpointTests(unittest.TestCase):
     def test_unknown_auxiliary_shape_is_closed_and_bound_to_its_refused_read(self):
         shape = dict(protocolKind='app', ownedAppHost=True, entryKind='index',
@@ -3946,8 +3997,13 @@ class QualificationTests(unittest.TestCase):
         source = dict(status='complete', routes=route_counts, visibility=dict(visible=1, hidden=1, unavailable=0))
         measured = {**inventory, 'source': source}
         self.assertEqual(q.public_onboarding({**setup, 'rejectedPageInventory': measured}, 'chatgpt-desktop')['rejectedPageInventory'], measured)
+        expanded = {**source, 'routes': {**route_counts, 'unknown': 0, 'spotlight': 1}}
+        spotlight = {**inventory, 'source': expanded}
+        self.assertEqual(q.public_onboarding({**setup, 'rejectedPageInventory': spotlight}, 'chatgpt-desktop')['rejectedPageInventory'], spotlight)
         for invalid in ({**source, 'url': 'PRIVATE'}, {**source, 'status': []},
                         {**source, 'routes': {**route_counts, 'unknown': True}},
+                        {**expanded, 'routes': {**expanded['routes'], 'spotlight': True}},
+                        {**expanded, 'routes': {**expanded['routes'], 'PRIVATE': 0}},
                         {**source, 'visibility': dict(visible=2, hidden=1, unavailable=0)}):
             with self.assertRaises(ValueError):
                 q.public_onboarding({**setup, 'rejectedPageInventory': {**inventory, 'source': invalid}}, 'chatgpt-desktop')

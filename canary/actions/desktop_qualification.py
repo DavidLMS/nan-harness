@@ -345,8 +345,8 @@ def public_mac_codex_home_state(value):
     return value
 
 
-def folder_trust_observation(trust):
-    if (type(trust) is not dict or set(trust) - {'rejectionStage','guardFailure','auxiliaryRouteFailure','unknownRouteShapes'} != {'status', 'clickAttempted', 'clickCompleted'}
+def folder_trust_observation(trust, *, platform=None):
+    if (type(trust) is not dict or set(trust) - {'rejectionStage','guardFailure','auxiliaryRouteFailure','unknownRouteShapes','spotlightAuxiliary'} != {'status', 'clickAttempted', 'clickCompleted'}
             or type(trust['status']) is not str
             or trust['status'] not in {'absent', 'blocked', 'completed', 'action-uncertain'}
             or type(trust['clickAttempted']) is not bool or type(trust['clickCompleted']) is not bool
@@ -372,7 +372,7 @@ def folder_trust_observation(trust):
             raise ValueError('invalid folder trust guard failure')
     if 'auxiliaryRouteFailure' in trust:
         observation = trust['auxiliaryRouteFailure']
-        routes = {'blank', 'avatarOverlay', 'hotkeyWindow', 'quickChat', 'quickChatPrewarm',
+        routes = {'blank', 'avatarOverlay', 'spotlight', 'hotkeyWindow', 'quickChat', 'quickChatPrewarm',
                   'globalDictation', 'debug', 'detachedWindow', 'unknown'}
         if (trust.get('guardFailure') != 'auxiliary-route'
                 or type(observation) is not dict
@@ -388,6 +388,27 @@ def folder_trust_observation(trust):
         if 'auxiliaryRouteFailure' not in trust:
             raise ValueError('missing folder trust route refusal')
         codex_unknown_route_shapes(trust['unknownRouteShapes'], trust['auxiliaryRouteFailure'])
+    if 'spotlightAuxiliary' in trust:
+        spotlight_auxiliary(trust['spotlightAuxiliary'], platform)
+
+
+def spotlight_auxiliary(value, platform):
+    counts = {'inputCount', 'listCount', 'editableCount'}
+    fields = counts | {'sourceVersion', 'rendererSha256', 'status', 'failure', 'stableSamples'}
+    failures = {'main-focus', 'auxiliary-focus', 'initial-scope', 'scope-changed', 'source-open',
+                'source-transition', 'foreign-controls', 'identity', 'ownership', 'deadline', 'query'}
+    if (platform != 'windows' or type(value) is not dict or set(value) != fields
+            or value['sourceVersion'] != '26.1007.21434'
+            or value['rendererSha256'] != '2b78662247051c8b0905e1afbe0839187b8267e9181e179bc422322e4010433b'
+            or type(value['status']) is not str or value['status'] not in {'verified', 'rejected'}
+            or type(value['stableSamples']) is not int or not 0 <= value['stableSamples'] <= 2
+            or any(value[key] is not None and (type(value[key]) is not int or not 0 <= value[key] <= 4096)
+                   for key in counts)
+            or value['status'] == 'verified' and (value['failure'] is not None
+                or value['stableSamples'] != 2 or any(value[key] != 1 for key in counts))
+            or value['status'] == 'rejected' and (type(value['failure']) is not str
+                or value['failure'] not in failures)):
+        raise ValueError('invalid closed Spotlight auxiliary observation')
 
 
 def codex_unknown_route_shapes(shapes, routes):
@@ -818,7 +839,7 @@ def public_onboarding(setup, app, *, platform=None, initial_confirmation=None):
     if 'taskScopeObservation' in setup:
         task_scope_observation(setup['taskScopeObservation'])
     if 'folderTrust' in setup:
-        folder_trust_observation(setup['folderTrust'])
+        folder_trust_observation(setup['folderTrust'], platform=platform)
     if 'mainGuardFailure' in setup:
         failure = setup['mainGuardFailure']
         if (type(failure) is not str or failure not in {
@@ -858,10 +879,11 @@ def public_onboarding(setup, app, *, platform=None, initial_confirmation=None):
                     or (source['status'] == 'unavailable' and set(source) != {'status'})
                     or (source['status'] == 'complete' and (
                         set(source) != {'status', 'routes', 'visibility'}
-                        or any(type(source.get(key)) is not dict or set(source[key]) != fields
+                        or any(type(source.get(key)) is not dict or set(source[key]) not in allowed
                                or any(type(count) is not int or not 0 <= count <= 32 for count in source[key].values())
                                or sum(source[key].values()) != inventory['total']
-                               for key, fields in (('routes', routes), ('visibility', visibility)))))):
+                               for key, allowed in (('routes', (routes, routes | {'spotlight'})),
+                                                    ('visibility', (visibility,))))))):
                 raise ValueError('invalid rejected renderer source inventory')
     if 'taskScopeProved' in setup:
         if type(setup['taskScopeProved']) is not bool:
@@ -3059,7 +3081,7 @@ def semantic_observations(directory, app, platform=None):
                 if (app != 'chatgpt-desktop' or type(trust) is not dict
                         or type(trust.get('phase')) is not str or trust['phase'] not in phases):
                     raise ValueError('invalid folder trust progress')
-                folder_trust_observation({key: item for key, item in trust.items() if key != 'phase'})
+                folder_trust_observation({key: item for key, item in trust.items() if key != 'phase'}, platform=platform)
                 record['folderTrustObservation'] = trust
             if 'observerShutdown' in value:
                 if type(value['observerShutdown']) is not str:
@@ -3309,13 +3331,17 @@ def semantic_observations(directory, app, platform=None):
             if 'codexSession' in value:
                 session = value['codexSession']
                 flags = {'bindingVerified', 'codingComposerReady', 'auxiliaryInert'}
-                if (app != 'chatgpt-desktop' or type(session) is not dict or set(session) - {'inputChannel'} != flags | {'pageCount'}
+                if (app != 'chatgpt-desktop' or type(session) is not dict or set(session) - {'inputChannel', 'spotlightAuxiliary'} != flags | {'pageCount'}
                         or type(session.get('inputChannel', 'native-focused')) is not str
                         or session.get('inputChannel', 'native-focused') not in {'native-focused', 'cdp-dom'}
                         or any(type(session[key]) is not bool for key in flags)
                         or type(session['pageCount']) is not int or not 0 <= session['pageCount'] <= 32
                         or session['codingComposerReady'] and not (session['bindingVerified'] and session['auxiliaryInert'])):
                     raise ValueError('invalid Codex session observation')
+                if 'spotlightAuxiliary' in session:
+                    spotlight_auxiliary(session['spotlightAuxiliary'], platform)
+                    if value['errorCategory'] is None and session['spotlightAuxiliary']['status'] != 'verified':
+                        raise ValueError('incomplete closed Spotlight auxiliary observation')
                 record['codexSession'] = dict(session)
             if 'publicOnboarding' in value:
                 record['publicOnboarding'] = public_onboarding(value['publicOnboarding'], app,
