@@ -5094,7 +5094,79 @@ class WindowsCleanupProgressTests(unittest.TestCase):
                     path.write_text(json.dumps(good))
                     with self.assertRaises(ValueError):q.semantic_observations(root,'zed-desktop')
 
+class HermesRetrySubtreePolicyTests(unittest.TestCase):
+    def test_policy_is_derived_only_from_the_verified_windows_source(self):
+        release = dict(version='0.17.6', revision='f97608f178d1ffeca59860195ab7da295f7c8e5f',
+            channel='github-source:NousResearch/hermes-agent', format='source',
+            url='https://github.com/NousResearch/hermes-agent.git')
+        self.assertEqual(runner.hermes_retry_subtree_policy('hermes-desktop', 'windows', release),
+                         runner.HERMES_RETRY_SUBTREE_SOURCE)
+        for key in release:
+            for changed in (release | {key: 'OTHER'}, {k: v for k, v in release.items() if k != key}):
+                self.assertIsNone(runner.hermes_retry_subtree_policy('hermes-desktop', 'windows', changed))
+        for app, platform in [('chatgpt-desktop', 'windows'), ('hermes-desktop', 'linux'),
+                              ('hermes-desktop', 'macos')]:
+            self.assertIsNone(runner.hermes_retry_subtree_policy(app, platform, release))
+        source = dict(GITHUB_ACTIONS='true', RUNNER_ENVIRONMENT='github-hosted', RUNNER_OS='Linux',
+                      FEASIBILITY_HERMES_RETRY_SUBTREE_SOURCE=runner.HERMES_RETRY_SUBTREE_SOURCE)
+        with self.assertRaisesRegex(ValueError, 'must be derived'):
+            runner.qualification_environment('hermes-desktop', Path('/facts'), Path('/nanh'), '/app', source)
+
+    def test_optional_settlement_status_never_certifies_input_or_response(self):
+        value = json.loads((ROOT / 'canary/tests/fixtures/hermes-retry-scope.json').read_text())
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'hermes.json'
+            for status in ('completed', 'rejected'):
+                path.write_text(json.dumps(value | {'retrySubtreeSettlement': status}))
+                record = q.semantic_observations(root, 'hermes-desktop', 'windows')[0]
+                self.assertEqual(record['retrySubtreeSettlement'], status)
+                self.assertFalse(record['inputSubmitted'])
+                self.assertFalse(record['responseVerified'])
+            for status in (None, {}, [], True, 'PRIVATE'):
+                path.write_text(json.dumps(value | {'retrySubtreeSettlement': status}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'hermes-desktop', 'windows')
+
+
 class WindowsProbeNamespaceTests(unittest.TestCase):
+    def test_codex_restart_controls_are_opaque_and_never_public_evidence(self):
+        value = dict(schemaVersion=1, mechanism='windows-launcher', diagnosticsOnly=True,
+            app='chatgpt-desktop', stage='connection-create', cause='already-exists',
+            childStarted=True, childExitCode=None, osCode=183)
+        with tempfile.TemporaryDirectory() as root:
+            directory = Path(root) / 'chatgpt-desktop-deterministic-0'
+            directory.mkdir()
+            (directory / 'closed.json').write_text(json.dumps(value))
+            control = directory / 'codex-restart-aB12z9'
+            control.mkdir()
+            (control / 'request.json').write_text('PRIVATE_NOT_PUBLIC_JSON')
+            (control / 'nested').mkdir()
+            self.assertEqual(q.semantic_observations(root, 'chatgpt-desktop', 'windows'), [value])
+            control.rename(directory / 'codex-restart-foreign')
+            with self.assertRaisesRegex(ValueError, 'invalid semantic probe entry'):
+                q.semantic_observations(root, 'chatgpt-desktop', 'windows')
+            (directory / 'codex-restart-foreign').rename(control)
+            control.rename(Path(root) / 'private')
+            control.symlink_to(Path(root) / 'private', target_is_directory=True)
+            with self.assertRaisesRegex(ValueError, 'invalid semantic probe entry'):
+                q.semantic_observations(root, 'chatgpt-desktop', 'windows')
+
+    def test_legacy_root_native_controls_share_a_global_three_directory_budget(self):
+        with tempfile.TemporaryDirectory() as root:
+            root = Path(root)
+            for index in range(3):
+                control = root / f'codex-restart-abcde{index}'
+                control.mkdir()
+                (control / 'request.json').write_text('PRIVATE_NOT_PUBLIC_JSON')
+            self.assertEqual(q.semantic_observations(root, 'chatgpt-desktop', 'windows'), [])
+            namespace = root / 'chatgpt-desktop-deterministic-0'
+            namespace.mkdir()
+            (namespace / 'codex-restart-abcde3').mkdir()
+            with self.assertRaisesRegex(ValueError, 'too many native control directories'):
+                q.semantic_observations(root, 'chatgpt-desktop', 'windows')
+            with self.assertRaisesRegex(ValueError, 'unknown semantic probe namespace'):
+                q.semantic_observations(root, 'hermes-desktop', 'windows')
+
     def test_same_pid_in_separate_probe_namespaces_keeps_all_closed_records(self):
         value = json.loads((ROOT / 'canary/tests/fixtures/hermes-retry-scope.json').read_text())
         with tempfile.TemporaryDirectory() as root:

@@ -4,8 +4,9 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const ownershipSource = fs.readFileSync(`${__dirname}/endpoint-ownership.cjs`, 'utf8');
 const ownershipFunctions = ownershipSource.slice(ownershipSource.indexOf('function saveWindowsProof('), ownershipSource.indexOf('return { ownedEndpoint'));
-const source = fs.readFileSync(`${__dirname}/observe-hermes.cjs`, 'utf8').replace("const { ownedEndpoint, descendant, parentPid, windowsProof } = require('./endpoint-ownership.cjs').proof(owner, port);", ownershipFunctions).replace("require('./hermes-response-observation.cjs').observe", '(' + require('./hermes-response-observation.cjs').observe.toString() + ')').replace('await driveDom(); process.exit(', 'await driveDom(); return process.exit(');
+const source = fs.readFileSync(`${__dirname}/observe-hermes.cjs`, 'utf8').replace("const { ownedEndpoint, descendant, parentPid, windowsProof } = require('./endpoint-ownership.cjs').proof(owner, port);", ownershipFunctions).replace("require('./hermes-response-observation.cjs').observe", '(' + require('./hermes-response-observation.cjs').observe.toString() + ')').replace("require('./hermes-retry-subtree.cjs')", `(() => { const module = { exports: {} }; ${fs.readFileSync(`${__dirname}/hermes-retry-subtree.cjs`, 'utf8')} return module.exports; })()`).replace('await driveDom(); process.exit(', 'await driveDom(); return process.exit(');
 async function trial(overrides, connectionOverrides = {}, scenario = null, qualify = false) {
+  const subtreeTrial = scenario?.startsWith('subtree-') ?? false;
   const output = new Map();
   const request = { connectionPath: '/connection', ownerPid: 20, prompt: 'Check this connection',
     expectedMarker: 'NAN CHECK RESPONSE ' + 'APPLE '.repeat(32), timeoutMs: 1, ...overrides };
@@ -22,7 +23,7 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
   let retryHandles = 0, latestHandleSamples = 0;
   let escapes = 0;
   let skips = 0;
-  let onboardingVisible = scenario?.startsWith('onboarding-') ?? false;
+  let onboardingVisible = (scenario?.startsWith('onboarding-') ?? false) || scenario === 'subtree-after-reveal';
   let samplingChoice = false;
   let commandVisible = scenario?.startsWith('command-') ?? false;
   let focusChecks = 0;
@@ -33,7 +34,11 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
   let scopeChecks = 0, scopeChanged = false, heldUserDetached = false, currentAlert;
   const unwrap = value => value && Object.hasOwn(value, 'scopeValue') ? value.scopeValue : value;
   const scopeHandle = value => ({ scopeValue: value,
-    async evaluate(callback, argument) { return callback(value, unwrap(argument)); }, async dispose() {} });
+    async evaluate(callback, argument) { return callback(value, unwrap(argument)); },
+    async getProperty(key) { return { asElement: () => ({
+      async evaluate(callback, argument) { sampleCount++; return callback(value[key], unwrap(argument)); },
+      async click(options) { return send.click(options); }, async dispose() {},
+    }) }; }, async dispose() {} });
   const scopeIncomplete = kind => capturingScope && (scenario === 'initial-scope-' + kind
     || scenario === 'initial-scope-' + kind + '-settles' && scopeCaptures === 1);
   const messageGroup = { isConnected: true };
@@ -43,16 +48,16 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
     matches(selector) { assert.equal(selector, ':disabled'); return scenario === 'retry-fieldset-disabled'; } };
   const reclaimedComposer = { tagName: 'DIV', privateText: 'PRIVATE_SYNTHETIC_VALUE',
     closest(selector) { return selector === '[data-slot="composer-root"]' ? {} : null; } };
-  const turnPair = { isConnected: true, closest() { return messageGroup; },
+  const turnPair = { isConnected: true, closest(selector) { return selector === '[data-slot="aui_message-group"]' ? messageGroup : null; },
     querySelectorAll(selector) { assert.equal(selector, '[data-role="user"]');
       if (scopeIncomplete('missing-user')) return [];
       if (capturingScope && scenario === 'initial-scope-duplicate-user') return [boundUser, { ...boundUser }];
       return [scenario === 'sampling-remount-user' && sampleCount >= 2 ? { ...boundUser } : boundUser]; } };
   const replacementPair = { ...turnPair };
   const currentPair = () => scopeChanged && scenario === 'scope-pair-missing' ? null
-    : scopeChanged && ['scope-user-reparented', 'scope-whole-tuple-remounted', 'scope-stability-pair-remounted', 'scope-diagnostic-failed'].includes(scenario)
+    : scopeChanged && (subtreeTrial || ['scope-user-reparented', 'scope-whole-tuple-remounted', 'scope-stability-pair-remounted', 'scope-diagnostic-failed'].includes(scenario))
       || scenario === 'initial-scope-valid-pair-changed' && scopeCaptures > 0 && !capturingScope ? replacementPair : turnPair;
-  const boundUser = { get isConnected() { return !heldUserDetached && !scopeIncomplete('disconnected-user'); }, closest() { return currentPair(); }, get innerText() {
+  const boundUser = { get isConnected() { return !heldUserDetached && !scopeIncomplete('disconnected-user'); }, closest(selector) { return selector === '[inert]' ? null : currentPair(); }, get innerText() {
     if (capturingScope && scenario === 'initial-scope-foreign-user') return 'Foreign synthetic prompt';
     return (['foreign-error-turn', 'delayed-foreign-error'].includes(scenario)
       || scenario === 'foreign-card-after-settle' && frames === 2
@@ -63,7 +68,7 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
   } };
   const assistantRoot = { isConnected: true, closest() { return scopeIncomplete('missing-pair') ? null : currentPair(); } };
   const boundAlert = { isConnected: true, get ownerDocument() { return capturingScope && scenario === 'initial-scope-foreign-document' ? {} : fixtureDocument; },
-    closest(selector) { return selector.includes('assistant-message-root')
+    closest(selector) { return selector === '[inert]' ? null : selector.includes('assistant-message-root')
       ? assistantRoot : scopeIncomplete('missing-pair') ? null
         : scenario === 'sampling-remount-pair' && sampleCount >= 2 ? { ...turnPair } : currentPair(); } };
   currentAlert = boundAlert;
@@ -102,6 +107,36 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
       centers++;
     },
   };
+  let subtreeReplacement;
+  let subtreeButton;
+  let subtreeFixtureError;
+  const subtreeStates = [];
+  if (subtreeTrial) {
+    const surface = { isConnected: true, get ownerDocument() { return fixtureDocument; },
+      getAttribute(key) { return key === 'data-session-anchor' ? 'workspace' : key === 'data-composer-target' ? 'main' : null; } };
+    const parent = { isConnected: true, get ownerDocument() { return fixtureDocument; } };
+    const viewport = { isConnected: true, get ownerDocument() { return fixtureDocument; },
+      contains(node) { return node === parent; }, closest(selector) { return selector === '[data-chat-surface]' ? surface : null; } };
+    Object.assign(messageGroup, { parentElement: parent,
+      closest(selector) { return selector === '[data-chat-surface]' ? surface : selector === '[data-slot="aui_thread-viewport"]' ? viewport : null; },
+      querySelectorAll(selector) { return selector === '[data-slot="aui_turn-pair"]' ? [currentPair()] : [currentAlert]; } });
+    Object.defineProperty(messageGroup, 'ownerDocument', { get: () => fixtureDocument });
+    const visible = node => { node.getBoundingClientRect ??= () => ({ width: 20, height: 20 });
+      Object.defineProperty(node, 'ownerDocument', { configurable: true, get: () => fixtureDocument }); return node; };
+    for (const node of [turnPair, boundUser, boundAlert, replacementPair]) visible(node);
+    subtreeReplacement = () => {
+      scopeChanged = true; turnPair.isConnected = false; heldUserDetached = true;
+      boundAlert.isConnected = false; hitButton.isConnected = false;
+      const user = visible({ ...boundUser, isConnected: true });
+      currentAlert = visible({ ...boundAlert, isConnected: true });
+      const button = visible({ ...hitButton, isConnected: true, innerText: 'Retry',
+        closest(selector) { return selector === '[role="alert"]' ? currentAlert
+          : selector === '[data-slot="aui_turn-pair"]' ? replacementPair : null; } });
+      currentAlert.querySelectorAll = () => [button];
+      replacementPair.querySelectorAll = () => [user];
+      subtreeButton = button;
+    };
+  }
   let pageEnumerations = 0;
   let observations = 0;
   let value = '';
@@ -160,6 +195,7 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
       assert(options.position.y > 0 && options.position.y < 20);
       clicks++;
       if (scenario === 'retry-intercepted') throw new Error('subtree intercepts pointer events PRIVATE_SYNTHETIC_VALUE');
+      if (scenario === 'subtree-native-owner-rejected') return;
       submits++; value = '';
     },
     async press(key) {
@@ -266,7 +302,18 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
     }
   }
   const page = {
-    async evaluateHandle(callback) { return scopeHandle(callback()); },
+    async evaluateHandle(callback, argument) {
+      try {
+        if (subtreeTrial && callback.name === 'inspectSubtree' && !scopeChanged
+            && (scenario !== 'subtree-after-reveal' || sampleCount >= 2)) {
+          assert.equal(callback(unwrap(argument)).state, 'unchanged', 'original source anchors');
+          subtreeReplacement();
+        }
+        const value = callback(unwrap(argument));
+        if (subtreeTrial && callback.name === 'inspectSubtree') subtreeStates.push(value.state);
+        return scopeHandle(value);
+      } catch (error) { subtreeFixtureError = error; throw error; }
+    },
     keyboard: { async press(key) { assert.equal(key, 'Escape'); escapes++;
       if (scenario === 'command-escape-failed') throw new Error('PRIVATE_SYNTHETIC_VALUE');
       if (scenario !== 'command-remaining') commandVisible = false;
@@ -331,12 +378,17 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
       require(name) {
         if (name === 'node:fs') return mockFs;
         if (name === 'node:crypto') return require('node:crypto');
+        if (name === 'node:child_process' && subtreeTrial) return { execFileSync(command, args) {
+          assert.equal(command, 'pwsh');
+          assert.ok(args.includes('endpoint') || args.includes('descendant'));
+          return 'true';
+        } };
         if (name === './owned-renderer-connection.cjs') return require(name);
         if (name.endsWith('/package.json')) return { version: '1.61.1' };
         return { chromium: { async connectOverCDP() { attaches++;
           if (!scenario) throw new Error('must not attach'); return browser; } } };
       },
-      URL, Buffer, setTimeout: (callback, delayMs) => { if (delayMs === 0) settleTimerObserved = true; return setTimeout(callback, delayMs); }, requestAnimationFrame: callback => {
+      __dirname, URL, Buffer, clearTimeout, setTimeout: (callback, delayMs) => { if (delayMs === 0) settleTimerObserved = true; return setTimeout(callback, delayMs); }, requestAnimationFrame: callback => {
         if (scenario !== 'retry-no-frames') setTimeout(() => { frames++; callback(); }, 0);
       }, window: { innerWidth: 100, innerHeight: 100 }, innerWidth: 100, innerHeight: 100,
       getComputedStyle: element => ({ display: scenario === 'retry-ancestor-hidden' ? 'none' : 'block', visibility: 'visible', contentVisibility: 'visible', clipPath: scenario === 'retry-source-clipped' ? 'inset(25px 0px 0px)' : 'inset(0px 0px 0px 0px)', maskImage: 'none', pointerEvents: scenario === 'retry-pointer-none' && element === hitButton ? 'none' : 'auto',
@@ -353,16 +405,20 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
         return [];
       }, elementFromPoint: (x, y) =>
         samplingChoice ? choiceButton : onboardingVisible ? onboardingRoot : commandVisible ? commandBackdrop : scenario === 'retry-center-covered' && x === 20 && y === 20 || scenario === 'retry-overlay' || (scenario === 'retry-centering' && centers === 0)
-          || (scenario === 'retry-intercepted' && clicks > 0) ? overlay : scenario === 'retry-fading-overlay' && sampleCount <= 2 ? foreignHit : ['retry-ancestor-cover', 'retry-composer-cover'].includes(scenario) ? ancestorFront : (['retry-all-covered', 'aux-write-failed'].includes(scenario) || scenario === 'retry-covered-at-final' && sampleCount >= 3) ? foreignHit : (sourceRegionSelectors[scenario] || ['gateway-connecting', 'gateway-forged'].includes(scenario)) ? sourceRegionHit : scenario === 'retry-frame-settle' && frames < 2 ? threadBackground : scenario === 'retry-source-clipped' ? threadBackground : scenario === 'retry-offviewport' ? null : scenario === 'retry-private-hit' ? foreignHit : scenario === 'retry-body-hit' ? bodyHit : scenario === 'retry-dock-strip' ? dockStrip : scenario === 'retry-child-hit' ? hitChild : hitButton },
-      process: { argv: ['node', 'helper', qualify ? '--qualify' : '--drive', '/request', '/output'], exit: resolve },
+          || (scenario === 'retry-intercepted' && clicks > 0) ? overlay : scenario === 'retry-fading-overlay' && sampleCount <= 2 ? foreignHit : ['retry-ancestor-cover', 'retry-composer-cover'].includes(scenario) ? ancestorFront : (['retry-all-covered', 'aux-write-failed'].includes(scenario) || scenario === 'retry-covered-at-final' && sampleCount >= 3) ? foreignHit : (sourceRegionSelectors[scenario] || ['gateway-connecting', 'gateway-forged'].includes(scenario)) ? sourceRegionHit : scenario === 'retry-frame-settle' && frames < 2 ? threadBackground : scenario === 'retry-source-clipped' ? threadBackground : scenario === 'retry-offviewport' ? null : scenario === 'retry-private-hit' ? foreignHit : scenario === 'retry-body-hit' ? bodyHit : scenario === 'retry-dock-strip' ? dockStrip : scenario === 'retry-child-hit' ? hitChild : subtreeButton ?? hitButton },
+      location: { href: rendererUrl + '#/PRIVATE-owned-session', hash: '#/PRIVATE-owned-session' },
+      process: { env: subtreeTrial ? { GITHUB_ACTIONS: 'true', RUNNER_ENVIRONMENT: 'github-hosted', RUNNER_OS: 'Windows',
+        FEASIBILITY_HERMES_RETRY_SUBTREE_SOURCE: '0.17.6:f97608f178d1ffeca59860195ab7da295f7c8e5f' } : {},
+        platform: subtreeTrial ? 'win32' : 'linux', argv: ['node', 'helper', qualify ? '--qualify' : '--drive', '/request', '/output'], exit: resolve },
     });
     setTimeout(() => reject(new Error('bounded helper fixture timed out')), 1000).unref();
   });
+  if (subtreeFixtureError) throw subtreeFixtureError;
   assert.equal(attaches, scenario ? 1 : 0);
   const facts = JSON.parse(output.get('/output'));
   if (qualify) {
     assert(!output.get('/output').includes(request.expectedMarker));
-    return { facts, submits, fills, clicks, keys, centers, frames, focuses, escapes, skips, retryHandles, auxiliary: output.get('/output.front.json'), backend: output.get('/output.backend.json') };
+    return { facts, submits, fills, clicks, keys, centers, frames, focuses, escapes, skips, retryHandles, subtreeStates, auxiliary: output.get('/output.front.json'), backend: output.get('/output.backend.json') };
   }
   assert.equal(facts.inputSubmitted, ['happy', 'delayed', 'missing-editor', 'transient-context', 'keyboard'].includes(scenario));
   assert.equal(facts.responseVerified, ['happy', 'delayed', 'missing-editor', 'transient-context', 'keyboard'].includes(scenario));
@@ -445,6 +501,31 @@ async function trial(overrides, connectionOverrides = {}, scenario = null, quali
   assert.equal(retry.facts.retryPointStable, true);
   assert.equal(retry.facts.retryHitOwnedPoints, 9);
   assert.equal(retry.facts.retryRectInViewport, true);
+  assert.equal(retry.facts.retrySubtreeSettlement, undefined, 'legacy policy does not attempt row settlement');
+  const settledSubtree = await trial({ ...retryRequest, timeoutMs: 900 }, {}, 'subtree-whole-remount', true);
+  assert.equal(settledSubtree.facts.retrySubtreeSettlement, 'completed', JSON.stringify({
+    errorCategory: settledSubtree.facts.errorCategory, scopeFailure: settledSubtree.facts.retryScopeFailure,
+    scopeObservation: settledSubtree.facts.retryScopeObservation, states: settledSubtree.subtreeStates }));
+  assert.equal(settledSubtree.facts.retryScopeFailure, null);
+  assert.equal(settledSubtree.facts.retryScopeObservation, undefined);
+  assert.equal(settledSubtree.facts.responseVerified, true);
+  assert.equal(settledSubtree.clicks, 1);
+  for (const key of ['fills', 'keys', 'skips', 'escapes']) assert.equal(settledSubtree[key], 0);
+  assert.ok(!JSON.stringify(settledSubtree.facts).includes('PRIVATE'));
+  const nativeOwnerRejected = await trial({ ...retryRequest, timeoutMs: 600 }, {}, 'subtree-native-owner-rejected', true);
+  assert.equal(nativeOwnerRejected.facts.retrySubtreeSettlement, 'completed');
+  assert.equal(nativeOwnerRejected.clicks, 1);
+  assert.equal(nativeOwnerRejected.submits, 0, 'controller never replaces a refused native session RPC');
+  assert.equal(nativeOwnerRejected.facts.responseVerified, false);
+  assert.equal(nativeOwnerRejected.facts.errorCategory, 'response-timeout');
+  assert.equal(nativeOwnerRejected.fills, 0);
+  assert.equal(nativeOwnerRejected.keys, 0);
+  const revealRejected = await trial({ ...retryRequest, timeoutMs: 900 }, {}, 'subtree-after-reveal', true);
+  assert.equal(revealRejected.facts.retrySubtreeSettlement, 'rejected');
+  assert.equal(revealRejected.facts.retryScopeFailure, 'pair-changed');
+  for (const key of ['fills', 'clicks', 'keys', 'skips', 'escapes']) assert.equal(revealRejected[key], 0);
+  assert.equal(revealRejected.facts.inputSubmitted, false);
+  if (process.argv[3]) fs.writeFileSync(process.argv[3], JSON.stringify(settledSubtree.facts) + '\n', { mode: 0o600 });
   for (const scenario of ['initial-scope-missing-pair-settles', 'initial-scope-missing-user-settles', 'initial-scope-disconnected-user-settles']) {
     const settled = await trial({ ...retryRequest, timeoutMs: 700 }, {}, scenario, true);
     assert.equal(settled.clicks, 1, scenario);

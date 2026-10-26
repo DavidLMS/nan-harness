@@ -9,6 +9,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Allow one passive Hermes error subtree settlement within its retained Windows
+  conversation before Retry, preserving native ownership and single-input checks.
 - Isolate Windows Desktop probe artifacts so reused process IDs cannot collide
   with connection or renderer records from earlier probes.
 - Keep the MiMo native-configuration canary compatible with deferred MCP dispatch

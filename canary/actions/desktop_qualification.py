@@ -1057,6 +1057,15 @@ def semantic_fact_paths(directory, app, platform):
     names = {f'{app}-deterministic-{index}' for index in range(3)}
     paths = []
     entries = 0
+    controls = 0
+    def native_control(entry):
+        nonlocal controls
+        if app != 'chatgpt-desktop' or not re.fullmatch(r'codex-restart-[A-Za-z0-9]{6}', entry.name):
+            return False
+        controls += 1
+        if controls > 3:
+            raise ValueError('too many native control directories')
+        return True
     for entry in directory.iterdir():
         entries += 1
         if entries > 1024:
@@ -1065,15 +1074,26 @@ def semantic_fact_paths(directory, app, platform):
                 or getattr(entry.lstat(), 'st_file_attributes', 0) & 0x400):
             raise ValueError('semantic namespace links are forbidden')
         if entry.is_dir():
+            if native_control(entry):
+                continue
             if entry.name not in names:
                 raise ValueError('unknown semantic probe namespace')
             for child in entry.iterdir():
                 entries += 1
                 if entries > 1024:
                     raise ValueError('too many semantic directory entries')
-                if (child.is_symlink() or child.is_dir()
+                if (child.is_symlink()
                         or getattr(child, 'is_junction', lambda: False)()
-                        or getattr(child.lstat(), 'st_file_attributes', 0) & 0x400 or not child.is_file()):
+                        or getattr(child.lstat(), 'st_file_attributes', 0) & 0x400):
+                    raise ValueError('invalid semantic probe entry')
+                if child.is_dir():
+                    # OwnedRestart keeps its private native handoff here. A
+                    # terminated CLI may leave it behind; its contents are never
+                    # evidence and must never be traversed or published.
+                    if native_control(child):
+                        continue
+                    raise ValueError('invalid semantic probe entry')
+                if not child.is_file():
                     raise ValueError('invalid semantic probe entry')
                 if child.suffix == '.json':
                     if child.name == 'native-diagnostics.json':
@@ -3456,6 +3476,11 @@ def semantic_observations(directory, app, platform=None):
             if 'retryScopeObservation' in value:
                 record['retryScopeObservation'] = hermes_retry_scope_observation(
                     value['retryScopeObservation'], value.get('retryScopeFailure'))
+            if 'retrySubtreeSettlement' in value:
+                status = value['retrySubtreeSettlement']
+                if type(status) is not str or status not in {'completed', 'rejected'}:
+                    raise ValueError('invalid Hermes retry subtree settlement')
+                record['retrySubtreeSettlement'] = status
             enum(record, value, 'retryReveal', {'none', 'command-dismissed', 'onboarding-skipped'})
             enum(record, value, 'retrySampleStatus', {'unmeasured', 'native-control-invalid', 'detached', 'hidden', 'disabled', 'inert', 'foreign-document', 'clipped', 'pointer-events-none', 'transformed', 'outside-viewport', 'no-owned-point', 'owned'})
             if 'retryHitOwnedPoints' in value:
@@ -3655,6 +3680,12 @@ def diagnose_pending(app, platform, architecture, source_sha, output, facts):
 
 
 REDUCTION_ERRORS = {
+    'too many native control directories': 'directory-budget',
+    'too many semantic directory entries': 'directory-budget',
+    'semantic namespace links are forbidden': 'namespace-link',
+    'unknown semantic probe namespace': 'namespace-identity',
+    'invalid semantic probe entry': 'namespace-entry',
+    'native diagnostic bundle belongs to the run root': 'namespace-diagnostics',
     'too many semantic observations': 'observation-budget',
     'too many private semantic metadata files': 'metadata-budget',
     'semantic observation identity differs': 'observation-identity',

@@ -361,8 +361,11 @@ async function driveDom() {
   let secondCandidate;
   let retainedScope;
   let samplingRemountUsed = false;
+  let retryDispatchStarted = false;
   const settleDeadline = Math.min(deadline, Date.now() + 5000);
   if (retryAction) {
+    const subtreeSource = require('./hermes-retry-subtree.cjs');
+    const subtreePolicy = subtreeSource.policy(process.platform, process.env, qualify, request.action);
     const scopeFailure = reason => { facts.retryScopeFailure = reason; return false; };
     const originalDocument = await page.evaluateHandle(() => document);
     let retryScope;
@@ -379,25 +382,9 @@ async function driveDom() {
       const button = await send.elementHandle({ timeout: Math.max(1, settleDeadline - Date.now()) });
       if (!button) { scopeFailure('retry-missing'); break; }
       if (!await send.isEnabled()) { await button.dispose(); scopeFailure('retry-disabled'); break; }
-      const candidate = await errorCards.evaluateHandle((alert, input) => {
-        if (alert.ownerDocument !== input.originalDocument || input.originalDocument !== document)
-          return { state: 'invalid' };
-        const assistant = alert.closest('[data-role="assistant"][data-slot="aui_assistant-message-root"]');
-        const pair = assistant?.closest('[data-slot="aui_turn-pair"]');
-        const group = pair?.closest('[data-slot="aui_message-group"]');
-        if (!alert.isConnected || !assistant?.isConnected || !pair?.isConnected || !group?.isConnected)
-          return { state: 'pending' };
-        const users = pair.querySelectorAll('[data-role="user"]');
-        if (users.length === 0) return { state: 'pending' };
-        if (users.length !== 1 || alert.closest('[data-slot="aui_turn-pair"]') !== pair
-            || users[0].innerText.trim() !== input.prompt
-            || users[0].closest('[data-slot="aui_turn-pair"]') !== pair
-            || input.button.ownerDocument !== document) return { state: 'invalid' };
-        if (!users[0].isConnected || !input.button.isConnected) return { state: 'pending' };
-        if (input.button.closest('[role="alert"]') !== alert
-            || input.button.closest('[data-slot="aui_turn-pair"]') !== pair) return { state: 'invalid' };
-        return { state: 'ready', alert, pair, group, user: users[0], document, button: input.button };
-      }, { prompt: request.prompt, button, originalDocument }, { timeout: Math.max(1, settleDeadline - Date.now()) });
+      const candidate = await errorCards.evaluateHandle(subtreeSource.captureInitialScope,
+        { prompt: request.prompt, button, originalDocument, subtreePolicy },
+        { timeout: Math.max(1, settleDeadline - Date.now()) });
       const state = await candidate.evaluate(value => value.state);
       if (state === 'ready') { retryScope = candidate; retryHandle = button; break; }
       await candidate.dispose(); await button.dispose();
@@ -408,7 +395,22 @@ async function driveDom() {
       if (!facts.retryScopeFailure) scopeFailure('initial-scope-incomplete');
       facts.errorCategory = 'send-unavailable'; saveFacts(); return;
     }
-    retainedScope = async phase => {
+    let revealAttempted = false;
+    const subtree = subtreePolicy ? subtreeSource.create({ page, scope: retryScope,
+      owned: ownedEndpoint, deadline: settleDeadline,
+      claim: () => {
+        if (samplingRemountUsed || revealAttempted || retryDispatchStarted) return false;
+        samplingRemountUsed = true; return true;
+      }, publish: status => { facts.retrySubtreeSettlement = status; } }) : null;
+    const prepareScope = async () => {
+      if (!subtree) return true;
+      const result = await subtree.ensure();
+      if (result.state === 'rejected') return false;
+      if (result.state === 'completed') { retryScope = result.scope; retryHandle = result.button; }
+      return true;
+    };
+    retainedScope = async (phase, prepared = false) => {
+      const admitted = prepared || await prepareScope();
       if (await errorCards.count() !== 1) return scopeFailure('error-turn');
       const result = await errorCards.evaluate((alert, held) => {
         const pair = alert.closest('[data-slot="aui_turn-pair"]');
@@ -439,19 +441,20 @@ async function driveDom() {
       if (result.reason !== null && result.observation && !facts.retryScopeObservation) try {
         facts.retryScopeObservation = { phase, ...result.observation };
       } catch { /* Diagnostics cannot grant or prevent an action. */ }
-      return result.reason === null || scopeFailure(result.reason);
+      return (result.reason === null || scopeFailure(result.reason)) && admitted;
     };
     let first;
     let second;
-    let revealAttempted = false;
     const reprove = async phase => {
       if (!ownedEndpoint()) return scopeFailure('endpoint');
+      const admitted = await prepareScope();
       if (await send.count() !== 1) return scopeFailure('retry-count');
       if (!await send.isEnabled()) return scopeFailure('retry-disabled');
       if (await retryUser.count() !== 1) return scopeFailure('user-count');
       if (!await retryUser.evaluate((e, prompt) => e.innerText.trim() === prompt, request.prompt)) return scopeFailure('user-text');
       if (!await errorProof()) return scopeFailure('error-turn');
-      if (!await retainedScope(phase)) return false;
+      if (!await retainedScope(phase, true)) return false;
+      if (!admitted) return false;
       if (!await send.evaluate((button, sampled) => button === sampled, retryHandle)) return scopeFailure('retry-changed');
       return true;
     };
@@ -647,7 +650,10 @@ async function driveDom() {
   try {
     // Real native Reload button; Playwright enforces ordinary actionability.
     // One stable owned interior position, never force or a keyboard fallback.
-    if (retryAction) await retryHandle.click({ position: retryPosition, timeout: Math.max(1, deadline - Date.now()) });
+    if (retryAction) {
+      retryDispatchStarted = true;
+      await retryHandle.click({ position: retryPosition, timeout: Math.max(1, deadline - Date.now()) });
+    }
     else await send.press('Enter', { timeout: Math.max(1, deadline - Date.now()) });
   } catch (error) {
     try { facts.sendBlocker = await readiness(); } catch { facts.sendBlocker = 'unmeasured'; }
