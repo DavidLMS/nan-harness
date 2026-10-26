@@ -63,6 +63,12 @@ const PROGRESS: [&str; 16] = [
     "readback", "copy", "copied", "send", "submit", "invoke", "finish",
 ];
 
+#[derive(Default)]
+pub(crate) struct WindowsChatProgress {
+    pub(crate) latest: Option<&'static str>,
+    pub(crate) work: Option<&'static str>,
+}
+
 fn progress(line: &str) -> Option<usize> {
     let label = line.strip_prefix("progress ")?.strip_suffix('\n')?;
     PROGRESS.iter().position(|allowed| *allowed == label)
@@ -96,7 +102,7 @@ pub(in crate::native) fn run(
     mode: &str,
     values: [&str; 3],
     deadline: Instant,
-    observed_progress: &mut Option<&'static str>,
+    observed_progress: &mut WindowsChatProgress,
 ) -> Result<Zeroizing<String>, FailureCategory> {
     if Instant::now() >= deadline {
         return Err(FailureCategory::Timeout);
@@ -162,7 +168,11 @@ pub(in crate::native) fn run(
     let result = loop {
         let line = receive()?;
         if let Some(stage) = progress(&line) {
-            *observed_progress = Some(PROGRESS[stage]);
+            let label = PROGRESS[stage];
+            observed_progress.latest = Some(label);
+            if label != "finish" {
+                observed_progress.work = Some(label);
+            }
         } else {
             break line;
         }
@@ -199,7 +209,7 @@ mod tests {
         suffix: &str,
         budget: Duration,
         mode: &str,
-        progress: &mut Option<&'static str>,
+        progress: &mut WindowsChatProgress,
     ) -> Result<Zeroizing<String>, FailureCategory> {
         use std::os::unix::fs::PermissionsExt as _;
         let temp = tempfile::tempdir().unwrap();
@@ -230,7 +240,9 @@ mod tests {
     }
     #[test]
     fn readiness_transport_rejects_trailing_data_and_expires_without_replay() {
-        let scripted = |suffix: &str, budget, mode: &str| scripted(suffix, budget, mode, &mut None);
+        let scripted = |suffix: &str, budget, mode: &str| {
+            scripted(suffix, budget, mode, &mut WindowsChatProgress::default())
+        };
         // Successful protocol cases allow interpreter startup; the timeout case
         // below retains its deliberately short action deadline.
         assert_eq!(
@@ -304,7 +316,7 @@ mod tests {
 
     #[test]
     fn progress_survives_timeout_without_substituting_for_receipt_or_helper_exit() {
-        let mut observed = None;
+        let mut observed = WindowsChatProgress::default();
         assert_eq!(
             scripted(
                 "print('progress setup\\nprogress tree\\nprogress finish\\nturn sent',flush=True)",
@@ -316,11 +328,12 @@ mod tests {
             .as_str(),
             "turn sent\n"
         );
-        assert_eq!(observed, Some("finish"));
-        observed = None;
+        assert_eq!(observed.latest, Some("finish"));
+        assert_eq!(observed.work, Some("tree"));
+        observed = WindowsChatProgress::default();
         assert_eq!(
             scripted(
-                "import time; print('progress finish\\nturn sent',flush=True); time.sleep(2)",
+                "import time; print('progress setup\\nprogress tree\\nprogress finish\\nturn sent',flush=True); time.sleep(2)",
                 Duration::from_millis(500),
                 "input-replace-owned",
                 &mut observed
@@ -328,6 +341,20 @@ mod tests {
             .unwrap_err(),
             FailureCategory::Timeout
         );
-        assert_eq!(observed, Some("finish"));
+        assert_eq!(observed.latest, Some("finish"));
+        assert_eq!(observed.work, Some("tree"));
+        observed = WindowsChatProgress::default();
+        assert_eq!(
+            scripted(
+                "print('progress setup\\nprogress tree\\nprogress finish\\nturn sent',flush=True); raise SystemExit(3)",
+                Duration::from_secs(10),
+                "input-replace-owned",
+                &mut observed
+            )
+            .unwrap_err(),
+            FailureCategory::NonzeroExit
+        );
+        assert_eq!(observed.latest, Some("finish"));
+        assert_eq!(observed.work, Some("tree"));
     }
 }

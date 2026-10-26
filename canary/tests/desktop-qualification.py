@@ -616,6 +616,32 @@ class QualificationTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'claude-desktop')
 
+    def test_initial_claude_rejection_is_closed_and_advisory(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'rejection.json'
+            for phase in ('initial-fit', 'final-fit', 'final-candidate'):
+                for cause in ('root-absent', 'root-ambiguous', 'root-changed', 'name-changed',
+                              'root-ineligible', 'bounds-changed', 'off-display', 'focus-unproved',
+                              'same-process-window', 'occluded', 'fit-identity-changed',
+                              'fit-precondition-rejected', 'native-fit-failed'):
+                    value = dict(schemaVersion=1, mechanism='claude-initial-window-rejection',
+                                 diagnosticsOnly=True, phase=phase, cause=cause)
+                    path.write_text(json.dumps(value))
+                    self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [value])
+            for change in ({'phase': 'PRIVATE'}, {'cause': 'PRIVATE'}, {'cause': []},
+                           {'diagnosticsOnly': False}, {'title': 'PRIVATE'}, {'windowId': 42}):
+                path.write_text(json.dumps(value | change))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'claude-desktop')
+            path.write_text(json.dumps(value))
+            with self.assertRaises(ValueError):
+                q.semantic_observations(root, 'zed-desktop')
+            # A diagnostic cannot qualify the envelope or supply any probe step.
+            record = q.envelope('claude-desktop', 'macos', 'aarch64', 'a' * 40)
+            record['semanticObservations'] = q.semantic_observations(root, 'claude-desktop')
+            self.assertEqual(record['qualification'], 'unqualified')
+            self.assertEqual(record['outcome'], 'blocked')
+
     def test_stability_counts_are_closed_and_never_accept_window_metadata(self):
         with tempfile.TemporaryDirectory() as root:
             path = Path(root) / 'stability.json'
@@ -2717,6 +2743,25 @@ class QualificationTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     q.semantic_observations(root, 'claude-desktop')
 
+    def test_windows_work_checkpoint_survives_finish_without_certifying_an_action(self):
+        value = dict(schemaVersion=1, mechanism='claude-windows-native-chat', diagnosticsOnly=True,
+                     stage='action-uncertain', actionPhase='transport', transportFailure='timeout',
+                     submittedTurns=2, inputVerifiedTurns=2, copiedResponses=2,
+                     retryAttempted=False, clipboardCleared=True, nativeProgress='finish')
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'work-progress.json'
+            for progress in ('setup', 'tree', 'composer', 'action', 'target', 'focus', 'select',
+                             'paste', 'pasted', 'readback', 'copy', 'copied', 'send', 'submit', 'invoke'):
+                item = value | {'nativeWorkProgress': progress}
+                path.write_text(json.dumps(item))
+                self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [item])
+            for change in ({'nativeWorkProgress': 'finish'}, {'nativeWorkProgress': 'PRIVATE'},
+                           {'nativeWorkProgress': None}, {'nativeWorkProgress': []},
+                           {'mechanism': 'claude-native-chat'}, {'rawInput': 'PRIVATE'}):
+                path.write_text(json.dumps(item | change))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'claude-desktop')
+
     def test_windows_tree_limits_remain_nonaccepting_and_closed(self):
         value = dict(schemaVersion=1, mechanism='claude-windows-native-chat', diagnosticsOnly=True,
                      stage='tree-depth', submittedTurns=1, inputVerifiedTurns=1, copiedResponses=0,
@@ -3406,7 +3451,7 @@ class QualificationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             path = root / 'boundary.json'
-            for boundary in ('request','policy','native-window','source-owner','tree','tree-cycle','tree-depth','tree-limit','tree-identity','tree-children','response-heading','response-row','response-row-role-limit','response-row-copy-absent','response-row-copy-ambiguous','response-row-headings','response-row-attachment','state','frame','frame-active','frame-state','frame-identity','frame-bounds','frame-ancestry-cycle','frame-ancestry-depth','frame-nested-dialog','frame-nested-frame','frame-nested-window','frame-editor-outside','frame-count','frame-client','client',
+            for boundary in ('request','policy','native-window','source-owner','tree','tree-cycle','tree-depth','tree-limit','tree-identity','tree-children','response-heading','response-row','response-row-role-limit','response-row-copy-absent','response-row-copy-ambiguous','response-row-headings','response-row-attachment','copy-already-attempted','copy-scope-changed','copy-control-state','copy-control-changed','copy-control-outside-frame','copy-control-hit','copy-final-reproof','copy-invoke','state','frame','frame-active','frame-state','frame-identity','frame-bounds','frame-ancestry-cycle','frame-ancestry-depth','frame-nested-dialog','frame-nested-frame','frame-nested-window','frame-editor-outside','frame-count','frame-client','client',
                              'mode','focus','input','clipboard','action','response','transport'):
                 path.write_text(json.dumps({**facts,'failureBoundary':boundary}))
                 record = q.semantic_observations(root,'claude-desktop')[0]

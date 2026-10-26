@@ -384,8 +384,15 @@ impl Visual {
                 let ready = settle.ready(extended_settle, Instant::now(), unchanged, deadline);
                 #[cfg(target_os = "macos")]
                 // Geometry mutation and incomplete initial focus both invalidate continuity.
-                if initial_mac_fit(&native, &snapshot, window, kind, &mut mac_fitted, deadline)?
-                    || ready && !initial_readiness(&native, &snapshot, window, owner, deadline)?
+                if initial_mac_fit(
+                    &native,
+                    &snapshot,
+                    window,
+                    kind,
+                    &mut mac_fitted,
+                    deadline,
+                    InitialWindowPhase::InitialFit,
+                )? || ready && !initial_readiness(&native, &snapshot, window, owner, deadline)?
                 {
                     require_owned_candidate(window, owner)?;
                     previous = None;
@@ -497,6 +504,11 @@ impl Visual {
             }
             pending = None;
             let candidate = final_initial_candidate(&snapshot, &original).map_err(|error| {
+                record_initial_window_rejection(
+                    &original,
+                    InitialWindowPhase::FinalCandidate,
+                    initial_window_rejection_cause(&snapshot, &original, error),
+                );
                 record_claude_snapshot(&snapshot, &original, "final-stability");
                 failure(error.reason())
             })?;
@@ -737,7 +749,7 @@ impl Visual {
         values: [&str; 3],
         deadline: Instant,
         native_stage: &mut Option<crate::native::WindowsChatStage>,
-        progress: &mut Option<&'static str>,
+        progress: &mut crate::native::WindowsChatProgress,
         mut observe: impl FnMut(&'static str, Option<FailureCategory>, Option<GuardFailure>),
     ) -> Result<crate::native::WindowsChatReceipt, Reason> {
         let expected = self.window.borrow().clone();
@@ -1725,6 +1737,7 @@ fn final_mac_fit(
         DesktopHarnessKind::Claude,
         &mut identity,
         deadline,
+        InitialWindowPhase::FinalFit,
     )?;
     visual.mac_fit_identity.set(identity);
     require_owned_candidate(current, owner)?;
@@ -1745,8 +1758,10 @@ fn initial_mac_fit(
     kind: DesktopHarnessKind,
     mac_fitted: &mut Option<(u64, u32)>,
     deadline: Instant,
+    phase: InitialWindowPhase,
 ) -> Result<bool, AcquisitionFailure> {
     if mac_fitted.is_some_and(|identity| identity != (window.id, window.pid)) {
+        record_initial_window_rejection(window, phase, InitialWindowCause::FitIdentityChanged);
         return Err(acquisition_failure(
             Reason::WindowChanged,
             crate::diagnostics::GuiAcquisitionStage::WindowStability,
@@ -1761,6 +1776,11 @@ fn initial_mac_fit(
             .windows_with_focus_until(window.pid, deadline)
             .map_err(initial_focus_transport_failure)?;
         if !mac_fit_precondition(&fresh, window) || Instant::now() >= deadline {
+            record_initial_window_rejection(
+                window,
+                phase,
+                InitialWindowCause::FitPreconditionRejected,
+            );
             return Err(acquisition_failure(
                 Reason::WindowChanged,
                 crate::diagnostics::GuiAcquisitionStage::WindowStability,
@@ -1769,6 +1789,7 @@ fn initial_mac_fit(
         native
             .fit_mac_owned_until(window, deadline)
             .map_err(|reason| {
+                record_initial_window_rejection(window, phase, InitialWindowCause::NativeFitFailed);
                 acquisition_failure(
                     reason,
                     crate::diagnostics::GuiAcquisitionStage::WindowStability,
@@ -1809,6 +1830,88 @@ fn mac_fit_precondition(snapshot: &Snapshot, window: &Window) -> bool {
     !snapshot.windows[..index]
         .iter()
         .any(|w| (w.pid == window.pid && w.layer == 0) || overlaps(w.bounds, window.bounds))
+}
+
+#[cfg(any(test, target_os = "macos"))]
+#[derive(Clone, Copy, Debug, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum InitialWindowPhase {
+    InitialFit,
+    FinalFit,
+    FinalCandidate,
+}
+
+#[cfg(any(test, target_os = "macos"))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum InitialWindowCause {
+    RootAbsent,
+    RootAmbiguous,
+    RootChanged,
+    NameChanged,
+    RootIneligible,
+    BoundsChanged,
+    OffDisplay,
+    FocusUnproved,
+    SameProcessWindow,
+    Occluded,
+    FitIdentityChanged,
+    FitPreconditionRejected,
+    NativeFitFailed,
+}
+
+// Explain the existing refusal using its own snapshot, without querying again
+// or changing the guard's verdict and precedence.
+#[cfg(any(test, target_os = "macos"))]
+fn initial_window_rejection_cause(
+    snapshot: &Snapshot,
+    original: &Window,
+    failure: GuardFailure,
+) -> InitialWindowCause {
+    match failure {
+        GuardFailure::IdentityMissing => {
+            let eligible = eligible_windows(DesktopHarnessKind::Claude, &snapshot.windows).count();
+            if eligible > 1 {
+                return InitialWindowCause::RootAmbiguous;
+            }
+            if let Some(current) = snapshot
+                .windows
+                .iter()
+                .find(|window| window.id == original.id && window.pid == original.pid)
+            {
+                if current.name != original.name {
+                    return InitialWindowCause::NameChanged;
+                }
+                if eligible_windows(DesktopHarnessKind::Claude, std::slice::from_ref(current))
+                    .next()
+                    .is_none()
+                {
+                    return InitialWindowCause::RootIneligible;
+                }
+            }
+            if eligible == 0 {
+                InitialWindowCause::RootAbsent
+            } else {
+                InitialWindowCause::RootChanged
+            }
+        }
+        GuardFailure::BoundsChanged => InitialWindowCause::BoundsChanged,
+        GuardFailure::ForegroundChanged => InitialWindowCause::FocusUnproved,
+        GuardFailure::SameProcessWindow => InitialWindowCause::SameProcessWindow,
+        GuardFailure::OffDisplay => InitialWindowCause::OffDisplay,
+        GuardFailure::Occluded => InitialWindowCause::Occluded,
+    }
+}
+
+#[cfg(any(test, target_os = "macos"))]
+fn initial_window_rejection(
+    phase: InitialWindowPhase,
+    cause: InitialWindowCause,
+) -> serde_json::Value {
+    serde_json::json!({
+        "schemaVersion": 1, "mechanism": "claude-initial-window-rejection",
+        "diagnosticsOnly": true, "phase": phase, "cause": cause,
+    })
 }
 
 #[cfg(any(test, target_os = "macos"))]
@@ -2344,35 +2447,55 @@ fn initial_decision_guard(snapshot: &Snapshot, original: &Window) -> Option<&'st
 }
 
 #[cfg(target_os = "macos")]
-fn record_claude_snapshot(snapshot: &Snapshot, held: &Window, phase: &str) {
-    if !cfg!(target_os = "macos")
-        || !matches_app(DesktopHarnessKind::Claude, &held.name)
+fn claude_observation_directory(held: &Window) -> Option<std::path::PathBuf> {
+    if !matches_app(DesktopHarnessKind::Claude, &held.name)
         || std::env::var("GITHUB_ACTIONS").as_deref() != Ok("true")
         || std::env::var("RUNNER_ENVIRONMENT").as_deref() != Ok("github-hosted")
         || std::env::var("RUNNER_OS").as_deref() != Ok("macOS")
         || std::env::var("NANH_DESKTOP_QUALIFICATION_MODE").as_deref() != Ok("startup-baseline")
         || std::env::var("NANH_CLAUDE_MAC_PROFILE_POLICY").as_deref() != Ok("native-known-folders")
     {
-        return;
+        return None;
     }
-    let Some(directory) =
-        std::env::var_os("NANH_DESKTOP_QUALIFICATION_FACTS").map(std::path::PathBuf::from)
-    else {
-        return;
-    };
-    let Ok(metadata) = std::fs::symlink_metadata(&directory) else {
-        return;
-    };
+    let directory =
+        std::env::var_os("NANH_DESKTOP_QUALIFICATION_FACTS").map(std::path::PathBuf::from)?;
+    let metadata = std::fs::symlink_metadata(&directory).ok()?;
     if !metadata.is_dir() || directory.canonicalize().ok().as_deref() != Some(directory.as_path()) {
-        return;
+        return None;
     }
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt as _;
         if metadata.permissions().mode() & 0o077 != 0 {
-            return;
+            return None;
         }
     }
+    Some(directory)
+}
+
+#[cfg(target_os = "macos")]
+fn record_initial_window_rejection(
+    held: &Window,
+    phase: InitialWindowPhase,
+    cause: InitialWindowCause,
+) {
+    let Some(directory) = claude_observation_directory(held) else {
+        return;
+    };
+    let path = directory.join(format!(
+        "claude-initial-window-rejection-{}.json",
+        std::process::id()
+    ));
+    if let Ok(file) = nan_harness_private_fs::open_private_new(&path) {
+        let _ = serde_json::to_writer(file, &initial_window_rejection(phase, cause));
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn record_claude_snapshot(snapshot: &Snapshot, held: &Window, phase: &str) {
+    let Some(directory) = claude_observation_directory(held) else {
+        return;
+    };
     let original = held;
     let held = if phase == "final-stability" {
         final_focus_expected(snapshot, original)
@@ -2786,6 +2909,126 @@ mod tests {
             final_initial_candidate(&hidden, &original),
             Err(GuardFailure::Occluded)
         );
+    }
+
+    #[test]
+    fn initial_window_rejection_explains_the_same_snapshot_without_changing_refusal() {
+        let valid = Snapshot::parse(
+            "FG 7 0\nDISPLAY 0 0 2000 2000\nWIN 1 7 10 20 800 600 436c61756465 0\nFOCUS proved 1\nFOCUS_WINDOW proved 1\n",
+        ).unwrap();
+        let original = valid.windows[0].clone();
+        assert!(final_initial_candidate(&valid, &original).is_ok());
+        let check = |snapshot: &Snapshot, failure, cause| {
+            assert_eq!(final_initial_candidate(snapshot, &original), Err(failure));
+            assert_eq!(
+                initial_window_rejection_cause(snapshot, &original, failure),
+                cause
+            );
+            assert_eq!(final_initial_candidate(snapshot, &original), Err(failure));
+        };
+        let mut absent = valid.clone();
+        absent.windows.clear();
+        check(
+            &absent,
+            GuardFailure::IdentityMissing,
+            InitialWindowCause::RootAbsent,
+        );
+        for replace_pid in [false, true] {
+            let mut changed = valid.clone();
+            if replace_pid {
+                changed.windows[0].pid = 8;
+            } else {
+                changed.windows[0].id = 2;
+            }
+            check(
+                &changed,
+                GuardFailure::IdentityMissing,
+                InitialWindowCause::RootChanged,
+            );
+        }
+        let mut renamed = valid.clone();
+        renamed.windows[0].name = "PRIVATE title".into();
+        check(
+            &renamed,
+            GuardFailure::IdentityMissing,
+            InitialWindowCause::NameChanged,
+        );
+        let mut small = valid.clone();
+        small.windows[0].bounds.width = 299;
+        check(
+            &small,
+            GuardFailure::IdentityMissing,
+            InitialWindowCause::RootIneligible,
+        );
+        let mut ambiguous = valid.clone();
+        ambiguous.windows.push(original.clone());
+        check(
+            &ambiguous,
+            GuardFailure::IdentityMissing,
+            InitialWindowCause::RootAmbiguous,
+        );
+        let off_display = Snapshot::parse(
+            "FG 7 0\nDISPLAY 0 0 2000 2000\nWIN 1 7 1800 20 800 600 436c61756465 0\nFOCUS proved 1\nFOCUS_WINDOW proved 1\n",
+        ).unwrap();
+        check(
+            &off_display,
+            GuardFailure::OffDisplay,
+            InitialWindowCause::OffDisplay,
+        );
+        let unproved = Snapshot::parse(
+            "FG 7 0\nDISPLAY 0 0 2000 2000\nWIN 1 7 10 20 800 600 436c61756465 0\n",
+        )
+        .unwrap();
+        check(
+            &unproved,
+            GuardFailure::ForegroundChanged,
+            InitialWindowCause::FocusUnproved,
+        );
+    }
+
+    #[test]
+    fn initial_window_rejection_serializes_only_closed_phase_and_cause() {
+        let phases = [
+            (InitialWindowPhase::InitialFit, "initial-fit"),
+            (InitialWindowPhase::FinalFit, "final-fit"),
+            (InitialWindowPhase::FinalCandidate, "final-candidate"),
+        ];
+        let causes = [
+            (InitialWindowCause::RootAbsent, "root-absent"),
+            (InitialWindowCause::RootAmbiguous, "root-ambiguous"),
+            (InitialWindowCause::RootChanged, "root-changed"),
+            (InitialWindowCause::NameChanged, "name-changed"),
+            (InitialWindowCause::RootIneligible, "root-ineligible"),
+            (InitialWindowCause::BoundsChanged, "bounds-changed"),
+            (InitialWindowCause::OffDisplay, "off-display"),
+            (InitialWindowCause::FocusUnproved, "focus-unproved"),
+            (InitialWindowCause::SameProcessWindow, "same-process-window"),
+            (InitialWindowCause::Occluded, "occluded"),
+            (
+                InitialWindowCause::FitIdentityChanged,
+                "fit-identity-changed",
+            ),
+            (
+                InitialWindowCause::FitPreconditionRejected,
+                "fit-precondition-rejected",
+            ),
+            (InitialWindowCause::NativeFitFailed, "native-fit-failed"),
+        ];
+        for (phase, phase_name) in phases {
+            for (cause, cause_name) in causes {
+                let value = initial_window_rejection(phase, cause);
+                assert_eq!(
+                    value,
+                    serde_json::json!({
+                        "schemaVersion": 1, "mechanism": "claude-initial-window-rejection",
+                        "diagnosticsOnly": true, "phase": phase_name, "cause": cause_name,
+                    })
+                );
+                let text = value.to_string();
+                assert!(!text.contains("PRIVATE"));
+                assert_eq!(value.as_object().unwrap().len(), 5);
+            }
+        }
     }
 
     #[test]

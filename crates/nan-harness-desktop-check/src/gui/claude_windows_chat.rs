@@ -68,6 +68,8 @@ struct Facts {
     native_stage: Option<WindowsChatStage>,
     #[serde(skip_serializing_if = "Option::is_none")]
     native_progress: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    native_work_progress: Option<&'static str>,
     transport_failure: Option<&'static str>,
     operation_timing: OperationTiming,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -92,6 +94,7 @@ impl Default for Facts {
             native_action: None,
             native_stage: None,
             native_progress: None,
+            native_work_progress: None,
             transport_failure: None,
             operation_timing: OperationTiming::default(),
             guard_rejection: None,
@@ -190,6 +193,7 @@ impl ClaudeWindowsChatSession<'_> {
         self.facts.guard_rejection = None;
         self.facts.native_stage = None;
         self.facts.native_progress = None;
+        self.facts.native_work_progress = None;
         let sentinel = Zeroizing::new(nonce()?);
         if !self.profile.verifies_owned(self.workspace, deadline) {
             return Err(Reason::IsolationUnavailable);
@@ -197,7 +201,7 @@ impl ClaudeWindowsChatSession<'_> {
         self.facts.action_phase = Some("transport");
         let facts = &mut self.facts;
         let mut native_stage = None;
-        let mut progress = None;
+        let mut progress = crate::native::WindowsChatProgress::default();
         let result = self.gui.visual.claude_windows_chat_turn_until(
             mode,
             [&self.prompt, marker, &sentinel],
@@ -239,7 +243,8 @@ impl ClaudeWindowsChatSession<'_> {
             },
         );
         self.facts.native_stage = native_stage;
-        self.facts.native_progress = progress;
+        self.facts.native_progress = progress.latest;
+        self.facts.native_work_progress = progress.work;
         self.facts.operation_timing.elapsed = started.elapsed().as_millis();
         let stage = match result {
             Ok(receipt) => {
@@ -471,6 +476,15 @@ mod tests {
         assert!(value.get("prompt").is_none());
         assert!(value.get("workspace").is_none());
         assert!(value.get("guardRejection").is_none());
+        assert!(value.get("nativeWorkProgress").is_none());
+        let observed = serde_json::to_value(Facts {
+            native_progress: Some("finish"),
+            native_work_progress: Some("tree"),
+            ..Facts::default()
+        })
+        .unwrap();
+        assert_eq!(observed["nativeProgress"], "finish");
+        assert_eq!(observed["nativeWorkProgress"], "tree");
     }
 
     #[test]

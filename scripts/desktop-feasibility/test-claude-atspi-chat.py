@@ -353,7 +353,20 @@ class NativeGuardProtocolTests(unittest.TestCase):
 
 class ResponseAdapter(Adapter):
     def __init__(self,**options):
-        super().__init__(**options);self.clipboard='old';self.copy_actions=0
+        super().__init__(**options);self.clipboard='old';self.copy_actions=0;self.copy_bounds_reads=0
+    def bounds(self,node):
+        if node=='copy':
+            self.copy_bounds_reads+=1
+            if self.changes.get('copy_outside'):
+                return (900,10,100,40)
+            if self.changes.get('copy_change_at',100) <= self.copy_bounds_reads:
+                return (20,10,100,40)
+        return super().bounds(node)
+    def state(self,node):
+        bits=super().state(node)
+        return bits & ~(1<<8) if node=='copy' and self.changes.get('copy_disabled') else bits
+    def hit(self,node,frame):
+        return False if node=='copy' and self.changes.get('copy_hit_mismatch') else super().hit(node,frame)
     def identity(self,node):
         if node=='wrapper':return (80,'PRIVATE wrapper','')
         if node=='row':return (97 if self.changes.get('row_wrapper') else self.changes.get('row_role',39),'','')
@@ -378,7 +391,7 @@ class ResponseAdapter(Adapter):
         if node=='copy':
             self.copy_actions+=1
             self.clipboard='wrong' if self.changes.get('wrong_copy') else 'private-marker'
-            return True
+            return not self.changes.get('copy_invoke_rejected')
         return super().invoke_once(node,index)
 
 class TreeRejectionTests(unittest.TestCase):
@@ -413,6 +426,26 @@ class ResponseTests(unittest.TestCase):
         c.bind();return adapter,c,c.copy_response('private-marker')
     def test_exact_assistant_scope_copy(self):
         a,c,f=self.case(title=True);self.assertTrue(f['responseVerified']);self.assertEqual(a.copy_actions,1)
+    def test_copy_refusal_site_is_closed_and_preserves_action_custody(self):
+        cases=[(dict(copy_change_at=2),'copy-control-changed'),
+               (dict(copy_change_at=4),'copy-final-reproof'),
+               (dict(copy_outside=True),'copy-control-outside-frame'),
+               (dict(copy_disabled=True),'copy-control-state'),
+               (dict(copy_hit_mismatch=True),'copy-control-hit'),
+               (dict(copy_invoke_rejected=True),'copy-invoke')]
+        for options,boundary in cases:
+            with self.subTest(boundary=boundary):
+                adapter,controller,facts=self.case(**options)
+                self.assertEqual(facts['failureBoundary'],boundary)
+                attempted=boundary=='copy-invoke'
+                self.assertEqual(adapter.copy_actions,int(attempted))
+                self.assertEqual(facts['stage'],'action-uncertain' if attempted else 'blocked')
+                self.assertFalse(facts['responseVerified'])
+                self.assertNotIn('private-marker',str(facts))
+                if attempted:
+                    controller.copy_response('private-marker')
+                    self.assertEqual(adapter.copy_actions,1)
+                    self.assertEqual(facts['failureBoundary'],'copy-already-attempted')
     def test_owned_wrapper_is_traversed_without_becoming_row_authority(self):
         adapter,controller,facts=self.case(wrapper=True)
         self.assertTrue(facts['responseVerified']);self.assertEqual(adapter.copy_actions,1)
