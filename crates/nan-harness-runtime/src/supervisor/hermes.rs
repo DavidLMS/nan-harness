@@ -279,8 +279,14 @@ async fn wait_helper(
     authority: Option<&mut ManagedChild>,
     prepared: &PreparedLaunch,
 ) -> Result<(), RuntimeError> {
+    // Windows readiness allows 90s of native activation plus interpreter startup.
+    let helper_timeout = if cfg!(windows) && action == "ready" {
+        Duration::from_secs(110)
+    } else {
+        HELPER_TIMEOUT
+    };
     let result = tokio::select! {
-        result = timeout(HELPER_TIMEOUT, child.wait()) => result.ok().and_then(Result::ok),
+        result = timeout(helper_timeout, child.wait()) => result.ok().and_then(Result::ok),
         _signal = cancellation.cancelled() => None,
         _status = async {
             match authority {

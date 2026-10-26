@@ -321,14 +321,14 @@ class PrivateFiles(unittest.TestCase):
             modules = {"hermes_cli": ModuleType("hermes_cli"),
                        "hermes_cli.gateway_runtime": gateway,
                        "hermes_cli.gateway_runtime_discovery": discovery}
-            with patch.dict(sys.modules, modules), patch.object(runtime.time, "monotonic", side_effect=[0, 1, 61]), patch.object(runtime.time, "sleep"):
+            with patch.dict(sys.modules, modules), patch.object(runtime.time, "monotonic", side_effect=[0, 1, runtime.READINESS_TIMEOUT_SECONDS + 1]), patch.object(runtime.time, "sleep"):
                 with self.assertRaises(runtime.ReadinessFailure) as caught:
                     runtime.ready(home, 123)
                 self.assertEqual(caught.exception.exit_code, runtime.READINESS_EXIT_CODES["runtime-protocol"])
             def absent(*_args, **_kwargs):
                 raise FileNotFoundError("private synthetic path")
             discovery.query_identify = absent
-            with patch.dict(sys.modules, modules), patch.object(runtime.time, "monotonic", side_effect=[0, 1, 61]), patch.object(runtime.time, "sleep"):
+            with patch.dict(sys.modules, modules), patch.object(runtime.time, "monotonic", side_effect=[0, 1, runtime.READINESS_TIMEOUT_SECONDS + 1]), patch.object(runtime.time, "sleep"):
                 with self.assertRaises(runtime.ReadinessFailure) as caught:
                     runtime.ready(home, 123)
                 self.assertEqual(caught.exception.exit_code, runtime.READINESS_EXIT_CODES["control-absent"])

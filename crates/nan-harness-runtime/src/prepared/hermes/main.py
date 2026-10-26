@@ -17,6 +17,8 @@ READINESS_EXIT_CODES = {reason: 90 + index for index, reason in enumerate((
     "identity-pid", "identity-home", "identity-supervisor", "runtime-protocol",
     "runtime-profile", "runtime-authority", "runtime-endpoint", "runtime-state",
 ))}
+# Cold Windows SDK activation can exceed the former 60-second readiness budget.
+READINESS_TIMEOUT_SECONDS = 90 if os.name == "nt" else 60
 
 
 class ReadinessFailure(RuntimeError):
@@ -35,7 +37,7 @@ def ready(home, pid):
     from frame_diagnostics import clear_exception, record_exception
     from hermes_cli.gateway_runtime import discover_gateway_endpoint
     from hermes_cli.gateway_runtime_discovery import query_identify
-    deadline = time.monotonic() + 60
+    deadline = time.monotonic() + READINESS_TIMEOUT_SECONDS
     reason = "control-absent"
     while time.monotonic() < deadline:
         try:
