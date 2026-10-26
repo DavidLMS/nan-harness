@@ -34,7 +34,9 @@ function sample(held) {
     spotlight:{failure:null,pending:false,inputCount:cap(inputs),listCount:cap(lists),editableCount:cap(editables)}};
   const body=document.body;
   const result={document,body,root:null,motion:null,command:null,input:null,list:null,scope};
-  const fail=reason=>{scope.spotlight.failure=reason;return result;};
+  const fail=(reason,check,kind)=>{scope.spotlight.failure=reason;
+    if(check)scope.spotlight.rejectionCheck=check;
+    if(kind)scope.spotlight.controlKind=kind;return result;};
   if(held&&held.document!==document)return fail('scope-changed');
   if(held&&held.body!==body)return fail('scope-changed');
   if(scope.focused)return fail('auxiliary-focus');
@@ -51,16 +53,16 @@ function sample(held) {
     '--cursor-interaction','--text-document'];
   if(!body||body.tagName!=='BODY'||!body.isConnected||body.parentElement!==document.documentElement
     ||body.getAttribute('tabindex')!=='0'||body.tabIndex!==0||body.isContentEditable
-    ||body.getAttributeNames().length!==2||body.getAttributeNames().some(name=>!['tabindex','style'].includes(name)))return fail('foreign-controls');
+    ||body.getAttributeNames().length!==2||body.getAttributeNames().some(name=>!['tabindex','style'].includes(name)))return fail('foreign-controls','body-anchor');
   const inline=body.style;
   if(inline.getPropertyValue('outline')!=='none'
-    ||[...inline].some(name=>!sourceStyleNames.includes(name)||inline.getPropertyPriority(name)!==''))return fail('foreign-controls');
+    ||[...inline].some(name=>!sourceStyleNames.includes(name)||inline.getPropertyPriority(name)!==''))return fail('foreign-controls','body-style');
   const controls=all('input,textarea,[contenteditable="true"],button,a[href],select,[tabindex],[role="button"],[role="option"],[role="combobox"],[role="listbox"]');
   const forbidden=all('iframe,frame,object,embed,textarea,[contenteditable="true"],[role="dialog"],[role="alertdialog"],[aria-modal="true"],[role="menu"]');
   const roots=all('.command-menu-dialog.global-command-menu-dialog');
   if(roots.length===0) {
     if(held?.root)return fail('scope-changed');
-    if(controls.some(e=>e!==body)||forbidden.length)return fail('foreign-controls');
+    if(controls.some(e=>e!==body)||forbidden.length)return fail('foreign-controls','initial-controls');
     scope.spotlight.pending=true;return result;
   }
   if(roots.length!==1)return fail('initial-scope');
@@ -79,16 +81,30 @@ function sample(held) {
   const style=getComputedStyle(motion);
   if(Number(style.opacity)!==0||style.pointerEvents!=='none'
     ||motion.getAnimations().some(a=>a.playState==='running'||a.pending))return fail('source-transition');
-  if(forbidden.length
-    ||controls.some(e=>e!==body&&(!command.contains(e)||getComputedStyle(e).pointerEvents!=='none'))||editables.length!==1||editables[0]!==input
-    ||['roleLegend','roleRadios','engineering','dialog','quickChatComposer'].some(key=>scope.counts[key]!==0))return fail('foreign-controls');
+  // Preserve the original short-circuit/predicate order. The closed label is
+  // cached from the exact refusing read and grants no new observation or input.
+  const kind=control=>{
+    try {
+      if(control===command)return 'command';if(control===input)return 'input';if(control===list)return 'list';
+      return control.tagName==='BUTTON'?(control.disabled?'disabled-button':'button'):
+        control.tagName==='A'?'anchor':control.tagName==='SELECT'?'select':'other';
+    } catch {return 'other';}
+  };
+  if(forbidden.length)return fail('foreign-controls','forbidden-nodes');
+  for(const control of controls) {
+    if(control===body)continue;
+    if(!command.contains(control))return fail('foreign-controls','control-location',kind(control));
+    if(getComputedStyle(control).pointerEvents!=='none')return fail('foreign-controls','control-pointer',kind(control));
+  }
+  if(editables.length!==1||editables[0]!==input)return fail('foreign-controls','editable-scope');
+  if(['roleLegend','roleRadios','engineering','dialog','quickChatComposer'].some(key=>scope.counts[key]!==0))return fail('foreign-controls','main-controls');
   // Hydration grants no exception to an observed open/transitioning palette.
   // Once its closed root exists, retain that tuple even while readiness waits.
   scope.spotlight.pending=document.readyState!=='complete';
   return result;
 }
 function create({deadline,now=Date.now}) {
-  let held=null,identity=null,failed=null,closed=false,stableSamples=0;
+  let held=null,identity=null,failed=null,closed=false,stableSamples=0,rejectionCheck=null,controlKind=null;
   let counts={inputCount:null,listCount:null,editableCount:null};
   const fail=reason=>{failed??=reason;return false;};
   const timely=()=>!closed&&!failed&&(now()<deadline||fail('deadline'));
@@ -117,7 +133,13 @@ function create({deadline,now=Date.now}) {
       const scope=await bounded(next.evaluate(value=>value.scope));
       if(!timely())throw Error('spotlight');
       counts=Object.fromEntries(Object.keys(counts).map(k=>[k,scope.spotlight[k]]));
-      if(scope.spotlight.failure){fail(scope.spotlight.failure);throw Error('spotlight');}
+      if(scope.spotlight.failure){
+        if(scope.spotlight.failure==='foreign-controls'){
+          rejectionCheck=scope.spotlight.rejectionCheck??null;
+          controlKind=scope.spotlight.controlKind??null;
+        }
+        fail(scope.spotlight.failure);throw Error('spotlight');
+      }
       await dispose(held);held=next;next=null;
       return scope;
     } catch {fail(now()>=deadline?'deadline':'query');throw Error('spotlight');}
@@ -125,7 +147,8 @@ function create({deadline,now=Date.now}) {
   };
   return {read,fail,within:bounded,failed:()=>failed,commit:()=>{if(timely())stableSamples=Math.min(2,stableSamples+1);},
     receipt:()=>({sourceVersion:VERSION,rendererSha256:RENDERER,status:failed?'rejected':stableSamples===2?'verified':'rejected',
-      failure:failed??(stableSamples===2?null:'initial-scope'),stableSamples,...counts}),
+      failure:failed??(stableSamples===2?null:'initial-scope'),stableSamples,...counts,
+      ...(rejectionCheck?{rejectionCheck}:{}),...(controlKind?{controlKind}:{})}),
     close:async()=>{closed=true;await dispose(held);held=null;}};
 }
 module.exports={policy,route,sample,create,ARTIFACT,VERSION,RENDERER};

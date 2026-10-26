@@ -186,6 +186,30 @@ class SpotlightAuxiliaryContractTests(unittest.TestCase):
                         'source-transition', 'foreign-controls', 'identity', 'ownership', 'deadline', 'query']:
             q.spotlight_auxiliary(witness | dict(status='rejected', failure=failure), 'windows')
 
+    def test_rejection_check_is_closed_optional_and_never_certifies_admission(self):
+        rejected = self.observation() | dict(status='rejected', failure='foreign-controls', stableSamples=0)
+        checks = ['body-anchor', 'body-style', 'initial-controls', 'forbidden-nodes',
+                  'control-location', 'control-pointer', 'editable-scope', 'main-controls']
+        for check in checks:
+            q.spotlight_auxiliary(rejected | dict(rejectionCheck=check), 'windows')
+        for check in [None, True, [], {}, 'PRIVATE']:
+            with self.assertRaises(ValueError):
+                q.spotlight_auxiliary(rejected | dict(rejectionCheck=check), 'windows')
+        for observation in [self.observation(), rejected | dict(failure='query')]:
+            with self.assertRaises(ValueError):
+                q.spotlight_auxiliary(observation | dict(rejectionCheck='body-anchor'), 'windows')
+
+    def test_control_kind_is_closed_and_bound_to_the_rejecting_control_predicate(self):
+        rejected = self.observation() | dict(status='rejected', failure='foreign-controls', stableSamples=0)
+        for check in ['control-location', 'control-pointer']:
+            for kind in ['command', 'input', 'list', 'disabled-button', 'button', 'anchor', 'select', 'other']:
+                q.spotlight_auxiliary(rejected | dict(rejectionCheck=check, controlKind=kind), 'windows')
+        for change in [dict(controlKind='button'), dict(rejectionCheck='body-style', controlKind='button'),
+                       *[dict(rejectionCheck='control-pointer', controlKind=kind)
+                         for kind in [None, True, [], {}, 'PRIVATE']]]:
+            with self.assertRaises(ValueError):
+                q.spotlight_auxiliary(rejected | change, 'windows')
+
 
 class RendererCheckpointTests(unittest.TestCase):
     def test_unknown_auxiliary_shape_is_closed_and_bound_to_its_refused_read(self):

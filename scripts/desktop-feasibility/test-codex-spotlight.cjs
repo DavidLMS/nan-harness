@@ -37,7 +37,7 @@ function dom() {
   motion.style.opacity='0';
   const input=node({},command),list=node({},command),option=node({},list);
   input.type='text';
-  const state={root,motion,command,input,list,option,foreign:[],foreignEditables:[],frames:[],ready:'complete',focus:false};
+  const state={root,motion,command,input,list,option,foreign:[],foreignEditables:[],frames:[],legends:[],ready:'complete',focus:false};
   const document={body,documentElement:html,hasFocus:()=>state.focus,visibilityState:'visible',get readyState(){return state.ready;},
     querySelectorAll(selector){
       switch(selector) {
@@ -48,7 +48,8 @@ function dom() {
         case 'textarea,[contenteditable="true"],input:not([type="radio"]):not([type="checkbox"]):not([type="hidden"])':return [state.input,...state.foreignEditables].filter(Boolean);
         case 'input,textarea,[contenteditable="true"],button,a[href],select,[tabindex],[role="button"],[role="option"],[role="combobox"],[role="listbox"]':return [document.body,state.command,state.input,state.list,state.option,...state.foreign,...state.foreignEditables].filter(Boolean);
         case 'iframe,frame,object,embed,textarea,[contenteditable="true"],[role="dialog"],[role="alertdialog"],[aria-modal="true"],[role="menu"]':return [...state.frames,...state.foreignEditables];
-        case 'fieldset > legend':case 'input[type="radio"][name="conversational-onboarding-inline-role"]':
+        case 'fieldset > legend':return state.legends;
+        case 'input[type="radio"][name="conversational-onboarding-inline-role"]':
         case '[role="dialog"],[role="alertdialog"]':case 'textarea[data-avatar-overlay-composition-autofocus]':return [];
         default:throw Error('unexpected selector');
       }
@@ -172,6 +173,35 @@ function fixture(options={}) {
     // A rejected lease cannot reopen after its source returns to a safe shape.
     assert.equal(await f.guard(),false);assert.equal(f.readCount(),1);await f.guard.close();
   }
+  const rejectionFixtures=[];
+  for(const [check,change] of [
+    ['body-anchor',d=>{d.document.body.attributes.role='button';}],
+    ['body-style',d=>{d.document.body.attributes.style+='; pointer-events: auto';}],
+    ['initial-controls',d=>{d.state.root=null;}],
+    ['forbidden-nodes',d=>{d.state.frames=[d.node()];}],
+    ['control-location',d=>{d.state.foreign=[d.node()];}],
+    ['control-pointer',d=>{d.state.input.style.pointerEvents='auto';}],
+    ['editable-scope',d=>{d.state.input.style.display='none';}],
+    ['main-controls',d=>{const legend=d.node({},d.state.command);legend.innerText='Select the kind of work you do';d.state.legends=[legend];}],
+  ]) {
+    f=fixture({beforeRead:({dom:d})=>change(d)});assert.equal(await f.guard(),false,check);
+    const receipt=f.guard.spotlightAuxiliary();assert.equal(receipt.failure,'foreign-controls');
+    assert.equal(receipt.rejectionCheck,check);assert.equal(f.readCount(),1);rejectionFixtures.push(receipt);
+    assert.equal(Object.hasOwn(receipt,'controlKind'),['control-location','control-pointer'].includes(check));
+    assert.equal(await f.guard(),false);assert.equal(f.readCount(),1);await f.guard.close();
+  }
+  for(const expected of ['command','input','list','disabled-button','button','anchor','select','other']) {
+    f=fixture({beforeRead:({dom:d})=>{
+      let control=d.state[expected];
+      if(!control){control=d.node({},d.state.command);control.tagName=({button:'BUTTON','disabled-button':'BUTTON',anchor:'A',select:'SELECT'})[expected]??'SPAN';
+        control.disabled=expected==='disabled-button';d.state.foreign=[control];}
+      control.style.pointerEvents='auto';
+    }});
+    assert.equal(await f.guard(),false,expected);const receipt=f.guard.spotlightAuxiliary();
+    assert.equal(receipt.rejectionCheck,'control-pointer');assert.equal(receipt.controlKind,expected);rejectionFixtures.push(receipt);
+    assert.equal(f.readCount(),1);await f.guard.close();
+  }
+  if(process.argv[3])fs.writeFileSync(process.argv[3],JSON.stringify(rejectionFixtures)+'\n',{mode:0o600});
   for(const change of ['document','root','input','main-focus','owner','deadline']) {
     f=fixture({beforeRead:({reads,dom:d,setDocument,setFocus})=>{
       if(reads!==2)return;
