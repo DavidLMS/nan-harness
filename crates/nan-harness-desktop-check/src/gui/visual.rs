@@ -715,8 +715,15 @@ impl Visual {
         })?;
         observe(Phase::AfterGuard, None, None);
         observe(Phase::Transport, None, None);
+        let transport_deadline =
+            crate::native::claude_chat_transport_deadline(deadline, Instant::now()).map_err(
+                |category| {
+                    observe(Phase::Transport, Some(category), None);
+                    category.reason()
+                },
+            )?;
         self.native
-            .claude_chat_turn(&self.window.borrow(), mode, values, deadline)
+            .claude_chat_turn(&self.window.borrow(), mode, values, transport_deadline)
             .map_err(|category| {
                 observe(Phase::Transport, Some(category), None);
                 category.reason()

@@ -1383,7 +1383,7 @@ def semantic_observations(directory, app):
                 record['nativeAction'] = action
             if 'nativeStage' in value:
                 stage = value['nativeStage']
-                if mechanism != 'claude-windows-native-chat' or type(stage) is not str or stage not in stages:
+                if mechanism not in {'claude-native-chat', 'claude-windows-native-chat'} or type(stage) is not str or stage not in stages:
                     raise ValueError('invalid Claude native receipt stage')
                 record['nativeStage'] = stage
             if 'operationTiming' in value:

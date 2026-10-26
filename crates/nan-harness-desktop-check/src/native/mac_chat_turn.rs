@@ -5,6 +5,17 @@ use zeroize::Zeroizing;
 
 pub(crate) const CHAT_TURN_MAX_MILLIS: u32 = 15_000;
 
+pub(crate) fn transport_deadline(
+    deadline: std::time::Instant,
+    now: std::time::Instant,
+) -> Result<std::time::Instant, super::FailureCategory> {
+    // The independent post-guard must fit inside the caller's original budget.
+    deadline
+        .checked_sub(std::time::Duration::from_secs(1))
+        .filter(|limit| *limit > now)
+        .ok_or(super::FailureCategory::Timeout)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum ChatActionPhase {
@@ -629,6 +640,26 @@ pub(super) fn request(
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn transport_leaves_post_guard_time_without_extending_the_action_deadline() {
+        use std::time::{Duration, Instant};
+        let now = Instant::now();
+        let deadline = now + Duration::from_secs(15);
+        assert_eq!(
+            transport_deadline(deadline, now),
+            Ok(deadline.checked_sub(Duration::from_secs(1)).unwrap())
+        );
+        for remaining in [
+            Duration::ZERO,
+            Duration::from_millis(500),
+            Duration::from_secs(1),
+        ] {
+            assert_eq!(
+                transport_deadline(now + remaining, now),
+                Err(super::super::FailureCategory::Timeout)
+            );
+        }
+    }
     #[test]
     fn window_guard_facts_are_closed_and_cannot_change_a_rejected_action() {
         let line = "window-guard collect-after focus query-error focused-element no-value\n";

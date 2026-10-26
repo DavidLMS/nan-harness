@@ -64,6 +64,8 @@ struct Facts {
     composer_shape: Option<crate::native::ComposerShape>,
     #[serde(skip_serializing_if = "Option::is_none")]
     native_window_guard: Option<crate::native::WindowGuardObservation>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    native_stage: Option<ChatTurnStage>,
     submitted_turns: u8,
     input_verified_turns: u8,
     copied_responses: u8,
@@ -86,6 +88,7 @@ impl Default for Facts {
             scope_shape: None,
             composer_shape: None,
             native_window_guard: None,
+            native_stage: None,
             submitted_turns: 0,
             input_verified_turns: 0,
             copied_responses: 0,
@@ -186,6 +189,7 @@ impl ClaudeNativeChatSession<'_> {
         self.facts.transport_failure = None;
         self.facts.guard_rejection = None;
         self.facts.native_window_guard = None;
+        self.facts.native_stage = None;
         if matches!(
             mode,
             "input" | "input-replace-owned" | "input-failure-owned"
@@ -206,16 +210,9 @@ impl ClaudeNativeChatSession<'_> {
         )?;
         let stage = receipt.stage;
         self.facts.stage = stage;
-        self.facts.action_phase = Some(ChatActionPhase::PostGuard);
-        self.gui
-            .visual
-            .claude_chat_guard_until(deadline, |failure, rejection| {
-                self.facts.transport_failure = failure.map(failure_label);
-                self.facts.guard_rejection = rejection.map(GuardRejection::from);
-            })?;
-        if Instant::now() >= deadline {
-            return Err(Reason::Timeout);
-        }
+        // Retain bounded native facts even if the independent post-guard fails.
+        // These observations never turn an uncertain action into a success.
+        self.facts.native_stage = Some(stage);
         if let Some(shape) = receipt.row_shape {
             self.facts.row_shape = Some(shape);
         }
@@ -226,6 +223,16 @@ impl ClaudeNativeChatSession<'_> {
             self.facts.composer_shape = Some(shape);
         }
         self.facts.native_window_guard = receipt.window_guard;
+        self.facts.action_phase = Some(ChatActionPhase::PostGuard);
+        self.gui
+            .visual
+            .claude_chat_guard_until(deadline, |failure, rejection| {
+                self.facts.transport_failure = failure.map(failure_label);
+                self.facts.guard_rejection = rejection.map(GuardRejection::from);
+            })?;
+        if Instant::now() >= deadline {
+            return Err(Reason::Timeout);
+        }
         self.facts.action_phase = Some(ChatActionPhase::Completed);
         Ok(stage)
     }

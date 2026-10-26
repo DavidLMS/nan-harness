@@ -2788,6 +2788,22 @@ class QualificationTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 q.semantic_observations(root, 'claude-desktop')
 
+    def test_mac_native_receipt_survives_uncertain_post_guard_without_qualifying(self):
+        value = dict(schemaVersion=1, mechanism='claude-native-chat', diagnosticsOnly=True,
+                     stage='action-uncertain', actionPhase='post-guard', transportFailure='timeout',
+                     nativeStage='composer', composerShape=dict(editors=0, startTasks=0, sendMessages=0),
+                     submittedTurns=2, inputVerifiedTurns=2, copiedResponses=2,
+                     retryAttempted=False, clipboardCleared=True)
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'receipt.json'
+            path.write_text(json.dumps(value))
+            self.assertEqual(q.semantic_observations(root, 'claude-desktop'), [value])
+            self.assertEqual(q.envelope('claude-desktop', 'macos', 'aarch64', 'a' * 40)['qualification'], 'unqualified')
+            for stage in ('PRIVATE', 7, None):
+                path.write_text(json.dumps({**value, 'nativeStage': stage}))
+                with self.assertRaises(ValueError):
+                    q.semantic_observations(root, 'claude-desktop')
+
     def test_native_composer_shape_is_bounded_and_cannot_qualify_a_probe(self):
         value = dict(schemaVersion=1, mechanism='claude-native-chat', diagnosticsOnly=True,
                      stage='composer-ambiguous', submittedTurns=2, inputVerifiedTurns=2, copiedResponses=2,
