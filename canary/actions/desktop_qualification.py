@@ -3271,7 +3271,7 @@ def semantic_observations(directory, app):
                 if status is not None and (type(status) is not int or not 400 <= status <= 599):
                     raise ValueError('invalid renderer HTTP status')
                 record['apiErrorStatus'] = status
-            enum(record, value, 'retryScopeFailure', {'endpoint', 'retry-count', 'retry-disabled', 'retry-missing', 'retry-changed', 'user-count', 'user-text', 'error-turn', 'document-changed', 'pair-changed', 'user-changed', 'alert-changed'})
+            enum(record, value, 'retryScopeFailure', {'initial-scope-incomplete', 'initial-scope-invalid', 'endpoint', 'retry-count', 'retry-disabled', 'retry-missing', 'retry-changed', 'user-count', 'user-text', 'error-turn', 'document-changed', 'pair-changed', 'user-changed', 'alert-changed'})
             enum(record, value, 'retryReveal', {'none', 'command-dismissed', 'onboarding-skipped'})
             enum(record, value, 'retrySampleStatus', {'unmeasured', 'native-control-invalid', 'detached', 'hidden', 'disabled', 'inert', 'foreign-document', 'clipped', 'pointer-events-none', 'transformed', 'outside-viewport', 'no-owned-point', 'owned'})
             if 'retryHitOwnedPoints' in value:

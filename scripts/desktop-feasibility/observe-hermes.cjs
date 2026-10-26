@@ -363,14 +363,51 @@ async function driveDom() {
   let samplingRemountUsed = false;
   const settleDeadline = Math.min(deadline, Date.now() + 5000);
   if (retryAction) {
-    retryHandle = await send.elementHandle({ timeout: Math.max(1, deadline - Date.now()) });
-    if (!retryHandle) { facts.errorCategory = 'send-unavailable'; saveFacts(); return; }
-    const retryScope = await errorCards.evaluateHandle(alert => {
-      const pair = alert.closest('[data-slot="aui_turn-pair"]');
-      const users = pair?.querySelectorAll('[data-role="user"]');
-      return { alert, pair, user: users?.length === 1 ? users[0] : null, document: alert.ownerDocument };
-    });
     const scopeFailure = reason => { facts.retryScopeFailure = reason; return false; };
+    const originalDocument = await page.evaluateHandle(() => document);
+    let retryScope;
+    // A prior locator proof cannot authorize an incomplete later snapshot.
+    // Only absence may settle before the first valid tuple; ambiguity or a
+    // foreign tuple rejects. Once valid, its identities are never reacquired.
+    while (Date.now() < settleDeadline) {
+      if (!ownedEndpoint()) { scopeFailure('endpoint'); break; }
+      const alerts = await errorCards.count(), buttons = await send.count();
+      if (alerts > 1 || buttons > 1) { scopeFailure('initial-scope-invalid'); break; }
+      if (alerts === 0 || buttons === 0) {
+        await delay(Math.min(20, Math.max(0, settleDeadline - Date.now()))); continue;
+      }
+      const button = await send.elementHandle({ timeout: Math.max(1, settleDeadline - Date.now()) });
+      if (!button) { scopeFailure('retry-missing'); break; }
+      if (!await send.isEnabled()) { await button.dispose(); scopeFailure('retry-disabled'); break; }
+      const candidate = await errorCards.evaluateHandle((alert, input) => {
+        if (alert.ownerDocument !== input.originalDocument || input.originalDocument !== document)
+          return { state: 'invalid' };
+        const assistant = alert.closest('[data-role="assistant"][data-slot="aui_assistant-message-root"]');
+        const pair = assistant?.closest('[data-slot="aui_turn-pair"]');
+        const group = pair?.closest('[data-slot="aui_message-group"]');
+        if (!alert.isConnected || !assistant?.isConnected || !pair?.isConnected || !group?.isConnected)
+          return { state: 'pending' };
+        const users = pair.querySelectorAll('[data-role="user"]');
+        if (users.length === 0) return { state: 'pending' };
+        if (users.length !== 1 || alert.closest('[data-slot="aui_turn-pair"]') !== pair
+            || users[0].innerText.trim() !== input.prompt
+            || users[0].closest('[data-slot="aui_turn-pair"]') !== pair
+            || input.button.ownerDocument !== document) return { state: 'invalid' };
+        if (!users[0].isConnected || !input.button.isConnected) return { state: 'pending' };
+        if (input.button.closest('[role="alert"]') !== alert
+            || input.button.closest('[data-slot="aui_turn-pair"]') !== pair) return { state: 'invalid' };
+        return { state: 'ready', alert, pair, user: users[0], document, button: input.button };
+      }, { prompt: request.prompt, button, originalDocument }, { timeout: Math.max(1, settleDeadline - Date.now()) });
+      const state = await candidate.evaluate(value => value.state);
+      if (state === 'ready') { retryScope = candidate; retryHandle = button; break; }
+      await candidate.dispose(); await button.dispose();
+      if (state !== 'pending') { scopeFailure('initial-scope-invalid'); break; }
+      await delay(Math.min(20, Math.max(0, settleDeadline - Date.now())));
+    }
+    if (!retryScope) {
+      if (!facts.retryScopeFailure) scopeFailure('initial-scope-incomplete');
+      facts.errorCategory = 'send-unavailable'; saveFacts(); return;
+    }
     retainedScope = async () => {
       if (await errorCards.count() !== 1) return scopeFailure('error-turn');
       const reason = await errorCards.evaluate((alert, held) => {
@@ -398,6 +435,11 @@ async function driveDom() {
       if (!await send.evaluate((button, sampled) => button === sampled, retryHandle)) return scopeFailure('retry-changed');
       return true;
     };
+    if (!await reprove()) { facts.errorCategory = 'send-unavailable'; saveFacts(); return; }
+    await delay(Math.min(100, Math.max(0, settleDeadline - Date.now())));
+    if (Date.now() >= settleDeadline || !await reprove()) {
+      facts.errorCategory = 'send-unavailable'; saveFacts(); return;
+    }
     while (Date.now() < settleDeadline) {
       if (!await reprove()) { facts.errorCategory = 'send-unavailable'; saveFacts(); return; }
       first = await retryHandle.evaluate(sampleRetryInterior);
