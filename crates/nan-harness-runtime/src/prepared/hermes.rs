@@ -168,6 +168,14 @@ fn prepare_gateway(
     for (name, content) in [
         ("main.py", include_str!("hermes/main.py")),
         ("nanh_profile.py", include_str!("hermes/nanh_profile.py")),
+        (
+            "frame_diagnostics.py",
+            include_str!("hermes/frame_diagnostics.py"),
+        ),
+        (
+            "frame_modules.json",
+            include_str!("hermes/frame_modules.json"),
+        ),
     ] {
         open_private_new(&scripts.join(name))?.write_all(content.as_bytes())?;
     }

@@ -208,7 +208,9 @@ def main(arguments):
 
 if __name__ == "__main__":
     try:
-        main(sys.argv[1:])
+        from frame_diagnostics import watch
+        with watch(sys.argv[1]):
+            main(sys.argv[1:])
     except ReadinessFailure as error:
         raise SystemExit(error.exit_code) from None
     except Exception as error:

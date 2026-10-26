@@ -1,6 +1,7 @@
 """Closed diagnostics from synthetic managed-profile output; never export text."""
 import json
 import os
+from pathlib import Path
 import re
 
 LIMIT = 64 * 1024
@@ -44,6 +45,8 @@ for module in ("fcntl", "pwd", "termios", "resource", "hermes_yaml", "pydantic",
     SIGNATURES["IMPORT-" + module.replace("_", "-").upper()] = ("No module named '" + module + "'",)
 PHASES = ("RESULT-BOUND", "RESULT-UNBOUND", "INIT-ONLY", "NO-INIT", "PROVIDER-OBSERVED", "PROVIDER-ABSENT")
 PREFIX = "NH-HERMES-FRONTEND-"
+FRAME_MODULES = set(json.loads((Path(__file__).resolve().parents[2]
+    / "crates/nan-harness-runtime/src/prepared/hermes/frame_modules.json").read_text()).values())
 # Specific native causes precede generic turn failures and progress facts.
 DIAGNOSTIC_CODES = tuple(PREFIX + code for code in (
     *("WINERROR-" + str(code) for code in WINERRORS),
@@ -104,3 +107,48 @@ def managed_profile_diagnostics(config):
             except OSError:
                 continue
     return list(dict.fromkeys(codes))
+
+
+def safe_frames(values):
+    if not isinstance(values, list) or len(values) > 3:
+        return []
+    result = []
+    for value in values:
+        if (not isinstance(value, dict) or set(value) != {"action", "sequence", "stacks"}
+                or not isinstance(value["action"], str) or value["action"] not in {"owner", "ready", "frontend"}
+                or type(value["sequence"]) is not int or not 0 <= value["sequence"] <= 100000
+                or not isinstance(value["stacks"], list) or len(value["stacks"]) > 4):
+            return []
+        for stack in value["stacks"]:
+            if not isinstance(stack, list) or len(stack) > 3:
+                return []
+            for frame in stack:
+                if (not isinstance(frame, dict) or set(frame) != {"module", "line"}
+                        or not isinstance(frame["module"], str) or frame["module"] not in FRAME_MODULES
+                        or type(frame["line"]) is not int or not 0 < frame["line"] <= 100000):
+                    return []
+        result.append(value)
+    return result
+
+
+def managed_profile_frames(config, identity):
+    parent = (config / "hermes-profiles").resolve()
+    profiles = list(parent.glob("*"))
+    if len(profiles) != 1 or profiles[0].is_symlink() or not profiles[0].resolve().is_relative_to(parent):
+        return []
+    profile = profiles[0].resolve()
+    records = []
+    for action in ("owner", "ready", "frontend"):
+        path = profile / (".nanh-frames-" + action + ".json")
+        try:
+            if path.is_symlink() or not path.resolve().is_relative_to(profile) or path.stat().st_size > 16384:
+                continue
+            value = json.loads(path.read_bytes())
+            if (not isinstance(value, dict) or set(value) != {"schemaVersion", "identity", "action", "sequence", "stacks"}
+                    or type(value["schemaVersion"]) is not int or value["schemaVersion"] != 1
+                    or value["identity"] != identity or value["action"] != action):
+                continue
+            records.extend(safe_frames([{key: value[key] for key in ("action", "sequence", "stacks")}]))
+        except (OSError, ValueError, TypeError):
+            continue
+    return records

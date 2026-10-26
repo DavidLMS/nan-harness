@@ -58,7 +58,7 @@ if os.name == "nt":
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from selection import CLI_HARNESSES, PLATFORMS as HOSTED_PLATFORMS, resolve_model
-from hermes_diagnostics import DIAGNOSTIC_CODES
+from hermes_diagnostics import DIAGNOSTIC_CODES, safe_frames
 
 HARNESSES = CLI_HARNESSES
 SEMVER = re.compile(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?\Z")
@@ -1082,10 +1082,11 @@ HERMES_PROFILE_DIAGNOSTICS.update({"NH-HERMES-FRONTEND-EXIT-" + str(code): "fron
 
 class HermesConformanceFailure(ConformanceFailure):
     """Retain all closed causes even when cleanup owns the primary failure code."""
-    def __init__(self, code, diagnostics, cleanup):
+    def __init__(self, code, diagnostics, cleanup, frames=None):
         super().__init__(code, 1)
         self.diagnostics = tuple(code for code in HERMES_PROFILE_DIAGNOSTICS if code in diagnostics)
         self.cleanup = cleanup if isinstance(cleanup, str) and cleanup in {"proven", "unproven"} else "unknown"
+        self.frames = safe_frames(frames)
 
 
 def hermes_profile_probe(args, environment):
@@ -1099,7 +1100,8 @@ def hermes_profile_probe(args, environment):
             sys.executable, "-B", str(ROOT / "canary/hermes/check.py"), "--nanh", str(args.binary),
             "--hermes", executable, "--output", str(report),
         ], args.directory, timeout=900, environment=environment, allow_failure=True)
-        if report.stat().st_size > 4096:
+        # Failure receipts can include bounded, closed source-position samples.
+        if report.stat().st_size > 16 * 1024:
             raise ValueError()
         result = json.loads(report.read_bytes())
         if (status == 0 and isinstance(result, dict) and type(result.get("schemaVersion")) is int
@@ -1113,7 +1115,8 @@ def hermes_profile_probe(args, environment):
                 phase += next(("-" + suffix for code, suffix in HERMES_PROFILE_DIAGNOSTICS.items() if code in diagnostics), "")
             else:
                 diagnostics = []
-            raise HermesConformanceFailure("conformance-hermes-" + phase + "-exit-nonzero", diagnostics, result.get("cleanup"))
+            raise HermesConformanceFailure("conformance-hermes-" + phase + "-exit-nonzero", diagnostics,
+                                           result.get("cleanup"), result.get("frames"))
         raise ValueError()
     except StageTimeout:
         raise ConformanceFailure("conformance-hermes-timeout", 1) from None
@@ -1430,6 +1433,8 @@ def failed_report(args, mismatch=None):
         if isinstance(mismatch, HermesConformanceFailure):
             summary = "Hermes fixture cleanup observation: " + mismatch.cleanup + ". Closed diagnostics: " \
                 + (", ".join(mismatch.diagnostics) or "none") + "."
+            if mismatch.frames:
+                summary += " Source positions: " + json.dumps(mismatch.frames, separators=(",", ":")) + "."
     if isinstance(mismatch, ProbeFailure):
         code = (PROBE_DIAGNOSTIC_CODES.get(mismatch.diagnostic)
                 if args.harness == "aider" and mismatch.stage == "completion-marker"

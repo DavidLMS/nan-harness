@@ -13,12 +13,14 @@ import sqlite3
 import sys
 import tempfile
 import threading
+import uuid
 
 sys.dont_write_bytecode = True
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "actions"))
 from cell import HERMES_PROFILE_DIAGNOSTICS, ensure_private_directory, private_command, protect_private
-from hermes_diagnostics import PREFIX, bounded_tail, closed_frontend_diagnostics, frontend_phase, managed_profile_diagnostics
+from hermes_diagnostics import (PREFIX, bounded_tail, closed_frontend_diagnostics, frontend_phase,
+                                managed_profile_diagnostics, managed_profile_frames)
 from processes import Gateways
 
 KEY = "synthetic-hermes-native-key"
@@ -144,6 +146,7 @@ def run(args):
     phase = "history-create"
     checks = []
     diagnostics = []
+    frames = []
 
     def launch(server, prompt, *, reasoning=None, model="qwen3.6", continuation=False):
         nonlocal launches
@@ -159,6 +162,8 @@ def run(args):
         # Windows exec starts a different PID and exits the wrapper. Keep this
         # foreground process alive so its Job is not closed around a live nanh.
         launches += 1
+        trace_identity = uuid.uuid4().hex
+        environment["NAN_HARNESS_HERMES_DIAGNOSTICS"] = trace_identity
         def closed_diagnostic(log, status):
             text = bounded_tail(log)
             allowed = set(HERMES_PROFILE_DIAGNOSTICS)
@@ -170,6 +175,7 @@ def run(args):
                                  environment=environment, allow_failure=True, diagnostic_callback=closed_diagnostic)
         if status != 0:
             diagnostics.extend(managed_profile_diagnostics(config))
+            frames.extend(managed_profile_frames(config, trace_identity))
             diagnostics.append(PREFIX + ("PROVIDER-OBSERVED" if server.requests else "PROVIDER-ABSENT"))
             if status in {1, 2, 125}:
                 diagnostics.append("NH-HERMES-FRONTEND-EXIT-" + str(status))
@@ -224,7 +230,7 @@ def run(args):
     success = set(checks) == set(CHECKS)
     result = {"schemaVersion": 1, "status": "passed" if success else "failed", "checks": CHECKS if success else [],
               **({} if success else {"phase": phase, "cleanup": "proven" if gone else "unproven",
-                                    "diagnostics": list(dict.fromkeys(diagnostics))})}
+                                    "diagnostics": list(dict.fromkeys(diagnostics)), "frames": frames})}
     write(args.output, json.dumps(result) + "\n")
     return 0 if success else 1
 

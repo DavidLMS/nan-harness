@@ -26,9 +26,68 @@ sys.path.insert(0, str(ROOT / "canary/hermes"))
 spec = importlib.util.spec_from_file_location("native_hermes_qualification", ROOT / "canary/hermes/check.py")
 native = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(native)
+spec = importlib.util.spec_from_file_location("hermes_frame_diagnostics", ROOT / "crates/nan-harness-runtime/src/prepared/hermes/frame_diagnostics.py")
+frame_diagnostics = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(frame_diagnostics)
 
 
 class Qualification(unittest.TestCase):
+    def test_source_positions_contain_only_known_module_identifiers_and_lines(self):
+        namespace = {"sys": sys}
+        exec(compile("def held():\n    private = 'sensitive synthetic payload'\n    return sys._getframe()\n",
+                     "/private/synthetic/user/hermes_cli/main.py", "exec"), namespace)
+        frame = namespace["held"]()
+        try:
+            positions = frame_diagnostics.public_frames(frame)
+            self.assertEqual(positions, [{"module": "cli_main", "line": 3}])
+            self.assertNotIn("private", json.dumps(positions))
+            self.assertNotIn("sensitive", json.dumps(positions))
+        finally:
+            frame.clear()
+
+    def test_frame_receipts_are_current_bounded_and_closed(self):
+        from hermes_diagnostics import managed_profile_frames, safe_frames
+        positions = [{"action": "owner", "sequence": 20, "stacks": [[{"module": "cli_main", "line": 12}]]}]
+        self.assertEqual(safe_frames(positions), positions)
+        for bad in [{"module": "private payload", "line": 12}, {"module": "cli_main", "line": True},
+                    {"module": "cli_main", "line": 100001}, {"module": "cli_main", "line": 12, "private": "payload"}]:
+            self.assertEqual(safe_frames([{**positions[0], "stacks": [[bad]]}]), [])
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory)
+            profile_home = config / "hermes-profiles/owned"
+            profile_home.mkdir(parents=True)
+            identity = "a" * 32
+            receipt = profile_home / ".nanh-frames-owner.json"
+            receipt.write_text(json.dumps({"schemaVersion": 1, "identity": identity, **positions[0]}))
+            self.assertEqual(managed_profile_frames(config, identity), positions)
+            self.assertEqual(managed_profile_frames(config, "b" * 32), [])
+            if os.name != "nt":
+                receipt.unlink()
+                foreign = config / "native-receipt.json"
+                foreign.write_text(json.dumps({"schemaVersion": 1, "identity": identity, **positions[0]}))
+                receipt.symlink_to(foreign)
+                self.assertEqual(managed_profile_frames(config, identity), [])
+
+    def test_position_watch_is_opt_in_and_cannot_follow_existing_output_links(self):
+        with patch.dict(os.environ, {"NAN_HARNESS_HERMES_DIAGNOSTICS": ""}), \
+                patch.object(frame_diagnostics.threading, "Thread") as thread:
+            with frame_diagnostics.watch("owner"):
+                pass
+            thread.assert_not_called()
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            foreign = home / "foreign"
+            foreign.write_text("preserve")
+            receipt = home / ".nanh-frames-owner.json"
+            if os.name != "nt":
+                receipt.symlink_to(foreign)
+            frame_diagnostics.snapshot(home, "owner", "a" * 32, 1)
+            self.assertEqual(foreign.read_text(), "preserve")
+            self.assertFalse(receipt.is_symlink())
+            value = json.loads(receipt.read_text())
+            self.assertEqual(value["identity"], "a" * 32)
+            self.assertEqual(value["sequence"], 1)
+
     def test_native_frontend_diagnostics_never_export_private_text(self):
         self.assertEqual(native.closed_frontend_diagnostics("private synthetic payload"), [])
         self.assertEqual(native.closed_frontend_diagnostics(
@@ -74,15 +133,18 @@ class Qualification(unittest.TestCase):
                                    stage="conformance", trigger="manual", output=root / "report.json")
             (root / "state.json").write_text(json.dumps({"startedAt": cell.timestamp(),
                 "durationMilliseconds": 0, "checks": [], "outcome": "passed"}))
-            failure = cell.HermesConformanceFailure("conformance-hermes-history-create-cleanup-exit-nonzero", codes, "proven")
+            frames = [{"action": "owner", "sequence": 1, "stacks": [[{"module": "cli_main", "line": 12}]]}]
+            failure = cell.HermesConformanceFailure("conformance-hermes-history-create-cleanup-exit-nonzero", codes, "proven", frames)
             with patch.object(cell, "private_command", return_value=0):
                 cell.failed_report(args, failure)
             value = json.loads(args.output.read_text())["failure"]
             self.assertEqual(value["code"], failure.code)
             for code in codes[:-1]:
                 self.assertIn(code, value["summary"])
+            self.assertIn('"module":"cli_main","line":12', value["summary"])
             self.assertNotIn("private synthetic", args.output.read_text())
             self.assertEqual(cell.HermesConformanceFailure(failure.code, codes, {"private": "value"}).cleanup, "unknown")
+            self.assertEqual(cell.HermesConformanceFailure(failure.code, codes, "proven", [{"private": "payload"}]).frames, [])
 
     def test_machine_frontend_is_selected_from_the_installed_version(self):
         for version, modern in [("0.21.0", False), ("0.22.0", True),
